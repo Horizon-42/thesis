@@ -54,6 +54,23 @@ const PREDICTED: ComparisonCategory = {
   groups: 10,
   constrained: false,
 };
+const EXPERIMENT: ComparisonCategory = {
+  key: "experiment_run_val",
+  label: "Validation — Experiment run",
+  dir: "experiment_run_val",
+  groups: 10,
+  constrained: false,
+  datasetSplit: "val",
+  resultSource: "experiment",
+  experiment: {
+    id: "campaign/stage/run",
+    group: "campaign",
+    checkpoint: "campaign/stage/run/checkpoint.pt",
+    model: "itransformer",
+    predictionOutput: "control",
+    seed: 1337,
+  },
+};
 
 const REPORT: EvaluationReport = {
   thresholds: {
@@ -117,7 +134,7 @@ describe("EvaluationSummary", () => {
     appState.activeAirportCode = "KRDU";
     appState.trajectoryComparison = false;
     appState.trajectoryComparisonCategory = OBSERVED.dir;
-    categoryState.categories = [OBSERVED, FITTED, RUNWAY_CONSTRAINED, PREDICTED];
+    categoryState.categories = [OBSERVED, FITTED, RUNWAY_CONSTRAINED, PREDICTED, EXPERIMENT];
     fetchJsonMock.mockReset();
   });
 
@@ -216,6 +233,53 @@ describe("EvaluationSummary", () => {
     expect(within(metric("Mean FDE")).getByText("2082 m")).toBeTruthy();
     expect(within(metric("95th-percentile FDE")).getByText("6002 m")).toBeTruthy();
     expect(screen.queryByText("Solve rate")).toBeNull();
+  });
+
+  it("shows all experiment aggregate statistics without opening the Details view", async () => {
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = EXPERIMENT.dir;
+    fetchJsonMock.mockResolvedValue({
+      ...INDEX,
+      datasetSplit: "val",
+      prediction: {
+        flights: 10,
+        flightsWithoutOverlap: 1,
+        finalTimeS: { mae: 58.1, p95Abs: 120.2, meanSigned: -4.3 },
+        adeM: { median: 1200, mean: 1755.6, p95: 4656.2, max: 9012 },
+        fdeM: { median: 1500, mean: 2082.4, p95: 6002.1, max: 10024 },
+        crossTrackP95M: { mean: 700, p95: 1800 },
+        altitudeP95M: { mean: 90, p95: 210 },
+        rawKinematics: {
+          predicted: {
+            positionVelocityRmseMps: { p95: 3.2 },
+            headingConsistencyP95Deg: { p95: 4.5 },
+            turnRateP95DegS: { p95: 2.1 },
+            accelerationP95Mps2: { p95: 1.4 },
+            jerkP95Mps3: { p95: 0.8 },
+          },
+        },
+      },
+      evaluation: {
+        solved: 10,
+        successful: 6,
+        successRateAmongSolved: 0.6,
+        lateralM: { mean: 12.4, p95: 30 },
+        verticalM: { mean_abs: 4.6, p95_abs: 7 },
+        finalTimeS: { mean: 305 },
+      },
+    } satisfies ComparisonIndex);
+
+    render(<EvaluationSummary />);
+
+    expect(await screen.findByRole("region", { name: "Experiment Evaluation" })).toBeTruthy();
+    expect(within(metric("Trajectories")).getByText("10")).toBeTruthy();
+    expect(within(metric("Median ADE")).getByText("1200 m")).toBeTruthy();
+    expect(within(metric("Maximum FDE")).getByText("10024 m")).toBeTruthy();
+    expect(within(metric("Final-time error MAE")).getByText("58.1 s")).toBeTruthy();
+    expect(within(metric("Position–velocity consistency p95")).getByText("3.2 m/s"))
+      .toBeTruthy();
+    expect(screen.getByText("Aggregate statistics")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
   });
 
   it("opens observed Details from its fixed report with a subject-aware title", async () => {

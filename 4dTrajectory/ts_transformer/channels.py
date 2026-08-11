@@ -96,6 +96,7 @@ CHANNELS: tuple[str, ...] = ("e", "n", "u", "edot", "ndot", "udot")
 # Column indices, so nothing downstream hard-codes a number.
 IDX = {name: i for i, name in enumerate(CHANNELS)}
 POSITION_IDX = (IDX["e"], IDX["n"], IDX["u"])
+VELOCITY_IDX = (IDX["edot"], IDX["ndot"], IDX["udot"])
 
 
 def channels_from_states(
@@ -212,3 +213,8 @@ def resample_uniform(times: np.ndarray, values: np.ndarray, dt_s: float) -> tupl
         # One-dimensional linear interpolation
         out[:, c] = np.interp(grid, times, values[:, c])
     return grid, out
+
+
+def horizontal_distance_m(values: np.ndarray) -> np.ndarray:
+    """Horizontal distance from the runway-threshold frame origin, in metres."""
+    return np.hypot(values[:, IDX["e"]], values[:, IDX["n"]])

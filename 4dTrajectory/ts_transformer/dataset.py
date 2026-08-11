@@ -1,4 +1,4 @@
-"""Observed arrivals -> uniform histories -> normalized-progress trajectory targets.
+"""Observed arrivals -> uniform histories -> configured trajectory-time targets.
 
 Pipeline per flight::
 
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field
@@ -32,6 +33,13 @@ from typing import Any, Iterator, Sequence
 import numpy as np
 import torch
 from torch.utils.data import Dataset, Sampler
+
+from aircraft.identity import get_default_identity_resolver
+from aircraft.query_aircraft_parameters import (
+    openap_direct_typecodes,
+    openap_source_label,
+    openap_support_kind,
+)
 
 # flight_key is the identity ``id_runway_icao24_landingTime`` — single-sourced in
 # flight_scenarios.identity because the optimizer batch derives its record filenames from
@@ -53,13 +61,38 @@ from trajectory_data_process.harvest.arrivals import (
 from channels import (
     CHANNELS,
     POSITION_IDX,
+    VELOCITY_IDX,
     channels_from_states,
     resample_uniform,
+    states_from_channels,
 )
-from config import DEFAULT_AIRCRAFT_TYPE, TSConfig
+from anchor_eligibility import (
+    eligible_random_train_anchors,
+    random_train_anchor_eligibility_policy,
+)
+from config import (
+    AIRCRAFT_FILTER_OPENAP_DIRECT,
+    CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    DEFAULT_AIRCRAFT_TYPE,
+    HORIZON_FULL,
+    HORIZON_NORMALIZED,
+    HORIZON_WINDOW,
+    TSConfig,
+    uses_control_dynamics,
+)
 from coordinate_frames import CoordinateFrame, frame_for_state
+from fixed_dt_supervision import (
+    FixedDTControlSupervision,
+    FixedDTSupervisionRow,
+    build_fixed_dt_supervision,
+    cache_fixed_dt_supervision_rows,
+    pack_fixed_dt_supervision_rows,
+)
+from time_grids import output_time_grid
+from reference_velocity import rebuild_reference_velocities
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
+DATA_SELECTION_SCHEMA = "ts-data-selection-v1-aircraft-filter"
 
 
 def dataset_flight_key(source: dict[str, Any], index: int) -> str:
@@ -267,6 +300,78 @@ class FlightSeries:
         return f"{self.airport}:{self.flight_id}" if self.airport else self.flight_id
 
 
+# Control-output conditioning is dimensionless and deliberately small.  The model still sees
+# the full observed state history; these values supply only what ADS-B cannot identify:
+# aircraft mass, installed thrust, and the aerodynamic model used by the rollout.
+DYNAMICS_CONDITION_NAMES = (
+    "mass_100t",
+    "max_thrust_1MN",
+    "wing_area_500m2",
+    "cl_max_3",
+    "cd0_0p1",
+    "induced_k_0p1",
+    "stall_threshold",
+    "stall_k_0p2",
+)
+
+
+def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
+    """Physical per-flight tensors required by a control model and its rollout."""
+    scenario = series.scenario
+    mass_kg = float(scenario.initial.m)
+    initial = states_from_channels(
+        np.array([0.0], dtype=np.float64),
+        series.values[anchor : anchor + 1],
+        series.frame,
+        mass_kg=mass_kg,
+    )[0][1]
+    aero = scenario.aero
+    max_thrust = float(scenario.aircraft.engine.max_thrust_total_n)
+    condition = np.array(
+        [
+            mass_kg / 100_000.0,
+            max_thrust / 1_000_000.0,
+            aero.S / 500.0,
+            aero.Cl_max / 3.0,
+            aero.Cd0 / 0.1,
+            aero.k / 0.1,
+            aero.stall_threshold,
+            aero.k_stall / 0.2,
+        ],
+        dtype=np.float32,
+    )
+    heading = float(getattr(series.frame, "heading_rad", 0.0))
+    return {
+        "condition": condition,
+        "initial_state": np.array(
+            [
+                initial.latitude,
+                initial.longitude,
+                initial.altitude,
+                initial.V,
+                initial.psi,
+                initial.gamma,
+                initial.m,
+            ],
+            dtype=np.float64,
+        ),
+        "aero_params": np.array(
+            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
+            dtype=np.float64,
+        ),
+        "control_lower": np.array([0.0, -math.pi / 4.0, 0.5], dtype=np.float32),
+        "control_upper": np.array([max_thrust, math.pi / 4.0, 2.0], dtype=np.float32),
+        "frame_params": np.array(
+            [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
+            dtype=np.float64,
+        ),
+        # The rollout frame rotation and the runway heading coincide only for the
+        # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
+        # so ENU rollouts are decomposed along/across the actual runway, not east/north.
+        "runway_heading_rad": np.array(float(scenario.target.psi), dtype=np.float64),
+    }
+
+
 @dataclass(frozen=True)
 class Normalizer:
     """Per-channel standardisation, fit on the TRAINING split only.
@@ -334,15 +439,55 @@ class Normalizer:
 # ── Loading ──────────────────────────────────────────────────────────────────
 
 def load_flight_dicts(
-    paths: str | Path | Sequence[str | Path], *, verbose: bool = True
+    paths: str | Path | Sequence[str | Path],
+    *,
+    include_flight_keys: set[str] | None = None,
+    verbose: bool = True,
 ) -> list[dict[str, Any]]:
-    """Model-ready flights from one or more authoritative arrival manifests."""
+    """Model-ready flights from authoritative manifests, optionally split-filtered.
+
+    ``include_flight_keys`` uses the airport-qualified checkpoint identity
+    ``AIRPORT:flight_key``. The set is reduced to each manifest's local keys before
+    :func:`load_arrival_flights` opens source tracks, so an excluded split's trajectory
+    values are never read merely to discard them later.
+    """
+    requested = None if include_flight_keys is None else set(include_flight_keys)
     flights: list[dict[str, Any]] = []
+    loaded_keys: set[str] = set()
     for manifest_path in _manifest_paths(paths):
-        manifest_flights = load_arrival_flights(manifest_path)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        airport = str(manifest.get("airport") or "").strip().upper()
+        local_keys = None
+        if requested is not None:
+            prefix = f"{airport}:"
+            local_keys = {
+                key[len(prefix):] for key in requested if key.startswith(prefix)
+            }
+            if not local_keys:
+                if verbose:
+                    print(f"  {manifest_path}: 0 selected manifest-rostered arrival(s)")
+                continue
+        manifest_flights = load_arrival_flights(
+            manifest_path,
+            include_flight_keys=local_keys,
+        )
         flights.extend(manifest_flights)
+        loaded_keys.update(
+            dataset_flight_key(flight, index)
+            for index, flight in enumerate(manifest_flights)
+        )
         if verbose:
-            print(f"  {manifest_path}: {len(manifest_flights)} manifest-rostered arrival(s)")
+            qualifier = "selected " if requested is not None else ""
+            print(
+                f"  {manifest_path}: {len(manifest_flights)} "
+                f"{qualifier}manifest-rostered arrival(s)"
+            )
+    if requested is not None:
+        missing = requested - loaded_keys
+        if missing:
+            raise ValueError(
+                f"arrival manifests do not roster requested flight {min(missing)!r}"
+            )
     return flights
 
 
@@ -357,9 +502,18 @@ class BuildReport:
 
     built: int = 0
     skipped: dict[str, int] = field(default_factory=dict)  # reason -> count
+    selected_typecodes: dict[str, int] = field(default_factory=dict)
+    rejected_aircraft: dict[str, int] = field(default_factory=dict)
 
     def skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
+
+    def select_typecode(self, typecode: str) -> None:
+        self.selected_typecodes[typecode] = self.selected_typecodes.get(typecode, 0) + 1
+
+    def reject_aircraft(self, reason: str) -> None:
+        self.rejected_aircraft[reason] = self.rejected_aircraft.get(reason, 0) + 1
+        self.skip("aircraft filter rejected")
 
     @property
     def total(self) -> int:
@@ -369,7 +523,35 @@ class BuildReport:
         lines = [f"built {self.built}/{self.total} series"]
         for reason, count in sorted(self.skipped.items(), key=lambda kv: -kv[1]):
             lines.append(f"  skipped {count:5d}  {reason}")
+        if self.selected_typecodes:
+            selected = ", ".join(
+                f"{code}:{count}"
+                for code, count in sorted(
+                    self.selected_typecodes.items(), key=lambda item: (-item[1], item[0])
+                )
+            )
+            lines.append(f"  selected aircraft  {selected}")
+        rejected = sorted(
+            self.rejected_aircraft.items(), key=lambda item: (-item[1], item[0])
+        )
+        for reason, count in rejected[:20]:
+            lines.append(f"  rejected {count:5d}  {reason}")
+        if len(rejected) > 20:
+            omitted = sum(count for _reason, count in rejected[20:])
+            lines.append(
+                f"  rejected {omitted:5d}  {len(rejected) - 20} additional type reasons "
+                "(see data_selection.json)"
+            )
         return "\n".join(lines)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "built": self.built,
+            "total": self.total,
+            "skipped": dict(sorted(self.skipped.items())),
+            "selected_typecodes": dict(sorted(self.selected_typecodes.items())),
+            "rejected_aircraft": dict(sorted(self.rejected_aircraft.items())),
+        }
 
 
 def build_series(
@@ -423,6 +605,27 @@ def build_series(
             report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
             continue
 
+        # Apply the strict fleet contract before geoid conversion, scenario construction,
+        # velocity fitting or resampling. Split identity is a per-flight hash assigned from
+        # manifest metadata, so rejecting a row here removes it *within* its original split;
+        # it cannot reshuffle any other flight between train/validation/test.
+        if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT:
+            identity = get_default_identity_resolver().resolve(
+                declared_type=flight.get("type"),
+                icao24=flight.get("icao24"),
+            )
+            support_kind = openap_support_kind(identity.typecode)
+            if support_kind != "direct":
+                if identity.typecode is None:
+                    reason = "unresolved ICAO Doc 8643 typecode"
+                elif support_kind == "synonym":
+                    reason = f"OpenAP synonym model ({identity.typecode})"
+                else:
+                    reason = f"no native OpenAP model ({identity.typecode})"
+                report.reject_aircraft(reason)
+                continue
+            report.select_typecode(identity.typecode)
+
         # Into the modeling plane: harvested altitude is ellipsoidal (HAE) while the
         # threshold-anchored channels and the evaluation gates are MSL. Converted HERE, not
         # inside build_scenario alone, because state_samples_from_track below takes the bare
@@ -432,8 +635,17 @@ def build_series(
         flight = flight_to_msl(flight)
         waypoints = flight["waypoints"]
 
-        scenario = build_scenario(flight, aircraft_type, airport=airport,
-                                  target_from_threshold=True)
+        scenario = build_scenario(flight,
+            None if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
+            else aircraft_type,
+            airport=airport,
+            target_from_threshold=True,
+            aircraft_provider=(
+                "openap"
+                if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
+                else "auto"
+            ),
+        )
         if scenario.target is None:
             runway = flight.get("runway") or "?"
             report.skip(f"no published threshold for runway {runway}")
@@ -475,6 +687,18 @@ def build_series(
             fitted=fitted,
             observed_crossing=observed_crossing,
         )
+        measured_velocity_rows = (
+            np.arange(len(supervision_times)) < len(grid)
+        ) & np.all(
+            supervision_weights[:, list(VELOCITY_IDX)] > 0.0, axis=1
+        )
+        supervision_values = rebuild_reference_velocities(
+            supervision_times,
+            supervision_values,
+            source=config.reference_velocity_source,
+            valid_rows=measured_velocity_rows,
+        )
+        resampled = supervision_values[: len(grid)].copy()
         series.append(FlightSeries(
             flight_id=flight_key(scenario.source, index), scenario=scenario, frame=frame,
             times=grid, values=resampled,
@@ -600,34 +824,63 @@ def window_anchors(
     config: TSConfig,
     *,
     minimum_anchor_index: int | None = None,
+    minimum_future_s: float = 0.0,
 ) -> range:
     """Valid anchor indices for ``series``.
 
     An anchor ``i`` is the index of the LAST observed sample: the model is shown
     ``values[i - seq_len + 1 : i + 1]`` and must predict what follows.
 
-    Every anchor must leave a non-empty remainder.  That remainder is resampled to the same
-    N endpoints on normalized progress ``tau = 1/N, ..., 1`` regardless of wall-clock time.
+    Normalized and full modes accept any non-empty remainder; normalized resamples the
+    complete remainder and full masks a short padded suffix. Window mode requires a complete
+    fixed-dt short horizon because those targets train one recursive forecasting pass.
     """
     if minimum_anchor_index is not None and minimum_anchor_index < 0:
         raise ValueError("minimum_anchor_index must be non-negative")
+    if minimum_future_s < 0.0:
+        raise ValueError("minimum_future_s must be non-negative")
     first = max(config.seq_len - 1, minimum_anchor_index or 0)
     # An anchor is always observed; fitted rows can be targets but never model inputs.
-    last = min(series.n_samples - 1, series.n_supervision_samples - 2)
+    last_with_remainder = series.n_supervision_samples - 2
+    required_window_s = config.pred_len * config.dt_s
+    complete_window_indices = np.flatnonzero(
+        series.supervision_times[-1] - series.times >= required_window_s - 1e-9
+    )
+    last_with_complete_window = (
+        int(complete_window_indices[-1]) if len(complete_window_indices) else -1
+    )
+    last_by_mode = {
+        HORIZON_NORMALIZED: last_with_remainder,
+        HORIZON_FULL: last_with_remainder,
+        HORIZON_WINDOW: last_with_complete_window,
+    }
+    future_eligible = np.flatnonzero(
+        series.supervision_times[-1] - series.times >= minimum_future_s - 1e-9
+    )
+    last_with_minimum_future = (
+        int(future_eligible[-1]) if len(future_eligible) else -1
+    )
+    last = min(
+        series.n_samples - 1,
+        last_by_mode[config.horizon_mode],
+        last_with_minimum_future,
+    )
     return range(first, last + 1) if last >= first else range(0)
 
 
 class TrajectoryWindows(Dataset, ABC):
-    """Shared normalized-target and batch mechanics for an explicit anchor population.
+    """Shared target-grid and batch mechanics for an explicit anchor population.
 
     Measured rows supervise all six channels. Fitted rows supervise only ``e/n/u`` at lower
-    weight.  Linear interpolation maps the remainder of every approach to a fixed progress
-    grid, so there is no padding and N does not imply a fixed number of seconds. Concrete
-    subclasses own anchor population and per-epoch index selection; this class contains no
-    fixed-versus-random mode branch.
+    weight. Linear interpolation maps the remainder either to a complete normalized grid or
+    to a physical full/window grid with a masked suffix. Concrete subclasses own anchor
+    population and per-epoch index selection; this class contains no fixed-versus-random
+    anchor-policy branch.
     """
 
     anchor_description: str
+    anchor_policy: str
+    sampling_version: str
 
     def __init__(
         self,
@@ -636,17 +889,27 @@ class TrajectoryWindows(Dataset, ABC):
         normalizer: Normalizer,
         *,
         minimum_anchor_index: int | None = None,
+        minimum_future_s: float = 0.0,
     ):
         self.series = list(series)
         self.config = config
         self.normalizer = normalizer
         self.minimum_anchor_index = minimum_anchor_index
+        self.minimum_future_s = float(minimum_future_s)
         self.index: list[tuple[int, int]] = []
         self.series_ranges: dict[int, tuple[int, int]] = {}
+        self.temporal_candidate_anchors = 0
+        self.eligible_candidate_anchors = 0
         for s_idx, item in enumerate(self.series):
             anchors = window_anchors(
-                item, config, minimum_anchor_index=minimum_anchor_index
+                item,
+                config,
+                minimum_anchor_index=minimum_anchor_index,
+                minimum_future_s=self.minimum_future_s,
             )
+            self.temporal_candidate_anchors += len(anchors)
+            anchors = self._eligible_anchors(item, anchors)
+            self.eligible_candidate_anchors += len(anchors)
             chosen = self._select_anchors(anchors)
             start = len(self.index)
             self.index.extend((s_idx, anchor) for anchor in chosen)
@@ -665,8 +928,10 @@ class TrajectoryWindows(Dataset, ABC):
         self.encoded = [
             normalizer.encode(s.supervision_values).astype(np.float32) for s in self.series
         ]
+        # Public diagnostic for normalized-time experiments. Actual query times come from
+        # the shared clock below, which also defines fixed-time loss and inference timing.
         self.progress = (
-            np.arange(1, config.n_segments + 1, dtype=np.float64) / config.n_segments
+            np.arange(1, config.pred_len + 1, dtype=np.float64) / config.pred_len
         )
         self.kinematic_channels = np.array(
             [channel for channel in range(len(config.channels)) if channel not in POSITION_IDX]
@@ -707,12 +972,82 @@ class TrajectoryWindows(Dataset, ABC):
         return len(self.index)
 
     @abstractmethod
-    def _select_anchors(self, anchors: range) -> Sequence[int]:
+    def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         """Return the concrete mode's stored anchor population for one flight."""
+
+    def _eligible_anchors(
+        self, _series: FlightSeries, anchors: Sequence[int]
+    ) -> Sequence[int]:
+        """Apply mode-specific non-temporal eligibility before anchor sampling."""
+        return anchors
 
     @abstractmethod
     def epoch_indices(self, seed: int) -> np.ndarray:
         """Return the concrete mode's one-flight-per-epoch sample indices."""
+
+    def anchor_statistics(self, seed: int) -> dict[str, Any]:
+        """Audit the exact one-window-per-flight sample selected for an epoch."""
+        indices = self.epoch_indices(seed)
+        anchors = np.array([self.index[int(index)][1] for index in indices], dtype=np.int64)
+        series_indices = np.array(
+            [self.index[int(index)][0] for index in indices], dtype=np.int64
+        )
+        if not len(indices):
+            return {
+                "policy": self.anchor_policy,
+                "sampling_version": self.sampling_version,
+                "minimum_future_s": self.minimum_future_s,
+                "eligibility_policy": getattr(
+                    self, "anchor_eligibility_policy", "temporal-only-v1"
+                ),
+                "temporal_candidate_anchors": self.temporal_candidate_anchors,
+                "eligible_candidate_anchors": self.eligible_candidate_anchors,
+                "excluded_candidate_anchors": (
+                    self.temporal_candidate_anchors - self.eligible_candidate_anchors
+                ),
+                "samples": 0,
+            }
+        anchor_times = np.array([
+            self.series[int(series_index)].times[int(anchor)]
+            for series_index, anchor in zip(series_indices, anchors)
+        ])
+        remaining_times = np.array([
+            self.series[int(series_index)].supervision_times[-1]
+            - self.series[int(series_index)].times[int(anchor)]
+            for series_index, anchor in zip(series_indices, anchors)
+        ])
+        digest_rows = sorted(
+            f"{self.series[int(series_index)].dataset_id}:{int(anchor)}"
+            for series_index, anchor in zip(series_indices, anchors)
+        )
+        digest = hashlib.sha256("\n".join(digest_rows).encode()).hexdigest()
+
+        def distribution(values: np.ndarray) -> dict[str, float]:
+            return {
+                "min": float(np.min(values)),
+                "p50": float(np.median(values)),
+                "max": float(np.max(values)),
+            }
+
+        return {
+            "policy": self.anchor_policy,
+            "sampling_version": self.sampling_version,
+            "minimum_future_s": self.minimum_future_s,
+            "eligibility_policy": getattr(
+                self, "anchor_eligibility_policy", "temporal-only-v1"
+            ),
+            "temporal_candidate_anchors": self.temporal_candidate_anchors,
+            "eligible_candidate_anchors": self.eligible_candidate_anchors,
+            "excluded_candidate_anchors": (
+                self.temporal_candidate_anchors - self.eligible_candidate_anchors
+            ),
+            "samples": len(indices),
+            "sample_sha256": digest,
+            "anchor_index": distribution(anchors),
+            "anchor_time_s": distribution(anchor_times),
+            "remaining_time_s": distribution(remaining_times),
+            "fixed_anchor_fraction": float(np.mean(anchors == self.config.seq_len - 1)),
+        }
 
     def _sample_arrays(
         self, i: int
@@ -725,7 +1060,8 @@ class TrajectoryWindows(Dataset, ABC):
         x = values[anchor - L + 1 : anchor + 1]
         anchor_time = float(series.times[anchor])
         final_time_s = float(series.supervision_times[-1] - anchor_time)
-        query_times = anchor_time + self.progress * final_time_s
+        time_grid = output_time_grid(final_time_s, self.config)
+        query_times = anchor_time + time_grid.offsets_s
 
         # One search locates interpolation neighbours for every output time. The same
         # [N] neighbour arrays then interpolate all C state and weight channels together;
@@ -740,6 +1076,7 @@ class TrajectoryWindows(Dataset, ABC):
         weights = source_weights[left] + fraction * (
             source_weights[right] - source_weights[left]
         )
+        weights[~time_grid.active] = 0.0
 
         # An observed crossing remains supervised even when it lies off the regular input
         # grid, but fitted-tail kinematics beyond the last measured velocity stay masked.
@@ -758,25 +1095,48 @@ class TrajectoryWindows(Dataset, ABC):
             self.flight_weights[s_idx],
         )
 
+    def _dynamics_arrays(self, i: int) -> dict[str, np.ndarray]:
+        s_idx, anchor = self.index[i]
+        return dynamics_arrays(self.series[s_idx], anchor)
+
+    def _fixed_dt_supervision(
+        self, indices: Sequence[int] | np.ndarray
+    ) -> FixedDTControlSupervision:
+        return build_fixed_dt_supervision(
+            self.series,
+            self.encoded,
+            [self.index[int(index)] for index in indices],
+            dt_s=self.config.dt_s,
+        )
+
     def __getitem__(
         self, i: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple:
         x, y, weights, final_time_s, flight_weight = self._sample_arrays(i)
-
-        return (
+        result = (
             torch.from_numpy(x.copy()),
             torch.from_numpy(y),
             torch.from_numpy(weights),
             torch.from_numpy(np.asarray(final_time_s)),
             torch.from_numpy(np.asarray(flight_weight)),
         )
+        if not uses_control_dynamics(self.config.prediction_output):
+            return result
+        dynamics = {
+            key: torch.from_numpy(value)
+            for key, value in self._dynamics_arrays(i).items()
+        }
+        if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
+            return (*result, dynamics)
+        dense = self._fixed_dt_supervision([i])
+        return (*result, dynamics, dense)
 
     def batch(
         self, indices: Sequence[int] | np.ndarray
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple:
         """Build one contiguous batch without per-sample Tensor creation and collation."""
         batch_size = len(indices)
-        L, N, C = self.config.seq_len, self.config.n_segments, len(self.config.channels)
+        L, N, C = self.config.seq_len, self.config.pred_len, len(self.config.channels)
         x = np.empty((batch_size, L, C), dtype=np.float32)
         y = np.empty((batch_size, N, C), dtype=np.float32)
         weights = np.empty_like(y)
@@ -796,19 +1156,74 @@ class TrajectoryWindows(Dataset, ABC):
             final_time_s[row] = sample_time
             flight_weights[row] = flight_weight
 
-        return tuple(
+        result = tuple(
             torch.from_numpy(array)
             for array in (x, y, weights, final_time_s, flight_weights)
         )
+        if not uses_control_dynamics(self.config.prediction_output):
+            return result
+        dynamics_rows = [self._dynamics_arrays(int(index)) for index in indices]
+        dynamics = {
+            key: torch.from_numpy(np.stack([row[key] for row in dynamics_rows]))
+            for key in dynamics_rows[0]
+        }
+        if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
+            return (*result, dynamics)
+        dense = self._fixed_dt_supervision(indices)
+        return (*result, dynamics, dense)
 
 
 class FixedAnchorTrajectoryWindows(TrajectoryWindows):
     """One deterministic `L-1` (or experiment-supplied common) anchor per flight."""
 
     anchor_description = "fixed train anchor L-1"
+    anchor_policy = "fixed"
+    sampling_version = "fixed-anchor-v1"
 
-    def _select_anchors(self, anchors: range) -> Sequence[int]:
-        return [anchors.start] if len(anchors) else []
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Every fixed-anchor row is reused on every validation epoch and on final replay.
+        # Cache the ragged source rows, not padded batches, so duration bucketing remains a
+        # pure batching decision and cannot change any target or dynamics value.
+        self._sample_cache = [
+            TrajectoryWindows._sample_arrays(self, index)
+            for index in range(len(self.index))
+        ]
+        self._dynamics_cache: list[dict[str, np.ndarray]] | None = None
+        self._fixed_dt_cache: tuple[FixedDTSupervisionRow, ...] | None = None
+        if uses_control_dynamics(self.config.prediction_output):
+            self._dynamics_cache = [
+                TrajectoryWindows._dynamics_arrays(self, index)
+                for index in range(len(self.index))
+            ]
+            if self.config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
+                self._fixed_dt_cache = cache_fixed_dt_supervision_rows(
+                    self.series,
+                    self.encoded,
+                    self.index,
+                    dt_s=self.config.dt_s,
+                )
+
+    def _sample_arrays(self, i: int):
+        return self._sample_cache[i]
+
+    def _dynamics_arrays(self, i: int) -> dict[str, np.ndarray]:
+        if self._dynamics_cache is None:
+            return super()._dynamics_arrays(i)
+        return self._dynamics_cache[i]
+
+    def _fixed_dt_supervision(
+        self, indices: Sequence[int] | np.ndarray
+    ) -> FixedDTControlSupervision:
+        if self._fixed_dt_cache is None:
+            return super()._fixed_dt_supervision(indices)
+        return pack_fixed_dt_supervision_rows(
+            [self._fixed_dt_cache[int(index)] for index in indices],
+            channels=len(self.config.channels),
+        )
+
+    def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
+        return [anchors[0]] if len(anchors) else []
 
     def epoch_indices(self, seed: int) -> np.ndarray:
         indices = self.range_starts[self.eligible_series].copy()
@@ -820,16 +1235,49 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
     """All valid anchors available; each epoch selects one uniformly per flight."""
 
     anchor_description = "one random valid train anchor per flight and epoch"
+    anchor_policy = "uniform-random"
+    sampling_version = "per-flight-hash-v2-output-eligibility"
 
-    def _select_anchors(self, anchors: range) -> Sequence[int]:
+    def __init__(
+        self,
+        series: Sequence[FlightSeries],
+        config: TSConfig,
+        normalizer: Normalizer,
+        *,
+        minimum_anchor_index: int | None = None,
+    ):
+        self.anchor_eligibility_policy = random_train_anchor_eligibility_policy(config)
+        super().__init__(
+            series,
+            config,
+            normalizer,
+            minimum_anchor_index=minimum_anchor_index,
+            minimum_future_s=config.random_train_anchor_min_future_s,
+        )
+
+    def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         return anchors
 
+    def _eligible_anchors(
+        self, series: FlightSeries, anchors: Sequence[int]
+    ) -> Sequence[int]:
+        return eligible_random_train_anchors(series, anchors, self.config)
+
     def epoch_indices(self, seed: int) -> np.ndarray:
-        rng = np.random.default_rng(seed)
         starts = self.range_starts[self.eligible_series]
         counts = self.range_counts[self.eligible_series]
-        offsets = np.floor(rng.random(len(starts)) * counts).astype(np.int64)
+        offsets = np.array([
+            int.from_bytes(
+                hashlib.sha256(
+                    f"{self.sampling_version}:{seed}:"
+                    f"{self.series[int(series_index)].dataset_id}".encode()
+                ).digest()[:8],
+                "big",
+            ) % int(count)
+            for series_index, count in zip(self.eligible_series, counts)
+        ], dtype=np.int64)
         indices = starts + offsets
+        rng = np.random.default_rng(seed)
         rng.shuffle(indices)
         return indices
 
@@ -846,7 +1294,7 @@ def _split_fraction(flight_id: str, seed: int) -> float:
 
 def split_name_for_dataset_id(dataset_id: str, config: TSConfig) -> str:
     """Return the locked outer split without reading any trajectory values."""
-    fraction = _split_fraction(dataset_id, config.seed)
+    fraction = _split_fraction(dataset_id, config.resolved_split_seed)
     if fraction < config.test_fraction:
         return "test"
     if fraction < config.test_fraction + config.val_fraction:
@@ -854,18 +1302,99 @@ def split_name_for_dataset_id(dataset_id: str, config: TSConfig) -> str:
     return "train"
 
 
+def flight_keys_by_split(
+    data_provenance: dict[str, Any], config: TSConfig
+) -> dict[str, list[str]]:
+    """Resolve airport-qualified split identities from manifest metadata only.
+
+    Arrival provenance already carries the authoritative roster and source digests. This
+    helper deliberately does not open any source trajectory file; callers can pass the
+    returned keys to :func:`load_flight_dicts` before loading model inputs.
+    """
+    if data_provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
+        raise ValueError("data_provenance is not a TS arrival-data fingerprint")
+    result: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    for manifest in data_provenance.get("manifests", []):
+        airport = str(manifest.get("airport") or "").strip().upper()
+        for record in manifest.get("source_records", []):
+            dataset_id = f"{airport}:{record['flight_key']}"
+            result[split_name_for_dataset_id(dataset_id, config)].append(dataset_id)
+    return result
+
+
+def data_selection_audit(
+    series: Sequence[FlightSeries],
+    report: BuildReport,
+    config: TSConfig,
+    outer_split_keys: dict[str, list[str]],
+) -> dict[str, Any]:
+    """Describe the post-split fleet selection without opening outer-test tracks.
+
+    ``outer_split_keys`` comes from manifest metadata only. ``series`` must contain only
+    development rows loaded by the caller; the sealed test population is recorded by
+    identity/hash and its aircraft eligibility is intentionally deferred until release.
+    """
+    selected: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    for item in series:
+        selected[split_name_for_dataset_id(item.dataset_id, config)].append(item.dataset_id)
+    if selected["test"]:
+        raise ValueError(
+            "data-selection audit received outer-test trajectory series during development"
+        )
+
+    def digest(keys: Sequence[str]) -> str:
+        payload = "\n".join(sorted(keys)).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    direct_typecodes = openap_direct_typecodes()
+    direct_digest = hashlib.sha256("\n".join(direct_typecodes).encode()).hexdigest()
+    return {
+        "schema_version": DATA_SELECTION_SCHEMA,
+        "aircraft_filter": config.aircraft_filter,
+        "identity_standard": "ICAO Doc 8643",
+        "performance_provider": openap_source_label(),
+        "openap_direct_typecodes": {
+            "count": len(direct_typecodes),
+            "sha256": direct_digest,
+            "values": list(direct_typecodes),
+        },
+        "split_policy": {
+            "method": "sha256(seed:airport-qualified-flight-id)",
+            "split_seed": config.resolved_split_seed,
+            "filter_applied_after_split_assignment": True,
+            "outer_test_tracks_loaded": False,
+            "outer_test_aircraft_filter_status": "deferred_until_test_release",
+        },
+        "splits": {
+            name: {
+                "raw_manifest_flights": len(outer_split_keys[name]),
+                "raw_identity_sha256": digest(outer_split_keys[name]),
+                "selected_flights": (
+                    len(selected[name]) if name != "test" else None
+                ),
+                "selected_identity_sha256": (
+                    digest(selected[name]) if name != "test" else None
+                ),
+            }
+            for name in ("train", "val", "test")
+        },
+        "development_build": report.to_dict(),
+    }
+
+
 def split_by_flight(
     series: Sequence[FlightSeries], config: TSConfig
 ) -> tuple[list[FlightSeries], list[FlightSeries], list[FlightSeries]]:
     """Deterministic train / val / test split at FLIGHT granularity.
 
-    Each flight's split is a pure function of ``(config.seed, airport:flight_id)`` — never of its
-    POSITION in the list. A positional shuffle looks deterministic but reshuffles the whole
-    assignment the moment one flight is added to or dropped from the harvest, silently
-    promoting old test flights into training on the next retrain. The cost of per-flight
-    hashing is that the realised fractions only approximate ``val_fraction`` /
-    ``test_fraction`` (exact in expectation); the win is that a flight, once in the test
-    set, stays there for every future harvest with the same seed.
+    Each flight's split is a pure function of ``(config.resolved_split_seed,
+    airport:flight_id)`` — never of its POSITION in the list or of the model-training seed.
+    A positional shuffle looks deterministic but reshuffles the whole assignment the moment
+    one flight is added to or dropped from the harvest, silently promoting old test flights
+    into training on the next retrain. The cost of per-flight hashing is that the realised
+    fractions only approximate ``val_fraction`` / ``test_fraction`` (exact in expectation);
+    the win is that a flight, once in the test set, stays there for every future harvest with
+    the same split seed.
     """
     train, val, test = [], [], []
     for s in series:

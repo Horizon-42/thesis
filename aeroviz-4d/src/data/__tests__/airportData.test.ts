@@ -61,6 +61,88 @@ describe("airportData helpers", () => {
     ).toBe(false);
   });
 
+  it("accepts only explicit train/validation/test dataset split labels", () => {
+    const entry = {
+      key: "ts_model_train",
+      label: "Training split",
+      dir: "ts_model_train",
+      groups: 3,
+      constrained: false,
+    };
+    expect(isComparisonCategoriesManifest({ categories: [{ ...entry, datasetSplit: "train" }] }))
+      .toBe(true);
+    expect(isComparisonCategoriesManifest({ categories: [{ ...entry, datasetSplit: "training" }] }))
+      .toBe(false);
+  });
+
+  it("accepts experiment categories only with explicit checkpoint metadata", () => {
+    const entry = {
+      key: "experiment_run_val",
+      label: "Experiment run · validation",
+      dir: "experiment_run_val",
+      groups: 3,
+      constrained: false,
+      datasetSplit: "val",
+      resultSource: "experiment",
+    };
+    expect(isComparisonCategoriesManifest({ categories: [entry] })).toBe(false);
+    expect(isComparisonCategoriesManifest({ categories: [{
+      ...entry,
+      experiment: {
+        id: "campaign/stage/run",
+        group: "campaign",
+        checkpoint: "campaign/stage/run/checkpoint.pt",
+        model: "itransformer",
+        predictionOutput: "control",
+        horizonMode: "normalized",
+        seed: 1337,
+      },
+    }] })).toBe(true);
+    expect(isComparisonCategoriesManifest({ categories: [{
+      ...entry,
+      experiment: { id: "run", group: "campaign" },
+    }] })).toBe(false);
+    expect(isComparisonCategoriesManifest({ categories: [{
+      ...entry,
+      experiment: {
+        id: "campaign/stage/run",
+        group: "campaign",
+        checkpoint: "campaign/stage/run/checkpoint.pt",
+        horizonMode: "unknown",
+      },
+    }] })).toBe(false);
+  });
+
+  it("accepts control-mixture experiment metadata without rejecting sibling categories", () => {
+    const baseline = {
+      key: "observed",
+      label: "Observed ADS-B",
+      dir: "observed",
+      groups: 0,
+      constrained: false,
+    };
+    const mixture = {
+      key: "experiment_mixture_val",
+      label: "Control mixture · validation",
+      dir: "experiment_mixture_val",
+      groups: 3,
+      constrained: false,
+      datasetSplit: "val",
+      resultSource: "experiment",
+      experiment: {
+        id: "campaign/stage/control_mixture_seed1337",
+        group: "campaign",
+        checkpoint: "campaign/stage/control_mixture_seed1337/checkpoint.pt",
+        model: "itransformer",
+        predictionOutput: "control-mixture",
+        horizonMode: "normalized",
+        seed: 1337,
+      },
+    };
+
+    expect(isComparisonCategoriesManifest({ categories: [baseline, mixture] })).toBe(true);
+  });
+
   it("distinguishes report-only evaluation categories from drawable comparisons", () => {
     expect(
       isDrawableComparisonCategory({

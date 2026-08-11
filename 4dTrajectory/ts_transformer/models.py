@@ -9,7 +9,10 @@ each state forecaster is wrapped in a thin adapter with one signature::
 
     forecaster(x: Tensor[B, seq_len, C]) -> Tensor[B, N, C]
 
-The replaceable output layer then adds ``final_time_s`` and returns a typed prediction.
+The state path attaches ``final_time_s`` to that forecast. The opt-in control path instead
+retains the same encoder's ordered per-channel pre-projection features, conditions them on
+the flight's mass and aerodynamic parameters, and decodes bounded controls plus a
+non-uniform time partition.
 """
 
 from __future__ import annotations
@@ -17,8 +20,20 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from config import TSConfig
+from config import (
+    CONTROL_DURATION_DIRECT,
+    CONTROL_DURATION_FACTORIZED,
+    CONTROL_VALUE_ABSOLUTE,
+    CONTROL_VALUE_TRIM_RESIDUAL,
+    PREDICTION_CONTROL,
+    PREDICTION_CONTROL_MIXTURE,
+    PREDICTION_STATE,
+    TSConfig,
+)
+from control_models import ControlMixtureOutputModel, ControlOutputModel
+from direct_duration_control import DirectDurationControlOutputModel
 from prediction_outputs import StateOutputLayer
+from trim_residual_control import TrimResidualControlOutputModel
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
 
@@ -40,6 +55,22 @@ class ITransformerAdapter(nn.Module):
         # uniform grid itself (dt is constant), not as an embedded timestamp feature.
         return self.inner(x, None, None, None)
 
+    def encode_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Flatten encoder tokens in channel-contract order before the state projector."""
+        if self.inner.use_norm:
+            x = x - x.mean(1, keepdim=True).detach()
+            x = x / torch.sqrt(torch.var(x, dim=1, keepdim=True, unbiased=False) + 1e-5)
+        encoded = self.inner.enc_embedding(x, None)
+        encoded, _attentions = self.inner.encoder(encoded, attn_mask=None)
+        # iTransformer has no channel-index embedding: averaging these permutation-
+        # equivariant tokens erases which latent came from e/n/u or its derivative. Keep
+        # the serialized CHANNELS order explicit in the flattened feature instead.
+        return encoded.flatten(start_dim=1)
+
+    def discard_state_head(self) -> None:
+        """Remove the unused state projector when this adapter feeds a control head."""
+        self.inner.projector = nn.Identity()
+
 
 class PatchTSTAdapter(nn.Module):
     """PatchTST: channel-independent, patched attention along TIME.
@@ -60,6 +91,37 @@ class PatchTSTAdapter(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.inner(x)
 
+    @staticmethod
+    def _backbone_features(backbone: nn.Module, x: torch.Tensor) -> torch.Tensor:
+        z = x.permute(0, 2, 1)
+        if backbone.revin:
+            z = backbone.revin_layer(z.permute(0, 2, 1), "norm").permute(0, 2, 1)
+        if backbone.padding_patch == "end":
+            z = backbone.padding_patch_layer(z)
+        z = z.unfold(dimension=-1, size=backbone.patch_len, step=backbone.stride)
+        z = z.permute(0, 1, 3, 2)
+        encoded = backbone.backbone(z)  # [B,C,d_model,patches]
+        # Pool only time patches. PatchTST processes channels independently and has no
+        # channel identity inside the backbone, so the ordered C axis must survive.
+        return encoded.mean(dim=3).flatten(start_dim=1)
+
+    def encode_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Pool channel-independent patch tokens before the state forecast head."""
+        if not self.inner.decomposition:
+            return self._backbone_features(self.inner.model, x)
+        residual, trend = self.inner.decomp_module(x)
+        return self._backbone_features(
+            self.inner.model_res, residual
+        ) + self._backbone_features(self.inner.model_trend, trend)
+
+    def discard_state_head(self) -> None:
+        """Remove unused flattened forecast heads from a control-only adapter."""
+        if self.inner.decomposition:
+            self.inner.model_res.head = nn.Identity()
+            self.inner.model_trend.head = nn.Identity()
+        else:
+            self.inner.model.head = nn.Identity()
+
 
 BUILDERS = {
     "itransformer": ITransformerAdapter,
@@ -72,9 +134,44 @@ def build_state_forecaster(config: TSConfig) -> nn.Module:
     return BUILDERS[config.model](config)
 
 
-def build_model(config: TSConfig) -> StateOutputLayer:
-    """Current state-output model with a separately replaceable prediction layer."""
+def _build_state_output(config: TSConfig) -> nn.Module:
     return StateOutputLayer(build_state_forecaster(config), config)
+
+
+def _build_control_output(config: TSConfig) -> nn.Module:
+    builders = {
+        (CONTROL_DURATION_FACTORIZED, CONTROL_VALUE_ABSOLUTE): ControlOutputModel,
+        (CONTROL_DURATION_DIRECT, CONTROL_VALUE_ABSOLUTE): (
+            DirectDurationControlOutputModel
+        ),
+        (CONTROL_DURATION_FACTORIZED, CONTROL_VALUE_TRIM_RESIDUAL): (
+            TrimResidualControlOutputModel
+        ),
+    }
+    return builders[
+        (
+            config.control_duration_parameterization,
+            config.control_value_parameterization,
+        )
+    ](
+        config, build_state_forecaster(config)
+    )
+
+
+def _build_control_mixture_output(config: TSConfig) -> nn.Module:
+    return ControlMixtureOutputModel(config, build_state_forecaster(config))
+
+
+OUTPUT_MODEL_BUILDERS = {
+    PREDICTION_STATE: _build_state_output,
+    PREDICTION_CONTROL: _build_control_output,
+    PREDICTION_CONTROL_MIXTURE: _build_control_mixture_output,
+}
+
+
+def build_model(config: TSConfig) -> nn.Module:
+    """Build an explicitly registered output strategy."""
+    return OUTPUT_MODEL_BUILDERS[config.prediction_output](config)
 
 
 def resolve_device(spec: str) -> torch.device:

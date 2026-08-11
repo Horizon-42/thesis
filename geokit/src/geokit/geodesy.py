@@ -65,6 +65,20 @@ def bearing_rad(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return math.atan2(y, x)
 
 
+def compass_bearing_to_math_enu_rad(bearing: float) -> float:
+    """Convert a compass bearing to the modeling layer's heading convention.
+
+    ``bearing`` is radians with 0 = North and positive clockwise toward East.
+    The result is radians in ``[-pi, pi]`` with 0 = East and positive
+    counter-clockwise toward North, matching ``GeodeticState.psi``.
+
+    The two conventions are reflections, not merely different wrap ranges::
+
+        psi = pi/2 - bearing
+    """
+    return math.remainder(math.pi / 2.0 - bearing, 2.0 * math.pi)
+
+
 # ── Flat-Earth (local-tangent) helpers ───────────────────────────────────────
 
 def metres_per_deg_lon(lat_deg: float) -> float:

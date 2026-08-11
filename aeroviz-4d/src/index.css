@@ -854,6 +854,26 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-style: italic;
 }
 
+.control-panel-experiment-selectors {
+  display: grid;
+  gap: 2px;
+}
+
+.control-panel-experiment-checkpoint {
+  margin: -2px 0 8px;
+  color: #75859b;
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-summary-summary-only {
+  color: #75859b;
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: right;
+}
+
 .control-panel label {
   display: flex;
   align-items: center;

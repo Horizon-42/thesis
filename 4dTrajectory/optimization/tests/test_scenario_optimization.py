@@ -688,15 +688,3 @@ def test_path_curve_length_ranks_shorter_path_lower():
     ])
     assert so._path_curve_length_m(short) < so._path_curve_length_m(long)
     assert so._path_curve_length_m(_pc([_wp("X", 36.0, -78.6)])) == float("inf")  # single point
-
-
-def test_iaf_initial_state_from_published_fix():
-    from geokit import FT_M, KT_MS
-    pc = _pc([_wp("CHWDR", 36.10, -78.70, alt_ft=5000.0), _wp("SCHOO", 36.00, -78.60)])
-    state = so._iaf_initial_state(pc, _scenario(target=None))
-    assert state.latitude == 36.10 and state.longitude == -78.70
-    assert state.altitude == pytest.approx(5000.0 * FT_M)
-    assert state.V == pytest.approx(140.0 * KT_MS)        # the procedure nominal speed
-    assert state.gamma == 0.0
-    assert state.m == A320.mass.max_takeoff_kg            # the scenario's mass
-    assert 0.0 <= state.psi <= 2 * 3.14159                # heading toward the next fix (radians)

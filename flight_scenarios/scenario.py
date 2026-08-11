@@ -15,19 +15,32 @@ from typing import Any
 from aerodynamic_model.common import GeodeticState
 from aircraft.aero_params import AeroParams
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS, Aircraft
-from aircraft.query_aircraft_parameters import AircraftLookupError, get_aircraft_parameters
+from aircraft.query_aircraft_parameters import (
+    AircraftLookupError,
+    get_aircraft_parameters,
+    openap_performance_metadata,
+    openap_source_label,
+)
 
 
-def aircraft_for_code(aircraft_id: str) -> Aircraft:
+AIRCRAFT_PROVIDERS = ("auto", "openap")
+
+
+def aircraft_for_code(aircraft_id: str, *, provider: str = "auto") -> Aircraft:
     """Resolve an aircraft code (e.g. ``"A320"``) to an :class:`Aircraft`.
 
-    Hand-tuned presets win (they carry a calibrated approach envelope); otherwise fall
-    back to the OpenAP cache (geometry/mass/engine/drag + a category-default approach).
+    Under the legacy/default ``auto`` policy, hand-tuned presets win (they carry a
+    calibrated approach envelope) and all other types use OpenAP. ``openap`` explicitly
+    bypasses presets so a fleet-filtered experiment cannot claim OpenAP provenance while
+    silently using A320/B77W preset dynamics.
     """
+    if provider not in AIRCRAFT_PROVIDERS:
+        raise ValueError(f"unknown aircraft provider {provider!r}; expected {AIRCRAFT_PROVIDERS}")
     code = aircraft_id.strip().upper()
-    preset = AIRCRAFT_PRESETS.get(code)
-    if preset is not None:
-        return preset
+    if provider == "auto":
+        preset = AIRCRAFT_PRESETS.get(code)
+        if preset is not None:
+            return preset
     try:
         return get_aircraft_parameters(code)
     except AircraftLookupError as exc:
@@ -35,6 +48,24 @@ def aircraft_for_code(aircraft_id: str) -> Aircraft:
         raise KeyError(
             f"unknown aircraft '{aircraft_id}'; known presets: {available}; OpenAP: {exc}"
         ) from None
+
+
+def aircraft_dynamics_source(aircraft_code: str, *, provider: str = "auto") -> str:
+    """Return the provider label used for a resolved scenario aircraft."""
+    code = aircraft_code.strip().upper()
+    if provider == "auto" and code in AIRCRAFT_PRESETS:
+        return "aircraft_preset"
+    return openap_source_label()
+
+
+def aircraft_dynamics_surrogate_typecode(
+    aircraft_code: str, *, provider: str = "auto"
+) -> str | None:
+    """OpenAP's actual surrogate type, or ``None`` for hand-tuned presets."""
+    code = aircraft_code.strip().upper()
+    if provider == "auto" and code in AIRCRAFT_PRESETS:
+        return None
+    return str(openap_performance_metadata(code)["performance_typecode"])
 
 
 @dataclass

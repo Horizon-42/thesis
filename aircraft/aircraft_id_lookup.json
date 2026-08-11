@@ -5,7 +5,7 @@
     "rows_with_typecode": 479947,
     "unique_typecodes": 1931
   },
-  "generated_at_utc": "2026-06-15T18:03:31.066239Z",
+  "generated_at_utc": "2026-07-28T21:37:16.477893Z",
   "icao24_to_typecode": {
     "000001": "AN2",
     "000009": "AAT3",
@@ -957550,7 +957550,8 @@
   },
   "schema_version": 1,
   "source": {
-    "aircraft_database_csv": "/Users/liudongxu/Desktop/studys/thesis/data/AIRCRAFT/aircraftDatabase.csv",
+    "aircraft_database_csv": "data/AIRCRAFT/aircraftDatabase.csv",
+    "aircraft_database_sha256": "d40c8a7b3825dfca896fe234de56040a70e7a215ee34a895468116e51e1afcae",
     "note": "OpenSky/ADS-B state vectors normally use ICAO24; registrations are included for convenience.",
     "primary_adsb_identifier": "icao24"
   },

@@ -36,9 +36,11 @@ from dataset import (  # noqa: E402
     arrival_data_provenance,
     build_series,
     cross_validation_folds,
+    flight_keys_by_split,
     load_flight_dicts,
     provenance_manifest_digests,
     split_by_flight,
+    split_name_for_dataset_id,
     window_anchors,
 )
 from models import build_model, parameter_count, resolve_device  # noqa: E402
@@ -169,6 +171,7 @@ def run_history_ablation(
     epochs: int,
     patience: int,
     auto_batch_size: bool,
+    outer_split_keys: dict[str, list[str]] | None = None,
     verbose: bool = True,
 ) -> dict[str, Any]:
     """Run outer-train-only CV over L while holding the anchor population fixed."""
@@ -182,7 +185,22 @@ def run_history_ablation(
         minimum_anchor_index=common_anchor_index,
         verbose=verbose,
     )
-    outer_train, outer_val, outer_test = split_by_flight(usable, population_config)
+    if outer_split_keys is None:
+        outer_train, outer_val, outer_test = split_by_flight(usable, population_config)
+        split_keys = {
+            "train": [item.dataset_id for item in outer_train],
+            "val": [item.dataset_id for item in outer_val],
+            "test": [item.dataset_id for item in outer_test],
+        }
+    else:
+        outer_train = usable
+        wrong_split = [
+            item.dataset_id for item in outer_train
+            if split_name_for_dataset_id(item.dataset_id, population_config) != "train"
+        ]
+        if wrong_split:
+            raise ValueError(f"history ablation loaded non-training flight {wrong_split[0]!r}")
+        split_keys = outer_split_keys
     folds = cross_validation_folds(outer_train, n_splits, seed=base_config.seed)
 
     device = resolve_device(base_config.device)
@@ -203,8 +221,9 @@ def run_history_ablation(
             f"({common_anchor_index * base_config.dt_s:.0f}s after entry)"
         )
         print(
-            f"  outer split (locked): train {len(outer_train)} / val {len(outer_val)} / "
-            f"test {len(outer_test)}"
+            f"  outer roster (locked): train {len(split_keys['train'])} / "
+            f"val {len(split_keys['val'])} / test {len(split_keys['test'])}; "
+            "opened train source tracks only"
         )
         print(
             f"  {n_splits} folds; {len(candidates_l) * n_splits} fits; "
@@ -325,15 +344,19 @@ def run_history_ablation(
             "base_config": population_config.to_dict(),
         },
         "outer_split": {
-            "train_flights": len(outer_train),
-            "validation_flights": len(outer_val),
-            "test_flights": len(outer_test),
-            "train_sha256": _series_digest(outer_train),
-            "validation_sha256": _series_digest(outer_val),
-            "test_sha256": _series_digest(outer_test),
-            "train_by_airport": _airport_counts(outer_train),
-            "validation_by_airport": _airport_counts(outer_val),
-            "test_by_airport": _airport_counts(outer_test),
+            "train_flights": len(split_keys["train"]),
+            "validation_flights": len(split_keys["val"]),
+            "test_flights": len(split_keys["test"]),
+            "train_sha256": hashlib.sha256(
+                "\n".join(sorted(split_keys["train"])).encode()
+            ).hexdigest(),
+            "validation_sha256": hashlib.sha256(
+                "\n".join(sorted(split_keys["val"])).encode()
+            ).hexdigest(),
+            "test_sha256": hashlib.sha256(
+                "\n".join(sorted(split_keys["test"])).encode()
+            ).hexdigest(),
+            "loaded_usable_train": len(outer_train),
         },
         "arrival_manifests": provenance_manifest_digests(data_provenance),
         "leakage_guard": {
@@ -536,7 +559,11 @@ def main(argv: list[str] | None = None) -> int:
     base_config = TSConfig(**config_values)
 
     provenance = arrival_data_provenance(manifests)
-    flights = load_flight_dicts(manifests)
+    outer_split_keys = flight_keys_by_split(provenance, base_config)
+    flights = load_flight_dicts(
+        manifests,
+        include_flight_keys=set(outer_split_keys["train"]),
+    )
     series, report = build_series(
         flights,
         base_config,
@@ -555,6 +582,7 @@ def main(argv: list[str] | None = None) -> int:
         epochs=args.epochs,
         patience=args.patience,
         auto_batch_size=args.batch_size == "auto",
+        outer_split_keys=outer_split_keys,
     )
     return 0
 

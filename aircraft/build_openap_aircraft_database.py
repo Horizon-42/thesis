@@ -3,7 +3,7 @@
 
 Run from the repository root:
 
-    python aircraft/build_openap_aircraft_database.py
+    conda run -n aeroviz python -m aircraft.build_openap_aircraft_database
 
 Inputs:
     data/AIRCRAFT/aircraftDatabase.csv
@@ -16,6 +16,7 @@ Outputs:
 from __future__ import annotations
 
 import csv
+import hashlib
 import importlib.metadata
 import json
 import math
@@ -66,6 +67,23 @@ def metadata_from_row(row: Mapping[str, str]) -> dict[str, str | None]:
     return {field: clean_value(row.get(field)) for field in METADATA_FIELDS}
 
 
+def source_path(path: Path) -> str:
+    """Use a reproducible repo-relative source label when possible."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(resolved)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def iter_aircraft_rows(csv_path: Path):
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         yield from csv.DictReader(handle)
@@ -99,7 +117,8 @@ def scan_aircraft_database(csv_path: Path) -> tuple[dict[str, dict[str, Any]], d
         "schema_version": 1,
         "generated_at_utc": now_utc(),
         "source": {
-            "aircraft_database_csv": str(csv_path),
+            "aircraft_database_csv": source_path(csv_path),
+            "aircraft_database_sha256": sha256_file(csv_path),
             "primary_adsb_identifier": "icao24",
             "note": "OpenSky/ADS-B state vectors normally use ICAO24; registrations are included for convenience.",
         },
@@ -168,9 +187,17 @@ def json_safe(value: Any) -> Any:
     return str(value)
 
 
-def build_openap_typecode_record(typecode: str, prop_module) -> tuple[dict[str, Any] | None, str | None]:
+def build_openap_typecode_record(
+    typecode: str,
+    prop_module,
+    *,
+    performance_typecode: str,
+) -> tuple[dict[str, Any] | None, str | None]:
     try:
-        aircraft = prop_module.aircraft(typecode)
+        # OpenAP's synonym table is part of its public aircraft-property contract.  The
+        # external identity remains the ICAO designator (``typecode``); OpenAP may reuse a
+        # related performance model internally for explicitly declared synonyms.
+        aircraft = prop_module.aircraft(typecode, use_synonym=True)
     except Exception as exc:
         return None, str(exc)
 
@@ -185,6 +212,7 @@ def build_openap_typecode_record(typecode: str, prop_module) -> tuple[dict[str, 
 
     record = {
         "typecode": typecode,
+        "openap_performance_typecode": performance_typecode,
         "aircraft_name": aircraft.get("aircraft"),
         "category": classify_aircraft(typecode),
         "geometry": {
@@ -249,7 +277,22 @@ def classify_aircraft(typecode: str) -> str:
 
 def build_parameter_database(csv_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     prop_module = load_openap_prop_module()
-    supported_typecodes = {normalize_id(typecode) for typecode in prop_module.available_aircraft()}
+    direct_typecodes = {
+        normalize_id(typecode) for typecode in prop_module.available_aircraft()
+    }
+    declared_synonym_map = {
+        normalize_id(row.orig): normalize_id(row.new)
+        for row in prop_module.aircraft_synonym.itertuples(index=False)
+    }
+    # OpenAP 2.4 lists CRJ9 both as a direct model and as a synonym.  Its lookup
+    # implementation correctly gives the direct model priority; mirror that rule in
+    # provenance instead of claiming that E75L parameters were used.
+    synonym_map = {
+        original: replacement
+        for original, replacement in declared_synonym_map.items()
+        if original not in direct_typecodes
+    }
+    supported_typecodes = direct_typecodes | set(synonym_map)
     representatives, lookup = scan_aircraft_database(csv_path)
 
     typecodes: dict[str, Any] = {}
@@ -263,7 +306,12 @@ def build_parameter_database(csv_path: Path) -> tuple[dict[str, Any], dict[str, 
             }
             continue
 
-        openap_record, error = build_openap_typecode_record(typecode, prop_module)
+        performance_typecode = synonym_map.get(typecode, typecode)
+        openap_record, error = build_openap_typecode_record(
+            typecode,
+            prop_module,
+            performance_typecode=performance_typecode,
+        )
         if error:
             typecodes[typecode] = {
                 "typecode": typecode,
@@ -283,8 +331,12 @@ def build_parameter_database(csv_path: Path) -> tuple[dict[str, Any], dict[str, 
         "schema_version": 1,
         "generated_at_utc": now_utc(),
         "source": {
-            "aircraft_database_csv": str(csv_path),
+            "aircraft_database_csv": source_path(csv_path),
+            "aircraft_database_sha256": sha256_file(csv_path),
             "openap_version": package_version("openap"),
+            "openap_synonyms_enabled": True,
+            "openap_direct_typecode_count": len(direct_typecodes),
+            "openap_synonym_typecode_count": len(synonym_map),
             "openap_supported_typecode_count": len(supported_typecodes),
             "aircraft_database_unique_typecode_count": len(representatives),
         },

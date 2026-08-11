@@ -71,6 +71,21 @@ def test_bearing_due_east():
     assert G.bearing_rad(0.0, 0.0, 0.0, 1.0) == pytest.approx(math.pi / 2.0, abs=1e-9)
 
 
+@pytest.mark.parametrize(
+    ("bearing", "expected_psi"),
+    [
+        (0.0, math.pi / 2.0),        # compass north -> model north
+        (math.pi / 2.0, 0.0),        # compass east -> model east
+        (math.pi, -math.pi / 2.0),   # compass south -> model south
+        (3.0 * math.pi / 2.0, -math.pi),  # compass west -> model west
+    ],
+)
+def test_compass_bearing_to_math_enu_rad(bearing, expected_psi):
+    assert G.compass_bearing_to_math_enu_rad(bearing) == pytest.approx(
+        expected_psi, abs=1e-12
+    )
+
+
 # ── Flat-Earth helpers ───────────────────────────────────────────────────────
 
 def test_metres_per_deg_lon_shrinks_with_latitude():
@@ -128,5 +143,12 @@ def test_bounds_pole_guard():
 # ── Public surface ───────────────────────────────────────────────────────────
 
 def test_public_exports():
-    for name in ("haversine_m", "bearing_rad", "WGS84_A", "SPHERE_RADIUS_M", "NM_M"):
+    for name in (
+        "haversine_m",
+        "bearing_rad",
+        "compass_bearing_to_math_enu_rad",
+        "WGS84_A",
+        "SPHERE_RADIUS_M",
+        "NM_M",
+    ):
         assert hasattr(geokit, name)

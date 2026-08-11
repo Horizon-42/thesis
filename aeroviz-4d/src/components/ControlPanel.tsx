@@ -28,6 +28,13 @@ import {
 } from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
 import { useEffect } from "react";
+import {
+  activeTrajectoryResultSource,
+  categoriesForResultSource,
+  categoryForExperimentSplit,
+  experimentOptions,
+  type TrajectoryResultSource,
+} from "../utils/trajectoryResultSources";
 
 const COMPARISON_KIND_LABELS: Record<ComparisonLegendKind, string> = {
   reference: "Reference",
@@ -71,8 +78,35 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
   const drawableComparisonCategories = comparisonCategories.filter(
     isDrawableComparisonCategory,
   );
+  const predictionCategories = categoriesForResultSource(
+    drawableComparisonCategories,
+    "prediction",
+  );
+  const experimentCategories = categoriesForResultSource(
+    drawableComparisonCategories,
+    "experiment",
+  );
+  const heldOutTestCategories = predictionCategories.filter(
+    (category) => category.datasetSplit === "test",
+  );
+  const trainingCategories = predictionCategories.filter(
+    (category) => category.datasetSplit === "train",
+  );
+  const otherComparisonCategories = predictionCategories.filter(
+    (category) => category.datasetSplit !== "train" && category.datasetSplit !== "test",
+  );
   const activeComparisonCategory =
     drawableComparisonCategories.find((c) => c.dir === trajectoryComparisonCategory) ?? null;
+  const resultSource = activeTrajectoryResultSource(
+    trajectoryComparison,
+    activeComparisonCategory,
+  );
+  const experiments = experimentOptions(experimentCategories);
+  const activeExperimentId = activeComparisonCategory?.experiment?.id ?? "";
+  const activeExperimentCategories = experimentCategories.filter(
+    (category) => category.experiment?.id === activeExperimentId,
+  );
+  const experimentGroups = [...new Set(experiments.map((experiment) => experiment.group))];
   const comparisonLegend = useComparisonLegend(
     activeAirportCode,
     activeComparisonCategory?.dir ?? null,
@@ -111,6 +145,21 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
     forceRunway: null,
   });
 
+  function selectResultSource(source: TrajectoryResultSource): void {
+    if (source === "baseline") {
+      setTrajectoryComparison(false);
+      return;
+    }
+    const candidates = source === "experiment" ? experimentCategories : predictionCategories;
+    const currentStillMatches = candidates.some(
+      (category) => category.dir === trajectoryComparisonCategory,
+    );
+    if (!currentStillMatches) {
+      setTrajectoryComparisonCategory(candidates[0]?.dir ?? null);
+    }
+    setTrajectoryComparison(true);
+  }
+
   return (
     <div className="control-panel">
       <div className="control-panel-approach-view">
@@ -136,7 +185,24 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
 
         {layers.trajectories ? (
           <div className="control-panel-trajectory-options" aria-label="Trajectory options">
-            {observedVerdicts.counts ? (
+            <label className="control-panel-airport-selector">
+              <span>Result source</span>
+              <select
+                className="control-panel-airport-selector-input"
+                value={resultSource}
+                onChange={(event) =>
+                  selectResultSource(event.target.value as TrajectoryResultSource)}
+              >
+                <option value="baseline">Baseline</option>
+                <option value="prediction" disabled={predictionCategories.length === 0}>
+                  Prediction
+                </option>
+                <option value="experiment" disabled={experimentCategories.length === 0}>
+                  Experiments
+                </option>
+              </select>
+            </label>
+            {resultSource === "baseline" && observedVerdicts.counts ? (
               <div className="control-panel-verdict-legend" aria-label="Approach verdict legend">
                 <div className="control-panel-verdict-title">
                   Approach verdict (FAA 8260.58D gates at the threshold)
@@ -166,33 +232,110 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                 ) : null}
               </div>
             ) : null}
-            <label>
-              <input
-                type="checkbox"
-                checked={trajectoryComparison}
-                onChange={(event) => setTrajectoryComparison(event.target.checked)}
-              />
-              Prediction comparison
-            </label>
-            {trajectoryComparison ? (
-              drawableComparisonCategories.length > 0 ? (
+            {resultSource === "prediction" ? (
+              predictionCategories.length > 0 ? (
                 <label className="control-panel-airport-selector">
-                  <span>Evaluation category</span>
+                  <span>Prediction result</span>
                   <select
                     className="control-panel-airport-selector-input"
                     value={trajectoryComparisonCategory ?? ""}
                     onChange={(event) => setTrajectoryComparisonCategory(event.target.value || null)}
                   >
-                    {drawableComparisonCategories.map((category) => (
-                      <option key={category.key} value={category.dir}>
-                        {category.label} ({category.groups})
-                      </option>
-                    ))}
+                    {heldOutTestCategories.length > 0 ? (
+                      <optgroup label="Held-out test results">
+                        {heldOutTestCategories.map((category) => (
+                          <option key={category.key} value={category.dir}>
+                            {category.label} ({category.groups})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {trainingCategories.length > 0 ? (
+                      <optgroup label="Training results (in-sample)">
+                        {trainingCategories.map((category) => (
+                          <option key={category.key} value={category.dir}>
+                            {category.label} ({category.groups})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {otherComparisonCategories.length > 0 ? (
+                      <optgroup label="Other evaluation results">
+                        {otherComparisonCategories.map((category) => (
+                          <option key={category.key} value={category.dir}>
+                            {category.label} ({category.groups})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
                   </select>
                 </label>
               ) : (
                 <p className="control-panel-comparison-empty">
                   No comparison data found for this airport.
+                </p>
+              )
+            ) : null}
+            {resultSource === "experiment" ? (
+              experimentCategories.length > 0 ? (
+                <div className="control-panel-experiment-selectors">
+                  <label className="control-panel-airport-selector">
+                    <span>Experiment model</span>
+                    <select
+                      className="control-panel-airport-selector-input"
+                      value={activeExperimentId}
+                      onChange={(event) => {
+                        const next = categoryForExperimentSplit(
+                          experimentCategories,
+                          event.target.value,
+                          activeComparisonCategory?.datasetSplit === "train" ? "train" : "val",
+                        );
+                        setTrajectoryComparisonCategory(next?.dir ?? null);
+                      }}
+                    >
+                      {experimentGroups.map((group) => (
+                        <optgroup key={group} label={group}>
+                          {experiments
+                            .filter((experiment) => experiment.group === group)
+                            .map((experiment) => (
+                              <option key={experiment.id} value={experiment.id}>
+                                {experiment.label} · {experiment.predictionOutput ?? "state"}
+                                {experiment.horizonMode === "normalized" ? " · normalized time" : ""}
+                                {experiment.horizonMode === "full" ? " · full horizon" : ""}
+                                {experiment.horizonMode === "window" ? " · recursive window" : ""}
+                                {experiment.seed == null ? "" : ` · seed ${experiment.seed}`}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="control-panel-airport-selector">
+                    <span>Dataset split</span>
+                    <select
+                      className="control-panel-airport-selector-input"
+                      value={activeComparisonCategory?.dir ?? ""}
+                      onChange={(event) =>
+                        setTrajectoryComparisonCategory(event.target.value || null)}
+                    >
+                      {activeExperimentCategories.map((category) => (
+                        <option key={category.key} value={category.dir}>
+                          {category.datasetSplit === "train" ? "Training (in-sample)" :
+                            category.datasetSplit === "val" ? "Validation (model selection)" :
+                              "Held-out test"} ({category.groups})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {activeComparisonCategory?.experiment ? (
+                    <p className="control-panel-experiment-checkpoint">
+                      {activeComparisonCategory.experiment.checkpoint}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="control-panel-comparison-empty">
+                  No experiment trajectories have been published for this airport.
                 </p>
               )
             ) : null}

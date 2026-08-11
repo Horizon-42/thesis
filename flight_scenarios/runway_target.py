@@ -19,6 +19,7 @@ from typing import Any
 
 from aerodynamic_model.common import GeodeticState
 from aircraft.aircraft_sets import Aircraft
+from geokit import compass_bearing_to_math_enu_rad
 
 _THRESHOLDS_PATH = (
     Path(__file__).resolve().parents[1]
@@ -88,8 +89,7 @@ def threshold_target_state(
         glidepath_deg = aircraft.approach.glide_angle_deg
     # ``heading_deg`` is a compass bearing (0 = N, clockwise); the modeling layer's psi is the
     # math-ENU heading (0 = E, CCW toward N), so psi = 90deg - bearing (then wrap to [-pi, pi]).
-    psi = math.radians(90.0 - course_deg)
-    psi = (psi + math.pi) % (2.0 * math.pi) - math.pi  # wrap to [-pi, pi]
+    psi = compass_bearing_to_math_enu_rad(math.radians(course_deg))
     return GeodeticState(
         latitude=lat,
         longitude=lon,

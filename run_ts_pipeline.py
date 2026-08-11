@@ -11,8 +11,9 @@ Two training scopes are explicit:
     predictions and publications for each airport's locked split.
 
 The TS command locks outer train/validation/test before cross-validation. CV sees outer-train
-only; final training uses outer-validation for early stopping; outer-test is consumed only by
-the prediction stage after the final checkpoint exists.
+only; final training uses outer-validation for early stopping. Routine runs publish train and
+validation only. Outer-test requires a separate checkpoint-bound, one-shot release after every
+experimental decision is frozen.
 """
 
 from __future__ import annotations
@@ -35,7 +36,57 @@ TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
-from config import COORDINATE_FRAMES, MODELS, TSConfig  # noqa: E402
+from config import (  # noqa: E402
+    AIRCRAFT_FILTER_ALL,
+    AIRCRAFT_FILTERS,
+    COORDINATE_FRAMES,
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+    CHECKPOINT_SELECTION_TERMINAL_STATE,
+    CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
+    CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+    CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
+    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+    CHECKPOINT_SELECTION_METRICS,
+    CHECKPOINT_SELECTION_OBJECTIVE,
+    CONTROL_DYNAMICS_BACKENDS,
+    CONTROL_DYNAMICS_REANCHORED_RK4,
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+    CONTROL_DURATION_FACTORIZED,
+    CONTROL_DURATION_PARAMETERIZATIONS,
+    CONTROL_GRADIENT_CLIP_GLOBAL,
+    CONTROL_GRADIENT_CLIP_POLICIES,
+    CONTROL_VALUE_ABSOLUTE,
+    CONTROL_VALUE_PARAMETERIZATIONS,
+    CONTROL_STATE_CLOCKS,
+    CONTROL_STATE_CLOCK_PREDICTED,
+    CONTROL_STATE_LOSS_GRIDS,
+    CONTROL_STATE_LOSS_GRID_NATIVE,
+    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    CONTROL_STATE_OBJECTIVES,
+    CONTROL_TERMINAL_CLOCKS,
+    CONTROL_TERMINAL_CLOCK_PREDICTED,
+    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
+    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
+    DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
+    DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+    DEFAULT_VALIDATION_COMMON_GRID_POINTS,
+    HORIZON_MODES,
+    HORIZON_NORMALIZED,
+    HORIZON_WINDOW,
+    MODELS,
+    PREDICTION_CONTROL_MIXTURE,
+    PREDICTION_CONTROL,
+    PREDICTION_OUTPUTS,
+    PREDICTION_STATE,
+    TSConfig,
+    control_recipe,
+    uses_control_dynamics,
+)
 from cross_validation import (  # noqa: E402
     BEST_CONFIG_NAME,
     CV_PARAMETER_GRIDS,
@@ -44,9 +95,10 @@ from cross_validation import (  # noqa: E402
     DEFAULT_CV_PARAMETERS,
     RESULTS_NAME as CV_RESULTS_NAME,
     RESULTS_SCHEMA as CV_RESULTS_SCHEMA,
+    applicable_cv_parameters,
     parameter_grid,
-    validate_cv_parameters,
 )
+from evaluation_protocol import TEST_RELEASE_NAME  # noqa: E402
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_NAME,
     CHECKPOINT_METADATA_SCHEMA,
@@ -57,6 +109,12 @@ TRAINING_MODES = ("per-airport", "pooled")
 MODEL_SHORT = {"itransformer": "itr", "patchtst": "ptst"}
 MODEL_LABEL = {"itransformer": "iTransformer", "patchtst": "PatchTST"}
 OUTPUT_KINDS = ("czml", "eval")
+PREDICTION_SPLITS = ("train", "val", "test")
+SPLIT_LABELS = {
+    "train": "Training split (in-sample)",
+    "val": "Validation split (model selection)",
+    "test": "Test split (held-out)",
+}
 
 
 def _file_sha256(path: Path) -> str:
@@ -95,6 +153,259 @@ def _anchor_tag(random_train_anchor: bool) -> str:
     return "_random_anchor" if random_train_anchor else ""
 
 
+def _training_cohort_tag(minimum_future_s: float) -> str:
+    if minimum_future_s <= 0.0:
+        return ""
+    compact = f"{minimum_future_s:g}".replace(".", "p")
+    return f"_cohort_min{compact}"
+
+
+def _validation_selection_tag(metric: str) -> str:
+    return {
+        CHECKPOINT_SELECTION_COMMON_GRID_ADE: "_common_grid_selection",
+        CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: "_common_grid_criteria_selection",
+        CHECKPOINT_SELECTION_TERMINAL_STATE: "_terminal_state_selection",
+    }.get(metric, "")
+
+
+def _prediction_output_tag(prediction_output: str) -> str:
+    return "" if prediction_output == PREDICTION_STATE else f"_{prediction_output}"
+
+
+def _control_clock_tag(prediction_output: str, state_clock: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or state_clock == CONTROL_STATE_CLOCK_PREDICTED
+    ):
+        return ""
+    return f"_{state_clock}_clock"
+
+
+def _control_terminal_clock_tag(
+    prediction_output: str, terminal_clock: str
+) -> str:
+    if (
+        prediction_output != PREDICTION_CONTROL
+        or terminal_clock == CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION
+    ):
+        return ""
+    return f"_terminal_{terminal_clock.replace('-', '_')}_clock"
+
+
+_CONTROL_TERMINAL_CLOCK_FILESYSTEM_TAGS = {
+    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION: "",
+    CONTROL_TERMINAL_CLOCK_PREDICTED: "_tcp",
+    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME: "_tcpdt",
+}
+
+
+def _control_terminal_clock_filesystem_tag(
+    prediction_output: str, terminal_clock: str
+) -> str:
+    if prediction_output != PREDICTION_CONTROL:
+        return ""
+    return _CONTROL_TERMINAL_CLOCK_FILESYSTEM_TAGS[terminal_clock]
+
+
+def _control_terminal_clock_label(terminal_clock: str) -> str:
+    if terminal_clock == CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION:
+        return ""
+    if terminal_clock == CONTROL_TERMINAL_CLOCK_PREDICTED:
+        return "deployable predicted-clock terminal (joint time gradient), "
+    if terminal_clock == CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME:
+        return "deployable predicted-clock terminal (detached total-time gradient), "
+    raise ValueError(f"unknown control terminal clock {terminal_clock!r}")
+
+
+def _control_state_loss_grid_tag(prediction_output: str, loss_grid: str) -> str:
+    if not uses_control_dynamics(prediction_output) or loss_grid == CONTROL_STATE_LOSS_GRID_NATIVE:
+        return ""
+    return f"_{loss_grid.replace('-', '_')}_loss"
+
+
+def _control_duration_tag(prediction_output: str, parameterization: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or parameterization == CONTROL_DURATION_FACTORIZED
+    ):
+        return ""
+    return f"_{parameterization}_duration"
+
+
+def _control_value_tag(prediction_output: str, parameterization: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or parameterization == CONTROL_VALUE_ABSOLUTE
+    ):
+        return ""
+    return f"_{parameterization.replace('-', '_')}"
+
+
+def _control_dynamics_tag(prediction_output: str, backend: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or backend == CONTROL_DYNAMICS_REANCHORED_RK4
+    ):
+        return ""
+    return f"_{backend.replace('-', '_')}"
+
+
+_CONTROL_DYNAMICS_FILESYSTEM_TAGS = {
+    CONTROL_DYNAMICS_REANCHORED_RK4: "",
+    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY: "_tcv",
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY: "_stcv",
+}
+
+
+def _control_dynamics_filesystem_tag(prediction_output: str, backend: str) -> str:
+    if not uses_control_dynamics(prediction_output):
+        return ""
+    return _CONTROL_DYNAMICS_FILESYSTEM_TAGS[backend]
+
+
+def _control_dynamics_label(prediction_output: str, backend: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or backend == CONTROL_DYNAMICS_REANCHORED_RK4
+    ):
+        return ""
+    return f"{backend} dynamics, "
+
+
+def _control_objective_tag(prediction_output: str, objective: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+    ):
+        return ""
+    return f"_{objective.replace('-', '_')}"
+
+
+def _terminal_tracking_recipe_tag(
+    prediction_output: str,
+    objective: str,
+    dense_weight: float,
+    geometry_weight: float,
+    arc_horizontal_velocity_weight: float,
+    arc_vertical_velocity_weight: float,
+    arc_horizontal_velocity_scale_mps: float,
+    arc_vertical_velocity_scale_mps: float,
+    arc_local_velocity: str,
+    arc_tangent_weight: float,
+    arc_position_end_weight: float,
+    arc_terminal: str,
+    arc_terminal_cross_track_emphasis: float,
+    arc_terminal_vertical_emphasis: float,
+    terminal_position_weight: float,
+    terminal_velocity_weight: float,
+    terminal_position_scale_m: float,
+    terminal_velocity_scale_mps: float,
+) -> str:
+    if prediction_output != PREDICTION_CONTROL or objective not in (
+        CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+    ):
+        return ""
+
+    def compact(value: float) -> str:
+        return f"{value:g}".replace(".", "p")
+
+    tracking = {
+        CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: f"_d{compact(dense_weight)}",
+        CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
+            f"_g{compact(geometry_weight)}"
+            f"_ahv{compact(arc_horizontal_velocity_weight)}"
+            f"_avv{compact(arc_vertical_velocity_weight)}"
+            f"_ahvs{compact(arc_horizontal_velocity_scale_mps)}mps"
+            f"_avvs{compact(arc_vertical_velocity_scale_mps)}mps"
+            f"_lv{arc_local_velocity.replace('-', '_')}"
+            f"_at{compact(arc_tangent_weight)}"
+            f"_pe{compact(arc_position_end_weight)}"
+            f"_term{arc_terminal.replace('-', '_')}"
+            f"_tc{compact(arc_terminal_cross_track_emphasis)}"
+            f"_tu{compact(arc_terminal_vertical_emphasis)}"
+        ),
+    }[objective]
+    return (
+        f"{tracking}"
+        f"_tp{compact(terminal_position_weight)}"
+        f"_tv{compact(terminal_velocity_weight)}"
+        f"_ps{compact(terminal_position_scale_m)}m"
+        f"_vs{compact(terminal_velocity_scale_mps)}mps"
+    )
+
+
+def _control_duration_gradient_tag(
+    prediction_output: str, state_duration_gradient: bool
+) -> str:
+    if not uses_control_dynamics(prediction_output) or state_duration_gradient:
+        return ""
+    return "_detached_duration_gradient"
+
+
+def _control_horizon_curriculum_tag(
+    horizons_s: tuple[float, ...], stage_epochs: int
+) -> str:
+    if not horizons_s:
+        return ""
+    horizons = "_".join(f"{value:g}".replace(".", "p") for value in horizons_s)
+    return f"_horizon_curriculum_{horizons}s_x{stage_epochs}"
+
+
+def _control_horizon_curriculum_label(
+    horizons_s: tuple[float, ...], stage_epochs: int
+) -> str:
+    if not horizons_s:
+        return ""
+    horizons = "→".join(f"{value:g}" for value in horizons_s)
+    return f"horizon curriculum {horizons} s × {stage_epochs} epochs, "
+
+
+def _control_gradient_clip_tag(max_norm: float, policy: str) -> str:
+    if max_norm <= 0.0:
+        return ""
+    compact = f"{max_norm:g}".replace(".", "p")
+    policy_tag = (
+        ""
+        if policy == CONTROL_GRADIENT_CLIP_GLOBAL
+        else f"_{policy.replace('-', '_')}"
+    )
+    return f"_gradient_clip{compact}{policy_tag}"
+
+
+def _control_gradient_clip_label(max_norm: float, policy: str) -> str:
+    if max_norm <= 0.0:
+        return ""
+    policy_label = (
+        ""
+        if policy == CONTROL_GRADIENT_CLIP_GLOBAL
+        else " (final-time head decoupled)"
+    )
+    return f"gradient clip {max_norm:g}{policy_label}, "
+
+
+def _control_duration_label(prediction_output: str, parameterization: str) -> str:
+    if not uses_control_dynamics(prediction_output):
+        return ""
+    return f"{parameterization} durations, "
+
+
+def _aircraft_filter_tag(aircraft_filter: str) -> str:
+    return "" if aircraft_filter == AIRCRAFT_FILTER_ALL else "_openap_direct"
+
+
+HORIZON_TAGS = {
+    "normalized": "normalized_time",
+    "full": "full",
+    "window": "window",
+}
+HORIZON_LABELS = {
+    "normalized": "normalized time",
+    "full": "full horizon",
+    "window": "recursive window",
+}
+
+
 class TrainingPlan:
     """One CV/final-training cell, shared by one or more airport predictions."""
 
@@ -104,11 +415,17 @@ class TrainingPlan:
         model: str,
         *,
         training_mode: str,
+        prediction_output: str = PREDICTION_STATE,
         n_segments: int | None = None,
+        horizon_mode: str = HORIZON_NORMALIZED,
+        full_horizon_steps: int | None = None,
+        window_horizon_steps: int | None = None,
         epochs: int | None = None,
         seed: int | None = None,
+        split_seed: int | None = None,
         device: str | None = None,
         aircraft_type: str | None = None,
+        aircraft_filter: str = AIRCRAFT_FILTER_ALL,
         coordinate_frame: str = "enu",
         batch_size: str = "2048",
         cv_folds: int = 3,
@@ -116,6 +433,46 @@ class TrainingPlan:
         cv_epochs: int = DEFAULT_CV_EPOCHS,
         cv_patience: int = DEFAULT_CV_PATIENCE,
         random_train_anchor: bool = False,
+        training_cohort_min_future_s: float = 0.0,
+        random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+        checkpoint_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE,
+        validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS,
+        control_effort_weight: float | None = None,
+        control_smoothness_weight: float | None = None,
+        control_dense_state_weight: float = 0.25,
+        control_geometry_weight: float = 0.75,
+        control_arc_horizontal_velocity_weight: float = 0.25,
+        control_arc_vertical_velocity_weight: float = 0.25,
+        control_arc_horizontal_velocity_scale_mps: float = 10.0,
+        control_arc_vertical_velocity_scale_mps: float = 2.0,
+        control_arc_local_velocity: str = CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+        control_arc_tangent_weight: float = 0.25,
+        control_arc_position_end_weight: float = 4.0,
+        control_arc_terminal: str = CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+        control_arc_terminal_cross_track_emphasis: float = 3.0,
+        control_arc_terminal_vertical_emphasis: float = 5.0,
+        control_terminal_position_weight: float = 1.0,
+        control_terminal_velocity_weight: float = 1.0,
+        control_terminal_position_scale_m: float = 100.0,
+        control_terminal_velocity_scale_mps: float = 10.0,
+        control_terminal_clock: str = CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
+        control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
+        control_value_parameterization: str = CONTROL_VALUE_ABSOLUTE,
+        control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4,
+        control_experts: int | None = None,
+        control_selector_weight: float | None = None,
+        control_diversity_weight: float | None = None,
+        control_state_clock: str = CONTROL_STATE_CLOCK_PREDICTED,
+        control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE,
+        control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+        control_state_duration_gradient: bool = True,
+        control_horizon_curriculum_s: tuple[float, ...] = (),
+        control_horizon_curriculum_stage_epochs: int = (
+            DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS
+        ),
+        control_gradient_clip_norm: float = 0.0,
+        control_gradient_clip_policy: str = CONTROL_GRADIENT_CLIP_GLOBAL,
+        control_rollout_dt: float | None = None,
         output_dir: str | Path | None = None,
     ) -> None:
         self.airports = tuple(sorted(airport.strip().upper() for airport in airports))
@@ -123,32 +480,143 @@ class TrainingPlan:
             raise ValueError("TrainingPlan requires at least one airport")
         self.model = model
         self.training_mode = training_mode
+        self.prediction_output = prediction_output
         self.n_segments = n_segments
+        self.horizon_mode = horizon_mode
+        self.full_horizon_steps = full_horizon_steps
+        self.window_horizon_steps = window_horizon_steps
         self.epochs = epochs
         self.seed = seed
+        self.split_seed = split_seed
         self.device = device
         self.aircraft_type = aircraft_type
+        self.aircraft_filter = aircraft_filter
         self.coordinate_frame = coordinate_frame
         self.batch_size = batch_size
         self.cv_folds = cv_folds
-        self.cv_parameters = validate_cv_parameters(cv_parameters)
+        self.cv_parameters = applicable_cv_parameters(cv_parameters, horizon_mode)
         self.cv_epochs = cv_epochs
         self.cv_patience = cv_patience
         self.random_train_anchor = random_train_anchor
+        self.training_cohort_min_future_s = training_cohort_min_future_s
+        self.random_train_anchor_min_future_s = random_train_anchor_min_future_s
+        self.checkpoint_selection_metric = checkpoint_selection_metric
+        self.validation_common_grid_points = validation_common_grid_points
+        self.control_effort_weight = control_effort_weight
+        self.control_smoothness_weight = control_smoothness_weight
+        self.control_dense_state_weight = control_dense_state_weight
+        self.control_geometry_weight = control_geometry_weight
+        self.control_arc_horizontal_velocity_weight = (
+            control_arc_horizontal_velocity_weight
+        )
+        self.control_arc_vertical_velocity_weight = (
+            control_arc_vertical_velocity_weight
+        )
+        self.control_arc_horizontal_velocity_scale_mps = (
+            control_arc_horizontal_velocity_scale_mps
+        )
+        self.control_arc_vertical_velocity_scale_mps = (
+            control_arc_vertical_velocity_scale_mps
+        )
+        self.control_arc_local_velocity = control_arc_local_velocity
+        self.control_arc_tangent_weight = control_arc_tangent_weight
+        self.control_arc_position_end_weight = control_arc_position_end_weight
+        self.control_arc_terminal = control_arc_terminal
+        self.control_arc_terminal_cross_track_emphasis = (
+            control_arc_terminal_cross_track_emphasis
+        )
+        self.control_arc_terminal_vertical_emphasis = (
+            control_arc_terminal_vertical_emphasis
+        )
+        self.control_terminal_position_weight = control_terminal_position_weight
+        self.control_terminal_velocity_weight = control_terminal_velocity_weight
+        self.control_terminal_position_scale_m = control_terminal_position_scale_m
+        self.control_terminal_velocity_scale_mps = control_terminal_velocity_scale_mps
+        self.control_terminal_clock = control_terminal_clock
+        self.control_duration_parameterization = control_duration_parameterization
+        self.control_value_parameterization = control_value_parameterization
+        self.control_dynamics_backend = control_dynamics_backend
+        self.control_experts = control_experts
+        self.control_selector_weight = control_selector_weight
+        self.control_diversity_weight = control_diversity_weight
+        self.control_state_clock = control_state_clock
+        self.control_state_loss_grid = control_state_loss_grid
+        self.control_state_objective = control_state_objective
+        self.control_state_duration_gradient = control_state_duration_gradient
+        self.control_horizon_curriculum_s = tuple(control_horizon_curriculum_s)
+        self.control_horizon_curriculum_stage_epochs = (
+            control_horizon_curriculum_stage_epochs
+        )
+        self.control_gradient_clip_norm = control_gradient_clip_norm
+        self.control_gradient_clip_policy = control_gradient_clip_policy
+        self.control_rollout_dt = control_rollout_dt
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
         scope = self.airports[0] if training_mode == "per-airport" else "POOLED"
-        suffix = _frame_tag(coordinate_frame) + _anchor_tag(random_train_anchor)
+        suffix = (
+            _prediction_output_tag(prediction_output)
+            + _control_duration_tag(
+                prediction_output, control_duration_parameterization
+            )
+            + _control_value_tag(
+                prediction_output, control_value_parameterization
+            )
+            + _control_dynamics_filesystem_tag(
+                prediction_output, control_dynamics_backend
+            )
+            + _control_clock_tag(prediction_output, control_state_clock)
+            + _control_terminal_clock_filesystem_tag(
+                prediction_output, control_terminal_clock
+            )
+            + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
+            + _control_objective_tag(prediction_output, control_state_objective)
+            + _terminal_tracking_recipe_tag(
+                prediction_output,
+                control_state_objective,
+                control_dense_state_weight,
+                control_geometry_weight,
+                control_arc_horizontal_velocity_weight,
+                control_arc_vertical_velocity_weight,
+                control_arc_horizontal_velocity_scale_mps,
+                control_arc_vertical_velocity_scale_mps,
+                control_arc_local_velocity,
+                control_arc_tangent_weight,
+                control_arc_position_end_weight,
+                control_arc_terminal,
+                control_arc_terminal_cross_track_emphasis,
+                control_arc_terminal_vertical_emphasis,
+                control_terminal_position_weight,
+                control_terminal_velocity_weight,
+                control_terminal_position_scale_m,
+                control_terminal_velocity_scale_mps,
+            )
+            + _control_duration_gradient_tag(
+                prediction_output, control_state_duration_gradient
+            )
+            + _control_horizon_curriculum_tag(
+                control_horizon_curriculum_s,
+                control_horizon_curriculum_stage_epochs,
+            )
+            + _control_gradient_clip_tag(
+                control_gradient_clip_norm, control_gradient_clip_policy
+            )
+            + _aircraft_filter_tag(aircraft_filter)
+            + _frame_tag(coordinate_frame)
+            + _anchor_tag(random_train_anchor)
+            + _training_cohort_tag(training_cohort_min_future_s)
+            + _validation_selection_tag(checkpoint_selection_metric)
+        )
         self.train_dir = (
             Path(output_dir)
             if output_dir is not None
-            else OPT_OUTPUTS_ROOT / scope / f"ts_{model}_normalized_time{suffix}"
+            else OPT_OUTPUTS_ROOT / scope / f"ts_{model}_{HORIZON_TAGS[horizon_mode]}{suffix}"
         )
         self.cv_dir = self.train_dir / "cross_validation"
         self.cv_results = self.cv_dir / CV_RESULTS_NAME
         self.best_config = self.cv_dir / BEST_CONFIG_NAME
         self.checkpoint = self.train_dir / CHECKPOINT_NAME
         self.checkpoint_metadata = self.train_dir / CHECKPOINT_METADATA_NAME
+        self.test_release = self.train_dir / TEST_RELEASE_NAME
 
     @property
     def pooled(self) -> bool:
@@ -164,19 +632,119 @@ class TrainingPlan:
     def _recipe_args(self, *, include_base_n_segments: bool = True) -> list[str]:
         args = [
             "--model", self.model,
+            "--prediction-output", self.prediction_output,
             "--coordinate-frame", self.coordinate_frame,
             "--batch-size", self.batch_size,
+            "--horizon-mode", self.horizon_mode,
         ]
+        if self.full_horizon_steps is not None:
+            args += ["--full-horizon-steps", str(self.full_horizon_steps)]
+        if self.window_horizon_steps is not None:
+            args += ["--window-horizon-steps", str(self.window_horizon_steps)]
         if self.random_train_anchor:
             args.append("--random-train-anchor")
+            args += [
+                "--random-train-anchor-min-future-s",
+                str(self.random_train_anchor_min_future_s),
+            ]
+        if self.training_cohort_min_future_s > 0.0:
+            args += [
+                "--training-cohort-min-future-s",
+                str(self.training_cohort_min_future_s),
+            ]
+        if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
+            args += ["--checkpoint-selection-metric", self.checkpoint_selection_metric]
+        if self.validation_common_grid_points != DEFAULT_VALIDATION_COMMON_GRID_POINTS:
+            args += [
+                "--validation-common-grid-points",
+                str(self.validation_common_grid_points),
+            ]
         if self.n_segments is not None and include_base_n_segments:
             args += ["--n-segments", str(self.n_segments)]
         if self.seed is not None:
             args += ["--seed", str(self.seed)]
+        if self.split_seed is not None:
+            args += ["--split-seed", str(self.split_seed)]
         if self.device is not None:
             args += ["--device", self.device]
         if self.aircraft_type is not None:
             args += ["--aircraft-type", self.aircraft_type]
+        args += ["--aircraft-filter", self.aircraft_filter]
+        if self.control_effort_weight is not None:
+            args += ["--control-effort-weight", str(self.control_effort_weight)]
+        if self.control_smoothness_weight is not None:
+            args += ["--control-smoothness-weight", str(self.control_smoothness_weight)]
+        args += [
+            "--control-dense-state-weight",
+            str(self.control_dense_state_weight),
+            "--control-geometry-weight",
+            str(self.control_geometry_weight),
+            "--control-arc-horizontal-velocity-weight",
+            str(self.control_arc_horizontal_velocity_weight),
+            "--control-arc-vertical-velocity-weight",
+            str(self.control_arc_vertical_velocity_weight),
+            "--control-arc-horizontal-velocity-scale-mps",
+            str(self.control_arc_horizontal_velocity_scale_mps),
+            "--control-arc-vertical-velocity-scale-mps",
+            str(self.control_arc_vertical_velocity_scale_mps),
+            "--control-arc-local-velocity",
+            self.control_arc_local_velocity,
+            "--control-arc-tangent-weight",
+            str(self.control_arc_tangent_weight),
+            "--control-arc-position-end-weight",
+            str(self.control_arc_position_end_weight),
+            "--control-arc-terminal",
+            self.control_arc_terminal,
+            "--control-arc-terminal-cross-track-emphasis",
+            str(self.control_arc_terminal_cross_track_emphasis),
+            "--control-arc-terminal-vertical-emphasis",
+            str(self.control_arc_terminal_vertical_emphasis),
+            "--control-terminal-position-weight",
+            str(self.control_terminal_position_weight),
+            "--control-terminal-velocity-weight",
+            str(self.control_terminal_velocity_weight),
+            "--control-terminal-position-scale-m",
+            str(self.control_terminal_position_scale_m),
+            "--control-terminal-velocity-scale-mps",
+            str(self.control_terminal_velocity_scale_mps),
+            "--control-terminal-clock",
+            self.control_terminal_clock,
+        ]
+        args += [
+            "--control-duration-parameterization",
+            self.control_duration_parameterization,
+            "--control-value-parameterization",
+            self.control_value_parameterization,
+            "--control-dynamics-backend",
+            self.control_dynamics_backend,
+        ]
+        if self.control_experts is not None:
+            args += ["--control-experts", str(self.control_experts)]
+        if self.control_selector_weight is not None:
+            args += ["--control-selector-weight", str(self.control_selector_weight)]
+        if self.control_diversity_weight is not None:
+            args += ["--control-diversity-weight", str(self.control_diversity_weight)]
+        args += ["--control-state-clock", self.control_state_clock]
+        args += ["--control-state-loss-grid", self.control_state_loss_grid]
+        args += ["--control-state-objective", self.control_state_objective]
+        if not self.control_state_duration_gradient:
+            args.append("--no-control-state-duration-gradient")
+        if self.control_horizon_curriculum_s:
+            args += [
+                "--control-horizon-curriculum",
+                ",".join(f"{value:g}" for value in self.control_horizon_curriculum_s),
+                "--control-horizon-stage-epochs",
+                str(self.control_horizon_curriculum_stage_epochs),
+            ]
+        if self.control_gradient_clip_norm > 0.0:
+            args += [
+                "--control-gradient-clip-norm",
+                f"{self.control_gradient_clip_norm:g}",
+                "--control-gradient-clip-policy",
+                self.control_gradient_clip_policy,
+            ]
+        if self.control_rollout_dt is not None:
+            args += ["--control-rollout-dt", str(self.control_rollout_dt)]
         return args
 
     def checkpoint_reuse_error(self) -> str | None:
@@ -205,6 +773,47 @@ class TrainingPlan:
                 f"{metadata.get('random_train_anchor')!r} does not match requested "
                 f"{self.random_train_anchor!r}"
             )
+        if (
+            metadata.get("training_cohort_min_future_s")
+            != self.training_cohort_min_future_s
+        ):
+            return "checkpoint training-cohort minimum future does not match the recipe"
+        if (
+            metadata.get("random_train_anchor_min_future_s")
+            != self.random_train_anchor_min_future_s
+        ):
+            return "checkpoint random-anchor minimum future does not match the recipe"
+        if metadata.get("checkpoint_selection_metric") != self.checkpoint_selection_metric:
+            return "checkpoint validation selection metric does not match the recipe"
+        if metadata.get("validation_common_grid_points") != self.validation_common_grid_points:
+            return "checkpoint common-grid point count does not match the recipe"
+        expected_config, _source = self.resolved_train_config(
+            use_best_config=self.cv_reuse_error() is None
+        )
+        if metadata.get("prediction_output") != expected_config.prediction_output:
+            return "checkpoint prediction output does not match the requested recipe"
+        if metadata.get("aircraft_filter") != expected_config.aircraft_filter:
+            return "checkpoint aircraft filter does not match the requested recipe"
+        if metadata.get("horizon_mode") != expected_config.horizon_mode:
+            return "checkpoint horizon mode does not match the requested recipe"
+        if metadata.get("pred_len") != expected_config.pred_len:
+            return "checkpoint output length does not match the requested recipe"
+        expected_scheduler = {
+            "name": "ReduceLROnPlateau",
+            "factor": expected_config.lr_plateau_factor,
+            "patience": expected_config.lr_plateau_patience,
+        }
+        if metadata.get("lr_scheduler") != expected_scheduler:
+            return "checkpoint LR scheduler does not match the requested recipe"
+        if (
+            expected_config.horizon_mode == HORIZON_WINDOW
+            and metadata.get("full_horizon_steps") != expected_config.full_horizon_steps
+        ):
+            return "checkpoint window rollout cap does not match the requested recipe"
+        if uses_control_dynamics(expected_config.prediction_output):
+            expected_control_recipe = control_recipe(expected_config)
+            if metadata.get("control_recipe") != expected_control_recipe:
+                return "checkpoint control recipe does not match the requested recipe"
         return None
 
     def cv_reuse_error(self) -> str | None:
@@ -258,17 +867,98 @@ class TrainingPlan:
         """Rebuild the exact base TSConfig produced by this plan's CV command."""
         overrides: dict[str, object] = {
             "model": self.model,
+            "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
+            "training_cohort_min_future_s": self.training_cohort_min_future_s,
+            "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
+            "checkpoint_selection_metric": self.checkpoint_selection_metric,
+            "validation_common_grid_points": self.validation_common_grid_points,
+            "horizon_mode": self.horizon_mode,
+            "aircraft_filter": self.aircraft_filter,
+            "control_state_supervision_clock": self.control_state_clock,
+            "control_state_loss_grid": self.control_state_loss_grid,
+            "control_state_objective": self.control_state_objective,
+            "control_dense_state_loss_weight": self.control_dense_state_weight,
+            "control_geometry_loss_weight": self.control_geometry_weight,
+            "control_arc_horizontal_velocity_loss_weight": (
+                self.control_arc_horizontal_velocity_weight
+            ),
+            "control_arc_vertical_velocity_loss_weight": (
+                self.control_arc_vertical_velocity_weight
+            ),
+            "control_arc_horizontal_velocity_scale_mps": (
+                self.control_arc_horizontal_velocity_scale_mps
+            ),
+            "control_arc_vertical_velocity_scale_mps": (
+                self.control_arc_vertical_velocity_scale_mps
+            ),
+            "control_arc_local_velocity_parameterization": (
+                self.control_arc_local_velocity
+            ),
+            "control_arc_tangent_loss_weight": self.control_arc_tangent_weight,
+            "control_arc_position_end_weight": self.control_arc_position_end_weight,
+            "control_arc_terminal_parameterization": self.control_arc_terminal,
+            "control_arc_terminal_cross_track_emphasis": (
+                self.control_arc_terminal_cross_track_emphasis
+            ),
+            "control_arc_terminal_vertical_emphasis": (
+                self.control_arc_terminal_vertical_emphasis
+            ),
+            "control_terminal_position_loss_weight": (
+                self.control_terminal_position_weight
+            ),
+            "control_terminal_velocity_loss_weight": (
+                self.control_terminal_velocity_weight
+            ),
+            "control_terminal_position_scale_m": (
+                self.control_terminal_position_scale_m
+            ),
+            "control_terminal_velocity_scale_mps": (
+                self.control_terminal_velocity_scale_mps
+            ),
+            "control_terminal_supervision_clock": self.control_terminal_clock,
+            "control_state_duration_gradient": self.control_state_duration_gradient,
+            "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
+            "control_horizon_curriculum_stage_epochs": (
+                self.control_horizon_curriculum_stage_epochs
+            ),
+            "control_gradient_clip_norm": self.control_gradient_clip_norm,
+            "control_gradient_clip_policy": self.control_gradient_clip_policy,
+            "control_duration_parameterization": self.control_duration_parameterization,
+            "control_value_parameterization": self.control_value_parameterization,
+            "control_dynamics_backend": self.control_dynamics_backend,
         }
+        if self.full_horizon_steps is not None:
+            overrides["full_horizon_steps"] = self.full_horizon_steps
+        if self.window_horizon_steps is not None:
+            overrides["window_horizon_steps"] = self.window_horizon_steps
         if self.n_segments is not None:
             overrides["n_segments"] = self.n_segments
         if self.seed is not None:
             overrides["seed"] = self.seed
+        if self.split_seed is not None:
+            overrides["split_seed"] = self.split_seed
         if self.device is not None:
             overrides["device"] = self.device
         if self.aircraft_type is not None:
             overrides["aircraft_type"] = self.aircraft_type
+        if self.control_effort_weight is not None:
+            overrides["control_effort_loss_weight"] = self.control_effort_weight
+        if self.control_smoothness_weight is not None:
+            overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
+        if self.control_experts is not None:
+            overrides["control_expert_count"] = self.control_experts
+        if self.control_selector_weight is not None:
+            overrides["control_mixture_selector_loss_weight"] = (
+                self.control_selector_weight
+            )
+        if self.control_diversity_weight is not None:
+            overrides["control_mixture_diversity_loss_weight"] = (
+                self.control_diversity_weight
+            )
+        if self.control_rollout_dt is not None:
+            overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
             overrides["batch_size"] = int(self.batch_size)
         return TSConfig(**overrides).to_dict()
@@ -316,9 +1006,72 @@ class TrainingPlan:
 
         overrides.update({
             "model": self.model,
+            "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
+            "training_cohort_min_future_s": self.training_cohort_min_future_s,
+            "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
+            "checkpoint_selection_metric": self.checkpoint_selection_metric,
+            "validation_common_grid_points": self.validation_common_grid_points,
+            "horizon_mode": self.horizon_mode,
+            "aircraft_filter": self.aircraft_filter,
+            "control_state_supervision_clock": self.control_state_clock,
+            "control_state_loss_grid": self.control_state_loss_grid,
+            "control_state_objective": self.control_state_objective,
+            "control_dense_state_loss_weight": self.control_dense_state_weight,
+            "control_geometry_loss_weight": self.control_geometry_weight,
+            "control_arc_horizontal_velocity_loss_weight": (
+                self.control_arc_horizontal_velocity_weight
+            ),
+            "control_arc_vertical_velocity_loss_weight": (
+                self.control_arc_vertical_velocity_weight
+            ),
+            "control_arc_horizontal_velocity_scale_mps": (
+                self.control_arc_horizontal_velocity_scale_mps
+            ),
+            "control_arc_vertical_velocity_scale_mps": (
+                self.control_arc_vertical_velocity_scale_mps
+            ),
+            "control_arc_local_velocity_parameterization": (
+                self.control_arc_local_velocity
+            ),
+            "control_arc_tangent_loss_weight": self.control_arc_tangent_weight,
+            "control_arc_position_end_weight": self.control_arc_position_end_weight,
+            "control_arc_terminal_parameterization": self.control_arc_terminal,
+            "control_arc_terminal_cross_track_emphasis": (
+                self.control_arc_terminal_cross_track_emphasis
+            ),
+            "control_arc_terminal_vertical_emphasis": (
+                self.control_arc_terminal_vertical_emphasis
+            ),
+            "control_terminal_position_loss_weight": (
+                self.control_terminal_position_weight
+            ),
+            "control_terminal_velocity_loss_weight": (
+                self.control_terminal_velocity_weight
+            ),
+            "control_terminal_position_scale_m": (
+                self.control_terminal_position_scale_m
+            ),
+            "control_terminal_velocity_scale_mps": (
+                self.control_terminal_velocity_scale_mps
+            ),
+            "control_terminal_supervision_clock": self.control_terminal_clock,
+            "control_state_duration_gradient": self.control_state_duration_gradient,
+            "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
+            "control_horizon_curriculum_stage_epochs": (
+                self.control_horizon_curriculum_stage_epochs
+            ),
+            "control_gradient_clip_norm": self.control_gradient_clip_norm,
+            "control_gradient_clip_policy": self.control_gradient_clip_policy,
+            "control_duration_parameterization": self.control_duration_parameterization,
+            "control_value_parameterization": self.control_value_parameterization,
+            "control_dynamics_backend": self.control_dynamics_backend,
         })
+        if self.full_horizon_steps is not None:
+            overrides["full_horizon_steps"] = self.full_horizon_steps
+        if self.window_horizon_steps is not None:
+            overrides["window_horizon_steps"] = self.window_horizon_steps
         if self.n_segments is not None and (
             not use_best_config or "n_segments" not in self.cv_parameters
         ):
@@ -327,10 +1080,28 @@ class TrainingPlan:
             overrides["epochs"] = self.epochs
         if self.seed is not None:
             overrides["seed"] = self.seed
+        if self.split_seed is not None:
+            overrides["split_seed"] = self.split_seed
         if self.device is not None:
             overrides["device"] = self.device
         if self.aircraft_type is not None:
             overrides["aircraft_type"] = self.aircraft_type
+        if self.control_effort_weight is not None:
+            overrides["control_effort_loss_weight"] = self.control_effort_weight
+        if self.control_smoothness_weight is not None:
+            overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
+        if self.control_experts is not None:
+            overrides["control_expert_count"] = self.control_experts
+        if self.control_selector_weight is not None:
+            overrides["control_mixture_selector_loss_weight"] = (
+                self.control_selector_weight
+            )
+        if self.control_diversity_weight is not None:
+            overrides["control_mixture_diversity_loss_weight"] = (
+                self.control_diversity_weight
+            )
+        if self.control_rollout_dt is not None:
+            overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
             overrides["batch_size"] = int(self.batch_size)
         return TSConfig(**overrides), source
@@ -357,35 +1128,164 @@ class PredictionPlan:
         airport: str,
         outputs: tuple[str, ...],
         *,
-        split: str = "test",
+        split: str = "val",
         experiment_tag: str | None = None,
     ) -> None:
         self.training = training
         self.airport = airport.upper()
         self.outputs = outputs
+        if split not in PREDICTION_SPLITS:
+            raise ValueError(f"unknown prediction split {split!r}")
         self.split = split
         self.data_manifest = arrival_manifest_path(self.airport)
         scope = "pooled_" if training.pooled else ""
         frame = _frame_tag(training.coordinate_frame)
         anchor = _anchor_tag(training.random_train_anchor)
+        training_cohort = _training_cohort_tag(
+            training.training_cohort_min_future_s
+        )
+        validation_selection = _validation_selection_tag(
+            training.checkpoint_selection_metric
+        )
+        prediction_output = _prediction_output_tag(training.prediction_output)
+        control_duration = _control_duration_tag(
+            training.prediction_output, training.control_duration_parameterization
+        )
+        control_value = _control_value_tag(
+            training.prediction_output, training.control_value_parameterization
+        )
+        control_dynamics_filesystem = _control_dynamics_filesystem_tag(
+            training.prediction_output, training.control_dynamics_backend
+        )
+        control_dynamics = _control_dynamics_tag(
+            training.prediction_output, training.control_dynamics_backend
+        )
+        control_clock = _control_clock_tag(
+            training.prediction_output, training.control_state_clock
+        )
+        control_terminal_clock_filesystem = (
+            _control_terminal_clock_filesystem_tag(
+                training.prediction_output, training.control_terminal_clock
+            )
+        )
+        control_terminal_clock = _control_terminal_clock_tag(
+            training.prediction_output, training.control_terminal_clock
+        )
+        control_state_loss_grid = _control_state_loss_grid_tag(
+            training.prediction_output, training.control_state_loss_grid
+        )
+        control_objective = _control_objective_tag(
+            training.prediction_output, training.control_state_objective
+        )
+        duration_gradient = _control_duration_gradient_tag(
+            training.prediction_output, training.control_state_duration_gradient
+        )
+        horizon_curriculum = _control_horizon_curriculum_tag(
+            training.control_horizon_curriculum_s,
+            training.control_horizon_curriculum_stage_epochs,
+        )
+        gradient_clip = _control_gradient_clip_tag(
+            training.control_gradient_clip_norm,
+            training.control_gradient_clip_policy,
+        )
+        aircraft_filter = _aircraft_filter_tag(training.aircraft_filter)
         tag = f"_{experiment_tag}" if experiment_tag else ""
-        stem = f"{scope}{training.model}_normalized_time{frame}{anchor}{tag}_{split}"
+        horizon_tag = HORIZON_TAGS[training.horizon_mode]
+        stem = (
+            f"{scope}{training.model}{prediction_output}{control_duration}{control_value}"
+            f"{control_dynamics_filesystem}"
+            f"{control_clock}{control_terminal_clock_filesystem}_{horizon_tag}"
+            f"{control_state_loss_grid}{control_objective}{duration_gradient}"
+            f"{horizon_curriculum}{gradient_clip}"
+            f"{aircraft_filter}{frame}{anchor}{training_cohort}"
+            f"{validation_selection}{tag}_{split}"
+        )
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
         self.summary = self.pred_dir / "summary.json"
         self.report = self.pred_dir / "evaluation_report.json"
         self.report_html = self.pred_dir / "evaluation_report.html"
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
-            f"ts_{category_scope}{MODEL_SHORT[training.model]}_normalized_time"
-            f"{frame}{anchor}{tag}_{split}"
+            f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
+            f"{control_duration}{control_value}{control_dynamics}"
+            f"{control_terminal_clock}_{horizon_tag}"
+            f"{control_state_loss_grid}{control_objective}{duration_gradient}"
+            f"{horizon_curriculum}{gradient_clip}"
+            f"{aircraft_filter}{frame}{anchor}{training_cohort}"
+            f"{validation_selection}{tag}_{split}"
         )
         model_label = MODEL_LABEL[training.model]
         pooled_label = "pooled, " if training.pooled else ""
         anchor_label = "random-anchor training, " if training.random_train_anchor else ""
         frame_label = "ENU" if training.coordinate_frame == "enu" else "runway-aligned"
+        horizon_label = HORIZON_LABELS[training.horizon_mode]
+        duration_label = _control_duration_label(
+            training.prediction_output,
+            training.control_duration_parameterization,
+        )
+        output_label = f"{training.prediction_output} output, {duration_label}"
+        dynamics_label = _control_dynamics_label(
+            training.prediction_output, training.control_dynamics_backend
+        )
+        value_label = (
+            "trim-residual controls, "
+            if training.control_value_parameterization != CONTROL_VALUE_ABSOLUTE
+            else ""
+        )
+        state_loss_label = (
+            "fixed-dt state loss, "
+            if training.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
+            else ""
+        )
+        objective_label = {
+            CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE: "",
+            CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA: (
+                "physical ADE/FDE criterion, "
+            ),
+            CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: (
+                "dense state + terminal position/velocity criterion "
+                f"({training.control_dense_state_weight:g}/"
+                f"{training.control_terminal_position_weight:g}/"
+                f"{training.control_terminal_velocity_weight:g}), "
+            ),
+            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
+                "horizontal-arc position/local-velocity + terminal criterion "
+                f"({training.control_geometry_weight:g}/"
+                f"{training.control_arc_horizontal_velocity_weight:g}/"
+                f"{training.control_arc_vertical_velocity_weight:g}/"
+                f"{training.control_terminal_position_weight:g}/"
+                f"{training.control_terminal_velocity_weight:g}), "
+                f"local={training.control_arc_local_velocity}, "
+                f"tangent={training.control_arc_tangent_weight:g}, "
+                f"position-end={training.control_arc_position_end_weight:g}, "
+                f"terminal={training.control_arc_terminal}, "
+                "terminal-emphasis="
+                f"cross×{training.control_arc_terminal_cross_track_emphasis:g}/"
+                f"vertical×{training.control_arc_terminal_vertical_emphasis:g}, "
+            ),
+        }[training.control_state_objective]
+        duration_gradient_label = (
+            "detached duration-state gradient, "
+            if not training.control_state_duration_gradient
+            else ""
+        )
+        terminal_clock_label = _control_terminal_clock_label(
+            training.control_terminal_clock
+        )
+        curriculum_label = _control_horizon_curriculum_label(
+            training.control_horizon_curriculum_s,
+            training.control_horizon_curriculum_stage_epochs,
+        )
+        gradient_clip_label = _control_gradient_clip_label(
+            training.control_gradient_clip_norm,
+            training.control_gradient_clip_policy,
+        )
         self.label = (
-            f"Predicted ({model_label}, {pooled_label}{anchor_label}normalized time, "
-            f"{frame_label}, {split} split)"
+            f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
+            f"{output_label}{value_label}{dynamics_label}{state_loss_label}{objective_label}"
+            f"{duration_gradient_label}{terminal_clock_label}"
+            f"{curriculum_label}{gradient_clip_label}"
+            f"{anchor_label}{horizon_label}, {frame_label})"
         )
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category
@@ -401,6 +1301,8 @@ class PredictionPlan:
             "--output-dir", str(self.pred_dir),
             "--split", self.split,
         ]
+        if self.split == "test":
+            predict.append("--test-release")
         if self.training.device is not None:
             predict += ["--device", self.training.device]
         named.append((f"predict ({self.split} split)", predict))
@@ -423,6 +1325,7 @@ class PredictionPlan:
                 "--airport", self.airport,
                 "--category", self.category,
                 "--category-label", self.label,
+                "--dataset-split", self.split,
                 "--evaluation-report", str(self.report),
             ]))
         return named
@@ -457,7 +1360,11 @@ def run_training(
     reuse_error = plan.checkpoint_reuse_error() if skip_train else None
     reuse = skip_train and reuse_error is None
     mode = "reuse checkpoint" if reuse else "train final checkpoint"
-    print(f"\n━━ {plan.label} [{plan.model} · normalized time · {plan.coordinate_frame}] · {mode}")
+    horizon_label = HORIZON_LABELS[plan.horizon_mode]
+    print(
+        f"\n━━ {plan.label} [{plan.model} · {plan.prediction_output} · "
+        f"{horizon_label} · {plan.coordinate_frame}] · {mode}"
+    )
     print(f"   manifests : {len(plan.data_manifests)}")
     print(f"   CV        : {plan.cv_dir}")
     print(f"   training  : {plan.train_dir}")
@@ -479,7 +1386,11 @@ def run_training(
         print(f"   config    : {source}")
         print(
             f"   trajectory: dt={config.dt_s:g}s, L={config.seq_len}, "
-            f"N={config.n_segments}, frame={config.coordinate_frame}, anchor={anchor}"
+            f"prediction_output={config.prediction_output}, mode={config.horizon_mode}, "
+            f"output={config.pred_len}, "
+            f"N={config.n_segments}, H_full={config.full_horizon_steps}, "
+            f"H_window={config.window_horizon_steps}, "
+            f"frame={config.coordinate_frame}, anchor={anchor}"
         )
         print(
             f"   network   : d_model={config.d_model}, d_ff={config.d_ff}, "
@@ -490,12 +1401,79 @@ def run_training(
             f"epochs={config.epochs}, patience={config.patience}"
         )
         print(
+            f"   loss      : final_time={config.final_time_loss_weight:g}, "
+            f"kinematic={config.kinematic_consistency_loss_weight:g}, "
+            f"terminal={config.terminal_loss_weight:g}"
+        )
+        if uses_control_dynamics(config.prediction_output):
+            print(
+                f"   control   : effort={config.control_effort_loss_weight:g}, "
+                f"smoothness={config.control_smoothness_loss_weight:g}, "
+                f"duration={config.control_duration_parameterization}, "
+                f"values={config.control_value_parameterization}, "
+                f"dynamics={config.control_dynamics_backend}, "
+                f"state_clock={config.control_state_supervision_clock}, "
+                f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
+            )
+            if config.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE:
+                print(
+                    "   terminal-state: "
+                    f"dense={config.control_dense_state_loss_weight:g}, "
+                    f"position={config.control_terminal_position_loss_weight:g}/"
+                    f"{config.control_terminal_position_scale_m:g}m, "
+                    f"velocity={config.control_terminal_velocity_loss_weight:g}/"
+                    f"{config.control_terminal_velocity_scale_mps:g}mps"
+                )
+            if (
+                config.control_state_objective
+                == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
+            ):
+                print(
+                    "   arc-geometry: "
+                    f"geometry={config.control_geometry_loss_weight:g}, "
+                    "local_velocity="
+                    f"{config.control_arc_horizontal_velocity_loss_weight:g}/"
+                    f"{config.control_arc_horizontal_velocity_scale_mps:g}mps horiz, "
+                    f"{config.control_arc_vertical_velocity_loss_weight:g}/"
+                    f"{config.control_arc_vertical_velocity_scale_mps:g}mps vertical, "
+                    f"local={config.control_arc_local_velocity_parameterization}, "
+                    f"tangent={config.control_arc_tangent_loss_weight:g}, "
+                    f"position_end={config.control_arc_position_end_weight:g}, "
+                    f"terminal_mode={config.control_arc_terminal_parameterization}, "
+                    "terminal_emphasis="
+                    f"cross×{config.control_arc_terminal_cross_track_emphasis:g}/"
+                    f"vertical×{config.control_arc_terminal_vertical_emphasis:g}, "
+                    f"position={config.control_terminal_position_loss_weight:g}/"
+                    f"{config.control_terminal_position_scale_m:g}m, "
+                    f"velocity={config.control_terminal_velocity_loss_weight:g}/"
+                    f"{config.control_terminal_velocity_scale_mps:g}mps"
+                )
+            if config.control_horizon_curriculum_s:
+                horizons = "→".join(
+                    f"{value:g}s" for value in config.control_horizon_curriculum_s
+                )
+                print(
+                    f"   curriculum: {horizons} × "
+                    f"{config.control_horizon_curriculum_stage_epochs} epochs -> full"
+                )
+            if config.control_gradient_clip_norm > 0.0:
+                print(
+                    f"   stability : gradient clip={config.control_gradient_clip_norm:g}, "
+                    f"policy={config.control_gradient_clip_policy}"
+                )
+            if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
+                print(
+                    f"   mixture   : experts={config.control_expert_count}, "
+                    f"selector={config.control_mixture_selector_loss_weight:g}, "
+                    f"diversity={config.control_mixture_diversity_loss_weight:g}"
+                )
+        print(
             f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
-            f"aircraft={config.aircraft_type}"
+            f"aircraft={config.aircraft_type}, aircraft_filter={config.aircraft_filter}"
         )
 
     _run_steps(
-        f"{plan.label} · {plan.model} · normalized time",
+        f"{plan.label} · {plan.model} · {horizon_label}",
         plan.steps(skip_cv=skip_cv, reuse_checkpoint=reuse),
         dry_run=dry_run,
         before_step=print_final_config,
@@ -505,9 +1483,26 @@ def run_training(
 
 def run_prediction(plan: PredictionPlan, *, dry_run: bool) -> None:
     print(f"\n  ━━ publish {plan.airport}: {plan.pred_dir}")
+    horizon_label = HORIZON_LABELS[plan.training.horizon_mode]
     _run_steps(
-        f"{plan.airport} · {plan.training.model} · normalized time",
+        f"{plan.airport} · {plan.training.model} · {horizon_label}",
         plan.steps(),
+        dry_run=dry_run,
+    )
+
+
+def freeze_test_release(plan: TrainingPlan, *, dry_run: bool) -> None:
+    """Make outer-test access explicit and bind it to this exact checkpoint/data roster."""
+    command = [
+        sys.executable,
+        str(TS_SCRIPT),
+        "freeze-test",
+        "--checkpoint", str(plan.checkpoint),
+        *plan._data_args(),
+    ]
+    _run_steps(
+        f"{plan.label} · {plan.model} · outer-test release",
+        [("freeze-test (irreversible)", command)],
         dry_run=dry_run,
     )
 
@@ -518,6 +1513,20 @@ def _parse_csv(raw: str, allowed: tuple[str, ...], flag: str) -> tuple[str, ...]
     if unknown or not tokens:
         raise argparse.ArgumentTypeError(f"{flag} takes a comma list from {allowed}, got {raw!r}")
     return tokens
+
+
+def _parse_positive_float_csv(raw: str) -> tuple[float, ...]:
+    try:
+        values = tuple(float(token.strip()) for token in raw.split(",") if token.strip())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "--control-horizon-curriculum takes comma-separated seconds"
+        ) from exc
+    if not values or any(value <= 0.0 for value in values):
+        raise argparse.ArgumentTypeError(
+            "--control-horizon-curriculum requires positive seconds"
+        )
+    return values
 
 
 def main() -> None:
@@ -533,18 +1542,160 @@ def main() -> None:
     parser.add_argument("--models", type=lambda raw: _parse_csv(raw, MODELS, "--models"),
                         default=MODELS, metavar=",".join(MODELS),
                         help="models to train (default: itransformer,patchtst)")
+    parser.add_argument(
+        "--prediction-output",
+        choices=PREDICTION_OUTPUTS,
+        default=PREDICTION_STATE,
+        help="state baseline or bounded controls with differentiable rollout",
+    )
     parser.add_argument("--n-segments", type=int, default=None,
                         help="base N for normalized progress; CV also tunes N")
+    parser.add_argument(
+        "--horizon-mode",
+        choices=HORIZON_MODES,
+        default=HORIZON_NORMALIZED,
+        help="prediction horizon (default: normalized)",
+    )
+    parser.add_argument(
+        "--full-horizon-steps",
+        type=int,
+        default=None,
+        help="H_full physical-dt outputs and window recursion cap (default: 300)",
+    )
+    parser.add_argument(
+        "--window-horizon-steps",
+        type=int,
+        default=None,
+        help="H_window outputs per recursive pass (default: 30)",
+    )
     parser.add_argument("--outputs", type=lambda raw: _parse_csv(raw, OUTPUT_KINDS, "--outputs"),
                         default=OUTPUT_KINDS, metavar="czml,eval")
-    parser.add_argument("--split", choices=("test", "val", "train", "all"), default="test")
+    parser.add_argument(
+        "--split", choices=(*PREDICTION_SPLITS, "development"), default="development",
+        help="publication split; default development publishes train and validation only",
+    )
+    parser.add_argument(
+        "--release-test",
+        action="store_true",
+        help="irreversibly freeze and evaluate outer-test; required with --split test",
+    )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--split-seed", type=int, default=None)
     parser.add_argument("--device", default=None)
     parser.add_argument("--aircraft-type", default=None)
+    parser.add_argument(
+        "--aircraft-filter",
+        choices=AIRCRAFT_FILTERS,
+        default=AIRCRAFT_FILTER_ALL,
+        help="fleet contract (openap-direct excludes synonyms, presets and fallbacks)",
+    )
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--batch-size", default="2048",
                         help="positive integer or auto (default: 2048)")
+    parser.add_argument("--control-effort-weight", type=float, default=None)
+    parser.add_argument("--control-smoothness-weight", type=float, default=None)
+    parser.add_argument("--control-dense-state-weight", type=float, default=0.25)
+    parser.add_argument("--control-geometry-weight", type=float, default=0.75)
+    parser.add_argument(
+        "--control-arc-horizontal-velocity-weight", type=float, default=0.25
+    )
+    parser.add_argument(
+        "--control-arc-vertical-velocity-weight", type=float, default=0.25
+    )
+    parser.add_argument(
+        "--control-arc-horizontal-velocity-scale-mps", type=float, default=10.0
+    )
+    parser.add_argument(
+        "--control-arc-vertical-velocity-scale-mps", type=float, default=2.0
+    )
+    parser.add_argument(
+        "--control-arc-local-velocity",
+        choices=CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
+        default=CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+    )
+    parser.add_argument("--control-arc-tangent-weight", type=float, default=0.25)
+    parser.add_argument("--control-arc-position-end-weight", type=float, default=4.0)
+    parser.add_argument(
+        "--control-arc-terminal",
+        choices=CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
+        default=CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+    )
+    parser.add_argument(
+        "--control-arc-terminal-cross-track-emphasis", type=float, default=3.0
+    )
+    parser.add_argument(
+        "--control-arc-terminal-vertical-emphasis", type=float, default=5.0
+    )
+    parser.add_argument("--control-terminal-position-weight", type=float, default=1.0)
+    parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
+    parser.add_argument("--control-terminal-position-scale-m", type=float, default=100.0)
+    parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=10.0)
+    parser.add_argument(
+        "--control-terminal-clock",
+        choices=CONTROL_TERMINAL_CLOCKS,
+        default=CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
+    )
+    parser.add_argument(
+        "--control-duration-parameterization",
+        choices=CONTROL_DURATION_PARAMETERIZATIONS,
+        default=CONTROL_DURATION_FACTORIZED,
+    )
+    parser.add_argument(
+        "--control-value-parameterization",
+        choices=CONTROL_VALUE_PARAMETERIZATIONS,
+        default=CONTROL_VALUE_ABSOLUTE,
+    )
+    parser.add_argument(
+        "--control-dynamics-backend",
+        choices=CONTROL_DYNAMICS_BACKENDS,
+        default=CONTROL_DYNAMICS_REANCHORED_RK4,
+    )
+    parser.add_argument("--control-experts", type=int, default=None)
+    parser.add_argument("--control-selector-weight", type=float, default=None)
+    parser.add_argument("--control-diversity-weight", type=float, default=None)
+    parser.add_argument(
+        "--control-state-clock",
+        choices=CONTROL_STATE_CLOCKS,
+        default=CONTROL_STATE_CLOCK_PREDICTED,
+    )
+    parser.add_argument(
+        "--control-state-loss-grid",
+        choices=CONTROL_STATE_LOSS_GRIDS,
+        default=CONTROL_STATE_LOSS_GRID_NATIVE,
+    )
+    parser.add_argument(
+        "--control-state-objective",
+        choices=CONTROL_STATE_OBJECTIVES,
+        default=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    )
+    parser.add_argument(
+        "--control-state-duration-gradient",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--control-horizon-curriculum",
+        type=_parse_positive_float_csv,
+        default=(),
+        metavar="SECONDS,...",
+    )
+    parser.add_argument(
+        "--control-horizon-stage-epochs",
+        type=int,
+        default=DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
+    )
+    parser.add_argument(
+        "--control-gradient-clip-norm",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--control-gradient-clip-policy",
+        choices=CONTROL_GRADIENT_CLIP_POLICIES,
+        default=CONTROL_GRADIENT_CLIP_GLOBAL,
+    )
+    parser.add_argument("--control-rollout-dt", type=float, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
         "--cv-parameters",
@@ -559,6 +1710,27 @@ def main() -> None:
         "--random-train-anchor",
         action="store_true",
         help="train rolling forecasts from random anchors; default is fixed anchor L-1",
+    )
+    parser.add_argument(
+        "--training-cohort-min-future-s",
+        type=float,
+        default=0.0,
+        help="train-only fixed-L-1 future-duration floor for controlled comparisons",
+    )
+    parser.add_argument(
+        "--random-train-anchor-min-future-s",
+        type=float,
+        default=DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+    )
+    parser.add_argument(
+        "--checkpoint-selection-metric",
+        choices=CHECKPOINT_SELECTION_METRICS,
+        default=CHECKPOINT_SELECTION_OBJECTIVE,
+    )
+    parser.add_argument(
+        "--validation-common-grid-points",
+        type=int,
+        default=DEFAULT_VALIDATION_COMMON_GRID_POINTS,
     )
     parser.add_argument(
         "--skip-cv",
@@ -577,6 +1749,13 @@ def main() -> None:
                 raise ValueError
         except ValueError:
             parser.error("--batch-size must be a positive integer or 'auto'")
+    if args.split == "test" and not args.release_test:
+        parser.error(
+            "--split test requires --release-test after all model and hyperparameter "
+            "decisions are frozen"
+        )
+    if args.split != "test" and args.release_test:
+        parser.error("--release-test is valid only with --split test")
 
     if args.airport:
         airports = [args.airport.strip().upper()]
@@ -597,17 +1776,24 @@ def main() -> None:
     ]
     print(f"{len(cells)} training cell(s), mode={args.training_mode}, airports={','.join(airports)}")
 
+    publish_splits = ("train", "val") if args.split == "development" else (args.split,)
     completed = 0
     for scope, model in cells:
         training = TrainingPlan(
             scope,
             model,
             training_mode=args.training_mode,
+            prediction_output=args.prediction_output,
             n_segments=args.n_segments,
+            horizon_mode=args.horizon_mode,
+            full_horizon_steps=args.full_horizon_steps,
+            window_horizon_steps=args.window_horizon_steps,
             epochs=args.epochs,
             seed=args.seed,
+            split_seed=args.split_seed,
             device=args.device,
             aircraft_type=args.aircraft_type,
+            aircraft_filter=args.aircraft_filter,
             coordinate_frame=args.coordinate_frame,
             batch_size=args.batch_size,
             cv_folds=args.cv_folds,
@@ -615,6 +1801,60 @@ def main() -> None:
             cv_epochs=args.cv_epochs,
             cv_patience=args.cv_patience,
             random_train_anchor=args.random_train_anchor,
+            training_cohort_min_future_s=args.training_cohort_min_future_s,
+            random_train_anchor_min_future_s=args.random_train_anchor_min_future_s,
+            checkpoint_selection_metric=args.checkpoint_selection_metric,
+            validation_common_grid_points=args.validation_common_grid_points,
+            control_effort_weight=args.control_effort_weight,
+            control_smoothness_weight=args.control_smoothness_weight,
+            control_dense_state_weight=args.control_dense_state_weight,
+            control_geometry_weight=args.control_geometry_weight,
+            control_arc_horizontal_velocity_weight=(
+                args.control_arc_horizontal_velocity_weight
+            ),
+            control_arc_vertical_velocity_weight=(
+                args.control_arc_vertical_velocity_weight
+            ),
+            control_arc_horizontal_velocity_scale_mps=(
+                args.control_arc_horizontal_velocity_scale_mps
+            ),
+            control_arc_vertical_velocity_scale_mps=(
+                args.control_arc_vertical_velocity_scale_mps
+            ),
+            control_arc_local_velocity=args.control_arc_local_velocity,
+            control_arc_tangent_weight=args.control_arc_tangent_weight,
+            control_arc_position_end_weight=args.control_arc_position_end_weight,
+            control_arc_terminal=args.control_arc_terminal,
+            control_arc_terminal_cross_track_emphasis=(
+                args.control_arc_terminal_cross_track_emphasis
+            ),
+            control_arc_terminal_vertical_emphasis=(
+                args.control_arc_terminal_vertical_emphasis
+            ),
+            control_terminal_position_weight=args.control_terminal_position_weight,
+            control_terminal_velocity_weight=args.control_terminal_velocity_weight,
+            control_terminal_position_scale_m=args.control_terminal_position_scale_m,
+            control_terminal_velocity_scale_mps=(
+                args.control_terminal_velocity_scale_mps
+            ),
+            control_terminal_clock=args.control_terminal_clock,
+            control_duration_parameterization=args.control_duration_parameterization,
+            control_value_parameterization=args.control_value_parameterization,
+            control_dynamics_backend=args.control_dynamics_backend,
+            control_experts=args.control_experts,
+            control_selector_weight=args.control_selector_weight,
+            control_diversity_weight=args.control_diversity_weight,
+            control_state_clock=args.control_state_clock,
+            control_state_loss_grid=args.control_state_loss_grid,
+            control_state_objective=args.control_state_objective,
+            control_state_duration_gradient=args.control_state_duration_gradient,
+            control_horizon_curriculum_s=args.control_horizon_curriculum,
+            control_horizon_curriculum_stage_epochs=(
+                args.control_horizon_stage_epochs
+            ),
+            control_gradient_clip_norm=args.control_gradient_clip_norm,
+            control_gradient_clip_policy=args.control_gradient_clip_policy,
+            control_rollout_dt=args.control_rollout_dt,
         )
         if not run_training(
             training,
@@ -623,16 +1863,19 @@ def main() -> None:
             skip_train=args.skip_train,
         ):
             continue
+        if args.split == "test":
+            freeze_test_release(training, dry_run=args.dry_run)
         for airport in scope:
-            run_prediction(
-                PredictionPlan(training, airport, tuple(args.outputs), split=args.split),
-                dry_run=args.dry_run,
-            )
+            for split in publish_splits:
+                run_prediction(
+                    PredictionPlan(training, airport, tuple(args.outputs), split=split),
+                    dry_run=args.dry_run,
+                )
         completed += 1
 
     verb = "previewed" if args.dry_run else "completed"
     print(f"\n✓ {verb} {completed}/{len(cells)} training cell(s) "
-          f"[CV={'skip/reuse' if args.skip_cv else 'run'}, split={args.split}]")
+          f"[CV={'skip/reuse' if args.skip_cv else 'run'}, splits={','.join(publish_splits)}]")
 
 
 if __name__ == "__main__":

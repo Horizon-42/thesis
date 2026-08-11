@@ -5,8 +5,10 @@ integrated separately behind one data plane, one training harness, and one expor
 
 The sibling `4dTrajectory/optimization` computes trajectories by **optimization** — direct
 collocation over a point-mass dynamics model, with hard procedure constraints. This package
-computes them by **data-driven learning** — transformers trained on observed ADS-B
-arrivals, with no dynamics model at all. Both emit the **same evaluation records**, so
+computes them by **data-driven learning** — transformers trained on observed ADS-B arrivals.
+Its default state-output path is the original kinematic baseline; its opt-in control-output
+path integrates learned controls through a differentiable Torch twin of the same point-mass
+dynamics. Both emit the **same evaluation records**, so
 `python -m evaluation --input <dir>` grades either one against the identical regulatory
 gates (lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m).
 
@@ -40,10 +42,10 @@ gates (lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m).
 
 ## Status
 
-The current code uses normalized-time prediction and intentionally does not load the older
-window/full checkpoints. A new CV + training run is required before reporting current-model
-quality; the KRDU numbers later in this document are retained as explicitly historical
-pre-normalized-time baselines.
+The current code keeps three explicit prediction contracts: `normalized`, `full`, and
+`window`. They share channels, output heads, losses, split policy, and anchor policy, while
+their target clocks and inference strategies are dispatched independently. Checkpoints record
+the selected mode and output length; changing modes requires retraining.
 
 Trained and evaluated on **real harvested ADS-B** (KRDU, 995 arrivals). Checkpoints were
 retrained twice on 2026-07-20, both times on the reproducible `flight_key` split
@@ -57,10 +59,10 @@ generation is parked in `outputs/KRDU/_pre_b3_transport/`. Earlier synthetic num
 kept where they are labelled as such, because two design decisions were made on synthetic
 data and the real run either confirmed or corrected them.
 
-**Scope:** this is a purely kinematic, single-aircraft baseline. No aerodynamic or dynamics
-model is connected — by design, not by omission. See
-[the dynamics section](#inputs-outputs-and-the-deliberate-absence-of-dynamics)
-before changing anything here.
+**Scope:** `prediction_output=state` remains the purely kinematic, single-aircraft baseline
+used by the recorded experiments below. `prediction_output=control` is a separate,
+checkpointed architecture; it adds per-flight aircraft conditioning and a differentiable
+dynamics rollout. See [the output architecture](#state-baseline-and-dynamics-constrained-control-output).
 
 ## Glossary
 
@@ -73,7 +75,7 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | **p95** | 95th percentile over the batch — the tail, where compounding error shows up before it moves the mean. |
 | **normalized progress `tau`** | Position in the predicted remainder, from anchor `tau=0` to endpoint `tau=1`, independent of physical duration. |
 | **anchor** | The last observed sample the model was conditioned on; records rebase time so the anchor is `t = 0`. |
-| **`L` / `N` / `dt`** | Observed lookback steps / normalized output segments / input resample step. Defaults `L=60, N=128, dt=2 s`; `N` is a CV parameter and does not fix the output duration. |
+| **`L` / `N` / `H` / `dt`** | Observed lookback / normalized output segments / fixed-time horizon steps / input resample step. Defaults: `L=60`, model-specific `N`, `H_window=30`, `H_full=300`, `dt=2 s`. |
 | **ENU** | Local **E**ast/**N**orth/**U**p Cartesian frame; here anchored at the runway threshold, so `(0,0,0)` is where an approach should end. |
 | **cross-track / along-track** | Horizontal error decomposed across / along the observed track's own course — "beside the path" vs "ahead/behind on it". |
 | **gates** | The evaluation thresholds every record is graded against: final lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m (FAA 8260.58D / 8260.3F derived; see `evaluation/thresholds.py`). |
@@ -89,11 +91,11 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 |---|---|
 | `config.py` | `TSConfig` — the one namespace both vendored models read, serialised into every checkpoint |
 | `channels.py` | the feature contract: geodetic states ⇄ threshold-anchored ENU channels |
-| `dataset.py` | track loading, input resampling, normalized-progress targets, by-flight split, normalisation |
-| `models.py` | model construction over the two vendored state forecasters |
+| `dataset.py` | track loading, input resampling, mode-dispatched targets, by-flight split, normalisation |
+| `models.py` | model construction over the two vendored encoders and selected state/control head |
 | `prediction_outputs.py` | typed state/control outputs, final-time head, bounded controls and duration partition |
-| `train.py` | joint state/final-time loss, early stopping, self-contained checkpoints |
-| `forecast.py` | one-pass normalized-progress prediction and learned wall-clock reconstruction |
+| `train.py` | state loss or differentiable control-rollout loss, early stopping, checkpoints |
+| `forecast.py` | independent normalized, one-pass full, and recursive-window inference strategies |
 | `metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
 | `export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
 | `flyability.py` | closed-form control inversion — what a predicted path would have required, vs the envelope |
@@ -120,6 +122,28 @@ python $TS train \
     --model itransformer --n-segments 128 \
     --output-dir 4dTrajectory/outputs/KRDU/ts_itr_normalized_time
 
+# opt-in control output: bounded schedule -> differentiable CasADi-equivalent rollout
+python $TS train \
+    --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
+    --airport KRDU --model itransformer \
+    --prediction-output control --horizon-mode normalized --n-segments 64 \
+    --batch-size auto \
+    --output-dir 4dTrajectory/outputs/KRDU/ts_itr_control
+
+# duration-head ablation: predict every positive segment duration directly and derive
+# final_time_s from their sum; the default remains factorized total-time + softmax fractions
+python $TS train \
+    --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
+    --airport KRDU --model patchtst \
+    --prediction-output control --control-duration-parameterization direct \
+    --horizon-mode normalized --n-segments 16 \
+    --output-dir 4dTrajectory/outputs/KRDU/ts_ptst_control_direct_duration
+
+# independently replay the retained best checkpoint on fixed-anchor train + validation
+python $TS evaluate-fit \
+    --checkpoint 4dTrajectory/outputs/KRDU/ts_itr_normalized_time/checkpoint.pt \
+    --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json
+
 # predict the held-out split, then grade it exactly like an optimizer batch
 python $TS predict --checkpoint 4dTrajectory/outputs/KRDU/ts_itr_normalized_time/checkpoint.pt \
     --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
@@ -132,15 +156,25 @@ python -m evaluation --input 4dTrajectory/outputs/KRDU/ts_pred
 `--data` takes an airport harvest directory, its `arrivals/` directory, or the explicit
 `arrivals/manifest.json`; repeat the flag to train one model over multiple airports. Legacy
 flight arrays and arbitrary JSON directories are rejected.
-`predict` defaults to `--split test` — the only flights the model never saw. The split is
+`predict` defaults to `--split val`; routine development never opens outer-test. The split is
 recorded in the checkpoint and keyed by `flight_key`. The checkpoint also carries the exact
 arrival-manifest SHA-256 and every flight's canonical source SHA-256; prediction rejects a
 rebuilt or changed manifest instead of silently intersecting its roster with an old split.
 Retrain after rebuilding arrivals.
 
+Every completed `train` call automatically performs the same deterministic fit replay on
+both outer-train and outer-validation: the retained best checkpoint runs under
+`model.eval()`, dropout is disabled, every flight uses anchor `L-1`, batches are sequential,
+and no shuffle is involved. `evaluate-fit` exposes that exact operation independently for an
+existing checkpoint; it never evaluates outer-test.
+
 `run_ts_pipeline.py` namespaces prediction output and frontend categories by split
-(`..._normalized_time_<split>`). A diagnostic `--split train`, `val`, or `all` run therefore cannot
-overwrite or masquerade as the default held-out `test` publication.
+(`..._<horizon-mode>_<split>`). It defaults to `--split development`, which publishes separate
+train and validation artifacts. `--split test` is rejected unless the same command also carries
+`--release-test`. That release creates `test_release.json` beside the checkpoint before loading
+any test trajectory, binds it to the checkpoint/data/split hashes, and records each claimed
+flight. Started or completed flights cannot be evaluated again. The frontend manifest and
+comparison index also carry an explicit `datasetSplit` field.
 
 ### Pooled training and cross-validation
 
@@ -149,7 +183,7 @@ airport; `pooled` runs one CV search and one final fit over all selected manifes
 that checkpoint to publish each airport separately:
 
 ```bash
-# All discovered K-airports -> one checkpoint per model, then per-airport test outputs.
+# All discovered K-airports -> one checkpoint per model, then train/validation outputs.
 conda run -n aeroviz python run_ts_pipeline.py \
   --training-mode pooled \
   --models itransformer \
@@ -160,14 +194,24 @@ conda run -n aeroviz python run_ts_pipeline.py \
   --training-mode pooled --models itransformer --dry-run
 ```
 
-Each cell executes `cross-validate -> final train -> predict test -> evaluate/publish`.
+Each development cell executes `cross-validate -> final train -> predict train/val ->
+evaluate/publish`.
 The split boundary is deliberately nested:
 
 1. lock airport-qualified outer train/validation/test flights;
 2. construct K folds from **outer-train only** and select hyperparameters by mean
    airport-macro fold loss;
 3. fit the selected configuration on outer-train with outer-validation early stopping;
-4. expose outer-test only to `predict` after the final checkpoint is fixed.
+4. after every analysis and model decision is permanently frozen, explicitly release test once:
+
+   ```bash
+   conda run -n aeroviz python run_ts_pipeline.py \
+     --skip-train --models itransformer --split test --release-test
+   ```
+
+The release ledger is an experiment artifact and must not be deleted or reset. If development
+continues after seeing test, that partition becomes a development test and a new temporal
+holdout is required for the final claim.
 
 `cross_validation/cv_results.json` records split digests, every fold score and explicit
 `outer_validation_used: false` / `outer_test_used: false` guards. `best_config.json` contains
@@ -181,8 +225,20 @@ for the next epoch. The loss weights each flight by the inverse flight count of 
 normalized to mean one, so every airport has the same total epoch weight without oversampling
 smaller airports. `--random-train-anchor` switches to a separate rolling/replanning dataset:
 it still uses every flight once, but independently selects one uniformly random valid anchor
-for that flight on each epoch. The train-only normalizer uses the same airport-then-flight
-weighting rather than duration-weighted moments. Random-anchor training, CV, predictions and
+for that flight on each epoch. Random anchors require at least 60 s of remaining supervision
+by default (`--random-train-anchor-min-future-s`), and their per-flight choice is derived from
+the training seed, epoch and stable flight identity rather than roster order. The train-only
+normalizer uses the same airport-then-flight weighting rather than duration-weighted moments.
+For control-output models, the independent anchor-eligibility policy also requires observed
+speed at the anchor to be at least `1.10 ×` the aircraft's sea-level stall speed. This keeps
+stopped/ground reports outside the airborne point-mass ODE; state-output random anchors retain
+the temporal-only policy. Per-epoch audit rows record the policy and excluded-candidate count.
+Controlled fixed-vs-random comparisons can additionally set
+`--training-cohort-min-future-s 60` on both arms. This independent floor is applied only to
+the outer-training roster at fixed anchor `L-1`; validation remains complete and fixed-anchor.
+The checkpoint, metadata, summary and artifact path record the filtered cohort separately from
+the random-anchor eligibility rule.
+Random-anchor training, CV, predictions and
 frontend categories receive a `_random_anchor` path suffix, so they cannot overwrite the
 fixed-anchor baseline. `--cv-folds`, `--cv-parameters`, and
 `--cv-epochs` expose the search dimensions and budgets. CV exhaustively evaluates the fixed
@@ -238,11 +294,12 @@ flat CSV tables, PNG/SVG plots, and `plots/index.md`. Use `--dry-run` to inspect
 and `--config-overrides <best_config.json>` to hold a previously selected architecture fixed.
 
 The runner defaults to `--batch-size auto`. It probes actual FP32 forward/backward/Adam steps
-for the selected architecture and normalized output grid, chooses a power of two, and backs off one doubling
-for allocator/display headroom; an explicit integer disables probing. The probe searches
-through batch 2048, so the current RTX 4060 8 GB workstation selects 1024 while retaining one
-doubling step of memory headroom. The result remains runtime-specific rather than a hard-coded
-GPU-name table.
+for the selected architecture and normalized output grid; an explicit integer disables
+probing. State output uses the largest successful power of two. Control output phase-shifts
+the duration partition across probe rows, exercising the per-segment maxima that determine
+batched rollout graph depth, then backs off one successful power of two as a safety margin
+for sharper partitions later in training. The result remains runtime-specific rather than a
+hard-coded GPU-name table.
 
 For a throughput-based batch measurement, run the standalone outer-train-only benchmark while
 the GPU is otherwise idle:
@@ -283,11 +340,11 @@ The script discovers the same fixed K-airport roster once, runs ENU and runway-a
 with the same seed, candidates, folds, sampling budget, and batch size, and rejects the
 comparison if their recorded split or fold digests differ. It selects the frame and that
 frame's hyperparameters using outer-train airport-macro CV loss, trains only the winner with
-outer-validation early stopping, and only then predicts each airport's outer-test flights.
+outer-validation early stopping, and leaves outer-test sealed by default. Pass `--release-test`
+only after the experiment is permanently frozen to perform the one-shot test prediction.
 The losing frame never sees outer-validation or outer-test. The auditable decision is written
 under `4dTrajectory/outputs/POOLED/ts_<model>_normalized_time_coordinate_frame_ablation/` as
-`coordinate_frame_ablation.json`. Use `--skip-test` to stop after the final fit and retain
-the test set for a later preregistered evaluation; use `--reuse-cv` only to reuse two
+`coordinate_frame_ablation.json`. Use `--reuse-cv` only to reuse two
 artifacts that pass the complete paired-run contract check. Immediately before the first
 test prediction, the decision file is marked `outer_test_evaluation_started`; the script
 then refuses to evaluate test again from the same experiment directory, including after a
@@ -348,39 +405,86 @@ together.) The rename `ve/vn/vu → edot/ndot/udot` is deliberate: the channel t
 serialised into every checkpoint and `load_checkpoint` refuses a mismatch, so pre-change
 checkpoints fail loudly instead of silently mis-scaling every velocity.
 
-### Normalized-time output (current)
+### Three horizon modes
 
-Each training anchor predicts the complete remaining approach on the same progress grid
-`tau_i = i/N, i=1..N`, together with a learned physical duration `final_time_s`.
-Training linearly interpolates each target remainder at
-`t_i = t_anchor + tau_i * true_final_time_s`; inference reconstructs timestamps with the
-same equation using the predicted duration. There is one forward pass, no padding, no
-recursive self-feeding, no fixed 300-step cap, and no closest-point truncation.
+Select one contract with `--horizon-mode normalized|full|window`. The modes coexist; none is
+an alias or compatibility branch.
+
+| mode | training target | inference |
+|---|---|---|
+| `normalized` (default) | Complete remainder at `tau_i=i/N`; no padding | One pass; `final_time_s` reconstructs physical timestamps; no geometric truncation or fixed cap |
+| `full` | `H_full=300` physical `dt=2 s` nodes; short remainders padded and loss-masked | One pass; fixed-dt timestamps; cut at closest threshold approach; cap at 600 s |
+| `window` | One complete `H_window=30` physical `dt=2 s` target per anchor | Recursively append each 60 s prediction, slide the history, and continue to `H_full`; then apply the same threshold/cap rule as `full` |
+
+The state and `final_time_s` heads remain shared. In `normalized`, the duration head defines
+the state-node clock. In `full/window`, state nodes retain their fixed `dt` clock and the head
+is an auxiliary remaining-time estimate. Target-grid construction lives in `time_grids.py`;
+mode-specific inference is dispatched in `forecast.py`; fixed/random anchor policy remains a
+separate dataset choice.
+
+```bash
+# normalized complete remainder
+conda run -n aeroviz python run_ts_pipeline.py --horizon-mode normalized
+
+# one-pass 600 s full horizon
+conda run -n aeroviz python run_ts_pipeline.py \
+  --horizon-mode full --full-horizon-steps 300
+
+# recursive 60 s windows, chained to the same 600 s cap
+conda run -n aeroviz python run_ts_pipeline.py \
+  --horizon-mode window --window-horizon-steps 30 --full-horizon-steps 300
+```
 
 The default anchor is fixed at `L-1`, so every flight contributes its earliest full-trajectory
 forecast once per epoch; flight order is reshuffled between epochs. Pass
 `--random-train-anchor` only when training a rolling predictor that must start from later
 approach phases as well. That mode selects one valid anchor per flight and epoch. Validation
-and exported prediction remain fixed at `L-1`.
+and exported prediction remain fixed at `L-1`. For control experiments whose deployment
+metric is physical-time accuracy, `--checkpoint-selection-metric
+fixed-anchor-common-grid-ade` also makes LR scheduling and early stopping use deterministic
+fixed-anchor common-grid validation ADE; the native model-clock loss remains a diagnostic.
+When fixed and random arms must use an identical 60-second-capable training roster, pass
+`--training-cohort-min-future-s 60` to both arms; it never filters validation.
+The frozen train/validation protocol is recorded in
+[`docs/2026-07-30_random_anchor_experiment_plan.zh.md`](docs/2026-07-30_random_anchor_experiment_plan.zh.md).
 
 `N` controls output resolution, not forecast seconds. It is serialized in checkpoints and
-included in the default cross-validation grid (`64, 128, 256`). The objective is normalized
-state MSE plus scaled final-time MSE; validation and CV
-select on the same joint loss. See
+included in the default cross-validation grid (`64, 128, 256`). The objective combines
+normalized state MSE, scaled final-time MSE, position/velocity displacement consistency,
+and an explicit terminal-position term. Displacement consistency is normalized by position
+scale so its gradient does not grow with N. Held-out physics/accuracy ablations selected
+iTransformer `N=64` and PatchTST `N=256`; both use kinematic weight `3.0` and terminal
+weight `0.02`. The full pooled iTransformer CUDA validation curve selected epoch 161;
+training therefore uses a 180-epoch cap with patience 20 and always reloads the best epoch.
+Validation and CV select on the same joint loss. See
 [`docs/normalized_time_and_control_output.zh.md`](docs/normalized_time_and_control_output.zh.md)
-for the exact state and future-control contracts.
+for the exact state and control contracts.
 
-### Historical horizon design (retired; results below use this older design)
+Validation history, CV folds and exported prediction summaries also persist raw-node
+position/velocity RMSE, heading-consistency p95, turn-rate p95, acceleration p95 and jerk
+p95. Prediction batches retain per-flight values plus fleet `median/mean/p95/max`; comparisons
+and the ablation selector use fleet p95 against the observed-track baseline. These metrics
+always consume the model's untouched nodes and explicit segment durations, so they are also
+valid for the non-uniform control rollout. The complete experiment protocol and
+validation/test tables are in
+[`docs/2026-07-27_kinematic_weight_epoch_ablation.zh.md`](docs/2026-07-27_kinematic_weight_epoch_ablation.zh.md).
 
-The following section documents the pre-normalized-time experiments only. The `window/full`,
-`pred_len`, recursive forecast, fixed horizon and threshold-truncation code paths no longer
-exist and their checkpoints must be retrained.
+PatchTST remains enabled as a comparison model, but its selected `N=256` state-head run is
+not physically usable (outer-test flyability 0.0% and raw jerk fleet p95 about 2204 m/s³).
+`N=256` is only its best held-out ADE among the tested grids, not a claim of flyability.
+
+The validation-only comparison, future-dispersion analysis and deterministic/multi-candidate
+coverage report are generated by `run_ts_predictability_report.py`; the current illustrated
+HTML is at
+`4dTrajectory/outputs/POOLED/ts_time_parameterization_predictability_report/report.html`.
+
+### Full versus recursive window
 
 Both models are fixed lookback→horizon (`L → H`); `L` and `H` are baked into the layer
 shapes, so changing either means retraining.
 
 **`--horizon-mode window`** — short `H` (default 30 steps = 60 s). To cover a whole approach,
-`recursive_forecast` chains passes: predict 30, append them to the history, slide, predict
+the window forecaster chains passes: predict 30, append them to the history, slide, predict
 again. From the second pass on the model is reading its own output, so error compounds.
 
 **`--horizon-mode full`** — `H` covers the whole approach (default 300 steps = 10 min) in one
@@ -390,9 +494,10 @@ learns to reproduce its own zero padding and every forecast tail collapses.
 
 Having both is the point: the gap between them measures what chaining actually costs.
 
-⚠️ The two modes' headline ADE/FDE are **not** directly comparable — window mode averages over
-a 60 s horizon per pass, full mode over horizons up to 10 min. The honest comparison is error
-against **lead time** (same seconds-ahead for both), which the results section reports.
+Native training/validation ADE is not directly comparable across the two fixed-time modes:
+window loss covers one 60 s pass, while full loss covers up to 600 s. Exported whole-approach
+predictions are comparable because both are evaluated after window recursion on the same
+physical timestamps; the report also publishes error against lead time.
 
 > Naming: `4dTrajectory/optimization` already uses *rollout* for forward-integrating
 > optimizer controls through the true dynamics. That is a different operation, so the ML
@@ -428,64 +533,84 @@ least-squares window fit, so their bandwidth is unchanged by a denser grid. `--d
 a CLI knob if a future dataset (e.g. 1 Hz radar) justifies it; resizing `L`/`H` with it is
 mandatory, per the coverage math above.
 
-### Inputs, outputs, and the deliberate absence of dynamics
+### State baseline and dynamics-constrained control output
 
-> **Read this before "improving" anything here.** This package is a *kinematic baseline*.
-> No aerodynamic or dynamics model is connected, and that is a scope decision, not an
-> oversight or an unfinished TODO.
+The output strategy is explicit and serialized in every checkpoint:
 
-Both models consume and produce the same tensor shape — channels in, channels out:
+```text
+prediction_output=state (default)
+  observed channels [B,L,6] -> Transformer -> states [B,N,6] + final_time_s [B]
 
-```
-input   x : [B,  60, 6]         seq_len=60 (120 s of lookback @ dt=2 s), 6 channels
-output  states       : [B, N, 6]  state endpoints at tau=1/N,...,1
-        final_time_s : [B]        learned physical duration from anchor to tau=1
-```
-
-Same six channels on both sides (`e, n, u, edot, ndot, udot`). The two architectures differ only
-in how they read that tensor: iTransformer makes each **channel** a token (attention *across*
-variates), PatchTST patches each channel along **time** and runs them independently (no
-cross-channel coupling at all).
-
-**Not in the input:** timestamps (`x_mark = None` — the grid is uniform, so `t` is implicit),
-mass, aircraft type, aerodynamic parameters, wind/weather, other traffic, runway or procedure
-geometry (present only implicitly, as the frame origin).
-
-The active output is still state, so exported records carry `controls == []`. The output
-contract is now separated in `prediction_outputs.py`: a future controls model returns
-`controls[B,N,3]` in `(thrust_N, bank_rad, load_factor)` order plus positive non-uniform
-`segment_durations[B,N]` whose sum is exactly `final_time_s`. This design is implemented but
-not connected to training until the dataset has control labels and a differentiable rollout.
-
-**What "no dynamics" concretely means.** The only symbol this package imports from
-`aerodynamic_model` is `GeodeticState` (`channels.py`) — a plain dataclass holding seven
-floats, no equations. Compare what the optimizer imports from the same package:
-`CasadiSimulator` (the point-mass dynamics) and `rollout_piecewise_constant` (true-dynamics
-integration).
-
-```
-optimization/     initial state ─► NLP (point-mass dynamics + hard constraints)
-                                ─► controls ─► true-dynamics integration ─► states
-                                   ▲ every step is bound by the equations of motion
-
-ts_transformer/   observed channels ─► Transformer ─► predicted channels
-                                       ▲ curve fitting; no equations anywhere
+prediction_output=control
+  observed channels [B,L,6] -> Transformer encoder features ┐
+  per-flight mass/aero data -> condition encoder            ├-> bounded controls [B,N,3]
+                                                            └-> non-uniform durations [B,N]
+  anchor geodetic state + controls + durations -> Torch dynamics -> state endpoints [B,N,7]
 ```
 
-So **nothing here guarantees** a predicted trajectory is flyable: speeds may leave the
-envelope, turn rates may imply impossible bank angles, the implied thrust may exceed the
-engines, the implied lift coefficient may exceed `Cl_max` (stall). This is the
-"statistically plausible but physically unflyable" / *flyability* problem the survey in
-`4dTrajectory/docs` names explicitly.
+The six observed channels remain `(e, n, u, edot, ndot, udot)`. iTransformer makes each
+channel a token; PatchTST patches each channel along time. In control mode the state forecast
+projector is removed. Time/patches are pooled within each channel, but the ordered channel
+axis is retained and flattened as `[B,C*d_model]`; an unlabeled mean across channels is
+forbidden because both vendored encoders lack channel-index identity. A small MLP fuses this
+ordered representation with eight scaled per-flight quantities: mass, maximum thrust, wing
+area, `Cl_max`, `Cd0`, induced-drag `k`, stall threshold, and stall-drag coefficient.
 
-That is the correct shape for a baseline. The trajectory-prediction literature reports
-ADE/FDE on exactly this kind of purely kinematic, data-driven model, and mixing dynamics in
-now would make it impossible to say what the learned component contributes on its own.
+The control contract is:
 
-#### If dynamics is added later, these are the four routes
+```text
+controls[..., 0] = thrust_N       bounded by [0, aircraft max thrust]
+controls[..., 1] = bank_rad       bounded by [-pi/4, pi/4]
+controls[..., 2] = load_factor    bounded by [0.5, 2.0]
 
-Listed in increasing order of intrusiveness, so a future change can pick deliberately rather
-than drift into one:
+segment_durations_i = softmax(duration_logits)_i * final_time_s
+sum(segment_durations) = final_time_s
+```
+
+The serialized `control_duration_parameterization` selects one of two isolated duration
+heads while retaining the same encoder, bounded-control head, parameter count, rollout and
+loss contract:
+
+```text
+factorized (default)
+  total_time = softplus(global_logit) * final_time_scale_s
+  duration_i = softmax(local_logits)_i * total_time
+
+direct
+  duration_i = softplus(global_logit + local_logit_i)
+               * final_time_scale_s / N
+  total_time = sum(duration_i)
+```
+
+Both initialize to uniform segments with total time `softplus(0) * final_time_scale_s`.
+Serialized control checkpoints must carry `control_duration_parameterization`; checkpoints
+that omit it are rejected and must be regenerated. Direct duration is a
+head-parameterization ablation, not a different public prediction output; both publish
+`predictionOutput=control`.
+
+Control mode currently requires `--horizon-mode normalized`. It needs no inverse-control
+labels. Uniform truth nodes are interpolated onto `cumsum(segment_durations)` before the
+rollout-state loss is evaluated, so every predicted endpoint and target share one physical
+timestamp; fit metrics use the same alignment. Its loss contains rollout-state, final-time, terminal,
+dimensionless control-effort, and control-smoothness terms. Position/velocity consistency is
+structural because every output state comes from one dynamics integration.
+
+`aerodynamic_model/torch_dynamics.py` is deliberately a discrete twin of
+`CasadiSimulator`, not a cheaper training surrogate. Each substep creates the same moving
+local ENU frame, evaluates the same ISA density, drag polar, `Cl_max`/stall transition and
+realized-load limit, advances the same explicit RK4 equations, and converts position and
+velocity through WGS84 ECEF into the next local frame. Physical rollout tensors use float64
+because subtracting local offsets from Earth-scale ECEF coordinates in float32 loses
+sub-metre information. `control_rollout_integrator_dt_s` defaults to the replay value 0.5 s.
+
+This makes control-output trajectories dynamically generated, but does not reproduce the
+optimizer's hard procedure/path constraints; learned controls can still leave the intended
+operating envelope. The state-output path remains unchanged so its historical results remain
+an independently measurable kinematic baseline.
+
+#### Four physics integration routes
+
+The repository now contains routes 1 and 4; routes 2 and 3 remain distinct alternatives:
 
 1. **Post-hoc flyability check** — ✅ **DONE**, see
    [Flyability](#flyability--measuring-the-gap-this-baseline-deliberately-leaves-open)
@@ -499,10 +624,10 @@ than drift into one:
    as a second stage in the `aeroviz` env.
 3. **Soft physical constraints in the loss** — penalise out-of-envelope acceleration / turn
    rate during training. This is the "constrained LSTM" line (Shi, IEEE T-ITS) in the survey.
-4. **Predict controls and integrate them** — the output head and non-uniform duration contract
-   are now implemented; completing this route still needs control supervision and a
-   *differentiable* dynamics model. Casadi cannot backpropagate into torch, so the point-mass
-   model would have to be reimplemented in torch.
+4. **Predict controls and integrate them** — ✅ **DONE as an opt-in output strategy**. The
+   differentiable Torch rollout is numerically contract-tested against CasADi for normal and
+   stalled steps, non-uniform multi-segment endpoints, and gradients through controls and
+   durations.
 
 ## Historical results on real KRDU data (pre-normalized-time architecture)
 
@@ -757,8 +882,14 @@ Training writes:
     best_config.json         selected TSConfig overrides
   checkpoint.pt             weights, config, normalizer, split, and arrival-data provenance
   checkpoint_metadata.json  checkpoint/manifest/split hashes and anchor policy for audit/reuse
-  history.json              training history, validation metrics, manifests, and source count
+  history.json              training history, deterministic train+validation metrics, provenance
+  fit_evaluation.json       best-checkpoint fixed-anchor train/validation replay + fit gaps
 ```
+
+`fit_evaluation.json` is checkpoint-SHA-bound. Its native-grid ADE/FDE and TTA blocks compare
+train with validation under identical inference conditions. For recursive `window`, these
+native metrics describe one short prediction pass; whole-trajectory compounding remains a
+separate forecast/export metric.
 
 Prediction writes one split-specific batch:
 
@@ -776,11 +907,10 @@ filenames and the comparison-CZML group key, so learned and optimized records fo
 always share a stem. Summary rows carry the full identity too (`id`, `icao24`, `runway`,
 `landing_time_utc`).
 
-Records are **reference-shaped**: `controls == []`. That is the contract, not a shortcut — a
-learned predictor emits no control schedule, and `evaluation.records` reads an empty control
-list as exactly that. The two evaluation JSONs do not copy their state arrays: `states_ref`
-selects the appropriate key (and observed anchor slice) from the single states file. Records
-are built by
+State-output records are **reference-shaped** (`controls == []`). Control-output records use
+the optimizer shape: the anchor and every segment endpoint have a 1:1 aligned active control.
+The two evaluation JSONs do not copy their state arrays: `states_ref` selects the appropriate
+key (and observed anchor slice) from the single states file. Records are built by
 `4dTrajectory/optimization/evaluation_export.py` rather than hand-rolled here, so there is one
 definition of the record shape. (That module is casadi-free, which is why it imports into the
 torch env.)
@@ -814,16 +944,17 @@ and that a state sequence generated by the geodetic kinematics integrates its ve
 channels back into its position channels exactly), normalized-progress interpolation,
 final-time loss, non-uniform control-duration invariants, the by-flight split, and — the important one — that an exported record satisfies the real
 `evaluation.records.record_from_dict` validator and that a written batch is loadable by the
-real manifest-only `load_records`.
+real manifest-only `load_records`. `aerodynamic_model/tests/test_torch_dynamics.py` separately
+pins the differentiable rollout against `CasadiSimulator`, including its stalled branch and
+non-uniform segment endpoints, and checks gradients to both controls and durations.
 
 ## Deliberate scope — NOT bugs, do not "fix" without deciding to
 
-These are what make this a baseline. Each is a defensible starting point that later work may
-choose to extend, but none is an accident:
+These are what make the default state-output path a baseline. Each is a defensible starting
+point that later work may choose to extend, but none is an accident:
 
-- **No dynamics / aerodynamics.** Purely kinematic. See
-  [the dynamics section](#inputs-outputs-and-the-deliberate-absence-of-dynamics) for what that
-  means and the four routes if it is ever added.
+- **State output has no dynamics / aerodynamics.** It remains purely kinematic. Select the
+  separate `control` output architecture when dynamics-generated states are the experiment.
 - **Single aircraft, no interaction.** One track in, one track out — no traffic context. The
   survey in `4dTrajectory/docs` identifies multi-aircraft interaction and ATC intent as the
   central open problem in terminal-airspace prediction; this is deliberately the single-aircraft

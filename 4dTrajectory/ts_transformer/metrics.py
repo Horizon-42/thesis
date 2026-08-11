@@ -27,6 +27,134 @@ from channels import IDX, POSITION_IDX
 # gate-side summaries can be read against each other.
 P95 = 95.0
 
+# Stable scalar keys shared by history.json, CV results, prediction summary.json and the
+# kinematic-weight ablation. Keeping this list beside the implementation prevents each
+# persistence boundary from inventing a subtly different subset or spelling.
+RAW_KINEMATIC_METRIC_KEYS = (
+    "position_velocity_rmse_mps",
+    "heading_consistency_p95_deg",
+    "turn_rate_p95_deg_s",
+    "acceleration_p95_mps2",
+    "jerk_p95_mps3",
+)
+
+
+def _p95(values: np.ndarray) -> float:
+    """p95 of finite magnitudes, or NaN when a trajectory is too short to define it."""
+    finite = np.abs(values[np.isfinite(values)])
+    return float(np.percentile(finite, P95)) if finite.size else float("nan")
+
+
+def _wrapped_angle_delta(radians: np.ndarray) -> np.ndarray:
+    """Adjacent signed angle changes in [-pi, pi], along the final axis."""
+    delta = np.diff(radians, axis=-1)
+    return np.arctan2(np.sin(delta), np.cos(delta))
+
+
+def raw_kinematic_metrics(
+    anchor_values: np.ndarray,
+    predicted_values: np.ndarray,
+    segment_durations_s: np.ndarray,
+    *,
+    valid_segments: np.ndarray | None = None,
+) -> dict[str, float | int]:
+    """Physical smoothness of unfiltered model output on its own time grid.
+
+    ``anchor_values`` is ``[B,C]``, predicted output is ``[B,N,C]`` and durations are
+    ``[B,N]``. Durations are explicit rather than reconstructed from ``final_time_s`` so
+    the same metric contract works unchanged when the output layer starts emitting
+    nonuniform segment durations.
+
+    Position-difference velocity and all higher derivatives come from the raw position
+    nodes, because those are the points exported to CZML. The velocity channels are used
+    only for the position/velocity RMSE and heading-consistency checks; a model cannot earn
+    a smoothness score by predicting smooth velocities beside a jagged position path.
+    """
+    anchor = np.asarray(anchor_values, dtype=np.float64)
+    predicted = np.asarray(predicted_values, dtype=np.float64)
+    durations = np.asarray(segment_durations_s, dtype=np.float64)
+    if anchor.ndim != 2 or predicted.ndim != 3 or durations.ndim != 2:
+        raise ValueError("raw kinematic metrics require [B,C], [B,N,C], [B,N]")
+    if predicted.shape[:2] != durations.shape or anchor.shape != predicted[:, 0].shape:
+        raise ValueError("raw kinematic metric shapes do not share B, N and C")
+    if valid_segments is None:
+        valid = np.ones_like(durations, dtype=bool)
+    else:
+        valid = np.asarray(valid_segments, dtype=bool)
+        if valid.shape != durations.shape:
+            raise ValueError("valid segment mask must match [B,N] durations")
+        # A padded suffix is the only supported ragged representation. Accepting holes
+        # would make acceleration/jerk adjacency ambiguous.
+        if np.any(valid[:, 1:] & ~valid[:, :-1]):
+            raise ValueError("valid segments must form a contiguous prefix")
+    if np.any(durations[valid] <= 0.0):
+        raise ValueError("valid segment durations must be positive")
+    safe_durations = np.where(valid, durations, 1.0)
+
+    nodes = np.concatenate((anchor[:, None, :], predicted), axis=1)
+    positions = nodes[..., list(POSITION_IDX)]
+    velocity_indices = [IDX["edot"], IDX["ndot"], IDX["udot"]]
+    state_velocities = nodes[..., velocity_indices]
+
+    geometric_velocity = np.diff(positions, axis=1) / safe_durations[..., None]
+    midpoint_velocity = 0.5 * (state_velocities[:, 1:] + state_velocities[:, :-1])
+    velocity_residual = geometric_velocity - midpoint_velocity
+
+    geometric_heading = np.arctan2(
+        geometric_velocity[..., 1], geometric_velocity[..., 0]
+    )
+    state_heading = np.arctan2(midpoint_velocity[..., 1], midpoint_velocity[..., 0])
+    geometric_speed = np.linalg.norm(geometric_velocity[..., :2], axis=-1)
+    state_speed = np.linalg.norm(midpoint_velocity[..., :2], axis=-1)
+    heading_valid = valid & (geometric_speed > 1e-6) & (state_speed > 1e-6)
+    heading_delta = np.arctan2(
+        np.sin(geometric_heading - state_heading),
+        np.cos(geometric_heading - state_heading),
+    )
+
+    node_times = np.concatenate(
+        (
+            np.zeros((len(durations), 1), dtype=np.float64),
+            np.cumsum(safe_durations, axis=1),
+        ),
+        axis=1,
+    )
+    velocity_times = 0.5 * (node_times[:, 1:] + node_times[:, :-1])
+    velocity_time_steps = np.diff(velocity_times, axis=1)
+
+    turn_rate = np.degrees(_wrapped_angle_delta(geometric_heading)) / velocity_time_steps
+    adjacent_valid = valid[:, 1:] & valid[:, :-1]
+    turn_valid = (
+        adjacent_valid
+        & (geometric_speed[:, 1:] > 1e-6)
+        & (geometric_speed[:, :-1] > 1e-6)
+    )
+
+    acceleration = np.diff(geometric_velocity, axis=1) / velocity_time_steps[..., None]
+    acceleration_magnitude = np.linalg.norm(acceleration, axis=-1)
+    acceleration_times = 0.5 * (velocity_times[:, 1:] + velocity_times[:, :-1])
+    acceleration_time_steps = np.diff(acceleration_times, axis=1)
+    jerk = np.diff(acceleration, axis=1) / acceleration_time_steps[..., None]
+    jerk_magnitude = np.linalg.norm(jerk, axis=-1)
+    jerk_valid = adjacent_valid[:, 1:] & adjacent_valid[:, :-1]
+
+    velocity_values = velocity_residual[valid]
+    position_velocity_rmse = (
+        float(np.sqrt(np.mean(velocity_values**2)))
+        if velocity_values.size
+        else float("nan")
+    )
+
+    return {
+        # Component RMSE matches the physical residual underlying the training loss.
+        "position_velocity_rmse_mps": position_velocity_rmse,
+        "heading_consistency_p95_deg": _p95(np.degrees(heading_delta[heading_valid])),
+        "turn_rate_p95_deg_s": _p95(turn_rate[turn_valid]),
+        "acceleration_p95_mps2": _p95(acceleration_magnitude[adjacent_valid]),
+        "jerk_p95_mps3": _p95(jerk_magnitude[jerk_valid]),
+        "segments": int(valid.sum()),
+    }
+
 
 def _positions(values: np.ndarray) -> np.ndarray:
     """[..., C] -> [..., 3] east/north/up."""

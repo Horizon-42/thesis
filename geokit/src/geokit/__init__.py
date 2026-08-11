@@ -28,6 +28,7 @@ from .constants import (
 from .geodesy import (
     bearing_rad,
     bounds_from_radius_km,
+    compass_bearing_to_math_enu_rad,
     equirectangular_distance_m,
     flat_distance_m,
     haversine_km,
@@ -74,6 +75,7 @@ __all__ = [
     "haversine_km",
     "equirectangular_distance_m",
     "bearing_rad",
+    "compass_bearing_to_math_enu_rad",
     "metres_per_deg_lon",
     "flat_distance_m",
     "metres_per_degree_precise",

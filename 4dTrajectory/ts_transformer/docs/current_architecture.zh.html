@@ -1,0 +1,2386 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>ts_transformer 当前架构 · 从全局到细节</title>
+  <style>
+    :root {
+      --ink: #172235;
+      --muted: #607086;
+      --paper: #f3f5f2;
+      --card: #ffffff;
+      --line: #d9e0dc;
+      --navy: #16324f;
+      --blue: #2364aa;
+      --cyan: #3aa7a3;
+      --mint: #dff3ec;
+      --orange: #e8793e;
+      --orange-soft: #fff0e7;
+      --violet: #7656a8;
+      --violet-soft: #eee8f8;
+      --red: #b94343;
+      --red-soft: #fbeaea;
+      --green: #27815f;
+      --shadow: 0 18px 45px rgba(22, 50, 79, .10);
+      --radius: 22px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 88% 2%, rgba(58, 167, 163, .13), transparent 24rem),
+        radial-gradient(circle at 7% 35%, rgba(232, 121, 62, .08), transparent 28rem),
+        var(--paper);
+      font-family: var(--sans);
+      line-height: 1.65;
+    }
+
+    a { color: inherit; }
+    button, input { font: inherit; }
+    code, .mono { font-family: var(--mono); }
+    code {
+      padding: .12rem .38rem;
+      color: #173f61;
+      background: #edf2f4;
+      border: 1px solid #dce5e8;
+      border-radius: 6px;
+      font-size: .9em;
+    }
+    sub { line-height: 0; }
+
+    .scroll-progress {
+      position: fixed;
+      z-index: 100;
+      inset: 0 auto auto 0;
+      width: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--orange), var(--cyan));
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      max-width: 1540px;
+      margin: 0 auto;
+    }
+
+    .side {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 34px 25px;
+      border-right: 1px solid rgba(22, 50, 79, .11);
+      background: rgba(243, 245, 242, .88);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 34px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      color: white;
+      background: var(--navy);
+      border-radius: 12px;
+      box-shadow: 8px 8px 0 var(--mint);
+      font: 800 13px/1 var(--mono);
+    }
+    .brand small {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .side nav { display: grid; gap: 4px; }
+    .side nav a {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      align-items: center;
+      padding: 8px 10px;
+      color: var(--muted);
+      text-decoration: none;
+      border-radius: 9px;
+      font-size: 13px;
+      transition: .18s ease;
+    }
+    .side nav a::before {
+      content: attr(data-index);
+      font: 600 10px/1 var(--mono);
+      color: #91a0ae;
+    }
+    .side nav a:hover,
+    .side nav a.active {
+      color: var(--navy);
+      background: white;
+      box-shadow: 0 5px 18px rgba(22, 50, 79, .07);
+    }
+    .side nav a.active::before { color: var(--orange); }
+
+    .side-note {
+      position: absolute;
+      inset: auto 24px 28px;
+      padding: 13px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, .68);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font-size: 11px;
+    }
+    .side-note strong { color: var(--ink); }
+
+    main {
+      min-width: 0;
+      padding: 34px clamp(24px, 5vw, 78px) 110px;
+    }
+    section {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 76px 0 20px;
+      scroll-margin-top: 20px;
+    }
+    .hero {
+      min-height: 88vh;
+      display: grid;
+      align-content: center;
+      padding-top: 42px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      width: fit-content;
+      color: var(--blue);
+      font: 700 12px/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before {
+      content: "";
+      width: 26px;
+      height: 2px;
+      background: var(--orange);
+    }
+    h1 {
+      max-width: 940px;
+      margin: 22px 0 20px;
+      font-size: clamp(46px, 7.2vw, 96px);
+      line-height: .98;
+      letter-spacing: -.065em;
+    }
+    h1 .accent {
+      position: relative;
+      color: var(--blue);
+      white-space: nowrap;
+    }
+    h1 .accent::after {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      left: 3%;
+      right: -2%;
+      bottom: .04em;
+      height: .18em;
+      background: var(--mint);
+      transform: rotate(-1.3deg);
+    }
+    .hero-lead {
+      max-width: 800px;
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(18px, 2vw, 24px);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 44px;
+    }
+    .stat {
+      padding: 20px;
+      background: rgba(255, 255, 255, .78);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 8px 26px rgba(22, 50, 79, .05);
+    }
+    .stat strong {
+      display: block;
+      color: var(--navy);
+      font-size: 30px;
+      line-height: 1.1;
+      letter-spacing: -.04em;
+    }
+    .stat span { color: var(--muted); font-size: 12px; }
+
+    .reading-guide {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .guide-card {
+      position: relative;
+      overflow: hidden;
+      padding: 20px 22px;
+      border-radius: 16px;
+    }
+    .guide-card::after {
+      content: "";
+      position: absolute;
+      width: 95px;
+      height: 95px;
+      right: -36px;
+      bottom: -42px;
+      border: 16px solid rgba(255, 255, 255, .42);
+      border-radius: 50%;
+    }
+    .guide-card.default { background: #dfeaf4; }
+    .guide-card.latest { background: var(--orange-soft); }
+    .guide-card b {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+    .guide-card p { margin: 0; font-size: 13px; }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: 95px minmax(0, 720px);
+      gap: 22px;
+      align-items: start;
+      margin-bottom: 32px;
+    }
+    .section-index {
+      color: var(--orange);
+      font: 700 44px/.9 var(--mono);
+      letter-spacing: -.08em;
+    }
+    h2 {
+      margin: 0 0 8px;
+      font-size: clamp(30px, 4vw, 52px);
+      line-height: 1.08;
+      letter-spacing: -.045em;
+    }
+    .section-head p {
+      max-width: 700px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    h3 {
+      margin: 0 0 12px;
+      font-size: 21px;
+      letter-spacing: -.025em;
+    }
+    h4 { margin: 0 0 8px; }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .panel-pad { padding: clamp(22px, 3vw, 34px); }
+    .subtle { color: var(--muted); }
+    .tiny { font-size: 12px; }
+
+    .segmented {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 5px;
+      background: #e9eeeb;
+      border-radius: 13px;
+    }
+    .segmented button {
+      padding: 8px 14px;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      border-radius: 9px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 750;
+      transition: .18s ease;
+    }
+    .segmented button:hover { color: var(--ink); }
+    .segmented button.active {
+      color: white;
+      background: var(--navy);
+      box-shadow: 0 5px 14px rgba(22, 50, 79, .20);
+    }
+
+    .mode-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .mode-summary {
+      max-width: 520px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .architecture-map {
+      position: relative;
+      overflow: hidden;
+      padding: 25px;
+      background:
+        linear-gradient(rgba(255,255,255,.93), rgba(255,255,255,.93)),
+        repeating-linear-gradient(0deg, transparent 0 27px, #dce5e0 27px 28px),
+        repeating-linear-gradient(90deg, transparent 0 27px, #dce5e0 27px 28px);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 24px;
+      align-items: stretch;
+    }
+    .flow-stage {
+      position: relative;
+      min-height: 185px;
+      padding: 18px 15px 15px;
+      background: white;
+      border: 1px solid #cfd8d4;
+      border-top: 4px solid var(--blue);
+      border-radius: 14px;
+      box-shadow: 0 8px 22px rgba(22, 50, 79, .08);
+      cursor: pointer;
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+    .flow-stage:hover, .flow-stage.selected {
+      transform: translateY(-4px);
+      border-color: var(--cyan);
+      box-shadow: 0 15px 30px rgba(22, 50, 79, .13);
+    }
+    .flow-stage::after {
+      content: "→";
+      position: absolute;
+      top: 73px;
+      right: -22px;
+      color: var(--orange);
+      font: 700 23px/1 var(--mono);
+    }
+    .flow-stage:last-child::after { display: none; }
+    .flow-stage:nth-child(2) { border-top-color: var(--cyan); }
+    .flow-stage:nth-child(3) { border-top-color: var(--violet); }
+    .flow-stage:nth-child(4) { border-top-color: var(--orange); }
+    .flow-stage:nth-child(5) { border-top-color: var(--green); }
+    .flow-stage:nth-child(6) { border-top-color: var(--red); }
+    .stage-no {
+      color: #98a5b0;
+      font: 650 10px/1 var(--mono);
+      letter-spacing: .1em;
+    }
+    .flow-stage h3 {
+      margin-top: 28px;
+      font-size: 17px;
+    }
+    .flow-stage p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .shape {
+      display: inline-block;
+      margin-top: 11px;
+      padding: 4px 7px;
+      color: #22526f;
+      background: #e9f3f5;
+      border-radius: 6px;
+      font: 650 10px/1.2 var(--mono);
+    }
+    .map-detail {
+      display: grid;
+      grid-template-columns: 84px 1fr auto;
+      gap: 18px;
+      align-items: center;
+      min-height: 94px;
+      margin-top: 18px;
+      padding: 16px 19px;
+      color: white;
+      background: var(--navy);
+      border-radius: 14px;
+    }
+    .map-detail .big-no {
+      color: #9bc7c4;
+      font: 700 34px/1 var(--mono);
+    }
+    .map-detail b { display: block; margin-bottom: 2px; }
+    .map-detail p { margin: 0; color: #cbd8e3; font-size: 12px; }
+    .map-detail .code-pill {
+      padding: 7px 10px;
+      color: #d8f5ed;
+      background: rgba(255,255,255,.09);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 8px;
+      font: 600 10px/1 var(--mono);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .three-col {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .four-col {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .data-card {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: white;
+    }
+    .data-card .icon {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      margin-bottom: 20px;
+      color: var(--blue);
+      background: #e8f0f7;
+      border-radius: 12px;
+      font: 700 13px/1 var(--mono);
+    }
+    .data-card p { margin: 0; color: var(--muted); font-size: 13px; }
+    .data-card ul { margin: 12px 0 0; padding-left: 18px; font-size: 12px; }
+
+    .sequence-viz {
+      position: relative;
+      overflow: hidden;
+      margin-top: 18px;
+      padding: 24px;
+      color: white;
+      background: var(--navy);
+      border-radius: 18px;
+    }
+    .sample-strip {
+      display: grid;
+      grid-template-columns: repeat(60, 1fr);
+      align-items: end;
+      gap: 2px;
+      height: 92px;
+      margin: 28px 0 10px;
+    }
+    .sample-bar {
+      min-width: 2px;
+      background: linear-gradient(180deg, #70d8ca, #3a78aa);
+      border-radius: 3px 3px 0 0;
+      opacity: .86;
+    }
+    .sample-bar:last-child {
+      background: var(--orange);
+      box-shadow: 0 0 0 3px rgba(232, 121, 62, .24);
+    }
+    .sequence-labels {
+      display: flex;
+      justify-content: space-between;
+      color: #b7c7d5;
+      font: 10px/1 var(--mono);
+    }
+    .anchor-flag {
+      position: absolute;
+      right: 24px;
+      top: 23px;
+      padding: 5px 9px;
+      color: #ffe0ce;
+      background: rgba(232, 121, 62, .18);
+      border: 1px solid rgba(232, 121, 62, .55);
+      border-radius: 999px;
+      font-size: 10px;
+    }
+
+    .channel-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .channel {
+      padding: 14px 10px;
+      text-align: center;
+      background: #f4f7f5;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+    }
+    .channel b {
+      display: block;
+      color: var(--blue);
+      font: 800 16px/1.2 var(--mono);
+    }
+    .channel span { color: var(--muted); font-size: 10px; }
+
+    .tensor-road {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .tensor {
+      padding: 10px 12px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font: 650 11px/1.3 var(--mono);
+    }
+    .tensor-road .arrow { color: var(--orange); font-weight: 800; }
+
+    .backbone-shell {
+      overflow: hidden;
+      border-radius: var(--radius);
+    }
+    .backbone-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: #e9eeeb;
+    }
+    .backbone-tabs button {
+      padding: 16px 20px;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      font-weight: 800;
+    }
+    .backbone-tabs button.active {
+      color: white;
+      background: var(--navy);
+    }
+    .backbone-view { padding: clamp(22px, 4vw, 38px); }
+    .backbone-view[hidden] { display: none; }
+    .backbone-top {
+      display: grid;
+      grid-template-columns: 1.05fr .95fr;
+      gap: 25px;
+      align-items: center;
+    }
+    .backbone-top .definition {
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .backbone-badge {
+      display: inline-block;
+      margin-bottom: 12px;
+      padding: 5px 9px;
+      color: var(--violet);
+      background: var(--violet-soft);
+      border-radius: 999px;
+      font: 700 10px/1 var(--mono);
+    }
+
+    .attention-viz {
+      position: relative;
+      min-height: 260px;
+      padding: 20px;
+      background: #f2f5f4;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+    }
+    .token-row {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 7px;
+      margin-bottom: 18px;
+    }
+    .token {
+      display: grid;
+      place-items: center;
+      aspect-ratio: 1;
+      color: white;
+      background: var(--blue);
+      border-radius: 10px;
+      font: 700 11px/1 var(--mono);
+    }
+    .matrix {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 4px;
+      width: 160px;
+      margin: 0 auto;
+    }
+    .matrix i {
+      display: block;
+      aspect-ratio: 1;
+      background: var(--cyan);
+      border-radius: 3px;
+      opacity: calc(.14 + var(--v) * .11);
+    }
+    .patch-lines {
+      display: grid;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .patch-line {
+      display: grid;
+      grid-template-columns: 35px repeat(7, 1fr);
+      gap: 5px;
+      align-items: center;
+    }
+    .patch-line b { color: var(--blue); font: 700 10px/1 var(--mono); }
+    .patch-line i {
+      height: 26px;
+      background: linear-gradient(135deg, #77c8c0, #4e77aa);
+      border-radius: 5px;
+      opacity: .82;
+    }
+    .patch-line:nth-child(even) i { background: linear-gradient(135deg, #a998ca, #5f6fa3); }
+
+    .layer-stack {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      align-items: center;
+      gap: 7px;
+      margin-top: 26px;
+    }
+    .layer-stack > div {
+      min-height: 78px;
+      display: grid;
+      align-content: center;
+      padding: 10px;
+      text-align: center;
+      background: #f5f7f6;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      font-size: 11px;
+    }
+    .layer-stack .op { color: var(--orange); font: 800 16px/1 var(--mono); }
+    .layer-stack small { display: block; color: var(--muted); font-size: 9px; }
+
+    .compare-table {
+      width: 100%;
+      margin-top: 20px;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .compare-table th, .compare-table td {
+      padding: 12px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+    }
+    .compare-table th {
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .compare-table td:first-child { font-weight: 750; }
+    .compare-table tr:last-child td { border-bottom: 0; }
+
+    .head-explorer { overflow: hidden; }
+    .head-tabs {
+      display: flex;
+      gap: 0;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+    }
+    .head-tabs button {
+      flex: 1;
+      min-width: 155px;
+      padding: 17px 15px;
+      color: var(--muted);
+      background: white;
+      border: 0;
+      border-bottom: 3px solid transparent;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .head-tabs button.active {
+      color: var(--blue);
+      border-bottom-color: var(--orange);
+    }
+    .head-view {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+      padding: clamp(24px, 4vw, 38px);
+    }
+    .head-view[hidden] { display: none; }
+    .formula-box {
+      display: grid;
+      gap: 10px;
+      align-content: center;
+      min-height: 230px;
+      padding: 24px;
+      color: white;
+      background: var(--navy);
+      border-radius: 17px;
+    }
+    .formula {
+      overflow-x: auto;
+      padding: 12px 14px;
+      color: #dcf6ef;
+      background: rgba(255,255,255,.075);
+      border-left: 3px solid var(--orange);
+      border-radius: 5px;
+      font: 650 12px/1.65 var(--mono);
+      white-space: nowrap;
+    }
+    .shape-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .shape-list div {
+      padding: 10px;
+      background: #f4f7f5;
+      border-radius: 9px;
+      font-size: 11px;
+    }
+    .shape-list b {
+      display: block;
+      color: var(--blue);
+      font-family: var(--mono);
+    }
+
+    .rollout-graphic {
+      position: relative;
+      overflow: hidden;
+      min-height: 270px;
+      background: var(--navy);
+      border-radius: 18px;
+    }
+    .rollout-graphic svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 270px;
+    }
+    .rollout-copy { padding: 5px 8px; }
+
+    .loss-layout {
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 18px;
+    }
+    .loss-stack { display: grid; gap: 10px; }
+    .loss-row {
+      display: grid;
+      grid-template-columns: 170px 1fr auto;
+      gap: 13px;
+      align-items: center;
+      padding: 13px 15px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .loss-row b { font-size: 12px; }
+    .loss-row small { color: var(--muted); font-size: 10px; }
+    .loss-bar {
+      height: 7px;
+      overflow: hidden;
+      background: #e9eeeb;
+      border-radius: 999px;
+    }
+    .loss-bar i {
+      display: block;
+      width: var(--w);
+      height: 100%;
+      background: var(--c, var(--blue));
+      border-radius: inherit;
+    }
+    .loss-weight {
+      min-width: 58px;
+      text-align: right;
+      color: var(--blue);
+      font: 700 10px/1 var(--mono);
+    }
+
+    .gradient-map {
+      padding: 23px;
+      color: white;
+      background: var(--navy);
+      border-radius: 17px;
+    }
+    .grad-node {
+      padding: 10px;
+      text-align: center;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 9px;
+      font-size: 11px;
+    }
+    .grad-arrow {
+      margin: 3px 0;
+      text-align: center;
+      color: #79d4b2;
+      font: 700 14px/1 var(--mono);
+    }
+    .grad-arrow.blocked { color: #f4a37a; text-decoration: line-through; }
+
+    .calculator {
+      margin-top: 18px;
+      padding: 24px;
+      background: var(--orange-soft);
+      border: 1px solid #f0d2c0;
+      border-radius: 17px;
+    }
+    .calculator-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 180px;
+      gap: 20px;
+      align-items: center;
+    }
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 750;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--orange);
+    }
+    .calc-result {
+      padding: 17px;
+      text-align: center;
+      color: white;
+      background: var(--orange);
+      border-radius: 13px;
+    }
+    .calc-result strong {
+      display: block;
+      font-size: 28px;
+      line-height: 1;
+    }
+    .calc-result span { font-size: 10px; }
+
+    .protocol {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+    }
+    .protocol::before {
+      content: "";
+      position: absolute;
+      top: 31px;
+      left: 9%;
+      right: 9%;
+      height: 2px;
+      background: #ccd8d3;
+    }
+    .protocol-step {
+      position: relative;
+      padding-top: 54px;
+      text-align: center;
+    }
+    .protocol-step::before {
+      content: attr(data-step);
+      position: absolute;
+      z-index: 1;
+      top: 16px;
+      left: 50%;
+      display: grid;
+      place-items: center;
+      width: 31px;
+      height: 31px;
+      color: white;
+      background: var(--blue);
+      border: 5px solid var(--paper);
+      border-radius: 50%;
+      transform: translateX(-50%);
+      font: 700 10px/1 var(--mono);
+    }
+    .protocol-step.sealed::before { background: var(--red); }
+    .protocol-step b { display: block; font-size: 12px; }
+    .protocol-step p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+
+    .warning {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 14px;
+      margin-top: 20px;
+      padding: 18px 20px;
+      color: #713731;
+      background: var(--red-soft);
+      border: 1px solid #edcaca;
+      border-radius: 14px;
+    }
+    .warning .sign { font: 800 20px/1 var(--mono); }
+    .warning p { margin: 0; font-size: 12px; }
+
+    .mode-matrix {
+      overflow-x: auto;
+      border-radius: 17px;
+    }
+    .mode-matrix table {
+      width: 100%;
+      min-width: 860px;
+      border-collapse: collapse;
+      background: white;
+      font-size: 11px;
+    }
+    .mode-matrix th, .mode-matrix td {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    .mode-matrix th {
+      color: var(--muted);
+      background: #f4f7f5;
+      font-size: 10px;
+    }
+    .mode-matrix tr:last-child td { border-bottom: 0; }
+    .yes { color: var(--green); font-weight: 800; }
+    .no { color: var(--red); font-weight: 800; }
+    .latest-chip, .default-chip {
+      display: inline-block;
+      margin-left: 5px;
+      padding: 3px 6px;
+      border-radius: 999px;
+      font: 700 8px/1 var(--mono);
+      vertical-align: middle;
+    }
+    .latest-chip { color: #9b431d; background: #ffdfce; }
+    .default-chip { color: #285b82; background: #dcebf5; }
+
+    .results-panel {
+      overflow: hidden;
+      color: white;
+      background: var(--navy);
+      border: 0;
+    }
+    .results-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      padding: 28px 30px 20px;
+      border-bottom: 1px solid rgba(255,255,255,.13);
+    }
+    .results-head p { margin: 3px 0 0; color: #b9c9d7; font-size: 12px; }
+    .results-head .date {
+      color: #9ecbc6;
+      font: 700 11px/1 var(--mono);
+    }
+    .results-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .results-table th, .results-table td {
+      padding: 15px 22px;
+      text-align: right;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+    }
+    .results-table th:first-child, .results-table td:first-child { text-align: left; }
+    .results-table th { color: #9fb2c1; font-size: 9px; text-transform: uppercase; }
+    .results-table tr:last-child td { border-bottom: 0; }
+    .results-table .best { color: #7ce0bd; font-weight: 800; }
+    .result-conclusion {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1px;
+      background: rgba(255,255,255,.1);
+    }
+    .result-conclusion div {
+      padding: 19px 22px;
+      background: var(--navy);
+    }
+    .result-conclusion b { display: block; color: #e8f4f3; font-size: 12px; }
+    .result-conclusion span { color: #9fb2c1; font-size: 10px; }
+
+    .source-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .source-card {
+      min-height: 130px;
+      padding: 17px;
+      text-decoration: none;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      transition: .18s ease;
+    }
+    .source-card:hover {
+      border-color: var(--cyan);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px rgba(22, 50, 79, .09);
+    }
+    .source-card b {
+      display: block;
+      overflow-wrap: anywhere;
+      color: var(--blue);
+      font: 700 11px/1.45 var(--mono);
+    }
+    .source-card span {
+      display: block;
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .source-ref {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      color: #547083;
+      font: 600 10px/1.45 var(--mono);
+    }
+    .source-ref::before {
+      content: "源码定位";
+      padding: 4px 7px;
+      color: #fff;
+      background: var(--blue);
+      border-radius: 5px;
+      font: 800 8px/1 var(--sans);
+      letter-spacing: .1em;
+    }
+    .source-ref a {
+      padding: 3px 6px;
+      color: #245e86;
+      background: #edf5f8;
+      border: 1px solid #d7e8ee;
+      border-radius: 5px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .source-ref a:hover {
+      color: #fff;
+      background: var(--blue);
+      border-color: var(--blue);
+    }
+    .source-ref.compact {
+      margin-top: 8px;
+      font-size: 9px;
+    }
+    .source-ref.compact::before {
+      padding: 3px 5px;
+      font-size: 7px;
+    }
+    .source-card .line-index {
+      display: inline-block;
+      margin-top: 7px;
+      padding: 3px 6px;
+      color: #245e86;
+      background: #edf5f8;
+      border-radius: 4px;
+      font: 700 9px/1.35 var(--mono);
+    }
+
+    .footer {
+      max-width: 1180px;
+      margin: 70px auto 0;
+      padding-top: 24px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 11px;
+    }
+
+    .mode-only { display: none; }
+    body[data-mode="state"] .mode-only[data-mode~="state"],
+    body[data-mode="control"] .mode-only[data-mode~="control"],
+    body[data-mode="mixture"] .mode-only[data-mode~="mixture"] { display: block; }
+
+    @media (max-width: 1180px) {
+      .layout { grid-template-columns: 1fr; }
+      .side {
+        position: sticky;
+        z-index: 50;
+        height: auto;
+        padding: 11px 18px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand { margin: 0; }
+      .brand-mark { width: 34px; height: 34px; box-shadow: none; }
+      .side nav {
+        display: flex;
+        overflow-x: auto;
+        margin-top: 8px;
+        padding-bottom: 2px;
+      }
+      .side nav a { min-width: max-content; grid-template-columns: auto 1fr; gap: 5px; }
+      .side-note { display: none; }
+      main { padding-top: 8px; }
+      .hero { min-height: auto; padding-top: 70px; }
+      .flow { grid-template-columns: repeat(3, 1fr); }
+      .flow-stage:nth-child(3)::after { display: none; }
+      .backbone-top { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 760px) {
+      main { padding-inline: 16px; }
+      section { padding-top: 58px; }
+      .hero-grid { grid-template-columns: 1fr 1fr; }
+      .reading-guide, .two-col, .three-col, .four-col,
+      .head-view, .loss-layout, .calculator-grid { grid-template-columns: 1fr; }
+      .section-head { grid-template-columns: 58px 1fr; gap: 10px; }
+      .section-index { font-size: 30px; }
+      .flow { grid-template-columns: 1fr; }
+      .flow-stage { min-height: auto; }
+      .flow-stage::after {
+        content: "↓";
+        top: auto;
+        right: 50%;
+        bottom: -22px;
+      }
+      .flow-stage:nth-child(3)::after { display: block; }
+      .map-detail { grid-template-columns: 45px 1fr; }
+      .map-detail .code-pill { display: none; }
+      .channel-grid { grid-template-columns: repeat(3, 1fr); }
+      .layer-stack { grid-template-columns: 1fr; }
+      .layer-stack .op { min-height: auto; padding: 0; }
+      .loss-row { grid-template-columns: 1fr auto; }
+      .loss-row .loss-bar { grid-column: 1 / -1; grid-row: 2; }
+      .protocol { grid-template-columns: 1fr; }
+      .protocol::before { top: 0; bottom: 0; left: 15px; right: auto; width: 2px; height: auto; }
+      .protocol-step { padding: 4px 0 14px 50px; text-align: left; }
+      .protocol-step::before { top: 2px; left: 15px; }
+      .result-conclusion, .source-grid { grid-template-columns: 1fr; }
+      .results-table { font-size: 10px; }
+      .results-table th, .results-table td { padding: 12px 8px; }
+    }
+
+    @media print {
+      .side, .scroll-progress, button { display: none !important; }
+      .layout { display: block; }
+      main { padding: 0; }
+      section { break-inside: avoid; }
+      .panel { box-shadow: none; }
+      .backbone-view[hidden], .head-view[hidden] { display: grid !important; }
+    }
+  </style>
+</head>
+<body data-mode="control">
+  <div class="scroll-progress" id="scrollProgress"></div>
+  <div class="layout">
+    <aside class="side">
+      <div class="brand">
+        <div class="brand-mark">TS</div>
+        <div>Trajectory Transformer<small>architecture atlas</small></div>
+      </div>
+      <nav aria-label="章节导航">
+        <a href="#overview" data-index="00">阅读入口</a>
+        <a href="#map" data-index="01">全局架构</a>
+        <a href="#input" data-index="02">输入与数据</a>
+        <a href="#backbone" data-index="03">两种 Backbone</a>
+        <a href="#heads" data-index="04">输出头</a>
+        <a href="#physics" data-index="05">动力学与 Loss</a>
+        <a href="#training" data-index="06">训练与验证</a>
+        <a href="#modes" data-index="07">模式约束</a>
+        <a href="#status" data-index="08">当前实验状态</a>
+        <a href="#sources" data-index="09">源码索引</a>
+      </nav>
+      <div class="side-note">
+        <strong>阅读建议</strong><br>
+        先看 01 的大图，再按 02 → 06 下钻。页面中的模式按钮会同步更新总览。
+      </div>
+    </aside>
+
+    <main>
+      <section class="hero" id="overview">
+        <div class="eyebrow">4dTrajectory / ts_transformer · 2026-07-31</div>
+        <h1>从一条 ADS-B 航迹，<br>到一条<span class="accent">可评分的 4D 预测</span></h1>
+        <p class="hero-lead">
+          一份从 top-down 到 bottom-up 的当前架构说明。先看统一数据流，再拆解
+          iTransformer、PatchTST、三类输出头、可微飞行动力学、loss 与验证契约。
+        </p>
+
+        <div class="hero-grid">
+          <div class="stat"><strong>2 s</strong><span>统一输入 / dense loss 时间步</span></div>
+          <div class="stat"><strong>60 × 6</strong><span>默认历史长度 L × 通道数 C</span></div>
+          <div class="stat"><strong>2</strong><span>可替换 backbone，共享其余系统</span></div>
+          <div class="stat"><strong>3</strong><span>state / control / control-mixture</span></div>
+        </div>
+
+        <div class="reading-guide">
+          <div class="guide-card default">
+            <b>仓库默认路径</b>
+            <p><code>iTransformer</code> + <code>state</code> + <code>normalized</code>，
+              直接回归未来六通道状态和总时长。</p>
+          </div>
+          <div class="guide-card latest">
+            <b>最新控制实验路径</b>
+            <p>两个 backbone + <code>control</code> + factorized duration + observed clock +
+              fixed-dt + physical-criteria + duration 梯度解耦。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="map">
+        <div class="section-head">
+          <div class="section-index">01</div>
+          <div>
+            <h2>全局架构：六个阶段，一条主干</h2>
+            <p>backbone 与输出策略是正交开关。训练循环不靠大段 if/else 拼模式，而是通过构建器、
+              typed prediction 与 loss handler 分派。</p>
+            <div class="source-ref">
+              <a href="../models.py#L123">models.py:123–161 · 模型构建注册表</a>
+              <a href="../train.py#L743">train.py:743–840 · loss 类型分派</a>
+              <a href="../config.py#L295">config.py:295–398 · 组合约束</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel panel-pad">
+          <div class="mode-toolbar">
+            <div class="segmented" id="modeButtons" aria-label="输出模式">
+              <button data-mode="state">State output</button>
+              <button class="active" data-mode="control">Control output</button>
+              <button data-mode="mixture">Control mixture</button>
+            </div>
+            <div class="mode-summary" id="modeSummary">
+              预测一条有界、分段常值的控制序列，再经可微 RK4 得到状态；这是最新实验使用的主路径。
+            </div>
+          </div>
+
+          <div class="architecture-map">
+            <div class="flow" id="architectureFlow">
+              <article class="flow-stage selected" data-detail="data">
+                <span class="stage-no">STAGE 01</span>
+                <h3>数据平面</h3>
+                <p>HAE→MSL、阈值坐标系、2 秒重采样、train-only Z-score。</p>
+                <span class="shape">x [B,60,6]</span>
+              </article>
+              <article class="flow-stage" data-detail="context">
+                <span class="stage-no">STAGE 02</span>
+                <h3>上下文</h3>
+                <p id="contextText">历史六通道 + 8 维飞机/气动条件。</p>
+                <span class="shape" id="contextShape">x + dyn [B,8]</span>
+              </article>
+              <article class="flow-stage" data-detail="backbone">
+                <span class="stage-no">STAGE 03</span>
+                <h3>Backbone</h3>
+                <p>iTransformer 跨通道注意力；PatchTST 沿时间 patch 注意力。</p>
+                <span class="shape">features [B,256]</span>
+              </article>
+              <article class="flow-stage" data-detail="head">
+                <span class="stage-no">STAGE 04</span>
+                <h3 id="headStageTitle">控制头</h3>
+                <p id="headStageText">有界 thrust / bank / load factor + duration。</p>
+                <span class="shape" id="headStageShape">u [B,N,3], Δt [B,N]</span>
+              </article>
+              <article class="flow-stage" data-detail="decode">
+                <span class="stage-no">STAGE 05</span>
+                <h3 id="decodeStageTitle">可微 rollout</h3>
+                <p id="decodeStageText">point-mass RHS + event-aligned RK4 + WGS84 转换。</p>
+                <span class="shape" id="decodeStageShape">ŝ [B,M,6]</span>
+              </article>
+              <article class="flow-stage" data-detail="objective">
+                <span class="stage-no">STAGE 06</span>
+                <h3>Loss / 选优</h3>
+                <p id="objectiveStageText">物理 ADE/FDE、时间、控制正则；固定 anchor 验证。</p>
+                <span class="shape">scalar → checkpoint</span>
+              </article>
+            </div>
+            <div class="map-detail" id="mapDetail" aria-live="polite">
+              <div class="big-no">01</div>
+              <div>
+                <b>数据平面：先建立可学习且可逆的坐标表达</b>
+                <p>原始经纬高不会直接进入模型；每条航迹先变成跑道阈值中心的六通道局部曲线。</p>
+              </div>
+              <div class="code-pill">dataset.py:545–797 · channels.py:90–214</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="input">
+        <div class="section-head">
+          <div class="section-index">02</div>
+          <div>
+            <h2>输入处理：把航迹变成模型真正看见的张量</h2>
+            <p>这里解决单位、坐标、时间不规则、航向角跳变和不同机场尺度问题。它既是预处理，
+              也是 checkpoint 契约的一部分。</p>
+          </div>
+        </div>
+
+        <div class="four-col">
+          <article class="data-card">
+            <div class="icon">A</div>
+            <h3>原始航迹</h3>
+            <p>manifest roster 的 waypoint：<code>[t, lon, lat, alt]</code>。开发期先按 flight ID
+              锁定 split，outer-test 数值不打开。</p>
+            <div class="source-ref compact">
+              <a href="../dataset.py#L429">dataset.py:429–481</a>
+              <a href="../dataset.py#L1219">dataset.py:1219–1236</a>
+            </div>
+          </article>
+          <article class="data-card">
+            <div class="icon">B</div>
+            <h3>物理场景</h3>
+            <p>HAE 转 MSL；解析跑道阈值、TCH、下滑角、机型、质量和 OpenAP 气动参数。</p>
+            <div class="source-ref compact">
+              <a href="../dataset.py#L545">dataset.py:545–689</a>
+              <a href="../dataset.py#L725">dataset.py:725–797</a>
+            </div>
+          </article>
+          <article class="data-card">
+            <div class="icon">C</div>
+            <h3>局部坐标</h3>
+            <p>原点是目标跑道阈值。可选 ENU 或沿跑道/侧向旋转坐标，位置单位都是米。</p>
+            <div class="source-ref compact">
+              <a href="../coordinate_frames.py#L17">coordinate_frames.py:17–104</a>
+              <a href="../channels.py#L101">channels.py:101–183</a>
+            </div>
+          </article>
+          <article class="data-card">
+            <div class="icon">D</div>
+            <h3>规则时间轴</h3>
+            <p>不规则 ADS-B 经线性插值落到 <code>dt=2 s</code> 网格；历史输入绝不包含拟合 tail。</p>
+            <div class="source-ref compact">
+              <a href="../channels.py#L186">channels.py:186–214</a>
+              <a href="../dataset.py#L239">dataset.py:239–274</a>
+            </div>
+          </article>
+        </div>
+
+        <div class="two-col" style="margin-top:18px">
+          <div class="panel panel-pad">
+            <h3>六通道：位置 + 同一坐标图上的精确导数</h3>
+            <p class="subtle tiny">不用原始 lat/lon，也不直接回归会在 ±π 跳变的 ψ。质量 m 不可由
+              ADS-B 观测，因此不作为输入通道；控制路径通过独立飞机条件提供。</p>
+            <div class="channel-grid">
+              <div class="channel"><b>e</b><span>东 / 跑道向，m</span></div>
+              <div class="channel"><b>n</b><span>北 / 侧向，m</span></div>
+              <div class="channel"><b>u</b><span>阈值相对高度，m</span></div>
+              <div class="channel"><b>ė</b><span>de/dt，m/s</span></div>
+              <div class="channel"><b>ṅ</b><span>dn/dt，m/s</span></div>
+              <div class="channel"><b>u̇</b><span>du/dt，m/s</span></div>
+            </div>
+            <div class="tensor-road">
+              <div class="tensor">GeodeticState<br>[lat,lon,h,V,ψ,γ,m]</div>
+              <span class="arrow">⇄</span>
+              <div class="tensor">channel row<br>[e,n,u,ė,ṅ,u̇]</div>
+            </div>
+            <div class="source-ref">
+              <a href="../channels.py#L90">channels.py:90–99 · 通道顺序契约</a>
+              <a href="../channels.py#L101">channels.py:101–183 · 双向转换</a>
+            </div>
+          </div>
+
+          <div class="panel panel-pad">
+            <h3>标准化与监督权重</h3>
+            <p class="subtle tiny">每通道 <code>z=(x−μ)/σ</code>，μ/σ 只在 train 上拟合；pooled
+              训练时机场等权、机场内航班等权。它主要平衡 loss 中米与 m/s 的量级。</p>
+            <div class="loss-stack" style="margin-top:18px">
+              <div class="loss-row">
+                <div><b>实测行</b><br><small>六通道都有监督</small></div>
+                <div class="loss-bar"><i style="--w:100%;--c:var(--blue)"></i></div>
+                <span class="loss-weight">Σw=1</span>
+              </div>
+              <div class="loss-row">
+                <div><b>拟合进近 tail</b><br><small>只监督 e/n/u</small></div>
+                <div class="loss-bar"><i style="--w:25%;--c:var(--cyan)"></i></div>
+                <span class="loss-weight">0.25</span>
+              </div>
+              <div class="loss-row">
+                <div><b>拟合终点</b><br><small>额外位置权重</small></div>
+                <div class="loss-bar"><i style="--w:100%;--c:var(--orange)"></i></div>
+                <span class="loss-weight">+1.0</span>
+              </div>
+            </div>
+            <div class="source-ref">
+              <a href="../dataset.py#L363">dataset.py:363–428 · train-only normalizer</a>
+              <a href="../dataset.py#L725">dataset.py:725–797 · 监督权重</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="sequence-viz">
+          <span class="anchor-flag">anchor = L−1 = 59</span>
+          <h3>默认历史窗口：60 个点 × 6 通道</h3>
+          <p class="tiny" style="margin:0;color:#b7c7d5">每条航班每个 epoch 一个样本。固定模式始终取
+            最早具有完整历史的 anchor；随机模式从合格 anchor 中按 flight hash 采一个。</p>
+          <div class="sample-strip" id="sampleStrip" aria-label="60 个历史采样点"></div>
+          <div class="sequence-labels"><span>t = −118 s</span><span>120 s history contract</span><span>t = 0 · anchor</span></div>
+          <div class="source-ref">
+            <a href="../dataset.py#L798">dataset.py:798–845 · 合格 anchor</a>
+            <a href="../dataset.py#L1152">dataset.py:1152–1216 · fixed/random 策略</a>
+            <a href="../config.py#L99">config.py:99–125 · dt/L/N 默认值</a>
+          </div>
+        </div>
+
+        <div class="panel panel-pad" style="margin-top:18px">
+          <h3>一个 batch 的完整输入契约</h3>
+          <div class="tensor-road">
+            <div class="tensor">history<br>x [B,L=60,C=6]</div><span class="arrow">+</span>
+            <div class="tensor">target states<br>y [B,N,6]</div><span class="arrow">+</span>
+            <div class="tensor">weights<br>w [B,N,6]</div><span class="arrow">+</span>
+            <div class="tensor">true duration<br>T [B]</div><span class="arrow">+</span>
+            <div class="tensor">airport macro<br>α [B]</div>
+          </div>
+          <div class="tensor-road mode-only" data-mode="control mixture">
+            <span class="arrow">+</span>
+            <div class="tensor">condition [B,8]<br>m, Tmax, S, Clmax, Cd0, k, stall…</div>
+            <span class="arrow">+</span>
+            <div class="tensor">rollout state / aero / bounds / frame</div>
+            <span class="arrow">+</span>
+            <div class="tensor">fixed-dt dense target [B,M,6]<br><span class="subtle">仅相应模式</span></div>
+          </div>
+          <div class="source-ref">
+            <a href="../dataset.py#L1028">dataset.py:1028–1149 · sample/batch 张量</a>
+            <a href="../dataset.py#L295">dataset.py:295–360 · 动力学条件</a>
+            <a href="../fixed_dt_supervision.py#L82">fixed_dt_supervision.py:82–114 · ragged dense target</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="backbone">
+        <div class="section-head">
+          <div class="section-index">03</div>
+          <div>
+            <h2>Backbone：同一输入，两种完全不同的注意力轴</h2>
+            <p>二者通过 adapter 统一为 state forecast 接口；控制模式则取 projector 之前的特征。
+              输出头、动力学与训练协议不因 backbone 改变。</p>
+            <div class="source-ref">
+              <a href="../models.py#L38">models.py:38–120 · 两个 adapter</a>
+              <a href="../models.py#L123">models.py:123–161 · builder seam</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel backbone-shell">
+          <div class="backbone-tabs" role="tablist">
+            <button class="active" data-backbone="itransformer">iTransformer · 变量即 token</button>
+            <button data-backbone="patchtst">PatchTST · 时间 patch 即 token</button>
+          </div>
+
+          <div class="backbone-view" id="itransformerView">
+            <div class="backbone-top">
+              <div>
+                <span class="backbone-badge">CROSS-VARIATE ATTENTION</span>
+                <h3>iTransformer：一次注意力直接建模六通道耦合</h3>
+                <p class="definition">每个通道的完整 60 点历史先经 <code>Linear(60→256)</code>
+                  变成一个 token，因此 token 数是 C=6。Self-attention 看到的是
+                  “e 与 n 如何共同转弯、u 与 u̇ 如何共同下降”。</p>
+                <div class="tensor-road">
+                  <div class="tensor">[B,60,6]</div><span class="arrow">permute</span>
+                  <div class="tensor">[B,6,60]</div><span class="arrow">Linear</span>
+                  <div class="tensor">[B,6,256]</div>
+                </div>
+                <div class="source-ref">
+                  <a href="../models.py#L38">models.py:38–69 · adapter/feature seam</a>
+                  <a href="../vendor/itransformer/model.py#L15">vendor/itransformer/model.py:15–82 · forward</a>
+                  <a href="../vendor/itransformer/embed.py#L22">vendor/itransformer/embed.py:22–37 · inverted embedding</a>
+                </div>
+              </div>
+              <div class="attention-viz" aria-label="iTransformer 六通道注意力矩阵">
+                <div class="token-row">
+                  <span class="token">e</span><span class="token">n</span><span class="token">u</span>
+                  <span class="token">ė</span><span class="token">ṅ</span><span class="token">u̇</span>
+                </div>
+                <div class="matrix">
+                  <i style="--v:8"></i><i style="--v:6"></i><i style="--v:3"></i><i style="--v:7"></i><i style="--v:5"></i><i style="--v:2"></i>
+                  <i style="--v:6"></i><i style="--v:8"></i><i style="--v:2"></i><i style="--v:5"></i><i style="--v:7"></i><i style="--v:2"></i>
+                  <i style="--v:3"></i><i style="--v:2"></i><i style="--v:8"></i><i style="--v:2"></i><i style="--v:3"></i><i style="--v:7"></i>
+                  <i style="--v:7"></i><i style="--v:5"></i><i style="--v:2"></i><i style="--v:8"></i><i style="--v:5"></i><i style="--v:2"></i>
+                  <i style="--v:5"></i><i style="--v:7"></i><i style="--v:3"></i><i style="--v:5"></i><i style="--v:8"></i><i style="--v:2"></i>
+                  <i style="--v:2"></i><i style="--v:2"></i><i style="--v:7"></i><i style="--v:2"></i><i style="--v:2"></i><i style="--v:8"></i>
+                </div>
+                <p class="tiny subtle" style="text-align:center;margin:12px 0 0">示意：6 × 6 variate attention</p>
+              </div>
+            </div>
+            <div class="layer-stack">
+              <div><b>Inverted embedding</b><small>L→d_model，无 calendar token</small></div>
+              <div class="op">→</div>
+              <div><b>3 × Encoder</b><small>8-head MHA + FFN 512 + LayerNorm</small></div>
+              <div class="op">→</div>
+              <div><b>State / feature seam</b><small>project 256→N，或 flatten 6×256</small></div>
+            </div>
+          </div>
+
+          <div class="backbone-view" id="patchtstView" hidden>
+            <div class="backbone-top">
+              <div>
+                <span class="backbone-badge">CHANNEL-INDEPENDENT PATCH ATTENTION</span>
+                <h3>PatchTST：每个通道独立观察局部时间形状</h3>
+                <p class="definition">每个通道独立切成时间 patch。默认 L=60、patch=16、stride=8、
+                  end padding，得到 7 个 patch token；六个通道共享同一套时间编码器，结构上没有
+                  cross-channel attention。</p>
+                <div class="tensor-road">
+                  <div class="tensor">[B,6,60]</div><span class="arrow">unfold</span>
+                  <div class="tensor">[B,6,7,16]</div><span class="arrow">Linear</span>
+                  <div class="tensor">[B×6,7,256]</div>
+                </div>
+                <div class="source-ref">
+                  <a href="../models.py#L72">models.py:72–120 · adapter/pooling</a>
+                  <a href="../vendor/patchtst/model.py#L15">vendor/patchtst/model.py:15–92 · wrapper</a>
+                  <a href="../vendor/patchtst/backbone.py#L16">vendor/patchtst/backbone.py:16–75, 128–170 · patch encoder</a>
+                </div>
+              </div>
+              <div class="attention-viz" aria-label="PatchTST 每通道七个 patch">
+                <div class="patch-lines">
+                  <div class="patch-line"><b>e</b><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <div class="patch-line"><b>n</b><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <div class="patch-line"><b>u</b><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <div class="patch-line"><b>ė</b><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <div class="patch-line"><b>ṅ</b><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <div class="patch-line"><b>u̇</b><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                </div>
+                <p class="tiny subtle" style="text-align:center;margin:12px 0 0">每一行独立做 7 × 7 patch attention</p>
+              </div>
+            </div>
+            <div class="layer-stack">
+              <div><b>Patch projection</b><small>16→d_model + learnable position</small></div>
+              <div class="op">→</div>
+              <div><b>3 × Encoder</b><small>对 B×C 序列做 8-head MHA</small></div>
+              <div class="op">→</div>
+              <div><b>State / feature seam</b><small>flatten patches→N，或 mean patch</small></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel panel-pad" style="margin-top:18px">
+          <h3>控制路径共享的 feature fusion</h3>
+          <p class="subtle tiny">无论 backbone 如何产生每通道特征，都保留序列化的 CHANNELS 顺序，
+            再与飞机条件合并。这样输出头天然同时支持两种 backbone。</p>
+          <div class="tensor-road">
+            <div class="tensor">backbone channels<br>[B,6,256]</div>
+            <span class="arrow">flatten →</span>
+            <div class="tensor">[B,1536]</div>
+            <span class="arrow">concat</span>
+            <div class="tensor">condition MLP<br>[B,8]→[B,256]</div>
+            <span class="arrow">→</span>
+            <div class="tensor">Linear(1792→256)<br>GELU + LayerNorm</div>
+            <span class="arrow">→</span>
+            <div class="tensor">fused feature<br>[B,256]</div>
+          </div>
+          <table class="compare-table">
+            <thead><tr><th>维度</th><th>iTransformer</th><th>PatchTST</th></tr></thead>
+            <tbody>
+              <tr><td>注意力沿什么轴</td><td>6 个变量 token</td><td>每通道 7 个时间 patch</td></tr>
+              <tr><td>跨通道交互</td><td>编码器内部直接发生</td><td>编码器中没有；仅在最终 fusion 发生</td></tr>
+              <tr><td>控制特征取法</td><td>6 token 按通道顺序 flatten</td><td>每通道沿 patch mean，再 flatten</td></tr>
+              <tr><td>默认 instance norm</td><td>use_norm=false</td><td>RevIN=false</td></tr>
+              <tr><td>默认 N（state normalized）</td><td>64</td><td>256</td></tr>
+            </tbody>
+          </table>
+          <div class="source-ref">
+            <a href="../control_models.py#L16">control_models.py:16–39 · condition/fusion</a>
+            <a href="../dataset.py#L295">dataset.py:295–360 · 8维条件及 bounds</a>
+            <a href="../models.py#L55">models.py:55–65, 92–112 · 两种特征提取</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="heads">
+        <div class="section-head">
+          <div class="section-index">04</div>
+          <div>
+            <h2>输出头：同一个 encoder，可以回答三种不同问题</h2>
+            <p>typed output 是核心解耦层：state head 返回状态；control head 返回物理控制；
+              mixture 返回 K 个完整候选和可部署 selector。训练 loss 按 prediction 类型分派。</p>
+            <div class="source-ref">
+              <a href="../prediction_outputs.py#L21">prediction_outputs.py:21–31 · typed contracts</a>
+              <a href="../models.py#L134">models.py:134–161 · 输出策略注册</a>
+              <a href="../train.py#L802">train.py:802–840 · loss 注册</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel head-explorer">
+          <div class="head-tabs" role="tablist">
+            <button class="active" data-head="state">① State</button>
+            <button data-head="factorized">② Control · factorized</button>
+            <button data-head="direct">③ Control · direct duration</button>
+            <button data-head="mixture">④ Control mixture</button>
+          </div>
+
+          <div class="head-view" id="stateHead">
+            <div>
+              <h3>直接状态预测</h3>
+              <p class="subtle">backbone 自己的 forecast projector 直接给出标准化六通道未来；
+                独立 FinalTimeHead 从完整历史估计到终点的物理秒数。</p>
+              <div class="shape-list">
+                <div><b>states [B,N,6]</b>标准化 channel space</div>
+                <div><b>final_time_s [B]</b>正的物理秒数</div>
+              </div>
+              <p class="tiny subtle">normalized / full / window 三种 horizon 都可用。full/window 的节点
+                固定相隔 2 秒；normalized 节点由预测总时长赋予物理时间。</p>
+              <div class="source-ref">
+                <a href="../prediction_outputs.py#L49">prediction_outputs.py:49–83</a>
+                <a href="../time_grids.py#L29">time_grids.py:29–104</a>
+                <a href="../forecast.py#L127">forecast.py:127–293</a>
+              </div>
+            </div>
+            <div class="formula-box">
+              <div class="formula">ŝ = Backbone(x)</div>
+              <div class="formula">T̂ = softplus(MLP(flatten(x))) × 600 s</div>
+              <div class="formula">StatePrediction(states=ŝ, final_time_s=T̂)</div>
+            </div>
+          </div>
+
+          <div class="head-view" id="factorizedHead" hidden>
+            <div>
+              <h3>Factorized control：总时长与分配解耦</h3>
+              <p class="subtle">一个头给出有界 controls，一个头给出总时长，softmax 只决定各段占比。
+                这是控制模式默认 duration 参数化，也是最新实验使用的参数化。</p>
+              <div class="shape-list">
+                <div><b>controls [B,N,3]</b>thrust / bank / load</div>
+                <div><b>durations [B,N]</b>ΣΔt = T̂</div>
+              </div>
+              <div class="source-ref">
+                <a href="../prediction_outputs.py#L86">prediction_outputs.py:86–154</a>
+                <a href="../control_models.py#L78">control_models.py:78–95</a>
+              </div>
+            </div>
+            <div class="formula-box">
+              <div class="formula">u = lower + sigmoid(W<sub>u</sub>f) ⊙ (upper−lower)</div>
+              <div class="formula">q = softmax(W<sub>t</sub>f)</div>
+              <div class="formula">Δt<sub>j</sub> = q<sub>j</sub> · T̂</div>
+              <div class="formula">T̂ = softplus(MLP(x)) × 600 s</div>
+            </div>
+          </div>
+
+          <div class="head-view" id="directHead" hidden>
+            <div>
+              <h3>Direct duration：每段直接预测正秒数</h3>
+              <p class="subtle">global logit 提供共享时长基线，local logits 给每段偏移；
+                每段经 softplus 后为正，总时长由求和得到。只改变 duration 头，不改 backbone、
+                control、rollout 或 ControlPrediction 接口。</p>
+              <div class="shape-list">
+                <div><b>local logits [B,N]</b>每段自由度</div>
+                <div><b>final_time_s [B]</b>Σ softplus duration</div>
+              </div>
+              <div class="source-ref">
+                <a href="../direct_duration_control.py#L22">direct_duration_control.py:22–72</a>
+                <a href="../models.py#L138">models.py:138–145 · 参数化 builder</a>
+              </div>
+            </div>
+            <div class="formula-box">
+              <div class="formula">g = MLP(x) ··· global raw logit</div>
+              <div class="formula">Δt<sub>j</sub> = softplus(g + (W<sub>t</sub>f)<sub>j</sub>) × 600/N</div>
+              <div class="formula">T̂ = Σ<sub>j=1..N</sub> Δt<sub>j</sub></div>
+            </div>
+          </div>
+
+          <div class="head-view" id="mixtureHead" hidden>
+            <div>
+              <h3>Control mixture：K 个完整意图候选</h3>
+              <p class="subtle">每个 expert 都有自己的控制、duration 和 final-time head；selector
+                只看历史特征，推理时 argmax 选一个。默认 K=3，当前探索已暂停。</p>
+              <div class="shape-list">
+                <div><b>controls [B,K,N,3]</b>K 条完整控制未来</div>
+                <div><b>selector [B,K]</b>部署时选 expert</div>
+              </div>
+              <div class="source-ref">
+                <a href="../control_mixture.py#L13">control_mixture.py:13–86</a>
+                <a href="../control_models.py#L98">control_models.py:98–135</a>
+                <a href="../control_mixture_loss.py#L56">control_mixture_loss.py:56–120</a>
+              </div>
+            </div>
+            <div class="formula-box">
+              <div class="formula">k* = argmin<sub>k</sub> L<sub>reconstruction,k</sub> ··· train only</div>
+              <div class="formula">L<sub>selector</sub> = 0.1 · CE(logits, stopgrad(k*))</div>
+              <div class="formula">L<sub>diversity</sub> = 0.01 · mean pair similarity</div>
+              <div class="formula">inference: k̂ = argmax selector(history)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel panel-pad" style="margin-top:18px">
+          <h3>Controls 如何被限制在飞机物理包线内</h3>
+          <div class="three-col">
+            <div class="data-card">
+              <div class="icon">T</div>
+              <h3>Thrust</h3>
+              <p><code>0 ≤ thrust ≤ max_thrust(type)</code><br>单位 N，逐飞机上界。</p>
+            </div>
+            <div class="data-card">
+              <div class="icon">φ</div>
+              <h3>Bank</h3>
+              <p><code>−π/4 ≤ bank ≤ π/4</code><br>横向转弯控制，单位 rad。</p>
+            </div>
+            <div class="data-card">
+              <div class="icon">n</div>
+              <h3>Load factor</h3>
+              <p><code>0.5 ≤ load ≤ 2.0</code><br>过载命令，失速时由模型实现值替代。</p>
+            </div>
+          </div>
+          <div class="source-ref">
+            <a href="../prediction_outputs.py#L127">prediction_outputs.py:127–154 · sigmoid bounds 映射</a>
+            <a href="../dataset.py#L310">dataset.py:310–360 · 逐航班物理包线</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="physics">
+        <div class="section-head">
+          <div class="section-index">05</div>
+          <div>
+            <h2>动力学与 Loss：control 不是轨迹，rollout 后才是</h2>
+            <p>控制预测必须穿过与 CasADi 模型数值契约一致的 Torch point-mass 模型。
+              这条路径保持可微，因此位置误差可以反传到 controls 与 duration。</p>
+            <div class="source-ref">
+              <a href="../../../aerodynamic_model/torch_dynamics.py#L37">aerodynamic_model/torch_dynamics.py:37–125 · 连续场/RK4</a>
+              <a href="../../../aerodynamic_model/torch_dense_rollout.py#L35">aerodynamic_model/torch_dense_rollout.py:35–190 · event schedule</a>
+              <a href="../train.py#L577">train.py:577–673 · control objective</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="rollout-graphic">
+            <svg viewBox="0 0 600 300" role="img" aria-label="分段控制经 RK4 形成航迹">
+              <defs>
+                <linearGradient id="pathGrad" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#78d8ca"/>
+                  <stop offset="1" stop-color="#e8793e"/>
+                </linearGradient>
+                <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              </defs>
+              <g opacity=".16" stroke="#c8dae5" stroke-width="1">
+                <path d="M30 60H570M30 120H570M30 180H570M30 240H570"/>
+                <path d="M90 25V275M180 25V275M270 25V275M360 25V275M450 25V275M540 25V275"/>
+              </g>
+              <path d="M46 245 C130 220,150 150,220 171 S345 229,405 148 S505 75,558 54"
+                fill="none" stroke="url(#pathGrad)" stroke-width="5" filter="url(#glow)"/>
+              <g fill="#fff" stroke="#3aa7a3" stroke-width="3">
+                <circle cx="46" cy="245" r="6"/><circle cx="137" cy="197" r="5"/>
+                <circle cx="220" cy="171" r="5"/><circle cx="310" cy="204" r="5"/>
+                <circle cx="405" cy="148" r="5"/><circle cx="486" cy="84" r="5"/>
+                <circle cx="558" cy="54" r="6"/>
+              </g>
+              <g font-family="monospace" font-size="11">
+                <text x="34" y="269" fill="#b8c9d6">anchor s₀</text>
+                <text x="505" y="38" fill="#ffd8c3">terminal ŝN</text>
+                <text x="102" y="187" fill="#d9e7ed">u₁, Δt₁</text>
+                <text x="260" y="229" fill="#d9e7ed">u₂ …</text>
+                <text x="412" y="126" fill="#d9e7ed">uN</text>
+              </g>
+            </svg>
+          </div>
+          <div class="panel panel-pad rollout-copy">
+            <h3>每个 RK4 子步里的 7 状态与 3 控制</h3>
+            <div class="formula" style="color:#204968;background:#eff5f6;border-left-color:var(--cyan)">
+              state = [lat, lon, altitude, V, ψ, γ, mass]
+            </div>
+            <div class="formula" style="color:#204968;background:#eff5f6;border-left-color:var(--orange);margin-top:8px">
+              control = [thrust, bank, load_factor]
+            </div>
+            <ul class="tiny subtle">
+              <li>ISA 密度 + <code>Cd = Cd0 + k·Cl² + stall_drag</code>；</li>
+              <li>RHS 更新位置、速度、航向和航迹角，质量保持常数；</li>
+              <li>每个 control segment 最多按 <code>0.5 s</code> RK4 子步积分；</li>
+              <li>每步做 ENU / ECEF / WGS84 geodetic 转换；</li>
+              <li>dense rollout 同时返回 2 秒 query states 和 segment endpoints。</li>
+            </ul>
+            <div class="source-ref">
+              <a href="../../../aerodynamic_model/torch_dynamics.py#L37">torch_dynamics.py:37–125 · ISA/aero/RHS/RK4</a>
+              <a href="../../../aerodynamic_model/torch_dynamics.py#L226">torch_dynamics.py:226–249 · geodetic step</a>
+              <a href="../../../aerodynamic_model/torch_dynamics.py#L634">torch_dynamics.py:634–691 · 回到六通道</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="loss-layout" style="margin-top:18px">
+          <div class="panel panel-pad">
+            <h3>State output 的加法 loss</h3>
+            <div class="loss-stack">
+              <div class="loss-row">
+                <div><b>L<sub>state</sub></b><br><small>带 mask 的标准化六通道 MSE</small></div>
+                <div class="loss-bar"><i style="--w:75%;--c:var(--blue)"></i></div>
+                <span class="loss-weight">× 1</span>
+              </div>
+              <div class="loss-row">
+                <div><b>L<sub>time</sub></b><br><small>((T̂−T)/600)²</small></div>
+                <div class="loss-bar"><i style="--w:42%;--c:var(--cyan)"></i></div>
+                <span class="loss-weight">× 1</span>
+              </div>
+              <div class="loss-row">
+                <div><b>L<sub>kinematic</sub></b><br><small>Δposition − ∫velocity·dt</small></div>
+                <div class="loss-bar"><i style="--w:100%;--c:var(--violet)"></i></div>
+                <span class="loss-weight">× 3</span>
+              </div>
+              <div class="loss-row">
+                <div><b>L<sub>terminal</sub></b><br><small>最终有效位置的标准化 MSE</small></div>
+                <div class="loss-bar"><i style="--w:18%;--c:var(--orange)"></i></div>
+                <span class="loss-weight">× .02</span>
+              </div>
+            </div>
+            <div class="source-ref">
+              <a href="../train.py#L317">train.py:317–429 · MSE/运动学项</a>
+              <a href="../train.py#L676">train.py:676–740 · state loss 求和</a>
+              <a href="../config.py#L242">config.py:242–259 · 默认权重</a>
+            </div>
+          </div>
+
+          <div class="panel panel-pad">
+            <h3>Control output 的附加正则</h3>
+            <p class="tiny subtle">状态来自同一动力学 rollout，因此不再单独加 state/velocity
+              consistency；它在结构上成立。</p>
+            <div class="loss-stack">
+              <div class="loss-row" style="grid-template-columns:1fr auto">
+                <div><b>L<sub>effort</sub></b><br><small>按飞机包线缩放后的 mean(u²)</small></div>
+                <span class="loss-weight">× .001</span>
+              </div>
+              <div class="loss-row" style="grid-template-columns:1fr auto">
+                <div><b>L<sub>smooth</sub></b><br><small>mean((u<sub>j+1</sub>−u<sub>j</sub>) / range)²</small></div>
+                <span class="loss-weight">× .01</span>
+              </div>
+              <div class="loss-row" style="grid-template-columns:1fr auto">
+                <div><b>L<sub>tracking</sub></b><br><small>normalized MSE 或 physical-criteria</small></div>
+                <span class="loss-weight">mode</span>
+              </div>
+            </div>
+            <div class="source-ref">
+              <a href="../train.py#L577">train.py:577–632 · tracking/time/effort/smooth</a>
+              <a href="../train.py#L635">train.py:635–673 · airport-macro reduction</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col" style="margin-top:18px">
+          <div class="gradient-map">
+            <h3>最新实验的梯度路径</h3>
+            <div class="grad-node">physical ADE / terminal loss</div>
+            <div class="grad-arrow">↓ differentiable rollout</div>
+            <div class="grad-node">controls → control projection → backbone</div>
+            <div class="grad-arrow blocked">↓ state gradient 被 detach</div>
+            <div class="grad-node">duration fractions / duration projection</div>
+            <div class="grad-arrow">↕ 独立路径</div>
+            <div class="grad-node">final-time loss → final-time head → history</div>
+            <p class="tiny" style="color:#b9c9d7;margin:13px 0 0">训练 rollout 使用 observed total
+              duration；推理仍只使用模型预测的 T̂。没有 oracle future 泄漏到推理。</p>
+            <div class="source-ref">
+              <a href="../train.py#L432">train.py:432–455 · observed clock/detach</a>
+              <a href="../forecast.py#L87">forecast.py:87–126 · control inference</a>
+            </div>
+          </div>
+          <div class="panel panel-pad">
+            <h3>Fixed-dt 与 segment endpoint 是两条独立时钟</h3>
+            <p class="subtle tiny">control 切换时间仍由 Δt<sub>j</sub> 决定；loss query 则固定在
+              2、4、6…秒。这样改变 segment 数或不均匀 duration 时，评价点仍与真实 2 秒参考对齐。</p>
+            <div class="tensor-road">
+              <div class="tensor">control switches<br>cumsum(Δt)</div>
+              <span class="arrow">≠</span>
+              <div class="tensor">loss query<br>2,4,6,… s</div>
+            </div>
+            <div class="formula" style="margin-top:16px;color:#204968;background:#eff5f6;border-left-color:var(--cyan)">
+              ADE = mean<sub>valid t</sub> || p̂(t) − p(t) ||₂
+            </div>
+            <div class="source-ref">
+              <a href="../fixed_dt_supervision.py#L36">fixed_dt_supervision.py:36–114 · 2秒目标</a>
+              <a href="../fixed_dt_control_loss.py#L24">fixed_dt_control_loss.py:24–82 · dense loss</a>
+              <a href="../../../aerodynamic_model/torch_dense_rollout.py#L350">torch_dense_rollout.py:350–424 · query rollout</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="calculator">
+          <h3>Physical-criteria 交互计算器</h3>
+          <p class="tiny subtle">目标是平滑逼近 ADE 与终点误差中更差的一项。温度固定 0.1，
+            两个距离都按 100 m 归一化。</p>
+          <div class="calculator-grid">
+            <label>
+              <span class="slider-label"><span>ADE</span><strong><span id="adeValue">225</span> m</strong></span>
+              <input id="adeSlider" type="range" min="0" max="1000" value="225" step="5">
+            </label>
+            <label>
+              <span class="slider-label"><span>Terminal error</span><strong><span id="fdeValue">207</span> m</strong></span>
+              <input id="fdeSlider" type="range" min="0" max="1000" value="207" step="5">
+            </label>
+            <div class="calc-result">
+              <strong id="criteriaValue">2.265</strong>
+              <span>smooth-max criterion</span>
+            </div>
+          </div>
+          <div class="formula" style="margin-top:15px;color:#793918;background:rgba(255,255,255,.65);border-left-color:var(--orange)">
+            L = 0.1 · log( exp((ADE/100)/0.1) + exp((Terminal/100)/0.1) )
+          </div>
+          <div class="source-ref">
+            <a href="../physical_criteria.py#L12">physical_criteria.py:12–77 · 完整实现</a>
+            <a href="../train.py#L548">train.py:548–574 · criterion 接入</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="training">
+        <div class="section-head">
+          <div class="section-index">06</div>
+          <div>
+            <h2>训练与验证：模型如何被选中，而不偷看 test</h2>
+            <p>split、采样、归一化、validation anchor 和 checkpoint metric 都是显式协议，
+              并被写入 checkpoint。真正的 outer-test 只允许最终一次 release。</p>
+            <div class="source-ref">
+              <a href="../dataset.py#L1219">dataset.py:1219–1348 · hash split</a>
+              <a href="../train.py#L1433">train.py:1433–1704 · fit loop</a>
+              <a href="../train.py#L1707">train.py:1707–1815 · test 隔离/checkpoint</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel panel-pad">
+          <div class="protocol">
+            <div class="protocol-step" data-step="1"><b>Manifest roster</b><p>只用权威 arrivals 清单</p></div>
+            <div class="protocol-step" data-step="2"><b>Hash split</b><p>seed + airport:flight ID</p></div>
+            <div class="protocol-step" data-step="3"><b>Outer-train</b><p>拟合 normalizer / CV / Adam</p></div>
+            <div class="protocol-step" data-step="4"><b>Outer-val</b><p>固定 L−1 anchor 选 checkpoint</p></div>
+            <div class="protocol-step sealed" data-step="5"><b>Outer-test</b><p>冻结后一次性 release</p></div>
+          </div>
+          <div class="warning">
+            <div class="sign">!</div>
+            <p><strong>开发期的 test 数值边界：</strong>只从 manifest 元数据计算 test flight 身份与 hash；
+              source track 不打开。训练完成的 <code>fit_evaluation.json</code> 只含 train / val。</p>
+          </div>
+        </div>
+
+        <div class="three-col" style="margin-top:18px">
+          <article class="data-card">
+            <div class="icon">S</div>
+            <h3>每航班每 epoch 一个样本</h3>
+            <p>固定 anchor：永远 L−1。随机 anchor：每个 flight 用稳定 hash 从 ≥60 s future 的候选中
+              取一个；validation 始终固定 anchor。</p>
+            <div class="source-ref compact">
+              <a href="../dataset.py#L1152">dataset.py:1152–1216</a>
+              <a href="../train.py#L1464">train.py:1464–1480</a>
+            </div>
+          </article>
+          <article class="data-card">
+            <div class="icon">A</div>
+            <h3>机场等权目标</h3>
+            <p>小机场航班权重大，大机场航班权重小；一个完整 epoch 中每个机场总权重一致，避免 pooled
+              模型被大机场支配。</p>
+            <div class="source-ref compact">
+              <a href="../dataset.py#L927">dataset.py:927–945</a>
+              <a href="../train.py#L1613">train.py:1613–1624</a>
+            </div>
+          </article>
+          <article class="data-card">
+            <div class="icon">C</div>
+            <h3>Checkpoint 选优</h3>
+            <p>可选 native objective、fixed-anchor common-grid ADE 或 common-grid physical criteria；
+              ReduceLROnPlateau 与 early stop 使用同一 metric。</p>
+            <div class="source-ref compact">
+              <a href="../train.py#L1321">train.py:1321–1430</a>
+              <a href="../train.py#L1623">train.py:1623–1693</a>
+            </div>
+          </article>
+        </div>
+
+        <div class="panel panel-pad" style="margin-top:18px">
+          <h3>为什么还需要 common-grid validation</h3>
+          <div class="two-col">
+            <div>
+              <p class="subtle tiny">不同模型节点的物理时间不同：state-normalized 是均匀 progress；
+                control 可以是非均匀 segment duration。验证时先固定真实剩余时长上的 64 个查询时刻，
+                再把预测按自己的物理 clock 插值到同一时刻。</p>
+              <div class="formula" style="color:#204968;background:#eff5f6;border-left-color:var(--cyan)">
+                t<sub>q,j</sub> = (j/64) · T<sub>true</sub>
+              </div>
+            </div>
+            <div>
+              <div class="tensor-road">
+                <div class="tensor">truth nodes<br>真实 2 s / fitted tail</div>
+                <span class="arrow">interp</span>
+                <div class="tensor">64 shared<br>physical times</div>
+              </div>
+              <div class="tensor-road">
+                <div class="tensor">prediction nodes<br>自己的 Δt / T̂</div>
+                <span class="arrow">interp</span>
+                <div class="tensor">ADE / FDE<br>metres</div>
+              </div>
+            </div>
+          </div>
+          <div class="source-ref">
+            <a href="../fixed_anchor_validation.py#L22">fixed_anchor_validation.py:22–54 · truth grid</a>
+            <a href="../fixed_anchor_validation.py#L57">fixed_anchor_validation.py:57–98 · prediction 对齐</a>
+            <a href="../fixed_anchor_validation.py#L101">fixed_anchor_validation.py:101–155 · ADE/FDE</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="modes">
+        <div class="section-head">
+          <div class="section-index">07</div>
+          <div>
+            <h2>模式矩阵：哪些组合真的合法</h2>
+            <p>不是每个开关都能任意组合。配置对象在构建时拒绝不相容模式，旧 control checkpoint
+              缺少新 recipe 字段时也要求重建，不做静默升级。</p>
+            <div class="source-ref">
+              <a href="../config.py#L24">config.py:24–83 · mode enums</a>
+              <a href="../config.py#L295">config.py:295–398 · 组合校验</a>
+              <a href="../config.py#L513">config.py:513–549 · 拒绝旧 recipe</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="mode-matrix panel">
+          <table>
+            <thead>
+              <tr>
+                <th>输出策略</th><th>Backbone</th><th>Horizon</th><th>Duration</th>
+                <th>State-loss grid</th><th>Objective</th><th>主要限制</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>state</b><span class="default-chip">DEFAULT</span></td>
+                <td>iTransformer / PatchTST</td>
+                <td>normalized / full / window</td>
+                <td>独立 final-time head</td>
+                <td>native output nodes</td>
+                <td>normalized MSE + kinematic + terminal</td>
+                <td><span class="yes">三种 horizon 全支持</span></td>
+              </tr>
+              <tr>
+                <td><b>control</b></td>
+                <td>iTransformer / PatchTST</td>
+                <td>normalized only</td>
+                <td>factorized / direct</td>
+                <td>native endpoint / fixed-dt</td>
+                <td>normalized MSE / physical-criteria</td>
+                <td>fixed-dt 要求 observed clock；physical 还要求 fixed-dt</td>
+              </tr>
+              <tr>
+                <td><b>control · latest</b><span class="latest-chip">EXPERIMENT</span></td>
+                <td>两者都已运行</td>
+                <td>normalized, N=64</td>
+                <td>factorized，fractions detach</td>
+                <td>fixed 2 s</td>
+                <td>smooth-max(ADE/100, FDE/100)</td>
+                <td>训练状态用 observed T；推理用 predicted T</td>
+              </tr>
+              <tr>
+                <td><b>control-mixture</b></td>
+                <td>iTransformer / PatchTST</td>
+                <td>normalized only</td>
+                <td>K 套 factorized</td>
+                <td>native endpoint</td>
+                <td>best-of-K + selector + diversity</td>
+                <td><span class="no">当前不支持 fixed-dt / physical-criteria</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="source-ref" style="padding:0 18px 18px">
+            <a href="../config.py#L295">config.py:295–398 · 表中合法性规则</a>
+            <a href="../models.py#L134">models.py:134–161 · mode builder</a>
+          </div>
+        </div>
+
+        <div class="two-col" style="margin-top:18px">
+          <div class="panel panel-pad">
+            <h3>默认关键参数</h3>
+            <table class="compare-table">
+              <tbody>
+                <tr><td>dt / L</td><td><code>2 s / 60</code></td></tr>
+                <tr><td>d_model / heads / layers / d_ff</td><td><code>256 / 8 / 3 / 512</code></td></tr>
+                <tr><td>dropout / activation</td><td><code>0.1 / GELU</code></td></tr>
+                <tr><td>Patch length / stride</td><td><code>16 / 8</code></td></tr>
+                <tr><td>full / window horizon</td><td><code>300 / 30 steps</code></td></tr>
+                <tr><td>final-time scale</td><td><code>600 s</code></td></tr>
+              </tbody>
+            </table>
+            <div class="source-ref">
+              <a href="../config.py#L99">config.py:99–125 · 时间尺度</a>
+              <a href="../config.py#L169">config.py:169–205 · backbone 超参</a>
+            </div>
+          </div>
+          <div class="panel panel-pad">
+            <h3>训练默认与最新实验配方</h3>
+            <table class="compare-table">
+              <thead><tr><th>参数</th><th>默认</th><th>最新控制实验</th></tr></thead>
+              <tbody>
+                <tr><td>batch</td><td>2048</td><td>512</td></tr>
+                <tr><td>epochs / patience</td><td>180 / 20</td><td>180 / 20</td></tr>
+                <tr><td>learning rate</td><td>5e−4</td><td>3e−4</td></tr>
+                <tr><td>state clock</td><td>predicted</td><td>observed</td></tr>
+                <tr><td>checkpoint selection</td><td>objective</td><td>common-grid criteria</td></tr>
+              </tbody>
+            </table>
+            <div class="source-ref">
+              <a href="../config.py#L207">config.py:207–241 · optimizer/selection 默认</a>
+              <a href="../config.py#L265">config.py:265–290 · 控制实验开关</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="status">
+        <div class="section-head">
+          <div class="section-index">08</div>
+          <div>
+            <h2>当前实验状态：架构已打通，能力仍受限</h2>
+            <p>以下仅来自 pooled 五机场 train/validation；没有 test 预测或指标。两个 backbone
+              使用同一输入、头、loss、split 与 seed。</p>
+            <div class="source-ref">
+              <a href="2026-07-30_direct_control_oracle.zh.md#L263">direct_control_oracle.zh.md:263–304 · 双 backbone 实验记录</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel results-panel">
+          <div class="results-head">
+            <div>
+              <h3 style="margin:0">Physical-criteria + detached duration 实验</h3>
+              <p>KMSY · KRDU · KSJC · KSMF · KSTL / OpenAP-direct / L60 / N64 / seed 1337</p>
+            </div>
+            <span class="date">DEVELOPMENT · TRAIN/VAL ONLY</span>
+          </div>
+          <table class="results-table">
+            <thead>
+              <tr><th>Backbone</th><th>Best epoch</th><th>Val criteria</th><th>Common ADE</th><th>Common FDE</th><th>Time MAE</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>iTransformer</td><td>15 / 35</td><td class="best">27.6909</td>
+                <td class="best">2,424.69 m</td><td class="best">2,688.55 m</td><td class="best">63.64 s</td>
+              </tr>
+              <tr>
+                <td>PatchTST</td><td>18 / 38</td><td>30.5592</td>
+                <td>2,754.61 m</td><td>3,029.34 m</td><td>63.99 s</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="result-conclusion">
+            <div><b>Backbone 不是主要瓶颈</b><span>两者均停在约 2.4–3.0 km，且约 epoch 20 同类失稳。</span></div>
+            <div><b>不是典型过拟合</b><span>train 与 val common-grid ADE 接近，能力上限先于泛化间隙出现。</span></div>
+            <div><b>Oracle 仍更好</b><span>单航迹直接优化约 225 m，说明“预测控制”比“表示控制”更难。</span></div>
+          </div>
+        </div>
+
+        <div class="warning">
+          <div class="sign">↯</div>
+          <p><strong>如何解读：</strong>迁移在软件结构与梯度语义上成功，但没有带来可用精度。
+            iTransformer 略优于 PatchTST；共享的长时域 single-shooting 控制映射、优化稳定性和
+            从历史推断进近意图，仍是更可能的核心瓶颈。</p>
+        </div>
+      </section>
+
+      <section id="sources">
+        <div class="section-head">
+          <div class="section-index">09</div>
+          <div>
+            <h2>源码索引：每一层去哪里核对</h2>
+            <p>本页描述以这些当前文件为准。HTML 不加载运行时数据，也不改变训练或发布契约。</p>
+          </div>
+        </div>
+
+        <div class="source-grid">
+          <a class="source-card" href="../channels.py#L90"><b>channels.py</b><span class="line-index">90–214</span><span>六通道、地理状态往返、2 秒重采样。</span></a>
+          <a class="source-card" href="../coordinate_frames.py#L17"><b>coordinate_frames.py</b><span class="line-index">17–104</span><span>ENU 与 runway-aligned 坐标实现。</span></a>
+          <a class="source-card" href="../dataset.py#L239"><b>dataset.py</b><span class="line-index">239–428 · 545–1216 · 1219–1381</span><span>series 构建、normalizer、anchor、batch、split。</span></a>
+          <a class="source-card" href="../models.py#L38"><b>models.py</b><span class="line-index">38–161</span><span>两种 adapter 和输出策略注册表。</span></a>
+          <a class="source-card" href="../control_models.py#L16"><b>control_models.py</b><span class="line-index">16–135</span><span>飞机条件、feature fusion、single/mixture 控制模型。</span></a>
+          <a class="source-card" href="../prediction_outputs.py#L21"><b>prediction_outputs.py</b><span class="line-index">21–154</span><span>typed outputs、final-time 与 factorized control head。</span></a>
+          <a class="source-card" href="../direct_duration_control.py#L22"><b>direct_duration_control.py</b><span class="line-index">22–72</span><span>直接正 duration 消融，保持统一接口。</span></a>
+          <a class="source-card" href="../control_mixture.py#L13"><b>control_mixture.py + loss</b><span class="line-index">head 13–86 · loss 56–120</span><span>K 个候选、selector、best-of-K 与 diversity。</span></a>
+          <a class="source-card" href="../fixed_dt_supervision.py#L18"><b>fixed_dt_supervision.py</b><span class="line-index">18–114</span><span>无语义点数上限的 ragged 2 秒监督。</span></a>
+          <a class="source-card" href="../fixed_dt_control_loss.py#L17"><b>fixed_dt_control_loss.py</b><span class="line-index">17–82</span><span>event-aligned dense rollout 与标准化状态 loss。</span></a>
+          <a class="source-card" href="../physical_criteria.py#L12"><b>physical_criteria.py</b><span class="line-index">12–77</span><span>米制 ADE、终点误差和 smooth-max。</span></a>
+          <a class="source-card" href="../train.py#L317"><b>train.py</b><span class="line-index">317–870 · 1255–1704</span><span>loss dispatch、机场等权、validation selection、fit loop。</span></a>
+          <a class="source-card" href="../fixed_anchor_validation.py#L22"><b>fixed_anchor_validation.py</b><span class="line-index">22–155</span><span>共享物理时间网格上的 ADE/FDE。</span></a>
+          <a class="source-card" href="../forecast.py#L52"><b>forecast.py</b><span class="line-index">52–311</span><span>normalized/full/window 与 control 推理策略。</span></a>
+          <a class="source-card" href="../config.py#L24"><b>config.py</b><span class="line-index">24–83 · 99–290 · 295–570</span><span>所有模式、约束与 checkpoint recipe。</span></a>
+          <a class="source-card" href="../../../aerodynamic_model/torch_dynamics.py#L37"><b>aerodynamic_model/torch_*.py</b><span class="line-index">dynamics 37–125, 226–249 · dense 35–190, 350–424</span><span>可微 point-mass RK4 与固定时刻 event rollout。</span></a>
+          <a class="source-card" href="../vendor/itransformer/model.py#L15"><b>vendor backbones</b><span class="line-index">iTransformer model 15–82 · PatchTST backbone 16–170</span><span>上游网络本体；项目 adapter 保持统一接口。</span></a>
+          <a class="source-card" href="2026-07-30_direct_control_oracle.zh.md#L263"><b>direct_control_oracle.zh.md</b><span class="line-index">263–304</span><span>oracle 改进、迁移与双 backbone 实验记录。</span></a>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <b>4dTrajectory / ts_transformer architecture atlas</b> · 单文件、离线、无外部依赖。<br>
+        内容生成于当前未提交的 review 工作树；仓库代码仍是唯一事实来源。
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      const body = document.body;
+      const modeContent = {
+        state: {
+          summary: "直接预测未来六通道状态与 final_time_s；可使用 normalized、full 或 recursive window。",
+          context: "只有标准化六通道历史；不需要飞机气动条件。",
+          contextShape: "x [B,60,6]",
+          headTitle: "状态头",
+          headText: "backbone projector 直接输出未来标准化状态。",
+          headShape: "ŝ [B,N,6], T̂ [B]",
+          decodeTitle: "时间解码",
+          decodeText: "按 normalized / fixed / recursive clock 赋予物理时间。",
+          decodeShape: "trajectory [B,N,6]",
+          objective: "state MSE + final-time + kinematic consistency + terminal。"
+        },
+        control: {
+          summary: "预测一条有界、分段常值的控制序列，再经可微 RK4 得到状态；这是最新实验使用的主路径。",
+          context: "历史六通道 + 8 维飞机/气动条件。",
+          contextShape: "x + dyn [B,8]",
+          headTitle: "控制头",
+          headText: "有界 thrust / bank / load factor + duration。",
+          headShape: "u [B,N,3], Δt [B,N]",
+          decodeTitle: "可微 rollout",
+          decodeText: "point-mass RHS + event-aligned RK4 + WGS84 转换。",
+          decodeShape: "ŝ [B,M,6]",
+          objective: "物理或标准化 tracking + 时间 + effort + smoothness。"
+        },
+        mixture: {
+          summary: "生成 K 条完整控制/时长候选，用 best-of-K 训练，并由 history-only selector 选择部署候选。",
+          context: "历史六通道 + 8 维条件；所有 expert 共享 fused feature。",
+          contextShape: "x + dyn → f [B,256]",
+          headTitle: "K 个控制 expert",
+          headText: "每个 expert 独立预测 controls、durations 与 final time。",
+          headShape: "u [B,K,N,3], logits [B,K]",
+          decodeTitle: "K 次 rollout",
+          decodeText: "训练比较各 expert reconstruction；推理只输出 selector argmax。",
+          decodeShape: "ŝ [B,K,N,6] → selected",
+          objective: "winner reconstruction + selector CE + bounded diversity。"
+        }
+      };
+
+      const setMode = (mode) => {
+        body.dataset.mode = mode;
+        document.querySelectorAll("#modeButtons button").forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.mode === mode);
+        });
+        const c = modeContent[mode];
+        document.getElementById("modeSummary").textContent = c.summary;
+        document.getElementById("contextText").textContent = c.context;
+        document.getElementById("contextShape").textContent = c.contextShape;
+        document.getElementById("headStageTitle").textContent = c.headTitle;
+        document.getElementById("headStageText").textContent = c.headText;
+        document.getElementById("headStageShape").textContent = c.headShape;
+        document.getElementById("decodeStageTitle").textContent = c.decodeTitle;
+        document.getElementById("decodeStageText").textContent = c.decodeText;
+        document.getElementById("decodeStageShape").textContent = c.decodeShape;
+        document.getElementById("objectiveStageText").textContent = c.objective;
+      };
+      document.querySelectorAll("#modeButtons button").forEach(btn => {
+        btn.addEventListener("click", () => setMode(btn.dataset.mode));
+      });
+
+      const details = {
+        data: ["01", "数据平面：先建立可学习且可逆的坐标表达",
+          "原始经纬高不会直接进入模型；每条航迹先变成跑道阈值中心的六通道局部曲线。",
+          "dataset.py:545–797 · channels.py:90–214"],
+        context: ["02", "上下文：观测历史与不可观测飞机属性分开",
+          "六通道 history 是所有模式的共同输入；控制模式额外使用质量、推力与气动参数。",
+          "dataset.py:295–360 · control_models.py:16–39"],
+        backbone: ["03", "Backbone：只负责从历史中抽取表示",
+          "iTransformer 在通道间注意，PatchTST 在每个通道的时间 patch 间注意。",
+          "models.py:38–161 · vendor/*/model.py"],
+        head: ["04", "输出头：定义模型到底预测什么",
+          "state、single control 和 mixture 都有独立模块，但共享 typed prediction seam。",
+          "prediction_outputs.py:21–154 · models.py:134–161"],
+        decode: ["05", "解码：把网络输出变成带物理时间的航迹",
+          "state 走时间网格；control 走可微 point-mass RK4，推理和训练复用同一动力学。",
+          "forecast.py:87–124 · torch_dynamics.py:37–125, 226–249"],
+        objective: ["06", "Loss 与验证：训练目标和部署指标明确分层",
+          "训练可使用 native 或 fixed-dt objective；checkpoint 始终可按固定 anchor common grid 选择。",
+          "train.py:317–870 · fixed_anchor_validation.py:22–155"]
+      };
+      const detailBox = document.getElementById("mapDetail");
+      document.querySelectorAll(".flow-stage").forEach(stage => {
+        stage.addEventListener("click", () => {
+          document.querySelectorAll(".flow-stage").forEach(x => x.classList.remove("selected"));
+          stage.classList.add("selected");
+          const [no, title, text, code] = details[stage.dataset.detail];
+          detailBox.innerHTML = `<div class="big-no">${no}</div><div><b>${title}</b><p>${text}</p></div><div class="code-pill">${code}</div>`;
+        });
+      });
+
+      document.querySelectorAll(".backbone-tabs button").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".backbone-tabs button").forEach(x => x.classList.remove("active"));
+          btn.classList.add("active");
+          document.getElementById("itransformerView").hidden = btn.dataset.backbone !== "itransformer";
+          document.getElementById("patchtstView").hidden = btn.dataset.backbone !== "patchtst";
+        });
+      });
+
+      const headIds = {
+        state: "stateHead",
+        factorized: "factorizedHead",
+        direct: "directHead",
+        mixture: "mixtureHead"
+      };
+      document.querySelectorAll(".head-tabs button").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".head-tabs button").forEach(x => x.classList.remove("active"));
+          btn.classList.add("active");
+          Object.entries(headIds).forEach(([key, id]) => {
+            document.getElementById(id).hidden = key !== btn.dataset.head;
+          });
+        });
+      });
+
+      const strip = document.getElementById("sampleStrip");
+      for (let i = 0; i < 60; i++) {
+        const bar = document.createElement("i");
+        bar.className = "sample-bar";
+        const wave = 22 + 48 * (0.5 + 0.5 * Math.sin(i * 0.31)) + (i / 59) * 18;
+        bar.style.height = `${Math.min(96, wave)}%`;
+        strip.appendChild(bar);
+      }
+
+      const ade = document.getElementById("adeSlider");
+      const fde = document.getElementById("fdeSlider");
+      const stableLogSumExp = (a, b, temperature = 0.1) => {
+        const m = Math.max(a, b);
+        return m + temperature * Math.log(Math.exp((a - m) / temperature) + Math.exp((b - m) / temperature));
+      };
+      const updateCalculator = () => {
+        const a = Number(ade.value);
+        const f = Number(fde.value);
+        document.getElementById("adeValue").textContent = a;
+        document.getElementById("fdeValue").textContent = f;
+        document.getElementById("criteriaValue").textContent =
+          stableLogSumExp(a / 100, f / 100).toFixed(3);
+      };
+      ade.addEventListener("input", updateCalculator);
+      fde.addEventListener("input", updateCalculator);
+      updateCalculator();
+
+      const navLinks = [...document.querySelectorAll(".side nav a")];
+      const sections = navLinks.map(link => document.querySelector(link.getAttribute("href")));
+      const onScroll = () => {
+        const doc = document.documentElement;
+        const max = doc.scrollHeight - doc.clientHeight;
+        document.getElementById("scrollProgress").style.width =
+          `${max > 0 ? (doc.scrollTop / max) * 100 : 0}%`;
+        let current = sections[0];
+        sections.forEach(section => {
+          if (section.getBoundingClientRect().top <= 150) current = section;
+        });
+        navLinks.forEach(link => {
+          link.classList.toggle("active", link.getAttribute("href") === `#${current.id}`);
+        });
+      };
+      document.addEventListener("scroll", onScroll, { passive: true });
+      onScroll();
+      setMode("control");
+    })();
+  </script>
+</body>
+</html>

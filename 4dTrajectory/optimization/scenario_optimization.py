@@ -866,28 +866,6 @@ def _iaf_full_paths(document: dict[str, Any]) -> list:
     return paths
 
 
-def _iaf_initial_state(pc, scenario: FlightScenario) -> GeodeticState:
-    """The physics initial state at a path's IAF: coded altitude, the procedure's nominal speed,
-    heading toward the next fix, level flight, the scenario's landing mass."""
-    from geokit import FT_M, KT_MS, bearing_rad
-    iaf, nxt = pc.waypoints[0], pc.waypoints[1]
-    alt_ft = iaf.altitude_ref_ft if iaf.altitude_ref_ft is not None else iaf.geometry_alt_ft
-    speed_ms = (
-        pc.nominal_speed_kt * KT_MS
-        if pc.nominal_speed_kt
-        else scenario.aircraft.approach.reference_speed_ms
-    )
-    return GeodeticState(
-        latitude=iaf.lat_deg,
-        longitude=iaf.lon_deg,
-        altitude=(alt_ft or 0.0) * FT_M,
-        V=speed_ms,
-        psi=bearing_rad(iaf.lat_deg, iaf.lon_deg, nxt.lat_deg, nxt.lon_deg),
-        gamma=0.0,
-        m=scenario.initial.m,
-    )
-
-
 def _lagrange_eval(xs, ys, query):
     """Evaluate the Lagrange polynomial through ``(xs, ys)`` at ``query`` (vectorized numpy)."""
     import numpy as np

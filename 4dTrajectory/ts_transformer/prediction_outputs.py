@@ -1,8 +1,8 @@
-"""Typed prediction contracts and replaceable output layers.
+"""Typed state/control prediction contracts and replaceable output layers.
 
-The current learner predicts states.  A later control learner can reuse the same training
-and rollout boundary by returning :class:`ControlPrediction`; the control head does not
-know about a particular transformer or aircraft model.
+The selected output strategy is explicit in :class:`config.TSConfig`. The control head is
+backbone-agnostic and receives per-flight physical bounds, while the caller owns the
+differentiable dynamics rollout that turns its controls into supervised states.
 """
 
 from __future__ import annotations
@@ -60,8 +60,12 @@ class FinalTimeHead(nn.Module):
             nn.Linear(config.d_model, 1),
         )
 
+    def raw(self, history: torch.Tensor) -> torch.Tensor:
+        """Return the shared unconstrained global duration logit."""
+        return self.network(history).squeeze(-1)
+
     def forward(self, history: torch.Tensor) -> torch.Tensor:
-        return F.softplus(self.network(history).squeeze(-1)) * self.scale_s
+        return F.softplus(self.raw(history)) * self.scale_s
 
 
 class StateOutputLayer(nn.Module):
@@ -90,23 +94,28 @@ class ControlOutputHead(nn.Module):
         self,
         input_dim: int,
         n_segments: int,
-        bounds: ControlBounds,
+        bounds: ControlBounds | None = None,
     ):
         super().__init__()
         self.n_segments = n_segments
         self.control_projection = nn.Linear(input_dim, n_segments * len(CONTROL_NAMES))
         self.duration_projection = nn.Linear(input_dim, n_segments)
-        self.register_buffer("lower", torch.tensor(bounds.lower, dtype=torch.float32))
-        self.register_buffer("upper", torch.tensor(bounds.upper, dtype=torch.float32))
+        if bounds is None:
+            self.register_buffer("lower", None)
+            self.register_buffer("upper", None)
+        else:
+            self.register_buffer("lower", torch.tensor(bounds.lower, dtype=torch.float32))
+            self.register_buffer("upper", torch.tensor(bounds.upper, dtype=torch.float32))
 
     def forward(
-        self, features: torch.Tensor, final_time_s: torch.Tensor
+        self,
+        features: torch.Tensor,
+        final_time_s: torch.Tensor,
+        *,
+        lower: torch.Tensor | None = None,
+        upper: torch.Tensor | None = None,
     ) -> ControlPrediction:
-        batch = features.shape[0]
-        unit_controls = torch.sigmoid(self.control_projection(features)).view(
-            batch, self.n_segments, len(CONTROL_NAMES)
-        )
-        controls = self.lower + unit_controls * (self.upper - self.lower)
+        controls = self.bounded_controls(features, lower=lower, upper=upper)
         fractions = torch.softmax(self.duration_projection(features), dim=-1)
         segment_durations = fractions * final_time_s.unsqueeze(-1)
         return ControlPrediction(
@@ -114,3 +123,32 @@ class ControlOutputHead(nn.Module):
             segment_durations=segment_durations,
             final_time_s=final_time_s,
         )
+
+    def bounded_controls(
+        self,
+        features: torch.Tensor,
+        *,
+        lower: torch.Tensor | None = None,
+        upper: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Map logits to per-flight physical bounds for reusable control heads."""
+        batch = features.shape[0]
+        lower = self.lower if lower is None else lower
+        upper = self.upper if upper is None else upper
+        if lower is None or upper is None:
+            raise ValueError("per-sample lower and upper bounds are required")
+        if lower.shape[-1] != len(CONTROL_NAMES) or upper.shape != lower.shape:
+            raise ValueError("control bounds must end in 3 aligned values")
+        if lower.ndim == 1:
+            lower = lower.unsqueeze(0).expand(batch, -1)
+            upper = upper.unsqueeze(0).expand(batch, -1)
+        if lower.shape != (batch, len(CONTROL_NAMES)):
+            raise ValueError(
+                f"per-sample bounds must be [B,3], got {tuple(lower.shape)} for B={batch}"
+            )
+        unit_controls = torch.sigmoid(self.control_projection(features)).view(
+            batch, self.n_segments, len(CONTROL_NAMES)
+        )
+        return lower.unsqueeze(1) + unit_controls * (
+            upper - lower
+        ).unsqueeze(1)

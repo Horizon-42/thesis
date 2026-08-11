@@ -116,6 +116,35 @@ export function airportComparisonCzmlUrl(
 export const OBSERVED_CATEGORY_KEY = "observed";
 export const OBSERVED_EVALUATION_REPORT_FILE = "evaluation_report.json";
 
+export type ComparisonResultSource = "prediction" | "experiment";
+
+export const EXPERIMENT_PREDICTION_OUTPUTS = [
+  "state",
+  "control",
+  "control-mixture",
+] as const;
+export type ExperimentPredictionOutput = typeof EXPERIMENT_PREDICTION_OUTPUTS[number];
+
+export function isExperimentPredictionOutput(
+  value: unknown,
+): value is ExperimentPredictionOutput {
+  return typeof value === "string" &&
+    (EXPERIMENT_PREDICTION_OUTPUTS as readonly string[]).includes(value);
+}
+
+export interface ExperimentCategoryMetadata {
+  /** Stable repository-relative run identity (without the checkpoint filename). */
+  id: string;
+  /** Campaign/collection used to group models in the experiment selector. */
+  group: string;
+  /** Repository-relative checkpoint path; presentation/provenance only. */
+  checkpoint: string;
+  model?: string | null;
+  predictionOutput?: ExperimentPredictionOutput | null;
+  horizonMode?: "normalized" | "full" | "window" | null;
+  seed?: number | null;
+}
+
 /** One evaluation category, as listed in `comparison/categories.json`. */
 export interface ComparisonCategory {
   /** Stable key, e.g. "asdb" / "runway" / "runway_cons". */
@@ -133,6 +162,12 @@ export interface ComparisonCategory {
    * naming convention, not a contract.
    */
   constrained: boolean;
+  /** Dataset partition for learned prediction categories; absent for optimization/baselines. */
+  datasetSplit?: "train" | "val" | "test";
+  /** Existing entries omit this and remain ordinary Prediction results. */
+  resultSource?: ComparisonResultSource;
+  /** Present only for categories published from the checkpoint experiment sweep. */
+  experiment?: ExperimentCategoryMetadata;
 }
 
 /** Report-only categories have no comparison groups or CZML to draw. */
@@ -149,11 +184,37 @@ export interface ComparisonCategoriesManifest {
 export function isComparisonCategory(value: unknown): value is ComparisonCategory {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
+  const experiment = candidate.experiment as Record<string, unknown> | undefined;
+  const validExperiment =
+    experiment === undefined ||
+    (typeof experiment === "object" &&
+      experiment !== null &&
+      typeof experiment.id === "string" &&
+      typeof experiment.group === "string" &&
+      typeof experiment.checkpoint === "string" &&
+      (experiment.model === undefined || experiment.model === null ||
+        typeof experiment.model === "string") &&
+      (experiment.predictionOutput === undefined || experiment.predictionOutput === null ||
+        isExperimentPredictionOutput(experiment.predictionOutput)) &&
+      (experiment.horizonMode === undefined || experiment.horizonMode === null ||
+        experiment.horizonMode === "normalized" || experiment.horizonMode === "full" ||
+        experiment.horizonMode === "window") &&
+      (experiment.seed === undefined || experiment.seed === null ||
+        typeof experiment.seed === "number"));
   return (
     typeof candidate.key === "string" &&
     typeof candidate.label === "string" &&
     typeof candidate.dir === "string" &&
-    typeof candidate.constrained === "boolean"
+    typeof candidate.constrained === "boolean" &&
+    (candidate.datasetSplit === undefined ||
+      candidate.datasetSplit === "train" ||
+      candidate.datasetSplit === "val" ||
+      candidate.datasetSplit === "test") &&
+    (candidate.resultSource === undefined ||
+      candidate.resultSource === "prediction" ||
+      candidate.resultSource === "experiment") &&
+    validExperiment &&
+    (candidate.resultSource !== "experiment" || experiment !== undefined)
   );
 }
 
@@ -228,16 +289,57 @@ export interface OptimizationStats {
 }
 
 export interface PredictionErrorSpread {
+  median?: number | null;
   mean?: number | null;
   p95?: number | null;
+  max?: number | null;
+}
+
+export interface PredictionFinalTimeStats {
+  mae?: number | null;
+  p95Abs?: number | null;
+  meanSigned?: number | null;
+}
+
+export interface PredictionRawKinematicStats {
+  positionVelocityRmseMps?: PredictionErrorSpread | null;
+  headingConsistencyP95Deg?: PredictionErrorSpread | null;
+  turnRateP95DegS?: PredictionErrorSpread | null;
+  accelerationP95Mps2?: PredictionErrorSpread | null;
+  jerkP95Mps3?: PredictionErrorSpread | null;
+}
+
+export interface PredictionRawKinematics {
+  predicted?: PredictionRawKinematicStats | null;
+  observedBaseline?: PredictionRawKinematicStats | null;
+  delta?: Record<string, number> | null;
 }
 
 /** ADE/FDE summary published from a ts_transformer's `summary.json.accuracy` block. */
 export interface PredictionAccuracyStats {
   flights?: number | null;
   flightsWithoutOverlap?: number | null;
+  finalTimeS?: PredictionFinalTimeStats | null;
   adeM?: PredictionErrorSpread | null;
   fdeM?: PredictionErrorSpread | null;
+  crossTrackP95M?: PredictionErrorSpread | null;
+  altitudeP95M?: PredictionErrorSpread | null;
+  rawKinematics?: PredictionRawKinematics | null;
+}
+
+export interface EvaluationBatchStats {
+  thresholds?: Record<string, number> | null;
+  total?: number | null;
+  measured?: number | null;
+  solved?: number | null;
+  solveRate?: number | null;
+  successful?: number | null;
+  successRate?: number | null;
+  successRateAmongSolved?: number | null;
+  lateralM?: Record<string, number> | null;
+  verticalM?: Record<string, number> | null;
+  finalTimeS?: Record<string, number> | null;
+  observed?: Record<string, number> | null;
 }
 
 export interface ComparisonIndex {
@@ -247,8 +349,12 @@ export interface ComparisonIndex {
   startHidden: boolean;
   /** References reuse the airport's canonical observed datasource. */
   referenceSource: "canonicalObserved";
+  /** Dataset partition for learned prediction categories. */
+  datasetSplit?: "train" | "val" | "test";
   groups: ComparisonGroup[];
   optimization?: OptimizationStats;
+  /** Complete batch-level evaluation statistics; excludes only per-flight details. */
+  evaluation?: EvaluationBatchStats;
   /** Present only for data-driven prediction categories. */
   prediction?: PredictionAccuracyStats;
   /** Immutable report artifact committed by this same index generation. */
@@ -280,6 +386,10 @@ export function isComparisonIndex(value: unknown): value is ComparisonIndex {
     typeof candidate.epoch === "string" &&
     typeof candidate.startHidden === "boolean" &&
     candidate.referenceSource === "canonicalObserved" &&
+    (candidate.datasetSplit === undefined ||
+      candidate.datasetSplit === "train" ||
+      candidate.datasetSplit === "val" ||
+      candidate.datasetSplit === "test") &&
     typeof candidate.evaluationReport === "string" &&
     Array.isArray(candidate.groups) &&
     candidate.groups.every(isComparisonGroup)
