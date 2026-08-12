@@ -9,9 +9,11 @@ each landing to at most one runway, and publishes explicit manifests for audit a
 ```text
 OpenSky history DB
   → harvest.tracks        reconstruct one contiguous track per flight (HAE)
-  → harvest.classify      assigned | ambiguous | unassignable | not_landing
+  → harvest.classify      runway assignment + one final-segment fit
+                          assigned | ambiguous | unassignable | not_landing
+                          + policy-free observed threshold event when estimated
   → tracks/manifest.json  authoritative roster of every harvested outcome
-       ├─ observed fit/evaluation + frontend CZML
+       ├─ observed event evaluation + frontend CZML
        └─ arrivals/manifest.json
             assigned + published CIFP TCH/glidepath
             + final 25 km entry → measured landing anchor
@@ -47,7 +49,7 @@ conda run -n aeroviz python trajectory_data_process/download_landings.py \
 conda run -n aeroviz python trajectory_data_process/download_landings.py --count 200
 ```
 
-Rebuild all derived outputs from an existing track harvest without downloading:
+Rebuild downstream views from unchanged assignment/event data without downloading:
 
 ```bash
 conda run -n aeroviz python -m trajectory_data_process.harvest \
@@ -56,8 +58,38 @@ conda run -n aeroviz python -m trajectory_data_process.harvest \
 
 `--evaluate-only` requires
 `trajectory_data_process/outputs/harvest/KRDU/tracks/manifest.json`. That file is created
-only by a successful full harvest; it is intentionally not reconstructed by globbing old
-track files.
+by a successful harvest or local reclassification; it is intentionally not reconstructed
+by globbing old track files. This mode does not refit trajectories. It rejects a legacy
+or stale threshold event whose runway-data fingerprint differs from the active runway
+configuration or CIFP cycle.
+
+Re-run runway assignment and final-segment fitting from the stored HAE samples, then
+rebuild arrivals, observed evaluation, CZML, and publication—still without downloading:
+
+```bash
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport KRDU --reclassify-existing
+```
+
+Use `--reclassify-existing` after changing the runway/CIFP data cycle or the assignment
+or fitting implementation. It validates every rostered source record, writes the complete
+new classification into a staging directory, and replaces `tracks/` only after every
+record succeeds. The manifest records `network_access: false`, the source-manifest hash,
+and the new per-runway fingerprints.
+
+Download ADS-B history again only when the stored source samples themselves must be
+replaced:
+
+```bash
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport KRDU --full-redownload
+```
+
+The three modes are mutually exclusive:
+
+- `--evaluate-only`: reuse assignment and threshold events; rebuild downstream views.
+- `--reclassify-existing`: reuse samples; rebuild assignment, events, and downstream views.
+- `--full-redownload`: acquire the source samples again and rebuild everything.
 
 Procedure assets are a separate static-data pipeline:
 
@@ -90,6 +122,17 @@ outputs/harvest/<ICAO>/
 - `unassignable`: coverage/geometry is insufficient for a reliable runway.
 - `not_landing`: the track does not satisfy the landing screen.
 
+Every roster row carries `event_status`. Each assigned track with a valid winning fit
+stores one `observed_threshold_event`: the estimated threshold crossing, uncertainty,
+source sample range, fit diagnostics, and extrapolation distance. It contains physical
+fit results only—not an LPV/LNAV-VNAV benchmark, limit, or verdict. Its runway-data
+fingerprint binds it to the exact threshold position, course, vertical datum, width,
+procedure facts, and FAA runway/CIFP cycles used by assignment.
+
+Observed event availability is calculated from the source manifest before filtering:
+assigned, ambiguous, and unassignable tracks form the arrival-candidate denominator;
+known `not_landing` tracks are reported separately as excluded.
+
 `arrivals/manifest.json` is narrower by design. It contains only supervised/modeling-ready
 arrivals: assigned tracks with a published CIFP Path Point (TCH and glidepath), cropped at
 the final entry into the terminal ring and stopped at `landing_sample_index`. Exclusions
@@ -104,10 +147,11 @@ with stale slice metadata.
 ```text
 harvest/runner.py       backward time-window scan and stopping policy
 harvest/tracks.py       row → contiguous measured Track
-harvest/classify.py     one-track/one-runway assignment and landing anchor
+harvest/classify.py     assignment, one final-segment fit, landing anchor, threshold event
 harvest/store.py        complete measured buckets + tracks manifest
+harvest/reclassify.py   no-download reassignment/refitting from stored HAE samples
 harvest/arrivals.py     model-ready crop/filter + arrivals manifest
-harvest/observed.py     inferred final-approach fit and evaluation records
+harvest/observed.py     datum conversion + evaluation records from the stored event
 harvest/czml.py         one canonical observed CZML + runway selector metadata
 download_landings.py    airport-list expansion only; no acquisition logic
 arrival_segment.py      final terminal-entry crop and local-circuit rule
@@ -154,12 +198,35 @@ would make the visualization wrong by the same geoid offset it fixes for modelin
 - FAA CIFP Path Point records supply landing-threshold position, published TCH, and
   glidepath. A runway without that record stays in the complete harvest but is excluded
   from model-ready arrivals.
+- Stored threshold events are cycle-bound derived data. If the active FAA runway or CIFP
+  facts change, `--evaluate-only` refuses to mix cycles; run `--reclassify-existing`.
 - OpenSky historical DB access is a separate account entitlement. Credentials are read by
   `pyopensky` (`OPENSKY_USERNAME` / `OPENSKY_PASSWORD` or its settings file).
 - The historical DB lags real time. Use a fixed `--start` sufficiently in the past when
   reproducibility/cache reuse matters.
 - `--no-cache` bypasses the history query cache. Interrupt handlers cancel the in-flight
   query so a stopped harvest does not keep a Trino quota slot occupied.
+
+## Safe derived-data cleanup
+
+Always preview a single-airport cleanup before deleting anything:
+
+```bash
+conda run -n aeroviz python clean_pipeline_data.py --airport KRDU --dry-run
+conda run -n aeroviz python clean_pipeline_data.py --airport KRDU
+```
+
+Use repeated `--airport ICAO` arguments for several airports. `--all-airports` is an
+explicit broader scope; omitting the scope is an error. The cleaner uses a producer-owned
+allowlist and removes only regenerable arrival/approach views, scenario files, canonical
+optimizer outputs, confirmed validation predictions, and eligible frontend publications.
+
+It never selects downloaded `tracks/`, checkpoint/history or `test_release.json`, formal
+experiments, final-test predictions, parked/manual/unknown outputs, static airport data,
+git-tracked files, or archives. A comparison tree containing an experiment or final-test
+publication is preserved as a unit. Missing or malformed prediction/comparison metadata
+also fails closed. On an approved clean, targets are validated and staged on the same
+filesystem before deletion; a staging failure restores every file already moved.
 
 ## Tests
 

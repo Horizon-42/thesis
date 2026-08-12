@@ -14,12 +14,18 @@ function row(over: Partial<EvaluationRow> = {}): EvaluationRow {
     file: "AAL123_05L_a1b2c3_20260101T000000Z_eval.json",
     solved: true,
     success: true,
+    verdict: "pass",
+    event_status: "estimated",
+    lateral_result: "pass",
+    vertical_result: "pass",
     violations: [],
     flight_key: "AAL123_05L_a1b2c3_20260101T000000Z",
     subject: "observed",
-    established: true,
-    extrapolated: true,
-    marginal: false,
+    airport: "KRDU",
+    runway: "05L",
+    benchmark: "lpv",
+    bounds: { guidance_lateral_m: 53.375, runway_lateral_m: 22.86,
+      effective_lateral_m: 22.86, vertical_lower_m: null, vertical_upper_m: null },
     ...over,
   };
 }
@@ -30,39 +36,24 @@ describe("verdictOfRow", () => {
   });
 
   it("fails a flight outside a gate", () => {
-    expect(verdictOfRow(row({ success: false, violations: ["lateral 200 m > 106.75 m"] }))).toBe(
+    expect(verdictOfRow(row({ success: false, verdict: "fail", lateral_result: "fail", violations: ["lateral"] }))).toBe(
       "fail",
     );
   });
 
-  it("calls a marginal PASS undecidable, not a pass", () => {
-    // The whole point of the third state: 71% of real KRDU flights land here, and
-    // claiming them as passes would overstate what a 25 ft-quantised measurement knows.
-    expect(verdictOfRow(row({ success: true, marginal: true }))).toBe("undecided");
+  it("maps an explicit indeterminate result to the neutral state", () => {
+    expect(verdictOfRow(row({ success: false, verdict: "indeterminate",
+      vertical_result: "indeterminate" }))).toBe("undecided");
   });
 
-  it("calls a marginal FAIL undecidable, not a failure", () => {
-    expect(verdictOfRow(row({ success: false, marginal: true }))).toBe("undecided");
-  });
-
-  it("calls a not-established flight undecidable, not a failure", () => {
-    // No stabilised final approach to fit means no crossing to judge — that is a
-    // statement about the track, not about how the approach was flown.
-    expect(
-      verdictOfRow(row({ established: false, success: false, violations: ["not_established"] })),
-    ).toBe("undecided");
-  });
-
-  it("treats an optimizer row (no established/marginal fields) as a plain verdict", () => {
-    expect(verdictOfRow({ id: "x", file: null, solved: true, success: true, violations: [] })).toBe(
-      "pass",
-    );
+  it("uses the explicit verdict rather than deriving one from success", () => {
+    expect(verdictOfRow(row({ success: false, verdict: "indeterminate" }))).toBe("undecided");
   });
 });
 
 describe("verdictsByFlightKey", () => {
   it("indexes on flight_key", () => {
-    const map = verdictsByFlightKey([row(), row({ flight_key: "B_23L_dd_20260101T010000Z", success: false })]);
+    const map = verdictsByFlightKey([row(), row({ flight_key: "B_23L_dd_20260101T010000Z", success: false, verdict: "fail" })]);
     expect(map.get("AAL123_05L_a1b2c3_20260101T000000Z")).toBe("pass");
     expect(map.get("B_23L_dd_20260101T010000Z")).toBe("fail");
   });
@@ -76,7 +67,7 @@ describe("verdictsByFlightKey", () => {
   it("does not collapse two flights sharing a callsign", () => {
     const map = verdictsByFlightKey([
       row({ flight_key: "AAL1_05L_aaa_20260101T000000Z", success: true }),
-      row({ flight_key: "AAL1_05L_bbb_20260102T000000Z", success: false }),
+      row({ flight_key: "AAL1_05L_bbb_20260102T000000Z", success: false, verdict: "fail" }),
     ]);
     expect(map.size).toBe(2);
     expect(map.get("AAL1_05L_aaa_20260101T000000Z")).toBe("pass");

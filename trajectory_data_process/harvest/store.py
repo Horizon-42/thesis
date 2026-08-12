@@ -1,28 +1,23 @@
-"""The harvest's on-disk layout: measured tracks and derived fits, kept apart.
+"""The harvest's on-disk layout: source samples and policy-free derived events.
 
     outputs/harvest/<ICAO>/
-        tracks/                     <- MEASURED. Reconstructed samples, HAE, unfitted.
+        tracks/                     <- Reconstructed HAE samples plus assignment output.
             assigned/<RWY>/<flight_key>.json
             ambiguous/<flight_key>.json
             unassignable/<flight_key>.json
             not_landing/<flight_key>.json
             manifest.json
-        approach/                   <- DERIVED. Fits, MSL, written by the arrival stage.
-            fits/<flight_key>.json
-            summary.json
+        arrivals/                   <- Model-ready final-arrival views of assigned tracks.
 
 WHY THE SPLIT IS PHYSICAL AND NOT COSMETIC
 ------------------------------------------
-``tracks/`` is what the sensors said: ellipsoidal altitudes exactly as broadcast, no
-model, no extrapolation, no datum conversion. ``approach/`` is what a fit INFERRED:
-MSL, a straight-line model, a crossing the receivers never saw. Mixing them in one
-directory invites the mistake of reading an inferred crossing as a measurement -- and
-the whole reason this pipeline exists is that the last measured sample and the actual
-crossing are 325 m apart.
-
-It also means the expensive half can be recomputed. Changing the fit window, the
-established criteria, or the TCH source rewrites ``approach/`` only; ``tracks/`` is
-re-derived solely by re-downloading.
+The sample array remains the sensor reconstruction: ellipsoidal altitude exactly as
+broadcast, with no extrapolated point inserted. Runway assignment also serializes one
+clearly labelled ``observed_threshold_event`` beside those samples. That event is a
+policy-free estimate produced from ``Assignment.fit``; consumers must not mistake it
+for a measured sample or refit the samples independently. A changed fitting method
+therefore requires local reclassification of these regenerable records from the stored
+samples; it does not require another OpenSky download.
 
 WHY ALL FOUR BUCKETS ARE WRITTEN
 --------------------------------
@@ -130,6 +125,7 @@ def track_record(classified: ClassifiedTrack) -> dict[str, Any]:
             "margin_m": _round(classified.assignment.margin_m),
             "reason": classified.assignment.reason,
         },
+        "observed_threshold_event": classified.observed_threshold_event,
         "samples": [
             [round(s.time_s - t0, 3), round(s.lon, 6), round(s.lat, 6), round(s.alt_hae_m, 1)]
             for s in track.samples
@@ -158,7 +154,10 @@ def write_tracks(
         path = paths.record(item)
         path.parent.mkdir(parents=True, exist_ok=True)
         record = track_record(item)
-        path.write_text(json.dumps(record, separators=(",", ":")), encoding="utf-8")
+        path.write_text(
+            json.dumps(record, separators=(",", ":"), allow_nan=False),
+            encoding="utf-8",
+        )
         counts[item.outcome] = counts.get(item.outcome, 0) + 1
         if item.runway:
             per_runway[item.runway] = per_runway.get(item.runway, 0) + 1
@@ -172,6 +171,7 @@ def write_tracks(
                 "callsign": item.track.callsign,
                 "landing_time_utc": item.landing_time_utc,
                 "landing_sample_index": item.landing_sample_index,
+                "event_status": item.observed_threshold_event.get("status"),
             }
         )
 
@@ -187,7 +187,9 @@ def write_tracks(
         "records": roster,
     }
     paths.manifest.parent.mkdir(parents=True, exist_ok=True)
-    paths.manifest.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    paths.manifest.write_text(
+        json.dumps(manifest, indent=1, allow_nan=False), encoding="utf-8"
+    )
     return manifest
 
 

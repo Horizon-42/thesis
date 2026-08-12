@@ -2982,6 +2982,10 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: #ffcd28;
 }
 
+.flight-table td.flight-table-indeterminate {
+  color: #989da6;
+}
+
 .flight-table th:nth-child(n + 2),
 .flight-table td:nth-child(n + 2) {
   text-align: right;

@@ -9,8 +9,9 @@ comparisons:
     is faster than the flight as flown, over the same start→target journey; the
     scenario's initial state is derived from the track start, so the durations
     are directly comparable).
-  * **path deviation** — both paths resampled at ``N_RESAMPLE`` fractions of
-    their OWN horizontal arc length, then compared point-by-point (horizontal
+  * **path deviation** — after proving the endpoints match, both paths are
+    resampled at ``N_RESAMPLE`` fractions of their horizontal arc length and
+    compared point-by-point (horizontal
     great-circle distance + signed altitude difference). This is a path-SHAPE
     comparison: the two trajectories fly different speed profiles by design
     (the optimizer minimizes time), so matching by time would conflate timing
@@ -28,6 +29,18 @@ from evaluation.records import TrajectoryRecord, load_record
 from evaluation.stats import magnitude_spread, signed_spread
 
 N_RESAMPLE = 101
+ENDPOINT_TOLERANCE_M = 1.0
+
+
+@dataclass(frozen=True)
+class ReferenceSpan:
+    """Whether two paths describe the same physical start/end span."""
+
+    comparable: bool
+    start_gap_m: float | None
+    end_gap_m: float | None
+    tolerance_m: float = ENDPOINT_TOLERANCE_M
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +81,35 @@ def load_reference(record: TrajectoryRecord) -> TrajectoryRecord:
     return reference
 
 
+def reference_span(
+    record: TrajectoryRecord,
+    reference: TrajectoryRecord,
+    *,
+    tolerance_m: float = ENDPOINT_TOLERANCE_M,
+) -> ReferenceSpan:
+    """Require both paths to share their physical endpoints before comparison."""
+    if tolerance_m < 0.0:
+        raise ValueError("reference endpoint tolerance must be non-negative")
+    if not record.states or not reference.states:
+        return ReferenceSpan(False, None, None, tolerance_m, "empty path")
+    start_gap = haversine_m(
+        record.states[0]["lat"], record.states[0]["lon"],
+        reference.states[0]["lat"], reference.states[0]["lon"],
+    )
+    end_gap = haversine_m(
+        record.states[-1]["lat"], record.states[-1]["lon"],
+        reference.states[-1]["lat"], reference.states[-1]["lon"],
+    )
+    comparable = start_gap <= tolerance_m and end_gap <= tolerance_m
+    return ReferenceSpan(
+        comparable,
+        start_gap,
+        end_gap,
+        tolerance_m,
+        None if comparable else "physical endpoints differ; comparison skipped",
+    )
+
+
 def horizontal_arc_length_m(states: list[dict[str, float]]) -> float:
     """Total along-track horizontal length (metres) of a record's state samples.
 
@@ -94,6 +136,14 @@ def compare_to_reference(
     n: int = N_RESAMPLE,
 ) -> ReferenceComparison:
     """Compare a SOLVED record's path + duration against its observed reference."""
+    span = reference_span(record, reference)
+    if not span.comparable:
+        start = "unavailable" if span.start_gap_m is None else f"{span.start_gap_m:.1f} m"
+        end = "unavailable" if span.end_gap_m is None else f"{span.end_gap_m:.1f} m"
+        raise ValueError(
+            "cannot compare paths over different physical spans: "
+            f"start gap {start}, end gap {end}"
+        )
     ours = resample_by_arc_length(record.states, n)
     theirs = resample_by_arc_length(reference.states, n)
     lateral = [haversine_m(a[0], a[1], b[0], b[1]) for a, b in zip(ours, theirs)]

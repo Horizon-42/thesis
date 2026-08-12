@@ -93,6 +93,16 @@ class RunwayFrame:
         """Put a whole track in the frame, in input order."""
         return [self.project(p) for p in points]
 
+    def unproject(self, projected: Projected) -> TrackPoint:
+        """Inverse :meth:`project` for one runway-frame point."""
+        east = projected.along_m * self._east_hat + projected.cross_m * self._north_hat
+        north = projected.along_m * self._north_hat - projected.cross_m * self._east_hat
+        return TrackPoint(
+            lat=self.lat + north / METRES_PER_DEG_LAT,
+            lon=self.lon + east / self._m_per_deg_lon,
+            alt_m=self.elevation_m + projected.height_m,
+        )
+
     def distance_m(self, point: TrackPoint) -> float:
         """Horizontal distance from the threshold, metres."""
         p = self.project(point)

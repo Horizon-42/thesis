@@ -14,9 +14,9 @@ three things, none of which belongs upstream of it:
      runway with no LPV procedure has no TCH and is SKIPPED, loudly -- it cannot be
      judged against LPV gates at all.
 
-Output lands in ``approach/``, apart from ``tracks/``, because everything here is
-inferred: an MSL altitude that was never measured, a velocity that was never broadcast,
-and downstream a crossing the receivers never saw.
+Output lands in ``approach/``, apart from ``tracks/``, because this is an evaluation
+view: it converts datum, derives kinematics, supplies the benchmark target, and carries
+the already serialized threshold estimate into the evaluator.
 """
 
 from __future__ import annotations
@@ -29,7 +29,11 @@ from typing import Any, Iterable, Iterator
 from flight_scenarios.datum import MSL_ALTITUDE_SOURCE
 from flight_scenarios.start_state import state_samples_from_track
 
-from trajectory_data_process.harvest.airports import Airport, Runway
+from trajectory_data_process.harvest.airports import (
+    Airport,
+    Runway,
+    require_matching_runway_data,
+)
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
 # Nominal mass for the state samples. It reaches no gate -- the regulation checks are
@@ -53,13 +57,22 @@ def observed_record(
 ) -> dict[str, Any]:
     """One stored track as an ``evaluation.records`` record, in MSL.
 
-    ``source.subject = "observed"`` is what makes ``evaluation.arrival`` measure this at
-    its fitted threshold crossing rather than at ``states[-1]`` -- see that module for
-    why the two are 325 m apart. ``source.runway_course_deg`` is stamped because
-    ``evaluation`` is geokit+stdlib only and cannot read a runway config.
+    Evaluation consumes the threshold event already produced by runway assignment;
+    it does not refit these state samples.
     """
     if runway.threshold_crossing_height_m is None:
         raise ValueError(f"{runway.airport} {runway.ident} publishes no LPV TCH")
+    event = track.get("observed_threshold_event")
+    if (
+        not isinstance(event, dict)
+        or event.get("status") != "estimated"
+        or event.get("runway") != runway.ident
+    ):
+        raise ValueError(
+            f"track {track.get('flight_key')!r} lacks an estimated threshold event "
+            f"for runway {runway.ident}; run --reclassify-existing"
+        )
+    require_matching_runway_data(event, runway)
 
     # H_MSL = h_HAE - N, applied once, here.
     waypoints = [
@@ -93,6 +106,7 @@ def observed_record(
         "source": {
             "id": track["callsign"] or track["icao24"],
             "subject": "observed",
+            "arr_airport": runway.airport,
             "flight_key": track["flight_key"],
             "icao24": track["icao24"],
             "runway": runway.ident,
@@ -103,6 +117,9 @@ def observed_record(
             "altitude_source": MSL_ALTITUDE_SOURCE,
             "hae_minus_msl_m": runway.hae_minus_msl_m,
             "vertical_source": runway.vertical_source,
+            # Copy policy-free producer output verbatim.  Benchmark selection and
+            # limits remain evaluation-owned.
+            "observed_threshold_event": event,
         },
         "initial_state": {k: v for k, v in states[0].items() if k != "t"},
         "target_state": target,
@@ -120,6 +137,8 @@ def write_observed_records(
     Tracks on runways with no published LPV TCH are skipped and LISTED -- a bounded
     coverage that is stated in the output rather than silently shrinking the batch.
     """
+    source = read_manifest(paths)
+    availability = source_event_availability(source)
     records_dir = paths.approach / RECORDS_DIR
     _clear(records_dir)
     records_dir.mkdir(parents=True, exist_ok=True)
@@ -127,7 +146,7 @@ def write_observed_records(
     roster: list[dict[str, Any]] = []
     skipped: list[SkippedTrack] = []
 
-    for row in read_manifest(paths)["records"]:
+    for row in source["records"]:
         if row["outcome"] != "assigned":
             continue
         track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
@@ -140,7 +159,7 @@ def write_observed_records(
         record = observed_record(track, runway, mass_kg=mass_kg)
         name = f"{row['flight_key']}_eval.json"
         (records_dir / name).write_text(
-            json.dumps(record, separators=(",", ":")), encoding="utf-8"
+            json.dumps(record, separators=(",", ":"), allow_nan=False), encoding="utf-8"
         )
         roster.append(
             {
@@ -155,14 +174,59 @@ def write_observed_records(
     summary = {
         "airport": airport.code,
         "subject": "observed",
+        "source_total": int(source["total"]),
+        "source_counts": source["counts"],
+        "event_availability": availability,
         "altitude_source": MSL_ALTITUDE_SOURCE,
         "mass_kg": mass_kg,
         "total": len(roster),
         "skipped": [{"flight_key": s.flight_key, "reason": s.reason} for s in skipped],
         "results": roster,
     }
-    (paths.approach / SUMMARY_NAME).write_text(json.dumps(summary, indent=1), encoding="utf-8")
+    (paths.approach / SUMMARY_NAME).write_text(
+        json.dumps(summary, indent=1, allow_nan=False), encoding="utf-8"
+    )
     return summary
+
+
+def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
+    """Availability over arrival candidates, before evaluation-record filtering.
+
+    ``not_landing`` tracks are outside the population: classification determined that
+    they are not arrivals at this airport. Assigned, ambiguous, and unassignable tracks
+    are candidate arrivals and therefore all belong in the denominator.
+    """
+    records = source.get("records")
+    if not isinstance(records, list) or source.get("total") != len(records):
+        raise ValueError("track manifest has an invalid records roster")
+    candidates = []
+    excluded_not_landing = 0
+    for index, row in enumerate(records):
+        if not isinstance(row, dict):
+            raise ValueError(f"track manifest record {index} must be an object")
+        outcome = row.get("outcome")
+        if outcome == "not_landing":
+            excluded_not_landing += 1
+            continue
+        if outcome not in ("assigned", "ambiguous", "unassignable"):
+            raise ValueError(f"track manifest record {index} has invalid outcome {outcome!r}")
+        status = row.get("event_status")
+        if status not in ("estimated", "unavailable"):
+            raise ValueError(
+                f"track manifest record {index} lacks event_status; run "
+                "--reclassify-existing"
+            )
+        candidates.append(status)
+    estimated = sum(status == "estimated" for status in candidates)
+    denominator = len(candidates)
+    return {
+        "denominator": "arrival_candidates_excluding_not_landing",
+        "event_denominator": denominator,
+        "event_estimated": estimated,
+        "event_unavailable": denominator - estimated,
+        "event_estimated_rate": estimated / denominator if denominator else 0.0,
+        "excluded_not_landing": excluded_not_landing,
+    }
 
 
 def iter_observed_records(paths: HarvestPaths) -> Iterator[Any]:

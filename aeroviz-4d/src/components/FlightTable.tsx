@@ -103,6 +103,8 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                         ? " flight-table-failed"
                         : optimizer?.offTarget
                           ? " flight-table-offtarget"
+                          : optimizer?.indeterminate
+                            ? " flight-table-indeterminate"
                           : ""
                     }`}
                     title={
@@ -110,6 +112,8 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                         ? `${id} — optimization failed`
                         : optimizer?.offTarget
                           ? `${id} — optimized but missed the target (off target)`
+                          : optimizer?.indeterminate
+                            ? `${id} — terminal verdict indeterminate`
                           : id
                     }
                   >

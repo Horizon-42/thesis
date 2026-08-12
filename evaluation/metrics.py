@@ -1,289 +1,312 @@
-"""The arrival judgement + batch metrics.
-
-Per record: where did the trajectory arrive, and inside the regulation gates?
-The arrival EVENT depends on the record's subject (``arrival.py``): a solve or a
-prediction is measured at ``states[-1]`` vs ``target_state``, an observed track
-at its fitted final approach extrapolated to the threshold. Lateral deviation =
-great-circle distance (``geokit.haversine_m``) for a final state, |cross-track
-at threshold| for an observed crossing; vertical = signed altitude difference.
-Speed / heading deltas are reported for context but NOT gated — the regulation
-gates (``thresholds.py``) are positional.
-
-Batch metrics over a set of records:
-
-  * solve rate    — records with a non-empty solution / all records
-  * success rate  — records whose arrival passes BOTH gates / all records
-                    (also reported among solved only)
-  * for observed batches, an ``observed`` block: established / not-established
-    counts + rate (the honest analogue of a solve rate, which is 1.0 by
-    construction there) and the marginal count (verdicts the data cannot decide)
-  * lateral / vertical deviation spreads over the measured records — mean, p95
-    and max. p95 is reported because RNP containment is itself a 95 % statistic
-    (8260.58D: position within the leg's RNP radius 95 % of the time), so the
-    p95 lateral deviation compares directly against RNP-style limits.
-  * mean / min / max flight time over the measured records
-  * when records carry a ``reference_file`` pointer, the observed-track
-    comparison (``reference.py``): per-trajectory flight-time delta + path
-    deviation, aggregated over the solved records.
-"""
+"""Terminal-event verdicts and auditable batch aggregation."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from evaluation.arrival import (
-    DEFAULT_SUBJECT,
+    TERMINAL_PLANE_TOLERANCE_M,
     ArrivalDeviation,
-    EstablishedCriteria,
     arrival_deviation,
     subject_of,
 )
+from evaluation.context import ContextKey, resolve_context
 from evaluation.records import TrajectoryRecord
 from evaluation.reference import (
+    ENDPOINT_TOLERANCE_M,
     ReferenceComparison,
     compare_to_reference,
     horizontal_arc_length_m,
     load_reference,
+    reference_span,
 )
 from evaluation.stats import magnitude_spread, mean, signed_spread
-from evaluation.thresholds import DeviationThresholds
-
+from evaluation.thresholds import (
+    NORMAL_95_MULTIPLIER,
+    AssessmentContext,
+    ComponentResult,
+    Verdict,
+)
 
 @dataclass(frozen=True)
 class TrajectoryEvaluation:
-    """One record's verdict: did it arrive, and inside the regulation gates?
-
-    ``violations`` holds one human-readable string per failed check (empty =
-    success; exactly ``("unsolved",)`` for unsolved records, ``("not_established",)``
-    for an observed track with no measurable arrival). ``deviation`` is None iff there
-    is no arrival to measure; ``reason`` says why (solver failure, or which established
-    criterion was unmet).
-
-    ``established`` is None for subjects where the notion does not apply (a solve either
-    reaches its target or does not exist). ``marginal`` is True when the arrival's 95%
-    confidence interval straddles a gate boundary — i.e. the data cannot decide the
-    verdict. It is always False for a computed trajectory, which has no measurement
-    uncertainty, and on real observed data it is the MAJORITY case: a bare pass rate
-    over 25 ft-quantised altitudes and a 9.15 m window claims more than it knows.
-    """
-
     record_id: str
     file: str | None
+    subject: str
     solved: bool
     success: bool
+    verdict: Verdict
+    lateral_result: ComponentResult
+    vertical_result: ComponentResult
     deviation: ArrivalDeviation | None
+    event_status: str
     violations: tuple[str, ...]
     reason: str | None
-    subject: str = DEFAULT_SUBJECT
-    established: bool | None = None
-    marginal: bool = False
+    benchmark: str
+    airport: str
+    runway: str
+    lateral_bound_m: float | None
+    guidance_lateral_bound_m: float | None
+    runway_lateral_bound_m: float
+    vertical_lower_bound_m: float | None
+    vertical_upper_bound_m: float | None
+    lateral_interval_m: tuple[float, float] | None = None
+    vertical_interval_m: tuple[float, float] | None = None
     flight_key: str | None = None
+
+
+def _component(
+    estimate: float,
+    lower: float | None,
+    upper: float | None,
+    sigma: float | None,
+) -> tuple[ComponentResult, tuple[float, float] | None]:
+    if lower is None or upper is None:
+        return "indeterminate", None
+    margin = 0.0 if sigma is None else NORMAL_95_MULTIPLIER * sigma
+    interval = (estimate - margin, estimate + margin)
+    if interval[0] >= lower and interval[1] <= upper:
+        return "pass", interval
+    if interval[1] < lower or interval[0] > upper:
+        return "fail", interval
+    return "indeterminate", interval
+
+
+def _composite(lateral: ComponentResult, vertical: ComponentResult) -> Verdict:
+    if "fail" in (lateral, vertical):
+        return "fail"
+    if lateral == "pass" and vertical == "pass":
+        return "pass"
+    return "indeterminate"
+
+
+def _validate_deviation(value: ArrivalDeviation) -> None:
+    required = {
+        "along_track_m": value.along_track_m,
+        "cross_track_m": value.cross_track_m,
+        "vertical_m": value.vertical_m,
+        "speed_ms": value.speed_ms,
+        "heading_rad": value.heading_rad,
+        "flight_time_s": value.flight_time_s,
+    }
+    optional = {
+        "lateral_sigma_m": value.lateral_sigma_m,
+        "vertical_sigma_m": value.vertical_sigma_m,
+        "glidepath_deg": value.glidepath_deg,
+        "extrapolation_m": value.extrapolation_m,
+    }
+    for name, number in {**required, **optional}.items():
+        if number is not None and not math.isfinite(float(number)):
+            raise ValueError(f"derived deviation {name} must be finite, got {number!r}")
+    for name in ("lateral_sigma_m", "vertical_sigma_m", "extrapolation_m"):
+        number = optional[name]
+        if number is not None and number < 0.0:
+            raise ValueError(f"derived deviation {name} must be non-negative")
 
 
 def evaluate_record(
     record: TrajectoryRecord,
-    thresholds: DeviationThresholds = DeviationThresholds(),
     *,
-    criteria: EstablishedCriteria = EstablishedCriteria(),
+    context: AssessmentContext,
 ) -> TrajectoryEvaluation:
-    """Judge one trajectory against the gates, at the arrival its subject defines.
-
-    The arrival event is dispatched by ``arrival.arrival_deviation``: a solve or a
-    prediction is measured at ``states[-1]``, an observation at its fitted, extrapolated
-    threshold crossing. See ``arrival.py`` for why those are not the same event.
-    """
+    """Evaluate one trajectory at its runway-threshold event."""
     record_id = str(
         record.source.get("id")
         or (record.path.stem if record.path is not None else "trajectory")
     )
     file = record.path.name if record.path is not None else None
     subject = subject_of(record)
-    if not record.solved:
-        return TrajectoryEvaluation(
-            record_id, file, solved=False, success=False,
-            deviation=None, violations=("unsolved",), reason=record.reason,
-            subject=subject, flight_key=record.source.get("flight_key"),
-        )
-
-    outcome = arrival_deviation(record, criteria=criteria)
-    if outcome.deviation is None:
-        # An observed track with no measurable arrival. Counted as its own bucket, never
-        # dropped and never extrapolated anyway.
-        return TrajectoryEvaluation(
-            record_id, file, solved=True, success=False,
-            deviation=None, violations=("not_established",), reason=outcome.reason,
-            subject=subject, established=False,
-            flight_key=record.source.get("flight_key"),
-        )
-
-    deviation = outcome.deviation
-    violations: list[str] = []
-    if deviation.lateral_m > thresholds.lateral_max_m:
-        violations.append(
-            f"lateral {deviation.lateral_m:.1f} m > {thresholds.lateral_max_m:.2f} m"
-        )
-    if deviation.vertical_m < -thresholds.vertical_below_max_m:
-        violations.append(
-            f"vertical {deviation.vertical_m:.1f} m below the "
-            f"-{thresholds.vertical_below_max_m:.2f} m window"
-        )
-    if deviation.vertical_m > thresholds.vertical_above_max_m:
-        violations.append(
-            f"vertical {deviation.vertical_m:.1f} m above the "
-            f"+{thresholds.vertical_above_max_m:.2f} m window"
-        )
-    return TrajectoryEvaluation(
-        record_id, file, solved=True, success=not violations,
-        deviation=deviation, violations=tuple(violations), reason=None,
-        subject=subject, established=outcome.established,
-        marginal=_is_marginal(deviation, thresholds),
+    limits = context.limits()
+    common = dict(
+        record_id=record_id,
+        file=file,
+        subject=subject,
+        benchmark=context.benchmark,
+        airport=context.airport,
+        runway=context.runway,
+        lateral_bound_m=limits.effective_lateral_m,
+        guidance_lateral_bound_m=limits.guidance_lateral_m,
+        runway_lateral_bound_m=limits.runway_lateral_m,
+        vertical_lower_bound_m=limits.vertical_lower_m,
+        vertical_upper_bound_m=limits.vertical_upper_m,
         flight_key=record.source.get("flight_key"),
     )
+    if not record.solved:
+        return TrajectoryEvaluation(
+            **common, solved=False, success=False, verdict="fail",
+            lateral_result="indeterminate", vertical_result="indeterminate",
+            deviation=None, event_status="unsolved", violations=("unsolved",),
+            reason=record.reason or "trajectory unsolved",
+        )
 
+    outcome = arrival_deviation(record, context=context)
+    if outcome.deviation is None:
+        computed_failure = subject != "observed"
+        return TrajectoryEvaluation(
+            **common, solved=True, success=False,
+            verdict="fail" if computed_failure else "indeterminate",
+            lateral_result="indeterminate", vertical_result="indeterminate",
+            deviation=None, event_status=outcome.event_status,
+            violations=((outcome.event_status,) if computed_failure else ()),
+            reason=outcome.reason,
+        )
+    deviation = outcome.deviation
+    _validate_deviation(deviation)
 
-def _is_marginal(deviation: ArrivalDeviation, thresholds: DeviationThresholds) -> bool:
-    """True when the 95% interval crosses a gate boundary, so the data cannot decide.
-
-    Only ever True for a measured arrival: a computed final state carries no sigma, so
-    ``lateral_sigma_m``/``vertical_sigma_m`` are None and this is False by construction.
-    """
-    if deviation.vertical_sigma_m is None and deviation.lateral_sigma_m is None:
-        return False
-    half_width = 1.96
-    if deviation.vertical_sigma_m is not None:
-        margin = half_width * deviation.vertical_sigma_m
-        if (
-            deviation.vertical_m - margin < -thresholds.vertical_below_max_m
-            or deviation.vertical_m + margin > thresholds.vertical_above_max_m
-        ) and (
-            deviation.vertical_m + margin >= -thresholds.vertical_below_max_m
-            and deviation.vertical_m - margin <= thresholds.vertical_above_max_m
-        ):
-            return True
-    if deviation.lateral_sigma_m is not None:
-        margin = half_width * deviation.lateral_sigma_m
-        # lateral_m is |cross-track|, so the interval on the magnitude is
-        # [max(0, lateral − margin), lateral + margin] — the lower bound clamps at 0
-        # when the signed CI contains the centreline, it never folds past it.
-        low = max(0.0, deviation.lateral_m - margin)
-        if low <= thresholds.lateral_max_m <= deviation.lateral_m + margin:
-            return True
-    return False
+    lateral_result, lateral_interval = _component(
+        deviation.cross_track_m,
+        None if limits.effective_lateral_m is None else -limits.effective_lateral_m,
+        limits.effective_lateral_m,
+        deviation.lateral_sigma_m,
+    )
+    vertical_result, vertical_interval = _component(
+        deviation.vertical_m,
+        limits.vertical_lower_m,
+        limits.vertical_upper_m,
+        deviation.vertical_sigma_m,
+    )
+    verdict = _composite(lateral_result, vertical_result)
+    violations: list[str] = []
+    if lateral_result == "fail":
+        violations.append("lateral")
+    if vertical_result == "fail":
+        violations.append("vertical")
+    reason = None
+    if verdict == "indeterminate":
+        reasons: list[str] = []
+        if lateral_result == "indeterminate":
+            reasons.append(
+                "lateral uncertainty interval overlaps the allowed boundary"
+                if limits.effective_lateral_m is not None
+                else "lateral bound unavailable"
+            )
+        if vertical_result == "indeterminate":
+            reasons.append(
+                limits.vertical_reason
+                or "vertical uncertainty interval overlaps the allowed boundary"
+            )
+        reason = "; ".join(reasons) or None
+    return TrajectoryEvaluation(
+        **common, solved=True, success=verdict == "pass", verdict=verdict,
+        lateral_result=lateral_result, vertical_result=vertical_result,
+        deviation=deviation, event_status=outcome.event_status,
+        violations=tuple(violations), reason=reason,
+        lateral_interval_m=lateral_interval, vertical_interval_m=vertical_interval,
+    )
 
 
 def evaluate_batch(
     records: Iterable[TrajectoryRecord],
-    thresholds: DeviationThresholds = DeviationThresholds(),
     *,
-    criteria: EstablishedCriteria = EstablishedCriteria(),
+    contexts: Mapping[ContextKey, AssessmentContext],
+    observed_availability: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate every record and aggregate the batch metrics.
-
-    Returns the report dict (= the ``evaluation_report.json`` schema — defined
-    HERE; other modules reference it):
-
-        {
-          "thresholds": asdict(DeviationThresholds),
-          "subject": "optimized"|"predicted"|"observed"|"mixed",  # of the batch
-          "observed": {...},                  # only when observed records exist:
-                                              #   established / not_established /
-                                              #   established_rate / marginal
-          "total": int,                       # all records
-          "measured": int,                    # records with an arrival to grade
-          "solved": int,                      # records with a non-empty solution
-          "solve_rate": float,                # solved / total (0.0 on an empty batch)
-          "successful": int,                  # measured AND inside both gates
-          "success_rate": float,              # successful / total
-          "success_rate_among_solved": float | None,   # None when nothing solved
-          "lateral_m": magnitude spread | None,        # lateral dev over measured
-          "vertical_m": signed spread | None,          # vertical dev (+ = high)
-          "final_time_s": {"mean","min","max"} | None, # flight times over measured
-          "reference": _reference_aggregate() result,
-          "trajectories": [_row() result per record, input order],
-        }
-
-    "magnitude/signed spread" are the ``stats.magnitude_spread`` /
-    ``stats.signed_spread`` dicts; ``None`` aggregates mean "nothing measured".
-    Rows of records that carry ``reference_file`` gain a ``"reference"`` block —
-    always ``{"file", "flight_time_s"}`` (the observed baseline); solved records
-    with arc-matchable paths add ``{"flight_time_delta_s", "path_lateral_m",
-    "path_vertical_m"}`` (the :class:`ReferenceComparison` fields); a solved
-    record whose path (or reference) has zero horizontal extent adds a ``"note"``
-    saying the comparison was skipped instead.
-    """
+    """Evaluate a batch and serialize every verdict-changing parameter."""
+    record_list = list(records)
     evaluations: list[TrajectoryEvaluation] = []
-    rows = []
+    rows: list[dict[str, Any]] = []
     comparisons: list[ReferenceComparison] = []
-    for record in records:
-        evaluation = evaluate_record(record, thresholds, criteria=criteria)
+    used: dict[ContextKey, AssessmentContext] = {}
+    for record in record_list:
+        context = resolve_context(record, contexts)
+        used[(context.airport, context.runway)] = context
+        evaluation = evaluate_record(record, context=context)
         evaluations.append(evaluation)
         row = _row(evaluation)
+        if evaluation.subject == "observed":
+            event = record.source.get("observed_threshold_event")
+            if isinstance(event, dict):
+                # Audit copy of policy-free producer output; no evaluation
+                # limits or verdicts are added to it.
+                row["observed_threshold_event"] = event
         if record.reference_file is not None:
             reference = load_reference(record)
+            span = reference_span(record, reference)
             block: dict[str, Any] = {
                 "file": record.reference_file,
-                "flight_time_s": float(reference.final_time_s),
+                "comparison_status": "compared" if span.comparable else "skipped",
+                "endpoint_tolerance_m": span.tolerance_m,
+                "start_gap_m": span.start_gap_m,
+                "end_gap_m": span.end_gap_m,
             }
-            if record.solved and horizontal_arc_length_m(record.states) > 0.0 \
-                    and horizontal_arc_length_m(reference.states) > 0.0:
+            if (
+                record.solved and span.comparable
+                and horizontal_arc_length_m(record.states) > 0.0
+                and horizontal_arc_length_m(reference.states) > 0.0
+            ):
                 comparison = compare_to_reference(record, reference)
                 comparisons.append(comparison)
                 block.update(
+                    reference_flight_time_s=comparison.reference_flight_time_s,
                     flight_time_delta_s=comparison.flight_time_delta_s,
                     path_lateral_m=comparison.path_lateral_m,
                     path_vertical_m=comparison.path_vertical_m,
                 )
-            elif record.solved:
-                # A zero-horizontal-extent path (e.g. a rollout truncated at its very
-                # first step) cannot be arc-length matched — keep the observed baseline
-                # and say why, instead of one degenerate record aborting the batch.
-                block["note"] = "zero-horizontal-extent path; comparison skipped"
-            rows.append({**row, "reference": block})
-        else:
-            rows.append(row)
+            else:
+                block["note"] = span.reason or "zero-horizontal-extent path; comparison skipped"
+                block["comparison_status"] = "skipped"
+            row["reference"] = block
+        rows.append(row)
 
-    # "solved" is structural (the record has states); "measured" is the set with an
-    # arrival to grade. They differ only for observed subjects, where a track can have
-    # states yet no established final approach to extrapolate from.
-    solved = [e for e in evaluations if e.solved]
-    measured = [e for e in evaluations if e.deviation is not None]
-    succeeded = [e for e in evaluations if e.success]
-    lateral = [e.deviation.lateral_m for e in measured]
-    vertical = [e.deviation.vertical_m for e in measured]
-    times = [e.deviation.flight_time_s for e in measured]
+    measured = [item for item in evaluations if item.deviation is not None]
+    solved = [item for item in evaluations if item.solved]
+    verdict_counts = {
+        key: sum(item.verdict == key for item in evaluations)
+        for key in ("pass", "fail", "indeterminate")
+    }
+    subjects = {item.subject for item in evaluations}
+    observed_block = None
+    if observed_availability is not None:
+        if subjects != {"observed"}:
+            raise ValueError(
+                "observed_availability can be attached only to an observed-only batch"
+            )
+        observed_block = _validated_observed_availability(observed_availability)
     total = len(evaluations)
-
-    subjects = {e.subject for e in evaluations}
-    observed = [e for e in evaluations if e.subject == "observed"]
-    subject_block: dict[str, Any] = {}
-    if observed:
-        established = [e for e in observed if e.established]
-        subject_block = {
-            # An observed track trivially "has states", so a solve rate over observed
-            # data is 1.0 by construction and means nothing. The established rate is
-            # the honest analogue; solve_rate stays in the top-level dict only for
-            # schema stability, and the renderers suppress it for observed batches.
-            "established": len(established),
-            "not_established": len(observed) - len(established),
-            "established_rate": len(established) / len(observed),
-            # How many verdicts the data cannot actually decide (see _is_marginal).
-            "marginal": sum(1 for e in observed if e.marginal),
-        }
-
+    times = [item.deviation.flight_time_s for item in measured]
     return {
-        "thresholds": asdict(thresholds),
+        "schema_version": "terminal-approach-evaluation-v2",
+        "methodology": {
+            "event": {
+                "computed_predicted": "terminal_state_at_threshold_plane",
+                "observed": "serialized_assignment_fit_threshold_event; no evaluation refit",
+                "terminal_plane_tolerance_m": TERMINAL_PLANE_TOLERANCE_M,
+            },
+            "uncertainty": {
+                "confidence": 0.95,
+                "normal_multiplier": NORMAL_95_MULTIPLIER,
+                "classification": "interval_inside_pass; disjoint_fail; overlap_indeterminate",
+                "observed_sigma_source": "final_segment_fit_standard_error_at_threshold",
+                "unmodelled_sources": [
+                    "ADS-B source integrity", "runway/FAS survey uncertainty",
+                    "geoid/datum uncertainty", "model-form and extrapolation uncertainty",
+                ],
+            },
+            "reference_comparison": {
+                "endpoint_tolerance_m": ENDPOINT_TOLERANCE_M,
+                "mismatched_span_policy": "skip_path_and_time_metrics",
+                "resampling": "common-endpoint horizontal arc fraction",
+            },
+        },
+        "assessment_contexts": [
+            {**context.to_dict(), "resolved_limits": context.limits().to_dict()}
+            for _key, context in sorted(used.items())
+        ],
         "subject": sorted(subjects)[0] if len(subjects) == 1 else "mixed",
-        **({"observed": subject_block} if subject_block else {}),
+        **({"observed": observed_block} if observed_block is not None else {}),
         "total": total,
         "measured": len(measured),
         "solved": len(solved),
         "solve_rate": len(solved) / total if total else 0.0,
-        "successful": len(succeeded),
-        "success_rate": len(succeeded) / total if total else 0.0,
-        "success_rate_among_solved": (len(succeeded) / len(solved)) if solved else None,
-        "lateral_m": magnitude_spread(lateral),
-        "vertical_m": signed_spread(vertical),
+        "verdict_counts": verdict_counts,
+        "successful": verdict_counts["pass"],
+        "failed": verdict_counts["fail"],
+        "indeterminate": verdict_counts["indeterminate"],
+        "success_rate": verdict_counts["pass"] / total if total else 0.0,
+        "lateral_m": magnitude_spread([item.deviation.lateral_m for item in measured]),
+        "vertical_m": signed_spread([item.deviation.vertical_m for item in measured]),
         "final_time_s": (
             {"mean": mean(times), "min": min(times), "max": max(times)} if times else None
         ),
@@ -292,79 +315,109 @@ def evaluate_batch(
     }
 
 
+def _validated_observed_availability(value: Mapping[str, Any]) -> dict[str, Any]:
+    expected = "arrival_candidates_excluding_not_landing"
+    if value.get("denominator") != expected:
+        raise ValueError(f"observed availability denominator must be {expected!r}")
+
+    def count(name: str) -> int:
+        item = value.get(name)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            raise ValueError(f"observed availability {name} must be a non-negative integer")
+        return item
+
+    denominator = count("event_denominator")
+    estimated = count("event_estimated")
+    unavailable = count("event_unavailable")
+    excluded = count("excluded_not_landing")
+    if estimated + unavailable != denominator:
+        raise ValueError("observed availability counts do not match event_denominator")
+    rate = value.get("event_estimated_rate")
+    if isinstance(rate, bool) or not isinstance(rate, (int, float)) \
+            or not math.isfinite(float(rate)):
+        raise ValueError("observed availability rate must be finite")
+    expected_rate = estimated / denominator if denominator else 0.0
+    if not math.isclose(float(rate), expected_rate, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError("observed availability rate disagrees with its counts")
+    return {
+        "denominator": expected,
+        "event_denominator": denominator,
+        "event_estimated": estimated,
+        "event_unavailable": unavailable,
+        "event_estimated_rate": expected_rate,
+        "excluded_not_landing": excluded,
+    }
+
+
 def _reference_aggregate(comparisons: list[ReferenceComparison]) -> dict[str, Any] | None:
-    """Batch view of the observed-track comparisons (solved records only).
-
-    ``None`` when nothing was compared, else:
-
-        {"compared": int,                                # comparisons aggregated
-         "flight_time_delta_s": {"mean","min","max"},    # optimized − observed, s
-         "path_lateral_m": {"mean","max"},               # mean of per-flight means /
-         "path_vertical_m": {"mean_abs","max_abs"}}      #   max of per-flight maxes, m
-    """
     if not comparisons:
         return None
-    deltas = [c.flight_time_delta_s for c in comparisons]
+    deltas = [item.flight_time_delta_s for item in comparisons]
     return {
         "compared": len(comparisons),
         "flight_time_delta_s": {"mean": mean(deltas), "min": min(deltas), "max": max(deltas)},
         "path_lateral_m": {
-            "mean": mean([c.path_lateral_m["mean"] for c in comparisons]),
-            "max": max(c.path_lateral_m["max"] for c in comparisons),
+            "mean": mean([item.path_lateral_m["mean"] for item in comparisons]),
+            "max": max(item.path_lateral_m["max"] for item in comparisons),
         },
         "path_vertical_m": {
-            "mean_abs": mean([c.path_vertical_m["mean_abs"] for c in comparisons]),
-            "max_abs": max(c.path_vertical_m["max_abs"] for c in comparisons),
+            "mean_abs": mean([item.path_vertical_m["mean_abs"] for item in comparisons]),
+            "max_abs": max(item.path_vertical_m["max_abs"] for item in comparisons),
         },
     }
 
 
-def _row(evaluation: TrajectoryEvaluation) -> dict[str, Any]:
-    """One report row (flattened :class:`TrajectoryEvaluation`).
-
-    Always ``{"id", "file", "solved", "success", "violations": [str, …]}``;
-    measured rows add the deviation fields ``{"lateral_m", "vertical_m",
-    "speed_ms", "heading_rad", "final_time_s"}`` (+ the observed extras when
-    ``extrapolated``), unsolved / not-established rows add ``"reason"``.
-    (``evaluate_batch`` may attach a ``"reference"`` block on top — documented
-    there.)
-    """
+def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
     row: dict[str, Any] = {
-        "id": evaluation.record_id,
-        "file": evaluation.file,
-        "solved": evaluation.solved,
-        "success": evaluation.success,
-        "violations": list(evaluation.violations),
+        "id": item.record_id,
+        "file": item.file,
+        "flight_key": item.flight_key,
+        "subject": item.subject,
+        "airport": item.airport,
+        "runway": item.runway,
+        "benchmark": item.benchmark,
+        "solved": item.solved,
+        "success": item.success,
+        "verdict": item.verdict,
+        "event_status": item.event_status,
+        "lateral_result": item.lateral_result,
+        "vertical_result": item.vertical_result,
+        "violations": list(item.violations),
+        "bounds": {
+            "guidance_lateral_m": item.guidance_lateral_bound_m,
+            "runway_lateral_m": item.runway_lateral_bound_m,
+            "effective_lateral_m": item.lateral_bound_m,
+            "vertical_lower_m": item.vertical_lower_bound_m,
+            "vertical_upper_m": item.vertical_upper_bound_m,
+        },
     }
-    if evaluation.flight_key is not None:
-        # The join key a consumer needs to match this verdict to a rendered track. `id`
-        # is the callsign and is NOT unique (552 distinct callsigns across 996 KRDU
-        # arrivals), so a UI that joined on it would swap verdicts between namesakes --
-        # which it has done before.
-        row["flight_key"] = evaluation.flight_key
-    if evaluation.subject != DEFAULT_SUBJECT:
-        row["subject"] = evaluation.subject
-    if evaluation.established is not None:
-        row["established"] = evaluation.established
-    if evaluation.deviation is not None:
-        deviation = evaluation.deviation
+    if item.deviation is not None:
+        deviation = item.deviation
+        row["deviation"] = {
+            "along_track_m": deviation.along_track_m,
+            "cross_track_m": deviation.cross_track_m,
+            "vertical_m": deviation.vertical_m,
+            "speed_ms": deviation.speed_ms,
+            "heading_rad": deviation.heading_rad,
+            "final_time_s": deviation.flight_time_s,
+            "lateral_sigma_m": deviation.lateral_sigma_m,
+            "vertical_sigma_m": deviation.vertical_sigma_m,
+            "lateral_interval_m": item.lateral_interval_m,
+            "vertical_interval_m": item.vertical_interval_m,
+            "extrapolated": deviation.extrapolated,
+            "glidepath_deg": deviation.glidepath_deg,
+            "extrapolation_m": deviation.extrapolation_m,
+        }
+        # Keep common descriptive columns flat for simple report consumers.
         row.update(
             lateral_m=deviation.lateral_m,
+            cross_track_m=deviation.cross_track_m,
+            along_track_m=deviation.along_track_m,
             vertical_m=deviation.vertical_m,
             speed_ms=deviation.speed_ms,
             heading_rad=deviation.heading_rad,
             final_time_s=deviation.flight_time_s,
         )
-        if deviation.extrapolated:
-            # A measured arrival: say so, and carry what makes the verdict readable.
-            row.update(
-                extrapolated=True,
-                marginal=evaluation.marginal,
-                lateral_sigma_m=deviation.lateral_sigma_m,
-                vertical_sigma_m=deviation.vertical_sigma_m,
-                glidepath_deg=deviation.glidepath_deg,
-                extrapolation_m=deviation.extrapolation_m,
-            )
-    if evaluation.reason:
-        row["reason"] = evaluation.reason
+    if item.reason is not None:
+        row["reason"] = item.reason
     return row

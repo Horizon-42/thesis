@@ -1,186 +1,164 @@
-# evaluation — judge trajectories against their targets
+# Terminal approach evaluation
 
-File-based seam at the **end** of the modeling pipeline: inputs are
-per-trajectory record files, the output is one JSON report. The package depends
-only on `geokit` + stdlib — it never imports the optimizer, so anything that can
-write the record format (the collocation batch, the ts_transformer predictions,
-the harvest's observed tracks, …) is evaluated identically.
+This package evaluates one runway-threshold event. It does not test the whole
+LPV cone and it does not certify that an aircraft actually flew the selected
+procedure.
 
-```
-scenario_optimization (batch)                    evaluation (this package)
-  ├─ references/<flight>_reference_eval.json ◄─┐
-  ├─ <flight>_states.json   (viz/comparison)   │ reference_file
-  ├─ <flight>_eval.json ───────────────────────┴►  python -m evaluation --input <dir>
-  └─ summary.json                                    └─► evaluation_report.json
-```
+The implemented data path is deliberately narrow:
 
-Pipeline runners (prepare scenarios, then references → optimization → selected tails):
-`python prepare_scenario_inputs.py --airport KRDU --target-type runway`, then
-`python run_scenario_optimization.py --airport KRDU --target-type runway [--with-constraint] [--outputs eval]`
-(`--outputs czml,eval` default: also rebuilds the frontend comparison CZML from the same solve)
+- U.S. airports backed by the current FAA NASR and CIFP cycles;
+- LPV as the primary benchmark;
+- RNP APCH LNAV/VNAV with explicitly approved Baro-VNAV as the sole fallback;
+- `pass`, `fail`, and `indeterminate` component/composite results.
 
-## Input contract (one JSON per trajectory)
+The normative rationale and source audit are in
+[FINAL_APPROACH_VERDICT_STANDARD.md](FINAL_APPROACH_VERDICT_STANDARD.md).
 
-```jsonc
-{
-  "source":        { "id": "AFR074", "runway": "05L", ... },   // provenance, free-form
-  "initial_state": { "lat", "lon", "alt", "V", "psi", "gamma", "m" },
-  "target_state":  { same keys },              // null allowed on unsolved records
-  "final_time_s":  380.5,                      // null when unsolved
-  "states":   [ { "t", "lat", "lon", "alt", "V", "psi", "gamma", "m" }, ... ],
-  "controls": [ { "thrust", "bank_rad", "load_factor" }, ... ],  // SAME length as states
-  "reason":   "ValueError: infeasible"         // unsolved records only
-}
+## Event flow
+
+```text
+raw ADS-B samples
+  -> runway assignment + one final-segment fit
+  -> policy-free observed_threshold_event
+  -> explicit HAE/MSL conversion
+  -> runway/procedure-specific terminal verdict
 ```
 
-- **Alignment.** `controls[i]` is the control **active at** `states[i].t`
-  (zero-order hold): the optimizer's sparse piecewise-constant segments sampled
-  onto the state grid. The terminal entry repeats the last segment's control.
-- **Reference records** — an observed ADS-B track expressed in this SAME
-  contract: per-sample kinematics derived from the track
-  (`flight_scenarios.state_samples_from_track`, times rebased to 0, the same
-  target the optimizer flew to) with `controls == []` (observed data has no
-  control inputs).
-- **Unsolved configurations** keep their boundary conditions but have
-  `states == controls == []` — that is how the batch **solve rate** is computed
-  from the file set alone.
-- **`reference_file`** (optional) points a record at its reference, resolved
-  relative to the record's own directory (the batch writes
-  `references/<identity>_reference_eval.json` and sets the pointer on every
-  record, failed ones included).
-- Units: metres / seconds / kg; lat/lon degrees; ψ/γ radians (model convention:
-  ψ = 0 East, CCW); alt metres MSL.
+Observed evaluation never calls `fit_final_segment()`. The assignment stage
+serializes the crossing estimate, uncertainty, source sample range, fit window,
+residual diagnostics, and extrapolation distance. Arrival preparation and CZML
+reuse the stored landing anchor/event as well. A legacy derived track without
+those fields must be reclassified from its stored samples.
 
-The optimization side produces these via
-`4dTrajectory/optimization/evaluation_export.py`. There is nothing to
-re-derive: the true-dynamics rollout (`aerodynamic_model.rollout_piecewise_constant`)
-already carries the active control on every sample; the export just maps it.
-Both `scenario_optimization` batch modes write a `*_eval.json` next to every
-`*_states.json` — **including failed scenarios** (empty record).
+Optimized and predicted records use their terminal state and must be at the
+threshold plane. Along-track and cross-track values are reported separately;
+great-circle endpoint distance is not labelled lateral deviation.
 
-## What is judged
+## Bounds
 
-Per trajectory (`evaluate_record`): **where did it arrive, vs the target?** The
-arrival event depends on the record's subject (`arrival.py` — `source.subject`,
-defaulting to `optimized`):
+For LPV:
 
-- **optimized / predicted** — `states[-1]` vs `target_state`: a solve
-  terminates at its target by construction, so the final state IS the arrival.
-  Lateral = great-circle distance (`geokit.haversine_m`), vertical = signed
-  altitude difference.
-- **observed** — the fitted final approach (`final_approach`), extrapolated to
-  the threshold. An observed track's `states[-1]` records where ADS-B reception
-  stopped (median 325 m short at KRDU), not where the aircraft crossed; graded
-  on it, real completed landings scored ~1% on the vertical gate.
+```text
+lateral = min(0.5 × published LPV lateral FSD, 0.5 × runway width)
+vertical = 0.5 × validated DO-229 vertical FSD
+```
 
-Speed / heading deltas are reported for context but not gated. A trajectory is
-**successful** iff it has a measured arrival inside both positional gates.
+The repository has no licensed, validated DO-229 vertical-scaling
+implementation. Therefore LPV vertical is `indeterminate`, and LPV overall is
+`indeterminate` unless another required component fails. No WCH, TCH, alert
+limit, or Baro-VNAV tolerance is substituted.
 
-## Observed arrivals (`arrival.py`)
+For the explicit LNAV/VNAV Baro-VNAV fallback:
 
-- **Established-on-final precondition** (`EstablishedCriteria`, CLI-overridable):
-  median |cross-track| ≤ 400 m, fitted glidepath in [2.0°, 4.5°], vertical fit
-  RMS ≤ 6 m (an RMS, not a max — one blip must not discard a clean approach).
-  `not_established` is a **counted outcome** (own row violation, own tally in
-  the report), never a drop and never a silent extrapolation — and it stays
-  distinct from the harvest's `unassignable` (reception failure).
-- **Uncertainty carried into the verdict**: the crossing is a fitted quantity,
-  so rows carry `lateral_sigma_m` / `vertical_sigma_m` and a `marginal` flag —
-  True when the 95 % CI straddles a gate boundary, i.e. the data cannot decide.
-  On 25 ft-quantised altitudes this is the majority case; read the deviation
-  distribution as primary, the pass rate as secondary.
-- The observed writer (`trajectory_data_process/harvest/observed.py`) stamps
-  `source.subject`, `source.runway_course_deg` (this package cannot read a
-  runway config) and targets threshold + published TCH in MSL; a missing
-  course or an unknown subject **raises** rather than guessing.
+```text
+lateral = min(0.15 NM, 0.5 × runway width)
+vertical = ±22 m
+```
 
-## Regulation-derived gates (`thresholds.py`, overridable)
+The fallback is not selected silently. `baro_vnav_approved` must be true in the
+evaluation context.
 
-| Gate | Default | Source (FAA Order 8260.58D — public, not vendored here) |
-|---|---|---|
-| lateral | ≤ 106.75 m | §3-1-5.c(3) "Course width at threshold" (pp. 3-7/3-8), Formula 3-1-1 — the course width at the LTP is `greater of 350 ft or tan(1.5°)·d_GARP`, a **one-sided** value (Figure 3-1-7 draws it ±350 ft about the centerline — the order says "course width" where this package says semiwidth). 350 ft = 106.68 m → **106.75 m** via the order's own "round to the nearest 0.25-meter increment" rule (so the number never appears verbatim); it is the tightest full-scale deflection any LPV final can have at the LTP |
-| vertical (low) | ≥ −3.05 m | §1-3-1.f(2)(b) "Threshold crossing height" (p. 1-27), item 1: default TCH ⇒ 30 ft wheel crossing height, minimum WCH 20 ft ⇒ 10 ft below the target (derived offset) |
-| vertical (high) | ≤ +6.10 m | same — maximum WCH 50 ft ⇒ 20 ft above (derived offset) |
+Observed estimates are classified using their 95% fit interval:
 
-The vertical window assumes the target altitude sits at the published TCH point
-over the threshold — true for this project's CIFP-anchored targets. For targets
-that are not thresholds (e.g. the unconstrained batch's end-of-track states) the
-gates still measure "reached the target to approach-guidance accuracy"; override
-them if a looser criterion is wanted (e.g. `--lateral-max-m 556` for RNP 0.3
-containment).
+- `pass`: the complete interval is inside the allowed interval;
+- `fail`: the two intervals do not overlap;
+- `indeterminate`: the intervals overlap a boundary or a required bound/event
+  is unavailable.
 
-## Observed-track comparison (`reference.py`)
+## Inputs and identity
 
-When a record carries `reference_file`, the report adds per-trajectory and batch
-comparisons against the flight as actually flown:
+Every record requires `source.subject` equal to `observed`, `optimized`, or
+`predicted`. Producers stamp it explicitly; the evaluator does not guess.
 
-- **flight-time delta** — `optimized − observed` (negative = the optimizer is
-  faster over the same start→target journey; the scenario's initial state is
-  derived from the track start, so durations compare directly). Unsolved records
-  still report the observed baseline duration.
-- **path deviation** — both paths resampled at 101 fractions of their own
-  horizontal arc length, then compared point-by-point (horizontal great-circle
-  distance + signed altitude difference; mean/p95/max). A path-SHAPE comparison:
-  the two fly different speed profiles by design, so time-matching would
-  conflate timing with geometry.
+The stable cross-artifact identity is `source.flight_key`. Callsign (`source.id`)
+is display text and can repeat. Reports and HTML overlays preserve both the
+flight key and record filename.
 
-## Batch metrics (`evaluate_batch` / the report JSON)
+All required numeric record values must be finite. JSON input rejects `NaN` and
+infinity, and every JSON output uses `allow_nan=False`.
 
-- `subject` — `optimized` / `predicted` / `observed`, or `mixed`
-- `solve_rate` — non-empty solutions / all records. For a pure observed batch
-  this is 1.0 by construction and both renderers suppress it in favour of:
-- `observed` (only when observed records exist) — `established` /
-  `not_established` counts, `established_rate`, and the `marginal` count
-- `success_rate` — passed both gates / all records (+ `success_rate_among_solved`)
-- `lateral_m` — mean / **p95** / max over measured records. p95 is reported because
-  RNP containment is itself a 95 % statistic (8260.58D: position within the
-  leg's RNP radius 95 % of the time), so it compares directly with RNP limits.
-- `vertical_m` — signed mean + abs mean / p95 / max
-- `final_time_s` — mean / min / max flight time over measured records
-- `trajectories` — one row per record (deviations, violations, failure reason;
-  observed rows add `established`, `extrapolated`, the sigmas and `marginal`)
+## Assessment context
 
-Gate flags and the established criteria are defined once in `cli.py` and shared
-by `python -m evaluation` and `python -m evaluation.visualize`, so the JSON and
-HTML reports cannot be produced with silently different knobs:
-`--fit-window-m -5000 -300 · --max-cross-track-m 400 ·
---glidepath-range-deg 2.0 4.5 · --max-vertical-rms-m 6.0`.
+Verdict policy does not live in raw tracks, arrival manifests, scenarios, or
+model outputs. The CLI resolves an evaluation-owned `AssessmentContext` from:
 
-## HTML report (`visualize.py`)
+- `trajectory_data_process/config/runway_thresholds.json` (FAA NASR runway
+  width and effective cycle); and
+- `data/CIFP/CIFP_260806/FAACIFP18` (LPV Path Point facts and cycle).
+
+Each report embeds the context and its resolved limits. The current standalone
+CLI rejects non-U.S. airports because no authoritative non-FAA data adapter is
+implemented.
+
+## CLI
 
 ```bash
-python -m evaluation.visualize --input outputs/run1 --output outputs/run1/evaluation_report.html
+conda run -n aeroviz python -m evaluation \
+  --input <record.json-or-batch-directory> \
+  --output evaluation_report.json
+
+conda run -n aeroviz python -m evaluation.visualize \
+  --input <record.json-or-batch-directory> \
+  --output evaluation_report.html \
+  --max-tracks 30
 ```
 
-Recomputes the evaluation from the record files (same flags as `python -m evaluation`)
-and renders a single HTML page: summary cards + aggregate tables, per-flight arrival
-lateral/vertical deviation charts against the gates (measured arrivals only — a
-not-established observed track has no crossing to plot), optimized-vs-observed flight
-times + Δtime distribution + path-shape deviation (when references exist), a
-per-flight track overlay (plan view + altitude profile behind a flight selector,
-`--max-tracks` evenly-sampled overlays embedded — the cap is stated on the page),
-and the full verdict table (established/marginal columns and ±95 % bounds appear
-when the batch has observed rows; for observed batches the solve-rate card is
-replaced by the established rate). Plotly loads from its CDN (same convention as
-the project's other interactive docs); all data is embedded.
+A batch directory is read only through `summary.json` and its
+`results[].eval_file` roster. `--max-tracks` must be positive.
 
-## Usage
+The harvest pipeline supplies its already loaded airport context directly:
 
 ```bash
-# batch-optimize scenarios (writes *_states.json + *_eval.json + summary.json;
-# --reference-tracks additionally writes references/ and points every record at its reference)
-python 4dTrajectory/optimization/scenario_optimization.py \
-    --scenarios scenarios.json --reference-tracks landings.json \
-    --output-dir outputs/run1 --constrained-iaf
-
-# evaluate the run
-python -m evaluation --input outputs/run1 --output outputs/run1/evaluation_report.json
-
-# HTML report (tables + charts)
-python -m evaluation.visualize --input outputs/run1 --output outputs/run1/evaluation_report.html
-
-# custom gates
-python -m evaluation --input outputs/run1 --lateral-max-m 556 --vertical-above-max-m 30
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport KRDU --evaluate-only
 ```
 
-Tests: `python -m pytest evaluation/tests -v` (also wired into `run_all_tests.sh`).
+`--evaluate-only` never changes assignment output. It rejects an observed event
+whose runway-frame fingerprint does not match the active FAA runway/CIFP data.
+To rebuild assignment, the threshold estimate, arrivals, evaluation, CZML, and
+publication from the already downloaded HAE samples, use:
+
+```bash
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport KRDU --reclassify-existing
+```
+
+This mode does not query or download from OpenSky. It writes the complete new
+classification into a staging directory and replaces `tracks/` only after every
+stored record succeeds. Use `--full-redownload` only when the stored source
+samples themselves must be replaced.
+
+## Reference comparisons
+
+Path and flight-time comparisons are descriptive and do not affect the terminal
+verdict. They are computed only when both physical start and end positions agree
+within 1 m. A mismatched ADS-B tail is marked `skipped`; the package does not
+normalize two different physical spans and report the result as path error.
+
+## Report essentials
+
+`terminal-approach-evaluation-v2` contains:
+
+- complete assessment contexts and resolved bounds;
+- event/uncertainty/reference-comparison methodology;
+- three-way verdict counts;
+- per-flight signed along-track, cross-track, and vertical deviations;
+- component and composite results;
+- stable identity and event audit data; and
+- reference comparison status and endpoint gaps.
+
+For observed-only reports, `observed.event_estimated_rate` is explicitly
+`event_estimated / arrival_candidates_excluding_not_landing`. Assigned,
+ambiguous, and unassignable tracks are in that denominator; known
+`not_landing` tracks are reported separately as excluded. This population is
+computed from `tracks/manifest.json` before evaluation-record filtering.
+
+`success` remains a convenience boolean equal to `verdict == "pass"`; consumers
+must use `verdict` when distinguishing failure from indeterminate.
+
+## Tests
+
+```bash
+conda run -n aeroviz python -m pytest evaluation/tests/ -q
+conda run -n aeroviz python -m pytest trajectory_data_process/harvest/tests/ -q
+```

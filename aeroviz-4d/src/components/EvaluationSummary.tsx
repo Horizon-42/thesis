@@ -102,12 +102,10 @@ function passRateAmongSolved(stats: OptimizationStats | null): number | null {
 }
 
 function observedPresentation(report: EvaluationReport | null): Presentation {
-  const establishedRate = report?.observed?.established_rate;
-  const measured = report?.measured;
-  const crossingPassRate =
-    report && measured != null && Number.isFinite(measured) && measured > 0
-      ? report.successful / measured
-      : null;
+  const eventRate = report?.observed?.event_estimated_rate;
+  const crossingPassRate = report && report.total > 0
+    ? report.verdict_counts.pass / report.total
+    : null;
   const lateralMean = report?.lateral_m?.mean;
   const verticalMeanAbs = report?.vertical_m?.mean_abs;
 
@@ -115,18 +113,17 @@ function observedPresentation(report: EvaluationReport | null): Presentation {
     title: "Observed Baseline Evaluation",
     context: "Observed ADS-B trajectories",
     note:
-      "Real ADS-B tracks are evaluated by fitting the established final-approach segment " +
-      "and extrapolating it to the runway threshold. No optimizer is involved. The " +
-      "threshold-crossing pass rate is calculated over established approaches; measurement " +
-      "uncertainty near a gate boundary is reported in Details.",
+      "Runway assignment produces one policy-free threshold-event estimate from the final " +
+      "approach fit; evaluation consumes that estimate without refitting ADS-B. LPV vertical " +
+      "and overall remain indeterminate until the validated RTCA vertical scale is available.",
     rows: [
       row(
-        "Established approach rate",
-        formatPercent(establishedRate ?? null),
-        establishedRate != null,
+        "Threshold-event availability",
+        formatPercent(eventRate ?? null),
+        eventRate != null,
       ),
       row(
-        "Threshold-crossing pass rate",
+        "Terminal-verdict pass rate",
         formatPercent(crossingPassRate),
         crossingPassRate != null,
       ),
@@ -194,7 +191,7 @@ function predictionPresentation(
   stats: OptimizationStats | null,
   evaluation: EvaluationBatchStats | null,
 ): Presentation {
-  const targetPassRate = evaluation?.successRateAmongSolved ?? passRateAmongSolved(stats);
+  const targetPassRate = evaluation?.successRate ?? passRateAmongSolved(stats);
   const formatCount = (value: number | null | undefined) =>
     value == null || !Number.isFinite(value) ? "—" : Math.round(value).toLocaleString();
   const formatScalar = (
@@ -245,6 +242,11 @@ function predictionPresentation(
         "Runway-threshold pass rate",
         formatPercent(targetPassRate),
         targetPassRate != null,
+      ),
+      ...optionalRow(
+        "Indeterminate terminal verdicts",
+        evaluation?.indeterminate,
+        formatCount(evaluation?.indeterminate),
       ),
       ...spreadRows("ADE", prediction?.adeM),
       ...spreadRows("FDE", prediction?.fdeM),

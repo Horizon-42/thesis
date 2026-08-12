@@ -1,39 +1,9 @@
-"""The arrival event: where a trajectory actually reached its target.
+"""Resolve the single runway-threshold event without fitting trajectories.
 
-A SOLVE AND AN OBSERVATION DO NOT ARRIVE THE SAME WAY
------------------------------------------------------
-``metrics.final_state_deviation`` measures ``states[-1]`` against ``target_state``. For a
-SOLVE that is exact: the trajectory terminates at its target by construction. For an
-OBSERVATION it is wrong, and not by a little -- 970 of 996 KRDU arrivals end a median
-325 m short of the threshold and still ~135 ft up, because crowd-sourced ADS-B receivers
-lose the aircraft before touchdown. Grading those on ``states[-1]`` measures where
-reception stopped. It scored real, completed airline landings at **0.9%** on the vertical
-gate.
-
-So the arrival event is dispatched on the record's subject rather than assumed:
-
-    optimized / predicted   ->  states[-1] vs target_state   (unchanged, byte for byte)
-    observed                ->  the fitted final approach, extrapolated to the threshold
-
-On the same KRDU data that raises the vertical gate from 0.9% to **49.2%**, and the fit
-self-validates: the recovered glidepath is 3.02-3.11 deg at all five airports.
-
-WHY A NEW SUBJECT FIELD
------------------------
-``controls == []`` cannot distinguish an observation from a prediction -- the ts exporter
-writes reference-shaped records too. So the subject is explicit on ``source.subject``.
-Absent, it defaults to ``optimized``; that default is safe for a specific reason, not by
-luck: ``optimized`` and ``predicted`` share one code path, so a mislabel between them
-cannot change any number. Only ``observed`` alters behaviour, and only the observed
-writer emits it.
-
-NOT-ESTABLISHED IS A RESULT, NOT A DROP
----------------------------------------
-An observed track whose final approach cannot be fitted has no arrival to measure. That
-is reported as ``not_established`` and counted, never silently extrapolated and never
-dropped: the established rate is 21-54% on real data, far too large a bucket to hide.
-It is also kept distinct from the harvest's ``unassignable`` -- that one means the
-receiver lost the aircraft, this one means the approach was not stabilised.
+Computed and predicted records use their terminal state.  Observed records
+consume the policy-free ``observed_threshold_event`` produced by runway
+assignment.  This module never selects ADS-B samples and never calls the final
+approach fitter.
 """
 
 from __future__ import annotations
@@ -42,79 +12,48 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
-from final_approach import RunwayFrame, TrackPoint, fit_final_segment
-from final_approach.fit import DEFAULT_WINDOW_M
-from geokit import haversine_m
+from final_approach import RunwayFrame, TrackPoint
 
 from evaluation.records import TrajectoryRecord
+from evaluation.thresholds import AssessmentContext
 
 Subject = Literal["optimized", "predicted", "observed"]
-
-DEFAULT_SUBJECT: Subject = "optimized"
-
-# Established-on-final criteria, applied to a SegmentFit. These are quality thresholds
-# and they live here, with the consumer -- deliberately not in ``final_approach``, whose
-# assignment step must never filter on them (see that package's docstring).
-MAX_CROSS_TRACK_M = 400.0
-GLIDEPATH_RANGE_DEG = (2.0, 4.5)
-MAX_VERTICAL_RMS_M = 6.0
-
-
-@dataclass(frozen=True)
-class EstablishedCriteria:
-    """What makes an observed final approach measurable.
-
-    ``max_vertical_rms_m`` is an RMS, not a max-residual, on purpose: a max-residual test
-    is decided by a single bad sample. Measured on KRDU, ``max <= 15 m`` threw away 66
-    otherwise clean approaches whose median fitted glidepath was 3.02 deg -- 12% of the
-    usable data discarded by one blip each.
-    """
-
-    window_m: tuple[float, float] = DEFAULT_WINDOW_M
-    max_cross_track_m: float = MAX_CROSS_TRACK_M
-    glidepath_range_deg: tuple[float, float] = GLIDEPATH_RANGE_DEG
-    max_vertical_rms_m: float = MAX_VERTICAL_RMS_M
+TERMINAL_PLANE_TOLERANCE_M = 1.0
 
 
 @dataclass(frozen=True)
 class ArrivalDeviation:
-    """How far the arrival missed the target, and how well that is known.
-
-    ``lateral_sigma_m`` / ``vertical_sigma_m`` are None for a solve (a computed final
-    state has no measurement uncertainty) and populated for an observation, where the
-    crossing is a fitted quantity. They are what make a gate verdict readable: on real
-    data the 95% interval straddles a gate boundary for the majority of flights, so a
-    bare pass rate overstates its own precision.
-    """
-
-    lateral_m: float
+    along_track_m: float
+    cross_track_m: float
     vertical_m: float
     speed_ms: float
     heading_rad: float
     flight_time_s: float
-
+    event_status: str
     extrapolated: bool
     lateral_sigma_m: float | None = None
     vertical_sigma_m: float | None = None
     glidepath_deg: float | None = None
     extrapolation_m: float | None = None
 
+    @property
+    def lateral_m(self) -> float:
+        return abs(self.cross_track_m)
+
 
 @dataclass(frozen=True)
 class ArrivalOutcome:
-    """Either a deviation, or the reason there is none."""
-
     deviation: ArrivalDeviation | None
-    established: bool | None  # None for subjects where the notion does not apply
+    event_status: str
     reason: str | None = None
 
 
 def subject_of(record: TrajectoryRecord) -> Subject:
-    """The record's subject, defaulting to ``optimized`` (see the module docstring)."""
-    subject = record.source.get("subject", DEFAULT_SUBJECT)
+    subject = record.source.get("subject")
     if subject not in ("optimized", "predicted", "observed"):
         raise ValueError(
-            f"unknown subject {subject!r}; expected 'optimized', 'predicted' or 'observed'"
+            "source.subject must be 'optimized', 'predicted', or 'observed'; "
+            f"got {subject!r}"
         )
     return subject
 
@@ -122,97 +61,168 @@ def subject_of(record: TrajectoryRecord) -> Subject:
 def arrival_deviation(
     record: TrajectoryRecord,
     *,
-    criteria: EstablishedCriteria = EstablishedCriteria(),
+    context: AssessmentContext,
 ) -> ArrivalOutcome:
-    """Measure where this trajectory arrived, by the semantics its subject deserves."""
-    if subject_of(record) != "observed":
-        return ArrivalOutcome(deviation=final_state_deviation(record), established=None)
-    return _observed_arrival(record, criteria)
+    if subject_of(record) == "observed":
+        return _observed_arrival(record, context)
+    return _computed_arrival(record, context)
 
 
-def final_state_deviation(record: TrajectoryRecord) -> ArrivalDeviation:
-    """states[-1] vs target_state — the solve/prediction measure (solved records only).
+def _computed_arrival(
+    record: TrajectoryRecord,
+    context: AssessmentContext,
+    *,
+    plane_tolerance_m: float = TERMINAL_PLANE_TOLERANCE_M,
+) -> ArrivalOutcome:
+    """Use the final state, or interpolate only the final bracketing segment."""
+    if not record.states or record.target_state is None:
+        raise ValueError("computed arrival requires a solved record and target_state")
+    target = record.target_state
+    frame = RunwayFrame(
+        ident=context.runway,
+        lat=target["lat"], lon=target["lon"], elevation_m=target["alt"],
+        course_deg=context.runway_course_deg,
+    )
+    final = record.states[-1]
+    final_projected = frame.project(
+        TrackPoint(final["lat"], final["lon"], final["alt"])
+    )
+    if abs(final_projected.along_m) <= plane_tolerance_m:
+        return ArrivalOutcome(
+            _state_deviation(final, target, frame, event_status="terminal_state"),
+            "terminal_state",
+        )
+    if len(record.states) >= 2:
+        previous = record.states[-2]
+        previous_projected = frame.project(
+            TrackPoint(previous["lat"], previous["lon"], previous["alt"])
+        )
+        if previous_projected.along_m <= 0.0 <= final_projected.along_m:
+            span = final_projected.along_m - previous_projected.along_m
+            fraction = -previous_projected.along_m / span
+            crossing = {
+                key: previous[key] + (final[key] - previous[key]) * fraction
+                for key in ("t", "lat", "lon", "alt", "V", "psi", "gamma", "m")
+            }
+            crossing["psi"] = previous["psi"] + math.remainder(
+                final["psi"] - previous["psi"], math.tau
+            ) * fraction
+            return ArrivalOutcome(
+                _state_deviation(
+                    crossing, target, frame, event_status="interpolated_threshold"
+                ),
+                "interpolated_threshold",
+            )
+    if final_projected.along_m < 0.0:
+        return ArrivalOutcome(
+            None, "not_reached",
+            f"trajectory ended {abs(final_projected.along_m):.1f} m before the threshold plane",
+        )
+    return ArrivalOutcome(
+        None, "threshold_not_bracketed",
+        "trajectory ended beyond the threshold but its final segment does not bracket the plane",
+    )
 
-    The single definition of the final-state deviation; ``evaluation`` re-exports it.
-    """
+
+def final_state_deviation(
+    record: TrajectoryRecord,
+    *,
+    context: AssessmentContext,
+) -> ArrivalDeviation:
+    """Measure a computed terminal state in a runway-aligned frame."""
+    if not record.states or record.target_state is None:
+        raise ValueError("final-state deviation requires a solved record and target_state")
     final, target = record.states[-1], record.target_state
+    frame = RunwayFrame(
+        ident=context.runway,
+        lat=target["lat"],
+        lon=target["lon"],
+        elevation_m=target["alt"],
+        course_deg=context.runway_course_deg,
+    )
+    return _state_deviation(final, target, frame, event_status="terminal_state")
+
+
+def _state_deviation(
+    state: dict[str, float],
+    target: dict[str, float],
+    frame: RunwayFrame,
+    *,
+    event_status: str,
+) -> ArrivalDeviation:
+    projected = frame.project(TrackPoint(state["lat"], state["lon"], state["alt"]))
     return ArrivalDeviation(
-        lateral_m=haversine_m(final["lat"], final["lon"], target["lat"], target["lon"]),
-        vertical_m=final["alt"] - target["alt"],
-        speed_ms=final["V"] - target["V"],
-        heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
-        flight_time_s=final["t"],
+        along_track_m=projected.along_m,
+        cross_track_m=projected.cross_m,
+        vertical_m=state["alt"] - target["alt"],
+        speed_ms=state["V"] - target["V"],
+        heading_rad=math.remainder(state["psi"] - target["psi"], math.tau),
+        flight_time_s=state["t"],
+        event_status=event_status,
         extrapolated=False,
     )
 
 
+def _event_number(event: dict, key: str, *, nonnegative: bool = False) -> float:
+    value = event.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"source.observed_threshold_event.{key} must be numeric")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"source.observed_threshold_event.{key} must be finite")
+    if nonnegative and number < 0.0:
+        raise ValueError(f"source.observed_threshold_event.{key} must be non-negative")
+    return number
+
+
 def _observed_arrival(
-    record: TrajectoryRecord, criteria: EstablishedCriteria
+    record: TrajectoryRecord,
+    context: AssessmentContext,
 ) -> ArrivalOutcome:
-    """Fit the flown final approach and extrapolate it to the threshold."""
-    course = record.source.get("runway_course_deg")
-    if course is None:
-        raise ValueError(
-            f"observed record {record.source.get('id')!r} has no source.runway_course_deg; "
-            "the observed writer must stamp it (evaluation cannot read the runway config)"
-        )
-    target = record.target_state
-    frame = RunwayFrame(
-        ident=str(record.source.get("runway", "?")),
-        lat=target["lat"],
-        lon=target["lon"],
-        elevation_m=target["alt"],  # target altitude IS threshold elevation + published TCH
-        course_deg=float(course),
-    )
-    fit = fit_final_segment(
-        [TrackPoint(s["lat"], s["lon"], s["alt"]) for s in record.states],
-        frame,
-        window_m=criteria.window_m,
-    )
-    if fit is None:
+    event = record.source.get("observed_threshold_event")
+    if not isinstance(event, dict):
+        return ArrivalOutcome(None, "unavailable", "observed threshold event missing")
+    status = event.get("status")
+    if status != "estimated":
+        reason = event.get("unavailable_reason")
         return ArrivalOutcome(
-            None, established=False,
-            reason=f"no final segment in [{criteria.window_m[0]:.0f}, {criteria.window_m[1]:.0f}] m",
+            None,
+            str(status or "unavailable"),
+            str(reason or "observed threshold event unavailable"),
         )
+    if event.get("runway") != context.runway:
+        raise ValueError(
+            "source.observed_threshold_event.runway disagrees with assessment context"
+        )
+    if event.get("altitude_datum") != "hae":
+        raise ValueError("observed threshold event altitude_datum must be 'hae'")
+    geoid = record.source.get("hae_minus_msl_m")
+    if isinstance(geoid, bool) or not isinstance(geoid, (int, float)) \
+            or not math.isfinite(float(geoid)):
+        raise ValueError("observed record requires finite source.hae_minus_msl_m")
+    if record.target_state is None or not record.states:
+        raise ValueError("observed threshold event requires a solved record and target_state")
 
-    unmet = _unmet_criteria(fit, criteria)
-    if unmet:
-        return ArrivalOutcome(None, established=False, reason="; ".join(unmet))
-
-    final = record.states[-1]
+    target, final = record.target_state, record.states[-1]
+    crossing_alt_msl = _event_number(event, "threshold_crossing_altitude_m") - float(geoid)
     return ArrivalOutcome(
-        deviation=ArrivalDeviation(
-            # The frame is anchored AT the target, so the fitted crossing offsets are the
-            # deviations -- no second distance computation, hence no second convention.
-            lateral_m=abs(fit.cross_at_threshold_m),
-            vertical_m=fit.height_at_threshold_m,
-            # Ungated context, taken from the last observed sample rather than
-            # extrapolated: neither is compared against a limit, and extrapolating speed
-            # over the truncated tail would amplify noise for no gain.
+        ArrivalDeviation(
+            # The event is evaluated at the threshold plane by construction.
+            along_track_m=0.0,
+            cross_track_m=_event_number(event, "signed_cross_track_m"),
+            vertical_m=crossing_alt_msl - target["alt"],
             speed_ms=final["V"] - target["V"],
             heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
             flight_time_s=final["t"],
+            event_status="estimated",
             extrapolated=True,
-            lateral_sigma_m=fit.cross.sigma_at_zero,
-            vertical_sigma_m=fit.height.sigma_at_zero,
-            glidepath_deg=fit.glidepath_deg,
-            extrapolation_m=fit.extrapolation_m,
+            lateral_sigma_m=_event_number(event, "cross_track_sigma_m", nonnegative=True),
+            vertical_sigma_m=_event_number(event, "altitude_sigma_m", nonnegative=True),
+            glidepath_deg=(
+                _event_number(event, "glidepath_deg")
+                if event.get("glidepath_deg") is not None else None
+            ),
+            extrapolation_m=_event_number(event, "extrapolation_m", nonnegative=True),
         ),
-        established=True,
+        "estimated",
     )
-
-
-def _unmet_criteria(fit, criteria: EstablishedCriteria) -> list[str]:
-    unmet: list[str] = []
-    if fit.median_abs_cross_m > criteria.max_cross_track_m:
-        unmet.append(
-            f"median cross-track {fit.median_abs_cross_m:.0f} m > {criteria.max_cross_track_m:.0f} m"
-        )
-    low, high = criteria.glidepath_range_deg
-    if not low <= fit.glidepath_deg <= high:
-        unmet.append(f"glidepath {fit.glidepath_deg:.2f} deg outside [{low}, {high}]")
-    if fit.height.rms_residual_m > criteria.max_vertical_rms_m:
-        unmet.append(
-            f"vertical RMS {fit.height.rms_residual_m:.1f} m > {criteria.max_vertical_rms_m:.1f} m"
-        )
-    return unmet

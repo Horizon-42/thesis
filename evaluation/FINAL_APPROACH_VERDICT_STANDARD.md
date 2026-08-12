@@ -1,6 +1,8 @@
 # Terminal final-approach verdict standard
 
-Status: design specification; implementation pending
+Status: implemented for the stated U.S. data path. LPV vertical is
+intentionally indeterminate pending a licensed and validated RTCA
+deviation-scaling implementation.
 
 Standards checked: 2026-08-12
 
@@ -141,6 +143,7 @@ contains measurement and fitting facts only:
 status                         estimated or unavailable
 method and method version
 runway
+runway_data_fingerprint         exact runway/frame/cycle binding
 threshold_crossing_lat and threshold_crossing_lon
 threshold_crossing_altitude_m
 altitude_datum                 HAE for the current harvest
@@ -167,6 +170,14 @@ The crossing latitude/longitude is the same `s = 0`, signed-cross-track point
 resolved in the exact runway frame used by assignment. Storing that point lets
 rendering reuse the estimate without reconstructing it from a later runway-data
 cycle.
+
+The event also carries an audit snapshot and canonical fingerprint of every
+runway fact that can affect assignment or interpretation: threshold position,
+course, HAE/MSL elevations and datum offset, runway width, TCH, glidepath,
+LPV course width, source identifiers, and effective FAA runway/CIFP cycles.
+Consumers reject a missing or mismatched fingerprint. The operator then runs
+`--reclassify-existing`, which recomputes derived assignment/event data from the
+stored HAE samples without downloading ADS-B again.
 
 The event must not contain an approach type, FAS profile, LPV/LNAV-VNAV
 limits, or any verdict. The raw `samples` array remains raw. `flight_key`
@@ -391,13 +402,12 @@ Keep the physical event and evaluation policy separate:
 
 The evaluator receives an explicit assessment context containing:
 
-- `subject`: `observed`, `optimized`, or `predicted`;
 - benchmark: `lpv` or `rnp_apch_lnav_vnav_baro`;
-- runway threshold, true course, width, elevation/datum, source, and date;
-- procedure/FAS identity, source, and cycle;
-- resolved benchmark parameters;
-- terminal-event method;
-- uncertainty method and confidence level.
+- airport/runway identity, true course, width, source, and effective cycle;
+- procedure/FAS source and effective cycle;
+- LPV lateral FSD when published;
+- LPV vertical FSD only after the RTCA implementation is validated; and
+- explicit approved Baro-VNAV applicability for the fallback.
 
 The resolved context is copied into the derived evaluation report. The
 observed event and its producer provenance are also copied into the report so
@@ -433,6 +443,13 @@ Each report must preserve:
 - lateral, vertical, and composite results; and
 - every evaluation parameter that can change a verdict.
 
+An observed event-availability rate must be computed from the source
+classification population before assigned-track filtering. Its denominator is
+assigned + ambiguous + unassignable arrival candidates; tracks classified as
+`not_landing` are outside that population and must be counted separately. The
+report must name this denominator and serialize estimated, unavailable, and
+excluded counts.
+
 Use `pass`, `fail`, and `indeterminate` for required components. Use
 `not_applicable` only for a genuinely non-applicable descriptive component,
 not to make an incomplete composite verdict pass.
@@ -442,7 +459,7 @@ Callsign alone is not a stable identity and may repeat within a batch.
 
 ## 9. Separate review fixes
 
-The following correctness fixes remain required but do not change the aviation
+The following correctness fixes are implemented and do not change the aviation
 standard:
 
 1. Reject non-finite inputs and JSON output.
@@ -451,6 +468,11 @@ standard:
 4. Serialize all verdict-changing methodology.
 5. Preserve existing stable flight identity in overlay selectors.
 6. Reject non-positive `--max-tracks`, or define zero as producing no overlays.
+7. Bind observed events to the exact runway-data frame and cycle.
+8. Compute event availability over source arrival candidates, before filtering.
+9. Do not let an indeterminate-component explanation mask a concrete failure.
+10. Preserve the three-way verdict in every chart color model.
+11. Apply strict JSON-number output to referenced state payloads too.
 
 Reference-path comparison is a descriptive metric, not part of the terminal
 verdict. Independently normalizing two paths with different endpoints compares
@@ -506,7 +528,7 @@ explicitly selected and supported by applicable procedure data.
 | FAA AC 20-138D Change 2, *Airworthiness Approval of Positioning and Navigation Systems* | FAA lists it active. Change 2 dated 2016-04-07. Ch. 4 and §§15-7 through 15-7.8 were read. | Confirms the certified SBAS installation/source chain and that LPV deviation details come from RTCA DO-229. It predates TSO-C146e and is not used alone for the scaling formula. | [FAA AC 20-138D Change 2](../docs/regulation/FAA_AC_20-138D_Change_2.pdf) |
 | EASA ETSO-C146e A1 | Applicable from 2020-07-25 and current in EASA's live ETSO register on 2026-08-12. §§1–5 and the relevant appendix introduction were read. | Public official confirmation that current C146e equipment requirements use RTCA DO-229E Section 2. | [EASA ETSO-C146e A1](../docs/regulation/EASA_ETSO-C146e_A1.pdf) |
 | FAA CIFP Readme, Volume 2608 | Cycle effective 2026-08-06 to 2026-09-03. All seven pages were read. | Confirms Path Point records and current FAA CIFP status. | [FAA CIFP Readme 2608](../data/CIFP/CIFP_260806/CIFP%20Readme%202608.pdf) |
-| FAA NASR APT layout and readme | Current 2026-08-06 distribution checked. Runway width, true alignment, effective-date, and datum fields were read. | One authoritative runway source for US aerodromes. Other States require their authoritative AIP/aerodrome source. | [APT layout](../docs/regulation/FAA_NASR_APT_DATA_LAYOUT_2025-10-23.pdf), [CSV readme](../docs/regulation/FAA_NASR_CSV_README_2026-08-06.pdf) |
+| FAA NASR APT layout, readme, and data archive | Current 2026-08-06 distribution checked. Runway width, true alignment, effective-date, and datum fields were read; `APT_RWY.csv` supplied the configured runway widths. | Authoritative runway source for the implemented U.S. aerodromes. Other States require their authoritative AIP/aerodrome source. | [APT layout](../docs/regulation/FAA_NASR_APT_DATA_LAYOUT_2025-10-23.pdf), [CSV readme](../docs/regulation/FAA_NASR_CSV_README_2026-08-06.pdf), [complete official archive](../docs/regulation/FAA_NASR_APT_CSV_2026-08-06.zip) |
 
 RTCA availability needs two separate statements:
 
@@ -545,6 +567,7 @@ bb9d8698beae04c2834e7fdfb9e1574a09efb867f222d94e2dcf52c9ab7f05c3  FAA_NASR_APT_D
 6338a19182d38294cdca37cf4838e643c55ab5a720f10b46b552cae89844bd24  FAA_NASR_CSV_README_2026-08-06.pdf
 47023fc1f557594435aaf06cfa0e056abe37c48b3c869a5a316e66d7cf54ba0f  CIFP Readme 2608.pdf
 a6ad75ba834fcc423fbc7f7aebb3e9d075ae169da3e9fce5693cd21f2355b6ca  FAACIFP18 (CIFP 260806)
+dd9768780197ba3e14d447be0be9cf95e1e55e7c56c8ec4dfecf5dc4f4a10ef1  FAA_NASR_APT_CSV_2026-08-06.zip
 ```
 
 ## 12. Implementation boundary
@@ -576,11 +599,11 @@ compatibility path that silently refits old records.
 
 ## 13. Acceptance criteria
 
-The implementation is complete only when:
+The current implementation is accepted when:
 
-1. the LPV vertical model is traceable to a read DO-229E specification,
-   currency-checked against DO-229F, and validated against authoritative
-   examples;
+1. LPV vertical and composite results remain `indeterminate` until a licensed
+   DO-229E scaling implementation is read, currency-checked against DO-229F,
+   and validated against authoritative examples;
 2. the LNAV/VNAV fallback requires explicit approved Baro-VNAV context;
 3. along-track and cross-track error are distinct;
 4. the winning runway-assignment fit produces one serialized, policy-free
@@ -588,11 +611,14 @@ The implementation is complete only when:
 5. evaluation, arrival preparation, and CZML do not call
    `fit_final_segment()` for an assigned stored track;
 6. non-finite values cannot pass or enter JSON;
-7. all methodology and source cycles are serialized;
-8. reference comparisons use a common physical span;
-9. existing stable identity appears in overlays;
-10. focused evaluation tests pass in the `aeroviz` conda environment;
-11. observed, optimized, and predicted pipeline entry points produce valid
+7. each observed event is fingerprint-bound to the exact runway frame and
+   source cycles, with stale events rejected;
+8. all methodology and source cycles are serialized;
+9. reference comparisons use a common physical span;
+10. existing stable identity appears in overlays;
+11. observed availability uses the pre-filter arrival-candidate denominator;
+12. focused evaluation tests pass in the `aeroviz` conda environment;
+13. observed, optimized, and predicted pipeline entry points produce valid
     reports; and
-12. no raw trajectory, arrival-manifest, scenario, optimizer, or prediction
-    schema changes.
+14. raw trajectories, arrival manifests, scenarios, optimizer outputs, and
+    prediction outputs contain no approach profile, limit, or verdict policy.

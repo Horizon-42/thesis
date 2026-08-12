@@ -52,10 +52,12 @@ def evaluation_record(
     target: GeodeticState,
     samples: Sequence[RolloutSample],
     source: dict[str, Any],
+    *,
+    subject: str,
 ) -> dict[str, Any]:
     """The solved-trajectory record: rollout states + their 1:1 aligned controls."""
     return {
-        "source": dict(source),
+        "source": {**source, "subject": _subject(subject)},
         "initial_state": state_dict(initial),
         "target_state": state_dict(target),
         "final_time_s": float(samples[-1].t),
@@ -72,6 +74,8 @@ def reference_evaluation_record(
     target: GeodeticState,
     timed_states: Sequence[tuple[float, GeodeticState]],
     source: dict[str, Any],
+    *,
+    subject: str,
 ) -> dict[str, Any]:
     """An OBSERVED track as an evaluation record (the comparison reference).
 
@@ -81,7 +85,7 @@ def reference_evaluation_record(
     reference record (vs the aligned 1:1 list of a solver record).
     """
     return {
-        "source": dict(source),
+        "source": {**source, "subject": _subject(subject)},
         "initial_state": state_dict(initial),
         "target_state": state_dict(target),
         "final_time_s": float(timed_states[-1][0]),
@@ -95,6 +99,8 @@ def failed_evaluation_record(
     target: GeodeticState | None,
     source: dict[str, Any],
     reason: str,
+    *,
+    subject: str,
 ) -> dict[str, Any]:
     """The unsolved-configuration record: boundary conditions kept, empty lists.
 
@@ -102,7 +108,7 @@ def failed_evaluation_record(
     the evaluation batch computes the solve rate from these.
     """
     return {
-        "source": dict(source),
+        "source": {**source, "subject": _subject(subject)},
         "initial_state": state_dict(initial),
         "target_state": state_dict(target) if target is not None else None,
         "final_time_s": None,
@@ -110,6 +116,12 @@ def failed_evaluation_record(
         "controls": [],
         "reason": reason,
     }
+
+
+def _subject(value: str) -> str:
+    if value not in ("optimized", "predicted", "observed"):
+        raise ValueError(f"invalid evaluation subject {value!r}")
+    return value
 
 
 def summary_row(

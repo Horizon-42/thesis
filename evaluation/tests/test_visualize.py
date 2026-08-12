@@ -1,183 +1,53 @@
-"""HTML visualization: payload structure, track sampling, end-to-end file output."""
+"""HTML payload keeps stable identity and enforces its overlay cap."""
 
-import json
-import math
-import sys
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from evaluation import load_records  # noqa: E402
-from evaluation.visualize import (  # noqa: E402
-    _sample_evenly,
-    build_payload,
-    main as visualize_main,
-)
+from evaluation import AssessmentContext, record_from_dict
+from evaluation.tests.test_evaluation import payload
+from evaluation.visualize import _sample_evenly, build_payload, render_html
 
 
-def _path_states(*, lon_offset_deg=0.0, alt_top=1000.0, t_end=100.0, n=5):
-    states = []
-    for k in range(n):
-        f = k / (n - 1)
-        states.append({
-            "t": t_end * f, "lat": 35.0 + 0.1 * f, "lon": -78.5 + lon_offset_deg,
-            "alt": alt_top + (130.0 - alt_top) * f,
-            "V": 100.0, "psi": math.pi / 2, "gamma": -0.05, "m": 60000.0,
-        })
-    return states
+def contexts():
+    context = AssessmentContext(
+        benchmark="rnp_apch_lnav_vnav_baro", airport="KRDU", runway="05L",
+        runway_course_deg=0.0, runway_width_m=45.72,
+        runway_source="faa_nasr_apt_rwy", runway_source_cycle="2026-08-06",
+        procedure_source="faa_terminal_procedure", procedure_source_cycle="2026-08-06",
+        baro_vnav_approved=True,
+    )
+    return {("KRDU", "05L"): context}
 
 
-def _solved_payload(flight_id="AFR074", *, reference_file=None):
-    states = _path_states(lon_offset_deg=0.001, t_end=80.0)
-    control = {"thrust": 1e5, "bank_rad": 0.0, "load_factor": 1.0}
-    payload = {
-        "source": {"id": flight_id},
-        "initial_state": {k: v for k, v in states[0].items() if k != "t"},
-        "target_state": {k: v for k, v in states[-1].items() if k != "t"},
-        "final_time_s": 80.0,
-        "states": states,
-        "controls": [control] * len(states),
-    }
-    if reference_file:
-        payload["reference_file"] = reference_file
-    return payload
+def records_with_repeated_callsign():
+    records = []
+    for index in range(2):
+        value = payload()
+        value["source"]["flight_key"] = f"TEST1_05L_abc12{index}_20260812T000000Z"
+        records.append(record_from_dict(value))
+    return records
 
 
-def _reference_payload():
-    states = _path_states()
-    return {
-        "source": {"id": "AFR074"},
-        "initial_state": {k: v for k, v in states[0].items() if k != "t"},
-        "target_state": {k: v for k, v in states[-1].items() if k != "t"},
-        "final_time_s": 100.0,
-        "states": states,
-        "controls": [],
-    }
+def test_overlay_labels_preserve_stable_flight_identity_for_repeated_callsigns():
+    result = build_payload(records_with_repeated_callsign(), contexts=contexts())
+    assert [track["id"] for track in result["tracks"]] == ["TEST1", "TEST1"]
+    assert len({track["label"] for track in result["tracks"]}) == 2
+    assert all(track["flight_key"] in track["label"] for track in result["tracks"])
 
 
-def _failed_payload():
-    return {
-        "source": {"id": "BAD001"},
-        "initial_state": _solved_payload()["initial_state"],
-        "target_state": None,
-        "final_time_s": None,
-        "states": [],
-        "controls": [],
-        "reason": "ValueError: infeasible",
-    }
+def test_non_positive_overlay_caps_are_rejected():
+    with pytest.raises(ValueError, match="greater than zero"):
+        _sample_evenly([1, 2], 0)
+    with pytest.raises(ValueError, match="greater than zero"):
+        build_payload(records_with_repeated_callsign(), contexts=contexts(), max_tracks=-1)
 
 
-def _manifest(dirpath, *eval_files):
-    """The batch roster load_records requires — results[].eval_file names the run's records."""
-    (dirpath / "summary.json").write_text(json.dumps({
-        "results": [{"eval_file": name} for name in eval_files],
-    }), encoding="utf-8")
-
-
-def _write_batch(tmp_path):
-    (tmp_path / "references").mkdir()
-    (tmp_path / "references" / "AFR074_reference_eval.json").write_text(
-        json.dumps(_reference_payload()), encoding="utf-8")
-    (tmp_path / "a_eval.json").write_text(
-        json.dumps(_solved_payload(reference_file="references/AFR074_reference_eval.json")),
-        encoding="utf-8")
-    (tmp_path / "b_eval.json").write_text(json.dumps(_failed_payload()), encoding="utf-8")
-    _manifest(tmp_path, "a_eval.json", "b_eval.json")
-
-
-def test_build_payload_embeds_report_and_tracks(tmp_path):
-    _write_batch(tmp_path)
-    payload = build_payload(load_records(tmp_path))
-    assert payload["report"]["total"] == 2 and payload["report"]["solved"] == 1
-    assert payload["tracksShown"] == payload["tracksTotal"] == 1
-    track = payload["tracks"][0]
-    assert track["id"] == "AFR074"
-    assert len(track["optimized"]["lat"]) == 101
-    assert len(track["reference"]["lat"]) == 101       # the pointed-at observed path
-    assert track["target"]["lat"] == pytest.approx(35.1)
-
-
-def test_sample_evenly_keeps_ends_and_caps():
-    items = list(range(10))
-    assert _sample_evenly(items, 20) == items          # no cap needed
-    sampled = _sample_evenly(items, 4)
-    assert len(sampled) == 4 and sampled[0] == 0 and sampled[-1] == 9
-
-
-def test_cli_writes_html_with_embedded_data(tmp_path, capsys):
-    _write_batch(tmp_path)
-    out = tmp_path / "report.html"
-    visualize_main(["--input", str(tmp_path), "--output", str(out)])
-    text = out.read_text(encoding="utf-8")
-    assert "const DATA" in text and "cdn.plot.ly" in text
-    assert "AFR074" in text and "Trajectory Evaluation Report" in text
-    # Aviation abbreviations are expanded in parentheses in the page body.
-    assert "WCH (Wheel Crossing Height)" in text
-    assert "ADS-B (Automatic Dependent Surveillance–Broadcast)" in text
-    assert "1/1 track overlays" in capsys.readouterr().out
-
-
-def test_observed_batch_builds_with_established_block_and_no_chart_gaps(tmp_path):
-    """An observed batch: the payload carries the established/marginal block, the page
-    builds end-to-end, and a not-established row (which has no crossing to plot) is
-    filtered out of the deviation charts by the measuredRows JS filter."""
-    from evaluation.tests.test_arrival import observed_record
-
-    def record_payload(record):
-        return {"source": record.source, "initial_state": record.initial_state,
-                "target_state": record.target_state, "final_time_s": record.final_time_s,
-                "states": record.states, "controls": record.controls}
-
-    (tmp_path / "g_eval.json").write_text(
-        json.dumps(record_payload(observed_record())), encoding="utf-8")
-    (tmp_path / "b_eval.json").write_text(
-        json.dumps(record_payload(observed_record(glidepath_deg=6.0))), encoding="utf-8")
-    _manifest(tmp_path, "g_eval.json", "b_eval.json")
-
-    payload = build_payload(load_records(tmp_path))
-    report = payload["report"]
-    assert report["subject"] == "observed"
-    assert report["observed"] == {
-        "established": 1, "not_established": 1, "established_rate": 0.5, "marginal": 0,
-    }
-    # Only the established row carries deviations for the charts to draw.
-    assert sum(1 for r in report["trajectories"] if "lateral_m" in r) == 1
-
-    out = tmp_path / "report.html"
-    visualize_main(["--input", str(tmp_path), "--output", str(out)])
-    text = out.read_text(encoding="utf-8")
-    assert "not_established" in text          # the verdict survives into the page data
-    assert "established rate" in text         # the card the solve rate is replaced by
-
-
-def test_degenerate_record_excluded_from_tracks_and_html_is_escaped(tmp_path):
-    # A single-sample solved record must not reach the resampler; hostile strings in
-    # source ids / reasons must not break out of the embedded <script> JSON.
-    _write_batch(tmp_path)
-    single = {"t": 0.0, "lat": 35.6, "lon": -78.5, "alt": 2000.0, "V": 130.0,
-              "psi": 1.5, "gamma": -0.05, "m": 60000.0}
-    degenerate = {
-        "source": {"id": "</script><img src=x>"},
-        "initial_state": {k: v for k, v in single.items() if k != "t"},
-        "target_state": {k: v for k, v in single.items() if k != "t"},
-        "final_time_s": 0.0,
-        "states": [single],
-        "controls": [{"thrust": 1e5, "bank_rad": 0.0, "load_factor": 1.0}],
-    }
-    (tmp_path / "c_eval.json").write_text(json.dumps(degenerate), encoding="utf-8")
-    _manifest(tmp_path, "a_eval.json", "b_eval.json", "c_eval.json")
-
-    out = tmp_path / "report.html"
-    visualize_main(["--input", str(tmp_path), "--output", str(out)])
-    text = out.read_text(encoding="utf-8")
-    # The degenerate record is in the report but NOT among the track overlays.
-    payload = build_payload(load_records(tmp_path))
-    assert payload["report"]["total"] == 3
-    assert payload["tracksTotal"] == 1 and payload["tracks"][0]["id"] == "AFR074"
-    # The raw close-tag sequence never appears inside the data blob (escaped as <\/).
-    assert "</script><img" not in text
-    assert "<\\/script><img" in text
+def test_rendered_payload_is_strict_json_and_escapes_script_close():
+    value = payload()
+    value["source"]["id"] = "</script><img src=x>"
+    result = build_payload([record_from_dict(value)], contexts=contexts())
+    page = render_html(result, title="Test", source_label="batch")
+    assert "const DATA=" in page
+    assert "</script><img" not in page
+    assert "<\\/script><img" in page

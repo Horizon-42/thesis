@@ -1,59 +1,45 @@
 #!/usr/bin/env python
-"""Delete the generated data of the optimization + ts_transformer pipelines.
+"""Delete only allow-listed, regenerable pipeline publications and views.
 
-The destructive sibling of ``archive_pipeline_data.py`` (which MOVES the same
-data into a named snapshot — prefer it when the run might still be worth
-keeping). This script wipes the whole chain's history so the next batch starts
-from a clean slate, with nothing stale left to mix in:
+This cleaner deliberately does *not* scan an entire output root and call everything in
+it disposable. It selects only these producer-owned artifacts:
 
-  1. flight_scenarios/outputs/                       scenarios (step 1)
-  2. 4dTrajectory/outputs/<ICAO>/…                   optimizer categories
-                                                     (asdb/runway/runway_cons)
-                                                     AND ts training + prediction
-                                                     dirs (ts_*/, ts_pred_*/)
-  3. aeroviz-4d/public/data/airports/<ICAO>/comparison/     frontend comparison CZML
-  4. aeroviz-4d/public/data/airports/<ICAO>/trajectories.czml    canonical observed layer
-     aeroviz-4d/public/data/airports/<ICAO>/landings/            runway selector metadata
-  5. trajectory_data_process/outputs/harvest/<ICAO>/arrivals/    derived arrival manifest
-     trajectory_data_process/outputs/harvest/<ICAO>/approach/    observed evaluation records
+  1. ``flight_scenarios/outputs/<ICAO>_*_scenarios.json``;
+  2. canonical optimizer categories ``fitted_adsb``, ``runway``, ``runway_cons`` and
+     their ``shared_references``;
+  3. standalone ``4dTrajectory/outputs/<ICAO>/ts_pred_*`` prediction publications;
+  4. frontend comparison and observed CZML publications; and
+  5. harvest ``arrivals/`` and ``approach/`` derived views.
 
-NOT touched, ever: the static airport layers (airport.json, runway.geojson,
-waypoints.geojson, procedures*, charts/, obstacles.geojson, local-terrain/),
-``data/archive/`` snapshots, anything tracked by git, and (by default) the downloaded
-``harvest/<ICAO>/tracks/`` source data.
+Never selected: downloaded ``tracks/``, training checkpoints/history, formal experiment
+directories/manifests, checkpoint-adjacent ``test_release.json``, parked/manual/unknown
+model outputs, static airport data, git-tracked files, and ``data/archive``.
 
-Kept by default, deletable by flag:
-
-  * ``--include-downloads``  also wipes measured ``harvest/<ICAO>/tracks/`` data
-    (expensive to recreate through OpenSky history). Derived ``arrivals/`` and
-    ``approach/`` are always deleted because they are outputs of
-    ``prepare_scenario_inputs.py``. The former legacy download layouts are not part of
-    the current pipeline and are never inferred as inputs.
-  * ``--include-parked``     also wipes the ``_``-prefixed dirs under
-    4dTrajectory/outputs (parked research artifacts, e.g. _pre_b3_transport,
-    _ablation_norm — the ablation numbers quoted in the ts README live there).
-
-Nothing is deleted without either an interactive confirmation or ``--yes``.
+Airport scope is mandatory. Files are moved into a same-filesystem staging directory
+first; a staging failure restores every moved file before the command exits. Nothing is
+removed without an interactive confirmation or ``--yes``.
 
 Usage:
-    python clean_pipeline_data.py --dry-run              # preview only
-    python clean_pipeline_data.py                        # plan + confirm + delete
-    python clean_pipeline_data.py --yes                  # no prompt (scripts)
-    python clean_pipeline_data.py --include-downloads    # ALSO drop downloaded tracks
+    conda run -n aeroviz python clean_pipeline_data.py --airport KRDU --dry-run
+    conda run -n aeroviz python clean_pipeline_data.py --airport KRDU
+    conda run -n aeroviz python clean_pipeline_data.py --all-airports --yes
 """
 
 from __future__ import annotations
 
 import argparse
 import functools
+import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parent
 
-# Single sources: the pipeline roots come from the preparation/optimization scripts,
-# the humanize + empty-dir pruning helpers from the archiver (repo-root scripts import flat).
+# Pipeline roots come from the producer scripts. The humanizer/pruner are import-light
+# helpers only; this cleaner does not use the archiver's broader production scan.
 from archive_pipeline_data import _human, _prune_empty_dirs  # noqa: E402
 from prepare_scenario_inputs import HARVEST_TRACKS_ROOT, SCENARIOS_DIR  # noqa: E402
 from run_scenario_optimization import (  # noqa: E402
@@ -64,6 +50,20 @@ from run_scenario_optimization import (  # noqa: E402
 # Despite its historical name in the runner, this is the harvest root, not the
 # per-airport ``tracks/`` directory.
 HARVEST_ROOT = HARVEST_TRACKS_ROOT
+
+OPTIMIZER_OUTPUT_DIRS = frozenset({
+    "fitted_adsb",
+    "runway",
+    "runway_cons",
+    "shared_references",
+})
+PROTECTED_EXPERIMENT_FILES = frozenset({
+    "checkpoint.pt",
+    "checkpoint_metadata.json",
+    "history.json",
+    "experiment_manifest.json",
+    "test_release.json",
+})
 
 
 @functools.lru_cache(maxsize=1)
@@ -101,21 +101,18 @@ def _tree_files(root: Path) -> list[Path]:
     return sorted(p for p in root.rglob("*") if p.is_file() and p.resolve() not in tracked)
 
 
-def _harvest_files_by_category() -> dict[str, list[Path]]:
-    """Roster harvest files without hiding the measured/derived boundary.
-
-    The supported layout is ``<ICAO>/{tracks,arrivals,approach}/...``. Unexpected files
-    remain visible in an ``other`` group rather than being silently skipped.
-    """
-    grouped = {"tracks": [], "arrivals": [], "approach": [], "other": []}
-    for path in _tree_files(HARVEST_ROOT):
-        parts = path.relative_to(HARVEST_ROOT).parts
-        category = parts[1] if len(parts) >= 2 else "other"
-        grouped[category if category in grouped else "other"].append(path)
-    return grouped
+def _is_airport_code(code: str) -> bool:
+    return len(code) == 4 and code.isalnum()
 
 
-def _harvest_category_files(category: str) -> tuple[list[Path], list[Path]]:
+def _selected(code: str, airports: set[str] | None) -> bool:
+    """Select only ICAO-shaped airport namespaces, never roots such as POOLED."""
+    return _is_airport_code(code) and (airports is None or code.upper() in airports)
+
+
+def _harvest_category_files(
+    category: str, airports: set[str] | None
+) -> tuple[list[Path], list[Path]]:
     """Files and existing per-airport dirs for one canonical harvest category.
 
     Default cleanup needs only ``arrivals`` and ``approach``. Scanning those roots
@@ -127,63 +124,203 @@ def _harvest_category_files(category: str) -> tuple[list[Path], list[Path]]:
         return files, roots
     for airport_dir in sorted(HARVEST_ROOT.iterdir()):
         category_dir = airport_dir / category
-        if not airport_dir.is_dir() or not category_dir.is_dir():
+        if (
+            not airport_dir.is_dir()
+            or not _selected(airport_dir.name, airports)
+            or not category_dir.is_dir()
+        ):
             continue
         files.extend(_tree_files(category_dir))
         roots.append(category_dir)
     return files, roots
 
 
-def deletion_groups(*, include_parked: bool, include_downloads: bool):
+def _scenario_files(airports: set[str] | None) -> list[Path]:
+    if not SCENARIOS_DIR.exists():
+        return []
+    tracked = _tracked_files()
+    files: list[Path] = []
+    for path in sorted(SCENARIOS_DIR.glob("*_scenarios.json")):
+        airport = path.name.split("_arrivals", 1)[0].upper()
+        if (
+            path.is_file()
+            and _selected(airport, airports)
+            and path.resolve() not in tracked
+        ):
+            files.append(path)
+    return files
+
+
+def _model_output_files(
+    airports: set[str] | None,
+) -> tuple[list[Path], list[Path], list[str]]:
+    """Allow-listed optimizer/prediction outputs; never training or experiments."""
+    files: list[Path] = []
+    containers: list[Path] = []
+    kept: list[str] = []
+    if not OPT_OUTPUTS_ROOT.exists():
+        return files, containers, kept
+    for airport_dir in sorted(OPT_OUTPUTS_ROOT.iterdir()):
+        if not airport_dir.is_dir() or not _selected(airport_dir.name, airports):
+            continue
+        for candidate in sorted(airport_dir.iterdir()):
+            if not candidate.is_dir() or not (
+                candidate.name in OPTIMIZER_OUTPUT_DIRS
+                or candidate.name.startswith("ts_pred_")
+            ):
+                continue
+            if candidate.name.startswith("ts_pred_"):
+                summary = candidate / "summary.json"
+                if candidate.name.endswith("_test"):
+                    kept.append(
+                        f"final-test prediction {candidate.relative_to(REPO_ROOT)}/"
+                    )
+                    continue
+                if not summary.is_file():
+                    kept.append(
+                        f"protected model output {candidate.relative_to(REPO_ROOT)}/ "
+                        "(missing prediction summary)"
+                    )
+                    continue
+                try:
+                    summary_payload = json.loads(summary.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    kept.append(
+                        f"protected model output {candidate.relative_to(REPO_ROOT)}/ "
+                        "(unreadable prediction summary)"
+                    )
+                    continue
+                split = (
+                    summary_payload.get("split")
+                    if isinstance(summary_payload, dict)
+                    else None
+                )
+                if split == "test":
+                    kept.append(
+                        f"final-test prediction {candidate.relative_to(REPO_ROOT)}/"
+                    )
+                    continue
+                if split != "val":
+                    kept.append(
+                        f"protected model output {candidate.relative_to(REPO_ROOT)}/ "
+                        f"(prediction split is {split!r}, not 'val')"
+                    )
+                    continue
+            protected = next(
+                (
+                    path for path in candidate.rglob("*")
+                    if path.is_file() and path.name in PROTECTED_EXPERIMENT_FILES
+                ),
+                None,
+            )
+            if protected is not None:
+                kept.append(
+                    f"protected model output {candidate.relative_to(REPO_ROOT)}/ "
+                    f"(contains {protected.name})"
+                )
+                continue
+            files.extend(_tree_files(candidate))
+            containers.append(candidate)
+    return files, containers, kept
+
+
+def _comparison_protection_reason(directory: Path) -> str | None:
+    """Why a comparison tree must stay intact, or ``None`` when fully owned."""
+    registry = directory / "categories.json"
+    if not registry.is_file():
+        return "missing categories registry"
+    try:
+        payload = json.loads(registry.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "unreadable categories registry"
+    categories = payload.get("categories") if isinstance(payload, dict) else None
+    if not isinstance(categories, list):
+        return "invalid categories registry"
+
+    declared_dirs: set[str] = set()
+    for category in categories:
+        if not isinstance(category, dict):
+            return "invalid categories registry"
+        category_dir = category.get("dir")
+        if (
+            not isinstance(category_dir, str)
+            or not category_dir
+            or Path(category_dir).name != category_dir
+            or category_dir in {".", ".."}
+        ):
+            return "invalid categories registry"
+        declared_dirs.add(category_dir)
+        if (
+            category.get("resultSource") == "experiment"
+            or category.get("datasetSplit") == "test"
+        ):
+            return "contains an experiment or final-test publication"
+
+    if any(not (directory / name).is_dir() for name in declared_dirs):
+        return "categories registry references a missing directory"
+    for child in directory.iterdir():
+        if child == registry:
+            continue
+        if child.is_symlink() or not child.is_dir() or child.name not in declared_dirs:
+            return "contains content not owned by the categories registry"
+        if child.name.startswith("experiment_") or child.name.endswith("_test"):
+            return "contains an experiment or final-test publication"
+    return None
+
+
+def deletion_groups(*, airports: set[str] | None):
     """``(label, files)`` groups to delete, the container dirs to remove once
     emptied, and the notes about what is deliberately being kept."""
     groups: list[tuple[str, list[Path]]] = []
     containers: list[Path] = []
-    kept: list[str] = []
+    kept: list[str] = [
+        "experiment and training outputs under 4dTrajectory/outputs/ "
+        "(checkpoints, histories, test ledgers, formal/manual/unknown runs)",
+        f"harvest tracks {HARVEST_ROOT.relative_to(REPO_ROOT)}/*/tracks/ "
+        "(downloaded source data; never selected by this cleaner)",
+    ]
 
-    groups.append(("scenarios    (flight_scenarios/outputs)", _tree_files(SCENARIOS_DIR)))
-
-    # Parked research artifacts are ``_``-prefixed dirs at ANY level under the
-    # outputs root (e.g. outputs/KRDU/_pre_b3_transport, outputs/KRDU/_ablation_norm
-    # — the previous ts generation and the ablation numbers the ts README quotes).
-    def _under_parked(rel_dir_parts: tuple[str, ...]) -> bool:
-        return any(part.startswith("_") for part in rel_dir_parts)
-
-    opt_files = _tree_files(OPT_OUTPUTS_ROOT)
-    if not include_parked:
-        opt_files = [f for f in opt_files
-                     if not _under_parked(f.relative_to(OPT_OUTPUTS_ROOT).parts[:-1])]
-        # Note each TOP-MOST parked dir once (a parked dir nested inside another is
-        # already covered by its ancestor's note).
-        for d in sorted(OPT_OUTPUTS_ROOT.rglob("_*") if OPT_OUTPUTS_ROOT.exists() else []):
-            if d.is_dir() and not _under_parked(d.relative_to(OPT_OUTPUTS_ROOT).parts[:-1]):
-                kept.append(f"parked research artifacts {d.relative_to(REPO_ROOT)}/ "
-                            f"(pass --include-parked to delete)")
-    groups.append(("optimization + ts (4dTrajectory/outputs)", opt_files))
+    groups.append(("scenarios    (allow-listed *_scenarios.json)", _scenario_files(airports)))
+    model_files, model_dirs, model_kept = _model_output_files(airports)
+    groups.append(("optimizer + standalone predictions (allow-listed)", model_files))
+    containers.extend(model_dirs)
+    kept.extend(model_kept)
 
     comparison_files: list[Path] = []
     observed_files: list[Path] = []
     if COMPARISON_AIRPORTS_ROOT.exists():
         for airport_dir in sorted(COMPARISON_AIRPORTS_ROOT.iterdir()):
-            if not airport_dir.is_dir():
+            if not airport_dir.is_dir() or not _selected(airport_dir.name, airports):
                 continue
             comparison_dir = airport_dir / "comparison"
             if comparison_dir.exists():
-                comparison_files += _tree_files(comparison_dir)
-                containers.append(comparison_dir)
-            # glob bypasses _tree_files, so apply the same git-tracked guard here.
-            observed_files += [f for f in sorted(airport_dir.glob("trajectories.czml*"))
-                               if f.resolve() not in _tracked_files()]
+                protection = _comparison_protection_reason(comparison_dir)
+                if protection is None:
+                    comparison_files += _tree_files(comparison_dir)
+                    containers.append(comparison_dir)
+                else:
+                    kept.append(
+                        f"frontend comparison {comparison_dir.relative_to(REPO_ROOT)}/ "
+                        f"({protection})"
+                    )
+            # The observed producer owns exactly this canonical filename. Prefix
+            # lookalikes may be curated copies and are deliberately out of scope.
+            trajectories = airport_dir / "trajectories.czml"
+            if (
+                trajectories.is_file()
+                and trajectories.resolve() not in _tracked_files()
+            ):
+                observed_files.append(trajectories)
             landings_dir = airport_dir / "landings"
             if landings_dir.exists():
                 observed_files += _tree_files(landings_dir)
                 containers.append(landings_dir)
     groups.append(("frontend comparison (airports/*/comparison)", comparison_files))
-    groups.append(("frontend observed layer (airports/*/{trajectories.czml*, landings})",
+    groups.append(("frontend observed layer (airports/*/{trajectories.czml, landings})",
                    observed_files))
 
-    arrival_files, arrival_dirs = _harvest_category_files("arrivals")
-    approach_files, approach_dirs = _harvest_category_files("approach")
+    arrival_files, arrival_dirs = _harvest_category_files("arrivals", airports)
+    approach_files, approach_dirs = _harvest_category_files("approach", airports)
     groups.extend(
         [
             ("harvest arrivals  (harvest/*/arrivals; derived)", arrival_files),
@@ -193,27 +330,10 @@ def deletion_groups(*, include_parked: bool, include_downloads: bool):
     containers.extend(arrival_dirs)
     containers.extend(approach_dirs)
 
-    if include_downloads:
-        harvest_files = _harvest_files_by_category()
-        groups.extend(
-            [
-                ("harvest tracks    (harvest/*/tracks; measured)",
-                 harvest_files["tracks"]),
-            ]
-        )
-        if harvest_files["other"]:
-            groups.append(("harvest other     (unexpected harvest files)",
-                           harvest_files["other"]))
-    else:
-        kept.append(f"harvest tracks {HARVEST_ROOT.relative_to(REPO_ROOT)}/*/tracks/ "
-                    f"(downloaded source data; pass --include-downloads to delete)")
-
     # Surface, never silently drop, any git-tracked file the guard excluded from the scan
     # (0 today — the roots are git-ignored — but a future ``git add`` under one must be
     # visible, not quietly skipped).
-    scanned_roots = [SCENARIOS_DIR, OPT_OUTPUTS_ROOT, *containers]
-    if include_downloads:
-        scanned_roots.append(HARVEST_ROOT)
+    scanned_roots = [SCENARIOS_DIR, *containers]
     tracked_in_scan = sum(
         1 for f in _tracked_files()
         if any(root == f or root in f.parents for root in scanned_roots)
@@ -225,19 +345,77 @@ def deletion_groups(*, include_parked: bool, include_downloads: bool):
     return groups, containers, kept
 
 
+def _validate_plan(files: list[Path]) -> list[Path]:
+    """Reject duplicates, protected sentinels, and paths outside producer roots."""
+    roots = tuple(
+        root.resolve()
+        for root in (
+            SCENARIOS_DIR,
+            OPT_OUTPUTS_ROOT,
+            COMPARISON_AIRPORTS_ROOT,
+            HARVEST_ROOT,
+        )
+    )
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for path in files:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        if path.name in PROTECTED_EXPERIMENT_FILES:
+            raise RuntimeError(f"refusing to select protected experiment file {path}")
+        if not any(resolved.is_relative_to(root) for root in roots):
+            raise RuntimeError(f"cleanup target escapes producer roots: {path}")
+        if resolved in _tracked_files():
+            raise RuntimeError(f"cleanup target is git-tracked: {path}")
+        seen.add(resolved)
+        unique.append(path)
+    return sorted(unique)
+
+
+def _move_file(source: Path, destination: Path) -> Path:
+    """Replace hook kept separate so rollback behavior can be failure-tested."""
+    return source.replace(destination)
+
+
+def delete_files_transactionally(files: list[Path], *, staging_root: Path) -> None:
+    """Stage every target before commit; restore all staged files on move failure."""
+    selected = _validate_plan(files)
+    if staging_root.exists():
+        raise FileExistsError(f"cleanup staging path already exists: {staging_root}")
+    staging_root.mkdir(parents=True)
+    moved: list[tuple[Path, Path]] = []
+    try:
+        for source in selected:
+            relative = source.absolute().relative_to(REPO_ROOT.absolute())
+            destination = staging_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _move_file(source, destination)
+            moved.append((source, destination))
+    except Exception:
+        for source, destination in reversed(moved):
+            source.parent.mkdir(parents=True, exist_ok=True)
+            _move_file(destination, source)
+        shutil.rmtree(staging_root)
+        raise
+    shutil.rmtree(staging_root)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
-        "--include-downloads", action="store_true",
-        help="ALSO delete measured trajectory_data_process/outputs/harvest/*/tracks "
-             "(derived arrivals/approach are deleted by default)",
+    scope = parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument(
+        "--airport",
+        action="append",
+        metavar="ICAO",
+        help="clean one airport; repeat for more than one",
     )
-    parser.add_argument(
-        "--include-parked", action="store_true",
-        help="ALSO delete the _-prefixed parked dirs under 4dTrajectory/outputs "
-             "(_pre_b3_transport, _ablation_norm, …)",
+    scope.add_argument(
+        "--all-airports",
+        action="store_true",
+        help="clean allow-listed derived data for every airport",
     )
     parser.add_argument("--yes", action="store_true",
                         help="delete without the interactive confirmation")
@@ -245,13 +423,19 @@ def main() -> None:
                         help="print the deletion plan without deleting anything")
     args = parser.parse_args()
 
-    groups, containers, kept = deletion_groups(
-        include_parked=args.include_parked, include_downloads=args.include_downloads)
+    airports = None if args.all_airports else {
+        value.strip().upper() for value in args.airport
+    }
+    if airports is not None and any(not _is_airport_code(code) for code in airports):
+        parser.error("--airport must be a four-character alphanumeric ICAO code")
+    groups, containers, kept = deletion_groups(airports=airports)
+    selected_files = _validate_plan([path for _, files in groups for path in files])
 
-    total_files = sum(len(files) for _, files in groups)
-    total_bytes = sum(f.stat().st_size for _, files in groups for f in files)
+    total_files = len(selected_files)
+    total_bytes = sum(path.stat().st_size for path in selected_files)
 
-    print(f"\n━━ clean pipeline data  ·  {REPO_ROOT}")
+    scope_label = "all airports" if airports is None else ", ".join(sorted(airports))
+    print(f"\n━━ clean regenerable pipeline data  ·  {scope_label}  ·  {REPO_ROOT}")
     for label, files in groups:
         size = sum(f.stat().st_size for f in files)
         print(f"   {label:<58} {len(files):>6} files  {_human(size):>10}")
@@ -259,7 +443,6 @@ def main() -> None:
     for note in kept:
         print(f"   · keeping {note}")
     print("   · static airport layers and data/archive snapshots are never touched")
-    print("   · reversible alternative: python archive_pipeline_data.py archive <name>")
 
     if total_files == 0:
         print("\n✓ nothing to delete — the working tree is already clean")
@@ -279,22 +462,14 @@ def main() -> None:
             print("aborted — nothing deleted")
             return
 
+    staging = REPO_ROOT / f".pipeline-clean-staging-{uuid4().hex}"
+    delete_files_transactionally(selected_files, staging_root=staging)
     for label, files in groups:
-        for f in files:
-            f.unlink()
         if files:
             print(f"   ✓ {label}: {len(files)} files deleted")
 
-    # Tidy the emptied trees: prune below the anchors we actually deleted from, and drop
-    # the emptied per-airport container dirs (comparison/, landings/) themselves. The
-    # The complete harvest tree is pruned only when --include-downloads deleted tracks.
-    # Otherwise the derived arrivals/approach dirs are handled through ``containers`` and
-    # the downloaded tracks tree is left untouched.
-    prune_anchors = [SCENARIOS_DIR, OPT_OUTPUTS_ROOT]
-    if args.include_downloads:
-        prune_anchors.append(HARVEST_ROOT)
-    for anchor in prune_anchors:
-        _prune_empty_dirs(anchor)
+    # Tidy only explicitly selected producer containers. Never recurse from the broad
+    # model or harvest roots, where protected experiment/source directories also live.
     for container in containers:
         _prune_empty_dirs(container)
         if container.exists() and not any(container.iterdir()):

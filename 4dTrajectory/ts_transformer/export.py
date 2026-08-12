@@ -1,8 +1,8 @@
 """Predicted approaches -> evaluation records the existing `evaluation` package can judge.
 
 A prediction batch writes the same directory shape ``4dTrajectory/optimization`` writes, so
-``python -m evaluation --input <dir>`` grades a learned predictor against the identical regulatory
-gates (lateral <= 106.75 m, vertical in [-3.05, +6.10] m) that grade the optimizer::
+``python -m evaluation --input <dir>`` grades a learned predictor against the same
+runway/procedure assessment context used for optimizer output::
 
     <output-dir>/
       <flight>_states.json                     canonical predicted + observed arrays
@@ -131,6 +131,7 @@ def build_prediction_record(
     source = dict(scenario.source)
     prediction_output = forecast.prediction_output
     source.update({
+        "subject": "predicted",
         "predictor": model_name,
         "predictionOutput": prediction_output,
         "horizonMode": horizon_mode,
@@ -150,7 +151,7 @@ def build_prediction_record(
             relative_offsets, forecast.values, series.frame, mass_kg=mass_kg
         )
         eval_record = reference_evaluation_record(
-            initial_state, scenario.target, predicted_states, source
+            initial_state, scenario.target, predicted_states, source, subject="predicted"
         )
         predicted_state_rows = [{"t": t, **state_dict(s)} for t, s in predicted_states]
     else:
@@ -164,13 +165,14 @@ def build_prediction_record(
             for index, (t, state) in enumerate(zip(offsets, endpoint_states))
         ]
         eval_record = evaluation_record(
-            initial_state, scenario.target, samples, source
+            initial_state, scenario.target, samples, source, subject="predicted"
         )
         predicted_state_rows = list(eval_record["states"])
     eval_record["reference_file"] = f"{REFERENCES_DIR}/{record_stem(scenario.source, index)}{_REFERENCE_EVAL_SUFFIX}"
 
     reference_record = reference_evaluation_record(
-        initial_state, scenario.target, observed_states, dict(scenario.source)
+        initial_state, scenario.target, observed_states, dict(scenario.source),
+        subject="observed",
     )
 
     states_payload = {
@@ -329,7 +331,10 @@ def write_batch(
         states_payload = dict(record.states_payload)
         states_payload["source"] = source
         states_path.write_text(
-            json.dumps(states_payload, separators=(",", ":")), encoding="utf-8"
+            json.dumps(
+                states_payload, separators=(",", ":"), allow_nan=False
+            ),
+            encoding="utf-8",
         )
         eval_payload = dict(record.eval_record)
         eval_payload["source"] = source
@@ -343,10 +348,10 @@ def write_batch(
         }
         reference_payload["states"] = []
         eval_path.write_text(
-            json.dumps(eval_payload, separators=(",", ":")), encoding="utf-8"
+            json.dumps(eval_payload, separators=(",", ":"), allow_nan=False), encoding="utf-8"
         )
         reference_path.write_text(
-            json.dumps(reference_payload, separators=(",", ":")), encoding="utf-8"
+            json.dumps(reference_payload, separators=(",", ":"), allow_nan=False), encoding="utf-8"
         )
         written.append(eval_path)
 

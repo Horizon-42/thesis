@@ -67,11 +67,11 @@ python run_scenario_optimization.py --jobs 6
 # dataset build + split happen inside train, split persisted in the checkpoint)
 python run_ts_pipeline.py --airport KRDU
 
-# Wipe ALL generated pipeline data (derived arrivals/approach, scenarios, optimizer+ts
-# outputs, frontend comparison + observed CZML). Downloaded harvest/*/tracks and _parked
-# dirs are kept unless --include-downloads / --include-parked; archive_pipeline_data.py
-# is the reversible alternative.
-python clean_pipeline_data.py --dry-run
+# Preview the allow-listed regenerable outputs for one airport, then clean them.
+# Training/experiment artifacts, final-test ledgers, downloaded tracks, unknown/manual
+# outputs, mixed experiment comparison trees, static data, and archives are preserved.
+conda run -n aeroviz python clean_pipeline_data.py --airport KRDU --dry-run
+conda run -n aeroviz python clean_pipeline_data.py --airport KRDU
 ```
 
 ### Learned prediction (4dTrajectory/ts_transformer/)

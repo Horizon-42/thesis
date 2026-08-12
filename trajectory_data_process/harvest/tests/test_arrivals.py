@@ -7,7 +7,11 @@ import json
 import pytest
 
 from flight_scenarios.identity import flight_key
-from trajectory_data_process.harvest.airports import Airport, Runway
+from trajectory_data_process.harvest.airports import (
+    Airport,
+    Runway,
+    runway_data_fingerprint,
+)
 from trajectory_data_process.harvest.arrivals import (
     _anchor_index,
     load_arrival_flights,
@@ -33,6 +37,10 @@ def _runway(
         hae_minus_msl_m=0.0,
         threshold_crossing_height_m=tch_m,
         published_glidepath_deg=glidepath_deg,
+        width_m=45.72,
+        lpv_course_width_m=106.75 if tch_m is not None else None,
+        runway_source_cycle="2026-08-06",
+        procedure_source_cycle="2026-08-06",
         position_source="faa_cifp_path_point",
         vertical_source="faa_cifp_path_point",
     )
@@ -85,6 +93,11 @@ def _source_track(
         "altitude_source": ALTITUDE_SOURCE,
         "altitude_datum": ALTITUDE_DATUM,
         "assignment": {"outcome": "assigned", "runway": runway},
+        "observed_threshold_event": {
+            "status": "estimated",
+            "runway": runway,
+            "runway_data_fingerprint": runway_data_fingerprint(_runway(runway)),
+        },
         "samples": samples,
     }
     relative = f"assigned/{runway}/{key}.json"
@@ -100,6 +113,7 @@ def _source_track(
         "callsign": callsign,
         "landing_time_utc": landing_time,
         "landing_sample_index": landing_sample_index,
+        "event_status": "estimated",
     }
 
 
@@ -140,7 +154,7 @@ def _approach_samples() -> list[list[float]]:
     ]
 
 
-def test_anchor_index_refits_final_pass_instead_of_trusting_stale_metadata():
+def test_anchor_index_consumes_the_stored_assignment_anchor_without_refitting():
     first_pass = [
         [float(i), -0.045 + i * 0.005, 0.0, 300.0 - i * 30.0]
         for i in range(10)
@@ -152,10 +166,25 @@ def test_anchor_index_refits_final_pass_instead_of_trusting_stale_metadata():
     track = {
         "flight_key": "TWOPASS_18_abc123_19700101T000009Z",
         "landing_sample_index": 9,
+        "observed_threshold_event": {
+            "status": "estimated",
+            "runway": "18",
+            "runway_data_fingerprint": runway_data_fingerprint(_runway("18")),
+        },
         "samples": [*first_pass, [10.0, 0.10, 0.0, 500.0], *final_pass],
     }
 
-    assert _anchor_index(track, _runway("18")) == len(track["samples"]) - 1
+    assert _anchor_index(track, _runway("18")) == 9
+
+
+def test_anchor_index_directs_legacy_tracks_to_local_reclassification():
+    track = {
+        "flight_key": "LEGACY",
+        "landing_sample_index": 1,
+        "samples": [[0.0, 0.1, 0.0, 100.0], [1.0, 0.0, 0.0, 25.0]],
+    }
+    with pytest.raises(ValueError, match="reclassify-existing"):
+        _anchor_index(track, _runway("18"))
 
 
 def test_arrival_manifest_crops_final_entry_to_landing_anchor_and_excludes_non_model_data(

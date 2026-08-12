@@ -371,18 +371,30 @@ def test_off_target_group_yellow_reference_and_verdict_metrics(tmp_path):
         "id": "DAL1312", "runway": "05L", "hae_minus_msl_m": -33.5
     }}
     (tmp_path / "DAL1312_05L_states.json").write_text(json.dumps(miss_data), encoding="utf-8")
+    indeterminate_data = {**STATE_DATA, "source": {
+        "id": "UAL55", "runway": "05L", "hae_minus_msl_m": -33.5
+    }}
+    (tmp_path / "UAL55_05L_states.json").write_text(
+        json.dumps(indeterminate_data), encoding="utf-8"
+    )
     results = [
         {"id": "AFR074", "runway": "05L", "status": "solved",
          "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"},
         {"id": "DAL1312", "runway": "05L", "status": "solved",
          "states_file": "DAL1312_05L_states.json", "eval_file": "DAL1312_05L_eval.json"},
+        {"id": "UAL55", "runway": "05L", "status": "solved",
+         "states_file": "UAL55_05L_states.json", "eval_file": "UAL55_05L_eval.json"},
     ]
-    adsb = [ADSB_CZML[0], ADSB_CZML[1], {**ADSB_CZML[1], "id": "DAL1312_05L", "name": "DAL1312"}]
+    adsb = [ADSB_CZML[0], ADSB_CZML[1],
+            {**ADSB_CZML[1], "id": "DAL1312_05L", "name": "DAL1312"},
+            {**ADSB_CZML[1], "id": "UAL55_05L", "name": "UAL55"}]
     verdicts = load_verdicts({"trajectories": [
-        {"file": "AFR074_05L_eval.json", "solved": True, "success": True,
+        {"file": "AFR074_05L_eval.json", "solved": True, "success": True, "verdict": "pass",
          "lateral_m": 2.8, "vertical_m": 0.1},
-        {"file": "DAL1312_05L_eval.json", "solved": True, "success": False,
+        {"file": "DAL1312_05L_eval.json", "solved": True, "success": False, "verdict": "fail",
          "lateral_m": 179.5, "vertical_m": -25.4},
+        {"file": "UAL55_05L_eval.json", "solved": True, "success": False,
+         "verdict": "indeterminate", "lateral_m": 2.0, "vertical_m": 1.0},
     ]})
 
     czml, index = build_runway_comparison(results, tmp_path, adsb, airport="KRDU",
@@ -407,7 +419,14 @@ def test_off_target_group_yellow_reference_and_verdict_metrics(tmp_path):
     assert ok_ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(REFERENCE_COLOR)
     assert ok_ref["properties"]["status"] == "solved"
 
+    undecided_ref = by_id["ref-UAL55_05L"]
+    assert undecided_ref["properties"]["status"] == "indeterminate"
+    assert undecided_ref["path"]["material"]["solidColor"]["color"]["rgba"] \
+        == list(REFERENCE_COLOR)
+
     by_group = {r["group"]: r for r in index}
+    assert by_group["UAL55_05L"]["status"] == "indeterminate"
+    assert by_group["UAL55_05L"]["terminalVerdict"] == "indeterminate"
     assert by_group["DAL1312_05L"]["status"] == "offTarget"
     assert by_group["DAL1312_05L"]["lateralErrM"] == 179.5
     assert by_group["DAL1312_05L"]["verticalErrM"] == -25.4
@@ -512,13 +531,15 @@ def test_prediction_accuracy_stats_publishes_existing_ade_and_fde():
 
 def test_evaluation_batch_stats_excludes_only_per_flight_details():
     report = {
-        "thresholds": {"lateral_max_m": 106.75},
+        "schema_version": "terminal-approach-evaluation-v2",
         "total": 10,
         "solved": 9,
         "solve_rate": 0.9,
         "successful": 4,
         "success_rate": 0.4,
-        "success_rate_among_solved": 4 / 9,
+        "failed": 2,
+        "indeterminate": 4,
+        "verdict_counts": {"pass": 4, "fail": 2, "indeterminate": 4},
         "lateral_m": {"mean": 12.0, "p95": 30.0, "max": 42.0},
         "vertical_m": {"mean_abs": 3.0, "p95_abs": 7.0},
         "final_time_s": {"mean": 300.0, "min": 200.0, "max": 400.0},
@@ -526,7 +547,8 @@ def test_evaluation_batch_stats_excludes_only_per_flight_details():
     }
     stats = evaluation_batch_stats(report)
     assert stats["solveRate"] == 0.9
-    assert stats["successRateAmongSolved"] == 4 / 9
+    assert stats["indeterminate"] == 4
+    assert stats["verdictCounts"]["fail"] == 2
     assert stats["lateralM"]["p95"] == 30.0
     assert "trajectories" not in stats
 
@@ -994,6 +1016,7 @@ def test_a_prediction_missing_the_gates_keeps_its_own_colour(tmp_path):
     results = [{"id": "AFR074", "runway": "05L", "status": "solved",
                 "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
     verdicts = {"AFR074_05L_eval.json": {"solved": True, "success": False,
+                                         "verdict": "fail",
                                          "lateral_m": 413.5, "vertical_m": 12.0}}
 
     czml, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU",
@@ -1015,6 +1038,7 @@ def test_an_optimizer_result_missing_the_gates_still_goes_off_target_yellow(tmp_
     results = [{"id": "AFR074", "runway": "05L", "status": "solved",
                 "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
     verdicts = {"AFR074_05L_eval.json": {"solved": True, "success": False,
+                                         "verdict": "fail",
                                          "lateral_m": 900.0, "vertical_m": 30.0}}
 
     czml, _ = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU",

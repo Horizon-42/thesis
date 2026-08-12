@@ -244,11 +244,13 @@ export interface ComparisonGroup {
   airport: string;
   /**
    * `solved` = optimized (and, when the run was evaluated, inside the gates);
-   * `offTarget` = optimized but the final state FAILED the evaluation gates
+   * `offTarget` = optimized but the terminal verdict failed;
+   * `indeterminate` = solved, but the evaluation cannot support pass or fail.
    * (yellow reference; added 2026-07 — absent in older indexes);
    * `failed` = no solution (dark-red reference only).
    */
-  status: "solved" | "offTarget" | "failed";
+  status: "solved" | "offTarget" | "indeterminate" | "failed";
+  terminalVerdict?: "pass" | "fail" | "indeterminate" | null;
   finalTimeS: number | null;
   initialState: ComparisonInitialState | null;
   /**
@@ -328,14 +330,16 @@ export interface PredictionAccuracyStats {
 }
 
 export interface EvaluationBatchStats {
-  thresholds?: Record<string, number> | null;
+  schemaVersion?: string | null;
   total?: number | null;
   measured?: number | null;
   solved?: number | null;
   solveRate?: number | null;
   successful?: number | null;
   successRate?: number | null;
-  successRateAmongSolved?: number | null;
+  failed?: number | null;
+  indeterminate?: number | null;
+  verdictCounts?: Record<string, number> | null;
   lateralM?: Record<string, number> | null;
   verticalM?: Record<string, number> | null;
   finalTimeS?: Record<string, number> | null;
@@ -371,6 +375,7 @@ export function isComparisonGroup(value: unknown): value is ComparisonGroup {
     typeof candidate.czml === "string" &&
     (candidate.status === "solved" ||
       candidate.status === "offTarget" ||
+      candidate.status === "indeterminate" ||
       candidate.status === "failed") &&
     Array.isArray(candidate.entities) &&
     candidate.entities.every((entity) => typeof entity === "string")

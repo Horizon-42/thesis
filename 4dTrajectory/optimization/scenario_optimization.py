@@ -244,7 +244,9 @@ def optimize_scenario(
         scenario.source, float(final_time),
         optimizer_states,
         [StateSample.from_state(s.t, s.state) for s in rollout],
-        evaluation=evaluation_record(initial, target, rollout, scenario.source),
+        evaluation=evaluation_record(
+            initial, target, rollout, scenario.source, subject="optimized"
+        ),
     )
 
 
@@ -490,11 +492,12 @@ def optimize_scenarios(
             # that is how the evaluation batch computes the solve rate.
             failed_record = failed_evaluation_record(
                 scenario.initial, scenario.target, scenario.source, error,
+                subject="optimized",
             )
             if reference_file:
                 failed_record["reference_file"] = reference_file
             (out / eval_name).write_text(
-                json.dumps(failed_record, separators=(",", ":")), encoding="utf-8"
+                json.dumps(failed_record, separators=(",", ":"), allow_nan=False), encoding="utf-8"
             )
             records[index] = _summary_record(
                 scenario, status="failed", states_file=None, eval_file=eval_name,
@@ -510,7 +513,7 @@ def optimize_scenarios(
         if reference_file:
             eval_dict["reference_file"] = reference_file
         (out / eval_name).write_text(
-            json.dumps(eval_dict, separators=(",", ":")), encoding="utf-8"
+            json.dumps(eval_dict, separators=(",", ":"), allow_nan=False), encoding="utf-8"
         )
         written.append(path)
         records[index] = _summary_record(
@@ -706,9 +709,13 @@ def write_reference_records(
             flight["waypoints"], mass_kg=scenario.initial.m,
             window_s=float(src.get("window_s") or DEFAULT_WINDOW_S),
         )
-        record = reference_evaluation_record(scenario.initial, scenario.target, timed_states, src)
+        record = reference_evaluation_record(
+            scenario.initial, scenario.target, timed_states, src, subject="observed"
+        )
         path = out / _reference_filename(_scenario_filename(scenario, index))
-        path.write_text(json.dumps(record, separators=(",", ":")), encoding="utf-8")
+        path.write_text(
+            json.dumps(record, separators=(",", ":"), allow_nan=False), encoding="utf-8"
+        )
         written.append(path)
     if source_signature is not None:
         records = [
@@ -1022,7 +1029,9 @@ def _iaf_result(
     return ScenarioOptimization(
         source, best.final_time, optimizer_states,
         [StateSample.from_state(s.t, s.state) for s in rollout],
-        evaluation=evaluation_record(best.initial, target, rollout, source),
+        evaluation=evaluation_record(
+            best.initial, target, rollout, source, subject="optimized"
+        ),
     )
 
 
@@ -1208,11 +1217,12 @@ def optimize_scenarios_constrained_iaf(
             failures.append((flight_id, error))
             failed_record = failed_evaluation_record(
                 scenario.initial, scenario.target, scenario.source, error,
+                subject="optimized",
             )
             if reference_file:
                 failed_record["reference_file"] = reference_file
             (out / eval_name).write_text(
-                json.dumps(failed_record, separators=(",", ":")), encoding="utf-8"
+                json.dumps(failed_record, separators=(",", ":"), allow_nan=False), encoding="utf-8"
             )
             records[index] = _summary_record(
                 scenario, status="failed", states_file=None, eval_file=eval_name,
@@ -1229,7 +1239,7 @@ def optimize_scenarios_constrained_iaf(
         if reference_file:
             eval_dict["reference_file"] = reference_file
         (out / eval_name).write_text(
-            json.dumps(eval_dict, separators=(",", ":")), encoding="utf-8"
+            json.dumps(eval_dict, separators=(",", ":"), allow_nan=False), encoding="utf-8"
         )
         written.append(out / name)
         record_row = _summary_record(

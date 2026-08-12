@@ -4,13 +4,17 @@ import EvaluationReportWindow from "../EvaluationReportWindow";
 import type { EvaluationReport } from "../../data/evaluationReport";
 
 const REPORT: EvaluationReport = {
-  thresholds: { lateral_max_m: 106.75, vertical_below_max_m: 3.05, vertical_above_max_m: 6.1 },
+  schema_version: "terminal-approach-evaluation-v2",
+  methodology: {}, assessment_contexts: [], subject: "optimized",
   total: 3,
+  measured: 2,
   solved: 2,
   solve_rate: 2 / 3,
   successful: 1,
+  failed: 2,
+  indeterminate: 0,
+  verdict_counts: { pass: 1, fail: 2, indeterminate: 0 },
   success_rate: 1 / 3,
-  success_rate_among_solved: 0.5,
   lateral_m: { mean: 101.0, p95: 171.7, max: 179.5 },
   vertical_m: { mean_signed: -13.5, mean_abs: 13.5, p95_abs: 24.2, max_abs: 25.4 },
   final_time_s: { mean: 364.6, min: 329.1, max: 400.2 },
@@ -23,17 +27,30 @@ const REPORT: EvaluationReport = {
   trajectories: [
     {
       id: "FDX1738", file: "a_eval.json", solved: true, success: true, violations: [],
+      subject: "optimized", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
+      verdict: "pass", event_status: "terminal_state", lateral_result: "pass", vertical_result: "pass",
+      bounds: { guidance_lateral_m: 277.8, runway_lateral_m: 22.86, effective_lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
       lateral_m: 22.43, vertical_m: -1.68, final_time_s: 329.1,
-      reference: { file: "r.json", flight_time_s: 536.0, flight_time_delta_s: -206.9 },
+      reference: { file: "r.json", comparison_status: "compared", endpoint_tolerance_m: 1,
+        start_gap_m: 0, end_gap_m: 0, reference_flight_time_s: 536.0,
+        flight_time_delta_s: -206.9 },
     },
     {
       id: "FDX1449", file: "b_eval.json", solved: true, success: false,
-      violations: ["lateral 179.5 m > 106.75 m"],
+      subject: "optimized", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
+      verdict: "fail", event_status: "terminal_state", lateral_result: "fail", vertical_result: "fail",
+      bounds: { guidance_lateral_m: 277.8, runway_lateral_m: 22.86, effective_lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
+      violations: ["lateral", "vertical"],
       lateral_m: 179.53, vertical_m: -25.4, final_time_s: 400.2,
-      reference: { file: "r2.json", flight_time_s: 281.0, flight_time_delta_s: 119.2 },
+      reference: { file: "r2.json", comparison_status: "compared", endpoint_tolerance_m: 1,
+        start_gap_m: 0, end_gap_m: 0, reference_flight_time_s: 281.0,
+        flight_time_delta_s: 119.2 },
     },
     {
       id: "UPS1276", file: "c_eval.json", solved: false, success: false,
+      subject: "optimized", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
+      verdict: "fail", event_status: "unsolved", lateral_result: "indeterminate", vertical_result: "indeterminate",
+      bounds: { guidance_lateral_m: 277.8, runway_lateral_m: 22.86, effective_lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
       violations: ["unsolved"], reason: "ValueError: Maximum_Iterations_Exceeded",
     },
   ],
@@ -54,10 +71,9 @@ describe("EvaluationReportWindow", () => {
     expect(screen.getByText("KRDU · runway_cons")).toBeTruthy();
     // cards
     expect(screen.getByText("solve rate 66.7%")).toBeTruthy();
-    expect(screen.getByText("success rate 33.3%")).toBeTruthy();
+    expect(screen.getByText("pass rate 33.3%")).toBeTruthy();
     expect(screen.getByText("mean Δt vs observed (optimized − flown)")).toBeTruthy();
-    // gates note carries the thresholds
-    expect(screen.getByText(/Gates \(FAA Order 8260\.58D\)/).textContent).toContain("106.75 m");
+    expect(screen.getByText(/bounds are runway and benchmark specific/i)).toBeTruthy();
     // aggregates straight from the report
     const aggregates = screen.getByRole("table", { name: /Aggregates/ });
     expect(aggregates.textContent).toContain("101.0");
@@ -82,7 +98,7 @@ describe("EvaluationReportWindow", () => {
     // verdict rows: gate-failed row flagged, unsolved row grayed with its reason
     const failRow = screen.getByText("FDX1449").closest("tr")!;
     expect(failRow.className).toContain("eval-row-fail");
-    expect(failRow.textContent).toContain("lateral 179.5 m > 106.75 m");
+    expect(failRow.textContent).toContain("fail");
     const unsolvedRow = screen.getByText("UPS1276").closest("tr")!;
     expect(unsolvedRow.className).toContain("eval-row-unsolved");
     expect(unsolvedRow.textContent).toContain("Maximum_Iterations_Exceeded");
@@ -153,7 +169,7 @@ describe("EvaluationReportWindow", () => {
     const bare: EvaluationReport = {
       ...REPORT,
       solved: 0, solve_rate: 0, successful: 0, success_rate: 0,
-      success_rate_among_solved: null,
+      failed: 1, indeterminate: 0, verdict_counts: { pass: 0, fail: 1, indeterminate: 0 },
       lateral_m: null, vertical_m: null, final_time_s: null, reference: null,
       trajectories: [REPORT.trajectories[2]],
     };
@@ -178,30 +194,40 @@ describe("EvaluationReportWindow", () => {
       solved: 3,
       solve_rate: 1,
       successful: 1,
+      failed: 0,
+      indeterminate: 2,
+      verdict_counts: { pass: 1, fail: 0, indeterminate: 2 },
       success_rate: 1 / 3,
-      success_rate_among_solved: 1 / 3,
       observed: {
-        established: 1,
-        not_established: 2,
-        established_rate: 1 / 3,
-        marginal: 0,
+        denominator: "arrival_candidates_excluding_not_landing",
+        event_denominator: 3,
+        event_estimated: 1,
+        event_unavailable: 2,
+        event_estimated_rate: 1 / 3,
+        excluded_not_landing: 0,
       },
       reference: null,
       trajectories: [
         {
           id: "MEASURED", file: "measured.json", solved: true, success: true,
-          subject: "observed", established: true, violations: [],
+          subject: "observed", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
+          verdict: "pass", event_status: "estimated", lateral_result: "pass", vertical_result: "pass",
+          bounds: REPORT.trajectories[0].bounds, violations: [],
           lateral_m: 12.5, vertical_m: 1.25, final_time_s: 320,
         },
         {
           id: "NO_CROSSING", file: "missing.json", solved: true, success: false,
-          subject: "observed", established: false, violations: ["not_established"],
+          subject: "observed", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
+          verdict: "indeterminate", event_status: "unavailable", lateral_result: "indeterminate", vertical_result: "indeterminate",
+          bounds: REPORT.trajectories[0].bounds, violations: [],
           lateral_m: null, vertical_m: null,
           reason: "vertical RMS 8.0 m > 6.0 m",
         },
         {
           id: "NON_FINITE", file: "invalid.json", solved: true, success: false,
-          subject: "observed", established: false, violations: ["not_established"],
+          subject: "observed", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
+          verdict: "indeterminate", event_status: "unavailable", lateral_result: "indeterminate", vertical_result: "indeterminate",
+          bounds: REPORT.trajectories[0].bounds, violations: [],
           lateral_m: Number.POSITIVE_INFINITY, vertical_m: 2, final_time_s: 315,
           reason: "invalid derived deviation",
         },
@@ -234,7 +260,40 @@ describe("EvaluationReportWindow", () => {
 
     const missingRow = screen.getByText("NO_CROSSING").closest("tr")!;
     const invalidRow = screen.getByText("NON_FINITE").closest("tr")!;
-    expect(within(missingRow).getByText("not established")).toBeTruthy();
+    expect(within(missingRow).getByText("not measured")).toBeTruthy();
     expect(within(invalidRow).getByText("invalid (non-finite)")).toBeTruthy();
+  });
+
+  it("renders an indeterminate time result with the neutral third-state colour", () => {
+    const uncertain = {
+      ...REPORT.trajectories[0],
+      id: "UNCERTAIN",
+      success: false,
+      verdict: "indeterminate" as const,
+      lateral_result: "indeterminate" as const,
+      violations: [],
+    };
+    render(
+      <EvaluationReportWindow
+        report={{
+          ...REPORT,
+          total: 1,
+          measured: 1,
+          solved: 1,
+          successful: 0,
+          failed: 0,
+          indeterminate: 1,
+          verdict_counts: { pass: 0, fail: 0, indeterminate: 1 },
+          success_rate: 0,
+          trajectories: [uncertain],
+        }}
+        title="Indeterminate Evaluation Report"
+        subtitle="KRDU"
+        onClose={vi.fn()}
+      />,
+    );
+
+    const title = screen.getByText(/UNCERTAIN: observed .* optimized/);
+    expect(title.parentElement?.getAttribute("fill")).toBe("#989da6");
   });
 });

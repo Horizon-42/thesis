@@ -68,8 +68,8 @@ export function kindOfEntityId(id: string): ComparisonKind {
 
 /**
  * The kinds a ts_transformer (prediction-schema) states file produces. The builder never bakes
- * the off-target yellow onto these — a forecast essentially always misses the 106.75 m lateral
- * gate, so marking it would repaint the whole batch — which is why they are excluded from the
+ * the off-target yellow onto these: terminal-policy colour is reserved for optimizer
+ * results, while prediction quality remains visible in the numerical report. Therefore they are excluded from the
  * "keep the CZML's verdict colour" rule below and simply take their legend colour.
  */
 const PREDICTION_SCHEMA_KINDS: ReadonlySet<ComparisonKind> = new Set(["predicted", "lookback"]);
@@ -99,11 +99,8 @@ export function applyComparisonRenderModel(
     // must sit on the trajectory that missed the target, not just the canonical reference.
     //
     // Predictions are excluded from that second exception because the builder never bakes
-    // the yellow for them: a forecast almost always misses the 106.75 m gate, so marking it
-    // would repaint every prediction and say nothing. `status` stays "offTarget" (it is
-    // true, and comparison_index.json reports it), but there is no verdict colour to
-    // preserve — so predictions take the legend colour like any other kind, instead of
-    // depending on the builder's PREDICTION_COLOR happening to equal the legend's.
+    // terminal-verdict yellow into them. They take the legend colour while their numerical
+    // terminal result remains available in comparison_index.json and the evaluation report.
     const status = entity.properties?.status?.getValue(Cesium.JulianDate.now());
     const keepsBakedVerdictColor =
       status === "offTarget" && !PREDICTION_SCHEMA_KINDS.has(kind);
@@ -266,7 +263,7 @@ export function useComparisonTrajectoryLayer(): void {
 
   const sourcesRef = useRef<Cesium.CzmlDataSource[]>([]);
   const shownRef = useRef<Set<string>>(new Set());
-  const observedGroupsRef = useRef<Map<string, "solved" | "offTarget" | "failed">>(
+  const observedGroupsRef = useRef<Map<string, "solved" | "offTarget" | "indeterminate" | "failed">>(
     new Map(),
   );
   const canonicalStylesRef = useRef<Map<Cesium.Entity, ObservedEntityStyleSnapshot>>(

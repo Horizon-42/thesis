@@ -2,10 +2,14 @@
 
     python -m trajectory_data_process.harvest --airport KRDU --count 200
     python -m trajectory_data_process.harvest --airport KRDU --evaluate-only
+    python -m trajectory_data_process.harvest --airport KRDU --reclassify-existing
 
-The measured ``tracks/`` roster is re-derived only by downloading. ``arrivals/`` and
-``approach/`` are pure derived views, so ``--evaluate-only`` rebuilds both from the stored
-track manifest after a crop, CIFP, fit, or criteria change.
+The measured samples and their assignment-produced threshold events live in ``tracks/``.
+``arrivals/`` and ``approach/`` are regenerable views, so ``--evaluate-only`` rebuilds
+them from that manifest after evaluation-policy or publication changes. A changed
+runway-data cycle or assignment/fitting method requires ``--reclassify-existing``.
+That mode reuses the stored HAE samples without querying OpenSky; downstream stages
+still never refit.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from evaluation.metrics import evaluate_batch
+from evaluation.context import contexts_for_airport
 
 from trajectory_data_process.acquisition.opensky_history import install_query_cancel_on_interrupt
 from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM
@@ -35,12 +40,13 @@ from trajectory_data_process.harvest.runner import (
     clear_harvest_checkpoint,
     harvest_airport,
 )
+from trajectory_data_process.harvest.reclassify import reclassify_stored_tracks
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = REPO_ROOT / "trajectory_data_process/config/runway_thresholds.json"
 DEFAULT_OUTPUT = REPO_ROOT / "trajectory_data_process/outputs/harvest"
-DEFAULT_CIFP = REPO_ROOT / "data/CIFP/CIFP_260319/FAACIFP18"
+DEFAULT_CIFP = REPO_ROOT / "data/CIFP/CIFP_260806/FAACIFP18"
 DEFAULT_FRONTEND_DATA = REPO_ROOT / "aeroviz-4d/public/data"
 
 
@@ -66,10 +72,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cifp", type=Path, default=DEFAULT_CIFP,
                         help="ARINC 424 CIFP file supplying per-runway published TCH")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--evaluate-only", action="store_true",
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--evaluate-only", action="store_true",
                         help="skip download; rebuild arrivals/, approach/, and publication")
+    mode.add_argument(
+        "--reclassify-existing",
+        action="store_true",
+        help="skip download; rerun assignment/fitting from stored tracks, then rebuild",
+    )
     parser.add_argument("--no-cache", action="store_true", help="bypass the history query cache")
-    parser.add_argument(
+    mode.add_argument(
         "--full-redownload",
         action="store_true",
         help="ignore a stored download start and bypass the OpenSky query cache",
@@ -95,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     code = args.airport.upper()
     paths = HarvestPaths(root=args.output, code=code)
-    if not args.evaluate_only and not args.full_redownload:
+    if not args.evaluate_only and not args.reclassify_existing and not args.full_redownload:
         completed = _completed_download_manifest(
             paths,
             expected_runways=_configured_runways(args.config, code),
@@ -117,7 +129,10 @@ def main(argv: list[str] | None = None) -> int:
 
     airport = load_airport(code, config_file=args.config, cifp_file=args.cifp)
 
-    if args.evaluate_only:
+    if args.reclassify_existing:
+        manifest = reclassify_stored_tracks(airport, paths)
+        print(f"[harvest] reclassified stored tracks without download: {manifest['counts']}")
+    elif args.evaluate_only:
         manifest = read_manifest(paths)
         print(f"[harvest] reusing stored tracks: {manifest['counts']}")
     else:
@@ -153,8 +168,14 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     summary = write_observed_records(airport, paths)
-    report = evaluate_batch(iter_observed_records(paths))
-    (paths.approach / REPORT_NAME).write_text(json.dumps(report, indent=1), encoding="utf-8")
+    report = evaluate_batch(
+        iter_observed_records(paths),
+        contexts=contexts_for_airport(airport),
+        observed_availability=summary["event_availability"],
+    )
+    (paths.approach / REPORT_NAME).write_text(
+        json.dumps(report, indent=1, allow_nan=False), encoding="utf-8"
+    )
 
     if not args.no_czml:
         rendered = render_observed_czml(
@@ -183,11 +204,12 @@ def _print_digest(code: str, manifest: dict, summary: dict, report: dict) -> Non
         print(f"  skipped     : {len(summary['skipped'])} (no published LPV TCH)")
     observed = report.get("observed", {})
     if observed:
-        print(f"  established : {observed['established']}/{summary['total']} "
-              f"({observed['established_rate']:.0%})  "
-              f"not established {observed['not_established']}")
-        print(f"  gates       : {report['successful']} pass of {report['measured']} measured "
-              f"— {observed['marginal']} marginal (the data cannot decide)")
+        print(f"  events      : {observed['event_estimated']}/"
+              f"{observed['event_denominator']} arrival candidates estimated "
+              f"({observed['event_estimated_rate']:.0%})")
+        counts = report["verdict_counts"]
+        print(f"  verdicts    : pass {counts['pass']}, fail {counts['fail']}, "
+              f"indeterminate {counts['indeterminate']}")
     if report.get("lateral_m"):
         print(f"  lateral  m  : {report['lateral_m']}")
         print(f"  vertical m  : {report['vertical_m']}")

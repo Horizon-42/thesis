@@ -17,8 +17,8 @@ COLUMN DECODE, AND WHY IT IS TRUSTWORTHY
 ----------------------------------------
 ARINC 424 is fixed-column, and a mis-set offset silently yields plausible numbers. This
 decode is pinned by a fact that cannot coincide: **4795 of 4900 records decode a course
-width of exactly 106.75 m**, which is independently the LPV semiwidth floor in
-``evaluation/thresholds.py`` (FAA 8260.58D Formula 3-1-1, 350 ft). A wrong offset would
+width of exactly 106.75 m**, the FAA Formula 3-1-1 minimum course-width value
+(350 ft). A wrong offset would
 have to land on that constant AND on 3.00 deg for 4227 records at the same time.
 ``read_path_points`` re-checks both on every load rather than trusting this comment.
 

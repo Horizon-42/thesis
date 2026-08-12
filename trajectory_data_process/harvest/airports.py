@@ -27,8 +27,10 @@ in the airport's CIFP-derived datum without turning the fallback into a model ta
 from __future__ import annotations
 
 import json
+import hashlib
 import math
-from dataclasses import dataclass
+import re
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, Sequence
 
@@ -37,6 +39,7 @@ from final_approach import RunwayFrame
 from trajectory_data_process.harvest.cifp import PathPoint, read_path_points
 
 Datum = Literal["msl", "hae"]
+RUNWAY_DATA_FINGERPRINT_SCHEMA = "harvest-runway-data-v1"
 
 
 @dataclass(frozen=True)
@@ -61,14 +64,28 @@ class Runway:
     hae_minus_msl_m: float
     threshold_crossing_height_m: float | None
     published_glidepath_deg: float | None
+    width_m: float
+    lpv_course_width_m: float | None
+    runway_source_cycle: str
+    procedure_source_cycle: str
     # Provenance is carried because CIFP and runway geometry can differ by tens of
     # metres and that difference lands directly in the measured deviations.
     position_source: str = "faa_cifp_path_point"
     vertical_source: str = "faa_cifp_path_point"
+    width_source: str = "faa_nasr_apt_rwy"
 
     def __post_init__(self) -> None:
         if abs(self.elevation_hae_m - self.elevation_msl_m - self.hae_minus_msl_m) > 1e-6:
             raise ValueError(f"{self.airport} {self.ident}: inconsistent vertical datum fields")
+        if not math.isfinite(self.width_m) or self.width_m <= 0.0:
+            raise ValueError(f"{self.airport} {self.ident}: invalid runway width {self.width_m!r}")
+        if self.lpv_course_width_m is not None and (
+            not math.isfinite(self.lpv_course_width_m) or self.lpv_course_width_m <= 0.0
+        ):
+            raise ValueError(
+                f"{self.airport} {self.ident}: invalid LPV course width "
+                f"{self.lpv_course_width_m!r}"
+            )
 
     def elevation(self, datum: Datum) -> float:
         return self.elevation_msl_m if datum == "msl" else self.elevation_hae_m
@@ -119,6 +136,37 @@ class Airport:
         raise KeyError(f"{self.code} has no threshold {ident!r}")
 
 
+def runway_data_snapshot(runway: Runway) -> dict:
+    """Complete runway facts that can change assignment or event interpretation."""
+    return {
+        "schema_version": RUNWAY_DATA_FINGERPRINT_SCHEMA,
+        **asdict(runway),
+    }
+
+
+def runway_data_fingerprint(runway: Runway) -> str:
+    """Stable hash binding a threshold event to its exact runway-data cycle/frame."""
+    encoded = json.dumps(
+        runway_data_snapshot(runway),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def require_matching_runway_data(event: dict, runway: Runway) -> None:
+    """Reject legacy or stale threshold events before mixing runway data cycles."""
+    stored = event.get("runway_data_fingerprint")
+    current = runway_data_fingerprint(runway)
+    if not isinstance(stored, str) or stored != current:
+        raise ValueError(
+            f"track threshold event has a missing or stale runway-data fingerprint for "
+            f"{runway.airport} {runway.ident}; run --reclassify-existing before "
+            "--evaluate-only"
+        )
+
+
 def load_airport(
     code: str,
     *,
@@ -140,8 +188,16 @@ def load_airport(
         raise ValueError(f"{code}: CIFP file is required for runway vertical datum facts")
     published: dict[tuple[str, str], PathPoint] = read_path_points(cifp_file, airport=code)
 
-    thresholds = [t for runway in entry["runways"] for t in runway["thresholds"]]
-    _require_complete(code, thresholds)
+    runway_rows = [
+        (threshold, runway)
+        for runway in entry["runways"]
+        for threshold in runway["thresholds"]
+    ]
+    _require_complete(code, [threshold for threshold, _runway in runway_rows])
+    width_cycle = str(entry.get("runway_width_effective_date") or "")
+    if not width_cycle:
+        raise ValueError(f"{code}: runway_width_effective_date is required")
+    procedure_cycle = _cifp_cycle(cifp_file)
 
     # Where a published LPV exists, its Landing Threshold Point WINS over the runway
     # geometry derived from OurAirports. The LTP is what the procedure is aimed at, so it
@@ -153,11 +209,14 @@ def load_airport(
     runways = tuple(
         _build_runway(
             code,
-            t,
-            published.get((code, t["ident"])),
+            threshold,
+            runway_row,
+            published.get((code, threshold["ident"])),
             airport_path_points,
+            runway_source_cycle=width_cycle,
+            procedure_source_cycle=procedure_cycle,
         )
-        for t in thresholds
+        for threshold, runway_row in runway_rows
     )
 
     return Airport(
@@ -172,9 +231,17 @@ def load_airport(
 def _build_runway(
     code: str,
     threshold: dict,
+    runway_row: dict,
     point: PathPoint | None,
     airport_path_points: Sequence[PathPoint],
+    *,
+    runway_source_cycle: str,
+    procedure_source_cycle: str,
 ) -> Runway:
+    width_ft = runway_row.get("width_ft")
+    if width_ft is None:
+        raise ValueError(f"{code} {runway_row.get('name')}: FAA NASR runway width is required")
+    width_m = float(width_ft) * 0.3048
     if point is not None:
         hae = point.ltp_ellipsoidal_height_m
         msl = point.ltp_orthometric_height_m
@@ -184,6 +251,10 @@ def _build_runway(
             course_deg=float(threshold["heading_deg"]),
             threshold_crossing_height_m=point.threshold_crossing_height_m,
             published_glidepath_deg=point.glidepath_deg,
+            width_m=width_m,
+            lpv_course_width_m=point.course_width_m,
+            runway_source_cycle=runway_source_cycle,
+            procedure_source_cycle=procedure_source_cycle,
             position_source="faa_cifp_path_point",
             vertical_source="faa_cifp_path_point",
         )
@@ -222,9 +293,23 @@ def _build_runway(
         course_deg=float(threshold["heading_deg"]),
         threshold_crossing_height_m=None,
         published_glidepath_deg=None,
+        width_m=width_m,
+        lpv_course_width_m=None,
+        runway_source_cycle=runway_source_cycle,
+        procedure_source_cycle=procedure_source_cycle,
         position_source="runway_geometry",
         vertical_source="nearest_faa_cifp_path_point_offset",
     )
+
+
+def _cifp_cycle(path: Path) -> str:
+    """``.../CIFP_260806/FAACIFP18`` -> ``2026-08-06``."""
+    for part in reversed(path.parts):
+        match = re.fullmatch(r"CIFP_(\d{2})(\d{2})(\d{2})", part)
+        if match:
+            year, month, day = match.groups()
+            return f"20{year}-{month}-{day}"
+    raise ValueError(f"cannot determine CIFP cycle from {path}")
 
 
 def _require_complete(code: str, thresholds: Sequence[dict]) -> None:

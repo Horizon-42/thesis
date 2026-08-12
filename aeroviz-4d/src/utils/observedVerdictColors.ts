@@ -1,29 +1,25 @@
 /**
  * observedVerdictColors.ts
  * ------------------------
- * How an observed ADS-B track is coloured by its FAA 8260.58D gate verdict.
+ * How an observed ADS-B track is coloured by its terminal-event verdict.
  *
  * THREE STATES, NOT TWO — and the third is the common one.
  *
- * A pass/fail pair would be a lie about this data. Observed altitudes arrive
- * quantised to 25 ft (7.62 m) and the vertical gate window is only 9.15 m wide, so
- * after the least-squares fit the 95 % confidence interval on a threshold crossing is
- * ~6.7 m — three quarters of the window. Measured on real KRDU arrivals, **71 % of
- * established flights have an interval that straddles a gate boundary**: the data
- * cannot decide those verdicts. Painting them red would report a measurement limit as
- * a flying error.
+ * A pass/fail pair would be a lie when a required operational bound is unavailable or
+ * a fitted observed threshold event overlaps a bound once its uncertainty is included.
+ * LPV vertical is deliberately indeterminate until the licensed RTCA vertical FSD
+ * scaling is validated; painting that state red would report missing authority as a
+ * flying error.
  *
- * A fourth situation is folded into the same neutral colour: a track that never flew a
- * fittable, stabilised final approach (`established === false`) has no crossing to
- * judge at all. It is not a failure either.
+ * An unavailable observed threshold estimate is folded into the same neutral colour.
+ * It has no defensible crossing to judge and is not itself a flying failure.
  *
  *   green   passed both gates, and the interval clears both boundaries
  *   red     missed a gate, and the interval clears the boundary it missed
- *   grey    undecidable — interval straddles a boundary, or never established
+ *   grey    indeterminate — a bound/event is unavailable or an interval overlaps it
  *
- * The backend decides `marginal` and `established` (`evaluation/metrics.py`); this
- * module only maps them to colours, so the UI can never invent a verdict the
- * evaluation did not reach.
+ * The backend owns the three-way verdict (`evaluation/metrics.py`); this module only
+ * maps it to colours, so the UI cannot invent a stronger conclusion.
  */
 
 import type { EvaluationRow } from "../data/evaluationReport";
@@ -39,9 +35,9 @@ export const OBSERVED_VERDICT_COLORS: Record<ObservedVerdict, string> = {
 
 /** Short human-readable label, used by the legend and the tooltip. */
 export const OBSERVED_VERDICT_LABELS: Record<ObservedVerdict, string> = {
-  pass: "Within both gates",
-  fail: "Outside a gate",
-  undecided: "Undecidable",
+  pass: "Terminal verdict: pass",
+  fail: "Terminal verdict: fail",
+  undecided: "Terminal verdict: indeterminate",
 };
 
 /**
@@ -49,23 +45,18 @@ export const OBSERVED_VERDICT_LABELS: Record<ObservedVerdict, string> = {
  * not know the measurement limits would otherwise read grey as "no data".
  */
 export const OBSERVED_VERDICT_HINTS: Record<ObservedVerdict, string> = {
-  pass: "Lateral ≤ 106.75 m and vertical inside −3.05…+6.10 m at the threshold.",
-  fail: "Missed a gate by more than the measurement uncertainty.",
-  undecided:
-    "Either the 95 % interval straddles a gate (25 ft altitude quantisation vs a 9.15 m window), " +
-    "or the flight never flew a stabilised final approach to fit.",
+  pass: "Both required components pass their runway/procedure-specific bounds.",
+  fail: "At least one required component fails its bound.",
+  undecided: "A required event, bound, or uncertainty interval does not support pass/fail.",
 };
 
 /**
  * The verdict for one report row.
  *
- * `undecided` wins over the pass/fail bit whenever the evaluation flagged the row as
- * marginal or not established — the point of the third state is that it OVERRIDES a
- * verdict the data cannot support.
+ * `undecided` is the UI spelling of the report's `indeterminate` verdict.
  */
 export function verdictOfRow(row: EvaluationRow): ObservedVerdict {
-  if (row.established === false || row.marginal) return "undecided";
-  return row.success ? "pass" : "fail";
+  return row.verdict === "indeterminate" ? "undecided" : row.verdict;
 }
 
 /**

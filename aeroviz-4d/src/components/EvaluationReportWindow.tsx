@@ -24,7 +24,12 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import type { EvaluationReport, EvaluationRow } from "../data/evaluationReport";
+import type {
+  EvaluationComponentResult,
+  EvaluationReport,
+  EvaluationRow,
+  EvaluationVerdict,
+} from "../data/evaluationReport";
 import {
   createDeviationScatterRenderer,
   type DeviationOrbitView,
@@ -44,8 +49,17 @@ interface Props {
 
 const OK_COLOR = "#3fbf72";
 const FAIL_COLOR = "#e05b5b";
+const INDETERMINATE_COLOR = "#989da6";
 const GATE_COLOR = "#e05b5b";
 const BAND_COLOR = "rgba(63, 191, 114, 0.16)";
+
+function verdictColor(verdict: EvaluationVerdict): string {
+  return verdict === "pass"
+    ? OK_COLOR
+    : verdict === "fail"
+      ? FAIL_COLOR
+      : INDETERMINATE_COLOR;
+}
 
 function formatNum(value: number | null | undefined, digits = 1): string {
   if (value == null || !Number.isFinite(value)) return "—";
@@ -78,7 +92,7 @@ interface ProfilePoint {
   label: string;
   value: number;
   /** Whether this flight passes THIS chart's own gate (colours the dot). */
-  pass: boolean;
+  result: EvaluationComponentResult;
 }
 
 /**
@@ -100,7 +114,7 @@ const DeviationProfile = memo(function DeviationProfile({
   scale: "log" | "symlog";
   /** Dashed limit line (the lateral gate), in metres. */
   gate?: number;
-  /** Shaded acceptance window [low, high] (the vertical WCH window), in metres. */
+  /** Shaded acceptance window [low, high] when a common vertical bound exists. */
   band?: [number, number];
 }) {
   const { plotWidth, plotHeight } = plotFrame();
@@ -147,7 +161,8 @@ const DeviationProfile = memo(function DeviationProfile({
     return out.sort((a, b) => a - b);
   }, [scale, lo, hi]);
 
-  const failures = points.filter((p) => !p.pass).length;
+  const failures = points.filter((p) => p.result === "fail").length;
+  const indeterminate = points.filter((p) => p.result === "indeterminate").length;
 
   return (
     <figure className="dyncmp-chart">
@@ -199,7 +214,8 @@ const DeviationProfile = memo(function DeviationProfile({
         ) : null}
         {sorted.map((p, i) => (
           <circle key={p.label + i} cx={x(i)} cy={y(transformed[i])} r={2}
-                  fill={p.pass ? OK_COLOR : FAIL_COLOR} fillOpacity={0.85}>
+                  fill={p.result === "pass" ? OK_COLOR : p.result === "fail" ? FAIL_COLOR : INDETERMINATE_COLOR}
+                  fillOpacity={0.85}>
             <title>{`${p.label}: ${formatNum(p.value, 2)} m`}</title>
           </circle>
         ))}
@@ -209,7 +225,8 @@ const DeviationProfile = memo(function DeviationProfile({
       </svg>
       <p className="eval-chart-note">
         <span style={{ color: OK_COLOR }}>●</span> passes this gate&nbsp;&nbsp;
-        <span style={{ color: FAIL_COLOR }}>●</span> outside ({failures} of {points.length})
+        <span style={{ color: FAIL_COLOR }}>●</span> outside ({failures})&nbsp;&nbsp;
+        <span style={{ color: INDETERMINATE_COLOR }}>●</span> indeterminate ({indeterminate})
       </p>
     </figure>
   );
@@ -219,7 +236,12 @@ const DeviationProfile = memo(function DeviationProfile({
 const TimeScatter = memo(function TimeScatter({
   points,
 }: {
-  points: { label: string; observed: number; optimized: number; success: boolean }[];
+  points: {
+    label: string;
+    observed: number;
+    optimized: number;
+    verdict: EvaluationVerdict;
+  }[];
 }) {
   const { plotWidth, plotHeight } = plotFrame();
   const all = points.flatMap((p) => [p.observed, p.optimized]);
@@ -249,7 +271,7 @@ const TimeScatter = memo(function TimeScatter({
           <circle
             key={p.label}
             cx={x(p.observed)} cy={y(p.optimized)} r={3}
-            fill={p.success ? OK_COLOR : FAIL_COLOR} fillOpacity={0.85}
+            fill={verdictColor(p.verdict)} fillOpacity={0.85}
           >
             <title>{`${p.label}: observed ${formatNum(p.observed, 0)} s → optimized ${formatNum(p.optimized, 0)} s`}</title>
           </circle>
@@ -260,7 +282,8 @@ const TimeScatter = memo(function TimeScatter({
       </svg>
       <p className="eval-chart-note">
         <span style={{ color: OK_COLOR }}>●</span> successful (all gates)&nbsp;&nbsp;
-        <span style={{ color: FAIL_COLOR }}>●</span> off target (failed a gate)
+        <span style={{ color: FAIL_COLOR }}>●</span> failed a gate&nbsp;&nbsp;
+        <span style={{ color: INDETERMINATE_COLOR }}>●</span> indeterminate
       </p>
     </figure>
   );
@@ -571,7 +594,7 @@ function deviationStatus(row: EvaluationRow): DeviationStatus {
   ) {
     return "invalid (non-finite)";
   }
-  return row.established === false ? "not established" : "not measured";
+  return row.event_status === "unavailable" ? "not measured" : "not measured";
 }
 
 function deviationStatusClass(status: DeviationStatus): string {
@@ -601,34 +624,39 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
     [solvedRows],
   );
 
-  const th = report.thresholds;
+  const commonNumber = (values: (number | null | undefined)[]): number | null => {
+    const finite = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (!finite.length || finite.length !== values.length) return null;
+    return finite.every((value) => Math.abs(value - finite[0]) < 1e-9) ? finite[0] : null;
+  };
+  const commonLateralBound = commonNumber(measuredRows.map((row) => row.bounds.effective_lateral_m));
+  const commonVerticalLower = commonNumber(measuredRows.map((row) => row.bounds.vertical_lower_m));
+  const commonVerticalUpper = commonNumber(measuredRows.map((row) => row.bounds.vertical_upper_m));
   const lateralValues = useMemo(
     () =>
       measuredRows.map((r) => ({
         label: r.id,
         value: r.lateral_m,
-        pass: r.lateral_m <= th.lateral_max_m,
+        result: r.lateral_result,
       })),
-    [measuredRows, th],
+    [measuredRows],
   );
   const verticalValues = useMemo(
     () =>
       measuredRows.map((r) => ({
         label: r.id,
         value: r.vertical_m,
-        pass:
-          r.vertical_m >= -th.vertical_below_max_m &&
-          r.vertical_m <= th.vertical_above_max_m,
+        result: r.vertical_result,
       })),
-    [measuredRows, th],
+    [measuredRows],
   );
   const timePoints = useMemo(
     () =>
       referenceRows.map((r) => ({
         label: r.id,
-        observed: r.reference!.flight_time_s,
+        observed: r.reference!.reference_flight_time_s ?? 0,
         optimized: r.final_time_s ?? 0,
-        success: r.success,
+        verdict: r.verdict,
       })),
     [referenceRows],
   );
@@ -638,12 +666,9 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         label: row.id,
         lateral: row.lateral_m,
         vertical: row.vertical_m,
-        pass:
-          row.lateral_m <= th.lateral_max_m &&
-          row.vertical_m >= -th.vertical_below_max_m &&
-          row.vertical_m <= th.vertical_above_max_m,
+        verdict: row.verdict,
       })),
-    [measuredRows, th],
+    [measuredRows],
   );
 
   // Draggable floating window (same pattern as DynamicsComparisonCharts):
@@ -690,12 +715,16 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
   // says nothing. The established rate (did the flight fly a fittable, stabilised final
   // approach?) replaces it rather than joining it.
   const observed = report.observed;
+  const isObserved = report.subject === "observed";
   const cards: { value: string; label: string }[] = [
-    { value: String(report.total), label: observed ? "observed flights" : "total trajectories" },
+    {
+      value: String(report.total),
+      label: isObserved ? "evaluated observed records" : "total trajectories",
+    },
     observed
       ? {
-          value: `${observed.established}/${report.total}`,
-          label: `established rate ${formatPct(observed.established_rate)}`,
+          value: `${observed.event_estimated}/${observed.event_denominator}`,
+          label: `threshold event estimated ${formatPct(observed.event_estimated_rate)}`,
         }
       : {
           value: `${report.solved}/${report.total}`,
@@ -703,19 +732,11 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         },
     {
       value: `${report.successful}/${report.measured ?? report.total}`,
-      label: observed ? "inside both gates" : `success rate ${formatPct(report.success_rate)}`,
+      label: `pass rate ${formatPct(report.success_rate)}`,
     },
+    { value: String(report.failed), label: "failed" },
+    { value: String(report.indeterminate), label: "indeterminate" },
   ];
-  if (observed) {
-    // Stated, never hidden: with 25 ft altitude quantisation against a 9.15 m window,
-    // most real approaches sit within noise of a gate boundary.
-    cards.push({ value: String(observed.marginal), label: "marginal (undecidable)" });
-    if (observed.not_established > 0) {
-      cards.push({ value: String(observed.not_established), label: "not established" });
-    }
-  } else if (report.success_rate_among_solved != null) {
-    cards.push({ value: formatPct(report.success_rate_among_solved), label: "success among solved" });
-  }
   if (report.final_time_s) {
     cards.push({ value: `${formatNum(report.final_time_s.mean)} s`, label: "mean flight time" });
   }
@@ -760,10 +781,9 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         </div>
 
         <p className="eval-report-gates">
-          Gates (FAA Order 8260.58D): lateral ≤ {formatNum(th.lateral_max_m, 2)} m — the LPV
-          (Localizer Performance with Vertical guidance) course semiwidth floor at the threshold;
-          vertical −{formatNum(th.vertical_below_max_m, 2)}/+{formatNum(th.vertical_above_max_m, 2)} m
-          — the WCH (Wheel Crossing Height) window about the published TCH (Threshold Crossing Height).
+          Terminal bounds are runway and benchmark specific and are shown in each row.
+          Lateral uses the tighter of the guidance bound and runway half-width. LPV
+          vertical remains indeterminate when the validated RTCA vertical scale is unavailable.
         </p>
 
         {deviationAvailability.excluded > 0 ? (
@@ -858,21 +878,24 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                   title="Final lateral deviation, worst → best"
                   points={lateralValues}
                   scale="log"
-                  gate={th.lateral_max_m}
+                  gate={commonLateralBound ?? undefined}
                 />
                 <DeviationProfile
                   title="Final vertical deviation, low → high"
                   points={verticalValues}
                   scale="symlog"
-                  band={[-th.vertical_below_max_m, th.vertical_above_max_m]}
+                  band={commonVerticalLower != null && commonVerticalUpper != null
+                    ? [commonVerticalLower, commonVerticalUpper]
+                    : undefined}
                 />
               </>
             ) : null}
-            {deviation3DPoints.length > 0 ? (
+            {deviation3DPoints.length > 0 && commonLateralBound != null &&
+            commonVerticalLower != null && commonVerticalUpper != null ? (
               <DeviationScatter3D
                 points={deviation3DPoints}
-                lateralGate={th.lateral_max_m}
-                verticalBand={[-th.vertical_below_max_m, th.vertical_above_max_m]}
+                lateralGate={commonLateralBound}
+                verticalBand={[commonVerticalLower, commonVerticalUpper]}
               />
             ) : null}
             {timePoints.length > 0 ? <TimeScatter points={timePoints} /> : null}
@@ -892,7 +915,10 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
               <tr>
                 <th scope="col">flight</th>
                 <th scope="col">solved</th>
-                <th scope="col">success</th>
+                <th scope="col">event</th>
+                <th scope="col">lateral</th>
+                <th scope="col">vertical</th>
+                <th scope="col">overall</th>
                 <th scope="col">deviation status</th>
                 <th scope="col">lateral (m)</th>
                 <th scope="col">vertical (m)</th>
@@ -905,11 +931,14 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
               {report.trajectories.map((row, i) => (
                 <tr
                   key={`${row.file ?? row.id}-${i}`}
-                  className={!row.solved ? "eval-row-unsolved" : row.success ? "" : "eval-row-fail"}
+                  className={!row.solved ? "eval-row-unsolved" : row.verdict === "fail" ? "eval-row-fail" : ""}
                 >
                   <th scope="row">{row.id}</th>
                   <td>{row.solved ? "✓" : "✗"}</td>
-                  <td>{row.success ? "✓" : "✗"}</td>
+                  <td>{row.event_status}</td>
+                  <td>{row.lateral_result}</td>
+                  <td>{row.vertical_result}</td>
+                  <td>{row.verdict}</td>
                   <td className={`eval-deviation-status ${deviationStatusClass(deviationStatus(row))}`}>
                     {deviationStatus(row)}
                   </td>

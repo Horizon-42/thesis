@@ -35,6 +35,8 @@ export interface FlightOptimizerDatum {
   failed: boolean;
   /** True when it solved but the final state FAILED the evaluation gates (off target). */
   offTarget: boolean;
+  /** True when it solved but a required terminal component could not be decided. */
+  indeterminate: boolean;
 }
 
 export interface FlightOptimizerData {
@@ -106,6 +108,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
             optimizedTimeS: group.status !== "failed" ? group.finalTimeS : null,
             failed: group.status === "failed",
             offTarget: group.status === "offTarget",
+            indeterminate: group.status === "indeterminate",
           });
         }
         setByFlightKey(map);

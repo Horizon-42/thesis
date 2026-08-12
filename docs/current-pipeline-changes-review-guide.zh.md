@@ -572,8 +572,15 @@ git diff -- \
 检查：
 
 - clean script 将 `trajectories.czml` 描述为唯一 observed 文件；
-- default clean 删除 preparation 派生的 `harvest/*/{arrivals,approach}`，但保留
-  下载的 `harvest/*/tracks`；`--include-downloads` 只扩展到 measured tracks；
+- clean script 强制显式 `--airport`（可重复）或 `--all-airports`，并且只删除
+  allow-list 内的可重建输出；
+- preparation 派生的 `harvest/*/{arrivals,approach}` 可删除，但下载的
+  `harvest/*/tracks` 永不进入 deletion plan；
+- checkpoint/history、`test_release.json`、formal experiment、parked/manual/未知
+  model output、final-test prediction 和混合 experiment comparison tree 永不删除；
+- standalone TS prediction 只有在 `summary.json` 可解析且明确写出 `split: "val"`
+  时才可删除；缺失、损坏或未知 metadata 必须 fail closed；
+- destructive path 先完成全量验证和同文件系统 staging，staging 失败时回滚；
 - archive 覆盖 `4dTrajectory/outputs`，因此 sibling `shared_references` 不会漏掉；
 - 文档不再宣称当前流程生成逐跑道 observed CZML 或 arrival record copies；
 - 根目录 `AGENTS.md` 明确优先使用 conda `aeroviz`；

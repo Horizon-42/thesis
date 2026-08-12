@@ -4,6 +4,23 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-12 — Fail-closed pipeline cleaner
+
+- `clean_pipeline_data.py` now requires an explicit airport scope and constructs its
+  deletion plan from producer-owned artifact names instead of recursively treating
+  `4dTrajectory/outputs` as disposable.
+- Downloaded tracks, checkpoints/history, `test_release.json`, formal experiments,
+  pooled roots, final-test and ambiguous predictions, parked/manual/unknown outputs,
+  tracked/static data, archives, and mixed experiment comparison publications are
+  protected.
+- Only standalone predictions whose readable metadata explicitly says `split: "val"`
+  are eligible. Comparison cleanup requires a readable registry that accounts for all
+  content. The canonical observed filename is matched exactly, not by prefix.
+- Destructive execution validates the complete plan and stages every selected file on
+  the same filesystem; a staging failure rolls the move set back. Safety tests cover the
+  allowlist, airport isolation, protected research state, mixed comparison output, exact
+  CZML ownership, required scope, dry-run behavior, and rollback.
+
 ### 2026-07-23 — Fitted threshold kinematics; preparation/optimization runner split
 
 - Fitted-ADS-B targets now derive `V/psi/gamma` from the same established final-approach

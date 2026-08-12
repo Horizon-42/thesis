@@ -1,25 +1,21 @@
-"""final_approach — the single geometry of a flown final-approach segment.
+"""final_approach — the single producer of flown final-approach geometry.
 
-One package, two consumers, no cycles::
+``trajectory_data_process`` projects a track into a runway-aligned frame, fits
+the final segment once, selects the runway, and serializes a policy-free
+threshold event. Evaluation consumes that event; it does not import or rerun
+the fitter.
 
-    trajectory_data_process  ──┐
-                               ├──>  final_approach  ──>  geokit + stdlib
-    evaluation/arrival.py    ──┘
-
-Both planes need the SAME geometry: project a track into a runway-aligned frame,
-least-squares fit the established final-approach segment, and extrapolate it to the
-landing threshold. They differ only in what they do with the result:
+The two decisions remain separate:
 
   * the harvest asks **which runway** — a RELATIVE comparison (``assign_runway``
     takes the arg-min over candidate runways) that must never reject a track for
     flying badly;
-  * evaluation asks **how good** — ABSOLUTE regulation gates (FAA 8260.58D) applied
-    to the same fit.
+  * evaluation asks **how good** — benchmark/runway bounds applied to the
+    serialized crossing and uncertainty.
 
 That split is load-bearing. If the harvest filtered on the quality criterion that
-evaluation later reports, every surviving track would pass by construction and the
-established rate would be 1.0 — a number manufactured by the selection rather than
-measured. So this package returns FACTS ONLY: it exposes no ``established`` flag, no
+evaluation later reports, every surviving track would pass by construction. So
+this package returns FACTS ONLY: it exposes no ``established`` flag, no
 pass/fail verdict, and no regulation constant. Thresholds live with their consumer.
 
 Why the fit exists at all: ADS-B coverage from crowd-sourced ground receivers stops

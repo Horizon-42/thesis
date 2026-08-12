@@ -163,13 +163,21 @@ summary / evaluation report
 需要完整清理派生链时先预览：
 
 ```bash
-conda run -n aeroviz python clean_pipeline_data.py --dry-run
+conda run -n aeroviz python clean_pipeline_data.py --airport KRDU --dry-run
 ```
 
-默认清理包括 preparation 生成的 `harvest/*/{arrivals,approach}`、scenario JSON、
-前端 observed/CZML，以及后续 optimization、TS 和 comparison 输出；下载得到的
-canonical `harvest/*/tracks` 会保留。只有明确需要重新下载时才传
-`--include-downloads`。
+机场范围是强制参数：重复使用 `--airport ICAO` 可选多个机场；只有确实要清理
+所有机场时才使用 `--all-airports`。清理器只选择 producer 明确拥有且可重建的
+输出：`harvest/*/{arrivals,approach}`、scenario JSON、三个 optimizer 类别及其
+shared references、带有效 `summary.json` 且明确为 `split: "val"` 的 standalone
+TS prediction、canonical observed CZML/landings，以及不含 experiment/test 发布物的
+comparison tree。
+
+清理器不会提供删除 source 或研究结果的扩大范围选项。下载得到的 canonical
+`harvest/*/tracks`、checkpoint/history、`test_release.json`、formal experiment、
+parked/manual/未知输出、混有 experiment 或 final-test 的 comparison tree、git tracked
+文件、静态机场数据和 `data/archive` 一律保留。实际删除前，所有目标先移动到同一
+文件系统的 staging 目录；如果 staging 过程失败，已移动文件会回滚。
 
 先重建观察与场景输入：
 

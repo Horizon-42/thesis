@@ -121,6 +121,7 @@ from dataset import (  # noqa: E402
 from development_cohorts import DevelopmentCohort  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
+from evaluation.thresholds import AssessmentContext  # noqa: E402
 from export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, record_stem, write_batch,
 )
@@ -158,6 +159,17 @@ from train import (  # noqa: E402
 )
 
 AIRPORT, RUNWAY = "KRDU", "05L"
+
+
+def _terminal_contexts():
+    context = AssessmentContext(
+        benchmark="lpv", airport=AIRPORT, runway=RUNWAY,
+        runway_course_deg=45.0, runway_width_m=45.72,
+        runway_source="faa_nasr_apt_rwy", runway_source_cycle="2026-08-06",
+        procedure_source="faa_cifp_path_point", procedure_source_cycle="2026-08-06",
+        lpv_lateral_fsd_m=106.75, lpv_vertical_fsd_m=None,
+    )
+    return {(AIRPORT, RUNWAY): context}
 
 
 def _fake_data_provenance(airport: str = AIRPORT):
@@ -5069,6 +5081,7 @@ def test_exported_record_satisfies_the_evaluation_contract():
 
     parsed = record_from_dict(record.eval_record)
     assert parsed.solved
+    assert parsed.source["subject"] == "predicted"
     assert parsed.controls == []            # a predictor emits no control schedule
     assert parsed.final_time_s == pytest.approx(parsed.states[-1]["t"], abs=1e-6)
     assert set(parsed.states[0]) == {"t", "lat", "lon", "alt", "V", "psi", "gamma", "m"}
@@ -5347,12 +5360,11 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
     }
 
 
-def test_reference_covers_the_same_span_as_the_prediction():
-    # evaluation.reference resamples both paths at 101 fractions of THEIR OWN arc length,
-    # so a whole-track reference against an anchor-to-threshold prediction compares
-    # mismatched segments — it reported kilometres of "path deviation" that were pure span
-    # mismatch. Both must start at the anchor.
-    from evaluation.reference import compare_to_reference
+def test_reference_comparison_detects_a_prediction_with_a_different_endpoint():
+    # A shared anchor is necessary but not sufficient. An untrained prediction can finish
+    # far from the observed endpoint; normalizing both full paths would compare different
+    # physical locations and must therefore be skipped by batch evaluation.
+    from evaluation.reference import reference_span
 
     series, config = _series(n_flights=3)
     normalizer = Normalizer.fit(series)
@@ -5369,8 +5381,10 @@ def test_reference_covers_the_same_span_as_the_prediction():
     assert reference.states[0]["lat"] == pytest.approx(predicted.states[0]["lat"], abs=1e-9)
     assert reference.states[0]["lon"] == pytest.approx(predicted.states[0]["lon"], abs=1e-9)
 
-    comparison = compare_to_reference(predicted, reference)
-    assert comparison.path_lateral_m is not None
+    span = reference_span(predicted, reference)
+    assert span.start_gap_m == pytest.approx(0.0, abs=1e-6)
+    assert span.comparable is False
+    assert span.end_gap_m > 1.0
 
 
 def test_batch_writes_a_manifest_that_evaluation_can_load_and_grade(tmp_path):
@@ -5391,7 +5405,7 @@ def test_batch_writes_a_manifest_that_evaluation_can_load_and_grade(tmp_path):
     # carries a results[] roster with resolvable eval_file entries.
     loaded = load_records(tmp_path)
     assert len(loaded) == len(series)
-    report = evaluate_batch(loaded)
+    report = evaluate_batch(loaded, contexts=_terminal_contexts())
     assert report["total"] == len(series) and report["solved"] == len(series)
 
     # Every record points at a reference that exists, so compare_to_reference works.
@@ -5514,6 +5528,27 @@ def test_write_batch_rejects_overlap_that_does_not_line_up_with_the_records(tmp_
     ]
     with pytest.raises(ValueError, match="once per record"):
         write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=[])
+
+
+def test_write_batch_rejects_non_finite_values_in_referenced_state_payload(tmp_path):
+    series, config = _series(n_flights=3)
+    normalizer = Normalizer.fit(series)
+    model = build_model(config).eval()
+    forecast = forecast_approach(
+        model, series[0], config, normalizer, device=torch.device("cpu")
+    )
+    record = build_prediction_record(
+        series[0], forecast, index=0,
+        model_name=config.model, horizon_mode=config.horizon_mode,
+    )
+    record.states_payload["predicted_states"][0]["alt"] = float("nan")
+    overlap = [observed_series_metrics(series[0], forecast)]
+
+    with pytest.raises(ValueError, match="Out of range float values"):
+        write_batch(
+            [record], output_dir=tmp_path,
+            config_dict=config.to_dict(), overlap=overlap,
+        )
 
 
 def test_stale_records_are_cleared_before_a_rerun(tmp_path):
@@ -5836,7 +5871,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
     out = tmp_path / "pred"
     write_batch(records, output_dir=out, config_dict=loaded_config.to_dict(), overlap=overlap)
 
-    report = evaluate_batch(load_records(out))
+    report = evaluate_batch(load_records(out), contexts=_terminal_contexts())
     assert report["total"] == 4
     # The gate outcome is not asserted — an undertrained model on synthetic data may or may
     # not land inside 106.75 m, and pinning that would make this a flaky quality test.

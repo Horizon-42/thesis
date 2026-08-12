@@ -37,10 +37,10 @@ verdicts, so the naive number is not offered as an option.
 
 WHAT THIS MODULE DOES NOT DO
 ----------------------------
-No thresholds, no ``established`` flag, no verdict. ``SegmentFit`` reports what the
-data says; ``evaluation/arrival.py`` applies the regulation gates and
-``assign_runway`` applies a relative comparison. See the package docstring for why
-that separation is load-bearing.
+No thresholds, no ``established`` flag, no verdict. ``SegmentFit`` reports what
+the data says; the harvest serializes the winning result and evaluation later
+applies its policy to that event. ``assign_runway`` applies only a relative
+comparison. See the package docstring for why that separation is load-bearing.
 """
 
 from __future__ import annotations

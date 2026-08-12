@@ -4,11 +4,13 @@
  * the camera or canvas size changes.
  */
 
+import type { EvaluationVerdict } from "../data/evaluationReport";
+
 export interface DeviationScatterDatum {
   label: string;
   lateral: number;
   vertical: number;
-  pass: boolean;
+  verdict: EvaluationVerdict;
 }
 
 export interface DeviationOrbitView {
@@ -107,6 +109,15 @@ const REFERENCE_COLOR: Color = [0.88, 0.92, 0.98, 0.48];
 const STEM_COLOR: Color = [0.58, 0.66, 0.78, 0.56];
 const PASS_COLOR: Color = [0.25, 0.75, 0.45, 0.96];
 const FAIL_COLOR: Color = [0.88, 0.36, 0.36, 0.96];
+const INDETERMINATE_COLOR: Color = [0.6, 0.62, 0.65, 0.96];
+
+export function deviationScatterColor(verdict: EvaluationVerdict): Color {
+  return verdict === "pass"
+    ? PASS_COLOR
+    : verdict === "fail"
+      ? FAIL_COLOR
+      : INDETERMINATE_COLOR;
+}
 
 function compileShader(
   gl: WebGLRenderingContext,
@@ -328,7 +339,7 @@ export function createDeviationScatterRenderer(
 
   const pointVertices: number[] = [];
   for (const point of preparedPoints) {
-    pushVertex(pointVertices, point.world, point.pass ? PASS_COLOR : FAIL_COLOR);
+    pushVertex(pointVertices, point.world, deviationScatterColor(point.verdict));
   }
 
   const createBuffer = (data: number[]) => {
@@ -412,7 +423,7 @@ export function createDeviationScatterRenderer(
           label: point.label,
           lateral: point.lateral,
           vertical: point.vertical,
-          pass: point.pass,
+          verdict: point.verdict,
           index: point.index,
           screenX: screen.x,
           screenY: screen.y,

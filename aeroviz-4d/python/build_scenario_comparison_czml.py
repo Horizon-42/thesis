@@ -454,9 +454,9 @@ def build_runway_comparison(
       • failed → reference only, in the dark-red FAILED_COLOR, labelled "(unsolved)".
 
     ``verdicts`` maps an eval-record filename (the summary row's ``eval_file``) to its
-    evaluation-report row (``{"solved", "success", "lateral_m", "vertical_m", …}`` — see
-    ``evaluation.metrics.evaluate_batch``). A solved flight whose row says ``success: false``
-    missed the regulation gates; its final lateral/vertical deviations are copied onto the
+    evaluation-report row (``{"solved", "verdict", "lateral_m", "vertical_m", …}`` — see
+    ``evaluation.metrics.evaluate_batch``). Only an explicit ``verdict: "fail"`` becomes
+    off-target; ``indeterminate`` remains distinct. Final deviations are copied onto the
     index record (``lateralErrM``/``verticalErrM``). ``None`` (no report) keeps every solved
     flight plain "solved".
 
@@ -521,17 +521,18 @@ def build_runway_comparison(
             # The evaluation verdict for this flight (joined by the summary row's eval_file):
             # solved-but-outside-the-gates renders as "off target" (yellow reference).
             verdict = (verdicts or {}).get(result.get("eval_file") or "")
-            off_target = (
-                verdict is not None and verdict.get("solved") and not verdict.get("success")
+            terminal_verdict = verdict.get("verdict") if verdict is not None else None
+            off_target = verdict is not None and verdict.get("solved") \
+                and terminal_verdict == "fail"
+            indeterminate = verdict is not None and verdict.get("solved") \
+                and terminal_verdict == "indeterminate"
+            status = "offTarget" if off_target else (
+                "indeterminate" if indeterminate else "solved"
             )
-            status = "offTarget" if off_target else "solved"
             offset = _record_offset(state_data)
-            # The off-target COLOURING exists to make the few results that missed their
-            # target stand out among mostly-successful ones. For a learned prediction that
-            # is backwards: a forecast essentially never lands inside the 106.75 m lateral
-            # gate (that limit is FAA containment for a planned/flown approach, not a
-            # forecast-accuracy target), so ~100% of a prediction batch would go yellow —
-            # the marking would carry no information and would erase the kind's own colour.
+            # Terminal-verdict colouring is reserved for optimizer results. Learned
+            # predictions keep their kind colour so prediction error and operational
+            # terminal assessment remain distinct visual concepts.
             # The `status` property stays accurate either way, and the per-flight deviation
             # is still surfaced by the index's lateralErrM/verticalErrM and the evaluation
             # report, which say far more than a binary colour.
@@ -608,6 +609,7 @@ def build_runway_comparison(
                 # Final-state deviations from the evaluation (shown by the flight list).
                 record["lateralErrM"] = verdict.get("lateral_m")
                 record["verticalErrM"] = verdict.get("vertical_m")
+                record["terminalVerdict"] = terminal_verdict
             index_records.append(record)
         else:
             if include_reference_entities:
@@ -841,14 +843,16 @@ def evaluation_batch_stats(report: dict[str, Any]) -> dict[str, Any]:
     index it already fetches without loading the details payload.
     """
     field_names = (
-        "thresholds",
+        "schema_version",
         "total",
         "measured",
         "solved",
         "solve_rate",
         "successful",
         "success_rate",
-        "success_rate_among_solved",
+        "failed",
+        "indeterminate",
+        "verdict_counts",
         "lateral_m",
         "vertical_m",
         "final_time_s",
@@ -858,7 +862,8 @@ def evaluation_batch_stats(report: dict[str, Any]) -> dict[str, Any]:
         {
             "solve_rate": "solveRate",
             "success_rate": "successRate",
-            "success_rate_among_solved": "successRateAmongSolved",
+            "schema_version": "schemaVersion",
+            "verdict_counts": "verdictCounts",
             "lateral_m": "lateralM",
             "vertical_m": "verticalM",
             "final_time_s": "finalTimeS",

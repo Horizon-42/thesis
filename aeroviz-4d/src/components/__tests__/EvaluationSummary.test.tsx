@@ -73,17 +73,17 @@ const EXPERIMENT: ComparisonCategory = {
 };
 
 const REPORT: EvaluationReport = {
-  thresholds: {
-    lateral_max_m: 106.75,
-    vertical_below_max_m: 3.05,
-    vertical_above_max_m: 6.1,
-  },
+  schema_version: "terminal-approach-evaluation-v2",
+  methodology: {}, assessment_contexts: [], subject: "optimized",
   total: 10,
+  measured: 8,
   solved: 8,
   solve_rate: 0.8,
   successful: 6,
+  failed: 2,
+  indeterminate: 2,
+  verdict_counts: { pass: 6, fail: 2, indeterminate: 2 },
   success_rate: 0.6,
-  success_rate_among_solved: 0.75,
   lateral_m: { mean: 12.4, p95: 30, max: 40 },
   vertical_m: { mean_signed: 1.2, mean_abs: 4.6, p95_abs: 7, max_abs: 9 },
   final_time_s: { mean: 305, min: 250, max: 360 },
@@ -98,10 +98,12 @@ const OBSERVED_REPORT: EvaluationReport = {
   solved: 10,
   solve_rate: 1,
   observed: {
-    established: 8,
-    not_established: 2,
-    established_rate: 0.8,
-    marginal: 3,
+    denominator: "arrival_candidates_excluding_not_landing",
+    event_denominator: 10,
+    event_estimated: 8,
+    event_unavailable: 2,
+    event_estimated_rate: 0.8,
+    excluded_not_landing: 3,
   },
 };
 
@@ -145,15 +147,15 @@ describe("EvaluationSummary", () => {
     expect(
       screen.getByRole("region", { name: "Observed Baseline Evaluation" }),
     ).toBeTruthy();
-    expect(await within(metric("Established approach rate")).findByText("80.0%")).toBeTruthy();
-    expect(within(metric("Threshold-crossing pass rate")).getByText("75.0%")).toBeTruthy();
+    expect(await within(metric("Threshold-event availability")).findByText("80.0%")).toBeTruthy();
+    expect(within(metric("Terminal-verdict pass rate")).getByText("60.0%")).toBeTruthy();
     expect(
       within(metric("Mean lateral deviation at threshold")).getByText("12 m"),
     ).toBeTruthy();
     expect(
       within(metric("Mean absolute vertical deviation at threshold")).getByText("5 m"),
     ).toBeTruthy();
-    expect(screen.getByText(/No optimizer is involved/)).toBeTruthy();
+    expect(screen.getByText(/without refitting ADS-B/)).toBeTruthy();
     expect(fetchJsonMock).toHaveBeenCalledWith(
       expect.stringContaining("KRDU/comparison/observed/evaluation_report.json"),
     );
@@ -262,7 +264,8 @@ describe("EvaluationSummary", () => {
       evaluation: {
         solved: 10,
         successful: 6,
-        successRateAmongSolved: 0.6,
+        successRate: 0.6,
+        indeterminate: 2,
         lateralM: { mean: 12.4, p95: 30 },
         verticalM: { mean_abs: 4.6, p95_abs: 7 },
         finalTimeS: { mean: 305 },

@@ -1,31 +1,11 @@
-/**
- * evaluationReport.ts
- * -------------------
- * Types + validation for the backend evaluation report (`python -m evaluation`
- * → an immutable `evaluation_report_<generation>.json`, named by the category's
- * committed comparison index and published verbatim by
- * `build_scenario_comparison_czml.py --evaluation-report`). Legacy indexes use
- * the former fixed `evaluation_report.json` name.
- *
- * SINGLE SOURCE: every number here was computed by the backend evaluation
- * package — the frontend only formats and plots. Do not derive metrics from
- * these fields; if a new metric is needed, add it to `evaluation/metrics.py`.
- */
+/** Backend terminal-approach evaluation report (schema v2). */
 
-export interface EvaluationThresholds {
-  lateral_max_m: number;
-  vertical_below_max_m: number;
-  vertical_above_max_m: number;
-}
-
-/** `stats.magnitude_spread` dict — mean / p95 / max of non-negative magnitudes. */
 export interface MagnitudeSpread {
   mean: number;
   p95: number;
   max: number;
 }
 
-/** `stats.signed_spread` dict — signed mean + |value| spreads. */
 export interface SignedSpread {
   mean_signed: number;
   mean_abs: number;
@@ -33,75 +13,67 @@ export interface SignedSpread {
   max_abs: number;
 }
 
-/** A row's observed-track comparison block (fields per `metrics.evaluate_batch`). */
+export type EvaluationSubject = "optimized" | "predicted" | "observed";
+export type EvaluationVerdict = "pass" | "fail" | "indeterminate";
+export type EvaluationComponentResult = EvaluationVerdict | "not_applicable";
+
+export interface EvaluationBounds {
+  guidance_lateral_m: number | null;
+  runway_lateral_m: number;
+  effective_lateral_m: number | null;
+  vertical_lower_m: number | null;
+  vertical_upper_m: number | null;
+}
+
 export interface EvaluationRowReference {
   file: string;
-  flight_time_s: number;
+  comparison_status: "compared" | "skipped";
+  endpoint_tolerance_m: number;
+  start_gap_m: number | null;
+  end_gap_m: number | null;
+  reference_flight_time_s?: number;
   flight_time_delta_s?: number;
   path_lateral_m?: MagnitudeSpread;
   path_vertical_m?: SignedSpread;
   note?: string;
 }
 
-/**
- * What kind of trajectory a report describes (`arrival.Subject`). Absent means
- * `optimized` — the backend only stamps it when it is not.
- */
-export type EvaluationSubject = "optimized" | "predicted" | "observed";
-
-/** One per-trajectory verdict row (`metrics._row`, deviations only when measured). */
 export interface EvaluationRow {
   id: string;
   file: string | null;
+  flight_key?: string | null;
+  subject: EvaluationSubject;
+  airport: string;
+  runway: string;
+  benchmark: "lpv" | "rnp_apch_lnav_vnav_baro";
   solved: boolean;
   success: boolean;
+  verdict: EvaluationVerdict;
+  event_status: string;
+  lateral_result: EvaluationComponentResult;
+  vertical_result: EvaluationComponentResult;
   violations: string[];
-  /** Missing/null when no arrival could be measured; consumers must not coerce it to zero. */
+  bounds: EvaluationBounds;
   lateral_m?: number | null;
-  /** Missing/null when no arrival could be measured; consumers must not coerce it to zero. */
+  cross_track_m?: number | null;
+  along_track_m?: number | null;
   vertical_m?: number | null;
   speed_ms?: number;
   heading_rad?: number;
   final_time_s?: number;
   reason?: string;
   reference?: EvaluationRowReference;
-  /**
-   * Canonical flight identity (`flight_scenarios.identity.flight_key`) and the ONLY
-   * safe join key to a rendered track: `id` is the callsign and is not unique.
-   */
-  flight_key?: string;
-  /** Observed rows only — see `EvaluationObservedAggregate`. */
-  subject?: EvaluationSubject;
-  established?: boolean;
-  /** True when the arrival was the fitted threshold crossing, not the last state. */
-  extrapolated?: boolean;
-  /** True when the 95 % interval straddles a gate boundary: verdict undecidable. */
-  marginal?: boolean;
-  lateral_sigma_m?: number;
-  vertical_sigma_m?: number;
-  glidepath_deg?: number;
-  extrapolation_m?: number;
 }
 
-/**
- * Observed-batch counts (`metrics.evaluate_batch` → `report.observed`).
- *
- * `solve_rate` is meaningless for observed data — an observed track trivially
- * "has states", so it is 1.0 by construction. `established_rate` is the honest
- * analogue and the UI shows it INSTEAD, never alongside.
- *
- * `marginal` counts flights whose gate verdict the data cannot decide: with
- * altitudes quantised to 25 ft (7.62 m) against a 9.15 m window, the majority of
- * real approaches land in this bucket, so a bare pass rate overstates itself.
- */
 export interface EvaluationObservedAggregate {
-  established: number;
-  not_established: number;
-  established_rate: number;
-  marginal: number;
+  denominator: "arrival_candidates_excluding_not_landing";
+  event_denominator: number;
+  event_estimated: number;
+  event_unavailable: number;
+  event_estimated_rate: number;
+  excluded_not_landing: number;
 }
 
-/** The batch observed-comparison aggregate (`metrics._reference_aggregate`). */
 export interface EvaluationReferenceAggregate {
   compared: number;
   flight_time_delta_s: { mean: number; min: number; max: number };
@@ -109,21 +81,21 @@ export interface EvaluationReferenceAggregate {
   path_vertical_m: { mean_abs: number; max_abs: number };
 }
 
-/** The report dict (`metrics.evaluate_batch` — schema documented there). */
 export interface EvaluationReport {
-  thresholds: EvaluationThresholds;
-  /** "mixed" when a batch holds more than one subject; absent on older reports. */
-  subject?: EvaluationSubject | "mixed";
-  /** Present only for observed batches. */
+  schema_version: "terminal-approach-evaluation-v2";
+  methodology: Record<string, unknown>;
+  assessment_contexts: Record<string, unknown>[];
+  subject: EvaluationSubject | "mixed";
   observed?: EvaluationObservedAggregate;
   total: number;
-  /** Records that yielded an arrival to grade — differs from `solved` only for observed. */
-  measured?: number;
+  measured: number;
   solved: number;
   solve_rate: number;
+  verdict_counts: Record<EvaluationVerdict, number>;
   successful: number;
+  failed: number;
+  indeterminate: number;
   success_rate: number;
-  success_rate_among_solved: number | null;
   lateral_m: MagnitudeSpread | null;
   vertical_m: SignedSpread | null;
   final_time_s: { mean: number; min: number; max: number } | null;
@@ -131,24 +103,57 @@ export interface EvaluationReport {
   trajectories: EvaluationRow[];
 }
 
+function isObservedAggregate(value: unknown): value is EvaluationObservedAggregate {
+  if (!value || typeof value !== "object") return false;
+  const aggregate = value as Record<string, unknown>;
+  const counts = [
+    aggregate.event_denominator,
+    aggregate.event_estimated,
+    aggregate.event_unavailable,
+    aggregate.excluded_not_landing,
+  ];
+  if (
+    aggregate.denominator !== "arrival_candidates_excluding_not_landing" ||
+    !counts.every((count) => Number.isInteger(count) && Number(count) >= 0) ||
+    typeof aggregate.event_estimated_rate !== "number" ||
+    !Number.isFinite(aggregate.event_estimated_rate)
+  ) {
+    return false;
+  }
+  const denominator = Number(aggregate.event_denominator);
+  const estimated = Number(aggregate.event_estimated);
+  const unavailable = Number(aggregate.event_unavailable);
+  const expectedRate = denominator === 0 ? 0 : estimated / denominator;
+  return (
+    estimated + unavailable === denominator &&
+    Math.abs(aggregate.event_estimated_rate - expectedRate) <= 1e-12
+  );
+}
+
 export function isEvaluationReport(value: unknown): value is EvaluationReport {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
+  const counts = candidate.verdict_counts as Record<string, unknown> | undefined;
   return (
+    candidate.schema_version === "terminal-approach-evaluation-v2" &&
     typeof candidate.total === "number" &&
     typeof candidate.solved === "number" &&
-    typeof candidate.solve_rate === "number" &&
-    typeof candidate.success_rate === "number" &&
-    !!candidate.thresholds &&
-    typeof candidate.thresholds === "object" &&
+    !!counts &&
+    typeof counts.pass === "number" &&
+    typeof counts.fail === "number" &&
+    typeof counts.indeterminate === "number" &&
+    (candidate.observed === undefined || isObservedAggregate(candidate.observed)) &&
+    Array.isArray(candidate.assessment_contexts) &&
     Array.isArray(candidate.trajectories) &&
-    candidate.trajectories.every(
-      (row) =>
-        !!row &&
-        typeof row === "object" &&
-        typeof (row as Record<string, unknown>).id === "string" &&
-        typeof (row as Record<string, unknown>).solved === "boolean" &&
-        typeof (row as Record<string, unknown>).success === "boolean",
-    )
+    candidate.trajectories.every((row) => {
+      if (!row || typeof row !== "object") return false;
+      const record = row as Record<string, unknown>;
+      return (
+        typeof record.id === "string" &&
+        typeof record.solved === "boolean" &&
+        ["pass", "fail", "indeterminate"].includes(String(record.verdict)) &&
+        !!record.bounds && typeof record.bounds === "object"
+      );
+    })
   );
 }

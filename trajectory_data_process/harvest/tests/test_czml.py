@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from flight_scenarios.identity import flight_key
-from trajectory_data_process.harvest.czml import render_observed_czml
+from trajectory_data_process.harvest.czml import _extrapolated_waypoints, render_observed_czml
 from trajectory_data_process.harvest.store import ALTITUDE_DATUM, ALTITUDE_SOURCE, HarvestPaths
 
 
@@ -69,3 +69,32 @@ def test_render_writes_one_canonical_czml_and_removes_legacy_partitions(tmp_path
     assert {packet["properties"]["runway"] for packet in packets[1:]} == {"01", "19"}
     manifest = json.loads(rendered.manifest.read_text(encoding="utf-8"))
     assert {row["file"] for row in manifest["runways"]} == {"trajectories.czml"}
+
+
+def test_extrapolated_tail_uses_the_serialized_event_and_fit_source_range():
+    track = {
+        "flight_key": "TEST_01_abc_20260812T000000Z",
+        "runway": "01",
+        "landing_sample_index": 3,
+        "samples": [
+            [0.0, -78.0, 35.0, 200.0],
+            [1.0, -78.0, 35.0005, 190.0],
+            [2.0, -78.0, 35.0010, 180.0],
+            [3.0, -78.0, 35.0015, 170.0],
+        ],
+        "observed_threshold_event": {
+            "status": "estimated",
+            "runway": "01",
+            "source_sample_range": [0, 2],
+            "extrapolation_m": 300.0,
+            "threshold_crossing_lon": -78.0,
+            "threshold_crossing_lat": 35.0037,
+            "threshold_crossing_altitude_m": 150.0,
+        },
+    }
+
+    tail = _extrapolated_waypoints(track)
+
+    assert tail[0][0] == 2.0
+    assert tail[0][2] == 35.001
+    assert tail[1][1:] == [-78.0, 35.0037, 150.0]

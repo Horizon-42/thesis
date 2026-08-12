@@ -205,7 +205,7 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
             {resultSource === "baseline" && observedVerdicts.counts ? (
               <div className="control-panel-verdict-legend" aria-label="Approach verdict legend">
                 <div className="control-panel-verdict-title">
-                  Approach verdict (FAA 8260.58D gates at the threshold)
+                  Terminal approach verdict (procedure and runway bounds)
                 </div>
                 {(["pass", "fail", "undecided"] as const).map((verdict) => (
                   <div key={verdict} className="control-panel-verdict-row">

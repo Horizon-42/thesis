@@ -150,9 +150,9 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
             raise ValueError("Direct collocation free-time optimization failed: Infeasible_Problem_Detected")
         return so.ScenarioOptimization(
             scenario.source, 12.0, [], [],
-            evaluation=ee.evaluation_record(
-                scenario.initial, scenario.target, _rollout_samples(scenario.initial),
-                scenario.source,
+                evaluation=ee.evaluation_record(
+                    scenario.initial, scenario.target, _rollout_samples(scenario.initial),
+                    scenario.source, subject="optimized",
             ),
         )
 
@@ -236,7 +236,10 @@ def test_evaluation_record_aligns_controls_with_states():
     # active at states[i].t — no re-derivation of the control schedule.
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, 60000.0)
     target = GeodeticState(35.9, -78.8, 130.0, 70.0, 0.8, -0.05, 60000.0)
-    record = ee.evaluation_record(initial, target, _rollout_samples(initial), {"id": "AFR074"})
+    record = ee.evaluation_record(
+        initial, target, _rollout_samples(initial), {"id": "AFR074"},
+        subject="optimized",
+    )
     assert len(record["states"]) == len(record["controls"]) == 3
     assert record["final_time_s"] == 10.0
     assert record["states"][0] == {"t": 0.0, "lat": 35.6, "lon": -78.5, "alt": 2000.0,
@@ -245,16 +248,20 @@ def test_evaluation_record_aligns_controls_with_states():
     assert record["controls"][1]["thrust"] == pytest.approx(1.0e5)
     assert record["controls"][2]["thrust"] == pytest.approx(8.0e4)
     assert record["target_state"]["alt"] == 130.0
-    assert record["source"] == {"id": "AFR074"}
+    assert record["source"] == {"id": "AFR074", "subject": "optimized"}
 
 
 def test_failed_evaluation_record_keeps_boundary_conditions_with_empty_lists():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, 60000.0)
-    record = ee.failed_evaluation_record(initial, None, {"id": "BAD"}, "ValueError: infeasible")
+    record = ee.failed_evaluation_record(
+        initial, None, {"id": "BAD"}, "ValueError: infeasible",
+        subject="optimized",
+    )
     assert record["states"] == [] and record["controls"] == []
     assert record["final_time_s"] is None and record["target_state"] is None
     assert record["initial_state"]["lat"] == 35.6
     assert record["reason"] == "ValueError: infeasible"
+    assert record["source"]["subject"] == "optimized"
 
 
 def test_eval_filename_mirrors_states_filename():
@@ -399,7 +406,7 @@ def test_batch_embeds_reference_pointers(monkeypatch, tmp_path):
             scenario.source, 12.0, [], [],
             evaluation=ee.evaluation_record(
                 scenario.initial, scenario.target, _rollout_samples(scenario.initial),
-                scenario.source,
+                scenario.source, subject="optimized",
             ),
         )
 

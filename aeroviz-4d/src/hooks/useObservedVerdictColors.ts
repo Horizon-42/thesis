@@ -1,13 +1,13 @@
 /**
  * useObservedVerdictColors.ts
  * ---------------------------
- * Repaints the plain observed ADS-B tracks by their FAA 8260.58D gate verdict:
- * green inside both gates, red outside one, grey when the data cannot decide.
+ * Repaints the plain observed ADS-B tracks by their terminal-event verdict:
+ * green for pass, red for fail, grey when the available evidence cannot decide.
  *
  * WHY REPAINT INSTEAD OF BAKING THE COLOUR INTO THE CZML
  * A verdict is not a property of the recorded flight — it is the output of an
- * evaluation that depends on the gates, the fit window and the established criteria,
- * all of which are tuned. Baking it would make every CZML stale on a threshold change
+ * evaluation that depends on the serialized threshold event and assessment context,
+ * all of which are versioned. Baking it would make every CZML stale on a policy change
  * and would couple track generation to the judging package it deliberately does not
  * import. The report is a separate, cheap fetch, so the colour is applied here.
  *

@@ -31,6 +31,10 @@ def _airport() -> Airport:
         hae_minus_msl_m=0.0,
         threshold_crossing_height_m=None,
         published_glidepath_deg=None,
+        width_m=45.72,
+        lpv_course_width_m=None,
+        runway_source_cycle="2026-08-06",
+        procedure_source_cycle="2026-08-06",
         position_source="faa_cifp_path_point",
         vertical_source="faa_cifp_path_point",
     )

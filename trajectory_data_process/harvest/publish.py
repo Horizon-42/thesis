@@ -52,7 +52,7 @@ def publish_observed_report(
     directory = root / key
     directory.mkdir(parents=True, exist_ok=True)
     report_path = directory / REPORT_NAME
-    report_path.write_text(json.dumps(report, indent=1), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=1, allow_nan=False), encoding="utf-8")
     _upsert_category(root / CATEGORIES_NAME, key=key, label=label, directory=key)
     return report_path
 
@@ -75,4 +75,6 @@ def _upsert_category(manifest_path: Path, *, key: str, label: str, directory: st
     )
     manifest["categories"] = sorted(kept, key=lambda c: c["key"])
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, allow_nan=False), encoding="utf-8"
+    )

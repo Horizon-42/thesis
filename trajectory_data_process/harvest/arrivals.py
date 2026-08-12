@@ -17,10 +17,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from final_approach import TrackPoint, fit_final_segment
-
 from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM, truncate_flights
-from trajectory_data_process.harvest.airports import Airport, Runway
+from trajectory_data_process.harvest.airports import (
+    Airport,
+    Runway,
+    require_matching_runway_data,
+)
 from trajectory_data_process.harvest.czml import czml_input_flight, verify_identity
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
@@ -157,7 +159,9 @@ def write_arrival_records(
     }
     path = arrival_manifest_path(paths)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    path.write_text(
+        json.dumps(manifest, indent=1, allow_nan=False), encoding="utf-8"
+    )
     return manifest
 
 
@@ -301,27 +305,26 @@ def resolve_arrival_manifest(path: str | Path) -> Path:
 
 
 def _anchor_index(track: dict[str, Any], runway: Runway) -> int:
-    points = [
-        TrackPoint(lat=float(row[2]), lon=float(row[1]), alt_m=float(row[3]))
-        for row in track["samples"]
-    ]
-    frame = runway.frame("hae")
-    fit = fit_final_segment(points, frame)
-    if fit is not None and fit.approaching:
-        # Refit against the current runway definition before deriving arrivals. Stored
-        # tracks can predate the final-inbound-pass anchor rule or a CIFP LTP update; a
-        # syntactically valid old index may therefore point at an earlier overflight.
-        return min(
-            range(fit.last_sample_index, len(points)),
-            key=lambda index: frame.distance_m(points[index]),
+    samples = track.get("samples")
+    if not isinstance(samples, list) or not samples:
+        raise ValueError(f"track {track.get('flight_key')!r} has no samples")
+    event = track.get("observed_threshold_event")
+    if (
+        not isinstance(event, dict)
+        or event.get("status") != "estimated"
+        or event.get("runway") != runway.ident
+    ):
+        raise ValueError(
+            f"track {track.get('flight_key')!r} lacks the serialized threshold event "
+            f"for runway {runway.ident!r}; run --reclassify-existing"
         )
+    require_matching_runway_data(event, runway)
     stored = track.get("landing_sample_index")
-    if isinstance(stored, int) and 0 <= stored < len(points):
+    if isinstance(stored, int) and not isinstance(stored, bool) and 0 <= stored < len(samples):
         return stored
     raise ValueError(
-        f"track {track.get('flight_key')!r} has neither a usable final inbound pass "
-        f"against runway {runway.ident!r} nor a valid stored landing_sample_index; "
-        "perform a full re-harvest"
+        f"track {track.get('flight_key')!r} has no valid stored landing_sample_index; "
+        "run --reclassify-existing"
     )
 
 

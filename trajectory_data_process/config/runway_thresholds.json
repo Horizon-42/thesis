@@ -6,9 +6,11 @@
       "lat": 35.878659,
       "lon": -78.7873,
       "elevation_m": 132.59,
+      "runway_width_effective_date": "2026-08-06",
       "runways": [
         {
           "name": "05L/23R",
+          "width_ft": 150,
           "length_ft": 10000,
           "surface": "CON",
           "thresholds": [
@@ -34,6 +36,7 @@
         },
         {
           "name": "05R/23L",
+          "width_ft": 150,
           "length_ft": 7500,
           "surface": "ASP",
           "thresholds": [
@@ -59,6 +62,7 @@
         },
         {
           "name": "14/32",
+          "width_ft": 100,
           "length_ft": 3570,
           "surface": "ASP",
           "thresholds": [
@@ -89,9 +93,11 @@
       "lat": 29.993401,
       "lon": -90.264673,
       "elevation_m": 1.22,
+      "runway_width_effective_date": "2026-08-06",
       "runways": [
         {
           "name": "02/20",
+          "width_ft": 150,
           "length_ft": 7002,
           "surface": "ASP",
           "thresholds": [
@@ -117,6 +123,7 @@
         },
         {
           "name": "11/29",
+          "width_ft": 150,
           "length_ft": 10104,
           "surface": "PEM",
           "thresholds": [
@@ -147,9 +154,11 @@
       "lat": 37.362452,
       "lon": -121.929188,
       "elevation_m": 18.9,
+      "runway_width_effective_date": "2026-08-06",
       "runways": [
         {
           "name": "12L/30R",
+          "width_ft": 150,
           "length_ft": 11000,
           "surface": "CON",
           "thresholds": [
@@ -175,6 +184,7 @@
         },
         {
           "name": "12R/30L",
+          "width_ft": 150,
           "length_ft": 11000,
           "surface": "CON",
           "thresholds": [
@@ -205,9 +215,11 @@
       "lat": 38.6954,
       "lon": -121.591003,
       "elevation_m": 8.23,
+      "runway_width_effective_date": "2026-08-06",
       "runways": [
         {
           "name": "17L/35R",
+          "width_ft": 150,
           "length_ft": 8605,
           "surface": "CON",
           "thresholds": [
@@ -233,6 +245,7 @@
         },
         {
           "name": "17R/35L",
+          "width_ft": 150,
           "length_ft": 8598,
           "surface": "CON",
           "thresholds": [
@@ -263,9 +276,11 @@
       "lat": 38.748697,
       "lon": -90.370003,
       "elevation_m": 188.37,
+      "runway_width_effective_date": "2026-08-06",
       "runways": [
         {
           "name": "06/24",
+          "width_ft": 150,
           "length_ft": 7603,
           "surface": "CON",
           "thresholds": [
@@ -291,6 +306,7 @@
         },
         {
           "name": "11/29",
+          "width_ft": 150,
           "length_ft": 9000,
           "surface": "CON",
           "thresholds": [
@@ -316,6 +332,7 @@
         },
         {
           "name": "12L/30R",
+          "width_ft": 150,
           "length_ft": 9013,
           "surface": "CON",
           "thresholds": [
@@ -341,6 +358,7 @@
         },
         {
           "name": "12R/30L",
+          "width_ft": 150,
           "length_ft": 11020,
           "surface": "CON",
           "thresholds": [
