@@ -167,7 +167,10 @@ def _terminal_contexts():
         runway_course_deg=45.0, runway_width_m=45.72,
         runway_source="faa_nasr_apt_rwy", runway_source_cycle="2026-08-06",
         procedure_source="faa_cifp_path_point", procedure_source_cycle="2026-08-06",
-        lpv_lateral_fsd_m=106.75, lpv_vertical_fsd_m=None,
+        threshold_elevation_hae_m=141.86,
+        threshold_elevation_msl_m=111.86,
+        threshold_crossing_height_m=15.0,
+        lpv_lateral_fsd_m=106.75,
     )
     return {(AIRPORT, RUNWAY): context}
 

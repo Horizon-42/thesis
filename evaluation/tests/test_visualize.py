@@ -15,6 +15,9 @@ def contexts():
         runway_course_deg=0.0, runway_width_m=45.72,
         runway_source="faa_nasr_apt_rwy", runway_source_cycle="2026-08-06",
         procedure_source="faa_terminal_procedure", procedure_source_cycle="2026-08-06",
+        threshold_elevation_hae_m=130.0,
+        threshold_elevation_msl_m=100.0,
+        threshold_crossing_height_m=30.0,
         baro_vnav_approved=True,
     )
     return {("KRDU", "05L"): context}
@@ -49,5 +52,8 @@ def test_rendered_payload_is_strict_json_and_escapes_script_close():
     result = build_payload([record_from_dict(value)], contexts=contexts())
     page = render_html(result, title="Test", source_label="batch")
     assert "const DATA=" in page
+    assert "7.5 m half-FSD threshold bound" in page
+    assert "remain indeterminate" not in page
+    assert "missing LPV bound" not in page
     assert "</script><img" not in page
     assert "<\\/script><img" in page

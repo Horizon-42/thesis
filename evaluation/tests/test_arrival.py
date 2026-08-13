@@ -18,6 +18,9 @@ def context(*, benchmark="lpv") -> AssessmentContext:
         runway_source_cycle="2026-08-06",
         procedure_source="faa_cifp_path_point",
         procedure_source_cycle="2026-08-06",
+        threshold_elevation_hae_m=130.0,
+        threshold_elevation_msl_m=100.0,
+        threshold_crossing_height_m=30.0,
         lpv_lateral_fsd_m=106.75 if benchmark == "lpv" else None,
         baro_vnav_approved=benchmark != "lpv",
     )
@@ -85,6 +88,14 @@ def test_computed_trajectory_ending_before_threshold_is_not_reached():
     assert outcome.event_status == "not_reached"
 
 
+def test_computed_target_altitude_must_match_authoritative_tch_context():
+    value = payload()
+    value["target_state"]["alt"] = 131.0
+
+    with pytest.raises(ValueError, match="target_state.alt.*authoritative"):
+        arrival_deviation(record_from_dict(value), context=context())
+
+
 def test_observed_record_consumes_serialized_event_and_converts_hae_to_msl():
     outcome = arrival_deviation(
         record_from_dict(payload(subject="observed", event=event(vertical=5.0))),
@@ -96,6 +107,14 @@ def test_observed_record_consumes_serialized_event_and_converts_hae_to_msl():
     assert deviation.vertical_m == pytest.approx(5.0)
     assert deviation.extrapolated is True
     assert deviation.extrapolation_m == pytest.approx(300.0)
+
+
+def test_observed_record_datum_offset_must_match_authoritative_context():
+    value = payload(subject="observed", event=event())
+    value["source"]["hae_minus_msl_m"] = 31.0
+
+    with pytest.raises(ValueError, match="hae_minus_msl_m.*authoritative"):
+        arrival_deviation(record_from_dict(value), context=context())
 
 
 def test_unavailable_observed_event_is_indeterminate_input_not_a_refit_request():

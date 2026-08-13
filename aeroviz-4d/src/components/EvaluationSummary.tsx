@@ -115,7 +115,7 @@ function observedPresentation(report: EvaluationReport | null): Presentation {
     note:
       "Runway assignment produces one policy-free threshold-event estimate from the final " +
       "approach fit; evaluation consumes that estimate without refitting ADS-B. LPV vertical " +
-      "and overall remain indeterminate until the validated RTCA vertical scale is available.",
+      "uses the published-TCH path with the 7.5 m half-FSD threshold bound.",
     rows: [
       row(
         "Threshold-event availability",

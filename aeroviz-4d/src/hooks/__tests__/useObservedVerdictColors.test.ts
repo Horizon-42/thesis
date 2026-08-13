@@ -84,8 +84,23 @@ describe("useObservedVerdictColors", () => {
     );
     fetchJsonMock.mockReset();
     fetchJsonMock.mockResolvedValue({
-      schema_version: "terminal-approach-evaluation-v2",
-      methodology: {},
+      schema_version: "terminal-approach-evaluation-v3",
+      methodology: {
+        terminal_vertical: {
+          reference: "LTP elevation MSL + published FAS TCH",
+          trajectory_altitude_datum: "msl",
+          target_context_tolerance_m: 0.01,
+          lpv: {
+            scale_model: "do229_lpv_angular_min_clamped",
+            one_sided_minimum_fsd_m: 15,
+            normal_fsd_fraction: 0.5,
+            effective_threshold_bound_m: 7.5,
+            sources: [
+              { document: "ICAO Doc 9613", location: "§5.3.3.1.1.1(b)", use: "half FSD" },
+            ],
+          },
+        },
+      },
       assessment_contexts: [],
       subject: "observed",
       total: 1,

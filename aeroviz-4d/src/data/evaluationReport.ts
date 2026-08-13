@@ -1,4 +1,4 @@
-/** Backend terminal-approach evaluation report (schema v2). */
+/** Backend terminal-approach evaluation report (schema v3). */
 
 export interface MagnitudeSpread {
   mean: number;
@@ -82,7 +82,7 @@ export interface EvaluationReferenceAggregate {
 }
 
 export interface EvaluationReport {
-  schema_version: "terminal-approach-evaluation-v2";
+  schema_version: "terminal-approach-evaluation-v3";
   methodology: Record<string, unknown>;
   assessment_contexts: Record<string, unknown>[];
   subject: EvaluationSubject | "mixed";
@@ -101,6 +101,43 @@ export interface EvaluationReport {
   final_time_s: { mean: number; min: number; max: number } | null;
   reference: EvaluationReferenceAggregate | null;
   trajectories: EvaluationRow[];
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function hasLpvVerticalMethodology(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const methodology = value as Record<string, unknown>;
+  const terminal = methodology.terminal_vertical;
+  if (!terminal || typeof terminal !== "object") return false;
+  const terminalRecord = terminal as Record<string, unknown>;
+  const lpv = terminalRecord.lpv;
+  if (!lpv || typeof lpv !== "object") return false;
+  const lpvRecord = lpv as Record<string, unknown>;
+  const sources = lpvRecord.sources;
+  return (
+    terminalRecord.reference === "LTP elevation MSL + published FAS TCH" &&
+    terminalRecord.trajectory_altitude_datum === "msl" &&
+    isFiniteNumber(terminalRecord.target_context_tolerance_m) &&
+    terminalRecord.target_context_tolerance_m >= 0 &&
+    lpvRecord.scale_model === "do229_lpv_angular_min_clamped" &&
+    lpvRecord.one_sided_minimum_fsd_m === 15 &&
+    lpvRecord.normal_fsd_fraction === 0.5 &&
+    lpvRecord.effective_threshold_bound_m === 7.5 &&
+    Array.isArray(sources) &&
+    sources.length > 0 &&
+    sources.every((source) => {
+      if (!source || typeof source !== "object") return false;
+      const record = source as Record<string, unknown>;
+      return (
+        typeof record.document === "string" &&
+        typeof record.location === "string" &&
+        typeof record.use === "string"
+      );
+    })
+  );
 }
 
 function isObservedAggregate(value: unknown): value is EvaluationObservedAggregate {
@@ -135,7 +172,8 @@ export function isEvaluationReport(value: unknown): value is EvaluationReport {
   const candidate = value as Record<string, unknown>;
   const counts = candidate.verdict_counts as Record<string, unknown> | undefined;
   return (
-    candidate.schema_version === "terminal-approach-evaluation-v2" &&
+    candidate.schema_version === "terminal-approach-evaluation-v3" &&
+    hasLpvVerticalMethodology(candidate.methodology) &&
     typeof candidate.total === "number" &&
     typeof candidate.solved === "number" &&
     !!counts &&

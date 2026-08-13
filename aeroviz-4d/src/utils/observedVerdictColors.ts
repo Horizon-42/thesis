@@ -7,9 +7,9 @@
  *
  * A pass/fail pair would be a lie when a required operational bound is unavailable or
  * a fitted observed threshold event overlaps a bound once its uncertainty is included.
- * LPV vertical is deliberately indeterminate until the licensed RTCA vertical FSD
- * scaling is validated; painting that state red would report missing authority as a
- * flying error.
+ * LPV has a resolved vertical bound, but an observed fit can still be indeterminate when
+ * its confidence interval overlaps that bound; painting that state red would report
+ * uncertainty as a flying error.
  *
  * An unavailable observed threshold estimate is folded into the same neutral colour.
  * It has no defensible crossing to judge and is not itself a flying failure.

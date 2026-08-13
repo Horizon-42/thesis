@@ -783,7 +783,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         <p className="eval-report-gates">
           Terminal bounds are runway and benchmark specific and are shown in each row.
           Lateral uses the tighter of the guidance bound and runway half-width. LPV
-          vertical remains indeterminate when the validated RTCA vertical scale is unavailable.
+          vertical uses the published-TCH path and the 7.5 m half-FSD threshold bound.
         </p>
 
         {deviationAvailability.excluded > 0 ? (

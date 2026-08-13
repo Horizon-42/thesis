@@ -6,7 +6,9 @@ import math
 
 import pytest
 
-from evaluation import AssessmentContext, evaluate_record, record_from_dict
+from evaluation import AssessmentContext, evaluate_batch, evaluate_record, record_from_dict
+from evaluation.context import assessment_for_runway
+from trajectory_data_process.harvest.airports import Runway
 
 
 TARGET = {
@@ -71,6 +73,24 @@ def _record(*, cross_m: float = 0.0, vertical_m: float = 0.0) -> dict:
     }
 
 
+def _computed_record(*, vertical_m: float = 0.0) -> dict:
+    first = {"t": 0.0, **TARGET, "lat": 35.8, "alt": 500.0}
+    last = {"t": 100.0, **TARGET, "alt": TARGET["alt"] + vertical_m}
+    return {
+        "source": {
+            "id": "IDEAL123",
+            "subject": "optimized",
+            "arr_airport": "KRDU",
+            "runway": "05L",
+        },
+        "initial_state": {key: value for key, value in first.items() if key != "t"},
+        "target_state": TARGET,
+        "final_time_s": 100.0,
+        "states": [first, last],
+        "controls": [{"thrust": 1.0}, {"thrust": 1.0}],
+    }
+
+
 def _lpv_context() -> AssessmentContext:
     return AssessmentContext(
         benchmark="lpv",
@@ -82,21 +102,58 @@ def _lpv_context() -> AssessmentContext:
         runway_source_cycle="2026-08-06",
         procedure_source="faa_cifp_path_point",
         procedure_source_cycle="2026-08-06",
+        threshold_elevation_hae_m=144.76,
+        threshold_elevation_msl_m=114.76,
+        threshold_crossing_height_m=15.24,
         lpv_lateral_fsd_m=106.75,
-        lpv_vertical_fsd_m=None,
     )
 
 
-def test_lpv_vertical_and_overall_remain_indeterminate_without_rtca_scale():
+def test_lpv_vertical_and_overall_use_the_resolved_threshold_bound():
     result = evaluate_record(record_from_dict(_record()), context=_lpv_context())
 
     assert result.lateral_result == "pass"
+    assert result.vertical_result == "pass"
+    assert result.vertical_lower_bound_m == pytest.approx(-7.5)
+    assert result.vertical_upper_bound_m == pytest.approx(7.5)
+    assert result.verdict == "pass"
+    assert result.success is True
+
+
+@pytest.mark.parametrize("vertical_m", [-7.5, 7.5])
+def test_ideal_lpv_trajectory_passes_at_the_exact_vertical_bound(vertical_m):
+    result = evaluate_record(
+        record_from_dict(_computed_record(vertical_m=vertical_m)),
+        context=_lpv_context(),
+    )
+
+    assert result.vertical_result == "pass"
+    assert result.verdict == "pass"
+
+
+@pytest.mark.parametrize("vertical_m", [-7.5001, 7.5001])
+def test_ideal_lpv_trajectory_fails_just_outside_vertical_bound(vertical_m):
+    result = evaluate_record(
+        record_from_dict(_computed_record(vertical_m=vertical_m)),
+        context=_lpv_context(),
+    )
+
+    assert result.vertical_result == "fail"
+    assert result.verdict == "fail"
+    assert result.violations == ("vertical",)
+
+
+def test_observed_uncertainty_overlapping_lpv_vertical_bound_is_indeterminate():
+    result = evaluate_record(
+        record_from_dict(_record(vertical_m=7.2)), context=_lpv_context()
+    )
+
+    assert result.vertical_interval_m == pytest.approx((6.71, 7.69))
     assert result.vertical_result == "indeterminate"
     assert result.verdict == "indeterminate"
-    assert result.success is False
 
 
-def test_runway_edge_failure_controls_even_when_lpv_vertical_is_indeterminate():
+def test_runway_edge_failure_controls_with_lpv_vertical_available():
     result = evaluate_record(
         record_from_dict(_record(cross_m=30.0)), context=_lpv_context()
     )
@@ -119,6 +176,9 @@ def test_lnav_vnav_fallback_has_a_real_vertical_gate():
         runway_source_cycle="2026-08-06",
         procedure_source="faa_terminal_procedure",
         procedure_source_cycle="2026-08-06",
+        threshold_elevation_hae_m=144.76,
+        threshold_elevation_msl_m=114.76,
+        threshold_crossing_height_m=15.24,
         baro_vnav_approved=True,
     )
 
@@ -131,6 +191,42 @@ def test_lnav_vnav_fallback_has_a_real_vertical_gate():
     assert result.vertical_lower_bound_m == pytest.approx(-22.0)
     assert result.vertical_upper_bound_m == pytest.approx(22.0)
     assert result.verdict == "pass"
+
+
+def test_non_lpv_fallback_keeps_lateral_result_when_path_reference_is_unavailable():
+    runway = Runway(
+        airport="KRDU",
+        ident="05L",
+        lat=TARGET["lat"],
+        lon=TARGET["lon"],
+        elevation_hae_m=130.0,
+        elevation_msl_m=100.0,
+        course_deg=45.0,
+        hae_minus_msl_m=30.0,
+        threshold_crossing_height_m=None,
+        published_glidepath_deg=None,
+        width_m=45.72,
+        lpv_course_width_m=None,
+        runway_source_cycle="2026-08-06",
+        procedure_source_cycle="2026-08-06",
+    )
+    context = assessment_for_runway(runway, baro_vnav_approved=True)
+
+    result = evaluate_record(record_from_dict(_computed_record()), context=context)
+
+    assert result.lateral_result == "pass"
+    assert result.vertical_result == "indeterminate"
+    assert result.verdict == "indeterminate"
+    assert result.deviation is not None
+    assert result.deviation.vertical_m is None
+    assert result.reason == "authoritative Baro-VNAV threshold path reference unavailable"
+
+    report = evaluate_batch(
+        [record_from_dict(_computed_record())],
+        contexts={("KRDU", "05L"): context},
+    )
+    assert report["vertical_m"] is None
+    assert report["trajectories"][0]["vertical_m"] is None
 
 
 def test_subject_is_required_instead_of_guessed():

@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Mapping
 
 from evaluation.arrival import (
+    TARGET_CONTEXT_TOLERANCE_M,
     TERMINAL_PLANE_TOLERANCE_M,
     ArrivalDeviation,
     arrival_deviation,
@@ -24,6 +25,10 @@ from evaluation.reference import (
 )
 from evaluation.stats import magnitude_spread, mean, signed_spread
 from evaluation.thresholds import (
+    ICAO_NORMAL_FSD_FRACTION,
+    LPV_VERTICAL_BOUND_M,
+    LPV_VERTICAL_FSD_MIN_M,
+    LPV_VERTICAL_SCALE_MODEL,
     NORMAL_95_MULTIPLIER,
     AssessmentContext,
     ComponentResult,
@@ -58,12 +63,12 @@ class TrajectoryEvaluation:
 
 
 def _component(
-    estimate: float,
+    estimate: float | None,
     lower: float | None,
     upper: float | None,
     sigma: float | None,
 ) -> tuple[ComponentResult, tuple[float, float] | None]:
-    if lower is None or upper is None:
+    if estimate is None or lower is None or upper is None:
         return "indeterminate", None
     margin = 0.0 if sigma is None else NORMAL_95_MULTIPLIER * sigma
     interval = (estimate - margin, estimate + margin)
@@ -86,12 +91,12 @@ def _validate_deviation(value: ArrivalDeviation) -> None:
     required = {
         "along_track_m": value.along_track_m,
         "cross_track_m": value.cross_track_m,
-        "vertical_m": value.vertical_m,
         "speed_ms": value.speed_ms,
         "heading_rad": value.heading_rad,
         "flight_time_s": value.flight_time_s,
     }
     optional = {
+        "vertical_m": value.vertical_m,
         "lateral_sigma_m": value.lateral_sigma_m,
         "vertical_sigma_m": value.vertical_sigma_m,
         "glidepath_deg": value.glidepath_deg,
@@ -267,7 +272,7 @@ def evaluate_batch(
     total = len(evaluations)
     times = [item.deviation.flight_time_s for item in measured]
     return {
-        "schema_version": "terminal-approach-evaluation-v2",
+        "schema_version": "terminal-approach-evaluation-v3",
         "methodology": {
             "event": {
                 "computed_predicted": "terminal_state_at_threshold_plane",
@@ -283,6 +288,40 @@ def evaluate_batch(
                     "ADS-B source integrity", "runway/FAS survey uncertainty",
                     "geoid/datum uncertainty", "model-form and extrapolation uncertainty",
                 ],
+            },
+            "terminal_vertical": {
+                "reference": "LTP elevation MSL + published FAS TCH",
+                "trajectory_altitude_datum": "msl",
+                "target_context_tolerance_m": TARGET_CONTEXT_TOLERANCE_M,
+                "lpv": {
+                    "scale_model": LPV_VERTICAL_SCALE_MODEL,
+                    "one_sided_minimum_fsd_m": LPV_VERTICAL_FSD_MIN_M,
+                    "normal_fsd_fraction": ICAO_NORMAL_FSD_FRACTION,
+                    "effective_threshold_bound_m": LPV_VERTICAL_BOUND_M,
+                    "sources": [
+                        {
+                            "document": "RTCA DO-229D",
+                            "location": "§§2.2.4.4.4 and 2.2.5.4.4",
+                            "use": "angular LPV scale and 15 m minimum linear FSD",
+                        },
+                        {
+                            "document": "ICAO Doc 9613, Fifth Edition (2023)",
+                            "location": (
+                                "Volume II, Part C, Chapter 5, Section B, "
+                                "§5.3.3.1.1.1(b)"
+                            ),
+                            "use": "normal-operation one-half vertical FSD",
+                        },
+                        {
+                            "document": (
+                                "Garmin AXIS Pilot's Guide for Certified Aircraft, "
+                                "190-03123-01 Rev B"
+                            ),
+                            "location": "Chapter 2, page 2-15, Glidepath - GPS Source",
+                            "use": "current certified-avionics confirmation of 15 m LPV lower FSD",
+                        },
+                    ],
+                },
             },
             "reference_comparison": {
                 "endpoint_tolerance_m": ENDPOINT_TOLERANCE_M,
@@ -306,7 +345,11 @@ def evaluate_batch(
         "indeterminate": verdict_counts["indeterminate"],
         "success_rate": verdict_counts["pass"] / total if total else 0.0,
         "lateral_m": magnitude_spread([item.deviation.lateral_m for item in measured]),
-        "vertical_m": signed_spread([item.deviation.vertical_m for item in measured]),
+        "vertical_m": signed_spread([
+            item.deviation.vertical_m
+            for item in measured
+            if item.deviation.vertical_m is not None
+        ]),
         "final_time_s": (
             {"mean": mean(times), "min": min(times), "max": max(times)} if times else None
         ),

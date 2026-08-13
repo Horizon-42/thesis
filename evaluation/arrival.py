@@ -19,13 +19,14 @@ from evaluation.thresholds import AssessmentContext
 
 Subject = Literal["optimized", "predicted", "observed"]
 TERMINAL_PLANE_TOLERANCE_M = 1.0
+TARGET_CONTEXT_TOLERANCE_M = 0.01
 
 
 @dataclass(frozen=True)
 class ArrivalDeviation:
     along_track_m: float
     cross_track_m: float
-    vertical_m: float
+    vertical_m: float | None
     speed_ms: float
     heading_rad: float
     flight_time_s: float
@@ -68,6 +69,29 @@ def arrival_deviation(
     return _computed_arrival(record, context)
 
 
+def _authoritative_target_altitude(
+    record: TrajectoryRecord,
+    context: AssessmentContext,
+) -> float | None:
+    if record.target_state is None:
+        raise ValueError("solved trajectory requires target_state")
+    desired = context.desired_threshold_altitude_msl_m
+    if desired is None:
+        return None
+    supplied = float(record.target_state["alt"])
+    if not math.isclose(
+        supplied,
+        desired,
+        rel_tol=0.0,
+        abs_tol=TARGET_CONTEXT_TOLERANCE_M,
+    ):
+        raise ValueError(
+            f"target_state.alt {supplied:.6f} m disagrees with authoritative "
+            f"LTP elevation + published TCH {desired:.6f} m"
+        )
+    return desired
+
+
 def _computed_arrival(
     record: TrajectoryRecord,
     context: AssessmentContext,
@@ -78,9 +102,14 @@ def _computed_arrival(
     if not record.states or record.target_state is None:
         raise ValueError("computed arrival requires a solved record and target_state")
     target = record.target_state
+    desired_altitude_msl_m = _authoritative_target_altitude(record, context)
     frame = RunwayFrame(
-        ident=context.runway,
-        lat=target["lat"], lon=target["lon"], elevation_m=target["alt"],
+        ident=context.runway, lat=target["lat"], lon=target["lon"],
+        elevation_m=(
+            desired_altitude_msl_m
+            if desired_altitude_msl_m is not None
+            else float(target["alt"])
+        ),
         course_deg=context.runway_course_deg,
     )
     final = record.states[-1]
@@ -89,7 +118,13 @@ def _computed_arrival(
     )
     if abs(final_projected.along_m) <= plane_tolerance_m:
         return ArrivalOutcome(
-            _state_deviation(final, target, frame, event_status="terminal_state"),
+            _state_deviation(
+                final,
+                target,
+                frame,
+                desired_altitude_msl_m=desired_altitude_msl_m,
+                event_status="terminal_state",
+            ),
             "terminal_state",
         )
     if len(record.states) >= 2:
@@ -109,7 +144,11 @@ def _computed_arrival(
             ) * fraction
             return ArrivalOutcome(
                 _state_deviation(
-                    crossing, target, frame, event_status="interpolated_threshold"
+                    crossing,
+                    target,
+                    frame,
+                    desired_altitude_msl_m=desired_altitude_msl_m,
+                    event_status="interpolated_threshold",
                 ),
                 "interpolated_threshold",
             )
@@ -133,14 +172,25 @@ def final_state_deviation(
     if not record.states or record.target_state is None:
         raise ValueError("final-state deviation requires a solved record and target_state")
     final, target = record.states[-1], record.target_state
+    desired_altitude_msl_m = _authoritative_target_altitude(record, context)
     frame = RunwayFrame(
         ident=context.runway,
         lat=target["lat"],
         lon=target["lon"],
-        elevation_m=target["alt"],
+        elevation_m=(
+            desired_altitude_msl_m
+            if desired_altitude_msl_m is not None
+            else float(target["alt"])
+        ),
         course_deg=context.runway_course_deg,
     )
-    return _state_deviation(final, target, frame, event_status="terminal_state")
+    return _state_deviation(
+        final,
+        target,
+        frame,
+        desired_altitude_msl_m=desired_altitude_msl_m,
+        event_status="terminal_state",
+    )
 
 
 def _state_deviation(
@@ -148,13 +198,18 @@ def _state_deviation(
     target: dict[str, float],
     frame: RunwayFrame,
     *,
+    desired_altitude_msl_m: float | None,
     event_status: str,
 ) -> ArrivalDeviation:
     projected = frame.project(TrackPoint(state["lat"], state["lon"], state["alt"]))
     return ArrivalDeviation(
         along_track_m=projected.along_m,
         cross_track_m=projected.cross_m,
-        vertical_m=state["alt"] - target["alt"],
+        vertical_m=(
+            None
+            if desired_altitude_msl_m is None
+            else state["alt"] - desired_altitude_msl_m
+        ),
         speed_ms=state["V"] - target["V"],
         heading_rad=math.remainder(state["psi"] - target["psi"], math.tau),
         flight_time_s=state["t"],
@@ -196,21 +251,40 @@ def _observed_arrival(
         )
     if event.get("altitude_datum") != "hae":
         raise ValueError("observed threshold event altitude_datum must be 'hae'")
-    geoid = record.source.get("hae_minus_msl_m")
-    if isinstance(geoid, bool) or not isinstance(geoid, (int, float)) \
-            or not math.isfinite(float(geoid)):
-        raise ValueError("observed record requires finite source.hae_minus_msl_m")
     if record.target_state is None or not record.states:
         raise ValueError("observed threshold event requires a solved record and target_state")
 
     target, final = record.target_state, record.states[-1]
-    crossing_alt_msl = _event_number(event, "threshold_crossing_altitude_m") - float(geoid)
+    desired_altitude_msl_m = _authoritative_target_altitude(record, context)
+    vertical_m = None
+    if desired_altitude_msl_m is not None:
+        geoid = record.source.get("hae_minus_msl_m")
+        if isinstance(geoid, bool) or not isinstance(geoid, (int, float)) \
+                or not math.isfinite(float(geoid)):
+            raise ValueError("observed record requires finite source.hae_minus_msl_m")
+        authoritative_geoid = context.hae_minus_msl_m
+        if authoritative_geoid is None:
+            raise ValueError("assessment context requires authoritative HAE and MSL elevations")
+        if not math.isclose(
+            float(geoid),
+            authoritative_geoid,
+            rel_tol=0.0,
+            abs_tol=TARGET_CONTEXT_TOLERANCE_M,
+        ):
+            raise ValueError(
+                f"source.hae_minus_msl_m {float(geoid):.6f} m disagrees with authoritative "
+                f"threshold datum offset {authoritative_geoid:.6f} m"
+            )
+        crossing_alt_msl = (
+            _event_number(event, "threshold_crossing_altitude_m") - authoritative_geoid
+        )
+        vertical_m = crossing_alt_msl - desired_altitude_msl_m
     return ArrivalOutcome(
         ArrivalDeviation(
             # The event is evaluated at the threshold plane by construction.
             along_track_m=0.0,
             cross_track_m=_event_number(event, "signed_cross_track_m"),
-            vertical_m=crossing_alt_msl - target["alt"],
+            vertical_m=vertical_m,
             speed_ms=final["V"] - target["V"],
             heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
             flight_time_s=final["t"],

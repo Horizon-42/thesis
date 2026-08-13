@@ -151,8 +151,9 @@ Zero and negative values raise before track serialization.
 ## Regeneration and verification
 
 The observed track schema now includes `observed_threshold_event`; evaluation
-records require explicit subject; reports use
-`terminal-approach-evaluation-v2`. These are derived artifacts and must be
+records require explicit subject. The original review fixes introduced report
+schema v2; the subsequent LPV vertical correction retires it in favour of
+`terminal-approach-evaluation-v3`. These are derived artifacts and must be
 regenerated. A legacy observed track is rejected with a local-reclassification
 instruction; it is never silently refitted.
 
@@ -235,9 +236,9 @@ non-landing track reports `1/3`, not `1/1`; the excluded count is one.
 
 ### Failure mechanism
 
-LPV vertical is currently indeterminate. Its missing-scale explanation was
-attached even when the lateral component failed, and the UI preferred that
-explanation over the actual lateral violation.
+At the time of this review fix, LPV vertical was indeterminate. Its
+missing-scale explanation was attached even when the lateral component failed,
+and the UI preferred that explanation over the actual lateral violation.
 
 ### Implemented correction
 

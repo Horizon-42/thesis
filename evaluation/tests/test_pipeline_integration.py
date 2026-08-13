@@ -61,8 +61,10 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(tmp_path)
     )
     row = report["trajectories"][0]
     assert row["lateral_result"] == "pass"
-    assert row["vertical_result"] == "indeterminate"
-    assert row["verdict"] == "indeterminate"
+    assert row["vertical_result"] == "pass"
+    assert row["verdict"] == "pass"
+    assert row["bounds"]["vertical_lower_m"] == -7.5
+    assert row["bounds"]["vertical_upper_m"] == 7.5
     assert row["observed_threshold_event"] == classified.observed_threshold_event
     assert report["observed"]["event_denominator"] == 1
 

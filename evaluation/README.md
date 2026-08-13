@@ -40,13 +40,20 @@ For LPV:
 
 ```text
 lateral = min(0.5 × published LPV lateral FSD, 0.5 × runway width)
-vertical = 0.5 × validated DO-229 vertical FSD
+vertical error = threshold-event altitude - (LTP elevation + published TCH)
+vertical bound = ±7.5 m
 ```
 
-The repository has no licensed, validated DO-229 vertical-scaling
-implementation. Therefore LPV vertical is `indeterminate`, and LPV overall is
-`indeterminate` unless another required component fails. No WCH, TCH, alert
-limit, or Baro-VNAV tolerance is substituted.
+The approved design uses the DO-229 angular LPV scale with its `15 m` minimum
+linear full-scale deflection, followed by ICAO's required one-half-FSD
+normal-operation fraction (`0.5 × 15 m = 7.5 m`). The exact source chapter and
+section indices, the scale derivation, and the landing-safety claim boundary
+are documented in
+[FINAL_APPROACH_VERDICT_STANDARD.md](FINAL_APPROACH_VERDICT_STANDARD.md#42-vertical-rule).
+
+The evaluator resolves this LPV scale itself; trajectories and harvested
+threshold events do not carry approach policy. No WCH/TCH range, SBAS alert
+limit, or Baro-VNAV tolerance is substituted for the LPV bound.
 
 For the explicit LNAV/VNAV Baro-VNAV fallback:
 
@@ -56,7 +63,11 @@ vertical = ±22 m
 ```
 
 The fallback is not selected silently. `baro_vnav_approved` must be true in the
-evaluation context.
+evaluation context. The ±22 m gate additionally requires an authoritative
+Baro-VNAV threshold-path altitude. The configured non-LPV runway fallback does
+not currently publish that reference, so evaluation still reports its lateral
+component but marks the vertical component and composite verdict
+`indeterminate`; it does not infer a target altitude from the trajectory.
 
 Observed estimates are classified using their 95% fit interval:
 
@@ -137,9 +148,11 @@ normalize two different physical spans and report the result as path error.
 
 ## Report essentials
 
-`terminal-approach-evaluation-v2` contains:
+`terminal-approach-evaluation-v3` contains:
 
 - complete assessment contexts and resolved bounds;
+- the published-TCH vertical reference, DO-229 minimum-clamped scale model,
+  `15 m` one-sided FSD, ICAO `0.5` fraction, and resolved `7.5 m` bound;
 - event/uncertainty/reference-comparison methodology;
 - three-way verdict counts;
 - per-flight signed along-track, cross-track, and vertical deviations;

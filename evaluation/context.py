@@ -20,8 +20,10 @@ def assessment_for_runway(
     """Create policy context without adding it to a trajectory artifact.
 
     LPV is selected only when the CIFP exposes an LPV course width.  The sole
-    fallback is RNP APCH LNAV/VNAV, and its vertical limit remains unavailable
-    unless the caller explicitly confirms approved Baro-VNAV applicability.
+    fallback is RNP APCH LNAV/VNAV. Its ±22 m vertical limit is enabled only
+    when the caller confirms approved Baro-VNAV applicability and supplies an
+    authoritative threshold-path reference. A configured non-LPV runway has
+    no such reference, so its vertical and composite results stay indeterminate.
     """
     selected = benchmark or (
         "lpv" if runway.lpv_course_width_m is not None
@@ -41,11 +43,12 @@ def assessment_for_runway(
             runway.position_source if selected == "lpv" else "faa_terminal_procedure"
         ),
         procedure_source_cycle=runway.procedure_source_cycle,
+        threshold_elevation_hae_m=runway.elevation_hae_m,
+        threshold_elevation_msl_m=runway.elevation_msl_m,
+        threshold_crossing_height_m=runway.threshold_crossing_height_m,
         lpv_lateral_fsd_m=(
             runway.lpv_course_width_m if selected == "lpv" else None
         ),
-        # Deliberately indeterminate until licensed RTCA scaling is validated.
-        lpv_vertical_fsd_m=None,
         baro_vnav_approved=(baro_vnav_approved if selected != "lpv" else False),
     )
 

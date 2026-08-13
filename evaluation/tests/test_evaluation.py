@@ -22,6 +22,9 @@ def context() -> AssessmentContext:
         runway_course_deg=0.0, runway_width_m=45.72,
         runway_source="faa_nasr_apt_rwy", runway_source_cycle="2026-08-06",
         procedure_source="faa_terminal_procedure", procedure_source_cycle="2026-08-06",
+        threshold_elevation_hae_m=130.0,
+        threshold_elevation_msl_m=100.0,
+        threshold_crossing_height_m=30.0,
         baro_vnav_approved=True,
     )
 
@@ -73,10 +76,21 @@ def test_json_nan_token_is_rejected(tmp_path):
 
 def test_batch_serializes_context_methodology_and_three_way_counts():
     report = evaluate_batch([record_from_dict(payload())], contexts=contexts())
-    assert report["schema_version"] == "terminal-approach-evaluation-v2"
+    assert report["schema_version"] == "terminal-approach-evaluation-v3"
     assert report["verdict_counts"] == {"pass": 1, "fail": 0, "indeterminate": 0}
     assert report["assessment_contexts"][0]["runway_source_cycle"] == "2026-08-06"
+    assert report["assessment_contexts"][0]["desired_threshold_altitude_msl_m"] == 130.0
     assert report["methodology"]["event"]["observed"].endswith("no evaluation refit")
+    lpv = report["methodology"]["terminal_vertical"]["lpv"]
+    assert lpv["scale_model"] == "do229_lpv_angular_min_clamped"
+    assert lpv["one_sided_minimum_fsd_m"] == 15.0
+    assert lpv["normal_fsd_fraction"] == 0.5
+    assert lpv["effective_threshold_bound_m"] == 7.5
+    assert {item["location"] for item in lpv["sources"]} == {
+        "§§2.2.4.4.4 and 2.2.5.4.4",
+        "Volume II, Part C, Chapter 5, Section B, §5.3.3.1.1.1(b)",
+        "Chapter 2, page 2-15, Glidepath - GPS Source",
+    }
     json.dumps(report, allow_nan=False)
 
 
