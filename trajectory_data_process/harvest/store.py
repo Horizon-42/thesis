@@ -149,8 +149,16 @@ def write_tracks(
     roster: list[dict[str, Any]] = []
     counts: dict[str, int] = {b: 0 for b in _BUCKETS}
     per_runway: dict[str, int] = {}
+    seen_flight_keys: set[str] = set()
 
     for item in classified:
+        if item.flight_key in seen_flight_keys:
+            raise ValueError(
+                f"duplicate flight_key {item.flight_key!r} produced during "
+                "classification/reclassification; multiple source tracks resolve to "
+                "the same current flight identity"
+            )
+        seen_flight_keys.add(item.flight_key)
         path = paths.record(item)
         path.parent.mkdir(parents=True, exist_ok=True)
         record = track_record(item)

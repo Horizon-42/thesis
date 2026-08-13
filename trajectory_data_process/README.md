@@ -77,6 +77,26 @@ new classification into a staging directory, and replaces `tracks/` only after e
 record succeeds. The manifest records `network_access: false`, the source-manifest hash,
 and the new per-runway fingerprints.
 
+Merge a second stored harvest root into the canonical root, then reclassify and rebuild
+all derived views without downloading:
+
+```bash
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport KRDU \
+  --merge-source trajectory_data_process/outputs/harvest-may-2026
+```
+
+`--merge-source` accepts a harvest root containing `<ICAO>/tracks/manifest.json`, not an
+individual airport directory, and may be repeated. The destination is the airport under
+`--output` (the canonical harvest root by default). Before changing it, the merge validates
+every rostered file and manifest count, rejects unsafe paths, and stages a
+same-filesystem hard-link tree. It then performs the complete reclassification in that
+staging tree and rejects collisions under the newly derived `flight_key`. Only after
+parsing, classification, uniqueness checks, and serialization all succeed does it
+atomically replace canonical `tracks/` and invalidate the derived `arrivals/` and
+`approach/` views. A failure leaves all three canonical trees unchanged. The manifest
+records source hashes and acquisition provenance. This mode never queries OpenSky.
+
 Download ADS-B history again only when the stored source samples themselves must be
 replaced:
 
@@ -85,10 +105,11 @@ conda run -n aeroviz python -m trajectory_data_process.harvest \
   --airport KRDU --full-redownload
 ```
 
-The three modes are mutually exclusive:
+The four modes are mutually exclusive:
 
 - `--evaluate-only`: reuse assignment and threshold events; rebuild downstream views.
 - `--reclassify-existing`: reuse samples; rebuild assignment, events, and downstream views.
+- `--merge-source ROOT`: merge stored samples, then rebuild assignment, events, and views.
 - `--full-redownload`: acquire the source samples again and rebuild everything.
 
 Procedure assets are a separate static-data pipeline:
@@ -149,6 +170,7 @@ harvest/runner.py       backward time-window scan and stopping policy
 harvest/tracks.py       row → contiguous measured Track
 harvest/classify.py     assignment, one final-segment fit, landing anchor, threshold event
 harvest/store.py        complete measured buckets + tracks manifest
+harvest/merge.py        transactional manifest merge + source provenance, no download
 harvest/reclassify.py   no-download reassignment/refitting from stored HAE samples
 harvest/arrivals.py     model-ready crop/filter + arrivals manifest
 harvest/observed.py     datum conversion + evaluation records from the stored event

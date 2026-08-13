@@ -3,6 +3,8 @@
     python -m trajectory_data_process.harvest --airport KRDU --count 200
     python -m trajectory_data_process.harvest --airport KRDU --evaluate-only
     python -m trajectory_data_process.harvest --airport KRDU --reclassify-existing
+    python -m trajectory_data_process.harvest --airport KRDU \
+        --merge-source trajectory_data_process/outputs/harvest-may-2026
 
 The measured samples and their assignment-produced threshold events live in ``tracks/``.
 ``arrivals/`` and ``approach/`` are regenerable views, so ``--evaluate-only`` rebuilds
@@ -33,6 +35,7 @@ from trajectory_data_process.harvest.observed import (
     write_observed_records,
 )
 from trajectory_data_process.harvest.czml import render_observed_czml
+from trajectory_data_process.harvest.merge import merge_stored_tracks
 from trajectory_data_process.harvest.publish import publish_observed_report
 from trajectory_data_process.harvest.runner import (
     HarvestPlan,
@@ -80,6 +83,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip download; rerun assignment/fitting from stored tracks, then rebuild",
     )
+    mode.add_argument(
+        "--merge-source",
+        type=Path,
+        action="append",
+        help=(
+            "merge another harvest root into --output, then reclassify and rebuild; "
+            "repeat for multiple source roots"
+        ),
+    )
     parser.add_argument("--no-cache", action="store_true", help="bypass the history query cache")
     mode.add_argument(
         "--full-redownload",
@@ -107,7 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     code = args.airport.upper()
     paths = HarvestPaths(root=args.output, code=code)
-    if not args.evaluate_only and not args.reclassify_existing and not args.full_redownload:
+    if not args.evaluate_only and not args.reclassify_existing \
+            and not args.merge_source and not args.full_redownload:
         completed = _completed_download_manifest(
             paths,
             expected_runways=_configured_runways(args.config, code),
@@ -129,7 +142,14 @@ def main(argv: list[str] | None = None) -> int:
 
     airport = load_airport(code, config_file=args.config, cifp_file=args.cifp)
 
-    if args.reclassify_existing:
+    if args.merge_source:
+        sources = [HarvestPaths(root=root, code=code) for root in args.merge_source]
+        manifest = merge_stored_tracks(paths, sources, airport=airport)
+        print(
+            f"[harvest] merged and reclassified {len(sources) + 1} source manifests "
+            f"without download: {manifest['counts']}"
+        )
+    elif args.reclassify_existing:
         manifest = reclassify_stored_tracks(airport, paths)
         print(f"[harvest] reclassified stored tracks without download: {manifest['counts']}")
     elif args.evaluate_only:

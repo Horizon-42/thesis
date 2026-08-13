@@ -119,7 +119,10 @@ def _stored_track(record: dict[str, Any], path: Path) -> Track:
     start_value = record.get("start_time_utc")
     if not isinstance(start_value, str):
         raise ValueError(f"{path}: start_time_utc is required")
-    parsed = datetime.fromisoformat(start_value.replace("Z", "+00:00"))
+    try:
+        parsed = datetime.fromisoformat(start_value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"{path}: invalid start_time_utc {start_value!r}") from error
     start_s = parsed.replace(tzinfo=parsed.tzinfo or timezone.utc).timestamp()
     rows = record.get("samples")
     if not isinstance(rows, list) or len(rows) < 2:
