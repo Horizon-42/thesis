@@ -5554,6 +5554,42 @@ def test_write_batch_rejects_non_finite_values_in_referenced_state_payload(tmp_p
         )
 
 
+def test_write_batch_serializes_unavailable_raw_metrics_as_json_null(tmp_path):
+    series, config = _series(n_flights=3)
+    normalizer = Normalizer.fit(series)
+    model = build_model(config).eval()
+    forecast = forecast_approach(
+        model, series[0], config, normalizer, device=torch.device("cpu")
+    )
+    record = build_prediction_record(
+        series[0], forecast, index=0,
+        model_name=config.model, horizon_mode=config.horizon_mode,
+    )
+    overlap = [observed_series_metrics(series[0], forecast)]
+    observed_raw = overlap[0]["raw_kinematics"]["observed_baseline"]
+    observed_raw["heading_consistency_p95_deg"] = float("nan")
+    observed_raw["turn_rate_p95_deg_s"] = float("nan")
+
+    write_batch(
+        [record], output_dir=tmp_path,
+        config_dict=config.to_dict(), overlap=overlap,
+    )
+
+    summary_text = (Path(tmp_path) / "summary.json").read_text(encoding="utf-8")
+    assert "NaN" not in summary_text
+    summary = json.loads(summary_text, parse_constant=lambda token: pytest.fail(token))
+    row_raw = summary["results"][0]["raw_kinematics"]["observed_baseline"]
+    assert row_raw["heading_consistency_p95_deg"] is None
+    assert row_raw["turn_rate_p95_deg_s"] is None
+    fleet_raw = summary["accuracy"]["raw_kinematics"]["observed_baseline"]
+    assert fleet_raw["heading_consistency_p95_deg"] == {
+        "count": 0, "median": None, "mean": None, "p95": None, "max": None,
+    }
+    assert summary["accuracy"]["raw_kinematics"]["delta"][
+        "heading_consistency_p95_deg"
+    ] is None
+
+
 def test_stale_records_are_cleared_before_a_rerun(tmp_path):
     series, config = _series(n_flights=3)
     normalizer = Normalizer.fit(series)

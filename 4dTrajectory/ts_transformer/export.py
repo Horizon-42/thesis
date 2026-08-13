@@ -210,6 +210,24 @@ def clear_stale_records(output_dir: Path) -> None:
             path.unlink()
 
 
+def _json_optional_metrics(value: Any) -> Any:
+    """Map undefined optional diagnostics to JSON null at the persistence boundary.
+
+    Raw kinematic metrics use NaN internally when a derivative is mathematically
+    undefined (for example, heading on a stationary observed tail).  Keep that numeric
+    convention for aggregation, but never publish Python's non-standard NaN token.
+    This helper is deliberately applied only to optional diagnostic fields; strict JSON
+    encoding still rejects non-finite trajectory states, times, and required metrics.
+    """
+    if isinstance(value, dict):
+        return {key: _json_optional_metrics(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_optional_metrics(item) for item in value]
+    if isinstance(value, (float, np.floating)) and not np.isfinite(value):
+        return None
+    return value
+
+
 def accuracy_block(overlap: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Roll per-flight overlap errors up into the batch's headline accuracy numbers.
 
@@ -377,13 +395,15 @@ def write_batch(
             "true_final_time_s": metrics["true_final_time_s"],
             "final_time_error_s": metrics["final_time_error_s"],
             "split": split,
-            "ade_m": metrics["ade_m"],
-            "fde_m": metrics["fde_m"],
+            "ade_m": _json_optional_metrics(metrics["ade_m"]),
+            "fde_m": _json_optional_metrics(metrics["fde_m"]),
             "overlap_steps": metrics["n_steps"],
-            "raw_kinematics": metrics["raw_kinematics"],
+            "raw_kinematics": _json_optional_metrics(metrics["raw_kinematics"]),
         })
         rows.append(row)
 
+    accuracy = accuracy_block(overlap)
+    accuracy["raw_kinematics"] = _json_optional_metrics(accuracy["raw_kinematics"])
     summary = {
         "scenarios": None,
         "mode": (
@@ -398,10 +418,12 @@ def write_batch(
         "solved": len(rows),
         "failed": 0,
         "failure_rate": 0.0,
-        "accuracy": accuracy_block(overlap),
+        "accuracy": accuracy,
         "results": rows,
     }
-    (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (out / "summary.json").write_text(
+        json.dumps(summary, indent=2, allow_nan=False), encoding="utf-8"
+    )
     return written
 
 
