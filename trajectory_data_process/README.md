@@ -11,7 +11,7 @@ OpenSky history DB
   → harvest.tracks        reconstruct one contiguous track per flight (HAE)
   → harvest.classify      runway assignment + threshold-event estimation
                           assigned | ambiguous | unassignable | not_landing
-                          + direct lateral / fitted vertical threshold event
+                          + bracket-anchored robust 3D threshold event
   → tracks/manifest.json  authoritative roster of every harvested outcome
        ├─ observed event evaluation + frontend CZML
        └─ arrivals/manifest.json
@@ -185,7 +185,7 @@ with stale slice metadata.
 harvest/runner.py       backward time-window scan and stopping policy
 harvest/tracks.py       row → contiguous measured Track
 harvest/classify.py     assignment, landing anchor, threshold-event orchestration
-harvest/threshold_event.py direct lateral / fitted vertical threshold event
+harvest/threshold_event.py structural bracket selection + one robust 3D event
 harvest/store.py        complete measured buckets + tracks manifest
 harvest/merge.py        transactional manifest merge + source provenance, no download
 harvest/reclassify.py   no-download reassignment/refitting from stored HAE samples

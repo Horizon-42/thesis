@@ -217,27 +217,23 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
         return None
     if event.get("status") != "estimated" or event.get("runway") != track.get("runway"):
         return None
-    if event.get("schema_version") != "observed-threshold-event-v4" \
-            or event.get("method_version") != 4:
+    if event.get("schema_version") != "observed-threshold-event-v6" \
+            or event.get("method_version") != 6:
         raise ValueError(
             f"track {track.get('flight_key')!r} has an obsolete threshold event; "
             "run --reclassify-existing"
         )
-    if event.get("method") == "direct_lateral_fitted_vertical":
-        # The measured track already contains both sides of the crossing. Drawing an
-        # additional inferred tail would duplicate measured geometry and mislabel it.
-        return None
-    if event.get("method") != "final_segment_window_ensemble":
+    if event.get("method") != "final_segment_robust_fit":
         raise ValueError(
             f"track {track.get('flight_key')!r} has unsupported threshold-event method "
             f"{event.get('method')!r}"
         )
-    component_ranges = event.get("component_source_sample_ranges")
-    fit_range = (
-        component_ranges.get("lateral")
-        if isinstance(component_ranges, dict)
-        else None
-    )
+    if isinstance(event.get("threshold_bracket"), dict):
+        # The measured track already contains both sides of its selected physical
+        # crossing.  The bracket anchors the fit but is not itself the event estimate;
+        # drawing an extra fitted tail would still duplicate measured geometry.
+        return None
+    fit_range = event.get("source_sample_range")
     anchor = track.get("landing_sample_index")
     if (
         not isinstance(fit_range, list) or len(fit_range) != 2

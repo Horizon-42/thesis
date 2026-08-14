@@ -7,11 +7,21 @@ import math
 import pytest
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 
-from final_approach import RunwayFrame, TrackPoint, fit_final_segment
+from final_approach import Projected, RunwayFrame, TrackPoint, fit_final_segment
+from final_approach.fit import _robust_seed_indices
 
 FRAME = RunwayFrame(ident="05L", lat=35.8745, lon=-78.802, elevation_m=111.86, course_deg=45.0)
 
 QUANTUM_M = 25.0 * 0.3048  # OpenSky geoaltitude is reported on a 25 ft lattice.
+
+
+def test_robust_seed_is_deterministically_bounded_for_dense_real_tracks():
+    indices = _robust_seed_indices(1_753)
+
+    assert len(indices) == 64
+    assert indices[0] == 0
+    assert indices[-1] == 1_752
+    assert indices == sorted(set(indices))
 
 
 def synthetic_approach(
@@ -121,6 +131,53 @@ def test_an_earlier_pass_through_the_window_is_excluded():
     assert fit is not None
     assert fit.median_abs_cross_m < 5.0  # the 4 km pass contributed nothing
     assert fit.cross_at_threshold_m == pytest.approx(0.0, abs=1.0)
+
+
+def test_small_step_reversal_cannot_accumulate_into_the_final_inbound_run():
+    """The reversal tolerance is cumulative, not a renewable per-sample allowance.
+
+    The first leg moves steadily away from the threshold in 50 m steps.  Every
+    individual step is below the 100 m jitter allowance, but together it is a
+    different leg and must not be admitted into the final inbound fit.
+    """
+    outbound = [
+        FRAME.unproject(Projected(float(along_m), 4_000.0, 300.0))
+        for along_m in range(-400, -2_001, -50)
+    ]
+    final = synthetic_approach(
+        start_along_m=-2_000.0,
+        end_along_m=-300.0,
+        step_m=100.0,
+    )
+
+    fit = fit_final_segment([*outbound, *final], FRAME)
+
+    assert fit is not None
+    assert fit.approaching
+    assert fit.median_abs_cross_m < 5.0
+    assert fit.height_at_threshold_m == pytest.approx(17.5, abs=0.5)
+
+
+def test_one_extreme_altitude_sample_is_rejected_before_the_final_fit():
+    points = synthetic_approach()
+    corrupted = list(points)
+    index = next(
+        i
+        for i, point in enumerate(corrupted)
+        if -1_000.0 < FRAME.project(point).along_m < -900.0
+    )
+    source = corrupted[index]
+    corrupted[index] = TrackPoint(
+        source.lat,
+        source.lon,
+        source.alt_m + 10_000.0,
+    )
+
+    fit = fit_final_segment(corrupted, FRAME)
+
+    assert fit is not None
+    assert fit.height_at_threshold_m == pytest.approx(17.5, abs=1.0)
+    assert index in fit.rejected_sample_indices
 
 
 def test_none_when_the_window_holds_too_few_samples():

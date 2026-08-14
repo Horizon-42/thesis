@@ -52,20 +52,14 @@ def payload(*, subject="optimized", event=None, final_lat=35.0, final_lon=-78.0)
 
 def event(*, cross=4.0, vertical=5.0):
     return {
-        "schema_version": "observed-threshold-event-v4",
-        "status": "estimated", "method": "final_segment_window_ensemble",
-        "method_version": 4, "runway": "05L",
-        "component_methods": {
-            "lateral": "final_segment_window_ensemble",
-            "vertical": "final_segment_window_ensemble",
-        },
+        "schema_version": "observed-threshold-event-v6",
+        "status": "estimated", "method": "final_segment_robust_fit",
+        "method_version": 6, "runway": "05L",
         "threshold_crossing_lat": 35.0, "threshold_crossing_lon": -78.0,
         "threshold_crossing_altitude_m": 160.0 + vertical,
         "altitude_datum": "hae", "signed_cross_track_m": cross,
         "cross_track_sigma_m": 0.5, "altitude_sigma_m": 0.75,
-        "component_source_sample_ranges": {
-            "lateral": [0, 1], "vertical": [0, 1],
-        },
+        "source_sample_range": [0, 1],
         "fit_window_m": [-5000.0, -300.0],
         "sample_count": 8, "along_track_span_m": 3000.0,
         "extrapolation_m": 300.0, "glidepath_deg": 3.0,
@@ -120,24 +114,15 @@ def test_observed_record_consumes_serialized_event_and_converts_hae_to_msl():
     assert deviation.extrapolation_m == pytest.approx(300.0)
 
 
-def test_direct_lateral_observation_still_reports_fitted_vertical_extrapolation():
-    direct = event(vertical=0.0)
-    direct.update(
-        method="direct_lateral_fitted_vertical",
-        component_methods={
-            "lateral": "threshold_plane_interpolation",
-            "vertical": "final_segment_window_ensemble",
-        },
-        lateral_extrapolation_m=0.0,
-    )
+def test_obsolete_hybrid_observed_method_is_rejected():
+    hybrid = event(vertical=0.0)
+    hybrid["method"] = "direct_lateral_fitted_vertical"
 
-    outcome = arrival_deviation(
-        record_from_dict(payload(subject="observed", event=direct)),
-        context=context(),
-    )
-
-    assert outcome.deviation is not None
-    assert outcome.deviation.extrapolated is True
+    with pytest.raises(ValueError, match="unsupported"):
+        arrival_deviation(
+            record_from_dict(payload(subject="observed", event=hybrid)),
+            context=context(),
+        )
 
 
 def test_observed_record_datum_offset_must_match_authoritative_context():
@@ -164,10 +149,10 @@ def test_observed_evaluation_has_no_fitter_dependency():
     assert "fit_final_segment" not in inspect.getsource(arrival_module)
 
 
-def test_version_two_observed_event_requires_local_reclassification():
+def test_version_five_observed_event_requires_local_reclassification():
     legacy = event()
-    legacy["schema_version"] = "observed-threshold-event-v2"
-    legacy["method_version"] = 2
+    legacy["schema_version"] = "observed-threshold-event-v5"
+    legacy["method_version"] = 5
 
     with pytest.raises(ValueError, match="reclassify-existing"):
         arrival_deviation(

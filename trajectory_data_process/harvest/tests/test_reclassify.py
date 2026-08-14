@@ -10,7 +10,10 @@ from final_approach import Projected
 from trajectory_data_process.harvest.__main__ import build_parser
 from trajectory_data_process.harvest.airports import Airport, Runway, runway_data_fingerprint
 from trajectory_data_process.harvest.classify import classify_track
-from trajectory_data_process.harvest.reclassify import reclassify_stored_tracks
+from trajectory_data_process.harvest.reclassify import (
+    _reclassification_order,
+    reclassify_stored_tracks,
+)
 from trajectory_data_process.harvest.store import HarvestPaths, track_record
 from trajectory_data_process.harvest.tracks import Sample, Track
 
@@ -96,3 +99,31 @@ def test_cli_exposes_an_exclusive_no_download_reclassification_mode():
     parser = build_parser()
     args = parser.parse_args(["--airport", "KAAA", "--reclassify-existing"])
     assert args.reclassify_existing is True
+
+
+def test_reclassification_orders_every_outcome_by_canonical_flight_time():
+    rows = [
+        {
+            "flight_key": "LATE_not_landing_abc003_20260701T000000Z",
+            "outcome": "not_landing",
+            "landing_time_utc": None,
+        },
+        {
+            "flight_key": "MIDDLE_18_abc002_20260601T000000Z",
+            "outcome": "assigned",
+            "landing_time_utc": "2026-06-01T00:00:00Z",
+        },
+        {
+            "flight_key": "EARLY_unassignable_abc001_20260501T000000Z",
+            "outcome": "unassignable",
+            "landing_time_utc": None,
+        },
+    ]
+
+    ordered = sorted(rows, key=_reclassification_order)
+
+    assert [row["flight_key"].split("_", 1)[0] for row in ordered] == [
+        "EARLY",
+        "MIDDLE",
+        "LATE",
+    ]

@@ -1,10 +1,9 @@
 """final_approach — the single producer of flown final-approach geometry.
 
-``trajectory_data_process`` projects a track into runway-aligned frames and fits
-the final segment to select the runway. Its threshold-event producer then uses a
-valid measured threshold bracket for lateral position when available and a
-producer-side final-segment fit for vertical height. Evaluation consumes that
-policy-free event; it does not import or rerun the fitter.
+``trajectory_data_process`` first uses a source-valid threshold bracket when one
+exists to select the runway and physical inbound pass. It then fits one robust
+three-dimensional final segment for both threshold coordinates. Evaluation consumes
+that policy-free event; it does not import or rerun the fitter.
 
 The two decisions remain separate:
 
@@ -19,11 +18,9 @@ evaluation later reports, every surviving track would pass by construction. So
 this package returns FACTS ONLY: it exposes no ``established`` flag, no
 pass/fail verdict, and no regulation constant. Thresholds live with their consumer.
 
-Why the fit still exists: it supplies the runway-assignment geometry, and many
-crowd-sourced ADS-B tracks stop before the threshold. Those unbracketed tracks need
-producer-side extrapolation. Even when positions bracket the threshold, OpenSky
-``geoaltitude`` is not guaranteed to share the position's update time; the event
-therefore combines direct lateral interpolation with a fitted vertical intercept.
+Why the fit still exists: many crowd-sourced ADS-B tracks stop before the threshold,
+and raw bracket altitude could not be validated consistently across airports. A
+bracket therefore anchors a pass but does not become one component of a hybrid point.
 See ``FIT_MODEL_OPTIMIZATION.md`` for the metadata experiments and uncertainty design.
 
 Datum contract (stated once, enforced nowhere): ``TrackPoint.alt_m`` and
@@ -41,6 +38,7 @@ from final_approach.assign import (
     LandingScreen,
     Outcome,
     assign_runway,
+    landing_screen_reason,
 )
 from final_approach.fit import (
     DEFAULT_MIN_SAMPLES,
@@ -70,5 +68,6 @@ __all__ = [
     "Assignment",
     "Outcome",
     "assign_runway",
+    "landing_screen_reason",
     "AMBIGUITY_MARGIN_M",
 ]

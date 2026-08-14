@@ -63,13 +63,9 @@ def observed_record(
     if runway.threshold_crossing_height_m is None:
         raise ValueError(f"{runway.airport} {runway.ident} publishes no LPV TCH")
     event = track.get("observed_threshold_event")
-    if (
-        not isinstance(event, dict)
-        or event.get("status") != "estimated"
-        or event.get("runway") != runway.ident
-    ):
+    if not isinstance(event, dict):
         raise ValueError(
-            f"track {track.get('flight_key')!r} lacks an estimated threshold event "
+            f"track {track.get('flight_key')!r} lacks a threshold event "
             f"for runway {runway.ident}; run --reclassify-existing"
         )
     require_current_threshold_event(event, runway)

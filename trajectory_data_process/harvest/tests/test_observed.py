@@ -28,10 +28,10 @@ def _runway() -> Runway:
 def test_observed_record_rejects_event_from_a_different_runway_cycle():
     runway = _runway()
     event = {
-        "schema_version": "observed-threshold-event-v4",
+        "schema_version": "observed-threshold-event-v6",
         "status": "estimated",
-        "method": "direct_lateral_fitted_vertical",
-        "method_version": 4,
+        "method": "final_segment_robust_fit",
+        "method_version": 6,
         "runway": runway.ident,
         "runway_data_fingerprint": runway_data_fingerprint(runway),
     }
@@ -47,6 +47,31 @@ def test_observed_record_rejects_event_from_a_different_runway_cycle():
 
     with pytest.raises(ValueError, match="runway-data fingerprint.*reclassify"):
         observed_record(track, newer)
+
+
+def test_observed_record_preserves_a_current_unavailable_event_for_indeterminate_evaluation():
+    runway = _runway()
+    event = {
+        "schema_version": "observed-threshold-event-v6",
+        "status": "unavailable",
+        "method": "final_segment_robust_fit",
+        "method_version": 6,
+        "runway": runway.ident,
+        "runway_data_fingerprint": runway_data_fingerprint(runway),
+        "unavailable_reason": "selected final inbound pass has no fittable segment",
+    }
+    track = {
+        "flight_key": "TEST_18_abc123_20260812T000000Z",
+        "callsign": "TEST",
+        "icao24": "abc123",
+        "landing_time_utc": "2026-08-12T00:00:00Z",
+        "observed_threshold_event": event,
+        "samples": [[0.0, -78.0, 35.05, 500.0], [1.0, -78.0, 35.04, 450.0]],
+    }
+
+    record = observed_record(track, runway)
+
+    assert record["source"]["observed_threshold_event"] == event
 
 
 def test_event_availability_counts_ambiguous_and_unassignable_candidates():

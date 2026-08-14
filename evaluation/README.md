@@ -19,19 +19,20 @@ The normative rationale and source audit are in
 ```text
 raw ADS-B samples
   -> runway assignment + producer-side threshold-event estimation
-  -> policy-free observed_threshold_event v4
+  -> policy-free observed_threshold_event v6
   -> explicit HAE/MSL conversion
   -> runway/procedure-specific terminal verdict
 ```
 
 Observed evaluation never imports or calls `fit_final_segment()`. The harvest stage
-directly interpolates lateral position from a threshold bracket whose displacement over
-the ADS-B `lastposupdate` interval agrees with reported ground speed, and
-uses a 3/4/5 km fit-window ensemble for vertical height. If no bracket exists, the
-fit also supplies lateral position. It serializes component provenance and diagnostic
-uncertainty. Arrival preparation and CZML reuse the stored landing anchor/event as
-well. Earlier derived events must be reclassified from their stored samples and
-protected ADS-B metadata sidecars. See
+uses a source-valid threshold bracket, when available, to choose the runway and anchor
+both ends of the physical inbound pass. One robust 3D fit then supplies both event
+coordinates; its preferred 3 km window and 4/5 km sensitivity candidates cannot search
+outside that selected pass. It
+serializes one source range, rejected-sample audit, and diagnostic uncertainty. Arrival
+preparation and CZML reuse the stored landing anchor/event as well. Earlier derived
+events must be reclassified from their stored samples and protected ADS-B metadata
+sidecars. See
 [the fit-model optimization design](../final_approach/FIT_MODEL_OPTIMIZATION.md).
 
 Optimized and predicted records use their terminal state and must be at the
@@ -79,7 +80,7 @@ All subjects use the same point-estimate rule:
 - `fail`: the estimate is outside the bound;
 - `indeterminate`: the event or an applicable bound is unavailable.
 
-Observed event-v4 uncertainty and its 95% interval remain in the report as
+Observed event-v6 uncertainty and its 95% interval remain in the report as
 estimator-quality diagnostics. They do not shrink the aviation bound and do
 not change pass/fail into `indeterminate`.
 

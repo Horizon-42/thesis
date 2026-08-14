@@ -100,12 +100,13 @@ class LandingScreen:
 class Assignment:
     """The verdict, plus every number that produced it.
 
-    ``scores`` maps runway ident -> median absolute cross-track offset (metres) for
-    each candidate that yielded a usable fit. Both outcomes that fitted anything
-    (``assigned`` and ``ambiguous``) keep every candidate's score, so a disputed
-    assignment can be audited without re-running -- an ``ambiguous`` result carries
-    the evidence of what it was torn between. The rejections (``not_landing``,
-    ``unassignable``) have nothing to score; their evidence is ``reason``.
+    ``assign_runway`` scores each fitted candidate by median absolute cross-track
+    offset. A producer that first observes a structural threshold bracket may instead
+    use the absolute bracket offset and can identify the runway even when the later
+    event fit is unavailable; in that case ``outcome`` is ``assigned`` and ``fit`` is
+    ``None``. Both assigned and ambiguous outcomes retain every relative score so the
+    choice can be audited without re-running. Rejections carry their evidence in
+    ``reason``.
     """
 
     outcome: Outcome
@@ -150,6 +151,26 @@ def _is_landing(
     return None
 
 
+def landing_screen_reason(
+    points: Sequence[TrackPoint],
+    frames: Sequence[RunwayFrame],
+    *,
+    screen: LandingScreen = LandingScreen(),
+) -> str | None:
+    """Return why the airport-level landing screen failed, or ``None``.
+
+    This deliberately does no runway assignment and no fitting.  Producers that can
+    assign from a measured threshold bracket use the same airport-level protection as
+    ``assign_runway`` without first allowing a fit to choose the runway.
+    """
+    if len(points) < 2:
+        return "fewer than 2 samples"
+    if not frames:
+        return "airport has no runway thresholds"
+    frame, anchor_index, distance_m = _closest(points, frames)
+    return _is_landing(points, frame, anchor_index, distance_m, screen)
+
+
 def assign_runway(
     points: Sequence[TrackPoint],
     frames: Sequence[RunwayFrame],
@@ -177,16 +198,13 @@ def assign_runway(
                        one landing ends up in two runways' statistics.
     ``assigned``       one runway wins outright.
     """
-    if len(points) < 2:
-        return Assignment("not_landing", None, None, {}, None, "fewer than 2 samples")
-
-    frame, anchor_index, distance_m = _closest(points, frames)
-    not_landing = _is_landing(points, frame, anchor_index, distance_m, screen)
+    not_landing = landing_screen_reason(points, frames, screen=screen)
     if not_landing is not None:
         return Assignment("not_landing", None, None, {}, None, not_landing)
 
     fits: dict[str, SegmentFit] = {}
     overflown: dict[str, float] = {}
+    outside_structure: dict[str, tuple[float, float]] = {}
     for candidate in frames:
         fit = fit_final_segment(
             points,
@@ -204,6 +222,19 @@ def assign_runway(
             # approach to it. See LandingScreen.max_crossing_height_m.
             overflown[candidate.ident] = fit.height_at_threshold_m
             continue
+        if (
+            fit.median_abs_cross_m > screen.threshold_radius_m
+            or abs(fit.cross_at_threshold_m) > screen.threshold_radius_m
+        ):
+            # The 1 km landing screen is deliberately much wider than any
+            # evaluation bound.  This only rejects a fitted leg whose body or
+            # threshold intercept is not geometrically associated with the runway;
+            # it does not preselect a later lateral pass verdict.
+            outside_structure[candidate.ident] = (
+                fit.median_abs_cross_m,
+                fit.cross_at_threshold_m,
+            )
+            continue
         fits[candidate.ident] = fit
 
     if not fits:
@@ -213,6 +244,22 @@ def assign_runway(
                 "not_landing", None, None, {}, None,
                 f"nearest runway {nearest[0]} would be crossed {nearest[1]:+.0f} m from its "
                 f"surface (limit {screen.max_crossing_height_m:.0f} m) — an overflight",
+            )
+        if outside_structure:
+            nearest = min(
+                outside_structure.items(),
+                key=lambda item: max(abs(item[1][0]), abs(item[1][1])),
+            )
+            median_cross, intercept_cross = nearest[1]
+            return Assignment(
+                "unassignable",
+                None,
+                None,
+                {},
+                None,
+                f"nearest fitted runway {nearest[0]} lies outside the landing "
+                f"structure (median {median_cross:.0f} m, threshold intercept "
+                f"{intercept_cross:+.0f} m; limit {screen.threshold_radius_m:.0f} m)",
             )
         return Assignment(
             "unassignable", None, None, {}, None,

@@ -281,9 +281,8 @@ def evaluate_batch(
             "event": {
                 "computed_predicted": "terminal_state_at_threshold_plane",
                 "observed": (
-                    "serialized_observed_threshold_event_v3: componentwise direct "
-                    "lateral interpolation and producer-side vertical fit, or a "
-                    "producer-side fit ensemble for both components; no evaluation refit"
+                    "serialized_observed_threshold_event_v6: bracket-selected physical "
+                    "pass with one producer-side robust 3D fit; no evaluation refit"
                 ),
                 "terminal_plane_tolerance_m": TERMINAL_PLANE_TOLERANCE_M,
             },
@@ -293,7 +292,7 @@ def evaluate_batch(
                 "classification": "diagnostic_only_not_used_by_verdict",
                 "verdict_rule": "point_estimate_against_inclusive_component_bounds",
                 "observed_sigma_source": (
-                    "serialized event-v4 diagnostic 95% margin divided by 1.96"
+                    "serialized event-v6 diagnostic 95% margin divided by 1.96"
                 ),
                 "unmodelled_sources": [
                     "ADS-B source integrity", "runway/FAS survey uncertainty",

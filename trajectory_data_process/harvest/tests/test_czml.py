@@ -83,14 +83,12 @@ def test_extrapolated_tail_uses_the_serialized_event_and_fit_source_range():
             [3.0, -78.0, 35.0015, 170.0],
         ],
         "observed_threshold_event": {
-            "schema_version": "observed-threshold-event-v4",
+            "schema_version": "observed-threshold-event-v6",
             "status": "estimated",
-            "method": "final_segment_window_ensemble",
-            "method_version": 4,
+            "method": "final_segment_robust_fit",
+            "method_version": 6,
             "runway": "01",
-            "component_source_sample_ranges": {
-                "lateral": [0, 2], "vertical": [0, 2],
-            },
+            "source_sample_range": [0, 2],
             "extrapolation_m": 300.0,
             "threshold_crossing_lon": -78.0,
             "threshold_crossing_lat": 35.0037,
@@ -105,7 +103,7 @@ def test_extrapolated_tail_uses_the_serialized_event_and_fit_source_range():
     assert tail[1][1:] == [-78.0, 35.0037, 150.0]
 
 
-def test_direct_lateral_threshold_event_does_not_add_an_extrapolated_czml_tail():
+def test_bracket_anchored_fit_does_not_add_an_extrapolated_czml_tail():
     track = {
         "flight_key": "DIRECT_01_abc_20260812T000000Z",
         "runway": "01",
@@ -116,16 +114,13 @@ def test_direct_lateral_threshold_event_does_not_add_an_extrapolated_czml_tail()
             [2.0, -78.0, 35.0010, 180.0],
         ],
         "observed_threshold_event": {
-            "schema_version": "observed-threshold-event-v4",
+            "schema_version": "observed-threshold-event-v6",
             "status": "estimated",
-            "method": "direct_lateral_fitted_vertical",
-            "method_version": 4,
+            "method": "final_segment_robust_fit",
+            "method_version": 6,
             "runway": "01",
-            "component_source_sample_ranges": {
-                "lateral": [1, 2], "vertical": [0, 1],
-            },
-            "lateral_extrapolation_m": 0.0,
-            "vertical_extrapolation_m": 300.0,
+            "source_sample_range": [0, 1],
+            "threshold_bracket": {"source_sample_range": [1, 2]},
             "extrapolation_m": 300.0,
         },
     }

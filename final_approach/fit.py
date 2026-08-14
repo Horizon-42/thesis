@@ -84,6 +84,17 @@ _INBOUND_TOLERANCE_M = 100.0
 _RHO_CLAMP = (0.0, 0.95)
 _MIN_EFFECTIVE_SAMPLES = 3.0
 
+# OpenSky geometric altitude is encoded on a 25 ft lattice.  A robust residual
+# scale may collapse to zero on a clean quantised descent, so half-distribution
+# standard deviation of one lattice step is the minimum meaningful scale.
+_ALTITUDE_QUANTUM_M = 25.0 * 0.3048
+_ALTITUDE_ROBUST_SIGMA_FLOOR_M = _ALTITUDE_QUANTUM_M / math.sqrt(12.0)
+_ROBUST_SIGMA_FACTOR = 1.482602218505602
+# A fixed 3.03-scale gross-outlier cut. It is deliberately generous: ordinary
+# quantisation scatter remains, while isolated kilometre-scale corruptions do not.
+_ROBUST_RESIDUAL_Z_MAX = math.sqrt(9.21034037197618)
+_MAX_ROBUST_SEED_SAMPLES = 64
+
 
 @dataclass(frozen=True)
 class LineFit:
@@ -129,6 +140,7 @@ class SegmentFit:
     median_abs_cross_m: float
     nearest_sample_along_m: float
     along_progress_m: float
+    rejected_sample_indices: tuple[int, ...]
 
     @property
     def cross_at_threshold_m(self) -> float:
@@ -227,14 +239,131 @@ def _final_inbound_run(
     if inner is None:
         return []
     run = [(inner, projected[inner])]
+    # Compare every earlier point with the most negative along-track coordinate
+    # already accepted in the suffix.  Comparing only adjacent points renews the
+    # 100 m allowance on every sample: a steady 50 m/s reversal can then accumulate
+    # for kilometres without ever tripping the old guard.
+    suffix_min_along_m = projected[inner].along_m
     for i in range(inner - 1, -1, -1):
         if projected[i].along_m < window_m[0]:
             break
-        if projected[i].along_m > projected[i + 1].along_m + _INBOUND_TOLERANCE_M:
+        if projected[i].along_m > suffix_min_along_m + _INBOUND_TOLERANCE_M:
             break
         run.append((i, projected[i]))
+        suffix_min_along_m = min(suffix_min_along_m, projected[i].along_m)
     run.reverse()
     return run
+
+
+def _anchored_final_inbound_run(
+    projected: Sequence[Projected],
+    window_m: tuple[float, float],
+    anchor_index: int,
+) -> list[tuple[int, Projected]]:
+    """Fit-window samples from the one inbound pass ending at ``anchor_index``.
+
+    A threshold bracket selects a physical pass even when its first received sample
+    is already inside the fit window's -300 m edge.  In that case an unanchored search
+    would find the last <= -300 m sample on an earlier pass and silently combine its
+    fit with the later bracket.  First walk backward from the bracket-side anchor to
+    the latest real along-track reversal, then run the normal window selection only
+    inside that selected pass.  If that pass has no fittable window, the honest result
+    is an empty run.
+    """
+    if not 0 <= anchor_index < len(projected):
+        raise IndexError(
+            f"pass anchor index {anchor_index} is outside {len(projected)} points"
+        )
+    start = anchor_index
+    suffix_min_along_m = projected[anchor_index].along_m
+    for index in range(anchor_index - 1, -1, -1):
+        if projected[index].along_m > suffix_min_along_m + _INBOUND_TOLERANCE_M:
+            break
+        start = index
+        suffix_min_along_m = min(
+            suffix_min_along_m,
+            projected[index].along_m,
+        )
+    return [
+        (start + index, point)
+        for index, point in _final_inbound_run(
+            projected[start : anchor_index + 1],
+            window_m,
+        )
+    ]
+
+
+def _median_line(xs: Sequence[float], ys: Sequence[float]) -> tuple[float, float]:
+    """Return a deterministic Theil-Sen seed for gross-outlier rejection."""
+    slopes = [
+        (ys[j] - ys[i]) / (xs[j] - xs[i])
+        for i in range(len(xs) - 1)
+        for j in range(i + 1, len(xs))
+        if abs(xs[j] - xs[i]) > 1e-9
+    ]
+    if not slopes:
+        raise ValueError("robust line needs distinct along-track coordinates")
+    slope = statistics.median(slopes)
+    intercept = statistics.median(
+        y - slope * x for x, y in zip(xs, ys)
+    )
+    return intercept, slope
+
+
+def _robust_seed_indices(sample_count: int) -> list[int]:
+    """Return an evenly spaced, endpoint-preserving bounded seed roster.
+
+    Exact Theil-Sen is quadratic.  Some real 5 km windows contain hundreds of
+    aggregated receiver rows, so applying it to every row makes reclassification
+    scale with the square of source density.  The seed only proposes a line; the
+    residual gate still checks every source row before the final OLS fit.
+    """
+    if sample_count < 0:
+        raise ValueError("sample_count must be non-negative")
+    if sample_count <= _MAX_ROBUST_SEED_SAMPLES:
+        return list(range(sample_count))
+    last = sample_count - 1
+    return [
+        round(index * last / (_MAX_ROBUST_SEED_SAMPLES - 1))
+        for index in range(_MAX_ROBUST_SEED_SAMPLES)
+    ]
+
+
+def _height_inliers(
+    xs: Sequence[float], heights: Sequence[float]
+) -> tuple[list[int], list[int]]:
+    """Select altitude-consistent samples without using TCH or verdict limits.
+
+    Runway assignment already uses the median lateral offset, which is robust to a
+    small number of position spikes.  The catastrophic failures observed in the
+    fixed cohort were isolated geometric-altitude values (for example 983 m and
+    10,828 m inside an otherwise normal descent).  Seed the vertical line with a
+    median slope/intercept, estimate scale with MAD, and run the reported OLS on the
+    retained samples.  The same retained indices are used for both fitted components.
+    """
+    seed_indices = _robust_seed_indices(len(xs))
+    intercept, slope = _median_line(
+        [xs[index] for index in seed_indices],
+        [heights[index] for index in seed_indices],
+    )
+    residuals = [
+        height - (intercept + slope * along)
+        for along, height in zip(xs, heights)
+    ]
+    center = statistics.median(residuals)
+    mad = statistics.median(abs(value - center) for value in residuals)
+    sigma = max(
+        _ROBUST_SIGMA_FACTOR * mad,
+        _ALTITUDE_ROBUST_SIGMA_FLOOR_M,
+    )
+    kept = [
+        index
+        for index, residual in enumerate(residuals)
+        if abs(residual - center) <= _ROBUST_RESIDUAL_Z_MAX * sigma
+    ]
+    kept_set = set(kept)
+    rejected = [index for index in range(len(xs)) if index not in kept_set]
+    return kept, rejected
 
 
 def fit_final_segment(
@@ -244,6 +373,7 @@ def fit_final_segment(
     window_m: tuple[float, float] = DEFAULT_WINDOW_M,
     min_samples: int = DEFAULT_MIN_SAMPLES,
     min_span_m: float = DEFAULT_MIN_SPAN_M,
+    pass_anchor_index: int | None = None,
 ) -> SegmentFit | None:
     """Fit ``points``' established segment against ``frame``, or None if it cannot be.
 
@@ -264,12 +394,34 @@ def fit_final_segment(
         raise ValueError("min_samples must be >= 3 (the line fit needs n - 2 degrees of freedom)")
     if min_span_m <= 0.0:
         raise ValueError("min_span_m must be > 0 (a zero-span segment cannot pin a slope)")
-    indexed = _final_inbound_run(frame.project_all(points), window_m)
+    projected = frame.project_all(points)
+    indexed = (
+        _final_inbound_run(projected, window_m)
+        if pass_anchor_index is None
+        else _anchored_final_inbound_run(
+            projected,
+            window_m,
+            pass_anchor_index,
+        )
+    )
     if len(indexed) < min_samples:
         return None
-    sample_indices = [index for index, _ in indexed]
-    projected = [point for _, point in indexed]
-    alongs = [p.along_m for p in projected]
+    source_indices = [index for index, _ in indexed]
+    source_projected = [point for _, point in indexed]
+    source_alongs = [p.along_m for p in source_projected]
+    span = max(source_alongs) - min(source_alongs)
+    if span < min_span_m:
+        return None
+
+    kept, rejected = _height_inliers(
+        source_alongs,
+        [point.height_m for point in source_projected],
+    )
+    if len(kept) < min_samples:
+        return None
+    projected = [source_projected[index] for index in kept]
+    sample_indices = [source_indices[index] for index in kept]
+    alongs = [point.along_m for point in projected]
     span = max(alongs) - min(alongs)
     if span < min_span_m:
         return None
@@ -289,4 +441,5 @@ def fit_final_segment(
         # Time-ordered, so the SIGN is direction of travel (see SegmentFit.approaching).
         # ``points`` is required to be in time order; projection preserves input order.
         along_progress_m=alongs[-1] - alongs[0],
+        rejected_sample_indices=tuple(source_indices[index] for index in rejected),
     )

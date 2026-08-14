@@ -94,10 +94,10 @@ def _source_track(
         "altitude_datum": ALTITUDE_DATUM,
         "assignment": {"outcome": "assigned", "runway": runway},
         "observed_threshold_event": {
-            "schema_version": "observed-threshold-event-v4",
+            "schema_version": "observed-threshold-event-v6",
             "status": "estimated",
-            "method": "final_segment_window_ensemble",
-            "method_version": 4,
+            "method": "final_segment_robust_fit",
+            "method_version": 6,
             "runway": runway,
             "runway_data_fingerprint": runway_data_fingerprint(_runway(runway)),
         },
@@ -170,10 +170,10 @@ def test_anchor_index_consumes_the_stored_assignment_anchor_without_refitting():
         "flight_key": "TWOPASS_18_abc123_19700101T000009Z",
         "landing_sample_index": 9,
         "observed_threshold_event": {
-            "schema_version": "observed-threshold-event-v4",
+            "schema_version": "observed-threshold-event-v6",
             "status": "estimated",
-            "method": "direct_lateral_fitted_vertical",
-            "method_version": 4,
+            "method": "final_segment_robust_fit",
+            "method_version": 6,
             "runway": "18",
             "runway_data_fingerprint": runway_data_fingerprint(_runway("18")),
         },
@@ -181,6 +181,46 @@ def test_anchor_index_consumes_the_stored_assignment_anchor_without_refitting():
     }
 
     assert _anchor_index(track, _runway("18")) == 9
+
+
+def test_anchor_index_rejects_an_obsolete_method_inside_the_current_schema():
+    runway = _runway("18")
+    track = {
+        "flight_key": "OBSOLETE_METHOD",
+        "landing_sample_index": 1,
+        "observed_threshold_event": {
+            "schema_version": "observed-threshold-event-v6",
+            "status": "estimated",
+            "method": "direct_lateral_fitted_vertical",
+            "method_version": 6,
+            "runway": "18",
+            "runway_data_fingerprint": runway_data_fingerprint(runway),
+        },
+        "samples": [[0.0, 0.1, 0.0, 100.0], [1.0, 0.0, 0.0, 25.0]],
+    }
+
+    with pytest.raises(ValueError, match="reclassify-existing"):
+        _anchor_index(track, runway)
+
+
+def test_anchor_index_accepts_a_current_unavailable_event_without_refitting():
+    runway = _runway("18")
+    track = {
+        "flight_key": "UNAVAILABLE",
+        "landing_sample_index": 1,
+        "observed_threshold_event": {
+            "schema_version": "observed-threshold-event-v6",
+            "status": "unavailable",
+            "method": "final_segment_robust_fit",
+            "method_version": 6,
+            "runway": "18",
+            "runway_data_fingerprint": runway_data_fingerprint(runway),
+            "unavailable_reason": "selected final inbound pass has no fittable segment",
+        },
+        "samples": [[0.0, 0.1, 0.0, 100.0], [1.0, 0.0, 0.0, 25.0]],
+    }
+
+    assert _anchor_index(track, runway) == 1
 
 
 def test_anchor_index_directs_legacy_tracks_to_local_reclassification():

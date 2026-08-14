@@ -144,15 +144,17 @@ Do not extrapolate a computed trajectory to manufacture a pass.
 ### 3.3 Observed ADS-B trajectories
 
 The last ADS-B point often represents receiver loss rather than the threshold.
-The harvest stage therefore produces the threshold event before evaluation. It
-uses direct interpolation for lateral position when final-inbound positions
-validly bracket `s = 0` and their displacement over the ADS-B `lastposupdate`
-interval agrees with the two reported ground-speed values. State-row `time` is
-not a position clock and is never used to derive bracket speed. Vertical height
-always comes from the producer-side
-final-segment fit because the source does not provide a geometric-altitude update
-time that can synchronize `geoaltitude` with `lastposupdate`. When no bracket
-exists, the fit supplies both components.
+The harvest stage therefore selects the runway and physical inbound pass, then
+produces the threshold event before evaluation. A structurally valid threshold
+bracket may select and terminate that pass, but the published event coordinates
+come from one producer-side robust three-dimensional final-segment fit. The fit
+uses the same retained source samples for lateral and vertical coordinates.
+
+The bracket's displacement check uses ADS-B `lastposupdate` and reported ground
+speed. State-row `time` is not a position clock. Direct vertical interpolation
+was rejected after a fixed cross-airport experiment failed its pre-registered
+clock-consistency and transfer criteria. Consequently there is no hybrid
+direct-lateral/fitted-vertical event and no direct raw bracket-altitude event.
 
 The harvested track record must serialize a small
 `observed_threshold_event`. The event
@@ -169,27 +171,29 @@ altitude_datum                 HAE for the current harvest
 signed_cross_track_m           right-positive
 cross_track_sigma_m            effective 95% margin / 1.96
 altitude_sigma_m               effective 95% margin / 1.96
-component_methods              lateral and vertical estimator names
-component_source_sample_ranges inclusive original indices by component
+source_sample_range             inclusive original fit indices
 fit window/candidate diagnostics
 sample_count and along-track span
 cross-track and altitude residual diagnostics
+rejected_sample_indices         original indices excluded as gross altitude corruption
 extrapolation_m
+threshold_bracket               optional pass-anchor audit, not the event estimator
+bracket_rejections              rejected candidate audit
 unavailable_reason             only when no event was produced
 ```
 
-For a directly bracketed event, only cross-track position is linearly
-interpolated at `s = 0`. For every observed event, the altitude is:
+For every estimated observed event:
 
 ```text
+signed_cross_track_m = primary_event_fit.cross_at_threshold_m
+
 threshold_crossing_altitude_hae
     = runway threshold elevation HAE
     + primary_event_fit.height_at_threshold_m
 ```
 
-The crossing latitude/longitude is the same `s = 0`, signed-cross-track point,
-obtained from direct interpolation when available and otherwise from the primary
-fit. Storing that point lets
+The crossing latitude/longitude is the corresponding fitted `s = 0`,
+signed-cross-track point. Storing that point lets
 rendering and evaluation reuse the estimate without reconstructing it from a
 later runway-data cycle. The estimator details and calibration limits are in
 [`final_approach/FIT_MODEL_OPTIMIZATION.md`](../final_approach/FIT_MODEL_OPTIMIZATION.md).

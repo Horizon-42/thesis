@@ -20,12 +20,9 @@ from evaluation.thresholds import AssessmentContext
 Subject = Literal["optimized", "predicted", "observed"]
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
-OBSERVED_EVENT_SCHEMA = "observed-threshold-event-v4"
-OBSERVED_EVENT_METHOD_VERSION = 4
-OBSERVED_EVENT_METHODS = {
-    "direct_lateral_fitted_vertical",
-    "final_segment_window_ensemble",
-}
+OBSERVED_EVENT_SCHEMA = "observed-threshold-event-v6"
+OBSERVED_EVENT_METHOD_VERSION = 6
+OBSERVED_EVENT_METHOD = "final_segment_robust_fit"
 
 
 @dataclass(frozen=True)
@@ -261,15 +258,19 @@ def _observed_arrival(
             f"observed threshold event must use {OBSERVED_EVENT_SCHEMA}; "
             "run --reclassify-existing"
         )
-    if event.get("method") not in OBSERVED_EVENT_METHODS:
+    if event.get("method") != OBSERVED_EVENT_METHOD:
         raise ValueError(
             f"unsupported observed threshold-event method {event.get('method')!r}"
         )
-    component_methods = event.get("component_methods")
-    if not isinstance(component_methods, dict) or component_methods.get("vertical") \
-            != "final_segment_window_ensemble" or component_methods.get("lateral") \
-            not in {"threshold_plane_interpolation", "final_segment_window_ensemble"}:
-        raise ValueError("observed threshold event has invalid component_methods")
+    source_range = event.get("source_sample_range")
+    if (
+        not isinstance(source_range, list)
+        or len(source_range) != 2
+        or not all(isinstance(value, int) and not isinstance(value, bool) for value in source_range)
+        or source_range[0] < 0
+        or source_range[1] < source_range[0]
+    ):
+        raise ValueError("observed threshold event has invalid source_sample_range")
     if event.get("altitude_datum") != "hae":
         raise ValueError("observed threshold event altitude_datum must be 'hae'")
     if record.target_state is None or not record.states:
@@ -300,6 +301,7 @@ def _observed_arrival(
             _event_number(event, "threshold_crossing_altitude_m") - authoritative_geoid
         )
         vertical_m = crossing_alt_msl - desired_altitude_msl_m
+    extrapolation_m = _event_number(event, "extrapolation_m", nonnegative=True)
     return ArrivalOutcome(
         ArrivalDeviation(
             # The event is evaluated at the threshold plane by construction.
@@ -310,16 +312,14 @@ def _observed_arrival(
             heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
             flight_time_s=final["t"],
             event_status="estimated",
-            extrapolated=(
-                component_methods.get("vertical") == "final_segment_window_ensemble"
-            ),
+            extrapolated=extrapolation_m > 0.0,
             lateral_sigma_m=_event_number(event, "cross_track_sigma_m", nonnegative=True),
             vertical_sigma_m=_event_number(event, "altitude_sigma_m", nonnegative=True),
             glidepath_deg=(
                 _event_number(event, "glidepath_deg")
                 if event.get("glidepath_deg") is not None else None
             ),
-            extrapolation_m=_event_number(event, "extrapolation_m", nonnegative=True),
+            extrapolation_m=extrapolation_m,
         ),
         "estimated",
     )

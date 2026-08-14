@@ -6,12 +6,17 @@ import math
 
 import pytest
 
-from final_approach import Projected, TrackPoint, fit_final_segment
+from final_approach import Assignment, Projected, TrackPoint, fit_final_segment
 from geokit import METRES_PER_DEG_LAT
 from trajectory_data_process.harvest.airports import Airport, Runway
 from trajectory_data_process.harvest.classify import classify_track
 from trajectory_data_process.harvest.store import track_record
-from trajectory_data_process.harvest.threshold_event import _extrapolated_event
+from trajectory_data_process.harvest.threshold_event import (
+    build_observed_threshold_event,
+    _fit_ensemble,
+    _fitted_event,
+    select_observed_threshold_bracket,
+)
 from trajectory_data_process.harvest.tracks import Sample, Track
 
 
@@ -94,8 +99,8 @@ def test_landing_anchor_belongs_to_last_inbound_pass_not_earlier_high_overflight
     assert event["runway_data"]["procedure_source_cycle"] == "2026-08-06"
     # The extrapolation uses the empirically selected 3 km primary window. The
     # winning 5 km assignment fit remains separately preserved for audit.
-    assert event["method"] == "final_segment_window_ensemble"
-    assert event["component_source_sample_ranges"]["vertical"] == [
+    assert event["method"] == "final_segment_robust_fit"
+    assert event["source_sample_range"] == [
         27, len(track.samples) - 3
     ]
     assert event["assignment_fit"]["source_sample_range"] == [
@@ -108,10 +113,48 @@ def test_landing_anchor_belongs_to_last_inbound_pass_not_earlier_high_overflight
     assert event["extrapolation_m"] == pytest.approx(300.0, abs=1.0)
 
 
+def test_event_fit_cannot_switch_to_samples_after_the_assignment_pass():
+    runway = _airport().runway("36")
+    frame = runway.frame("hae")
+    slope = math.tan(math.radians(3.0))
+    selected_samples = [
+        _sample(float(index), along_m, 15.0 - slope * along_m)
+        for index, along_m in enumerate(range(-5_000, -200, 100))
+    ]
+    selected_points = [
+        TrackPoint(sample.lat, sample.lon, sample.alt_hae_m)
+        for sample in selected_samples
+    ]
+    assignment_fit = fit_final_segment(selected_points, frame)
+    assert assignment_fit is not None
+
+    # A later approach-like stretch is deliberately appended.  The assignment has
+    # already selected the first pass, so event-window fitting must not search this
+    # later data and silently change the physical event.
+    later_samples = [
+        _sample(
+            float(len(selected_samples) + index),
+            along_m,
+            80.0 - slope * along_m,
+        )
+        for index, along_m in enumerate(range(-3_000, -200, 100))
+    ]
+    track = Track("abc123", "FIT123", tuple([*selected_samples, *later_samples]))
+    event = build_observed_threshold_event(
+        track,
+        runway,
+        Assignment("assigned", runway.ident, assignment_fit, {}, None, None),
+    )
+
+    assert event["status"] == "estimated"
+    assert event["source_sample_range"][1] <= assignment_fit.last_sample_index
+
+
 def _track_with_threshold_bracket(
     *,
     crossing_height_m: float,
     jump_cross_m: float = 0.0,
+    bracket_cross_m: float = 0.0,
     position_update_gap_s: float = 2.5,
     reported_ground_speed_m_s: float = 80.0,
 ):
@@ -123,8 +166,12 @@ def _track_with_threshold_bracket(
         height_m = 15.0 - slope * along_m
         point = frame.unproject(Projected(float(along_m), 0.0, height_m))
         samples.append(Sample(float(index), point.lat, point.lon, point.alt_m, False))
-    before = frame.unproject(Projected(-100.0, 0.0, crossing_height_m))
-    after = frame.unproject(Projected(100.0, jump_cross_m, crossing_height_m))
+    before = frame.unproject(
+        Projected(-100.0, bracket_cross_m, crossing_height_m)
+    )
+    after = frame.unproject(
+        Projected(100.0, bracket_cross_m + jump_cross_m, crossing_height_m)
+    )
     before_time = float(len(samples) - 1)
     after_time = float(len(samples))
     samples[-1] = Sample(
@@ -150,36 +197,30 @@ def _track_with_threshold_bracket(
     return Track("abc123", "FIT123", tuple(samples))
 
 
-def test_valid_threshold_bracket_uses_direct_lateral_and_fitted_vertical_components():
+def test_valid_threshold_bracket_anchors_one_robust_three_dimensional_fit():
     classified = classify_track(
         _track_with_threshold_bracket(crossing_height_m=25.0), _airport()
     )
 
     event = classified.observed_threshold_event
-    assert event["schema_version"] == "observed-threshold-event-v4"
-    assert event["method"] == "direct_lateral_fitted_vertical"
-    assert event["method_version"] == 4
-    assert event["component_methods"] == {
-        "lateral": "threshold_plane_interpolation",
-        "vertical": "final_segment_window_ensemble",
-    }
-    # The position bracket deliberately reports 25 m, but the earlier final
-    # segment follows a 15 m threshold intercept. Position and geoaltitude are
-    # not assumed to have the same update time.
+    assert event["schema_version"] == "observed-threshold-event-v6"
+    assert event["method"] == "final_segment_robust_fit"
+    assert event["method_version"] == 6
+    assert "component_methods" not in event
+    # The bracket selects and terminates the physical pass.  Both coordinates of
+    # the event then come from one robust pre-threshold fit; the bracket's raw
+    # altitude is not silently mixed into that fitted point.
     assert event["threshold_crossing_altitude_m"] == pytest.approx(
         ELEVATION_M + 15.0, abs=0.1
     )
-    assert event["component_source_sample_ranges"] == {
-        "lateral": [79, 80],
-        "vertical": [51, 77],
-    }
-    assert event["direct_vertical_proxy"]["height_m"] == pytest.approx(25.0)
-    assert event["direct_vertical_proxy"]["fit_disagreement_m"] == pytest.approx(10.0)
-    assert event["lateral_extrapolation_m"] == 0.0
+    assert event["source_sample_range"] == [51, 77]
+    assert event["threshold_bracket"]["source_sample_range"] == [79, 80]
+    assert event["threshold_bracket"]["height_at_threshold_m"] == pytest.approx(25.0)
+    assert event["lateral_extrapolation_m"] == pytest.approx(300.0, abs=1.0)
     assert event["vertical_extrapolation_m"] == pytest.approx(300.0, abs=1.0)
-    assert event["interpolation"]["position_update_gap_s"] == pytest.approx(2.5)
-    assert event["interpolation"]["reported_ground_speed_mean_m_s"] == 80.0
-    assert event["interpolation"]["position_derived_speed_m_s"] == pytest.approx(
+    assert event["threshold_bracket"]["position_update_gap_s"] == pytest.approx(2.5)
+    assert event["threshold_bracket"]["reported_ground_speed_mean_m_s"] == 80.0
+    assert event["threshold_bracket"]["position_derived_speed_m_s"] == pytest.approx(
         80.0, abs=0.2
     )
 
@@ -194,7 +235,7 @@ def test_implausible_threshold_jump_falls_back_to_validated_extrapolation():
     )
 
     event = classified.observed_threshold_event
-    assert event["method"] == "final_segment_window_ensemble"
+    assert event["method"] == "final_segment_robust_fit"
     assert event["fit_window_m"] == [-3000.0, -300.0]
     assert {tuple(candidate["window_m"]) for candidate in event["candidate_fits"]} == {
         (-3000.0, -300.0),
@@ -206,8 +247,134 @@ def test_implausible_threshold_jump_falls_back_to_validated_extrapolation():
         + event["uncertainty_95_m"]["vertical_window_sensitivity"]
     )
     assert event["uncertainty_95_m"]["lateral_effective"] >= 10.5
-    assert event["interpolation_rejections"][0]["reason"] == \
+    assert event["bracket_rejections"][0]["reason"] == \
         "position displacement disagrees with ADS-B reported ground speed"
+
+
+def test_speed_valid_bracket_outside_landing_structure_is_not_direct():
+    classified = classify_track(
+        _track_with_threshold_bracket(
+            crossing_height_m=25.0,
+            bracket_cross_m=1_500.0,
+        ),
+        _airport(),
+    )
+
+    event = classified.observed_threshold_event
+    assert event["method"] == "final_segment_robust_fit"
+    assert event["signed_cross_track_m"] == pytest.approx(0.0, abs=0.5)
+    assert any(
+        rejection["reason"] == "threshold bracket is outside landing structure"
+        for rejection in event["bracket_rejections"]
+    )
+
+
+def test_low_lateral_bracket_hundreds_of_metres_high_is_not_direct():
+    classified = classify_track(
+        _track_with_threshold_bracket(crossing_height_m=120.0),
+        _airport(),
+    )
+
+    event = classified.observed_threshold_event
+    assert event["method"] == "final_segment_robust_fit"
+    assert event["threshold_crossing_altitude_m"] == pytest.approx(
+        ELEVATION_M + 15.0, abs=0.5
+    )
+
+
+def test_bracket_selection_uses_cross_track_not_the_later_parallel_threshold():
+    base = _airport().runway("36")
+    east_shift_deg = 200.0 / (
+        METRES_PER_DEG_LAT * math.cos(math.radians(LAT))
+    )
+    parallel = Runway(
+        **{
+            **base.__dict__,
+            "ident": "36R",
+            "lat": base.lat + 100.0 / METRES_PER_DEG_LAT,
+            "lon": base.lon + east_shift_deg,
+        }
+    )
+    slope = math.tan(math.radians(3.0))
+    samples = []
+    for index, along_m in enumerate(range(-5_000, 201, 100)):
+        point = base.frame("hae").unproject(
+            Projected(float(along_m), 0.0, 15.0 - slope * along_m)
+        )
+        samples.append(
+            Sample(
+                float(index),
+                point.lat,
+                point.lon,
+                point.alt_m,
+                False,
+                reported_ground_speed_m_s=100.0,
+                last_position_update_s=float(index),
+                last_contact_s=float(index),
+            )
+        )
+    track = Track("abc123", "FIT123", tuple(samples))
+
+    selection = select_observed_threshold_bracket(
+        track,
+        (base, parallel),
+        max_structural_cross_m=1_000.0,
+        max_structural_height_m=100.0,
+    )
+
+    assert selection.outcome == "assigned"
+    assert selection.bracket is not None
+    assert selection.bracket.runway.ident == "36"
+    assert selection.bracket.source_sample_range == (49, 50)
+    assert selection.scores_m["36"] == pytest.approx(0.0, abs=0.5)
+    assert selection.scores_m["36R"] == pytest.approx(200.0, abs=1.0)
+
+
+def test_valid_bracket_cannot_publish_a_structurally_incompatible_fit():
+    runway = _airport().runway("36")
+    frame = runway.frame("hae")
+    slope = math.tan(math.radians(3.0))
+    samples = []
+    for index, along_m in enumerate(range(-8_000, 0, 100)):
+        cross_m = 0.0 if along_m == -100 else 1_500.0
+        point = frame.unproject(
+            Projected(float(along_m), cross_m, 15.0 - slope * along_m)
+        )
+        samples.append(Sample(float(index), point.lat, point.lon, point.alt_m, False))
+    after = frame.unproject(Projected(100.0, 0.0, 15.0))
+    samples[-1] = Sample(
+        samples[-1].time_s,
+        samples[-1].lat,
+        samples[-1].lon,
+        samples[-1].alt_hae_m,
+        False,
+        reported_ground_speed_m_s=100.0,
+        last_position_update_s=79.0,
+        last_contact_s=79.0,
+    )
+    samples.append(
+        Sample(
+            81.0,
+            after.lat,
+            after.lon,
+            after.alt_m,
+            False,
+            reported_ground_speed_m_s=100.0,
+            last_position_update_s=81.0,
+            last_contact_s=81.0,
+        )
+    )
+
+    classified = classify_track(Track("abc123", "FIT123", tuple(samples)), _airport())
+
+    assert classified.outcome == "assigned"
+    assert classified.fit is None
+    assert classified.observed_threshold_event["status"] == "unavailable"
+    assert classified.observed_threshold_event["method"] == \
+        "final_segment_robust_fit"
+    assert "structurally incompatible" in classified.observed_threshold_event[
+        "unavailable_reason"
+    ]
 
 
 def test_state_row_time_does_not_create_a_false_position_jump():
@@ -224,16 +391,16 @@ def test_state_row_time_does_not_create_a_false_position_jump():
     )
 
     event = classified.observed_threshold_event
-    assert event["method"] == "direct_lateral_fitted_vertical"
-    assert event["interpolation"]["sample_gap_s"] == 1.0
-    assert event["interpolation"]["position_update_gap_s"] == 5.0
-    assert event["interpolation"]["position_derived_speed_m_s"] == pytest.approx(
+    assert event["method"] == "final_segment_robust_fit"
+    assert event["threshold_bracket"]["sample_gap_s"] == 1.0
+    assert event["threshold_bracket"]["position_update_gap_s"] == 5.0
+    assert event["threshold_bracket"]["position_derived_speed_m_s"] == pytest.approx(
         100.0, abs=1.0
     )
-    assert event["interpolation"]["reported_ground_speed_mean_m_s"] == 100.0
+    assert event["threshold_bracket"]["reported_ground_speed_mean_m_s"] == 100.0
 
 
-def test_rejected_threshold_bracket_does_not_hide_later_valid_crossing():
+def test_later_valid_bracket_does_not_reuse_an_earlier_approach_fit():
     track = _track_with_threshold_bracket(
         crossing_height_m=25.0,
         jump_cross_m=1_000.0,
@@ -274,13 +441,16 @@ def test_rejected_threshold_bracket_does_not_hide_later_valid_crossing():
     )
 
     event = classified.observed_threshold_event
-    assert event["method"] == "direct_lateral_fitted_vertical"
-    assert event["component_source_sample_ranges"]["lateral"] == [81, 82]
-    assert event["threshold_crossing_altitude_m"] == pytest.approx(
-        ELEVATION_M + 15.0, abs=0.1
-    )
-    assert event["interpolation_rejections"][0]["source_sample_range"] == [79, 80]
-    assert event["interpolation_rejections"][0]["reason"] == \
+    assert classified.outcome == "assigned"
+    assert classified.fit is None
+    assert classified.landing_sample_index == 81
+    assert event["method"] == "final_segment_robust_fit"
+    assert event["status"] == "unavailable"
+    assert event["unavailable_reason"] == \
+        "selected final inbound pass has no fittable segment"
+    assert event["threshold_bracket"]["source_sample_range"] == [81, 82]
+    assert event["bracket_rejections"][0]["source_sample_range"] == [79, 80]
+    assert event["bracket_rejections"][0]["reason"] == \
         "position displacement disagrees with ADS-B reported ground speed"
 
 
@@ -309,7 +479,15 @@ def test_wider_primary_fit_reports_statistical_and_window_diagnostics_without_pr
     )
     assert assignment_fit is not None
 
-    event = _extrapolated_event(runway, points, assignment_fit, [])
+    ensemble = _fit_ensemble(runway, points, assignment_fit)
+    assert ensemble is not None
+    event = _fitted_event(
+        runway,
+        assignment_fit,
+        ensemble=ensemble,
+        bracket=None,
+        bracket_rejections=(),
+    )
 
     assert event["status"] == "estimated"
     assert event["fit_window_m"] == expected_window

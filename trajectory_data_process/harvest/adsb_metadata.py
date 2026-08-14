@@ -38,8 +38,8 @@ class _Partition:
 class SidecarStateMetadata:
     """Exact ``(icao24, state-row time)`` lookup over backfilled Parquet files.
 
-    Partitions are loaded lazily and cached two at a time. Reclassification orders
-    assigned records chronologically, so every partition is normally read once without
+    Partitions are loaded lazily and cached two at a time. Reclassification orders all
+    stored outcomes chronologically, so every partition is normally read once without
     loading the multi-gigabyte airport sidecar into memory at once.
     """
 

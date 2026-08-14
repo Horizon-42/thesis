@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -28,6 +29,9 @@ from trajectory_data_process.harvest.store import (
 )
 from trajectory_data_process.harvest.tracks import Sample, Track
 from trajectory_data_process.harvest.threshold_event import StateMetadataLookup
+
+
+_FLIGHT_KEY_TIME = re.compile(r"_(\d{8}T\d{6}Z)$")
 
 
 def reclassify_stored_tracks(
@@ -108,8 +112,9 @@ def _classified_records(
     metadata_lookup: StateMetadataLookup | None,
 ) -> Iterator[ClassifiedTrack]:
     seen: set[str] = set()
-    # Sidecar partitions are chronological. Processing assigned arrivals in that order
-    # lets the bounded metadata cache read each Parquet partition approximately once.
+    # Sidecar partitions are chronological. Every outcome must follow flight time:
+    # tracks previously rejected by an older classifier may now reach metadata lookup,
+    # so callsign ordering would repeatedly evict and reload the same Parquet partitions.
     ordered = sorted(source["records"], key=_reclassification_order)
     for index, row in enumerate(ordered):
         if not isinstance(row, dict) or not isinstance(row.get("file"), str):
@@ -132,13 +137,17 @@ def _classified_records(
         )
 
 
-def _reclassification_order(row: Any) -> tuple[int, str, str]:
+def _reclassification_order(row: Any) -> tuple[str, str]:
     if not isinstance(row, dict):
-        return (2, "", "")
-    landing = row.get("landing_time_utc")
-    if row.get("outcome") == "assigned" and isinstance(landing, str):
-        return (0, landing, str(row.get("flight_key") or ""))
-    return (1, "", str(row.get("flight_key") or ""))
+        return ("99999999T999999Z", "")
+    key = row.get("flight_key")
+    if not isinstance(key, str):
+        return ("99999999T999999Z", "")
+    match = _FLIGHT_KEY_TIME.search(key)
+    return (
+        match.group(1) if match is not None else "99999999T999999Z",
+        key,
+    )
 
 
 def _stored_track(record: dict[str, Any], path: Path) -> Track:

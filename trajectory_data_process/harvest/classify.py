@@ -15,10 +15,11 @@ that keyed on the callsign has been bitten -- the ts train/val/test split leaked
 comparison CZML dropped 22% of a batch, the frontend table swapped verdicts between
 namesakes, and Cesium merged two flights into one entity.
 
-The landing time here is the time of the sample closest to the assigned threshold ON THE
-FINAL INBOUND PASS selected by ``final_approach``.  Contiguity alone is not enough: one
+The landing time here is the time of the sample closest to the assigned threshold on the
+selected final inbound pass. A source-valid threshold bracket anchors that pass when
+available; otherwise the final-segment fit does. Contiguity alone is not enough: one
 flight can overfly a threshold, go around, and later land without any time discontinuity.
-Searching the whole track would let the earlier pass steal both the landing timestamp and
+Searching the whole track would let another pass steal both the landing timestamp and
 the arrival crop merely because its discrete ADS-B sample happened to lie closer.
 """
 
@@ -27,14 +28,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from final_approach import Assignment, LandingScreen, SegmentFit, assign_runway
+from final_approach import (
+    Assignment,
+    LandingScreen,
+    SegmentFit,
+    assign_runway,
+    fit_final_segment,
+    landing_screen_reason,
+)
 
 from flight_scenarios.identity import flight_key
 
 from trajectory_data_process.harvest.airports import Airport
 from trajectory_data_process.harvest.threshold_event import (
     StateMetadataLookup,
+    ThresholdBracket,
     build_observed_threshold_event,
+    select_observed_threshold_bracket,
 )
 from trajectory_data_process.harvest.tracks import Track
 
@@ -48,6 +58,7 @@ class ClassifiedTrack:
     landing_time_utc: str | None
     landing_sample_index: int | None
     observed_threshold_event: dict
+    threshold_bracket: ThresholdBracket | None = None
 
     @property
     def outcome(self) -> str:
@@ -102,8 +113,78 @@ def classify_track(
     the geoid undulation (~33 m) with no symptom -- the mistake the predecessor made.
     """
     points = [_track_point(s) for s in track.samples]
-    assignment = assign_runway(points, airport.frames("hae"), screen=screen)
-    landing_sample_index = _landing_sample_index(track, airport, assignment)
+    frames = airport.frames("hae")
+    not_landing = landing_screen_reason(points, frames, screen=screen)
+    bracket: ThresholdBracket | None = None
+    bracket_rejections: tuple[dict, ...] = ()
+    if not_landing is not None:
+        assignment = Assignment(
+            "not_landing", None, None, {}, None, not_landing
+        )
+    else:
+        selection = select_observed_threshold_bracket(
+            track,
+            list(airport.runways),
+            metadata_lookup=metadata_lookup,
+            max_structural_cross_m=screen.threshold_radius_m,
+            max_structural_height_m=screen.max_crossing_height_m,
+        )
+        bracket_rejections = selection.rejections
+        if selection.outcome == "assigned":
+            assert selection.bracket is not None
+            bracket = selection.bracket
+            before_index = bracket.source_sample_range[0]
+            fit = fit_final_segment(
+                points,
+                bracket.runway.frame("hae"),
+                pass_anchor_index=before_index,
+            )
+            fit_reason = None
+            if fit is not None:
+                if not fit.approaching:
+                    fit_reason = "selected bracket fit is not inbound"
+                elif abs(fit.height_at_threshold_m) > screen.max_crossing_height_m:
+                    fit_reason = (
+                        "selected bracket fit is structurally incompatible with "
+                        f"the runway surface ({fit.height_at_threshold_m:+.0f} m; "
+                        f"limit {screen.max_crossing_height_m:.0f} m)"
+                    )
+                elif (
+                    fit.median_abs_cross_m > screen.threshold_radius_m
+                    or abs(fit.cross_at_threshold_m) > screen.threshold_radius_m
+                ):
+                    fit_reason = (
+                        "selected bracket fit is structurally incompatible with "
+                        f"the runway centreline (median {fit.median_abs_cross_m:.0f} m, "
+                        f"intercept {fit.cross_at_threshold_m:+.0f} m; limit "
+                        f"{screen.threshold_radius_m:.0f} m)"
+                    )
+            if fit_reason is not None:
+                fit = None
+            assignment = Assignment(
+                "assigned",
+                bracket.runway.ident,
+                fit,
+                selection.scores_m,
+                selection.margin_m,
+                fit_reason,
+            )
+        elif selection.outcome == "ambiguous":
+            assignment = Assignment(
+                "ambiguous",
+                None,
+                None,
+                selection.scores_m,
+                selection.margin_m,
+                selection.reason,
+            )
+        else:
+            # Tracks whose source data do not provide a usable bracket retain the
+            # single robust final-segment assignment path.
+            assignment = assign_runway(points, frames, screen=screen)
+    landing_sample_index = _landing_sample_index(
+        track, airport, assignment, bracket=bracket
+    )
     return ClassifiedTrack(
         track=track,
         assignment=assignment,
@@ -117,8 +198,10 @@ def classify_track(
             track,
             airport.runway(assignment.runway) if assignment.runway is not None else None,
             assignment,
-            metadata_lookup=metadata_lookup,
+            bracket=bracket,
+            bracket_rejections=bracket_rejections,
         ),
+        threshold_bracket=bracket,
     )
 
 
@@ -147,16 +230,29 @@ def _track_point(sample):
 
 
 def _landing_sample_index(
-    track: Track, airport: Airport, assignment: Assignment
+    track: Track,
+    airport: Airport,
+    assignment: Assignment,
+    *,
+    bracket: ThresholdBracket | None = None,
 ) -> int | None:
-    """Sample closest to the threshold on the assigned fit's final inbound pass.
+    """Sample closest to the threshold on the selected final inbound pass.
 
-    ``fit_final_segment`` records the exact source indices of the pass it fitted. Start the
-    endpoint search at that fit's last sample, so an earlier overflight/go-around cannot
-    become the landing identity and this code cannot drift from the assignment geometry.
+    A selected bracket restricts the choice to its two source samples. Without one,
+    ``fit_final_segment`` records the exact source indices of the pass it fitted; start
+    the endpoint search at that fit's last sample so an earlier pass cannot become the
+    landing identity.
     """
     if assignment.runway is None:
         return None
+    if bracket is not None:
+        if bracket.runway.ident != assignment.runway:
+            raise ValueError("landing bracket runway disagrees with assignment")
+        frame = bracket.runway.frame("hae")
+        return min(
+            bracket.source_sample_range,
+            key=lambda index: frame.distance_m(_track_point(track.samples[index])),
+        )
     if assignment.fit is None:
         raise ValueError(
             f"assigned runway {assignment.runway!r} has no final-approach fit"

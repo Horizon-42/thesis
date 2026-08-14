@@ -7,7 +7,14 @@ import math
 import pytest
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 
-from final_approach import Assignment, LandingScreen, RunwayFrame, TrackPoint, assign_runway
+from final_approach import (
+    Assignment,
+    LandingScreen,
+    Projected,
+    RunwayFrame,
+    TrackPoint,
+    assign_runway,
+)
 from final_approach.tests.test_fit import synthetic_approach
 
 
@@ -116,6 +123,19 @@ def test_a_descent_across_the_field_is_not_a_landing():
     result = assign_runway(overflight, PARALLELS)
     assert result.outcome == "not_landing"
     assert "overflight" in result.reason
+
+
+def test_a_fit_outside_the_landing_structure_cannot_win_assignment():
+    """A late point near the threshold must not legitimise a remote fitted leg."""
+    remote_leg = synthetic_approach(frame=KSJC_30L, cross_m=2_000.0)
+    threshold_point = KSJC_30L.unproject(Projected(0.0, 0.0, 17.5))
+
+    result = assign_runway([*remote_leg, threshold_point], [KSJC_30L])
+
+    assert result.outcome == "unassignable"
+    assert result.runway is None
+    assert result.reason is not None
+    assert "landing structure" in result.reason
 
 
 def test_a_high_but_real_approach_is_still_a_landing():
