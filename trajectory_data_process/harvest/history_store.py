@@ -22,6 +22,9 @@ _COLUMNS = (
     "callsign",
     "onground",
     "geoaltitude",
+    "velocity",
+    "lastposupdate",
+    "lastcontact",
 )
 
 
@@ -44,10 +47,14 @@ class DiskHistoryStore:
                 callsign TEXT,
                 onground INTEGER,
                 geoaltitude REAL,
+                velocity REAL,
+                lastposupdate REAL,
+                lastcontact REAL,
                 PRIMARY KEY (icao24, time)
             ) WITHOUT ROWID
             """
         )
+        self._ensure_source_metadata_columns()
 
     def __enter__(self) -> DiskHistoryStore:
         return self
@@ -84,6 +91,9 @@ class DiskHistoryStore:
                     _text(_at(source, positions["callsign"]), strip_only=True),
                     _boolean(_at(source, positions["onground"])),
                     _scalar(_at(source, positions["geoaltitude"])),
+                    _scalar(_at(source, positions["velocity"])),
+                    _time_s(_at(source, positions["lastposupdate"])),
+                    _time_s(_at(source, positions["lastcontact"])),
                 )
 
         # Adjacent history requests both include their shared timestamp. Replacing on
@@ -91,8 +101,9 @@ class DiskHistoryStore:
         self.connection.executemany(
             """
             INSERT OR REPLACE INTO samples
-                (time, icao24, lat, lon, callsign, onground, geoaltitude)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (time, icao24, lat, lon, callsign, onground, geoaltitude,
+                 velocity, lastposupdate, lastcontact)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             values(),
         )
@@ -103,7 +114,8 @@ class DiskHistoryStore:
         """Load every accumulated row for one aircraft, in chronological order."""
         cursor = self.connection.execute(
             """
-            SELECT time, icao24, lat, lon, callsign, onground, geoaltitude
+            SELECT time, icao24, lat, lon, callsign, onground, geoaltitude,
+                   velocity, lastposupdate, lastcontact
             FROM samples
             WHERE icao24 = ?
             ORDER BY time
@@ -119,6 +131,17 @@ class DiskHistoryStore:
         )
         for (icao24,) in cursor:
             yield str(icao24)
+
+    def _ensure_source_metadata_columns(self) -> None:
+        """Add nullable metadata columns to a resumable pre-v3 checkpoint safely."""
+        existing = {
+            str(row[1])
+            for row in self.connection.execute("PRAGMA table_info(samples)")
+        }
+        for column in ("velocity", "lastposupdate", "lastcontact"):
+            if column not in existing:
+                self.connection.execute(f"ALTER TABLE samples ADD COLUMN {column} REAL")
+        self.connection.commit()
 
 
 def _at(row: tuple[Any, ...], position: int | None) -> Any:

@@ -145,8 +145,14 @@ Do not extrapolate a computed trajectory to manufacture a pass.
 
 The last ADS-B point often represents receiver loss rather than the threshold.
 The harvest stage therefore produces the threshold event before evaluation. It
-uses direct interpolation when final-inbound samples validly bracket `s = 0`,
-and producer-side fit-window extrapolation otherwise.
+uses direct interpolation for lateral position when final-inbound positions
+validly bracket `s = 0` and their displacement over the ADS-B `lastposupdate`
+interval agrees with the two reported ground-speed values. State-row `time` is
+not a position clock and is never used to derive bracket speed. Vertical height
+always comes from the producer-side
+final-segment fit because the source does not provide a geometric-altitude update
+time that can synchronize `geoaltitude` with `lastposupdate`. When no bracket
+exists, the fit supplies both components.
 
 The harvested track record must serialize a small
 `observed_threshold_event`. The event
@@ -163,16 +169,17 @@ altitude_datum                 HAE for the current harvest
 signed_cross_track_m           right-positive
 cross_track_sigma_m            effective 95% margin / 1.96
 altitude_sigma_m               effective 95% margin / 1.96
-source_sample_range            inclusive original sample indices
-fit window/candidate diagnostics when extrapolated
+component_methods              lateral and vertical estimator names
+component_source_sample_ranges inclusive original indices by component
+fit window/candidate diagnostics
 sample_count and along-track span
 cross-track and altitude residual diagnostics
 extrapolation_m
 unavailable_reason             only when no event was produced
 ```
 
-For a directly bracketed event, the altitude and cross-track position are
-linearly interpolated at `s = 0`. For an unbracketed event, the altitude is:
+For a directly bracketed event, only cross-track position is linearly
+interpolated at `s = 0`. For every observed event, the altitude is:
 
 ```text
 threshold_crossing_altitude_hae
@@ -180,8 +187,9 @@ threshold_crossing_altitude_hae
     + primary_event_fit.height_at_threshold_m
 ```
 
-The crossing latitude/longitude is the same `s = 0`, signed-cross-track point
-resolved in the exact runway frame used by assignment. Storing that point lets
+The crossing latitude/longitude is the same `s = 0`, signed-cross-track point,
+obtained from direct interpolation when available and otherwise from the primary
+fit. Storing that point lets
 rendering and evaluation reuse the estimate without reconstructing it from a
 later runway-data cycle. The estimator details and calibration limits are in
 [`final_approach/FIT_MODEL_OPTIMIZATION.md`](../final_approach/FIT_MODEL_OPTIMIZATION.md).

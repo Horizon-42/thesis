@@ -52,14 +52,21 @@ def payload(*, subject="optimized", event=None, final_lat=35.0, final_lon=-78.0)
 
 def event(*, cross=4.0, vertical=5.0):
     return {
-        "schema_version": "observed-threshold-event-v2",
+        "schema_version": "observed-threshold-event-v4",
         "status": "estimated", "method": "final_segment_window_ensemble",
-        "method_version": 2, "runway": "05L",
+        "method_version": 4, "runway": "05L",
+        "component_methods": {
+            "lateral": "final_segment_window_ensemble",
+            "vertical": "final_segment_window_ensemble",
+        },
         "threshold_crossing_lat": 35.0, "threshold_crossing_lon": -78.0,
         "threshold_crossing_altitude_m": 160.0 + vertical,
         "altitude_datum": "hae", "signed_cross_track_m": cross,
         "cross_track_sigma_m": 0.5, "altitude_sigma_m": 0.75,
-        "source_sample_range": [0, 1], "fit_window_m": [-5000.0, -300.0],
+        "component_source_sample_ranges": {
+            "lateral": [0, 1], "vertical": [0, 1],
+        },
+        "fit_window_m": [-5000.0, -300.0],
         "sample_count": 8, "along_track_span_m": 3000.0,
         "extrapolation_m": 300.0, "glidepath_deg": 3.0,
     }
@@ -113,11 +120,15 @@ def test_observed_record_consumes_serialized_event_and_converts_hae_to_msl():
     assert deviation.extrapolation_m == pytest.approx(300.0)
 
 
-def test_direct_observed_crossing_is_not_labelled_extrapolated():
+def test_direct_lateral_observation_still_reports_fitted_vertical_extrapolation():
     direct = event(vertical=0.0)
     direct.update(
-        method="threshold_plane_interpolation",
-        extrapolation_m=0.0,
+        method="direct_lateral_fitted_vertical",
+        component_methods={
+            "lateral": "threshold_plane_interpolation",
+            "vertical": "final_segment_window_ensemble",
+        },
+        lateral_extrapolation_m=0.0,
     )
 
     outcome = arrival_deviation(
@@ -126,7 +137,7 @@ def test_direct_observed_crossing_is_not_labelled_extrapolated():
     )
 
     assert outcome.deviation is not None
-    assert outcome.deviation.extrapolated is False
+    assert outcome.deviation.extrapolated is True
 
 
 def test_observed_record_datum_offset_must_match_authoritative_context():
@@ -153,10 +164,10 @@ def test_observed_evaluation_has_no_fitter_dependency():
     assert "fit_final_segment" not in inspect.getsource(arrival_module)
 
 
-def test_version_one_observed_event_requires_local_reclassification():
+def test_version_two_observed_event_requires_local_reclassification():
     legacy = event()
-    legacy.pop("schema_version")
-    legacy["method_version"] = 1
+    legacy["schema_version"] = "observed-threshold-event-v2"
+    legacy["method_version"] = 2
 
     with pytest.raises(ValueError, match="reclassify-existing"):
         arrival_deviation(

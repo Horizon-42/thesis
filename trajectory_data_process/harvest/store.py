@@ -14,9 +14,10 @@ WHY THE SPLIT IS PHYSICAL AND NOT COSMETIC
 The sample array remains the sensor reconstruction: ellipsoidal altitude exactly as
 broadcast, with no extrapolated point inserted. Runway assignment also serializes one
 clearly labelled ``observed_threshold_event`` beside those samples. That event is a
-policy-free estimate produced either from a valid measured threshold bracket or from
-producer-side fit-window extrapolation; consumers must not mistake it for a measured
-sample or refit the samples independently. A changed estimator method therefore
+policy-free, componentwise estimate: a valid measured threshold-position bracket
+supplies lateral geometry when available, while producer-side fitting supplies the
+vertical intercept and any missing lateral intercept. Consumers must not mistake it
+for a measured sample or refit the samples independently. A changed estimator method therefore
 requires local reclassification of these regenerable records from the stored samples;
 it does not require another OpenSky download.
 

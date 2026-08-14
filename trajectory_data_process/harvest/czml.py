@@ -217,13 +217,13 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
         return None
     if event.get("status") != "estimated" or event.get("runway") != track.get("runway"):
         return None
-    if event.get("schema_version") != "observed-threshold-event-v2" \
-            or event.get("method_version") != 2:
+    if event.get("schema_version") != "observed-threshold-event-v4" \
+            or event.get("method_version") != 4:
         raise ValueError(
             f"track {track.get('flight_key')!r} has an obsolete threshold event; "
             "run --reclassify-existing"
         )
-    if event.get("method") == "threshold_plane_interpolation":
+    if event.get("method") == "direct_lateral_fitted_vertical":
         # The measured track already contains both sides of the crossing. Drawing an
         # additional inferred tail would duplicate measured geometry and mislabel it.
         return None
@@ -232,7 +232,12 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
             f"track {track.get('flight_key')!r} has unsupported threshold-event method "
             f"{event.get('method')!r}"
         )
-    fit_range = event.get("source_sample_range")
+    component_ranges = event.get("component_source_sample_ranges")
+    fit_range = (
+        component_ranges.get("lateral")
+        if isinstance(component_ranges, dict)
+        else None
+    )
     anchor = track.get("landing_sample_index")
     if (
         not isinstance(fit_range, list) or len(fit_range) != 2

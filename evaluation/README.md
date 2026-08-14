@@ -19,16 +19,19 @@ The normative rationale and source audit are in
 ```text
 raw ADS-B samples
   -> runway assignment + producer-side threshold-event estimation
-  -> policy-free observed_threshold_event v2
+  -> policy-free observed_threshold_event v4
   -> explicit HAE/MSL conversion
   -> runway/procedure-specific terminal verdict
 ```
 
 Observed evaluation never imports or calls `fit_final_segment()`. The harvest stage
-directly interpolates a valid measured threshold bracket; if none exists, it uses a
-3/4/5 km fit-window ensemble and serializes the crossing estimate and effective
+directly interpolates lateral position from a threshold bracket whose displacement over
+the ADS-B `lastposupdate` interval agrees with reported ground speed, and
+uses a 3/4/5 km fit-window ensemble for vertical height. If no bracket exists, the
+fit also supplies lateral position. It serializes component provenance and diagnostic
 uncertainty. Arrival preparation and CZML reuse the stored landing anchor/event as
-well. Version-1 derived events must be reclassified from their stored samples. See
+well. Earlier derived events must be reclassified from their stored samples and
+protected ADS-B metadata sidecars. See
 [the fit-model optimization design](../final_approach/FIT_MODEL_OPTIMIZATION.md).
 
 Optimized and predicted records use their terminal state and must be at the
@@ -76,7 +79,7 @@ All subjects use the same point-estimate rule:
 - `fail`: the estimate is outside the bound;
 - `indeterminate`: the event or an applicable bound is unavailable.
 
-Observed event-v2 uncertainty and its 95% interval remain in the report as
+Observed event-v4 uncertainty and its 95% interval remain in the report as
 estimator-quality diagnostics. They do not shrink the aviation bound and do
 not change pass/fail into `indeterminate`.
 

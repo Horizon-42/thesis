@@ -56,6 +56,15 @@ STATE_VECTOR_COLUMNS = (
     "geoaltitude",
 )
 
+# The harvest also needs the source position clock. ``time`` is merely the state-row
+# clock and may advance while OpenSky repeats an older position. Keeping these separate
+# prevents a stale final position from being misread as an impossible one-second jump.
+HARVEST_STATE_VECTOR_COLUMNS = (
+    *STATE_VECTOR_COLUMNS,
+    "lastposupdate",
+    "lastcontact",
+)
+
 # When querying by airport, the joined flights table supplies estimated
 # departure/arrival airports and must be prefixed as ``FlightsData4.*``. These columns
 # are ONLY available with ``airport=`` -- see the check in fetch_history_dataframe.

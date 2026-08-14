@@ -27,12 +27,15 @@ from trajectory_data_process.harvest.store import (
     write_tracks,
 )
 from trajectory_data_process.harvest.tracks import Sample, Track
+from trajectory_data_process.harvest.threshold_event import StateMetadataLookup
 
 
 def reclassify_stored_tracks(
     airport: Airport,
     paths: HarvestPaths,
     *,
+    metadata_lookup: StateMetadataLookup,
+    metadata_provenance: dict[str, Any],
     screen: LandingScreen = LandingScreen(),
 ) -> dict[str, Any]:
     """Reclassify every rostered track, staging all output before the swap.
@@ -49,6 +52,7 @@ def reclassify_stored_tracks(
         "completed_utc": datetime.now(timezone.utc).isoformat(),
         "network_access": False,
         "source_manifest_sha256": source_manifest_sha256,
+        "adsb_metadata": dict(metadata_provenance),
         "runway_data_fingerprints": {
             runway.ident: runway_data_fingerprint(runway)
             for runway in airport.runways
@@ -61,7 +65,13 @@ def reclassify_stored_tracks(
     ) as temporary:
         staged = HarvestPaths(Path(temporary), paths.code)
         manifest = write_tracks(
-            _classified_records(source, airport, paths, screen),
+            _classified_records(
+                source,
+                airport,
+                paths,
+                screen,
+                metadata_lookup=metadata_lookup,
+            ),
             staged,
             provenance=provenance,
         )
@@ -94,9 +104,14 @@ def _classified_records(
     airport: Airport,
     paths: HarvestPaths,
     screen: LandingScreen,
+    *,
+    metadata_lookup: StateMetadataLookup | None,
 ) -> Iterator[ClassifiedTrack]:
     seen: set[str] = set()
-    for index, row in enumerate(source["records"]):
+    # Sidecar partitions are chronological. Processing assigned arrivals in that order
+    # lets the bounded metadata cache read each Parquet partition approximately once.
+    ordered = sorted(source["records"], key=_reclassification_order)
+    for index, row in enumerate(ordered):
         if not isinstance(row, dict) or not isinstance(row.get("file"), str):
             raise ValueError(f"{paths.manifest}: record {index} lacks file")
         key = row.get("flight_key")
@@ -109,7 +124,21 @@ def _classified_records(
         record = _strict_json(record_path)
         if record.get("flight_key") != key:
             raise ValueError(f"{record_path}: flight_key disagrees with manifest")
-        yield classify_track(_stored_track(record, record_path), airport, screen=screen)
+        yield classify_track(
+            _stored_track(record, record_path),
+            airport,
+            screen=screen,
+            metadata_lookup=metadata_lookup,
+        )
+
+
+def _reclassification_order(row: Any) -> tuple[int, str, str]:
+    if not isinstance(row, dict):
+        return (2, "", "")
+    landing = row.get("landing_time_utc")
+    if row.get("outcome") == "assigned" and isinstance(landing, str):
+        return (0, landing, str(row.get("flight_key") or ""))
+    return (1, "", str(row.get("flight_key") or ""))
 
 
 def _stored_track(record: dict[str, Any], path: Path) -> Track:

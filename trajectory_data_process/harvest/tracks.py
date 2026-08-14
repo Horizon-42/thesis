@@ -43,6 +43,7 @@ than this one).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Iterator, Literal, Sequence
 
@@ -72,13 +73,21 @@ DEFAULT_MIN_SAMPLES = 10
 
 @dataclass(frozen=True)
 class Sample:
-    """One state vector. ``alt_hae_m`` is ellipsoidal, as broadcast."""
+    """One state vector, including source timing used for integrity checks.
+
+    ``time_s`` is the state-vector row time.  It is deliberately distinct from
+    ``last_position_update_s``: OpenSky can repeat an older position in a newer row,
+    so using row time to derive velocity creates false coordinate jumps.
+    """
 
     time_s: float
     lat: float
     lon: float
     alt_hae_m: float
     on_ground: bool
+    reported_ground_speed_m_s: float | None = None
+    last_position_update_s: float | None = None
+    last_contact_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -181,9 +190,42 @@ def _to_sample(row: dict[str, Any], scale: float) -> Sample | None:
             lon=float(lon),
             alt_hae_m=float(alt) * scale,
             on_ground=bool(row.get("onground") or row.get("on_ground") or False),
+            reported_ground_speed_m_s=_optional_float(row.get("velocity")),
+            last_position_update_s=_optional_time_s(row.get("lastposupdate")),
+            last_contact_s=_optional_time_s(row.get("lastcontact")),
         )
     except (TypeError, ValueError):
         return None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _optional_time_s(value: Any) -> float | None:
+    number = _optional_float(value)
+    if number is not None:
+        return number
+    if value is None:
+        return None
+    try:
+        import pandas as pd
+
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+        else:
+            timestamp = timestamp.tz_convert("UTC")
+        result = float(timestamp.timestamp())
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if math.isfinite(result) else None
 
 
 def _metadata(row: dict[str, Any]) -> tuple[str | None, str | None]:

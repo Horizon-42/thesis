@@ -24,10 +24,14 @@ TARGET = {
 
 def _record(*, cross_m: float = 0.0, vertical_m: float = 0.0) -> dict:
     event = {
-        "schema_version": "observed-threshold-event-v2",
+        "schema_version": "observed-threshold-event-v4",
         "status": "estimated",
         "method": "final_segment_window_ensemble",
-        "method_version": 2,
+        "method_version": 4,
+        "component_methods": {
+            "lateral": "final_segment_window_ensemble",
+            "vertical": "final_segment_window_ensemble",
+        },
         "runway": "05L",
         "threshold_crossing_lat": TARGET["lat"],
         "threshold_crossing_lon": TARGET["lon"],
@@ -36,7 +40,9 @@ def _record(*, cross_m: float = 0.0, vertical_m: float = 0.0) -> dict:
         "signed_cross_track_m": cross_m,
         "cross_track_sigma_m": 0.25,
         "altitude_sigma_m": 0.25,
-        "source_sample_range": [0, 1],
+        "component_source_sample_ranges": {
+            "lateral": [0, 1], "vertical": [0, 1],
+        },
         "fit_window_m": [-5_000.0, -300.0],
         "sample_count": 8,
         "along_track_span_m": 4_000.0,

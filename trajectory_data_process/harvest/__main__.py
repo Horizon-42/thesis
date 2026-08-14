@@ -28,6 +28,7 @@ from evaluation.context import contexts_for_airport
 from trajectory_data_process.acquisition.opensky_history import install_query_cancel_on_interrupt
 from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM
 from trajectory_data_process.harvest.airports import load_airport
+from trajectory_data_process.harvest.adsb_metadata import SidecarStateMetadata
 from trajectory_data_process.harvest.arrivals import arrival_manifest_path, write_arrival_records
 from trajectory_data_process.harvest.observed import (
     REPORT_NAME,
@@ -49,6 +50,7 @@ from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = REPO_ROOT / "trajectory_data_process/config/runway_thresholds.json"
 DEFAULT_OUTPUT = REPO_ROOT / "trajectory_data_process/outputs/harvest"
+DEFAULT_ADSB_METADATA = REPO_ROOT / "trajectory_data_process/outputs/adsb-metadata"
 DEFAULT_CIFP = REPO_ROOT / "data/CIFP/CIFP_260806/FAACIFP18"
 DEFAULT_FRONTEND_DATA = REPO_ROOT / "aeroviz-4d/public/data"
 
@@ -75,6 +77,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cifp", type=Path, default=DEFAULT_CIFP,
                         help="ARINC 424 CIFP file supplying per-runway published TCH")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--adsb-metadata",
+        type=Path,
+        default=DEFAULT_ADSB_METADATA,
+        help=(
+            "backfilled ADS-B velocity/freshness sidecars used by no-download "
+            "reclassification"
+        ),
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--evaluate-only", action="store_true",
                         help="skip download; rebuild arrivals/, approach/, and publication")
@@ -141,16 +152,34 @@ def main(argv: list[str] | None = None) -> int:
         clear_harvest_checkpoint(paths)
 
     airport = load_airport(code, config_file=args.config, cifp_file=args.cifp)
+    metadata = (
+        SidecarStateMetadata(args.adsb_metadata, code)
+        if args.reclassify_existing or args.merge_source
+        else None
+    )
 
     if args.merge_source:
+        assert metadata is not None
         sources = [HarvestPaths(root=root, code=code) for root in args.merge_source]
-        manifest = merge_stored_tracks(paths, sources, airport=airport)
+        manifest = merge_stored_tracks(
+            paths,
+            sources,
+            airport=airport,
+            metadata_lookup=metadata.lookup,
+            metadata_provenance=metadata.provenance,
+        )
         print(
             f"[harvest] merged and reclassified {len(sources) + 1} source manifests "
             f"without download: {manifest['counts']}"
         )
     elif args.reclassify_existing:
-        manifest = reclassify_stored_tracks(airport, paths)
+        assert metadata is not None
+        manifest = reclassify_stored_tracks(
+            airport,
+            paths,
+            metadata_lookup=metadata.lookup,
+            metadata_provenance=metadata.provenance,
+        )
         print(f"[harvest] reclassified stored tracks without download: {manifest['counts']}")
     elif args.evaluate_only:
         manifest = read_manifest(paths)

@@ -10,7 +10,19 @@ KRDU_LAT, KRDU_LON = 35.8776, -78.7875
 FT_M = 0.3048
 
 
-def row(t, *, lat=KRDU_LAT, lon=KRDU_LON, alt_ft=3000.0, ground=False, dep="KATL", arr="KRDU"):
+def row(
+    t,
+    *,
+    lat=KRDU_LAT,
+    lon=KRDU_LON,
+    alt_ft=3000.0,
+    ground=False,
+    dep="KATL",
+    arr="KRDU",
+    velocity=70.0,
+    lastposupdate=None,
+    lastcontact=None,
+):
     return {
         "icao24": "abc123",
         "callsign": "TEST123",
@@ -19,6 +31,9 @@ def row(t, *, lat=KRDU_LAT, lon=KRDU_LON, alt_ft=3000.0, ground=False, dep="KATL
         "longitude": lon,
         "geoaltitude": alt_ft,
         "onground": ground,
+        "velocity": velocity,
+        "lastposupdate": float(t) - 0.25 if lastposupdate is None else lastposupdate,
+        "lastcontact": float(t) - 0.1 if lastcontact is None else lastcontact,
         "estdepartureairport": dep,
         "estarrivalairport": arr,
     }
@@ -59,6 +74,14 @@ def test_feet_are_converted_and_metres_are_not():
     metres = build(approach_rows(), altitude_units="m")[0]
     assert feet.samples[0].alt_hae_m == pytest.approx(3000.0 * FT_M)
     assert metres.samples[0].alt_hae_m == pytest.approx(3000.0)
+
+
+def test_adsb_velocity_and_position_freshness_stay_attached_to_the_sample():
+    track = build(approach_rows())[0]
+    sample = track.samples[0]
+    assert sample.reported_ground_speed_m_s == 70.0
+    assert sample.last_position_update_s == pytest.approx(sample.time_s - 0.25)
+    assert sample.last_contact_s == pytest.approx(sample.time_s - 0.1)
 
 
 # --- defect 1: a track glued to a later pass --------------------------------------

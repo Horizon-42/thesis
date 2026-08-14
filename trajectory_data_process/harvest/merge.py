@@ -20,6 +20,7 @@ from trajectory_data_process.harvest.store import (
     ALTITUDE_SOURCE,
     HarvestPaths,
 )
+from trajectory_data_process.harvest.threshold_event import StateMetadataLookup
 
 _BUCKETS = ("assigned", "ambiguous", "unassignable", "not_landing")
 
@@ -29,6 +30,8 @@ def merge_stored_tracks(
     additional_sources: list[HarvestPaths],
     *,
     airport: Airport,
+    metadata_lookup: StateMetadataLookup,
+    metadata_provenance: dict[str, Any],
 ) -> dict[str, Any]:
     """Merge destination plus additional source manifests through a staged hard-link tree.
 
@@ -64,7 +67,12 @@ def merge_stored_tracks(
         # Reclassification is part of the same transaction. Parsing, current
         # assignment, current-key uniqueness, and serialization must all pass
         # while the canonical tree and its derived views are still untouched.
-        manifest = reclassify_stored_tracks(airport, staged)
+        manifest = reclassify_stored_tracks(
+            airport,
+            staged,
+            metadata_lookup=metadata_lookup,
+            metadata_provenance=metadata_provenance,
+        )
         _replace_tracks_directory(staged.tracks, destination.tracks)
 
     _invalidate_local_views(destination)

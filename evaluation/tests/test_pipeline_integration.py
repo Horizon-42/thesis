@@ -44,6 +44,9 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(
             lon=point.lon,
             alt_hae_m=point.alt_m,
             on_ground=False,
+            reported_ground_speed_m_s=200.0,
+            last_position_update_s=1_786_492_800.0 + index * 2.5,
+            last_contact_s=1_786_492_800.0 + index * 2.5,
         ))
     crossing = frame.unproject(Projected(
         250.0,
@@ -56,12 +59,19 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(
         lon=crossing.lon,
         alt_hae_m=crossing.alt_m,
         on_ground=False,
+        reported_ground_speed_m_s=200.0,
+        last_position_update_s=1_786_492_800.0 + len(samples) * 2.5,
+        last_contact_s=1_786_492_800.0 + len(samples) * 2.5,
     ))
     classified = classify_track(Track("abc123", "PIPE1", tuple(samples)), airport)
     assert classified.runway == "05L"
     assert classified.observed_threshold_event["status"] == "estimated"
     assert classified.observed_threshold_event["method"] == \
-        "threshold_plane_interpolation"
+        "direct_lateral_fitted_vertical"
+    assert classified.observed_threshold_event["component_methods"] == {
+        "lateral": "threshold_plane_interpolation",
+        "vertical": "final_segment_window_ensemble",
+    }
 
     paths = HarvestPaths(tmp_path / "harvest", "KRDU")
     write_tracks([classified], paths, provenance={"test": True})

@@ -73,6 +73,11 @@ def test_idle_runway_gives_up_after_four_days_of_backward_scan(tmp_path: Path) -
     assert result.scanned_from == stop - timedelta(days=4)
     assert result.manifest["provenance"]["given_up"] == ["18"]
     assert len(calls) == 16
+    assert all(
+        {"velocity", "lastposupdate", "lastcontact"}
+        <= set(call["selected_columns"])
+        for call in calls
+    )
 
 
 def test_dry_window_restarts_when_runway_count_last_increases(

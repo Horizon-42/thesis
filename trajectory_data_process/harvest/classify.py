@@ -32,7 +32,10 @@ from final_approach import Assignment, LandingScreen, SegmentFit, assign_runway
 from flight_scenarios.identity import flight_key
 
 from trajectory_data_process.harvest.airports import Airport
-from trajectory_data_process.harvest.threshold_event import build_observed_threshold_event
+from trajectory_data_process.harvest.threshold_event import (
+    StateMetadataLookup,
+    build_observed_threshold_event,
+)
 from trajectory_data_process.harvest.tracks import Track
 
 
@@ -90,6 +93,7 @@ def classify_track(
     airport: Airport,
     *,
     screen: LandingScreen = LandingScreen(),
+    metadata_lookup: StateMetadataLookup | None = None,
 ) -> ClassifiedTrack:
     """Assign one track to at most one runway.
 
@@ -113,14 +117,27 @@ def classify_track(
             track,
             airport.runway(assignment.runway) if assignment.runway is not None else None,
             assignment,
+            metadata_lookup=metadata_lookup,
         ),
     )
 
 
 def classify_tracks(
-    tracks: list[Track], airport: Airport, *, screen: LandingScreen = LandingScreen()
+    tracks: list[Track],
+    airport: Airport,
+    *,
+    screen: LandingScreen = LandingScreen(),
+    metadata_lookup: StateMetadataLookup | None = None,
 ) -> list[ClassifiedTrack]:
-    return [classify_track(t, airport, screen=screen) for t in tracks]
+    return [
+        classify_track(
+            track,
+            airport,
+            screen=screen,
+            metadata_lookup=metadata_lookup,
+        )
+        for track in tracks
+    ]
 
 
 def _track_point(sample):

@@ -20,10 +20,10 @@ from evaluation.thresholds import AssessmentContext
 Subject = Literal["optimized", "predicted", "observed"]
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
-OBSERVED_EVENT_SCHEMA = "observed-threshold-event-v2"
-OBSERVED_EVENT_METHOD_VERSION = 2
+OBSERVED_EVENT_SCHEMA = "observed-threshold-event-v4"
+OBSERVED_EVENT_METHOD_VERSION = 4
 OBSERVED_EVENT_METHODS = {
-    "threshold_plane_interpolation",
+    "direct_lateral_fitted_vertical",
     "final_segment_window_ensemble",
 }
 
@@ -265,6 +265,11 @@ def _observed_arrival(
         raise ValueError(
             f"unsupported observed threshold-event method {event.get('method')!r}"
         )
+    component_methods = event.get("component_methods")
+    if not isinstance(component_methods, dict) or component_methods.get("vertical") \
+            != "final_segment_window_ensemble" or component_methods.get("lateral") \
+            not in {"threshold_plane_interpolation", "final_segment_window_ensemble"}:
+        raise ValueError("observed threshold event has invalid component_methods")
     if event.get("altitude_datum") != "hae":
         raise ValueError("observed threshold event altitude_datum must be 'hae'")
     if record.target_state is None or not record.states:
@@ -305,7 +310,9 @@ def _observed_arrival(
             heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
             flight_time_s=final["t"],
             event_status="estimated",
-            extrapolated=event.get("method") == "final_segment_window_ensemble",
+            extrapolated=(
+                component_methods.get("vertical") == "final_segment_window_ensemble"
+            ),
             lateral_sigma_m=_event_number(event, "cross_track_sigma_m", nonnegative=True),
             vertical_sigma_m=_event_number(event, "altitude_sigma_m", nonnegative=True),
             glidepath_deg=(

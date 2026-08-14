@@ -152,7 +152,13 @@ def test_merge_stages_hard_links_preserves_provenance_and_invalidates_views(tmp_
     (destination.approach / "stale.json").write_text("{}", encoding="utf-8")
     source_hash = hashlib.sha256(source.manifest.read_bytes()).hexdigest()
 
-    merged = merge_stored_tracks(destination, [source], airport=_airport())
+    merged = merge_stored_tracks(
+        destination,
+        [source],
+        airport=_airport(),
+        metadata_lookup=lambda _icao24, _time_s: None,
+        metadata_provenance={"test": True},
+    )
 
     assert merged["total"] == 2
     assert merged["counts"]["not_landing"] == 2
@@ -188,7 +194,13 @@ def test_merge_rejects_duplicate_identity_without_changing_destination(tmp_path)
     before = destination.manifest.read_bytes()
 
     with pytest.raises(ValueError, match="duplicate flight_key"):
-        merge_stored_tracks(destination, [source], airport=_airport())
+        merge_stored_tracks(
+            destination,
+            [source],
+            airport=_airport(),
+            metadata_lookup=lambda _icao24, _time_s: None,
+            metadata_provenance={"test": True},
+        )
 
     assert destination.manifest.read_bytes() == before
     assert json.loads(destination.manifest.read_text(encoding="utf-8"))["total"] == 1
@@ -214,7 +226,13 @@ def test_merge_rejects_a_manifest_path_that_escapes_tracks(tmp_path):
     source.manifest.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(ValueError, match="escapes tracks directory"):
-        merge_stored_tracks(destination, [source], airport=_airport())
+        merge_stored_tracks(
+            destination,
+            [source],
+            airport=_airport(),
+            metadata_lookup=lambda _icao24, _time_s: None,
+            metadata_provenance={"test": True},
+        )
 
 
 def test_merge_rejects_post_reclassification_collision_without_committing(tmp_path):
@@ -240,7 +258,13 @@ def test_merge_rejects_post_reclassification_collision_without_committing(tmp_pa
     stale.write_text("{}", encoding="utf-8")
 
     with pytest.raises(ValueError, match="duplicate flight_key.*reclassification"):
-        merge_stored_tracks(destination, [source], airport=_airport())
+        merge_stored_tracks(
+            destination,
+            [source],
+            airport=_airport(),
+            metadata_lookup=lambda _icao24, _time_s: None,
+            metadata_provenance={"test": True},
+        )
 
     assert destination.manifest.read_bytes() == before
     assert stale.read_text(encoding="utf-8") == "{}"
@@ -268,7 +292,13 @@ def test_merge_validates_reclassification_before_committing(tmp_path):
     stale.write_text("{}", encoding="utf-8")
 
     with pytest.raises(ValueError, match="start_time_utc"):
-        merge_stored_tracks(destination, [source], airport=_airport())
+        merge_stored_tracks(
+            destination,
+            [source],
+            airport=_airport(),
+            metadata_lookup=lambda _icao24, _time_s: None,
+            metadata_provenance={"test": True},
+        )
 
     assert destination.manifest.read_bytes() == before
     assert stale.read_text(encoding="utf-8") == "{}"

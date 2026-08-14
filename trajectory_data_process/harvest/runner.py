@@ -38,7 +38,7 @@ from typing import Any, Callable, Iterator, Sequence
 from final_approach import LandingScreen
 
 from trajectory_data_process.acquisition.opensky_history import (
-    STATE_VECTOR_COLUMNS,
+    HARVEST_STATE_VECTOR_COLUMNS,
     fetch_history_dataframe,
 )
 from trajectory_data_process.geo import bounds_from_radius_km
@@ -56,7 +56,7 @@ DEFAULT_MAX_LOOKBACK_DAYS = 30.0
 # Give a runway up once the scan has gone this long past its last new landing: an idle
 # runway end would otherwise drag the whole airport to the lookback limit.
 DEFAULT_DRY_GIVE_UP_DAYS = 4.0
-CHECKPOINT_VERSION = 2
+CHECKPOINT_VERSION = 3
 # Retry only transport failures. Six retries span 195 seconds, which is long enough to
 # bridge a short Wi-Fi/DNS outage without hiding persistent authentication or query
 # errors indefinitely.
@@ -199,7 +199,7 @@ def harvest_airport(
                 start=chunk_start,
                 stop=cursor,
                 bounds=bounds,
-                selected_columns=STATE_VECTOR_COLUMNS,
+                selected_columns=HARVEST_STATE_VECTOR_COLUMNS,
                 cached=plan.cached,
             )
             chunks += 1

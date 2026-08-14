@@ -72,7 +72,12 @@ def test_reclassify_existing_reuses_samples_and_adds_current_frame_fingerprint(t
     }), encoding="utf-8")
     samples_before = legacy["samples"]
 
-    manifest = reclassify_stored_tracks(_airport(), paths)
+    manifest = reclassify_stored_tracks(
+        _airport(),
+        paths,
+        metadata_lookup=lambda _icao24, _time_s: None,
+        metadata_provenance={"test": True},
+    )
 
     assert manifest["total"] == 1
     [row] = manifest["records"]
@@ -82,6 +87,9 @@ def test_reclassify_existing_reuses_samples_and_adds_current_frame_fingerprint(t
         runway_data_fingerprint(_airport().runway("18"))
     assert row["event_status"] == "estimated"
     assert manifest["provenance"]["reclassification"]["network_access"] is False
+    assert manifest["provenance"]["reclassification"]["adsb_metadata"] == {
+        "test": True
+    }
 
 
 def test_cli_exposes_an_exclusive_no_download_reclassification_mode():

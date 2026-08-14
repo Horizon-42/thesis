@@ -95,7 +95,9 @@ def test_landing_anchor_belongs_to_last_inbound_pass_not_earlier_high_overflight
     # The extrapolation uses the empirically selected 3 km primary window. The
     # winning 5 km assignment fit remains separately preserved for audit.
     assert event["method"] == "final_segment_window_ensemble"
-    assert event["source_sample_range"] == [27, len(track.samples) - 3]
+    assert event["component_source_sample_ranges"]["vertical"] == [
+        27, len(track.samples) - 3
+    ]
     assert event["assignment_fit"]["source_sample_range"] == [
         len(early), len(track.samples) - 3
     ]
@@ -106,7 +108,13 @@ def test_landing_anchor_belongs_to_last_inbound_pass_not_earlier_high_overflight
     assert event["extrapolation_m"] == pytest.approx(300.0, abs=1.0)
 
 
-def _track_with_threshold_bracket(*, crossing_height_m: float, jump_cross_m: float = 0.0):
+def _track_with_threshold_bracket(
+    *,
+    crossing_height_m: float,
+    jump_cross_m: float = 0.0,
+    position_update_gap_s: float = 2.5,
+    reported_ground_speed_m_s: float = 80.0,
+):
     runway = _airport().runway("36")
     frame = runway.frame("hae")
     slope = math.tan(math.radians(3.0))
@@ -117,26 +125,63 @@ def _track_with_threshold_bracket(*, crossing_height_m: float, jump_cross_m: flo
         samples.append(Sample(float(index), point.lat, point.lon, point.alt_m, False))
     before = frame.unproject(Projected(-100.0, 0.0, crossing_height_m))
     after = frame.unproject(Projected(100.0, jump_cross_m, crossing_height_m))
-    samples[-1] = Sample(float(len(samples) - 1), before.lat, before.lon, before.alt_m, False)
-    samples.append(Sample(float(len(samples)), after.lat, after.lon, after.alt_m, False))
+    before_time = float(len(samples) - 1)
+    after_time = float(len(samples))
+    samples[-1] = Sample(
+        before_time,
+        before.lat,
+        before.lon,
+        before.alt_m,
+        False,
+        reported_ground_speed_m_s=reported_ground_speed_m_s,
+        last_position_update_s=after_time - position_update_gap_s,
+        last_contact_s=before_time,
+    )
+    samples.append(Sample(
+        after_time,
+        after.lat,
+        after.lon,
+        after.alt_m,
+        False,
+        reported_ground_speed_m_s=reported_ground_speed_m_s,
+        last_position_update_s=after_time,
+        last_contact_s=after_time,
+    ))
     return Track("abc123", "FIT123", tuple(samples))
 
 
-def test_valid_threshold_bracket_uses_physical_crossing_instead_of_fit_extension():
+def test_valid_threshold_bracket_uses_direct_lateral_and_fitted_vertical_components():
     classified = classify_track(
         _track_with_threshold_bracket(crossing_height_m=25.0), _airport()
     )
 
     event = classified.observed_threshold_event
-    assert event["schema_version"] == "observed-threshold-event-v2"
-    assert event["method"] == "threshold_plane_interpolation"
-    assert event["method_version"] == 2
+    assert event["schema_version"] == "observed-threshold-event-v4"
+    assert event["method"] == "direct_lateral_fitted_vertical"
+    assert event["method_version"] == 4
+    assert event["component_methods"] == {
+        "lateral": "threshold_plane_interpolation",
+        "vertical": "final_segment_window_ensemble",
+    }
+    # The position bracket deliberately reports 25 m, but the earlier final
+    # segment follows a 15 m threshold intercept. Position and geoaltitude are
+    # not assumed to have the same update time.
     assert event["threshold_crossing_altitude_m"] == pytest.approx(
-        ELEVATION_M + 25.0, abs=0.1
+        ELEVATION_M + 15.0, abs=0.1
     )
-    assert event["source_sample_range"] == [79, 80]
-    assert event["extrapolation_m"] == 0.0
-    assert event["uncertainty_95_m"]["vertical_effective"] >= 3.81
+    assert event["component_source_sample_ranges"] == {
+        "lateral": [79, 80],
+        "vertical": [51, 77],
+    }
+    assert event["direct_vertical_proxy"]["height_m"] == pytest.approx(25.0)
+    assert event["direct_vertical_proxy"]["fit_disagreement_m"] == pytest.approx(10.0)
+    assert event["lateral_extrapolation_m"] == 0.0
+    assert event["vertical_extrapolation_m"] == pytest.approx(300.0, abs=1.0)
+    assert event["interpolation"]["position_update_gap_s"] == pytest.approx(2.5)
+    assert event["interpolation"]["reported_ground_speed_mean_m_s"] == 80.0
+    assert event["interpolation"]["position_derived_speed_m_s"] == pytest.approx(
+        80.0, abs=0.2
+    )
 
 
 def test_implausible_threshold_jump_falls_back_to_validated_extrapolation():
@@ -156,10 +201,36 @@ def test_implausible_threshold_jump_falls_back_to_validated_extrapolation():
         (-4000.0, -300.0),
         (-5000.0, -300.0),
     }
-    assert event["uncertainty_95_m"]["vertical_effective"] >= 13.0
+    assert event["uncertainty_95_m"]["vertical_effective"] == pytest.approx(
+        event["uncertainty_95_m"]["vertical_statistical"]
+        + event["uncertainty_95_m"]["vertical_window_sensitivity"]
+    )
     assert event["uncertainty_95_m"]["lateral_effective"] >= 10.5
     assert event["interpolation_rejections"][0]["reason"] == \
-        "implied horizontal speed exceeds 200 m/s"
+        "position displacement disagrees with ADS-B reported ground speed"
+
+
+def test_state_row_time_does_not_create_a_false_position_jump():
+    classified = classify_track(
+        _track_with_threshold_bracket(
+            crossing_height_m=25.0,
+            # About 500 m in the one-second state-row interval, but 100 m/s
+            # over the real five-second ADS-B position-update interval.
+            jump_cross_m=458.0,
+            position_update_gap_s=5.0,
+            reported_ground_speed_m_s=100.0,
+        ),
+        _airport(),
+    )
+
+    event = classified.observed_threshold_event
+    assert event["method"] == "direct_lateral_fitted_vertical"
+    assert event["interpolation"]["sample_gap_s"] == 1.0
+    assert event["interpolation"]["position_update_gap_s"] == 5.0
+    assert event["interpolation"]["position_derived_speed_m_s"] == pytest.approx(
+        100.0, abs=1.0
+    )
+    assert event["interpolation"]["reported_ground_speed_mean_m_s"] == 100.0
 
 
 def test_rejected_threshold_bracket_does_not_hide_later_valid_crossing():
@@ -180,8 +251,20 @@ def test_rejected_threshold_bracket_does_not_hide_later_valid_crossing():
                 returned_before.lon,
                 returned_before.alt_m,
                 False,
+                reported_ground_speed_m_s=100.0,
+                last_position_update_s=82.0,
+                last_contact_s=82.0,
             ),
-            Sample(84.0, valid_after.lat, valid_after.lon, valid_after.alt_m, False),
+            Sample(
+                84.0,
+                valid_after.lat,
+                valid_after.lon,
+                valid_after.alt_m,
+                False,
+                reported_ground_speed_m_s=100.0,
+                last_position_update_s=84.0,
+                last_contact_s=84.0,
+            ),
         )
     )
 
@@ -191,28 +274,26 @@ def test_rejected_threshold_bracket_does_not_hide_later_valid_crossing():
     )
 
     event = classified.observed_threshold_event
-    assert event["method"] == "threshold_plane_interpolation"
-    assert event["source_sample_range"] == [81, 82]
+    assert event["method"] == "direct_lateral_fitted_vertical"
+    assert event["component_source_sample_ranges"]["lateral"] == [81, 82]
     assert event["threshold_crossing_altitude_m"] == pytest.approx(
-        ELEVATION_M + 25.0, abs=0.1
+        ELEVATION_M + 15.0, abs=0.1
     )
     assert event["interpolation_rejections"][0]["source_sample_range"] == [79, 80]
     assert event["interpolation_rejections"][0]["reason"] == \
-        "implied horizontal speed exceeds 200 m/s"
+        "position displacement disagrees with ADS-B reported ground speed"
 
 
 @pytest.mark.parametrize(
-    ("outer_m", "expected_window", "expected_p95_m", "expected_floor_m"),
+    ("outer_m", "expected_window"),
     (
-        (-4_000, [-4_000.0, -300.0], 13.43, 13.5),
-        (-5_000, [-5_000.0, -300.0], 14.39, 14.5),
+        (-4_000, [-4_000.0, -300.0]),
+        (-5_000, [-5_000.0, -300.0]),
     ),
 )
-def test_wider_primary_fit_uses_its_own_vertical_calibration(
+def test_wider_primary_fit_reports_statistical_and_window_diagnostics_without_proxy_floor(
     outer_m: int,
     expected_window: list[float],
-    expected_p95_m: float,
-    expected_floor_m: float,
 ):
     runway = _airport().runway("36")
     frame = runway.frame("hae")
@@ -232,8 +313,9 @@ def test_wider_primary_fit_uses_its_own_vertical_calibration(
 
     assert event["status"] == "estimated"
     assert event["fit_window_m"] == expected_window
-    assert event["empirical_calibration"][
-        "primary_window_vertical_error_p95_m"
-    ] == expected_p95_m
-    assert event["uncertainty_95_m"]["vertical_empirical_floor"] == expected_floor_m
-    assert event["uncertainty_95_m"]["vertical_effective"] >= expected_floor_m
+    assert "empirical_calibration" not in event
+    assert "vertical_empirical_floor" not in event["uncertainty_95_m"]
+    assert event["uncertainty_95_m"]["vertical_effective"] == pytest.approx(
+        event["uncertainty_95_m"]["vertical_statistical"]
+        + event["uncertainty_95_m"]["vertical_window_sensitivity"]
+    )

@@ -1,305 +1,375 @@
-# Observed threshold-event estimator optimization
+# Observed threshold-event fitting redesign
 
-Status: implemented and verdict coupling corrected on 2026-08-13
+Status: implemented as `observed-threshold-event-v4` and regenerated across the
+five production airports on 2026-08-14. Version 4 replaces version 3's
+state-row-time speed screen with the ADS-B position-clock integrity check below.
 
-Scope: the policy-free observed threshold-event producer in
-`trajectory_data_process.harvest`; evaluation remains a consumer and never fits
-or refits an observed trajectory.
+Scope: the policy-free observed ADS-B threshold-event producer in
+`trajectory_data_process.harvest`. Evaluation consumes the serialized event and
+must never fit or refit observed samples.
 
-## 1. Objective
+## 1. Decision
 
-Estimate the aircraft navigation reference point at the Landing Threshold Point
-(LTP) plane (`along_track = 0`) for an assigned final inbound trajectory.
-
-The event contains geometry and estimator-quality diagnostics only. It must not
-contain LPV limits, an approach verdict, or evaluation policy. Evaluation
-separately compares the serialized event point estimate with the published-TCH
-path.
-
-The estimator must distinguish two physically different cases:
-
-1. **Observed crossing:** the final inbound ADS-B samples bracket the LTP plane.
-2. **Unobserved crossing:** reception ends before the LTP plane and the crossing
-   must be extrapolated.
-
-The former implementation always used case 2, even when case 1 was available.
-
-The purpose of fitting is therefore narrow: estimate the one physical crossing
-event when reception ends before it. Fitting is not an additional aviation
-gate, and its residual or population error distribution must not redefine the
-LPV/LNAV-VNAV limits later applied by evaluation.
-
-### 1.1 Method pattern checked against published work
-
-The implementation follows the established trajectory-processing pattern,
-without claiming that any cited paper defines this project's exact altitude
-estimator:
-
-- NASA/TM-20220019263, pp. 8–9, first resolves the landing runway and distance
-  to its threshold, then calculates localizer/glideslope deviations over
-  contiguous final-approach intervals. This supports runway-frame event
-  extraction before performance assessment.
-- Olive et al. (2020), §§3.3 and 3.5, identify landing/final-approach events
-  using runway context and explicitly document unreliable ground flags,
-  successive alignments, go-arounds, and circle-to-land corner cases. This
-  supports the selected-final-pass rule rather than an unconstrained search of
-  the whole track.
-- Waltert and Figuet (2024), §2.3, treat low-altitude ADS-B coverage as a
-  missing-event estimation problem. They train only on fully covered landings
-  and split complete trajectories into train, validation, and test sets. Their
-  target is remaining landing time, not crossing altitude; the transferable
-  lesson is the validation design, not their XGBoost model.
-
-Local copies read for this design are:
-
-- [NASA/TM-20220019263](../docs/literature_review/threshold_event_estimation/NASA_TM_20220019263.pdf)
-- [Olive et al., 2020](../docs/literature_review/threshold_event_estimation/Olive_et_al_2020_Trajectory_Event_Detection.pdf)
-- [Waltert and Figuet, 2024](../docs/literature_review/threshold_event_estimation/Waltert_Figuet_2024_ADSB_Missing_Landing_Time.pdf)
-
-## 2. Evidence motivating the change
-
-The merged five-airport observed set contains 43,951 LPV-evaluable assigned
-tracks. Of those, 29,319 have samples on both sides of the LTP plane. The old
-`[-5000, -300] m` straight-line fit nevertheless discarded those samples and
-extrapolated every crossing.
-
-For the 29,319 bracketed records, direct linear interpolation and the former
-fit differed vertically by:
-
-| Statistic | Direct crossing minus former fit |
-|---|---:|
-| median signed | `+3.69 m` |
-| median absolute | `4.81 m` |
-| 95th-percentile absolute | `19.03 m` |
-
-The positive displacement is consistent with the physical trajectory beginning
-to round out relative to the extension of the earlier glidepath. Consequently,
-the former value represented the intersection of an earlier fitted line with the
-threshold plane, not necessarily the aircraft's physical crossing.
-
-Some apparent brackets are position jumps. A structural validity screen using
-`sample gap <= 5 s` and implied horizontal speed `<= 200 m/s` retains 21,599
-crossings. These bounds are data-quality limits, not approach-performance
-criteria. They are deliberately above normal transport-category approach speeds
-and reject only a temporally sparse or physically implausible interpolation.
-
-## 3. Estimator decision flow
+The observed event must be estimated by component:
 
 ```text
-assigned runway + winning final-inbound fit + raw HAE samples
-                         |
-                         v
-search after the winning fit for the first valid LTP bracket
-              / yes                       \ no
-             v                             v
-threshold-plane interpolation      multi-window extrapolation
-             |                             |
-             +------ policy-free observed_threshold_event ------+
-                                                           |
-                                                           v
-                                            evaluation consumes event
-                                            (no fit and no refit)
+selected final inbound pass
+        |
+        +-- lateral position at LTP plane
+        |      valid measured position bracket -> direct interpolation
+        |      otherwise                       -> final-segment fit
+        |
+        +-- vertical height at LTP plane
+               always                          -> final-segment fit
 ```
 
-Only samples after the winning assignment fit are searched. This preserves the
-selected final inbound pass and prevents an earlier overflight or go-around from
-supplying the crossing.
+The vertical event fit remains an ordinary straight-line least-squares fit over
+the preferred runway-frame window `[-3000, -300] m`, with `[-4000, -300] m`
+and `[-5000, -300] m` as availability fallbacks. The runway-assignment fit is
+unchanged.
 
-## 4. Direct threshold-plane interpolation
+This is intentionally not a more complicated regression. Small experiments on
+the newly completed metadata reject Huber, time-parametric, quadratic, freshness-
+weighted, and velocity-screened alternatives. The new evidence instead exposes
+a data-alignment error in the version-2 design: a threshold position bracket is
+not proof that the `geoaltitude` value in those same state-vector rows was updated
+at that position.
 
-For consecutive runway-frame samples `a` and `b` satisfying
+The direct bracket therefore remains the best available lateral observation but
+is no longer used as the observed vertical crossing height.
+
+## 2. Required boundaries
+
+- Raw track samples remain raw HAE observations.
+- Runway assignment and threshold-event estimation remain producer-side derived
+  processing.
+- The event contains geometry, estimator provenance, and quality diagnostics;
+  it contains no LPV/LNAV-VNAV policy and no verdict.
+- Evaluation validates and applies the selected terminal standard to the stored
+  point. It does not select samples, interpolate, or call `fit_final_segment()`.
+- Optimized and predicted trajectories are unaffected: their threshold state is
+  evaluated directly.
+- Changing the evaluation standard never causes ADS-B refitting.
+- The backfilled metadata remains a source sidecar. It is not copied into the raw
+  coordinate array. No-download reclassification reads the sidecar by exact
+  `(icao24, state-row time)` key; a new harvest requests the same source fields
+  directly.
+
+## 3. What the new metadata establishes
+
+The completed sidecars under
+`trajectory_data_process/outputs/adsb-metadata/<ICAO>/` contain state-vector
+`velocity`, `lastposupdate`, and `lastcontact`, plus operational-status GVA where
+available.
+
+### 3.1 Alignment and freshness probe
+
+A cross-airport probe of 348 tracks and 14,258 final-fit samples found:
+
+| Check | Result |
+|---|---:|
+| exact state-row matches | `100%` |
+| ambiguous matches | `0` |
+| `time - lastposupdate` median | `0.273 s` |
+| `time - lastposupdate` p95 | `0.842 s` |
+| maximum observed position age | `7.199 s` |
+| reported/geometric speed absolute difference median | `3.336 m/s` |
+| reported/geometric speed absolute difference p95 | `12.567 m/s` |
+| GVA `45 m` | `347 / 348 tracks` |
+| GVA `150 m` | `1 / 348 tracks` |
+
+`lastposupdate` supplies horizontal-position freshness. The downloaded source has
+no corresponding per-row geometric-altitude update time, so it cannot synchronize
+the threshold position and `geoaltitude` after the fact. GVA is a source-integrity
+diagnostic, not a correction vector, and the nearly constant `45 m` value cannot
+choose among candidate regressors or recover a threshold height.
+
+### 3.2 Regression probe
+
+Using the current directly bracketed crossing as a comparison proxy, not as
+ground truth, the 348-track probe produced:
+
+| Candidate vertical estimator | MAE vs direct proxy | p95 absolute difference |
+|---|---:|---:|
+| straight OLS, `[-3000, -300] m` | `5.390 m` | `13.891 m` |
+| position-deduplicated OLS | worse | `15.246 m` |
+| Huber robust line | worse | `16.186 m` |
+| time-parametric line | worse | `15.281 m` |
+| quadratic in along-track | worse | `16.997 m` |
+
+Discarding samples when reported and geometric speed differed by more than
+`20 m/s` also worsened the p95 result. Screening whole tracks at `15 m/s`
+improved the proxy p95 to `12.360 m` but retained only `47.1%` of tracks. That
+is unacceptable availability loss and is not a fitting method.
+
+These results reject added estimator complexity and metadata weighting.
+
+### 3.5 Full threshold-bracket position-jump audit
+
+Version 3 divided the geodesic distance between bracket rows by the difference
+between their state-row `time` values. That clock is not the position clock:
+OpenSky can publish a new state row while repeating an older position. The full
+five-airport audit compared 21,873 accepted direct brackets and 7,721 brackets
+rejected by that old screen against `lastposupdate` and reported ground
+`velocity`:
+
+| Quantity | Accepted direct brackets | Old speed-screen rejects |
+|---|---:|---:|
+| state-row gap, median | `1.000 s` | `1.000 s` |
+| real position-update gap, median | `1.066 s` | `5.181 s` |
+| position-derived speed, median | `68.961 m/s` | `72.259 m/s` |
+| reported ground speed, median | `68.943 m/s` | `72.363 m/s` |
+| absolute speed disagreement, median | `3.057 m/s` | `1.032 m/s` |
+| absolute speed disagreement, p99 | `22.622 m/s` | `21.254 m/s` |
+
+Thus the old rejection is structurally caused by the wrong clock, not by high
+aircraft speed. But the rejected set also contains genuine jumps: 40 pairs still
+exceed `200 m/s` after division by the real position-update interval, and the
+largest disagrees with reported speed by more than `2,100 m/s`.
+
+Version 4 therefore does not remove validation. It requires:
+
+```text
+0 < delta(lastposupdate) <= 30 s
+0 < each reported ground speed <= 200 m/s
+abs(position-derived speed - mean reported speed) <= 25 m/s
+0.5 <= position-derived speed / mean reported speed <= 1.5
+```
+
+The `25 m/s` limit is the accepted-control p99 (`22.622 m/s`) rounded up;
+the `30 s` freshness limit rounds up that control set's maximum (`27.25 s`).
+The independent ratio bound prevents a very low reported speed from passing on
+the absolute allowance alone. These are empirical source-integrity gates, not
+LPV performance limits. Applied to the audit corpus, the combined rule retains
+21,702/21,873 old direct brackets and recovers 7,588/7,721 old rejects, while
+continuing to reject 304 inconsistent or excessively stale brackets across both
+groups.
+
+### 3.3 Threshold-altitude dynamics probe
+
+A second stratified sample contained 904 LPV tracks from KMSY, KRDU, KSJC,
+KSMF, and KSTL. Every selected record had a published TCH, a valid direct LTP
+position bracket, and a lateral point inside the existing lateral gate.
+
+| Observation | Result |
+|---|---:|
+| same altitude on both bracket rows | `426 / 904` |
+| next altitude change found within 10 samples | `863 / 904` |
+| time to next altitude change, median | `2.0 s` |
+| first-change absolute rate, p95 | `7.6 m/s` |
+| drop of at least `15 m` within `3 s` | `49 / 904` |
+
+The last group is decisive evidence against coupling the direct position and
+vertical estimates. Its median direct height error relative to published TCH was
+`+8.939 m`; the direct point passed the `±7.5 m` vertical gate only `32.65%` of
+the time. The 3 km line fit passed `73.47%` of the time. Closeness to TCH is not
+used to choose the estimator; that would bias the measurement toward the
+standard. The selection is based on the physically implausible altitude steps.
+
+Representative records show the failure directly:
+
+| Flight | Height at position bracket | First post-bracket height | Time |
+|---|---:|---:|---:|
+| KMSY UAL1493 | `40.4 m` | `10.0 m` | `1.2 s` after crossing |
+| KMSY AAL2208 | `40.4 m` | `25.2 m` | `1.2 s` after crossing |
+| KMSY SWA1232 | `48.1 m` | `17.6 m` | `1.8 s` after crossing |
+
+For UAL1493, `lastposupdate` makes the horizontal motion coherent with the
+reported speed, while `geoaltitude` drops `30.4 m` in the next state row. This
+is an altitude/position update-alignment problem, not a trajectory capable of a
+physical `30.4 m/s` descent at the runway threshold.
+
+### 3.4 Window probe
+
+On a separate 894-track cross-airport window cohort, shorter windows increasingly reproduce the
+direct proxy because they approach the bracket, but they do not behave more
+consistently relative to the independent published TCH reference:
+
+| Window | MAE vs direct proxy | p95 vs direct | MAE vs TCH | p95 vs TCH |
+|---|---:|---:|---:|---:|
+| `[-3000, -300] m` | `4.849` | `12.588` | `4.532` | `11.895` |
+| `[-2000, -200] m` | `4.414` | `11.958` | `4.596` | `11.702` |
+| `[-1500, -100] m` | `3.901` | `10.689` | `4.671` | `12.055` |
+| `[-1000, -100] m` | `3.693` | `10.054` | `4.946` | `12.961` |
+| `[-1000, 0] m` | `2.918` | `7.968` | `4.934` | `12.723` |
+
+The 3 km window has the best overall TCH MAE and avoids fitting the threshold
+altitude staircase itself. The 2 km candidate has a slightly smaller overall TCH
+p95 but degrades one airport materially and is not consistently better across
+airports. There is no evidence for replacing the transparent 3 km primary.
+
+## 4. Version-4 estimator
+
+### 4.1 Final-pass selection
+
+Runway assignment continues to select the final inbound pass and supplies its
+winning fit. Threshold processing searches only after that fit. An earlier
+overflight, go-around, or reciprocal pass cannot supply the event.
+
+### 4.2 Lateral component
+
+For consecutive runway-frame positions `a` and `b` satisfying
 `a.along <= 0 <= b.along`, compute:
 
 ```text
 fraction = -a.along / (b.along - a.along)
-cross    = a.cross  + fraction * (b.cross  - a.cross)
-height   = a.height + fraction * (b.height - a.height)
+cross    = a.cross + fraction * (b.cross - a.cross)
 ```
 
-The pair is usable only when:
+The pair must be strictly inbound and state-row time must increase. Position
+integrity is then checked against the real `lastposupdate` interval and the two
+ADS-B reported ground-speed values using §3.5. State-row time is never used to
+derive motion speed. If metadata is absent, ambiguous, stale, or inconsistent,
+the bracket is rejected and the primary final-segment fit supplies the lateral
+intercept. The lateral verdict limits themselves are unchanged.
 
-- time is strictly increasing;
-- the gap is no more than `5 s`;
-- along-track movement is toward and through the threshold; and
-- implied horizontal speed is no more than `200 m/s`.
+### 4.3 Vertical component
 
-A pair that crosses the threshold plane but fails one of these checks is recorded
-in `interpolation_rejections` and skipped. The search continues through later
-consecutive pairs on the same selected final pass; only the absence of any valid
-later bracket selects extrapolation. This prevents one position spike from hiding
-a later physical threshold crossing while keeping the rejected pair auditable.
+Fit height against runway-frame along-track distance over these windows:
 
-The event method is `threshold_plane_interpolation`, method version 2, and
-`extrapolation_m` is zero. Its source range is exactly the two inclusive source
-sample indices.
+1. `[-3000, -300] m` preferred;
+2. `[-4000, -300] m` if the preferred window cannot meet sample/span rules;
+3. `[-5000, -300] m` as the final availability fallback.
 
-OpenSky geometric altitude in this data is quantized to 25 ft (`7.62 m`). The
-direct vertical 95% half-width is therefore at least half a quantum (`3.81 m`).
-The producer also retains the larger uncertainty indicated by the final-segment
-fit. This prevents interpolation from manufacturing sub-quantum certainty.
-
-For lateral uncertainty, the producer retains the final-fit statistical margin
-and the direct-versus-fit disagreement, whichever is larger. The latter makes a
-late lateral change visible in the event uncertainty instead of silently treating
-the earlier centreline extension as the measured crossing.
-
-The report must continue to list ADS-B integrity and systematic position error as
-unmodelled unless the source supplies suitable integrity metadata.
-
-## 5. Extrapolated crossing
-
-When no valid bracket exists, extrapolation remains necessary. It is produced in
-the harvest/final-approach stage, never in evaluation.
-
-### 5.1 Preferred and fallback windows
-
-The preferred fit uses `[-3000, -300] m`. If it does not meet the fit's minimum
-sample-count and along-track-span requirements, the producer selects the first
-valid wider window in this order: `[-4000, -300] m`, then `[-5000, -300] m`.
-Against all 21,599 valid direct crossings, these candidate windows performed as
-follows:
-
-| Window | Median signed error | Mean absolute error | 95th absolute error |
-|---|---:|---:|---:|
-| `[-5000, -300] m` | `-2.53 m` | `5.67 m` | `14.39 m` |
-| `[-4000, -300] m` | `-2.37 m` | `5.44 m` | `13.43 m` |
-| `[-3000, -300] m` | `-2.32 m` | `5.10 m` | `12.65 m` |
-| `[-5000, -500] m` | `-2.66 m` | `6.21 m` | `15.62 m` |
-
-The 3 km window has the lowest measured error while retaining a much longer
-baseline than the extrapolation distance. This is a data-driven estimator choice,
-not an aviation verdict threshold.
-
-A second check expanded to all `21,873` assigned tracks with a valid direct
-crossing, including assignment-only non-LPV runways, and left out one whole
-airport at a time. With a median offset fitted only on the other four airports,
-the held-out vertical results were:
-
-| Window | Leave-one-airport-out MAE | Leave-one-airport-out 95th absolute error |
-|---|---:|---:|
-| `[-3000, -300] m` | `4.71 m` | `11.33 m` |
-| `[-4000, -300] m` | `5.08 m` | `12.12 m` |
-| `[-5000, -300] m` | `5.27 m` | `12.95 m` |
-
-The 3 km candidate was best for every held-out airport. The implementation does
-not apply the learned median correction: its residual bias still varies by
-airport, and adding a correction without an independent airport/cycle cohort
-would overstate generality. The validation is used to choose the window, while
-the stored point remains the transparent line intercept.
-
-### 5.2 Window-sensitivity ensemble
-
-The producer also fits every available wider candidate. These candidates do not
-vote on the point estimate: the 3 km fit is primary when available, otherwise the
-first valid wider window is primary. Their maximum departure from that primary
-intercept is serialized as window/model sensitivity.
-
-For each component, the serialized diagnostic margin is:
+For the primary fit:
 
 ```text
-max(
-    largest candidate statistical 95% margin + window sensitivity,
-    empirical extrapolation error floor
-)
+threshold_crossing_altitude_hae
+    = runway_threshold_elevation_hae
+    + primary_fit.height_at_threshold_m
 ```
 
-The vertical empirical floor is selected for the actual primary estimator and
-rounded upward to the next `0.5 m`: `13.0 m` for the 3 km window (`12.65 m`
-measured p95), `13.5 m` for 4 km (`13.43 m`), or `14.5 m` for 5 km (`14.39 m`).
-The lateral floor is `10.5 m`, rounding upward the observed 95th-percentile
-direct-versus-former-fit difference (`10.29 m`). The selected primary window,
-measured vertical p95, rounding quantum, applied margins, and calibration
-population are serialized in the event. They are estimator-quality parameters,
-not LPV limits and not per-flight Gaussian confidence claims.
+The version-2 direct bracket altitude is retained only as a non-gating
+`direct_vertical_proxy` diagnostic when available. It is not the event point.
 
-This cohort was used to set the empirical floors. The leave-one-airport-out
-check validates the window ranking, but a later airport/cycle cohort is still
-required before the diagnostic margins are described as generally calibrated
-beyond the current five-airport data.
+No TCH value, `±7.5 m` bound, median correction, airport correction, GVA value,
+or verdict result enters the fit. This prevents circularly fitting observations
+toward the standard that later evaluates them.
 
-Most importantly, these diagnostics do not decide conformance. A nominal
-zero-deviation estimate can pass the `±7.5 m` point gate even when its empirical
-error diagnostic is wider than `7.5 m`. The report exposes both facts instead
-of silently replacing the standard with a tighter data-confidence test.
+### 4.4 Diagnostics and uncertainty
 
-## 6. Event contract version 2
+The producer serializes:
 
-Every current event carries:
+- the primary fit and every available candidate fit;
+- statistical intercept diagnostics;
+- maximum candidate-window sensitivity;
+- direct-versus-fit vertical proxy disagreement when a bracket exists;
+- the direct bracket's lateral provenance and rejected-pair audit; and
+- unmodelled ADS-B source integrity and altitude update alignment.
+
+The former event-v2 vertical “empirical error floor” is retired. It was calibrated
+against direct bracket altitude as though that value were truth; the new metadata
+and altitude-dynamics probe invalidate that interpretation. Direct-versus-fit
+distribution values may be reported as disagreement diagnostics, not as accuracy
+bounds.
+
+The event's diagnostic vertical margin is:
 
 ```text
-schema_version: observed-threshold-event-v2
-status: estimated | unavailable
-method: threshold_plane_interpolation | final_segment_window_ensemble
-method_version: 2
-runway and runway-data fingerprint
+largest candidate statistical 95% intercept margin
+    + maximum candidate-window sensitivity
+```
+
+It is not a complete ADS-B accuracy claim and does not control the aviation
+verdict. Evaluation continues to classify the point estimate against the
+applicable bound and displays uncertainty separately.
+
+## 5. Event contract v4
+
+Every estimated event carries:
+
+```text
+schema_version: observed-threshold-event-v4
+method_version: 4
+method: direct_lateral_fitted_vertical | final_segment_window_ensemble
+component_methods:
+  lateral: threshold_plane_interpolation | final_segment_window_ensemble
+  vertical: final_segment_window_ensemble
+component_source_sample_ranges:
+  lateral: inclusive source indices
+  vertical: inclusive source indices
+runway and exact runway-data fingerprint
 threshold crossing latitude, longitude, and HAE altitude
 signed cross-track offset
-cross-track and altitude sigma retained as evaluation-report diagnostics
-explicit 95% uncertainty half-widths and their components
-source sample range
-fit diagnostics and winning assignment-fit range
-interpolation diagnostics, rejected-bracket audit, or candidate-window diagnostics
-extrapolation distance
+primary vertical fit window and candidate fits
+lateral and vertical diagnostic sigmas
+component extrapolation distances
+fit/interpolation diagnostics, including both clocks, reported speed,
+position-derived speed, disagreement, ratio, and applied integrity limits
 unmodelled uncertainty sources
 ```
 
-Version 1 events are obsolete derived artifacts. Consumers reject them and direct
-the operator to `--reclassify-existing`. Reclassification reads the stored HAE
-samples and performs no OpenSky download.
+Earlier events are obsolete derived artifacts. Consumers must reject them and
+request `--reclassify-existing`. Reclassification uses the stored raw HAE samples
+plus the protected ADS-B metadata sidecar; it does not redownload history. Exact
+key matching is mandatory, and conflicting duplicate state rows are treated as
+metadata unavailable rather than guessed. The reclassification provenance stores
+the sidecar schema, airport, manifest path, and manifest SHA-256.
 
-## 7. Evaluation boundary
+## 6. Evaluation and rendering boundary
 
-Evaluation may:
+Evaluation may validate the v4 event, convert HAE to MSL using the authoritative
+runway datum offset, and apply the selected final-approach standard. It must not
+import the fitter or replace either component estimate.
 
-- validate the event, datum, runway fingerprint, and finite values;
-- convert the serialized HAE crossing altitude to MSL;
-- apply the selected LPV or LNAV/VNAV limits; and
-- classify the supplied point estimate against the selected component bounds;
-- report the supplied uncertainty interval as a non-gating diagnostic.
+CZML may draw an inferred tail only when lateral position is also fit because the
+measured trajectory never reached the threshold. A record with a direct lateral
+bracket already contains measured geometry on both sides of the plane; drawing an
+extra fit tail would duplicate and mislabel it.
 
-Evaluation must not:
+## 7. Acceptance and production verification
 
-- import or call `fit_final_segment()`;
-- select ADS-B samples;
-- interpolate the threshold crossing;
-- alter the producer's uncertainty; or
-- replace an unavailable event with a downstream estimate.
+1. A synthetic track whose bracket altitude is deliberately wrong still gets its
+   lateral position from the bracket and its vertical point from the 3 km fit.
+2. A track without a valid bracket gets both components from the fit ensemble.
+3. The serialized source ranges identify lateral and vertical inputs separately.
+4. Earlier event artifacts are rejected with a reclassification instruction.
+5. Evaluation tests prove observed processing consumes the event and never refits.
+6. Existing optimized/predicted terminal-state evaluation is unchanged.
+7. Focused final-approach, harvest, evaluation, and pipeline-integration tests pass.
 
-A regression test monkeypatches the final-approach fitter to raise and verifies
-that evaluation of a stored event still succeeds.
+All seven criteria are satisfied. The related Python suite reports `157 passed`.
+The existing no-download `--reclassify-existing` mode then rebuilt tracks,
+arrivals, evaluation, CZML, and frontend publication for every production airport:
 
-## 8. Acceptance criteria
+| Airport | Assigned v4 events | Direct lateral | Evaluated | Pass | Fail | Indeterminate |
+|---|---:|---:|---:|---:|---:|---:|
+| KMSY | 4,299 | 4,224 | 4,299 | 3,183 | 1,116 | 0 |
+| KRDU | 16,530 | 1,215 | 14,967 | 10,702 | 4,265 | 0 |
+| KSJC | 10,945 | 10,901 | 10,945 | 8,608 | 2,337 | 0 |
+| KSMF | 4,683 | 4,578 | 4,412 | 3,814 | 598 | 0 |
+| KSTL | 9,328 | 8,378 | 9,328 | 7,634 | 1,694 | 0 |
+| **Total** | **45,785** | **29,296** | **43,951** | **33,941** | **10,010** | **0** |
 
-1. A valid final-inbound bracket produces the interpolated physical crossing,
-   not the earlier fit intercept.
-2. A rejected threshold bracket remains auditable and does not prevent a later
-   valid bracket from being used.
-3. A path without a valid bracket uses the preferred 3 km fit when available;
-   otherwise it uses the 4 km or 5 km fallback with that window's own calibrated
-   vertical floor. It serializes all available candidates, sensitivity,
-   calibration floors, and uncertainty composition.
-4. Direct vertical uncertainty is never smaller than half the 25 ft altitude
-   quantum at 95% confidence.
-5. Version 1 events are rejected as obsolete derived artifacts.
-6. Arrival/CZML consumers do not draw an inferred tail for a directly observed
-   crossing.
-7. Evaluation tests prove no observed refitting occurs.
-8. Existing raw samples, arrival/model schemas, trajectory identities, LPV
-   limits, and lateral verdict formula remain unchanged.
-9. A zero-deviation extrapolated event passes the point gate regardless of a
-   wider diagnostic interval; a point outside the gate fails even if that
-   interval overlaps it.
+The combined point-verdict pass rate is `77.2246%`. The difference between
+assigned and evaluated counts is the existing published-TCH eligibility rule,
+not an estimator failure. A post-run audit parsed every assigned track and found
+only event schema v4, method version 4, an estimated status, and a fitted vertical
+component. It also checked all 29,296 direct events against their serialized
+integrity limits and found zero violations. The remaining 16,489 events use
+fitted lateral: 16,163 have no bracket, 88 exceed the 30-second real position
+gap, and 239 bracket attempts disagree with reported speed. One event rejected
+an early pair and accepted a later valid pair, so rejection reasons sum to one
+more than fitted-lateral events. Local and frontend-published reports are
+byte-equivalent as parsed JSON. No OpenSky query was made during regeneration.
 
-## 9. Reference audit
+## 8. Method references
 
-All three PDFs above were downloaded from their publishers and read in full,
-not inferred from search-result outlines. They are publication artifacts rather
-than versioned operational standards, so “newest edition” does not apply. The
-normative LPV/LNAV-VNAV sources and their edition/status checks remain in
-[`evaluation/FINAL_APPROACH_VERDICT_STANDARD.md`](../evaluation/FINAL_APPROACH_VERDICT_STANDARD.md#11-official-source-audit).
+These publications support the runway-frame, selected-final-pass, and explicit
+missing-event treatment. They do not define this project's numerical threshold
+height estimator, so no stronger claim is made.
 
-```text
-f07a0e9d00e2453e785af0628be85c7e1e83d85ea2cd40ebda4e6dfaf63dac4c  NASA_TM_20220019263.pdf
-9f5c2cc44713ad9b1ad390ce9b849febd00011ec03b590189fa3769ee75038c7  Olive_et_al_2020_Trajectory_Event_Detection.pdf
-2ac53bcecb009ae8c6386e2f9bcbfac1f0c7b9e0cb8add1dab92533ce88a4f70  Waltert_Figuet_2024_ADSB_Missing_Landing_Time.pdf
-```
+- [NASA/TM-20220019263](../docs/literature_review/threshold_event_estimation/NASA_TM_20220019263.pdf),
+  pp. 8–9: resolve landing runway/distance to threshold before calculating
+  localizer and glideslope deviations over contiguous final-approach intervals.
+- [Olive et al. (2020)](../docs/literature_review/threshold_event_estimation/Olive_et_al_2020_Trajectory_Event_Detection.pdf),
+  §§3.3 and 3.5: runway-context landing/final-approach event detection and the
+  treatment of successive alignments, go-arounds, circle-to-land cases, and
+  unreliable ground flags.
+- [Waltert and Figuet (2024)](../docs/literature_review/threshold_event_estimation/Waltert_Figuet_2024_ADSB_Missing_Landing_Time.pdf),
+  §2.3: treat low-altitude coverage as missing-event estimation and validate on
+  complete landings. Their target is remaining landing time, not threshold
+  altitude; only the validation pattern transfers here.
+
+The normative LPV/LNAV-VNAV verdict sources and section-level citations remain in
+[`evaluation/FINAL_APPROACH_VERDICT_STANDARD.md`](../evaluation/FINAL_APPROACH_VERDICT_STANDARD.md).
