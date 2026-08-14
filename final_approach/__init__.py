@@ -1,9 +1,10 @@
 """final_approach — the single producer of flown final-approach geometry.
 
-``trajectory_data_process`` projects a track into a runway-aligned frame, fits
-the final segment once, selects the runway, and serializes a policy-free
-threshold event. Evaluation consumes that event; it does not import or rerun
-the fitter.
+``trajectory_data_process`` projects a track into runway-aligned frames and fits
+the final segment to select the runway. Its threshold-event producer then uses a
+valid measured threshold bracket when available, or producer-side fit-window
+extrapolation otherwise. Evaluation consumes that policy-free event; it does not
+import or rerun the fitter.
 
 The two decisions remain separate:
 
@@ -11,20 +12,19 @@ The two decisions remain separate:
     takes the arg-min over candidate runways) that must never reject a track for
     flying badly;
   * evaluation asks **how good** — benchmark/runway bounds applied to the
-    serialized crossing and uncertainty.
+    serialized crossing and uncertainty, without fitting trajectory samples.
 
 That split is load-bearing. If the harvest filtered on the quality criterion that
 evaluation later reports, every surviving track would pass by construction. So
 this package returns FACTS ONLY: it exposes no ``established`` flag, no
 pass/fail verdict, and no regulation constant. Thresholds live with their consumer.
 
-Why the fit exists at all: ADS-B coverage from crowd-sourced ground receivers stops
-before touchdown (measured on 996 KRDU arrivals: 970 end short of the threshold, a
-median 325 m out and still ~135 ft up, at a clean 1 Hz cadence right to the cut).
-The last sample therefore records where reception ended, not where the aircraft
-crossed. Fitting the flown segment and extrapolating recovers the crossing; the
-recovered glidepath (3.02-3.11 deg across five airports) is the self-check that it
-recovers a real approach rather than inventing one.
+Why the fit still exists: it supplies the runway-assignment geometry, and many
+crowd-sourced ADS-B tracks stop before the threshold. Those unbracketed tracks need
+producer-side extrapolation. When valid samples do bracket the threshold, the event
+producer uses their physical crossing instead of extending the earlier fit through
+the round-out. See ``FIT_MODEL_OPTIMIZATION.md`` for the measured comparison and
+uncertainty design.
 
 Datum contract (stated once, enforced nowhere): ``TrackPoint.alt_m`` and
 ``RunwayFrame.elevation_m`` MUST share a vertical datum. The harvest works in

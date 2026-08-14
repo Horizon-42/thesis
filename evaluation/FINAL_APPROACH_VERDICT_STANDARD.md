@@ -1,8 +1,9 @@
 # Terminal final-approach verdict standard
 
 Status: implemented for the stated U.S. data path. The evaluator applies the
-corrected `±7.5 m` LPV threshold rule and report schema v3; Section 13 records
-the acceptance criteria used to verify the implementation.
+corrected `±7.5 m` LPV threshold rule to the threshold-event point estimate and
+uses report schema v3; Section 13 records the acceptance criteria used to
+verify the implementation.
 
 Standards checked: 2026-08-13
 
@@ -34,8 +35,11 @@ The verdict evaluates:
 
 - signed lateral offset from the runway centreline;
 - signed vertical offset from the configured desired path;
-- whether a valid threshold event exists; and
-- uncertainty in the measured or derived values.
+- whether a valid threshold event and applicable bounds exist.
+
+Estimator uncertainty is retained as diagnostic metadata. It does not tighten
+an operational bound or replace a geometric pass/fail result with
+`indeterminate`.
 
 For observed ADS-B, the verdict does not fit the trajectory. The data flow is:
 
@@ -47,9 +51,10 @@ raw ADS-B samples
 ```
 
 `classify_track()` already calls `assign_runway()`, which retains the winning
-`SegmentFit` as `Assignment.fit`. That fit is the single source of the observed
-threshold estimate. Downstream stages must consume the serialized estimate and
-must not call `fit_final_segment()` again.
+`SegmentFit` as `Assignment.fit`. The threshold-event producer uses that final
+inbound pass to interpolate a measured crossing when available, or performs
+the one producer-side extrapolation otherwise. Downstream stages consume the
+serialized result and must not call `fit_final_segment()` again.
 
 The current fixed thresholds are withdrawn:
 
@@ -71,8 +76,8 @@ LPV full-scale magnitude is `15 m`; therefore the normal bound is
 `0.5 × 15 m = 7.5 m`. One-half runway width is exact
 centreline-to-edge geometry.
 
-This correction changes LPV vertical evaluation only. The lateral rule remains
-unchanged.
+The lateral bound formula remains unchanged. Both lateral and vertical
+components use the same point-estimate classification rule.
 
 ## 2. Claim boundary
 
@@ -139,11 +144,12 @@ Do not extrapolate a computed trajectory to manufacture a pass.
 ### 3.3 Observed ADS-B trajectories
 
 The last ADS-B point often represents receiver loss rather than the threshold.
-The runway-assignment stage already solves this by fitting several
-final-approach samples and evaluating the winning fit at `s = 0`.
+The harvest stage therefore produces the threshold event before evaluation. It
+uses direct interpolation when final-inbound samples validly bracket `s = 0`,
+and producer-side fit-window extrapolation otherwise.
 
 The harvested track record must serialize a small
-`observed_threshold_event` derived directly from `Assignment.fit`. The event
+`observed_threshold_event`. The event
 contains measurement and fitting facts only:
 
 ```text
@@ -155,28 +161,30 @@ threshold_crossing_lat and threshold_crossing_lon
 threshold_crossing_altitude_m
 altitude_datum                 HAE for the current harvest
 signed_cross_track_m           right-positive
-cross_track_sigma_m            fit standard error at s = 0
-altitude_sigma_m               fit standard error at s = 0
+cross_track_sigma_m            effective 95% margin / 1.96
+altitude_sigma_m               effective 95% margin / 1.96
 source_sample_range            inclusive original sample indices
-fit_window_m
+fit window/candidate diagnostics when extrapolated
 sample_count and along-track span
 cross-track and altitude residual diagnostics
 extrapolation_m
 unavailable_reason             only when no event was produced
 ```
 
-The altitude is physical crossing altitude in HAE:
+For a directly bracketed event, the altitude and cross-track position are
+linearly interpolated at `s = 0`. For an unbracketed event, the altitude is:
 
 ```text
 threshold_crossing_altitude_hae
     = runway threshold elevation HAE
-    + Assignment.fit.height_at_threshold_m
+    + primary_event_fit.height_at_threshold_m
 ```
 
 The crossing latitude/longitude is the same `s = 0`, signed-cross-track point
 resolved in the exact runway frame used by assignment. Storing that point lets
-rendering reuse the estimate without reconstructing it from a later runway-data
-cycle.
+rendering and evaluation reuse the estimate without reconstructing it from a
+later runway-data cycle. The estimator details and calibration limits are in
+[`final_approach/FIT_MODEL_OPTIMIZATION.md`](../final_approach/FIT_MODEL_OPTIMIZATION.md).
 
 The event also carries an audit snapshot and canonical fingerprint of every
 runway fact that can affect assignment or interpretation: threshold position,
@@ -191,8 +199,10 @@ limits, or any verdict. The raw `samples` array remains raw. `flight_key`
 remains the stable record identity and is not redefined inside the event.
 
 Evaluation consumes this event. It returns `indeterminate` when its status is
-not `estimated` or required uncertainty/provenance is invalid. It does not
-select samples, fit lines, or replace the stored estimate.
+not `estimated`, required provenance is invalid, or an applicable component
+bound is unavailable. It does not select samples, fit lines, or replace the
+stored estimate. A valid estimate is classified against the bound even when
+its diagnostic uncertainty interval crosses that bound.
 
 Arrival preparation uses the already stored landing-sample index. CZML uses
 the stored event and its source range to render any explicitly labelled
@@ -309,13 +319,12 @@ An LPV verdict requires:
 - published FAS TCH for the selected runway/procedure;
 - the evaluation methodology identifier for the DO-229 angular LPV scale with
   its `15 m` minimum linear limit;
-- compatible aircraft/trajectory altitude reference; and
-- quantified uncertainty or an explicit list of missing uncertainty sources.
+- compatible aircraft/trajectory altitude reference.
 
 The rule is source-independent. Observed, optimized, and predicted trajectories
 use the same threshold altitude, datum conversion, signed error, and `±7.5 m`
-bound. Data-source uncertainty may make an individual component
-`indeterminate`, but the vertical bound itself is no longer unavailable.
+bound. Available source uncertainty is reported separately and does not alter
+that bound or the point-estimate verdict.
 
 Do not substitute:
 
@@ -364,8 +373,8 @@ B_runway = 0.5 × runway width
 B_lat = min(B_guidance, B_runway)
 ```
 
-Apply the same signed cross-track and uncertainty classification used for LPV.
-The runway bound will normally control at the threshold.
+Apply the same signed cross-track point classification used for LPV. The runway
+bound will normally control at the threshold.
 
 ### 5.3 Vertical rule
 
@@ -409,27 +418,35 @@ The report label is:
 RNP APCH LNAV/VNAV (Baro-VNAV) terminal geometric verdict
 ```
 
-## 6. Uncertainty and invalid values
+## 6. Estimator quality and invalid values
 
-### 6.1 Interval classification
+### 6.1 Point verdict and diagnostic interval
 
-For signed estimate `e`, allowed magnitude `B`, and total 95% uncertainty
-half-width `U95`:
+For signed event estimate `e` and inclusive component bounds `[L, U]`:
 
 ```text
-measurement interval = [e - U95, e + U95]
-allowed interval     = [-B, B]
-
-pass          if the measurement interval is wholly inside the allowed interval
-fail          if the intervals do not overlap
-indeterminate otherwise
+pass          if L <= e <= U
+fail          otherwise
+indeterminate only when e or an applicable bound is unavailable
 ```
 
-Do not widen an official bound to hide uncertainty.
+When a producer supplies an uncertainty scale `sigma`, the report may also
+serialize the diagnostic 95% interval `e ± 1.96 sigma`. That interval describes
+the estimator or data source; it is not a second, stricter aviation limit and
+does not participate in the verdict.
 
-Observed uncertainty should include all material sources that can be
-quantified: ADS-B position and altitude, fit regression, extrapolation, timing,
-datum conversion, and runway/FAS reference data. List unmodelled sources.
+This separation is essential. The official `±7.5 m` LPV value is already the
+normal-operation deviation bound derived from one-half FSD. Requiring a noisy
+data source's complete confidence interval to fit inside it silently shrinks
+the standard and makes a zero-error estimate impossible to pass whenever its
+uncertainty exceeds `7.5 m`. Conversely, an out-of-bound point must not become
+`indeterminate` merely because a wide interval overlaps the gate.
+
+Observed estimator diagnostics should quantify sources that can be measured,
+including fit regression, extrapolation sensitivity, timing, and altitude
+quantization, and list material unmodelled sources. These values support data-
+quality analysis and estimator validation; they do not claim avionics
+integrity and do not change the trajectory verdict.
 
 ### 6.2 Finite validation
 
@@ -496,7 +513,8 @@ Each report must preserve:
 - guidance, runway, effective lateral, and vertical bounds;
 - LPV vertical scale model (`do229_lpv_angular_min_clamped`), one-sided minimum
   FSD (`15 m`), ICAO fraction (`0.5`), and resolved bound (`7.5 m`);
-- uncertainty intervals and missing uncertainty sources;
+- diagnostic uncertainty intervals and missing uncertainty sources, explicitly
+  marked as non-verdict metadata;
 - lateral, vertical, and composite results; and
 - every evaluation parameter that can change a verdict.
 
@@ -562,8 +580,8 @@ effective bound   = 7.5 m
 abs(+6 m) <= 7.5 m → pass
 ```
 
-An otherwise identical `+8 m` crossing fails. With uncertainty, apply the
-interval rule in Section 6 rather than widening `7.5 m`.
+An otherwise identical `+8 m` crossing fails. A diagnostic estimator interval
+may accompany either result, but it does not widen or shrink `7.5 m`.
 
 For a common `50 ft` published TCH, the geometric pass interval for the
 navigation reference point is approximately `25.4 ft` through `74.6 ft` above
@@ -660,12 +678,14 @@ Implementation of this vertical correction may change:
 Implementation must not change:
 
 - raw ADS-B samples or the in-memory raw trajectory model;
-- any `trajectory_data_process` schema, final-segment fitting, runway-assignment,
-  arrival preparation, or CZML behavior;
 - arrival-manifest, flight-scenario, optimizer, or prediction contracts;
 - stable identity generation;
-- the current lateral formula or its inputs;
+- the current lateral bound formula or its inputs;
 - unrelated approach types.
+
+The separately approved threshold-estimator optimization may change only the
+policy-free derived observed event and its producer-side fitting. It must not
+move fitting into evaluation or add approach policy to trajectory/model data.
 
 The harvested-track record already contains the policy-free threshold event,
 and the current runway model already carries published CIFP TCH. Therefore this
@@ -705,4 +725,7 @@ The corrected implementation is accepted when:
     FSD, ICAO `0.5` fraction, resolved `7.5 m` bound, and the source section
     indices from Section 11; and
 16. boundary tests cover exact `±7.5 m`, values just inside/outside, non-finite
-    values, and uncertainty intervals that overlap either boundary.
+    values, and prove that diagnostic uncertainty intervals do not change an
+    otherwise valid point verdict;
+17. a zero-deviation extrapolated event can pass even when its diagnostic
+    uncertainty exceeds the vertical bound.

@@ -83,7 +83,10 @@ def test_extrapolated_tail_uses_the_serialized_event_and_fit_source_range():
             [3.0, -78.0, 35.0015, 170.0],
         ],
         "observed_threshold_event": {
+            "schema_version": "observed-threshold-event-v2",
             "status": "estimated",
+            "method": "final_segment_window_ensemble",
+            "method_version": 2,
             "runway": "01",
             "source_sample_range": [0, 2],
             "extrapolation_m": 300.0,
@@ -98,3 +101,27 @@ def test_extrapolated_tail_uses_the_serialized_event_and_fit_source_range():
     assert tail[0][0] == 2.0
     assert tail[0][2] == 35.001
     assert tail[1][1:] == [-78.0, 35.0037, 150.0]
+
+
+def test_direct_threshold_event_does_not_add_an_extrapolated_czml_tail():
+    track = {
+        "flight_key": "DIRECT_01_abc_20260812T000000Z",
+        "runway": "01",
+        "landing_sample_index": 2,
+        "samples": [
+            [0.0, -78.0, 35.0, 200.0],
+            [1.0, -78.0, 35.0005, 190.0],
+            [2.0, -78.0, 35.0010, 180.0],
+        ],
+        "observed_threshold_event": {
+            "schema_version": "observed-threshold-event-v2",
+            "status": "estimated",
+            "method": "threshold_plane_interpolation",
+            "method_version": 2,
+            "runway": "01",
+            "source_sample_range": [1, 2],
+            "extrapolation_m": 0.0,
+        },
+    }
+
+    assert _extrapolated_waypoints(track) is None

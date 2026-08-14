@@ -66,17 +66,21 @@ def _component(
     estimate: float | None,
     lower: float | None,
     upper: float | None,
-    sigma: float | None,
-) -> tuple[ComponentResult, tuple[float, float] | None]:
+) -> ComponentResult:
     if estimate is None or lower is None or upper is None:
-        return "indeterminate", None
+        return "indeterminate"
+    return "pass" if lower <= estimate <= upper else "fail"
+
+
+def _diagnostic_interval(
+    estimate: float | None,
+    sigma: float | None,
+) -> tuple[float, float] | None:
+    """Return an estimator interval for audit, never for verdict classification."""
+    if estimate is None:
+        return None
     margin = 0.0 if sigma is None else NORMAL_95_MULTIPLIER * sigma
-    interval = (estimate - margin, estimate + margin)
-    if interval[0] >= lower and interval[1] <= upper:
-        return "pass", interval
-    if interval[1] < lower or interval[0] > upper:
-        return "fail", interval
-    return "indeterminate", interval
+    return estimate - margin, estimate + margin
 
 
 def _composite(lateral: ComponentResult, vertical: ComponentResult) -> Verdict:
@@ -160,17 +164,21 @@ def evaluate_record(
     deviation = outcome.deviation
     _validate_deviation(deviation)
 
-    lateral_result, lateral_interval = _component(
+    lateral_result = _component(
         deviation.cross_track_m,
         None if limits.effective_lateral_m is None else -limits.effective_lateral_m,
         limits.effective_lateral_m,
-        deviation.lateral_sigma_m,
     )
-    vertical_result, vertical_interval = _component(
+    vertical_result = _component(
         deviation.vertical_m,
         limits.vertical_lower_m,
         limits.vertical_upper_m,
-        deviation.vertical_sigma_m,
+    )
+    lateral_interval = _diagnostic_interval(
+        deviation.cross_track_m, deviation.lateral_sigma_m
+    )
+    vertical_interval = _diagnostic_interval(
+        deviation.vertical_m, deviation.vertical_sigma_m
     )
     verdict = _composite(lateral_result, vertical_result)
     violations: list[str] = []
@@ -182,15 +190,11 @@ def evaluate_record(
     if verdict == "indeterminate":
         reasons: list[str] = []
         if lateral_result == "indeterminate":
-            reasons.append(
-                "lateral uncertainty interval overlaps the allowed boundary"
-                if limits.effective_lateral_m is not None
-                else "lateral bound unavailable"
-            )
+            reasons.append("lateral bound or estimate unavailable")
         if vertical_result == "indeterminate":
             reasons.append(
                 limits.vertical_reason
-                or "vertical uncertainty interval overlaps the allowed boundary"
+                or "vertical bound or estimate unavailable"
             )
         reason = "; ".join(reasons) or None
     return TrajectoryEvaluation(
@@ -276,14 +280,20 @@ def evaluate_batch(
         "methodology": {
             "event": {
                 "computed_predicted": "terminal_state_at_threshold_plane",
-                "observed": "serialized_assignment_fit_threshold_event; no evaluation refit",
+                "observed": (
+                    "serialized_observed_threshold_event_v2: direct threshold-plane "
+                    "interpolation or producer-side window ensemble; no evaluation refit"
+                ),
                 "terminal_plane_tolerance_m": TERMINAL_PLANE_TOLERANCE_M,
             },
             "uncertainty": {
                 "confidence": 0.95,
                 "normal_multiplier": NORMAL_95_MULTIPLIER,
-                "classification": "interval_inside_pass; disjoint_fail; overlap_indeterminate",
-                "observed_sigma_source": "final_segment_fit_standard_error_at_threshold",
+                "classification": "diagnostic_only_not_used_by_verdict",
+                "verdict_rule": "point_estimate_against_inclusive_component_bounds",
+                "observed_sigma_source": (
+                    "serialized event-v2 effective 95% margin divided by 1.96"
+                ),
                 "unmodelled_sources": [
                     "ADS-B source integrity", "runway/FAS survey uncertainty",
                     "geoid/datum uncertainty", "model-form and extrapolation uncertainty",

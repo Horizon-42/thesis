@@ -94,7 +94,10 @@ def _source_track(
         "altitude_datum": ALTITUDE_DATUM,
         "assignment": {"outcome": "assigned", "runway": runway},
         "observed_threshold_event": {
+            "schema_version": "observed-threshold-event-v2",
             "status": "estimated",
+            "method": "final_segment_window_ensemble",
+            "method_version": 2,
             "runway": runway,
             "runway_data_fingerprint": runway_data_fingerprint(_runway(runway)),
         },
@@ -167,7 +170,10 @@ def test_anchor_index_consumes_the_stored_assignment_anchor_without_refitting():
         "flight_key": "TWOPASS_18_abc123_19700101T000009Z",
         "landing_sample_index": 9,
         "observed_threshold_event": {
+            "schema_version": "observed-threshold-event-v2",
             "status": "estimated",
+            "method": "threshold_plane_interpolation",
+            "method_version": 2,
             "runway": "18",
             "runway_data_fingerprint": runway_data_fingerprint(_runway("18")),
         },

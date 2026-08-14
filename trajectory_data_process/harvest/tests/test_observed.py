@@ -28,7 +28,10 @@ def _runway() -> Runway:
 def test_observed_record_rejects_event_from_a_different_runway_cycle():
     runway = _runway()
     event = {
+        "schema_version": "observed-threshold-event-v2",
         "status": "estimated",
+        "method": "threshold_plane_interpolation",
+        "method_version": 2,
         "runway": runway.ident,
         "runway_data_fingerprint": runway_data_fingerprint(runway),
     }

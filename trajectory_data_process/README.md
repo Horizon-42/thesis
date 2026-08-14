@@ -9,9 +9,9 @@ each landing to at most one runway, and publishes explicit manifests for audit a
 ```text
 OpenSky history DB
   → harvest.tracks        reconstruct one contiguous track per flight (HAE)
-  → harvest.classify      runway assignment + one final-segment fit
+  → harvest.classify      runway assignment + threshold-event estimation
                           assigned | ambiguous | unassignable | not_landing
-                          + policy-free observed threshold event when estimated
+                          + direct crossing or calibrated extrapolation
   → tracks/manifest.json  authoritative roster of every harvested outcome
        ├─ observed event evaluation + frontend CZML
        └─ arrivals/manifest.json
@@ -144,11 +144,23 @@ outputs/harvest/<ICAO>/
 - `not_landing`: the track does not satisfy the landing screen.
 
 Every roster row carries `event_status`. Each assigned track with a valid winning fit
-stores one `observed_threshold_event`: the estimated threshold crossing, uncertainty,
-source sample range, fit diagnostics, and extrapolation distance. It contains physical
-fit results only—not an LPV/LNAV-VNAV benchmark, limit, or verdict. Its runway-data
+stores one version-2 `observed_threshold_event`. A valid final-inbound threshold bracket
+is interpolated directly; rejected brackets are audited while later pairs remain
+searchable. Otherwise the preferred 3 km fit, or a calibrated 4 km/5 km fallback when
+the narrower fit lacks enough data, extrapolates the crossing. The event records
+available-window sensitivity, uncertainty, source indices, method
+diagnostics, and extrapolation distance. It contains physical estimator results only—not
+an LPV/LNAV-VNAV benchmark, limit, or verdict. Its runway-data
 fingerprint binds it to the exact threshold position, course, vertical datum, width,
 procedure facts, and FAA runway/CIFP cycles used by assignment.
+
+The uncertainty fields describe estimator/data quality; evaluation publishes
+them as diagnostics but does not use them to shrink a component bound or turn
+an available point estimate into `indeterminate`.
+
+The estimator design, calibration evidence, uncertainty construction, and version-2
+contract are documented in
+[`final_approach/FIT_MODEL_OPTIMIZATION.md`](../final_approach/FIT_MODEL_OPTIMIZATION.md).
 
 Observed event availability is calculated from the source manifest before filtering:
 assigned, ambiguous, and unassignable tracks form the arrival-candidate denominator;
@@ -168,7 +180,8 @@ with stale slice metadata.
 ```text
 harvest/runner.py       backward time-window scan and stopping policy
 harvest/tracks.py       row → contiguous measured Track
-harvest/classify.py     assignment, one final-segment fit, landing anchor, threshold event
+harvest/classify.py     assignment, landing anchor, threshold-event orchestration
+harvest/threshold_event.py direct crossing or calibrated fit-window extrapolation
 harvest/store.py        complete measured buckets + tracks manifest
 harvest/merge.py        transactional manifest merge + source provenance, no download
 harvest/reclassify.py   no-download reassignment/refitting from stored HAE samples

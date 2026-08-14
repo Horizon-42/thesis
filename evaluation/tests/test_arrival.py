@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
+import evaluation.arrival as arrival_module
 from evaluation import AssessmentContext, arrival_deviation, record_from_dict
 
 
@@ -49,8 +52,9 @@ def payload(*, subject="optimized", event=None, final_lat=35.0, final_lon=-78.0)
 
 def event(*, cross=4.0, vertical=5.0):
     return {
-        "status": "estimated", "method": "final_segment_linear_fit",
-        "method_version": 1, "runway": "05L",
+        "schema_version": "observed-threshold-event-v2",
+        "status": "estimated", "method": "final_segment_window_ensemble",
+        "method_version": 2, "runway": "05L",
         "threshold_crossing_lat": 35.0, "threshold_crossing_lon": -78.0,
         "threshold_crossing_altitude_m": 160.0 + vertical,
         "altitude_datum": "hae", "signed_cross_track_m": cross,
@@ -109,6 +113,22 @@ def test_observed_record_consumes_serialized_event_and_converts_hae_to_msl():
     assert deviation.extrapolation_m == pytest.approx(300.0)
 
 
+def test_direct_observed_crossing_is_not_labelled_extrapolated():
+    direct = event(vertical=0.0)
+    direct.update(
+        method="threshold_plane_interpolation",
+        extrapolation_m=0.0,
+    )
+
+    outcome = arrival_deviation(
+        record_from_dict(payload(subject="observed", event=direct)),
+        context=context(),
+    )
+
+    assert outcome.deviation is not None
+    assert outcome.deviation.extrapolated is False
+
+
 def test_observed_record_datum_offset_must_match_authoritative_context():
     value = payload(subject="observed", event=event())
     value["source"]["hae_minus_msl_m"] = 31.0
@@ -125,6 +145,24 @@ def test_unavailable_observed_event_is_indeterminate_input_not_a_refit_request()
     assert outcome.deviation is None
     assert outcome.event_status == "unavailable"
     assert outcome.reason == "no assignment fit"
+
+
+def test_observed_evaluation_has_no_fitter_dependency():
+    # Protect the architectural boundary even if a future local import would evade
+    # the runtime monkeypatch used by the pipeline integration test.
+    assert "fit_final_segment" not in inspect.getsource(arrival_module)
+
+
+def test_version_one_observed_event_requires_local_reclassification():
+    legacy = event()
+    legacy.pop("schema_version")
+    legacy["method_version"] = 1
+
+    with pytest.raises(ValueError, match="reclassify-existing"):
+        arrival_deviation(
+            record_from_dict(payload(subject="observed", event=legacy)),
+            context=context(),
+        )
 
 
 def test_observed_event_must_match_the_assessed_runway():

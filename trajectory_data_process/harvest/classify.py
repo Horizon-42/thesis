@@ -27,15 +27,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from final_approach import Assignment, LandingScreen, Projected, SegmentFit, assign_runway
+from final_approach import Assignment, LandingScreen, SegmentFit, assign_runway
 
 from flight_scenarios.identity import flight_key
 
-from trajectory_data_process.harvest.airports import (
-    Airport,
-    runway_data_fingerprint,
-    runway_data_snapshot,
-)
+from trajectory_data_process.harvest.airports import Airport
+from trajectory_data_process.harvest.threshold_event import build_observed_threshold_event
 from trajectory_data_process.harvest.tracks import Track
 
 
@@ -112,7 +109,11 @@ def classify_track(
             else None
         ),
         landing_sample_index=landing_sample_index,
-        observed_threshold_event=_observed_threshold_event(airport, assignment),
+        observed_threshold_event=build_observed_threshold_event(
+            track,
+            airport.runway(assignment.runway) if assignment.runway is not None else None,
+            assignment,
+        ),
     )
 
 
@@ -155,57 +156,6 @@ def _landing_sample_index(
         range(final_pass_index, len(track.samples)),
         key=lambda index: frame.distance_m(_track_point(track.samples[index])),
     )
-
-
-def _observed_threshold_event(airport: Airport, assignment: Assignment) -> dict:
-    """Policy-free threshold estimate produced by the winning assignment fit."""
-    common = {
-        "status": "unavailable",
-        "method": "final_segment_linear_fit",
-        "method_version": 1,
-    }
-    fit = assignment.fit
-    if assignment.runway is None or fit is None:
-        return {**common, "unavailable_reason": assignment.reason or assignment.outcome}
-
-    runway = airport.runway(assignment.runway)
-    frame = runway.frame("hae")
-    crossing = frame.unproject(
-        Projected(0.0, fit.cross_at_threshold_m, fit.height_at_threshold_m)
-    )
-
-    def diagnostics(line) -> dict:
-        return {
-            "rms_residual_m": line.rms_residual_m,
-            "max_abs_residual_m": line.max_abs_residual_m,
-            "rho": line.rho,
-            "n_effective": line.n_effective,
-        }
-
-    return {
-        **common,
-        "status": "estimated",
-        "runway": assignment.runway,
-        "runway_data": runway_data_snapshot(runway),
-        "runway_data_fingerprint": runway_data_fingerprint(runway),
-        "threshold_crossing_lat": crossing.lat,
-        "threshold_crossing_lon": crossing.lon,
-        "threshold_crossing_altitude_m": crossing.alt_m,
-        "altitude_datum": "hae",
-        "signed_cross_track_m": fit.cross_at_threshold_m,
-        "cross_track_sigma_m": fit.cross.sigma_at_zero,
-        "altitude_sigma_m": fit.height.sigma_at_zero,
-        "source_sample_range": [fit.first_sample_index, fit.last_sample_index],
-        "fit_window_m": list(fit.window_m),
-        "sample_count": fit.n_samples,
-        "along_track_span_m": fit.span_m,
-        "cross_track_fit": diagnostics(fit.cross),
-        "altitude_fit": diagnostics(fit.height),
-        "glidepath_deg": fit.glidepath_deg,
-        "median_abs_cross_track_m": fit.median_abs_cross_m,
-        "nearest_sample_along_m": fit.nearest_sample_along_m,
-        "extrapolation_m": fit.extrapolation_m,
-    }
 
 
 def _iso(time_s: float) -> str:

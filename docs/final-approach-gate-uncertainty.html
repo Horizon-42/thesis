@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>From ADS-B Samples to a Gate Verdict</title>
+  <title>Superseded: ADS-B Gate-Uncertainty Explainer</title>
   <style>
     :root { color-scheme: light dark; --bg:#f7f8fa; --paper:#fff; --text:#20242a; --muted:#5d6672; --line:#d9dee5; --accent:#1769aa; --soft:#eaf3fb; --warn:#9a4e00; --good:#16733d; --bad:#b52b32; }
     @media (prefers-color-scheme:dark) { :root { --bg:#15181c; --paper:#20242a; --text:#f2f4f7; --muted:#b5bdc8; --line:#3b424c; --accent:#86c5ff; --soft:#1d3448; --warn:#ffc273; --good:#75d99a; --bad:#ff8c91; } }
@@ -43,6 +43,15 @@
 <main>
 <article>
   <header>
+    <div class="note"><strong>Superseded on 2026-08-13.</strong> This historical
+    explainer describes an interval-gated verdict that is not used by the current
+    evaluation package. The 95% interval is now estimator-quality metadata only;
+    pass/fail compares the threshold-event point estimate with the inclusive
+    aviation bounds. See
+    <a href="../evaluation/FINAL_APPROACH_VERDICT_STANDARD.md">the current verdict standard</a>
+    and
+    <a href="../final_approach/FIT_MODEL_OPTIMIZATION.md">the validated estimator design</a>.
+    The remaining page is retained only to document the superseded model.</div>
     <p class="small">AeroViz-4D · Observed baseline evaluation</p>
     <h1>From ADS-B Samples to a Gate Verdict</h1>
     <p class="lead">Why a trajectory that looks aligned with the runway can still be outside the gate—and why uncertainty sometimes makes “undecidable” more honest than pass or fail.</p>

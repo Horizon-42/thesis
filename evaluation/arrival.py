@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
-from final_approach import RunwayFrame, TrackPoint
+from final_approach.frame import RunwayFrame, TrackPoint
 
 from evaluation.records import TrajectoryRecord
 from evaluation.thresholds import AssessmentContext
@@ -20,6 +20,12 @@ from evaluation.thresholds import AssessmentContext
 Subject = Literal["optimized", "predicted", "observed"]
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
+OBSERVED_EVENT_SCHEMA = "observed-threshold-event-v2"
+OBSERVED_EVENT_METHOD_VERSION = 2
+OBSERVED_EVENT_METHODS = {
+    "threshold_plane_interpolation",
+    "final_segment_window_ensemble",
+}
 
 
 @dataclass(frozen=True)
@@ -249,6 +255,16 @@ def _observed_arrival(
         raise ValueError(
             "source.observed_threshold_event.runway disagrees with assessment context"
         )
+    if event.get("schema_version") != OBSERVED_EVENT_SCHEMA \
+            or event.get("method_version") != OBSERVED_EVENT_METHOD_VERSION:
+        raise ValueError(
+            f"observed threshold event must use {OBSERVED_EVENT_SCHEMA}; "
+            "run --reclassify-existing"
+        )
+    if event.get("method") not in OBSERVED_EVENT_METHODS:
+        raise ValueError(
+            f"unsupported observed threshold-event method {event.get('method')!r}"
+        )
     if event.get("altitude_datum") != "hae":
         raise ValueError("observed threshold event altitude_datum must be 'hae'")
     if record.target_state is None or not record.states:
@@ -289,7 +305,7 @@ def _observed_arrival(
             heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
             flight_time_s=final["t"],
             event_status="estimated",
-            extrapolated=True,
+            extrapolated=event.get("method") == "final_segment_window_ensemble",
             lateral_sigma_m=_event_number(event, "cross_track_sigma_m", nonnegative=True),
             vertical_sigma_m=_event_number(event, "altitude_sigma_m", nonnegative=True),
             glidepath_deg=(

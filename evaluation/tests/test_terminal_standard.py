@@ -24,9 +24,10 @@ TARGET = {
 
 def _record(*, cross_m: float = 0.0, vertical_m: float = 0.0) -> dict:
     event = {
+        "schema_version": "observed-threshold-event-v2",
         "status": "estimated",
-        "method": "final_segment_linear_fit",
-        "method_version": 1,
+        "method": "final_segment_window_ensemble",
+        "method_version": 2,
         "runway": "05L",
         "threshold_crossing_lat": TARGET["lat"],
         "threshold_crossing_lon": TARGET["lon"],
@@ -143,14 +144,37 @@ def test_ideal_lpv_trajectory_fails_just_outside_vertical_bound(vertical_m):
     assert result.violations == ("vertical",)
 
 
-def test_observed_uncertainty_overlapping_lpv_vertical_bound_is_indeterminate():
+def test_observed_uncertainty_is_diagnostic_and_does_not_shrink_vertical_gate():
     result = evaluate_record(
         record_from_dict(_record(vertical_m=7.2)), context=_lpv_context()
     )
 
     assert result.vertical_interval_m == pytest.approx((6.71, 7.69))
-    assert result.vertical_result == "indeterminate"
-    assert result.verdict == "indeterminate"
+    assert result.vertical_result == "pass"
+    assert result.verdict == "pass"
+
+
+def test_nominal_extrapolated_event_can_pass_with_large_estimator_uncertainty():
+    payload = _record()
+    payload["source"]["observed_threshold_event"]["altitude_sigma_m"] = 13.0 / 1.96
+
+    result = evaluate_record(record_from_dict(payload), context=_lpv_context())
+
+    assert result.vertical_interval_m == pytest.approx((-13.0, 13.0))
+    assert result.vertical_result == "pass"
+    assert result.verdict == "pass"
+
+
+def test_observed_point_outside_gate_fails_even_when_interval_overlaps_gate():
+    payload = _record(vertical_m=8.0)
+    payload["source"]["observed_threshold_event"]["altitude_sigma_m"] = 2.0
+
+    result = evaluate_record(record_from_dict(payload), context=_lpv_context())
+
+    assert result.vertical_interval_m == pytest.approx((4.08, 11.92))
+    assert result.vertical_result == "fail"
+    assert result.verdict == "fail"
+    assert result.violations == ("vertical",)
 
 
 def test_runway_edge_failure_controls_with_lpv_vertical_available():
@@ -163,6 +187,21 @@ def test_runway_edge_failure_controls_with_lpv_vertical_available():
     assert result.verdict == "fail"
     assert result.violations == ("lateral",)
     assert result.reason is None
+
+
+def test_estimator_uncertainty_does_not_change_lateral_point_verdict():
+    inside = _record(cross_m=22.8)
+    inside["source"]["observed_threshold_event"]["cross_track_sigma_m"] = 2.0
+    outside = _record(cross_m=23.0)
+    outside["source"]["observed_threshold_event"]["cross_track_sigma_m"] = 2.0
+
+    pass_result = evaluate_record(record_from_dict(inside), context=_lpv_context())
+    fail_result = evaluate_record(record_from_dict(outside), context=_lpv_context())
+
+    assert pass_result.lateral_interval_m == pytest.approx((18.88, 26.72))
+    assert pass_result.lateral_result == "pass"
+    assert fail_result.lateral_interval_m == pytest.approx((19.08, 26.92))
+    assert fail_result.lateral_result == "fail"
 
 
 def test_lnav_vnav_fallback_has_a_real_vertical_gate():

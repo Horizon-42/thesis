@@ -13,14 +13,13 @@ prior mean with exploding variance, which would drag the crossing toward zero. Y
 reach for a GP when the functional form is unknown. Here it is known, and the fitted
 glidepath coming out 3.02-3.11 deg across five airports is the evidence.
 
-WHY THE FIT IS MANDATORY, NOT COSMETIC
---------------------------------------
+WHY THE FIT IS MANDATORY FOR ASSIGNMENT AND UNOBSERVED CROSSINGS
+----------------------------------------------------------------
 OpenSky's ``geoaltitude`` is quantised to 25 ft = 7.62 m (verified: all 482 distinct
-altitudes in the KRDU set lie on that lattice). The vertical evaluation window is
-9.15 m wide, so ONE sample carries +/-3.81 m of rounding -- it cannot resolve the
-window even in principle. Averaging a few hundred lattice-quantised samples is what
-drives the crossing's standard error below 2 m. The fit recovers sub-quantum
-precision; the last raw sample never could.
+altitudes in the KRDU set lie on that lattice). A fit supplies stable geometry for
+runway assignment and is required when reception ends before the threshold. A valid
+pair that physically brackets the threshold is handled by the harvest event producer
+instead; its uncertainty is never allowed below half the altitude quantum.
 
 WHY THE UNCERTAINTY IS AUTOCORRELATION-CORRECTED
 ------------------------------------------------
@@ -32,15 +31,16 @@ Measured lag-1 residual autocorrelation is rho ~ 0.43, i.e. n_eff ~ 0.40 n.
 
 Both variance terms must be deflated -- ``Sxx`` is a sum over the same correlated
 samples as ``1/n``. Correcting only the first understates sigma (it gives a 1.15x
-inflation where the honest figure is 1.58x). On a 9.15 m gate that difference changes
-verdicts, so the naive number is not offered as an option.
+inflation where the honest figure is 1.58x). The value is retained as an estimator
+diagnostic; evaluation does not use it to shrink an aviation gate.
 
 WHAT THIS MODULE DOES NOT DO
 ----------------------------
 No thresholds, no ``established`` flag, no verdict. ``SegmentFit`` reports what
-the data says; the harvest serializes the winning result and evaluation later
-applies its policy to that event. ``assign_runway`` applies only a relative
-comparison. See the package docstring for why that separation is load-bearing.
+the data says; the harvest may use it for assignment or an unobserved crossing,
+and evaluation later applies policy to the serialized event. ``assign_runway``
+applies only a relative comparison. See the package docstring for why that
+separation is load-bearing.
 """
 
 from __future__ import annotations
@@ -55,8 +55,8 @@ from final_approach.frame import Projected, RunwayFrame, TrackPoint
 # Along-track window of the ESTABLISHED segment, metres (negative = before threshold).
 #
 # Outer edge -5000 m: on a 3 deg path that is ~900 ft above threshold elevation, just
-# below the 1000 ft stabilisation gate every airline SOP requires an approach to be
-# stable by. Reaching further out measurably biases the extrapolation HIGH (KRDU
+# below the commonly used 1000 ft stabilised-approach reference. Reaching further out
+# measurably biases the extrapolation HIGH (KRDU
 # median crossing +5.43 m from -8000 m vs +3.66 m from -5000 m) because aircraft are
 # still intercepting the glidepath from above out there.
 #
@@ -250,9 +250,8 @@ def fit_final_segment(
     None means "this track does not carry a fittable final segment for this runway" --
     too few samples in the window, or too short a baseline to pin a slope. That is a
     NORMAL outcome (a track truncated early by ADS-B coverage, or one still on base
-    leg), not an error, and callers classify it: the harvest as ``unassignable``,
-    evaluation as ``not_established``. Both must count it rather than drop it, since
-    it is a statement about coverage, not about how the approach was flown.
+    leg), not an error. Producer-side callers classify and count it rather than drop
+    it, since it is a statement about coverage, not about how the approach was flown.
 
     Projection is done once; both lines are fitted over the same sample set, so the
     cross-track and vertical answers always describe the same segment.

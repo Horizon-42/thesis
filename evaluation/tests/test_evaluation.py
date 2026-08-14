@@ -81,6 +81,10 @@ def test_batch_serializes_context_methodology_and_three_way_counts():
     assert report["assessment_contexts"][0]["runway_source_cycle"] == "2026-08-06"
     assert report["assessment_contexts"][0]["desired_threshold_altitude_msl_m"] == 130.0
     assert report["methodology"]["event"]["observed"].endswith("no evaluation refit")
+    uncertainty = report["methodology"]["uncertainty"]
+    assert uncertainty["classification"] == "diagnostic_only_not_used_by_verdict"
+    assert uncertainty["verdict_rule"] == \
+        "point_estimate_against_inclusive_component_bounds"
     lpv = report["methodology"]["terminal_vertical"]["lpv"]
     assert lpv["scale_model"] == "do229_lpv_angular_min_clamped"
     assert lpv["one_sided_minimum_fsd_m"] == 15.0

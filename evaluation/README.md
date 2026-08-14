@@ -18,17 +18,18 @@ The normative rationale and source audit are in
 
 ```text
 raw ADS-B samples
-  -> runway assignment + one final-segment fit
-  -> policy-free observed_threshold_event
+  -> runway assignment + producer-side threshold-event estimation
+  -> policy-free observed_threshold_event v2
   -> explicit HAE/MSL conversion
   -> runway/procedure-specific terminal verdict
 ```
 
-Observed evaluation never calls `fit_final_segment()`. The assignment stage
-serializes the crossing estimate, uncertainty, source sample range, fit window,
-residual diagnostics, and extrapolation distance. Arrival preparation and CZML
-reuse the stored landing anchor/event as well. A legacy derived track without
-those fields must be reclassified from its stored samples.
+Observed evaluation never imports or calls `fit_final_segment()`. The harvest stage
+directly interpolates a valid measured threshold bracket; if none exists, it uses a
+3/4/5 km fit-window ensemble and serializes the crossing estimate and effective
+uncertainty. Arrival preparation and CZML reuse the stored landing anchor/event as
+well. Version-1 derived events must be reclassified from their stored samples. See
+[the fit-model optimization design](../final_approach/FIT_MODEL_OPTIMIZATION.md).
 
 Optimized and predicted records use their terminal state and must be at the
 threshold plane. Along-track and cross-track values are reported separately;
@@ -69,12 +70,15 @@ not currently publish that reference, so evaluation still reports its lateral
 component but marks the vertical component and composite verdict
 `indeterminate`; it does not infer a target altitude from the trajectory.
 
-Observed estimates are classified using their 95% fit interval:
+All subjects use the same point-estimate rule:
 
-- `pass`: the complete interval is inside the allowed interval;
-- `fail`: the two intervals do not overlap;
-- `indeterminate`: the intervals overlap a boundary or a required bound/event
-  is unavailable.
+- `pass`: the signed threshold-event estimate is inside the inclusive bound;
+- `fail`: the estimate is outside the bound;
+- `indeterminate`: the event or an applicable bound is unavailable.
+
+Observed event-v2 uncertainty and its 95% interval remain in the report as
+estimator-quality diagnostics. They do not shrink the aviation bound and do
+not change pass/fail into `indeterminate`.
 
 ## Inputs and identity
 
@@ -153,7 +157,7 @@ normalize two different physical spans and report the result as path error.
 - complete assessment contexts and resolved bounds;
 - the published-TCH vertical reference, DO-229 minimum-clamped scale model,
   `15 m` one-sided FSD, ICAO `0.5` fraction, and resolved `7.5 m` bound;
-- event/uncertainty/reference-comparison methodology;
+- event/point-verdict/diagnostic-uncertainty/reference-comparison methodology;
 - three-way verdict counts;
 - per-flight signed along-track, cross-track, and vertical deviations;
 - component and composite results;

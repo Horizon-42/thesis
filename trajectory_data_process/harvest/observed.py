@@ -32,9 +32,9 @@ from flight_scenarios.start_state import state_samples_from_track
 from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
-    require_matching_runway_data,
 )
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
+from trajectory_data_process.harvest.threshold_event import require_current_threshold_event
 
 # Nominal mass for the state samples. It reaches no gate -- the regulation checks are
 # positional -- and an observed track carries no mass information, so inventing a
@@ -72,7 +72,7 @@ def observed_record(
             f"track {track.get('flight_key')!r} lacks an estimated threshold event "
             f"for runway {runway.ident}; run --reclassify-existing"
         )
-    require_matching_runway_data(event, runway)
+    require_current_threshold_event(event, runway)
 
     # H_MSL = h_HAE - N, applied once, here.
     waypoints = [

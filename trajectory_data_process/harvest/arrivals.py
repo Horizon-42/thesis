@@ -21,10 +21,10 @@ from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM, truncate_fl
 from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
-    require_matching_runway_data,
 )
 from trajectory_data_process.harvest.czml import czml_input_flight, verify_identity
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
+from trajectory_data_process.harvest.threshold_event import require_current_threshold_event
 
 ARRIVALS_DIR = "arrivals"
 MANIFEST_NAME = "manifest.json"
@@ -309,16 +309,12 @@ def _anchor_index(track: dict[str, Any], runway: Runway) -> int:
     if not isinstance(samples, list) or not samples:
         raise ValueError(f"track {track.get('flight_key')!r} has no samples")
     event = track.get("observed_threshold_event")
-    if (
-        not isinstance(event, dict)
-        or event.get("status") != "estimated"
-        or event.get("runway") != runway.ident
-    ):
+    if not isinstance(event, dict):
         raise ValueError(
             f"track {track.get('flight_key')!r} lacks the serialized threshold event "
             f"for runway {runway.ident!r}; run --reclassify-existing"
         )
-    require_matching_runway_data(event, runway)
+    require_current_threshold_event(event, runway)
     stored = track.get("landing_sample_index")
     if isinstance(stored, int) and not isinstance(stored, bool) and 0 <= stored < len(samples):
         return stored

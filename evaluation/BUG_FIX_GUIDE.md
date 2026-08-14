@@ -99,7 +99,8 @@ uncertainty, and extrapolation. Reports preserve that event plus:
 - assessment context and resolved bounds;
 - authoritative source/effective cycles;
 - event method and threshold-plane tolerance;
-- 95% interval classification rule and multiplier;
+- point-estimate verdict rule and inclusive bounds;
+- 95% estimator interval method, explicitly diagnostic and non-gating;
 - explicitly unmodelled uncertainty sources; and
 - reference endpoint policy.
 

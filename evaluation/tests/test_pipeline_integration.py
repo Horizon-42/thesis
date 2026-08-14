@@ -20,7 +20,9 @@ from trajectory_data_process.harvest.tracks import Sample, Track
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(tmp_path):
+def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(
+    tmp_path, monkeypatch
+):
     airport = load_airport(
         "KRDU",
         config_file=REPO_ROOT / "trajectory_data_process/config/runway_thresholds.json",
@@ -43,9 +45,23 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(tmp_path)
             alt_hae_m=point.alt_m,
             on_ground=False,
         ))
+    crossing = frame.unproject(Projected(
+        250.0,
+        0.0,
+        runway.threshold_crossing_height_m - slope * 250.0,
+    ))
+    samples.append(Sample(
+        time_s=1_786_492_800.0 + len(samples) * 2.5,
+        lat=crossing.lat,
+        lon=crossing.lon,
+        alt_hae_m=crossing.alt_m,
+        on_ground=False,
+    ))
     classified = classify_track(Track("abc123", "PIPE1", tuple(samples)), airport)
     assert classified.runway == "05L"
     assert classified.observed_threshold_event["status"] == "estimated"
+    assert classified.observed_threshold_event["method"] == \
+        "threshold_plane_interpolation"
 
     paths = HarvestPaths(tmp_path / "harvest", "KRDU")
     write_tracks([classified], paths, provenance={"test": True})
@@ -53,6 +69,11 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(tmp_path)
     assert arrivals["counts"]["included"] == 1
     observed = write_observed_records(airport, paths)
     assert observed["total"] == 1
+
+    def fail_if_evaluation_refits(*_args, **_kwargs):
+        raise AssertionError("evaluation must consume the serialized event without refitting")
+
+    monkeypatch.setattr("final_approach.fit_final_segment", fail_if_evaluation_refits)
 
     report = evaluate_batch(
         iter_observed_records(paths),
