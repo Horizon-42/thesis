@@ -44,6 +44,7 @@ TRACKS_DIR = "tracks"
 APPROACH_DIR = "approach"
 MANIFEST_NAME = "manifest.json"
 CHECKPOINT_DIR = ".download-checkpoint"
+TRACK_SCHEMA_VERSION = "harvest-tracks-v2-source-timing"
 
 # What the harvest records about its own altitudes, so a consumer can never guess.
 ALTITUDE_SOURCE = "opensky_history_geoaltitude_m"
@@ -115,11 +116,20 @@ def track_record(classified: ClassifiedTrack) -> dict[str, Any]:
         "runway": classified.runway,
         "landing_time_utc": classified.landing_time_utc,
         "landing_sample_index": classified.landing_sample_index,
-        "start_time_utc": _iso(track.start_s),
+        "start_time_utc": _iso_precise(track.start_s),
         "duration_s": round(track.end_s - track.start_s, 3),
         "max_sample_gap_s": round(track.max_gap_s, 3),
         "altitude_source": ALTITUDE_SOURCE,
         "altitude_datum": ALTITUDE_DATUM,
+        "source_integrity": (
+            track.source_integrity.to_dict()
+            if track.source_integrity is not None
+            else None
+        ),
+        "reported_ground_speeds_m_s": [
+            _round(sample.reported_ground_speed_m_s)
+            for sample in track.samples
+        ],
         "assignment": {
             "outcome": classified.outcome,
             "runway": classified.runway,
@@ -140,6 +150,7 @@ def write_tracks(
     paths: HarvestPaths,
     *,
     provenance: dict[str, Any],
+    source_integrity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write every bucket plus the manifest; return the manifest.
 
@@ -152,6 +163,7 @@ def write_tracks(
     counts: dict[str, int] = {b: 0 for b in _BUCKETS}
     per_runway: dict[str, int] = {}
     seen_flight_keys: set[str] = set()
+    source_integrity_complete = True
 
     for item in classified:
         if item.flight_key in seen_flight_keys:
@@ -164,6 +176,9 @@ def write_tracks(
         path = paths.record(item)
         path.parent.mkdir(parents=True, exist_ok=True)
         record = track_record(item)
+        source_integrity_complete = (
+            source_integrity_complete and record["source_integrity"] is not None
+        )
         path.write_text(
             json.dumps(record, separators=(",", ":"), allow_nan=False),
             encoding="utf-8",
@@ -186,6 +201,7 @@ def write_tracks(
         )
 
     manifest = {
+        "schema_version": TRACK_SCHEMA_VERSION,
         "airport": paths.code,
         "written_utc": _iso(datetime.now(tz=timezone.utc).timestamp()),
         "altitude_source": ALTITUDE_SOURCE,
@@ -193,9 +209,12 @@ def write_tracks(
         "counts": counts,
         "per_runway": dict(sorted(per_runway.items())),
         "total": len(roster),
+        "source_integrity_complete": source_integrity_complete,
         "provenance": provenance,
         "records": roster,
     }
+    if source_integrity is not None:
+        manifest["source_integrity"] = source_integrity
     paths.manifest.parent.mkdir(parents=True, exist_ok=True)
     paths.manifest.write_text(
         json.dumps(manifest, indent=1, allow_nan=False), encoding="utf-8"
@@ -211,6 +230,22 @@ def read_manifest(paths: HarvestPaths) -> dict[str, Any]:
             "never by globbing (globbing counts orphans from earlier runs)."
         )
     return json.loads(paths.manifest.read_text(encoding="utf-8"))
+
+
+def require_source_timed_manifest(
+    manifest: dict[str, Any], *, path: Path | None = None
+) -> None:
+    """Reject derived tracks that predate source freshness reconstruction."""
+    if (
+        manifest.get("schema_version") != TRACK_SCHEMA_VERSION
+        or manifest.get("source_integrity_complete") is not True
+    ):
+        location = f"{path}: " if path is not None else ""
+        raise ValueError(
+            f"{location}tracks are not {TRACK_SCHEMA_VERSION}; rebuild them into a "
+            "new staging root with --rebuild-fresh-from before creating arrivals "
+            "or evaluation"
+        )
 
 
 def iter_records(paths: HarvestPaths, *, outcome: str | None = None) -> Iterator[dict[str, Any]]:
@@ -232,6 +267,12 @@ def _clear(directory: Path) -> None:
 
 def _iso(time_s: float) -> str:
     return datetime.fromtimestamp(time_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _iso_precise(time_s: float) -> str:
+    return datetime.fromtimestamp(time_s, tz=timezone.utc).isoformat(
+        timespec="milliseconds"
+    ).replace("+00:00", "Z")
 
 
 def _round(value: float | None) -> float | None:

@@ -33,7 +33,11 @@ from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
 )
-from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
+from trajectory_data_process.harvest.store import (
+    HarvestPaths,
+    read_manifest,
+    require_source_timed_manifest,
+)
 from trajectory_data_process.harvest.threshold_event import require_current_threshold_event
 
 # Nominal mass for the state samples. It reaches no gate -- the regulation checks are
@@ -113,6 +117,7 @@ def observed_record(
             "altitude_source": MSL_ALTITUDE_SOURCE,
             "hae_minus_msl_m": runway.hae_minus_msl_m,
             "vertical_source": runway.vertical_source,
+            "source_integrity": track.get("source_integrity"),
             # Copy policy-free producer output verbatim.  Benchmark selection and
             # limits remain evaluation-owned.
             "observed_threshold_event": event,
@@ -134,6 +139,7 @@ def write_observed_records(
     coverage that is stated in the output rather than silently shrinking the batch.
     """
     source = read_manifest(paths)
+    require_source_timed_manifest(source, path=paths.manifest)
     availability = source_event_availability(source)
     records_dir = paths.approach / RECORDS_DIR
     _clear(records_dir)
@@ -214,7 +220,29 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
             )
         candidates.append(status)
     estimated = sum(status == "estimated" for status in candidates)
-    denominator = len(candidates)
+    integrity_excluded_candidates = 0
+    integrity = source.get("source_integrity")
+    if integrity is not None:
+        if not isinstance(integrity, dict) or not isinstance(
+            integrity.get("excluded"), list
+        ):
+            raise ValueError("track manifest has invalid source_integrity exclusions")
+        for index, excluded in enumerate(integrity["excluded"]):
+            if not isinstance(excluded, dict):
+                raise ValueError(
+                    f"source_integrity exclusion {index} must be an object"
+                )
+            outcome = excluded.get("source_outcome")
+            if outcome == "not_landing":
+                excluded_not_landing += 1
+            elif outcome in ("assigned", "ambiguous", "unassignable"):
+                integrity_excluded_candidates += 1
+            else:
+                raise ValueError(
+                    f"source_integrity exclusion {index} has invalid source_outcome "
+                    f"{outcome!r}"
+                )
+    denominator = len(candidates) + integrity_excluded_candidates
     return {
         "denominator": "arrival_candidates_excluding_not_landing",
         "event_denominator": denominator,
@@ -222,6 +250,7 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
         "event_unavailable": denominator - estimated,
         "event_estimated_rate": estimated / denominator if denominator else 0.0,
         "excluded_not_landing": excluded_not_landing,
+        "source_integrity_excluded_candidates": integrity_excluded_candidates,
     }
 
 

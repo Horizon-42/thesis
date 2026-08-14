@@ -99,3 +99,37 @@ def test_event_availability_counts_ambiguous_and_unassignable_candidates():
     assert availability["event_unavailable"] == 2
     assert availability["event_estimated_rate"] == pytest.approx(1 / 3)
     assert availability["excluded_not_landing"] == 1
+
+
+def test_event_availability_counts_source_integrity_exclusions():
+    source = {
+        "total": 1,
+        "counts": {
+            "assigned": 1,
+            "ambiguous": 0,
+            "unassignable": 0,
+            "not_landing": 0,
+        },
+        "records": [{"outcome": "assigned", "event_status": "estimated"}],
+        "source_integrity": {
+            "source_total": 3,
+            "source_counts": {
+                "assigned": 2,
+                "ambiguous": 0,
+                "unassignable": 0,
+                "not_landing": 1,
+            },
+            "excluded": [
+                {"source_flight_key": "LOST", "source_outcome": "assigned"},
+                {"source_flight_key": "OVERFLIGHT", "source_outcome": "not_landing"},
+            ],
+        },
+    }
+
+    availability = source_event_availability(source)
+
+    assert availability["event_denominator"] == 2
+    assert availability["event_estimated"] == 1
+    assert availability["event_unavailable"] == 1
+    assert availability["excluded_not_landing"] == 1
+    assert availability["source_integrity_excluded_candidates"] == 1

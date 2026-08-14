@@ -38,9 +38,11 @@ class _Partition:
 class SidecarStateMetadata:
     """Exact ``(icao24, state-row time)`` lookup over backfilled Parquet files.
 
-    Partitions are loaded lazily and cached two at a time. Reclassification orders all
-    stored outcomes chronologically, so every partition is normally read once without
-    loading the multi-gigabyte airport sidecar into memory at once.
+    Partitions are loaded lazily as compact pandas columns and cached two at a time.
+    ``lookup_many`` joins a batch of requested track rows in native vectorised code;
+    it does not construct a Python dictionary/object for every row in a 6-hour airport
+    partition.  Chronological rebuild batches therefore read each partition roughly
+    once without loading the multi-gigabyte airport sidecar into memory at once.
     """
 
     def __init__(self, root: Path, airport: str, *, cache_partitions: int = 2) -> None:
@@ -63,24 +65,71 @@ class SidecarStateMetadata:
             running_stop = max(running_stop, partition.stop_s)
             self._prefix_max_stops.append(running_stop)
         self._cache_limit = cache_partitions
-        self._cache: OrderedDict[
-            Path, dict[tuple[str, int], AdsbStateMetadata | None]
-        ] = OrderedDict()
+        self._cache: OrderedDict[Path, pd.DataFrame] = OrderedDict()
 
     def lookup(self, icao24: str, state_time_s: float) -> AdsbStateMetadata | None:
         """Return one unambiguous exact row; never guess across duplicates."""
-        if not math.isfinite(state_time_s):
-            return None
-        key = (icao24.lower().strip(), round(state_time_s * 1000.0))
-        matches: list[AdsbStateMetadata] = []
-        for partition in self._containing(state_time_s):
-            value = self._rows(partition).get(key)
-            if value is not None:
-                matches.append(value)
-        if not matches:
-            return None
-        first = matches[0]
-        return first if all(value == first for value in matches[1:]) else None
+        return self.lookup_many([(icao24, state_time_s)])[0]
+
+    def lookup_many(
+        self, queries: list[tuple[str, float]] | tuple[tuple[str, float], ...]
+    ) -> list[AdsbStateMetadata | None]:
+        """Resolve an ordered query batch with exact, conflict-aware joins."""
+        matches: list[list[AdsbStateMetadata]] = [[] for _ in queries]
+        per_partition: dict[Path, tuple[_Partition, list[int]]] = {}
+        normalized: list[tuple[str, int] | None] = []
+        for index, (icao24, state_time_s) in enumerate(queries):
+            if not math.isfinite(state_time_s):
+                normalized.append(None)
+                continue
+            normalized.append(
+                (icao24.lower().strip(), round(state_time_s * 1000.0))
+            )
+            for partition in self._containing(state_time_s):
+                entry = per_partition.setdefault(
+                    partition.path, (partition, [])
+                )
+                entry[1].append(index)
+
+        for partition, indices in per_partition.values():
+            query_frame = pd.DataFrame(
+                [
+                    (index, normalized[index][0], normalized[index][1])
+                    for index in indices
+                    if normalized[index] is not None
+                ],
+                columns=["query_index", "icao24_key", "time_ms"],
+            )
+            if query_frame.empty:
+                continue
+            frame = self._frame(partition)
+            # Aircraft filtering is cheap and substantially shrinks busy-airport
+            # partitions before the exact composite-key join.
+            aircraft = query_frame["icao24_key"].unique()
+            candidate = frame[frame["icao24_key"].isin(aircraft)]
+            joined = query_frame.merge(
+                candidate,
+                on=["icao24_key", "time_ms"],
+                how="inner",
+                sort=False,
+            )
+            for row in joined.itertuples(index=False):
+                matches[int(row.query_index)].append(
+                    AdsbStateMetadata(
+                        _finite(row.velocity),
+                        _finite(row.lastposupdate),
+                        _finite(row.lastcontact),
+                    )
+                )
+
+        output: list[AdsbStateMetadata | None] = []
+        for values in matches:
+            if not values:
+                output.append(None)
+                continue
+            first = values[0]
+            output.append(first if all(value == first for value in values[1:]) else None)
+        return output
 
     def _containing(self, state_time_s: float) -> list[_Partition]:
         stop = bisect.bisect_right(self._starts, state_time_s)
@@ -96,9 +145,7 @@ class SidecarStateMetadata:
                 output.append(partition)
         return output
 
-    def _rows(
-        self, partition: _Partition
-    ) -> dict[tuple[str, int], AdsbStateMetadata | None]:
+    def _frame(self, partition: _Partition) -> pd.DataFrame:
         cached = self._cache.pop(partition.path, None)
         if cached is not None:
             self._cache[partition.path] = cached
@@ -112,21 +159,17 @@ class SidecarStateMetadata:
         time_ms = pd.to_datetime(frame["time"], utc=True).astype(
             "datetime64[ms, UTC]"
         ).astype("int64")
-        aircraft = frame["icao24"].astype(str).str.lower().str.strip()
-        rows: dict[tuple[str, int], AdsbStateMetadata | None] = {}
-        for index, source in enumerate(
-            frame[["velocity", "lastposupdate", "lastcontact"]].itertuples(
-                index=False, name=None
-            )
-        ):
-            key = (aircraft.iat[index], int(time_ms.iat[index]))
-            value = AdsbStateMetadata(*(_finite(item) for item in source))
-            previous = rows.get(key, value)
-            rows[key] = value if previous == value else None
-        self._cache[partition.path] = rows
+        compact = pd.DataFrame({
+            "icao24_key": frame["icao24"].astype(str).str.lower().str.strip(),
+            "time_ms": time_ms,
+            "velocity": frame["velocity"],
+            "lastposupdate": frame["lastposupdate"],
+            "lastcontact": frame["lastcontact"],
+        })
+        self._cache[partition.path] = compact
         while len(self._cache) > self._cache_limit:
             self._cache.popitem(last=False)
-        return rows
+        return compact
 
 
 def _load_catalog(base: Path, airport: str) -> list[_Partition]:

@@ -230,6 +230,9 @@ def evaluate_batch(
                 # Audit copy of policy-free producer output; no evaluation
                 # limits or verdicts are added to it.
                 row["observed_threshold_event"] = event
+            source_integrity = record.source.get("source_integrity")
+            if isinstance(source_integrity, dict):
+                row["source_integrity"] = source_integrity
         if record.reference_file is not None:
             reference = load_reference(record)
             span = reference_span(record, reference)
@@ -295,9 +298,25 @@ def evaluate_batch(
                     "serialized event-v6 diagnostic 95% margin divided by 1.96"
                 ),
                 "unmodelled_sources": [
-                    "ADS-B source integrity", "runway/FAS survey uncertainty",
+                    "ADS-B geometric-altitude update alignment and measurement error",
+                    "runway/FAS survey uncertainty",
                     "geoid/datum uncertainty", "model-form and extrapolation uncertainty",
                 ],
+            },
+            "observed_source_integrity": {
+                "required_track_schema": "harvest-tracks-v2-source-timing",
+                "position_time_basis": "lastposupdate",
+                "freshness": (
+                    "state_time-lastcontact <= 15 s and "
+                    "state_time-lastposupdate <= 15 s"
+                ),
+                "held_state_policy": (
+                    "one state snapshot nearest each lastposupdate; asynchronous "
+                    "geoaltitude changes are audited"
+                ),
+                "coverage_gap_policy": (
+                    "do not bridge position-update gaps greater than 15 s"
+                ),
             },
             "terminal_vertical": {
                 "reference": "LTP elevation MSL + published FAS TCH",
@@ -383,6 +402,21 @@ def _validated_observed_availability(value: Mapping[str, Any]) -> dict[str, Any]
     estimated = count("event_estimated")
     unavailable = count("event_unavailable")
     excluded = count("excluded_not_landing")
+    integrity_excluded = value.get("source_integrity_excluded_candidates", 0)
+    if (
+        isinstance(integrity_excluded, bool)
+        or not isinstance(integrity_excluded, int)
+        or integrity_excluded < 0
+    ):
+        raise ValueError(
+            "observed availability source_integrity_excluded_candidates must be "
+            "a non-negative integer"
+        )
+    if integrity_excluded > unavailable:
+        raise ValueError(
+            "observed availability source-integrity exclusions exceed unavailable "
+            "events"
+        )
     if estimated + unavailable != denominator:
         raise ValueError("observed availability counts do not match event_denominator")
     rate = value.get("event_estimated_rate")
@@ -399,6 +433,7 @@ def _validated_observed_availability(value: Mapping[str, Any]) -> dict[str, Any]
         "event_unavailable": unavailable,
         "event_estimated_rate": expected_rate,
         "excluded_not_landing": excluded,
+        "source_integrity_excluded_candidates": integrity_excluded,
     }
 
 

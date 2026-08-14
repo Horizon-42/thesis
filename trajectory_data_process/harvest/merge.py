@@ -14,7 +14,10 @@ from typing import Any
 from uuid import uuid4
 
 from trajectory_data_process.harvest.airports import Airport
-from trajectory_data_process.harvest.reclassify import reclassify_stored_tracks
+from trajectory_data_process.harvest.reclassify import (
+    StateMetadataBatchLookup,
+    reclassify_stored_tracks,
+)
 from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
     ALTITUDE_SOURCE,
@@ -32,6 +35,7 @@ def merge_stored_tracks(
     airport: Airport,
     metadata_lookup: StateMetadataLookup,
     metadata_provenance: dict[str, Any],
+    metadata_lookup_many: StateMetadataBatchLookup | None = None,
 ) -> dict[str, Any]:
     """Merge destination plus additional source manifests through a staged hard-link tree.
 
@@ -72,6 +76,7 @@ def merge_stored_tracks(
             staged,
             metadata_lookup=metadata_lookup,
             metadata_provenance=metadata_provenance,
+            metadata_lookup_many=metadata_lookup_many,
         )
         _replace_tracks_directory(staged.tracks, destination.tracks)
 

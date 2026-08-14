@@ -36,6 +36,7 @@ from trajectory_data_process.harvest.observed import (
     write_observed_records,
 )
 from trajectory_data_process.harvest.czml import render_observed_czml
+from trajectory_data_process.harvest.freshness_rebuild import rebuild_fresh_tracks
 from trajectory_data_process.harvest.merge import merge_stored_tracks
 from trajectory_data_process.harvest.publish import publish_observed_report
 from trajectory_data_process.harvest.runner import (
@@ -103,6 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
             "repeat for multiple source roots"
         ),
     )
+    mode.add_argument(
+        "--rebuild-fresh-from",
+        type=Path,
+        help=(
+            "read an existing harvest root, restore ADS-B source timing in batches, "
+            "and write a new --output staging root; source data are never modified"
+        ),
+    )
     parser.add_argument("--no-cache", action="store_true", help="bypass the history query cache")
     mode.add_argument(
         "--full-redownload",
@@ -131,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
     code = args.airport.upper()
     paths = HarvestPaths(root=args.output, code=code)
     if not args.evaluate_only and not args.reclassify_existing \
-            and not args.merge_source and not args.full_redownload:
+            and not args.merge_source and not args.rebuild_fresh_from \
+            and not args.full_redownload:
         completed = _completed_download_manifest(
             paths,
             expected_runways=_configured_runways(args.config, code),
@@ -154,11 +164,26 @@ def main(argv: list[str] | None = None) -> int:
     airport = load_airport(code, config_file=args.config, cifp_file=args.cifp)
     metadata = (
         SidecarStateMetadata(args.adsb_metadata, code)
-        if args.reclassify_existing or args.merge_source
+        if args.reclassify_existing or args.merge_source or args.rebuild_fresh_from
         else None
     )
 
-    if args.merge_source:
+    staging_rebuild = args.rebuild_fresh_from is not None
+    if args.rebuild_fresh_from:
+        assert metadata is not None
+        source = HarvestPaths(root=args.rebuild_fresh_from, code=code)
+        manifest = rebuild_fresh_tracks(
+            airport,
+            source,
+            paths,
+            metadata=metadata,
+        )
+        print(
+            f"[harvest] source-timed staging rebuild without download: "
+            f"{manifest['counts']} (excluded "
+            f"{manifest['source_integrity']['excluded_total']})"
+        )
+    elif args.merge_source:
         assert metadata is not None
         sources = [HarvestPaths(root=root, code=code) for root in args.merge_source]
         manifest = merge_stored_tracks(
@@ -167,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
             airport=airport,
             metadata_lookup=metadata.lookup,
             metadata_provenance=metadata.provenance,
+            metadata_lookup_many=metadata.lookup_many,
         )
         print(
             f"[harvest] merged and reclassified {len(sources) + 1} source manifests "
@@ -179,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
             paths,
             metadata_lookup=metadata.lookup,
             metadata_provenance=metadata.provenance,
+            metadata_lookup_many=metadata.lookup_many,
         )
         print(f"[harvest] reclassified stored tracks without download: {manifest['counts']}")
     elif args.evaluate_only:
@@ -226,14 +253,19 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(report, indent=1, allow_nan=False), encoding="utf-8"
     )
 
-    if not args.no_czml:
+    if staging_rebuild and (not args.no_czml or not args.no_publish):
+        print(
+            "[harvest] staging rebuild: frontend CZML/publication skipped; "
+            "validate the new output before publishing it explicitly"
+        )
+    if not args.no_czml and not staging_rebuild:
         rendered = render_observed_czml(
             paths, frontend_data_root=args.frontend_data, multiplier=args.multiplier
         )
         print(f"[harvest] observed CZML: {rendered.flights} flights over "
               f"{len(rendered.runway_counts)} runway(s) -> {rendered.combined_czml}")
 
-    if not args.no_publish:
+    if not args.no_publish and not staging_rebuild:
         published = publish_observed_report(
             report, frontend_data_root=args.frontend_data, airport=code
         )

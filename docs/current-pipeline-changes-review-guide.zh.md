@@ -304,7 +304,7 @@ git diff -- \
 核心 schema：
 
 ```text
-harvest-arrivals-v3-track-slices
+harvest-arrivals-v4-source-timed-track-slices
 ```
 
 每条 arrival row 应包含：
@@ -665,7 +665,7 @@ jq '{schemaVersion, combined, runways}' \
 - arrivals 下只有 manifest，不再有 `records/`；
 - `landings/` 下没有 `.czml`；
 - `_czml_input` 不存在；
-- schema 为 `harvest-arrivals-v3-track-slices`；
+- schema 为 `harvest-arrivals-v4-source-timed-track-slices`；
 - runway entries 全部指向 `trajectories.czml`；
 - KRDU 的 `no_published_tch` 数量仍明确存在，而不是变成 load failure。
 

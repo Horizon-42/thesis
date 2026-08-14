@@ -8,7 +8,7 @@
 
 本项目不需要因为使用 `geoaltitude` 而推翻重做。`geoaltitude` 是 ADS-B/GNSS 提供的 WGS-84 椭球高（HAE），正是本项目保存三维几何轨迹时应使用的高度基准。当前 HAE 到 MSL 的显式转换边界也是正确的。
 
-但是，当前派生数据存在一个独立且真实的完整性问题：OpenSky 会在离开覆盖后继续保留 state vector 最多 300 秒，而当前 harvest 没有执行 OpenSky 官方建议的 `time - lastcontact <= 15` 过滤，也没有在重分类时恢复并使用 `lastposupdate`/`lastcontact`。因此，同一个最后已知位置和高度会被当成多个新的逐秒观测参与最终段拟合和模型输入。
+但是，本次审计所针对的既有派生数据存在一个独立且真实的完整性问题：OpenSky 会在离开覆盖后继续保留 state vector 最多 300 秒，而旧 harvest 没有执行 OpenSky 官方建议的 `time - lastcontact <= 15` 过滤，也没有在重分类时恢复并使用 `lastposupdate`/`lastcontact`。因此，同一个最后已知位置和高度会被当成多个新的逐秒观测参与最终段拟合和模型输入。
 
 五机场全量审计得到：
 
@@ -19,7 +19,9 @@
 - 仅在内存中排除 stale 行后，46,212/46,212 个 event 的当前拟合范围仍满足现行最低点数（8）和空间跨度（500 m）。这证明真实最终下降数据仍然存在，不能把问题解释为“整条航迹没有可用垂直高度”。
 - 更严格的 KRDU 连续性检查表明，清理会暴露少量真实接收空洞：按 15 秒断开时，16,638 个 event 中 16,631 个的最后连续块仍可拟合，16,637 个至少有一个可拟合连续块。其余少数应标记 unavailable，而不是跨空洞强行拟合。
 
-因此，必须作废并重建的是受 stale/held 行影响的派生 arrivals、observed threshold events、observed evaluation，以及用当前 arrivals 训练出的开发模型。无需删除或重新下载现有 HAE 轨迹和 ADS-B metadata sidecar；它们保留了完成安全重建所需的信息。任何重建都应写入新的 staging/version 目录并经过校验后再决定是否发布，不能原地破坏现有数据。
+因此，必须作废并重建的是受 stale/held 行影响的派生 arrivals、observed threshold events、observed evaluation，以及用旧 arrivals 训练出的开发模型。无需删除或重新下载现有 HAE 轨迹和 ADS-B metadata sidecar；它们保留了完成安全重建所需的信息。
+
+该修复现已实现为 `--rebuild-fresh-from SOURCE --output STAGING`：源目录只读，目标机场必须不存在；输出采用 `harvest-tracks-v2-source-timing` 和 `harvest-arrivals-v4-source-timed-track-slices`。五机场迁移、差异审计和 canonical 切换已经完成，结果见 [10-source-timed-canonical-promotion-audit.md](10-source-timed-canonical-promotion-audit.md)。本文件前述统计描述的是修复前数据，不能误读为当前 canonical 结果。
 
 ## 2. 必须区分的三个问题
 
@@ -81,7 +83,7 @@ AND time - lastcontact <= 15
 
 REST API 的 state-vector contract 还说明：如果过去 15 秒没有 position report，`time_position` 可以为空。历史 Trino 数据仍会保留 state vector，因此研究查询必须主动执行 freshness 过滤。
 
-当前代码在构造 `Sample` 时保存了 `lastposupdate` 和 `lastcontact`，但只检查经纬度和 `geoaltitude` 非空，没有 freshness gate。重分类从存储 JSON 恢复时又只恢复 `[time, lon, lat, alt]`，把两个 freshness 字段留空；metadata lookup 目前只保护 threshold bracket，没有保护整个拟合或 arrival slice。最终段 OLS 因而会把 held rows 当作额外权重，arrival 则会把 held tail 当作真实 4D 运动时间。
+修复前的代码在构造 `Sample` 时保存了 `lastposupdate` 和 `lastcontact`，但只检查经纬度和 `geoaltitude` 非空，没有 freshness gate。重分类从存储 JSON 恢复时又只恢复 `[time, lon, lat, alt]`，把两个 freshness 字段留空；metadata lookup 只保护 threshold bracket，没有保护整个拟合或 arrival slice。最终段拟合因而会把 held rows 当作额外权重，arrival 则会把 held tail 当作真实 4D 运动时间。
 
 ## 3. 只读审计方法
 
@@ -133,6 +135,43 @@ KRDU 另做时间连续性检查：fresh 点相邻 state-row time 相差超过 1
 - 其他四机场大部分完全不变，最大差仅 KMSY 0.085 m。
 
 该实验说明问题不是“删掉 stale 后没有轨迹”，同时证明 held rows 确实能显著移动个别 KRDU 拟合。它不是全量重分类结果，不能替代安全 staging rebuild。
+
+### 3.5 `lastposupdate` 与 `geoaltitude` 同步审计
+
+为关闭原设计中的 open question，另取每机场按时间连续的 100 条轨迹，共
+213,127 个已精确匹配 sidecar 的 state rows，比较相邻 state snapshot：
+
+- 33,566 对相邻 snapshot 具有相同 `lastposupdate`；
+- 经 freshness 双门限后，仍有 1,260 对在经纬度和 `lastposupdate` 不变时改变了
+  `geoaltitude`；
+- 这些变化全部伴随 `lastcontact` 前进；典型绝对高度步进为 7.6 m（25 ft）；
+- 因此 `lastposupdate` 是水平位置的正确主时间，但不是可证明的独立
+  `geoaltitude` 更新时间。OpenSky state-vector schema 不提供
+  `lastgeoaltitudeupdate`。
+
+在每机场 100 条 assigned 轨迹上，又比较两种明确的高度对齐选择：
+
+| Airport | 可比 events | “held 组最后快照”减“最接近 lastposupdate 快照”的 threshold altitude P05/中位数/P95/max abs (m) | runway/assignment 改变 |
+|---|---:|---:|---:|
+| KMSY | 98 | -2.469 / 0.000 / +0.590 / 5.516 | 0 |
+| KRDU | 96 | -5.891 / -0.743 / +0.540 / 10.675 | 0 |
+| KSJC | 99 | 0.000 / 0.000 / 0.000 / 0.398 | 0 |
+| KSMF | 88 | 0.000 / 0.000 / 0.000 / 1.027 | 0 |
+| KSTL | 98 | -0.898 / 0.000 / 0.000 / 2.408 | 0 |
+
+这个差异不能靠 verdict 标准消除；尤其 KRDU，随意选 held 组的最后高度可移动
+拟合结果超过 7.5 m 垂直门限。因此新实现采用以下可审计规则：
+
+1. 以 `lastposupdate` 作为水平位置样本时间；
+2. 同一 `(icao24, lastposupdate)` 只产生一个三维样本；
+3. 选择 state-row time 最接近该 `lastposupdate` 的 snapshot，避免把之后才到达的
+   异步高度错误回填到较早水平位置；
+4. 同组发生高度变化时增加 `geoaltitude_async_groups`，不把后续高度当作新的空间点；
+5. 剩余的近地面几何高度测量/对齐误差继续作为 estimator uncertainty，而不是
+   伪装成已知为零。
+
+该规则不声称恢复了不存在的 message-level 高度时间戳；它选择与水平测量时刻
+距离最近的可观测 snapshot，并把无法完全消除的不确定性保留下来。
 
 ## 4. 五机场全量结果
 
@@ -241,9 +280,7 @@ evaluation 标准仍然可以对任意 ideal、optimized 或 predicted trajector
 - 不需要让 evaluation 自己重新拟合 ADS-B；
 - 不应把现有数据原地覆盖后假装与旧实验同一版本。
 
-## 7. 安全修复边界（尚未实施）
-
-本审计没有实施下列变更。正式设计和实现前应先写测试，并使用全新 staging 目录。
+## 7. 已实施的安全修复边界
 
 建议的数据流为：
 
@@ -259,7 +296,7 @@ evaluation 标准仍然可以对任意 ideal、optimized 或 predicted trajector
     -> train/validation 模型重训
 ```
 
-最低安全要求：
+实现满足以下安全要求：
 
 1. 对 source roots 在运行前后做 roster、size、mtime 或 SHA-256 审计，保证零修改。
 2. 输出只能进入新的 sibling staging/version directory。
@@ -271,7 +308,31 @@ evaluation 标准仍然可以对任意 ideal、optimized 或 predicted trajector
 8. 在发布前比较旧/新 runway assignment、arrival roster、fit 参数和 verdict confusion matrix。
 9. 在用户明确批准前，不删除、移动或覆盖任何现有 track、sidecar、arrival、evaluation 或模型文件。
 
-`lastposupdate` 是否应成为位置 sample 的规范时间，以及 `geoaltitude` 更新是否需要进一步从 raw `position_data4` 做 message-level 对齐，需要先做小规模实验后再定；不能在本审计文档中未经验证地固定为新公共 schema。
+迁移命令：
+
+```bash
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport KRDU \
+  --rebuild-fresh-from /path/to/legacy-harvest \
+  --output /path/to/new-source-timed-staging
+```
+
+当前 canonical 五机场数据已经迁移；以上命令只用于其他 legacy harvest，不能把
+已经 source-timed 的 canonical root 再作为 migration source。
+
+实现细节：
+
+- sidecar 以默认 512 条轨迹为批次做向量化 exact join，避免给 6 小时分区内每个
+  airport state row 建 Python 对象字典；
+- KMSY 512 条真实轨迹、224,269 个查询键的小实验中，读取轨迹 0.426 s、sidecar
+  join 0.808 s、清理 0.545 s；峰值 RSS 约 435 MB；
+- 该批次保留 504 条，8 条因最终 fresh block 少于两个点进入显式 exclusion；
+  14,983 个 held rows 被移除，2,277 个异步高度组被审计；
+- 源 manifest 和所有 rostered record 的 relative path、size、mtime_ns 被散列，
+  处理前后不一致时 staging 不提交；
+- 写入前要求可用空间至少为 rostered source-track bytes 的 3 倍再加 2 GiB 保留量；
+- 新 staging 模式自动跳过 frontend CZML/publication，避免未经审核的数据替换当前展示；
+- evaluation 不做 refit，只消费 classification 阶段从 clean track 产生的序列化 event。
 
 ## 8. 官方参考资料与本地快照
 
@@ -303,9 +364,11 @@ evaluation 标准仍然可以对任意 ideal、optimized 或 predicted trajector
 
 ## 9. 本地代码证据
 
-- `trajectory_data_process/harvest/tracks.py::_to_sample`：保存 freshness metadata，但没有应用 freshness gate。
-- `trajectory_data_process/harvest/reclassify.py::_stored_track`：只从 `[t, lon, lat, alt]` 恢复 `Sample`，freshness metadata 只通过 bracket lookup 使用。
-- `final_approach/fit.py::fit_final_segment`：拟合接收 `TrackPoint`，没有源 freshness 信息，因此无法自行排除 held rows。
-- `trajectory_data_process/harvest/arrivals.py::write_arrival_records`：按 landing anchor 切出 arrival；上游 held tail 会直接进入 model-ready slice。
+- `trajectory_data_process/harvest/tracks.py::source_timed_final_block`：执行 freshness、held 去重、异步高度审计和 15 s coverage 分块。
+- `trajectory_data_process/harvest/adsb_metadata.py::lookup_many`：按分区批量 exact join，并拒绝冲突 duplicate。
+- `trajectory_data_process/harvest/freshness_rebuild.py::rebuild_fresh_tracks`：只读源、批量处理、源指纹复核和新目录提交。
+- `trajectory_data_process/harvest/reclassify.py::_source_timed_track`：旧的原子 reclassification 模式也必须先恢复 source timing。
+- `trajectory_data_process/harvest/arrivals.py::write_arrival_records`：只接受完整的 `harvest-tracks-v2-source-timing` manifest。
+- `evaluation/arrival.py`：继续只消费序列化 threshold event，不调用 final-segment fitter。
 
 这进一步说明修复必须发生在轨迹派生/分类边界，而不是在 evaluation 中再次拟合或事后猜测。

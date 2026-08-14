@@ -1173,7 +1173,7 @@ def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU"
     manifest.write_text(
         json.dumps(
             {
-                "schema_version": "harvest-arrivals-v3-track-slices",
+                "schema_version": "harvest-arrivals-v4-source-timed-track-slices",
                 "airport": airport,
                 "source_manifest": "../tracks/manifest.json",
                 "altitude_source": "opensky_history_geoaltitude_m",

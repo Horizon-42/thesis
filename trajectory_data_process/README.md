@@ -8,7 +8,9 @@ each landing to at most one runway, and publishes explicit manifests for audit a
 
 ```text
 OpenSky history DB
-  → harvest.tracks        reconstruct one contiguous track per flight (HAE)
+  → harvest.tracks        freshness gate + held-state collapse
+                          position clock = lastposupdate; altitude remains HAE
+                          final continuous position-update block only
   → harvest.classify      runway assignment + threshold-event estimation
                           assigned | ambiguous | unassignable | not_landing
                           + bracket-anchored robust 3D threshold event
@@ -62,6 +64,42 @@ by a successful harvest or local reclassification; it is intentionally not recon
 by globbing old track files. This mode does not refit trajectories. It rejects a legacy
 or stale threshold event whose runway-data fingerprint differs from the active runway
 configuration or CIFP cycle.
+It also requires the `harvest-tracks-v2-source-timing` contract; a pre-fix manifest is
+rejected instead of silently rebuilding arrivals from held OpenSky state vectors.
+
+The canonical five-airport dataset has already completed the source-timing migration
+(see `docs/10-source-timed-canonical-promotion-audit.md`). To migrate another legacy
+harvest safely with the backfilled ADS-B timing sidecars, use distinct legacy and
+staging roots:
+
+```bash
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport KRDU \
+  --rebuild-fresh-from /path/to/legacy-harvest \
+  --output /path/to/new-source-timed-staging
+```
+
+This is the recommended migration mode. The source and destination airport roots must
+be different and non-nested, and the destination airport must not already exist. The
+mode resolves sidecar metadata in batches (default 512 tracks), writes to a temporary
+directory on the destination filesystem, and verifies the source manifest plus every
+rostered file's size/mtime fingerprint before and after processing. It then builds
+arrivals and observed evaluation inside the new output root. Frontend CZML/publication
+are deliberately skipped until the staging result has been reviewed.
+
+Before writing airport data, the mode requires free space for three times the rostered
+source-track bytes plus a 2 GiB reserve. This deliberately conservative preflight covers
+the additional reported-speed array, evaluation records, and temporary serialization;
+it is repeated independently for every airport, so a multi-airport rebuild stops before
+starting the next airport if accumulated outputs have consumed the reserve.
+
+Horizontal samples are timestamped by `lastposupdate`. A sample is retained only when
+both `state time - lastcontact <= 15 s` and
+`state time - lastposupdate <= 15 s`. Repeated snapshots with the same position time
+collapse to the snapshot nearest that update. If `geoaltitude` changes while the
+horizontal position time is held, the later height is not treated as a synchronized 3D
+point; the group is counted in `source_integrity.geoaltitude_async_groups`. Position
+gaps over 15 seconds are never bridged: only the final continuous block remains.
 
 Re-run runway assignment and final-segment fitting from the stored HAE samples, then
 rebuild arrivals, observed evaluation, CZML, and publication—still without downloading:
@@ -105,11 +143,12 @@ conda run -n aeroviz python -m trajectory_data_process.harvest \
   --airport KRDU --full-redownload
 ```
 
-The four modes are mutually exclusive:
+The five modes are mutually exclusive:
 
 - `--evaluate-only`: reuse assignment and threshold events; rebuild downstream views.
 - `--reclassify-existing`: reuse samples; rebuild assignment, events, and downstream views.
 - `--merge-source ROOT`: merge stored samples, then rebuild assignment, events, and views.
+- `--rebuild-fresh-from ROOT`: read old tracks and timing sidecars into a new safe staging root.
 - `--full-redownload`: acquire the source samples again and rebuild everything.
 
 Procedure assets are a separate static-data pipeline:
@@ -143,17 +182,19 @@ outputs/harvest/<ICAO>/
 - `unassignable`: coverage/geometry is insufficient for a reliable runway.
 - `not_landing`: the track does not satisfy the landing screen.
 
-Every roster row carries `event_status`. Each assigned track with a valid winning fit
-stores one version-4 `observed_threshold_event`. A final-inbound threshold-position
-bracket supplies the lateral intercept only after its displacement over
-`lastposupdate` time agrees with the two ADS-B reported ground-speed values; state-row
-time is not used as a motion clock. Rejected brackets are audited while later pairs
-remain searchable. Vertical height always comes from the preferred 3 km final-segment
-fit, or a 4 km/5 km availability fallback when the narrower fit lacks enough data. If
-no position bracket exists, the same fit ensemble supplies lateral position. The event
-records component-specific source ranges, available-window sensitivity, uncertainty, method
-diagnostics, and extrapolation distance. It contains physical estimator results only—not
-an LPV/LNAV-VNAV benchmark, limit, or verdict. Its runway-data
+The tracks manifest uses `harvest-tracks-v2-source-timing` and records whether source
+integrity is complete. Every track record carries its own cleanup counts and a parallel
+`reported_ground_speeds_m_s` array; the four-column geometry sample contract remains
+unchanged, and `start_time_utc` retains millisecond precision. Every roster
+row also carries `event_status`. Each assigned track with a valid winning fit stores one
+version-6 `observed_threshold_event`. A source-valid threshold bracket selects the runway
+and physical inbound pass after its displacement over `lastposupdate` time agrees with
+the two ADS-B reported ground-speed values; it does not independently supply the final
+lateral or vertical estimate. Both components come from the same robust 3D final-segment
+fit, using the preferred 3 km window or audited 4 km/5 km availability candidates.
+Rejected brackets remain audited. The event records source ranges, window sensitivity,
+uncertainty, method diagnostics, and extrapolation distance. It contains physical
+estimator results only—not an LPV/LNAV-VNAV benchmark, limit, or verdict. Its runway-data
 fingerprint binds it to the exact threshold position, course, vertical datum, width,
 procedure facts, and FAA runway/CIFP cycles used by assignment.
 
@@ -168,13 +209,15 @@ contract are documented in
 
 Observed event availability is calculated from the source manifest before filtering:
 assigned, ambiguous, and unassignable tracks form the arrival-candidate denominator;
-known `not_landing` tracks are reported separately as excluded.
+known `not_landing` tracks are reported separately as excluded. Arrival candidates that
+cannot yield a two-point fresh final block remain unavailable in this denominator via
+the staging manifest's source-integrity exclusion roster.
 
 `arrivals/manifest.json` is narrower by design. It contains only supervised/modeling-ready
 arrivals: assigned tracks with a published CIFP Path Point (TCH and glidepath), cropped at
 the final entry into the terminal ring and stopped at `landing_sample_index`. Exclusions
 such as `local_circuit`, `no_published_tch`, and `no_published_glidepath` remain counted in
-the manifest. The v3 manifest stores only the source track file and slice indices; consumers
+the manifest. The v4 source-timed manifest stores only the source track file and slice indices; consumers
 materialize the crop from that canonical track instead of keeping a second JSON copy. Each
 view row also pins the source file's SHA-256 so a changed track cannot be combined silently
 with stale slice metadata.
@@ -184,6 +227,7 @@ with stale slice metadata.
 ```text
 harvest/runner.py       backward time-window scan and stopping policy
 harvest/tracks.py       row → contiguous measured Track
+harvest/freshness_rebuild.py batched, source-preserving staging migration
 harvest/classify.py     assignment, landing anchor, threshold-event orchestration
 harvest/threshold_event.py structural bracket selection + one robust 3D event
 harvest/store.py        complete measured buckets + tracks manifest

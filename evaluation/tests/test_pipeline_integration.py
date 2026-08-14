@@ -14,7 +14,11 @@ from trajectory_data_process.harvest.classify import classify_track
 from trajectory_data_process.harvest.czml import render_observed_czml
 from trajectory_data_process.harvest.observed import iter_observed_records, write_observed_records
 from trajectory_data_process.harvest.store import HarvestPaths, write_tracks
-from trajectory_data_process.harvest.tracks import Sample, Track
+from trajectory_data_process.harvest.tracks import (
+    Sample,
+    Track,
+    source_timed_final_block,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -63,7 +67,10 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(
         last_position_update_s=1_786_492_800.0 + len(samples) * 2.5,
         last_contact_s=1_786_492_800.0 + len(samples) * 2.5,
     ))
-    classified = classify_track(Track("abc123", "PIPE1", tuple(samples)), airport)
+    source_timed, integrity = source_timed_final_block(samples)
+    classified = classify_track(
+        Track("abc123", "PIPE1", tuple(source_timed), integrity), airport
+    )
     assert classified.runway == "05L"
     assert classified.observed_threshold_event["status"] == "estimated"
     assert classified.observed_threshold_event["method"] == \

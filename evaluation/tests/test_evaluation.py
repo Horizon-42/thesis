@@ -108,6 +108,7 @@ def test_observed_availability_is_supplied_from_the_unfiltered_harvest_roster():
         "event_unavailable": 2,
         "event_estimated_rate": 1 / 3,
         "excluded_not_landing": 1,
+        "source_integrity_excluded_candidates": 0,
     }
     report = evaluate_batch(
         [record_from_dict(_record())],

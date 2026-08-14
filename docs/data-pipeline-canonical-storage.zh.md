@@ -48,7 +48,7 @@ summary / evaluation report
 | 数据事实 | 唯一物理锚点 | 其他消费者如何引用 |
 |---|---|---|
 | OpenSky 实测 HAE 样本 | `tracks/.../<flight_key>.json` | `tracks/manifest.json` roster；arrival 用文件名和样本索引 |
-| 模型可用 arrival 集合 | `arrivals/manifest.json` | schema `harvest-arrivals-v3-track-slices`；文件名、SHA-256 和样本索引锚定 track 切片 |
+| 模型可用 arrival 集合 | `arrivals/manifest.json` | schema `harvest-arrivals-v4-source-timed-track-slices`；文件名、SHA-256 和样本索引锚定已完成 freshness 清理的 track 切片 |
 | 跑道 TCH、下滑角和 datum | arrival manifest 顶层 `runway_targets` | 每条记录只保存 runway key |
 | 观察评估状态 | `approach/records/*_eval.json` | 流式进入 `evaluate_batch`；这是包含 MSL 和拟合速度的新派生量 |
 | 前端观察轨迹 | `<airport>/trajectories.czml` | `landings/index.json` 的各 runway 均指向该文件，前端内存过滤 |

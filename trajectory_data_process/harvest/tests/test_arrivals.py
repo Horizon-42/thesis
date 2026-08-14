@@ -13,11 +13,17 @@ from trajectory_data_process.harvest.airports import (
     runway_data_fingerprint,
 )
 from trajectory_data_process.harvest.arrivals import (
+    SCHEMA_VERSION,
     _anchor_index,
     load_arrival_flights,
     write_arrival_records,
 )
-from trajectory_data_process.harvest.store import ALTITUDE_DATUM, ALTITUDE_SOURCE, HarvestPaths
+from trajectory_data_process.harvest.store import (
+    ALTITUDE_DATUM,
+    ALTITUDE_SOURCE,
+    TRACK_SCHEMA_VERSION,
+    HarvestPaths,
+)
 
 
 def _runway(
@@ -125,6 +131,7 @@ def _write_source_manifest(paths: HarvestPaths, rows: list[dict]) -> None:
     paths.manifest.write_text(
         json.dumps(
             {
+                "schema_version": TRACK_SCHEMA_VERSION,
                 "airport": paths.code,
                 "altitude_source": ALTITUDE_SOURCE,
                 "altitude_datum": ALTITUDE_DATUM,
@@ -135,6 +142,7 @@ def _write_source_manifest(paths: HarvestPaths, rows: list[dict]) -> None:
                     "not_landing": 0,
                 },
                 "total": len(rows),
+                "source_integrity_complete": True,
                 "records": rows,
             }
         ),
@@ -280,7 +288,7 @@ def test_arrival_manifest_crops_final_entry_to_landing_anchor_and_excludes_non_m
 
     manifest = write_arrival_records(_airport(), paths)
 
-    assert manifest["schema_version"] == "harvest-arrivals-v3-track-slices"
+    assert manifest["schema_version"] == SCHEMA_VERSION
     assert manifest["counts"] == {
         "source_total": 4,
         "assigned": 4,

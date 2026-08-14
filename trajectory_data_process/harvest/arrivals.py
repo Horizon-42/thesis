@@ -23,12 +23,16 @@ from trajectory_data_process.harvest.airports import (
     Runway,
 )
 from trajectory_data_process.harvest.czml import czml_input_flight, verify_identity
-from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
+from trajectory_data_process.harvest.store import (
+    HarvestPaths,
+    read_manifest,
+    require_source_timed_manifest,
+)
 from trajectory_data_process.harvest.threshold_event import require_current_threshold_event
 
 ARRIVALS_DIR = "arrivals"
 MANIFEST_NAME = "manifest.json"
-SCHEMA_VERSION = "harvest-arrivals-v3-track-slices"
+SCHEMA_VERSION = "harvest-arrivals-v4-source-timed-track-slices"
 
 
 def arrival_manifest_path(paths: HarvestPaths) -> Path:
@@ -49,6 +53,7 @@ def write_arrival_records(
     Local circuits are also excluded after the terminal-entry cut.
     """
     source = read_manifest(paths)
+    require_source_timed_manifest(source, path=paths.manifest)
     root = paths.airport / ARRIVALS_DIR
     _clear(root)
     root.mkdir(parents=True, exist_ok=True)

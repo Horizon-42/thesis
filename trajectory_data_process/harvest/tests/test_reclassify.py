@@ -5,17 +5,26 @@ from __future__ import annotations
 import json
 import math
 
+import pytest
+
 from final_approach import Projected
 
 from trajectory_data_process.harvest.__main__ import build_parser
+from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
 from trajectory_data_process.harvest.airports import Airport, Runway, runway_data_fingerprint
 from trajectory_data_process.harvest.classify import classify_track
 from trajectory_data_process.harvest.reclassify import (
     _reclassification_order,
+    _stored_track,
     reclassify_stored_tracks,
 )
 from trajectory_data_process.harvest.store import HarvestPaths, track_record
-from trajectory_data_process.harvest.tracks import Sample, Track
+from trajectory_data_process.harvest.tracks import (
+    SOURCE_INTEGRITY_SCHEMA,
+    Sample,
+    SourceIntegrity,
+    Track,
+)
 
 
 def _airport() -> Airport:
@@ -48,6 +57,10 @@ def _classified():
     return classify_track(Track("abc123", "TEST1", tuple(samples)), _airport())
 
 
+def _metadata(_icao24, time_s):
+    return AdsbStateMetadata(70.0, time_s, time_s)
+
+
 def test_reclassify_existing_reuses_samples_and_adds_current_frame_fingerprint(tmp_path):
     paths = HarvestPaths(tmp_path, "KAAA")
     classified = _classified()
@@ -78,7 +91,7 @@ def test_reclassify_existing_reuses_samples_and_adds_current_frame_fingerprint(t
     manifest = reclassify_stored_tracks(
         _airport(),
         paths,
-        metadata_lookup=lambda _icao24, _time_s: None,
+        metadata_lookup=_metadata,
         metadata_provenance={"test": True},
     )
 
@@ -99,6 +112,145 @@ def test_cli_exposes_an_exclusive_no_download_reclassification_mode():
     parser = build_parser()
     args = parser.parse_args(["--airport", "KAAA", "--reclassify-existing"])
     assert args.reclassify_existing is True
+
+
+def test_source_timed_track_round_trip_preserves_subsecond_time_and_speed(tmp_path):
+    base = _classified().track
+    samples = tuple(
+        Sample(
+            sample.time_s + 0.375,
+            sample.lat,
+            sample.lon,
+            sample.alt_hae_m,
+            sample.on_ground,
+            71.25,
+            sample.time_s + 0.375,
+            sample.time_s + 0.4,
+        )
+        for sample in base.samples
+    )
+    integrity = SourceIntegrity(
+        SOURCE_INTEGRITY_SCHEMA,
+        input_rows=len(samples),
+        metadata_missing_rows=0,
+        stale_last_contact_rows=0,
+        stale_position_rows=0,
+        future_timestamp_rows=0,
+        inconsistent_position_groups=0,
+        geoaltitude_async_groups=0,
+        held_rows_removed=0,
+        coverage_gap_count=0,
+        retained_rows=len(samples),
+    )
+    classified = classify_track(
+        Track(base.icao24, base.callsign, samples, integrity), _airport()
+    )
+    record = track_record(classified)
+    path = tmp_path / "track.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+    restored = _stored_track(record, path)
+
+    assert restored.start_s == pytest.approx(samples[0].time_s, abs=0.0005)
+    assert restored.samples[0].reported_ground_speed_m_s == 71.25
+    assert restored.source_integrity == integrity
+
+
+def test_reclassify_preserves_population_integrity_audit_without_nested_copy(tmp_path):
+    base = _classified().track
+    integrity = SourceIntegrity(
+        SOURCE_INTEGRITY_SCHEMA,
+        input_rows=len(base.samples),
+        metadata_missing_rows=0,
+        stale_last_contact_rows=0,
+        stale_position_rows=0,
+        future_timestamp_rows=0,
+        inconsistent_position_groups=0,
+        geoaltitude_async_groups=0,
+        held_rows_removed=0,
+        coverage_gap_count=0,
+        retained_rows=len(base.samples),
+    )
+    classified = classify_track(
+        Track(base.icao24, base.callsign, base.samples, integrity), _airport()
+    )
+    record = track_record(classified)
+    relative = f"assigned/18/{record['flight_key']}.json"
+    paths = HarvestPaths(tmp_path, "KAAA")
+    path = paths.tracks / relative
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(record), encoding="utf-8")
+    population_audit = {
+        "schema_version": SOURCE_INTEGRITY_SCHEMA,
+        "source_total": 2,
+        "source_counts": {
+            "assigned": 2,
+            "ambiguous": 0,
+            "unassignable": 0,
+            "not_landing": 0,
+        },
+        "output_total": 1,
+        "excluded_total": 1,
+        "excluded": [
+            {
+                "source_flight_key": "EXCLUDED_18_def456_20260801T000000Z",
+                "source_outcome": "assigned",
+                "reason": "final fresh position block has fewer than two samples",
+                "source_integrity": integrity.to_dict(),
+            }
+        ],
+        "totals": {},
+    }
+    paths.manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "harvest-tracks-v2-source-timing",
+                "airport": "KAAA",
+                "altitude_source": record["altitude_source"],
+                "altitude_datum": record["altitude_datum"],
+                "counts": {
+                    "assigned": 1,
+                    "ambiguous": 0,
+                    "unassignable": 0,
+                    "not_landing": 0,
+                },
+                "per_runway": {"18": 1},
+                "total": 1,
+                "source_integrity_complete": True,
+                "source_integrity": population_audit,
+                "provenance": {
+                    "freshness_rebuild": {
+                        "source_integrity": population_audit,
+                    }
+                },
+                "records": [
+                    {
+                        "flight_key": record["flight_key"],
+                        "file": relative,
+                        "outcome": "assigned",
+                        "runway": "18",
+                        "icao24": "abc123",
+                        "callsign": "TEST1",
+                        "landing_time_utc": record["landing_time_utc"],
+                        "landing_sample_index": record["landing_sample_index"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = reclassify_stored_tracks(
+        _airport(),
+        paths,
+        metadata_lookup=lambda *_args: pytest.fail(
+            "source-timed reclassification must not query ADS-B metadata"
+        ),
+        metadata_provenance={"unused": True},
+    )
+
+    assert manifest["source_integrity"] == population_audit
+    assert "source_integrity" not in manifest["provenance"]["freshness_rebuild"]
 
 
 def test_reclassification_orders_every_outcome_by_canonical_flight_time():

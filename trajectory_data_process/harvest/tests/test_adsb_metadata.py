@@ -61,6 +61,39 @@ def test_lookup_returns_reported_speed_and_real_position_update_time(tmp_path):
     assert metadata.last_contact_s == timestamp.timestamp() - 0.1
 
 
+def test_lookup_many_preserves_query_order_and_missing_rows(tmp_path):
+    first = pd.Timestamp("2026-08-01T00:10:00Z")
+    second = pd.Timestamp("2026-08-01T00:10:01Z")
+    _write_partition(tmp_path, [
+        {
+            "time": first,
+            "icao24": "abc123",
+            "velocity": 70.0,
+            "lastposupdate": first.timestamp() - 0.2,
+            "lastcontact": first.timestamp() - 0.1,
+        },
+        {
+            "time": second,
+            "icao24": "abc123",
+            "velocity": 71.0,
+            "lastposupdate": second.timestamp() - 0.2,
+            "lastcontact": second.timestamp() - 0.1,
+        },
+    ])
+
+    values = SidecarStateMetadata(tmp_path, "KAAA").lookup_many([
+        ("abc123", second.timestamp()),
+        ("missing", first.timestamp()),
+        ("ABC123", first.timestamp()),
+    ])
+
+    assert [value.reported_ground_speed_m_s if value else None for value in values] == [
+        71.0,
+        None,
+        70.0,
+    ]
+
+
 def test_conflicting_duplicate_state_rows_are_not_guessed(tmp_path):
     timestamp = pd.Timestamp("2026-08-01T00:10:00Z")
     _write_partition(tmp_path, [

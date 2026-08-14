@@ -539,8 +539,7 @@ def _fitted_event(
             "vertical_effective": ensemble.vertical_effective_95_m,
         },
         "unmodelled_uncertainty_sources": [
-            "ADS-B source integrity",
-            "ADS-B geometric-altitude update alignment",
+            "ADS-B geometric-altitude update alignment and measurement error",
             "runway/FAS survey uncertainty",
             "geoid/datum uncertainty",
         ],

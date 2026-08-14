@@ -134,6 +134,22 @@ conda run -n aeroviz python -m trajectory_data_process.harvest \
 
 `--evaluate-only` never changes assignment output. It rejects an observed event
 whose runway-frame fingerprint does not match the active FAA runway/CIFP data.
+It also rejects a tracks manifest that predates source-timing cleanup. The canonical
+five-airport harvest is already migrated. To migrate another legacy downloaded dataset
+without modifying it, use distinct legacy and staging roots:
+
+```bash
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport KRDU \
+  --rebuild-fresh-from /path/to/legacy-harvest \
+  --output /path/to/new-source-timed-staging
+```
+
+The observed event is then fitted once from fresh samples whose horizontal clock is
+OpenSky `lastposupdate`; held state rows and position-update gaps over 15 seconds do not
+enter the fit. `geoaltitude` remains HAE. Because OpenSky provides no separate geometric
+altitude update timestamp, height changes under a held horizontal position are audited
+in the track's `source_integrity` block and are not emitted as additional 3D samples.
 To rebuild assignment, the threshold estimate, arrivals, evaluation, CZML, and
 publication from the already downloaded HAE samples, use:
 
@@ -171,7 +187,9 @@ normalize two different physical spans and report the result as path error.
 For observed-only reports, `observed.event_estimated_rate` is explicitly
 `event_estimated / arrival_candidates_excluding_not_landing`. Assigned,
 ambiguous, and unassignable tracks are in that denominator; known
-`not_landing` tracks are reported separately as excluded. This population is
+`not_landing` tracks are reported separately as excluded. Source arrival candidates
+excluded because no two-point fresh final block remains are counted as unavailable in
+`source_integrity_excluded_candidates`. This population is
 computed from `tracks/manifest.json` before evaluation-record filtering.
 
 `success` remains a convenience boolean equal to `verdict == "pass"`; consumers

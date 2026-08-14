@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from trajectory_data_process.harvest.airports import Airport, Runway
+from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
 from trajectory_data_process.harvest.__main__ import build_parser
 from trajectory_data_process.harvest.merge import merge_stored_tracks
 from trajectory_data_process.harvest.store import (
@@ -44,6 +45,10 @@ def _airport() -> Airport:
             ),
         ),
     )
+
+
+def _metadata(_icao24: str, time_s: float) -> AdsbStateMetadata:
+    return AdsbStateMetadata(70.0, time_s, time_s)
 
 
 def _rewrite_record(paths: HarvestPaths, **updates: object) -> None:
@@ -156,7 +161,7 @@ def test_merge_stages_hard_links_preserves_provenance_and_invalidates_views(tmp_
         destination,
         [source],
         airport=_airport(),
-        metadata_lookup=lambda _icao24, _time_s: None,
+        metadata_lookup=_metadata,
         metadata_provenance={"test": True},
     )
 
@@ -198,7 +203,7 @@ def test_merge_rejects_duplicate_identity_without_changing_destination(tmp_path)
             destination,
             [source],
             airport=_airport(),
-            metadata_lookup=lambda _icao24, _time_s: None,
+            metadata_lookup=_metadata,
             metadata_provenance={"test": True},
         )
 
@@ -230,7 +235,7 @@ def test_merge_rejects_a_manifest_path_that_escapes_tracks(tmp_path):
             destination,
             [source],
             airport=_airport(),
-            metadata_lookup=lambda _icao24, _time_s: None,
+            metadata_lookup=_metadata,
             metadata_provenance={"test": True},
         )
 
@@ -262,7 +267,7 @@ def test_merge_rejects_post_reclassification_collision_without_committing(tmp_pa
             destination,
             [source],
             airport=_airport(),
-            metadata_lookup=lambda _icao24, _time_s: None,
+            metadata_lookup=_metadata,
             metadata_provenance={"test": True},
         )
 
@@ -296,7 +301,7 @@ def test_merge_validates_reclassification_before_committing(tmp_path):
             destination,
             [source],
             airport=_airport(),
-            metadata_lookup=lambda _icao24, _time_s: None,
+            metadata_lookup=_metadata,
             metadata_provenance={"test": True},
         )
 

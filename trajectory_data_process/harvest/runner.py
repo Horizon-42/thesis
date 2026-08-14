@@ -56,7 +56,11 @@ DEFAULT_MAX_LOOKBACK_DAYS = 30.0
 # Give a runway up once the scan has gone this long past its last new landing: an idle
 # runway end would otherwise drag the whole airport to the lookback limit.
 DEFAULT_DRY_GIVE_UP_DAYS = 4.0
-CHECKPOINT_VERSION = 3
+# Source-timed reconstruction changed quota classification.  A v3 checkpoint contains
+# per-aircraft counts from held state-row time and cannot be resumed selectively: an
+# untouched aircraft would retain the old count.  Checkpoints are temporary/regenerable,
+# so require a clean v4 scan instead of adding a dual-policy migration path.
+CHECKPOINT_VERSION = 4
 # Retry only transport failures. Six retries span 195 seconds, which is long enough to
 # bridge a short Wi-Fi/DNS outage without hiding persistent authentication or query
 # errors indefinitely.

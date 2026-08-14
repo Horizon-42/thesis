@@ -80,8 +80,82 @@ def test_adsb_velocity_and_position_freshness_stay_attached_to_the_sample():
     track = build(approach_rows())[0]
     sample = track.samples[0]
     assert sample.reported_ground_speed_m_s == 70.0
-    assert sample.last_position_update_s == pytest.approx(sample.time_s - 0.25)
-    assert sample.last_contact_s == pytest.approx(sample.time_s - 0.1)
+    assert sample.time_s == pytest.approx(sample.last_position_update_s)
+    assert sample.last_contact_s == pytest.approx(sample.time_s + 0.15)
+
+
+def test_held_state_rows_are_collapsed_onto_last_position_update_time():
+    rows = approach_rows(n=20)
+    held = dict(rows[-1])
+    held["timestamp"] = 20.0
+    held["lastcontact"] = 19.9
+    rows.append(held)
+
+    track = build(rows, min_samples=2)[0]
+
+    assert len(track.samples) == 20
+    assert [sample.time_s for sample in track.samples] == pytest.approx(
+        [row["lastposupdate"] for row in rows[:-1]]
+    )
+    assert track.source_integrity is not None
+    assert track.source_integrity.held_rows_removed == 1
+
+
+def test_geoaltitude_change_without_position_update_is_audited_not_refit():
+    rows = approach_rows(n=20)
+    asynchronous = dict(rows[5])
+    asynchronous["timestamp"] = rows[5]["timestamp"] + 0.5
+    asynchronous["lastcontact"] = asynchronous["timestamp"] - 0.05
+    asynchronous["geoaltitude"] = rows[5]["geoaltitude"] + 25.0
+    rows.insert(6, asynchronous)
+
+    track = build(rows, min_samples=2)[0]
+
+    assert len(track.samples) == 20
+    assert track.samples[5].alt_hae_m == pytest.approx(rows[5]["geoaltitude"] * FT_M)
+    assert track.source_integrity is not None
+    assert track.source_integrity.geoaltitude_async_groups == 1
+    assert track.source_integrity.held_rows_removed == 1
+
+
+def test_freshness_filter_uses_both_lastcontact_and_lastposupdate():
+    rows = approach_rows(n=20)
+    rows[3]["lastcontact"] = rows[3]["timestamp"] - 16.0
+    rows[4]["lastposupdate"] = rows[4]["timestamp"] - 16.0
+
+    track = build(rows, min_samples=2)[0]
+
+    assert len(track.samples) == 18
+    assert track.source_integrity is not None
+    assert track.source_integrity.stale_last_contact_rows == 1
+    assert track.source_integrity.stale_position_rows == 1
+    assert track.source_integrity.coverage_gap_count == 0
+
+
+def test_only_final_contiguous_source_position_block_survives():
+    first = approach_rows(0.0, 12)
+    second = approach_rows(40.0, 12)
+
+    track = build([*first, *second], min_samples=2, max_gap_s=900.0)[0]
+
+    assert track.start_s == pytest.approx(second[0]["lastposupdate"])
+    assert len(track.samples) == len(second)
+    assert track.source_integrity is not None
+    assert track.source_integrity.coverage_gap_count == 1
+
+
+def test_position_update_time_rewind_starts_a_new_block_without_reordering():
+    rows = approach_rows(0.0, 12)
+    later = approach_rows(20.0, 12)
+    for index, item in enumerate(later):
+        item["lastposupdate"] = 5.0 + index
+
+    track = build([*rows, *later], min_samples=2, max_gap_s=900.0)[0]
+
+    assert track.start_s == pytest.approx(5.0)
+    assert len(track.samples) == len(later)
+    assert track.source_integrity is not None
+    assert track.source_integrity.coverage_gap_count == 1
 
 
 # --- defect 1: a track glued to a later pass --------------------------------------
@@ -150,6 +224,16 @@ def test_samples_without_a_geometric_altitude_are_dropped():
     rows[5]["geoaltitude"] = None
     track = build(rows)[0]
     assert len(track.samples) == len(rows) - 1
+
+
+def test_non_finite_position_or_altitude_rows_are_dropped():
+    rows = approach_rows()
+    rows[3]["geoaltitude"] = float("nan")
+    rows[4]["longitude"] = float("inf")
+
+    track = build(rows)[0]
+
+    assert len(track.samples) == len(rows) - 2
 
 
 def test_tracks_are_time_ordered_even_from_shuffled_rows():
