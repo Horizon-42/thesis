@@ -160,9 +160,9 @@
 <main>
   <header>
     <h1>最终进近 Evaluation 失败原因分析</h1>
-    <p>基于五个美国机场的 <code>terminal-approach-evaluation-v3</code> observed 报告；统计对象是已进入 LPV 阈值判决的 44,457 条航迹。</p>
+    <p>基于五个美国机场的 <code>terminal-approach-evaluation-v3</code> observed 报告；统计对象是已进入 LPV 阈值判决的 42,874 条航迹。</p>
     <div class="meta">
-      <span class="pill">生成日期：2026-08-14</span>
+      <span class="pill">生成日期：2026-08-15</span>
       <span class="pill">KMSY · KRDU · KSJC · KSMF · KSTL</span>
       <span class="pill">v6 当前结果 · producer 单次拟合</span>
     </div>
@@ -181,11 +181,11 @@
 
   <section>
     <div class="callout">
-      <strong>本页已按 v6 重新生成。</strong>
-      五机场派生数据均已重跑。KSJC 的
-      <code>N968RC_30L_ad7b58_20260502T041134Z</code> 不再把晚期 bracket 与早期
-      approach fit 组合，其事件现在为 unavailable，正式 verdict 从 fail 改为
-      indeterminate。evaluation 只消费 producer 序列化的阈值事件，不重新 fitting。
+      <strong>本页已按 source-timed canonical 数据重新生成。</strong>
+      五机场均已使用现有 canonical tracks 执行 <code>--reclassify-existing</code>，以
+      <code>lastposupdate</code> 建立位置时序并重新生成 threshold-event v6、arrivals 和
+      observed evaluation。evaluation 只消费 producer 序列化的阈值事件，不重新 fitting；
+      本页也只读取新报告，不读取原始轨迹后另行估计。
     </div>
   </section>
 
@@ -209,8 +209,8 @@
       </div>
       <div class="card signal-card" style="--signal:#d28a10">
         <div class="eyebrow">当前最值得追查的信号</div>
-        <div class="big">45.31%</div>
-        <div class="explain">6,222 个有 bracket 的正式 fail 中，2,819 个 bracket 点在同一 gate 内。它提示 fit 与近阈值样本存在系统性分歧，需查模型/数据，不代表应改标准。</div>
+        <div class="big">45.03%</div>
+        <div class="explain">6,153 个有 bracket 的正式 fail 中，2,771 个 bracket 点在同一 gate 内。它提示 fit 与近阈值样本存在系统性分歧，需查模型/数据，不代表应改标准。</div>
       </div>
     </div>
   </section>
@@ -392,10 +392,10 @@
   <section id="diagnostic-matrix">
     <h2>看到异常时先查什么：诊断矩阵</h2>
     <div class="grid cards">
-      <div class="card"><div class="label">涉及垂直的 fail</div><div class="value" style="color:var(--vertical)">10,489</div><div class="sub">99.25% 的全部 fail，先查方向、TCH/datum 与拟合截距</div></div>
-      <div class="card"><div class="label">横向越界超过 gate 50 m+</div><div class="value" style="color:var(--lateral)">614</div><div class="sub">不像正常中心线散布，优先查 runway/pass selection</div></div>
-      <div class="card"><div class="label">Bracket 对照会 pass</div><div class="value" style="color:var(--both)">2,819</div><div class="sub">占 bracketed fail 45.31%，是 fit/source 分歧诊断</div></div>
-      <div class="card"><div class="label">Indeterminate</div><div class="value" style="color:var(--indeterminate)">151</div><div class="sub">检查 unavailable reason；不要在图上误画为 fail</div></div>
+      <div class="card"><div class="label">涉及垂直的 fail</div><div class="value" style="color:var(--vertical)">9,761</div><div class="sub">99.17% 的全部 fail，先查方向、TCH/datum 与拟合截距</div></div>
+      <div class="card"><div class="label">横向越界超过 gate 50 m+</div><div class="value" style="color:var(--lateral)">547</div><div class="sub">不像正常中心线散布，优先查 runway/pass selection</div></div>
+      <div class="card"><div class="label">Bracket 对照会 pass</div><div class="value" style="color:var(--both)">2,771</div><div class="sub">占 bracketed fail 45.03%，是 fit/source 分歧诊断</div></div>
+      <div class="card"><div class="label">Indeterminate</div><div class="value" style="color:var(--indeterminate)">127</div><div class="sub">检查 unavailable reason；不要在图上误画为 fail</div></div>
     </div>
     <div class="callout warning"><strong>异常统计只是调查入口，不是自动根因。</strong>先按下表检查事件 provenance 与 fit diagnostics，再判断是源数据、pass 选择、fitting，还是实际几何越界。</div>
     <div class="table-wrap" style="max-height:none">
@@ -555,7 +555,7 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
     <h2>数据结果：结论先行</h2>
     <div class="callout">
       <strong>正式判决中，主要失败原因是垂直越界。</strong>
-      10,568 个 fail 中，9,833 个（93.05%）仅垂直失败，656 个（6.21%）横向和垂直同时失败，只有 79 个（0.75%）仅横向失败。因此共有 10,489 个 fail（99.25%）涉及垂直分量。
+      9,843 个 fail 中，9,154 个（93.00%）仅垂直失败，607 个（6.17%）横向和垂直同时失败，只有 82 个（0.83%）仅横向失败。因此共有 9,761 个 fail（99.17%）涉及垂直分量。
     </div>
     <div class="grid cards" id="summaryCards" aria-live="polite"></div>
     <div class="controls" aria-label="机场筛选">
@@ -578,7 +578,7 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
       <span class="swatch" style="background:var(--indeterminate)"></span> Indeterminate
     </div>
     <div id="verdictChart" class="chart" role="img" aria-label="各机场判决比例堆叠条形图"></div>
-    <p class="footnote">分母是报告中的可判决航迹。KSMF 的 274 条无已发布 LPV TCH 航迹没有进入该分母，因此 KSMF 显示 4,457 条而不是全部 4,731 条 assigned。</p>
+    <p class="footnote">分母严格取各机场 <code>evaluation_report.json/trajectories</code>。KRDU 的 1,558 条和 KSMF 的 261 条无已发布 LPV TCH assigned 航迹没有进入 evaluation，因此两场分别显示 14,387 和 4,306 条；event availability 使用另一个、包含 unavailable candidate 的分母，不能与这里混用。</p>
   </section>
 
   <section>
@@ -593,11 +593,11 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
       <div class="card">
         <h3>垂直方向</h3>
         <div id="verticalDirectionChart" class="chart" role="img" aria-label="垂直失败高低方向图"></div>
-        <p class="footnote">五机场合计：高于上界 6,566（62.60%）；低于下界 3,923（37.40%）。方向存在明显机场差异：KSJC 以偏低为主，其余四场以偏高为主。</p>
+        <p class="footnote">五机场合计：高于上界 6,171（63.22%）；低于下界 3,590（36.78%）。方向存在明显机场差异：KSJC 以偏低为主，其余四场以偏高为主。</p>
       </div>
       <div class="card">
         <h3>为什么横向数量少但值得检查</h3>
-        <p>横向失败涉及 735 条（6.95% 的 fail），其中 614 条（83.54%）超过横向界限达 50 m 以上。横向越界量中位数为 370.02 m，远大于约 22.86 m 的典型跑道半宽。</p>
+        <p>横向失败涉及 689 条（7.00% 的 fail），其中 547 条（79.39%）超过横向界限达 50 m 以上。横向越界量中位数为 368.64 m，远大于约 22.86 m 的典型跑道半宽。</p>
         <p>这不是普通的几米级中心线散布形态。结合这些数据均来自成功着陆航迹，它更像是少量最终段选择、航迹阶段污染或拟合外推异常，应优先逐条复核，而不能直接解释成飞机实际在跑道外通过阈值。</p>
       </div>
     </div>
@@ -629,7 +629,7 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
     <div class="grid cards" id="bracketCards"></div>
     <div id="bracketChart" class="chart" role="img" aria-label="失败航迹的 bracket 反事实判决图"></div>
     <p id="bracketText"></p>
-    <p class="footnote">五机场合计的 10,568 个正式 fail 中，6,222 个具有有效 bracket；其中 2,819 个（45.31%）的 bracket 点在同一横向/垂直边界内。fitted event 与 bracket 的绝对差异中位数为横向 2.66 m、垂直 6.70 m，P95 分别为 137.57 m 和 27.09 m。该分布长尾说明少量极端 fitting 结果会显著影响 fail 统计。</p>
+    <p class="footnote">五机场合计的 9,843 个正式 fail 中，6,153 个具有有效 bracket；其中 2,771 个（45.03%）的 bracket 点在同一横向/垂直边界内。fitted event 与 bracket 的绝对差异中位数为横向 2.69 m、垂直 6.55 m，P95 分别为 75.77 m 和 24.55 m。该分布仍有明显长尾，说明少量极端 fitting 结果会显著影响 fail 统计。</p>
   </section>
 
   <section>
@@ -660,6 +660,7 @@ otherwise     ⇔  indeterminate</div>
   <section id="sources">
     <h2>7. 数据来源、标准依据与可复现性</h2>
     <ul class="source-list">
+      <li><a href="../trajectory_data_process/docs/10-source-timed-canonical-promotion-audit.md">Source-timed canonical promotion audit</a>：说明 <code>lastposupdate</code> 时序重建、geo-altitude 同步审计、新旧 canonical 差异和不可破坏的原始数据边界。</li>
       <li><a href="../final_approach/FIT_MODEL_OPTIMIZATION.md">Observed final-approach fit design</a>：v6 算法边界、固定 cohort 实验、拒绝方案与事件 contract；实现位于 <a href="../final_approach/fit.py"><code>final_approach/fit.py</code></a> 和 <a href="../trajectory_data_process/harvest/threshold_event.py"><code>threshold_event.py</code></a>。</li>
       <li><a href="FINAL_APPROACH_VERDICT_STANDARD.md">项目判决标准设计</a>：阈值事件定义、LPV/LNAV-VNAV 边界推导、claim boundary、报告要求及章节级官方来源；实现位于 <a href="metrics.py"><code>evaluation/metrics.py</code></a>、<a href="arrival.py"><code>arrival.py</code></a> 和 <a href="thresholds.py"><code>thresholds.py</code></a>。</li>
       <li><a href="../docs/literature_review/threshold_event_estimation/Olive_et_al_2025_ADSB_Filtering.pdf">Olive et al., Filtering Techniques for ADS-B Trajectory Preprocessing</a>：§§2.2–2.5、§3.1、§§3.4–3.5，ADS-B 预处理、异常值与轨迹一致性方法依据。</li>
@@ -683,28 +684,28 @@ otherwise     ⇔  indeterminate</div>
 <script>
   const AIRPORT_ORDER = ["KMSY", "KRDU", "KSJC", "KSMF", "KSTL"];
   const DATA = {
-    ALL: {label:"五机场合计",total:44457,pass:33738,fail:10568,indeterminate:151,verticalOnly:9833,both:656,lateralOnly:79,high:6566,low:3923,vBins:[4517,3543,1337,1092],lBins:[27,37,57,614],vMedian:3.1305,vP95:26.1263,lMedian:370.0167,lP95:755.6128,bracket:{with:6222,pass:2819,fail:3403,latMedian:2.6640,latP95:137.5749,vertMedian:6.7027,vertP95:27.0927}},
-    KMSY: {label:"KMSY",total:4306,pass:3167,fail:1125,indeterminate:14,verticalOnly:1105,both:11,lateralOnly:9,high:986,low:130,vBins:[552,439,103,22],lBins:[3,0,6,11],vMedian:2.5435,vP95:9.6638,lMedian:103.9814,lP95:534.8322,bracket:{with:1103,pass:288,fail:815,latMedian:2.7005,latP95:10.1547,vertMedian:5.7282,vertP95:18.7051}},
-    KRDU: {label:"KRDU",total:15015,pass:10709,fail:4296,indeterminate:10,verticalOnly:4196,both:73,lateralOnly:27,high:3210,low:1059,vBins:[1654,1520,700,395],lBins:[10,13,18,59],vMedian:3.6430,vP95:19.1770,lMedian:84.4575,lP95:646.7232,bracket:{with:202,pass:58,fail:144,latMedian:2.0943,latP95:9.9956,vertMedian:14.3537,vertP95:33.8978}},
-    KSJC: {label:"KSJC",total:11333,pass:8606,fail:2631,indeterminate:96,verticalOnly:2267,both:339,lateralOnly:25,high:270,low:2336,vBins:[955,788,386,477],lBins:[13,14,26,311],vMedian:4.1643,vP95:45.9460,lMedian:369.1843,lP95:779.4706,bracket:{with:2615,pass:1497,fail:1118,latMedian:2.7987,latP95:484.9286,vertMedian:8.2015,vertP95:42.7858}},
-    KSMF: {label:"KSMF",total:4457,pass:3807,fail:626,indeterminate:24,verticalOnly:584,both:36,lateralOnly:6,high:383,low:237,vBins:[335,201,48,36],lBins:[0,6,2,34],vMedian:2.1227,vP95:16.7276,lMedian:277.8717,lP95:848.7343,bracket:{with:600,pass:470,fail:130,latMedian:2.7398,latP95:90.3207,vertMedian:6.0997,vertP95:22.1981}},
-    KSTL: {label:"KSTL",total:9346,pass:7449,fail:1890,indeterminate:7,verticalOnly:1681,both:197,lateralOnly:12,high:1717,low:161,vBins:[1021,595,100,162],lBins:[1,4,5,199],vMedian:2.1493,vP95:35.6545,lMedian:373.3859,lP95:382.7589,bracket:{with:1702,pass:506,fail:1196,latMedian:2.4400,latP95:8.5054,vertMedian:4.4050,vertP95:17.8352}}
+    ALL: {label:"五机场合计",total:42874,pass:32904,fail:9843,indeterminate:127,verticalOnly:9154,both:607,lateralOnly:82,high:6171,low:3590,vBins:[4475,3451,1069,766],lBins:[43,42,57,547],vMedian:2.8227,vP95:22.2993,lMedian:368.6405,lP95:704.5973,bracket:{with:6153,pass:2771,fail:3382,latMedian:2.6931,latP95:75.7739,vertMedian:6.5512,vertP95:24.5524}},
+    KMSY: {label:"KMSY",total:4159,pass:2972,fail:1175,indeterminate:12,verticalOnly:1162,both:6,lateralOnly:7,high:1048,low:120,vBins:[556,480,117,15],lBins:[4,1,4,4],vMedian:2.6718,vP95:9.7421,lMedian:42.4368,lP95:203.5792,bracket:{with:1159,pass:301,fail:858,latMedian:2.8957,latP95:10.8343,vertMedian:5.6039,vertP95:18.3656}},
+    KRDU: {label:"KRDU",total:14387,pass:10798,fail:3580,indeterminate:9,verticalOnly:3469,both:70,lateralOnly:41,high:2710,low:829,vBins:[1608,1364,431,136],lBins:[22,22,22,45],vMedian:2.8438,vP95:13.5186,lMedian:24.2482,lP95:488.9916,bracket:{with:118,pass:45,fail:73,latMedian:3.0504,latP95:12.2337,vertMedian:8.1687,vertP95:29.6300}},
+    KSJC: {label:"KSJC",total:11204,pass:8554,fail:2569,indeterminate:81,verticalOnly:2230,both:318,lateralOnly:21,high:268,low:2280,vBins:[951,778,373,446],lBins:[13,13,24,289],vMedian:4.0938,vP95:44.9009,lMedian:370.5137,lP95:769.5976,bracket:{with:2557,pass:1481,fail:1076,latMedian:2.7746,latP95:472.0682,vertMedian:8.1854,vertP95:42.4990}},
+    KSMF: {label:"KSMF",total:4306,pass:3694,fail:594,indeterminate:18,verticalOnly:567,both:23,lateralOnly:4,high:381,low:209,vBins:[336,189,45,20],lBins:[1,3,2,21],vMedian:1.9894,vP95:10.8306,lMedian:273.0060,lP95:854.8289,bracket:{with:577,pass:454,fail:123,latMedian:2.6085,latP95:14.4264,vertMedian:5.8121,vertP95:18.1826}},
+    KSTL: {label:"KSTL",total:8818,pass:6886,fail:1925,indeterminate:7,verticalOnly:1726,both:190,lateralOnly:9,high:1764,low:152,vBins:[1024,640,103,149],lBins:[3,3,5,188],vMedian:2.2437,vP95:34.2455,lMedian:373.1997,lP95:383.2879,bracket:{with:1742,pass:490,fail:1252,latMedian:2.4595,latP95:8.9518,vertMedian:4.6148,vertP95:17.3346}}
   };
 
   const RUNWAYS = [
-    ["KMSY","02",291,219,71,1,71,0,0],["KMSY","11",2652,1845,798,9,784,7,7],["KMSY","20",3,2,1,0,1,0,0],["KMSY","29",1360,1101,255,4,249,4,2],
-    ["KRDU","05L",3100,2015,1085,0,1081,2,2],["KRDU","05R",1766,1069,696,1,674,15,7],["KRDU","23L",3490,2771,710,9,646,49,15],["KRDU","23R",6659,4854,1805,0,1795,7,3],
-    ["KSJC","12L",15,4,8,3,2,5,1],["KSJC","12R",575,392,175,8,162,11,2],["KSJC","30L",9757,7635,2064,58,1853,194,17],["KSJC","30R",986,575,384,27,250,129,5],
-    ["KSMF","17L",1260,1112,146,2,139,7,0],["KSMF","17R",2586,2181,389,16,361,23,5],["KSMF","35L",611,514,91,6,84,6,1],
-    ["KSTL","06",1,1,0,0,0,0,0],["KSTL","11",669,540,129,0,129,0,0],["KSTL","12L",3954,3368,582,4,573,7,2],["KSTL","12R",441,246,195,0,76,118,1],["KSTL","24",24,19,5,0,5,0,0],["KSTL","29",97,87,10,0,9,0,1],["KSTL","30L",108,94,14,0,12,2,0],["KSTL","30R",4052,3094,955,3,877,70,8]
+    ["KMSY","02",284,205,78,1,78,0,0],["KMSY","11",2623,1763,852,8,840,6,6],["KMSY","20",2,2,0,0,0,0,0],["KMSY","29",1250,1002,245,3,244,0,1],
+    ["KRDU","05L",3072,1758,1314,0,1309,4,1],["KRDU","05R",1473,894,578,1,553,15,10],["KRDU","23L",3216,2498,710,8,648,44,18],["KRDU","23R",6626,5648,978,0,959,7,12],
+    ["KSJC","12L",15,4,8,3,2,5,1],["KSJC","12R",573,391,174,8,161,11,2],["KSJC","30L",9650,7587,2016,47,1819,182,15],["KSJC","30R",966,572,371,23,248,120,3],
+    ["KSMF","17L",1175,1040,134,1,128,6,0],["KSMF","17R",2531,2150,369,12,353,13,3],["KSMF","35L",600,504,91,5,86,4,1],
+    ["KSTL","06",1,1,0,0,0,0,0],["KSTL","11",654,508,146,0,146,0,0],["KSTL","12L",3869,3274,591,4,583,7,1],["KSTL","12R",374,193,181,0,67,113,1],["KSTL","24",23,18,5,0,5,0,0],["KSTL","29",96,84,12,0,11,0,1],["KSTL","30L",52,44,8,0,7,1,0],["KSTL","30R",3749,2764,982,3,907,69,6]
   ];
 
   const SOURCES = {
-    KMSY:"1ca0ce74c22c5ca61a12ecd7f85f925ca43e4754fe37ee1c17627996d7c78b3f",
-    KRDU:"63675fa1885aee0e1fd7db35db774d274bc5f5a4d9e5e8fa106a1e777abb9097",
-    KSJC:"fdbc6b0028262a8641bfb408915a48b566b16665be10747f20a418b240964bac",
-    KSMF:"15cbff3edf74e79d51e981d255b323f21241f0a48eb41d6f852edc022d4a43f1",
-    KSTL:"0e37bda0fd4889ecaae0aeb7dab1678cd05169b09cab42751f90d98a6860aca0"
+    KMSY:"b3f60b68196ea56ed4133b132e4a11336efdad10f2f5b87ec653ccc37085ff48",
+    KRDU:"f3c5d1c4ab38bd0dd1f644103dcbb1181a6f9a52df9ff1a9c5051ff721b11ec8",
+    KSJC:"fd7972f8d1eaa2749963597827309025e35c05c48e29177e82a015b440a9cba0",
+    KSMF:"c8cae669a02fa43df1d4b30bdab9b3c6160e7febc234eb81651be9c1087393cf",
+    KSTL:"9c038f61d8ae02fbffa238bcf33430bb2950b5504381b620e620b8de35c690e9"
   };
 
   const colors = {pass:"#198754",fail:"#c93b4a",indeterminate:"#d99a17",verticalOnly:"#5468d4",both:"#8d4eb2",lateralOnly:"#e9823f",high:"#4d78cc",low:"#54a6a6"};
@@ -783,7 +784,7 @@ otherwise     ⇔  indeterminate</div>
   }
 
   function renderSources() {
-    document.getElementById("sourceRows").innerHTML=AIRPORT_ORDER.map(k=>`<tr><td>${k}</td><td><a href="../aeroviz-4d/public/data/airports/${k}/comparison/observed/evaluation_report.json">evaluation_report.json</a></td><td class="hash">${SOURCES[k]}</td></tr>`).join("");
+    document.getElementById("sourceRows").innerHTML=AIRPORT_ORDER.map(k=>`<tr><td>${k}</td><td><a href="../trajectory_data_process/outputs/harvest/${k}/approach/evaluation_report.json">evaluation_report.json</a></td><td class="hash">${SOURCES[k]}</td></tr>`).join("");
   }
 
   document.querySelectorAll("button[data-airport]").forEach(button=>button.addEventListener("click",()=>{
