@@ -67,9 +67,11 @@ from config import (  # noqa: E402
     CONTROL_STATE_OBJECTIVES,
     CONTROL_TERMINAL_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
+    FLOAT32_MATMUL_PRECISIONS,
     HORIZON_MODES,
     MODELS,
     PREDICTION_OUTPUTS,
+    TRAINING_PRECISIONS,
     TSConfig,
 )
 from approach_clustering.cli import (  # noqa: E402
@@ -238,6 +240,18 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=_batch_size, default=None,
                         help="positive integer, or 'auto' to probe the active CUDA GPU")
+    parser.add_argument(
+        "--training-precision",
+        choices=TRAINING_PRECISIONS,
+        default=None,
+        help="network matrix precision; objectives run outside autocast and control dynamics stay FP64",
+    )
+    parser.add_argument(
+        "--float32-matmul-precision",
+        choices=FLOAT32_MATMUL_PRECISIONS,
+        default=None,
+        help="PyTorch FP32 matmul policy; 'high' permits TF32 on supported CUDA GPUs",
+    )
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--lr-plateau-factor", type=float, default=None)
     parser.add_argument("--lr-plateau-patience", type=int, default=None)
@@ -513,6 +527,8 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("dt_s", args.dt), ("epochs", args.epochs),
         ("reference_velocity_source", args.reference_velocity_source),
         ("batch_size", args.batch_size if isinstance(args.batch_size, int) else None),
+        ("training_precision", args.training_precision),
+        ("float32_matmul_precision", args.float32_matmul_precision),
         ("learning_rate", args.learning_rate),
         ("lr_plateau_factor", args.lr_plateau_factor),
         ("lr_plateau_patience", args.lr_plateau_patience),

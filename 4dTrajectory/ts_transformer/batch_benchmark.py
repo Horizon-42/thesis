@@ -35,7 +35,11 @@ import run_ts_pipeline as pipeline  # noqa: E402
 from config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
+    FLOAT32_MATMUL_PRECISIONS,
     MODELS,
+    PREDICTION_OUTPUTS,
+    PREDICTION_STATE,
+    TRAINING_PRECISIONS,
     TSConfig,
 )
 from cross_validation import CV_OVERRIDE_FIELDS  # noqa: E402
@@ -50,13 +54,20 @@ from dataset import (  # noqa: E402
     split_name_for_dataset_id,
 )
 from models import build_model, parameter_count, resolve_device  # noqa: E402
-from train import prediction_loss, usable_series  # noqa: E402
+from train import (  # noqa: E402
+    model_forward,
+    move_dynamics,
+    move_fixed_dt_supervision,
+    prediction_loss,
+    unpack_batch,
+    usable_series,
+)
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     load_arrival_flights,
     resolve_arrival_manifest,
 )
 
-RESULT_SCHEMA = "ts-batch-throughput-benchmark-v4-flight-epochs"
+RESULT_SCHEMA = "ts-batch-throughput-benchmark-v5-compute-precision"
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -210,6 +221,7 @@ def benchmark_candidate(
     """Measure the current end-to-end in-RAM batch builder + FP32 training path."""
     model = optimizer = iterator = None
     x = y = weights = final_time_s = flight_weights = prediction = loss = None
+    dynamics = dense_supervision = None
     started = time.perf_counter()
     try:
         torch.manual_seed(config.seed)
@@ -227,6 +239,7 @@ def benchmark_candidate(
         def step() -> int:
             nonlocal epoch, iterator
             nonlocal x, y, weights, final_time_s, flight_weights, prediction, loss
+            nonlocal dynamics, dense_supervision
             try:
                 batch = next(iterator)
             except StopIteration:
@@ -235,14 +248,24 @@ def benchmark_candidate(
                     dataset, batch_size, shuffle=True, seed=config.seed + epoch
                 ))
                 batch = next(iterator)
-            x, y, weights, final_time_s, flight_weights = batch
+            (
+                x,
+                y,
+                weights,
+                final_time_s,
+                flight_weights,
+                dynamics,
+                dense_supervision,
+            ) = unpack_batch(batch)
             x = x.to(device)
             y = y.to(device)
             weights = weights.to(device)
             final_time_s = final_time_s.to(device)
             flight_weights = flight_weights.to(device)
+            dynamics = move_dynamics(dynamics, device)
+            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
             optimizer.zero_grad()
-            prediction = model(x)
+            prediction = model_forward(model, x, dynamics)
             loss = prediction_loss(
                 prediction,
                 x[:, -1],
@@ -252,6 +275,8 @@ def benchmark_candidate(
                 flight_weights,
                 config,
                 dataset.normalizer,
+                dynamics,
+                dense_supervision,
             )
             loss.backward()
             optimizer.step()
@@ -294,6 +319,7 @@ def benchmark_candidate(
             "wall_seconds": time.perf_counter() - started,
         }
     finally:
+        del dense_supervision, dynamics
         del loss, prediction, flight_weights, final_time_s, weights, y, x
         del iterator, optimizer, model
         gc.collect()
@@ -315,6 +341,11 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--airports", type=_parse_airports, default=None,
                         help="comma-separated airport roster; default: all discovered K-airports")
     parser.add_argument("--model", choices=MODELS, default="itransformer")
+    parser.add_argument(
+        "--prediction-output",
+        choices=PREDICTION_OUTPUTS,
+        default=PREDICTION_STATE,
+    )
     parser.add_argument("--n-segments", type=int, default=None)
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--config-overrides", default=None,
@@ -322,6 +353,10 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--aircraft-type", default=DEFAULT_AIRCRAFT_TYPE)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--training-precision", choices=TRAINING_PRECISIONS,
+                        default="float32")
+    parser.add_argument("--float32-matmul-precision", choices=FLOAT32_MATMUL_PRECISIONS,
+                        default="highest")
     parser.add_argument(
         "--random-train-anchor",
         action="store_true",
@@ -353,10 +388,13 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     config_values = {
         **tuned,
         "model": args.model,
+        "prediction_output": args.prediction_output,
         "coordinate_frame": args.coordinate_frame,
         "aircraft_type": args.aircraft_type,
         "seed": args.seed,
         "device": args.device,
+        "training_precision": args.training_precision,
+        "float32_matmul_precision": args.float32_matmul_precision,
         "random_train_anchor": args.random_train_anchor,
     }
     if args.n_segments is not None:
@@ -376,7 +414,8 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
     output_path = (args.output or (
         pipeline.OPT_OUTPUTS_ROOT / "POOLED" / "batch_benchmarks" /
-        f"{args.model}_normalized_time_{args.coordinate_frame.replace('-', '_')}.json"
+        f"{args.model}_{args.prediction_output}_normalized_time_"
+        f"{args.coordinate_frame.replace('-', '_')}.json"
     )).resolve()
     properties = torch.cuda.get_device_properties(device)
     free_bytes, total_bytes = torch.cuda.mem_get_info(device)
@@ -386,7 +425,7 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         flush=True,
     )
     print(
-        f"model={config.model}, frame={config.coordinate_frame}, "
+        f"model={config.model}/{config.prediction_output}, frame={config.coordinate_frame}, "
         f"L={config.seq_len}, N={config.n_segments}, parameters={parameter_count(build_model(config)):,}",
         flush=True,
     )
@@ -465,7 +504,11 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         },
         "config": config.to_dict(),
         "benchmark": {
-            "precision": "float32",
+            "network_compute_precision": config.training_precision,
+            "float32_matmul_precision": config.float32_matmul_precision,
+            "objective_precision": (
+                "outside autocast: state FP32; control rollout terms promote to FP64"
+            ),
             "training_step": "in-memory batch build + host-to-device + forward + backward + Adam",
             "warmup_steps": args.warmup_steps,
             "measure_steps_per_repeat": args.measure_steps,

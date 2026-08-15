@@ -111,7 +111,7 @@ from training_performance import EpochProfiler
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v35-true-time-endpoint-loss"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v36-explicit-compute-precision"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-output-true-time-physical-position-duration-v1",
     HORIZON_FULL: "full-horizon-physical-position-duration-v1",
@@ -285,7 +285,11 @@ def model_forward(
     history: torch.Tensor,
     dynamics: dict[str, torch.Tensor] | None,
 ):
-    return model(history) if dynamics is None else model(history, dynamics)
+    from training_precision import model_autocast, prediction_to_float32
+
+    with model_autocast(model, history):
+        prediction = model(history) if dynamics is None else model(history, dynamics)
+    return prediction_to_float32(prediction)
 
 
 def control_rollout_channels(
@@ -2905,6 +2909,8 @@ def train(
         "validation_common_grid_points": config.validation_common_grid_points,
         "horizon_mode": config.horizon_mode,
         "prediction_output": config.prediction_output,
+        "training_precision": config.training_precision,
+        "float32_matmul_precision": config.float32_matmul_precision,
         "aircraft_filter": config.aircraft_filter,
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,

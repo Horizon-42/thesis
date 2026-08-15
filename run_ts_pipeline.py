@@ -76,6 +76,8 @@ from config import (  # noqa: E402
     DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     DEFAULT_VALIDATION_COMMON_GRID_POINTS,
+    FLOAT32_MATMUL_PRECISION_HIGH,
+    FLOAT32_MATMUL_PRECISIONS,
     HORIZON_MODES,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -85,6 +87,8 @@ from config import (  # noqa: E402
     PREDICTION_OUTPUTS,
     PREDICTION_STATE,
     TSConfig,
+    TRAINING_PRECISION_BFLOAT16,
+    TRAINING_PRECISIONS,
     control_recipe,
     uses_control_dynamics,
 )
@@ -442,6 +446,8 @@ class TrainingPlan:
         aircraft_filter: str = AIRCRAFT_FILTER_ALL,
         coordinate_frame: str = "enu",
         batch_size: str = "2048",
+        training_precision: str = TRAINING_PRECISION_BFLOAT16,
+        float32_matmul_precision: str = FLOAT32_MATMUL_PRECISION_HIGH,
         cv_folds: int = 3,
         cv_parameters: tuple[str, ...] = DEFAULT_CV_PARAMETERS,
         cv_epochs: int = DEFAULT_CV_EPOCHS,
@@ -507,6 +513,8 @@ class TrainingPlan:
         self.aircraft_filter = aircraft_filter
         self.coordinate_frame = coordinate_frame
         self.batch_size = batch_size
+        self.training_precision = training_precision
+        self.float32_matmul_precision = float32_matmul_precision
         self.cv_folds = cv_folds
         self.cv_parameters = applicable_cv_parameters(cv_parameters, horizon_mode)
         self.cv_epochs = cv_epochs
@@ -660,6 +668,8 @@ class TrainingPlan:
             "--prediction-output", self.prediction_output,
             "--coordinate-frame", self.coordinate_frame,
             "--batch-size", self.batch_size,
+            "--training-precision", self.training_precision,
+            "--float32-matmul-precision", self.float32_matmul_precision,
             "--horizon-mode", self.horizon_mode,
         ]
         if self.full_horizon_steps is not None:
@@ -821,6 +831,13 @@ class TrainingPlan:
         )
         if metadata.get("prediction_output") != expected_config.prediction_output:
             return "checkpoint prediction output does not match the requested recipe"
+        if metadata.get("training_precision") != expected_config.training_precision:
+            return "checkpoint training precision does not match the requested recipe"
+        if (
+            metadata.get("float32_matmul_precision")
+            != expected_config.float32_matmul_precision
+        ):
+            return "checkpoint float32 matmul precision does not match the requested recipe"
         if metadata.get("aircraft_filter") != expected_config.aircraft_filter:
             return "checkpoint aircraft filter does not match the requested recipe"
         if metadata.get("horizon_mode") != expected_config.horizon_mode:
@@ -902,6 +919,8 @@ class TrainingPlan:
             "model": self.model,
             "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
+            "training_precision": self.training_precision,
+            "float32_matmul_precision": self.float32_matmul_precision,
             "random_train_anchor": self.random_train_anchor,
             "training_cohort_min_future_s": self.training_cohort_min_future_s,
             "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
@@ -1041,6 +1060,8 @@ class TrainingPlan:
             "model": self.model,
             "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
+            "training_precision": self.training_precision,
+            "float32_matmul_precision": self.float32_matmul_precision,
             "random_train_anchor": self.random_train_anchor,
             "training_cohort_min_future_s": self.training_cohort_min_future_s,
             "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
@@ -1636,6 +1657,18 @@ def main() -> None:
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--batch-size", default="2048",
                         help="positive integer or auto (default: 2048)")
+    parser.add_argument(
+        "--training-precision",
+        choices=TRAINING_PRECISIONS,
+        default=TRAINING_PRECISION_BFLOAT16,
+        help="network compute precision; loss and control dynamics retain their explicit precision",
+    )
+    parser.add_argument(
+        "--float32-matmul-precision",
+        choices=FLOAT32_MATMUL_PRECISIONS,
+        default=FLOAT32_MATMUL_PRECISION_HIGH,
+        help="PyTorch float32 matrix-multiplication policy",
+    )
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument("--control-dense-state-weight", type=float, default=0.25)
@@ -1845,6 +1878,8 @@ def main() -> None:
             aircraft_filter=args.aircraft_filter,
             coordinate_frame=args.coordinate_frame,
             batch_size=args.batch_size,
+            training_precision=args.training_precision,
+            float32_matmul_precision=args.float32_matmul_precision,
             cv_folds=args.cv_folds,
             cv_parameters=args.cv_parameters,
             cv_epochs=args.cv_epochs,

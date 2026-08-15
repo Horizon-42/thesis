@@ -91,7 +91,7 @@ from config import (  # noqa: E402
     CONTROL_TERMINAL_CLOCK_PREDICTED,
     CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
-    PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
+    PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE, PREDICTION_STATE,
     TSConfig, control_recipe,
 )
 from control_mixture import ControlMixturePrediction  # noqa: E402
@@ -2216,6 +2216,36 @@ def test_pipeline_preserves_control_mixture_recipe_in_commands_and_config(tmp_pa
     assert config.control_expert_count == 4
     assert config.control_mixture_selector_loss_weight == pytest.approx(0.2)
     assert config.control_mixture_diversity_loss_weight == pytest.approx(0.03)
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+@pytest.mark.parametrize("prediction_output", [PREDICTION_STATE, PREDICTION_CONTROL])
+def test_pipeline_uses_shared_optimized_compute_backend_without_renaming_cells(
+    model_name, prediction_output
+):
+    baseline = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        model_name,
+        training_mode="pooled",
+        prediction_output=prediction_output,
+        training_precision="float32",
+        float32_matmul_precision="highest",
+    )
+    optimized = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        model_name,
+        training_mode="pooled",
+        prediction_output=prediction_output,
+    )
+
+    recipe = optimized._recipe_args()
+    config, _source = optimized.resolved_train_config(use_best_config=False)
+
+    assert recipe[recipe.index("--training-precision") + 1] == "bfloat16"
+    assert recipe[recipe.index("--float32-matmul-precision") + 1] == "high"
+    assert config.training_precision == "bfloat16"
+    assert config.float32_matmul_precision == "high"
+    assert optimized.train_dir == baseline.train_dir
 
 
 def test_pipeline_carries_and_names_common_training_cohort():
@@ -4830,8 +4860,10 @@ def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
         "random_train_anchor_min_future_s": plan.random_train_anchor_min_future_s,
         "checkpoint_selection_metric": plan.checkpoint_selection_metric,
         "validation_common_grid_points": plan.validation_common_grid_points,
-        "prediction_output": config.prediction_output,
-        "aircraft_filter": config.aircraft_filter,
+            "prediction_output": config.prediction_output,
+            "training_precision": config.training_precision,
+            "float32_matmul_precision": config.float32_matmul_precision,
+            "aircraft_filter": config.aircraft_filter,
         "horizon_mode": config.horizon_mode,
         "pred_len": config.pred_len,
         "lr_scheduler": {
@@ -6369,8 +6401,10 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
             "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
             "validation_common_grid_points": 64,
         "horizon_mode": HORIZON_NORMALIZED,
-        "prediction_output": "state",
-        "aircraft_filter": "all",
+            "prediction_output": "state",
+            "training_precision": config.training_precision,
+            "float32_matmul_precision": config.float32_matmul_precision,
+            "aircraft_filter": "all",
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
         "lr_scheduler": {
