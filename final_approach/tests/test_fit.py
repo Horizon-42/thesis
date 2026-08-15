@@ -158,6 +158,60 @@ def test_small_step_reversal_cannot_accumulate_into_the_final_inbound_run():
     assert fit.height_at_threshold_m == pytest.approx(17.5, abs=0.5)
 
 
+def test_base_to_final_turn_is_excluded_before_fitting_the_aligned_suffix():
+    """Monotonic along-track progress alone does not establish a straight final.
+
+    The aircraft turns onto the centreline inside the 3 km event window.  Treating
+    that entire curve as one line extrapolates a fictitious crossing hundreds of
+    metres off the runway even though the final 700 m are exactly aligned.
+    """
+    slope = math.tan(math.radians(3.0))
+    points = []
+    for along_m in range(-3_000, -299, 100):
+        if along_m >= -1_000:
+            cross_m = 0.0
+        else:
+            turn_fraction = (-along_m - 1_000.0) / 2_000.0
+            cross_m = 16_000.0 * turn_fraction * turn_fraction
+        points.append(
+            FRAME.unproject(
+                Projected(
+                    float(along_m),
+                    cross_m,
+                    17.5 - slope * along_m,
+                )
+            )
+        )
+
+    fit = fit_final_segment(points, FRAME, window_m=(-3_000.0, -300.0))
+
+    assert fit is not None
+    assert fit.first_sample_index >= 20
+    assert fit.cross_at_threshold_m == pytest.approx(0.0, abs=1.0)
+    assert fit.height_at_threshold_m == pytest.approx(17.5, abs=0.5)
+
+
+def test_no_fit_when_the_nearest_minimum_span_is_still_turning():
+    """Without 500 m of coherent straight final, extrapolation is unavailable."""
+    slope = math.tan(math.radians(3.0))
+    points = [
+        FRAME.unproject(
+            Projected(
+                float(along_m),
+                16_000.0 * ((-along_m - 300.0) / 2_700.0) ** 2,
+                17.5 - slope * along_m,
+            )
+        )
+        for along_m in range(-3_000, -299, 100)
+    ]
+
+    assert fit_final_segment(
+        points,
+        FRAME,
+        window_m=(-3_000.0, -300.0),
+    ) is None
+
+
 def test_one_extreme_altitude_sample_is_rejected_before_the_final_fit():
     points = synthetic_approach()
     corrupted = list(points)

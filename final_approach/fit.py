@@ -95,6 +95,15 @@ _ROBUST_SIGMA_FACTOR = 1.482602218505602
 _ROBUST_RESIDUAL_Z_MAX = math.sqrt(9.21034037197618)
 _MAX_ROBUST_SEED_SAMPLES = 64
 
+# Empirical 95% lateral model margin used by the event producer.  Here it has a
+# second, policy-free role: the closest-to-threshold 500 m seed must be much less
+# curved than this, and earlier samples may join the straight final only while their
+# robust residual remains within three such scales.  The clean five-airport control
+# maxes out at 3.62 m; 10.5 m deliberately leaves generous room for ADS-B position
+# noise without allowing a base-to-final turn hundreds of metres wide to define the
+# threshold intercept.
+LATERAL_FIT_MODEL_FLOOR_95_M = 10.5
+
 
 @dataclass(frozen=True)
 class LineFit:
@@ -293,6 +302,79 @@ def _anchored_final_inbound_run(
     ]
 
 
+def _robust_line_residuals(
+    xs: Sequence[float], ys: Sequence[float]
+) -> tuple[float, float, list[float]]:
+    """Return a bounded Theil-Sen seed and its centred robust residual scale."""
+    seed_indices = _robust_seed_indices(len(xs))
+    intercept, slope = _median_line(
+        [xs[index] for index in seed_indices],
+        [ys[index] for index in seed_indices],
+    )
+    residuals = [
+        value - (intercept + slope * along)
+        for along, value in zip(xs, ys)
+    ]
+    center = statistics.median(residuals)
+    return intercept + center, slope, [value - center for value in residuals]
+
+
+def _straight_final_suffix(
+    indexed: list[tuple[int, Projected]],
+    *,
+    min_samples: int,
+    min_span_m: float,
+) -> list[tuple[int, Projected]]:
+    """Return the final straight suffix after centreline capture.
+
+    Along-track monotonicity identifies one physical pass, but an aircraft can keep
+    moving inbound while turning from base onto final.  Seed the line from the
+    closest-to-threshold suffix that is itself long enough to fit, require that seed
+    to be laterally coherent, then extend it backward only while the same line still
+    explains the source positions.  This is model-validity selection, not a runway
+    or evaluation gate: a straight approach with a constant lateral offset survives.
+    """
+    if len(indexed) < min_samples:
+        return []
+    anchor = indexed[-1][1]
+    seed_start = next(
+        (
+            index
+            for index in range(len(indexed) - min_samples, -1, -1)
+            if anchor.along_m - indexed[index][1].along_m >= min_span_m
+        ),
+        None,
+    )
+    if seed_start is None:
+        return []
+
+    seed = [point for _, point in indexed[seed_start:]]
+    seed_xs = [point.along_m for point in seed]
+    seed_crosses = [point.cross_m for point in seed]
+    intercept, slope, residuals = _robust_line_residuals(
+        seed_xs,
+        seed_crosses,
+    )
+    seed_scale = _ROBUST_SIGMA_FACTOR * statistics.median(
+        abs(value) for value in residuals
+    )
+    if seed_scale > LATERAL_FIT_MODEL_FLOOR_95_M:
+        return []
+
+    residual_limit = _ROBUST_RESIDUAL_Z_MAX * max(
+        seed_scale,
+        LATERAL_FIT_MODEL_FLOOR_95_M,
+    )
+    start = seed_start
+    for index in range(seed_start - 1, -1, -1):
+        point = indexed[index][1]
+        residual = point.cross_m - (intercept + slope * point.along_m)
+        if abs(residual) > residual_limit:
+            break
+        start = index
+    return indexed[start:]
+
+
 def _median_line(xs: Sequence[float], ys: Sequence[float]) -> tuple[float, float]:
     """Return a deterministic Theil-Sen seed for gross-outlier rejection."""
     slopes = [
@@ -329,6 +411,25 @@ def _robust_seed_indices(sample_count: int) -> list[int]:
     ]
 
 
+def _line_inliers(
+    xs: Sequence[float], values: Sequence[float], *, sigma_floor_m: float
+) -> tuple[list[int], list[int]]:
+    """Select samples consistent with one line using a bounded robust seed."""
+    _intercept, _slope, residuals = _robust_line_residuals(xs, values)
+    sigma = max(
+        _ROBUST_SIGMA_FACTOR * statistics.median(abs(value) for value in residuals),
+        sigma_floor_m,
+    )
+    kept = [
+        index
+        for index, residual in enumerate(residuals)
+        if abs(residual) <= _ROBUST_RESIDUAL_Z_MAX * sigma
+    ]
+    kept_set = set(kept)
+    rejected = [index for index in range(len(xs)) if index not in kept_set]
+    return kept, rejected
+
+
 def _height_inliers(
     xs: Sequence[float], heights: Sequence[float]
 ) -> tuple[list[int], list[int]]:
@@ -341,29 +442,11 @@ def _height_inliers(
     median slope/intercept, estimate scale with MAD, and run the reported OLS on the
     retained samples.  The same retained indices are used for both fitted components.
     """
-    seed_indices = _robust_seed_indices(len(xs))
-    intercept, slope = _median_line(
-        [xs[index] for index in seed_indices],
-        [heights[index] for index in seed_indices],
+    return _line_inliers(
+        xs,
+        heights,
+        sigma_floor_m=_ALTITUDE_ROBUST_SIGMA_FLOOR_M,
     )
-    residuals = [
-        height - (intercept + slope * along)
-        for along, height in zip(xs, heights)
-    ]
-    center = statistics.median(residuals)
-    mad = statistics.median(abs(value - center) for value in residuals)
-    sigma = max(
-        _ROBUST_SIGMA_FACTOR * mad,
-        _ALTITUDE_ROBUST_SIGMA_FLOOR_M,
-    )
-    kept = [
-        index
-        for index, residual in enumerate(residuals)
-        if abs(residual - center) <= _ROBUST_RESIDUAL_Z_MAX * sigma
-    ]
-    kept_set = set(kept)
-    rejected = [index for index in range(len(xs)) if index not in kept_set]
-    return kept, rejected
 
 
 def fit_final_segment(
@@ -404,6 +487,11 @@ def fit_final_segment(
             pass_anchor_index,
         )
     )
+    indexed = _straight_final_suffix(
+        indexed,
+        min_samples=min_samples,
+        min_span_m=min_span_m,
+    )
     if len(indexed) < min_samples:
         return None
     source_indices = [index for index, _ in indexed]
@@ -413,10 +501,20 @@ def fit_final_segment(
     if span < min_span_m:
         return None
 
-    kept, rejected = _height_inliers(
+    height_kept, _height_rejected = _height_inliers(
         source_alongs,
         [point.height_m for point in source_projected],
     )
+    cross_kept, _cross_rejected = _line_inliers(
+        source_alongs,
+        [point.cross_m for point in source_projected],
+        sigma_floor_m=LATERAL_FIT_MODEL_FLOOR_95_M,
+    )
+    kept = sorted(set(height_kept) & set(cross_kept))
+    kept_set = set(kept)
+    rejected = [
+        index for index in range(len(source_projected)) if index not in kept_set
+    ]
     if len(kept) < min_samples:
         return None
     projected = [source_projected[index] for index in kept]

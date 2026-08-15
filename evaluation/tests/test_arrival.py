@@ -52,9 +52,9 @@ def payload(*, subject="optimized", event=None, final_lat=35.0, final_lon=-78.0)
 
 def event(*, cross=4.0, vertical=5.0):
     return {
-        "schema_version": "observed-threshold-event-v6",
+        "schema_version": "observed-threshold-event-v7",
         "status": "estimated", "method": "final_segment_robust_fit",
-        "method_version": 6, "runway": "05L",
+        "method_version": 7, "runway": "05L",
         "threshold_crossing_lat": 35.0, "threshold_crossing_lon": -78.0,
         "threshold_crossing_altitude_m": 160.0 + vertical,
         "altitude_datum": "hae", "signed_cross_track_m": cross,

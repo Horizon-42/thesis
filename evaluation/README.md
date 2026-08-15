@@ -19,16 +19,17 @@ The normative rationale and source audit are in
 ```text
 raw ADS-B samples
   -> runway assignment + producer-side threshold-event estimation
-  -> policy-free observed_threshold_event v6
+  -> policy-free observed_threshold_event v7
   -> explicit HAE/MSL conversion
   -> runway/procedure-specific terminal verdict
 ```
 
 Observed evaluation never imports or calls `fit_final_segment()`. The harvest stage
 uses a source-valid threshold bracket, when available, to choose the runway and anchor
-both ends of the physical inbound pass. One robust 3D fit then supplies both event
-coordinates; its preferred 3 km window and 4/5 km sensitivity candidates cannot search
-outside that selected pass. It
+both ends of the physical inbound pass. A nearest-threshold straight seed excludes any
+earlier base-to-final turn before one robust 3D fit supplies both event coordinates;
+its preferred 3 km window and 4/5 km sensitivity candidates cannot search outside that
+selected straight pass. It
 serializes one source range, rejected-sample audit, and diagnostic uncertainty. Arrival
 preparation and CZML reuse the stored landing anchor/event as well. Earlier derived
 events must be reclassified from their stored samples and protected ADS-B metadata
@@ -80,7 +81,7 @@ All subjects use the same point-estimate rule:
 - `fail`: the estimate is outside the bound;
 - `indeterminate`: the event or an applicable bound is unavailable.
 
-Observed event-v6 uncertainty and its 95% interval remain in the report as
+Observed event-v7 uncertainty and its 95% interval remain in the report as
 estimator-quality diagnostics. They do not shrink the aviation bound and do
 not change pass/fail into `indeterminate`.
 

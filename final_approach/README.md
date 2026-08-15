@@ -128,8 +128,11 @@ samples into the fit and produced a **median cross-track of 8.7 km**, which then
 a runway assignment.
 
 `_final_inbound_run` walks backward from the last sample at or inside the window's inner
-edge and stops on a reversal. This also subsumes direction: an outbound track yields no
-fit at all.
+edge and stops on a reversal. A second geometric step seeds the closest usable 500 m,
+requires that seed to be laterally straight, and extends it backward only while the
+same robust line explains the source positions. Thus a monotonic base-to-final turn is
+not confused with an established straight segment. This also subsumes direction: an
+outbound track yields no fit at all.
 
 ## The four outcomes
 

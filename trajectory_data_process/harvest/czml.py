@@ -44,6 +44,11 @@ from flight_scenarios.identity import flight_key
 from geokit import haversine_m
 
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
+from trajectory_data_process.harvest.threshold_event import (
+    EVENT_METHOD,
+    EVENT_METHOD_VERSION,
+    EVENT_SCHEMA_VERSION,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GENERATOR = REPO_ROOT / "aeroviz-4d" / "python" / "generate_czml.py"
@@ -217,13 +222,13 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
         return None
     if event.get("status") != "estimated" or event.get("runway") != track.get("runway"):
         return None
-    if event.get("schema_version") != "observed-threshold-event-v6" \
-            or event.get("method_version") != 6:
+    if event.get("schema_version") != EVENT_SCHEMA_VERSION \
+            or event.get("method_version") != EVENT_METHOD_VERSION:
         raise ValueError(
             f"track {track.get('flight_key')!r} has an obsolete threshold event; "
             "run --reclassify-existing"
         )
-    if event.get("method") != "final_segment_robust_fit":
+    if event.get("method") != EVENT_METHOD:
         raise ValueError(
             f"track {track.get('flight_key')!r} has unsupported threshold-event method "
             f"{event.get('method')!r}"

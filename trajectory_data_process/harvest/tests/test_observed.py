@@ -28,10 +28,10 @@ def _runway() -> Runway:
 def test_observed_record_rejects_event_from_a_different_runway_cycle():
     runway = _runway()
     event = {
-        "schema_version": "observed-threshold-event-v6",
+        "schema_version": "observed-threshold-event-v7",
         "status": "estimated",
         "method": "final_segment_robust_fit",
-        "method_version": 6,
+        "method_version": 7,
         "runway": runway.ident,
         "runway_data_fingerprint": runway_data_fingerprint(runway),
     }
@@ -52,10 +52,10 @@ def test_observed_record_rejects_event_from_a_different_runway_cycle():
 def test_observed_record_preserves_a_current_unavailable_event_for_indeterminate_evaluation():
     runway = _runway()
     event = {
-        "schema_version": "observed-threshold-event-v6",
+        "schema_version": "observed-threshold-event-v7",
         "status": "unavailable",
         "method": "final_segment_robust_fit",
-        "method_version": 6,
+        "method_version": 7,
         "runway": runway.ident,
         "runway_data_fingerprint": runway_data_fingerprint(runway),
         "unavailable_reason": "selected final inbound pass has no fittable segment",

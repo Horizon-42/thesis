@@ -20,8 +20,8 @@ from evaluation.thresholds import AssessmentContext
 Subject = Literal["optimized", "predicted", "observed"]
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
-OBSERVED_EVENT_SCHEMA = "observed-threshold-event-v6"
-OBSERVED_EVENT_METHOD_VERSION = 6
+OBSERVED_EVENT_SCHEMA = "observed-threshold-event-v7"
+OBSERVED_EVENT_METHOD_VERSION = 7
 OBSERVED_EVENT_METHOD = "final_segment_robust_fit"
 
 

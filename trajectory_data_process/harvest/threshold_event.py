@@ -13,6 +13,7 @@ from typing import Any, Callable
 from final_approach import (
     AMBIGUITY_MARGIN_M,
     Assignment,
+    LATERAL_FIT_MODEL_FLOOR_95_M,
     Projected,
     SegmentFit,
     TrackPoint,
@@ -29,8 +30,8 @@ from trajectory_data_process.harvest.airports import (
 from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
 from trajectory_data_process.harvest.tracks import Track
 
-EVENT_SCHEMA_VERSION = "observed-threshold-event-v6"
-EVENT_METHOD_VERSION = 6
+EVENT_SCHEMA_VERSION = "observed-threshold-event-v7"
+EVENT_METHOD_VERSION = 7
 EVENT_METHOD = "final_segment_robust_fit"
 
 # These are source-integrity gates, not approach-performance limits. The 25 m/s
@@ -54,7 +55,7 @@ EXTRAPOLATION_WINDOWS_M = (
     (-4000.0, -300.0),
     (-5000.0, -300.0),
 )
-LATERAL_FIT_MODEL_FLOOR_95_M = 10.5
+MAX_PARALLEL_COURSE_DELTA_DEG = 5.0
 
 
 @dataclass(frozen=True)
@@ -106,19 +107,25 @@ def select_observed_threshold_bracket(
     The runway with the smallest absolute crossing offset wins; sample recency is only
     a deterministic tie-break within one runway and never substitutes for geometry.
     """
+    runway_list = tuple(runways)
     points = [
         TrackPoint(sample.lat, sample.lon, sample.alt_hae_m)
         for sample in track.samples
     ]
     winners: dict[str, ThresholdBracket] = {}
     rejections: list[dict[str, Any]] = []
-    for runway in runways:
+    for runway in runway_list:
+        structural_cross_m = _runway_bracket_cross_limit(
+            runway,
+            runway_list,
+            fallback_m=max_structural_cross_m,
+        )
         candidates, runway_rejections = _validated_brackets_for_runway(
             track,
             points,
             runway,
             metadata_lookup=metadata_lookup,
-            max_structural_cross_m=max_structural_cross_m,
+            max_structural_cross_m=structural_cross_m,
             max_structural_height_m=max_structural_height_m,
         )
         rejections.extend(
@@ -171,6 +178,42 @@ def select_observed_threshold_bracket(
         None,
         tuple(rejections),
     )
+
+
+def _course_difference_deg(left: float, right: float) -> float:
+    return abs((left - right + 180.0) % 360.0 - 180.0)
+
+
+def _runway_bracket_cross_limit(
+    runway: Runway,
+    runways: tuple[Runway, ...],
+    *,
+    fallback_m: float,
+) -> float:
+    """Keep a bracket inside the runway's half of any parallel pair.
+
+    Longitudinally staggered parallel thresholds are different physical planes. A
+    track on one centreline can cross its neighbour's plane hundreds of metres off
+    that neighbour before reaching its own threshold. The airport-wide 1 km landing
+    radius cannot distinguish those planes, but half the parallel separation can:
+    each physical point belongs to at most one runway corridor, with the midpoint
+    left to the normal ambiguity outcome. Isolated runways retain the broad fallback.
+    """
+    frame = runway.frame("hae")
+    half_separations = []
+    for other in runways:
+        if other.ident == runway.ident or _course_difference_deg(
+            runway.course_deg,
+            other.course_deg,
+        ) > MAX_PARALLEL_COURSE_DELTA_DEG:
+            continue
+        other_threshold = frame.project(
+            TrackPoint(other.lat, other.lon, other.elevation_hae_m)
+        )
+        separation_m = abs(other_threshold.cross_m)
+        if separation_m > 0.0:
+            half_separations.append(separation_m / 2.0)
+    return min([fallback_m, *half_separations])
 
 
 def build_observed_threshold_event(

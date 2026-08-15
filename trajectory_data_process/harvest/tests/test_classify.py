@@ -203,9 +203,9 @@ def test_valid_threshold_bracket_anchors_one_robust_three_dimensional_fit():
     )
 
     event = classified.observed_threshold_event
-    assert event["schema_version"] == "observed-threshold-event-v6"
+    assert event["schema_version"] == "observed-threshold-event-v7"
     assert event["method"] == "final_segment_robust_fit"
-    assert event["method_version"] == 6
+    assert event["method_version"] == 7
     assert "component_methods" not in event
     # The bracket selects and terminates the physical pass.  Both coordinates of
     # the event then come from one robust pre-threshold fit; the bracket's raw
@@ -327,7 +327,66 @@ def test_bracket_selection_uses_cross_track_not_the_later_parallel_threshold():
     assert selection.bracket.runway.ident == "36"
     assert selection.bracket.source_sample_range == (49, 50)
     assert selection.scores_m["36"] == pytest.approx(0.0, abs=0.5)
-    assert selection.scores_m["36R"] == pytest.approx(200.0, abs=1.0)
+    assert "36R" not in selection.scores_m
+    assert any(
+        rejection["runway"] == "36R"
+        and rejection["reason"] == "threshold bracket is outside landing structure"
+        and rejection["max_structural_cross_m"] == pytest.approx(100.0, abs=1.0)
+        for rejection in selection.rejections
+    )
+
+
+def test_staggered_parallel_threshold_cannot_claim_a_neighbouring_runway_track():
+    """A broad airport radius must not turn a parallel threshold plane into a runway.
+
+    The correct threshold is 300 m farther along the landing direction and 400 m
+    across. Reception ends 100 m before it, after the aircraft has crossed the wrong
+    runway's earlier threshold plane. The fitted centreline identifies 36R; the 400 m
+    plane crossing must not override it merely because it lies inside the airport's
+    generic 1 km landing screen.
+    """
+    wrong = _airport().runway("36")
+    correct_threshold = wrong.frame("hae").unproject(
+        Projected(300.0, 400.0, 0.0)
+    )
+    correct = Runway(
+        **{
+            **wrong.__dict__,
+            "ident": "36R",
+            "lat": correct_threshold.lat,
+            "lon": correct_threshold.lon,
+        }
+    )
+    airport = Airport("KFIT", LAT, LON, ELEVATION_M, (wrong, correct))
+    slope = math.tan(math.radians(3.0))
+    samples = []
+    for index, along_m in enumerate(range(-7_000, 0, 100)):
+        point = correct.frame("hae").unproject(
+            Projected(float(along_m), 0.0, 15.0 - slope * along_m)
+        )
+        samples.append(
+            Sample(
+                float(index),
+                point.lat,
+                point.lon,
+                point.alt_m,
+                False,
+                reported_ground_speed_m_s=100.0,
+                last_position_update_s=float(index),
+                last_contact_s=float(index),
+            )
+        )
+
+    classified = classify_track(
+        Track("abc123", "FIT123", tuple(samples)),
+        airport,
+    )
+
+    assert classified.outcome == "assigned"
+    assert classified.runway == "36R"
+    assert classified.threshold_bracket is None
+    assert classified.fit is not None
+    assert classified.fit.median_abs_cross_m == pytest.approx(0.0, abs=1.0)
 
 
 def test_valid_bracket_cannot_publish_a_structurally_incompatible_fit():

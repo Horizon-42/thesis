@@ -1,8 +1,10 @@
 # Observed final-approach fit design
 
-Status: **implemented as `observed-threshold-event-v6`; focused tests pass and a
-read-only five-airport impact audit is recorded below. Production artifacts still
-require `--reclassify-existing`.**
+Status: **implemented as `observed-threshold-event-v7`; focused tests pass. V7 adds
+straight-final capture and parallel-runway bracket ownership to the v6 physical-pass
+and robust-height contract. The five active airport harvests were reclassified and
+published with v7 on 2026-08-15; any older derived artifacts require
+`--reclassify-existing`.**
 
 This document describes the one maintained observed-event algorithm. Rejected
 experiments are retained here as evidence only; they are not executable modes,
@@ -24,7 +26,7 @@ raw, time-ordered ADS-B track
     -> airport-level landing screen
     -> runway and physical-pass selection
     -> one robust 3D final-segment fit
-    -> observed-threshold-event-v6
+    -> observed-threshold-event-v7
     -> evaluation applies the selected standard without refitting
 ```
 
@@ -34,7 +36,7 @@ their terminal state or their final 3D threshold bracket, as documented in
 
 ## 2. Root defects
 
-The earlier producer had four independent faults.
+The maintained producer now addresses six independent faults.
 
 ### 2.1 A plane crossing was mistaken for a landing crossing
 
@@ -74,9 +76,33 @@ both ends of that physical inbound run, and searches for fit-window samples only
 inside it. A selected pass with insufficient pre-threshold coverage is now reported
 `unavailable`; it never borrows another pass.
 
-These faults explain the previously high `indeterminate` rate. They are pass-selection
-and source-robustness faults, not evidence that a large fraction of successful
-landings violated the final-approach standard.
+### 2.5 Monotonic inbound progress was mistaken for a straight final
+
+The v6 pass walk correctly excluded reversals but could still retain a base-to-final
+turn: along-track distance decreases throughout that turn even while cross-track
+position bends by kilometres. A single OLS line through the curve can extrapolate a
+hundreds-of-metres threshold intercept after the source positions have already reached
+the centreline.
+
+V7 seeds the nearest source suffix that meets the existing eight-sample/500 m minimum,
+requires its robust lateral scale to remain within the existing 10.5 m model margin,
+and extends the segment backward only while the seed line explains each earlier point.
+Both fitted coordinates then use the same retained straight-segment samples.
+
+### 2.6 A staggered parallel threshold plane could claim its neighbour
+
+The generic 1,000 m airport landing radius admitted a crossing hundreds of metres from
+a runway centreline. When parallel thresholds are longitudinally staggered and the
+correct later threshold is not observed, the earlier plane could therefore claim an
+aircraft centred on the neighbouring runway.
+
+V7 gives each same-direction parallel runway its half of the centreline separation.
+The midpoint remains the ownership boundary; isolated runways retain the broad 1,000 m
+structural radius. This is runway identity geometry, not the runway-edge verdict gate.
+
+These faults explain the previously extreme fitted lateral intercepts and some
+unavailable outcomes. They are pass-selection and source-robustness faults, not
+evidence that those aircraft crossed the selected runway hundreds of metres away.
 
 ## 3. Current algorithm
 
@@ -96,15 +122,16 @@ eligible only when:
 before.along < 0 <= after.along
 after.along > before.along
 sample time increases
-abs(interpolated cross-track) <= 1000 m
+abs(interpolated cross-track) <= structural runway corridor
 abs(interpolated height above threshold) <= 100 m
 ```
 
-The last two values define a broad finite landing structure. They do not classify
-approach quality. The 1,000 m bound is the existing airport landing radius and is much
-wider than the runway-edge verdict. The 100 m bound is roughly five times the highest
-published threshold-crossing height in the current airport set; a crossing farther
-away vertically is not a landing at that threshold.
+The last two values define a finite landing structure. They do not classify approach
+quality. An isolated runway uses the existing broad 1,000 m airport landing radius.
+For same-direction parallel runways, the lateral bound is the smaller of 1,000 m and
+half the nearest parallel centreline separation, so a physical point cannot be owned
+by both staggered threshold planes. The 100 m vertical bound is roughly five times the
+highest published threshold-crossing height in the current airport set.
 
 An eligible pair must also pass the source-integrity checks:
 
@@ -156,14 +183,19 @@ Both coordinates use the same retained samples and the same estimator. There is 
 
 Within a continuous inbound window:
 
-1. compute a deterministic Theil-Sen vertical line seed from at most 64 evenly spaced,
+1. seed the closest suffix satisfying eight samples and 500 m span with a deterministic
+   Theil-Sen lateral line;
+2. require that suffix to be laterally coherent and extend it backward only while its
+   robust residual test continues to hold;
+3. compute a deterministic Theil-Sen vertical line seed from at most 64 evenly spaced,
    endpoint-preserving samples;
-2. calculate vertical residuals;
-3. estimate scale with `1.4826 * MAD`, with a minimum scale of
+4. calculate lateral and vertical residuals;
+5. estimate vertical scale with `1.4826 * MAD`, with a minimum scale of
    `7.62 / sqrt(12) m` for the documented 25 ft altitude quantum;
-4. reject residuals beyond the fixed 3.03-scale gross-outlier cut;
-5. require the original minimum of 8 retained samples and 500 m span; and
-6. fit ordinary least-squares cross-track and height lines to the same retained rows.
+6. reject component residuals beyond the fixed 3.03-scale gross-outlier cut;
+7. require the original minimum of 8 retained samples and 500 m span; and
+8. fit ordinary least-squares cross-track and height lines to the intersection of the
+   same retained rows.
 
 The published fit remains an auditable OLS line. The robust seed only prevents isolated
 source corruption from choosing that line. Rejected original sample indices are
@@ -269,14 +301,46 @@ The fixed input identity is preserved by these manifest hashes:
 | KSMF | `571f770a64ff1c73aa0a87b6e3e09a90bbb31c56e1fc6684e7ba17684d2983b9` | `3c022aa953cc7e55295922011e0d4ce318a39594e53bfd0b299f85454fe91004` |
 | KSTL | `1d86220f79f27068b485341b917b03aa0471b161cb7b35053ae6d4fcdca57c58` | `7e9c658ec336f63df24068f556a487ad968022740a01eb4853580131b6c135ec` |
 
+### 5.2 v7 straight-final and parallel-runway validation
+
+Before implementation, the frozen real-data audit contained all 547 events whose
+fitted lateral deviation exceeded the selected runway gate by more than 50 m, plus
+500 clean pass controls from each airport. Running the v7 production classifier over
+those stored tracks made no writes and used no network access:
+
+- 450/547 old severe events moved inside the selected runway gate;
+- only 13/547 remained more than 50 m beyond the gate;
+- 187 were reassigned, including 185 KSTL staggered-parallel cases;
+- 20 became honestly unavailable because no 500 m straight final could be established;
+- all 2,500 clean controls remained estimated on the same runway; and
+- clean-control absolute changes had median and p95 equal to 0 m for both fitted
+  cross-track and threshold altitude.
+
+The complete five-airport reclassification then rebuilt tracks, arrivals, evaluation,
+CZML, and the frontend observed reports:
+
+| Measure | v6 | v7 |
+|---|---:|---:|
+| Evaluated arrivals | 42,874 | 42,932 |
+| Pass | 32,904 | 33,167 |
+| Fail | 9,843 | 9,725 |
+| Indeterminate | 127 | 40 |
+| Severe lateral events | 547 | 29 |
+
+The 29 residual severe lateral events contain no remaining staggered-parallel bracket
+ownership case. Eleven have a centred physical bracket but a divergent pre-`-300 m`
+fit; that is the separately recorded fit-versus-bracket question and is not hidden by
+changing this producer without a validated vertical-time design. The other records
+either have no source-valid bracket or their bracket is itself outside the runway gate.
+
 ## 6. Event contract and consumers
 
-`observed-threshold-event-v6` has one estimator method:
+`observed-threshold-event-v7` has one estimator method:
 
 ```text
 status: estimated | unavailable
 method: final_segment_robust_fit
-method_version: 6
+method_version: 7
 runway and runway-data fingerprint
 source_sample_range
 threshold-crossing latitude, longitude, and HAE altitude
@@ -291,7 +355,7 @@ The optional bracket block is explicitly labelled
 `runway_and_pass_anchor_not_event_estimator`. It records the source pair and integrity
 evidence without pretending that its raw altitude is the fitted event.
 
-Evaluation accepts only v6, converts HAE to MSL with the authoritative runway datum,
+Evaluation accepts only v7, converts HAE to MSL with the authoritative runway datum,
 and applies the standard. Arrival preparation and CZML also consume the stored event;
 none of these stages imports or calls the fitter. Older derived events require
 `--reclassify-existing`; raw tracks and downloaded ADS-B sidecars are not downloaded or

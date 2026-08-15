@@ -24,10 +24,10 @@ TARGET = {
 
 def _record(*, cross_m: float = 0.0, vertical_m: float = 0.0) -> dict:
     event = {
-        "schema_version": "observed-threshold-event-v6",
+        "schema_version": "observed-threshold-event-v7",
         "status": "estimated",
         "method": "final_segment_robust_fit",
-        "method_version": 6,
+        "method_version": 7,
         "runway": "05L",
         "threshold_crossing_lat": TARGET["lat"],
         "threshold_crossing_lon": TARGET["lon"],
