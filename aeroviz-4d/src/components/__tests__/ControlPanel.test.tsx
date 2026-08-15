@@ -14,6 +14,7 @@ const {
   setTrajectoryComparisonCategory,
   setTrajectoryComparisonKind,
   setTrajectorySampleCount,
+  setObservedVerdictFilter,
   landingsRef,
 } = vi.hoisted(() => {
   const defaultLayers = {
@@ -68,6 +69,7 @@ const {
       lookback: true,
     },
     trajectorySampleCount: 0,
+    observedVerdictFilter: "all",
     comparisonCategories: [] as Array<Record<string, unknown>>,
     comparisonLegend: {
       kinds: [] as string[],
@@ -89,6 +91,7 @@ const {
       appState.trajectoryComparisonCategory = null;
       appState.comparisonCategories = [];
       appState.comparisonLegend = { kinds: [], statuses: [], status: "idle" };
+      appState.observedVerdictFilter = "all";
     },
     toggleLayer: vi.fn(),
     setPlaybackSpeed: vi.fn(),
@@ -100,6 +103,7 @@ const {
     setTrajectoryComparisonCategory: vi.fn(),
     setTrajectoryComparisonKind: vi.fn(),
     setTrajectorySampleCount: vi.fn(),
+    setObservedVerdictFilter: vi.fn(),
     landingsRef: { current: { manifest: null as unknown, status: "empty" } },
   };
 });
@@ -118,6 +122,7 @@ vi.mock("../../context/AppContext", () => ({
     setTrajectoryComparisonCategory,
     setTrajectoryComparisonKind,
     setTrajectorySampleCount,
+    setObservedVerdictFilter,
   }),
 }));
 
@@ -291,6 +296,35 @@ describe("ControlPanel", () => {
     fireEvent.change(source, { target: { value: "experiment" } });
     expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("experiment_run_val");
     expect(setTrajectoryComparison).toHaveBeenCalledWith(true);
+  });
+
+  it("filters verdicts within the baseline sample without changing sampling", () => {
+    render(
+      <ControlPanel
+        observedVerdicts={{
+          counts: { pass: 4, fail: 2, undecided: 3 },
+          verdictsByFlightId: new Map(),
+          matched: 9,
+          total: 9,
+          loading: false,
+          missing: false,
+        }}
+      />,
+    );
+
+    const filter = screen.getByLabelText("Show baseline sample") as HTMLSelectElement;
+    expect([...filter.options].map((option) => option.textContent)).toEqual([
+      "All sampled trajectories",
+      "Pass only",
+      "Fail only",
+      "Indeterminate only",
+    ]);
+    fireEvent.change(filter, { target: { value: "fail" } });
+
+    expect(setObservedVerdictFilter).toHaveBeenCalledWith("fail");
+    expect(setTrajectorySampleCount).not.toHaveBeenCalled();
+    expect(setTrajectoryComparison).not.toHaveBeenCalled();
+    expect(screen.getByText(/sampled trajectory set does not change/i)).toBeTruthy();
   });
 
   it("selects an experiment model and its train/validation publication independently", () => {

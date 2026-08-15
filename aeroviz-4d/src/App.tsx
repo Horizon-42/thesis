@@ -39,6 +39,7 @@ function FlightApp() {
     selectedRunway,
     trajectoryComparison,
     trajectorySampleCount,
+    observedVerdictFilter,
     mode,
     proceduresOpen,
   } = useApp();
@@ -64,17 +65,21 @@ function FlightApp() {
     landingsManifest,
     landingsStatus,
   });
+  // Fetch the baseline verdict index independently of its current visibility. This lets the
+  // display-only filter apply immediately when returning from a comparison result source.
+  const observedVerdicts = useObservedVerdictColors(
+    observedVisible && !trajectoryComparison,
+  );
   const { flightIds, flightSummaries, warning, error } = useCzmlLoader(
     observedFileUrl,
     observedVisible,
     observedRunwayFilter,
+    {
+      filter: observedVerdictFilter,
+      verdictsByFlightId: observedVerdicts.verdictsByFlightId,
+    },
   );
   useComparisonTrajectoryLayer();
-  // Colour the plain observed tracks by their gate verdict. Only when they are the
-  // thing on screen — with the comparison on, its own kind colours own the scene.
-  const observedVerdicts = useObservedVerdictColors(
-    observedVisible && !trajectoryComparison,
-  );
   const czmlError = landingsError ?? error;
   const czmlStatus = czmlError ?? warning;
 

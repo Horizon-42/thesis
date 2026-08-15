@@ -31,6 +31,11 @@ import { sampleSubset } from "../utils/sampleTrajectories";
 import { planTrajectoryModels, TRAJECTORY_PATH_WIDTH } from "../utils/trajectoryRenderModel";
 import { addDataSourceHidden } from "../utils/cesiumDataSource";
 import { summarizeObservedCzml, type ObservedFlightSummary } from "../utils/observedFlightSummary";
+import {
+  matchesObservedVerdictFilter,
+  type ObservedVerdict,
+  type ObservedVerdictFilter,
+} from "../utils/observedVerdictColors";
 
 export type { ObservedFlightSummary };
 
@@ -48,6 +53,11 @@ export interface CzmlLoaderState {
   error: string | null;
 }
 
+export interface ObservedVerdictVisibility {
+  filter: ObservedVerdictFilter;
+  verdictsByFlightId: ReadonlyMap<string, ObservedVerdict> | null;
+}
+
 /**
  * Load a CZML trajectory file and drive the Cesium clock from it.
  *
@@ -63,7 +73,10 @@ export function useCzmlLoader(
   czmlUrl: string,
   visible: boolean = true,
   runwayFilter: string | null = null,
+  observedVerdictVisibility?: ObservedVerdictVisibility,
 ): CzmlLoaderState {
+  const observedVerdictFilter = observedVerdictVisibility?.filter ?? "all";
+  const verdictsByFlightId = observedVerdictVisibility?.verdictsByFlightId ?? null;
   const {
     viewer,
     layers,
@@ -215,7 +228,7 @@ export function useCzmlLoader(
   useEffect(() => {
     setSelectedFlightId(null);
     if (viewer) viewer.trackedEntity = undefined;
-  }, [runwayFilter, setSelectedFlightId, viewer]);
+  }, [runwayFilter, observedVerdictFilter, setSelectedFlightId, viewer]);
 
   // ── Recompute the shown sample + the model subset (random) ───────────────────
   // `trajectorySampleCount` flights are shown (0 = all); of those, a capped subset is
@@ -244,7 +257,14 @@ export function useCzmlLoader(
     for (const entity of ds.entities.values) {
       if (entity.id === "document") continue;
       const onRunway = !runwayFilter || runwayByIdRef.current.get(entity.id) === runwayFilter;
-      const shown = onRunway && shownIdsRef.current.has(entity.id);
+      const verdict = verdictsByFlightId?.get(entity.id) ?? "undecided";
+      // A missing verdict index means the report is still loading or unavailable. Keep the
+      // sampled baseline visible in that case instead of turning a display filter into a
+      // data-availability switch. Once loaded, every observed entity has a verdict entry.
+      const passesVerdictFilter =
+        !verdictsByFlightId ||
+        matchesObservedVerdictFilter(verdict, observedVerdictFilter);
+      const shown = onRunway && shownIdsRef.current.has(entity.id) && passesVerdictFilter;
       entity.show = shown;
       if (entity.path) entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
       if (entity.model) {
@@ -263,6 +283,8 @@ export function useCzmlLoader(
     state.isLoaded,
     state.flightIds,
     selectedFlightId,
+    observedVerdictFilter,
+    verdictsByFlightId,
   ]);
 
   const flightIds = runwayFilter

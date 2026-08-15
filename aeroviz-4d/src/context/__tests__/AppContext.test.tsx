@@ -101,6 +101,7 @@ describe("AppContext", () => {
     expect(result.current.presentationMode).toBe(false);
     expect(result.current.layersDrawerOpen).toBe(false);
     expect(result.current.rightInspectorCollapsed).toBe(false);
+    expect(result.current.observedVerdictFilter).toBe("all");
 
     act(() => {
       result.current.setMode("optimize");
@@ -108,6 +109,7 @@ describe("AppContext", () => {
       result.current.setPresentationMode(true);
       result.current.setLayersDrawerOpen(true);
       result.current.setRightInspectorCollapsed(true);
+      result.current.setObservedVerdictFilter("fail");
     });
 
     expect(result.current.mode).toBe("optimize");
@@ -115,6 +117,7 @@ describe("AppContext", () => {
     expect(result.current.presentationMode).toBe(true);
     expect(result.current.layersDrawerOpen).toBe(true);
     expect(result.current.rightInspectorCollapsed).toBe(true);
+    expect(result.current.observedVerdictFilter).toBe("fail");
   });
 
   it("preserves the active mode and the procedures panel across an airport switch", async () => {

@@ -44,6 +44,7 @@ import type {
 import { fetchJson } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerrain";
+import type { ObservedVerdictFilter } from "../utils/observedVerdictColors";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -186,6 +187,10 @@ interface FlightSessionState {
   /** How many trajectories to render (0 = all); applies to both normal and comparison modes. */
   trajectorySampleCount: number;
   setTrajectorySampleCount: (count: number) => void;
+
+  /** Display-only verdict filter applied after the observed baseline sample is chosen. */
+  observedVerdictFilter: ObservedVerdictFilter;
+  setObservedVerdictFilter: (filter: ObservedVerdictFilter) => void;
 }
 
 interface ProcedureSessionState {
@@ -324,6 +329,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrajectoryComparisonKinds((prev) => ({ ...prev, [kind]: visible }));
   }, []);
   const [trajectorySampleCount, setTrajectorySampleCount] = useState<number>(200);
+  const [observedVerdictFilter, setObservedVerdictFilter] =
+    useState<ObservedVerdictFilter>("all");
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
   const [autoReplay, setAutoReplay] = useState<boolean>(true);
   const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});
@@ -495,9 +502,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrajectoryComparisonKind,
     trajectorySampleCount,
     setTrajectorySampleCount,
+    observedVerdictFilter,
+    setObservedVerdictFilter,
   }), [selectedFlightId, selectedRunway, trajectoryDataSource, optimizedTrajectoryDataSource,
     trajectoryComparison, trajectoryComparisonCategory, trajectoryComparisonKinds,
-    setTrajectoryComparisonKind, trajectorySampleCount]);
+    setTrajectoryComparisonKind, trajectorySampleCount, observedVerdictFilter]);
   const procedureSessionState: ProcedureSessionState = useMemo(() => ({
     procedureVisibility,
     setProcedureBranchVisible,

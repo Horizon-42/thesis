@@ -159,7 +159,21 @@ describe("useObservedVerdictColors", () => {
       fail: 0,
       undecided: 1,
     });
+    expect([...result.current.verdictsByFlightId!.entries()]).toEqual([
+      ["MATCHED_05L_abc123_20260701T000000Z", "pass"],
+      ["NO_TCH_32_def456_20260701T010000Z", "undecided"],
+    ]);
     expect(result.current.matched).toBe(1);
     expect(result.current.total).toBe(2);
+  });
+
+  it("prepares verdicts while inactive without repainting comparison-owned entities", async () => {
+    const { result } = renderHook(() => useObservedVerdictColors(false));
+
+    await waitFor(() => expect(result.current.verdictsByFlightId).not.toBeNull());
+
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+    expect(entities[0].path.material.color.getValue()).toBe("original");
+    expect(entities[1].path.material.color.getValue()).toBe("original");
   });
 });

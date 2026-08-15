@@ -4899,6 +4899,21 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: #c8d8ec;
 }
 
+.control-panel-verdict-filter {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 3px;
+  font-size: 10px;
+  color: #aebfd4;
+}
+
+.control-panel-verdict-filter-hint {
+  margin-bottom: 6px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #8fa6c2;
+}
+
 .control-panel-verdict-row {
   display: grid;
   grid-template-columns: 12px 1fr;

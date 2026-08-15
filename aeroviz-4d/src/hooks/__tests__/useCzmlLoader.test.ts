@@ -252,4 +252,35 @@ describe("useCzmlLoader", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(loadCzml).toHaveBeenCalledTimes(1);
   });
+
+  it("filters only within the loaded baseline sample and does not reload it", async () => {
+    const entities = [
+      { id: "flight-pass", show: true },
+      { id: "flight-fail", show: true },
+      { id: "flight-indeterminate", show: true },
+    ];
+    loadCzml.mockResolvedValue({
+      entities: { values: entities },
+      clock: { startTime: makeTime(10), stopTime: makeTime(70) },
+    });
+    const verdictsByFlightId = new Map([
+      ["flight-pass", "pass"],
+      ["flight-fail", "fail"],
+      ["flight-indeterminate", "undecided"],
+    ] as const);
+
+    const { result, rerender } = renderHook(
+      ({ filter }) =>
+        useCzmlLoader(CZML_URL, true, null, { filter, verdictsByFlightId }),
+      { initialProps: { filter: "fail" as "all" | "fail" } },
+    );
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+
+    expect(entities.map((entity) => entity.show)).toEqual([false, true, false]);
+
+    rerender({ filter: "all" });
+    await waitFor(() => expect(entities.map((entity) => entity.show)).toEqual([true, true, true]));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(loadCzml).toHaveBeenCalledTimes(1);
+  });
 });

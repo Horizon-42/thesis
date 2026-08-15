@@ -4,6 +4,7 @@ import type { EvaluationRow } from "../../data/evaluationReport";
 import {
   OBSERVED_VERDICT_COLORS,
   countVerdicts,
+  matchesObservedVerdictFilter,
   verdictOfRow,
   verdictsByFlightKey,
 } from "../observedVerdictColors";
@@ -86,6 +87,19 @@ describe("countVerdicts", () => {
 
   it("reports zeroes for an empty batch", () => {
     expect(countVerdicts([])).toEqual({ pass: 0, fail: 0, undecided: 0 });
+  });
+});
+
+describe("matchesObservedVerdictFilter", () => {
+  it("treats all as all trajectories in the existing sample", () => {
+    expect(matchesObservedVerdictFilter("pass", "all")).toBe(true);
+    expect(matchesObservedVerdictFilter("fail", "all")).toBe(true);
+    expect(matchesObservedVerdictFilter("undecided", "all")).toBe(true);
+  });
+
+  it("matches exactly one verdict", () => {
+    expect(matchesObservedVerdictFilter("fail", "fail")).toBe(true);
+    expect(matchesObservedVerdictFilter("pass", "fail")).toBe(false);
   });
 });
 

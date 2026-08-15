@@ -40,8 +40,10 @@ import {
 } from "../utils/observedVerdictColors";
 
 export interface ObservedVerdictState {
-  /** Verdict counts over every painted track, or null when inactive. */
+  /** Verdict counts over every loaded observed track, or null when unavailable. */
   counts: Record<ObservedVerdict, number> | null;
+  /** Verdict for every loaded entity; unmatched tracks use the neutral state. */
+  verdictsByFlightId: ReadonlyMap<string, ObservedVerdict> | null;
   /** How many entities found a published verdict, and how many exist. */
   matched: number;
   total: number;
@@ -53,6 +55,7 @@ export interface ObservedVerdictState {
 
 const EMPTY: ObservedVerdictState = {
   counts: null,
+  verdictsByFlightId: null,
   matched: 0,
   total: 0,
   loading: false,
@@ -66,7 +69,7 @@ export function useObservedVerdictColors(
   const [state, setState] = useState<ObservedVerdictState>(EMPTY);
 
   useEffect(() => {
-    if (!active || !activeAirportCode || !trajectoryDataSource) {
+    if (!activeAirportCode || !trajectoryDataSource) {
       setState(EMPTY);
       return;
     }
@@ -96,7 +99,8 @@ export function useObservedVerdictColors(
       }
 
       const byKey = verdictsByFlightKey(report.trajectories);
-      const painted: ObservedVerdict[] = [];
+      const verdictsByFlightId = new Map<string, ObservedVerdict>();
+      const verdicts: ObservedVerdict[] = [];
       let matched = 0;
       let total = 0;
       for (const entity of trajectoryDataSource.entities.values) {
@@ -105,20 +109,13 @@ export function useObservedVerdictColors(
         const publishedVerdict = byKey.get(entity.id);
         if (publishedVerdict) matched += 1;
         const verdict = publishedVerdict ?? "undecided";
-        painted.push(verdict);
-        const color = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS[verdict]);
-        if (entity.path?.material instanceof Cesium.ColorMaterialProperty) {
-          entity.path.material.color = new Cesium.ConstantProperty(color);
-        } else if (entity.path) {
-          entity.path.material = new Cesium.ColorMaterialProperty(color);
-        }
-        if (entity.polyline) {
-          entity.polyline.material = new Cesium.ColorMaterialProperty(color);
-        }
+        verdictsByFlightId.set(entity.id, verdict);
+        verdicts.push(verdict);
       }
       if (cancelled) return;
       setState({
-        counts: countVerdicts(painted),
+        counts: countVerdicts(verdicts),
+        verdictsByFlightId,
         matched,
         total,
         loading: false,
@@ -129,7 +126,37 @@ export function useObservedVerdictColors(
     return () => {
       cancelled = true;
     };
-  }, [viewer, trajectoryDataSource, activeAirportCode, active]);
+  }, [viewer, trajectoryDataSource, activeAirportCode]);
+
+  // Painting is intentionally separate from report loading. The verdict index remains ready
+  // while a comparison source owns the observed entities, but its colours are not disturbed.
+  // Returning to Baseline then repaints from the cached index without refetching the report.
+  useEffect(() => {
+    if (
+      !active ||
+      !trajectoryDataSource ||
+      !state.verdictsByFlightId ||
+      !isCesiumViewerUsable(viewer)
+    ) {
+      return;
+    }
+    for (const entity of trajectoryDataSource.entities.values) {
+      if (entity.id === "document") continue;
+      paintEntity(entity, state.verdictsByFlightId.get(entity.id) ?? "undecided");
+    }
+  }, [active, viewer, trajectoryDataSource, state.verdictsByFlightId]);
 
   return state;
+}
+
+function paintEntity(entity: Cesium.Entity, verdict: ObservedVerdict): void {
+  const color = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS[verdict]);
+  if (entity.path?.material instanceof Cesium.ColorMaterialProperty) {
+    entity.path.material.color = new Cesium.ConstantProperty(color);
+  } else if (entity.path) {
+    entity.path.material = new Cesium.ColorMaterialProperty(color);
+  }
+  if (entity.polyline) {
+    entity.polyline.material = new Cesium.ColorMaterialProperty(color);
+  }
 }

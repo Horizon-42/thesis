@@ -15,6 +15,7 @@ import {
   OBSERVED_VERDICT_COLORS,
   OBSERVED_VERDICT_HINTS,
   OBSERVED_VERDICT_LABELS,
+  type ObservedVerdictFilter,
 } from "../utils/observedVerdictColors";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { useComparisonLegend } from "../hooks/useComparisonLegend";
@@ -53,6 +54,7 @@ interface ControlPanelProps {
 
 const NO_VERDICTS: ObservedVerdictState = {
   counts: null,
+  verdictsByFlightId: null,
   matched: 0,
   total: 0,
   loading: false,
@@ -73,6 +75,8 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
     setTrajectoryComparisonKind,
     trajectorySampleCount,
     setTrajectorySampleCount,
+    observedVerdictFilter,
+    setObservedVerdictFilter,
   } = useApp();
   const { categories: comparisonCategories } = useComparisonCategories(activeAirportCode);
   const drawableComparisonCategories = comparisonCategories.filter(
@@ -206,6 +210,23 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
               <div className="control-panel-verdict-legend" aria-label="Approach verdict legend">
                 <div className="control-panel-verdict-title">
                   Terminal approach verdict (procedure and runway bounds)
+                </div>
+                <label className="control-panel-verdict-filter">
+                  <span>Show baseline sample</span>
+                  <select
+                    className="control-panel-airport-selector-input"
+                    value={observedVerdictFilter}
+                    onChange={(event) =>
+                      setObservedVerdictFilter(event.target.value as ObservedVerdictFilter)}
+                  >
+                    <option value="all">All sampled trajectories</option>
+                    <option value="pass">Pass only</option>
+                    <option value="fail">Fail only</option>
+                    <option value="undecided">Indeterminate only</option>
+                  </select>
+                </label>
+                <div className="control-panel-verdict-filter-hint">
+                  Visibility only — the sampled trajectory set does not change.
                 </div>
                 {(["pass", "fail", "undecided"] as const).map((verdict) => (
                   <div key={verdict} className="control-panel-verdict-row">

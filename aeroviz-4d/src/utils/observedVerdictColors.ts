@@ -25,6 +25,7 @@
 import type { EvaluationRow } from "../data/evaluationReport";
 
 export type ObservedVerdict = "pass" | "fail" | "undecided";
+export type ObservedVerdictFilter = "all" | ObservedVerdict;
 
 /** Path colours. Deliberately desaturated for grey so it recedes behind the verdicts. */
 export const OBSERVED_VERDICT_COLORS: Record<ObservedVerdict, string> = {
@@ -82,4 +83,16 @@ export function countVerdicts(
   const counts: Record<ObservedVerdict, number> = { pass: 0, fail: 0, undecided: 0 };
   for (const v of verdicts) counts[v] += 1;
   return counts;
+}
+
+/**
+ * Whether one already-sampled observed trajectory passes the display-only verdict filter.
+ * Sampling deliberately happens before this predicate is applied; `all` therefore means
+ * all trajectories in the current sample, never all trajectories in the loaded harvest.
+ */
+export function matchesObservedVerdictFilter(
+  verdict: ObservedVerdict,
+  filter: ObservedVerdictFilter,
+): boolean {
+  return filter === "all" || verdict === filter;
 }
