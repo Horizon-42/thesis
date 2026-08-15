@@ -91,8 +91,8 @@ from fixed_dt_supervision import (
 from time_grids import output_time_grid
 from reference_velocity import rebuild_reference_velocities
 
-ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
-DATA_SELECTION_SCHEMA = "ts-data-selection-v1-aircraft-filter"
+ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v3-eligibility-bound"
+DATA_SELECTION_SCHEMA = "ts-data-selection-v2-pre-split-eligibility"
 
 
 def dataset_flight_key(source: dict[str, Any], index: int) -> str:
@@ -130,6 +130,8 @@ def _manifest_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
 
 def arrival_data_provenance(
     paths: str | Path | Sequence[str | Path],
+    *,
+    eligibility_rosters: Sequence[str | Path] | None = None,
 ) -> dict[str, Any]:
     """Fingerprint the exact canonical arrival rosters used by a training run.
 
@@ -137,7 +139,20 @@ def arrival_data_provenance(
     each flight's canonical source digest as well makes the checkpoint independently
     auditable without reopening every source track.
     """
+    roster_by_airport: dict[str, tuple[Path, bytes, dict[str, Any]]] = {}
+    for raw_roster in eligibility_rosters or ():
+        roster_path = Path(raw_roster).resolve()
+        roster_bytes = roster_path.read_bytes()
+        roster = json.loads(roster_bytes)
+        airport = str(roster.get("airport") or "").strip().upper()
+        if not airport:
+            raise ValueError(f"{roster_path} does not declare an airport")
+        if airport in roster_by_airport:
+            raise ValueError(f"multiple eligibility rosters supplied for airport {airport}")
+        roster_by_airport[airport] = (roster_path, roster_bytes, roster)
+
     manifest_entries: list[dict[str, Any]] = []
+    manifest_airports: set[str] = set()
     for manifest_path in _manifest_paths(paths):
         manifest_bytes = manifest_path.read_bytes()
         manifest = json.loads(manifest_bytes)
@@ -145,6 +160,44 @@ def arrival_data_provenance(
         if not isinstance(records, list):
             raise ValueError(f"{manifest_path} lacks an arrival records roster")
         airport = str(manifest.get("airport") or "").strip().upper()
+        manifest_airports.add(airport)
+
+        eligible_keys: set[str] | None = None
+        eligibility: dict[str, Any] | None = None
+        if eligibility_rosters is not None:
+            if airport not in roster_by_airport:
+                raise ValueError(f"no eligibility roster supplied for airport {airport}")
+            roster_path, roster_bytes, roster = roster_by_airport[airport]
+            from lateral_eligibility import (  # local import keeps the loader policy-agnostic
+                LATERAL_PASS_POLICY,
+                LATERAL_PASS_ROSTER_SCHEMA,
+            )
+            if roster.get("schema_version") != LATERAL_PASS_ROSTER_SCHEMA:
+                raise ValueError(f"{roster_path} has the wrong eligibility schema")
+            sources = roster.get("sources")
+            manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
+            if (
+                not isinstance(sources, dict)
+                or sources.get("arrival_manifest_sha256") != manifest_digest
+            ):
+                raise ValueError(f"{roster_path} was built for a different arrival manifest")
+            if roster.get("policy") != LATERAL_PASS_POLICY:
+                raise ValueError(f"{roster_path} has the wrong eligibility policy")
+            keys = roster.get("eligible_flight_keys")
+            if (
+                not isinstance(keys, list)
+                or any(not isinstance(key, str) or not key for key in keys)
+                or len(set(keys)) != len(keys)
+            ):
+                raise ValueError(f"{roster_path} has invalid eligible flight identities")
+            eligible_keys = set(keys)
+            eligibility = {
+                "schema_version": roster["schema_version"],
+                "policy": roster["policy"],
+                "roster_sha256": hashlib.sha256(roster_bytes).hexdigest(),
+                "evaluation_report_sha256": sources.get("evaluation_report_sha256"),
+                "counts": roster.get("counts"),
+            }
 
         source_records: list[dict[str, str]] = []
         seen: set[str] = set()
@@ -166,16 +219,33 @@ def arrival_data_provenance(
                     f"{manifest_path}: arrival record {index} has invalid source_sha256"
                 )
             seen.add(key)
+            if eligible_keys is not None and key not in eligible_keys:
+                continue
             source_records.append(
                 {"flight_key": key, "source_sha256": source_sha256.lower()}
             )
 
         source_records.sort(key=lambda item: item["flight_key"])
+        if eligible_keys is not None:
+            missing_eligible = eligible_keys - seen
+            if missing_eligible:
+                raise ValueError(
+                    f"{roster_path} names flight absent from arrival manifest: "
+                    f"{min(missing_eligible)!r}"
+                )
         manifest_entries.append({
             "airport": airport,
             "arrival_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            "arrival_candidate_count": len(records),
+            "eligibility": eligibility,
             "source_records": source_records,
         })
+
+    unused_rosters = roster_by_airport.keys() - manifest_airports
+    if unused_rosters:
+        raise ValueError(
+            f"eligibility roster supplied without arrival manifest for {min(unused_rosters)}"
+        )
 
     return {
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -201,6 +271,32 @@ def provenance_manifest_digests(provenance: dict[str, Any]) -> dict[str, str]:
         if airport in result:
             raise ValueError(f"data_provenance repeats airport {airport}")
         result[airport] = digest
+    return result
+
+
+def provenance_eligibility_digests(
+    provenance: dict[str, Any],
+) -> dict[str, str]:
+    """Compact airport -> pre-split eligibility artifact digest."""
+    if provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
+        raise ValueError("data_provenance is not a multi-airport TS fingerprint")
+    result: dict[str, str] = {}
+    for entry in provenance.get("manifests", []):
+        if not isinstance(entry, dict):
+            raise ValueError("data_provenance manifest entry is not an object")
+        airport = entry.get("airport")
+        eligibility = entry.get("eligibility")
+        digest = (
+            eligibility.get("roster_sha256")
+            if isinstance(eligibility, dict)
+            else None
+        )
+        if not isinstance(airport, str) or (
+            digest is not None and not isinstance(digest, str)
+        ):
+            raise ValueError("data_provenance has invalid eligibility identity")
+        if digest is not None:
+            result[airport] = digest
     return result
 
 
@@ -1361,14 +1457,15 @@ def data_selection_audit(
         "split_policy": {
             "method": "sha256(seed:airport-qualified-flight-id)",
             "split_seed": config.resolved_split_seed,
-            "filter_applied_after_split_assignment": True,
+            "eligibility_applied_before_split_assignment": True,
+            "aircraft_filter_applied_after_split_assignment": True,
             "outer_test_tracks_loaded": False,
             "outer_test_aircraft_filter_status": "deferred_until_test_release",
         },
         "splits": {
             name: {
-                "raw_manifest_flights": len(outer_split_keys[name]),
-                "raw_identity_sha256": digest(outer_split_keys[name]),
+                "eligible_roster_flights": len(outer_split_keys[name]),
+                "eligible_identity_sha256": digest(outer_split_keys[name]),
                 "selected_flights": (
                     len(selected[name]) if name != "test" else None
                 ),

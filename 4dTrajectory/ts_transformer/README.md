@@ -122,6 +122,7 @@ TS=4dTrajectory/ts_transformer/__main__.py
 # train
 python $TS train \
     --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
+    --eligibility-roster trajectory_data_process/outputs/harvest/KRDU/arrivals/lateral_pass_eligibility.json \
     --airport KRDU \
     --model itransformer --n-segments 128 \
     --output-dir 4dTrajectory/outputs/KRDU/ts_itr_normalized_time
@@ -356,7 +357,24 @@ partially failed test stage.
 
 ## Data selection & flight identity
 
-Training reads only the `records` roster in `arrivals/manifest.json`. The manifest is built
+The top-level pipeline first joins `arrivals/manifest.json` to the observed
+`approach/evaluation_report.json` by exact `flight_key` and atomically writes
+`arrivals/lateral_pass_eligibility.json`. A flight is eligible exactly when
+`lateral_result == "pass"`; vertical and overall verdicts are deliberately irrelevant to
+this filter. Every arrival candidate must have one evaluation row, while evaluation-only
+rows are counted and ignored. The sidecar binds both source files by SHA-256.
+
+Eligibility is applied before deterministic train/validation/test assignment. The TS loader
+then opens only the selected split identities, so excluded trajectories and sealed outer-test
+trajectory values are not read during development. Checkpoints and CV results bind the
+eligibility-sidecar digest in addition to the arrival-manifest digest, preventing reuse after
+either evaluation or the arrival roster changes. This is a data-plane contract only: model,
+loss, and optimizer code do not import evaluation policy. `run_ts_pipeline.py` creates or
+refreshes all required sidecars and supplies them automatically; direct CLI calls must pass
+one `--eligibility-roster` per `--data` manifest.
+
+After that qualification, training reads only the `records` roster in
+`arrivals/manifest.json`. The manifest is built
 from `assigned` tracks with a published CIFP TCH/glidepath, cropped from the final 25 km
 entry to the measured landing anchor; local circuits remain in the audit counts but cannot
 enter training. An orphan JSON beside `records/` is ignored, and a duplicate `flight_key`

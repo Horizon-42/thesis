@@ -32,6 +32,7 @@ from config import (
 from dataset import (
     FixedAnchorTrajectoryWindows, FlightSeries,
     cross_validation_folds,
+    provenance_eligibility_digests,
     provenance_manifest_digests,
     split_by_flight,
 )
@@ -40,7 +41,7 @@ from train import evaluate_split, filter_training_cohort, fit_model, usable_seri
 
 RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"
-RESULTS_SCHEMA = "ts-cross-validation-v11-training-cohort-audit"
+RESULTS_SCHEMA = "ts-cross-validation-v12-lateral-eligibility"
 SELECTION_METRIC = (
     "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
     "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
@@ -278,6 +279,7 @@ def cross_validate(
         key=lambda row: (row["mean_val_macro_loss"], row["candidate"]),
     )
     best_overrides = dict(best["overrides"])
+    eligibility_digests = provenance_eligibility_digests(data_provenance)
     results = {
         "schema_version": RESULTS_SCHEMA,
         "selection_metric": SELECTION_METRIC_DESCRIPTIONS[
@@ -315,6 +317,8 @@ def cross_validate(
         "best_mean_val_macro_loss": best["mean_val_macro_loss"],
         "best_overrides": best_overrides,
     }
+    if eligibility_digests:
+        results["eligibility_rosters"] = eligibility_digests
     _write_json_atomic(out / RESULTS_NAME, results)
     _write_json_atomic(out / BEST_CONFIG_NAME, best_overrides)
     if verbose:

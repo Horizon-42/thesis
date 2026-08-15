@@ -120,11 +120,24 @@ from train import (  # noqa: E402
 )
 
 
+def _add_eligibility_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--eligibility-roster",
+        action="append",
+        default=None,
+        help=(
+            "pre-split flight eligibility JSON; repeat once per --data manifest. "
+            "The top-level pipeline supplies evaluation-derived lateral-pass rosters."
+        ),
+    )
+
+
 def _add_data_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--data", required=True, action="append",
         help="airport harvest directory or arrivals/manifest.json; repeat for pooled training",
     )
+    _add_eligibility_arg(parser)
     parser.add_argument("--airport", default=None,
                         help="ICAO code, when the flight dicts do not carry arr_airport")
     parser.add_argument("--aircraft-type", default=None,
@@ -142,6 +155,13 @@ def _add_data_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument("--output-dir", required=True)
+
+
+def _provenance_from_args(args: argparse.Namespace) -> dict[str, object]:
+    rosters = getattr(args, "eligibility_roster", None)
+    if rosters is None:
+        return arrival_data_provenance(args.data)
+    return arrival_data_provenance(args.data, eligibility_rosters=rosters)
 
 
 def _batch_size(value: str) -> int | str:
@@ -681,6 +701,7 @@ def main(argv: list[str] | None = None) -> int:
         "--data", required=True, action="append",
         help="the complete training arrival-manifest roster; repeat for pooled training",
     )
+    _add_eligibility_arg(p_fit)
     p_fit.add_argument("--checkpoint", required=True)
     p_fit.add_argument(
         "--output-dir",
@@ -699,6 +720,7 @@ def main(argv: list[str] | None = None) -> int:
         "--data", required=True, action="append",
         help="the complete training arrival-manifest roster; repeat for pooled training",
     )
+    _add_eligibility_arg(p_freeze)
 
     # ── predict ──────────────────────────────────────────────────────────────
     p_predict = sub.add_parser(
@@ -733,7 +755,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "freeze-test":
         _model, _config, _normalizer, payload = load_checkpoint(args.checkpoint)
-        current_provenance = arrival_data_provenance(args.data)
+        current_provenance = _provenance_from_args(args)
         try:
             release_path = create_test_release(
                 args.checkpoint, payload, current_provenance
@@ -746,7 +768,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "evaluate-fit":
         checkpoint_path = Path(args.checkpoint).resolve()
         model, config, normalizer, payload = load_checkpoint(checkpoint_path)
-        current_provenance = arrival_data_provenance(args.data)
+        current_provenance = _provenance_from_args(args)
         require_matching_data_provenance(payload, current_provenance)
 
         wanted = payload["split"]["train"] + payload["split"]["val"]
@@ -825,7 +847,7 @@ def main(argv: list[str] | None = None) -> int:
         config, batch_auto = _config_from_args(args, parser)
         if bool(args.campaign_id) != bool(args.experiment_id):
             parser.error("--campaign-id and --experiment-id must be supplied together")
-        data_provenance = arrival_data_provenance(args.data)
+        data_provenance = _provenance_from_args(args)
         outer_split_keys = flight_keys_by_split(data_provenance, config)
         development_cohort = None
         if args.development_cohort:
@@ -868,6 +890,18 @@ def main(argv: list[str] | None = None) -> int:
         data_selection = data_selection_audit(
             series, build_report, config, outer_split_keys
         )
+        data_selection["pre_split_eligibility"] = [
+            {
+                "airport": entry["airport"],
+                "arrival_candidates": entry.get("arrival_candidate_count"),
+                **(
+                    entry["eligibility"]
+                    if isinstance(entry.get("eligibility"), dict)
+                    else {"policy": "none"}
+                ),
+            }
+            for entry in data_provenance["manifests"]
+        ]
         if development_cohort is not None:
             data_selection["development_cohort"] = development_cohort_audit(
                 args.development_cohort, development_cohort
@@ -949,7 +983,7 @@ def main(argv: list[str] | None = None) -> int:
             f"--aircraft-filter {args.aircraft_filter!r} differs from checkpoint policy "
             f"{config.aircraft_filter!r}"
         )
-    current_provenance = arrival_data_provenance(args.data)
+    current_provenance = _provenance_from_args(args)
     require_matching_data_provenance(payload, current_provenance, allow_subset=True)
     device = resolve_device(args.device)
     model = model.to(device)

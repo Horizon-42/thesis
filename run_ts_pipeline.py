@@ -99,6 +99,10 @@ from cross_validation import (  # noqa: E402
     parameter_grid,
 )
 from evaluation_protocol import TEST_RELEASE_NAME  # noqa: E402
+from lateral_eligibility import (  # noqa: E402
+    default_lateral_pass_roster_path,
+    ensure_lateral_pass_roster,
+)
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_NAME,
     CHECKPOINT_METADATA_SCHEMA,
@@ -143,6 +147,13 @@ def discover_k_airports() -> list[str]:
 
 def _manifest_digests(airports: tuple[str, ...]) -> dict[str, str]:
     return {airport: _file_sha256(arrival_manifest_path(airport)) for airport in airports}
+
+
+def _eligibility_digests(airports: tuple[str, ...]) -> dict[str, str]:
+    return {
+        airport: _file_sha256(default_lateral_pass_roster_path(arrival_manifest_path(airport)))
+        for airport in airports
+    }
 
 
 def _frame_tag(coordinate_frame: str) -> str:
@@ -552,6 +563,9 @@ class TrainingPlan:
         self.control_rollout_dt = control_rollout_dt
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
+        self.eligibility_rosters = tuple(
+            default_lateral_pass_roster_path(manifest) for manifest in self.data_manifests
+        )
         scope = self.airports[0] if training_mode == "per-airport" else "POOLED"
         suffix = (
             _prediction_output_tag(prediction_output)
@@ -627,7 +641,15 @@ class TrainingPlan:
         return "POOLED[" + ",".join(self.airports) + "]" if self.pooled else self.airports[0]
 
     def _data_args(self) -> list[str]:
-        return [token for manifest in self.data_manifests for token in ("--data", str(manifest))]
+        data = [
+            token for manifest in self.data_manifests for token in ("--data", str(manifest))
+        ]
+        eligibility = [
+            token
+            for roster in self.eligibility_rosters
+            for token in ("--eligibility-roster", str(roster))
+        ]
+        return data + eligibility
 
     def _recipe_args(self, *, include_base_n_segments: bool = True) -> list[str]:
         args = [
@@ -754,6 +776,8 @@ class TrainingPlan:
             return f"missing checkpoint metadata {self.checkpoint_metadata}"
         if any(not manifest.is_file() for manifest in self.data_manifests):
             return "one or more arrival manifests are missing"
+        if any(not roster.is_file() for roster in self.eligibility_rosters):
+            return "one or more lateral-pass eligibility rosters are missing"
         try:
             metadata = json.loads(self.checkpoint_metadata.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -767,6 +791,8 @@ class TrainingPlan:
             return "checkpoint failed SHA-256 validation"
         if metadata.get("arrival_manifests") != _manifest_digests(self.airports):
             return "checkpoint was trained against different arrival manifests"
+        if metadata.get("eligibility_rosters") != _eligibility_digests(self.airports):
+            return "checkpoint was trained against different eligibility rosters"
         if metadata.get("random_train_anchor") != self.random_train_anchor:
             return (
                 "checkpoint random_train_anchor="
@@ -819,6 +845,8 @@ class TrainingPlan:
     def cv_reuse_error(self) -> str | None:
         if not self.cv_results.is_file() or not self.best_config.is_file():
             return "missing cross-validation results or best_config.json"
+        if any(not roster.is_file() for roster in self.eligibility_rosters):
+            return "one or more lateral-pass eligibility rosters are missing"
         try:
             results = json.loads(self.cv_results.read_text(encoding="utf-8"))
             best = json.loads(self.best_config.read_text(encoding="utf-8"))
@@ -834,6 +862,8 @@ class TrainingPlan:
             return "cross-validation best_config.json disagrees with cv_results.json"
         if results.get("arrival_manifests") != _manifest_digests(self.airports):
             return "cross-validation used different arrival manifests"
+        if results.get("eligibility_rosters") != _eligibility_digests(self.airports):
+            return "cross-validation used different eligibility rosters"
         base_config = results.get("base_config")
         expected_config = self._expected_cv_base_config()
         if base_config != expected_config:
@@ -1298,6 +1328,8 @@ class PredictionPlan:
             py, str(TS_SCRIPT), "predict",
             "--checkpoint", str(self.training.checkpoint),
             "--data", str(self.data_manifest),
+            "--eligibility-roster",
+            str(default_lateral_pass_roster_path(self.data_manifest)),
             "--output-dir", str(self.pred_dir),
             "--split", self.split,
         ]
@@ -1763,6 +1795,12 @@ def main() -> None:
         airports = discover_k_airports()
         if not airports:
             parser.error(f"no K-prefixed airports with arrivals manifests under {HARVEST_ROOT}")
+
+    if not args.dry_run:
+        print("preparing evaluation-derived lateral-pass eligibility rosters")
+        for airport in airports:
+            roster = ensure_lateral_pass_roster(arrival_manifest_path(airport))
+            print(f"  {airport}: {roster}")
 
     scopes = (
         [tuple(airports)]

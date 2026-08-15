@@ -82,6 +82,7 @@ from dataset import (
     RandomAnchorTrajectoryWindows,
     TrajectoryWindows,
     iter_batches,
+    provenance_eligibility_digests,
     provenance_manifest_digests,
     split_by_flight,
     window_anchors,
@@ -102,7 +103,7 @@ from training_performance import EpochProfiler
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v32-dense-rollout-duration-floor"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v33-lateral-eligibility"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -2628,6 +2629,7 @@ def train(
     if data_provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
         raise ValueError("data_provenance is not a TS arrival-data fingerprint")
     manifest_digests = provenance_manifest_digests(data_provenance)
+    eligibility_digests = provenance_eligibility_digests(data_provenance)
 
     series = usable_series(series, config, verbose=verbose)
     train_series, val_series, test_series = split_by_flight(series, config)
@@ -2763,6 +2765,8 @@ def train(
             "test": _keys_sha256(checkpoint_test_keys),
         },
     }
+    if eligibility_digests:
+        checkpoint_metadata["eligibility_rosters"] = eligibility_digests
     if fit.model_pretraining is not None:
         checkpoint_metadata["model_pretraining"] = fit.model_pretraining
     if data_selection is not None:
@@ -2818,6 +2822,8 @@ def train(
         "data_selection": data_selection,
         "history": [vars(h) for h in fit.history],
     }
+    if eligibility_digests:
+        summary["data_provenance"]["eligibility_rosters"] = eligibility_digests
     if fit.model_pretraining is not None:
         summary["model_pretraining"] = fit.model_pretraining
     (out / HISTORY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")

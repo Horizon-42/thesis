@@ -4578,6 +4578,15 @@ def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
     manifest.write_text("{}", encoding="utf-8")
     plan.data_manifests = (manifest,)
     monkeypatch.setattr(pipeline_module, "_manifest_digests", lambda _airports: [])
+    roster = tmp_path / "lateral_pass_eligibility.json"
+    roster.write_text("{}", encoding="utf-8")
+    plan.eligibility_rosters = (roster,)
+    eligibility_digest = hashlib.sha256(b"{}").hexdigest()
+    monkeypatch.setattr(
+        pipeline_module,
+        "_eligibility_digests",
+        lambda _airports: {AIRPORT: eligibility_digest},
+    )
 
     config, _source = plan.resolved_train_config(use_best_config=False)
     legacy_recipe = control_recipe(config)
@@ -4586,6 +4595,7 @@ def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
         "schema_version": CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(b"checkpoint").hexdigest(),
         "arrival_manifests": [],
+        "eligibility_rosters": {AIRPORT: eligibility_digest},
         "random_train_anchor": plan.random_train_anchor,
         "training_cohort_min_future_s": plan.training_cohort_min_future_s,
         "random_train_anchor_min_future_s": plan.random_train_anchor_min_future_s,
