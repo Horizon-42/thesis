@@ -74,8 +74,9 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(
     assert classified.runway == "05L"
     assert classified.observed_threshold_event["status"] == "estimated"
     assert classified.observed_threshold_event["method"] == \
-        "final_segment_robust_fit"
-    assert "component_methods" not in classified.observed_threshold_event
+        "direct_linear_bracket"
+    assert classified.observed_threshold_event["observability"] == \
+        "within_observed_support"
 
     paths = HarvestPaths(tmp_path / "harvest", "KRDU")
     write_tracks([classified], paths, provenance={"test": True})

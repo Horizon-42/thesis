@@ -33,7 +33,6 @@ from final_approach import (
     LandingScreen,
     SegmentFit,
     assign_runway,
-    fit_final_segment,
     landing_screen_reason,
 )
 
@@ -41,7 +40,6 @@ from flight_scenarios.identity import flight_key
 
 from trajectory_data_process.harvest.airports import Airport
 from trajectory_data_process.harvest.threshold_event import (
-    StateMetadataLookup,
     ThresholdBracket,
     build_observed_threshold_event,
     select_observed_threshold_bracket,
@@ -104,7 +102,6 @@ def classify_track(
     airport: Airport,
     *,
     screen: LandingScreen = LandingScreen(),
-    metadata_lookup: StateMetadataLookup | None = None,
 ) -> ClassifiedTrack:
     """Assign one track to at most one runway.
 
@@ -117,6 +114,7 @@ def classify_track(
     not_landing = landing_screen_reason(points, frames, screen=screen)
     bracket: ThresholdBracket | None = None
     bracket_rejections: tuple[dict, ...] = ()
+    unavailable_observability = "unavailable"
     if not_landing is not None:
         assignment = Assignment(
             "not_landing", None, None, {}, None, not_landing
@@ -125,7 +123,6 @@ def classify_track(
         selection = select_observed_threshold_bracket(
             track,
             list(airport.runways),
-            metadata_lookup=metadata_lookup,
             max_structural_cross_m=screen.threshold_radius_m,
             max_structural_height_m=screen.max_crossing_height_m,
         )
@@ -133,41 +130,13 @@ def classify_track(
         if selection.outcome == "assigned":
             assert selection.bracket is not None
             bracket = selection.bracket
-            before_index = bracket.source_sample_range[0]
-            fit = fit_final_segment(
-                points,
-                bracket.runway.frame("hae"),
-                pass_anchor_index=before_index,
-            )
-            fit_reason = None
-            if fit is not None:
-                if not fit.approaching:
-                    fit_reason = "selected bracket fit is not inbound"
-                elif abs(fit.height_at_threshold_m) > screen.max_crossing_height_m:
-                    fit_reason = (
-                        "selected bracket fit is structurally incompatible with "
-                        f"the runway surface ({fit.height_at_threshold_m:+.0f} m; "
-                        f"limit {screen.max_crossing_height_m:.0f} m)"
-                    )
-                elif (
-                    fit.median_abs_cross_m > screen.threshold_radius_m
-                    or abs(fit.cross_at_threshold_m) > screen.threshold_radius_m
-                ):
-                    fit_reason = (
-                        "selected bracket fit is structurally incompatible with "
-                        f"the runway centreline (median {fit.median_abs_cross_m:.0f} m, "
-                        f"intercept {fit.cross_at_threshold_m:+.0f} m; limit "
-                        f"{screen.threshold_radius_m:.0f} m)"
-                    )
-            if fit_reason is not None:
-                fit = None
             assignment = Assignment(
                 "assigned",
                 bracket.runway.ident,
-                fit,
+                None,
                 selection.scores_m,
                 selection.margin_m,
-                fit_reason,
+                None,
             )
         elif selection.outcome == "ambiguous":
             assignment = Assignment(
@@ -178,6 +147,33 @@ def classify_track(
                 selection.margin_m,
                 selection.reason,
             )
+        elif selection.outcome == "invalid_support":
+            # Identify the runway from the normal relative fit before deciding whether
+            # the rejected bracket is relevant. An integrity failure against an
+            # unrelated parallel threshold must not suppress a valid censored event.
+            fitted = assign_runway(points, frames, screen=screen)
+            rejected_selected_runway = (
+                fitted.runway is not None
+                and any(
+                    rejection.get("runway") == fitted.runway
+                    and rejection.get("category") == "source_integrity"
+                    for rejection in bracket_rejections
+                )
+            )
+            if rejected_selected_runway:
+                # Contrary observed support on the selected runway cannot be replaced
+                # silently by a model extrapolation.
+                assignment = Assignment(
+                    "unassignable",
+                    None,
+                    None,
+                    fitted.scores,
+                    fitted.margin_m,
+                    selection.reason,
+                )
+                unavailable_observability = "invalid_support"
+            else:
+                assignment = fitted
         else:
             # Tracks whose source data do not provide a usable bracket retain the
             # single robust final-segment assignment path.
@@ -200,6 +196,7 @@ def classify_track(
             assignment,
             bracket=bracket,
             bracket_rejections=bracket_rejections,
+            unavailable_observability=unavailable_observability,
         ),
         threshold_bracket=bracket,
     )
@@ -210,14 +207,12 @@ def classify_tracks(
     airport: Airport,
     *,
     screen: LandingScreen = LandingScreen(),
-    metadata_lookup: StateMetadataLookup | None = None,
 ) -> list[ClassifiedTrack]:
     return [
         classify_track(
             track,
             airport,
             screen=screen,
-            metadata_lookup=metadata_lookup,
         )
         for track in tracks
     ]

@@ -20,9 +20,9 @@ from evaluation.thresholds import AssessmentContext
 Subject = Literal["optimized", "predicted", "observed"]
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
-OBSERVED_EVENT_SCHEMA = "observed-threshold-event-v7"
-OBSERVED_EVENT_METHOD_VERSION = 7
-OBSERVED_EVENT_METHOD = "final_segment_robust_fit"
+OBSERVED_EVENT_SCHEMA = "runway-threshold-event-v1"
+OBSERVED_DIRECT_METHOD = "direct_linear_bracket"
+OBSERVED_CENSORED_METHOD = "censored_robust_line"
 
 
 @dataclass(frozen=True)
@@ -240,27 +240,48 @@ def _observed_arrival(
     event = record.source.get("observed_threshold_event")
     if not isinstance(event, dict):
         return ArrivalOutcome(None, "unavailable", "observed threshold event missing")
-    status = event.get("status")
-    if status != "estimated":
-        reason = event.get("unavailable_reason")
-        return ArrivalOutcome(
-            None,
-            str(status or "unavailable"),
-            str(reason or "observed threshold event unavailable"),
+    if event.get("schema_version") != OBSERVED_EVENT_SCHEMA:
+        raise ValueError(
+            f"observed threshold event must use {OBSERVED_EVENT_SCHEMA}; "
+            "run --reclassify-existing"
         )
     if event.get("runway") != context.runway:
         raise ValueError(
             "source.observed_threshold_event.runway disagrees with assessment context"
         )
-    if event.get("schema_version") != OBSERVED_EVENT_SCHEMA \
-            or event.get("method_version") != OBSERVED_EVENT_METHOD_VERSION:
+    frame_fingerprint = context.threshold_frame_fingerprint
+    if frame_fingerprint is not None and (
+        event.get("threshold_frame_fingerprint") != frame_fingerprint
+    ):
         raise ValueError(
-            f"observed threshold event must use {OBSERVED_EVENT_SCHEMA}; "
-            "run --reclassify-existing"
+            "source.observed_threshold_event physical frame disagrees with "
+            "assessment context; run --reclassify-existing"
         )
-    if event.get("method") != OBSERVED_EVENT_METHOD:
+    status = event.get("status")
+    if status == "unavailable":
+        if event.get("method") != "none" or event.get("observability") not in (
+            "invalid_support",
+            "unavailable",
+        ):
+            raise ValueError("unavailable observed threshold event has invalid discriminators")
+        reason = event.get("unavailable_reason")
+        return ArrivalOutcome(
+            None,
+            str(event["observability"]),
+            str(reason or "observed threshold event unavailable"),
+        )
+    if status != "estimated":
+        raise ValueError(f"observed threshold event has invalid status {status!r}")
+    method = event.get("method")
+    observability = event.get("observability")
+    expected_observability = {
+        OBSERVED_DIRECT_METHOD: "within_observed_support",
+        OBSERVED_CENSORED_METHOD: "right_censored",
+    }.get(method)
+    if expected_observability is None or observability != expected_observability:
         raise ValueError(
-            f"unsupported observed threshold-event method {event.get('method')!r}"
+            "unsupported observed threshold-event method/observability "
+            f"{method!r}/{observability!r}"
         )
     source_range = event.get("source_sample_range")
     if (
@@ -301,7 +322,17 @@ def _observed_arrival(
             _event_number(event, "threshold_crossing_altitude_m") - authoritative_geoid
         )
         vertical_m = crossing_alt_msl - desired_altitude_msl_m
-    extrapolation_m = _event_number(event, "extrapolation_m", nonnegative=True)
+    if event.get("uncertainty") != {"status": "uncalibrated"}:
+        raise ValueError(
+            "source.observed_threshold_event uncertainty must be explicitly uncalibrated"
+        )
+    extrapolation_m = _event_number(
+        event, "extrapolation_distance_m", nonnegative=True
+    )
+    if method == OBSERVED_DIRECT_METHOD and extrapolation_m != 0.0:
+        raise ValueError("direct observed threshold event cannot be extrapolated")
+    if method == OBSERVED_CENSORED_METHOD and extrapolation_m <= 0.0:
+        raise ValueError("censored observed threshold event requires positive extrapolation")
     return ArrivalOutcome(
         ArrivalDeviation(
             # The event is evaluated at the threshold plane by construction.
@@ -313,12 +344,9 @@ def _observed_arrival(
             flight_time_s=final["t"],
             event_status="estimated",
             extrapolated=extrapolation_m > 0.0,
-            lateral_sigma_m=_event_number(event, "cross_track_sigma_m", nonnegative=True),
-            vertical_sigma_m=_event_number(event, "altitude_sigma_m", nonnegative=True),
-            glidepath_deg=(
-                _event_number(event, "glidepath_deg")
-                if event.get("glidepath_deg") is not None else None
-            ),
+            lateral_sigma_m=None,
+            vertical_sigma_m=None,
+            glidepath_deg=None,
             extrapolation_m=extrapolation_m,
         ),
         "estimated",

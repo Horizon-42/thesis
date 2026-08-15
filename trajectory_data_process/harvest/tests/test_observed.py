@@ -6,7 +6,11 @@ from dataclasses import replace
 
 import pytest
 
-from trajectory_data_process.harvest.airports import Runway, runway_data_fingerprint
+from trajectory_data_process.harvest.airports import (
+    Runway,
+    threshold_frame_fingerprint,
+    threshold_frame_snapshot,
+)
 from trajectory_data_process.harvest.observed import (
     observed_record,
     source_event_availability,
@@ -28,12 +32,13 @@ def _runway() -> Runway:
 def test_observed_record_rejects_event_from_a_different_runway_cycle():
     runway = _runway()
     event = {
-        "schema_version": "observed-threshold-event-v7",
+        "schema_version": "runway-threshold-event-v1",
         "status": "estimated",
-        "method": "final_segment_robust_fit",
-        "method_version": 7,
+        "method": "censored_robust_line",
+        "observability": "right_censored",
         "runway": runway.ident,
-        "runway_data_fingerprint": runway_data_fingerprint(runway),
+        "threshold_frame_snapshot": threshold_frame_snapshot(runway),
+        "threshold_frame_fingerprint": threshold_frame_fingerprint(runway),
     }
     track = {
         "flight_key": "TEST_18_abc123_20260812T000000Z",
@@ -45,20 +50,22 @@ def test_observed_record_rejects_event_from_a_different_runway_cycle():
     }
     newer = replace(runway, procedure_source_cycle="2026-09-03")
 
-    with pytest.raises(ValueError, match="runway-data fingerprint.*reclassify"):
+    with pytest.raises(ValueError, match="physical-frame fingerprint.*reclassify"):
         observed_record(track, newer)
 
 
 def test_observed_record_preserves_a_current_unavailable_event_for_indeterminate_evaluation():
     runway = _runway()
     event = {
-        "schema_version": "observed-threshold-event-v7",
+        "schema_version": "runway-threshold-event-v1",
         "status": "unavailable",
-        "method": "final_segment_robust_fit",
-        "method_version": 7,
+        "method": "none",
+        "observability": "unavailable",
         "runway": runway.ident,
-        "runway_data_fingerprint": runway_data_fingerprint(runway),
+        "threshold_frame_snapshot": threshold_frame_snapshot(runway),
+        "threshold_frame_fingerprint": threshold_frame_fingerprint(runway),
         "unavailable_reason": "selected final inbound pass has no fittable segment",
+        "diagnostics": {"bracket_rejections": []},
     }
     track = {
         "flight_key": "TEST_18_abc123_20260812T000000Z",

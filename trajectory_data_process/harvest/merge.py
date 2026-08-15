@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from trajectory_data_process.harvest.airports import Airport
 from trajectory_data_process.harvest.reclassify import (
+    StateMetadataLookup,
     StateMetadataBatchLookup,
     reclassify_stored_tracks,
 )
@@ -23,8 +24,6 @@ from trajectory_data_process.harvest.store import (
     ALTITUDE_SOURCE,
     HarvestPaths,
 )
-from trajectory_data_process.harvest.threshold_event import StateMetadataLookup
-
 _BUCKETS = ("assigned", "ambiguous", "unassignable", "not_landing")
 
 

@@ -32,6 +32,7 @@ from the modeling side.
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import tempfile
@@ -45,8 +46,8 @@ from geokit import haversine_m
 
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 from trajectory_data_process.harvest.threshold_event import (
-    EVENT_METHOD,
-    EVENT_METHOD_VERSION,
+    CENSORED_EVENT_METHOD,
+    DIRECT_EVENT_METHOD,
     EVENT_SCHEMA_VERSION,
 )
 
@@ -222,22 +223,21 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
         return None
     if event.get("status") != "estimated" or event.get("runway") != track.get("runway"):
         return None
-    if event.get("schema_version") != EVENT_SCHEMA_VERSION \
-            or event.get("method_version") != EVENT_METHOD_VERSION:
+    if event.get("schema_version") != EVENT_SCHEMA_VERSION:
         raise ValueError(
             f"track {track.get('flight_key')!r} has an obsolete threshold event; "
             "run --reclassify-existing"
         )
-    if event.get("method") != EVENT_METHOD:
+    method = event.get("method")
+    observability = event.get("observability")
+    if method == DIRECT_EVENT_METHOD and observability == "within_observed_support":
+        # The measured samples already contain both sides of the crossing.
+        return None
+    if method != CENSORED_EVENT_METHOD or observability != "right_censored":
         raise ValueError(
             f"track {track.get('flight_key')!r} has unsupported threshold-event method "
-            f"{event.get('method')!r}"
+            f"{method!r}/{observability!r}"
         )
-    if isinstance(event.get("threshold_bracket"), dict):
-        # The measured track already contains both sides of its selected physical
-        # crossing.  The bracket anchors the fit but is not itself the event estimate;
-        # drawing an extra fitted tail would still duplicate measured geometry.
-        return None
     fit_range = event.get("source_sample_range")
     anchor = track.get("landing_sample_index")
     if (
@@ -256,7 +256,11 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
     dt = float(start[0]) - float(previous[0])
     distance = haversine_m(float(previous[2]), float(previous[1]), float(start[2]), float(start[1]))
     speed_ms = distance / dt if dt > 0.0 and distance > 0.0 else 70.0
-    extrapolation = float(event["extrapolation_m"])
+    extrapolation = float(event["extrapolation_distance_m"])
+    if not math.isfinite(extrapolation) or extrapolation <= 0.0:
+        raise ValueError(
+            f"track {track.get('flight_key')!r} has invalid censored extrapolation"
+        )
     end_t = float(start[0]) + extrapolation / speed_ms
     crossing = [
         round(float(event["threshold_crossing_lon"]), 7),

@@ -35,11 +35,9 @@ from trajectory_data_process.harvest.tracks import (
     source_integrity_from_dict,
     source_timed_final_block,
 )
-from trajectory_data_process.harvest.threshold_event import StateMetadataLookup
-
-
 _FLIGHT_KEY_TIME = re.compile(r"_(\d{8}T\d{6}Z)$")
 DEFAULT_RECLASSIFY_BATCH_TRACKS = 512
+StateMetadataLookup = Callable[[str, float], AdsbStateMetadata | None]
 StateMetadataBatchLookup = Callable[
     [list[tuple[str, float]]], list[AdsbStateMetadata | None]
 ]

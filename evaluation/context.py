@@ -6,7 +6,11 @@ from collections.abc import Iterable, Mapping
 
 from evaluation.records import TrajectoryRecord
 from evaluation.thresholds import AssessmentContext
-from trajectory_data_process.harvest.airports import Airport, Runway
+from trajectory_data_process.harvest.airports import (
+    Airport,
+    Runway,
+    threshold_frame_fingerprint,
+)
 
 ContextKey = tuple[str, str]
 
@@ -50,6 +54,7 @@ def assessment_for_runway(
             runway.lpv_course_width_m if selected == "lpv" else None
         ),
         baro_vnav_approved=(baro_vnav_approved if selected != "lpv" else False),
+        threshold_frame_fingerprint=threshold_frame_fingerprint(runway),
     )
 
 

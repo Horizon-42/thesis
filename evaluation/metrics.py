@@ -77,9 +77,9 @@ def _diagnostic_interval(
     sigma: float | None,
 ) -> tuple[float, float] | None:
     """Return an estimator interval for audit, never for verdict classification."""
-    if estimate is None:
+    if estimate is None or sigma is None:
         return None
-    margin = 0.0 if sigma is None else NORMAL_95_MULTIPLIER * sigma
+    margin = NORMAL_95_MULTIPLIER * sigma
     return estimate - margin, estimate + margin
 
 
@@ -284,20 +284,18 @@ def evaluate_batch(
             "event": {
                 "computed_predicted": "terminal_state_at_threshold_plane",
                 "observed": (
-                    "serialized_observed_threshold_event_v7: bracket-selected physical "
-                    "pass with one producer-side centreline-captured robust 3D fit; "
-                    "no evaluation refit"
+                    "serialized_runway_threshold_event_v1: direct 3D interpolation "
+                    "inside observed support, otherwise the single winning "
+                    "assignment fit for a right-censored pass; no evaluation refit"
                 ),
                 "terminal_plane_tolerance_m": TERMINAL_PLANE_TOLERANCE_M,
             },
             "uncertainty": {
-                "confidence": 0.95,
-                "normal_multiplier": NORMAL_95_MULTIPLIER,
                 "classification": "diagnostic_only_not_used_by_verdict",
                 "verdict_rule": "point_estimate_against_inclusive_component_bounds",
-                "observed_sigma_source": (
-                    "serialized event-v7 diagnostic 95% margin divided by 1.96"
-                ),
+                "observed_status": "uncalibrated",
+                "observed_numeric_interval": None,
+                "future_calibrated_interval_rule": "estimate_plus_or_minus_1.96_sigma",
                 "unmodelled_sources": [
                     "ADS-B geometric-altitude update alignment and measurement error",
                     "runway/FAS survey uncertainty",

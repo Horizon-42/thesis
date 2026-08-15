@@ -8,6 +8,8 @@ the LPV or RNP APCH LNAV/VNAV limits documented in
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, Mapping
@@ -66,6 +68,7 @@ class AssessmentContext:
     threshold_crossing_height_m: float | None = None
     lpv_lateral_fsd_m: float | None = None
     baro_vnav_approved: bool = False
+    threshold_frame_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if self.benchmark not in ("lpv", "rnp_apch_lnav_vnav_baro"):
@@ -90,6 +93,11 @@ class AssessmentContext:
         _positive("lpv_lateral_fsd_m", self.lpv_lateral_fsd_m, required=False)
         if not isinstance(self.baro_vnav_approved, bool):
             raise ValueError("baro_vnav_approved must be boolean")
+        if self.threshold_frame_fingerprint is not None and (
+            not isinstance(self.threshold_frame_fingerprint, str)
+            or not self.threshold_frame_fingerprint.strip()
+        ):
+            raise ValueError("threshold_frame_fingerprint must be a non-empty string")
         if self.benchmark == "lpv":
             for name in (
                 "threshold_elevation_hae_m",
@@ -146,12 +154,28 @@ class AssessmentContext:
                 else float(data["lpv_lateral_fsd_m"])
             ),
             baro_vnav_approved=data.get("baro_vnav_approved", False),
+            threshold_frame_fingerprint=data.get("threshold_frame_fingerprint"),
         )
+
+    @property
+    def evaluation_context_fingerprint(self) -> str:
+        """Hash every physical and policy fact that can change a verdict."""
+        encoded = json.dumps(
+            {
+                "schema_version": "terminal-assessment-context-v1",
+                **asdict(self),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             **asdict(self),
             "desired_threshold_altitude_msl_m": self.desired_threshold_altitude_msl_m,
+            "evaluation_context_fingerprint": self.evaluation_context_fingerprint,
         }
 
     def limits(self) -> "ResolvedLimits":

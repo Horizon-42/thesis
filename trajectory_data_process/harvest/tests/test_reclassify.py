@@ -11,7 +11,11 @@ from final_approach import Projected
 
 from trajectory_data_process.harvest.__main__ import build_parser
 from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
-from trajectory_data_process.harvest.airports import Airport, Runway, runway_data_fingerprint
+from trajectory_data_process.harvest.airports import (
+    Airport,
+    Runway,
+    threshold_frame_fingerprint,
+)
 from trajectory_data_process.harvest.classify import classify_track
 from trajectory_data_process.harvest.reclassify import (
     _reclassification_order,
@@ -65,8 +69,8 @@ def test_reclassify_existing_reuses_samples_and_adds_current_frame_fingerprint(t
     paths = HarvestPaths(tmp_path, "KAAA")
     classified = _classified()
     legacy = track_record(classified)
-    legacy["observed_threshold_event"].pop("runway_data_fingerprint", None)
-    legacy["observed_threshold_event"].pop("runway_data", None)
+    legacy["observed_threshold_event"].pop("threshold_frame_fingerprint", None)
+    legacy["observed_threshold_event"].pop("threshold_frame_snapshot", None)
     relative = f"assigned/18/{legacy['flight_key']}.json"
     path = paths.tracks / relative
     path.parent.mkdir(parents=True)
@@ -99,8 +103,8 @@ def test_reclassify_existing_reuses_samples_and_adds_current_frame_fingerprint(t
     [row] = manifest["records"]
     rewritten = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
     assert rewritten["samples"] == samples_before
-    assert rewritten["observed_threshold_event"]["runway_data_fingerprint"] == \
-        runway_data_fingerprint(_airport().runway("18"))
+    assert rewritten["observed_threshold_event"]["threshold_frame_fingerprint"] == \
+        threshold_frame_fingerprint(_airport().runway("18"))
     assert row["event_status"] == "estimated"
     assert manifest["provenance"]["reclassification"]["network_access"] is False
     assert manifest["provenance"]["reclassification"]["adsb_metadata"] == {

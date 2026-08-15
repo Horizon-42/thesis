@@ -24,35 +24,21 @@ TARGET = {
 
 def _record(*, cross_m: float = 0.0, vertical_m: float = 0.0) -> dict:
     event = {
-        "schema_version": "observed-threshold-event-v7",
+        "schema_version": "runway-threshold-event-v1",
         "status": "estimated",
-        "method": "final_segment_robust_fit",
-        "method_version": 7,
+        "method": "censored_robust_line",
+        "observability": "right_censored",
         "runway": "05L",
         "threshold_crossing_lat": TARGET["lat"],
         "threshold_crossing_lon": TARGET["lon"],
         "threshold_crossing_altitude_m": TARGET["alt"] + 30.0 + vertical_m,
         "altitude_datum": "hae",
         "signed_cross_track_m": cross_m,
-        "cross_track_sigma_m": 0.25,
-        "altitude_sigma_m": 0.25,
         "source_sample_range": [0, 1],
-        "fit_window_m": [-5_000.0, -300.0],
-        "sample_count": 8,
-        "along_track_span_m": 4_000.0,
-        "extrapolation_m": 325.0,
-        "cross_track_fit": {
-            "rms_residual_m": 0.5,
-            "max_abs_residual_m": 1.0,
-            "rho": 0.0,
-            "n_effective": 8.0,
-        },
-        "altitude_fit": {
-            "rms_residual_m": 0.5,
-            "max_abs_residual_m": 1.0,
-            "rho": 0.0,
-            "n_effective": 8.0,
-        },
+        "event_time_s": None,
+        "interpolation_fraction": None,
+        "extrapolation_distance_m": 325.0,
+        "uncertainty": {"status": "uncalibrated"},
     }
     first = {"t": 0.0, **TARGET, "lat": 35.8, "alt": 500.0}
     last = {"t": 100.0, **TARGET, "lat": 35.89, "alt": 150.0}
@@ -144,34 +130,22 @@ def test_ideal_lpv_trajectory_fails_just_outside_vertical_bound(vertical_m):
     assert result.violations == ("vertical",)
 
 
-def test_observed_uncertainty_is_diagnostic_and_does_not_shrink_vertical_gate():
+def test_uncalibrated_observed_event_has_no_numeric_interval_and_keeps_point_gate():
     result = evaluate_record(
         record_from_dict(_record(vertical_m=7.2)), context=_lpv_context()
     )
 
-    assert result.vertical_interval_m == pytest.approx((6.71, 7.69))
+    assert result.vertical_interval_m is None
     assert result.vertical_result == "pass"
     assert result.verdict == "pass"
 
 
-def test_nominal_extrapolated_event_can_pass_with_large_estimator_uncertainty():
-    payload = _record()
-    payload["source"]["observed_threshold_event"]["altitude_sigma_m"] = 13.0 / 1.96
-
-    result = evaluate_record(record_from_dict(payload), context=_lpv_context())
-
-    assert result.vertical_interval_m == pytest.approx((-13.0, 13.0))
-    assert result.vertical_result == "pass"
-    assert result.verdict == "pass"
-
-
-def test_observed_point_outside_gate_fails_even_when_interval_overlaps_gate():
+def test_observed_point_outside_gate_fails_without_a_fabricated_interval():
     payload = _record(vertical_m=8.0)
-    payload["source"]["observed_threshold_event"]["altitude_sigma_m"] = 2.0
 
     result = evaluate_record(record_from_dict(payload), context=_lpv_context())
 
-    assert result.vertical_interval_m == pytest.approx((4.08, 11.92))
+    assert result.vertical_interval_m is None
     assert result.vertical_result == "fail"
     assert result.verdict == "fail"
     assert result.violations == ("vertical",)
@@ -191,16 +165,14 @@ def test_runway_edge_failure_controls_with_lpv_vertical_available():
 
 def test_estimator_uncertainty_does_not_change_lateral_point_verdict():
     inside = _record(cross_m=22.8)
-    inside["source"]["observed_threshold_event"]["cross_track_sigma_m"] = 2.0
     outside = _record(cross_m=23.0)
-    outside["source"]["observed_threshold_event"]["cross_track_sigma_m"] = 2.0
 
     pass_result = evaluate_record(record_from_dict(inside), context=_lpv_context())
     fail_result = evaluate_record(record_from_dict(outside), context=_lpv_context())
 
-    assert pass_result.lateral_interval_m == pytest.approx((18.88, 26.72))
+    assert pass_result.lateral_interval_m is None
     assert pass_result.lateral_result == "pass"
-    assert fail_result.lateral_interval_m == pytest.approx((19.08, 26.92))
+    assert fail_result.lateral_interval_m is None
     assert fail_result.lateral_result == "fail"
 
 

@@ -13,13 +13,13 @@ WHY THE SPLIT IS PHYSICAL AND NOT COSMETIC
 ------------------------------------------
 The sample array remains the sensor reconstruction: ellipsoidal altitude exactly as
 broadcast, with no extrapolated point inserted. Runway assignment also serializes one
-clearly labelled ``observed_threshold_event`` beside those samples. That event is a
-policy-free robust 3D fit. A valid measured threshold bracket may select and terminate
-the physical pass, but it is retained as audit evidence rather than mixed into one
-component of the event point. Consumers must not mistake the fitted event for a
-measured sample or refit the samples independently. A changed estimator method therefore
-requires local reclassification of these regenerable records from the stored samples;
-it does not require another OpenSky download.
+clearly labelled ``observed_threshold_event`` beside those samples. That event is
+policy-free: a valid measured threshold bracket is interpolated directly in 3D; only a
+right-censored pass uses the one robust fit that already selected its runway. Consumers
+must not mistake an inferred event for a measured sample or refit the samples
+independently. A changed estimator method therefore requires local reclassification of
+these regenerable records from the stored samples; it does not require another OpenSky
+download.
 
 WHY ALL FOUR BUCKETS ARE WRITTEN
 --------------------------------

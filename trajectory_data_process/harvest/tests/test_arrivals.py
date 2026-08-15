@@ -10,7 +10,8 @@ from flight_scenarios.identity import flight_key
 from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
-    runway_data_fingerprint,
+    threshold_frame_fingerprint,
+    threshold_frame_snapshot,
 )
 from trajectory_data_process.harvest.arrivals import (
     SCHEMA_VERSION,
@@ -66,6 +67,40 @@ def _airport() -> Airport:
     )
 
 
+def _threshold_event(runway: Runway, *, status: str = "estimated") -> dict:
+    common = {
+        "schema_version": "runway-threshold-event-v1",
+        "runway": runway.ident,
+        "threshold_frame_snapshot": threshold_frame_snapshot(runway),
+        "threshold_frame_fingerprint": threshold_frame_fingerprint(runway),
+    }
+    if status == "unavailable":
+        return {
+            **common,
+            "status": "unavailable",
+            "method": "none",
+            "observability": "unavailable",
+            "unavailable_reason": "selected final inbound pass has no fittable segment",
+            "diagnostics": {"bracket_rejections": []},
+        }
+    return {
+        **common,
+        "status": "estimated",
+        "method": "direct_linear_bracket",
+        "observability": "within_observed_support",
+        "event_time_s": 1.0,
+        "threshold_crossing_lat": runway.lat,
+        "threshold_crossing_lon": runway.lon,
+        "threshold_crossing_altitude_m": runway.elevation_hae_m + 15.0,
+        "altitude_datum": "hae",
+        "signed_cross_track_m": 0.0,
+        "source_sample_range": [0, 1],
+        "interpolation_fraction": 1.0,
+        "extrapolation_distance_m": 0.0,
+        "uncertainty": {"status": "uncalibrated"},
+    }
+
+
 def _source_track(
     paths: HarvestPaths,
     *,
@@ -99,14 +134,7 @@ def _source_track(
         "altitude_source": ALTITUDE_SOURCE,
         "altitude_datum": ALTITUDE_DATUM,
         "assignment": {"outcome": "assigned", "runway": runway},
-        "observed_threshold_event": {
-            "schema_version": "observed-threshold-event-v7",
-            "status": "estimated",
-            "method": "final_segment_robust_fit",
-            "method_version": 7,
-            "runway": runway,
-            "runway_data_fingerprint": runway_data_fingerprint(_runway(runway)),
-        },
+        "observed_threshold_event": _threshold_event(_runway(runway)),
         "samples": samples,
     }
     relative = f"assigned/{runway}/{key}.json"
@@ -177,14 +205,7 @@ def test_anchor_index_consumes_the_stored_assignment_anchor_without_refitting():
     track = {
         "flight_key": "TWOPASS_18_abc123_19700101T000009Z",
         "landing_sample_index": 9,
-        "observed_threshold_event": {
-            "schema_version": "observed-threshold-event-v7",
-            "status": "estimated",
-            "method": "final_segment_robust_fit",
-            "method_version": 7,
-            "runway": "18",
-            "runway_data_fingerprint": runway_data_fingerprint(_runway("18")),
-        },
+        "observed_threshold_event": _threshold_event(_runway("18")),
         "samples": [*first_pass, [10.0, 0.10, 0.0, 500.0], *final_pass],
     }
 
@@ -197,12 +218,8 @@ def test_anchor_index_rejects_an_obsolete_method_inside_the_current_schema():
         "flight_key": "OBSOLETE_METHOD",
         "landing_sample_index": 1,
         "observed_threshold_event": {
-            "schema_version": "observed-threshold-event-v7",
-            "status": "estimated",
+            **_threshold_event(runway),
             "method": "direct_lateral_fitted_vertical",
-            "method_version": 7,
-            "runway": "18",
-            "runway_data_fingerprint": runway_data_fingerprint(runway),
         },
         "samples": [[0.0, 0.1, 0.0, 100.0], [1.0, 0.0, 0.0, 25.0]],
     }
@@ -216,15 +233,7 @@ def test_anchor_index_accepts_a_current_unavailable_event_without_refitting():
     track = {
         "flight_key": "UNAVAILABLE",
         "landing_sample_index": 1,
-        "observed_threshold_event": {
-            "schema_version": "observed-threshold-event-v7",
-            "status": "unavailable",
-            "method": "final_segment_robust_fit",
-            "method_version": 7,
-            "runway": "18",
-            "runway_data_fingerprint": runway_data_fingerprint(runway),
-            "unavailable_reason": "selected final inbound pass has no fittable segment",
-        },
+        "observed_threshold_event": _threshold_event(runway, status="unavailable"),
         "samples": [[0.0, 0.1, 0.0, 100.0], [1.0, 0.0, 0.0, 25.0]],
     }
 

@@ -40,6 +40,7 @@ from trajectory_data_process.harvest.cifp import PathPoint, read_path_points
 
 Datum = Literal["msl", "hae"]
 RUNWAY_DATA_FINGERPRINT_SCHEMA = "harvest-runway-data-v1"
+THRESHOLD_FRAME_FINGERPRINT_SCHEMA = "threshold-physical-frame-v1"
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,53 @@ def require_matching_runway_data(event: dict, runway: Runway) -> None:
             f"track threshold event has a missing or stale runway-data fingerprint for "
             f"{runway.airport} {runway.ident}; run --reclassify-existing before "
             "--evaluate-only"
+        )
+
+
+def threshold_frame_snapshot(runway: Runway) -> dict:
+    """Physical LTP frame facts, excluding every evaluation-policy parameter.
+
+    TCH, glidepath scale, course width, and runway width decide how an event is
+    evaluated; they do not change the physical plane where the event was estimated.
+    Keeping them out allows a policy-only update to reuse the same measured event.
+    """
+    return {
+        "schema_version": THRESHOLD_FRAME_FINGERPRINT_SCHEMA,
+        "airport": runway.airport,
+        "runway": runway.ident,
+        "threshold_lat": runway.lat,
+        "threshold_lon": runway.lon,
+        "threshold_elevation_hae_m": runway.elevation_hae_m,
+        "threshold_elevation_msl_m": runway.elevation_msl_m,
+        "hae_minus_msl_m": runway.hae_minus_msl_m,
+        "runway_course_deg": runway.course_deg,
+        "runway_source_cycle": runway.runway_source_cycle,
+        "procedure_source_cycle": runway.procedure_source_cycle,
+        "position_source": runway.position_source,
+        "vertical_source": runway.vertical_source,
+    }
+
+
+def threshold_frame_fingerprint(runway: Runway) -> str:
+    """Stable hash binding a derived event to its physical threshold frame."""
+    encoded = json.dumps(
+        threshold_frame_snapshot(runway),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def require_matching_threshold_frame(event: dict, runway: Runway) -> None:
+    """Reject an event estimated in a different LTP frame or data cycle."""
+    stored = event.get("threshold_frame_fingerprint")
+    current = threshold_frame_fingerprint(runway)
+    if not isinstance(stored, str) or stored != current:
+        raise ValueError(
+            f"track threshold event has a missing or stale physical-frame "
+            f"fingerprint for {runway.airport} {runway.ident}; run "
+            "--reclassify-existing before --evaluate-only"
         )
 
 

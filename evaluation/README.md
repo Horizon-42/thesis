@@ -19,22 +19,20 @@ The normative rationale and source audit are in
 ```text
 raw ADS-B samples
   -> runway assignment + producer-side threshold-event estimation
-  -> policy-free observed_threshold_event v7
+  -> policy-free runway-threshold-event-v1
   -> explicit HAE/MSL conversion
   -> runway/procedure-specific terminal verdict
 ```
 
-Observed evaluation never imports or calls `fit_final_segment()`. The harvest stage
-uses a source-valid threshold bracket, when available, to choose the runway and anchor
-both ends of the physical inbound pass. A nearest-threshold straight seed excludes any
-earlier base-to-final turn before one robust 3D fit supplies both event coordinates;
-its preferred 3 km window and 4/5 km sensitivity candidates cannot search outside that
-selected straight pass. It
-serializes one source range, rejected-sample audit, and diagnostic uncertainty. Arrival
-preparation and CZML reuse the stored landing anchor/event as well. Earlier derived
-events must be reclassified from their stored samples and protected ADS-B metadata
-sidecars. See
-[the fit-model optimization design](../final_approach/FIT_MODEL_OPTIMIZATION.md).
+Observed evaluation never imports or calls `fit_final_segment()`. The producer has two
+mutually exclusive physical cases. A source-valid pair that brackets the threshold
+plane is interpolated directly in 3D with one fraction. If the selected inbound pass
+ends before the plane, the event reuses the single `[-5000, -300] m` robust fit that
+already won runway assignment; it does not fit again. A plausible bracket that fails
+source integrity is unavailable and cannot silently fall back to extrapolation.
+Arrival preparation and CZML reuse the stored landing anchor/event. See the
+[first-principles archive](../docs/threshold-event-first-principles-development.zh.md)
+and the [implemented simplified design](../docs/threshold-event-simplified-implementation.zh.md).
 
 Optimized and predicted records use their terminal state and must be at the
 threshold plane. Along-track and cross-track values are reported separately;
@@ -81,9 +79,9 @@ All subjects use the same point-estimate rule:
 - `fail`: the estimate is outside the bound;
 - `indeterminate`: the event or an applicable bound is unavailable.
 
-Observed event-v7 uncertainty and its 95% interval remain in the report as
-estimator-quality diagnostics. They do not shrink the aviation bound and do
-not change pass/fail into `indeterminate`.
+Observed event uncertainty is currently marked `uncalibrated`; no numeric 95% interval
+is manufactured. This does not shrink or expand the aviation bound and does not change
+the point-estimate pass/fail rule.
 
 ## Inputs and identity
 
@@ -135,8 +133,8 @@ conda run -n aeroviz python -m trajectory_data_process.harvest \
 
 `--evaluate-only` never changes assignment output. It rejects an observed event
 whose runway-frame fingerprint does not match the active FAA runway/CIFP data.
-It also rejects a tracks manifest that predates source-timing cleanup. The canonical
-five-airport harvest is already migrated. To migrate another legacy downloaded dataset
+It also rejects a tracks manifest that predates source-timing cleanup. To migrate a
+legacy downloaded dataset
 without modifying it, use distinct legacy and staging roots:
 
 ```bash
@@ -146,9 +144,10 @@ conda run -n aeroviz python -m trajectory_data_process.harvest \
   --output /path/to/new-source-timed-staging
 ```
 
-The observed event is then fitted once from fresh samples whose horizontal clock is
-OpenSky `lastposupdate`; held state rows and position-update gaps over 15 seconds do not
-enter the fit. `geoaltitude` remains HAE. Because OpenSky provides no separate geometric
+Fresh samples use OpenSky `lastposupdate` as their horizontal clock; held state rows and
+position-update gaps over 15 seconds do not enter the track. A direct event is
+interpolated from its two source samples, while a censored event reuses assignment's
+one fit. `geoaltitude` remains HAE. Because OpenSky provides no separate geometric
 altitude update timestamp, height changes under a held horizontal position are audited
 in the track's `source_integrity` block and are not emitted as additional 3D samples.
 To rebuild assignment, the threshold estimate, arrivals, evaluation, CZML, and
@@ -178,7 +177,7 @@ normalize two different physical spans and report the result as path error.
 - complete assessment contexts and resolved bounds;
 - the published-TCH vertical reference, DO-229 minimum-clamped scale model,
   `15 m` one-sided FSD, ICAO `0.5` fraction, and resolved `7.5 m` bound;
-- event/point-verdict/diagnostic-uncertainty/reference-comparison methodology;
+- event/point-verdict/uncalibrated-uncertainty/reference-comparison methodology;
 - three-way verdict counts;
 - per-flight signed along-track, cross-track, and vertical deviations;
 - component and composite results;

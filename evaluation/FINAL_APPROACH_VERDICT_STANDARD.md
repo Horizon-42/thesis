@@ -145,64 +145,72 @@ Do not extrapolate a computed trajectory to manufacture a pass.
 
 The last ADS-B point often represents receiver loss rather than the threshold.
 The harvest stage therefore selects the runway and physical inbound pass, then
-produces the threshold event before evaluation. A structurally valid threshold
-bracket may select and terminate that pass, but the published event coordinates
-come from one producer-side robust three-dimensional final-segment fit. The fit
-uses the same retained source samples for lateral and vertical coordinates.
+produces the threshold event before evaluation. The production resolver has exactly
+two mutually exclusive physical cases.
 
-The bracket's displacement check uses ADS-B `lastposupdate` and reported ground
-speed. State-row `time` is not a position clock. Direct vertical interpolation
-was rejected after a fixed cross-airport experiment failed its pre-registered
-clock-consistency and transfer criteria. Consequently there is no hybrid
-direct-lateral/fitted-vertical event and no direct raw bracket-altitude event.
+For adjacent source-timed samples with runway-frame along coordinates
+$a_i<0\le a_{i+1}$, define
 
-The harvested track record must serialize a small
-`observed_threshold_event`. The event
-contains measurement and fitting facts only:
+$$
+\alpha=\frac{-a_i}{a_{i+1}-a_i}.
+$$
+
+The direct event uses this same $\alpha$ for time, cross-track and HAE height. It
+does not run `fit_final_segment()`. If the winning inbound pass ends strictly before
+the threshold, the censored event reuses the one robust `[-5000,-300] m` fit that
+already won runway assignment. The event producer never runs a second fit or a
+multi-window ensemble. A plausible geometric bracket that fails source integrity is
+`invalid_support`; it cannot silently fall back to an extrapolated fit.
+
+The bracket displacement check uses the stored track's ADS-B reported ground speed.
+The track has already rewritten sample time to `lastposupdate`; state-row `time` is not
+used as a second position clock.
+
+The harvested track record serializes `runway-threshold-event-v1`. It contains only
+physical measurement/estimation facts:
 
 ```text
 status                         estimated or unavailable
-method and method version
+observability                  within_observed_support, right_censored,
+                               invalid_support, or unavailable
+method                         direct_linear_bracket, censored_robust_line, or none
 runway
-runway_data_fingerprint         exact runway/frame/cycle binding
+threshold_frame_snapshot       physical LTP frame and source cycles only
+threshold_frame_fingerprint    canonical physical-frame binding
 threshold_crossing_lat and threshold_crossing_lon
 threshold_crossing_altitude_m
 altitude_datum                 HAE for the current harvest
 signed_cross_track_m           right-positive
-cross_track_sigma_m            effective 95% margin / 1.96
-altitude_sigma_m               effective 95% margin / 1.96
-source_sample_range             inclusive original fit indices
-fit window/candidate diagnostics
-sample_count and along-track span
-cross-track and altitude residual diagnostics
-rejected_sample_indices         original indices excluded as gross altitude corruption
-extrapolation_m
-threshold_bracket               optional pass-anchor audit, not the event estimator
-bracket_rejections              rejected candidate audit
+event_time_s                   interpolated for direct; null for censored
+source_sample_range            bracket pair or inclusive winning-fit indices
+interpolation_fraction         alpha for direct; null for censored
+extrapolation_distance_m       zero for direct; positive for censored
+uncertainty                    {status: uncalibrated}
+source_integrity and diagnostics
 unavailable_reason             only when no event was produced
 ```
 
-For every estimated observed event:
+For a direct event:
 
 ```text
-signed_cross_track_m = primary_event_fit.cross_at_threshold_m
+signed_cross_track_m = (1-alpha) * cross_i + alpha * cross_(i+1)
 
 threshold_crossing_altitude_hae
-    = runway threshold elevation HAE
-    + primary_event_fit.height_at_threshold_m
+    = (1-alpha) * altitude_i + alpha * altitude_(i+1)
 ```
 
-The crossing latitude/longitude is the corresponding fitted `s = 0`,
-signed-cross-track point. Storing that point lets
-rendering and evaluation reuse the estimate without reconstructing it from a
-later runway-data cycle. The estimator details and calibration limits are in
-[`final_approach/FIT_MODEL_OPTIMIZATION.md`](../final_approach/FIT_MODEL_OPTIMIZATION.md).
+For a censored event, both coordinates are the intercepts of the same already selected
+assignment fit. The crossing latitude/longitude is the inverse projection of
+`(along=0, signed_cross, height)` in the stored physical frame. Rendering and
+evaluation reuse this point without reconstruction. The strict mathematical design,
+source-only experiment and implementation limits are in
+[`docs/threshold-event-simplified-implementation.zh.md`](../docs/threshold-event-simplified-implementation.zh.md).
 
-The event also carries an audit snapshot and canonical fingerprint of every
-runway fact that can affect assignment or interpretation: threshold position,
-course, HAE/MSL elevations and datum offset, runway width, TCH, glidepath,
-LPV course width, source identifiers, and effective FAA runway/CIFP cycles.
-Consumers reject a missing or mismatched fingerprint. The operator then runs
+The event's physical-frame fingerprint covers threshold position, course, HAE/MSL
+elevations, datum offset, physical source identifiers and effective source cycles. It
+deliberately excludes runway width, TCH, glidepath and LPV course width: those are
+evaluation policy. The report separately hashes the complete evaluation context.
+Consumers reject a missing or mismatched physical fingerprint. The operator then runs
 `--reclassify-existing`, which recomputes derived assignment/event data from the
 stored HAE samples without downloading ADS-B again.
 
@@ -213,8 +221,9 @@ remains the stable record identity and is not redefined inside the event.
 Evaluation consumes this event. It returns `indeterminate` when its status is
 not `estimated`, required provenance is invalid, or an applicable component
 bound is unavailable. It does not select samples, fit lines, or replace the
-stored estimate. A valid estimate is classified against the bound even when
-its diagnostic uncertainty interval crosses that bound.
+stored estimate. Numeric estimator uncertainty is not yet calibrated, so the event
+does not publish a fabricated confidence interval. A valid point estimate is still
+classified against the applicable bound.
 
 Arrival preparation uses the already stored landing-sample index. CZML uses
 the stored event and its source range to render any explicitly labelled
@@ -432,7 +441,7 @@ RNP APCH LNAV/VNAV (Baro-VNAV) terminal geometric verdict
 
 ## 6. Estimator quality and invalid values
 
-### 6.1 Point verdict and diagnostic interval
+### 6.1 Point verdict and uncertainty status
 
 For signed event estimate `e` and inclusive component bounds `[L, U]`:
 
@@ -442,10 +451,11 @@ fail          otherwise
 indeterminate only when e or an applicable bound is unavailable
 ```
 
-When a producer supplies an uncertainty scale `sigma`, the report may also
-serialize the diagnostic 95% interval `e ± 1.96 sigma`. That interval describes
-the estimator or data source; it is not a second, stricter aviation limit and
-does not participate in the verdict.
+The current observed-event producer has no validated numeric uncertainty model. It
+therefore serializes `uncertainty.status = uncalibrated`, and the report emits no
+numeric interval. A later producer may publish `e ± 1.96 sigma` only after a separate
+calibration establishes what `sigma` means. Such an interval would describe estimator
+quality; it would not be a second aviation limit and would not participate in verdicts.
 
 This separation is essential. The official `±7.5 m` LPV value is already the
 normal-operation deviation bound derived from one-half FSD. Requiring a noisy
@@ -454,11 +464,9 @@ the standard and makes a zero-error estimate impossible to pass whenever its
 uncertainty exceeds `7.5 m`. Conversely, an out-of-bound point must not become
 `indeterminate` merely because a wide interval overlaps the gate.
 
-Observed estimator diagnostics should quantify sources that can be measured,
-including fit regression, extrapolation sensitivity, timing, and altitude
-quantization, and list material unmodelled sources. These values support data-
-quality analysis and estimator validation; they do not claim avionics
-integrity and do not change the trajectory verdict.
+Observed diagnostics preserve source range, interpolation/extrapolation status, timing,
+speed consistency, and censored-fit residual facts. They support future calibration;
+they do not currently claim a confidence level or avionics integrity.
 
 ### 6.2 Finite validation
 
@@ -519,14 +527,15 @@ Each report must preserve:
 - runway and procedure identities;
 - source documents and effective cycles;
 - event method and status;
-- the observed event's source sample range, fit window, extrapolation,
-  diagnostics, uncertainty, altitude datum, and producer version;
+- the observed event's observability, source sample range,
+  interpolation/extrapolation distance, diagnostics, uncertainty status, altitude
+  datum, physical-frame snapshot, and schema version;
 - signed `s`, `x`, and `z` deviations;
 - guidance, runway, effective lateral, and vertical bounds;
 - LPV vertical scale model (`do229_lpv_angular_min_clamped`), one-sided minimum
   FSD (`15 m`), ICAO fraction (`0.5`), and resolved bound (`7.5 m`);
-- diagnostic uncertainty intervals and missing uncertainty sources, explicitly
-  marked as non-verdict metadata;
+- calibrated diagnostic intervals when available, otherwise the explicit
+  `uncalibrated` status, always marked as non-verdict metadata;
 - lateral, vertical, and composite results; and
 - every evaluation parameter that can change a verdict.
 
@@ -699,12 +708,11 @@ The separately approved threshold-estimator optimization may change only the
 policy-free derived observed event and its producer-side fitting. It must not
 move fitting into evaluation or add approach policy to trajectory/model data.
 
-The harvested-track record already contains the policy-free threshold event,
-and the current runway model already carries published CIFP TCH. Therefore this
-correction requires neither re-harvesting nor reclassification when the runway-
-data fingerprint is current. Evaluation reports are regenerable; retire the v2
-report contract, publish the corrected v3 reports, and do not add a dual-read
-compatibility path for stale derived reports.
+The current runway model already carries published CIFP TCH. A pure evaluation-policy
+change therefore requires neither re-harvesting nor event reclassification when the
+physical-frame fingerprint is current. An event-estimator schema change does require
+local `--reclassify-existing`, but never a new OpenSky download. Derived events and
+reports have no dual-read compatibility path.
 
 ## 13. Acceptance criteria
 
@@ -717,8 +725,8 @@ The corrected implementation is accepted when:
    latter, lateral remains evaluable while vertical and overall are
    indeterminate;
 3. along-track and cross-track error are distinct;
-4. the winning runway-assignment fit produces one serialized, policy-free
-   observed threshold event with uncertainty;
+4. a valid bracket produces one direct 3D event without fitting, while a
+   right-censored pass reuses the winning assignment fit without a second fit;
 5. evaluation, arrival preparation, and CZML do not call
    `fit_final_segment()` for an assigned stored track;
 6. non-finite values cannot pass or enter JSON;
@@ -737,7 +745,7 @@ The corrected implementation is accepted when:
     FSD, ICAO `0.5` fraction, resolved `7.5 m` bound, and the source section
     indices from Section 11; and
 16. boundary tests cover exact `±7.5 m`, values just inside/outside, non-finite
-    values, and prove that diagnostic uncertainty intervals do not change an
-    otherwise valid point verdict;
-17. a zero-deviation extrapolated event can pass even when its diagnostic
-    uncertainty exceeds the vertical bound.
+    values, and prove that missing calibration does not change an otherwise valid
+    point verdict; and
+17. observed events remain explicitly distinguishable as direct, right-censored,
+    invalid support, or unavailable.

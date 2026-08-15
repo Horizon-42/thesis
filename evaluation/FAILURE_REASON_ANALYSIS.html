@@ -160,22 +160,24 @@
 <main>
   <header>
     <h1>最终进近 Evaluation 失败原因分析</h1>
-    <p>基于五个美国机场的 <code>terminal-approach-evaluation-v3</code> observed 报告；统计对象是已进入 LPV 阈值判决的 42,874 条航迹。</p>
+    <p>基于五个美国机场全量迁移后的 <code>terminal-approach-evaluation-v3</code> observed 报告；统计对象是已进入 LPV 阈值判决的 42,746 条航迹。</p>
     <div class="meta">
       <span class="pill">生成日期：2026-08-15</span>
       <span class="pill">KMSY · KRDU · KSJC · KSMF · KSTL</span>
-      <span class="pill">v6 当前结果 · producer 单次拟合</span>
+      <span class="pill">threshold-event v1 · direct 优先 · evaluation 不 refit</span>
     </div>
   </header>
 
   <nav class="jump-nav" aria-label="报告导航">
     <a href="#quick-read">30 秒总览</a>
+    <a href="#what-changed">新旧区别</a>
     <a href="#pipeline-map">数据流</a>
-    <a href="#fit-window">Fitting 图解</a>
+    <a href="#fit-window">Estimator 图解</a>
     <a href="#verdict-map">判决标准</a>
     <a href="#diagnostic-matrix">排障矩阵</a>
     <a href="#results">结果</a>
-    <a href="#bracket-diagnostic">Bracket 诊断</a>
+    <a href="#method-diagnostic">方法分层</a>
+    <a href="#remaining-causes">剩余原因</a>
     <a href="#sources">来源</a>
   </nav>
 
@@ -183,9 +185,10 @@
     <div class="callout">
       <strong>本页已按 source-timed canonical 数据重新生成。</strong>
       五机场均已使用现有 canonical tracks 执行 <code>--reclassify-existing</code>，以
-      <code>lastposupdate</code> 建立位置时序并重新生成 threshold-event v6、arrivals 和
-      observed evaluation。evaluation 只消费 producer 序列化的阈值事件，不重新 fitting；
-      本页也只读取新报告，不读取原始轨迹后另行估计。
+      <code>lastposupdate</code> 建立位置时序并重新生成 <code>runway-threshold-event-v1</code>、
+      arrivals 和 observed evaluation。四个有 pre-run 基线的机场 source-only SHA-256
+      前后完全一致；evaluation 只消费 producer 序列化事件，不重新 fitting。本页也只读
+      新报告和事件 diagnostics，不从原始轨迹另行制造 event。
     </div>
   </section>
 
@@ -199,31 +202,69 @@
       </div>
       <div class="card signal-card" style="--signal:#8d4eb2">
         <div class="eyebrow">Observed 数据路径</div>
-        <div class="big">Producer 只 fit 一次</div>
-        <div class="explain">Bracket 选择跑道和 physical pass；robust OLS 产生 v6 event；evaluation 禁止重新 fitting。</div>
+        <div class="big">Direct 不 fit</div>
+        <div class="explain">有 source-valid bracket 时，同一个 α 直接插值时间、横向和高度；只有 right-censored 才复用 assignment fit。</div>
       </div>
       <div class="card signal-card" style="--signal:#c93b4a">
         <div class="eyebrow">真正改变 verdict 的 gate</div>
         <div class="big">横向跑道边缘 · 垂直 ±7.5 m</div>
-        <div class="explain">横向为 <code>min(½ LPV FSD, ½ runway width)</code>；本页的 30 s、25 m/s、100 m 等值都不是 verdict gate。</div>
+        <div class="explain">横向为 <code>min(½ LPV FSD, ½ runway width)</code>；本页的 15 s、25 m/s、100 m 等值都不是 verdict gate。</div>
       </div>
       <div class="card signal-card" style="--signal:#d28a10">
         <div class="eyebrow">当前最值得追查的信号</div>
-        <div class="big">45.03%</div>
-        <div class="explain">6,153 个有 bracket 的正式 fail 中，2,771 个 bracket 点在同一 gate 内。它提示 fit 与近阈值样本存在系统性分歧，需查模型/数据，不代表应改标准。</div>
+        <div class="big">17.7% → 78.8%</div>
+        <div class="explain">Direct bracket 的 fail rate 从位置间隔 ≤2 s 时约 17.7%，升到 &gt;5 s 时 78.8%；这是时序/高度同步风险信号。</div>
       </div>
     </div>
   </section>
 
+  <section id="what-changed">
+    <h2>这次更新与之前的主要区别</h2>
+    <div class="grid two">
+      <div class="card">
+        <h3>之前：v6 全部发布 fitted intercept</h3>
+        <div class="formula">bracket → 选择 runway / physical pass
+selected pass → 3/4/5 km candidate fits
+robust seed + OLS → s=0 截距
+截距 → observed event</div>
+        <p>即使轨迹已经用相邻样本直接跨过 LTP，bracket 也只是 anchor，正式 event 仍来自较远最终段的拟合外推。这样会平滑近阈值高度，但也可能使 event 与实际跨越样本分歧，并产生横向长尾。</p>
+      </div>
+      <div class="card">
+        <h3>现在：v1 按可观测性选择唯一方法</h3>
+        <div class="formula">within observed support
+  → direct_linear_bracket（零 fit）
+
+right-censored before LTP
+  → reuse Assignment.fit（零次 event-side refit）
+
+invalid / insufficient evidence
+  → unavailable</div>
+        <p>Direct 的时间、横向和垂直共享同一个插值系数 α；不再产生 hybrid event。Censored 只复用一次固定窗口 fit，不再维护候选窗口、ensemble 或 runtime 旧版本 fallback。</p>
+      </div>
+    </div>
+    <table style="margin-top:16px">
+      <thead><tr><th>项目</th><th>旧 HTML / v6</th><th>本次 v1</th><th>变化</th></tr></thead>
+      <tbody>
+        <tr><td>可评估</td><td>42,874</td><td>42,746</td><td>−128；全量重分类后 cohort 略有变化</td></tr>
+        <tr><td>Pass</td><td>32,904</td><td>30,928</td><td>−1,976</td></tr>
+        <tr><td>Fail</td><td>9,843</td><td>11,804</td><td>+1,961</td></tr>
+        <tr><td>Indeterminate</td><td>127</td><td>14</td><td>−113；严格分支减少了含混结果</td></tr>
+        <tr><td>横向相关 fail</td><td>689</td><td>65</td><td>极端 fitted lateral 长尾基本消失</td></tr>
+        <tr><td>判决标准</td><td>跑道半宽 + LPV ±7.5 m</td><td>完全相同</td><td><strong>没有为 pass rate 调 gate</strong></td></tr>
+      </tbody>
+    </table>
+    <div class="callout warning" style="margin-top:14px"><strong>不能把 +1,961 个 fail 简单解释为“新算法更差”。</strong>本次同时改变了派生 event 方法和重分类 cohort，且 <code>flight_key</code> 会随 runway/outcome 改变，无法仅凭聚合数做严格逐航班因果配对。能确定的是：v1 不再用远端 fit 覆盖一个已经观测到的 threshold crossing，因此 KMSY/KSTL 的近阈值高度偏高信号被直接暴露；KRDU、KSJC、KSMF 则明显减少 fail。</div>
+  </section>
+
   <section id="pipeline-map">
-    <h2>一张图看懂：哪里 fit，哪里判决</h2>
+    <h2>一张图看懂：哪里估计 event，哪里应用判决</h2>
     <div class="pipeline" aria-label="Observed 与 computed 轨迹的数据流">
       <div class="lane-label">Observed<br>ADS-B</div>
       <div class="stage source">时序 HAE 样本<small>raw track 不写入标准</small></div>
       <div class="flow-arrow">→</div>
-      <div class="stage integrity">Bracket + pass<small>跑道/航段/源完整性</small></div>
+      <div class="stage integrity">可观测性分支<small>direct / censored / unavailable</small></div>
       <div class="flow-arrow">→</div>
-      <div class="stage fit">Robust 3D fit<small>生成 event-v6</small></div>
+      <div class="stage fit">Threshold event v1<small>direct 插值或复用 fit</small></div>
       <div class="flow-arrow">→</div>
       <div class="stage gate">Evaluation<small>LPV / LNAV-VNAV gates</small></div>
 
@@ -251,7 +292,7 @@
           <dl class="metric-list">
             <dt>Bracket 横向结构</dt><dd>≤ 1000 m</dd>
             <dt>Bracket 高度结构</dt><dd>≤ 100 m</dd>
-            <dt>Position update gap</dt><dd>≤ 30 s</dd>
+            <dt>Position coverage gap</dt><dd>≤ 15 s</dd>
             <dt>速度差</dt><dd>≤ 25 m/s</dd>
             <dt>速度比</dt><dd>0.5–1.5</dd>
           </dl>
@@ -259,16 +300,16 @@
         </div>
       </div>
       <div class="card boundary-card fit">
-        <h3>② Fitting 可用性/诊断</h3>
+        <h3>② Estimator 可用性/诊断</h3>
         <div class="body">
           <dl class="metric-list">
-            <dt>Primary window</dt><dd>−3000…−300 m</dd>
-            <dt>最少保留样本</dt><dd>8</dd>
-            <dt>最短 span</dt><dd>500 m</dd>
-            <dt>Outlier cut</dt><dd>3.03 × scale</dd>
-            <dt>Lateral 95% floor</dt><dd>10.5 m</dd>
+            <dt>Direct 支持</dt><dd>aᵢ&lt;0≤aᵢ₊₁</dd>
+            <dt>Direct fit 次数</dt><dd>0</dd>
+            <dt>Censored window</dt><dd>−5000…−300 m</dd>
+            <dt>Censored fit</dt><dd>复用 winner</dd>
+            <dt>Numeric uncertainty</dt><dd>uncalibrated</dd>
           </dl>
-          <div class="scope-note">用途：决定能否产生可信 event，并报告 uncertainty。<strong>不改变 LPV gate。</strong></div>
+          <div class="scope-note">用途：按可观测性取得同一个 LTP event。<strong>没有 ensemble，也不改变 LPV gate。</strong></div>
         </div>
       </div>
       <div class="card boundary-card gate">
@@ -288,56 +329,47 @@
   </section>
 
   <section id="fit-window">
-    <h2>Fitting 图解：只允许选定 pass 向阈值外推</h2>
+    <h2>Estimator 图解：观测域内插值，观测域外才拟合</h2>
     <div class="svg-panel">
-      <svg viewBox="0 0 1000 345" role="img" aria-label="v6 最终进近拟合窗口和阈值事件示意图">
+      <svg viewBox="0 0 1000 430" role="img" aria-label="threshold-event v1 direct 与 censored 两个互斥分支">
         <defs>
           <marker id="arrowHead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#68758c"/></marker>
         </defs>
-        <rect x="0" y="0" width="1000" height="345" fill="#fbfcfe"/>
-        <text x="32" y="30" font-size="15" font-weight="700" fill="#253657">沿跑道纵剖面（示意，非某条真实航迹）</text>
+        <rect width="1000" height="430" fill="#fbfcfe"/>
+        <text x="30" y="30" font-size="15" font-weight="700" fill="#253657">同一个目标：导航参考点穿过 LTP 平面 a=0 的三维事件</text>
+        <line x1="900" y1="48" x2="900" y2="385" stroke="#c93b4a" stroke-width="3" stroke-dasharray="6 5"/>
+        <text x="908" y="63" font-size="12" fill="#a52737" font-weight="700">LTP / a=0</text>
 
-        <text x="30" y="69" font-size="12" fill="#667085">Assignment</text>
-        <rect x="90" y="52" width="760" height="22" rx="5" fill="#dfe5ee"/>
-        <text x="470" y="68" text-anchor="middle" font-size="11" fill="#48566e">−5000 … −300 m</text>
+        <rect x="28" y="55" width="840" height="145" rx="12" fill="#effaf4" stroke="#8ecbad"/>
+        <text x="48" y="82" font-size="14" font-weight="700" fill="#146c43">A · within_observed_support → direct_linear_bracket</text>
+        <line x1="610" y1="155" x2="940" y2="100" stroke="#198754" stroke-width="3"/>
+        <circle cx="842" cy="116" r="8" fill="#5468d4" stroke="#fff" stroke-width="3"/>
+        <circle cx="930" cy="102" r="8" fill="#5468d4" stroke="#fff" stroke-width="3"/>
+        <circle cx="900" cy="107" r="9" fill="#198754" stroke="#fff" stroke-width="3"/>
+        <text x="620" y="111" font-size="12" fill="#344054">aᵢ &lt; 0 ≤ aᵢ₊₁</text>
+        <text x="620" y="131" font-size="12" fill="#344054">α = −aᵢ / (aᵢ₊₁−aᵢ)</text>
+        <text x="48" y="118" font-size="12" fill="#344054">时间、cross-track、高度使用同一个 α</text>
+        <text x="48" y="141" font-size="12" fill="#344054">fit 次数 = 0；extrapolation = 0</text>
+        <text x="48" y="164" font-size="12" fill="#344054">当前 evaluated：28,130；fail 9,219（32.77%）</text>
+        <text x="48" y="187" font-size="11" fill="#667085">这里的误差直接来自跨阈值两端的 source-timed HAE 样本。</text>
 
-        <text x="30" y="103" font-size="12" fill="#667085">5 km candidate</text>
-        <rect x="90" y="86" width="760" height="18" rx="4" fill="#d8ddfb"/>
-        <text x="30" y="132" font-size="12" fill="#667085">4 km candidate</text>
-        <rect x="242" y="115" width="608" height="18" rx="4" fill="#bdc6f5"/>
-        <text x="30" y="161" font-size="12" fill="#334b78" font-weight="700">Primary 3 km</text>
-        <rect x="394" y="144" width="456" height="20" rx="4" fill="#7788df"/>
+        <rect x="28" y="220" width="840" height="165" rx="12" fill="#f0f2ff" stroke="#a8b1e8"/>
+        <text x="48" y="247" font-size="14" font-weight="700" fill="#334b78">B · right_censored → censored_robust_line</text>
+        <rect x="90" y="286" width="650" height="18" rx="4" fill="#7788df"/>
+        <text x="415" y="300" text-anchor="middle" font-size="11" fill="#fff">唯一 assignment fit window：−5000…−300 m</text>
+        <line x1="330" y1="350" x2="900" y2="321" stroke="#5468d4" stroke-width="3"/>
+        <circle cx="405" cy="346" r="5" fill="#5468d4"/><circle cx="520" cy="340" r="5" fill="#5468d4"/>
+        <circle cx="640" cy="334" r="5" fill="#5468d4"/><circle cx="740" cy="330" r="5" fill="#5468d4"/>
+        <circle cx="900" cy="321" r="9" fill="#8d4eb2" stroke="#fff" stroke-width="3"/>
+        <line x1="742" y1="330" x2="894" y2="322" stroke="#68758c" stroke-width="2" marker-end="url(#arrowHead)"/>
+        <text x="48" y="275" font-size="12" fill="#344054">没有阈值后样本；只复用 winning Assignment.fit，不在 event producer 二次拟合</text>
+        <text x="48" y="373" font-size="12" fill="#344054">当前 evaluated：14,602；fail 2,585（17.70%）；uncertainty = uncalibrated</text>
 
-        <rect x="850" y="45" width="50" height="206" fill="#fff2d7"/>
-        <text x="875" y="183" text-anchor="middle" font-size="10" fill="#8a6108" transform="rotate(-90 875 183)">不进入 fit：−300…0 m</text>
-        <line x1="900" y1="40" x2="900" y2="267" stroke="#c93b4a" stroke-width="3" stroke-dasharray="6 5"/>
-        <text x="908" y="58" font-size="12" fill="#a52737" font-weight="700">LTP / s=0</text>
-
-        <line x1="394" y1="244" x2="900" y2="216" stroke="#5468d4" stroke-width="3"/>
-        <circle cx="420" cy="242" r="5" fill="#5468d4"/><circle cx="495" cy="236" r="5" fill="#5468d4"/>
-        <circle cx="570" cy="235" r="5" fill="#5468d4"/><circle cx="648" cy="229" r="5" fill="#5468d4"/>
-        <circle cx="728" cy="224" r="5" fill="#5468d4"/><circle cx="815" cy="220" r="5" fill="#5468d4"/>
-        <circle cx="630" cy="189" r="7" fill="#fff" stroke="#c93b4a" stroke-width="3"/>
-        <line x1="638" y1="186" x2="694" y2="173" stroke="#c93b4a" marker-end="url(#arrowHead)"/>
-        <text x="701" y="174" font-size="11" fill="#a52737">高度 gross outlier：不进入 OLS</text>
-
-        <circle cx="900" cy="216" r="8" fill="#198754" stroke="#fff" stroke-width="3"/>
-        <text x="908" y="211" font-size="11" fill="#146c43" font-weight="700">发布的 fitted intercept</text>
-        <line x1="850" y1="220" x2="895" y2="217" stroke="#68758c" stroke-width="2" marker-end="url(#arrowHead)"/>
-        <text x="780" y="203" font-size="11" fill="#667085">外推距离</text>
-
-        <circle cx="883" cy="274" r="6" fill="#d99a17"/><circle cx="922" cy="274" r="6" fill="#d99a17"/>
-        <line x1="883" y1="274" x2="922" y2="274" stroke="#d99a17" stroke-width="3"/>
-        <text x="762" y="295" font-size="11" fill="#8a6108">Bracket 选择 pass / anchor；黄点插值不是发布 event</text>
-
-        <line x1="90" y1="313" x2="900" y2="313" stroke="#68758c" stroke-width="1.5" marker-end="url(#arrowHead)"/>
-        <g fill="#667085" font-size="11" text-anchor="middle">
-          <text x="90" y="332">−5000</text><text x="242" y="332">−4000</text><text x="394" y="332">−3000</text>
-          <text x="850" y="332">−300</text><text x="900" y="332">0 m</text>
-        </g>
+        <line x1="90" y1="407" x2="900" y2="407" stroke="#68758c" stroke-width="1.5" marker-end="url(#arrowHead)"/>
+        <g fill="#667085" font-size="11" text-anchor="middle"><text x="90" y="424">−5000</text><text x="740" y="424">−300</text><text x="900" y="424">0 m</text></g>
       </svg>
     </div>
-    <p class="diagram-caption">读图重点：蓝色 OLS 截距才是 event；黄色 bracket 只锚定选定 pass。若黄色 bracket 属于后一次 pass，而该 pass 在 −300 m 之前无可拟合样本，v6 返回 unavailable，绝不回到更早的一次 approach。</p>
+    <p class="diagram-caption">读图重点：A 与 B 是由可观测性决定的互斥数学问题，不是两个可调模式。Direct 是域内插值；censored 是域外推断。若 plausible bracket 的 source integrity 失败，结果必须 unavailable，不能降级成 fit 来绕过坏数据。</p>
   </section>
 
   <section id="verdict-map">
@@ -386,29 +418,29 @@
       <div class="verdict-box pass"><strong>PASS</strong>横向和垂直都通过</div>
       <div class="verdict-box indeterminate"><strong>INDETERMINATE</strong>没有 fail，但事件或适用 bound 不可用</div>
     </div>
-    <p class="footnote"><strong>σ 不进入上面的三值逻辑。</strong>置信区间跨 gate 仍按 point estimate 判决；否则会把航空标准错误地收紧成“整个 estimator interval 都必须落在 gate 内”。</p>
+    <p class="footnote"><strong>Estimator uncertainty 不进入上面的三值逻辑。</strong>v1 observed uncertainty 当前是 <code>uncalibrated</code>；未来即使得到校准 interval，也不能把航空标准偷偷收紧成“整个 interval 都必须落在 gate 内”。</p>
   </section>
 
   <section id="diagnostic-matrix">
     <h2>看到异常时先查什么：诊断矩阵</h2>
     <div class="grid cards">
-      <div class="card"><div class="label">涉及垂直的 fail</div><div class="value" style="color:var(--vertical)">9,761</div><div class="sub">99.17% 的全部 fail，先查方向、TCH/datum 与拟合截距</div></div>
-      <div class="card"><div class="label">横向越界超过 gate 50 m+</div><div class="value" style="color:var(--lateral)">547</div><div class="sub">不像正常中心线散布，优先查 runway/pass selection</div></div>
-      <div class="card"><div class="label">Bracket 对照会 pass</div><div class="value" style="color:var(--both)">2,771</div><div class="sub">占 bracketed fail 45.03%，是 fit/source 分歧诊断</div></div>
-      <div class="card"><div class="label">Indeterminate</div><div class="value" style="color:var(--indeterminate)">127</div><div class="sub">检查 unavailable reason；不要在图上误画为 fail</div></div>
+      <div class="card"><div class="label">涉及垂直的 fail</div><div class="value" style="color:var(--vertical)">11,792</div><div class="sub">99.90% 的全部 fail；横向标准不是当前主矛盾</div></div>
+      <div class="card"><div class="label">Direct event fail</div><div class="value" style="color:var(--both)">9,219</div><div class="sub">这些不是 fit 截距；先查 bracket 时间间隔和 geo-altitude</div></div>
+      <div class="card"><div class="label">Direct gap &gt; 2 s 的 fail rate</div><div class="value" style="color:var(--fail)">67.41%</div><div class="sub">相比 gap ≤ 2 s 的 17.69%，相关性很强但尚非因果证明</div></div>
+      <div class="card"><div class="label">Indeterminate</div><div class="value" style="color:var(--indeterminate)">14</div><div class="sub">严格 unavailable 分支；前端必须保持三值颜色</div></div>
     </div>
     <div class="callout warning"><strong>异常统计只是调查入口，不是自动根因。</strong>先按下表检查事件 provenance 与 fit diagnostics，再判断是源数据、pass 选择、fitting，还是实际几何越界。</div>
     <div class="table-wrap" style="max-height:none">
       <table class="diagnostic-table">
         <thead><tr><th>优先级</th><th>观察到的现象</th><th>首先检查的报告字段</th><th>判断重点 / 动作</th></tr></thead>
         <tbody>
-          <tr><td><span class="priority p1">P1</span></td><td>Landing 航迹却出现数百米横向偏差</td><td><code>runway</code>、<code>source_sample_range</code>、<code>cross_track_fit</code>、<code>threshold_bracket</code></td><td>优先怀疑跑道/pass 选择或错误航段污染，不要先放宽 runway-edge gate。</td></tr>
-          <tr><td><span class="priority p1">P1</span></td><td>后一次 bracket 配上早期 fit</td><td>Bracket range 与 event/assignment fit ranges；<code>unavailable_reason</code></td><td>v6 要求同一 selected inbound run。后一次 pass 无 −300 m 前覆盖时必须 unavailable，不能借早期 pass。</td></tr>
-          <tr><td><span class="priority p1">P1</span></td><td>换 CIFP/NASR 周期后结果突然漂移</td><td><code>runway_data_fingerprint</code>、runway/procedure cycle、HAE−MSL offset</td><td>任何 frame/cycle 不一致都应拒绝旧事件并 <code>--reclassify-existing</code>，而不是混用。</td></tr>
-          <tr><td><span class="priority p2">P2</span></td><td>垂直 fail 数量异常高</td><td><code>vertical_m</code> 正负方向、TCH、datum、<code>altitude_fit</code>、<code>extrapolation_m</code></td><td>先区分真实偏高/偏低与 datum/TCH/拟合截距问题；±7.5 m 是标准 gate，不应用 pass rate 反向调参。</td></tr>
-          <tr><td><span class="priority p2">P2</span></td><td>Fit fail，但 bracket 点会 pass</td><td><code>candidate_fits</code>、window sensitivity、fit↔bracket Δx/Δz、rejected indices</td><td>这是模型/近阈值源数据分歧信号。Bracket 是审计对照，不可直接替代 fitted event。</td></tr>
-          <tr><td><span class="priority p2">P2</span></td><td>Event unavailable</td><td><code>unavailable_reason</code>、bracket rejections、sample count/span、速度完整性字段</td><td>区分缺元数据、选定 pass 覆盖不足、结构不相容和 ambiguity；不要静默 fallback 到旧 event schema。</td></tr>
-          <tr><td><span class="priority info">INFO</span></td><td>95% interval 跨 gate</td><td><code>uncertainty_95_m</code>、sigma、point estimate、component result</td><td>只标记估计质量；当前标准仍使用 point estimate，不应在图中涂成 fail 或 indeterminate。</td></tr>
+          <tr><td><span class="priority p1">P1</span></td><td>Direct 垂直 fail 随 bracket gap 急升</td><td><code>method</code>、<code>position_update_gap_s</code>、reported/derived speed、<code>geoaltitude_async_groups</code></td><td>先审计高度与位置的时间同步；不能把 direct 误叫作 fitting 问题，也不能先放宽 ±7.5 m。</td></tr>
+          <tr><td><span class="priority p1">P1</span></td><td>Censored event fail</td><td><code>observability</code>、<code>extrapolation_distance_m</code>、assignment fit range/RMS</td><td>这是域外估计；按距离与机场做 source-only truncation validation，校准前保持 <code>uncalibrated</code>。</td></tr>
+          <tr><td><span class="priority p1">P1</span></td><td>换 CIFP/NASR 周期后结果漂移</td><td><code>threshold_frame_fingerprint</code>、<code>evaluation_context_fingerprint</code>、source cycles</td><td>物理 frame 不匹配必须拒绝旧 event；只改变 TCH/FSD/width 时保留 physical event，但重算 verdict。</td></tr>
+          <tr><td><span class="priority p2">P2</span></td><td>机场级垂直 bias 相反</td><td>按机场/跑道的 vertical median、TCH、HAE−MSL offset、GVA/altitude source</td><td>KMSY/KSTL 偏高、KSJC 略偏低，不像一个通用 gate 错误；查数据源、datum 和 procedure-context。</td></tr>
+          <tr><td><span class="priority p2">P2</span></td><td>成功着陆但 LPV verdict fail</td><td>实际飞行 procedure/mode、所用 runway/FAS、导航参考点定义</td><td>成功着陆不等于“按本项目 LPV TCH ±7.5 m 穿越阈值”；当前 ADS-B 数据不能确认实际 flown procedure。</td></tr>
+          <tr><td><span class="priority p2">P2</span></td><td>Event unavailable</td><td><code>unavailable_reason</code>、bracket rejections、source span、frame fingerprint</td><td>区分 invalid support、coverage 不足和 ambiguity；不得 fallback 到旧 schema 或另一物理 pass。</td></tr>
+          <tr><td><span class="priority info">INFO</span></td><td>Uncertainty 尚未给数值</td><td><code>uncertainty.status</code>、method、observability</td><td>v1 明确为 <code>uncalibrated</code>；不能制造零宽或伪 95% interval，也不改变 point verdict。</td></tr>
           <tr><td><span class="priority p1">P1</span></td><td>NaN / Infinity 或前端 JSON 无法加载</td><td>事件、bounds、states sidecar 及 report 中全部数值</td><td>必须在 producer/load/write 阶段拒绝非有限数；不能依赖 Python 比较返回 false 后“通过”。</td></tr>
         </tbody>
       </table>
@@ -417,55 +449,59 @@
 
   <section id="fit-details">
     <details class="method-details">
-      <summary>技术附录 A：Observed threshold-event v6 fitting 模型
-        <small>展开查看精确 predicates、窗口、robust seed、OLS 与 uncertainty 公式</small>
+      <summary>技术附录 A：Observed runway-threshold-event-v1 estimator
+        <small>展开查看 direct/censored 判定、共享 α、固定 fit 与 unavailable 规则</small>
       </summary>
       <div class="details-body">
-    <p><strong>适用范围：</strong>这个 fitter 只用于 observed ADS-B 航迹。optimized 和 predicted 航迹不经过它；它们按后述 terminal-state 规则直接进入 evaluation。fitter 的唯一输出是与政策无关的跑道阈值面三维事件，不包含 LPV/LNAV-VNAV 类型、判决门限或 verdict。</p>
-    <div class="formula">按时间排序的 ADS-B HAE 样本
-  → 宽松机场着陆结构筛选
-  → 选择跑道与真实 inbound pass
-  → 在该 pass 内进行一次稳健三维最终段拟合
-  → observed-threshold-event-v6
-  → evaluation 读取已序列化事件，不重新拟合</div>
+    <p><strong>适用范围：</strong>这个 resolver 只用于 observed ADS-B。它输出与 policy 无关的 LTP 三维事件，不包含 TCH、FSD、runway width、approach type 或 verdict。optimized/predicted 按后述 terminal-state 规则取得同一个数学事件，不经过 observed resolver。</p>
+    <div class="formula">source-timed HAE track
+  → landing structure + runway/pass association
+  → within support ? direct interpolation
+    : right-censored ? reuse winning assignment fit
+    : unavailable
+  → runway-threshold-event-v1
+  → evaluation 严格读取，不重新拟合</div>
 
     <div class="grid two" style="margin-top:16px">
       <div class="card">
-        <h3>A.1 Bracket 只选择跑道与物理 pass</h3>
-        <p>对每条跑道检查连续样本对。候选必须从阈值前严格向阈值后运动：</p>
+        <h3>A.1 Direct：bracket 就是正式 event evidence</h3>
+        <p>对相邻 source-timed 样本检查一次 inbound crossing：</p>
         <div class="formula">before.s &lt; 0 ≤ after.s
 after.s &gt; before.s
 after.time &gt; before.time
 |interpolated cross-track| ≤ 1000 m
 |interpolated height above threshold| ≤ 100 m</div>
-        <p>其中 1,000 m/100 m 是排除无关飞越的<strong>结构范围</strong>，不是 approach pass 门限。每条跑道保留绝对横向偏移最小的候选；不同跑道最优分数差小于 50 m 时标为 ambiguous。</p>
+        <p>1,000 m/100 m 只排除无关飞越，不是 verdict gate。选定 source-valid bracket 后，<code>interpolation_fraction</code> 同时应用于时间、cross-track 和 HAE 高度；不再调用 <code>fit_final_segment()</code>。</p>
       </div>
       <div class="card">
-        <h3>A.2 ADS-B 位移与速度完整性</h3>
-        <p>位置速度使用 <code>lastposupdate</code>，而不是可能重复旧位置的 state-row time：</p>
-        <div class="formula">0 &lt; Δlastposupdate ≤ 30 s
+        <h3>A.2 Direct source-integrity</h3>
+        <p>位置时间使用 <code>lastposupdate</code>，并检查 reported velocity：</p>
+        <div class="formula">0 &lt; Δlastposupdate ≤ 15 s
 0 &lt; reported ground speed ≤ 200 m/s
 |position speed − mean reported speed| ≤ 25 m/s
 0.5 ≤ position speed / mean reported speed ≤ 1.5</div>
-        <p>这些值只筛查源数据跳跃。25 m/s 是五机场 accepted-control 差值 p99=22.62 m/s 的向上取整；它不是航空器进近性能标准。</p>
+        <p>这些 predicate 只拒绝位置跳跃与冻结，不保证 geo-altitude 与 position 真正同一测量时刻。本次统计显示 bracket gap 与 direct fail 强相关，因此 15 s 是完整性上限，不是“15 s 内垂直值都足够精确”的保证。</p>
       </div>
     </div>
 
-    <h3>A.3 选定 pass 的上下边界</h3>
-    <p>合法 bracket 的阈值前样本成为显式 <code>pass_anchor_index</code>。算法从 anchor 反向寻找最近一次真实 along-track 反转，并只在该连续 inbound run 内寻找拟合样本。100 m 容差相对已接受后缀的最小 along-track 位置计算，因此是<strong>总退回上限</strong>，不会在每个样本重新获得 100 m。若后一次 pass 从 −100 m 才恢复接收，它在 −300 m 内边界之前没有样本，事件会变成 unavailable，不会借用早期 approach。</p>
-    <p>没有 source-valid bracket 时，系统仍可用同一个 robust final-segment fitter 做相对跑道 assignment；它同样只能使用选中的最终 inbound pass。Bracket 的插值位置会写入审计字段，但其角色明确标记为 <code>runway_and_pass_anchor_not_event_estimator</code>。</p>
+    <h3>A.3 Direct 三维插值</h3>
+    <div class="formula">α = −aᵢ / (aᵢ₊₁ − aᵢ)
 
-    <h3>A.4 拟合窗口、异常值处理与阈值截距</h3>
+t* = (1−α)tᵢ + αtᵢ₊₁
+c* = (1−α)cᵢ + αcᵢ₊₁
+u* = (1−α)uᵢ + αuᵢ₊₁
+a* = 0</div>
+    <p>同一个 α 是关键不变量：禁止再组合 <code>c* from bracket</code> 与 <code>u* from fit</code>。Direct event 的 <code>extrapolation_distance_m=0</code>，uncertainty 状态为 <code>uncalibrated</code>。</p>
+
+    <h3>A.4 Censored：唯一固定 fit，只复用不重算</h3>
     <table>
-      <thead><tr><th>项目</th><th>当前实现</th><th>目的</th></tr></thead>
+      <thead><tr><th>条件/项目</th><th>v1 当前实现</th><th>边界</th></tr></thead>
       <tbody>
-        <tr><td>Assignment 窗口</td><td><code>[-5000, -300] m</code></td><td>比较跑道并确定一个最终入航段</td></tr>
-        <tr><td>Event 候选窗口</td><td><code>[-3000,-300]</code>、<code>[-4000,-300]</code>、<code>[-5000,-300] m</code></td><td>优先最短可用窗口，同时记录窗口敏感度</td></tr>
-        <tr><td>最少数据</td><td>异常值剔除后至少 8 个样本、500 m along-track span</td><td>保证斜率与截距可辨识</td></tr>
-        <tr><td>稳健 seed</td><td>最多 64 个均匀、保留端点的样本做 deterministic Theil–Sen 高度线</td><td>避免密集数据的二次复杂度，并抵抗孤立高度破坏</td></tr>
-        <tr><td>高度残差尺度</td><td><code>max(1.4826 × MAD, 7.62/√12 m)</code></td><td>保留 ADS-B 25 ft 高度量化的最低合理尺度</td></tr>
-        <tr><td>Gross-outlier cut</td><td><code>|residual − median| ≤ 3.03 × scale</code></td><td>排除孤立的百米/千米级错误高度</td></tr>
-        <tr><td>最终估计器</td><td>对同一批保留样本分别拟合 cross-track 与 height 的 OLS 直线</td><td>横向和垂直必须描述同一个物理段</td></tr>
+        <tr><td>进入条件</td><td>winning inbound pass 的可信支持全部位于阈值前</td><td>已有 plausible 但 integrity-failed bracket 时禁止使用</td></tr>
+        <tr><td>Assignment 窗口</td><td><code>[-5000, -300] m</code></td><td>只允许 selected contiguous inbound pass</td></tr>
+        <tr><td>Event 计算</td><td>直接复用 <code>Assignment.fit</code> 的截距</td><td>event producer 额外 fit 次数为 0</td></tr>
+        <tr><td>旧候选窗口</td><td>已删除</td><td>无 3/4/5 km ensemble、window sensitivity 或 v6 fallback</td></tr>
+        <tr><td>Uncertainty</td><td><code>uncalibrated</code></td><td>不制造 numeric 95% interval，不参与 verdict</td></tr>
       </tbody>
     </table>
     <div class="formula" style="margin-top:14px">x(s) = aₓ + bₓs              h(s) = aₕ + bₕs
@@ -473,11 +509,11 @@ after.time &gt; before.time
 signed cross-track at LTP = aₓ
 crossing altitude HAE     = threshold elevation HAE + aₕ
 crossing latitude/longitude = runway frame unproject(s=0, x=aₓ)</div>
-    <p>Theil–Sen/MAD 不直接发布事件，也不使用 TCH 或 evaluation 门限；它只选择可进入最终 OLS 的源样本。被排除的原始 sample indices、两条 OLS 的 RMS/最大残差、lag-1 自相关、有效样本数、窗口和外推距离都写入事件。</p>
+    <p>这里的 robust fit 仍用于无 bracket 的 runway association/censored event，但不是 direct event 的 challenger。source-only truncation 实验显示 censored 垂直 P95 误差可达约 36–41 m，因此不能把其 17.70% fail 全部解释为真实飞行偏差。</p>
 
-    <h3>A.5 不确定度与 unavailable</h3>
-    <p>候选窗口中最大的 <code>1.96 × intercept standard error</code> 作为 statistical 95% 项；各候选截距相对 primary 的最大变化作为 window-sensitivity 项。垂直有效 95% margin 为两者之和；横向还使用 <code>max(10.5 m, statistical + sensitivity)</code> 的模型下限。事件将有效 margin 除以 1.96 后保存为 sigma。</p>
-    <div class="callout warning"><strong>这些是不确定度诊断，不是 verdict gate。</strong>如果选定 pass 没有满足样本数/跨度的候选、拟合与着陆结构不相容，或事件/跑道周期指纹失配，结果为 unavailable 或被拒绝；系统不会降低门限、切换旧算法或从另一段航迹借样本。</div>
+    <h3>A.5 Frame 与 policy 分离</h3>
+    <p>Event 保存仅含物理 LTP 的 <code>threshold_frame_fingerprint</code>；evaluation 另存包含 TCH、FSD、runway width 和标准版本的 <code>evaluation_context_fingerprint</code>。换跑道 frame/cycle 必须重建 event；只换 policy 时可以复用 physical event，但必须重算 verdict。</p>
+    <div class="callout warning"><strong>Unavailable 是有效结果，不是异常回退入口。</strong>invalid support、pass coverage 不足、ambiguity 或 frame mismatch 都不得通过切换旧 schema、另一窗口或另一段航迹来制造 estimate。</div>
       </div>
     </details>
   </section>
@@ -494,7 +530,7 @@ crossing latitude/longitude = runway frame unproject(s=0, x=aₓ)</div>
     <table>
       <thead><tr><th>轨迹 subject</th><th>阈值事件来源</th><th>禁止行为</th></tr></thead>
       <tbody>
-        <tr><td>Observed</td><td>只读取当前周期匹配的 <code>observed-threshold-event-v6</code>；HAE 用权威跑道 datum offset 转为 MSL</td><td>evaluation 不选样本、不插值原始 ADS-B、不调用 fitter</td></tr>
+        <tr><td>Observed</td><td>只读取物理 frame 匹配的 <code>runway-threshold-event-v1</code>；HAE 用 event frame 的 threshold-relative 高度映射到 MSL</td><td>evaluation 不选样本、不插值原始 ADS-B、不调用 fitter</td></tr>
         <tr><td>Optimized / predicted</td><td>末状态在阈值面 ±1 m 内时直接使用；否则仅当最后两个状态 bracket <code>s=0</code> 时线性插值</td><td>不搜索更早的“更好”状态，也不向阈值外推制造 pass</td></tr>
       </tbody>
     </table>
@@ -544,7 +580,7 @@ component indeterminate ⇔ estimate 或适用 bound 不可用
 overall fail          ⇔ lateral 或 vertical 任一为 fail
 overall pass          ⇔ lateral 和 vertical 都为 pass
 overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indeterminate</div>
-    <p>判决使用 inclusive point estimate。报告中的 <code>estimate ± 1.96σ</code> 只描述 estimator/data quality；置信区间跨越 gate 不会把合法 point estimate 变成 indeterminate，也不会把已越界点改成 indeterminate。所有坐标、时间、宽度、FSD、bounds、sigma 与 deviations 必须为有限数；NaN/Infinity 必须拒绝，不能依靠比较结果“自然通过”。</p>
+    <p>判决使用 inclusive point estimate。v1 observed uncertainty 尚未校准，因此不发布 numeric interval；未来若校准，interval 也只描述 estimator/data quality，不改变 point verdict。所有坐标、时间、宽度、FSD、bounds 与 deviations 必须为有限数；NaN/Infinity 必须拒绝，不能依靠比较结果“自然通过”。</p>
 
     <div class="callout"><strong>结果边界：</strong>本报告回答“轨迹导航参考点在 LTP 阈值面是否符合所选 LPV 或 LNAV/VNAV 几何基准并位于跑道横向范围内”。它不证明整段 FAS conformance、实际机组选择的 approach mode、航电 integrity、障碍面净空、operator stabilized-approach policy、touchdown point 或完整机体/起落架 containment。</div>
       </div>
@@ -555,7 +591,7 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
     <h2>数据结果：结论先行</h2>
     <div class="callout">
       <strong>正式判决中，主要失败原因是垂直越界。</strong>
-      9,843 个 fail 中，9,154 个（93.00%）仅垂直失败，607 个（6.17%）横向和垂直同时失败，只有 82 个（0.83%）仅横向失败。因此共有 9,761 个 fail（99.17%）涉及垂直分量。
+      11,804 个 fail 中，11,739 个（99.45%）仅垂直失败，53 个（0.45%）横向和垂直同时失败，只有 12 个（0.10%）仅横向失败。因此共有 11,792 个 fail（99.90%）涉及垂直分量。
     </div>
     <div class="grid cards" id="summaryCards" aria-live="polite"></div>
     <div class="controls" aria-label="机场筛选">
@@ -578,7 +614,7 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
       <span class="swatch" style="background:var(--indeterminate)"></span> Indeterminate
     </div>
     <div id="verdictChart" class="chart" role="img" aria-label="各机场判决比例堆叠条形图"></div>
-    <p class="footnote">分母严格取各机场 <code>evaluation_report.json/trajectories</code>。KRDU 的 1,558 条和 KSMF 的 261 条无已发布 LPV TCH assigned 航迹没有进入 evaluation，因此两场分别显示 14,387 和 4,306 条；event availability 使用另一个、包含 unavailable candidate 的分母，不能与这里混用。</p>
+    <p class="footnote">分母严格取各机场 <code>evaluation_report.json/trajectories</code>。KRDU 有 1,617 条 assigned 航迹因无已发布 LPV TCH 未进入 evaluation，KSMF 相应为 259 条；因此两场分别显示 14,439 和 4,231 条。event observability 的分母包含所有 source outcomes，不能与 verdict 分母混用。</p>
   </section>
 
   <section>
@@ -593,12 +629,12 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
       <div class="card">
         <h3>垂直方向</h3>
         <div id="verticalDirectionChart" class="chart" role="img" aria-label="垂直失败高低方向图"></div>
-        <p class="footnote">五机场合计：高于上界 6,171（63.22%）；低于下界 3,590（36.78%）。方向存在明显机场差异：KSJC 以偏低为主，其余四场以偏高为主。</p>
+        <p class="footnote">五机场合计：高于上界 9,341（79.22%）；低于下界 2,451（20.78%）。方向存在明显机场差异：KSJC 以偏低为主；KMSY、KSTL、KSMF 和 KRDU 以偏高为主。</p>
       </div>
       <div class="card">
         <h3>为什么横向数量少但值得检查</h3>
-        <p>横向失败涉及 689 条（7.00% 的 fail），其中 547 条（79.39%）超过横向界限达 50 m 以上。横向越界量中位数为 368.64 m，远大于约 22.86 m 的典型跑道半宽。</p>
-        <p>这不是普通的几米级中心线散布形态。结合这些数据均来自成功着陆航迹，它更像是少量最终段选择、航迹阶段污染或拟合外推异常，应优先逐条复核，而不能直接解释成飞机实际在跑道外通过阈值。</p>
+        <p>横向失败现在只涉及 65 条（0.55% 的 fail），其中 15 条超过横向界限 50 m 以上；横向越界量中位数为 12.99 m。相比旧 v6 的 689 条和 368.64 m 中位数，极端 lateral fit 长尾已大幅消失。</p>
+        <p>这支持当前“direct bracket 横向插值 + 跑道半宽 gate”的设计。剩余 65 条仍需按 method/runway/pass 逐条复核，但没有证据要求放宽横向标准。</p>
       </div>
     </div>
   </section>
@@ -620,20 +656,81 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
     </div>
   </section>
 
-  <section id="bracket-diagnostic">
-    <h2>4. Threshold bracket 与正式 fitted event 的诊断对照</h2>
-    <div class="callout warning">
-      <strong>这是一项诊断，不是替代判决。</strong>
-      当前 evaluation 正确地消费 producer 生成的 <code>observed_threshold_event</code>，不会重新拟合；threshold bracket 只作为物理 pass anchor 和审计证据。下面把 bracket 点代入同一边界，只用于发现 fitted event 与实际跨越样本之间的分歧。
+  <section id="method-diagnostic">
+    <h2>4. 按 event 方法分层：哪些是 fit，哪些不是</h2>
+    <div class="callout">
+      <strong>新结果最重要的解释边界：</strong>direct fail 不能再归因于 final-segment fitting，因为 direct 分支根本不调用 fitter；censored fail 才包含阈值外推模型误差。
     </div>
-    <div class="grid cards" id="bracketCards"></div>
-    <div id="bracketChart" class="chart" role="img" aria-label="失败航迹的 bracket 反事实判决图"></div>
-    <p id="bracketText"></p>
-    <p class="footnote">五机场合计的 9,843 个正式 fail 中，6,153 个具有有效 bracket；其中 2,771 个（45.03%）的 bracket 点在同一横向/垂直边界内。fitted event 与 bracket 的绝对差异中位数为横向 2.69 m、垂直 6.55 m，P95 分别为 75.77 m 和 24.55 m。该分布仍有明显长尾，说明少量极端 fitting 结果会显著影响 fail 统计。</p>
+    <div class="grid cards" id="methodCards"></div>
+    <div id="methodChart" class="chart" role="img" aria-label="Direct 与 censored event 的 pass fail 分布"></div>
+    <p id="methodText"></p>
+    <table style="margin-top:14px">
+      <thead><tr><th>机场</th><th>Direct n</th><th>Direct fail rate</th><th>Censored n</th><th>Censored fail rate</th><th>读法</th></tr></thead>
+      <tbody>
+        <tr><td>KMSY</td><td>4,097</td><td>66.29%</td><td>52</td><td>28.85%</td><td>主要是 direct 近阈值高度问题，不是 fit</td></tr>
+        <tr><td>KRDU</td><td>735</td><td>55.24%</td><td>13,703</td><td>17.40%</td><td>总体约 20% 主要由 censored cohort 决定</td></tr>
+        <tr><td>KSJC</td><td>11,148</td><td>14.27%</td><td>3</td><td>66.67%</td><td>几乎全部 direct；censored 样本太少</td></tr>
+        <tr><td>KSMF</td><td>4,225</td><td>9.23%</td><td>4</td><td>50.00%</td><td>direct 表现最好；censored 样本太少</td></tr>
+        <tr><td>KSTL</td><td>7,925</td><td>51.94%</td><td>840</td><td>21.67%</td><td>主要是 direct，且机场/跑道 bias 明显</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="remaining-causes">
+    <h2>5. “剩余约 20%”可能是什么原因</h2>
+    <div class="callout warning"><strong>先纠正分母：</strong>五机场合计 fail rate 是 27.61%，不是统一的 20%；KSMF 9.26%、KSJC 14.28%、KRDU 19.32%、KSTL 49.01%、KMSY 65.81%。如果“约 20%”指 KRDU 或 censored cohort，它们分别是 19.32% 和 17.70%。机场差异如此大，本身就反对“同一个通用 LPV gate 写错了”的解释。</div>
+
+    <h3>5.1 已经由数据直接证实的模式</h3>
+    <div class="table-wrap" style="max-height:none">
+      <table>
+        <thead><tr><th>Direct bracket 位置间隔</th><th>样本数</th><th>Fail</th><th>Fail rate</th><th>解释边界</th></tr></thead>
+        <tbody>
+          <tr><td>≤ 1 s</td><td>7,244</td><td>1,099</td><td>15.17%</td><td>短间隔基线</td></tr>
+          <tr><td>1–2 s</td><td>12,353</td><td>2,368</td><td>19.17%</td><td>仍接近“约 20%”</td></tr>
+          <tr><td>2–5 s</td><td>5,272</td><td>3,182</td><td>60.36%</td><td>风险显著升高</td></tr>
+          <tr><td>&gt; 5 s</td><td>3,261</td><td>2,570</td><td>78.81%</td><td>不能把插值高度当作高精度同步测量</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>合并后，gap ≤2 s 的 direct fail rate 为 17.69%，gap &gt;2 s 为 67.41%。有 <code>geoaltitude_async_groups</code> 的 direct 轨迹 fail rate 为 43.02%，没有该标记的为 15.89%。两项都只是<strong>相关性</strong>：机场、接收覆盖和航班构成可能混杂，尚不能单独证明某个高度值错误。</p>
+
+    <h3>5.2 原因优先级与当前证据</h3>
+    <div class="grid two">
+      <div class="card">
+        <h3><span class="priority p1">P1</span> 高度与位置仍非真正同步</h3>
+        <p><strong>最强候选，direct 为主。</strong>track 的时间轴已改为 <code>lastposupdate</code>，并去除了 held positions；但 OpenSky state snapshot 没有独立的 geo-altitude measurement timestamp。当前做法只能把最近高度快照对齐到位置更新时间。</p>
+        <p>gap/async 与 fail 的强梯度支持继续审计这一层。下一步应按 bracket 两端的高度变化、GVA、gap 和机场做受控分层；在完成前，不能说“整条航迹高度都不可信”，也不能说“所有 direct fail 都是真实偏差”。</p>
+      </div>
+      <div class="card">
+        <h3><span class="priority p1">P1</span> Censored 外推模型误差</h3>
+        <p><strong>KRDU 为主。</strong>14,602 个 censored event 有 2,585 个 fail（17.70%）。它们没有阈值后观测，只能从 <code>[-5000,-300] m</code> 线性外推。</p>
+        <p>source-only truncation 实验的 censored vertical abs P95 在最差机场达到约 36–41 m，说明其中一部分“约 20%”可能是 estimator error。numeric uncertainty 尚未校准，所以不能把每个 censored fail 都当作已确认的物理越界。</p>
+      </div>
+      <div class="card">
+        <h3><span class="priority p2">P2</span> Benchmark 与实际 flown procedure 不同</h3>
+        <p>Evaluation 明确比较“该跑道 LPV FAS 的 published TCH”。一条 ADS-B 航迹成功着陆，只证明它完成了着陆，不证明机组实际飞的是被选择的 LPV procedure，也不证明全程保持 LPV guidance。</p>
+        <p>ILS、visual、Baro-VNAV、不同 FAS 或人工操纵都可能产生安全着陆但不满足本项目的理想 LPV 几何。当前 ADS-B/harvest 数据没有 flown-procedure/mode 字段，因此这是合理但尚未直接验证的候选。</p>
+      </div>
+      <div class="card">
+        <h3><span class="priority p2">P2</span> 机场级 altitude/datum/reference bias</h3>
+        <p>Direct vertical median 在 KMSY 为 +9.72 m、KSTL +8.13 m、KRDU +10.06 m，而 KSJC 为 −1.28 m、KSMF +3.53 m。符号和幅度随机场明显变化。</p>
+        <p>这要求逐机场复核 geo-altitude/GVA、HAE−MSL offset、FAA LTP elevation、published TCH 和导航参考点定义。frame/cycle fingerprint 已防止静默混周期，但不能证明所有权威输入与 ADS-B 高度在实际测量层面没有 residual bias。</p>
+      </div>
+      <div class="card">
+        <h3><span class="priority info">事实</span> 真实轨迹可安全着陆但不通过理想 gate</h3>
+        <p>±7.5 m 是本项目依据 LPV FSD 正常运行比例建立的理想阈值事件 conformance gate，不是“能否安全落地”的充分必要条件。成功着陆样本中存在真实 threshold-crossing dispersion 并不矛盾。</p>
+        <p>因此本报告的 fail 应读作“没有通过所选理想 LPV LTP 几何基准”，不能写成“飞机没有正常着陆”。</p>
+      </div>
+      <div class="card">
+        <h3><span class="priority info">排除</span> 横向 gate 不是剩余主因</h3>
+        <p>11,804 个 fail 中只有 65 个涉及横向，12 个仅横向。新 direct 方法消除了旧 v6 大部分横向长尾；目前没有数据依据修改 <code>min(½FSD,½runway width)</code>。</p>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:14px"><strong>当前最可靠的结论：</strong>剩余 fail 不是一个单一“fitting bug”。Direct 的首要调查对象是 threshold 附近的高度—位置时间一致性；censored 的首要调查对象是外推误差；在两者之外，还必须区分“理想 LPV benchmark conformance”与“实际成功着陆”。只有完成 GVA/gap 分层和 flown-procedure 验证后，才能把剩余比例进一步分配给数据误差、模型误差和真实几何偏差。</div>
   </section>
 
   <section>
-    <h2>5. 各跑道失败率</h2>
+    <h2>6. 各跑道失败率</h2>
     <p>表格随机场筛选切换。小样本跑道必须结合样本数阅读；例如 KSJC 12L 的 53.3% 仅基于 15 条，不能与数千条样本的跑道直接比较。</p>
     <div class="table-wrap">
       <table>
@@ -644,7 +741,7 @@ overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indetermin
   </section>
 
   <section>
-    <h2>6. 判决条件与“原因”的边界</h2>
+    <h2>7. 判决条件与“原因”的边界</h2>
     <div class="formula">vertical_error = threshold-event altitude − (LTP elevation + published TCH)
 vertical pass  ⇔  −7.5 m ≤ vertical_error ≤ +7.5 m
 
@@ -654,14 +751,16 @@ overall fail  ⇔  任一适用 component fail
 overall pass  ⇔  lateral pass AND vertical pass
 otherwise     ⇔  indeterminate</div>
     <p><strong>正式失败原因</strong>是上述分量越界；这是本报告可以直接、确定地统计的内容。<strong>物理根因</strong>可能包括真实飞行偏差、最终段样本选择、拟合模型、外推、ADS-B 高度/位置时间对齐等。仅凭 verdict 不能把这些根因互相替代。</p>
-    <p>当前 uncertainty 字段是诊断信息，不改变 point-estimate verdict。因此本报告没有把置信区间重叠边界重新分类。</p>
+    <p>当前 observed uncertainty 明确为 <code>uncalibrated</code>，不提供 numeric interval，也不改变 point-estimate verdict。报告不会用一个未经验证的区间把 pass/fail 改成 indeterminate。</p>
   </section>
 
   <section id="sources">
-    <h2>7. 数据来源、标准依据与可复现性</h2>
+    <h2>8. 数据来源、标准依据与可复现性</h2>
     <ul class="source-list">
       <li><a href="../trajectory_data_process/docs/10-source-timed-canonical-promotion-audit.md">Source-timed canonical promotion audit</a>：说明 <code>lastposupdate</code> 时序重建、geo-altitude 同步审计、新旧 canonical 差异和不可破坏的原始数据边界。</li>
-      <li><a href="../final_approach/FIT_MODEL_OPTIMIZATION.md">Observed final-approach fit design</a>：v6 算法边界、固定 cohort 实验、拒绝方案与事件 contract；实现位于 <a href="../final_approach/fit.py"><code>final_approach/fit.py</code></a> 和 <a href="../trajectory_data_process/harvest/threshold_event.py"><code>threshold_event.py</code></a>。</li>
+      <li><a href="../docs/threshold-event-first-principles-development.zh.md">Threshold-event 第一性原理开发档案</a>：目标事件、可观测性、数学定义、frame/policy 分离和严格 claim boundary。</li>
+      <li><a href="../docs/threshold-event-simplified-implementation.zh.md">Threshold-event v1 简化实现与全量迁移记录</a>：direct/censored 唯一生产路径、source-only 实验、五机场统计、source hash 与测试结果；实现位于 <a href="../trajectory_data_process/harvest/threshold_event.py"><code>threshold_event.py</code></a>。</li>
+      <li><a href="../final_approach/FIT_MODEL_OPTIMIZATION.md">Observed final-approach fit historical design</a>：保留旧 fitting 演进和实验依据；当前生产 event contract 以上述 v1 文档为准。</li>
       <li><a href="FINAL_APPROACH_VERDICT_STANDARD.md">项目判决标准设计</a>：阈值事件定义、LPV/LNAV-VNAV 边界推导、claim boundary、报告要求及章节级官方来源；实现位于 <a href="metrics.py"><code>evaluation/metrics.py</code></a>、<a href="arrival.py"><code>arrival.py</code></a> 和 <a href="thresholds.py"><code>thresholds.py</code></a>。</li>
       <li><a href="../docs/literature_review/threshold_event_estimation/Olive_et_al_2025_ADSB_Filtering.pdf">Olive et al., Filtering Techniques for ADS-B Trajectory Preprocessing</a>：§§2.2–2.5、§3.1、§§3.4–3.5，ADS-B 预处理、异常值与轨迹一致性方法依据。</li>
       <li><a href="../docs/literature_review/threshold_event_estimation/Olive_et_al_2020_Trajectory_Event_Detection.pdf">Olive et al. (2020), Trajectory Event Detection</a>：§§3.3、3.5，runway-context event detection 与 successive passes。</li>
@@ -684,28 +783,28 @@ otherwise     ⇔  indeterminate</div>
 <script>
   const AIRPORT_ORDER = ["KMSY", "KRDU", "KSJC", "KSMF", "KSTL"];
   const DATA = {
-    ALL: {label:"五机场合计",total:42874,pass:32904,fail:9843,indeterminate:127,verticalOnly:9154,both:607,lateralOnly:82,high:6171,low:3590,vBins:[4475,3451,1069,766],lBins:[43,42,57,547],vMedian:2.8227,vP95:22.2993,lMedian:368.6405,lP95:704.5973,bracket:{with:6153,pass:2771,fail:3382,latMedian:2.6931,latP95:75.7739,vertMedian:6.5512,vertP95:24.5524}},
-    KMSY: {label:"KMSY",total:4159,pass:2972,fail:1175,indeterminate:12,verticalOnly:1162,both:6,lateralOnly:7,high:1048,low:120,vBins:[556,480,117,15],lBins:[4,1,4,4],vMedian:2.6718,vP95:9.7421,lMedian:42.4368,lP95:203.5792,bracket:{with:1159,pass:301,fail:858,latMedian:2.8957,latP95:10.8343,vertMedian:5.6039,vertP95:18.3656}},
-    KRDU: {label:"KRDU",total:14387,pass:10798,fail:3580,indeterminate:9,verticalOnly:3469,both:70,lateralOnly:41,high:2710,low:829,vBins:[1608,1364,431,136],lBins:[22,22,22,45],vMedian:2.8438,vP95:13.5186,lMedian:24.2482,lP95:488.9916,bracket:{with:118,pass:45,fail:73,latMedian:3.0504,latP95:12.2337,vertMedian:8.1687,vertP95:29.6300}},
-    KSJC: {label:"KSJC",total:11204,pass:8554,fail:2569,indeterminate:81,verticalOnly:2230,both:318,lateralOnly:21,high:268,low:2280,vBins:[951,778,373,446],lBins:[13,13,24,289],vMedian:4.0938,vP95:44.9009,lMedian:370.5137,lP95:769.5976,bracket:{with:2557,pass:1481,fail:1076,latMedian:2.7746,latP95:472.0682,vertMedian:8.1854,vertP95:42.4990}},
-    KSMF: {label:"KSMF",total:4306,pass:3694,fail:594,indeterminate:18,verticalOnly:567,both:23,lateralOnly:4,high:381,low:209,vBins:[336,189,45,20],lBins:[1,3,2,21],vMedian:1.9894,vP95:10.8306,lMedian:273.0060,lP95:854.8289,bracket:{with:577,pass:454,fail:123,latMedian:2.6085,latP95:14.4264,vertMedian:5.8121,vertP95:18.1826}},
-    KSTL: {label:"KSTL",total:8818,pass:6886,fail:1925,indeterminate:7,verticalOnly:1726,both:190,lateralOnly:9,high:1764,low:152,vBins:[1024,640,103,149],lBins:[3,3,5,188],vMedian:2.2437,vP95:34.2455,lMedian:373.1997,lP95:383.2879,bracket:{with:1742,pass:490,fail:1252,latMedian:2.4595,latP95:8.9518,vertMedian:4.6148,vertP95:17.3346}}
+    ALL: {label:"五机场合计",total:42746,pass:30928,fail:11804,indeterminate:14,verticalOnly:11739,both:53,lateralOnly:12,high:9341,low:2451,vBins:[4311,3994,2737,750],lBins:[16,18,16,15],vMedian:4.5331,vP95:16.1360,lMedian:12.9888,lP95:199.0928,direct:{n:28130,pass:18911,fail:9219},censored:{n:14602,pass:12017,fail:2585}},
+    KMSY: {label:"KMSY",total:4150,pass:1418,fail:2731,indeterminate:1,verticalOnly:2725,both:6,lateralOnly:0,high:2716,low:15,vBins:[958,598,931,244],lBins:[0,1,0,5],vMedian:4.9708,vP95:16.1360,lMedian:131.6659,lP95:196.0778,direct:{n:4097,pass:1381,fail:2716},censored:{n:52,pass:37,fail:15}},
+    KRDU: {label:"KRDU",total:14439,pass:11648,fail:2790,indeterminate:1,verticalOnly:2734,both:45,lateralOnly:11,high:1854,low:925,vBins:[1214,986,357,222],lBins:[15,16,15,10],vMedian:3.0573,vP95:20.2161,lMedian:11.1170,lP95:236.3435,direct:{n:735,pass:329,fail:406},censored:{n:13703,pass:11319,fail:2384}},
+    KSJC: {label:"KSJC",total:11157,pass:9558,fail:1593,indeterminate:6,verticalOnly:1593,both:0,lateralOnly:0,high:183,low:1410,vBins:[1117,266,203,7],lBins:[0,0,0,0],vMedian:1.3811,vP95:8.9811,lMedian:0,lP95:0,direct:{n:11148,pass:9557,fail:1591},censored:{n:3,pass:1,fail:2}},
+    KSMF: {label:"KSMF",total:4231,pass:3837,fail:392,indeterminate:2,verticalOnly:391,both:1,lateralOnly:0,high:347,low:45,vBins:[205,167,13,7],lBins:[0,0,1,0],vMedian:2.2483,vP95:7.5211,lMedian:19.8106,lP95:19.8106,direct:{n:4225,pass:3835,fail:390},censored:{n:4,pass:2,fail:2}},
+    KSTL: {label:"KSTL",total:8769,pass:4467,fail:4298,indeterminate:4,verticalOnly:4296,both:1,lateralOnly:1,high:4241,low:56,vBins:[817,1977,1233,270],lBins:[1,1,0,0],vMedian:5.2264,vP95:15.9845,lMedian:4.3714,lP95:5.7712,direct:{n:7925,pass:3809,fail:4116},censored:{n:840,pass:658,fail:182}}
   };
 
   const RUNWAYS = [
-    ["KMSY","02",284,205,78,1,78,0,0],["KMSY","11",2623,1763,852,8,840,6,6],["KMSY","20",2,2,0,0,0,0,0],["KMSY","29",1250,1002,245,3,244,0,1],
-    ["KRDU","05L",3072,1758,1314,0,1309,4,1],["KRDU","05R",1473,894,578,1,553,15,10],["KRDU","23L",3216,2498,710,8,648,44,18],["KRDU","23R",6626,5648,978,0,959,7,12],
-    ["KSJC","12L",15,4,8,3,2,5,1],["KSJC","12R",573,391,174,8,161,11,2],["KSJC","30L",9650,7587,2016,47,1819,182,15],["KSJC","30R",966,572,371,23,248,120,3],
-    ["KSMF","17L",1175,1040,134,1,128,6,0],["KSMF","17R",2531,2150,369,12,353,13,3],["KSMF","35L",600,504,91,5,86,4,1],
-    ["KSTL","06",1,1,0,0,0,0,0],["KSTL","11",654,508,146,0,146,0,0],["KSTL","12L",3869,3274,591,4,583,7,1],["KSTL","12R",374,193,181,0,67,113,1],["KSTL","24",23,18,5,0,5,0,0],["KSTL","29",96,84,12,0,11,0,1],["KSTL","30L",52,44,8,0,7,1,0],["KSTL","30R",3749,2764,982,3,907,69,6]
+    ["KMSY","02",284,65,219,0,218,1,0],["KMSY","11",2616,1103,1512,1,1510,2,0],["KMSY","20",2,1,1,0,1,0,0],["KMSY","29",1248,249,999,0,996,3,0],
+    ["KRDU","05L",3076,2364,711,1,707,4,0],["KRDU","05R",1492,1056,436,0,417,15,4],["KRDU","23L",3233,2348,885,0,866,16,3],["KRDU","23R",6638,5880,758,0,744,10,4],
+    ["KSJC","12L",14,8,6,0,6,0,0],["KSJC","12R",569,492,77,0,77,0,0],["KSJC","30L",9611,8349,1256,6,1256,0,0],["KSJC","30R",963,709,254,0,254,0,0],
+    ["KSMF","17L",1146,1074,71,1,71,0,0],["KSMF","17R",2492,2264,227,1,226,1,0],["KSMF","35L",593,499,94,0,94,0,0],
+    ["KSTL","06",1,1,0,0,0,0,0],["KSTL","11",647,239,408,0,408,0,0],["KSTL","12L",3943,2921,1022,0,1021,0,1],["KSTL","12R",262,98,163,1,163,0,0],["KSTL","24",23,17,6,0,6,0,0],["KSTL","29",96,59,37,0,37,0,0],["KSTL","30L",121,81,40,0,39,1,0],["KSTL","30R",3676,1051,2622,3,2622,0,0]
   ];
 
   const SOURCES = {
-    KMSY:"b3f60b68196ea56ed4133b132e4a11336efdad10f2f5b87ec653ccc37085ff48",
-    KRDU:"f3c5d1c4ab38bd0dd1f644103dcbb1181a6f9a52df9ff1a9c5051ff721b11ec8",
-    KSJC:"fd7972f8d1eaa2749963597827309025e35c05c48e29177e82a015b440a9cba0",
-    KSMF:"c8cae669a02fa43df1d4b30bdab9b3c6160e7febc234eb81651be9c1087393cf",
-    KSTL:"9c038f61d8ae02fbffa238bcf33430bb2950b5504381b620e620b8de35c690e9"
+    KMSY:"f0ab6fbd27b3d3ae2376974f2ffeffebc725089e226252b148e4b6d13bd0c4d6",
+    KRDU:"30e68609fc9d94c310e56d58e39c6c2527d9971cee41865bebc7fb4c38358d55",
+    KSJC:"549786483f046417bbf44ca8a947df9266cec7da3f1b98534de150ff92f36db9",
+    KSMF:"2610078d74be381a53783ed6f30514c627839f210f927c80d90e7d6eaa22d810",
+    KSTL:"7ef9a10b0baaccb7a24ee6d6659105807a5227073d3799020efd306cc1a7fe88"
   };
 
   const colors = {pass:"#198754",fail:"#c93b4a",indeterminate:"#d99a17",verticalOnly:"#5468d4",both:"#8d4eb2",lateralOnly:"#e9823f",high:"#4d78cc",low:"#54a6a6"};
@@ -764,14 +863,17 @@ otherwise     ⇔  indeterminate</div>
     countBars("lateralSeverityChart",["≤ 5 m","5–15 m","15–50 m","> 50 m"],d.lBins,["#f2b185","#ea945b","#df7636","#b95022"]);
     document.getElementById("verticalSeverityText").textContent=`垂直越界量：中位数 ${d.vMedian.toFixed(2)} m，P95 ${d.vP95.toFixed(2)} m。`;
     document.getElementById("lateralSeverityText").textContent=`横向越界量：中位数 ${d.lMedian.toFixed(2)} m，P95 ${d.lP95.toFixed(2)} m。`;
-    document.getElementById("bracketCards").innerHTML = [
-      ["有有效 bracket 的正式 fail",fmt(d.bracket.with),pct(d.bracket.with,d.fail)],
-      ["Bracket 对照会通过",fmt(d.bracket.pass),pct(d.bracket.pass,d.bracket.with)],
-      ["Fit↔bracket 横向差 P95",`${d.bracket.latP95.toFixed(2)} m`,`中位数 ${d.bracket.latMedian.toFixed(2)} m`],
-      ["Fit↔bracket 垂直差 P95",`${d.bracket.vertP95.toFixed(2)} m`,`中位数 ${d.bracket.vertMedian.toFixed(2)} m`]
+    document.getElementById("methodCards").innerHTML = [
+      ["Direct evaluated",fmt(d.direct.n),`${pct(d.direct.n,d.total)} 的可评估航迹`],
+      ["Direct fail",fmt(d.direct.fail),`${pct(d.direct.fail,d.direct.n)} 的 direct`],
+      ["Censored evaluated",fmt(d.censored.n),`${pct(d.censored.n,d.total)} 的可评估航迹`],
+      ["Censored fail",fmt(d.censored.fail),`${pct(d.censored.fail,d.censored.n)} 的 censored`]
     ].map(x=>`<div class="card"><div class="label">${x[0]}</div><div class="value">${x[1]}</div><div class="sub">${x[2]}</div></div>`).join("");
-    stackedChart("bracketChart",[{label:d.label,pass:d.bracket.pass,fail:d.bracket.fail}], [{key:"pass",label:"Bracket 对照通过"},{key:"fail",label:"Bracket 对照失败"}], r=>r.pass+r.fail, r=>fmt(r.pass+r.fail));
-    document.getElementById("bracketText").textContent=`${d.label} 的 ${fmt(d.bracket.with)} 个 bracketed fail 中，有 ${fmt(d.bracket.pass)} 个 bracket 点在同一边界内。它提示 producer fitting 与近阈值样本不一致的规模，不会自动推翻正式 fitted-event verdict。`;
+    stackedChart("methodChart",[
+      {label:"Direct",pass:d.direct.pass,fail:d.direct.fail},
+      {label:"Censored",pass:d.censored.pass,fail:d.censored.fail}
+    ], [{key:"pass",label:"Pass"},{key:"fail",label:"Fail"}], r=>r.pass+r.fail, (r,den)=>pct(r.fail,den)+" fail");
+    document.getElementById("methodText").textContent=`${d.label}：direct ${fmt(d.direct.n)} 条、fail rate ${pct(d.direct.fail,d.direct.n)}；censored ${fmt(d.censored.n)} 条、fail rate ${pct(d.censored.fail,d.censored.n)}。只有后者包含 final-segment 外推误差。`;
     renderRunways(key);
   }
 

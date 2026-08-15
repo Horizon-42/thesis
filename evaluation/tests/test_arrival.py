@@ -52,17 +52,17 @@ def payload(*, subject="optimized", event=None, final_lat=35.0, final_lon=-78.0)
 
 def event(*, cross=4.0, vertical=5.0):
     return {
-        "schema_version": "observed-threshold-event-v7",
-        "status": "estimated", "method": "final_segment_robust_fit",
-        "method_version": 7, "runway": "05L",
+        "schema_version": "runway-threshold-event-v1",
+        "status": "estimated", "method": "censored_robust_line",
+        "observability": "right_censored", "runway": "05L",
         "threshold_crossing_lat": 35.0, "threshold_crossing_lon": -78.0,
         "threshold_crossing_altitude_m": 160.0 + vertical,
         "altitude_datum": "hae", "signed_cross_track_m": cross,
-        "cross_track_sigma_m": 0.5, "altitude_sigma_m": 0.75,
         "source_sample_range": [0, 1],
-        "fit_window_m": [-5000.0, -300.0],
-        "sample_count": 8, "along_track_span_m": 3000.0,
-        "extrapolation_m": 300.0, "glidepath_deg": 3.0,
+        "interpolation_fraction": None,
+        "event_time_s": None,
+        "extrapolation_distance_m": 300.0,
+        "uncertainty": {"status": "uncalibrated"},
     }
 
 
@@ -135,7 +135,12 @@ def test_observed_record_datum_offset_must_match_authoritative_context():
 
 def test_unavailable_observed_event_is_indeterminate_input_not_a_refit_request():
     record = record_from_dict(payload(subject="observed", event={
-        "status": "unavailable", "unavailable_reason": "no assignment fit",
+        "schema_version": "runway-threshold-event-v1",
+        "status": "unavailable",
+        "method": "none",
+        "observability": "unavailable",
+        "runway": "05L",
+        "unavailable_reason": "no assignment fit",
     }))
     outcome = arrival_deviation(record, context=context())
     assert outcome.deviation is None
@@ -149,10 +154,26 @@ def test_observed_evaluation_has_no_fitter_dependency():
     assert "fit_final_segment" not in inspect.getsource(arrival_module)
 
 
-def test_version_five_observed_event_requires_local_reclassification():
+def test_v7_observed_event_requires_local_reclassification():
     legacy = event()
-    legacy["schema_version"] = "observed-threshold-event-v5"
-    legacy["method_version"] = 5
+    legacy["schema_version"] = "observed-threshold-event-v7"
+
+    with pytest.raises(ValueError, match="reclassify-existing"):
+        arrival_deviation(
+            record_from_dict(payload(subject="observed", event=legacy)),
+            context=context(),
+        )
+
+
+def test_v7_unavailable_event_also_requires_local_reclassification():
+    legacy = {
+        "schema_version": "observed-threshold-event-v7",
+        "status": "unavailable",
+        "method": "final_segment_robust_fit",
+        "method_version": 7,
+        "runway": "05L",
+        "unavailable_reason": "legacy",
+    }
 
     with pytest.raises(ValueError, match="reclassify-existing"):
         arrival_deviation(

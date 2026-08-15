@@ -101,12 +101,11 @@ class Assignment:
     """The verdict, plus every number that produced it.
 
     ``assign_runway`` scores each fitted candidate by median absolute cross-track
-    offset. A producer that first observes a structural threshold bracket may instead
-    use the absolute bracket offset and can identify the runway even when the later
-    event fit is unavailable; in that case ``outcome`` is ``assigned`` and ``fit`` is
-    ``None``. Both assigned and ambiguous outcomes retain every relative score so the
-    choice can be audited without re-running. Rejections carry their evidence in
-    ``reason``.
+    offset. A producer that first observes a source-valid structural threshold bracket
+    instead uses its absolute crossing offset; that bracket is also the direct event,
+    so ``outcome`` is ``assigned`` and ``fit`` is intentionally ``None``. Both assigned
+    and ambiguous outcomes retain every relative score so the choice can be audited
+    without re-running. Rejections carry their evidence in ``reason``.
     """
 
     outcome: Outcome

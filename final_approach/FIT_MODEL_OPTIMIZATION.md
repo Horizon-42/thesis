@@ -1,14 +1,15 @@
 # Observed final-approach fit design
 
-Status: **implemented as `observed-threshold-event-v7`; focused tests pass. V7 adds
-straight-final capture and parallel-runway bracket ownership to the v6 physical-pass
-and robust-height contract. The five active airport harvests were reclassified and
-published with v7 on 2026-08-15; any older derived artifacts require
-`--reclassify-existing`.**
+Status: **superseded historical design record. `observed-threshold-event-v7` is no
+longer executable or accepted. The current production contract is
+`runway-threshold-event-v1`, defined in
+[`docs/threshold-event-simplified-implementation.zh.md`](../docs/threshold-event-simplified-implementation.zh.md).
+Sections below preserve why v7 was built; they are not current implementation
+instructions or compatibility modes.**
 
-This document describes the one maintained observed-event algorithm. Rejected
-experiments are retained here as evidence only; they are not executable modes,
-compatibility branches, or evaluation fallbacks.
+This document preserves the former v7 algorithm and its rejected experiments as
+evidence only. None is an executable mode, compatibility branch, or evaluation
+fallback.
 
 ## 1. Question and boundary
 
