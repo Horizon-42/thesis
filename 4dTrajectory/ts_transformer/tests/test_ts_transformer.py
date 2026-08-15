@@ -4834,6 +4834,198 @@ def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkey
     assert (tmp_path / "best_config.json").is_file()
 
 
+def test_cross_validation_resumes_from_atomic_candidate_checkpoint(
+    tmp_path, monkeypatch
+):
+    series, config = _series(
+        n_flights=24,
+        device="cpu",
+        epochs=1,
+        patience=1,
+        d_model=16,
+        d_ff=32,
+        n_heads=4,
+        e_layers=1,
+        batch_size=32,
+    )
+    provenance = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": AIRPORT,
+            "arrival_manifest_sha256": "a" * 64,
+            "source_records": [],
+        }],
+    }
+    monkeypatch.setattr(
+        cv,
+        "evaluate_split",
+        lambda *_args, **_kwargs: {
+            "ade_m": 1.0,
+            "raw_kinematics": {key: 1.0 for key in RAW_KINEMATIC_METRIC_KEYS},
+        },
+    )
+
+    first_run_calls = 0
+
+    def interrupted_fit(train_series, _val_series, fold_config, **_kwargs):
+        nonlocal first_run_calls
+        first_run_calls += 1
+        if first_run_calls == 3:
+            raise KeyboardInterrupt
+        score = float(fold_config.weight_decay + fold_config.seed * 1e-9)
+        row = SimpleNamespace(
+            epoch=1,
+            val_loss=score,
+            val_by_airport={AIRPORT: score},
+        )
+        return SimpleNamespace(
+            history=[row],
+            best_val_loss=score,
+            config=fold_config,
+            model=object(),
+            normalizer=Normalizer.fit(train_series),
+            device=torch.device("cpu"),
+        )
+
+    monkeypatch.setattr(cv, "fit_model", interrupted_fit)
+    with pytest.raises(KeyboardInterrupt):
+        cv.cross_validate(
+            series,
+            config,
+            output_dir=tmp_path,
+            data_provenance=provenance,
+            n_splits=2,
+            cv_parameters=("weight_decay",),
+            cv_epochs=1,
+            cv_patience=1,
+            verbose=False,
+        )
+
+    progress_path = tmp_path / cv.PROGRESS_NAME
+    progress = json.loads(progress_path.read_text())
+    assert progress["schema_version"] == cv.PROGRESS_SCHEMA
+    assert progress["completed_candidates"] == 1
+    assert [row["candidate"] for row in progress["candidates"]] == [0]
+    assert not progress_path.with_suffix(progress_path.suffix + ".tmp").exists()
+
+    resumed_calls = 0
+
+    def resumed_fit(train_series, _val_series, fold_config, **_kwargs):
+        nonlocal resumed_calls
+        resumed_calls += 1
+        score = float(fold_config.weight_decay + fold_config.seed * 1e-9)
+        row = SimpleNamespace(
+            epoch=1,
+            val_loss=score,
+            val_by_airport={AIRPORT: score},
+        )
+        return SimpleNamespace(
+            history=[row],
+            best_val_loss=score,
+            config=fold_config,
+            model=object(),
+            normalizer=Normalizer.fit(train_series),
+            device=torch.device("cpu"),
+        )
+
+    monkeypatch.setattr(cv, "fit_model", resumed_fit)
+    result = cv.cross_validate(
+        series,
+        config,
+        output_dir=tmp_path,
+        data_provenance=provenance,
+        n_splits=2,
+        cv_parameters=("weight_decay",),
+        cv_epochs=1,
+        cv_patience=1,
+        verbose=False,
+    )
+
+    assert resumed_calls == 2
+    assert [row["candidate"] for row in result["candidates"]] == [0, 1]
+    completed = json.loads(progress_path.read_text())
+    assert completed["completed_candidates"] == 2
+    assert completed["run_contract_sha256"] == result["run_contract_sha256"]
+
+
+def test_cross_validation_rejects_candidate_checkpoint_from_another_contract(
+    tmp_path, monkeypatch
+):
+    series, config = _series(
+        n_flights=24,
+        device="cpu",
+        epochs=1,
+        patience=1,
+        d_model=16,
+        d_ff=32,
+        n_heads=4,
+        e_layers=1,
+        batch_size=32,
+    )
+    provenance = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": AIRPORT,
+            "arrival_manifest_sha256": "a" * 64,
+            "source_records": [],
+        }],
+    }
+
+    def fake_fit(train_series, _val_series, fold_config, **_kwargs):
+        score = float(fold_config.weight_decay + fold_config.seed * 1e-9)
+        row = SimpleNamespace(
+            epoch=1,
+            val_loss=score,
+            val_by_airport={AIRPORT: score},
+        )
+        return SimpleNamespace(
+            history=[row],
+            best_val_loss=score,
+            config=fold_config,
+            model=object(),
+            normalizer=Normalizer.fit(train_series),
+            device=torch.device("cpu"),
+        )
+
+    monkeypatch.setattr(cv, "fit_model", fake_fit)
+    monkeypatch.setattr(
+        cv,
+        "evaluate_split",
+        lambda *_args, **_kwargs: {
+            "ade_m": 1.0,
+            "raw_kinematics": {key: 1.0 for key in RAW_KINEMATIC_METRIC_KEYS},
+        },
+    )
+    cv.cross_validate(
+        series,
+        config,
+        output_dir=tmp_path,
+        data_provenance=provenance,
+        n_splits=2,
+        cv_parameters=("weight_decay",),
+        cv_epochs=1,
+        cv_patience=1,
+        verbose=False,
+    )
+    progress_path = tmp_path / cv.PROGRESS_NAME
+    progress = json.loads(progress_path.read_text())
+    progress["run_contract_sha256"] = "0" * 64
+    progress_path.write_text(json.dumps(progress), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="candidate checkpoint.*contract"):
+        cv.cross_validate(
+            series,
+            config,
+            output_dir=tmp_path,
+            data_provenance=provenance,
+            n_splits=2,
+            cv_parameters=("weight_decay",),
+            cv_epochs=1,
+            cv_patience=1,
+            verbose=False,
+        )
+
+
 def test_cross_validation_describes_common_grid_criteria_selection():
     assert cv.SELECTION_METRIC_DESCRIPTIONS[
         CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA

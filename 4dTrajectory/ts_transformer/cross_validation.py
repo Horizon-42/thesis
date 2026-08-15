@@ -11,6 +11,7 @@ import gc
 import hashlib
 import itertools
 import json
+import math
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
@@ -41,7 +42,9 @@ from train import evaluate_split, filter_training_cohort, fit_model, usable_seri
 
 RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"
-RESULTS_SCHEMA = "ts-cross-validation-v12-lateral-eligibility"
+PROGRESS_NAME = "cv_candidate_progress.json"
+RESULTS_SCHEMA = "ts-cross-validation-v13-candidate-checkpoints"
+PROGRESS_SCHEMA = "ts-cross-validation-progress-v1"
 SELECTION_METRIC = (
     "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
     "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
@@ -150,8 +153,191 @@ def _airport_counts(series: Sequence[FlightSeries]) -> dict[str, int]:
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    temporary.write_text(
+        json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8"
+    )
     temporary.replace(path)
+
+
+def _reject_nonfinite_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant {value!r}")
+
+
+def _read_json_strict(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=_reject_nonfinite_constant,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"candidate checkpoint {path} is invalid: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"candidate checkpoint {path} must contain a JSON object")
+    return payload
+
+
+def _canonical_sha256(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _split_audit(
+    outer_train: Sequence[FlightSeries],
+    outer_val: Sequence[FlightSeries],
+    outer_test: Sequence[FlightSeries],
+) -> dict[str, Any]:
+    return {
+        "train_flights": len(outer_train),
+        "validation_flights": len(outer_val),
+        "test_flights": len(outer_test),
+        "train_sha256": _split_digest(outer_train),
+        "validation_sha256": _split_digest(outer_val),
+        "test_sha256": _split_digest(outer_test),
+        "train_by_airport": _airport_counts(outer_train),
+        "validation_by_airport": _airport_counts(outer_val),
+        "test_by_airport": _airport_counts(outer_test),
+    }
+
+
+def _candidate_run_contract(
+    *,
+    base_config: TSConfig,
+    outer_split: dict[str, Any],
+    training_cohort: dict[str, Any],
+    folds: Sequence[Sequence[FlightSeries]],
+    selected_parameters: Sequence[str],
+    candidates: Sequence[dict[str, Any]],
+    cv_epochs: int,
+    cv_patience: int,
+    auto_batch_size: bool,
+    data_provenance: dict[str, Any],
+) -> dict[str, Any]:
+    contract = {
+        "progress_schema_version": PROGRESS_SCHEMA,
+        "results_schema_version": RESULTS_SCHEMA,
+        "base_config": base_config.to_dict(),
+        "checkpoint_selection_metric": base_config.checkpoint_selection_metric,
+        "outer_split": outer_split,
+        "training_cohort": training_cohort,
+        "folds": [
+            {
+                "fold": fold_index,
+                "validation_flights": len(fold),
+                "validation_by_airport": _airport_counts(fold),
+                "validation_split_sha256": _split_digest(fold),
+            }
+            for fold_index, fold in enumerate(folds)
+        ],
+        "n_splits": len(folds),
+        "tuned_parameters": list(selected_parameters),
+        "candidate_overrides": list(candidates),
+        "cv_epochs": cv_epochs,
+        "cv_patience": cv_patience,
+        "auto_batch_size": auto_batch_size,
+        "arrival_manifests": provenance_manifest_digests(data_provenance),
+        "eligibility_rosters": provenance_eligibility_digests(data_provenance),
+    }
+    # Keep the in-memory contract in the same JSON-native representation that is
+    # restored on resume (notably, dataclass tuple fields become JSON arrays).
+    return json.loads(json.dumps(contract, allow_nan=False))
+
+
+def _require_finite_number(value: Any, label: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"candidate checkpoint {label} must be numeric")
+    if not math.isfinite(float(value)):
+        raise ValueError(f"candidate checkpoint {label} must be finite")
+
+
+def _load_candidate_progress(
+    path: Path,
+    *,
+    run_contract: dict[str, Any],
+    run_contract_sha256: str,
+    candidates: Sequence[dict[str, Any]],
+    folds: Sequence[Sequence[FlightSeries]],
+) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    payload = _read_json_strict(path)
+    if payload.get("schema_version") != PROGRESS_SCHEMA:
+        raise ValueError(
+            "candidate checkpoint schema does not match the current implementation"
+        )
+    if (
+        payload.get("run_contract_sha256") != run_contract_sha256
+        or payload.get("run_contract") != run_contract
+    ):
+        raise ValueError(
+            "candidate checkpoint does not match the current CV run contract"
+        )
+    completed = payload.get("completed_candidates")
+    rows = payload.get("candidates")
+    if (
+        isinstance(completed, bool)
+        or not isinstance(completed, int)
+        or completed < 0
+        or completed > len(candidates)
+        or not isinstance(rows, list)
+        or len(rows) != completed
+        or payload.get("candidate_count") != len(candidates)
+    ):
+        raise ValueError("candidate checkpoint has an invalid completion boundary")
+    for expected_index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError("candidate checkpoint candidate row must be an object")
+        if row.get("candidate") != expected_index:
+            raise ValueError("candidate checkpoint candidates must be sequential")
+        if row.get("overrides") != candidates[expected_index]:
+            raise ValueError("candidate checkpoint overrides do not match run contract")
+        _require_finite_number(
+            row.get("mean_val_macro_loss"), "mean_val_macro_loss"
+        )
+        _require_finite_number(
+            row.get("std_val_macro_loss"), "std_val_macro_loss"
+        )
+        fold_rows = row.get("folds")
+        if not isinstance(fold_rows, list) or len(fold_rows) != len(folds):
+            raise ValueError("candidate checkpoint has incomplete fold results")
+        for fold_index, fold_row in enumerate(fold_rows):
+            if not isinstance(fold_row, dict) or fold_row.get("fold") != fold_index:
+                raise ValueError("candidate checkpoint fold order is invalid")
+            if (
+                fold_row.get("validation_flights") != len(folds[fold_index])
+                or fold_row.get("validation_split_sha256")
+                != _split_digest(folds[fold_index])
+            ):
+                raise ValueError(
+                    "candidate checkpoint fold does not match current CV run contract"
+                )
+            _require_finite_number(
+                fold_row.get("best_validation_selection"),
+                "best_validation_selection",
+            )
+    return rows
+
+
+def _write_candidate_progress(
+    path: Path,
+    *,
+    run_contract: dict[str, Any],
+    run_contract_sha256: str,
+    candidate_count: int,
+    candidate_results: Sequence[dict[str, Any]],
+) -> None:
+    _write_json_atomic(path, {
+        "schema_version": PROGRESS_SCHEMA,
+        "run_contract_sha256": run_contract_sha256,
+        "run_contract": run_contract,
+        "candidate_count": candidate_count,
+        "completed_candidates": len(candidate_results),
+        "candidates": list(candidate_results),
+    })
 
 
 def cross_validate(
@@ -183,15 +369,44 @@ def cross_validate(
         cv_parameters, base_config.horizon_mode
     )
     candidates = _candidate_overrides(base_config, selected_parameters)
+    outer_split = _split_audit(outer_train, outer_val, outer_test)
+    eligibility_digests = provenance_eligibility_digests(data_provenance)
+    manifest_digests = provenance_manifest_digests(data_provenance)
+    run_contract = _candidate_run_contract(
+        base_config=base_config,
+        outer_split=outer_split,
+        training_cohort=training_cohort,
+        folds=folds,
+        selected_parameters=selected_parameters,
+        candidates=candidates,
+        cv_epochs=cv_epochs,
+        cv_patience=cv_patience,
+        auto_batch_size=auto_batch_size,
+        data_provenance=data_provenance,
+    )
+    run_contract_sha256 = _canonical_sha256(run_contract)
+    progress_path = out / PROGRESS_NAME
+    candidate_results = _load_candidate_progress(
+        progress_path,
+        run_contract=run_contract,
+        run_contract_sha256=run_contract_sha256,
+        candidates=candidates,
+        folds=folds,
+    )
 
     if verbose:
         print(f"  outer split (locked): train {len(outer_train)} / val {len(outer_val)} / "
               f"test {len(outer_test)}")
         print(f"  CV isolation: {n_splits} folds over outer-train only; outer-val/test untouched")
         print(f"  candidates: {len(candidates)}; epochs {cv_epochs}; patience {cv_patience}")
+        if candidate_results:
+            print(
+                f"  resume: {len(candidate_results)}/{len(candidates)} complete "
+                f"candidate(s) restored from {progress_path}"
+            )
 
-    candidate_results: list[dict[str, Any]] = []
-    for candidate_index, overrides in enumerate(candidates, 1):
+    for candidate_index in range(len(candidate_results), len(candidates)):
+        overrides = candidates[candidate_index]
         candidate_config = replace(
             base_config,
             **overrides,
@@ -204,7 +419,10 @@ def cross_validate(
         )
         candidate_config = replace(candidate_config, batch_size=resolved_batch)
         if verbose:
-            print(f"\n  CV candidate {candidate_index}/{len(candidates)}: {overrides}")
+            print(
+                f"\n  CV candidate {candidate_index + 1}/{len(candidates)}: "
+                f"{overrides}"
+            )
 
         fold_results: list[dict[str, Any]] = []
         for fold_index, fold_val in enumerate(folds):
@@ -267,21 +485,28 @@ def cross_validate(
 
         scores = [row["best_validation_selection"] for row in fold_results]
         candidate_results.append({
-            "candidate": candidate_index - 1,
+            "candidate": candidate_index,
             "overrides": overrides,
             "mean_val_macro_loss": fmean(scores),
             "std_val_macro_loss": pstdev(scores),
             "folds": fold_results,
         })
+        _write_candidate_progress(
+            progress_path,
+            run_contract=run_contract,
+            run_contract_sha256=run_contract_sha256,
+            candidate_count=len(candidates),
+            candidate_results=candidate_results,
+        )
 
     best = min(
         candidate_results,
         key=lambda row: (row["mean_val_macro_loss"], row["candidate"]),
     )
     best_overrides = dict(best["overrides"])
-    eligibility_digests = provenance_eligibility_digests(data_provenance)
     results = {
         "schema_version": RESULTS_SCHEMA,
+        "run_contract_sha256": run_contract_sha256,
         "selection_metric": SELECTION_METRIC_DESCRIPTIONS[
             base_config.checkpoint_selection_metric
         ],
@@ -290,17 +515,7 @@ def cross_validate(
             "outer_validation_used": False,
             "outer_test_used": False,
         },
-        "outer_split": {
-            "train_flights": len(outer_train),
-            "validation_flights": len(outer_val),
-            "test_flights": len(outer_test),
-            "train_sha256": _split_digest(outer_train),
-            "validation_sha256": _split_digest(outer_val),
-            "test_sha256": _split_digest(outer_test),
-            "train_by_airport": _airport_counts(outer_train),
-            "validation_by_airport": _airport_counts(outer_val),
-            "test_by_airport": _airport_counts(outer_test),
-        },
+        "outer_split": outer_split,
         "training_cohort": training_cohort,
         "n_splits": n_splits,
         "search_strategy": "exhaustive_grid",
@@ -311,7 +526,7 @@ def cross_validate(
         "cv_patience": cv_patience,
         "auto_batch_size": auto_batch_size,
         "base_config": base_config.to_dict(),
-        "arrival_manifests": provenance_manifest_digests(data_provenance),
+        "arrival_manifests": manifest_digests,
         "candidates": candidate_results,
         "best_candidate": best["candidate"],
         "best_mean_val_macro_loss": best["mean_val_macro_loss"],
