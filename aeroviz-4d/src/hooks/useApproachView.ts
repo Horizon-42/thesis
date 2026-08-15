@@ -201,21 +201,17 @@ export function useApproachView(): ApproachViewState {
     selectedFlightId,
   } = useApp();
   // Which trajectory sources are the CURRENT tab's globe content — the approach view plots
-  // only those, so it mirrors the active task instead of also drawing the observed
-  // tracks that stay loaded (but hidden) behind an approach view opened in Optimize/Fly/Compare.
+  // only those, so it mirrors the active task rather than leaking a hidden source into
+  // another task's profile.
   const sourceSelection = useMemo(
     () =>
       planApproachViewSources({
         mode,
-        activeAirportCode,
-        selectedRunway,
         trajectoryComparison,
         hasOptimizedSource: optimizedTrajectoryDataSource !== null,
       }),
     [
       mode,
-      activeAirportCode,
-      selectedRunway,
       trajectoryComparison,
       optimizedTrajectoryDataSource,
     ],

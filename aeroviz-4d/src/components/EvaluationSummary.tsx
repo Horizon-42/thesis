@@ -9,9 +9,9 @@
  *   • optimization   — solver outcome and error relative to the selected target;
  *   • data-driven    — runway-threshold gate pass plus ADE/FDE against the observed trajectory.
  *
- * Observed is a report-only category and therefore reads its fixed report directly.
- * Modelled categories first read their immutable comparison index; Details then follows
- * the exact evaluation-report filename committed by that index.
+ * Observed summary metrics arrive with the bounded trajectory response; its large fixed
+ * report is fetched only when Details opens. Modelled categories first read their immutable
+ * comparison index; Details then follows the exact report filename committed by that index.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -29,6 +29,7 @@ import {
   type PredictionErrorSpread,
 } from "../data/airportData";
 import { isEvaluationReport, type EvaluationReport } from "../data/evaluationReport";
+import type { ObservedEvaluationSummary } from "../data/observedTracks";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { formatDuration, formatPercent } from "../utils/flightListFormat";
@@ -101,7 +102,7 @@ function passRateAmongSolved(stats: OptimizationStats | null): number | null {
   return successful / solved;
 }
 
-function observedPresentation(report: EvaluationReport | null): Presentation {
+function observedPresentation(report: ObservedEvaluationSummary | null): Presentation {
   const eventRate = report?.observed?.event_estimated_rate;
   const crossingPassRate = report && report.total > 0
     ? report.verdict_counts.pass / report.total
@@ -326,7 +327,11 @@ function predictionPresentation(
   };
 }
 
-export default function EvaluationSummary() {
+export default function EvaluationSummary({
+  observedEvaluation = null,
+}: {
+  observedEvaluation?: ObservedEvaluationSummary | null;
+}) {
   const {
     activeAirportCode,
     trajectoryComparison,
@@ -351,47 +356,21 @@ export default function EvaluationSummary() {
   useEffect(() => {
     setOpen(false);
     setError(null);
+    setLoading(false);
     setLoaded(null);
     if (!activeAirportCode || !category || !sourceKey) return;
 
     let cancelled = false;
     const kind = evaluationKind(category);
     if (kind === "observed") {
-      const reportKey = `${sourceKey}/${OBSERVED_EVALUATION_REPORT_FILE}`;
-      setLoading(true);
-      fetchJson<unknown>(
-        airportEvaluationReportUrl(
-          activeAirportCode,
-          category.dir,
-          OBSERVED_EVALUATION_REPORT_FILE,
-        ),
-      )
-        .then((data) => {
-          if (!isEvaluationReport(data)) {
-            throw new Error("evaluation report is malformed");
-          }
-          if (cancelled) return;
-          setCachedReport({ key: reportKey, report: data });
-          setLoaded({
-            key: sourceKey,
-            reportFile: OBSERVED_EVALUATION_REPORT_FILE,
-            stats: null,
-            prediction: null,
-            evaluation: null,
-            report: data,
-          });
-        })
-        .catch((fetchError) => {
-          if (cancelled) return;
-          setError(
-            isMissingJsonAsset(fetchError)
-              ? "No observed evaluation report is published for this airport."
-              : String(fetchError instanceof Error ? fetchError.message : fetchError),
-          );
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
+      setLoaded({
+        key: sourceKey,
+        reportFile: OBSERVED_EVALUATION_REPORT_FILE,
+        stats: null,
+        prediction: null,
+        evaluation: null,
+        report: null,
+      });
     } else {
       setLoading(true);
       fetchJson<unknown>(airportComparisonIndexUrl(activeAirportCode, category.dir))
@@ -441,7 +420,7 @@ export default function EvaluationSummary() {
     }
     const kind = evaluationKind(category);
     if (kind === "observed") {
-      return observedPresentation(loaded?.key === sourceKey ? loaded.report : null);
+      return observedPresentation(observedEvaluation);
     }
     if (kind === "dataDriven") {
       return predictionPresentation(
@@ -455,7 +434,7 @@ export default function EvaluationSummary() {
       category,
       loaded?.key === sourceKey ? loaded.stats : null,
     );
-  }, [category, loaded, sourceKey]);
+  }, [category, loaded, observedEvaluation, sourceKey]);
 
   const currentLoaded = loaded?.key === sourceKey ? loaded : null;
   const reportKey =

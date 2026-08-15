@@ -16,7 +16,7 @@
  *         (useTerrainHillshadeLayer/useTerrainHeightTintLayer) adds local terrain visual aids
  *         (useProcedureSegmentLayer) loads v3 procedure render bundles
  *         (useOcsLayer)          builds OCS geometry
- *         (useCzmlLoader)        loads trajectories.czml
+ *         (useObservedTrajectoryLayer) loads the bounded observed response
  */
 
 import { useRef } from "react";

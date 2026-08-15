@@ -10,12 +10,15 @@
  */
 
 import { useApp } from "../context/AppContext";
-import type { ObservedVerdictState } from "../hooks/useObservedVerdictColors";
+import {
+  NO_OBSERVED_VERDICTS,
+  type ObservedVerdictFilter,
+  type ObservedVerdicts,
+} from "../data/observedTracks";
 import {
   OBSERVED_VERDICT_COLORS,
   OBSERVED_VERDICT_HINTS,
   OBSERVED_VERDICT_LABELS,
-  type ObservedVerdictFilter,
 } from "../utils/observedVerdictColors";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { useComparisonLegend } from "../hooks/useComparisonLegend";
@@ -46,22 +49,15 @@ const COMPARISON_KIND_LABELS: Record<ComparisonLegendKind, string> = {
 
 interface ControlPanelProps {
   /**
-   * Gate-verdict tally for the plain observed tracks. Optional and defaulted: it drives
-   * a legend only, so the panel stays constructible (and testable) without it.
+   * Gate-verdict tally for the complete runway-eligible observed roster. Optional and
+   * defaulted: it drives a legend only, so the panel remains independently testable.
    */
-  observedVerdicts?: ObservedVerdictState;
+  observedVerdicts?: ObservedVerdicts;
 }
 
-const NO_VERDICTS: ObservedVerdictState = {
-  counts: null,
-  verdictsByFlightId: null,
-  matched: 0,
-  total: 0,
-  loading: false,
-  missing: false,
-};
-
-export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: ControlPanelProps) {
+export default function ControlPanel({
+  observedVerdicts = NO_OBSERVED_VERDICTS,
+}: ControlPanelProps) {
   const {
     layers,
     toggleLayer,
@@ -212,21 +208,22 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                   Terminal approach verdict (procedure and runway bounds)
                 </div>
                 <label className="control-panel-verdict-filter">
-                  <span>Show baseline sample</span>
+                  <span>Baseline verdict</span>
                   <select
                     className="control-panel-airport-selector-input"
                     value={observedVerdictFilter}
                     onChange={(event) =>
                       setObservedVerdictFilter(event.target.value as ObservedVerdictFilter)}
                   >
-                    <option value="all">All sampled trajectories</option>
+                    <option value="all">All verdicts</option>
                     <option value="pass">Pass only</option>
                     <option value="fail">Fail only</option>
                     <option value="undecided">Indeterminate only</option>
                   </select>
                 </label>
                 <div className="control-panel-verdict-filter-hint">
-                  Visibility only — the sampled trajectory set does not change.
+                  The sample limit applies within the selected verdict; if fewer tracks exist,
+                  all are shown.
                 </div>
                 {(["pass", "fail", "undecided"] as const).map((verdict) => (
                   <div key={verdict} className="control-panel-verdict-row">

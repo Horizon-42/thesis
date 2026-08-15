@@ -44,7 +44,7 @@ import type {
 import { fetchJson } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerrain";
-import type { ObservedVerdictFilter } from "../utils/observedVerdictColors";
+import type { ObservedVerdictFilter } from "../data/observedTracks";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -184,11 +184,11 @@ interface FlightSessionState {
   trajectoryComparisonKinds: Record<ComparisonKind, boolean>;
   setTrajectoryComparisonKind: (kind: ComparisonKind, visible: boolean) => void;
 
-  /** How many trajectories to render (0 = all); applies to both normal and comparison modes. */
+  /** How many trajectories to render (0 = all); baseline applies it inside the active verdict. */
   trajectorySampleCount: number;
   setTrajectorySampleCount: (count: number) => void;
 
-  /** Display-only verdict filter applied after the observed baseline sample is chosen. */
+  /** Verdict pool from which the observed baseline sample is chosen. */
   observedVerdictFilter: ObservedVerdictFilter;
   setObservedVerdictFilter: (filter: ObservedVerdictFilter) => void;
 }

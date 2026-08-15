@@ -6,8 +6,6 @@ import {
 
 const base: ApproachViewSourceInputs = {
   mode: "observe",
-  activeAirportCode: "KRDU",
-  selectedRunway: "05L",
   trajectoryComparison: false,
   hasOptimizedSource: false,
 };

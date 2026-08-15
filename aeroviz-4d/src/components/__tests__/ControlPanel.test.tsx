@@ -298,23 +298,20 @@ describe("ControlPanel", () => {
     expect(setTrajectoryComparison).toHaveBeenCalledWith(true);
   });
 
-  it("filters verdicts within the baseline sample without changing sampling", () => {
+  it("explains that each baseline verdict is sampled independently", () => {
     render(
       <ControlPanel
         observedVerdicts={{
           counts: { pass: 4, fail: 2, undecided: 3 },
-          verdictsByFlightId: new Map(),
           matched: 9,
           total: 9,
-          loading: false,
-          missing: false,
         }}
       />,
     );
 
-    const filter = screen.getByLabelText("Show baseline sample") as HTMLSelectElement;
+    const filter = screen.getByLabelText("Baseline verdict") as HTMLSelectElement;
     expect([...filter.options].map((option) => option.textContent)).toEqual([
-      "All sampled trajectories",
+      "All verdicts",
       "Pass only",
       "Fail only",
       "Indeterminate only",
@@ -324,7 +321,8 @@ describe("ControlPanel", () => {
     expect(setObservedVerdictFilter).toHaveBeenCalledWith("fail");
     expect(setTrajectorySampleCount).not.toHaveBeenCalled();
     expect(setTrajectoryComparison).not.toHaveBeenCalled();
-    expect(screen.getByText(/sampled trajectory set does not change/i)).toBeTruthy();
+    expect(screen.getByText(/sample limit applies within the selected verdict/i)).toBeTruthy();
+    expect(screen.getByText(/if fewer tracks exist, all are shown/i)).toBeTruthy();
   });
 
   it("selects an experiment model and its train/validation publication independently", () => {

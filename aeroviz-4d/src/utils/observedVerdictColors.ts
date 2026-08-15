@@ -22,10 +22,7 @@
  * maps it to colours, so the UI cannot invent a stronger conclusion.
  */
 
-import type { EvaluationRow } from "../data/evaluationReport";
-
-export type ObservedVerdict = "pass" | "fail" | "undecided";
-export type ObservedVerdictFilter = "all" | ObservedVerdict;
+import type { ObservedVerdict } from "../data/observedTracks";
 
 /** Path colours. Deliberately desaturated for grey so it recedes behind the verdicts. */
 export const OBSERVED_VERDICT_COLORS: Record<ObservedVerdict, string> = {
@@ -69,49 +66,3 @@ export const OBSERVED_VERDICT_HINTS: Record<ObservedVerdict, string> = {
   fail: "At least one required component fails its bound.",
   undecided: "A required event, bound, or uncertainty interval does not support pass/fail.",
 };
-
-/**
- * The verdict for one report row.
- *
- * `undecided` is the UI spelling of the report's `indeterminate` verdict.
- */
-export function verdictOfRow(row: EvaluationRow): ObservedVerdict {
-  return row.verdict === "indeterminate" ? "undecided" : row.verdict;
-}
-
-/**
- * Index a report's rows by `flight_key` for joining against rendered entity ids.
- *
- * Keyed on `flight_key`, never on `id`: `id` is the callsign, and a callsign is not
- * unique (552 distinct callsigns across 996 KRDU arrivals). Joining on it swaps
- * verdicts between namesakes — a mistake this project has already made in four
- * separate layers. Rows without a `flight_key` are skipped rather than guessed at.
- */
-export function verdictsByFlightKey(rows: EvaluationRow[]): Map<string, ObservedVerdict> {
-  const out = new Map<string, ObservedVerdict>();
-  for (const row of rows) {
-    if (row.flight_key) out.set(row.flight_key, verdictOfRow(row));
-  }
-  return out;
-}
-
-/** Verdict counts, for the legend's "n of m" readout. */
-export function countVerdicts(
-  verdicts: Iterable<ObservedVerdict>,
-): Record<ObservedVerdict, number> {
-  const counts: Record<ObservedVerdict, number> = { pass: 0, fail: 0, undecided: 0 };
-  for (const v of verdicts) counts[v] += 1;
-  return counts;
-}
-
-/**
- * Whether one already-sampled observed trajectory passes the display-only verdict filter.
- * Sampling deliberately happens before this predicate is applied; `all` therefore means
- * all trajectories in the current sample, never all trajectories in the loaded harvest.
- */
-export function matchesObservedVerdictFilter(
-  verdict: ObservedVerdict,
-  filter: ObservedVerdictFilter,
-): boolean {
-  return filter === "all" || verdict === filter;
-}

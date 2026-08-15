@@ -61,11 +61,13 @@ class AeroVizBackendApp:
                 query = parse_qs(parsed.query, keep_blank_values=True)
                 airport = _query_value(query, "airport", required=True)
                 runway = _query_value(query, "runway")
+                verdict = _query_value(query, "verdict")
                 limit = _query_int(query, "limit", default=200)
                 seed = _query_int(query, "seed", default=0)
                 return 200, self.observed_trajectory_backend.query(
                     airport,
                     runway=runway,
+                    verdict=verdict,
                     limit=limit,
                     seed=seed,
                 )

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComparisonCategory, ComparisonIndex } from "../../data/airportData";
 import type { EvaluationReport } from "../../data/evaluationReport";
+import type { ObservedEvaluationSummary } from "../../data/observedTracks";
 
 const { appState, categoryState, fetchJsonMock } = vi.hoisted(() => ({
   appState: {
@@ -127,6 +128,14 @@ const OBSERVED_REPORT: EvaluationReport = {
   },
 };
 
+const OBSERVED_SUMMARY: ObservedEvaluationSummary = {
+  total: OBSERVED_REPORT.total,
+  verdict_counts: OBSERVED_REPORT.verdict_counts,
+  observed: OBSERVED_REPORT.observed ?? null,
+  lateral_m: OBSERVED_REPORT.lateral_m,
+  vertical_m: OBSERVED_REPORT.vertical_m,
+};
+
 const INDEX: ComparisonIndex = {
   schemaVersion: "comparison-v2-generation",
   generation: "batch123",
@@ -161,8 +170,7 @@ describe("EvaluationSummary", () => {
   });
 
   it("renders the report-only observed category with baseline-specific metrics", async () => {
-    fetchJsonMock.mockResolvedValue(OBSERVED_REPORT);
-    render(<EvaluationSummary />);
+    render(<EvaluationSummary observedEvaluation={OBSERVED_SUMMARY} />);
 
     expect(
       screen.getByRole("region", { name: "Observed Baseline Evaluation" }),
@@ -176,24 +184,18 @@ describe("EvaluationSummary", () => {
       within(metric("Mean absolute vertical deviation at threshold")).getByText("5 m"),
     ).toBeTruthy();
     expect(screen.getByText(/without refitting ADS-B/)).toBeTruthy();
-    expect(fetchJsonMock).toHaveBeenCalledWith(
-      expect.stringContaining("KRDU/comparison/observed/evaluation_report.json"),
-    );
+    expect(fetchJsonMock).not.toHaveBeenCalled();
   });
 
   it("returns to the observed baseline when comparison is off", async () => {
     appState.trajectoryComparison = false;
     appState.trajectoryComparisonCategory = FITTED.dir;
-    fetchJsonMock.mockResolvedValue(OBSERVED_REPORT);
-
-    render(<EvaluationSummary />);
+    render(<EvaluationSummary observedEvaluation={OBSERVED_SUMMARY} />);
 
     expect(
       await screen.findByRole("region", { name: "Observed Baseline Evaluation" }),
     ).toBeTruthy();
-    expect(fetchJsonMock).toHaveBeenCalledWith(
-      expect.stringContaining("KRDU/comparison/observed/evaluation_report.json"),
-    );
+    expect(fetchJsonMock).not.toHaveBeenCalled();
     expect(fetchJsonMock).not.toHaveBeenCalledWith(
       expect.stringContaining("fitted_adsb/comparison_index.json"),
     );
@@ -309,7 +311,7 @@ describe("EvaluationSummary", () => {
 
   it("opens observed Details from its fixed report with a subject-aware title", async () => {
     fetchJsonMock.mockResolvedValue(OBSERVED_REPORT);
-    render(<EvaluationSummary />);
+    render(<EvaluationSummary observedEvaluation={OBSERVED_SUMMARY} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Details" }));
     expect(

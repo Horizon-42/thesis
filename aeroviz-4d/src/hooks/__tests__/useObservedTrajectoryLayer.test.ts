@@ -12,6 +12,14 @@ function jsonResponse(body: unknown) {
   };
 }
 
+function observedResponse(
+  czml: unknown[],
+  verdicts: unknown = null,
+  evaluation: unknown = null,
+) {
+  return { schemaVersion: "observed-trajectories-v1", czml, verdicts, evaluation };
+}
+
 const {
   loadCzml,
   mockViewer,
@@ -20,6 +28,8 @@ const {
   setSelectedFlightId,
   setTrajectoryDataSource,
   makeTime,
+  ConstantProperty,
+  ColorMaterialProperty,
 } = vi.hoisted(() => {
   const makeTime = (seconds: number): any => ({
     seconds,
@@ -30,6 +40,22 @@ const {
   const setSelectedFlightId = vi.fn();
   const setTrajectoryDataSource = vi.fn();
   let trajectoriesVisible = true;
+
+  class ConstantProperty {
+    constructor(private readonly value: unknown) {}
+
+    getValue() {
+      return this.value;
+    }
+  }
+
+  class ColorMaterialProperty {
+    color: ConstantProperty;
+
+    constructor(color: unknown) {
+      this.color = new ConstantProperty(color);
+    }
+  }
 
   const mockViewer = {
     clock: {
@@ -60,13 +86,21 @@ const {
     setSelectedFlightId,
     setTrajectoryDataSource,
     makeTime,
+    ConstantProperty,
+    ColorMaterialProperty,
   };
 });
 
 vi.mock("cesium", () => ({
   ClockRange: {
     LOOP_STOP: "LOOP_STOP",
+    CLAMPED: "CLAMPED",
   },
+  Color: {
+    fromCssColorString: (value: string) => value,
+  },
+  ConstantProperty,
+  ColorMaterialProperty,
   JulianDate: {
     lessThan: (left: { seconds: number }, right: { seconds: number }) =>
       left.seconds < right.seconds,
@@ -78,8 +112,8 @@ vi.mock("cesium", () => ({
 
     constructor(public name: string) {}
 
-    async load(url: string) {
-      const loaded = await loadCzml(url);
+    async load(czml: unknown) {
+      const loaded = await loadCzml(czml);
       Object.assign(this, loaded);
       return this;
     }
@@ -90,13 +124,14 @@ vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     viewer: mockViewer,
     layers: { trajectories: getTrajectoriesVisible() },
-    trajectorySampleCount: 0,
+    autoReplay: true,
+    selectedFlightId: null,
     setSelectedFlightId,
     setTrajectoryDataSource,
   }),
 }));
 
-import { useCzmlLoader } from "../useCzmlLoader";
+import { useObservedTrajectoryLayer } from "../useObservedTrajectoryLayer";
 
 function resetViewer() {
   mockViewer.clock.startTime = makeTime(0);
@@ -114,13 +149,13 @@ function resetViewer() {
   setTrajectoriesVisible(true);
 }
 
-describe("useCzmlLoader", () => {
+describe("useObservedTrajectoryLayer", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     resetViewer();
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue(jsonResponse([{ id: "document" }]));
+    fetchMock.mockResolvedValue(jsonResponse(observedResponse([{ id: "document" }])));
     vi.stubGlobal("fetch", fetchMock);
     loadCzml.mockReset();
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -137,7 +172,7 @@ describe("useCzmlLoader", () => {
       clock: { startTime: makeTime(5), stopTime: makeTime(5) },
     });
 
-    const { result } = renderHook(() => useCzmlLoader(CZML_URL));
+    const { result } = renderHook(() => useObservedTrajectoryLayer(CZML_URL));
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
@@ -157,7 +192,7 @@ describe("useCzmlLoader", () => {
       clock: { startTime: makeTime(8), stopTime: makeTime(8) },
     });
 
-    const { result } = renderHook(() => useCzmlLoader(CZML_URL));
+    const { result } = renderHook(() => useObservedTrajectoryLayer(CZML_URL));
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
@@ -178,7 +213,7 @@ describe("useCzmlLoader", () => {
       clock: { startTime: makeTime(10), stopTime: makeTime(70) },
     });
 
-    const { result } = renderHook(() => useCzmlLoader(CZML_URL));
+    const { result } = renderHook(() => useObservedTrajectoryLayer(CZML_URL));
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
@@ -204,7 +239,7 @@ describe("useCzmlLoader", () => {
       clock: { startTime: makeTime(10), stopTime: makeTime(70) },
     });
 
-    const { result } = renderHook(() => useCzmlLoader(CZML_URL, false));
+    const { result } = renderHook(() => useObservedTrajectoryLayer(CZML_URL, false));
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
     // The file is still loaded (parsed + added) ...
@@ -219,67 +254,82 @@ describe("useCzmlLoader", () => {
       clock: { startTime: makeTime(10), stopTime: makeTime(70) },
     });
 
-    const { result } = renderHook(() => useCzmlLoader(CZML_URL, true));
+    const { result } = renderHook(() => useObservedTrajectoryLayer(CZML_URL, true));
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
     expect(mockViewer.dataSources.add.mock.calls[0][0].show).toBe(true);
   });
 
-  it("filters runways without fetching or loading a second CZML file", async () => {
-    fetchMock.mockResolvedValue(jsonResponse([
-      { id: "document" },
-      { id: "flight-05L", properties: { runway: "05L" } },
-      { id: "flight-23R", properties: { runway: "23R" } },
-    ]));
-    const entities = [{ id: "flight-05L", show: true }, { id: "flight-23R", show: true }];
-    loadCzml.mockResolvedValue({
-      entities: { values: entities },
-      clock: { startTime: makeTime(10), stopTime: makeTime(70) },
-    });
+  it("replaces the bounded response when the backend runway URL changes", async () => {
+    const runway05Url = `${CZML_URL}?runway=05L`;
+    const runway23Url = `${CZML_URL}?runway=23R`;
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(observedResponse([
+        { id: "document" },
+        { id: "flight-05L" },
+      ])))
+      .mockResolvedValueOnce(jsonResponse(observedResponse([
+        { id: "document" },
+        { id: "flight-23R" },
+      ])));
+    loadCzml
+      .mockResolvedValueOnce({
+        entities: { values: [{ id: "flight-05L", show: true }] },
+        clock: { startTime: makeTime(10), stopTime: makeTime(70) },
+      })
+      .mockResolvedValueOnce({
+        entities: { values: [{ id: "flight-23R", show: true }] },
+        clock: { startTime: makeTime(10), stopTime: makeTime(70) },
+      });
 
     const { result, rerender } = renderHook(
-      ({ runway }) => useCzmlLoader(CZML_URL, true, runway),
-      { initialProps: { runway: "05L" as string | null } },
+      ({ url }) => useObservedTrajectoryLayer(url, true),
+      { initialProps: { url: runway05Url } },
     );
-    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    await waitFor(() => expect(result.current.flightIds).toEqual(["flight-05L"]));
 
-    expect(result.current.flightIds).toEqual(["flight-05L"]);
-    expect(entities.map((entity) => entity.show)).toEqual([true, false]);
-
-    rerender({ runway: "23R" });
+    rerender({ url: runway23Url });
     await waitFor(() => expect(result.current.flightIds).toEqual(["flight-23R"]));
-    expect(entities.map((entity) => entity.show)).toEqual([false, true]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(loadCzml).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, runway05Url);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, runway23Url);
+    expect(loadCzml).toHaveBeenCalledTimes(2);
   });
 
-  it("filters only within the loaded baseline sample and does not reload it", async () => {
-    const entities = [
-      { id: "flight-pass", show: true },
-      { id: "flight-fail", show: true },
-      { id: "flight-indeterminate", show: true },
-    ];
+  it("renders every backend-selected verdict track and exposes compact metadata", async () => {
+    const entities = [{
+      id: "flight-fail",
+      show: false,
+      path: { material: new ColorMaterialProperty("original") },
+    }];
+    fetchMock.mockResolvedValue(jsonResponse(observedResponse(
+      [{ id: "document" }, { id: "flight-fail" }],
+      {
+        counts: { pass: 4, fail: 1, undecided: 2 },
+        byFlightId: { "flight-fail": "fail" },
+        matched: 6,
+        total: 7,
+      },
+      {
+        total: 7,
+        verdict_counts: { pass: 4, fail: 1, indeterminate: 2 },
+        observed: { event_estimated_rate: 0.8 },
+        lateral_m: { mean: 12.5 },
+        vertical_m: { mean_abs: 4.5 },
+      },
+    )));
     loadCzml.mockResolvedValue({
       entities: { values: entities },
       clock: { startTime: makeTime(10), stopTime: makeTime(70) },
     });
-    const verdictsByFlightId = new Map([
-      ["flight-pass", "pass"],
-      ["flight-fail", "fail"],
-      ["flight-indeterminate", "undecided"],
-    ] as const);
 
-    const { result, rerender } = renderHook(
-      ({ filter }) =>
-        useCzmlLoader(CZML_URL, true, null, { filter, verdictsByFlightId }),
-      { initialProps: { filter: "fail" as "all" | "fail" } },
-    );
+    const { result } = renderHook(() => useObservedTrajectoryLayer(CZML_URL));
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
-    expect(entities.map((entity) => entity.show)).toEqual([false, true, false]);
-
-    rerender({ filter: "all" });
-    await waitFor(() => expect(entities.map((entity) => entity.show)).toEqual([true, true, true]));
+    expect(result.current.flightIds).toEqual(["flight-fail"]);
+    expect(result.current.observedVerdicts.counts).toEqual({ pass: 4, fail: 1, undecided: 2 });
+    expect(result.current.observedEvaluation?.observed?.event_estimated_rate).toBe(0.8);
+    expect(entities[0].show).toBe(true);
+    expect(entities[0].path.material.color.getValue()).toBe("rgb(230, 70, 70)");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(loadCzml).toHaveBeenCalledTimes(1);
   });

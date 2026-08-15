@@ -14,15 +14,15 @@
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
 import type * as Cesium from "cesium";
-import type { ObservedFlightSummary } from "../hooks/useCzmlLoader";
+import type { ObservedFlightSummary } from "../utils/observedFlightSummary";
 import { useFlightOptimizerData } from "../hooks/useFlightOptimizerData";
 import { formatDuration, formatSpeed, formatMass } from "../utils/flightListFormat";
 import { COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
 
 interface FlightTableProps {
-  /** Flight IDs from useCzmlLoader. */
+  /** Flight IDs from useObservedTrajectoryLayer. */
   flightIds: string[];
-  /** Per-flight duration + initial ground speed from useCzmlLoader. */
+  /** Per-flight duration + initial ground speed from useObservedTrajectoryLayer. */
   flightSummaries: Record<string, ObservedFlightSummary>;
 }
 

@@ -26,10 +26,9 @@ import ProcedurePanel from "./components/ProcedurePanel";
 import ApproachViewPanel from "./components/ApproachViewPanel";
 import { useApp } from "./context/AppContext";
 import { planObservedTracks } from "./data/observedTracks";
-import { useCzmlLoader } from "./hooks/useCzmlLoader";
+import { useObservedTrajectoryLayer } from "./hooks/useObservedTrajectoryLayer";
 import { useComparisonTrajectoryLayer } from "./hooks/useComparisonTrajectoryLayer";
 import { useLandingsManifest } from "./hooks/useLandingsManifest";
-import { useObservedVerdictColors } from "./hooks/useObservedVerdictColors";
 import { AEROVIZ_BACKEND_URL } from "./pilot/pilotClient";
 import { useEffect, useState } from "react";
 
@@ -50,34 +49,31 @@ function FlightApp() {
   } = useLandingsManifest(activeAirportCode ?? "");
   // Observed tracks are loaded AND painted only in Observe (see planObservedTracks): the
   // runway profile samples them only in Observe too, so no other task needs them in memory
-  // — and loading them elsewhere would let useCzmlLoader hijack the shared clock.
+  // — and loading them elsewhere would let the observed layer hijack the shared clock.
   const {
     fileUrl: observedFileUrl,
     visible: observedVisible,
-    runwayFilter: observedRunwayFilter,
   } = planObservedTracks({
     mode,
     activeAirportCode,
     selectedRunway,
     trajectoryComparison,
     trajectorySampleCount,
+    observedVerdictFilter,
     backendUrl: AEROVIZ_BACKEND_URL,
     landingsManifest,
     landingsStatus,
   });
-  // Fetch the baseline verdict index independently of its current visibility. This lets the
-  // display-only filter apply immediately when returning from a comparison result source.
-  const observedVerdicts = useObservedVerdictColors(
-    observedVisible && !trajectoryComparison,
-  );
-  const { flightIds, flightSummaries, warning, error } = useCzmlLoader(
+  const {
+    flightIds,
+    flightSummaries,
+    warning,
+    error,
+    observedVerdicts,
+    observedEvaluation,
+  } = useObservedTrajectoryLayer(
     observedFileUrl,
     observedVisible,
-    observedRunwayFilter,
-    {
-      filter: observedVerdictFilter,
-      verdictsByFlightId: observedVerdicts.verdictsByFlightId,
-    },
   );
   useComparisonTrajectoryLayer();
   const czmlError = landingsError ?? error;
@@ -96,6 +92,7 @@ function FlightApp() {
             flightIds={flightIds}
             flightSummaries={flightSummaries}
             observedVerdicts={observedVerdicts}
+            observedEvaluation={observedEvaluation}
           />
         }
         right={

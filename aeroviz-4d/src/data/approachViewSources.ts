@@ -5,12 +5,10 @@
  * mirrors the ACTIVE TASK — it samples a source only when that source is the
  * current tab's content on the globe.
  *
- * The subtlety this exists to handle: the observed ADS-B tracks stay LOADED
- * behind an open approach view in EVERY task (the approach view samples the loaded
- * source), but they are Observe's content and are painted on the globe only
- * there (see planObservedTracks). So a profile opened in Fly / Optimize /
- * Compare must NOT plot the observed tracks — they are invisible on the globe
- * in those tabs, and plotting them would show trajectories the tab has hidden.
+ * Observed ADS-B tracks exist only in Observe and are visible only for Baseline
+ * (see planObservedTracks). A profile opened in Fly / Optimize / Compare must
+ * therefore never plot that source; it would disagree with the globe and could
+ * also let the observed clock interfere with optimized playback.
  * The optimized playback is the Optimize tab's content: it exists only while a
  * trajectory-play result is loaded (WorkbenchMode "optimize") and is that tab's
  * content whenever it does.
@@ -31,8 +29,6 @@ import {
 } from "./observedTracks";
 
 export interface ApproachViewSourceInputs extends ObservedTrackVisibilityInputs {
-  activeAirportCode: string | null;
-  selectedRunway: string | null;
   /** Whether an optimized-playback datasource is currently loaded. */
   hasOptimizedSource: boolean;
 }

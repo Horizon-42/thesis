@@ -12,11 +12,14 @@
 
 import { useApp, type WorkbenchMode } from "../context/AppContext";
 import ControlPanel from "./ControlPanel";
-import type { ObservedVerdictState } from "../hooks/useObservedVerdictColors";
+import type {
+  ObservedEvaluationSummary,
+  ObservedVerdicts,
+} from "../data/observedTracks";
 import FlightTable from "./FlightTable";
 import EvaluationSummary from "./EvaluationSummary";
 import PilotPanel from "./PilotPanel";
-import type { ObservedFlightSummary } from "../hooks/useCzmlLoader";
+import type { ObservedFlightSummary } from "../utils/observedFlightSummary";
 
 type PilotPanelMode = "pilot" | "trajectory" | "comparison";
 
@@ -37,14 +40,17 @@ interface WorkbenchLeftDockProps {
   flightIds: string[];
   /** Per-flight duration + initial ground speed for the flight list. */
   flightSummaries: Record<string, ObservedFlightSummary>;
-  /** Gate-verdict tally for the plain observed tracks (ControlPanel's legend). */
-  observedVerdicts?: ObservedVerdictState;
+  /** Gate-verdict tally for the complete runway-eligible observed roster. */
+  observedVerdicts?: ObservedVerdicts;
+  /** Compact aggregate returned with the observed trajectory response. */
+  observedEvaluation?: ObservedEvaluationSummary | null;
 }
 
 export default function WorkbenchLeftDock({
   flightIds,
   flightSummaries,
   observedVerdicts,
+  observedEvaluation,
 }: WorkbenchLeftDockProps) {
   const { mode, setMode } = useApp();
 
@@ -64,7 +70,7 @@ export default function WorkbenchLeftDock({
     <div className="workbench-left-dock">
       <ControlPanel observedVerdicts={observedVerdicts} />
       <FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />
-      <EvaluationSummary />
+      <EvaluationSummary observedEvaluation={observedEvaluation} />
     </div>
   );
 }

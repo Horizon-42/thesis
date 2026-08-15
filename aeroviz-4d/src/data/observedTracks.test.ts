@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { planObservedTracks, type ObservedTrackInputs } from "./observedTracks";
+import {
+  isObservedTrajectoryResponse,
+  decodeObservedVerdicts,
+  planObservedTracks,
+  type ObservedTrackInputs,
+} from "./observedTracks";
 
 const BACKEND_URL = "http://backend.test";
 
@@ -9,6 +14,7 @@ const base: ObservedTrackInputs = {
   selectedRunway: null,
   trajectoryComparison: false,
   trajectorySampleCount: 200,
+  observedVerdictFilter: "all",
   backendUrl: BACKEND_URL,
 };
 
@@ -17,7 +23,6 @@ describe("planObservedTracks", () => {
     expect(planObservedTracks(base)).toEqual({
       fileUrl: `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0`,
       visible: true,
-      runwayFilter: null,
     });
   });
 
@@ -38,7 +43,6 @@ describe("planObservedTracks", () => {
       fileUrl:
         `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0&runway=05L`,
       visible: true,
-      runwayFilter: "05L",
     });
   });
 
@@ -51,7 +55,6 @@ describe("planObservedTracks", () => {
     })).toEqual({
       fileUrl: "",
       visible: true,
-      runwayFilter: null,
     });
   });
 
@@ -64,7 +67,6 @@ describe("planObservedTracks", () => {
     })).toEqual({
       fileUrl: "",
       visible: true,
-      runwayFilter: null,
     });
   });
 
@@ -74,7 +76,6 @@ describe("planObservedTracks", () => {
       expect(planObservedTracks({ ...base, mode })).toEqual({
         fileUrl: "",
         visible: false,
-        runwayFilter: null,
       });
     },
   );
@@ -83,12 +84,11 @@ describe("planObservedTracks", () => {
     "does NOT load the observed tracks in %s even with a runway profile open",
     (mode) => {
       // The profile samples observed tracks only in Observe, so no other task needs them
-      // loaded. Loading them here previously let useCzmlLoader hijack the shared clock and
+      // loaded. Loading them here previously let the observed layer hijack the shared clock and
       // made the optimized playback vanish — so they must stay released.
       expect(planObservedTracks({ ...base, mode, selectedRunway: "05L" })).toEqual({
         fileUrl: "",
         visible: false,
-        runwayFilter: "05L",
       });
     },
   );
@@ -99,7 +99,6 @@ describe("planObservedTracks", () => {
       `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0`,
     );
     expect(plan.visible).toBe(false);
-    expect(plan.runwayFilter).toBeNull();
   });
 
   it("puts sample-count changes in the request URL so the loader refetches", () => {
@@ -108,11 +107,60 @@ describe("planObservedTracks", () => {
     );
   });
 
+  it("puts the baseline verdict in the request so the backend filters before sampling", () => {
+    expect(planObservedTracks({ ...base, observedVerdictFilter: "fail" }).fileUrl).toBe(
+      `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0&verdict=fail`,
+    );
+  });
+
+  it("does not apply the baseline verdict to comparison reference loading", () => {
+    expect(planObservedTracks({
+      ...base,
+      trajectoryComparison: true,
+      observedVerdictFilter: "fail",
+    }).fileUrl).toBe(`${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0`);
+  });
+
   it("loads nothing when no airport is active", () => {
     expect(planObservedTracks({ ...base, activeAirportCode: null })).toEqual({
       fileUrl: "",
       visible: true,
-      runwayFilter: null,
     });
+  });
+});
+
+describe("observed trajectory response", () => {
+  const response = {
+    schemaVersion: "observed-trajectories-v1",
+    czml: [{ id: "document" }, { id: "flight-fail" }],
+    verdicts: {
+      counts: { pass: 4, fail: 1, undecided: 2 },
+      byFlightId: { "flight-fail": "fail" },
+      matched: 6,
+      total: 7,
+    },
+    evaluation: {
+      total: 7,
+      verdict_counts: { pass: 4, fail: 1, indeterminate: 2 },
+      observed: { event_estimated_rate: 0.8 },
+      lateral_m: { mean: 12.5 },
+      vertical_m: { mean_abs: 4.5 },
+    },
+  } as const;
+
+  it("validates and converts the bounded backend payload", () => {
+    expect(isObservedTrajectoryResponse(response)).toBe(true);
+    if (!isObservedTrajectoryResponse(response)) throw new Error("invalid fixture");
+    expect([...decodeObservedVerdicts(response.verdicts).byFlightId!.entries()]).toEqual([
+      ["flight-fail", "fail"],
+    ]);
+  });
+
+  it("rejects legacy bare CZML and invalid verdicts", () => {
+    expect(isObservedTrajectoryResponse(response.czml)).toBe(false);
+    expect(isObservedTrajectoryResponse({
+      ...response,
+      verdicts: { ...response.verdicts, byFlightId: { bad: "failed" } },
+    })).toBe(false);
   });
 });

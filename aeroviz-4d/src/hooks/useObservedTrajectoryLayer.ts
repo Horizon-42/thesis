@@ -1,16 +1,16 @@
 /**
- * useCzmlLoader.ts
- * ----------------
- * Custom hook: load a CZML file and synchronise the Cesium Clock so
- * the timeline bar spans the exact time window of the trajectory data.
+ * useObservedTrajectoryLayer.ts
+ * -----------------------------
+ * Observed-layer hook: load one bounded backend response, paint terminal
+ * verdicts, and synchronise the Cesium clock.
  *
  * What this hook does:
- *   1. Loads the CZML file into a CzmlDataSource.
+ *   1. Loads the bounded observed response into a CzmlDataSource.
  *   2. Reads the clock interval embedded in the CZML "document" packet.
  *   3. Writes those times into viewer.clock so the timeline bar shows the
  *      correct start/end, and animation begins from the start.
- *   4. Optionally tracks (camera follows) the first aircraft entity.
- *   5. Returns loading state so the UI can show a spinner or error message.
+ *   4. Applies verdict colours and the aircraft-model rendering budget.
+ *   5. Returns the selected roster and compact evaluation metadata.
  *
  * Key Cesium concepts:
  *   • CzmlDataSource  — loads and drives animated entities from CZML.
@@ -27,22 +27,27 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
-import { sampleSubset } from "../utils/sampleTrajectories";
 import { planTrajectoryModels, TRAJECTORY_PATH_WIDTH } from "../utils/trajectoryRenderModel";
 import { addDataSourceHidden } from "../utils/cesiumDataSource";
 import { summarizeObservedCzml, type ObservedFlightSummary } from "../utils/observedFlightSummary";
 import {
-  matchesObservedVerdictFilter,
-  type ObservedVerdict,
-  type ObservedVerdictFilter,
+  OBSERVED_FITTED_TAIL_COLORS,
+  OBSERVED_FITTED_TAIL_OUTLINE_COLORS,
+  OBSERVED_VERDICT_COLORS,
 } from "../utils/observedVerdictColors";
+import {
+  NO_OBSERVED_VERDICTS,
+  isObservedTrajectoryResponse,
+  decodeObservedVerdicts,
+  type ObservedEvaluationSummary,
+  type ObservedVerdict,
+  type ObservedVerdicts,
+} from "../data/observedTracks";
 
-export type { ObservedFlightSummary };
-
-const LAYER_NAME = "czml-trajectories";
+const LAYER_NAME = "observed-trajectories";
 
 // ── Return type ───────────────────────────────────────────────────────────────
-export interface CzmlLoaderState {
+export interface ObservedTrajectoryLayerState {
   isLoaded: boolean;
   /** IDs of all aircraft entities found in the CZML (excludes "document") */
   flightIds: string[];
@@ -51,37 +56,29 @@ export interface CzmlLoaderState {
   /** Non-fatal data issue that should be shown to the user. */
   warning: string | null;
   error: string | null;
-}
-
-export interface ObservedVerdictVisibility {
-  filter: ObservedVerdictFilter;
-  verdictsByFlightId: ReadonlyMap<string, ObservedVerdict> | null;
+  /** Terminal verdicts and counts delivered with the bounded trajectory response. */
+  observedVerdicts: ObservedVerdicts;
+  /** Compact observed aggregate; the full report is loaded only when Details opens. */
+  observedEvaluation: ObservedEvaluationSummary | null;
 }
 
 /**
- * Load a CZML trajectory file and drive the Cesium clock from it.
+ * Load a bounded observed-trajectory response and drive the Cesium clock from it.
  *
- * Loading is keyed on `czmlUrl` ONLY — the source is loaded once per file and released when the
- * url changes (airport/runway) or empties. `visible` toggles the layer's visibility WITHOUT
- * reloading, so callers can hide the (large) observed layer while the comparison view is on and
- * bring it back instantly, instead of re-parsing 100 MB on every toggle.
+ * Loading is keyed on `responseUrl` only. The URL already encodes airport, runway,
+ * verdict, and sample limit; `visible` can hide/reveal the loaded source without a reload.
  *
- * @param czmlUrl - path to the CZML file, e.g. "/data/airports/KRDU/trajectories.czml" ("" = none)
+ * @param responseUrl - backend URL for one runway/verdict/sample selection ("" = none)
  * @param visible - whether the layer should be shown (still gated by the Trajectories toggle)
  */
-export function useCzmlLoader(
-  czmlUrl: string,
+export function useObservedTrajectoryLayer(
+  responseUrl: string,
   visible: boolean = true,
-  runwayFilter: string | null = null,
-  observedVerdictVisibility?: ObservedVerdictVisibility,
-): CzmlLoaderState {
-  const observedVerdictFilter = observedVerdictVisibility?.filter ?? "all";
-  const verdictsByFlightId = observedVerdictVisibility?.verdictsByFlightId ?? null;
+): ObservedTrajectoryLayerState {
   const {
     viewer,
     layers,
     autoReplay,
-    trajectorySampleCount,
     selectedFlightId,
     setSelectedFlightId,
     setTrajectoryDataSource,
@@ -89,24 +86,23 @@ export function useCzmlLoader(
   // Hold a direct reference — the CZML document packet can overwrite the
   // datasource name, making getByName() unreliable for visibility sync.
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
-  // The shown sample + the (random) subset that carries an aircraft model. Held in
-  // refs so re-selecting a flight re-applies the render model WITHOUT reshuffling the
-  // subset (the random pick only recomputes when the data / sample count changes).
-  const shownIdsRef = useRef<Set<string>>(new Set());
+  // The backend already returned the final sampled roster. Only aircraft-model selection
+  // remains client-side because it is a rendering budget, not a data-selection rule.
   const modelIdsRef = useRef<Set<string>>(new Set());
-  const runwayByIdRef = useRef<Map<string, string>>(new Map());
-  const [state, setState] = useState<CzmlLoaderState>({
+  const [state, setState] = useState<ObservedTrajectoryLayerState>({
     isLoaded: false,
     flightIds: [],
     flightSummaries: {},
     warning: null,
     error: null,
+    observedVerdicts: NO_OBSERVED_VERDICTS,
+    observedEvaluation: null,
   });
 
   useEffect(() => {
-    if (!viewer || !czmlUrl) {
+    if (!viewer || !responseUrl) {
       setTrajectoryDataSource(null);
-      setState({ isLoaded: false, flightIds: [], flightSummaries: {}, warning: null, error: null });
+      setState(emptyState());
       return;
     }
 
@@ -114,8 +110,11 @@ export function useCzmlLoader(
     let dataSource: Cesium.CzmlDataSource | undefined;
     let cancelled = false;
 
-    setState({ isLoaded: false, flightIds: [], flightSummaries: {}, warning: null, error: null });
+    setState(emptyState());
     setTrajectoryDataSource(null);
+    modelIdsRef.current = new Set();
+    viewer.trackedEntity = undefined;
+    setSelectedFlightId(null);
 
     // ── Step 1: Fetch once, then hand the parsed packet array to Cesium.
     // This preserves the missing-asset guard without downloading the CZML twice, and lets us read
@@ -123,11 +122,20 @@ export function useCzmlLoader(
     // observed CZML carries no `availability`, so Cesium entities have none to derive duration from.
     const ds = new Cesium.CzmlDataSource(LAYER_NAME);
     let flightSummaries: Record<string, ObservedFlightSummary> = {};
-    fetchJson<unknown>(czmlUrl)
-      .then((czml) => {
-        flightSummaries = summarizeObservedCzml(czml);
-        runwayByIdRef.current = runwayIndex(czml);
-        return ds.load(czml);
+    let observedVerdicts = NO_OBSERVED_VERDICTS;
+    let verdictsByFlightId: ReadonlyMap<string, ObservedVerdict> | null = null;
+    let observedEvaluation: ObservedEvaluationSummary | null = null;
+    fetchJson<unknown>(responseUrl)
+      .then((response) => {
+        if (!isObservedTrajectoryResponse(response)) {
+          throw new Error(`${responseUrl} is not an observed-trajectories-v1 response`);
+        }
+        flightSummaries = summarizeObservedCzml(response.czml);
+        const decodedVerdicts = decodeObservedVerdicts(response.verdicts);
+        observedVerdicts = decodedVerdicts.summary;
+        verdictsByFlightId = decodedVerdicts.byFlightId;
+        observedEvaluation = response.evaluation;
+        return ds.load(response.czml);
       })
       .then((loadedDs) => {
         if (cancelled) return;
@@ -140,22 +148,40 @@ export function useCzmlLoader(
 
         if (ids.length === 0) {
           const warning =
-            `No trajectory entities were found in ${czmlUrl}. ` +
+            `No trajectory entities were found in ${responseUrl}. ` +
             "The globe will stay open, but playback is disabled until CZML data is generated.";
 
-          console.warn(`[useCzmlLoader] ${warning}`);
+          console.warn(`[useObservedTrajectoryLayer] ${warning}`);
           viewer.trackedEntity = undefined;
           setSelectedFlightId(null);
           setTrajectoryDataSource(null);
-          setState({ isLoaded: true, flightIds: [], flightSummaries: {}, warning, error: null });
+          setState({
+            isLoaded: true,
+            flightIds: [],
+            flightSummaries: {},
+            warning,
+            error: null,
+            observedVerdicts,
+            observedEvaluation,
+          });
           return;
+        }
+
+        modelIdsRef.current = planTrajectoryModels(ids, null).modelIds;
+        if (verdictsByFlightId) {
+          for (const entity of loadedDs.entities.values) {
+            if (entity.id === "document") continue;
+            paintObservedEntity(
+              entity,
+              verdictsByFlightId.get(entity.id) ?? "undecided",
+            );
+          }
         }
 
         dataSource = loadedDs;
         dsRef.current = loadedDs;
-        // Add hidden: the render-model pass below samples + sets each entity's `show`, and the
-        // visibility-sync effect then reveals the source. Adding it visible here would flash
-        // EVERY flight for a frame before the sample is applied (see addDataSourceHidden).
+        // Add hidden: the render-model pass below configures every selected entity before the
+        // visibility-sync effect reveals the source, preventing a one-frame unstyled flash.
         addDataSourceHidden(viewer, loadedDs);
         setTrajectoryDataSource(loadedDs);
 
@@ -176,9 +202,9 @@ export function useCzmlLoader(
             viewer.timeline?.zoomTo(viewer.clock.startTime, viewer.clock.stopTime);
           } else {
             warning =
-              `The CZML clock interval in ${czmlUrl} has no duration. ` +
+              `The CZML clock interval in ${responseUrl} has no duration. ` +
               "Trajectory entities were loaded, but playback timing was not changed.";
-            console.warn(`[useCzmlLoader] ${warning}`);
+            console.warn(`[useObservedTrajectoryLayer] ${warning}`);
           }
         }
 
@@ -187,25 +213,37 @@ export function useCzmlLoader(
         viewer.trackedEntity = undefined;
         setSelectedFlightId(null);
 
-        setState({ isLoaded: true, flightIds: ids, flightSummaries, warning, error: null });
+        setState({
+          isLoaded: true,
+          flightIds: ids,
+          flightSummaries,
+          warning,
+          error: null,
+          observedVerdicts,
+          observedEvaluation,
+        });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         if (isMissingJsonAsset(err)) {
           const warning =
-            `${czmlUrl} was not found. ` +
+            `${responseUrl} was not found. ` +
             "The globe will stay open, but playback is disabled until CZML data is generated.";
-          console.warn(`[useCzmlLoader] ${warning}`);
+          console.warn(`[useObservedTrajectoryLayer] ${warning}`);
           viewer.trackedEntity = undefined;
           setSelectedFlightId(null);
           setTrajectoryDataSource(null);
-          setState({ isLoaded: true, flightIds: [], flightSummaries: {}, warning, error: null });
+          setState({
+            ...emptyState(),
+            isLoaded: true,
+            warning,
+          });
           return;
         }
 
         const message = err instanceof Error ? err.message : String(err);
         setTrajectoryDataSource(null);
-        setState({ isLoaded: false, flightIds: [], flightSummaries: {}, warning: null, error: message });
+        setState({ ...emptyState(), error: message });
       });
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
@@ -218,33 +256,12 @@ export function useCzmlLoader(
         viewer.trackedEntity = undefined;
       }
     };
-  }, [viewer, czmlUrl, setSelectedFlightId, setTrajectoryDataSource]);
+  }, [viewer, responseUrl, setSelectedFlightId, setTrajectoryDataSource]);
 
   // ── Sync visibility (toggles the loaded layer's show WITHOUT reloading) ──────
   useEffect(() => {
     if (dsRef.current) dsRef.current.show = visible && layers.trajectories;
   }, [visible, layers.trajectories, state.isLoaded]);
-
-  useEffect(() => {
-    setSelectedFlightId(null);
-    if (viewer) viewer.trackedEntity = undefined;
-  }, [runwayFilter, observedVerdictFilter, setSelectedFlightId, viewer]);
-
-  // ── Recompute the shown sample + the model subset (random) ───────────────────
-  // `trajectorySampleCount` flights are shown (0 = all); of those, a capped subset is
-  // chosen to carry an aircraft model. Only recomputes when the data / count changes,
-  // so selecting a flight (below) never reshuffles which flights are planes.
-  useEffect(() => {
-    const ds = dsRef.current;
-    if (!ds || !state.isLoaded) return;
-    const ids = ds.entities.values
-      .filter((entity) => entity.id !== "document")
-      .map((entity) => entity.id)
-      .filter((id) => !runwayFilter || runwayByIdRef.current.get(id) === runwayFilter);
-    const allShown = !(trajectorySampleCount > 0) || trajectorySampleCount >= ids.length;
-    shownIdsRef.current = allShown ? new Set(ids) : new Set(sampleSubset(ids, trajectorySampleCount));
-    modelIdsRef.current = planTrajectoryModels([...shownIdsRef.current], null).modelIds;
-  }, [trajectorySampleCount, runwayFilter, state.isLoaded, state.flightIds]);
 
   // ── Apply the render model to entities ───────────────────────────────────────
   // Every shown flight draws as a uniform-width path; only the subset (plus the
@@ -253,63 +270,66 @@ export function useCzmlLoader(
   // Re-runs on selection change so the tracked aircraft always shows its model+label.
   useEffect(() => {
     const ds = dsRef.current;
-    if (!ds || !state.isLoaded) return;
+    if (!ds || !state.isLoaded || !visible) return;
+    const selectedIsLoaded =
+      selectedFlightId !== null && state.flightIds.includes(selectedFlightId);
+    const selectedDisplaces =
+      selectedIsLoaded && !modelIdsRef.current.has(selectedFlightId);
+    const displacedModelId = selectedDisplaces
+      ? modelIdsRef.current.values().next().value as string | undefined
+      : undefined;
     for (const entity of ds.entities.values) {
       if (entity.id === "document") continue;
-      const onRunway = !runwayFilter || runwayByIdRef.current.get(entity.id) === runwayFilter;
-      const verdict = verdictsByFlightId?.get(entity.id) ?? "undecided";
-      // A missing verdict index means the report is still loading or unavailable. Keep the
-      // sampled baseline visible in that case instead of turning a display filter into a
-      // data-availability switch. Once loaded, every observed entity has a verdict entry.
-      const passesVerdictFilter =
-        !verdictsByFlightId ||
-        matchesObservedVerdictFilter(verdict, observedVerdictFilter);
-      const shown = onRunway && shownIdsRef.current.has(entity.id) && passesVerdictFilter;
-      entity.show = shown;
+      entity.show = true;
       if (entity.path) entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
       if (entity.model) {
-        const hasModel = shown && (modelIdsRef.current.has(entity.id) || entity.id === selectedFlightId);
+        const hasModel =
+          entity.id === selectedFlightId ||
+          (modelIdsRef.current.has(entity.id) && entity.id !== displacedModelId);
         entity.model.show = new Cesium.ConstantProperty(hasModel);
         entity.model.runAnimations = new Cesium.ConstantProperty(false);
       }
       if (entity.label) {
-        entity.label.show = new Cesium.ConstantProperty(shown && entity.id === selectedFlightId);
+        entity.label.show = new Cesium.ConstantProperty(entity.id === selectedFlightId);
       }
     }
   }, [
-    trajectorySampleCount,
-    runwayFilter,
     visible,
     state.isLoaded,
     state.flightIds,
     selectedFlightId,
-    observedVerdictFilter,
-    verdictsByFlightId,
   ]);
-
-  const flightIds = runwayFilter
-    ? state.flightIds.filter((id) => runwayByIdRef.current.get(id) === runwayFilter)
-    : state.flightIds;
-  const flightSummaries: Record<string, ObservedFlightSummary> = {};
-  for (const id of flightIds) {
-    if (state.flightSummaries[id]) flightSummaries[id] = state.flightSummaries[id];
-  }
-  return { ...state, flightIds, flightSummaries };
+  return state;
 }
 
-function runwayIndex(czml: unknown): Map<string, string> {
-  const index = new Map<string, string>();
-  if (!Array.isArray(czml)) return index;
-  for (const packet of czml) {
-    if (!packet || typeof packet !== "object") continue;
-    const value = packet as Record<string, unknown>;
-    const properties =
-      value.properties && typeof value.properties === "object"
-        ? (value.properties as Record<string, unknown>)
-        : null;
-    if (typeof value.id === "string" && typeof properties?.runway === "string") {
-      index.set(value.id, properties.runway);
-    }
+function emptyState(): ObservedTrajectoryLayerState {
+  return {
+    isLoaded: false,
+    flightIds: [],
+    flightSummaries: {},
+    warning: null,
+    error: null,
+    observedVerdicts: NO_OBSERVED_VERDICTS,
+    observedEvaluation: null,
+  };
+}
+
+function paintObservedEntity(entity: Cesium.Entity, verdict: ObservedVerdict): void {
+  const color = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS[verdict]);
+  if (entity.path?.material instanceof Cesium.ColorMaterialProperty) {
+    entity.path.material.color = new Cesium.ConstantProperty(color);
+  } else if (entity.path) {
+    entity.path.material = new Cesium.ColorMaterialProperty(color);
   }
-  return index;
+  if (entity.polyline) {
+    entity.polyline.material = new Cesium.ColorMaterialProperty(color);
+  }
+  if (entity.polylineVolume) {
+    const fittedColor = Cesium.Color.fromCssColorString(OBSERVED_FITTED_TAIL_COLORS[verdict]);
+    const fittedOutlineColor = Cesium.Color.fromCssColorString(
+      OBSERVED_FITTED_TAIL_OUTLINE_COLORS[verdict],
+    );
+    entity.polylineVolume.material = new Cesium.ColorMaterialProperty(fittedColor);
+    entity.polylineVolume.outlineColor = new Cesium.ConstantProperty(fittedOutlineColor);
+  }
 }
