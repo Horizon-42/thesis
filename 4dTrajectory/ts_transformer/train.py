@@ -56,7 +56,10 @@ from config import (
     uses_control_dynamics,
 )
 from control_mixture import ControlMixturePrediction
-from control_dynamics_backends import control_dynamics_backend
+from control_dynamics_backends import (
+    DenseControlRolloutChannels,
+    control_dynamics_backend,
+)
 from control_loss_components import (
     ControlStateLossResult,
     control_tracking_loss_terms,
@@ -99,7 +102,7 @@ from training_performance import EpochProfiler
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v31-dual-terminal-clock"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v32-dense-rollout-duration-floor"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -164,7 +167,10 @@ def target_contract(config: TSConfig) -> str:
     if config.prediction_output == PREDICTION_STATE:
         return STATE_TARGET_CONTRACTS[config.horizon_mode]
     if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
-        base = "bounded-control-mixture-best-of-k-selector-v1"
+        base = (
+            "bounded-control-mixture-best-of-k-selector-v1"
+            f"+duration-uniform-floor={config.control_duration_uniform_floor:g}-v1"
+        )
         if config.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4:
             base += f"+dynamics={config.control_dynamics_backend}-v1"
         return base
@@ -175,6 +181,9 @@ def target_contract(config: TSConfig) -> str:
             config.control_state_loss_grid,
         )
     ]
+    base += (
+        f"+duration-uniform-floor={config.control_duration_uniform_floor:g}-v1"
+    )
     if config.control_value_parameterization == CONTROL_VALUE_TRIM_RESIDUAL:
         base += "+trim-residual-control-v1"
     if config.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4:
@@ -292,6 +301,33 @@ def control_rollout_channels(
     return rollout.channels, rollout.geodetic_states
 
 
+def control_dense_rollout_channels(
+    prediction: ControlPrediction,
+    dynamics: dict[str, torch.Tensor],
+    query_offsets_s: torch.Tensor,
+    query_valid: torch.Tensor,
+    config: TSConfig,
+) -> DenseControlRolloutChannels:
+    """Return actual RK4 states at requested physical times and segment boundaries.
+
+    This is the deployable counterpart to :func:`control_rollout_channels`.  Callers that
+    need a trajectory curve must use query states from this function; segment endpoints are
+    intentionally too sparse to stand in for the integrated path.
+    """
+    rollout_dtype = torch.float64
+    return control_dynamics_backend(config).dense_rollout(
+        dynamics["initial_state"].to(rollout_dtype),
+        prediction.controls.to(rollout_dtype),
+        prediction.segment_durations.to(rollout_dtype),
+        dynamics["aero_params"].to(rollout_dtype),
+        dynamics["frame_params"].to(rollout_dtype),
+        query_offsets_s.to(dtype=rollout_dtype, device=prediction.controls.device),
+        query_valid.to(device=prediction.controls.device),
+        config,
+        segment_valid=None,
+    )
+
+
 def align_control_targets_to_prediction_clock(
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
@@ -307,13 +343,31 @@ def align_control_targets_to_prediction_clock(
     anchor supplies the ``t=0`` node; queries after the true endpoint clamp to its terminal
     state while the separate final-time loss continues to penalize their clock error.
     """
+    query_offsets_s = predicted_segment_durations_s.cumsum(dim=1)
+    return align_control_targets_to_query_clock(
+        normalized_anchor_state,
+        target_states,
+        state_weights,
+        query_offsets_s,
+        target_final_time_s,
+    )
+
+
+def align_control_targets_to_query_clock(
+    normalized_anchor_state: torch.Tensor,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    query_offsets_s: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Interpolate normalized truth onto arbitrary predicted physical timestamps."""
     if target_states.shape != state_weights.shape or target_states.ndim != 3:
         raise ValueError("control targets and weights must be aligned [B,N,C] tensors")
     batch, segments, channels = target_states.shape
     if normalized_anchor_state.shape != (batch, channels):
         raise ValueError("normalized control anchors must be [B,C]")
-    if predicted_segment_durations_s.shape != (batch, segments):
-        raise ValueError("predicted control durations must be [B,N]")
+    if query_offsets_s.ndim != 2 or query_offsets_s.shape[0] != batch:
+        raise ValueError("control target query offsets must be [B,M]")
     if target_final_time_s.shape != (batch,):
         raise ValueError("target final time must be [B]")
     if torch.any(target_final_time_s <= 0.0):
@@ -333,7 +387,7 @@ def align_control_targets_to_prediction_clock(
     source_weights = torch.cat((anchor_weights, state_weights), dim=1)
 
     query_progress = (
-        predicted_segment_durations_s.to(dtype=dtype, device=device).cumsum(dim=1)
+        query_offsets_s.to(dtype=dtype, device=device)
         / target_final_time_s.to(dtype=dtype, device=device).unsqueeze(1)
     ).clamp(min=0.0, max=1.0)
     source_coordinate = query_progress * segments
@@ -1038,18 +1092,40 @@ def _prediction_batch_replay(
         deployable = deployable_control_prediction(output)
         if dynamics is None:
             raise ValueError("control replay requires per-flight dynamics")
-        physical, _geodetic = control_rollout_channels(
-            deployable, dynamics, dataset.config
+        points = dataset.config.validation_common_grid_points
+        progress = torch.arange(
+            1,
+            points + 1,
+            dtype=torch.float64,
+            device=deployable.segment_durations.device,
+        ) / points
+        predicted_total_s = deployable.segment_durations.to(torch.float64).sum(dim=1)
+        query_offsets_s = predicted_total_s.unsqueeze(1) * progress.unsqueeze(0)
+        query_valid = torch.ones_like(query_offsets_s, dtype=torch.bool)
+        rollout = control_dense_rollout_channels(
+            deployable,
+            dynamics,
+            query_offsets_s,
+            query_valid,
+            dataset.config,
         )
-        predicted_physical = physical.detach().cpu().numpy().astype(np.float32)
-        metric_targets, metric_weights = align_control_targets_to_prediction_clock(
+        predicted_physical = (
+            rollout.query_channels.detach().cpu().numpy().astype(np.float32)
+        )
+        metric_targets, metric_weights = align_control_targets_to_query_clock(
             x[:, -1],
             y,
             mask,
-            deployable.segment_durations,
+            query_offsets_s,
             final_time_s,
         )
-        segment_durations_s = deployable.segment_durations.detach().cpu().numpy()
+        segment_durations_s = np.broadcast_to(
+            (
+                predicted_total_s.detach().cpu().numpy().astype(np.float64)
+                / points
+            )[:, None],
+            (len(x), points),
+        ).copy()
         predicted_time_s = deployable.final_time_s.detach().cpu().numpy()
     else:
         if not isinstance(output, StatePrediction):

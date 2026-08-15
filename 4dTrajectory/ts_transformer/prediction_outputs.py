@@ -95,9 +95,13 @@ class ControlOutputHead(nn.Module):
         input_dim: int,
         n_segments: int,
         bounds: ControlBounds | None = None,
+        duration_uniform_floor: float = 0.0,
     ):
         super().__init__()
+        if not 0.0 <= duration_uniform_floor < 1.0:
+            raise ValueError("duration_uniform_floor must be in [0, 1)")
         self.n_segments = n_segments
+        self.duration_uniform_floor = float(duration_uniform_floor)
         self.control_projection = nn.Linear(input_dim, n_segments * len(CONTROL_NAMES))
         self.duration_projection = nn.Linear(input_dim, n_segments)
         if bounds is None:
@@ -116,7 +120,9 @@ class ControlOutputHead(nn.Module):
         upper: torch.Tensor | None = None,
     ) -> ControlPrediction:
         controls = self.bounded_controls(features, lower=lower, upper=upper)
-        fractions = torch.softmax(self.duration_projection(features), dim=-1)
+        fractions = stabilized_duration_fractions(
+            self.duration_projection(features), self.duration_uniform_floor
+        )
         segment_durations = fractions * final_time_s.unsqueeze(-1)
         return ControlPrediction(
             controls=controls,
@@ -152,3 +158,20 @@ class ControlOutputHead(nn.Module):
         return lower.unsqueeze(1) + unit_controls * (
             upper - lower
         ).unsqueeze(1)
+
+
+def stabilized_duration_fractions(
+    logits: torch.Tensor, uniform_floor: float
+) -> torch.Tensor:
+    """Keep a learnable partition while reserving duration mass uniformly.
+
+    A raw softmax permits one segment to approach 100% of the trajectory. Reserving a
+    fixed share of total time uniformly gives every segment a hard positive floor and
+    bounds the largest possible segment without clipping gradients.
+    """
+    if logits.ndim < 1 or logits.shape[-1] < 1:
+        raise ValueError("duration logits must end in at least one segment")
+    if not 0.0 <= uniform_floor < 1.0:
+        raise ValueError("duration uniform floor must be in [0, 1)")
+    learned = torch.softmax(logits, dim=-1)
+    return learned * (1.0 - uniform_floor) + uniform_floor / logits.shape[-1]

@@ -48,6 +48,8 @@ class EndpointControlRollout:
 class DenseControlRolloutChannels:
     query_channels: torch.Tensor
     segment_end_channels: torch.Tensor
+    query_geodetic_states: torch.Tensor
+    segment_end_geodetic_states: torch.Tensor
 
 
 class ControlDynamicsBackend(ABC):
@@ -139,6 +141,8 @@ class ReanchoredRK4Backend(ControlDynamicsBackend):
                 frame_params,
                 runway_aligned=runway_aligned,
             ),
+            rollout.query_states,
+            rollout.segment_end_states,
         )
 
 
@@ -194,6 +198,12 @@ class TransportChartVelocityBackend(ControlDynamicsBackend):
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
         runway_aligned = config.coordinate_frame == "runway-aligned"
+        query_geodetic = transport_chart_state_to_geodetic(
+            rollout.query_states, frame_params
+        )
+        endpoint_geodetic = transport_chart_state_to_geodetic(
+            rollout.segment_end_states, frame_params
+        )
         return DenseControlRolloutChannels(
             transport_chart_state_to_channels(
                 rollout.query_states,
@@ -205,6 +215,8 @@ class TransportChartVelocityBackend(ControlDynamicsBackend):
                 frame_params,
                 runway_aligned=runway_aligned,
             ),
+            query_geodetic,
+            endpoint_geodetic,
         )
 
 
@@ -269,6 +281,12 @@ class ScaledTransportChartVelocityBackend(ControlDynamicsBackend):
             rollout.segment_end_states
         )
         runway_aligned = config.coordinate_frame == "runway-aligned"
+        query_geodetic = transport_chart_state_to_geodetic(
+            query_states, frame_params
+        )
+        endpoint_geodetic = transport_chart_state_to_geodetic(
+            endpoint_states, frame_params
+        )
         return DenseControlRolloutChannels(
             transport_chart_state_to_channels(
                 query_states, frame_params, runway_aligned=runway_aligned
@@ -276,6 +294,8 @@ class ScaledTransportChartVelocityBackend(ControlDynamicsBackend):
             transport_chart_state_to_channels(
                 endpoint_states, frame_params, runway_aligned=runway_aligned
             ),
+            query_geodetic,
+            endpoint_geodetic,
         )
 
 

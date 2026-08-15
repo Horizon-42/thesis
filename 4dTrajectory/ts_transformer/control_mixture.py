@@ -50,10 +50,22 @@ class ControlMixturePrediction:
 class ControlMixtureHead(nn.Module):
     """Independent control/duration experts and a separate deployable selector."""
 
-    def __init__(self, input_dim: int, n_segments: int, expert_count: int):
+    def __init__(
+        self,
+        input_dim: int,
+        n_segments: int,
+        expert_count: int,
+        *,
+        duration_uniform_floor: float = 0.0,
+    ):
         super().__init__()
         self.experts = nn.ModuleList(
-            ControlOutputHead(input_dim, n_segments) for _ in range(expert_count)
+            ControlOutputHead(
+                input_dim,
+                n_segments,
+                duration_uniform_floor=duration_uniform_floor,
+            )
+            for _ in range(expert_count)
         )
         self.selector = nn.Linear(input_dim, expert_count)
 

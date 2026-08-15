@@ -81,7 +81,11 @@ class ControlOutputModel(ControlFeatureModel):
     def __init__(self, config: TSConfig, feature_encoder: nn.Module):
         super().__init__(config, feature_encoder)
         self.final_time_head = FinalTimeHead(config)
-        self.control_head = ControlOutputHead(config.d_model, int(config.n_segments))
+        self.control_head = ControlOutputHead(
+            config.d_model,
+            int(config.n_segments),
+            duration_uniform_floor=config.control_duration_uniform_floor,
+        )
         _initialize_control_head(self.control_head)
         _initialize_final_time_head(self.final_time_head)
 
@@ -107,6 +111,7 @@ class ControlMixtureOutputModel(ControlFeatureModel):
             config.d_model,
             int(config.n_segments),
             config.control_expert_count,
+            duration_uniform_floor=config.control_duration_uniform_floor,
         )
         offsets = torch.linspace(-1.0, 1.0, config.control_expert_count).tolist()
         for offset, time_head, control_head in zip(

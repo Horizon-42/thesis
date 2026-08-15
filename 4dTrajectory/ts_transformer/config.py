@@ -162,8 +162,9 @@ DEFAULT_SEQ_LEN = 60
 
 # Every remaining approach is mapped onto the same normalized progress domain [0, 1].
 # For state output, N is the number of equal-progress future endpoints. For control output,
-# N is the number of learned non-uniform piecewise-constant control segments and the rollout
-# returns their endpoints. It is deliberately independent of ``dt_s``. Held-out state-output
+# N is the number of learned non-uniform piecewise-constant control segments; deployment
+# samples the resulting dynamics densely rather than treating their endpoints as the path.
+# It is deliberately independent of ``dt_s``. Held-out state-output
 # N=64/128/256 ablations selected 64 for iTransformer but 256 for PatchTST; model-specific
 # defaults live in one mapping so callers do not reproduce architecture branches.
 DEFAULT_N_SEGMENTS_BY_MODEL = {
@@ -179,6 +180,7 @@ DEFAULT_FINAL_TIME_SCALE_S = 600.0
 DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S = 60.0
 DEFAULT_VALIDATION_COMMON_GRID_POINTS = 64
 DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS = 10
+DEFAULT_CONTROL_DURATION_UNIFORM_FLOOR = 0.8
 
 # Fallback aircraft when a flight dict has no resolvable type or usable performance model.
 # Not cosmetic: it sets the target state's Vref and threshold-crossing height — the ENU
@@ -322,6 +324,11 @@ class TSConfig:
     # positive segment duration and derives total time by summation. Both emit the same
     # ControlPrediction contract, so rollout/loss/inference remain strategy-agnostic.
     control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED
+    # Reserve this fraction of total duration uniformly across control segments; only the
+    # remainder is allocated by learned logits. At the 0.8 default no single segment can
+    # exceed ``0.2 + 0.8/N`` of the horizon, eliminating the observed ~95% collapse while
+    # preserving a learnable non-uniform partition.
+    control_duration_uniform_floor: float = DEFAULT_CONTROL_DURATION_UNIFORM_FLOOR
     # Absolute controls preserve the original head. Trim-residual controls use only the
     # observed anchor state and aircraft parameters to construct a deployable zero-residual
     # baseline, then learn bounded corrections with the same backbone features.
@@ -809,6 +816,8 @@ class TSConfig:
             raise ValueError("control_effort_loss_weight must be non-negative")
         if self.control_smoothness_loss_weight < 0.0:
             raise ValueError("control_smoothness_loss_weight must be non-negative")
+        if not 0.0 <= self.control_duration_uniform_floor < 1.0:
+            raise ValueError("control_duration_uniform_floor must be in [0, 1)")
         for name, value in (
             ("control_dense_state_loss_weight", self.control_dense_state_loss_weight),
             ("control_geometry_loss_weight", self.control_geometry_loss_weight),
@@ -1015,6 +1024,7 @@ class TSConfig:
             "control_terminal_position_scale_m",
             "control_terminal_velocity_scale_mps",
             "control_terminal_supervision_clock",
+            "control_duration_uniform_floor",
         ):
             if (
                 uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
@@ -1044,6 +1054,7 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": config.control_duration_parameterization,
+        "duration_uniform_floor": config.control_duration_uniform_floor,
         "value_parameterization": config.control_value_parameterization,
         "dynamics_backend": config.control_dynamics_backend,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,

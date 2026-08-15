@@ -20,7 +20,12 @@ from aerodynamic_model.torch_dynamics import (
 )
 from config import TSConfig
 from control_models import ControlFeatureModel
-from prediction_outputs import CONTROL_NAMES, ControlPrediction, FinalTimeHead
+from prediction_outputs import (
+    CONTROL_NAMES,
+    ControlPrediction,
+    FinalTimeHead,
+    stabilized_duration_fractions,
+)
 
 
 TRIM_INTERIOR_FRACTION = 1e-6
@@ -106,9 +111,12 @@ def bounded_trim_residual_controls(
 class TrimResidualControlHead(nn.Module):
     """Factorized-duration head whose zero control logits mean anchor-state trim."""
 
-    def __init__(self, input_dim: int, n_segments: int):
+    def __init__(
+        self, input_dim: int, n_segments: int, *, duration_uniform_floor: float = 0.0
+    ):
         super().__init__()
         self.n_segments = n_segments
+        self.duration_uniform_floor = float(duration_uniform_floor)
         self.control_projection = nn.Linear(
             input_dim, n_segments * len(CONTROL_NAMES)
         )
@@ -146,7 +154,9 @@ class TrimResidualControlHead(nn.Module):
             lower.to(dtype=dtype),
             upper.to(dtype=dtype),
         )
-        fractions = torch.softmax(self.duration_projection(features), dim=-1)
+        fractions = stabilized_duration_fractions(
+            self.duration_projection(features), self.duration_uniform_floor
+        )
         durations = fractions * final_time_s.unsqueeze(-1)
         return ControlPrediction(
             controls=controls,
@@ -162,7 +172,9 @@ class TrimResidualControlOutputModel(ControlFeatureModel):
         super().__init__(config, feature_encoder)
         self.final_time_head = FinalTimeHead(config)
         self.control_head = TrimResidualControlHead(
-            config.d_model, int(config.n_segments)
+            config.d_model,
+            int(config.n_segments),
+            duration_uniform_floor=config.control_duration_uniform_floor,
         )
         with torch.no_grad():
             final_layer = self.final_time_head.network[-1]

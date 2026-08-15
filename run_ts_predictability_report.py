@@ -63,12 +63,12 @@ from models import resolve_device  # noqa: E402
 from train import (  # noqa: E402
     FIT_EVALUATION_NAME,
     FIT_EVALUATION_SCHEMA,
-    control_rollout_channels,
+    control_dense_rollout_channels,
     load_checkpoint,
     usable_series,
 )
 
-REPORT_SCHEMA = "ts-pooled-predictability-report-v4-control-diagnostics-validation-only"
+REPORT_SCHEMA = "ts-pooled-predictability-report-v5-dense-control-validation-only"
 DEFAULT_REMAINING_TIME_EDGES_S = (0.0, 30.0, 60.0, 120.0, 180.0, 300.0, 450.0, 600.0)
 ROUTE_TYPES = ("straight-in", "single-turn", "vectoring", "holding-like")
 
@@ -208,17 +208,40 @@ def predict_batch_nodes(
     histories: torch.Tensor,
     series: Sequence[FlightSeries],
     device: torch.device,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
-    """Return physical nodes, final time, explicit durations and optional controls."""
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray | None,
+    np.ndarray | None,
+]:
+    """Return physical nodes, their clock, and the optional sparse control schedule."""
     if uses_control_dynamics(run.config.prediction_output):
         dynamics = batch_dynamics_tensors(series, run.config, device)
         output = deployable_control_prediction(run.model(histories, dynamics))
-        channels, _geodetic = control_rollout_channels(output, dynamics, run.config)
+        points = run.config.validation_common_grid_points
+        progress = torch.arange(
+            1, points + 1, dtype=torch.float64, device=device
+        ) / points
+        total_duration = output.segment_durations.to(torch.float64).sum(dim=1)
+        query_offsets = total_duration.unsqueeze(1) * progress.unsqueeze(0)
+        rollout = control_dense_rollout_channels(
+            output,
+            dynamics,
+            query_offsets,
+            torch.ones_like(query_offsets, dtype=torch.bool),
+            run.config,
+        )
+        sample_durations = np.broadcast_to(
+            (total_duration.detach().cpu().numpy() / points)[:, None],
+            (len(histories), points),
+        ).copy()
         return (
-            channels.detach().cpu().numpy().astype(np.float32),
+            rollout.query_channels.detach().cpu().numpy().astype(np.float32),
             output.final_time_s.detach().cpu().numpy().astype(np.float64),
-            output.segment_durations.detach().cpu().numpy().astype(np.float64),
+            sample_durations,
             output.controls.detach().cpu().numpy().astype(np.float64),
+            output.segment_durations.detach().cpu().numpy().astype(np.float64),
         )
 
     states, final_time = _NODE_PREDICTORS[run.config.horizon_mode](
@@ -234,7 +257,7 @@ def predict_batch_nodes(
         ).copy()
     else:
         durations = np.full(physical.shape[:2], run.config.dt_s, dtype=np.float64)
-    return physical, final_time_array, durations, None
+    return physical, final_time_array, durations, None, None
 
 
 def control_distribution_statistics(
@@ -327,11 +350,18 @@ def run_deterministic(
     final_times: list[np.ndarray] = []
     raw_durations: list[np.ndarray] = []
     raw_controls: list[np.ndarray] = []
+    raw_control_durations: list[np.ndarray] = []
     capped: list[bool] = []
     with torch.no_grad():
         for start in range(0, len(series), batch_size):
             stop = min(start + batch_size, len(series))
-            decoded, predicted_time, durations, controls = predict_batch_nodes(
+            (
+                decoded,
+                predicted_time,
+                durations,
+                controls,
+                control_durations,
+            ) = predict_batch_nodes(
                 run,
                 torch.from_numpy(histories[start:stop]).to(device),
                 series[start:stop],
@@ -342,6 +372,8 @@ def run_deterministic(
             raw_durations.append(durations)
             if controls is not None:
                 raw_controls.append(controls)
+                assert control_durations is not None
+                raw_control_durations.append(control_durations)
             for local, absolute in enumerate(range(start, stop)):
                 sampled, was_capped = resample_prediction(
                     anchors[absolute],
@@ -366,7 +398,7 @@ def run_deterministic(
         dynamics = [dynamics_arrays(item, run.config.seq_len - 1) for item in series]
         control_diagnostics = control_distribution_statistics(
             np.concatenate(raw_controls),
-            durations,
+            np.concatenate(raw_control_durations),
             np.stack([row["control_lower"] for row in dynamics]),
             np.stack([row["control_upper"] for row in dynamics]),
         )
@@ -416,9 +448,13 @@ def mc_dropout_coverage(
             best_ade = np.full(stop - start, np.inf)
             best_fde = np.full(stop - start, np.inf)
             for draw in range(1, sample_count + 1):
-                decoded, predicted_time, durations, _controls = predict_batch_nodes(
-                    run, tensor, series[start:stop], device
-                )
+                (
+                    decoded,
+                    predicted_time,
+                    durations,
+                    _controls,
+                    _control_durations,
+                ) = predict_batch_nodes(run, tensor, series[start:stop], device)
                 sampled = []
                 for local, absolute in enumerate(range(start, stop)):
                     candidate, _capped = resample_prediction(

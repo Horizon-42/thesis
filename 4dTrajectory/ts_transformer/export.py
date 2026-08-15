@@ -11,7 +11,8 @@ runway/procedure assessment context used for optimizer output::
       summary.json                             the manifest — load_records reads ONLY this
 
 State-output records are reference-shaped (``controls == []``). Control-output records use
-the optimizer-shaped contract: rollout states plus their aligned active controls.
+the optimizer-shaped contract: dense true-dynamics states plus their aligned active
+controls. The learned sparse control schedule is retained separately in ``control_segments``.
 
 Record construction goes through ``4dTrajectory/optimization/evaluation_export.py`` rather
 than building the JSON here, so there is one definition of the record shape. That module is
@@ -143,10 +144,12 @@ def build_prediction_record(
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,
+        "stateSampleCount": forecast.n_steps,
     })
 
+    control_segments: list[dict[str, Any]] = []
     if forecast.controls is None:
-        relative_offsets = np.cumsum(forecast.segment_durations_s)
+        relative_offsets = np.cumsum(forecast.sample_durations_s)
         predicted_states = [anchor_state] + states_from_channels(
             relative_offsets, forecast.values, series.frame, mass_kg=mass_kg
         )
@@ -155,19 +158,51 @@ def build_prediction_record(
         )
         predicted_state_rows = [{"t": t, **state_dict(s)} for t, s in predicted_states]
     else:
-        if forecast.geodetic_values is None or forecast.segment_durations_s is None:
-            raise ValueError("control forecast must carry geodetic states and segment durations")
+        if forecast.geodetic_values is None:
+            raise ValueError("control forecast must carry dense geodetic states")
+        if len(forecast.sample_durations_s) != len(forecast.geodetic_values):
+            raise ValueError("control state samples and their physical clock must align")
+        if len(forecast.segment_durations_s) != len(forecast.controls):
+            raise ValueError("control segments and durations must align")
         controls = [LoadFactorControl(*map(float, row)) for row in forecast.controls]
-        endpoint_states = [GeodeticState(*map(float, row)) for row in forecast.geodetic_values]
-        offsets = np.cumsum(forecast.segment_durations_s)
+        dense_states = [GeodeticState(*map(float, row)) for row in forecast.geodetic_values]
+        sample_offsets = np.cumsum(forecast.sample_durations_s)
+        control_boundaries = np.cumsum(forecast.segment_durations_s)
+        tolerance = (
+            np.finfo(np.float64).eps
+            * max(float(control_boundaries[-1]), 1.0)
+            * 32.0
+        )
+        if not np.isclose(
+            sample_offsets[-1], control_boundaries[-1], rtol=0.0, atol=tolerance
+        ):
+            raise ValueError("dense state clock must end at the control horizon")
+        segment_indices = np.searchsorted(
+            control_boundaries + tolerance, sample_offsets, side="left"
+        ).clip(max=len(controls) - 1)
         samples = [RolloutSample(0.0, initial_state, controls[0], 0)] + [
-            RolloutSample(float(t), state, controls[index], index)
-            for index, (t, state) in enumerate(zip(offsets, endpoint_states))
+            RolloutSample(float(t), state, controls[int(segment)], int(segment))
+            for t, state, segment in zip(sample_offsets, dense_states, segment_indices)
         ]
         eval_record = evaluation_record(
             initial_state, scenario.target, samples, source, subject="predicted"
         )
         predicted_state_rows = list(eval_record["states"])
+        starts = np.concatenate(([0.0], control_boundaries[:-1]))
+        control_segments = [
+            {
+                "segment_index": index,
+                "start_t": float(start),
+                "end_t": float(end),
+                "duration_s": float(duration),
+                "thrust": float(control.thrust),
+                "bank_rad": float(control.bank_rad),
+                "load_factor": float(control.load_factor),
+            }
+            for index, (start, end, duration, control) in enumerate(
+                zip(starts, control_boundaries, forecast.segment_durations_s, controls)
+            )
+        ]
     eval_record["reference_file"] = f"{REFERENCES_DIR}/{record_stem(scenario.source, index)}{_REFERENCE_EVAL_SUFFIX}"
 
     reference_record = reference_evaluation_record(
@@ -185,6 +220,7 @@ def build_prediction_record(
         # model was given; the reference RECORD is span-matched instead.
         "predicted_states": predicted_state_rows,
         "observed_states": [{"t": t, **state_dict(s)} for t, s in full_observed_states],
+        "control_segments": control_segments,
     }
 
     return PredictionRecord(
@@ -444,7 +480,7 @@ def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[st
         "final_time_error_s": forecast.final_time_s - true_final_time_s,
     }
     anchor_values = series.values[forecast.anchor][None, ...]
-    predicted_durations = forecast.segment_durations_s[None, ...]
+    predicted_durations = forecast.sample_durations_s[None, ...]
     observed_values = series.values[forecast.anchor + 1 :]
     observed_durations = np.diff(series.times[forecast.anchor:])[None, ...]
     raw_metrics = {

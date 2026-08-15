@@ -1657,6 +1657,40 @@ def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch)
         )
 
 
+def test_control_validation_replay_uses_dense_dynamics_queries():
+    series, config = _series(
+        n_flights=1,
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=8,
+        n_segments=2,
+        validation_common_grid_points=5,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    raw_batch = next(dataset_module.iter_batches(dataset, 1, shuffle=False, seed=0))
+    x, y, mask, final_time_s, _weights, dynamics, _dense = (
+        train_module.unpack_batch(raw_batch)
+    )
+    assert dynamics is not None
+    midpoint = 0.5 * (dynamics["control_lower"] + dynamics["control_upper"])
+    prediction = ControlPrediction(
+        controls=midpoint[:, None, :].expand(-1, 2, -1).contiguous(),
+        segment_durations=torch.tensor([[0.75, 1.25]], dtype=torch.float32),
+        final_time_s=torch.tensor([2.0], dtype=torch.float32),
+    )
+
+    replay = train_module._prediction_batch_replay(
+        prediction, x, y, mask, final_time_s, dynamics, dataset
+    )
+
+    assert replay.predicted.shape == (1, 5, config.enc_in)
+    assert replay.truth.shape == replay.predicted.shape
+    assert replay.segment_durations_s.shape == (1, 5)
+    np.testing.assert_allclose(replay.segment_durations_s, 0.4)
+    assert replay.predicted_time_s.tolist() == pytest.approx([2.0])
+
+
 def test_fixed_anchor_cache_is_bitwise_identical_to_uncached_builders():
     series, config = _series(
         n_flights=3,
@@ -1826,6 +1860,33 @@ def test_control_head_bounds_controls_and_partitions_time_non_uniformly():
     assert torch.all(result.controls <= head.upper)
 
 
+def test_control_head_reserves_uniform_duration_mass_to_prevent_partition_collapse():
+    head = ControlOutputHead(
+        input_dim=1,
+        n_segments=5,
+        bounds=ControlBounds(
+            lower=(0.0, -math.pi / 4, 0.5),
+            upper=(120_000.0, math.pi / 4, 2.0),
+        ),
+        duration_uniform_floor=0.8,
+    )
+    with torch.no_grad():
+        head.duration_projection.weight.zero_()
+        head.duration_projection.bias.copy_(
+            torch.tensor([100.0, -100.0, -100.0, -100.0, -100.0])
+        )
+
+    result = head(torch.zeros(1, 1), torch.tensor([100.0]))
+    fractions = result.segment_durations[0] / result.final_time_s[0]
+
+    # 80% of the duration is reserved uniformly. The remaining 20% stays learnable,
+    # so even adversarial logits cannot recreate the historical ~95% single segment.
+    fractions = fractions.detach()
+    assert fractions.min().item() >= 0.8 / 5.0 - 1e-6
+    assert fractions.max().item() <= 0.2 + 0.8 / 5.0 + 1e-6
+    assert fractions.sum().item() == pytest.approx(1.0)
+
+
 @pytest.mark.parametrize(
     ("lower", "upper"),
     [
@@ -1874,6 +1935,7 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": CONTROL_DURATION_FACTORIZED,
+        "duration_uniform_floor": config.control_duration_uniform_floor,
         "value_parameterization": CONTROL_VALUE_ABSOLUTE,
         "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
         "reference_velocity_source": config.reference_velocity_source,
@@ -2102,6 +2164,7 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_terminal_position_scale_m",
         "control_terminal_velocity_scale_mps",
         "control_terminal_supervision_clock",
+        "control_duration_uniform_floor",
     ],
 )
 def test_legacy_control_config_without_physical_criteria_recipe_is_rejected(field):
@@ -2849,6 +2912,7 @@ def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
     torch.testing.assert_close(prediction.final_time_s, torch.tensor([4.0, 5.0]))
     assert train_module.target_contract(config) == (
         "bounded-control-nonuniform-duration-casadi-rollout-observed-clock-aligned-v3"
+        "+duration-uniform-floor=0.8-v1"
     )
 
 
@@ -4634,14 +4698,19 @@ def test_common_grid_report_executes_control_model_with_flight_dynamics():
     )
 
     with torch.no_grad():
-        values, final_time, durations, controls = predictability_report.predict_batch_nodes(
-            run, histories, series, torch.device("cpu")
+        values, final_time, durations, controls, control_durations = (
+            predictability_report.predict_batch_nodes(
+                run, histories, series, torch.device("cpu")
+            )
         )
 
-    assert values.shape == (2, config.n_segments, config.enc_in)
-    assert durations.shape == (2, config.n_segments)
+    assert values.shape == (2, config.validation_common_grid_points, config.enc_in)
+    assert durations.shape == (2, config.validation_common_grid_points)
     assert controls is not None and controls.shape == (2, config.n_segments, 3)
+    assert control_durations is not None
+    assert control_durations.shape == (2, config.n_segments)
     np.testing.assert_allclose(durations.sum(axis=1), final_time, rtol=1e-6)
+    np.testing.assert_allclose(control_durations.sum(axis=1), final_time, rtol=1e-6)
 
 
 def test_control_distribution_statistics_reports_bounds_changes_and_duration_tails():
@@ -5182,11 +5251,21 @@ def test_control_forecast_exports_optimizer_shaped_states_and_aligned_controls()
     parsed = record_from_dict(record.eval_record)
 
     assert parsed.solved
-    assert len(parsed.states) == len(parsed.controls) == 3
+    assert len(parsed.states) == len(parsed.controls) == 6
     assert record.source["predictionOutput"] == "control"
-    assert [state["t"] for state in parsed.states] == pytest.approx([0.0, 0.75, 2.0])
+    assert [state["t"] for state in parsed.states] == pytest.approx(
+        [0.0, 0.5, 0.75, 1.0, 1.5, 2.0]
+    )
+    assert forecast.sample_durations_s.tolist() == pytest.approx(
+        [0.5, 0.25, 0.25, 0.5, 0.5]
+    )
+    assert forecast.segment_durations_s.tolist() == pytest.approx([0.75, 1.25])
     assert parsed.controls[0]["thrust"] == pytest.approx(40_000.0)
+    assert parsed.controls[2]["thrust"] == pytest.approx(40_000.0)
+    assert parsed.controls[3]["thrust"] == pytest.approx(32_000.0)
     assert parsed.controls[-1]["thrust"] == pytest.approx(32_000.0)
+    assert [row["duration_s"] for row in record.states_payload["control_segments"]] \
+        == pytest.approx([0.75, 1.25])
     assert parsed.final_time_s == pytest.approx(2.0)
 
 
@@ -5251,11 +5330,13 @@ def test_control_mixture_forecast_uses_selector_without_truth_access():
     [
         (
             CONTROL_DURATION_FACTORIZED,
-            "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2",
+            "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
+            "+duration-uniform-floor=0.8-v1",
         ),
         (
             CONTROL_DURATION_DIRECT,
-            "bounded-control-direct-duration-casadi-rollout-clock-aligned-v1",
+            "bounded-control-direct-duration-casadi-rollout-clock-aligned-v1"
+            "+duration-uniform-floor=0.8-v1",
         ),
     ],
 )
@@ -5305,9 +5386,10 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
     assert metadata["prediction_output"] == PREDICTION_CONTROL
     assert metadata["control_recipe"] == {
         "effort_loss_weight": config.control_effort_loss_weight,
-        "smoothness_loss_weight": config.control_smoothness_loss_weight,
-        "duration_parameterization": duration_parameterization,
-        "value_parameterization": CONTROL_VALUE_ABSOLUTE,
+            "smoothness_loss_weight": config.control_smoothness_loss_weight,
+            "duration_parameterization": duration_parameterization,
+            "duration_uniform_floor": config.control_duration_uniform_floor,
+            "value_parameterization": CONTROL_VALUE_ABSOLUTE,
         "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
         "reference_velocity_source": config.reference_velocity_source,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,

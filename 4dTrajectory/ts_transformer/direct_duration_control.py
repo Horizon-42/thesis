@@ -16,14 +16,29 @@ from control_models import (
     _initialize_control_head,
     _initialize_final_time_head,
 )
-from prediction_outputs import ControlOutputHead, ControlPrediction, FinalTimeHead
+from prediction_outputs import (
+    ControlOutputHead,
+    ControlPrediction,
+    FinalTimeHead,
+)
 
 
 class DirectDurationControlHead(ControlOutputHead):
     """Predict independent positive durations and derive total time by summation."""
 
-    def __init__(self, input_dim: int, n_segments: int, final_time_scale_s: float):
-        super().__init__(input_dim, n_segments)
+    def __init__(
+        self,
+        input_dim: int,
+        n_segments: int,
+        final_time_scale_s: float,
+        *,
+        duration_uniform_floor: float = 0.0,
+    ):
+        super().__init__(
+            input_dim,
+            n_segments,
+            duration_uniform_floor=duration_uniform_floor,
+        )
         self.segment_scale_s = final_time_scale_s / n_segments
 
     def forward(
@@ -36,9 +51,16 @@ class DirectDurationControlHead(ControlOutputHead):
     ) -> ControlPrediction:
         controls = self.bounded_controls(features, lower=lower, upper=upper)
         local_logits = self.duration_projection(features)
-        segment_durations = F.softplus(
+        raw_durations = F.softplus(
             global_duration_logit.unsqueeze(-1) + local_logits
         ) * self.segment_scale_s
+        total_duration = raw_durations.sum(dim=-1, keepdim=True)
+        learned_fractions = raw_durations / total_duration
+        fractions = (
+            learned_fractions * (1.0 - self.duration_uniform_floor)
+            + self.duration_uniform_floor / self.n_segments
+        )
+        segment_durations = fractions * total_duration
         return ControlPrediction(
             controls=controls,
             segment_durations=segment_durations,
@@ -58,6 +80,7 @@ class DirectDurationControlOutputModel(ControlFeatureModel):
             config.d_model,
             int(config.n_segments),
             config.final_time_scale_s,
+            duration_uniform_floor=config.control_duration_uniform_floor,
         )
         _initialize_control_head(self.control_head)
         _initialize_final_time_head(self.global_duration_head)

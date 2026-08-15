@@ -286,6 +286,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--control-duration-uniform-floor",
+        type=float,
+        default=None,
+        help=(
+            "fraction of total control duration reserved uniformly across segments "
+            "to prevent a single-segment partition collapse (default: 0.8)"
+        ),
+    )
+    parser.add_argument(
         "--control-value-parameterization",
         choices=CONTROL_VALUE_PARAMETERIZATIONS,
         default=None,
@@ -536,6 +545,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ),
         ("control_terminal_supervision_clock", args.control_terminal_clock),
         ("control_duration_parameterization", args.control_duration_parameterization),
+        ("control_duration_uniform_floor", args.control_duration_uniform_floor),
         ("control_value_parameterization", args.control_value_parameterization),
         ("control_dynamics_backend", args.control_dynamics_backend),
         ("control_expert_count", args.control_experts),

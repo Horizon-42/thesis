@@ -22,7 +22,7 @@ from config import (
 from control_prediction_adapters import deployable_control_prediction
 from dataset import FlightSeries, Normalizer, dynamics_arrays
 from time_grids import output_time_grid
-from train import control_rollout_channels
+from train import control_dense_rollout_channels
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,10 @@ class Forecast:
     passes: int
     truncated_at_threshold: bool
     horizon_capped: bool
+    # State-sample intervals align 1:1 with ``times``/``values``. Control segment
+    # durations remain sparse and align 1:1 with ``controls``; the two clocks are
+    # deliberately separate because a dynamics trajectory is denser than its controls.
+    sample_durations_s: np.ndarray
     segment_durations_s: np.ndarray
     controls: np.ndarray | None = None
     geodetic_values: np.ndarray | None = None
@@ -102,13 +106,20 @@ def _forecast_control(
     model.eval()
     with torch.no_grad():
         prediction = deployable_control_prediction(model(tensor, dynamics))
-        channels, geodetic = control_rollout_channels(prediction, dynamics, config)
     durations = prediction.segment_durations[0].cpu().numpy().astype(np.float64)
-    offsets = np.cumsum(durations)
+    offsets = _dense_control_query_offsets(
+        durations, config.control_rollout_integrator_dt_s
+    )
+    query_offsets = torch.from_numpy(offsets[None, :]).to(device)
+    query_valid = torch.ones_like(query_offsets, dtype=torch.bool)
+    with torch.no_grad():
+        rollout = control_dense_rollout_channels(
+            prediction, dynamics, query_offsets, query_valid, config
+        )
     final_time_s = float(offsets[-1])
     return Forecast(
         times=float(series.times[anchor]) + offsets,
-        values=channels[0].cpu().numpy().astype(np.float64),
+        values=rollout.query_channels[0].cpu().numpy().astype(np.float64),
         normalized_progress=offsets / final_time_s,
         anchor=anchor,
         final_time_s=final_time_s,
@@ -118,10 +129,35 @@ def _forecast_control(
         truncated_at_threshold=False,
         horizon_capped=False,
         controls=prediction.controls[0].cpu().numpy().astype(np.float64),
+        sample_durations_s=np.diff(np.concatenate(([0.0], offsets))),
         segment_durations_s=durations,
-        geodetic_values=geodetic[0].cpu().numpy().astype(np.float64),
+        geodetic_values=(
+            rollout.query_geodetic_states[0].cpu().numpy().astype(np.float64)
+        ),
         prediction_output=config.prediction_output,
     )
+
+
+def _dense_control_query_offsets(
+    segment_durations_s: np.ndarray, output_dt_s: float
+) -> np.ndarray:
+    """Return regular output times plus every exact control-switch boundary."""
+    durations = np.asarray(segment_durations_s, dtype=np.float64)
+    if durations.ndim != 1 or not len(durations):
+        raise ValueError("control forecast needs at least one segment duration")
+    if not np.isfinite(durations).all() or np.any(durations <= 0.0):
+        raise ValueError("control segment durations must be finite and positive")
+    if not np.isfinite(output_dt_s) or output_dt_s <= 0.0:
+        raise ValueError("dense control output interval must be finite and positive")
+    boundaries = np.cumsum(durations)
+    total = float(boundaries[-1])
+    regular = np.arange(output_dt_s, total, output_dt_s, dtype=np.float64)
+    candidates = np.sort(np.concatenate((regular, boundaries)))
+    tolerance = np.finfo(np.float64).eps * max(total, 1.0) * 16.0
+    keep = np.concatenate(([True], np.diff(candidates) > tolerance))
+    offsets = candidates[keep]
+    offsets[-1] = total
+    return offsets
 
 
 def _forecast_from_fixed_states(
@@ -147,6 +183,7 @@ def _forecast_from_fixed_states(
         passes=passes,
         truncated_at_threshold=False,
         horizon_capped=False,
+        sample_durations_s=np.full(len(offsets), config.dt_s, dtype=np.float64),
         segment_durations_s=np.full(len(offsets), config.dt_s, dtype=np.float64),
         prediction_output=config.prediction_output,
     )
@@ -177,6 +214,7 @@ def _forecast_normalized(
         passes=1,
         truncated_at_threshold=False,
         horizon_capped=False,
+        sample_durations_s=time_grid.segment_durations_s,
         segment_durations_s=time_grid.segment_durations_s,
         prediction_output=config.prediction_output,
     )
@@ -325,5 +363,6 @@ def truncate_at_threshold(forecast: Forecast) -> Forecast:
         normalized_progress=progress,
         final_time_s=final_time_s,
         truncated_at_threshold=True,
+        sample_durations_s=forecast.sample_durations_s[: closest + 1],
         segment_durations_s=forecast.segment_durations_s[: closest + 1],
     )
