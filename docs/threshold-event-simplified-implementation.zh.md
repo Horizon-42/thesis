@@ -4,6 +4,10 @@
 
 日期：2026-08-15
 
+> 标准更新说明：本文的事件估计器设计保持有效；垂直 verdict 已由
+> `terminal-approach-evaluation-v4` 统一改为 `±22 m` RNAV 终端几何界限。
+> 第 17.3–17.4 节的旧 pass/fail 数量是标准更新前的历史运行记录，不是当前结果。
+
 上位规范：[跑道阈值事件：第一性原理开发档案](threshold-event-first-principles-development.zh.md)
 
 ## 1. 目标
@@ -35,7 +39,7 @@ $$
   `flight_key`，因此必须重建下游 roster/split，不能把旧 checkpoint 视为与新
   manifest 同一数据版本；
 - 不按 evaluation pass/fail 筛选轨迹；
-- 不改变 LPV lateral 或 vertical 标准；
+- 不让 LPV lateral 或 vertical 标准参与事件估计器选择；
 - 不查看或使用 outer-test；
 - 不把 TCH、FSD、runway width、approach type 或 verdict 写进 event；
 - 不在 evaluation 中 refit observed trajectory；
@@ -374,11 +378,15 @@ $$
 B_L=\min(0.5F_L,0.5W).
 $$
 
-垂直 bound 不变：
+垂直 bound 由 evaluation v4 统一定义：
 
 $$
-B_V=0.5\times15\ \mathrm m=7.5\ \mathrm m.
+B_V=22\ \mathrm m.
 $$
+
+其依据和适用范围见
+[`evaluation/FINAL_APPROACH_VERDICT_STANDARD.md`](../evaluation/FINAL_APPROACH_VERDICT_STANDARD.md)。
+它不进入 direct/censored resolver，也不改变物理 event。
 
 $$
 V_q=
@@ -707,7 +715,27 @@ runway/outcome，因此重分类结果变化时其值也会变化。KMSY、KSTL�
 
 迁移完成后重新运行 focused suite，结果为：`173 passed in 1.27s`。
 
-### 17.5 尚存边界
+### 17.5 Evaluation v4 policy-only 重算（2026-08-15）
+
+事件估计器和 tracks 不变，仅用 `--evaluate-only --no-czml` 重新应用
+`±22 m` RNAV terminal geometry 规则并发布 schema
+`terminal-approach-evaluation-v4`：
+
+| 机场 | total | pass | fail | indeterminate | pass rate |
+|---|---:|---:|---:|---:|---:|
+| KMSY | 4,150 | 3,892 | 257 | 1 | 93.78% |
+| KRDU | 14,439 | 14,168 | 270 | 1 | 98.12% |
+| KSJC | 11,157 | 11,144 | 7 | 6 | 99.88% |
+| KSMF | 4,231 | 4,221 | 8 | 2 | 99.76% |
+| KSTL | 8,769 | 8,485 | 280 | 4 | 96.76% |
+| **合计** | **42,746** | **41,910** | **822** | **14** | **98.04%** |
+
+KMSY 的 257 条 fail 全部来自 `direct_linear_bracket`，而不是 censored fit；
+KRDU 的 270 条 fail 中有 195 条来自 censored fit。该分层说明 v4 标准修正与
+event estimator 诊断是两个独立问题，不能再用一个机场的总 fail rate 推断
+fitting 全局失效。
+
+### 17.6 尚存边界
 
 - censored 的 source-only 截断误差已经报告，但 numeric uncertainty 尚未校准，
   因此继续保持 `uncalibrated`；

@@ -52,7 +52,7 @@ def test_rendered_payload_is_strict_json_and_escapes_script_close():
     result = build_payload([record_from_dict(value)], contexts=contexts())
     page = render_html(result, title="Test", source_label="batch")
     assert "const DATA=" in page
-    assert "7.5 m half-FSD threshold bound" in page
+    assert "22 m RNAV/RNP terminal vertical bound" in page
     assert "remain indeterminate" not in page
     assert "missing LPV bound" not in page
     assert "</script><img" not in page

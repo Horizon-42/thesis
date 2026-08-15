@@ -54,7 +54,7 @@ FAA 的 `Summary of the Investigation into the Use of Automatic Dependent Survei
 - Table 3（§3.4.6–3.4.7）：非 WAAS 1090ES 各段平均差为 1.560–14.134 ft，标准差为 6.579–9.758 ft；样本仍有限；
 - §4.1–4.3：FAA 判断 UAT 足以用于 ASE 估计，1090ES 也可能足够，但非 WAAS 情况需要更多试飞。
 
-这份研究说明 ADS-B 几何高度不是“非物理数据”或随机数。不过它是在 FL280/FL410 的专用试飞、level segment 和独立 truth 时间匹配条件下完成，不能直接证明商业航班在跑道入口处每个 OpenSky 样本都满足 ±7.5 m。它支持“数据源有物理意义”，不替代本项目的近地面完整性控制。
+这份研究说明 ADS-B 几何高度不是“非物理数据”或随机数。不过它是在 FL280/FL410 的专用试飞、level segment 和独立 truth 时间匹配条件下完成，不能直接证明商业航班在跑道入口处每个 OpenSky 样本都满足当前终端垂直界限。它支持“数据源有物理意义”，不替代本项目的近地面完整性控制。
 
 当前五机场数据也呈现清晰的物理信号。在先前固定 2,500 条航迹检查中，最终段拟合得到：
 
@@ -160,7 +160,7 @@ KRDU 另做时间连续性检查：fresh 点相邻 state-row time 相差超过 1
 | KSTL | 98 | -0.898 / 0.000 / 0.000 / 2.408 | 0 |
 
 这个差异不能靠 verdict 标准消除；尤其 KRDU，随意选 held 组的最后高度可移动
-拟合结果超过 7.5 m 垂直门限。因此新实现采用以下可审计规则：
+拟合结果超过 10 m。因此新实现采用以下可审计规则：
 
 1. 以 `lastposupdate` 作为水平位置样本时间；
 2. 同一 `(icao24, lastposupdate)` 只产生一个三维样本；
@@ -237,17 +237,19 @@ KRDU arrival 的单航迹 stale 比例 P50/P95/max 为 0.587%/51.155%/74.026%，
 - 两个 bracket 端点可以移动了位置但仍报告同一量化高度；
 - state vector 是字段聚合，不保证所有字段同一时刻更新。
 
-正确边界是：bracket 选择 runway/pass；fresh、连续的最终段估计 threshold crossing altitude；evaluation 只应用标准，不重新拟合。
+正确边界是：source-valid bracket 对同一对三维样本直接内插完整 threshold event；
+只有阈值前右删失的 pass 才复用 runway assignment 已选中的 robust fit；evaluation
+只消费 event 并应用标准，不重新拟合。
 
 ### 5.2 不能把 GVA 类别直接当作实际误差
 
 FAA AC 20-165B §3.3.3.9 规定 GVA 应来自位置源设计数据或合格 VFOM；没有合格 accuracy metric 时应广播 GVA=0。GVA 是声明的 95% accuracy category，不是当前样本的实际误差。
 
-当前 operational-status sidecar 的可用 GVA 绝大多数解码为 `<=45 m` 类别。这个类别太粗，不能单独证明某个 crossing 满足 ±7.5 m；但也不能推导“实际误差就是 45 m”。因此：
+当前 operational-status sidecar 的可用 GVA 绝大多数解码为 `<=45 m` 类别。这个类别太粗，不能单独证明某个 crossing 满足当前 `±22 m` 终端界限；但也不能推导“实际误差就是 45 m”。因此：
 
 - GVA 可作为来源资格与 uncertainty 上界的 metadata；
 - 不应以 `GVA=45 m` 直接把全部轨迹判为不可用；
-- 也不应在 GVA 不可用时假装每个观测都具有精确 ±7.5 m accuracy。
+- 也不应在 GVA 不可用时假装每个观测都具有精确 `±22 m` accuracy。
 
 ### 5.3 Ideal/predicted trajectory 不受 ADS-B source uncertainty 限制
 

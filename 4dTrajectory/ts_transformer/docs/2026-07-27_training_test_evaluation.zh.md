@@ -1,5 +1,10 @@
 # 2026-07-27 归一化时间模型训练集/测试集评估
 
+> 历史结果说明：本文记录的是 2026-07-27 当时的实验与旧 evaluation gate。
+> 当前 runtime 已使用 `terminal-approach-evaluation-v4`：横向为跑道/程序特定界限，
+> 垂直为 published-TCH path 的 `[-22,+22] m`。本文的旧 terminal pass 数量必须在
+> 重新发布 prediction 后更新，不能与 v4 observed pass rate 直接比较。
+
 ## 1. 评估对象
 
 本报告评估当前 pooled ENU checkpoint：
@@ -22,7 +27,7 @@
 1. `history.json` 中的 loss 和 validation ADE/FDE 在归一化进度监督网格上计算，适合判断优化过程和 checkpoint 选择。
 2. 发布目录 `summary.json` 中的 train/test ADE、FDE 和到达时间误差，均按预测结果与实际观测航迹的物理时间重叠段计算。本文只用这套同口径指标比较 train 与 test。
 
-终点 lateral/vertical 指标来自独立的 `evaluation_report.json`，表示最终状态相对跑道目标门的偏差。严格成功条件为 lateral 不超过 106.75 m，且 vertical 位于 -3.05 m 至 +6.10 m。
+终点 lateral/vertical 指标来自独立的 `evaluation_report.json`，表示最终状态相对跑道目标门的偏差。本节以下原始数字使用当时的旧 gate；当前标准见文首说明和 `evaluation/FINAL_APPROACH_VERDICT_STANDARD.md`。
 
 ## 3. 训练过程
 

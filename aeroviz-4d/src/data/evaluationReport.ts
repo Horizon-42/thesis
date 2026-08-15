@@ -1,4 +1,4 @@
-/** Backend terminal-approach evaluation report (schema v3). */
+/** Backend terminal-approach evaluation report (schema v4). */
 
 export interface MagnitudeSpread {
   mean: number;
@@ -82,7 +82,7 @@ export interface EvaluationReferenceAggregate {
 }
 
 export interface EvaluationReport {
-  schema_version: "terminal-approach-evaluation-v3";
+  schema_version: "terminal-approach-evaluation-v4";
   methodology: Record<string, unknown>;
   assessment_contexts: Record<string, unknown>[];
   subject: EvaluationSubject | "mixed";
@@ -107,36 +107,32 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function hasLpvVerticalMethodology(value: unknown): boolean {
+function hasCommonRnavVerticalMethodology(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const methodology = value as Record<string, unknown>;
   const terminal = methodology.terminal_vertical;
   if (!terminal || typeof terminal !== "object") return false;
   const terminalRecord = terminal as Record<string, unknown>;
-  const lpv = terminalRecord.lpv;
-  if (!lpv || typeof lpv !== "object") return false;
-  const lpvRecord = lpv as Record<string, unknown>;
-  const sources = lpvRecord.sources;
+  const acceptance = terminalRecord.common_rnav_terminal_acceptance;
+  if (!acceptance || typeof acceptance !== "object") return false;
+  const acceptanceRecord = acceptance as Record<string, unknown>;
+  const source = acceptanceRecord.source;
+  if (!source || typeof source !== "object") return false;
+  const sourceRecord = source as Record<string, unknown>;
   return (
     terminalRecord.reference === "LTP elevation MSL + published FAS TCH" &&
     terminalRecord.trajectory_altitude_datum === "msl" &&
     isFiniteNumber(terminalRecord.target_context_tolerance_m) &&
     terminalRecord.target_context_tolerance_m >= 0 &&
-    lpvRecord.scale_model === "do229_lpv_angular_min_clamped" &&
-    lpvRecord.one_sided_minimum_fsd_m === 15 &&
-    lpvRecord.normal_fsd_fraction === 0.5 &&
-    lpvRecord.effective_threshold_bound_m === 7.5 &&
-    Array.isArray(sources) &&
-    sources.length > 0 &&
-    sources.every((source) => {
-      if (!source || typeof source !== "object") return false;
-      const record = source as Record<string, unknown>;
-      return (
-        typeof record.document === "string" &&
-        typeof record.location === "string" &&
-        typeof record.use === "string"
-      );
-    })
+    acceptanceRecord.standard_id === "icao_doc_9613_rnp_apch_fas_22m" &&
+    acceptanceRecord.lower_m === -22 &&
+    acceptanceRecord.upper_m === 22 &&
+    acceptanceRecord.claim_boundary ===
+      "terminal final-approach geometry; not touchdown or landing certification" &&
+    typeof sourceRecord.document === "string" &&
+    sourceRecord.location ===
+      "Volume II, Part C, Chapter 5, Section A, §5.3.4.4.7" &&
+    typeof sourceRecord.use === "string"
   );
 }
 
@@ -172,8 +168,8 @@ export function isEvaluationReport(value: unknown): value is EvaluationReport {
   const candidate = value as Record<string, unknown>;
   const counts = candidate.verdict_counts as Record<string, unknown> | undefined;
   return (
-    candidate.schema_version === "terminal-approach-evaluation-v3" &&
-    hasLpvVerticalMethodology(candidate.methodology) &&
+    candidate.schema_version === "terminal-approach-evaluation-v4" &&
+    hasCommonRnavVerticalMethodology(candidate.methodology) &&
     typeof candidate.total === "number" &&
     typeof candidate.solved === "number" &&
     !!counts &&

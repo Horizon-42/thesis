@@ -25,11 +25,9 @@ from evaluation.reference import (
 )
 from evaluation.stats import magnitude_spread, mean, signed_spread
 from evaluation.thresholds import (
-    ICAO_NORMAL_FSD_FRACTION,
-    LPV_VERTICAL_BOUND_M,
-    LPV_VERTICAL_FSD_MIN_M,
-    LPV_VERTICAL_SCALE_MODEL,
     NORMAL_95_MULTIPLIER,
+    RNAV_TERMINAL_VERTICAL_BOUND_M,
+    RNAV_TERMINAL_VERTICAL_STANDARD_ID,
     AssessmentContext,
     ComponentResult,
     Verdict,
@@ -279,7 +277,7 @@ def evaluate_batch(
     total = len(evaluations)
     times = [item.deviation.flight_time_s for item in measured]
     return {
-        "schema_version": "terminal-approach-evaluation-v3",
+        "schema_version": "terminal-approach-evaluation-v4",
         "methodology": {
             "event": {
                 "computed_predicted": "terminal_state_at_threshold_plane",
@@ -321,34 +319,25 @@ def evaluate_batch(
                 "reference": "LTP elevation MSL + published FAS TCH",
                 "trajectory_altitude_datum": "msl",
                 "target_context_tolerance_m": TARGET_CONTEXT_TOLERANCE_M,
-                "lpv": {
-                    "scale_model": LPV_VERTICAL_SCALE_MODEL,
-                    "one_sided_minimum_fsd_m": LPV_VERTICAL_FSD_MIN_M,
-                    "normal_fsd_fraction": ICAO_NORMAL_FSD_FRACTION,
-                    "effective_threshold_bound_m": LPV_VERTICAL_BOUND_M,
-                    "sources": [
-                        {
-                            "document": "RTCA DO-229D",
-                            "location": "§§2.2.4.4.4 and 2.2.5.4.4",
-                            "use": "angular LPV scale and 15 m minimum linear FSD",
-                        },
-                        {
-                            "document": "ICAO Doc 9613, Fifth Edition (2023)",
-                            "location": (
-                                "Volume II, Part C, Chapter 5, Section B, "
-                                "§5.3.3.1.1.1(b)"
-                            ),
-                            "use": "normal-operation one-half vertical FSD",
-                        },
-                        {
-                            "document": (
-                                "Garmin AXIS Pilot's Guide for Certified Aircraft, "
-                                "190-03123-01 Rev B"
-                            ),
-                            "location": "Chapter 2, page 2-15, Glidepath - GPS Source",
-                            "use": "current certified-avionics confirmation of 15 m LPV lower FSD",
-                        },
-                    ],
+                "common_rnav_terminal_acceptance": {
+                    "standard_id": RNAV_TERMINAL_VERTICAL_STANDARD_ID,
+                    "lower_m": -RNAV_TERMINAL_VERTICAL_BOUND_M,
+                    "upper_m": RNAV_TERMINAL_VERTICAL_BOUND_M,
+                    "source": {
+                        "document": "ICAO Doc 9613, Fifth Edition (2023)",
+                        "location": (
+                            "Volume II, Part C, Chapter 5, Section A, "
+                            "§5.3.4.4.7"
+                        ),
+                        "use": (
+                            "RNP APCH Baro-VNAV final-approach vertical-deviation "
+                            "limit used as the common RNAV/LPV terminal acceptance bound"
+                        ),
+                    },
+                    "claim_boundary": (
+                        "terminal final-approach geometry; not touchdown or "
+                        "landing certification"
+                    ),
                 },
             },
             "reference_comparison": {

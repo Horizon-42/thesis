@@ -19,12 +19,15 @@ ComponentResult = Literal["pass", "fail", "indeterminate", "not_applicable"]
 Verdict = Literal["pass", "fail", "indeterminate"]
 
 LNAV_FINAL_XTK_M = 0.15 * 1852.0
-BARO_VNAV_VERTICAL_M = 22.0
+# One common terminal-geometry acceptance bound for the vertically guided RNAV
+# benchmarks supported by this project.  ICAO Doc 9613, Volume II, Part C,
+# Chapter 5, Section A, §5.3.4.4.7 specifies +22 m/-22 m for Baro-VNAV
+# deviations during the RNP APCH final approach segment.  The evaluator uses
+# that value as its project-wide RNAV terminal bound; it does not reinterpret
+# LPV display full-scale deflection as a landing-success threshold.
+RNAV_TERMINAL_VERTICAL_BOUND_M = 22.0
+RNAV_TERMINAL_VERTICAL_STANDARD_ID = "icao_doc_9613_rnp_apch_fas_22m"
 NORMAL_95_MULTIPLIER = 1.96
-LPV_VERTICAL_FSD_MIN_M = 15.0
-ICAO_NORMAL_FSD_FRACTION = 0.5
-LPV_VERTICAL_BOUND_M = LPV_VERTICAL_FSD_MIN_M * ICAO_NORMAL_FSD_FRACTION
-LPV_VERTICAL_SCALE_MODEL = "do229_lpv_angular_min_clamped"
 
 
 def _positive(name: str, value: float | None, *, required: bool = True) -> float | None:
@@ -50,8 +53,8 @@ class AssessmentContext:
     """Runway/procedure facts required to resolve one terminal verdict.
 
     No trajectory fit or verdict belongs here.  Published threshold elevations
-    and TCH define the authoritative desired crossing altitude; LPV vertical
-    scale policy remains evaluation-owned and is not supplied by a trajectory.
+    and TCH define the authoritative desired crossing altitude; vertical
+    acceptance policy remains evaluation-owned and is not supplied by a trajectory.
     """
 
     benchmark: Benchmark
@@ -191,11 +194,8 @@ class AssessmentContext:
                 guidance_lateral_m=guidance,
                 runway_lateral_m=runway_half,
                 effective_lateral_m=lateral,
-                vertical_lower_m=-LPV_VERTICAL_BOUND_M,
-                vertical_upper_m=LPV_VERTICAL_BOUND_M,
-                vertical_scale_model=LPV_VERTICAL_SCALE_MODEL,
-                vertical_fsd_m=LPV_VERTICAL_FSD_MIN_M,
-                vertical_fsd_fraction=ICAO_NORMAL_FSD_FRACTION,
+                vertical_lower_m=-RNAV_TERMINAL_VERTICAL_BOUND_M,
+                vertical_upper_m=RNAV_TERMINAL_VERTICAL_BOUND_M,
             )
 
         vertical_available = (
@@ -217,8 +217,12 @@ class AssessmentContext:
             guidance_lateral_m=LNAV_FINAL_XTK_M,
             runway_lateral_m=runway_half,
             effective_lateral_m=min(LNAV_FINAL_XTK_M, runway_half),
-            vertical_lower_m=-BARO_VNAV_VERTICAL_M if vertical_available else None,
-            vertical_upper_m=BARO_VNAV_VERTICAL_M if vertical_available else None,
+            vertical_lower_m=(
+                -RNAV_TERMINAL_VERTICAL_BOUND_M if vertical_available else None
+            ),
+            vertical_upper_m=(
+                RNAV_TERMINAL_VERTICAL_BOUND_M if vertical_available else None
+            ),
             vertical_reason=vertical_reason,
         )
 
@@ -234,9 +238,6 @@ class ResolvedLimits:
     vertical_lower_m: float | None
     vertical_upper_m: float | None
     vertical_reason: str | None = None
-    vertical_scale_model: str | None = None
-    vertical_fsd_m: float | None = None
-    vertical_fsd_fraction: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -96,19 +96,19 @@ def _lpv_context() -> AssessmentContext:
     )
 
 
-def test_lpv_vertical_and_overall_use_the_resolved_threshold_bound():
+def test_lpv_reference_uses_the_common_rnav_terminal_vertical_bound():
     result = evaluate_record(record_from_dict(_record()), context=_lpv_context())
 
     assert result.lateral_result == "pass"
     assert result.vertical_result == "pass"
-    assert result.vertical_lower_bound_m == pytest.approx(-7.5)
-    assert result.vertical_upper_bound_m == pytest.approx(7.5)
+    assert result.vertical_lower_bound_m == pytest.approx(-22.0)
+    assert result.vertical_upper_bound_m == pytest.approx(22.0)
     assert result.verdict == "pass"
     assert result.success is True
 
 
-@pytest.mark.parametrize("vertical_m", [-7.5, 7.5])
-def test_ideal_lpv_trajectory_passes_at_the_exact_vertical_bound(vertical_m):
+@pytest.mark.parametrize("vertical_m", [-22.0, 22.0])
+def test_ideal_rnav_trajectory_passes_at_the_exact_vertical_bound(vertical_m):
     result = evaluate_record(
         record_from_dict(_computed_record(vertical_m=vertical_m)),
         context=_lpv_context(),
@@ -118,8 +118,8 @@ def test_ideal_lpv_trajectory_passes_at_the_exact_vertical_bound(vertical_m):
     assert result.verdict == "pass"
 
 
-@pytest.mark.parametrize("vertical_m", [-7.5001, 7.5001])
-def test_ideal_lpv_trajectory_fails_just_outside_vertical_bound(vertical_m):
+@pytest.mark.parametrize("vertical_m", [-22.0001, 22.0001])
+def test_ideal_rnav_trajectory_fails_just_outside_vertical_bound(vertical_m):
     result = evaluate_record(
         record_from_dict(_computed_record(vertical_m=vertical_m)),
         context=_lpv_context(),
@@ -132,7 +132,7 @@ def test_ideal_lpv_trajectory_fails_just_outside_vertical_bound(vertical_m):
 
 def test_uncalibrated_observed_event_has_no_numeric_interval_and_keeps_point_gate():
     result = evaluate_record(
-        record_from_dict(_record(vertical_m=7.2)), context=_lpv_context()
+        record_from_dict(_record(vertical_m=21.9)), context=_lpv_context()
     )
 
     assert result.vertical_interval_m is None
@@ -141,7 +141,7 @@ def test_uncalibrated_observed_event_has_no_numeric_interval_and_keeps_point_gat
 
 
 def test_observed_point_outside_gate_fails_without_a_fabricated_interval():
-    payload = _record(vertical_m=8.0)
+    payload = _record(vertical_m=22.1)
 
     result = evaluate_record(record_from_dict(payload), context=_lpv_context())
 

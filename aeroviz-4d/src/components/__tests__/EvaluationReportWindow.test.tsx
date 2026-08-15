@@ -4,7 +4,7 @@ import EvaluationReportWindow from "../EvaluationReportWindow";
 import type { EvaluationReport } from "../../data/evaluationReport";
 
 const REPORT: EvaluationReport = {
-  schema_version: "terminal-approach-evaluation-v3",
+  schema_version: "terminal-approach-evaluation-v4",
   methodology: {}, assessment_contexts: [], subject: "optimized",
   total: 3,
   measured: 2,

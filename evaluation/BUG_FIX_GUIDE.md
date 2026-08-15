@@ -154,7 +154,7 @@ Zero and negative values raise before track serialization.
 The observed track schema now includes `observed_threshold_event`; evaluation
 records require explicit subject. The original review fixes introduced report
 schema v2; the subsequent LPV vertical correction retires it in favour of
-`terminal-approach-evaluation-v3`. These are derived artifacts and must be
+`terminal-approach-evaluation-v4`. These are derived artifacts and must be
 regenerated. A legacy observed track is rejected with a local-reclassification
 instruction; it is never silently refitted.
 

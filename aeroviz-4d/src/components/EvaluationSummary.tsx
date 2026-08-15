@@ -113,9 +113,10 @@ function observedPresentation(report: EvaluationReport | null): Presentation {
     title: "Observed Baseline Evaluation",
     context: "Observed ADS-B trajectories",
     note:
-      "Runway assignment produces one policy-free threshold-event estimate from the final " +
-      "approach fit; evaluation consumes that estimate without refitting ADS-B. LPV vertical " +
-      "uses the published-TCH path with the 7.5 m half-FSD threshold bound.",
+      "Runway assignment produces one policy-free threshold-event estimate by direct " +
+      "bracket interpolation or a censored final-approach fit; evaluation consumes it " +
+      "without refitting ADS-B. Vertical uses the published-TCH path and the common " +
+      "22 m RNAV/RNP terminal bound; this is not landing certification.",
     rows: [
       row(
         "Threshold-event availability",

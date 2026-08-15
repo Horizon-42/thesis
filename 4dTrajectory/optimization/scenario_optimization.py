@@ -113,8 +113,8 @@ _GRAVITY = 9.81
 # centimetres around it (measured: a 3.9 cm dip on a floor-riding HS solve whose
 # unguarded replay landed 0.7 m from the target — a zero-margin guard cut that same
 # replay 10 km short and failed 97% of an unconstrained batch). 5 m is two orders above
-# that noise and far below any real divergence; the evaluation's vertical gate
-# (final state, −3.05/+6.10 m) is unaffected by where the mid-flight guard sits.
+# that noise and far below any real divergence; the terminal evaluation is applied only
+# to the final threshold event and is unaffected by where this mid-flight guard sits.
 ROLLOUT_GUARD_MARGIN_M = 5.0
 
 

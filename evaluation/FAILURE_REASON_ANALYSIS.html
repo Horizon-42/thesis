@@ -3,897 +3,271 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>最终进近 Evaluation 失败原因分析</title>
+  <title>终端进近 Evaluation v4：结果与失败诊断</title>
   <style>
     :root {
-      color-scheme: light;
-      --ink: #172033;
-      --muted: #667085;
-      --line: #d8dee9;
-      --panel: #ffffff;
-      --page: #f3f6fa;
-      --pass: #198754;
-      --fail: #c93b4a;
-      --indeterminate: #d99a17;
-      --vertical: #5468d4;
-      --lateral: #e9823f;
-      --both: #8d4eb2;
-      --high: #4d78cc;
-      --low: #54a6a6;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-        "Segoe UI", sans-serif;
+      --ink:#182034; --muted:#64708a; --line:#dce3ef; --paper:#f6f8fc;
+      --panel:#fff; --pass:#17865b; --fail:#d94841; --ind:#d18a16;
+      --old:#aab4c7; --blue:#3e68cf; --purple:#7656c9; --cyan:#2f91a8;
     }
-    * { box-sizing: border-box; }
-    body { margin: 0; color: var(--ink); background: var(--page); line-height: 1.55; }
-    main { width: min(1240px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 64px; }
-    header, section {
-      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-      box-shadow: 0 3px 14px rgb(25 35 55 / 6%); margin-bottom: 18px;
-    }
-    header { padding: 28px; background: linear-gradient(135deg, #182544, #334b78); color: white; }
-    header h1 { margin: 0 0 8px; font-size: clamp(1.65rem, 3vw, 2.45rem); }
-    header p { max-width: 900px; margin: 6px 0; color: #d9e3f4; }
-    section { padding: 22px; }
-    h2 { margin: 0 0 14px; font-size: 1.3rem; }
-    h3 { margin: 22px 0 8px; font-size: 1.04rem; }
-    p { margin: 8px 0; }
-    code { padding: 1px 5px; border-radius: 4px; background: #edf1f6; color: #253657; }
-    a { color: #2d5fad; }
-    .meta, .legend, .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .pill, button {
-      border: 1px solid #c8d0df; border-radius: 999px; padding: 6px 11px;
-      background: white; color: var(--ink); font: inherit;
-    }
-    header .pill { border-color: #7385a8; color: white; background: #ffffff12; }
-    button { cursor: pointer; }
-    button[aria-pressed="true"] { color: white; background: #294c88; border-color: #294c88; }
-    .callout { border-left: 5px solid var(--vertical); padding: 12px 15px; background: #f0f3ff; }
-    .warning { border-left-color: var(--fail); background: #fff1f2; }
-    .grid { display: grid; gap: 14px; }
-    .cards { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 16px 0; }
-    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: #fbfcfe; }
-    .card .label { color: var(--muted); font-size: .84rem; }
-    .card .value { margin-top: 3px; font-size: 1.65rem; font-weight: 720; }
-    .card .sub { color: var(--muted); font-size: .82rem; }
-    .chart { width: 100%; overflow-x: auto; min-height: 90px; }
-    .chart svg { display: block; min-width: 660px; }
-    .legend { color: var(--muted); font-size: .84rem; margin: 8px 0 12px; }
-    .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
-    table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-    th, td { border-bottom: 1px solid #e6eaf0; padding: 8px 10px; text-align: right; vertical-align: top; }
-    th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
-    th { color: #48566e; font-size: .83rem; background: #f6f8fb; position: sticky; top: 0; }
-    .table-wrap { overflow: auto; max-height: 590px; border: 1px solid var(--line); border-radius: 9px; }
-    .rate-cell { position: relative; min-width: 112px; }
-    .rate-cell span { position: relative; z-index: 1; }
-    .rate-cell::before {
-      content: ""; position: absolute; left: 5px; top: 20%; bottom: 20%; width: var(--rate);
-      max-width: calc(100% - 10px); border-radius: 3px; background: #f4c6cb;
-    }
-    .footnote { color: var(--muted); font-size: .86rem; }
-    .formula { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 12px;
-      background: #f5f7fa; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; }
-    .source-list li { margin-bottom: 8px; }
-    .hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem; word-break: break-all; }
-    .jump-nav {
-      position: sticky; top: 8px; z-index: 20; display: flex; flex-wrap: wrap; gap: 7px;
-      margin: 0 0 18px; padding: 9px; border: 1px solid #cad3e2; border-radius: 12px;
-      background: rgb(255 255 255 / 94%); box-shadow: 0 4px 18px rgb(25 35 55 / 10%);
-      backdrop-filter: blur(8px);
-    }
-    .jump-nav a { padding: 5px 10px; border-radius: 999px; color: #334b78; text-decoration: none; font-size: .86rem; }
-    .jump-nav a:hover, .jump-nav a:focus-visible { background: #e9eef7; outline: none; }
-    .hero-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 14px; }
-    .signal-card { position: relative; overflow: hidden; min-height: 145px; }
-    .signal-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--signal); }
-    .signal-card .eyebrow { color: var(--muted); font-size: .75rem; letter-spacing: .05em; text-transform: uppercase; }
-    .signal-card .big { margin: 7px 0 3px; font-size: 1.65rem; line-height: 1.08; font-weight: 760; color: var(--signal); }
-    .signal-card .explain { color: #4b5870; font-size: .86rem; }
-    .pipeline {
-      display: grid; grid-template-columns: 120px minmax(110px,1fr) 30px minmax(110px,1fr) 30px minmax(110px,1fr) 30px minmax(110px,1fr); gap: 8px;
-      align-items: stretch; margin: 14px 0 8px; overflow-x: auto;
-    }
-    .lane-label { display: grid; place-items: center; min-height: 70px; border-radius: 9px; font-weight: 720; background: #eef2f8; }
-    .stage { display: grid; place-items: center; min-width: 92px; min-height: 70px; padding: 9px; border: 1px solid; border-radius: 9px; text-align: center; font-size: .83rem; line-height: 1.3; }
-    .stage small { display: block; margin-top: 3px; color: var(--muted); font-size: .7rem; }
-    .stage.source { border-color: #9fb0c9; background: #f2f5f9; }
-    .stage.integrity { border-color: #d6a751; background: #fff8e7; }
-    .stage.fit { border-color: #7788df; background: #f0f2ff; }
-    .stage.gate { border-color: #d26a76; background: #fff0f2; }
-    .stage.output { border-color: #57a67a; background: #effaf4; }
-    .flow-arrow { display: grid; place-items: center; min-width: 24px; color: #76839a; font-size: 1.25rem; }
-    .method-key { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; color: var(--muted); font-size: .8rem; }
-    .method-key span { display: inline-flex; gap: 6px; align-items: center; }
-    .method-key i { width: 11px; height: 11px; border: 1px solid; border-radius: 3px; }
-    .boundary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 14px; }
-    .boundary-card { padding: 0; overflow: hidden; }
-    .boundary-card h3 { margin: 0; padding: 11px 14px; font-size: .92rem; }
-    .boundary-card .body { padding: 12px 14px 14px; }
-    .boundary-card.integrity h3 { background: #fff0c9; }
-    .boundary-card.fit h3 { background: #e5e9ff; }
-    .boundary-card.gate h3 { background: #ffe1e5; }
-    .metric-list { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 0; font-size: .82rem; }
-    .metric-list dt { color: #536078; }
-    .metric-list dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700; }
-    .scope-note { margin-top: 12px; padding: 9px 11px; border-radius: 8px; background: #f5f7fa; color: var(--muted); font-size: .8rem; }
-    .svg-panel { border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe; overflow-x: auto; }
-    .svg-panel svg { display: block; width: 100%; min-width: 760px; height: auto; }
-    .diagram-caption { margin: 8px 0 0; color: var(--muted); font-size: .82rem; }
-    .verdict-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-top: 12px; }
-    .verdict-box { padding: 11px; border-radius: 9px; border: 1px solid; text-align: center; }
-    .verdict-box strong { display: block; font-size: 1.05rem; }
-    .verdict-box.pass { color: #146c43; border-color: #8ecbad; background: #effaf4; }
-    .verdict-box.fail { color: #a52737; border-color: #e6a5ad; background: #fff0f2; }
-    .verdict-box.indeterminate { color: #8a6108; border-color: #e6c676; background: #fff8e7; }
-    .diagnostic-table th, .diagnostic-table td { text-align: left; }
-    .diagnostic-table td:first-child { font-weight: 700; }
-    .priority { display: inline-block; min-width: 26px; padding: 2px 6px; border-radius: 999px; text-align: center; font-size: .72rem; font-weight: 750; }
-    .priority.p1 { color: #a52737; background: #ffe1e5; }
-    .priority.p2 { color: #8a6108; background: #fff0c9; }
-    .priority.info { color: #2d5fad; background: #e8effc; }
-    details.method-details { border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe; }
-    details.method-details > summary { cursor: pointer; padding: 15px 17px; font-weight: 740; color: #2e426b; }
-    details.method-details > summary small { display: block; margin-top: 3px; color: var(--muted); font-weight: 400; }
-    details.method-details[open] > summary { border-bottom: 1px solid var(--line); }
-    .details-body { padding: 4px 17px 17px; }
-    @media (max-width: 850px) {
-      .cards, .two, .hero-grid { grid-template-columns: 1fr 1fr; }
-      .boundary-grid { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 560px) {
-      main { width: min(100% - 18px, 1240px); padding-top: 10px; }
-      header, section { padding: 16px; border-radius: 10px; }
-      .cards, .two, .hero-grid { grid-template-columns: 1fr; }
-      .jump-nav { position: static; }
-    }
-    @media print {
-      body { background: white; }
-      main { width: 100%; padding: 0; }
-      header, section { box-shadow: none; break-inside: avoid; }
-      .controls { display: none; }
-      .table-wrap { max-height: none; overflow: visible; }
-    }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:15px/1.58 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    header { color:#fff; background:linear-gradient(125deg,#14203d,#3159ae); padding:44px max(24px,calc((100% - 1180px)/2)); }
+    header h1 { margin:0 0 10px; font-size:clamp(27px,4vw,44px); line-height:1.16; }
+    header p { max-width:900px; margin:5px 0; color:#dce6ff; }
+    main { width:min(1180px,calc(100% - 32px)); margin:24px auto 60px; }
+    section { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:24px; margin:18px 0; box-shadow:0 7px 26px rgba(30,49,91,.06); }
+    h2 { margin:0 0 14px; font-size:24px; }
+    h3 { margin:22px 0 10px; font-size:18px; }
+    p { margin:8px 0; }
+    code,.formula { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    code { padding:.08em .3em; border-radius:4px; background:#eef2f9; }
+    a { color:#2857bb; }
+    .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; }
+    .card { border:1px solid var(--line); border-radius:12px; padding:15px; background:#fbfcff; }
+    .card .value { font-size:30px; font-weight:750; line-height:1.15; }
+    .card .label { color:var(--muted); font-size:13px; margin-top:4px; }
+    .pass { color:var(--pass); } .fail { color:var(--fail); } .ind { color:var(--ind); }
+    .callout { border-left:5px solid var(--blue); background:#f0f4ff; padding:13px 16px; border-radius:7px; }
+    .warning { border-left-color:var(--ind); background:#fff8e8; }
+    .good { border-left-color:var(--pass); background:#eefaf5; }
+    .formula { white-space:pre-wrap; border:1px solid #cad6ef; background:#f4f7ff; border-radius:10px; padding:14px; font-size:14px; overflow:auto; }
+    .flow { display:grid; grid-template-columns:1fr auto 1fr auto 1fr; gap:10px; align-items:center; margin:18px 0; }
+    .flow .node { min-height:100px; border:1px solid var(--line); border-radius:12px; padding:14px; background:#fbfcff; }
+    .flow .arrow { font-size:25px; color:var(--blue); }
+    .bar-row { display:grid; grid-template-columns:72px 1fr 72px; gap:10px; align-items:center; margin:10px 0; }
+    .track { height:22px; background:#edf1f7; border-radius:6px; overflow:hidden; position:relative; }
+    .bar { height:100%; border-radius:5px; min-width:1px; }
+    .compare { height:34px; }
+    .compare .old,.compare .new { position:absolute; left:0; height:13px; border-radius:4px; }
+    .compare .old { top:2px; background:var(--old); }
+    .compare .new { bottom:2px; background:var(--pass); }
+    .legend { display:flex; flex-wrap:wrap; gap:15px; color:var(--muted); font-size:13px; margin:8px 0 16px; }
+    .swatch { width:12px; height:12px; border-radius:3px; display:inline-block; margin-right:5px; vertical-align:-1px; }
+    .stack { height:28px; display:flex; overflow:hidden; border-radius:7px; background:#edf1f7; }
+    .stack span { display:flex; align-items:center; justify-content:center; color:white; font-size:12px; min-width:1px; }
+    .selector { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0 18px; }
+    button { border:1px solid #b9c5dc; background:white; color:var(--ink); border-radius:999px; padding:7px 14px; cursor:pointer; }
+    button.active { color:white; border-color:var(--blue); background:var(--blue); }
+    table { width:100%; border-collapse:collapse; margin:10px 0; }
+    th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:#46536e; background:#f5f7fb; font-weight:650; }
+    td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
+    .matrix td:first-child { width:76px; font-weight:700; }
+    .p1 { color:#a5221d; } .p2 { color:#9a6511; } .p3 { color:#3159ae; }
+    .meter { display:flex; align-items:flex-end; gap:12px; min-height:190px; padding:20px 10px 0; border-bottom:1px solid #aeb9cc; }
+    .column { flex:1; text-align:center; min-width:45px; }
+    .column .fill { width:min(72px,90%); margin:auto; background:var(--purple); border-radius:7px 7px 0 0; min-height:2px; }
+    .column .n { font-weight:700; margin-bottom:5px; }
+    .column .x { color:var(--muted); font-size:12px; margin-top:6px; }
+    .small { font-size:13px; color:var(--muted); }
+    .pill { display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; background:#eef2f9; }
+    .diagram { width:100%; height:auto; display:block; margin:10px 0; }
+    footer { color:var(--muted); text-align:center; padding:10px; }
+    @media (max-width:850px) { .grid { grid-template-columns:repeat(2,1fr); } .flow { grid-template-columns:1fr; } .flow .arrow { transform:rotate(90deg); text-align:center; } }
+    @media (max-width:560px) { main { width:min(100% - 18px,1180px); } section { padding:16px; } .grid { grid-template-columns:1fr 1fr; } .bar-row { grid-template-columns:52px 1fr 58px; } table { font-size:12px; } }
   </style>
 </head>
 <body>
+<header>
+  <h1>Terminal Approach Evaluation v4</h1>
+  <p>五个美国机场 · 42,746 条 observed trajectory · 2026-08-15 全量重算</p>
+  <p>结论先行：旧 `±7.5 m` 是 LPV guidance tracking scale 的派生值，不是通用着陆判据；v4 使用单一 `±22 m` RNAV 终端几何界限，横向规则不变。</p>
+</header>
+
 <main>
-  <header>
-    <h1>最终进近 Evaluation 失败原因分析</h1>
-    <p>基于五个美国机场全量迁移后的 <code>terminal-approach-evaluation-v3</code> observed 报告；统计对象是已进入 LPV 阈值判决的 42,746 条航迹。</p>
-    <div class="meta">
-      <span class="pill">生成日期：2026-08-15</span>
-      <span class="pill">KMSY · KRDU · KSJC · KSMF · KSTL</span>
-      <span class="pill">threshold-event v1 · direct 优先 · evaluation 不 refit</span>
+  <section>
+    <h2>一眼看懂结果</h2>
+    <div class="grid">
+      <div class="card"><div class="value">42,746</div><div class="label">进入 verdict 的航迹</div></div>
+      <div class="card"><div class="value pass">41,910</div><div class="label">pass · 98.04%</div></div>
+      <div class="card"><div class="value fail">822</div><div class="label">fail · 1.92%</div></div>
+      <div class="card"><div class="value ind">14</div><div class="label">indeterminate · 0.03%</div></div>
     </div>
-  </header>
-
-  <nav class="jump-nav" aria-label="报告导航">
-    <a href="#quick-read">30 秒总览</a>
-    <a href="#what-changed">新旧区别</a>
-    <a href="#pipeline-map">数据流</a>
-    <a href="#fit-window">Estimator 图解</a>
-    <a href="#verdict-map">判决标准</a>
-    <a href="#diagnostic-matrix">排障矩阵</a>
-    <a href="#results">结果</a>
-    <a href="#method-diagnostic">方法分层</a>
-    <a href="#remaining-causes">剩余原因</a>
-    <a href="#sources">来源</a>
-  </nav>
+    <p class="callout good"><strong>最重要的诊断：</strong>KMSY 的旧高失败率不是 fitting 主导。新标准下剩余 257 个 fail 全部来自真实支持域内的 direct bracket，且全部为高于目标 `+22 m`；因此应继续审计局部高度/机场系统偏差，但不能再用调整 fitting 来解释全部旧 fail。</p>
+  </section>
 
   <section>
-    <div class="callout">
-      <strong>本页已按 source-timed canonical 数据重新生成。</strong>
-      五机场均已使用现有 canonical tracks 执行 <code>--reclassify-existing</code>，以
-      <code>lastposupdate</code> 建立位置时序并重新生成 <code>runway-threshold-event-v1</code>、
-      arrivals 和 observed evaluation。四个有 pre-run 基线的机场 source-only SHA-256
-      前后完全一致；evaluation 只消费 producer 序列化事件，不重新 fitting。本页也只读
-      新报告和事件 diagnostics，不从原始轨迹另行制造 event。
+    <h2>标准改变了什么</h2>
+    <svg class="diagram" viewBox="0 0 920 210" role="img" aria-label="旧七点五米与新二十二米界限比较">
+      <line x1="70" y1="105" x2="850" y2="105" stroke="#92a0b8" stroke-width="2"/>
+      <line x1="460" y1="24" x2="460" y2="185" stroke="#182034" stroke-width="2"/>
+      <text x="460" y="18" text-anchor="middle" font-size="13">published TCH path · z = 0</text>
+      <rect x="327" y="48" width="266" height="38" rx="8" fill="#aab4c7" opacity=".72"/>
+      <text x="460" y="72" text-anchor="middle" font-size="14">v3: −7.5 m … +7.5 m</text>
+      <rect x="70" y="122" width="780" height="45" rx="8" fill="#3e68cf" opacity=".82"/>
+      <text x="460" y="150" text-anchor="middle" fill="white" font-size="15">v4: −22 m … +22 m</text>
+      <text x="70" y="194" text-anchor="middle" font-size="12">−22 m</text><text x="850" y="194" text-anchor="middle" font-size="12">+22 m</text>
+    </svg>
+    <div class="grid">
+      <div class="card" style="grid-column:span 2"><strong>退役：±7.5 m</strong><p>来自 close-in LPV `15 m` 一侧显示 FSD 与 ICAO 正常跟踪 `½ FSD` 的组合。它适合描述 guidance tracking，不是 threshold crossing 或 landing outcome 的通用法规界限；也不是 `±7.5 ft`。</p></div>
+      <div class="card" style="grid-column:span 2"><strong>当前：±22 m</strong><p>数值依据 ICAO Doc 9613 Vol. II, Part C, Ch. 5, Section A §5.3.4.4.7 的 RNP APCH Baro-VNAV 最终进近垂直偏差限制。项目将它统一用于 RNAV/LPV terminal geometry；不声称它是法律意义上的 landing certification。</p></div>
     </div>
+    <div class="formula">vertical_error = event_altitude − (LTP_elevation + published_TCH)
+vertical_pass  ⇔  −22 m ≤ vertical_error ≤ +22 m
+
+LPV_lateral_bound = min(0.5 × published_lateral_FSD, 0.5 × runway_width)
+lateral_pass       ⇔ |signed_cross_track| ≤ LPV_lateral_bound</div>
   </section>
 
-  <section id="quick-read">
-    <h2>30 秒总览：先看这四件事</h2>
-    <div class="grid hero-grid">
-      <div class="card signal-card" style="--signal:#5468d4">
-        <div class="eyebrow">评估对象</div>
-        <div class="big">一个 LTP 事件</div>
-        <div class="explain">只判断轨迹穿过跑道阈值面 <code>s=0</code> 时的位置，不检查整条 LPV cone，也不是“最后 N 个点”。</div>
-      </div>
-      <div class="card signal-card" style="--signal:#8d4eb2">
-        <div class="eyebrow">Observed 数据路径</div>
-        <div class="big">Direct 不 fit</div>
-        <div class="explain">有 source-valid bracket 时，同一个 α 直接插值时间、横向和高度；只有 right-censored 才复用 assignment fit。</div>
-      </div>
-      <div class="card signal-card" style="--signal:#c93b4a">
-        <div class="eyebrow">真正改变 verdict 的 gate</div>
-        <div class="big">横向跑道边缘 · 垂直 ±7.5 m</div>
-        <div class="explain">横向为 <code>min(½ LPV FSD, ½ runway width)</code>；本页的 15 s、25 m/s、100 m 等值都不是 verdict gate。</div>
-      </div>
-      <div class="card signal-card" style="--signal:#d28a10">
-        <div class="eyebrow">当前最值得追查的信号</div>
-        <div class="big">17.7% → 78.8%</div>
-        <div class="explain">Direct bracket 的 fail rate 从位置间隔 ≤2 s 时约 17.7%，升到 &gt;5 s 时 78.8%；这是时序/高度同步风险信号。</div>
-      </div>
-    </div>
+  <section>
+    <h2>旧规则与 v4：不是调机场参数，而是修正问题定义</h2>
+    <div class="legend"><span><i class="swatch" style="background:var(--old)"></i>旧 v3 pass rate</span><span><i class="swatch" style="background:var(--pass)"></i>v4 pass rate</span></div>
+    <div id="comparisonChart"></div>
+    <p class="small">两个版本使用同一批 threshold events 和相同 lateral bounds；这里只改变垂直标准。各机场没有单独调参。</p>
   </section>
 
-  <section id="what-changed">
-    <h2>这次更新与之前的主要区别</h2>
-    <div class="grid two">
-      <div class="card">
-        <h3>之前：v6 全部发布 fitted intercept</h3>
-        <div class="formula">bracket → 选择 runway / physical pass
-selected pass → 3/4/5 km candidate fits
-robust seed + OLS → s=0 截距
-截距 → observed event</div>
-        <p>即使轨迹已经用相邻样本直接跨过 LTP，bracket 也只是 anchor，正式 event 仍来自较远最终段的拟合外推。这样会平滑近阈值高度，但也可能使 event 与实际跨越样本分歧，并产生横向长尾。</p>
-      </div>
-      <div class="card">
-        <h3>现在：v1 按可观测性选择唯一方法</h3>
-        <div class="formula">within observed support
-  → direct_linear_bracket（零 fit）
-
-right-censored before LTP
-  → reuse Assignment.fit（零次 event-side refit）
-
-invalid / insufficient evidence
-  → unavailable</div>
-        <p>Direct 的时间、横向和垂直共享同一个插值系数 α；不再产生 hybrid event。Censored 只复用一次固定窗口 fit，不再维护候选窗口、ensemble 或 runtime 旧版本 fallback。</p>
-      </div>
+  <section>
+    <h2>Pipeline 边界：evaluation 不做 fitting</h2>
+    <div class="flow">
+      <div class="node"><strong>1 · source / model trajectory</strong><p>observed 保存源时序和 HAE；optimized/predicted 保存计算状态。</p></div>
+      <div class="arrow">→</div>
+      <div class="node"><strong>2 · threshold event</strong><p>有 bracket：同一对 3D 样本直接插值。阈值前 right-censored：复用 runway assignment 已选 robust fit。</p></div>
+      <div class="arrow">→</div>
+      <div class="node"><strong>3 · evaluation v4</strong><p>只做 datum 转换、误差计算和固定 bounds 判决；不选择样本、不 refit。</p></div>
     </div>
-    <table style="margin-top:16px">
-      <thead><tr><th>项目</th><th>旧 HTML / v6</th><th>本次 v1</th><th>变化</th></tr></thead>
+    <p class="callout"><strong>为什么 bracket 仍然重要：</strong>它说明阈值交点位于观测支持域内，此时 lateral 和 vertical 必须由同一个插值分数、同一个事件时间产生。只有没有 bracket 的右删失航迹才需要拟合外推。</p>
+  </section>
+
+  <section>
+    <h2>按机场查看剩余 fail</h2>
+    <div class="selector" id="airportButtons"></div>
+    <div class="grid">
+      <div class="card"><div class="value" id="airportTotal">—</div><div class="label">evaluated</div></div>
+      <div class="card"><div class="value pass" id="airportPass">—</div><div class="label">pass</div></div>
+      <div class="card"><div class="value fail" id="airportFail">—</div><div class="label">fail</div></div>
+      <div class="card"><div class="value ind" id="airportInd">—</div><div class="label">indeterminate</div></div>
+    </div>
+    <h3>失败组件</h3>
+    <div class="stack" id="componentStack"></div>
+    <div class="legend" id="componentLegend"></div>
+    <h3>事件估计路径</h3>
+    <div class="stack" id="methodStack"></div>
+    <div class="legend" id="methodLegend"></div>
+    <h3>垂直越界严重度</h3>
+    <div class="meter" id="severityChart"></div>
+    <p class="small">严重度是超过 `±22 m` 边界的距离，而不是相对 published TCH 的总误差。</p>
+  </section>
+
+  <section>
+    <h2>剩余 822 条：应先查什么</h2>
+    <table class="matrix">
+      <thead><tr><th>优先级</th><th>可观察事实</th><th>解释</th><th>下一步（不改变标准）</th></tr></thead>
       <tbody>
-        <tr><td>可评估</td><td>42,874</td><td>42,746</td><td>−128；全量重分类后 cohort 略有变化</td></tr>
-        <tr><td>Pass</td><td>32,904</td><td>30,928</td><td>−1,976</td></tr>
-        <tr><td>Fail</td><td>9,843</td><td>11,804</td><td>+1,961</td></tr>
-        <tr><td>Indeterminate</td><td>127</td><td>14</td><td>−113；严格分支减少了含混结果</td></tr>
-        <tr><td>横向相关 fail</td><td>689</td><td>65</td><td>极端 fitted lateral 长尾基本消失</td></tr>
-        <tr><td>判决标准</td><td>跑道半宽 + LPV ±7.5 m</td><td>完全相同</td><td><strong>没有为 pass rate 调 gate</strong></td></tr>
+        <tr><td class="p1">P1</td><td>KMSY 257 fail 全为 direct、高侧；其中 218 条只超界 ≤5 m。</td><td>与 censored fit 无关；更像近地面 25 ft 量化、geoaltitude 时序残差、TCH/垂直基准或机场级系统偏差叠加。</td><td>对 KMSY/11 与 KMSY/29 做 source-row、HAE→MSL、TCH 和后续 runway-contained 低点的样本审计。</td></tr>
+        <tr><td class="p1">P1</td><td>KSTL 280 fail 中 250 来自 30R，且 158 条垂直超界 ≤5 m。</td><td>强烈的 runway cluster，不像通用 estimator 全局失效。</td><td>核查 30R 的 CIFP LTP/TCH、NASR threshold elevation、geoid offset 与 source cycle fingerprint。</td></tr>
+        <tr><td class="p1">P1</td><td>KRDU 270 fail 中 195 条使用 censored robust fit。</td><td>这里 fitting 确实是主要可疑项，因为没有 threshold bracket 作为直接观测。</td><td>按 extrapolation distance、fit support、残差、runway 和高/低侧分层；不把 direct 与 censored 混在一起。</td></tr>
+        <tr><td class="p2">P2</td><td>共 65 条涉及 lateral，其中 44 条仅 lateral。</td><td>数量很少，但大幅越界可能表示 runway assignment、multipass 或轨迹整理问题。</td><td>按 absolute cross-track 排序人工可视化；横向 gate 暂不改变。</td></tr>
+        <tr><td class="p2">P2</td><td>26 条垂直超界超过 30 m。</td><td>不是边界附近的量化抖动，应优先检查异常数据、错误 frame 或实际非标准 crossing。</td><td>逐条输出 event provenance、source sample range、frame fingerprint 和机场/runway overlay。</td></tr>
+        <tr><td class="p3">P3</td><td>14 条 indeterminate。</td><td>这是诚实的数据/事件不可用状态，不应画成 fail。</td><td>保持三态显示；只在补足可信 event/context 后重算。</td></tr>
       </tbody>
     </table>
-    <div class="callout warning" style="margin-top:14px"><strong>不能把 +1,961 个 fail 简单解释为“新算法更差”。</strong>本次同时改变了派生 event 方法和重分类 cohort，且 <code>flight_key</code> 会随 runway/outcome 改变，无法仅凭聚合数做严格逐航班因果配对。能确定的是：v1 不再用远端 fit 覆盖一个已经观测到的 threshold crossing，因此 KMSY/KSTL 的近阈值高度偏高信号被直接暴露；KRDU、KSJC、KSMF 则明显减少 fail。</div>
   </section>
 
-  <section id="pipeline-map">
-    <h2>一张图看懂：哪里估计 event，哪里应用判决</h2>
-    <div class="pipeline" aria-label="Observed 与 computed 轨迹的数据流">
-      <div class="lane-label">Observed<br>ADS-B</div>
-      <div class="stage source">时序 HAE 样本<small>raw track 不写入标准</small></div>
-      <div class="flow-arrow">→</div>
-      <div class="stage integrity">可观测性分支<small>direct / censored / unavailable</small></div>
-      <div class="flow-arrow">→</div>
-      <div class="stage fit">Threshold event v1<small>direct 插值或复用 fit</small></div>
-      <div class="flow-arrow">→</div>
-      <div class="stage gate">Evaluation<small>LPV / LNAV-VNAV gates</small></div>
-
-      <div class="lane-label">Optimized<br>/ Predicted</div>
-      <div class="stage source">模型 states<small>明确 source.subject</small></div>
-      <div class="flow-arrow">→</div>
-      <div class="stage integrity">最后状态 / 最后一段<small>±1 m 或 bracket s=0</small></div>
-      <div class="flow-arrow">→</div>
-      <div class="stage output">Terminal event<small>不使用 ADS-B fitter</small></div>
-      <div class="flow-arrow">→</div>
-      <div class="stage gate">Evaluation<small>与 observed 同一 gates</small></div>
-    </div>
-    <div class="method-key">
-      <span><i style="background:#f2f5f9;border-color:#9fb0c9"></i>输入/事件</span>
-      <span><i style="background:#fff8e7;border-color:#d6a751"></i>结构与数据完整性</span>
-      <span><i style="background:#f0f2ff;border-color:#7788df"></i>估计模型</span>
-      <span><i style="background:#fff0f2;border-color:#d26a76"></i>正式 verdict 标准</span>
-    </div>
-
-    <h3>不要再混淆三类数字</h3>
-    <div class="grid boundary-grid">
-      <div class="card boundary-card integrity">
-        <h3>① 结构/源完整性检查</h3>
-        <div class="body">
-          <dl class="metric-list">
-            <dt>Bracket 横向结构</dt><dd>≤ 1000 m</dd>
-            <dt>Bracket 高度结构</dt><dd>≤ 100 m</dd>
-            <dt>Position coverage gap</dt><dd>≤ 15 s</dd>
-            <dt>速度差</dt><dd>≤ 25 m/s</dd>
-            <dt>速度比</dt><dd>0.5–1.5</dd>
-          </dl>
-          <div class="scope-note">用途：拒绝飞越、位置冻结与跳跃。<strong>绝不表示 approach pass。</strong></div>
-        </div>
-      </div>
-      <div class="card boundary-card fit">
-        <h3>② Estimator 可用性/诊断</h3>
-        <div class="body">
-          <dl class="metric-list">
-            <dt>Direct 支持</dt><dd>aᵢ&lt;0≤aᵢ₊₁</dd>
-            <dt>Direct fit 次数</dt><dd>0</dd>
-            <dt>Censored window</dt><dd>−5000…−300 m</dd>
-            <dt>Censored fit</dt><dd>复用 winner</dd>
-            <dt>Numeric uncertainty</dt><dd>uncalibrated</dd>
-          </dl>
-          <div class="scope-note">用途：按可观测性取得同一个 LTP event。<strong>没有 ensemble，也不改变 LPV gate。</strong></div>
-        </div>
-      </div>
-      <div class="card boundary-card gate">
-        <h3>③ 正式 Evaluation gates</h3>
-        <div class="body">
-          <dl class="metric-list">
-            <dt>LPV 横向</dt><dd>min(½FSD, ½W)</dd>
-            <dt>典型 45.72 m 跑道</dt><dd>±22.86 m</dd>
-            <dt>LPV 垂直</dt><dd>±7.5 m</dd>
-            <dt>LNAV/VNAV 横向</dt><dd>min(277.8 m, ½W)</dd>
-            <dt>Baro-VNAV 垂直</dt><dd>±22 m</dd>
-          </dl>
-          <div class="scope-note">用途：唯一可以产生 component pass/fail 的数字；边界采用 inclusive comparison。</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="fit-window">
-    <h2>Estimator 图解：观测域内插值，观测域外才拟合</h2>
-    <div class="svg-panel">
-      <svg viewBox="0 0 1000 430" role="img" aria-label="threshold-event v1 direct 与 censored 两个互斥分支">
-        <defs>
-          <marker id="arrowHead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#68758c"/></marker>
-        </defs>
-        <rect width="1000" height="430" fill="#fbfcfe"/>
-        <text x="30" y="30" font-size="15" font-weight="700" fill="#253657">同一个目标：导航参考点穿过 LTP 平面 a=0 的三维事件</text>
-        <line x1="900" y1="48" x2="900" y2="385" stroke="#c93b4a" stroke-width="3" stroke-dasharray="6 5"/>
-        <text x="908" y="63" font-size="12" fill="#a52737" font-weight="700">LTP / a=0</text>
-
-        <rect x="28" y="55" width="840" height="145" rx="12" fill="#effaf4" stroke="#8ecbad"/>
-        <text x="48" y="82" font-size="14" font-weight="700" fill="#146c43">A · within_observed_support → direct_linear_bracket</text>
-        <line x1="610" y1="155" x2="940" y2="100" stroke="#198754" stroke-width="3"/>
-        <circle cx="842" cy="116" r="8" fill="#5468d4" stroke="#fff" stroke-width="3"/>
-        <circle cx="930" cy="102" r="8" fill="#5468d4" stroke="#fff" stroke-width="3"/>
-        <circle cx="900" cy="107" r="9" fill="#198754" stroke="#fff" stroke-width="3"/>
-        <text x="620" y="111" font-size="12" fill="#344054">aᵢ &lt; 0 ≤ aᵢ₊₁</text>
-        <text x="620" y="131" font-size="12" fill="#344054">α = −aᵢ / (aᵢ₊₁−aᵢ)</text>
-        <text x="48" y="118" font-size="12" fill="#344054">时间、cross-track、高度使用同一个 α</text>
-        <text x="48" y="141" font-size="12" fill="#344054">fit 次数 = 0；extrapolation = 0</text>
-        <text x="48" y="164" font-size="12" fill="#344054">当前 evaluated：28,130；fail 9,219（32.77%）</text>
-        <text x="48" y="187" font-size="11" fill="#667085">这里的误差直接来自跨阈值两端的 source-timed HAE 样本。</text>
-
-        <rect x="28" y="220" width="840" height="165" rx="12" fill="#f0f2ff" stroke="#a8b1e8"/>
-        <text x="48" y="247" font-size="14" font-weight="700" fill="#334b78">B · right_censored → censored_robust_line</text>
-        <rect x="90" y="286" width="650" height="18" rx="4" fill="#7788df"/>
-        <text x="415" y="300" text-anchor="middle" font-size="11" fill="#fff">唯一 assignment fit window：−5000…−300 m</text>
-        <line x1="330" y1="350" x2="900" y2="321" stroke="#5468d4" stroke-width="3"/>
-        <circle cx="405" cy="346" r="5" fill="#5468d4"/><circle cx="520" cy="340" r="5" fill="#5468d4"/>
-        <circle cx="640" cy="334" r="5" fill="#5468d4"/><circle cx="740" cy="330" r="5" fill="#5468d4"/>
-        <circle cx="900" cy="321" r="9" fill="#8d4eb2" stroke="#fff" stroke-width="3"/>
-        <line x1="742" y1="330" x2="894" y2="322" stroke="#68758c" stroke-width="2" marker-end="url(#arrowHead)"/>
-        <text x="48" y="275" font-size="12" fill="#344054">没有阈值后样本；只复用 winning Assignment.fit，不在 event producer 二次拟合</text>
-        <text x="48" y="373" font-size="12" fill="#344054">当前 evaluated：14,602；fail 2,585（17.70%）；uncertainty = uncalibrated</text>
-
-        <line x1="90" y1="407" x2="900" y2="407" stroke="#68758c" stroke-width="1.5" marker-end="url(#arrowHead)"/>
-        <g fill="#667085" font-size="11" text-anchor="middle"><text x="90" y="424">−5000</text><text x="740" y="424">−300</text><text x="900" y="424">0 m</text></g>
-      </svg>
-    </div>
-    <p class="diagram-caption">读图重点：A 与 B 是由可观测性决定的互斥数学问题，不是两个可调模式。Direct 是域内插值；censored 是域外推断。若 plausible bracket 的 source integrity 失败，结果必须 unavailable，不能降级成 fit 来绕过坏数据。</p>
-  </section>
-
-  <section id="verdict-map">
-    <h2>Evaluation 图解：同一个点，分别过横向和垂直 gate</h2>
-    <div class="grid two">
-      <div>
-        <div class="svg-panel">
-          <svg viewBox="0 0 520 230" role="img" aria-label="LPV 横向门限与跑道半宽示意图">
-            <rect width="520" height="230" fill="#fbfcfe"/>
-            <text x="20" y="28" font-size="15" font-weight="700" fill="#253657">横向 · 跑道俯视</text>
-            <rect x="52" y="64" width="416" height="112" rx="8" fill="#e7ecfb"/>
-            <text x="260" y="56" text-anchor="middle" font-size="11" fill="#4d5f91">LPV normal half-FSD 示例：±53.375 m</text>
-            <rect x="171" y="80" width="178" height="80" fill="#56606f"/>
-            <line x1="260" y1="80" x2="260" y2="160" stroke="#fff" stroke-width="2" stroke-dasharray="10 7"/>
-            <text x="260" y="194" text-anchor="middle" font-size="12" fill="#172033">45.72 m 跑道 → 有效 gate = ±22.86 m</text>
-            <circle cx="305" cy="120" r="8" fill="#198754" stroke="#fff" stroke-width="3"/>
-            <text x="316" y="113" font-size="11" fill="#146c43">pass example</text>
-            <circle cx="385" cy="120" r="8" fill="#c93b4a" stroke="#fff" stroke-width="3"/>
-            <text x="396" y="138" font-size="11" fill="#a52737">runway-edge fail</text>
-          </svg>
-        </div>
-        <p class="diagram-caption"><code>B_lat=min(0.5×FSD, 0.5×W)</code>。在典型 150 ft 跑道上，跑道半宽而不是 LPV guidance half-FSD 控制。</p>
-      </div>
-      <div>
-        <div class="svg-panel">
-          <svg viewBox="0 0 520 230" role="img" aria-label="LPV 垂直正负七点五米门限示意图">
-            <rect width="520" height="230" fill="#fbfcfe"/>
-            <text x="20" y="28" font-size="15" font-weight="700" fill="#253657">垂直 · LTP 阈值面</text>
-            <rect x="75" y="55" width="360" height="130" rx="8" fill="#fff0f2"/>
-            <rect x="75" y="82" width="360" height="76" fill="#e3f5ea"/>
-            <line x1="75" y1="120" x2="435" y2="120" stroke="#198754" stroke-width="2" stroke-dasharray="7 5"/>
-            <text x="445" y="86" font-size="11" fill="#146c43">+7.5 m</text>
-            <text x="445" y="124" font-size="11" fill="#146c43">TCH path / z=0</text>
-            <text x="445" y="162" font-size="11" fill="#146c43">−7.5 m</text>
-            <circle cx="225" cy="101" r="8" fill="#198754" stroke="#fff" stroke-width="3"/>
-            <text x="205" y="74" text-anchor="middle" font-size="11" fill="#146c43">pass</text>
-            <circle cx="325" cy="174" r="8" fill="#c93b4a" stroke="#fff" stroke-width="3"/>
-            <text x="325" y="203" text-anchor="middle" font-size="11" fill="#a52737">low fail</text>
-          </svg>
-        </div>
-        <p class="diagram-caption"><code>z=altitude at LTP−(LTP elevation+published TCH)</code>；LPV FSD 下限 15 m × ICAO 正常运行比例 0.5 = ±7.5 m。</p>
-      </div>
-    </div>
-    <div class="verdict-strip" aria-label="三值判决合成规则">
-      <div class="verdict-box fail"><strong>FAIL</strong>横向或垂直任一越界</div>
-      <div class="verdict-box pass"><strong>PASS</strong>横向和垂直都通过</div>
-      <div class="verdict-box indeterminate"><strong>INDETERMINATE</strong>没有 fail，但事件或适用 bound 不可用</div>
-    </div>
-    <p class="footnote"><strong>Estimator uncertainty 不进入上面的三值逻辑。</strong>v1 observed uncertainty 当前是 <code>uncalibrated</code>；未来即使得到校准 interval，也不能把航空标准偷偷收紧成“整个 interval 都必须落在 gate 内”。</p>
-  </section>
-
-  <section id="diagnostic-matrix">
-    <h2>看到异常时先查什么：诊断矩阵</h2>
-    <div class="grid cards">
-      <div class="card"><div class="label">涉及垂直的 fail</div><div class="value" style="color:var(--vertical)">11,792</div><div class="sub">99.90% 的全部 fail；横向标准不是当前主矛盾</div></div>
-      <div class="card"><div class="label">Direct event fail</div><div class="value" style="color:var(--both)">9,219</div><div class="sub">这些不是 fit 截距；先查 bracket 时间间隔和 geo-altitude</div></div>
-      <div class="card"><div class="label">Direct gap &gt; 2 s 的 fail rate</div><div class="value" style="color:var(--fail)">67.41%</div><div class="sub">相比 gap ≤ 2 s 的 17.69%，相关性很强但尚非因果证明</div></div>
-      <div class="card"><div class="label">Indeterminate</div><div class="value" style="color:var(--indeterminate)">14</div><div class="sub">严格 unavailable 分支；前端必须保持三值颜色</div></div>
-    </div>
-    <div class="callout warning"><strong>异常统计只是调查入口，不是自动根因。</strong>先按下表检查事件 provenance 与 fit diagnostics，再判断是源数据、pass 选择、fitting，还是实际几何越界。</div>
-    <div class="table-wrap" style="max-height:none">
-      <table class="diagnostic-table">
-        <thead><tr><th>优先级</th><th>观察到的现象</th><th>首先检查的报告字段</th><th>判断重点 / 动作</th></tr></thead>
-        <tbody>
-          <tr><td><span class="priority p1">P1</span></td><td>Direct 垂直 fail 随 bracket gap 急升</td><td><code>method</code>、<code>position_update_gap_s</code>、reported/derived speed、<code>geoaltitude_async_groups</code></td><td>先审计高度与位置的时间同步；不能把 direct 误叫作 fitting 问题，也不能先放宽 ±7.5 m。</td></tr>
-          <tr><td><span class="priority p1">P1</span></td><td>Censored event fail</td><td><code>observability</code>、<code>extrapolation_distance_m</code>、assignment fit range/RMS</td><td>这是域外估计；按距离与机场做 source-only truncation validation，校准前保持 <code>uncalibrated</code>。</td></tr>
-          <tr><td><span class="priority p1">P1</span></td><td>换 CIFP/NASR 周期后结果漂移</td><td><code>threshold_frame_fingerprint</code>、<code>evaluation_context_fingerprint</code>、source cycles</td><td>物理 frame 不匹配必须拒绝旧 event；只改变 TCH/FSD/width 时保留 physical event，但重算 verdict。</td></tr>
-          <tr><td><span class="priority p2">P2</span></td><td>机场级垂直 bias 相反</td><td>按机场/跑道的 vertical median、TCH、HAE−MSL offset、GVA/altitude source</td><td>KMSY/KSTL 偏高、KSJC 略偏低，不像一个通用 gate 错误；查数据源、datum 和 procedure-context。</td></tr>
-          <tr><td><span class="priority p2">P2</span></td><td>成功着陆但 LPV verdict fail</td><td>实际飞行 procedure/mode、所用 runway/FAS、导航参考点定义</td><td>成功着陆不等于“按本项目 LPV TCH ±7.5 m 穿越阈值”；当前 ADS-B 数据不能确认实际 flown procedure。</td></tr>
-          <tr><td><span class="priority p2">P2</span></td><td>Event unavailable</td><td><code>unavailable_reason</code>、bracket rejections、source span、frame fingerprint</td><td>区分 invalid support、coverage 不足和 ambiguity；不得 fallback 到旧 schema 或另一物理 pass。</td></tr>
-          <tr><td><span class="priority info">INFO</span></td><td>Uncertainty 尚未给数值</td><td><code>uncertainty.status</code>、method、observability</td><td>v1 明确为 <code>uncalibrated</code>；不能制造零宽或伪 95% interval，也不改变 point verdict。</td></tr>
-          <tr><td><span class="priority p1">P1</span></td><td>NaN / Infinity 或前端 JSON 无法加载</td><td>事件、bounds、states sidecar 及 report 中全部数值</td><td>必须在 producer/load/write 阶段拒绝非有限数；不能依赖 Python 比较返回 false 后“通过”。</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section id="fit-details">
-    <details class="method-details">
-      <summary>技术附录 A：Observed runway-threshold-event-v1 estimator
-        <small>展开查看 direct/censored 判定、共享 α、固定 fit 与 unavailable 规则</small>
-      </summary>
-      <div class="details-body">
-    <p><strong>适用范围：</strong>这个 resolver 只用于 observed ADS-B。它输出与 policy 无关的 LTP 三维事件，不包含 TCH、FSD、runway width、approach type 或 verdict。optimized/predicted 按后述 terminal-state 规则取得同一个数学事件，不经过 observed resolver。</p>
-    <div class="formula">source-timed HAE track
-  → landing structure + runway/pass association
-  → within support ? direct interpolation
-    : right-censored ? reuse winning assignment fit
-    : unavailable
-  → runway-threshold-event-v1
-  → evaluation 严格读取，不重新拟合</div>
-
-    <div class="grid two" style="margin-top:16px">
-      <div class="card">
-        <h3>A.1 Direct：bracket 就是正式 event evidence</h3>
-        <p>对相邻 source-timed 样本检查一次 inbound crossing：</p>
-        <div class="formula">before.s &lt; 0 ≤ after.s
-after.s &gt; before.s
-after.time &gt; before.time
-|interpolated cross-track| ≤ 1000 m
-|interpolated height above threshold| ≤ 100 m</div>
-        <p>1,000 m/100 m 只排除无关飞越，不是 verdict gate。选定 source-valid bracket 后，<code>interpolation_fraction</code> 同时应用于时间、cross-track 和 HAE 高度；不再调用 <code>fit_final_segment()</code>。</p>
-      </div>
-      <div class="card">
-        <h3>A.2 Direct source-integrity</h3>
-        <p>位置时间使用 <code>lastposupdate</code>，并检查 reported velocity：</p>
-        <div class="formula">0 &lt; Δlastposupdate ≤ 15 s
-0 &lt; reported ground speed ≤ 200 m/s
-|position speed − mean reported speed| ≤ 25 m/s
-0.5 ≤ position speed / mean reported speed ≤ 1.5</div>
-        <p>这些 predicate 只拒绝位置跳跃与冻结，不保证 geo-altitude 与 position 真正同一测量时刻。本次统计显示 bracket gap 与 direct fail 强相关，因此 15 s 是完整性上限，不是“15 s 内垂直值都足够精确”的保证。</p>
-      </div>
-    </div>
-
-    <h3>A.3 Direct 三维插值</h3>
-    <div class="formula">α = −aᵢ / (aᵢ₊₁ − aᵢ)
-
-t* = (1−α)tᵢ + αtᵢ₊₁
-c* = (1−α)cᵢ + αcᵢ₊₁
-u* = (1−α)uᵢ + αuᵢ₊₁
-a* = 0</div>
-    <p>同一个 α 是关键不变量：禁止再组合 <code>c* from bracket</code> 与 <code>u* from fit</code>。Direct event 的 <code>extrapolation_distance_m=0</code>，uncertainty 状态为 <code>uncalibrated</code>。</p>
-
-    <h3>A.4 Censored：唯一固定 fit，只复用不重算</h3>
+  <section>
+    <h2>失败集中在哪些跑道</h2>
     <table>
-      <thead><tr><th>条件/项目</th><th>v1 当前实现</th><th>边界</th></tr></thead>
+      <thead><tr><th>机场/跑道</th><th class="num">fail</th><th class="num">仅 lateral</th><th class="num">涉及 vertical</th><th class="num">fail 中位 vertical error</th></tr></thead>
       <tbody>
-        <tr><td>进入条件</td><td>winning inbound pass 的可信支持全部位于阈值前</td><td>已有 plausible 但 integrity-failed bracket 时禁止使用</td></tr>
-        <tr><td>Assignment 窗口</td><td><code>[-5000, -300] m</code></td><td>只允许 selected contiguous inbound pass</td></tr>
-        <tr><td>Event 计算</td><td>直接复用 <code>Assignment.fit</code> 的截距</td><td>event producer 额外 fit 次数为 0</td></tr>
-        <tr><td>旧候选窗口</td><td>已删除</td><td>无 3/4/5 km ensemble、window sensitivity 或 v6 fallback</td></tr>
-        <tr><td>Uncertainty</td><td><code>uncalibrated</code></td><td>不制造 numeric 95% interval，不参与 verdict</td></tr>
+        <tr><td>KSTL/30R</td><td class="num">250</td><td class="num">0</td><td class="num">250</td><td class="num">+25.82 m</td></tr>
+        <tr><td>KMSY/11</td><td class="num">178</td><td class="num">0</td><td class="num">178</td><td class="num">+23.64 m</td></tr>
+        <tr><td>KRDU/23L</td><td class="num">91</td><td class="num">15</td><td class="num">76</td><td class="num">−23.94 m</td></tr>
+        <tr><td>KRDU/23R</td><td class="num">91</td><td class="num">11</td><td class="num">80</td><td class="num">+22.38 m</td></tr>
+        <tr><td>KRDU/05R</td><td class="num">69</td><td class="num">13</td><td class="num">56</td><td class="num">+23.24 m</td></tr>
+        <tr><td>KMSY/29</td><td class="num">61</td><td class="num">0</td><td class="num">61</td><td class="num">+24.92 m</td></tr>
       </tbody>
     </table>
-    <div class="formula" style="margin-top:14px">x(s) = aₓ + bₓs              h(s) = aₕ + bₕs
-
-signed cross-track at LTP = aₓ
-crossing altitude HAE     = threshold elevation HAE + aₕ
-crossing latitude/longitude = runway frame unproject(s=0, x=aₓ)</div>
-    <p>这里的 robust fit 仍用于无 bracket 的 runway association/censored event，但不是 direct event 的 challenger。source-only truncation 实验显示 censored 垂直 P95 误差可达约 36–41 m，因此不能把其 17.70% fail 全部解释为真实飞行偏差。</p>
-
-    <h3>A.5 Frame 与 policy 分离</h3>
-    <p>Event 保存仅含物理 LTP 的 <code>threshold_frame_fingerprint</code>；evaluation 另存包含 TCH、FSD、runway width 和标准版本的 <code>evaluation_context_fingerprint</code>。换跑道 frame/cycle 必须重建 event；只换 policy 时可以复用 physical event，但必须重算 verdict。</p>
-    <div class="callout warning"><strong>Unavailable 是有效结果，不是异常回退入口。</strong>invalid support、pass coverage 不足、ambiguity 或 frame mismatch 都不得通过切换旧 schema、另一窗口或另一段航迹来制造 estimate。</div>
-      </div>
-    </details>
+    <p class="small">该表用于定位数据链路问题，不用于为每条跑道制定不同 gate。</p>
   </section>
 
-  <section id="evaluation-details">
-    <details class="method-details">
-      <summary>技术附录 B：Evaluation 判决标准
-        <small>展开查看 observed/computed 事件、LPV/LNAV-VNAV 公式、三值合成与 claim boundary</small>
-      </summary>
-      <div class="details-body">
-    <p>Evaluation 对 observed、optimized 和 predicted 使用同一个跑道坐标系与同一套 LPV/LNAV-VNAV 数值标准；不同之处只在于如何取得阈值事件。</p>
-
-    <h3>B.1 被评估的事件</h3>
-    <table>
-      <thead><tr><th>轨迹 subject</th><th>阈值事件来源</th><th>禁止行为</th></tr></thead>
-      <tbody>
-        <tr><td>Observed</td><td>只读取物理 frame 匹配的 <code>runway-threshold-event-v1</code>；HAE 用 event frame 的 threshold-relative 高度映射到 MSL</td><td>evaluation 不选样本、不插值原始 ADS-B、不调用 fitter</td></tr>
-        <tr><td>Optimized / predicted</td><td>末状态在阈值面 ±1 m 内时直接使用；否则仅当最后两个状态 bracket <code>s=0</code> 时线性插值</td><td>不搜索更早的“更好”状态，也不向阈值外推制造 pass</td></tr>
-      </tbody>
+  <section>
+    <h2>五机场最终统计</h2>
+    <table id="airportTable">
+      <thead><tr><th>机场</th><th class="num">total</th><th class="num">pass</th><th class="num">fail</th><th class="num">indeterminate</th><th class="num">pass rate</th><th>报告</th></tr></thead>
+      <tbody></tbody>
     </table>
-    <p>若 computed/predicted 轨迹没有到达阈值或未解出，判为 fail；observed 事件不可估计时判为 indeterminate。所有 subject 都评价<strong>一个 LTP 阈值面事件</strong>，不是整条 LPV cone 或最后若干任意采样点。</p>
-
-    <h3>B.2 跑道坐标与垂直参考</h3>
-    <div class="formula">s = 相对 LTP 阈值面的有符号 along-track（阈值前为负）
-x = 相对跑道中心线的有符号 cross-track（右侧为正）
-
-desired altitude MSL = LTP elevation MSL + published FAS TCH
-z = trajectory altitude MSL at s=0 − desired altitude MSL</div>
-    <p>TCH 是标称路径在阈值处的高度，不是误差容差。Observed 必须同时通过事件内 runway-data fingerprint 与当前 assessment context 的跑道、周期、坐标、航向和 HAE/MSL datum 一致性检查，防止把旧周期拟合结果套到新跑道框架。</p>
-
-    <h3>B.3 LPV 主标准</h3>
-    <div class="grid two">
-      <div class="card">
-        <h3>横向</h3>
-        <div class="formula">B_guidance = 0.5 × LPV lateral FSD
-B_runway  = 0.5 × runway width
-B_lateral = min(B_guidance, B_runway)
-
-pass ⇔ |x| ≤ B_lateral</div>
-        <p>FAA Order 8260.58D Formula 3-1-1 的阈值 course-width 下限示例为 106.75 m，因此 half-FSD 为 53.375 m；实际判决使用当前 FAS 值。跑道半宽是项目的几何保护项，确保被评价的导航参考点不在跑道边缘之外；它不声称机翼或起落架整体均被包含。</p>
-      </div>
-      <div class="card">
-        <h3>垂直</h3>
-        <div class="formula">LPV one-sided minimum FSD = 15 m
-ICAO normal-operation fraction = 0.5
-B_vertical = 0.5 × 15 m = 7.5 m
-
-pass ⇔ −7.5 m ≤ z ≤ +7.5 m</div>
-        <p>15 m 来自 RTCA DO-229D §§2.2.4.4.4、2.2.5.4.4 的 angular/minimum-clamped LPV scale；0.5 来自 ICAO Doc 9613 Fifth Edition, Volume II, Part C, Chapter 5, Section B, §5.3.3.1.1.1(b)。这不是由本数据集调参得到，也不是 WCH、TCH 范围或 SBAS alert limit。</p>
-      </div>
-    </div>
-
-    <h3>B.4 唯一 fallback：RNP APCH LNAV/VNAV（approved Baro-VNAV）</h3>
-    <div class="formula">B_lateral = min(0.15 NM = 277.8 m, 0.5 × runway width)
-B_vertical = 22 m
-pass ⇔ |x| ≤ B_lateral AND |z| ≤ 22 m</div>
-    <p>±22 m 来自 ICAO Doc 9613 §5.3.4.4.7。只有 assessment context 明确确认 approved Baro-VNAV 并提供权威阈值路径高度时才启用垂直 gate；否则 vertical 为 indeterminate，overall 仅在 lateral fail 时为 fail，其余为 indeterminate。Pure LNAV 没有批准的对称垂直路径误差 gate，因此不是三维 verdict fallback。</p>
-
-    <h3>B.5 三值合成与 point-estimate 原则</h3>
-    <div class="formula">component pass          ⇔ 有 estimate 和 bounds，且 lower ≤ estimate ≤ upper
-component fail          ⇔ 有 estimate 和 bounds，但 estimate 越界
-component indeterminate ⇔ estimate 或适用 bound 不可用
-
-overall fail          ⇔ lateral 或 vertical 任一为 fail
-overall pass          ⇔ lateral 和 vertical 都为 pass
-overall indeterminate ⇔ 没有 fail，但至少一个 component 为 indeterminate</div>
-    <p>判决使用 inclusive point estimate。v1 observed uncertainty 尚未校准，因此不发布 numeric interval；未来若校准，interval 也只描述 estimator/data quality，不改变 point verdict。所有坐标、时间、宽度、FSD、bounds 与 deviations 必须为有限数；NaN/Infinity 必须拒绝，不能依靠比较结果“自然通过”。</p>
-
-    <div class="callout"><strong>结果边界：</strong>本报告回答“轨迹导航参考点在 LTP 阈值面是否符合所选 LPV 或 LNAV/VNAV 几何基准并位于跑道横向范围内”。它不证明整段 FAS conformance、实际机组选择的 approach mode、航电 integrity、障碍面净空、operator stabilized-approach policy、touchdown point 或完整机体/起落架 containment。</div>
-      </div>
-    </details>
-  </section>
-
-  <section id="results">
-    <h2>数据结果：结论先行</h2>
-    <div class="callout">
-      <strong>正式判决中，主要失败原因是垂直越界。</strong>
-      11,804 个 fail 中，11,739 个（99.45%）仅垂直失败，53 个（0.45%）横向和垂直同时失败，只有 12 个（0.10%）仅横向失败。因此共有 11,792 个 fail（99.90%）涉及垂直分量。
-    </div>
-    <div class="grid cards" id="summaryCards" aria-live="polite"></div>
-    <div class="controls" aria-label="机场筛选">
-      <strong>详细统计：</strong>
-      <button data-airport="ALL" aria-pressed="true">五机场合计</button>
-      <button data-airport="KMSY" aria-pressed="false">KMSY</button>
-      <button data-airport="KRDU" aria-pressed="false">KRDU</button>
-      <button data-airport="KSJC" aria-pressed="false">KSJC</button>
-      <button data-airport="KSMF" aria-pressed="false">KSMF</button>
-      <button data-airport="KSTL" aria-pressed="false">KSTL</button>
-    </div>
-    <div id="selectedNarrative" class="callout" style="margin-top:14px"></div>
+    <p>事件可用性另有明确分母：五机场 `44,608 / 45,659 = 97.70%`。它包含 assigned、ambiguous 和 unassignable arrival candidates，而不是在过滤后的 evaluation rows 上制造 100% 可用率。</p>
   </section>
 
   <section>
-    <h2>1. 总体判决分布</h2>
-    <div class="legend">
-      <span class="swatch" style="background:var(--pass)"></span> Pass
-      <span class="swatch" style="background:var(--fail)"></span> Fail
-      <span class="swatch" style="background:var(--indeterminate)"></span> Indeterminate
-    </div>
-    <div id="verdictChart" class="chart" role="img" aria-label="各机场判决比例堆叠条形图"></div>
-    <p class="footnote">分母严格取各机场 <code>evaluation_report.json/trajectories</code>。KRDU 有 1,617 条 assigned 航迹因无已发布 LPV TCH 未进入 evaluation，KSMF 相应为 259 条；因此两场分别显示 14,439 和 4,231 条。event observability 的分母包含所有 source outcomes，不能与 verdict 分母混用。</p>
-  </section>
-
-  <section>
-    <h2>2. Fail 的组成</h2>
-    <div class="legend">
-      <span class="swatch" style="background:var(--vertical)"></span> 仅垂直
-      <span class="swatch" style="background:var(--both)"></span> 横向 + 垂直
-      <span class="swatch" style="background:var(--lateral)"></span> 仅横向
-    </div>
-    <div id="reasonChart" class="chart" role="img" aria-label="各机场失败原因比例堆叠条形图"></div>
-    <div class="grid two" style="margin-top:16px">
-      <div class="card">
-        <h3>垂直方向</h3>
-        <div id="verticalDirectionChart" class="chart" role="img" aria-label="垂直失败高低方向图"></div>
-        <p class="footnote">五机场合计：高于上界 9,341（79.22%）；低于下界 2,451（20.78%）。方向存在明显机场差异：KSJC 以偏低为主；KMSY、KSTL、KSMF 和 KRDU 以偏高为主。</p>
-      </div>
-      <div class="card">
-        <h3>为什么横向数量少但值得检查</h3>
-        <p>横向失败现在只涉及 65 条（0.55% 的 fail），其中 15 条超过横向界限 50 m 以上；横向越界量中位数为 12.99 m。相比旧 v6 的 689 条和 368.64 m 中位数，极端 lateral fit 长尾已大幅消失。</p>
-        <p>这支持当前“direct bracket 横向插值 + 跑道半宽 gate”的设计。剩余 65 条仍需按 method/runway/pass 逐条复核，但没有证据要求放宽横向标准。</p>
-      </div>
+    <h2>解释边界</h2>
+    <div class="grid">
+      <div class="card" style="grid-column:span 2"><strong>pass 表示</strong><p>在阈值平面处，轨迹参考点满足当前 RNAV terminal geometry 的横向和垂直接受界限。</p></div>
+      <div class="card" style="grid-column:span 2"><strong>pass 不表示</strong><p>航空器已安全着陆、符合特定公司 SOP、全机在跑道内、满足障碍净空，或实际飞行了所选 LPV procedure。</p></div>
+      <div class="card" style="grid-column:span 2"><strong>fail 表示</strong><p>至少一个可评价的 terminal component 超界；它是诊断信号，需要结合 event method 和 provenance 解释。</p></div>
+      <div class="card" style="grid-column:span 2"><strong>indeterminate 表示</strong><p>可信 event 或适用 context 不足。它不是 fail，也不能当 pass。</p></div>
     </div>
   </section>
 
   <section>
-    <h2>3. 越界严重度</h2>
-    <p>下面统计的是“超过边界多少”，不是相对目标的总偏差。例如垂直越界 2 m 表示绝对垂直误差约为 9.5 m（7.5 + 2）。图表随上方机场筛选切换。</p>
-    <div class="grid two">
-      <div class="card">
-        <h3 id="verticalSeverityTitle">垂直越界量</h3>
-        <div id="verticalSeverityChart" class="chart"></div>
-        <p id="verticalSeverityText" class="footnote"></p>
-      </div>
-      <div class="card">
-        <h3 id="lateralSeverityTitle">横向越界量</h3>
-        <div id="lateralSeverityChart" class="chart"></div>
-        <p id="lateralSeverityText" class="footnote"></p>
-      </div>
-    </div>
-  </section>
-
-  <section id="method-diagnostic">
-    <h2>4. 按 event 方法分层：哪些是 fit，哪些不是</h2>
-    <div class="callout">
-      <strong>新结果最重要的解释边界：</strong>direct fail 不能再归因于 final-segment fitting，因为 direct 分支根本不调用 fitter；censored fail 才包含阈值外推模型误差。
-    </div>
-    <div class="grid cards" id="methodCards"></div>
-    <div id="methodChart" class="chart" role="img" aria-label="Direct 与 censored event 的 pass fail 分布"></div>
-    <p id="methodText"></p>
-    <table style="margin-top:14px">
-      <thead><tr><th>机场</th><th>Direct n</th><th>Direct fail rate</th><th>Censored n</th><th>Censored fail rate</th><th>读法</th></tr></thead>
-      <tbody>
-        <tr><td>KMSY</td><td>4,097</td><td>66.29%</td><td>52</td><td>28.85%</td><td>主要是 direct 近阈值高度问题，不是 fit</td></tr>
-        <tr><td>KRDU</td><td>735</td><td>55.24%</td><td>13,703</td><td>17.40%</td><td>总体约 20% 主要由 censored cohort 决定</td></tr>
-        <tr><td>KSJC</td><td>11,148</td><td>14.27%</td><td>3</td><td>66.67%</td><td>几乎全部 direct；censored 样本太少</td></tr>
-        <tr><td>KSMF</td><td>4,225</td><td>9.23%</td><td>4</td><td>50.00%</td><td>direct 表现最好；censored 样本太少</td></tr>
-        <tr><td>KSTL</td><td>7,925</td><td>51.94%</td><td>840</td><td>21.67%</td><td>主要是 direct，且机场/跑道 bias 明显</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <section id="remaining-causes">
-    <h2>5. “剩余约 20%”可能是什么原因</h2>
-    <div class="callout warning"><strong>先纠正分母：</strong>五机场合计 fail rate 是 27.61%，不是统一的 20%；KSMF 9.26%、KSJC 14.28%、KRDU 19.32%、KSTL 49.01%、KMSY 65.81%。如果“约 20%”指 KRDU 或 censored cohort，它们分别是 19.32% 和 17.70%。机场差异如此大，本身就反对“同一个通用 LPV gate 写错了”的解释。</div>
-
-    <h3>5.1 已经由数据直接证实的模式</h3>
-    <div class="table-wrap" style="max-height:none">
-      <table>
-        <thead><tr><th>Direct bracket 位置间隔</th><th>样本数</th><th>Fail</th><th>Fail rate</th><th>解释边界</th></tr></thead>
-        <tbody>
-          <tr><td>≤ 1 s</td><td>7,244</td><td>1,099</td><td>15.17%</td><td>短间隔基线</td></tr>
-          <tr><td>1–2 s</td><td>12,353</td><td>2,368</td><td>19.17%</td><td>仍接近“约 20%”</td></tr>
-          <tr><td>2–5 s</td><td>5,272</td><td>3,182</td><td>60.36%</td><td>风险显著升高</td></tr>
-          <tr><td>&gt; 5 s</td><td>3,261</td><td>2,570</td><td>78.81%</td><td>不能把插值高度当作高精度同步测量</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <p>合并后，gap ≤2 s 的 direct fail rate 为 17.69%，gap &gt;2 s 为 67.41%。有 <code>geoaltitude_async_groups</code> 的 direct 轨迹 fail rate 为 43.02%，没有该标记的为 15.89%。两项都只是<strong>相关性</strong>：机场、接收覆盖和航班构成可能混杂，尚不能单独证明某个高度值错误。</p>
-
-    <h3>5.2 原因优先级与当前证据</h3>
-    <div class="grid two">
-      <div class="card">
-        <h3><span class="priority p1">P1</span> 高度与位置仍非真正同步</h3>
-        <p><strong>最强候选，direct 为主。</strong>track 的时间轴已改为 <code>lastposupdate</code>，并去除了 held positions；但 OpenSky state snapshot 没有独立的 geo-altitude measurement timestamp。当前做法只能把最近高度快照对齐到位置更新时间。</p>
-        <p>gap/async 与 fail 的强梯度支持继续审计这一层。下一步应按 bracket 两端的高度变化、GVA、gap 和机场做受控分层；在完成前，不能说“整条航迹高度都不可信”，也不能说“所有 direct fail 都是真实偏差”。</p>
-      </div>
-      <div class="card">
-        <h3><span class="priority p1">P1</span> Censored 外推模型误差</h3>
-        <p><strong>KRDU 为主。</strong>14,602 个 censored event 有 2,585 个 fail（17.70%）。它们没有阈值后观测，只能从 <code>[-5000,-300] m</code> 线性外推。</p>
-        <p>source-only truncation 实验的 censored vertical abs P95 在最差机场达到约 36–41 m，说明其中一部分“约 20%”可能是 estimator error。numeric uncertainty 尚未校准，所以不能把每个 censored fail 都当作已确认的物理越界。</p>
-      </div>
-      <div class="card">
-        <h3><span class="priority p2">P2</span> Benchmark 与实际 flown procedure 不同</h3>
-        <p>Evaluation 明确比较“该跑道 LPV FAS 的 published TCH”。一条 ADS-B 航迹成功着陆，只证明它完成了着陆，不证明机组实际飞的是被选择的 LPV procedure，也不证明全程保持 LPV guidance。</p>
-        <p>ILS、visual、Baro-VNAV、不同 FAS 或人工操纵都可能产生安全着陆但不满足本项目的理想 LPV 几何。当前 ADS-B/harvest 数据没有 flown-procedure/mode 字段，因此这是合理但尚未直接验证的候选。</p>
-      </div>
-      <div class="card">
-        <h3><span class="priority p2">P2</span> 机场级 altitude/datum/reference bias</h3>
-        <p>Direct vertical median 在 KMSY 为 +9.72 m、KSTL +8.13 m、KRDU +10.06 m，而 KSJC 为 −1.28 m、KSMF +3.53 m。符号和幅度随机场明显变化。</p>
-        <p>这要求逐机场复核 geo-altitude/GVA、HAE−MSL offset、FAA LTP elevation、published TCH 和导航参考点定义。frame/cycle fingerprint 已防止静默混周期，但不能证明所有权威输入与 ADS-B 高度在实际测量层面没有 residual bias。</p>
-      </div>
-      <div class="card">
-        <h3><span class="priority info">事实</span> 真实轨迹可安全着陆但不通过理想 gate</h3>
-        <p>±7.5 m 是本项目依据 LPV FSD 正常运行比例建立的理想阈值事件 conformance gate，不是“能否安全落地”的充分必要条件。成功着陆样本中存在真实 threshold-crossing dispersion 并不矛盾。</p>
-        <p>因此本报告的 fail 应读作“没有通过所选理想 LPV LTP 几何基准”，不能写成“飞机没有正常着陆”。</p>
-      </div>
-      <div class="card">
-        <h3><span class="priority info">排除</span> 横向 gate 不是剩余主因</h3>
-        <p>11,804 个 fail 中只有 65 个涉及横向，12 个仅横向。新 direct 方法消除了旧 v6 大部分横向长尾；目前没有数据依据修改 <code>min(½FSD,½runway width)</code>。</p>
-      </div>
-    </div>
-    <div class="callout" style="margin-top:14px"><strong>当前最可靠的结论：</strong>剩余 fail 不是一个单一“fitting bug”。Direct 的首要调查对象是 threshold 附近的高度—位置时间一致性；censored 的首要调查对象是外推误差；在两者之外，还必须区分“理想 LPV benchmark conformance”与“实际成功着陆”。只有完成 GVA/gap 分层和 flown-procedure 验证后，才能把剩余比例进一步分配给数据误差、模型误差和真实几何偏差。</div>
-  </section>
-
-  <section>
-    <h2>6. 各跑道失败率</h2>
-    <p>表格随机场筛选切换。小样本跑道必须结合样本数阅读；例如 KSJC 12L 的 53.3% 仅基于 15 条，不能与数千条样本的跑道直接比较。</p>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>机场</th><th>跑道</th><th>可评估</th><th>Pass</th><th>Fail</th><th>Indet.</th><th>Fail rate</th><th>仅垂直</th><th>两者</th><th>仅横向</th></tr></thead>
-        <tbody id="runwayRows"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section>
-    <h2>7. 判决条件与“原因”的边界</h2>
-    <div class="formula">vertical_error = threshold-event altitude − (LTP elevation + published TCH)
-vertical pass  ⇔  −7.5 m ≤ vertical_error ≤ +7.5 m
-
-lateral pass  ⇔  |signed cross-track| ≤ min(½ LPV lateral FSD, ½ runway width)
-
-overall fail  ⇔  任一适用 component fail
-overall pass  ⇔  lateral pass AND vertical pass
-otherwise     ⇔  indeterminate</div>
-    <p><strong>正式失败原因</strong>是上述分量越界；这是本报告可以直接、确定地统计的内容。<strong>物理根因</strong>可能包括真实飞行偏差、最终段样本选择、拟合模型、外推、ADS-B 高度/位置时间对齐等。仅凭 verdict 不能把这些根因互相替代。</p>
-    <p>当前 observed uncertainty 明确为 <code>uncalibrated</code>，不提供 numeric interval，也不改变 point-estimate verdict。报告不会用一个未经验证的区间把 pass/fail 改成 indeterminate。</p>
-  </section>
-
-  <section id="sources">
-    <h2>8. 数据来源、标准依据与可复现性</h2>
-    <ul class="source-list">
-      <li><a href="../trajectory_data_process/docs/10-source-timed-canonical-promotion-audit.md">Source-timed canonical promotion audit</a>：说明 <code>lastposupdate</code> 时序重建、geo-altitude 同步审计、新旧 canonical 差异和不可破坏的原始数据边界。</li>
-      <li><a href="../docs/threshold-event-first-principles-development.zh.md">Threshold-event 第一性原理开发档案</a>：目标事件、可观测性、数学定义、frame/policy 分离和严格 claim boundary。</li>
-      <li><a href="../docs/threshold-event-simplified-implementation.zh.md">Threshold-event v1 简化实现与全量迁移记录</a>：direct/censored 唯一生产路径、source-only 实验、五机场统计、source hash 与测试结果；实现位于 <a href="../trajectory_data_process/harvest/threshold_event.py"><code>threshold_event.py</code></a>。</li>
-      <li><a href="../final_approach/FIT_MODEL_OPTIMIZATION.md">Observed final-approach fit historical design</a>：保留旧 fitting 演进和实验依据；当前生产 event contract 以上述 v1 文档为准。</li>
-      <li><a href="FINAL_APPROACH_VERDICT_STANDARD.md">项目判决标准设计</a>：阈值事件定义、LPV/LNAV-VNAV 边界推导、claim boundary、报告要求及章节级官方来源；实现位于 <a href="metrics.py"><code>evaluation/metrics.py</code></a>、<a href="arrival.py"><code>arrival.py</code></a> 和 <a href="thresholds.py"><code>thresholds.py</code></a>。</li>
-      <li><a href="../docs/literature_review/threshold_event_estimation/Olive_et_al_2025_ADSB_Filtering.pdf">Olive et al., Filtering Techniques for ADS-B Trajectory Preprocessing</a>：§§2.2–2.5、§3.1、§§3.4–3.5，ADS-B 预处理、异常值与轨迹一致性方法依据。</li>
-      <li><a href="../docs/literature_review/threshold_event_estimation/Olive_et_al_2020_Trajectory_Event_Detection.pdf">Olive et al. (2020), Trajectory Event Detection</a>：§§3.3、3.5，runway-context event detection 与 successive passes。</li>
-      <li><a href="../docs/literature_review/threshold_event_estimation/NASA_TM_20220019263.pdf">NASA/TM-20220019263</a>：pp. 8–9，先解析 runway context，再计算 localizer/glideslope deviation。</li>
-      <li><a href="../docs/regulation/ICAO_Doc_9613_5th_Ed_2023.pdf">ICAO Doc 9613，第五版（2023）</a>：Volume II, Part C, Chapter 5, Section B, §5.3.3.1.1.1(b)，正常运行使用半个垂直 FSD。</li>
-      <li>RTCA DO-229D §§2.2.4.4.4、2.2.5.4.4：LPV 角度标度与 15 m 最小一侧 FSD；完整文档受 RTCA 许可限制，仓库不分发。</li>
-      <li><a href="../docs/regulation/EASA_CM-AS-002_Issue-01_Revision-01.pdf">EASA CM-AS-002 Issue 01 Revision 01</a>：§6.3.2，公开复述 DO-229D 的 <code>±0.25 × GPA</code> angular FSD 关系，仅作为可公开追踪证据。</li>
-      <li><a href="../docs/regulation/Order_8260.58D.pdf">FAA Order 8260.58D</a>：§1-3-1.f(2)(b)、§3-1-5.c(3)、Figure 3-1-7、Formula 3-1-1，TCH/WCH 定义及 106.75 m threshold course-width floor；不作为通用 operating rule。</li>
-      <li><a href="../docs/regulation/Garmin_AXIS_Pilots_Guide_190-03123-01_Rev_B_2026.pdf">Garmin AXIS Pilot's Guide Rev B</a>：Chapter 2, page 2-15，当前认证航电资料对 LPV 15 m 下限的公开佐证。</li>
+    <h2>官方依据与可复现入口</h2>
+    <ul>
+      <li><a href="FINAL_APPROACH_VERDICT_STANDARD.md">完整标准设计与数学定义</a></li>
+      <li><a href="../docs/regulation/ICAO_Doc_9613_5th_Ed_2023.pdf">ICAO Doc 9613, Fifth Edition (2023)</a>：Vol. II, Part C, Ch. 5, Section A §§5.3.4.4.7–8；Section B §§5.3.3.1.1.1(b), 5.3.4.5.7–8。</li>
+      <li><a href="../docs/regulation/Order_8260.58D.pdf">FAA Order 8260.58D</a>：§1-3-1.f(2)(b), Table 1-3-1；用于 published TCH 路径定义，不作为实际飞行误差 gate。</li>
+      <li><a href="../docs/regulation/FAA_AC_91-79B_2023.pdf">FAA AC 91-79B</a>：§5.2.3；阈值高度对 landing distance 的影响，但没有通用对称 pass/fail 数值。</li>
+      <li><a href="../docs/regulation/FAA_AC_20-191_2026.pdf">FAA AC 20-191 (2026)</a>：§5.2.10.1.6；已审计但适用 CAT II/III touchdown criteria，不挪用为 RNAV/LPV threshold gate。</li>
+      <li><a href="../docs/regulation/EU_Regulation_965-2012_consolidated_2026-02-22.pdf">EASA Air Operations consolidated rule</a>：CAT.OP.MPA.310；要求安全 threshold margin，但无统一数字。</li>
     </ul>
-    <h3>输入报告及 SHA-256</h3>
-    <table>
-      <thead><tr><th>机场</th><th>报告</th><th>SHA-256</th></tr></thead>
-      <tbody id="sourceRows"></tbody>
-    </table>
-    <p class="footnote">统计直接读取每份报告的 <code>trajectories[].verdict</code>、<code>violations</code>、<code>bounds</code>、<code>cross_track_m</code>、<code>vertical_m</code> 和 producer 已序列化的 threshold-event 审计字段；没有读取原始轨迹后重新 fitting。</p>
+    <p class="small">报告 schema：<code>terminal-approach-evaluation-v4</code>。标准 ID：<code>icao_doc_9613_rnp_apch_fas_22m</code>。</p>
   </section>
 </main>
+<footer>Generated from the five regenerated v4 observed reports · 2026-08-15</footer>
 
 <script>
-  const AIRPORT_ORDER = ["KMSY", "KRDU", "KSJC", "KSMF", "KSTL"];
-  const DATA = {
-    ALL: {label:"五机场合计",total:42746,pass:30928,fail:11804,indeterminate:14,verticalOnly:11739,both:53,lateralOnly:12,high:9341,low:2451,vBins:[4311,3994,2737,750],lBins:[16,18,16,15],vMedian:4.5331,vP95:16.1360,lMedian:12.9888,lP95:199.0928,direct:{n:28130,pass:18911,fail:9219},censored:{n:14602,pass:12017,fail:2585}},
-    KMSY: {label:"KMSY",total:4150,pass:1418,fail:2731,indeterminate:1,verticalOnly:2725,both:6,lateralOnly:0,high:2716,low:15,vBins:[958,598,931,244],lBins:[0,1,0,5],vMedian:4.9708,vP95:16.1360,lMedian:131.6659,lP95:196.0778,direct:{n:4097,pass:1381,fail:2716},censored:{n:52,pass:37,fail:15}},
-    KRDU: {label:"KRDU",total:14439,pass:11648,fail:2790,indeterminate:1,verticalOnly:2734,both:45,lateralOnly:11,high:1854,low:925,vBins:[1214,986,357,222],lBins:[15,16,15,10],vMedian:3.0573,vP95:20.2161,lMedian:11.1170,lP95:236.3435,direct:{n:735,pass:329,fail:406},censored:{n:13703,pass:11319,fail:2384}},
-    KSJC: {label:"KSJC",total:11157,pass:9558,fail:1593,indeterminate:6,verticalOnly:1593,both:0,lateralOnly:0,high:183,low:1410,vBins:[1117,266,203,7],lBins:[0,0,0,0],vMedian:1.3811,vP95:8.9811,lMedian:0,lP95:0,direct:{n:11148,pass:9557,fail:1591},censored:{n:3,pass:1,fail:2}},
-    KSMF: {label:"KSMF",total:4231,pass:3837,fail:392,indeterminate:2,verticalOnly:391,both:1,lateralOnly:0,high:347,low:45,vBins:[205,167,13,7],lBins:[0,0,1,0],vMedian:2.2483,vP95:7.5211,lMedian:19.8106,lP95:19.8106,direct:{n:4225,pass:3835,fail:390},censored:{n:4,pass:2,fail:2}},
-    KSTL: {label:"KSTL",total:8769,pass:4467,fail:4298,indeterminate:4,verticalOnly:4296,both:1,lateralOnly:1,high:4241,low:56,vBins:[817,1977,1233,270],lBins:[1,1,0,0],vMedian:5.2264,vP95:15.9845,lMedian:4.3714,lP95:5.7712,direct:{n:7925,pass:3809,fail:4116},censored:{n:840,pass:658,fail:182}}
-  };
-
-  const RUNWAYS = [
-    ["KMSY","02",284,65,219,0,218,1,0],["KMSY","11",2616,1103,1512,1,1510,2,0],["KMSY","20",2,1,1,0,1,0,0],["KMSY","29",1248,249,999,0,996,3,0],
-    ["KRDU","05L",3076,2364,711,1,707,4,0],["KRDU","05R",1492,1056,436,0,417,15,4],["KRDU","23L",3233,2348,885,0,866,16,3],["KRDU","23R",6638,5880,758,0,744,10,4],
-    ["KSJC","12L",14,8,6,0,6,0,0],["KSJC","12R",569,492,77,0,77,0,0],["KSJC","30L",9611,8349,1256,6,1256,0,0],["KSJC","30R",963,709,254,0,254,0,0],
-    ["KSMF","17L",1146,1074,71,1,71,0,0],["KSMF","17R",2492,2264,227,1,226,1,0],["KSMF","35L",593,499,94,0,94,0,0],
-    ["KSTL","06",1,1,0,0,0,0,0],["KSTL","11",647,239,408,0,408,0,0],["KSTL","12L",3943,2921,1022,0,1021,0,1],["KSTL","12R",262,98,163,1,163,0,0],["KSTL","24",23,17,6,0,6,0,0],["KSTL","29",96,59,37,0,37,0,0],["KSTL","30L",121,81,40,0,39,1,0],["KSTL","30R",3676,1051,2622,3,2622,0,0]
-  ];
-
-  const SOURCES = {
-    KMSY:"f0ab6fbd27b3d3ae2376974f2ffeffebc725089e226252b148e4b6d13bd0c4d6",
-    KRDU:"30e68609fc9d94c310e56d58e39c6c2527d9971cee41865bebc7fb4c38358d55",
-    KSJC:"549786483f046417bbf44ca8a947df9266cec7da3f1b98534de150ff92f36db9",
-    KSMF:"2610078d74be381a53783ed6f30514c627839f210f927c80d90e7d6eaa22d810",
-    KSTL:"7ef9a10b0baaccb7a24ee6d6659105807a5227073d3799020efd306cc1a7fe88"
-  };
-
-  const colors = {pass:"#198754",fail:"#c93b4a",indeterminate:"#d99a17",verticalOnly:"#5468d4",both:"#8d4eb2",lateralOnly:"#e9823f",high:"#4d78cc",low:"#54a6a6"};
-  const fmt = n => new Intl.NumberFormat("zh-CN").format(n);
-  const pct = (n, d) => d ? `${(100*n/d).toFixed(2)}%` : "—";
-
-  function stackedChart(target, rows, segments, denominator, valueLabel) {
-    const left = 104, right = 88, width = 820, barWidth = width-left-right;
-    const rowHeight = 43, height = 28 + rows.length*rowHeight;
-    let body = `<svg viewBox="0 0 ${width} ${height}" aria-hidden="true">`;
-    rows.forEach((row, i) => {
-      const y = 18 + i*rowHeight;
-      const den = denominator(row);
-      body += `<text x="0" y="${y+15}" font-size="13" fill="#344054">${row.label}</text>`;
-      body += `<rect x="${left}" y="${y}" width="${barWidth}" height="21" rx="4" fill="#edf1f5"/>`;
-      let x = left;
-      segments.forEach(seg => {
-        const value = row[seg.key] || 0;
-        const w = den ? barWidth*value/den : 0;
-        if (w > 0) body += `<rect x="${x}" y="${y}" width="${w}" height="21" fill="${colors[seg.key]}"><title>${row.label} · ${seg.label}: ${fmt(value)} (${pct(value,den)})</title></rect>`;
-        x += w;
-      });
-      body += `<text x="${width-right+8}" y="${y+15}" font-size="12" fill="#667085">${valueLabel(row,den)}</text>`;
-    });
-    body += `</svg>`;
-    document.getElementById(target).innerHTML = body;
-  }
-
-  function countBars(target, labels, values, palette) {
-    const width=640, left=105, right=76, rowHeight=39, height=20+labels.length*rowHeight;
-    const max=Math.max(...values,1); let body=`<svg viewBox="0 0 ${width} ${height}" aria-hidden="true">`;
-    labels.forEach((label,i)=>{ const y=12+i*rowHeight, w=(width-left-right)*values[i]/max;
-      body += `<text x="0" y="${y+14}" font-size="12" fill="#344054">${label}</text><rect x="${left}" y="${y}" width="${w}" height="19" rx="3" fill="${palette[i] || palette[0]}"><title>${label}: ${fmt(values[i])}</title></rect><text x="${left+w+7}" y="${y+14}" font-size="12" fill="#667085">${fmt(values[i])}</text>`;
-    });
-    document.getElementById(target).innerHTML=body+`</svg>`;
-  }
-
-  function renderStaticCharts() {
-    const rows = AIRPORT_ORDER.map(k => ({label:k,...DATA[k]}));
-    stackedChart("verdictChart", rows, [{key:"pass",label:"Pass"},{key:"fail",label:"Fail"},{key:"indeterminate",label:"Indeterminate"}], r=>r.total, (r)=>pct(r.fail,r.total)+" fail");
-    stackedChart("reasonChart", rows, [{key:"verticalOnly",label:"仅垂直"},{key:"both",label:"两者"},{key:"lateralOnly",label:"仅横向"}], r=>r.fail, r=>fmt(r.fail)+" fail");
-    stackedChart("verticalDirectionChart", rows, [{key:"high",label:"偏高"},{key:"low",label:"偏低"}], r=>r.high+r.low, r=>pct(r.high,r.high+r.low)+" 高");
-  }
-
-  function renderSelection(key) {
-    const d=DATA[key], vertical=d.verticalOnly+d.both, lateral=d.lateralOnly+d.both;
-    document.getElementById("summaryCards").innerHTML = [
-      ["可评估航迹",fmt(d.total),`${fmt(d.pass)} pass · ${fmt(d.indeterminate)} indeterminate`],
-      ["Fail",fmt(d.fail),`${pct(d.fail,d.total)} 的可评估航迹`],
-      ["涉及垂直失败",fmt(vertical),`${pct(vertical,d.fail)} 的 fail`],
-      ["涉及横向失败",fmt(lateral),`${pct(lateral,d.fail)} 的 fail`]
-    ].map(x=>`<div class="card"><div class="label">${x[0]}</div><div class="value">${x[1]}</div><div class="sub">${x[2]}</div></div>`).join("");
-    const dominant = d.high >= d.low ? "偏高" : "偏低";
-    document.getElementById("selectedNarrative").innerHTML = `<strong>${d.label}：</strong>${fmt(d.fail)} 个 fail 中，${fmt(d.verticalOnly)} 个仅垂直、${fmt(d.both)} 个两者同时、${fmt(d.lateralOnly)} 个仅横向。垂直失败以<strong>${dominant}</strong>为主（偏高 ${fmt(d.high)}，偏低 ${fmt(d.low)}）。`;
-    countBars("verticalSeverityChart",["≤ 2.5 m","2.5–7.5 m","7.5–15 m","> 15 m"],d.vBins,["#8493e6","#697bd9","#5468c7","#3d4fa8"]);
-    countBars("lateralSeverityChart",["≤ 5 m","5–15 m","15–50 m","> 50 m"],d.lBins,["#f2b185","#ea945b","#df7636","#b95022"]);
-    document.getElementById("verticalSeverityText").textContent=`垂直越界量：中位数 ${d.vMedian.toFixed(2)} m，P95 ${d.vP95.toFixed(2)} m。`;
-    document.getElementById("lateralSeverityText").textContent=`横向越界量：中位数 ${d.lMedian.toFixed(2)} m，P95 ${d.lP95.toFixed(2)} m。`;
-    document.getElementById("methodCards").innerHTML = [
-      ["Direct evaluated",fmt(d.direct.n),`${pct(d.direct.n,d.total)} 的可评估航迹`],
-      ["Direct fail",fmt(d.direct.fail),`${pct(d.direct.fail,d.direct.n)} 的 direct`],
-      ["Censored evaluated",fmt(d.censored.n),`${pct(d.censored.n,d.total)} 的可评估航迹`],
-      ["Censored fail",fmt(d.censored.fail),`${pct(d.censored.fail,d.censored.n)} 的 censored`]
-    ].map(x=>`<div class="card"><div class="label">${x[0]}</div><div class="value">${x[1]}</div><div class="sub">${x[2]}</div></div>`).join("");
-    stackedChart("methodChart",[
-      {label:"Direct",pass:d.direct.pass,fail:d.direct.fail},
-      {label:"Censored",pass:d.censored.pass,fail:d.censored.fail}
-    ], [{key:"pass",label:"Pass"},{key:"fail",label:"Fail"}], r=>r.pass+r.fail, (r,den)=>pct(r.fail,den)+" fail");
-    document.getElementById("methodText").textContent=`${d.label}：direct ${fmt(d.direct.n)} 条、fail rate ${pct(d.direct.fail,d.direct.n)}；censored ${fmt(d.censored.n)} 条、fail rate ${pct(d.censored.fail,d.censored.n)}。只有后者包含 final-segment 外推误差。`;
-    renderRunways(key);
-  }
-
-  function renderRunways(key) {
-    const rows=RUNWAYS.filter(r=>key==="ALL" || r[0]===key).sort((a,b)=>b[4]/b[2]-a[4]/a[2]);
-    document.getElementById("runwayRows").innerHTML=rows.map(r=>{
-      const rate=100*r[4]/r[2];
-      return `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${fmt(r[2])}</td><td>${fmt(r[3])}</td><td>${fmt(r[4])}</td><td>${fmt(r[5])}</td><td class="rate-cell" style="--rate:${rate}%"><span>${rate.toFixed(1)}%</span></td><td>${fmt(r[6])}</td><td>${fmt(r[7])}</td><td>${fmt(r[8])}</td></tr>`;
-    }).join("");
-  }
-
-  function renderSources() {
-    document.getElementById("sourceRows").innerHTML=AIRPORT_ORDER.map(k=>`<tr><td>${k}</td><td><a href="../trajectory_data_process/outputs/harvest/${k}/approach/evaluation_report.json">evaluation_report.json</a></td><td class="hash">${SOURCES[k]}</td></tr>`).join("");
-  }
-
-  document.querySelectorAll("button[data-airport]").forEach(button=>button.addEventListener("click",()=>{
-    document.querySelectorAll("button[data-airport]").forEach(item=>item.setAttribute("aria-pressed",String(item===button)));
-    renderSelection(button.dataset.airport);
-  }));
-  renderStaticCharts(); renderSelection("ALL"); renderSources();
+const airports = {
+  ALL:{total:42746,pass:41910,fail:822,ind:14,oldPass:30928,latOnly:44,vertOnly:757,both:21,direct:617,censored:205,severity:[456,256,40,26]},
+  KMSY:{total:4150,pass:3892,fail:257,ind:1,oldPass:1418,latOnly:0,vertOnly:251,both:6,direct:257,censored:0,severity:[218,30,4,5]},
+  KRDU:{total:14439,pass:14168,fail:270,ind:1,oldPass:11648,latOnly:41,vertOnly:214,both:15,direct:75,censored:195,severity:[76,111,26,16]},
+  KSJC:{total:11157,pass:11144,fail:7,ind:6,oldPass:9558,latOnly:0,vertOnly:7,both:0,direct:6,censored:1,severity:[2,2,2,1]},
+  KSMF:{total:4231,pass:4221,fail:8,ind:2,oldPass:3837,latOnly:1,vertOnly:7,both:0,direct:8,censored:0,severity:[2,3,0,2]},
+  KSTL:{total:8769,pass:8485,fail:280,ind:4,oldPass:4467,latOnly:2,vertOnly:278,both:0,direct:271,censored:9,severity:[158,110,8,2]}
+};
+const reports = {
+  KMSY:"../trajectory_data_process/outputs/harvest/KMSY/approach/evaluation_report.json",
+  KRDU:"../trajectory_data_process/outputs/harvest/KRDU/approach/evaluation_report.json",
+  KSJC:"../trajectory_data_process/outputs/harvest/KSJC/approach/evaluation_report.json",
+  KSMF:"../trajectory_data_process/outputs/harvest/KSMF/approach/evaluation_report.json",
+  KSTL:"../trajectory_data_process/outputs/harvest/KSTL/approach/evaluation_report.json"
+};
+const fmt = n => n.toLocaleString("en-US");
+function comparison(){
+  const root=document.getElementById("comparisonChart");
+  root.innerHTML=Object.entries(airports).filter(([k])=>k!=="ALL").map(([k,d])=>{
+    const old=100*d.oldPass/d.total, now=100*d.pass/d.total;
+    return `<div class="bar-row"><strong>${k}</strong><div class="track compare"><span class="old" style="width:${old}%"></span><span class="new" style="width:${now}%"></span></div><span>${old.toFixed(1)} → <b>${now.toFixed(1)}%</b></span></div>`;
+  }).join("");
+}
+function stack(id, parts){
+  const total=parts.reduce((s,p)=>s+p.n,0)||1;
+  document.getElementById(id).innerHTML=parts.map(p=>`<span style="width:${100*p.n/total}%;background:${p.color}" title="${p.label}: ${p.n}">${p.n?fmt(p.n):""}</span>`).join("");
+}
+function legend(id,parts){
+  document.getElementById(id).innerHTML=parts.map(p=>`<span><i class="swatch" style="background:${p.color}"></i>${p.label}: <b>${fmt(p.n)}</b></span>`).join("");
+}
+function selectAirport(key){
+  document.querySelectorAll("#airportButtons button").forEach(b=>b.classList.toggle("active",b.dataset.key===key));
+  const d=airports[key];
+  document.getElementById("airportTotal").textContent=fmt(d.total);
+  document.getElementById("airportPass").textContent=`${fmt(d.pass)} · ${(100*d.pass/d.total).toFixed(2)}%`;
+  document.getElementById("airportFail").textContent=`${fmt(d.fail)} · ${(100*d.fail/d.total).toFixed(2)}%`;
+  document.getElementById("airportInd").textContent=fmt(d.ind);
+  const components=[{label:"仅 lateral",n:d.latOnly,color:"#2f91a8"},{label:"仅 vertical",n:d.vertOnly,color:"#d94841"},{label:"lateral + vertical",n:d.both,color:"#7656c9"}];
+  stack("componentStack",components); legend("componentLegend",components);
+  const methods=[{label:"direct bracket",n:d.direct,color:"#3159ae"},{label:"censored fit",n:d.censored,color:"#d18a16"}];
+  stack("methodStack",methods); legend("methodLegend",methods);
+  const max=Math.max(...d.severity,1), labels=["≤5 m","5–15 m","15–30 m",">30 m"];
+  document.getElementById("severityChart").innerHTML=d.severity.map((n,i)=>`<div class="column"><div class="n">${fmt(n)}</div><div class="fill" style="height:${150*n/max}px;background:${i<2?'#7656c9':'#d94841'}"></div><div class="x">${labels[i]}</div></div>`).join("");
+}
+function init(){
+  comparison();
+  const buttons=document.getElementById("airportButtons");
+  Object.keys(airports).forEach(k=>{const b=document.createElement("button");b.textContent=k;b.dataset.key=k;b.onclick=()=>selectAirport(k);buttons.appendChild(b);});
+  const tbody=document.querySelector("#airportTable tbody");
+  tbody.innerHTML=Object.entries(airports).filter(([k])=>k!=="ALL").map(([k,d])=>`<tr><td><strong>${k}</strong></td><td class="num">${fmt(d.total)}</td><td class="num pass">${fmt(d.pass)}</td><td class="num fail">${fmt(d.fail)}</td><td class="num ind">${fmt(d.ind)}</td><td class="num">${(100*d.pass/d.total).toFixed(2)}%</td><td><a href="${reports[k]}">JSON</a></td></tr>`).join("")+`<tr><td><strong>Total</strong></td><td class="num"><strong>42,746</strong></td><td class="num pass"><strong>41,910</strong></td><td class="num fail"><strong>822</strong></td><td class="num ind"><strong>14</strong></td><td class="num"><strong>98.04%</strong></td><td></td></tr>`;
+  selectAirport("ALL");
+}
+init();
 </script>
 </body>
 </html>

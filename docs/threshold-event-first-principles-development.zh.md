@@ -4,6 +4,11 @@
 
 日期：2026-08-15
 
+> 历史标准说明：本文冻结时第 12.3 节使用的 `±7.5 m` 已退役，不是当前
+> runtime 规则。当前唯一规则及官方来源见
+> [`evaluation/FINAL_APPROACH_VERDICT_STANDARD.md`](../evaluation/FINAL_APPROACH_VERDICT_STANDARD.md)。
+> 本文保留旧推导仅用于解释当时的 estimator 实验约束。
+
 范围：观测航迹的跑道关联、跑道阈值事件估计、统一评价入口，以及由此产生的可再生成派生数据
 
 不在范围内：重新下载 ADS-B、修改原始样本、改变 LPV 横向标准、筛选训练集、查看或使用 outer-test

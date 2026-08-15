@@ -45,19 +45,21 @@ For LPV:
 ```text
 lateral = min(0.5 × published LPV lateral FSD, 0.5 × runway width)
 vertical error = threshold-event altitude - (LTP elevation + published TCH)
-vertical bound = ±7.5 m
+vertical bound = ±22 m
 ```
 
-The approved design uses the DO-229 angular LPV scale with its `15 m` minimum
-linear full-scale deflection, followed by ICAO's required one-half-FSD
-normal-operation fraction (`0.5 × 15 m = 7.5 m`). The exact source chapter and
-section indices, the scale derivation, and the landing-safety claim boundary
-are documented in
-[FINAL_APPROACH_VERDICT_STANDARD.md](FINAL_APPROACH_VERDICT_STANDARD.md#42-vertical-rule).
+The single project-wide vertical value comes from ICAO Doc 9613, Fifth Edition,
+Volume II, Part C, Chapter 5, Section A, §5.3.4.4.7: `+22 m/-22 m` for RNP APCH
+Baro-VNAV final-approach deviation. This project uses it consistently as an
+RNAV terminal-geometry acceptance bound for LPV and approved LNAV/VNAV. It is
+not presented as a universal legal landing-certification limit. The exact
+claim boundary, rejected alternatives, and evidence are documented in
+[FINAL_APPROACH_VERDICT_STANDARD.md](FINAL_APPROACH_VERDICT_STANDARD.md#1-decision-and-claim-boundary).
 
-The evaluator resolves this LPV scale itself; trajectories and harvested
-threshold events do not carry approach policy. No WCH/TCH range, SBAS alert
-limit, or Baro-VNAV tolerance is substituted for the LPV bound.
+The retired `±7.5 m` value was half of the minimum close-in LPV display FSD. It
+is a guidance-tracking scale, not a universal threshold-crossing or landing
+outcome standard, and is no longer computed or serialized. Trajectories and
+harvested threshold events do not carry evaluation policy.
 
 For the explicit LNAV/VNAV Baro-VNAV fallback:
 
@@ -172,11 +174,11 @@ normalize two different physical spans and report the result as path error.
 
 ## Report essentials
 
-`terminal-approach-evaluation-v3` contains:
+`terminal-approach-evaluation-v4` contains:
 
 - complete assessment contexts and resolved bounds;
-- the published-TCH vertical reference, DO-229 minimum-clamped scale model,
-  `15 m` one-sided FSD, ICAO `0.5` fraction, and resolved `7.5 m` bound;
+- the published-TCH vertical reference, common `±22 m` RNAV terminal bound,
+  exact ICAO source location, and non-certification claim boundary;
 - event/point-verdict/uncalibrated-uncertainty/reference-comparison methodology;
 - three-way verdict counts;
 - per-flight signed along-track, cross-track, and vertical deviations;

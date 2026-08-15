@@ -9,8 +9,10 @@ computes them by **data-driven learning** — transformers trained on observed A
 Its default state-output path is the original kinematic baseline; its opt-in control-output
 path integrates learned controls through a differentiable Torch twin of the same point-mass
 dynamics. Both emit the **same evaluation records**, so
-`python -m evaluation --input <dir>` grades either one against the identical regulatory
-gates (lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m).
+`python -m evaluation --input <dir>` grades either one against the identical,
+evaluation-owned terminal-geometry rules: runway-specific lateral containment and the
+common RNAV vertical bound `[-22, +22] m` about the published-TCH path. These are project
+acceptance rules, not landing certification.
 
 ```
                 observed arrival tracks (trajectory_data_process)
@@ -78,7 +80,7 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | **`L` / `N` / `H` / `dt`** | Observed lookback / normalized output segments / fixed-time horizon steps / input resample step. Defaults: `L=60`, model-specific `N`, `H_window=30`, `H_full=300`, `dt=2 s`. |
 | **ENU** | Local **E**ast/**N**orth/**U**p Cartesian frame; here anchored at the runway threshold, so `(0,0,0)` is where an approach should end. |
 | **cross-track / along-track** | Horizontal error decomposed across / along the observed track's own course — "beside the path" vs "ahead/behind on it". |
-| **gates** | The evaluation thresholds every record is graded against: final lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m (FAA 8260.58D / 8260.3F derived; see `evaluation/thresholds.py`). |
+| **gates** | Evaluation-owned terminal geometry: LPV lateral `min(½ published FSD, ½ runway width)` and vertical `[-22,+22] m` about `LTP elevation + published TCH`. See `evaluation/FINAL_APPROACH_VERDICT_STANDARD.md`; this is not landing certification. |
 | **`flight_key`** | The repo-wide flight identity `id_runway_icao24_landingTime` — the record filename stem, the train/val/test split key, and the observed CZML entity id. |
 | **pp** | Percentage points (a difference of rates, e.g. 73.7% − 63.2% = +10.5 pp). |
 | **`final_time_s`** | Learned physical time from the observed anchor to the predicted endpoint. |
