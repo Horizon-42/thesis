@@ -15,7 +15,7 @@ from final_approach import (
     TrackPoint,
     assign_runway,
 )
-from final_approach.tests.test_fit import synthetic_approach
+from final_approach.tests.factories import synthetic_approach
 
 
 def parallel_frame(base: RunwayFrame, ident: str, separation_m: float) -> RunwayFrame:
@@ -43,7 +43,13 @@ KSJC_SEPARATION_M = 228.4
 KSJC_30L = RunwayFrame(ident="30L", lat=37.362, lon=-121.929, elevation_m=18.6, course_deg=302.0)
 KSJC_30R = parallel_frame(KSJC_30L, "30R", KSJC_SEPARATION_M)
 # The opposite end of the same physical runway -- indistinguishable by cross-track.
-KSJC_12R = RunwayFrame(ident="12R", lat=KSJC_30L.lat, lon=KSJC_30L.lon, elevation_m=18.6, course_deg=122.0)
+KSJC_12R = RunwayFrame(
+    ident="12R",
+    lat=KSJC_30L.lat,
+    lon=KSJC_30L.lon,
+    elevation_m=18.6,
+    course_deg=122.0,
+)
 
 PARALLELS = [KSJC_30L, KSJC_30R, KSJC_12R]
 

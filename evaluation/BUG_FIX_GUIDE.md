@@ -94,13 +94,13 @@ positional gates. A published result could not be reproduced.
 
 Evaluation no longer fits an observed trajectory. Runway assignment serializes
 the single policy-free event, including fit window, sample range, residuals,
-uncertainty, and extrapolation. Reports preserve that event plus:
+uncertainty status, and extrapolation where applicable. Reports preserve that event plus:
 
 - assessment context and resolved bounds;
 - authoritative source/effective cycles;
 - event method and threshold-plane tolerance;
 - point-estimate verdict rule and inclusive bounds;
-- 95% estimator interval method, explicitly diagnostic and non-gating;
+- explicit `uncalibrated` observed uncertainty with no fabricated numeric interval;
 - explicitly unmodelled uncertainty sources; and
 - reference endpoint policy.
 

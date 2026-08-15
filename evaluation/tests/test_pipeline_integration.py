@@ -89,6 +89,12 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(
         raise AssertionError("evaluation must consume the serialized event without refitting")
 
     monkeypatch.setattr("final_approach.fit_final_segment", fail_if_evaluation_refits)
+    monkeypatch.setattr(
+        "final_approach.fit.fit_final_segment", fail_if_evaluation_refits
+    )
+    monkeypatch.setattr(
+        "final_approach.assign.fit_final_segment", fail_if_evaluation_refits
+    )
 
     report = evaluate_batch(
         iter_observed_records(paths),

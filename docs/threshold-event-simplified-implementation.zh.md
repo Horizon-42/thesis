@@ -466,7 +466,8 @@ $$
 
 - `threshold_frame_snapshot()` 与 `threshold_frame_fingerprint()`；
 - strict `require_matching_threshold_frame()`；
-- `runway-threshold-event-v1` validator；
+- `final_approach/event_contract.py` 中 producer/evaluator 共享的 v1
+  schema/method 判别常量，以及两端各自的严格语义校验；
 - direct/censored discriminated event builders；
 - CZML 按 `observability` 判断 direct 与 inferred tail；
 - evaluation report 保存 evaluation-context facts/fingerprint；
@@ -485,7 +486,7 @@ $$
 7. censored source range 不跨 selected inbound pass；
 8. physical frame 变化拒绝旧 event；
 9. 仅 TCH/FSD/width 变化不改变 frame fingerprint，但改变 evaluation fingerprint；
-10. evaluation source code 不导入/调用 `fit_final_segment()`；
+10. runtime integration test 证明 evaluation 不调用 `fit_final_segment()`；
 11. observed/optimized/predicted 使用相同误差符号与 gate；
 12. CZML direct event 不添加 inferred tail，censored event 才添加；
 13. 非有限 event/criteria 被严格拒绝；

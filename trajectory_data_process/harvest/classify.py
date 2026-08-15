@@ -32,6 +32,7 @@ from final_approach import (
     Assignment,
     LandingScreen,
     SegmentFit,
+    TrackPoint,
     assign_runway,
     landing_screen_reason,
 )
@@ -44,7 +45,7 @@ from trajectory_data_process.harvest.threshold_event import (
     build_observed_threshold_event,
     select_observed_threshold_bracket,
 )
-from trajectory_data_process.harvest.tracks import Track
+from trajectory_data_process.harvest.tracks import Sample, Track
 
 
 @dataclass(frozen=True)
@@ -218,9 +219,7 @@ def classify_tracks(
     ]
 
 
-def _track_point(sample):
-    from final_approach import TrackPoint
-
+def _track_point(sample: Sample) -> TrackPoint:
     return TrackPoint(lat=sample.lat, lon=sample.lon, alt_m=sample.alt_hae_m)
 
 

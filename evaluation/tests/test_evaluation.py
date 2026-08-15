@@ -8,46 +8,24 @@ import math
 import pytest
 
 from evaluation import (
-    AssessmentContext,
     compare_to_reference,
     evaluate_batch,
     load_record,
     record_from_dict,
 )
-
-
-def context() -> AssessmentContext:
-    return AssessmentContext(
-        benchmark="rnp_apch_lnav_vnav_baro", airport="KRDU", runway="05L",
-        runway_course_deg=0.0, runway_width_m=45.72,
-        runway_source="faa_nasr_apt_rwy", runway_source_cycle="2026-08-06",
-        procedure_source="faa_terminal_procedure", procedure_source_cycle="2026-08-06",
-        threshold_elevation_hae_m=130.0,
-        threshold_elevation_msl_m=100.0,
-        threshold_crossing_height_m=30.0,
-        baro_vnav_approved=True,
-    )
-
-
-def payload(*, subject="optimized", final_lat=35.0, final_lon=-78.0,
-            final_alt=130.0, final_t=100.0):
-    target = {"lat": 35.0, "lon": -78.0, "alt": 130.0, "V": 70.0,
-              "psi": 0.0, "gamma": -0.05, "m": 60_000.0}
-    first = {"t": 0.0, **target, "lat": 34.9, "alt": 1000.0}
-    last = {"t": final_t, **target, "lat": final_lat, "lon": final_lon,
-            "alt": final_alt}
-    return {
-        "source": {"id": "TEST1", "subject": subject, "arr_airport": "KRDU",
-                   "runway": "05L", "icao24": "abc123",
-                   "landing_time_utc": "2026-08-12T00:00:00Z"},
-        "initial_state": {key: value for key, value in first.items() if key != "t"},
-        "target_state": target, "final_time_s": final_t, "states": [first, last],
-        "controls": [] if subject == "observed" else [{"thrust": 1.0}] * 2,
-    }
+from evaluation.tests.factories import (
+    assessment_context,
+    observed_payload,
+    trajectory_payload,
+)
 
 
 def contexts():
-    return {("KRDU", "05L"): context()}
+    return {
+        ("KRDU", "05L"): assessment_context(
+            benchmark="rnp_apch_lnav_vnav_baro"
+        )
+    }
 
 
 @pytest.mark.parametrize(
@@ -55,11 +33,15 @@ def contexts():
     ["initial", "target", "first", "interior", "last", "time", "control"],
 )
 def test_non_finite_values_are_rejected_at_the_record_boundary(location):
-    value = payload()
+    value = trajectory_payload()
     if location == "initial": value["initial_state"]["alt"] = math.nan
     elif location == "target": value["target_state"]["lat"] = math.inf
     elif location == "first": value["states"][0]["lon"] = -math.inf
-    elif location == "interior": value["states"].insert(1, dict(value["states"][0], alt=math.nan, t=50.0)); value["controls"].insert(1, {"thrust": 1.0})
+    elif location == "interior":
+        value["states"].insert(
+            1, dict(value["states"][0], alt=math.nan, t=50.0)
+        )
+        value["controls"].insert(1, {"thrust": 1.0})
     elif location == "last": value["states"][-1]["alt"] = math.nan
     elif location == "time": value["final_time_s"] = math.nan
     else: value["controls"][0]["thrust"] = math.inf
@@ -69,22 +51,34 @@ def test_non_finite_values_are_rejected_at_the_record_boundary(location):
 
 def test_json_nan_token_is_rejected(tmp_path):
     path = tmp_path / "bad.json"
-    path.write_text(json.dumps(payload()).replace("130.0", "NaN", 1), encoding="utf-8")
+    path.write_text(
+        json.dumps(trajectory_payload()).replace("130.0", "NaN", 1),
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="non-standard JSON"):
         load_record(path)
 
 
 def test_batch_serializes_context_methodology_and_three_way_counts():
-    report = evaluate_batch([record_from_dict(payload())], contexts=contexts())
+    report = evaluate_batch(
+        [record_from_dict(trajectory_payload())], contexts=contexts()
+    )
     assert report["schema_version"] == "terminal-approach-evaluation-v4"
     assert report["verdict_counts"] == {"pass": 1, "fail": 0, "indeterminate": 0}
     assert report["assessment_contexts"][0]["runway_source_cycle"] == "2026-08-06"
     assert report["assessment_contexts"][0]["desired_threshold_altitude_msl_m"] == 130.0
     assert report["methodology"]["event"]["observed"].endswith("no evaluation refit")
     uncertainty = report["methodology"]["uncertainty"]
-    assert uncertainty["classification"] == "diagnostic_only_not_used_by_verdict"
-    assert uncertainty["verdict_rule"] == \
-        "point_estimate_against_inclusive_component_bounds"
+    assert uncertainty == {
+        "verdict_rule": "point_estimate_against_inclusive_component_bounds",
+        "observed_status": "uncalibrated",
+        "unmodelled_sources": [
+            "ADS-B geometric-altitude update alignment and measurement error",
+            "runway/FAS survey uncertainty",
+            "geoid/datum uncertainty",
+            "model-form and extrapolation uncertainty",
+        ],
+    }
     vertical = report["methodology"]["terminal_vertical"]
     acceptance = vertical["common_rnav_terminal_acceptance"]
     assert acceptance["standard_id"] == "icao_doc_9613_rnp_apch_fas_22m"
@@ -96,12 +90,15 @@ def test_batch_serializes_context_methodology_and_three_way_counts():
     assert acceptance["claim_boundary"] == (
         "terminal final-approach geometry; not touchdown or landing certification"
     )
+    deviation = report["trajectories"][0]["deviation"]
+    assert "lateral_sigma_m" not in deviation
+    assert "vertical_sigma_m" not in deviation
+    assert "lateral_interval_m" not in deviation
+    assert "vertical_interval_m" not in deviation
     json.dumps(report, allow_nan=False)
 
 
 def test_observed_availability_is_supplied_from_the_unfiltered_harvest_roster():
-    from evaluation.tests.test_terminal_standard import _lpv_context, _record
-
     availability = {
         "denominator": "arrival_candidates_excluding_not_landing",
         "event_denominator": 3,
@@ -112,8 +109,8 @@ def test_observed_availability_is_supplied_from_the_unfiltered_harvest_roster():
         "source_integrity_excluded_candidates": 0,
     }
     report = evaluate_batch(
-        [record_from_dict(_record())],
-        contexts={("KRDU", "05L"): _lpv_context()},
+        [record_from_dict(observed_payload())],
+        contexts={("KRDU", "05L"): assessment_context()},
         observed_availability=availability,
     )
 
@@ -123,7 +120,8 @@ def test_observed_availability_is_supplied_from_the_unfiltered_harvest_roster():
 
 def test_computed_trajectory_that_does_not_reach_threshold_fails_the_event():
     report = evaluate_batch(
-        [record_from_dict(payload(final_lat=34.999))], contexts=contexts()
+        [record_from_dict(trajectory_payload(final_lat=34.999))],
+        contexts=contexts(),
     )
     row = report["trajectories"][0]
     assert row["event_status"] == "not_reached"
@@ -131,11 +129,9 @@ def test_computed_trajectory_that_does_not_reach_threshold_fails_the_event():
 
 
 def test_observed_report_copies_the_policy_free_event_for_audit():
-    from evaluation.tests.test_terminal_standard import _record, _lpv_context
-
-    record = record_from_dict(_record())
+    record = record_from_dict(observed_payload())
     report = evaluate_batch(
-        [record], contexts={("KRDU", "05L"): _lpv_context()}
+        [record], contexts={("KRDU", "05L"): assessment_context()}
     )
     copied = report["trajectories"][0]["observed_threshold_event"]
     assert copied == record.source["observed_threshold_event"]
@@ -143,9 +139,9 @@ def test_observed_report_copies_the_policy_free_event_for_audit():
 
 
 def _write_pair(tmp_path, *, reference_end_lat: float):
-    ours = payload()
+    ours = trajectory_payload()
     ours["reference_file"] = "reference.json"
-    ref = payload(subject="observed", final_lat=reference_end_lat)
+    ref = trajectory_payload(subject="observed", final_lat=reference_end_lat)
     (tmp_path / "reference.json").write_text(json.dumps(ref), encoding="utf-8")
     path = tmp_path / "ours.json"
     path.write_text(json.dumps(ours), encoding="utf-8")
@@ -175,7 +171,7 @@ def test_reference_comparison_runs_when_both_physical_endpoints_match(tmp_path):
 
 
 def test_empty_failed_path_skips_reference_with_strict_json_null_gaps(tmp_path):
-    ours = payload()
+    ours = trajectory_payload()
     ours.update(
         reference_file="reference.json",
         final_time_s=None,
@@ -183,7 +179,7 @@ def test_empty_failed_path_skips_reference_with_strict_json_null_gaps(tmp_path):
         controls=[],
         reason="solver failed",
     )
-    reference = payload(subject="observed")
+    reference = trajectory_payload(subject="observed")
     (tmp_path / "reference.json").write_text(
         json.dumps(reference), encoding="utf-8"
     )

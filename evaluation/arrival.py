@@ -12,6 +12,14 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
+from final_approach.event_contract import (
+    CENSORED_EVENT_METHOD,
+    DIRECT_EVENT_METHOD,
+    ESTIMATED_OBSERVABILITY_BY_METHOD,
+    EVENT_SCHEMA_VERSION,
+    NO_EVENT_METHOD,
+    UNAVAILABLE_OBSERVABILITIES,
+)
 from final_approach.frame import RunwayFrame, TrackPoint
 
 from evaluation.records import TrajectoryRecord
@@ -20,9 +28,6 @@ from evaluation.thresholds import AssessmentContext
 Subject = Literal["optimized", "predicted", "observed"]
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
-OBSERVED_EVENT_SCHEMA = "runway-threshold-event-v1"
-OBSERVED_DIRECT_METHOD = "direct_linear_bracket"
-OBSERVED_CENSORED_METHOD = "censored_robust_line"
 
 
 @dataclass(frozen=True)
@@ -33,11 +38,6 @@ class ArrivalDeviation:
     speed_ms: float
     heading_rad: float
     flight_time_s: float
-    event_status: str
-    extrapolated: bool
-    lateral_sigma_m: float | None = None
-    vertical_sigma_m: float | None = None
-    glidepath_deg: float | None = None
     extrapolation_m: float | None = None
 
     @property
@@ -126,7 +126,6 @@ def _computed_arrival(
                 target,
                 frame,
                 desired_altitude_msl_m=desired_altitude_msl_m,
-                event_status="terminal_state",
             ),
             "terminal_state",
         )
@@ -151,7 +150,6 @@ def _computed_arrival(
                     target,
                     frame,
                     desired_altitude_msl_m=desired_altitude_msl_m,
-                    event_status="interpolated_threshold",
                 ),
                 "interpolated_threshold",
             )
@@ -166,43 +164,12 @@ def _computed_arrival(
     )
 
 
-def final_state_deviation(
-    record: TrajectoryRecord,
-    *,
-    context: AssessmentContext,
-) -> ArrivalDeviation:
-    """Measure a computed terminal state in a runway-aligned frame."""
-    if not record.states or record.target_state is None:
-        raise ValueError("final-state deviation requires a solved record and target_state")
-    final, target = record.states[-1], record.target_state
-    desired_altitude_msl_m = _authoritative_target_altitude(record, context)
-    frame = RunwayFrame(
-        ident=context.runway,
-        lat=target["lat"],
-        lon=target["lon"],
-        elevation_m=(
-            desired_altitude_msl_m
-            if desired_altitude_msl_m is not None
-            else float(target["alt"])
-        ),
-        course_deg=context.runway_course_deg,
-    )
-    return _state_deviation(
-        final,
-        target,
-        frame,
-        desired_altitude_msl_m=desired_altitude_msl_m,
-        event_status="terminal_state",
-    )
-
-
 def _state_deviation(
     state: dict[str, float],
     target: dict[str, float],
     frame: RunwayFrame,
     *,
     desired_altitude_msl_m: float | None,
-    event_status: str,
 ) -> ArrivalDeviation:
     projected = frame.project(TrackPoint(state["lat"], state["lon"], state["alt"]))
     return ArrivalDeviation(
@@ -216,8 +183,6 @@ def _state_deviation(
         speed_ms=state["V"] - target["V"],
         heading_rad=math.remainder(state["psi"] - target["psi"], math.tau),
         flight_time_s=state["t"],
-        event_status=event_status,
-        extrapolated=False,
     )
 
 
@@ -240,9 +205,9 @@ def _observed_arrival(
     event = record.source.get("observed_threshold_event")
     if not isinstance(event, dict):
         return ArrivalOutcome(None, "unavailable", "observed threshold event missing")
-    if event.get("schema_version") != OBSERVED_EVENT_SCHEMA:
+    if event.get("schema_version") != EVENT_SCHEMA_VERSION:
         raise ValueError(
-            f"observed threshold event must use {OBSERVED_EVENT_SCHEMA}; "
+            f"observed threshold event must use {EVENT_SCHEMA_VERSION}; "
             "run --reclassify-existing"
         )
     if event.get("runway") != context.runway:
@@ -259,9 +224,9 @@ def _observed_arrival(
         )
     status = event.get("status")
     if status == "unavailable":
-        if event.get("method") != "none" or event.get("observability") not in (
-            "invalid_support",
-            "unavailable",
+        if (
+            event.get("method") != NO_EVENT_METHOD
+            or event.get("observability") not in UNAVAILABLE_OBSERVABILITIES
         ):
             raise ValueError("unavailable observed threshold event has invalid discriminators")
         reason = event.get("unavailable_reason")
@@ -274,10 +239,7 @@ def _observed_arrival(
         raise ValueError(f"observed threshold event has invalid status {status!r}")
     method = event.get("method")
     observability = event.get("observability")
-    expected_observability = {
-        OBSERVED_DIRECT_METHOD: "within_observed_support",
-        OBSERVED_CENSORED_METHOD: "right_censored",
-    }.get(method)
+    expected_observability = ESTIMATED_OBSERVABILITY_BY_METHOD.get(method)
     if expected_observability is None or observability != expected_observability:
         raise ValueError(
             "unsupported observed threshold-event method/observability "
@@ -287,7 +249,10 @@ def _observed_arrival(
     if (
         not isinstance(source_range, list)
         or len(source_range) != 2
-        or not all(isinstance(value, int) and not isinstance(value, bool) for value in source_range)
+        or not all(
+            isinstance(value, int) and not isinstance(value, bool)
+            for value in source_range
+        )
         or source_range[0] < 0
         or source_range[1] < source_range[0]
     ):
@@ -329,9 +294,9 @@ def _observed_arrival(
     extrapolation_m = _event_number(
         event, "extrapolation_distance_m", nonnegative=True
     )
-    if method == OBSERVED_DIRECT_METHOD and extrapolation_m != 0.0:
+    if method == DIRECT_EVENT_METHOD and extrapolation_m != 0.0:
         raise ValueError("direct observed threshold event cannot be extrapolated")
-    if method == OBSERVED_CENSORED_METHOD and extrapolation_m <= 0.0:
+    if method == CENSORED_EVENT_METHOD and extrapolation_m <= 0.0:
         raise ValueError("censored observed threshold event requires positive extrapolation")
     return ArrivalOutcome(
         ArrivalDeviation(
@@ -342,11 +307,6 @@ def _observed_arrival(
             speed_ms=final["V"] - target["V"],
             heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
             flight_time_s=final["t"],
-            event_status="estimated",
-            extrapolated=extrapolation_m > 0.0,
-            lateral_sigma_m=None,
-            vertical_sigma_m=None,
-            glidepath_deg=None,
             extrapolation_m=extrapolation_m,
         ),
         "estimated",

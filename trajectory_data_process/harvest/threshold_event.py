@@ -19,6 +19,14 @@ from final_approach import (
     SegmentFit,
     TrackPoint,
 )
+from final_approach.event_contract import (
+    CENSORED_EVENT_METHOD,
+    DIRECT_EVENT_METHOD,
+    ESTIMATED_OBSERVABILITY_BY_METHOD,
+    EVENT_SCHEMA_VERSION,
+    NO_EVENT_METHOD,
+    UNAVAILABLE_OBSERVABILITIES,
+)
 from geokit import haversine_m
 
 from trajectory_data_process.harvest.airports import (
@@ -31,11 +39,6 @@ from trajectory_data_process.harvest.tracks import (
     MAX_POSITION_COVERAGE_GAP_S,
     Track,
 )
-
-EVENT_SCHEMA_VERSION = "runway-threshold-event-v1"
-DIRECT_EVENT_METHOD = "direct_linear_bracket"
-CENSORED_EVENT_METHOD = "censored_robust_line"
-NO_EVENT_METHOD = "none"
 
 # Source-integrity checks, never approach-performance gates.  The speed tolerances are
 # the development-corpus controls documented in the simplified implementation record.
@@ -226,19 +229,13 @@ def require_current_threshold_event(event: dict[str, Any], runway: Runway) -> No
     method = event.get("method")
     observability = event.get("observability")
     if status == "unavailable":
-        if method != NO_EVENT_METHOD or observability not in (
-            "invalid_support",
-            "unavailable",
-        ):
+        if method != NO_EVENT_METHOD or observability not in UNAVAILABLE_OBSERVABILITIES:
             raise ValueError("unavailable threshold event has an invalid discriminator")
         if not isinstance(event.get("unavailable_reason"), str):
             raise ValueError("unavailable threshold event requires a reason")
         return
 
-    expected_observability = {
-        DIRECT_EVENT_METHOD: "within_observed_support",
-        CENSORED_EVENT_METHOD: "right_censored",
-    }.get(method)
+    expected_observability = ESTIMATED_OBSERVABILITY_BY_METHOD.get(method)
     if expected_observability is None or observability != expected_observability:
         raise ValueError(
             "estimated threshold event has an invalid method/observability pair; "
@@ -547,7 +544,7 @@ def _unavailable_event(
     observability: str,
     bracket_rejections: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
-    if observability not in ("invalid_support", "unavailable"):
+    if observability not in UNAVAILABLE_OBSERVABILITIES:
         raise ValueError(f"invalid unavailable observability {observability!r}")
     common = (
         {"schema_version": EVENT_SCHEMA_VERSION}
@@ -621,8 +618,6 @@ def _line_audit(line: Any) -> dict[str, float]:
     return {
         "rms_residual_m": line.rms_residual_m,
         "max_abs_residual_m": line.max_abs_residual_m,
-        "rho": line.rho,
-        "n_effective": line.n_effective,
     }
 
 

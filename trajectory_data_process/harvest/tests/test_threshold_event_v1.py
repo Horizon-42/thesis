@@ -9,7 +9,6 @@ import pytest
 
 from final_approach import Assignment, Projected, TrackPoint, fit_final_segment
 from evaluation.context import assessment_for_runway
-from trajectory_data_process.harvest import classify as classify_module
 from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
@@ -106,10 +105,8 @@ def test_direct_event_interpolates_time_lateral_and_vertical_with_one_fraction(
     def unexpected_fit(*_args, **_kwargs):
         pytest.fail("a source-valid direct bracket must not run a trajectory fit")
 
-    # The old implementation imports the fitter into classify.py; raising=False also
-    # keeps this assertion valid after that obsolete import is removed.
     monkeypatch.setattr(
-        classify_module, "fit_final_segment", unexpected_fit, raising=False
+        "final_approach.assign.fit_final_segment", unexpected_fit
     )
     runway = _runway()
     classified = classify_track(
@@ -151,7 +148,6 @@ def test_plausible_bracket_with_failed_source_integrity_does_not_fallback_to_fit
 
 
 def test_censored_event_reuses_winning_assignment_fit_without_refitting(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runway = _runway()
     slope = math.tan(math.radians(3.0))
@@ -176,12 +172,6 @@ def test_censored_event_reuses_winning_assignment_fit_without_refitting(
     fit = fit_final_segment(points, runway.frame("hae"))
     assert fit is not None
 
-    import trajectory_data_process.harvest.threshold_event as event_module
-
-    def unexpected_fit(*_args, **_kwargs):
-        pytest.fail("the event builder must reuse Assignment.fit")
-
-    monkeypatch.setattr(event_module, "fit_final_segment", unexpected_fit, raising=False)
     event = build_observed_threshold_event(
         track,
         runway,
@@ -198,6 +188,10 @@ def test_censored_event_reuses_winning_assignment_fit_without_refitting(
     assert event["extrapolation_distance_m"] == pytest.approx(100.0, abs=1.0)
     assert event["event_time_s"] is None
     assert event["uncertainty"] == {"status": "uncalibrated"}
+    assert set(event["diagnostics"]["fit"]["altitude_fit"]) == {
+        "rms_residual_m",
+        "max_abs_residual_m",
+    }
 
 
 def test_physical_frame_fingerprint_excludes_evaluation_policy() -> None:

@@ -25,7 +25,6 @@ from evaluation.reference import (
 )
 from evaluation.stats import magnitude_spread, mean, signed_spread
 from evaluation.thresholds import (
-    NORMAL_95_MULTIPLIER,
     RNAV_TERMINAL_VERTICAL_BOUND_M,
     RNAV_TERMINAL_VERTICAL_STANDARD_ID,
     AssessmentContext,
@@ -55,8 +54,6 @@ class TrajectoryEvaluation:
     runway_lateral_bound_m: float
     vertical_lower_bound_m: float | None
     vertical_upper_bound_m: float | None
-    lateral_interval_m: tuple[float, float] | None = None
-    vertical_interval_m: tuple[float, float] | None = None
     flight_key: str | None = None
 
 
@@ -68,17 +65,6 @@ def _component(
     if estimate is None or lower is None or upper is None:
         return "indeterminate"
     return "pass" if lower <= estimate <= upper else "fail"
-
-
-def _diagnostic_interval(
-    estimate: float | None,
-    sigma: float | None,
-) -> tuple[float, float] | None:
-    """Return an estimator interval for audit, never for verdict classification."""
-    if estimate is None or sigma is None:
-        return None
-    margin = NORMAL_95_MULTIPLIER * sigma
-    return estimate - margin, estimate + margin
 
 
 def _composite(lateral: ComponentResult, vertical: ComponentResult) -> Verdict:
@@ -99,18 +85,13 @@ def _validate_deviation(value: ArrivalDeviation) -> None:
     }
     optional = {
         "vertical_m": value.vertical_m,
-        "lateral_sigma_m": value.lateral_sigma_m,
-        "vertical_sigma_m": value.vertical_sigma_m,
-        "glidepath_deg": value.glidepath_deg,
         "extrapolation_m": value.extrapolation_m,
     }
     for name, number in {**required, **optional}.items():
         if number is not None and not math.isfinite(float(number)):
             raise ValueError(f"derived deviation {name} must be finite, got {number!r}")
-    for name in ("lateral_sigma_m", "vertical_sigma_m", "extrapolation_m"):
-        number = optional[name]
-        if number is not None and number < 0.0:
-            raise ValueError(f"derived deviation {name} must be non-negative")
+    if value.extrapolation_m is not None and value.extrapolation_m < 0.0:
+        raise ValueError("derived deviation extrapolation_m must be non-negative")
 
 
 def evaluate_record(
@@ -172,12 +153,6 @@ def evaluate_record(
         limits.vertical_lower_m,
         limits.vertical_upper_m,
     )
-    lateral_interval = _diagnostic_interval(
-        deviation.cross_track_m, deviation.lateral_sigma_m
-    )
-    vertical_interval = _diagnostic_interval(
-        deviation.vertical_m, deviation.vertical_sigma_m
-    )
     verdict = _composite(lateral_result, vertical_result)
     violations: list[str] = []
     if lateral_result == "fail":
@@ -200,7 +175,6 @@ def evaluate_record(
         lateral_result=lateral_result, vertical_result=vertical_result,
         deviation=deviation, event_status=outcome.event_status,
         violations=tuple(violations), reason=reason,
-        lateral_interval_m=lateral_interval, vertical_interval_m=vertical_interval,
     )
 
 
@@ -289,11 +263,8 @@ def evaluate_batch(
                 "terminal_plane_tolerance_m": TERMINAL_PLANE_TOLERANCE_M,
             },
             "uncertainty": {
-                "classification": "diagnostic_only_not_used_by_verdict",
                 "verdict_rule": "point_estimate_against_inclusive_component_bounds",
                 "observed_status": "uncalibrated",
-                "observed_numeric_interval": None,
-                "future_calibrated_interval_rule": "estimate_plus_or_minus_1.96_sigma",
                 "unmodelled_sources": [
                     "ADS-B geometric-altitude update alignment and measurement error",
                     "runway/FAS survey uncertainty",
@@ -476,12 +447,10 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             "speed_ms": deviation.speed_ms,
             "heading_rad": deviation.heading_rad,
             "final_time_s": deviation.flight_time_s,
-            "lateral_sigma_m": deviation.lateral_sigma_m,
-            "vertical_sigma_m": deviation.vertical_sigma_m,
-            "lateral_interval_m": item.lateral_interval_m,
-            "vertical_interval_m": item.vertical_interval_m,
-            "extrapolated": deviation.extrapolated,
-            "glidepath_deg": deviation.glidepath_deg,
+            "extrapolated": bool(
+                deviation.extrapolation_m is not None
+                and deviation.extrapolation_m > 0.0
+            ),
             "extrapolation_m": deviation.extrapolation_m,
         }
         # Keep common descriptive columns flat for simple report consumers.

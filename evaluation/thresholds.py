@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Literal, Mapping
 
 Benchmark = Literal["lpv", "rnp_apch_lnav_vnav_baro"]
-ComponentResult = Literal["pass", "fail", "indeterminate", "not_applicable"]
+ComponentResult = Literal["pass", "fail", "indeterminate"]
 Verdict = Literal["pass", "fail", "indeterminate"]
 
 LNAV_FINAL_XTK_M = 0.15 * 1852.0
@@ -27,7 +27,6 @@ LNAV_FINAL_XTK_M = 0.15 * 1852.0
 # LPV display full-scale deflection as a landing-success threshold.
 RNAV_TERMINAL_VERTICAL_BOUND_M = 22.0
 RNAV_TERMINAL_VERTICAL_STANDARD_ID = "icao_doc_9613_rnp_apch_fas_22m"
-NORMAL_95_MULTIPLIER = 1.96
 
 
 def _positive(name: str, value: float | None, *, required: bool = True) -> float | None:

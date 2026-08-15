@@ -19,20 +19,7 @@ OpenSky's ``geoaltitude`` is quantised to 25 ft = 7.62 m (verified: all 482 dist
 altitudes in the KRDU set lie on that lattice). A fit supplies stable geometry for
 runway assignment and is required when reception ends before the threshold. A valid
 pair that physically brackets the threshold is handled by the harvest event producer
-instead; its uncertainty is never allowed below half the altitude quantum.
-
-WHY THE UNCERTAINTY IS AUTOCORRELATION-CORRECTED
-------------------------------------------------
-Textbook OLS variance assumes ``n`` independent samples. At 1 Hz on a smooth descent
-they are not: the aircraft crosses one 7.62 m quantisation step every ~2 samples
-(measured 3.81 m of descent per sample), so consecutive residuals share the same
-rounding error -- 54.8% of consecutive KRDU samples report an IDENTICAL raw altitude.
-Measured lag-1 residual autocorrelation is rho ~ 0.43, i.e. n_eff ~ 0.40 n.
-
-Both variance terms must be deflated -- ``Sxx`` is a sum over the same correlated
-samples as ``1/n``. Correcting only the first understates sigma (it gives a 1.15x
-inflation where the honest figure is 1.58x). The value is retained as an estimator
-diagnostic; evaluation does not use it to shrink an aviation gate.
+instead and does not run this fitter.
 
 WHAT THIS MODULE DOES NOT DO
 ----------------------------
@@ -66,7 +53,7 @@ from final_approach.frame import Projected, RunwayFrame, TrackPoint
 # the truncation this fit exists to bridge.
 #
 # Shrinking the window further does not help: below ~3 km the baseline is too short
-# to pin the slope and sigma grows sharply (2.50 m at a 2 km window vs 1.68 m at 5 km).
+# to pin the threshold intercept reliably.
 DEFAULT_WINDOW_M = (-5000.0, -300.0)
 
 DEFAULT_MIN_SAMPLES = 8
@@ -78,52 +65,34 @@ DEFAULT_MIN_SPAN_M = 500.0
 # along-track stall of a late centreline intercept without tolerating a real reversal.
 _INBOUND_TOLERANCE_M = 100.0
 
-# Negative residual autocorrelation would SHRINK the variance. Clamping at zero keeps
-# the correction one-sided (it can only ever widen the interval), so a noisy rho
-# estimate cannot manufacture precision.
-_RHO_CLAMP = (0.0, 0.95)
-_MIN_EFFECTIVE_SAMPLES = 3.0
-
 # OpenSky geometric altitude is encoded on a 25 ft lattice.  A robust residual
 # scale may collapse to zero on a clean quantised descent, so half-distribution
 # standard deviation of one lattice step is the minimum meaningful scale.
 _ALTITUDE_QUANTUM_M = 25.0 * 0.3048
-_ALTITUDE_ROBUST_SIGMA_FLOOR_M = _ALTITUDE_QUANTUM_M / math.sqrt(12.0)
-_ROBUST_SIGMA_FACTOR = 1.482602218505602
+_ALTITUDE_RESIDUAL_SCALE_FLOOR_M = _ALTITUDE_QUANTUM_M / math.sqrt(12.0)
+_MAD_SCALE_FACTOR = 1.482602218505602
 # A fixed 3.03-scale gross-outlier cut. It is deliberately generous: ordinary
 # quantisation scatter remains, while isolated kilometre-scale corruptions do not.
 _ROBUST_RESIDUAL_Z_MAX = math.sqrt(9.21034037197618)
 _MAX_ROBUST_SEED_SAMPLES = 64
 
-# Empirical 95% lateral model margin used by the event producer.  Here it has a
-# second, policy-free role: the closest-to-threshold 500 m seed must be much less
-# curved than this, and earlier samples may join the straight final only while their
-# robust residual remains within three such scales.  The clean five-airport control
+# Empirical lateral residual floor. The closest-to-threshold 500 m seed must be much
+# less curved than this, and earlier samples may join the straight final only while
+# their robust residual remains within three such scales. The clean five-airport control
 # maxes out at 3.62 m; 10.5 m deliberately leaves generous room for ADS-B position
 # noise without allowing a base-to-final turn hundreds of metres wide to define the
 # threshold intercept.
-LATERAL_FIT_MODEL_FLOOR_95_M = 10.5
+_LATERAL_RESIDUAL_FLOOR_M = 10.5
 
 
 @dataclass(frozen=True)
 class LineFit:
-    """One ordinary-least-squares line ``y = intercept + slope * x``, fitted over a
-    window of x and reported AT x = 0 (the threshold).
-
-    ``sigma_at_zero`` is the standard error of the fitted MEAN response at x = 0 --
-    a confidence interval on where the aircraft's true smooth path crossed, which is
-    the question being asked. It is deliberately not a prediction interval: that would
-    add the per-sample scatter ``s``, i.e. the 25 ft quantisation noise of a
-    hypothetical extra measurement, which is not part of where the aircraft was.
-    """
+    """An OLS line ``y = intercept + slope * x`` evaluated at the threshold."""
 
     intercept: float
     slope: float
     rms_residual_m: float
     max_abs_residual_m: float
-    rho: float
-    n_effective: float
-    sigma_at_zero: float
 
 
 @dataclass(frozen=True)
@@ -167,11 +136,6 @@ class SegmentFit:
         return math.degrees(math.atan(-self.height.slope))
 
     @property
-    def extrapolation_m(self) -> float:
-        """How far past the last usable sample the crossing was extrapolated."""
-        return abs(self.nearest_sample_along_m)
-
-    @property
     def approaching(self) -> bool:
         """True when the track moved TOWARD this threshold across the window.
 
@@ -185,11 +149,7 @@ class SegmentFit:
 
 
 def _fit_line(xs: Sequence[float], ys: Sequence[float]) -> LineFit:
-    """OLS with an autocorrelation-corrected standard error at x = 0.
-
-    Requires at least 3 points (residual variance needs n - 2 degrees of freedom)
-    and non-identical xs; ``fit_final_segment`` validates both at its boundary.
-    """
+    """Fit one OLS line and retain only diagnostics serialized by the producer."""
     n = len(xs)
     x_bar = sum(xs) / n
     y_bar = sum(ys) / n
@@ -200,24 +160,12 @@ def _fit_line(xs: Sequence[float], ys: Sequence[float]) -> LineFit:
 
     residuals = [y - (intercept + slope * x) for x, y in zip(xs, ys)]
     sse = sum(r * r for r in residuals)
-    s = math.sqrt(sse / (n - 2))
-
-    # Lag-1 residual autocorrelation -> effective sample size. Both variance terms are
-    # deflated: Sxx is a sum over the same correlated samples as the 1/n term.
-    rho = sum(residuals[i] * residuals[i + 1] for i in range(n - 1)) / sse if sse > 0 else 0.0
-    rho = min(max(rho, _RHO_CLAMP[0]), _RHO_CLAMP[1])
-    n_eff = max(n * (1.0 - rho) / (1.0 + rho), _MIN_EFFECTIVE_SAMPLES)
-    s_xx_eff = s_xx * (n_eff / n)
-    sigma = s * math.sqrt(1.0 / n_eff + (x_bar * x_bar) / s_xx_eff)
 
     return LineFit(
         intercept=intercept,
         slope=slope,
         rms_residual_m=math.sqrt(sse / n),
         max_abs_residual_m=max(abs(r) for r in residuals),
-        rho=rho,
-        n_effective=n_eff,
-        sigma_at_zero=sigma,
     )
 
 
@@ -262,44 +210,6 @@ def _final_inbound_run(
         suffix_min_along_m = min(suffix_min_along_m, projected[i].along_m)
     run.reverse()
     return run
-
-
-def _anchored_final_inbound_run(
-    projected: Sequence[Projected],
-    window_m: tuple[float, float],
-    anchor_index: int,
-) -> list[tuple[int, Projected]]:
-    """Fit-window samples from the one inbound pass ending at ``anchor_index``.
-
-    A threshold bracket selects a physical pass even when its first received sample
-    is already inside the fit window's -300 m edge.  In that case an unanchored search
-    would find the last <= -300 m sample on an earlier pass and silently combine its
-    fit with the later bracket.  First walk backward from the bracket-side anchor to
-    the latest real along-track reversal, then run the normal window selection only
-    inside that selected pass.  If that pass has no fittable window, the honest result
-    is an empty run.
-    """
-    if not 0 <= anchor_index < len(projected):
-        raise IndexError(
-            f"pass anchor index {anchor_index} is outside {len(projected)} points"
-        )
-    start = anchor_index
-    suffix_min_along_m = projected[anchor_index].along_m
-    for index in range(anchor_index - 1, -1, -1):
-        if projected[index].along_m > suffix_min_along_m + _INBOUND_TOLERANCE_M:
-            break
-        start = index
-        suffix_min_along_m = min(
-            suffix_min_along_m,
-            projected[index].along_m,
-        )
-    return [
-        (start + index, point)
-        for index, point in _final_inbound_run(
-            projected[start : anchor_index + 1],
-            window_m,
-        )
-    ]
 
 
 def _robust_line_residuals(
@@ -355,15 +265,15 @@ def _straight_final_suffix(
         seed_xs,
         seed_crosses,
     )
-    seed_scale = _ROBUST_SIGMA_FACTOR * statistics.median(
+    seed_scale = _MAD_SCALE_FACTOR * statistics.median(
         abs(value) for value in residuals
     )
-    if seed_scale > LATERAL_FIT_MODEL_FLOOR_95_M:
+    if seed_scale > _LATERAL_RESIDUAL_FLOOR_M:
         return []
 
     residual_limit = _ROBUST_RESIDUAL_Z_MAX * max(
         seed_scale,
-        LATERAL_FIT_MODEL_FLOOR_95_M,
+        _LATERAL_RESIDUAL_FLOOR_M,
     )
     start = seed_start
     for index in range(seed_start - 1, -1, -1):
@@ -412,18 +322,18 @@ def _robust_seed_indices(sample_count: int) -> list[int]:
 
 
 def _line_inliers(
-    xs: Sequence[float], values: Sequence[float], *, sigma_floor_m: float
+    xs: Sequence[float], values: Sequence[float], *, scale_floor_m: float
 ) -> tuple[list[int], list[int]]:
     """Select samples consistent with one line using a bounded robust seed."""
     _intercept, _slope, residuals = _robust_line_residuals(xs, values)
-    sigma = max(
-        _ROBUST_SIGMA_FACTOR * statistics.median(abs(value) for value in residuals),
-        sigma_floor_m,
+    scale_m = max(
+        _MAD_SCALE_FACTOR * statistics.median(abs(value) for value in residuals),
+        scale_floor_m,
     )
     kept = [
         index
         for index, residual in enumerate(residuals)
-        if abs(residual) <= _ROBUST_RESIDUAL_Z_MAX * sigma
+        if abs(residual) <= _ROBUST_RESIDUAL_Z_MAX * scale_m
     ]
     kept_set = set(kept)
     rejected = [index for index in range(len(xs)) if index not in kept_set]
@@ -445,7 +355,7 @@ def _height_inliers(
     return _line_inliers(
         xs,
         heights,
-        sigma_floor_m=_ALTITUDE_ROBUST_SIGMA_FLOOR_M,
+        scale_floor_m=_ALTITUDE_RESIDUAL_SCALE_FLOOR_M,
     )
 
 
@@ -456,7 +366,6 @@ def fit_final_segment(
     window_m: tuple[float, float] = DEFAULT_WINDOW_M,
     min_samples: int = DEFAULT_MIN_SAMPLES,
     min_span_m: float = DEFAULT_MIN_SPAN_M,
-    pass_anchor_index: int | None = None,
 ) -> SegmentFit | None:
     """Fit ``points``' established segment against ``frame``, or None if it cannot be.
 
@@ -478,15 +387,7 @@ def fit_final_segment(
     if min_span_m <= 0.0:
         raise ValueError("min_span_m must be > 0 (a zero-span segment cannot pin a slope)")
     projected = frame.project_all(points)
-    indexed = (
-        _final_inbound_run(projected, window_m)
-        if pass_anchor_index is None
-        else _anchored_final_inbound_run(
-            projected,
-            window_m,
-            pass_anchor_index,
-        )
-    )
+    indexed = _final_inbound_run(projected, window_m)
     indexed = _straight_final_suffix(
         indexed,
         min_samples=min_samples,
@@ -508,7 +409,7 @@ def fit_final_segment(
     cross_kept, _cross_rejected = _line_inliers(
         source_alongs,
         [point.cross_m for point in source_projected],
-        sigma_floor_m=LATERAL_FIT_MODEL_FLOOR_95_M,
+        scale_floor_m=_LATERAL_RESIDUAL_FLOOR_M,
     )
     kept = sorted(set(height_kept) & set(cross_kept))
     kept_set = set(kept)

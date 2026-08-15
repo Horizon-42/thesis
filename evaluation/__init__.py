@@ -5,7 +5,6 @@ from evaluation.arrival import (
     ArrivalOutcome,
     Subject,
     arrival_deviation,
-    final_state_deviation,
     subject_of,
 )
 from evaluation.context import assessment_for_runway, contexts_for_airport, resolve_context
@@ -48,7 +47,6 @@ __all__ = [
     "contexts_for_airport",
     "evaluate_batch",
     "evaluate_record",
-    "final_state_deviation",
     "horizontal_arc_length_m",
     "load_record",
     "load_records",

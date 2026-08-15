@@ -35,9 +35,10 @@ Optimized and predicted trajectories do not use this ADS-B fitter. Evaluation re
 their terminal state or their final 3D threshold bracket, as documented in
 [`evaluation/FINAL_APPROACH_VERDICT_STANDARD.md`](../evaluation/FINAL_APPROACH_VERDICT_STANDARD.md).
 
-## 2. Root defects
+## 2. Root defects addressed by the former v7 design
 
-The maintained producer now addresses six independent faults.
+The former v7 producer addressed six independent faults. The current v1 resolver keeps
+the still-relevant pass-selection and robustness fixes but does not execute v7.
 
 ### 2.1 A plane crossing was mistaken for a landing crossing
 
@@ -105,7 +106,7 @@ These faults explain the previously extreme fitted lateral intercepts and some
 unavailable outcomes. They are pass-selection and source-robustness faults, not
 evidence that those aircraft crossed the selected runway hundreds of metres away.
 
-## 3. Current algorithm
+## 3. Former v7 algorithm (archive only)
 
 ### 3.1 Airport-level landing screen
 
@@ -204,9 +205,10 @@ serialized in fit diagnostics. Bounding only the seed prevents quadratic runtime
 dense aggregated receiver rows; the residual check and final OLS still use every
 eligible row.
 
-Lag-1 residual autocorrelation continues to reduce the effective sample count used by
-the intercept uncertainty. Window sensitivity is also serialized. Evaluation treats
-these as diagnostics and does not move or shrink the aviation gate.
+V7 also computed a lag-1 autocorrelation-adjusted intercept uncertainty and serialized
+window sensitivity. The current v1 implementation deliberately does neither: numeric
+uncertainty was never calibrated for verdict use, so it remains explicitly
+`uncalibrated`.
 
 ## 4. Why direct 3D interpolation was rejected
 

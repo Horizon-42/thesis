@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 
 from evaluation.records import TrajectoryRecord
 from evaluation.thresholds import AssessmentContext
@@ -82,14 +82,3 @@ def resolve_context(
     except KeyError as exc:
         raise ValueError(f"no assessment context for {key[0]} runway {key[1]}") from exc
     return context
-
-
-def used_contexts(
-    records: Iterable[TrajectoryRecord],
-    contexts: Mapping[ContextKey, AssessmentContext],
-) -> list[AssessmentContext]:
-    unique: dict[ContextKey, AssessmentContext] = {}
-    for record in records:
-        context = resolve_context(record, contexts)
-        unique[(context.airport, context.runway)] = context
-    return [unique[key] for key in sorted(unique)]

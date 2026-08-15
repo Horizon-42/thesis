@@ -15,7 +15,7 @@ export interface SignedSpread {
 
 export type EvaluationSubject = "optimized" | "predicted" | "observed";
 export type EvaluationVerdict = "pass" | "fail" | "indeterminate";
-export type EvaluationComponentResult = EvaluationVerdict | "not_applicable";
+export type EvaluationComponentResult = EvaluationVerdict;
 
 export interface EvaluationBounds {
   guidance_lateral_m: number | null;

@@ -4,29 +4,23 @@ from __future__ import annotations
 
 import pytest
 
-from evaluation import AssessmentContext, record_from_dict
-from evaluation.tests.test_evaluation import payload
+from evaluation import record_from_dict
+from evaluation.tests.factories import assessment_context, trajectory_payload
 from evaluation.visualize import _sample_evenly, build_payload, render_html
 
 
 def contexts():
-    context = AssessmentContext(
-        benchmark="rnp_apch_lnav_vnav_baro", airport="KRDU", runway="05L",
-        runway_course_deg=0.0, runway_width_m=45.72,
-        runway_source="faa_nasr_apt_rwy", runway_source_cycle="2026-08-06",
-        procedure_source="faa_terminal_procedure", procedure_source_cycle="2026-08-06",
-        threshold_elevation_hae_m=130.0,
-        threshold_elevation_msl_m=100.0,
-        threshold_crossing_height_m=30.0,
-        baro_vnav_approved=True,
-    )
-    return {("KRDU", "05L"): context}
+    return {
+        ("KRDU", "05L"): assessment_context(
+            benchmark="rnp_apch_lnav_vnav_baro"
+        )
+    }
 
 
 def records_with_repeated_callsign():
     records = []
     for index in range(2):
-        value = payload()
+        value = trajectory_payload()
         value["source"]["flight_key"] = f"TEST1_05L_abc12{index}_20260812T000000Z"
         records.append(record_from_dict(value))
     return records
@@ -47,7 +41,7 @@ def test_non_positive_overlay_caps_are_rejected():
 
 
 def test_rendered_payload_is_strict_json_and_escapes_script_close():
-    value = payload()
+    value = trajectory_payload()
     value["source"]["id"] = "</script><img src=x>"
     result = build_payload([record_from_dict(value)], contexts=contexts())
     page = render_html(result, title="Test", source_label="batch")
