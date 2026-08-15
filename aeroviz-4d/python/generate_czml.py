@@ -47,10 +47,11 @@ TRAIL_COLORS = [
     (138,  43, 226, 200),   # blue violet
 ]
 
-# An inferred threshold crossing is not another verdict: it must remain identifiable when
-# the frontend repaints the measured path white (comparison reference), green, red, or grey
-# (observed evaluation). A translucent ice-blue volume is therefore attached to the SAME
-# entity instead of making another flight entity or borrowing the verdict colour.
+# An inferred threshold crossing is not another measured path: it must remain identifiable
+# when the frontend repaints the measured path white (comparison reference), green, red, or
+# grey (observed evaluation). A translucent ice-blue volume is therefore attached to the SAME
+# entity. The observed frontend may tint that independent material with the entity's verdict,
+# while its volume geometry still preserves the measured-vs-inferred distinction.
 EXTRAPOLATED_COLOR = (105, 205, 255, 105)
 EXTRAPOLATED_OUTLINE_COLOR = (175, 230, 255, 190)
 _EXTRAPOLATED_RADIUS_M = 3.0
@@ -296,6 +297,11 @@ def build_orientation_property(
         "epoch": epoch_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "unitQuaternion": flat,
         "interpolationAlgorithm": "LINEAR",
+        # The shared document clock normally extends beyond an individual flight's
+        # final sample. Its position already HOLDs there; the orientation must do the
+        # same or Cesium loses the quaternion and the parked model snaps to a default
+        # ECEF attitude that no longer follows the final track segment.
+        "forwardExtrapolationType": "HOLD",
     }
 
 
@@ -305,11 +311,10 @@ def build_extrapolated_tail_property(
 ) -> dict[str, Any] | None:
     """A translucent 3-D overlay for the fitted, non-measured approach extension.
 
-    ``polylineVolume`` is deliberate. The observed-verdict hook recolours an entity's
-    ``path`` and ``polyline`` to green/red/grey; using either for the extension would erase
-    the measured-vs-inferred distinction exactly when evaluation colouring is enabled.
-    Keeping the overlay on the original entity also avoids a synthetic second "flight" in
-    the loader, table, sampling, and comparison reference lookup.
+    ``polylineVolume`` is deliberate. It lets the observed-verdict hook tint this extension
+    independently of the measured ``path`` while the distinct volume geometry continues to
+    mark it as inferred. Keeping the overlay on the original entity also avoids a synthetic
+    second "flight" in the loader, table, sampling, and comparison reference lookup.
     """
     if len(waypoints) < 2:
         return None

@@ -34,6 +34,25 @@ export const OBSERVED_VERDICT_COLORS: Record<ObservedVerdict, string> = {
   undecided: "rgb(150, 150, 155)",
 };
 
+/**
+ * Fitted threshold extensions remain visibly distinct from measured paths by retaining
+ * 35% of their generated ice-blue hue and mixing in 65% of the terminal verdict hue.
+ * These are applied only at render time to the entity's independent `polylineVolume`;
+ * generated CZML and its canonical ice-blue material remain unchanged.
+ */
+export const OBSERVED_FITTED_TAIL_COLORS: Record<ObservedVerdict, string> = {
+  pass: "rgba(76, 202, 148, 0.58)",
+  fail: "rgba(186, 117, 135, 0.58)",
+  undecided: "rgba(134, 169, 190, 0.58)",
+};
+
+/** Higher-contrast versions of the same mix for the fitted volume's outline. */
+export const OBSERVED_FITTED_TAIL_OUTLINE_COLORS: Record<ObservedVerdict, string> = {
+  pass: "rgba(100, 211, 148, 0.9)",
+  fail: "rgba(211, 126, 135, 0.9)",
+  undecided: "rgba(159, 178, 190, 0.9)",
+};
+
 /** Short human-readable label, used by the legend and the tooltip. */
 export const OBSERVED_VERDICT_LABELS: Record<ObservedVerdict, string> = {
   pass: "Terminal verdict: pass",

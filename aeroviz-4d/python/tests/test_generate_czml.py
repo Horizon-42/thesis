@@ -216,6 +216,7 @@ class TestBuildOrientationProperty:
         assert "epoch" in prop
         assert "unitQuaternion" in prop
         assert prop["interpolationAlgorithm"] == "LINEAR"
+        assert prop["forwardExtrapolationType"] == "HOLD"
 
     def test_flat_array_length(self):
         wps = [(0, -114.0, 50.0, 3000), (60, -114.0, 51.0, 3000)]

@@ -5,6 +5,7 @@ const {
   appState,
   entities,
   fetchJsonMock,
+  ConstantProperty,
   ColorMaterialProperty,
 } = vi.hoisted(() => {
   class ConstantProperty {
@@ -26,11 +27,16 @@ const {
   const entities: Array<{
     id: string;
     path: { material: InstanceType<typeof ColorMaterialProperty> };
+    polylineVolume: {
+      material: InstanceType<typeof ColorMaterialProperty>;
+      outlineColor: InstanceType<typeof ConstantProperty>;
+    };
   }> = [];
 
   return {
     entities,
     fetchJsonMock: vi.fn(),
+    ConstantProperty,
     ColorMaterialProperty,
     appState: {
       viewer: {},
@@ -76,10 +82,18 @@ describe("useObservedVerdictColors", () => {
       {
         id: "MATCHED_05L_abc123_20260701T000000Z",
         path: { material: new ColorMaterialProperty("original") },
+        polylineVolume: {
+          material: new ColorMaterialProperty("ice-blue"),
+          outlineColor: new ConstantProperty("ice-blue-outline"),
+        },
       },
       {
         id: "NO_TCH_32_def456_20260701T010000Z",
         path: { material: new ColorMaterialProperty("original") },
+        polylineVolume: {
+          material: new ColorMaterialProperty("ice-blue"),
+          outlineColor: new ConstantProperty("ice-blue-outline"),
+        },
       },
     );
     fetchJsonMock.mockReset();
@@ -154,6 +168,15 @@ describe("useObservedVerdictColors", () => {
     expect(entities[1].path.material.color.getValue()).toBe(
       OBSERVED_VERDICT_COLORS.undecided,
     );
+    expect(entities[0].polylineVolume.material.color.getValue()).toBe(
+      "rgba(76, 202, 148, 0.58)",
+    );
+    expect(entities[0].polylineVolume.outlineColor.getValue()).toBe(
+      "rgba(100, 211, 148, 0.9)",
+    );
+    expect(entities[1].polylineVolume.material.color.getValue()).toBe(
+      "rgba(134, 169, 190, 0.58)",
+    );
     expect(result.current.counts).toEqual({
       pass: 1,
       fail: 0,
@@ -175,5 +198,7 @@ describe("useObservedVerdictColors", () => {
     expect(fetchJsonMock).toHaveBeenCalledTimes(1);
     expect(entities[0].path.material.color.getValue()).toBe("original");
     expect(entities[1].path.material.color.getValue()).toBe("original");
+    expect(entities[0].polylineVolume.material.color.getValue()).toBe("ice-blue");
+    expect(entities[1].polylineVolume.material.color.getValue()).toBe("ice-blue");
   });
 });

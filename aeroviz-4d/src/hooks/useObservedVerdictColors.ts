@@ -33,6 +33,8 @@ import { isEvaluationReport } from "../data/evaluationReport";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import {
+  OBSERVED_FITTED_TAIL_COLORS,
+  OBSERVED_FITTED_TAIL_OUTLINE_COLORS,
   OBSERVED_VERDICT_COLORS,
   countVerdicts,
   verdictsByFlightKey,
@@ -158,5 +160,15 @@ function paintEntity(entity: Cesium.Entity, verdict: ObservedVerdict): void {
   }
   if (entity.polyline) {
     entity.polyline.material = new Cesium.ColorMaterialProperty(color);
+  }
+  if (entity.polylineVolume) {
+    const fittedColor = Cesium.Color.fromCssColorString(
+      OBSERVED_FITTED_TAIL_COLORS[verdict],
+    );
+    const fittedOutlineColor = Cesium.Color.fromCssColorString(
+      OBSERVED_FITTED_TAIL_OUTLINE_COLORS[verdict],
+    );
+    entity.polylineVolume.material = new Cesium.ColorMaterialProperty(fittedColor);
+    entity.polylineVolume.outlineColor = new Cesium.ConstantProperty(fittedOutlineColor);
   }
 }
