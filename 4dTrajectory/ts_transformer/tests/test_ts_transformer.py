@@ -131,13 +131,14 @@ from fixed_dt_supervision import (  # noqa: E402
 )
 from fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_arc_length_geometry_metrics,
+    fixed_anchor_common_grid_ade_metrics,
     fixed_anchor_common_grid_metrics,
     fixed_anchor_common_weights_and_terminal_velocity,
 )
 from forecast import Forecast, forecast_approach  # noqa: E402
 from metrics import (  # noqa: E402
-    RAW_KINEMATIC_METRIC_KEYS, error_components, raw_kinematic_metrics,
-    trajectory_metrics,
+    RAW_KINEMATIC_METRIC_KEYS, common_physical_time_flight_metrics,
+    raw_kinematic_metrics, states_with_derived_velocity,
 )
 from models import build_model, parameter_count  # noqa: E402
 from prediction_outputs import (  # noqa: E402
@@ -155,7 +156,7 @@ from train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
     evaluate_fit_splits,
     load_checkpoint, masked_mse, position_velocity_consistency_loss,
-    prediction_loss, train,
+    prediction_loss, state_prediction_loss_components, train,
 )
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -896,27 +897,195 @@ def test_prediction_loss_adds_scaled_final_time_error():
 
 def test_prediction_loss_applies_per_flight_airport_weights():
     config = TSConfig(
+        n_segments=2,
+        validation_common_grid_points=2,
         final_time_loss_weight=0.0,
+        state_endpoint_loss_weight=0.0,
         kinematic_consistency_loss_weight=0.0,
         terminal_loss_weight=0.0,
     )
-    target = torch.zeros((2, 1, len(ch.CHANNELS)))
+    target = torch.zeros((2, 2, len(ch.CHANNELS)))
     prediction = StatePrediction(
         states=torch.stack((torch.ones_like(target[0]), 3.0 * torch.ones_like(target[0]))),
-        final_time_s=torch.zeros(2),
+        final_time_s=torch.full((2,), 10.0),
     )
     loss = prediction_loss(
         prediction,
         torch.zeros((2, len(ch.CHANNELS))),
         target,
         torch.ones_like(target),
-        torch.zeros(2),
+        torch.full((2,), 10.0),
         torch.tensor([1.5, 0.5]),
         config,
         _identity_normalizer(),
     )
 
-    assert float(loss) == pytest.approx((1.0 * 1.5 + 9.0 * 0.5) / 2.0)
+    expected_physical_position_mse = (3.0 * 1.5 + 27.0 * 0.5) / 2.0
+    assert float(loss) == pytest.approx(expected_physical_position_mse / 10_000.0**2)
+
+
+def test_default_checkpoint_selection_is_common_true_time_ade():
+    assert TSConfig().checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE
+
+
+def test_state_loss_is_isotropic_physical_position_plus_time_only():
+    normalizer = Normalizer(
+        mean=np.zeros(len(ch.CHANNELS)),
+        std=np.array([100.0, 200.0, 10.0, 2.0, 3.0, 4.0]),
+    )
+    config = TSConfig(
+        n_segments=2,
+        validation_common_grid_points=2,
+        final_time_loss_weight=1.0,
+        state_endpoint_loss_weight=0.0,
+        kinematic_consistency_loss_weight=99.0,
+        terminal_loss_weight=99.0,
+    )
+    target = torch.zeros((1, 2, len(ch.CHANNELS)))
+    predicted = target.clone()
+    predicted[..., ch.IDX["e"]] = 1.0       # 100 m
+    predicted[..., ch.IDX["u"]] = 10.0      # 100 m despite a different std
+    predicted[..., list(ch.VELOCITY_IDX)] = 999.0
+    components = state_prediction_loss_components(
+        StatePrediction(states=predicted, final_time_s=torch.tensor([600.0])),
+        torch.zeros((1, len(ch.CHANNELS))),
+        target,
+        torch.ones_like(target),
+        torch.tensor([600.0]),
+        torch.ones(1),
+        config,
+        normalizer,
+    )
+
+    assert float(components.state) == pytest.approx(
+        (100.0**2 + 100.0**2) / 10_000.0**2
+    )
+    assert float(components.final_time) == pytest.approx(0.0)
+    assert float(components.kinematic) == pytest.approx(0.0)
+    assert float(components.terminal) == pytest.approx(0.0)
+
+
+def test_state_position_loss_uses_true_time_not_equal_progress():
+    config = TSConfig(
+        n_segments=2,
+        validation_common_grid_points=2,
+        final_time_loss_weight=0.0,
+    )
+    target = torch.zeros((1, 2, len(ch.CHANNELS)))
+    target[0, :, ch.IDX["e"]] = torch.tensor([50.0, 100.0])
+    prediction = StatePrediction(
+        states=target.clone(),
+        final_time_s=torch.tensor([5.0]),
+    )
+    components = state_prediction_loss_components(
+        prediction,
+        torch.zeros((1, len(ch.CHANNELS))),
+        target,
+        torch.ones_like(target),
+        torch.tensor([10.0]),
+        torch.ones(1),
+        config,
+        _identity_normalizer(),
+    )
+
+    # At true t=5 s, the short prediction has already reached its 100 m endpoint while
+    # truth is at 50 m.  Equal-progress loss would incorrectly be zero.
+    assert float(components.state) == pytest.approx(
+        (50.0**2 / 2.0) / 10_000.0**2
+    )
+
+
+def test_common_physical_time_metric_penalizes_an_early_ending_prediction():
+    anchor = np.zeros(len(ch.CHANNELS))
+    truth = np.zeros((2, len(ch.CHANNELS)))
+    truth[:, ch.IDX["e"]] = [50.0, 100.0]
+    predicted = np.zeros((1, len(ch.CHANNELS)))
+    predicted[0, ch.IDX["e"]] = 50.0
+
+    block = common_physical_time_flight_metrics(
+        anchor_values=anchor,
+        predicted_values=predicted,
+        predicted_offsets_s=np.array([5.0]),
+        predicted_final_time_s=5.0,
+        truth_values=truth,
+        truth_offsets_s=np.array([5.0, 10.0]),
+        true_final_time_s=10.0,
+        points=2,
+    )
+
+    # The old overlap-only metric saw only the exact 5 s point and returned zero.  The
+    # common grid holds the predicted endpoint through the true 10 s horizon.
+    assert block["ade_m"] == pytest.approx(25.0)
+    assert block["fde_m"] == pytest.approx(50.0)
+    assert block["final_time_error_s"] == pytest.approx(-5.0)
+    assert block["coverage_ratio"] == pytest.approx(0.5)
+
+
+def test_common_physical_time_metric_uses_the_truth_path_frame():
+    anchor = np.zeros(len(ch.CHANNELS))
+    truth = np.zeros((2, len(ch.CHANNELS)))
+    truth[:, ch.IDX["e"]] = [100.0, 200.0]
+    predicted = truth.copy()
+    predicted[:, ch.IDX["n"]] = 50.0
+
+    block = common_physical_time_flight_metrics(
+        anchor_values=anchor,
+        predicted_values=predicted,
+        predicted_offsets_s=np.array([1.0, 2.0]),
+        predicted_final_time_s=2.0,
+        truth_values=truth,
+        truth_offsets_s=np.array([1.0, 2.0]),
+        true_final_time_s=2.0,
+        points=2,
+    )
+
+    assert block["along_track_m"]["mean_abs"] == pytest.approx(0.0, abs=1e-9)
+    assert block["cross_track_m"]["mean_signed"] == pytest.approx(50.0)
+    assert block["vertical_m"]["mean_abs"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_common_physical_time_metric_rejects_nonfinite_or_nonmonotonic_paths():
+    anchor = np.zeros(len(ch.CHANNELS))
+    path = np.zeros((2, len(ch.CHANNELS)))
+    arguments = dict(
+        anchor_values=anchor,
+        predicted_values=path,
+        predicted_final_time_s=2.0,
+        truth_values=path,
+        truth_offsets_s=np.array([1.0, 2.0]),
+        true_final_time_s=2.0,
+        points=2,
+    )
+    with pytest.raises(ValueError, match="strictly increasing"):
+        common_physical_time_flight_metrics(
+            **arguments, predicted_offsets_s=np.array([1.0, 1.0])
+        )
+    bad = path.copy()
+    bad[0, ch.IDX["u"]] = np.nan
+    with pytest.raises(ValueError, match="must be finite"):
+        common_physical_time_flight_metrics(
+            **{**arguments, "predicted_values": bad},
+            predicted_offsets_s=np.array([1.0, 2.0]),
+        )
+
+
+def test_state_velocity_is_derived_from_the_same_piecewise_linear_position_curve():
+    anchor = np.zeros(len(ch.CHANNELS))
+    predicted = np.zeros((2, len(ch.CHANNELS)))
+    predicted[:, ch.IDX["e"]] = [10.0, 40.0]
+    predicted[:, ch.IDX["n"]] = [0.0, 8.0]
+    predicted[:, list(ch.VELOCITY_IDX)] = 999.0
+
+    derived = states_with_derived_velocity(
+        anchor, predicted, np.array([2.0, 4.0])
+    )
+
+    assert derived[:, ch.IDX["edot"]].tolist() == pytest.approx([5.0, 7.5])
+    assert derived[:, ch.IDX["ndot"]].tolist() == pytest.approx([0.0, 2.0])
+    assert derived[:, ch.IDX["udot"]].tolist() == pytest.approx([0.0, 0.0])
+    assert derived[:, list(ch.POSITION_IDX)] == pytest.approx(
+        predicted[:, list(ch.POSITION_IDX)]
+    )
 
 
 def test_position_velocity_consistency_loss_is_zero_for_integrated_motion():
@@ -1007,11 +1176,13 @@ def test_full_kinematic_loss_uses_dt_and_short_final_segment():
     assert loss.tolist() == pytest.approx([0.0], abs=1e-12)
 
 
-def test_prediction_loss_adds_explicit_terminal_position_error():
+def test_state_loss_has_one_explicit_physical_output_endpoint_task():
     config = TSConfig(
         final_time_loss_weight=0.0,
+        state_endpoint_loss_weight=1.0,
         kinematic_consistency_loss_weight=0.0,
-        terminal_loss_weight=3.0,
+        terminal_loss_weight=99.0,
+        validation_common_grid_points=2,
     )
     target = torch.zeros((1, 2, len(ch.CHANNELS)))
     predicted = target.clone()
@@ -1021,31 +1192,31 @@ def test_prediction_loss_adds_explicit_terminal_position_error():
         StatePrediction(states=predicted, final_time_s=torch.tensor([2.0])),
         torch.zeros((1, len(ch.CHANNELS))),
         target,
-        torch.zeros_like(target),
+        torch.ones_like(target),
         torch.tensor([2.0]),
         torch.ones(1),
         config,
         _identity_normalizer(),
     )
 
-    assert float(loss) == pytest.approx(1.0)
+    assert float(loss) == pytest.approx((1.0 / 2.0 + 1.0) / 10_000.0**2)
 
 
-def test_full_terminal_loss_uses_last_unpadded_target():
+def test_full_position_and_endpoint_loss_ignore_the_padded_suffix():
     config = TSConfig(
         horizon_mode=HORIZON_FULL,
         full_horizon_steps=3,
         final_time_loss_weight=0.0,
+        state_endpoint_loss_weight=1.0,
         kinematic_consistency_loss_weight=0.0,
-        terminal_loss_weight=3.0,
+        terminal_loss_weight=99.0,
     )
     target = torch.zeros((1, 3, len(ch.CHANNELS)))
     predicted = target.clone()
     predicted[0, 1, ch.IDX["e"]] = 1.0
     predicted[0, 2, ch.IDX["e"]] = 1000.0
     weights = torch.zeros_like(target)
-    # Keep the rows identifiable as valid without also charging the e error to state MSE;
-    # this isolates the explicit terminal component in the total loss.
+    # The first two rows are valid. The 1000 m padded suffix must not enter the loss.
     weights[0, :2, ch.IDX["n"]] = 1.0
 
     loss = prediction_loss(
@@ -1059,7 +1230,32 @@ def test_full_terminal_loss_uses_last_unpadded_target():
         _identity_normalizer(),
     )
 
-    assert float(loss) == pytest.approx(1.0)
+    # Row 1 is the last supervised output endpoint, so it contributes once to the path
+    # average and once to the explicit endpoint task. Row 2 is padding and contributes 0.
+    assert float(loss) == pytest.approx((1.0 / 2.0 + 1.0) / 10_000.0**2)
+
+
+def test_state_endpoint_rejects_noncontiguous_position_supervision():
+    config = TSConfig(
+        horizon_mode=HORIZON_FULL,
+        full_horizon_steps=3,
+        final_time_loss_weight=0.0,
+    )
+    target = torch.zeros((1, 3, len(ch.CHANNELS)))
+    weights = torch.zeros_like(target)
+    weights[0, (0, 2), ch.IDX["e"]] = 1.0
+
+    with pytest.raises(ValueError, match="contiguous prefix"):
+        prediction_loss(
+            StatePrediction(states=target.clone(), final_time_s=torch.tensor([3.0])),
+            torch.zeros((1, len(ch.CHANNELS))),
+            target,
+            weights,
+            torch.tensor([3.0]),
+            torch.ones(1),
+            config,
+            _identity_normalizer(),
+        )
 
 
 def test_split_by_flight_is_disjoint_and_reproducible():
@@ -3986,6 +4182,34 @@ def test_terminal_state_common_grid_metrics_use_fixed_dt_terminal_velocity_targe
     )
 
 
+def test_formal_common_grid_selector_returns_only_lean_position_time_metrics():
+    series, config = _series(n_flights=1, seq_len=8, n_segments=2)
+    item = series[0]
+    anchor = config.seq_len - 1
+    duration = float(item.supervision_times[-1] - item.times[anchor])
+    offsets = np.array([duration / 2.0, duration])
+    query_times = item.times[anchor] + offsets
+    predicted = np.column_stack([
+        np.interp(query_times, item.supervision_times, item.supervision_values[:, channel])
+        for channel in range(len(ch.CHANNELS))
+    ])[None, ...]
+
+    metrics = fixed_anchor_common_grid_ade_metrics(
+        series,
+        config,
+        item.values[anchor][None, :],
+        predicted,
+        np.array([duration]),
+        np.diff(np.concatenate(([0.0], offsets)))[None, :],
+        points=2,
+    )
+
+    assert metrics["ade_m"] == pytest.approx(0.0, abs=1e-7)
+    assert metrics["fde_m"] == pytest.approx(0.0, abs=1e-7)
+    assert "dense_state_loss" not in metrics
+    assert not any(key.startswith("arc_length_") for key in metrics)
+
+
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
 @pytest.mark.parametrize("integrator_dt_s", [2.0, 0.3])
 def test_fixed_dt_control_loss_forms_one_differentiable_training_step(
@@ -4241,13 +4465,18 @@ def test_default_config_uses_selected_normalized_output_and_physics_losses():
     assert config.patience == 20
     assert config.lr_plateau_patience == 3
     assert config.lr_plateau_factor == 0.5
+    assert config.state_endpoint_loss_weight == 0.25
     assert config.kinematic_consistency_loss_weight == 3.0
     assert config.terminal_loss_weight == 0.02
 
 
 @pytest.mark.parametrize(
     "field",
-    ["kinematic_consistency_loss_weight", "terminal_loss_weight"],
+    [
+        "state_endpoint_loss_weight",
+        "kinematic_consistency_loss_weight",
+        "terminal_loss_weight",
+    ],
 )
 def test_negative_physics_loss_weights_are_rejected(field):
     with pytest.raises(ValueError, match=field):
@@ -4795,13 +5024,6 @@ def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkey
         )
 
     monkeypatch.setattr(cv, "fit_model", fake_fit)
-    monkeypatch.setattr(
-        cv, "evaluate_split",
-        lambda *_args, **_kwargs: {
-            "ade_m": 1.0,
-            "raw_kinematics": {key: 1.0 for key in RAW_KINEMATIC_METRIC_KEYS},
-        },
-    )
     provenance = {
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
         "manifests": [{
@@ -4827,9 +5049,7 @@ def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkey
     assert result["leakage_guard"]["outer_test_used"] is False
     assert result["schema_version"] == cv.RESULTS_SCHEMA
     assert result["selection_metric"] == (
-        "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
-        "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
-        "terminal-position MSE"
+        "mean outer-train-fold airport-macro fixed-anchor common physical-time ADE"
     )
     assert (tmp_path / "best_config.json").is_file()
 
@@ -4856,15 +5076,6 @@ def test_cross_validation_resumes_from_atomic_candidate_checkpoint(
             "source_records": [],
         }],
     }
-    monkeypatch.setattr(
-        cv,
-        "evaluate_split",
-        lambda *_args, **_kwargs: {
-            "ade_m": 1.0,
-            "raw_kinematics": {key: 1.0 for key in RAW_KINEMATIC_METRIC_KEYS},
-        },
-    )
-
     first_run_calls = 0
 
     def interrupted_fit(train_series, _val_series, fold_config, **_kwargs):
@@ -4988,14 +5199,6 @@ def test_cross_validation_rejects_candidate_checkpoint_from_another_contract(
         )
 
     monkeypatch.setattr(cv, "fit_model", fake_fit)
-    monkeypatch.setattr(
-        cv,
-        "evaluate_split",
-        lambda *_args, **_kwargs: {
-            "ade_m": 1.0,
-            "raw_kinematics": {key: 1.0 for key in RAW_KINEMATIC_METRIC_KEYS},
-        },
-    )
     cv.cross_validate(
         series,
         config,
@@ -5067,7 +5270,8 @@ def test_cross_validation_runs_real_two_fold_search(tmp_path):
     assert len(result["candidates"]) == 2
     assert all(len(candidate["folds"]) == 2 for candidate in result["candidates"])
     assert all(
-        "raw_kinematics" in fold["validation_metrics"]
+        "validation_selection_by_airport" in fold
+        and "validation_metrics" not in fold
         for candidate in result["candidates"]
         for fold in candidate["folds"]
     )
@@ -5080,12 +5284,12 @@ def test_cross_validation_exhausts_the_default_three_parameter_grid():
     config = TSConfig(n_segments=128)
     candidates = cv._candidate_overrides(config)
 
-    assert len(candidates) == 27
+    assert len(candidates) == 45
     assert {
         (candidate["n_segments"], candidate["learning_rate"], candidate["d_model"])
         for candidate in candidates
     } == set(itertools.product(
-        (64, 128, 256),
+        (16, 32, 64, 128, 256),
         (1e-4, 3e-4, 5e-4),
         (64, 128, 256),
     ))
@@ -5110,27 +5314,6 @@ def test_fixed_horizon_cv_does_not_repeat_inert_n_segment_candidates(horizon_mod
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
 
-def test_error_decomposes_into_along_and_cross_track_in_the_truth_frame():
-    # Truth heading due east; predicted position offset 100 m north of it. That is a pure
-    # CROSS-track error — the aircraft is on schedule but off the path. If the two came out
-    # swapped, a lateral containment failure would read as a harmless timing error.
-    truth = np.zeros((1, 1, len(ch.CHANNELS)))
-    truth[0, 0, ch.IDX["edot"]] = 100.0
-    predicted = truth.copy()
-    predicted[0, 0, ch.IDX["n"]] = 100.0
-    mask = np.ones((1, 1))
-
-    components = error_components(predicted, truth, mask)
-    assert components["along"][0] == pytest.approx(0.0, abs=1e-9)
-    assert components["cross"][0] == pytest.approx(100.0)   # + = left of the true course
-
-    # ...and an offset straight ahead is pure along-track.
-    ahead = truth.copy()
-    ahead[0, 0, ch.IDX["e"]] = 100.0
-    components = error_components(ahead, truth, mask)
-    assert components["along"][0] == pytest.approx(100.0)
-    assert components["cross"][0] == pytest.approx(0.0, abs=1e-9)
-
 
 def test_spread_matches_the_gate_side_signed_spread():
     # metrics._spread is the VECTORISED twin of evaluation/stats.signed_spread (that one
@@ -5145,19 +5328,6 @@ def test_spread_matches_the_gate_side_signed_spread():
     assert set(ours) == set(theirs)
     for key in ours:
         assert ours[key] == pytest.approx(theirs[key])
-
-
-def test_fde_reads_each_sample_own_last_valid_step():
-    # Two samples with different valid lengths. FDE must use each one's real endpoint, not
-    # a fixed column — otherwise a padded short approach reports the error of its padding.
-    truth = np.zeros((2, 3, len(ch.CHANNELS)))
-    predicted = np.zeros((2, 3, len(ch.CHANNELS)))
-    predicted[0, 1, ch.IDX["e"]] = 10.0   # sample 0 ends at step 1
-    predicted[1, 2, ch.IDX["e"]] = 20.0   # sample 1 ends at step 2
-    mask = np.array([[1.0, 1.0, 0.0], [1.0, 1.0, 1.0]])
-
-    block = trajectory_metrics(predicted, truth, mask)
-    assert block["fde_m"] == pytest.approx((10.0 + 20.0) / 2)
 
 
 def test_raw_kinematic_metrics_use_nonuniform_segment_durations():
@@ -5411,6 +5581,35 @@ def test_normalized_state_export_preserves_a_tiny_relative_clock():
     assert metrics["raw_kinematics"]["predicted"]["segments"] == config.pred_len
     assert np.all(np.diff(exported_times) > 0.0)
     assert parsed.final_time_s == pytest.approx(tiny_final_time_s, rel=1e-6)
+
+
+def test_post_training_accuracy_does_not_drop_the_tail_after_early_completion():
+    series, config = _series(n_flights=1)
+    item = series[0]
+    anchor = config.seq_len - 1
+    duration = float(item.times[anchor + 1] - item.times[anchor])
+    forecast = Forecast(
+        times=np.array([item.times[anchor + 1]]),
+        values=item.values[anchor + 1 : anchor + 2].copy(),
+        normalized_progress=np.array([1.0]),
+        anchor=anchor,
+        final_time_s=duration,
+        predicted_final_time_s=duration,
+        horizon_mode=HORIZON_NORMALIZED,
+        passes=1,
+        truncated_at_threshold=False,
+        horizon_capped=False,
+        sample_durations_s=np.array([duration]),
+        segment_durations_s=np.array([duration]),
+    )
+
+    metrics = observed_series_metrics(item, forecast, points=8)
+
+    assert metrics["n_steps"] == 8
+    assert metrics["coverage_ratio"] < 0.1
+    assert metrics["ade_m"] > 0.0
+    assert metrics["fde_m"] > metrics["ade_m"]
+    assert metrics["final_time_error_s"] < 0.0
 
 
 def test_control_forecast_exports_optimizer_shaped_states_and_aligned_controls():
@@ -5686,7 +5885,9 @@ def test_batch_writes_a_manifest_that_evaluation_can_load_and_grade(tmp_path):
                                                model_name=config.model,
                                                horizon_mode=config.horizon_mode))
         overlap.append(observed_series_metrics(s, forecast))
-    write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
+    write_batch(
+        records, output_dir=tmp_path, config_dict=config.to_dict(), flight_metrics=overlap
+    )
 
     # load_records is manifest-ONLY (no glob fallback), so this also proves summary.json
     # carries a results[] roster with resolvable eval_file entries.
@@ -5720,7 +5921,7 @@ def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
         records,
         output_dir=tmp_path,
         config_dict=config.to_dict(),
-        overlap=overlap,
+        flight_metrics=overlap,
         split="val",
     )
 
@@ -5740,37 +5941,37 @@ def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
     # without re-running the forecast.
     for row, metrics in zip(summary["results"], overlap):
         assert row["ade_m"] == pytest.approx(metrics["ade_m"])
-        assert row["overlap_steps"] == metrics["n_steps"]
+        assert row["metric_steps"] == metrics["n_steps"]
+        assert row["arrival_endpoint_error_m"] == pytest.approx(
+            metrics["arrival_endpoint_error_m"]
+        )
         assert row["final_time_error_s"] == pytest.approx(metrics["final_time_error_s"])
         assert row["raw_kinematics"] == metrics["raw_kinematics"]
 
 
-def test_accuracy_block_excludes_and_counts_flights_with_no_overlap():
-    # A forecast that shares no samples with its observed track carries NaN errors. Averaging
-    # those in would poison the batch mean; silently dropping them would overstate coverage.
+def test_accuracy_block_rejects_missing_or_nonfinite_flight_metrics():
     raw = {
         "predicted": {key: 2.0 for key in RAW_KINEMATIC_METRIC_KEYS},
         "observed_baseline": {key: 1.0 for key in RAW_KINEMATIC_METRIC_KEYS},
     }
-    overlap = [{"ade_m": 100.0, "fde_m": 200.0, "cross_track_p95_m": 50.0,
+    overlap = [{"ade_m": 100.0, "fde_m": 200.0,
+                "arrival_endpoint_error_m": 175.0, "cross_track_p95_m": 50.0,
                 "altitude_p95_m": 10.0, "n_steps": 30,
                 "true_final_time_s": 300.0, "final_time_error_s": 20.0,
                 "raw_kinematics": raw},
-               {"ade_m": float("nan"), "fde_m": float("nan"), "cross_track_p95_m": float("nan"),
+               {"ade_m": float("nan"), "fde_m": float("nan"),
+                "arrival_endpoint_error_m": float("nan"),
+                "cross_track_p95_m": float("nan"),
                 "altitude_p95_m": float("nan"), "n_steps": 0,
                 "true_final_time_s": 400.0, "final_time_error_s": -10.0,
                 "raw_kinematics": raw}]
-    block = accuracy_block(overlap)
-    assert block["flights"] == 1 and block["flights_without_overlap"] == 1
-    assert block["ade_m"]["mean"] == pytest.approx(100.0)
-    assert block["ade_m"]["median"] == pytest.approx(100.0)
-    assert block["final_time_s"]["mae"] == pytest.approx(15.0)
-    raw_summary = block["raw_kinematics"]
-    assert raw_summary["predicted"][RAW_KINEMATIC_METRIC_KEYS[0]]["median"] == 2.0
-    assert raw_summary["delta"][RAW_KINEMATIC_METRIC_KEYS[0]] == 1.0
-
-    empty = accuracy_block([overlap[1]])
-    assert empty["flights"] == 0 and "ade_m" not in empty
+    with pytest.raises(ValueError, match="finite common-time metrics"):
+        accuracy_block(overlap)
+    with pytest.raises(ValueError, match="finite common-time metrics"):
+        accuracy_block([overlap[1]])
+    bad_time = dict(overlap[0], final_time_error_s=float("inf"))
+    with pytest.raises(ValueError, match="finite final-time error"):
+        accuracy_block([bad_time])
 
 
 def test_accuracy_block_emits_empty_raw_metric_stats_when_all_values_are_nan():
@@ -5781,6 +5982,7 @@ def test_accuracy_block_emits_empty_raw_metric_stats_when_all_values_are_nan():
     row = {
         "ade_m": 1.0,
         "fde_m": 2.0,
+        "arrival_endpoint_error_m": 2.5,
         "cross_track_p95_m": 1.0,
         "altitude_p95_m": 1.0,
         "n_steps": 1,
@@ -5814,7 +6016,9 @@ def test_write_batch_rejects_overlap_that_does_not_line_up_with_the_records(tmp_
         for index, s in enumerate(series)
     ]
     with pytest.raises(ValueError, match="once per record"):
-        write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=[])
+        write_batch(
+            records, output_dir=tmp_path, config_dict=config.to_dict(), flight_metrics=[]
+        )
 
 
 def test_write_batch_rejects_non_finite_values_in_referenced_state_payload(tmp_path):
@@ -5834,7 +6038,7 @@ def test_write_batch_rejects_non_finite_values_in_referenced_state_payload(tmp_p
     with pytest.raises(ValueError, match="Out of range float values"):
         write_batch(
             [record], output_dir=tmp_path,
-            config_dict=config.to_dict(), overlap=overlap,
+            config_dict=config.to_dict(), flight_metrics=overlap,
         )
 
 
@@ -5856,7 +6060,7 @@ def test_write_batch_serializes_unavailable_raw_metrics_as_json_null(tmp_path):
 
     write_batch(
         [record], output_dir=tmp_path,
-        config_dict=config.to_dict(), overlap=overlap,
+        config_dict=config.to_dict(), flight_metrics=overlap,
     )
 
     summary_text = (Path(tmp_path) / "summary.json").read_text(encoding="utf-8")
@@ -5888,7 +6092,12 @@ def test_stale_records_are_cleared_before_a_rerun(tmp_path):
                                                    model_name=config.model,
                                                    horizon_mode=config.horizon_mode))
             overlap.append(observed_series_metrics(s, forecast))
-        write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
+        write_batch(
+            records,
+            output_dir=tmp_path,
+            config_dict=config.to_dict(),
+            flight_metrics=overlap,
+        )
 
     batch(3)
     batch(1)   # a shrinking flight set must not leave orphans behind
@@ -5901,8 +6110,8 @@ def test_stale_records_are_cleared_before_a_rerun(tmp_path):
 @pytest.mark.parametrize(
     ("horizon_mode", "contract", "expected_passes"),
     (
-        (HORIZON_FULL, "full-horizon-fixed-time-displacement-kinematic-v2", 1),
-        (HORIZON_WINDOW, "recursive-window-fixed-time-displacement-kinematic-v2", 3),
+        (HORIZON_FULL, "full-horizon-physical-position-duration-v1", 1),
+        (HORIZON_WINDOW, "recursive-window-physical-position-duration-v1", 3),
     ),
 )
 def test_fixed_time_modes_train_checkpoint_and_forecast(
@@ -5982,11 +6191,13 @@ def test_fit_evaluation_is_fixed_anchor_eval_mode_and_repeatable():
         "anchor": "fixed L-1",
         "batch_order": "sequential (shuffle disabled)",
         "splits": ["train", "val"],
-        "metric_grid": "native target grid; measured-data mask",
+        "metric_grid": (
+            "Q=64 common true physical time; prediction endpoint held after early completion"
+        ),
     }
     assert first["splits"]["train"]["flights"] == len(train_series)
     assert first["splits"]["val"]["flights"] == len(val_series)
-    assert first["diagnostics"]["native_generalization"]["ade_m"]["ratio"] > 0.0
+    assert first["diagnostics"]["generalization"]["ade_m"]["ratio"] > 0.0
 
 
 def test_evaluate_fit_cli_runs_train_and_validation_together(tmp_path, monkeypatch):
@@ -6109,7 +6320,8 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         config,
         output_dir=tmp_path / "run",
         data_provenance=provenance,
-        verbose=False,
+        # Exercise the persisted metric block's human-readable publication seam too.
+        verbose=True,
     )
     assert summary["epochs_run"] == 2
     assert set(summary["metrics"]) == {"train", "val"}
@@ -6129,7 +6341,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
     model, loaded_config, normalizer, payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert loaded_config == config          # the config survives the round-trip verbatim
     assert payload["target_contract"] == (
-        "normalized-time-runway-crossing-displacement-kinematic-v3"
+        "normalized-output-true-time-physical-position-duration-v1"
     )
     assert payload[evaluation_protocol.TEST_RELEASE_PROTOCOL_FIELD] == (
         evaluation_protocol.TEST_RELEASE_SCHEMA
@@ -6154,7 +6366,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
             "training_cohort_min_future_s": 0.0,
             "training_cohort_excluded_flights": 0,
             "random_train_anchor_min_future_s": 60.0,
-            "checkpoint_selection_metric": "fixed-anchor-objective",
+            "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
             "validation_common_grid_points": 64,
         "horizon_mode": HORIZON_NORMALIZED,
         "prediction_output": "state",
@@ -6192,7 +6404,12 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
                                                horizon_mode=loaded_config.horizon_mode))
         overlap.append(observed_series_metrics(s, forecast))
     out = tmp_path / "pred"
-    write_batch(records, output_dir=out, config_dict=loaded_config.to_dict(), overlap=overlap)
+    write_batch(
+        records,
+        output_dir=out,
+        config_dict=loaded_config.to_dict(),
+        flight_metrics=overlap,
+    )
 
     report = evaluate_batch(load_records(out), contexts=_terminal_contexts())
     assert report["total"] == 4

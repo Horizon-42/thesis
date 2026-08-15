@@ -499,16 +499,21 @@ def test_prediction_accuracy_stats_publishes_existing_ade_and_fde():
             "final_time_s": {"mae": 58.1, "p95_abs": 120.0, "mean_signed": -4.0},
             "ade_m": {"median": 1400.0, "mean": 1755.6, "p95": 4656.2, "max": 9012.0},
             "fde_m": {"median": 1600.0, "mean": 2082.4, "p95": 6002.1, "max": 10024.0},
+            "arrival_endpoint_error_m": {
+                "median": 900.0, "mean": 1200.0, "p95": 3500.0, "max": 7000.0
+            },
             "cross_track_p95_m": {"mean": 700.0, "p95": 1800.0},
             "altitude_p95_m": {"mean": 90.0, "p95": 210.0},
         },
     }
     assert prediction_accuracy_stats(summary) == {
         "flights": 152,
-        "flightsWithoutOverlap": 0,
         "finalTimeS": {"mae": 58.1, "p95Abs": 120.0, "meanSigned": -4.0},
         "adeM": {"median": 1400.0, "mean": 1755.6, "p95": 4656.2, "max": 9012.0},
         "fdeM": {"median": 1600.0, "mean": 2082.4, "p95": 6002.1, "max": 10024.0},
+        "arrivalEndpointErrorM": {
+            "median": 900.0, "mean": 1200.0, "p95": 3500.0, "max": 7000.0
+        },
         "crossTrackP95M": {"mean": 700.0, "p95": 1800.0},
         "altitudeP95M": {"mean": 90.0, "p95": 210.0},
         "rawKinematics": {"predicted": None, "observedBaseline": None, "delta": None},
@@ -516,13 +521,13 @@ def test_prediction_accuracy_stats_publishes_existing_ade_and_fde():
     assert prediction_accuracy_stats({"mode": "runway", "total": 4}) is None
     assert prediction_accuracy_stats({
         "mode": "tsTransformer:itransformer:full:test",
-        "accuracy": {"flights": 0, "flights_without_overlap": 3},
+        "accuracy": {"flights": 0},
     }) == {
         "flights": 0,
-        "flightsWithoutOverlap": 3,
         "finalTimeS": None,
         "adeM": None,
         "fdeM": None,
+        "arrivalEndpointErrorM": None,
         "crossTrackP95M": None,
         "altitudeP95M": None,
         "rawKinematics": {"predicted": None, "observedBaseline": None, "delta": None},
@@ -606,10 +611,10 @@ def test_prediction_batch_commits_accuracy_to_comparison_index(monkeypatch, tmp_
 
     assert index["prediction"] == {
         "flights": 1,
-        "flightsWithoutOverlap": 0,
         "finalTimeS": None,
         "adeM": {"mean": 125.0, "p95": 125.0},
         "fdeM": {"mean": 240.0, "p95": 240.0},
+        "arrivalEndpointErrorM": None,
         "crossTrackP95M": None,
         "altitudeP95M": None,
         "rawKinematics": {"predicted": None, "observedBaseline": None, "delta": None},

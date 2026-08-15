@@ -320,10 +320,10 @@ export interface PredictionRawKinematics {
 /** ADE/FDE summary published from a ts_transformer's `summary.json.accuracy` block. */
 export interface PredictionAccuracyStats {
   flights?: number | null;
-  flightsWithoutOverlap?: number | null;
   finalTimeS?: PredictionFinalTimeStats | null;
   adeM?: PredictionErrorSpread | null;
   fdeM?: PredictionErrorSpread | null;
+  arrivalEndpointErrorM?: PredictionErrorSpread | null;
   crossTrackP95M?: PredictionErrorSpread | null;
   altitudeP95M?: PredictionErrorSpread | null;
   rawKinematics?: PredictionRawKinematics | null;

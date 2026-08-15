@@ -239,9 +239,9 @@ describe("EvaluationSummary", () => {
       ...INDEX,
       prediction: {
         flights: 10,
-        flightsWithoutOverlap: 0,
         adeM: { mean: 1755.6, p95: 4656.2 },
         fdeM: { mean: 2082.4, p95: 6002.1 },
+        arrivalEndpointErrorM: { mean: 1255.9, p95: 3976.8 },
       },
     } satisfies ComparisonIndex);
     render(<EvaluationSummary />);
@@ -254,6 +254,8 @@ describe("EvaluationSummary", () => {
     expect(within(metric("95th-percentile ADE")).getByText("4656 m")).toBeTruthy();
     expect(within(metric("Mean FDE")).getByText("2082 m")).toBeTruthy();
     expect(within(metric("95th-percentile FDE")).getByText("6002 m")).toBeTruthy();
+    expect(within(metric("Mean arrival endpoint error")).getByText("1256 m"))
+      .toBeTruthy();
     expect(screen.queryByText("Solve rate")).toBeNull();
   });
 
@@ -265,10 +267,10 @@ describe("EvaluationSummary", () => {
       datasetSplit: "val",
       prediction: {
         flights: 10,
-        flightsWithoutOverlap: 1,
         finalTimeS: { mae: 58.1, p95Abs: 120.2, meanSigned: -4.3 },
         adeM: { median: 1200, mean: 1755.6, p95: 4656.2, max: 9012 },
         fdeM: { median: 1500, mean: 2082.4, p95: 6002.1, max: 10024 },
+        arrivalEndpointErrorM: { median: 900, mean: 1200, p95: 3500, max: 7000 },
         crossTrackP95M: { mean: 700, p95: 1800 },
         altitudeP95M: { mean: 90, p95: 210 },
         rawKinematics: {

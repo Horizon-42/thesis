@@ -245,10 +245,19 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="position-only weight for fitted ADS-B tail rows (default: 0.25)")
     parser.add_argument("--fitted-terminal-weight", type=float, default=None,
                         help="additional position-only weight at the fitted crossing (default: 1.0)")
+    parser.add_argument(
+        "--state-endpoint-loss-weight",
+        type=float,
+        default=None,
+        help=(
+            "direct-state output-endpoint position task weight; shares the path-loss "
+            "physical scale (default: 0.25)"
+        ),
+    )
     parser.add_argument("--kinematic-consistency-weight", type=float, default=None,
-                        help="position/velocity consistency loss weight (default: 3.0)")
+                        help="control/oracle compatibility weight; direct state ignores it")
     parser.add_argument("--terminal-loss-weight", type=float, default=None,
-                        help="explicit final-position loss weight (default: 0.02)")
+                        help="control/oracle compatibility weight; direct state ignores it")
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument("--control-dense-state-weight", type=float, default=None)
@@ -510,6 +519,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("patience", args.patience),
         ("fitted_tail_position_weight", args.fitted_tail_weight),
         ("fitted_terminal_position_weight", args.fitted_terminal_weight),
+        ("state_endpoint_loss_weight", args.state_endpoint_loss_weight),
         ("kinematic_consistency_loss_weight", args.kinematic_consistency_weight),
         ("terminal_loss_weight", args.terminal_loss_weight),
         ("control_effort_loss_weight", args.control_effort_weight),
@@ -830,7 +840,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"FDE {metrics['fde_m']:7.1f} m   "
                 f"time MAE {metrics['final_time_s']['mae']:5.1f} s"
             )
-        gap = document["diagnostics"]["native_generalization"]
+        gap = document["diagnostics"]["generalization"]
         print(
             "  gap    "
             f"ADE {gap['ade_m']['absolute_gap']:+.1f} m "
@@ -1026,7 +1036,7 @@ def main(argv: list[str] | None = None) -> int:
     series, _build_report = _build_series_or_exit(args, config, parser, flights)
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
-    records, overlap = [], []
+    records, flight_metrics = [], []
     for index, s in enumerate(series):
         forecast = forecast_approach(
             model, s, config, normalizer, device=device, truncate=not args.no_truncate
@@ -1039,10 +1049,20 @@ def main(argv: list[str] | None = None) -> int:
             horizon_mode=config.horizon_mode,
             split=args.split,
         ))
-        overlap.append(observed_series_metrics(s, forecast))
+        flight_metrics.append(observed_series_metrics(
+            s,
+            forecast,
+            points=config.validation_common_grid_points,
+        ))
 
-    paths = write_batch(records, output_dir=args.output_dir, config_dict=config.to_dict(),
-                        overlap=overlap, checkpoint=str(args.checkpoint), split=args.split)
+    paths = write_batch(
+        records,
+        output_dir=args.output_dir,
+        config_dict=config.to_dict(),
+        flight_metrics=flight_metrics,
+        checkpoint=str(args.checkpoint),
+        split=args.split,
+    )
 
     capped = sum(record.source.get("horizonCapped", False) for record in records)
     if capped:
@@ -1053,7 +1073,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Printed from the block that was just persisted, so the terminal and summary.json
     # cannot report different numbers for the same run.
-    accuracy = accuracy_block(overlap)
+    accuracy = accuracy_block(flight_metrics)
     if accuracy["flights"]:
         ade, fde = accuracy["ade_m"], accuracy["fde_m"]
         print(f"  vs observed track: ADE {ade['mean']:.1f} m (p95 {ade['p95']:.1f})   "

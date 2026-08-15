@@ -55,7 +55,8 @@ from channels import states_from_channels  # noqa: E402
 from dataset import FlightSeries, flight_key  # noqa: E402
 from forecast import Forecast  # noqa: E402
 from metrics import (  # noqa: E402
-    RAW_KINEMATIC_METRIC_KEYS, raw_kinematic_metrics, trajectory_metrics,
+    RAW_KINEMATIC_METRIC_KEYS, common_physical_time_flight_metrics,
+    raw_kinematic_metrics,
 )
 
 # The filename stem IS the flight identity — flight_scenarios.identity.flight_key, the
@@ -264,18 +265,20 @@ def _json_optional_metrics(value: Any) -> Any:
     return value
 
 
-def accuracy_block(overlap: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Roll per-flight overlap errors up into the batch's headline accuracy numbers.
-
-    Flights whose forecast and observed track do not overlap at all (``n_steps == 0``) carry
-    NaN errors and are excluded from the statistics AND counted, rather than being quietly
-    averaged in as zero.
+def accuracy_block(flight_metrics: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Roll strict per-flight common-physical-time metrics into batch summaries.
 
     Median, mean, p95 and max are reported because raw derivatives have a deliberately
     unbounded physical scale: one catastrophically short predicted duration can dominate
     the mean while the fleet p95 still describes the tail experienced by a typical batch.
     """
-    time_errors = np.array([m["final_time_error_s"] for m in overlap], dtype=np.float64)
+    if not flight_metrics:
+        return {"flights": 0}
+    time_errors = np.array(
+        [m["final_time_error_s"] for m in flight_metrics], dtype=np.float64
+    )
+    if not np.isfinite(time_errors).all():
+        raise ValueError("every prediction must have a finite final-time error")
     time_block = {
         "mae": float(np.abs(time_errors).mean()),
         "p95_abs": float(np.percentile(np.abs(time_errors), 95)),
@@ -286,7 +289,8 @@ def accuracy_block(overlap: Sequence[dict[str, Any]]) -> dict[str, Any]:
         result = {}
         for key in RAW_KINEMATIC_METRIC_KEYS:
             values = np.array(
-                [row["raw_kinematics"][role][key] for row in overlap], dtype=np.float64
+                [row["raw_kinematics"][role][key] for row in flight_metrics],
+                dtype=np.float64,
             )
             values = values[np.isfinite(values)]
             if not len(values):
@@ -320,15 +324,16 @@ def accuracy_block(overlap: Sequence[dict[str, Any]]) -> dict[str, Any]:
             for key in RAW_KINEMATIC_METRIC_KEYS
         },
     }
-    finite = [m for m in overlap if m["n_steps"]]
-    if not finite:
-        return {
-            "flights": 0,
-            "flights_without_overlap": len(overlap),
-            "final_time_s": time_block,
-            "raw_kinematics": raw_block,
-        }
-
+    finite = [
+        row for row in flight_metrics
+        if row.get("n_steps", 0) > 0
+        and all(
+            np.isfinite(row[key])
+            for key in ("ade_m", "fde_m", "arrival_endpoint_error_m")
+        )
+    ]
+    if len(finite) != len(flight_metrics):
+        raise ValueError("every prediction must have finite common-time metrics")
     def stats(key: str) -> dict[str, float]:
         values = np.array([m[key] for m in finite], dtype=np.float64)
         return {"median": float(np.median(values)),
@@ -337,10 +342,10 @@ def accuracy_block(overlap: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "flights": len(finite),
-        "flights_without_overlap": len(overlap) - len(finite),
         "final_time_s": time_block,
         "ade_m": stats("ade_m"),
         "fde_m": stats("fde_m"),
+        "arrival_endpoint_error_m": stats("arrival_endpoint_error_m"),
         "cross_track_p95_m": stats("cross_track_p95_m"),
         "altitude_p95_m": stats("altitude_p95_m"),
         "raw_kinematics": raw_block,
@@ -352,20 +357,20 @@ def write_batch(
     *,
     output_dir: str | Path,
     config_dict: dict[str, Any],
-    overlap: Sequence[dict[str, float]],
+    flight_metrics: Sequence[dict[str, float]],
     checkpoint: str | None = None,
     split: str = "test",
 ) -> list[Path]:
     """Write every record plus the ``summary.json`` manifest. Returns the eval-file paths.
 
-    ``overlap`` is ``observed_series_metrics`` per record, positionally aligned. It is
+    ``flight_metrics`` is ``observed_series_metrics`` per record, positionally aligned. It is
     required, not optional: a prediction batch's error against the observed track is its
     headline result, and leaving it to the caller to print made it live in terminal
     scrollback only — invisible to any comparison across batches.
     """
-    if len(overlap) != len(records):
+    if len(flight_metrics) != len(records):
         raise ValueError(
-            f"overlap has {len(overlap)} entries for {len(records)} records — "
+            f"flight_metrics has {len(flight_metrics)} entries for {len(records)} records — "
             "observed_series_metrics must be collected once per record, in order"
         )
     out = Path(output_dir)
@@ -375,7 +380,7 @@ def write_batch(
 
     written: list[Path] = []
     rows: list[dict[str, Any]] = []
-    for record, metrics in zip(records, overlap):
+    for record, metrics in zip(records, flight_metrics):
         states_path = out / f"{record.stem}{_STATES_SUFFIX}"
         eval_path = out / f"{record.stem}{_EVAL_SUFFIX}"
         reference_path = out / REFERENCES_DIR / f"{record.stem}{_REFERENCE_EVAL_SUFFIX}"
@@ -419,8 +424,8 @@ def write_batch(
             reason=None,
         )
         # ts_transformer additions beyond the optimizer's row. The optimizer has no
-        # equivalent of ade/fde — it solves toward a target rather than reproducing a track,
-        # so these are graded against the flight's OWN observed samples over the overlap.
+        # equivalent of ADE/FDE because it solves toward a target rather than reproducing
+        # a track. These metrics use the full true horizon on the fixed common-time grid.
         row.update({
             "predictor": source.get("predictor"),
             "prediction_output": source.get("predictionOutput"),
@@ -433,12 +438,15 @@ def write_batch(
             "split": split,
             "ade_m": _json_optional_metrics(metrics["ade_m"]),
             "fde_m": _json_optional_metrics(metrics["fde_m"]),
-            "overlap_steps": metrics["n_steps"],
+            "arrival_endpoint_error_m": _json_optional_metrics(
+                metrics["arrival_endpoint_error_m"]
+            ),
+            "metric_steps": metrics["n_steps"],
             "raw_kinematics": _json_optional_metrics(metrics["raw_kinematics"]),
         })
         rows.append(row)
 
-    accuracy = accuracy_block(overlap)
+    accuracy = accuracy_block(flight_metrics)
     accuracy["raw_kinematics"] = _json_optional_metrics(accuracy["raw_kinematics"])
     summary = {
         "scenarios": None,
@@ -463,22 +471,15 @@ def write_batch(
     return written
 
 
-def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[str, Any]:
-    """Error of one predicted approach against its own observed track, metres.
-
-    The forecast carries explicit physical timestamps reconstructed from its checkpoint's
-    normalized or fixed-horizon clock. Observations are interpolated at those timestamps over
-    their overlap.
-    """
-    valid = forecast.times <= series.times[-1]
-    n = int(valid.sum())
-    true_final_time_s = float(
-        series.supervision_times[-1] - series.times[forecast.anchor]
-    )
-    time_metrics = {
-        "true_final_time_s": true_final_time_s,
-        "final_time_error_s": forecast.final_time_s - true_final_time_s,
-    }
+def observed_series_metrics(
+    series: FlightSeries,
+    forecast: Forecast,
+    *,
+    points: int = 64,
+) -> dict[str, Any]:
+    """Whole-trajectory accuracy on one fixed true-physical-time grid."""
+    anchor_time = float(series.times[forecast.anchor])
+    true_final_time_s = float(series.supervision_times[-1] - anchor_time)
     anchor_values = series.values[forecast.anchor][None, ...]
     predicted_durations = forecast.sample_durations_s[None, ...]
     observed_values = series.values[forecast.anchor + 1 :]
@@ -491,30 +492,27 @@ def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[st
             anchor_values, observed_values[None, ...], observed_durations
         ),
     }
-    if n == 0:
-        return {
-            "ade_m": float("nan"),
-            "fde_m": float("nan"),
-            "n_steps": 0,
-            "raw_kinematics": raw_metrics,
-            **time_metrics,
-        }
-
-    query_times = forecast.times[valid]
-    observed = np.column_stack([
-        np.interp(query_times, series.times, series.values[:, channel])
-        for channel in range(series.values.shape[1])
-    ])
-    predicted = forecast.values[valid][None, ...]
-    truth = observed[None, ...]
-    mask = np.ones((1, n), dtype=np.float64)
-    block = trajectory_metrics(predicted, truth, mask)
+    future = series.supervision_times > anchor_time
+    block = common_physical_time_flight_metrics(
+        anchor_values=anchor_values[0],
+        predicted_values=forecast.values,
+        predicted_offsets_s=np.cumsum(forecast.sample_durations_s),
+        predicted_final_time_s=forecast.predicted_final_time_s,
+        truth_values=series.supervision_values[future],
+        truth_offsets_s=series.supervision_times[future] - anchor_time,
+        true_final_time_s=true_final_time_s,
+        points=points,
+    )
     return {
         "ade_m": block["ade_m"],
         "fde_m": block["fde_m"],
+        "arrival_endpoint_error_m": block["arrival_endpoint_error_m"],
+        "horizontal_ade_m": block["horizontal_ade_m"],
         "cross_track_p95_m": block["cross_track_m"]["p95_abs"],
-        "altitude_p95_m": block["altitude_m"]["p95_abs"],
-        "n_steps": n,
+        "altitude_p95_m": block["vertical_m"]["p95_abs"],
+        "n_steps": block["n_steps"],
+        "coverage_ratio": block["coverage_ratio"],
         "raw_kinematics": raw_metrics,
-        **time_metrics,
+        "true_final_time_s": block["true_final_time_s"],
+        "final_time_error_s": block["final_time_error_s"],
     }

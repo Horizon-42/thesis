@@ -226,19 +226,14 @@ function predictionPresentation(
       : "Data-Driven Model Evaluation",
     context: category.label,
     note:
-      "ADE is the mean position error across the predicted trajectory; FDE is the position " +
-      "error at the final predicted sample. Both compare the prediction with the observed " +
-      "track over their overlapping samples. The runway-threshold pass rate grades the " +
+      "ADE is the mean 3D position error on a fixed true-time grid. FDE locates the " +
+      "prediction at the observed arrival time; endpoint error compares the predicted " +
+      "arrival position with the observed endpoint. The runway-threshold pass rate grades the " +
       "prediction's final state against both evaluation gates. Train results are in-sample; " +
       "validation results are the development/model-selection partition. A solver solve rate " +
       "does not apply.",
     rows: [
       row("Trajectories", formatCount(prediction?.flights), prediction?.flights != null),
-      row(
-        "Without temporal overlap",
-        formatCount(prediction?.flightsWithoutOverlap),
-        prediction?.flightsWithoutOverlap != null,
-      ),
       row(
         "Runway-threshold pass rate",
         formatPercent(targetPassRate),
@@ -251,6 +246,7 @@ function predictionPresentation(
       ),
       ...spreadRows("ADE", prediction?.adeM),
       ...spreadRows("FDE", prediction?.fdeM),
+      ...spreadRows("arrival endpoint error", prediction?.arrivalEndpointErrorM),
       ...optionalRow(
         "Final-time error MAE",
         prediction?.finalTimeS?.mae,

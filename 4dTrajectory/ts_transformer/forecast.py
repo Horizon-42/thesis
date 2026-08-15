@@ -21,6 +21,7 @@ from config import (
 )
 from control_prediction_adapters import deployable_control_prediction
 from dataset import FlightSeries, Normalizer, dynamics_arrays
+from metrics import states_with_derived_velocity
 from time_grids import output_time_grid
 from train import control_dense_rollout_channels
 
@@ -172,9 +173,13 @@ def _forecast_from_fixed_states(
     offsets = np.arange(1, len(states) + 1, dtype=np.float64) * config.dt_s
     final_time_s = float(offsets[-1]) if len(offsets) else 0.0
     progress = offsets / final_time_s if final_time_s else np.zeros_like(offsets)
+    durations = np.full(len(offsets), config.dt_s, dtype=np.float64)
+    physical = states_with_derived_velocity(
+        series.values[anchor], normalizer.decode(states), durations
+    )
     return Forecast(
         times=float(series.times[anchor]) + offsets,
-        values=normalizer.decode(states),
+        values=physical,
         normalized_progress=progress,
         anchor=anchor,
         final_time_s=final_time_s,
@@ -183,8 +188,8 @@ def _forecast_from_fixed_states(
         passes=passes,
         truncated_at_threshold=False,
         horizon_capped=False,
-        sample_durations_s=np.full(len(offsets), config.dt_s, dtype=np.float64),
-        segment_durations_s=np.full(len(offsets), config.dt_s, dtype=np.float64),
+        sample_durations_s=durations,
+        segment_durations_s=durations,
         prediction_output=config.prediction_output,
     )
 
@@ -203,9 +208,12 @@ def _forecast_normalized(
     offsets = time_grid.offsets_s
     final_time_s = float(offsets[-1]) if len(offsets) else 0.0
     progress = offsets / final_time_s if final_time_s else np.zeros_like(offsets)
+    physical = states_with_derived_velocity(
+        series.values[anchor], normalizer.decode(states), time_grid.segment_durations_s
+    )
     return Forecast(
         times=float(series.times[anchor]) + offsets,
-        values=normalizer.decode(states),
+        values=physical,
         normalized_progress=progress,
         anchor=anchor,
         final_time_s=final_time_s,
@@ -251,6 +259,13 @@ def _forecast_window(
         states, pass_final_time_s = _forward(model, history, device)
         if not chunks:
             predicted_final_time_s = pass_final_time_s
+        physical_anchor = normalizer.decode(history[-1:])[0]
+        physical_states = states_with_derived_velocity(
+            physical_anchor,
+            normalizer.decode(states),
+            np.full(len(states), config.dt_s, dtype=np.float64),
+        )
+        states = normalizer.encode(physical_states)
         chunks.append(states)
         produced += len(states)
         history = np.concatenate((history, states), axis=0)[-config.seq_len :]

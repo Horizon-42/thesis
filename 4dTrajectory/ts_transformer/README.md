@@ -205,7 +205,7 @@ The split boundary is deliberately nested:
 
 1. lock airport-qualified outer train/validation/test flights;
 2. construct K folds from **outer-train only** and select hyperparameters by mean
-   airport-macro fold loss;
+   airport-macro `Q=64` common-true-time 3D ADE;
 3. fit the selected configuration on outer-train with outer-validation early stopping;
 4. after every analysis and model decision is permanently frozen, explicitly release test once:
 
@@ -461,39 +461,45 @@ The default anchor is fixed at `L-1`, so every flight contributes its earliest f
 forecast once per epoch; flight order is reshuffled between epochs. Pass
 `--random-train-anchor` only when training a rolling predictor that must start from later
 approach phases as well. That mode selects one valid anchor per flight and epoch. Validation
-and exported prediction remain fixed at `L-1`. For control experiments whose deployment
-metric is physical-time accuracy, `--checkpoint-selection-metric
-fixed-anchor-common-grid-ade` also makes LR scheduling and early stopping use deterministic
-fixed-anchor common-grid validation ADE; the native model-clock loss remains a diagnostic.
+and exported prediction remain fixed at `L-1`. The formal default
+`--checkpoint-selection-metric fixed-anchor-common-grid-ade` makes CV, LR scheduling,
+early stopping and checkpoint retention use the same deterministic airport-macro physical-time
+ADE. Alternative selectors are explicit research ablations, not production headline metrics.
 When fixed and random arms must use an identical 60-second-capable training roster, pass
 `--training-cohort-min-future-s 60` to both arms; it never filters validation.
 The frozen train/validation protocol is recorded in
 [`docs/2026-07-30_random_anchor_experiment_plan.zh.md`](docs/2026-07-30_random_anchor_experiment_plan.zh.md).
 
-`N` controls output resolution, not forecast seconds. It is serialized in checkpoints and
-included in the default cross-validation grid (`64, 128, 256`). The objective combines
-normalized state MSE, scaled final-time MSE, position/velocity displacement consistency,
-and an explicit terminal-position term. Displacement consistency is normalized by position
-scale so its gradient does not grow with N. Held-out physics/accuracy ablations selected
-iTransformer `N=64` and PatchTST `N=256`; both use kinematic weight `3.0` and terminal
-weight `0.02`. The full pooled iTransformer CUDA validation curve selected epoch 161;
-training therefore uses a 180-epoch cap with patience 20 and always reloads the best epoch.
-Validation and CV select on the same joint loss. See
-[`docs/normalized_time_and_control_output.zh.md`](docs/normalized_time_and_control_output.zh.md)
-for the exact state and control contracts.
+`N` controls model output resolution, not forecast seconds. It is serialized in checkpoints;
+the default normalized-mode CV grid is now `16, 32, 64, 128, 256`. Every candidate is judged
+on a separate fixed `Q=64` common true-time grid, so changing `N` never changes the exam.
 
-Validation history, CV folds and exported prediction summaries also persist raw-node
+The formal direct-state objective has only three tasks:
+
+```text
+true-time physical 3D path MSE / (10,000 m)^2
++ 0.25 × physical 3D output-endpoint MSE / (10,000 m)^2
++ final-time MSE / (600 s)^2
+```
+
+Future velocity is not an independent label or loss; exported velocity is derived from the
+same predicted position curve and clock. The endpoint target is the flight's actual final
+supervision point, never a hard-coded runway centre or TCH. A frozen 500-train/250-validation
+development study found that the `0.25` endpoint task reduced two-seed mean endpoint error
+from about 1.92 km to 1.33 km while slightly improving mean ADE. Previous checkpoints based
+on normalized six-channel MSE, kinematic weight `3.0`, terminal weight `0.02`, or the old
+`N=64/128/256` grid are historical artifacts and must not be mixed with this contract.
+The mathematical definitions and evidence are in
+[`docs/2026-08-15_comprehensive_metrics_review.zh.md`](docs/2026-08-15_comprehensive_metrics_review.zh.md).
+
+Final fit reports and exported prediction summaries also persist raw-node
 position/velocity RMSE, heading-consistency p95, turn-rate p95, acceleration p95 and jerk
-p95. Prediction batches retain per-flight values plus fleet `median/mean/p95/max`; comparisons
-and the ablation selector use fleet p95 against the observed-track baseline. These metrics
-always consume the model's untouched nodes and explicit segment durations, so they are also
-valid for the non-uniform control rollout. The complete experiment protocol and
-validation/test tables are in
-[`docs/2026-07-27_kinematic_weight_epoch_ablation.zh.md`](docs/2026-07-27_kinematic_weight_epoch_ablation.zh.md).
-
-PatchTST remains enabled as a comparison model, but its selected `N=256` state-head run is
-not physically usable (outer-test flyability 0.0% and raw jerk fleet p95 about 2204 m/s³).
-`N=256` is only its best held-out ADE among the tested grids, not a claim of flyability.
+p95. Prediction batches retain per-flight values plus fleet `median/mean/p95/max`; reports
+compare them with a same-resolution observed-track baseline. These metrics consume untouched
+predicted position nodes and explicit segment durations; direct-state velocity is derived from
+that same curve, while control velocity comes from the rollout. They are quality-assurance diagnostics only: raw
+kinematics, FDE, endpoint error, ETA and runway-threshold pass rate never replace the single
+common-time ADE checkpoint selector.
 
 The validation-only comparison, future-dispersion analysis and deterministic/multi-candidate
 coverage report are generated by `run_ts_predictability_report.py`; the current illustrated

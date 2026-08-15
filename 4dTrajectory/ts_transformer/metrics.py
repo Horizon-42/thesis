@@ -1,27 +1,17 @@
-"""Trajectory error metrics, in metres, on denormalised channel predictions.
+"""Formal true-physical-time trajectory metrics and raw-curve QA.
 
-Two families, because they answer different questions:
-
-**Displacement** — ADE (average displacement error, mean over normalized progress) and FDE (final
-displacement error, at the last valid step). The standard pair in the trajectory-prediction
-literature and what the survey in ``4dTrajectory/docs`` reports for every method.
-
-**Decomposed** — along-track / cross-track / altitude. A 400 m ADE means something very
-different when it is 400 m of "arrived early/late along the same path" than when it is
-400 m of "flew a different path", and only the second threatens the lateral containment
-the evaluation gates check. The decomposition is taken in the frame of the TRUE velocity at
-each step: the along-track unit vector is the truth's own horizontal heading, so
-along-track error is a timing/speed error and cross-track error is a path error.
-
-All inputs are PHYSICAL units (metres, m/s) — decode through the normalizer first. State
-weights can exclude fitted position-only supervision from observed-track headline metrics.
+The accuracy kernel evaluates denormalised predictions on one fixed true-time grid and
+reports 3D ADE/FDE plus horizontal, along-track, cross-track, vertical, endpoint and clock
+errors.  Raw kinematic summaries are a separate quality-assurance family and never select a
+checkpoint.  The former normalized-progress evaluator was removed so production code has one
+accuracy definition rather than two similarly named alternatives.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from channels import IDX, POSITION_IDX
+from channels import IDX, POSITION_IDX, VELOCITY_IDX
 
 # Reported percentiles. p95 mirrors evaluation/stats.magnitude_spread so the ML-side and
 # gate-side summaries can be read against each other.
@@ -37,6 +27,184 @@ RAW_KINEMATIC_METRIC_KEYS = (
     "acceleration_p95_mps2",
     "jerk_p95_mps3",
 )
+
+
+def states_with_derived_velocity(
+    anchor_values: np.ndarray,
+    predicted_values: np.ndarray,
+    segment_durations_s: np.ndarray,
+) -> np.ndarray:
+    """Return physical states whose velocity is the predicted position derivative.
+
+    The direct-state model's future target is position plus duration.  Velocity remains an
+    input feature, but at inference it is derived from consecutive predicted positions so
+    exported state rows cannot carry a second, contradictory trajectory.  Each node uses
+    the left derivative of the piecewise-linear position curve over its preceding segment.
+    """
+    anchor = np.asarray(anchor_values, dtype=np.float64)
+    predicted = np.asarray(predicted_values, dtype=np.float64)
+    durations = np.asarray(segment_durations_s, dtype=np.float64)
+    squeeze = predicted.ndim == 2
+    if squeeze:
+        predicted = predicted[None, ...]
+        anchor = anchor[None, ...] if anchor.ndim == 1 else anchor
+        durations = durations[None, ...] if durations.ndim == 1 else durations
+    if predicted.ndim != 3 or anchor.ndim != 2 or durations.ndim != 2:
+        raise ValueError("derived velocity requires [B,C], [B,N,C], and [B,N]")
+    if predicted.shape[:2] != durations.shape or predicted.shape[0] != anchor.shape[0]:
+        raise ValueError("derived velocity inputs do not share batch and segment axes")
+    if predicted.shape[2] != anchor.shape[1]:
+        raise ValueError("anchor and predicted states use different channel counts")
+    if not (
+        np.isfinite(anchor).all()
+        and np.isfinite(predicted).all()
+        and np.isfinite(durations).all()
+    ):
+        raise ValueError("derived velocity inputs must be finite")
+    if np.any(durations <= 0.0):
+        raise ValueError("derived velocity segment durations must be positive")
+
+    result = predicted.copy()
+    positions = result[..., list(POSITION_IDX)]
+    previous = np.concatenate(
+        (anchor[:, None, list(POSITION_IDX)], positions[:, :-1]), axis=1
+    )
+    result[..., list(VELOCITY_IDX)] = (
+        positions - previous
+    ) / durations[..., None]
+    return result[0] if squeeze else result
+
+
+def _validated_path(
+    offsets_s: np.ndarray,
+    values: np.ndarray,
+    *,
+    label: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    offsets = np.asarray(offsets_s, dtype=np.float64)
+    path = np.asarray(values, dtype=np.float64)
+    if offsets.ndim != 1 or path.ndim != 2 or len(offsets) != len(path):
+        raise ValueError(f"{label} offsets and values must align as [N] and [N,C]")
+    if not len(offsets):
+        raise ValueError(f"{label} path must contain at least one future node")
+    if path.shape[1] <= max(POSITION_IDX):
+        raise ValueError(f"{label} path does not contain three position channels")
+    if not np.isfinite(offsets).all() or not np.isfinite(path).all():
+        raise ValueError(f"{label} path must be finite")
+    if offsets[0] <= 0.0 or np.any(np.diff(offsets) <= 0.0):
+        raise ValueError(f"{label} clock must be finite, positive, and strictly increasing")
+    return offsets, path
+
+
+def _sample_positions(
+    anchor_values: np.ndarray,
+    offsets_s: np.ndarray,
+    values: np.ndarray,
+    query_offsets_s: np.ndarray,
+    *,
+    label: str,
+) -> np.ndarray:
+    offsets, path = _validated_path(offsets_s, values, label=label)
+    anchor = np.asarray(anchor_values, dtype=np.float64)
+    query = np.asarray(query_offsets_s, dtype=np.float64)
+    if anchor.ndim != 1 or anchor.shape[0] != path.shape[1]:
+        raise ValueError(f"{label} anchor must be [C] and match the path")
+    if query.ndim != 1 or not np.isfinite(query).all() or np.any(query < 0.0):
+        raise ValueError("common-grid query offsets must be finite and non-negative")
+    if not np.isfinite(anchor).all():
+        raise ValueError(f"{label} anchor must be finite")
+    node_times = np.concatenate(([0.0], offsets))
+    positions = np.concatenate(
+        (anchor[None, list(POSITION_IDX)], path[:, list(POSITION_IDX)]), axis=0
+    )
+    # np.interp holds the final node to the right.  This is intentional: a prediction
+    # ending early remains accountable over the complete true flight horizon.
+    return np.column_stack([
+        np.interp(query, node_times, positions[:, axis]) for axis in range(3)
+    ])
+
+
+def common_physical_time_flight_metrics(
+    *,
+    anchor_values: np.ndarray,
+    predicted_values: np.ndarray,
+    predicted_offsets_s: np.ndarray,
+    predicted_final_time_s: float,
+    truth_values: np.ndarray,
+    truth_offsets_s: np.ndarray,
+    true_final_time_s: float,
+    points: int = 64,
+) -> dict[str, object]:
+    """One flight on a fixed true-physical-time grid, with no overlap truncation."""
+    if isinstance(points, bool) or not isinstance(points, int) or points <= 1:
+        raise ValueError("common physical-time points must be an integer greater than one")
+    if not np.isfinite(predicted_final_time_s) or predicted_final_time_s <= 0.0:
+        raise ValueError("predicted final time must be finite and positive")
+    if not np.isfinite(true_final_time_s) or true_final_time_s <= 0.0:
+        raise ValueError("true final time must be finite and positive")
+    truth_offsets, truth_path = _validated_path(
+        truth_offsets_s, truth_values, label="truth"
+    )
+    tolerance = np.finfo(np.float64).eps * max(true_final_time_s, 1.0) * 32.0
+    if truth_offsets[-1] < true_final_time_s - tolerance:
+        raise ValueError("truth path does not cover its declared final time")
+
+    progress = np.arange(1, points + 1, dtype=np.float64) / points
+    query = progress * true_final_time_s
+    truth = _sample_positions(
+        anchor_values, truth_offsets, truth_path, query, label="truth"
+    )
+    predicted = _sample_positions(
+        anchor_values,
+        predicted_offsets_s,
+        predicted_values,
+        query,
+        label="prediction",
+    )
+    delta = predicted - truth
+    displacement = np.linalg.norm(delta, axis=1)
+    horizontal = np.linalg.norm(delta[:, :2], axis=1)
+
+    anchor_position = np.asarray(anchor_values, dtype=np.float64)[list(POSITION_IDX)]
+    truth_with_anchor = np.concatenate((anchor_position[None, :], truth), axis=0)
+    time_with_anchor = np.concatenate(([0.0], query))
+    tangent = np.gradient(truth_with_anchor[:, :2], time_with_anchor, axis=0)[1:]
+    tangent_norm = np.linalg.norm(tangent, axis=1)
+    unit = np.zeros_like(tangent)
+    moving = tangent_norm > 1e-9
+    unit[moving] = tangent[moving] / tangent_norm[moving, None]
+    along = delta[:, 0] * unit[:, 0] + delta[:, 1] * unit[:, 1]
+    cross = -delta[:, 0] * unit[:, 1] + delta[:, 1] * unit[:, 0]
+    vertical = delta[:, 2]
+    time_error = float(predicted_final_time_s - true_final_time_s)
+    predicted_arrival = _sample_positions(
+        anchor_values,
+        predicted_offsets_s,
+        predicted_values,
+        np.asarray([predicted_final_time_s], dtype=np.float64),
+        label="prediction",
+    )[0]
+    arrival_endpoint_error = float(np.linalg.norm(predicted_arrival - truth[-1]))
+
+    return {
+        "metric_grid": "common true physical time",
+        "points": points,
+        "ade_m": float(displacement.mean()),
+        "fde_m": float(displacement[-1]),
+        "arrival_endpoint_error_m": arrival_endpoint_error,
+        "horizontal_ade_m": float(horizontal.mean()),
+        "along_track_m": _spread(along),
+        "cross_track_m": _spread(cross),
+        "vertical_m": _spread(vertical),
+        "final_time_error_s": time_error,
+        "true_final_time_s": float(true_final_time_s),
+        "predicted_final_time_s": float(predicted_final_time_s),
+        "coverage_ratio": float(
+            np.asarray(predicted_offsets_s, dtype=np.float64)[-1] / true_final_time_s
+        ),
+        "n_steps": points,
+        "displacement_m": displacement,
+    }
 
 
 def _p95(values: np.ndarray) -> float:
@@ -156,62 +324,6 @@ def raw_kinematic_metrics(
     }
 
 
-def _positions(values: np.ndarray) -> np.ndarray:
-    """[..., C] -> [..., 3] east/north/up."""
-    return values[..., list(POSITION_IDX)]
-
-
-def _horizontal_unit(values: np.ndarray) -> np.ndarray:
-    """Unit vector along the truth's horizontal velocity, [..., 2].
-
-    Built from the chart-derivative channels; their direction differs from the physical
-    heading by the ratio of the two transport factors (< 0.1 deg over a TMA), which is
-    noise for an error DECOMPOSITION frame. Where ground speed is ~0 (a stationary or
-    purely vertical sample) the direction is undefined; those steps get a zero vector,
-    which sends their whole horizontal error into the cross-track term rather than
-    splitting it arbitrarily.
-    """
-    ve = values[..., IDX["edot"]]
-    vn = values[..., IDX["ndot"]]
-    speed = np.hypot(ve, vn)
-    safe = speed > 1e-6
-    unit = np.zeros(values.shape[:-1] + (2,), dtype=np.float64)
-    unit[..., 0] = np.where(safe, ve / np.where(safe, speed, 1.0), 0.0)
-    unit[..., 1] = np.where(safe, vn / np.where(safe, speed, 1.0), 0.0)
-    return unit
-
-
-def error_components(
-    predicted: np.ndarray, truth: np.ndarray, mask: np.ndarray
-) -> dict[str, np.ndarray]:
-    """Flat, mask-filtered per-step error components in metres.
-
-    ``predicted`` / ``truth`` are ``[B, N, C]`` in physical units, ``mask`` is ``[B, N]``.
-    Returns 1-D arrays over the valid progress points: ``displacement`` (3D), ``horizontal``,
-    ``along`` (signed, + = predicted ahead of truth), ``cross`` (signed, + = left of the
-    true course), ``vertical`` (signed, + = predicted high) — plus ``displacement_grid``,
-    the UNMASKED ``[B, H]`` displacement, kept for per-sample indexing (FDE).
-    """
-    delta = _positions(predicted) - _positions(truth)
-    unit = _horizontal_unit(truth)
-
-    de, dn, du = delta[..., 0], delta[..., 1], delta[..., 2]
-    along = de * unit[..., 0] + dn * unit[..., 1]
-    # Left-normal of (ux, uy) is (-uy, ux); positive cross-track = left of the true course.
-    cross = de * -unit[..., 1] + dn * unit[..., 0]
-
-    displacement_grid = np.sqrt(de**2 + dn**2 + du**2)
-    valid = mask > 0.5
-    return {
-        "displacement": displacement_grid[valid],
-        "displacement_grid": displacement_grid,
-        "horizontal": np.hypot(de, dn)[valid],
-        "along": along[valid],
-        "cross": cross[valid],
-        "vertical": du[valid],
-    }
-
-
 def _spread(values: np.ndarray) -> dict[str, float]:
     """Magnitude summary of a signed error array.
 
@@ -227,62 +339,3 @@ def _spread(values: np.ndarray) -> dict[str, float]:
         "max_abs": float(magnitude.max()),
         "mean_signed": float(values.mean()),
     }
-
-
-def final_index(mask: np.ndarray) -> np.ndarray:
-    """Index of the last valid progress point per sample, ``[B]``."""
-    return mask.shape[1] - 1 - np.argmax(mask[:, ::-1] > 0.5, axis=1)
-
-
-def trajectory_metrics(
-    predicted: np.ndarray, truth: np.ndarray, mask: np.ndarray
-) -> dict[str, object]:
-    """The full metric block for a batch of predictions.
-
-    ``{ade_m, fde_m, ..., along_track_m: {...}, cross_track_m: {...},
-       altitude_m: {...}, n_steps, n_samples}``
-
-    ADE averages per-progress-point displacement. FDE is the error at normalized progress
-    one, the predicted endpoint of each approach.
-    """
-    components = error_components(predicted, truth, mask)
-    displacement = components["displacement"]
-
-    last = final_index(mask)
-    rows = np.arange(predicted.shape[0])
-    has_any = mask.sum(axis=1) > 0
-    fde = components["displacement_grid"][rows, last][has_any]
-
-    return {
-        "ade_m": float(displacement.mean()),
-        "fde_m": float(fde.mean()),
-        "ade_p95_m": float(np.percentile(displacement, P95)),
-        "fde_p95_m": float(np.percentile(fde, P95)),
-        "horizontal_m": _spread(components["horizontal"]),
-        "along_track_m": _spread(components["along"]),
-        "cross_track_m": _spread(components["cross"]),
-        "altitude_m": _spread(components["vertical"]),
-        "n_steps": int(displacement.size),
-        "n_samples": int(predicted.shape[0]),
-    }
-
-
-def error_by_progress(
-    predicted: np.ndarray, truth: np.ndarray, mask: np.ndarray
-) -> list[dict[str, float]]:
-    """Displacement error over the shared normalized progress domain ``(0, 1]``."""
-    per_step = np.sqrt(((_positions(predicted) - _positions(truth)) ** 2).sum(axis=-1))
-    rows = []
-    for h in range(predicted.shape[1]):
-        valid = mask[:, h] > 0.5
-        if not valid.any():
-            continue
-        errors = per_step[valid, h]
-        rows.append({
-            "segment": h + 1,
-            "progress": (h + 1) / predicted.shape[1],
-            "mean_m": float(errors.mean()),
-            "p95_m": float(np.percentile(errors, P95)),
-            "n": int(valid.sum()),
-        })
-    return rows

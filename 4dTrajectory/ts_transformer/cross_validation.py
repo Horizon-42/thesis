@@ -31,24 +31,23 @@ from config import (
     TSConfig,
 )
 from dataset import (
-    FixedAnchorTrajectoryWindows, FlightSeries,
+    FlightSeries,
     cross_validation_folds,
     provenance_eligibility_digests,
     provenance_manifest_digests,
     split_by_flight,
 )
 from models import resolve_device
-from train import evaluate_split, filter_training_cohort, fit_model, usable_series
+from train import filter_training_cohort, fit_model, usable_series
 
 RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"
 PROGRESS_NAME = "cv_candidate_progress.json"
-RESULTS_SCHEMA = "ts-cross-validation-v13-candidate-checkpoints"
-PROGRESS_SCHEMA = "ts-cross-validation-progress-v1"
+RESULTS_SCHEMA = "ts-cross-validation-v15-common-true-time-endpoint-loss"
+PROGRESS_SCHEMA = "ts-cross-validation-progress-v3-common-true-time-endpoint-loss"
 SELECTION_METRIC = (
-    "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
-    "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
-    "terminal-position MSE"
+    "mean outer-train-fold airport-macro configured training objective "
+    "(legacy diagnostic selector)"
 )
 SELECTION_METRIC_DESCRIPTIONS = {
     CHECKPOINT_SELECTION_OBJECTIVE: SELECTION_METRIC,
@@ -69,7 +68,9 @@ SELECTION_METRIC_DESCRIPTIONS = {
     ),
 }
 CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {
-    "n_segments": (64, 128, 256),
+    # N is a real smoothness/accuracy breakpoint, not merely output resolution. Keep the
+    # earlier candidates and add the empirically important lower-resolution region.
+    "n_segments": (16, 32, 64, 128, 256),
     "learning_rate": (1e-4, 3e-4, 5e-4),
     "d_model": (64, 128, 256),
     "e_layers": (2, 3),
@@ -454,13 +455,6 @@ def cross_validate(
             best_selection = getattr(
                 fit, "best_validation_selection", fit.best_val_loss
             )
-            validation_metrics = evaluate_split(
-                fit.model,
-                FixedAnchorTrajectoryWindows(fold_val, fit.config, fit.normalizer),
-                fit.normalizer,
-                fit.config,
-                fit.device,
-            )
             fold_results.append({
                 "fold": fold_index,
                 "train_flights": len(fold_train),
@@ -472,11 +466,12 @@ def cross_validate(
                 "validation_selection_metric": candidate_config.checkpoint_selection_metric,
                 "best_epoch": best_epoch.epoch,
                 "val_by_airport": best_epoch.val_by_airport,
+                "validation_selection_by_airport": getattr(
+                    best_epoch,
+                    "validation_selection_by_airport",
+                    best_epoch.val_by_airport,
+                ),
                 "batch_size": fit.config.batch_size,
-                # Independent physical-unit diagnostics. Candidate selection remains the
-                # declared airport-macro objective above; these fields make accuracy and
-                # smoothness trade-offs auditable without changing that objective.
-                "validation_metrics": validation_metrics,
             })
             del fit
             gc.collect()

@@ -177,6 +177,7 @@ DEFAULT_N_SEGMENTS = DEFAULT_N_SEGMENTS_BY_MODEL[MODELS[0]]
 # ``final_time_s`` is emitted in physical seconds.  The scale only nondimensionalizes its
 # loss; it is not a duration cap and does not change the value returned at inference.
 DEFAULT_FINAL_TIME_SCALE_S = 600.0
+DEFAULT_POSITION_LOSS_SCALE_M = 10_000.0
 DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S = 60.0
 DEFAULT_VALIDATION_COMMON_GRID_POINTS = 64
 DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS = 10
@@ -296,10 +297,9 @@ class TSConfig:
     # target and do not represent the fixed-anchor deployment task. This train-only floor is
     # frozen before validation; fixed-anchor train/validation windows do not use it.
     random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S
-    # Checkpoint selection is an explicit validation policy. The historical normalized
-    # objective remains the default; control experiments may opt into the deployable
-    # fixed-anchor physical-time metric without changing their training loss.
-    checkpoint_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE
+    # One formal development score: fixed-anchor, common true-physical-time, airport-macro
+    # 3D ADE.  It is shared by CV, the LR scheduler, early stopping and checkpointing.
+    checkpoint_selection_metric: str = CHECKPOINT_SELECTION_COMMON_GRID_ADE
     validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS
     # Inferred final-approach geometry is weaker supervision than an observed ADS-B row.
     # These weights apply to POSITION channels only; fitted velocity channels are always
@@ -308,12 +308,17 @@ class TSConfig:
     fitted_tail_position_weight: float = 0.25
     fitted_terminal_position_weight: float = 1.0
     final_time_loss_weight: float = 1.0
-    # Position/velocity consistency is evaluated as a physical displacement residual and
-    # normalized by fitted position scales, so increasing N does not amplify its gradient.
-    # Held-out raw-physics/ADE ablation selected 3.0. A weight of 10 brought acceleration
-    # and jerk close to the observed p95 but degraded ADE by 13.6% and flyability by 13.9 pp.
+    # One explicit output-endpoint task prevents the last physical position from being
+    # diluted to 1/N of the whole-path objective. It uses the same physical position scale
+    # as the path loss; the 0.25 coefficient is frozen by the development Pareto audit.
+    state_endpoint_loss_weight: float = 0.25
+    # Control/oracle experiment compatibility knobs. The formal direct-state objective
+    # ignores both: it predicts position+duration and derives future velocity from position.
     kinematic_consistency_loss_weight: float = 3.0
     terminal_loss_weight: float = 0.02
+    # Nondimensionalizes the direct-state physical 3D position MSE. This is an optimizer
+    # scale, not an aviation acceptance threshold; the checkpoint records it explicitly.
+    position_loss_scale_m: float = DEFAULT_POSITION_LOSS_SCALE_M
     final_time_scale_s: float = DEFAULT_FINAL_TIME_SCALE_S
     # Control-output-only regularizers. Controls are scaled by each flight's own envelope
     # before these are evaluated, so mixed-aircraft batches share one dimensionless loss.
@@ -779,6 +784,7 @@ class TSConfig:
         for name in (
             "dt_s",
             "learning_rate",
+            "position_loss_scale_m",
             "final_time_scale_s",
             "control_rollout_integrator_dt_s",
         ):
@@ -808,6 +814,8 @@ class TSConfig:
             raise ValueError("fitted_terminal_position_weight must be non-negative")
         if self.final_time_loss_weight < 0.0:
             raise ValueError("final_time_loss_weight must be non-negative")
+        if self.state_endpoint_loss_weight < 0.0:
+            raise ValueError("state_endpoint_loss_weight must be non-negative")
         if self.kinematic_consistency_loss_weight < 0.0:
             raise ValueError("kinematic_consistency_loss_weight must be non-negative")
         if self.terminal_loss_weight < 0.0:

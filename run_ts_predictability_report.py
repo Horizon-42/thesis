@@ -1203,7 +1203,7 @@ def main() -> None:
         evaluation = fit_evaluations[run.label]
         train_metrics = evaluation["splits"]["train"]["metrics"]
         val_metrics = evaluation["splits"]["val"]["metrics"]
-        gap = evaluation["diagnostics"]["native_generalization"]
+        gap = evaluation["diagnostics"]["generalization"]
         fit_summary.append({
             "label": run.label,
             "train_flights": evaluation["splits"]["train"]["flights"],

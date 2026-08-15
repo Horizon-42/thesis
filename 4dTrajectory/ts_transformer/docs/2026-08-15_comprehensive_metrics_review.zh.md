@@ -1,32 +1,32 @@
 # 4D 轨迹模型 metrics 全面审核与最小化设计
 
 日期：2026-08-15  
-状态：设计审核完成；尚未修改正式 loss、CV 或报告实现  
+状态：审核与小规模 development 验证完成；正式实现已更新，全量 CV 尚未启动
 数据隔离：只读取 train/validation 与既有 development 产物；**未读取 outer-test 轨迹或预测**
 
 ## 1. 最终结论
 
-当前系统不是“缺少更多指标”，而是同一模型被三套不等价的口径同时描述：
+本次审核确认，问题不是“指标太少”，而是过去同一模型曾被三套不等价口径描述：
 
-1. 训练 loss 在归一化进度上比较六维 state，并叠加时间、运动学和终点项；
-2. CV/fit report 可以在真实物理时间公共网格上比较，但默认 checkpoint 仍由训练复合
-   objective 选择；
-3. prediction `summary.json` 又只比较预测与观测的时间重叠部分。
+1. 训练 loss 曾在归一化进度上比较六维 state，并叠加时间、运动学和弱终点项；
+2. CV/fit report 曾同时保留 native、common-grid、terminal、arc-length 等 selector；
+3. prediction `summary.json` 曾只比较预测与观测的时间重叠部分。
 
 这三套数值不能同时叫“模型准确率”。建议收缩为以下单一合同：
 
-- **训练**：真实物理时间对齐的各向同性三维位置 MSE + 独立到达时间 MSE；机场宏平均。
+- **训练**：真实物理时间对齐的各向同性三维路径位置 MSE + `0.25` 倍真实输出端点
+  位置 MSE + 独立到达时间 MSE；机场宏平均。
 - **CV、学习率调度、早停、checkpoint、正式 validation**：全部使用同一个
   `Q=64` 真实物理时间公共网格上的 **airport-macro 3D ADE**。
-- **正式报告**：主指标之外，分别报告水平、沿航迹、横航迹、垂直和到达时间误差，
-  不再把它们任意加权成第二个总分。
+- **正式报告**：主指标之外，分别报告水平、沿航迹、横航迹、垂直、真实时刻 FDE、
+  预测到达端点误差和到达时间误差，不再把它们任意加权成第二个总分。
 - **最终进近 evaluation**：继续判断跑道阈值处的横向/垂直通过状态，但它是终端运行
   验收，不参与模型训练或选模。
 - **模型输出**：历史输入可以保留位置和速度；未来输出应只学习位置曲线与总时长，
-  未来速度由曲线和时钟求导得到。终点是已知跑道目标时，应结构性固定，而不是再增加
-  terminal loss 让模型学习一个已知事实。
+  未来速度由曲线和时钟求导得到。模型必须预测实际跑道阈值穿越位置，不能把终点强制
+  固定在跑道中心/TCH；真实 lateral-pass 航迹在阈值处仍有非零横向与垂直偏差。
 
-因此，CV **必须使用 common grid**。候选的输出节点数 `N=64/128/256` 可以不同，
+因此，CV **必须使用 common grid**。候选的输出节点数 `N=16/32/64/128/256` 可以不同，
 但正式比较网格 `Q` 必须相同；否则节点更多的候选会改变“考题”本身。
 
 ## 2. 审核对象与非目标
@@ -57,21 +57,20 @@
 
 | 层 | 当前核心口径 | 主要问题 |
 |---|---|---|
-| direct-state 训练 | 六个逐轴标准化 channel 的加权 MSE + final-time + position/velocity consistency + terminal position | 不同轴的标准差偷偷定义了物理权重；速度是位置的冗余未来标签；四项权重需要反复调参 |
-| checkpoint/CV | 默认 `fixed-anchor-objective`；另保留 common-grid、terminal-state、arc-length 等多种 selector | “最佳模型”随 selector 改变；训练目标而非可部署物理误差主导默认选模 |
-| fit evaluation | native normalized-progress 指标 + common physical-time 大型诊断块 | 一个 iTransformer 报告约 912 个 scalar leaf，PatchTST 约 2832 个；信息过载且主口径不清 |
-| prediction summary | 只在 `forecast.times <= observed_end` 的重叠区间插值比较 | 预测过短的尾部被删掉，预测过长的尾部也不比较；可能奖励错误时钟 |
+| direct-state 训练 | 真实时间三维路径位置 + 输出端点位置 + final-time；未来速度由位置导出 | 三项分别对应整条曲线、到达几何和 4D 时钟；不再监督冗余 future velocity |
+| checkpoint/CV | 正式默认固定为 `Q=64` airport-macro common true-time ADE | scheduler、early stop、checkpoint 和 CV 候选使用同一标量；其他 selector 只属显式实验模式 |
+| fit evaluation | 同一 immutable replay 产生 common-time 主指标、分量、端点、ETA 和 QA | 不再用 native normalized loss 充当模型准确率；完整诊断只在训练结束后计算 |
+| prediction summary | 固定真实时长上的 `Q=64` common-time 比较 | 提前结束保持其末点并继续受罚；另分开报告预测到达端点误差 |
 | approach evaluation | 单个跑道阈值事件的 lateral/vertical/overall 三态 verdict | 这是终端验收，不是整条预测轨迹的模型准确率；不应进入 CV |
 
 关键实现位置：
 
-- `train.py:813–880`：当前 direct-state 四项 loss；
-- `train.py:1966–1989`：已有但非默认的 airport-macro common-grid ADE selector；
-- `train.py:2435–2467`：每个 full-horizon epoch 无论 selector 都计算完整 common-grid
-  诊断块；
+- `train.py` 的 `state_prediction_loss_components`：当前 direct-state 三任务 loss；
+- `train.py` 的 validation selection：默认 airport-macro common-grid ADE selector；
+- `train.py` 的 `evaluate_split`：训练结束后的完整 common-grid 诊断；
 - `fixed_anchor_validation.py:356–445`：公共物理时间评估；
-- `export.py:466–520`：prediction summary 的 overlap-only 口径；
-- `metrics.py:237–267`：native grid 上的 pooled ADE/FDE 与误差分解。
+- `export.py` 的 `observed_series_metrics` / `accuracy_block`：prediction summary；
+- `metrics.py` 的 `common_physical_time_flight_metrics`：独立于模型节点数的单航班核。
 
 ## 4. 已发现的实质问题
 
@@ -156,14 +155,28 @@ ADE_{airport\text{-}macro}=1533.4\ \mathrm m.
 差约 `6.2%`，因为 KRDU 等机场样本更多且机场难度不同。正式主指标必须与训练人口政策
 一致，采用 airport-macro；micro 只能作为描述性补充。
 
-### 4.5 endpoint/FDE 在当前任务中部分退化
+### 4.5 FDE 与预测到达端点误差回答不同问题
 
 既有 validation-only predictability report 显示：训练库近邻 oracle 的平均未来离散度为
-`1666.1 m`，但终点离散度只有 `19.3 m`，因为所有目标都结束在已知跑道阈值坐标原点。
+`1666.1 m`，但终点离散度只有 `19.3 m`，因为所有目标都在同一跑道阈值平面附近结束。
 其 `K=20 minADE=453.5 m`，而 `minFDE=4.85 m`。
 
-这说明：中段路径确实具有多模态不确定性，但终点主要是已知条件。FDE 可检查数据/实现
-是否遵守终点合同，不能主导模型选择，更不能通过加大 terminal loss 假装解决中段预测。
+这不等于终点坐标已知。对五个机场各抽取 5 条当前 lateral-pass 航迹后，实际末端局部
+坐标仍出现约 `-13.1…+7.5 m` 的水平分量和 `-8.9…+17.5 m` 的垂直分量。阈值平面和
+目标跑道已知，**实际穿越偏差未知且正是 downstream verdict 要评价的量**。因此不能使用
+endpoint-constrained curve 把终点写死；否则所有预测都会人为命中目标，终端 evaluation
+失效。
+
+但“不能写死终点”不等于“终点无需监督”。后续 development 审计发现，仅用 `Q=64`
+路径平均时，最后一个查询点只占路径任务的 `1/64`；`N=16` baseline 的 validation
+预测到达端点误差仍约 `1.9 km`。因此必须区分：
+
+- `FDE_true`：在真实到达时间 `T_i` 查询预测曲线，既受路径误差也受时钟误差；
+- `E_end`：在模型自己的预测到达时间 `T_hat_i` 查询预测曲线，再与该航班真实终点比较，
+  主要描述终点几何。
+
+最终设计保留一个**软的、对真实航班终点的监督项**，不使用跑道中心或 TCH 作为硬编码
+答案。它不参与 checkpoint selector；正式 selector 仍只用 whole-path ADE。
 
 ## 5. 正式 validation 的严格数学定义
 
@@ -220,9 +233,8 @@ ADE_a=\frac1{|V_a|}\sum_{i\in V_a}ADE_i,
 3. early stopping；
 4. retained checkpoint。
 
-CV 的候选分数是各 outer-train fold 的 `S` 的算术平均。只有当两个候选差异落在预注册
-的实际等价区间（建议相对 `1%`）内，才以参数量更少、推理更快者胜出；不能临时查看
-另一指标后改变 tie-break。
+CV 的候选分数是各 outer-train fold 的 `S` 的算术平均，取最小者；若浮点值完全相同，
+按预先生成的候选顺序决定，不能临时查看 FDE、pass rate 或另一诊断指标后改变赢家。
 
 ### 5.3 必须报告、但不混入 `S` 的指标
 
@@ -251,7 +263,8 @@ c_{iq}=-e_e t_n+e_n t_e.
 | signed cross-track | mean bias、MAE、p95，m | 路径形状/横向偏差 |
 | signed vertical | mean bias、MAE、p95，m | 垂直剖面偏差 |
 | final-time error | signed mean、MAE、p95，s | CTA/到达时间能力 |
-| FDE at `t=T_i` | mean/p95，m | 终点合同与实现诊断，不选模 |
+| FDE at `t=T_i` | mean/p95，m | 真实到达时刻的位置误差，不选模 |
+| arrival endpoint error | mean/p50/p95，m | `p_hat(T_hat_i)` 对真实终点的几何误差，不选模 |
 | invalid/coverage | count/rate | 防止丢弃困难样本后虚假变好 |
 | inference runtime | median/p95，ms/flight | 工程部署能力 |
 
@@ -283,11 +296,14 @@ Q=64 与 Q=256 的逐航班排序相关性为 `0.99998`。因此 Q=64 已达到�
 (e,n,u,\dot e,\dot n,\dot u)_{t-L+1:t}.
 \]
 
-未来监督只保留：
+未来优化目标只使用：
 
 \[
-\hat{\mathbf p}_{i1:Q},\qquad \hat T_i.
+\hat{\mathbf p}_{i1:N},\qquad \hat T_i,
 \]
+
+并在 loss 内把这 `N` 个节点可微地采样到固定的 `Q` 个真实时间查询点。`N` 属于模型，
+`Q` 属于考核/训练对齐合同。
 
 速度、航向和下滑角由预测位置曲线与预测时钟求导：
 
@@ -298,24 +314,9 @@ Q=64 与 Q=256 的逐航班排序相关性为 `0.99998`。因此 Q=64 已达到�
 这不会丢失下游需要的速度；它只删除“模型同时输出一条位置曲线和一条可能与其矛盾的
 速度曲线”的自由度。
 
-当跑道目标 `p_target` 已知时，推荐使用端点约束的残差曲线：
-
-\[
-\hat{\mathbf p}_i(\tau)
-=(1-\tau)\mathbf p_{i0}+\tau\mathbf p_{target}
-+\tau(1-\tau)\mathbf g_{\theta,i}(\tau),
-\qquad 0\le\tau\le1.
-\]
-
-它严格保证：
-
-\[
-\hat{\mathbf p}_i(0)=\mathbf p_{i0},\qquad
-\hat{\mathbf p}_i(1)=\mathbf p_{target}.
-\]
-
-于是不再需要 terminal-position loss。这个约束只属于“已知跑道目标的到达模型”；通用
-轨迹评估器仍可评价没有已知终点的其他轨迹。
+跑道阈值定义了参考平面和期望中心/TCH，但没有给出该航班将实际穿越平面的横向、高度
+偏差。因此输出曲线的末端必须保持可学习；不能采用 `p_hat(1)=p_target` 的硬端点约束。
+输出端点保持可学习，并以该航班的真实监督端点作为软目标；它从不被替换为跑道中心/TCH。
 
 ### 6.2 loss 定义
 
@@ -341,18 +342,35 @@ L_{p,i}=\frac{1}{Q s_p^2}
 L_{T,i}=\left(\frac{\hat T_i-T_i}{s_T}\right)^2.
 \]
 
+令 `q_i` 为该样本最后一个有位置监督的输出节点（固定长度模式可在其后带 padding），
+端点项为：
+
+\[
+L_{E,i}=\frac{\left\lVert
+\hat{\mathbf p}_{i,q_i}-\mathbf p_{i,q_i}
+\right\rVert_2^2}{s_p^2}.
+\]
+
 机场宏平均总 loss：
 
 \[
 \boxed{
 L=\frac1{|A|}\sum_{a\in A}\frac1{|B_a|}
-\sum_{i\in B_a}(L_{p,i}+L_{T,i})
+\sum_{i\in B_a}(L_{p,i}+0.25L_{E,i}+L_{T,i})
 }.
 \]
 
-最小 baseline 使用 `s_p=10,000 m`、`s_T=600 s`。这两个数是训练数值尺度和位置/时间
+最小 baseline 使用 `s_p=10,000 m`、`s_T=600 s`。端点与路径使用同一个 `s_p`，避免
+引入第二套物理单位；`0.25` 是在冻结 development cohort 上按 Pareto 结果预注册的任务
+权重。`s_p`、`s_T` 是训练数值尺度和位置/时间
 任务权衡，**不是航空通过门限**。它们必须写入 checkpoint 与报告，并在全量 CV 前冻结；
 不能根据 outer-validation/test 临时调节。
+
+`L_T` 不能因 true-time 路径项已包含时钟影响而直接删除。冻结 cohort 的两种子消融显示，
+删除显式时间项后 ADE 可维持在 `1312.9–1389.5 m`，但 ETA MAE 恶化到
+`553.4–723.7 s`。模型可以用一条很长的预测时钟，只让曲线前缀覆盖真实时域；路径位置
+仍然接近，但模型自己声明的到达时刻已经失效。因此位置曲线与总时长是两个不可合并的
+输出任务，`L_T` 是必要项。
 
 训练用平方误差是为了稳定优化；正式模型比较仍使用物理单位 ADE、误差分布和时间 MAE。
 这一做法也与 iTransformer/PatchTST 原论文使用 MSE 训练、MAE/MSE 类物理误差评估的
@@ -364,7 +382,7 @@ L=\frac1{|A|}\sum_{a\in A}\frac1{|B_a|}
 |---|---|---|
 | 六维 future-state MSE | 改为三维物理位置 | 未来速度冗余且会与位置不一致；逐轴标准化隐藏物理权重 |
 | kinematic consistency | 删除 | 速度由位置曲线求导后，一致性是结构性质，不再需要惩罚 |
-| terminal position | 删除 | 已知跑道目标由端点参数化严格满足 |
+| 旧 terminal position | 替换为 `0.25 L_E` | 旧项过弱且语义混杂；新项只监督真实输出端点，不强制命中跑道中心 |
 | arc-length/path-length scalar | 不进入正式 loss | 同一路径长度可以对应完全不同的曲线 |
 | acceleration/jerk/smoothness | 只保留离线 QA | 没有项目级可接受上限时，不应主导准确率选模 |
 | approach pass rate | 不进入训练/CV | 单个终端事件，离散且大量候选并列；不能衡量中段 |
@@ -374,20 +392,43 @@ Kendall–Gal–Cipolla §3 说明多任务性能会强烈依赖手工权重，�
 train/validation 上预注册的 `s_T` 敏感性实验显示结论不稳定时，才考虑两个 learned
 log-variance；不应一开始再增加新机制。
 
+### 6.4 control-output loss 的审核边界
+
+`prediction_output=control` 不是当前 production baseline，而是显式动力学消融。它最后
+仍生成一条位置—时间曲线，因此**训练完成后的正式 evaluation 完全相同**：同一个 Q=64
+common-time ADE、FDE、arrival endpoint、ETA 和阈值 verdict，不允许为 control 另造更有利
+的 headline metric。
+
+其现有训练代码提供 normalized-MSE、physical-criteria、terminal-state 和 arc-length 多个
+recipe。这些 recipe 的用途是研究“怎样训练控制量”，不能同时被解释成四套正式模型质量
+定义；尤其默认 normalized-channel MSE 仍有第 4.1 节的隐式轴权重问题。若未来要把
+control-output 晋升为正式候选，最小目标应复用：
+
+\[
+L_{control}=L_p+0.25L_E+L_T
++\lambda_u L_{effort}+\lambda_{\Delta u}L_{smooth},
+\]
+
+前三项必须与 state-output 使用相同物理定义；后两项只负责避免不可执行或高频抖动控制，
+且使用按飞机控制包线归一化的现有定义。是否需要以及如何冻结 `lambda_u`、
+`lambda_Delta_u` 必须另做 control 专用 development ablation。当前证据不足以把 state 模型
+的小实验结果直接移植到昂贵 RK4 control 训练，因此本轮不改它的实验 recipe，也不把它
+混入接下来的默认 state-model CV。这是明确的适用边界，不是遗漏。
+
 ## 7. 小规模开发实验
 
 ### 7.1 协议
 
 - 当前 lateral-pass eligibility 数据；五个美国机场；
-- 每机场 100 条 outer-train、50 条 outer-validation；共 500 train、250 val，其中一条
-  因不足 120 s 被既有 builder 跳过，实际 val=249；
+- 每机场 100 条 outer-train、50 条 outer-validation；候选选择前先验证可构建性，最终
+  精确重建 500 train、250 validation；
 - outer split seed 固定为 1337；模型初始化 seed 为 1337、2027；
 - 轻量 iTransformer：`d_model=64`、2 层、`N=64`、batch 64、最多 100 epochs；
 - 所有组均用 `Q=64 airport-macro true-time ADE` 调度、早停与选 checkpoint；
 - 没有创建正式 checkpoint，没有读取 outer-test。
 
-为了只审核 loss，实验仍使用现有六通道输出 head，但简化组只让位置和时间接收梯度；
-因此它证明“删掉冗余监督”有价值，却还不是最终三通道输出结构的性能声明。
+为了只审核 loss，实验仍使用现有六通道 tensor 合同，但未来速度不接收监督梯度，发布前
+由预测位置和时钟统一导出；因此结果证明“删掉冗余监督”有价值，不声称改变 backbone。
 
 ### 7.2 两个种子的结果
 
@@ -414,6 +455,81 @@ true-time 简化 loss 相对当前复合 loss 的两次 improvement 分别为 `4
 同时把 time MAE 作为独立正式指标。若研究目标改成 CTA 优先，必须显式改变任务要求，
 不能暗中换权重。
 
+### 7.3 输出节点数 `N` 与 validation 网格 `Q` 的消融
+
+保持 `Q=64`、模型和 cohort 不变，仅改变模型原生输出节点数：
+
+| N | validation ADE | FDE at true time | time MAE | raw acceleration p95 | raw jerk p95 |
+|---:|---:|---:|---:|---:|---:|
+| 16 | **1414.2 m** | **2026.3 m** | 31.4 s | **10.10 m/s²** | **1.81 m/s³** |
+| 32 | 1457.1 m | 2208.4 m | 35.6 s | 44.74 m/s² | 14.48 m/s³ |
+| 64 | 1417.7 m | 2098.6 m | **28.4 s** | 209.5 m/s² | 169.2 m/s³ |
+
+同一 `Q=64` 观测 baseline 的 acceleration/jerk p95 约为 `3.96 m/s²` / `2.43 m/s³`；
+按同为 16 节点的公平网格则约为 `2.12 m/s²` / `0.10 m/s³`。这说明：
+
+1. `Q` 只负责公平考核，不能随候选 `N` 改变；
+2. `N` 是实质模型容量/平滑度超参数；旧 CV 只测 `64/128/256` 会漏掉有效区域；
+3. 先把 `16/32` 加入 CV，比增加一个缺乏阈值依据的 acceleration loss 更简约。
+
+因此正式 CV 保留原候选并扩成 `N={16,32,64,128,256}`。运动学只报告 prediction 与
+同分辨率 observed baseline，不进入 selector。
+
+### 7.4 输出端点 loss 的两种子消融
+
+用 `N=16` 比较无端点项和候选权重。下表的 endpoint 是
+`||p_hat(T_hat)-p(T)||`，不是在真实时间查询的 FDE：
+
+| seed | endpoint 权重 | ADE | FDE true-time | endpoint error | time MAE | accel p95 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1337 | 0 | 1414.2 m | 2026.3 m | 1942.9 m | 31.4 s | 10.10 m/s² |
+| 1337 | 0.25 | **1372.9 m** | **1803.1 m** | **1289.2 m** | **28.1 s** | 10.57 m/s² |
+| 1337 | 0.5 | 1400.3 m | 1839.4 m | 1293.2 m | 28.4 s | 12.09 m/s² |
+| 1337 | 1.0 | 1426.5 m | 1792.7 m | 1255.9 m | 27.8 s | 13.07 m/s² |
+| 2027 | 0 | **1400.1 m** | 2032.0 m | 1900.1 m | 30.6 s | **10.36 m/s²** |
+| 2027 | 0.25 | 1417.5 m | **1877.0 m** | **1371.5 m** | **28.0 s** | 14.00 m/s² |
+
+两种子均值中，`0.25` 相对 `0`：ADE 从约 `1407.1` 降至 `1395.2 m`，endpoint 从约
+`1921.5` 降至 `1330.4 m`，FDE 从约 `2029.1` 降至 `1840.1 m`，time MAE 从约 `31.0`
+降至 `28.1 s`。它是唯一在两种子均值上同时改善整条路径、终点和 ETA 的最小候选；更大
+权重只换来很少的 endpoint 收益，并恶化 ADE/运动学。因此冻结为 `0.25`，不把权重继续
+扩成正式 CV 维度。
+
+### 7.5 时间任务尺度的敏感性
+
+`s_T` 不是航空法规门限，而是空间与时间两项之间必须显式声明的研究取舍。在同一
+`N=16`、endpoint weight `0.25`、两个种子的 cohort 上：
+
+| `s_T` | 两种子平均 ADE | 两种子平均 FDE | 平均 endpoint error | 平均 ETA MAE |
+|---:|---:|---:|---:|---:|
+| 300 s | 1421.1 m | **1833.8 m** | 1343.6 m | **24.0 s** |
+| 600 s | **1395.2 m** | 1840.1 m | **1330.4 m** | 28.1 s |
+
+两者不存在全指标上的绝对支配：300 s 更重视 ETA，600 s 更重视本项目预注册的主指标
+whole-path ADE，并略改善预测到达端点。由于当前论文问题以完整 4D 位置曲线为主、ETA
+作为独立 secondary metric，正式 baseline 冻结 `s_T=600 s`。如果研究问题改成 CTA
+优先，应新建并预注册一个 CTA 实验，而不是在看到正式 validation/test 后换尺度。
+
+### 7.6 低 N 训练真值的近似边界
+
+正式 validation 始终直接从原始监督时间轴采样 Q=64 真值。当前训练张量为了保持每个
+候选自己的 `N` 节点表示，会先在 N 个节点上取真值，再把该分段线性表示查询到 Q=64。
+它不改变正式评分，但意味着低 N 模型的训练目标是“该模型分辨率可表达的真值近似”，
+而不是保留原始轨迹的所有局部折点。
+
+在冻结的 750 条 development 航迹上，相对直接 Q=64 真值的三维重建误差为：
+
+| N | 所有查询点 mean | 查询点 p95 | per-flight mean p95 |
+|---:|---:|---:|---:|
+| 16 | 18.3 m | 84.6 m | 65.4 m |
+| 32 | 5.2 m | 18.6 m | 14.7 m |
+| 64 | 约 0 m | 约 0 m | 约 0 m |
+
+相对于当前约 1.4 km 的 validation ADE，这一近似不足以证明值得为 training batch 再维护
+一套独立 Q64 真值张量；而且 N=16 的分段线性输出本身也无法表达这些高频折点。最简设计
+因此保留当前训练表示，并把**正式 validation 的原始 Q64 真值**作为最终裁判。若全量
+validation 的 ADE 已降到百米量级，再重新审计这一近似；不要现在提前增加数据接口。
+
 ## 8. 正式训练后 evaluation
 
 ### 8.1 development 阶段
@@ -437,9 +553,14 @@ secondary
   per-flight p50/p95
   horizontal / along / cross / vertical
   final-time error
-  FDE diagnostic
+  FDE at true arrival time
+  predicted-arrival endpoint error
   invalid and coverage
   inference runtime
+
+quality_assurance
+  raw turn / acceleration / jerk
+  same-resolution observed baseline
 
 terminal_evaluation
   reference to the separate evaluation report and criteria
@@ -488,40 +609,40 @@ model prediction
 它作为独立 downstream evaluation 发布，不能代替 ADE，也不能因一个阈值事件通过就宣称
 整条预测正确。
 
-## 10. 实施计划
+## 10. 实施状态与后续运行顺序
 
-以下步骤在用户确认本设计后实施；每一步都保持 raw/downloaded 航迹只读：
+当前已经完成且不会改写 raw/downloaded 航迹：
 
-1. 新建一个纯函数 common-grid metric kernel，只计算选模需要的 per-flight 3D ADE；
-   完整分解只在训练结束后执行一次。
-2. 把默认且唯一的正式 selector 改为 Q=64 airport-macro common-grid ADE；CV、scheduler、
-   early stop、checkpoint 共用它。
-3. 将 direct-state loss 改为第 6.2 节的 true-time position + time；删除正式路径上的
-   kinematic、terminal、arc-length selector 分支。旧报告是可再生产物，要求重新生成，
-   不增加双读兼容层。
-4. 解耦 input channels 与 output targets：输入保留速度，输出改为位置+时长；由曲线导出
-   速度。随后加入端点约束参数化。
-5. 让 fit evaluation 和 prediction summary 调用同一 metric kernel；移除 overlap-only
-   headline，保留它也只能标成 diagnostic。
-6. 测试非有限值、非单调时钟、提前/延后终止、N 不同但 Q 相同、机场宏平均、分解符号、
-   endpoint constraint 和 outer-test 隔离。
-7. 先用本节相同小 cohort 做回归，再在 outer-train 上运行完整 CV；确认候选后训练一次
-   outer-train + outer-validation development checkpoint。此阶段仍不打开 outer-test。
+1. common-time 纯 metric kernel；提前结束的尾部不再被截掉；
+2. 默认 selector 统一为 `Q=64` airport-macro ADE，供 CV、scheduler、early stop 和
+   checkpoint 共用；
+3. direct-state loss 改为第 6.2 节的路径 + 端点 + 时间三项；future velocity 不再监督，
+   而由发布曲线导出；
+4. fit evaluation 与 prediction summary 使用同一 true-time 定义；FDE 与预测到达端点
+   error 分开；
+5. raw kinematics 增加同分辨率 observed baseline；它属于 QA，不选模；
+6. CV 的 `N` 候选加入 `16/32`，progress checkpoint 原子写入，可断点续跑。
 
-## 11. 不建议继续保留为正式模式的 legacy 设计
+后续只按以下顺序继续：全量单元测试 → development CV → 冻结最优候选 → outer-train +
+validation checkpoint → train/validation 报告。仍不打开 outer-test；只有用户明确宣布最终
+release 后才能执行一次 test。
 
-为避免再次出现“代码里同时维护多代 evaluation”的问题，迁移完成后，以下内容只保留在
-历史文档/旧 artifact 中，不作为可选 production mode：
+## 11. 正式合同与实验模式的边界
+
+为避免“多个指标都像正式答案”，以下内容不属于默认 production contract：
 
 - `fixed-anchor-objective` selector；
 - `fixed-anchor-common-grid-criteria` 的 ADE/FDE smooth-max；
 - terminal-state selector；
 - arc-length-geometry selector；
 - prediction summary 的 overlap-only accuracy；
-- future velocity 监督、kinematic consistency 和 terminal loss；
+- future velocity 监督和 kinematic consistency；
+- 旧的 control/oracle terminal loss（direct-state 的 `0.25 L_E` 是新的明确输出端点任务）；
 - 把 raw acceleration/jerk 或 approach pass rate用于 checkpoint selection。
 
-这项删除需要在实现回合中作为明确迁移执行；本审核文档本身没有删除任何功能。
+现有 control、oracle 和其他 selector 仍作为显式研究消融保留，避免破坏既有实验功能；
+`run_ts_pipeline.py` 默认路径不会选用它们。旧的可再生 checkpoint/summary schema 不做
+双读迁移，必须用新合同重新生成。
 
 ## 12. 依据与适用边界
 
@@ -563,14 +684,20 @@ model prediction
 - 分量和 ETA 分开报告；threshold verdict 与模型准确率分层；
 - 每 epoch 只算 lean selector，完整 diagnostics 只在训练结束后算。
 
-已被两种子小实验支持、但全量前仍需回归：
+已由单元测试和两种子小实验支持：
 
 - true-time position + time loss 优于当前六维复合 loss；
-- future velocity、kinematic 和 terminal loss 可从正式 direct-state 训练目标中移除。
+- future velocity、kinematic 可从正式 direct-state 训练目标中移除；
+- 一个小权重的真实输出端点任务是必要的，`0.25` 比 `0/0.5/1.0` 的综合 Pareto 更好；
+- 独立时间项不能删除；删除后 ETA MAE 恶化到约 9–12 分钟；
+- `s_T=300/600 s` 存在可解释的 ETA/ADE trade-off，当前 whole-path 主目标选择 600 s；
+- `N=16/32` 必须进入 CV，而 `Q=64` 保持固定。
 
-需要在实现后用 development 数据验证一次：
+仍需由完整 development CV 回答：
 
-- 三通道输出 head 与由曲线导出速度的数值稳定性；
-- endpoint-constrained residual curve 是否保持中段 ADE 优势；
-- `s_T=600 s` 对完整 outer-train CV 的敏感性。若候选间差异小于实际等价区间，保留
-  固定值；不要扩展成大规模 loss-weight 搜索。
+- 两个 backbone 在新增低 `N` 候选下各自的最优超参数；
+- 小 cohort 的 `N=16` 优势能否在全部 outer-train folds 保持；
+- 完整 validation 上 endpoint、ETA 与 raw-kinematic baseline 的分布。
+
+`s_T=600 s` 与 endpoint weight `0.25` 已在进入正式 CV 前冻结，不再扩成 loss-weight 搜索；
+否则 CV 会同时承担模型容量、空间/时间价值判断和终点价值判断，既昂贵又无法解释。

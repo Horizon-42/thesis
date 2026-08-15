@@ -42,6 +42,7 @@ from config import (  # noqa: E402
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
     CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
@@ -173,9 +174,11 @@ def _training_cohort_tag(minimum_future_s: float) -> str:
 
 def _validation_selection_tag(metric: str) -> str:
     return {
-        CHECKPOINT_SELECTION_COMMON_GRID_ADE: "_common_grid_selection",
+        CHECKPOINT_SELECTION_COMMON_GRID_ADE: "",
+        CHECKPOINT_SELECTION_OBJECTIVE: "_legacy_objective_selection",
         CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: "_common_grid_criteria_selection",
         CHECKPOINT_SELECTION_TERMINAL_STATE: "_terminal_state_selection",
+        CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY: "_arc_length_selection",
     }.get(metric, "")
 
 
@@ -446,7 +449,7 @@ class TrainingPlan:
         random_train_anchor: bool = False,
         training_cohort_min_future_s: float = 0.0,
         random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
-        checkpoint_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE,
+        checkpoint_selection_metric: str = CHECKPOINT_SELECTION_COMMON_GRID_ADE,
         validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS,
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
@@ -674,7 +677,7 @@ class TrainingPlan:
                 "--training-cohort-min-future-s",
                 str(self.training_cohort_min_future_s),
             ]
-        if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
+        if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_COMMON_GRID_ADE:
             args += ["--checkpoint-selection-metric", self.checkpoint_selection_metric]
         if self.validation_common_grid_points != DEFAULT_VALIDATION_COMMON_GRID_POINTS:
             args += [
@@ -1432,11 +1435,19 @@ def run_training(
             f"   optimizer : lr={config.learning_rate:g}, weight_decay={config.weight_decay:g}, "
             f"epochs={config.epochs}, patience={config.patience}"
         )
-        print(
-            f"   loss      : final_time={config.final_time_loss_weight:g}, "
-            f"kinematic={config.kinematic_consistency_loss_weight:g}, "
-            f"terminal={config.terminal_loss_weight:g}"
-        )
+        if config.prediction_output == PREDICTION_STATE:
+            print(
+                f"   loss      : true-time 3D position/{config.position_loss_scale_m:g}m "
+                f"+ {config.state_endpoint_loss_weight:g}× output-endpoint position "
+                f"+ final_time/{config.final_time_scale_s:g}s; "
+                "future velocity derived from position"
+            )
+        else:
+            print(
+                f"   loss      : final_time={config.final_time_loss_weight:g}, "
+                f"kinematic={config.kinematic_consistency_loss_weight:g}, "
+                f"terminal={config.terminal_loss_weight:g}"
+            )
         if uses_control_dynamics(config.prediction_output):
             print(
                 f"   control   : effort={config.control_effort_loss_weight:g}, "
@@ -1757,7 +1768,7 @@ def main() -> None:
     parser.add_argument(
         "--checkpoint-selection-metric",
         choices=CHECKPOINT_SELECTION_METRICS,
-        default=CHECKPOINT_SELECTION_OBJECTIVE,
+        default=CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     )
     parser.add_argument(
         "--validation-common-grid-points",

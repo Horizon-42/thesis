@@ -353,7 +353,7 @@ def resample_prediction_to_physical_time(
     return sampled, capped
 
 
-def fixed_anchor_common_grid_metrics(
+def _fixed_anchor_common_position_arrays(
     series: Sequence[FlightSeries],
     config: TSConfig,
     anchor_values: np.ndarray,
@@ -362,9 +362,8 @@ def fixed_anchor_common_grid_metrics(
     segment_durations_s: np.ndarray,
     *,
     points: int,
-    normalizer: Normalizer | None = None,
-) -> dict[str, Any]:
-    """Evaluate aligned fixed-anchor predictions in physical metres and seconds."""
+):
+    """Validate and materialize only the arrays required by formal 3D ADE."""
     count = len(series)
     anchor_values = np.asarray(anchor_values)
     predicted_values = np.asarray(predicted_values)
@@ -380,6 +379,15 @@ def fixed_anchor_common_grid_metrics(
         raise ValueError("predicted final times must be [B]")
     if segment_durations_s.shape != predicted_values.shape[:2]:
         raise ValueError("segment durations must align with predicted nodes")
+    if not (
+        np.isfinite(anchor_values).all()
+        and np.isfinite(predicted_values).all()
+        and np.isfinite(predicted_final_time_s).all()
+        and np.isfinite(segment_durations_s).all()
+    ):
+        raise ValueError("common-grid prediction inputs must be finite")
+    if np.any(predicted_final_time_s <= 0.0) or np.any(segment_durations_s <= 0.0):
+        raise ValueError("common-grid prediction clocks must be positive")
 
     truth, true_duration_s, progress = fixed_anchor_common_truth(series, config, points)
     common = np.empty_like(truth)
@@ -395,6 +403,215 @@ def fixed_anchor_common_grid_metrics(
         )
     delta = common[..., list(POSITION_IDX)] - truth[..., list(POSITION_IDX)]
     error = np.linalg.norm(delta, axis=-1)
+    return truth, common, true_duration_s, progress, capped, error
+
+
+def fixed_anchor_common_grid_ade_metrics(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    anchor_values: np.ndarray,
+    predicted_values: np.ndarray,
+    predicted_final_time_s: np.ndarray,
+    segment_durations_s: np.ndarray,
+    *,
+    points: int,
+) -> dict[str, Any]:
+    """Lean formal selector: common true-time per-flight 3D ADE and FDE only."""
+    (
+        _truth,
+        _common,
+        true_duration_s,
+        _progress,
+        capped,
+        error,
+    ) = _fixed_anchor_common_position_arrays(
+        series,
+        config,
+        anchor_values,
+        predicted_values,
+        predicted_final_time_s,
+        segment_durations_s,
+        points=points,
+    )
+    return _common_grid_ade_result(
+        len(series),
+        points,
+        predicted_final_time_s,
+        true_duration_s,
+        capped,
+        error,
+    )
+
+
+def _common_grid_ade_result(
+    flights: int,
+    points: int,
+    predicted_final_time_s: np.ndarray,
+    true_duration_s: np.ndarray,
+    capped: np.ndarray,
+    error: np.ndarray,
+) -> dict[str, Any]:
+    predicted_final_time_s = np.asarray(predicted_final_time_s, dtype=np.float64)
+    time_error = predicted_final_time_s - true_duration_s
+    return {
+        "anchor": "fixed L-1",
+        "metric_grid": "common true physical-time grid",
+        "points": points,
+        "flights": flights,
+        "ade_m": float(error.mean()),
+        "fde_m": float(error[:, -1].mean()),
+        "final_time_mae_s": float(np.abs(time_error).mean()),
+        "prediction_horizon_cap_rate": float(capped.mean()),
+        "ade_per_flight_m": error.mean(axis=1),
+        "fde_per_flight_m": error[:, -1],
+        "predicted_final_time_s": predicted_final_time_s,
+        "true_final_time_s": true_duration_s,
+    }
+
+
+def _signed_spread(values: np.ndarray) -> dict[str, float]:
+    values = np.asarray(values, dtype=np.float64)
+    magnitude = np.abs(values)
+    return {
+        "mean_signed": float(values.mean()),
+        "mean_abs": float(magnitude.mean()),
+        "p95_abs": float(np.percentile(magnitude, 95)),
+        "max_abs": float(magnitude.max()),
+    }
+
+
+def _magnitude_spread(values: np.ndarray) -> dict[str, float]:
+    values = np.asarray(values, dtype=np.float64)
+    return {
+        "mean": float(values.mean()),
+        "median": float(np.median(values)),
+        "p95": float(np.percentile(values, 95)),
+        "max": float(values.max()),
+    }
+
+
+def fixed_anchor_common_grid_report_metrics(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    anchor_values: np.ndarray,
+    predicted_values: np.ndarray,
+    predicted_final_time_s: np.ndarray,
+    segment_durations_s: np.ndarray,
+    *,
+    points: int,
+) -> dict[str, Any]:
+    """Formal post-fit metrics: one common true-time grid and interpretable components."""
+    truth, common, true_duration_s, progress, capped, error = (
+        _fixed_anchor_common_position_arrays(
+            series,
+            config,
+            anchor_values,
+            predicted_values,
+            predicted_final_time_s,
+            segment_durations_s,
+            points=points,
+        )
+    )
+    delta = common[..., list(POSITION_IDX)] - truth[..., list(POSITION_IDX)]
+    horizontal = np.linalg.norm(delta[..., :2], axis=-1)
+    anchor_positions = np.asarray(anchor_values, dtype=np.float64)[
+        :, None, list(POSITION_IDX)
+    ]
+    truth_with_anchor = np.concatenate((anchor_positions, truth[..., list(POSITION_IDX)]), axis=1)
+    tangent = np.gradient(truth_with_anchor[..., :2], axis=1)[:, 1:]
+    norm = np.linalg.norm(tangent, axis=-1)
+    unit = np.zeros_like(tangent)
+    moving = norm > 1e-9
+    unit[moving] = tangent[moving] / norm[moving, None]
+    along = delta[..., 0] * unit[..., 0] + delta[..., 1] * unit[..., 1]
+    cross = -delta[..., 0] * unit[..., 1] + delta[..., 1] * unit[..., 0]
+    vertical = delta[..., 2]
+    predicted_final_time_s = np.asarray(predicted_final_time_s, dtype=np.float64)
+    time_error = predicted_final_time_s - true_duration_s
+    per_flight_ade = error.mean(axis=1)
+    per_flight_fde = error[:, -1]
+    # FDE above asks "where is the prediction at the true arrival time?".  Separately,
+    # sample the prediction at its own estimated arrival time and compare that position
+    # with the observed output endpoint. Keeping both prevents clock and geometry errors
+    # from being conflated in diagnosis.
+    predicted_arrival = np.empty((len(series), len(POSITION_IDX)), dtype=np.float64)
+    for index in range(len(series)):
+        arrival, _ = resample_prediction_to_physical_time(
+            anchor_values[index],
+            predicted_values[index],
+            float(predicted_final_time_s[index]),
+            config,
+            np.asarray([predicted_final_time_s[index]], dtype=np.float64),
+            segment_durations_s[index],
+        )
+        predicted_arrival[index] = arrival[0, list(POSITION_IDX)]
+    endpoint_error = np.linalg.norm(
+        predicted_arrival - truth[:, -1, list(POSITION_IDX)], axis=-1
+    )
+    return {
+        "anchor": "fixed L-1",
+        "metric_grid": "common true physical-time grid",
+        "points": points,
+        "flights": len(series),
+        "ade_m": float(per_flight_ade.mean()),
+        "fde_m": float(per_flight_fde.mean()),
+        "ade_distribution_m": _magnitude_spread(per_flight_ade),
+        "fde_distribution_m": _magnitude_spread(per_flight_fde),
+        "arrival_endpoint_error_m": _magnitude_spread(endpoint_error),
+        "horizontal_m": _magnitude_spread(horizontal.mean(axis=1)),
+        "along_track_m": _signed_spread(along),
+        "cross_track_m": _signed_spread(cross),
+        "vertical_m": _signed_spread(vertical),
+        "final_time_s": {
+            "mae": float(np.abs(time_error).mean()),
+            "rmse": float(np.sqrt(np.mean(time_error**2))),
+            "p95_abs": float(np.percentile(np.abs(time_error), 95)),
+            "mean_signed": float(time_error.mean()),
+        },
+        "prediction_horizon_cap_rate": float(capped.mean()),
+        "invalid_flights": 0,
+        "by_progress": [
+            {
+                "progress": float(progress[index]),
+                "mean_m": float(error[:, index].mean()),
+                "p95_m": float(np.percentile(error[:, index], 95)),
+            }
+            for index in range(points)
+        ],
+    }
+
+
+def fixed_anchor_common_grid_metrics(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    anchor_values: np.ndarray,
+    predicted_values: np.ndarray,
+    predicted_final_time_s: np.ndarray,
+    segment_durations_s: np.ndarray,
+    *,
+    points: int,
+    normalizer: Normalizer | None = None,
+) -> dict[str, Any]:
+    """Full post-fit diagnostics on the formal common physical-time grid."""
+    truth, common, true_duration_s, progress, capped, error = (
+        _fixed_anchor_common_position_arrays(
+            series,
+            config,
+            anchor_values,
+            predicted_values,
+            predicted_final_time_s,
+            segment_durations_s,
+            points=points,
+        )
+    )
+    result = _common_grid_ade_result(
+        len(series),
+        points,
+        predicted_final_time_s,
+        true_duration_s,
+        capped,
+        error,
+    )
     weights, terminal_velocity_target = (
         fixed_anchor_common_weights_and_terminal_velocity(
             series, config, progress, true_duration_s
@@ -404,23 +621,10 @@ def fixed_anchor_common_grid_metrics(
         common[:, -1, list(VELOCITY_IDX)] - terminal_velocity_target,
         axis=-1,
     )
-    time_error = predicted_final_time_s - true_duration_s
-    result = {
-        "anchor": "fixed L-1",
-        "metric_grid": "common physical-time grid",
-        "points": points,
-        "flights": count,
-        "ade_m": float(error.mean()),
-        "fde_m": float(error[:, -1].mean()),
+    result.update({
         "terminal_velocity_error_mps": float(terminal_velocity_error.mean()),
-        "final_time_mae_s": float(np.abs(time_error).mean()),
-        "prediction_horizon_cap_rate": float(capped.mean()),
-        "ade_per_flight_m": error.mean(axis=1),
-        "fde_per_flight_m": error[:, -1],
         "terminal_velocity_error_per_flight_mps": terminal_velocity_error,
-        "predicted_final_time_s": predicted_final_time_s,
-        "true_final_time_s": true_duration_s,
-    }
+    })
     if normalizer is not None:
         result.update(
             fixed_anchor_arc_length_geometry_metrics(

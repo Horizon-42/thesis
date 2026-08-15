@@ -726,9 +726,9 @@ def optimization_stats(
 def prediction_accuracy_stats(summary: dict[str, Any]) -> dict[str, Any] | None:
     """Frontend accuracy/clock/kinematic summary for a ts_transformer batch.
 
-    The predictor already computes these aggregates against the observed overlap and writes
-    them to ``summary.json.accuracy``. Publication only changes field casing; it must never
-    recompute trajectory accuracy from rendered CZML.
+    The predictor already computes these aggregates on the complete true-time comparison
+    grid and writes them to ``summary.json.accuracy``. Publication only changes field casing;
+    it must never recompute trajectory accuracy from rendered CZML.
     """
     mode = summary.get("mode")
     if not isinstance(mode, str) or not mode.startswith("tsTransformer:"):
@@ -740,8 +740,8 @@ def prediction_accuracy_stats(summary: dict[str, Any]) -> dict[str, Any] | None:
 
     def spread(source_key: str) -> dict[str, float] | None:
         source = accuracy.get(source_key)
-        # `accuracy_block` omits error spreads when no forecast overlaps its observed
-        # reference. That is a valid empty result; the UI renders unavailable metrics.
+        # An empty prediction batch has no spread. That is a valid empty result; the UI
+        # renders unavailable metrics.
         if source is None:
             return None
         if not isinstance(source, dict):
@@ -821,10 +821,10 @@ def prediction_accuracy_stats(summary: dict[str, Any]) -> dict[str, Any] | None:
 
     return {
         "flights": accuracy.get("flights"),
-        "flightsWithoutOverlap": accuracy.get("flights_without_overlap"),
         "finalTimeS": final_time(),
         "adeM": spread("ade_m"),
         "fdeM": spread("fde_m"),
+        "arrivalEndpointErrorM": spread("arrival_endpoint_error_m"),
         "crossTrackP95M": spread("cross_track_p95_m"),
         "altitudeP95M": spread("altitude_p95_m"),
         "rawKinematics": {

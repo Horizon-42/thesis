@@ -92,9 +92,17 @@ from evaluation_protocol import (
     TEST_RELEASE_PROTOCOL_FIELD,
     TEST_RELEASE_SCHEMA,
 )
-from fixed_anchor_validation import fixed_anchor_common_grid_metrics
+from fixed_anchor_validation import (
+    fixed_anchor_common_truth,
+    fixed_anchor_common_grid_ade_metrics,
+    fixed_anchor_common_grid_metrics,
+    fixed_anchor_common_grid_report_metrics,
+)
 from fixed_dt_supervision import FixedDTControlSupervision
-from metrics import error_by_progress, raw_kinematic_metrics, trajectory_metrics
+from metrics import (
+    raw_kinematic_metrics,
+    states_with_derived_velocity,
+)
 from models import build_model, parameter_count, resolve_device
 from prediction_outputs import ControlPrediction, StatePrediction
 from physical_criteria import physical_criteria_loss
@@ -103,15 +111,15 @@ from training_performance import EpochProfiler
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v33-lateral-eligibility"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v35-true-time-endpoint-loss"
 STATE_TARGET_CONTRACTS = {
-    HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
-    HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
-    HORIZON_WINDOW: "recursive-window-fixed-time-displacement-kinematic-v2",
+    HORIZON_NORMALIZED: "normalized-output-true-time-physical-position-duration-v1",
+    HORIZON_FULL: "full-horizon-physical-position-duration-v1",
+    HORIZON_WINDOW: "recursive-window-physical-position-duration-v1",
 }
 HISTORY_NAME = "history.json"
 FIT_EVALUATION_NAME = "fit_evaluation.json"
-FIT_EVALUATION_SCHEMA = "ts-fit-evaluation-v1-best-checkpoint-fixed-anchor"
+FIT_EVALUATION_SCHEMA = "ts-fit-evaluation-v3-common-true-time-endpoint"
 STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
 CONTROL_LOSS_COMPONENT_NAMES = (
     "state", "final_time", "kinematic", "terminal", "control_effort", "control_smoothness"
@@ -810,6 +818,25 @@ def control_prediction_loss_components(
     )
 
 
+def _sample_uniform_progress_nodes(
+    nodes: torch.Tensor,
+    query_progress: torch.Tensor,
+) -> torch.Tensor:
+    """Differentiably sample ``[B,N+1,D]`` nodes defined at progress ``0..1``."""
+    if nodes.ndim != 3 or query_progress.ndim != 2:
+        raise ValueError("progress sampling requires [B,N+1,D] nodes and [B,Q] queries")
+    if nodes.shape[0] != query_progress.shape[0] or nodes.shape[1] < 2:
+        raise ValueError("progress sampling batch/segment shapes do not align")
+    segments = nodes.shape[1] - 1
+    scaled = query_progress.clamp(min=0.0, max=1.0) * segments
+    left = torch.floor(scaled).to(torch.long).clamp(max=segments - 1)
+    fraction = (scaled - left.to(scaled.dtype)).unsqueeze(-1)
+    gather_index = left.unsqueeze(-1).expand(-1, -1, nodes.shape[-1])
+    left_values = torch.gather(nodes, 1, gather_index)
+    right_values = torch.gather(nodes, 1, gather_index + 1)
+    return left_values + fraction * (right_values - left_values)
+
+
 def state_prediction_loss_components(
     prediction: StatePrediction,
     normalized_anchor_state: torch.Tensor,
@@ -823,49 +850,81 @@ def state_prediction_loss_components(
     dense_supervision: FixedDTControlSupervision | None = None,
     training_stage: ControlTrainingStage | None = None,
 ) -> LossComponents:
-    """Return the direct-state strategy's airport-macro loss contributions."""
+    """Return the direct-state physical-position/time airport-macro objective."""
     del dynamics, dense_supervision
     if training_stage is not None:
         raise ValueError("horizon curriculum is not supported by state prediction")
-    state_error = ((prediction.states - target_states) ** 2 * state_weights).sum(
-        dim=(1, 2)
+    if prediction.states.shape != target_states.shape:
+        raise ValueError("state prediction and target tensors must align")
+
+    position_indices = list(POSITION_IDX)
+    position_std = torch.as_tensor(
+        normalizer.std[position_indices],
+        dtype=prediction.states.dtype,
+        device=prediction.states.device,
     )
-    state_denominator = state_weights.sum(dim=(1, 2)).clamp(min=1.0)
-    state_loss = state_error / state_denominator
+    predicted_position = prediction.states[..., position_indices]
+    target_position = target_states[..., position_indices]
+    point_weights = state_weights[..., position_indices].sum(dim=-1)
+
+    # The output endpoint is the last position carrying supervision, not necessarily the
+    # final tensor row: fixed-horizon targets can contain a padded suffix. This is a second
+    # task over the same physical target, not a runway-centre prior or a fitted trajectory.
+    valid_position = point_weights > 0.0
+    if not torch.all(valid_position.any(dim=1)):
+        raise ValueError("every state target must contain a supervised position endpoint")
+    if torch.any(valid_position[:, 1:] & ~valid_position[:, :-1]):
+        raise ValueError("supervised state positions must form a contiguous prefix")
+    last_index = valid_position.sum(dim=1) - 1
+    gather_index = last_index[:, None, None].expand(-1, 1, len(position_indices))
+    predicted_endpoint = torch.gather(predicted_position, 1, gather_index).squeeze(1)
+    target_endpoint = torch.gather(target_position, 1, gather_index).squeeze(1)
+
+    if config.horizon_mode == HORIZON_NORMALIZED:
+        points = config.validation_common_grid_points
+        progress = torch.arange(
+            1,
+            points + 1,
+            dtype=prediction.states.dtype,
+            device=prediction.states.device,
+        ) / points
+        truth_progress = progress.unsqueeze(0).expand(len(target_states), -1)
+        prediction_progress = (
+            truth_progress
+            * target_final_time_s.unsqueeze(1)
+            / prediction.final_time_s.unsqueeze(1).clamp(min=1e-6)
+        ).clamp(min=0.0, max=1.0)
+        anchor_position = normalized_anchor_state[:, None, position_indices]
+        predicted_nodes = torch.cat((anchor_position, predicted_position), dim=1)
+        target_nodes = torch.cat((anchor_position, target_position), dim=1)
+        anchor_weight = point_weights[:, :1]
+        weight_nodes = torch.cat((anchor_weight, point_weights), dim=1)
+        predicted_position = _sample_uniform_progress_nodes(
+            predicted_nodes, prediction_progress
+        )
+        target_position = _sample_uniform_progress_nodes(
+            target_nodes, truth_progress
+        )
+        point_weights = _sample_uniform_progress_nodes(
+            weight_nodes.unsqueeze(-1), truth_progress
+        ).squeeze(-1)
+
+    physical_delta = (predicted_position - target_position) * position_std
+    squared_distance = physical_delta.square().sum(dim=-1)
+    state_loss = (
+        (squared_distance * point_weights).sum(dim=1)
+        / point_weights.sum(dim=1).clamp(min=1e-12)
+        / (config.position_loss_scale_m**2)
+    )
+    endpoint_delta = (predicted_endpoint - target_endpoint) * position_std
+    endpoint_loss = (
+        endpoint_delta.square().sum(dim=-1)
+        / (config.position_loss_scale_m**2)
+    )
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
-    if config.kinematic_consistency_loss_weight:
-        kinematic_loss = position_velocity_consistency_loss(
-            normalized_anchor_state,
-            prediction.states,
-            target_final_time_s,
-            normalizer,
-            config=config,
-            state_weights=state_weights,
-        )
-    else:
-        kinematic_loss = state_loss.new_zeros(state_loss.shape)
-    if config.terminal_loss_weight:
-        position_valid = state_weights[..., list(POSITION_IDX)].sum(dim=-1) > 0.0
-        terminal_index = {
-            HORIZON_NORMALIZED: lambda: torch.full(
-                (len(target_states),),
-                target_states.shape[1] - 1,
-                dtype=torch.long,
-                device=target_states.device,
-            ),
-            HORIZON_FULL: lambda: position_valid.long().sum(dim=1).clamp(min=1) - 1,
-            HORIZON_WINDOW: lambda: position_valid.long().sum(dim=1).clamp(min=1) - 1,
-        }[config.horizon_mode]()
-        rows = torch.arange(len(target_states), device=target_states.device)
-        terminal_delta = (
-            prediction.states[rows, terminal_index][:, list(POSITION_IDX)]
-            - target_states[rows, terminal_index][:, list(POSITION_IDX)]
-        )
-        terminal_loss = terminal_delta.square().mean(dim=1)
-    else:
-        terminal_loss = state_loss.new_zeros(state_loss.shape)
+    zero = state_loss.new_zeros(state_loss.shape)
 
     def weighted_mean(values: torch.Tensor) -> torch.Tensor:
         return (values * flight_weights).mean()
@@ -873,10 +932,8 @@ def state_prediction_loss_components(
     return LossComponents(
         state=weighted_mean(state_loss),
         final_time=config.final_time_loss_weight * weighted_mean(time_loss),
-        kinematic=(
-            config.kinematic_consistency_loss_weight * weighted_mean(kinematic_loss)
-        ),
-        terminal=config.terminal_loss_weight * weighted_mean(terminal_loss),
+        kinematic=weighted_mean(zero),
+        terminal=config.state_endpoint_loss_weight * weighted_mean(endpoint_loss),
     )
 
 
@@ -1148,6 +1205,12 @@ def _prediction_batch_replay(
     anchors = dataset.normalizer.decode(
         x[:, -1].detach().cpu().numpy().astype(np.float64)
     ).astype(np.float32)
+    if not uses_control_dynamics(dataset.config.prediction_output):
+        predicted_physical = states_with_derived_velocity(
+            anchors,
+            predicted_physical,
+            segment_durations_s,
+        ).astype(np.float32)
     raw_mask = metric_weights.detach().cpu().numpy()
     if raw_mask.ndim == 3:
         raw_mask = np.all(raw_mask > 0.0, axis=-1).astype(np.float32)
@@ -1248,20 +1311,67 @@ def evaluate_split(
     *,
     replay: SplitPredictionReplay | None = None,
 ) -> dict[str, Any]:
-    """Physical-unit state and final-time metrics for a split."""
+    """Formal fixed-anchor metrics on the common true-physical-time grid."""
     replay = replay or _predict_split(
         model, dataset, normalizer, device, config.batch_size
     )
-    block = trajectory_metrics(replay.predicted, replay.truth, replay.mask)
-    block["by_progress"] = error_by_progress(
-        replay.predicted, replay.truth, replay.mask
+    block = fixed_anchor_common_grid_report_metrics(
+        dataset.series,
+        config,
+        replay.anchors,
+        replay.predicted,
+        replay.predicted_time_s,
+        replay.segment_durations_s,
+        points=config.validation_common_grid_points,
     )
-    time_error = replay.predicted_time_s - replay.truth_time_s
-    block["final_time_s"] = {
-        "mae": float(np.abs(time_error).mean()),
-        "rmse": float(np.sqrt(np.mean(time_error**2))),
-        "mean_signed": float(time_error.mean()),
+    indices_by_airport: dict[str, list[int]] = {}
+    for index, item in enumerate(dataset.series):
+        indices_by_airport.setdefault(item.airport or "<unknown>", []).append(index)
+    by_airport: dict[str, dict[str, Any]] = {}
+    for airport, indices in sorted(indices_by_airport.items()):
+        selected = np.asarray(indices, dtype=np.int64)
+        airport_block = fixed_anchor_common_grid_report_metrics(
+            [dataset.series[index] for index in indices],
+            config,
+            replay.anchors[selected],
+            replay.predicted[selected],
+            replay.predicted_time_s[selected],
+            replay.segment_durations_s[selected],
+            points=config.validation_common_grid_points,
+        )
+        by_airport[airport] = {
+            key: airport_block[key]
+            for key in (
+                "flights",
+                "ade_m",
+                "fde_m",
+                "arrival_endpoint_error_m",
+                "horizontal_m",
+                "along_track_m",
+                "cross_track_m",
+                "vertical_m",
+                "final_time_s",
+                "prediction_horizon_cap_rate",
+                "invalid_flights",
+            )
+        }
+    block["flight_micro_ade_m"] = block["ade_m"]
+    block["flight_micro_fde_m"] = block["fde_m"]
+    block["per_airport"] = by_airport
+    block["airport_macro"] = {
+        "ade_m": float(np.mean([item["ade_m"] for item in by_airport.values()])),
+        "fde_m": float(np.mean([item["fde_m"] for item in by_airport.values()])),
+        "arrival_endpoint_error_m": float(np.mean([
+            item["arrival_endpoint_error_m"]["mean"]
+            for item in by_airport.values()
+        ])),
+        "final_time_mae_s": float(np.mean([
+            item["final_time_s"]["mae"] for item in by_airport.values()
+        ])),
     }
+    # Compatibility scalar names now point at the single formal airport-macro score.
+    block["ade_m"] = block["airport_macro"]["ade_m"]
+    block["fde_m"] = block["airport_macro"]["fde_m"]
     # Raw model nodes on their own predicted clock: no measured-track interpolation,
     # spline, filtering or CZML resampling. Durations are explicit [B,N] so this call site
     # remains valid when the output layer moves from uniform to nonuniform segments.
@@ -1271,6 +1381,18 @@ def evaluate_split(
         replay.predicted,
         replay.segment_durations_s,
         valid_segments=active_segments,
+    )
+    observed_nodes, observed_duration_s, _ = fixed_anchor_common_truth(
+        dataset.series, config, replay.predicted.shape[1]
+    )
+    observed_segment_durations_s = np.broadcast_to(
+        (observed_duration_s / replay.predicted.shape[1])[:, None],
+        replay.segment_durations_s.shape,
+    ).copy()
+    block["raw_kinematics_observed_baseline"] = raw_kinematic_metrics(
+        replay.anchors,
+        observed_nodes,
+        observed_segment_durations_s,
     )
     return block
 
@@ -1426,7 +1548,7 @@ def evaluate_fit_splits(
     train_metrics = splits["train"]["metrics"]
     val_metrics = splits["val"]["metrics"]
     diagnostics: dict[str, Any] = {
-        "native_generalization": {
+        "generalization": {
             "ade_m": _generalization_metric(train_metrics["ade_m"], val_metrics["ade_m"]),
             "fde_m": _generalization_metric(train_metrics["fde_m"], val_metrics["fde_m"]),
             "final_time_mae_s": _generalization_metric(
@@ -1447,7 +1569,10 @@ def evaluate_fit_splits(
             "anchor": "fixed L-1",
             "batch_order": "sequential (shuffle disabled)",
             "splits": ["train", "val"],
-            "metric_grid": "native target grid; measured-data mask",
+            "metric_grid": (
+                f"Q={config.validation_common_grid_points} common true physical time; "
+                "prediction endpoint held after early completion"
+            ),
         },
         "config": config.to_dict(),
         "splits": splits,
@@ -1471,16 +1596,24 @@ def evaluate_fixed_anchor_series(
             f"fixed-anchor {split_name} replay covers {len(dataset)}/{len(series)} flights"
         )
     replay = _predict_split(model, dataset, normalizer, device, config.batch_size)
+    formal_metrics = evaluate_split(
+        model, dataset, normalizer, config, device, replay=replay
+    )
+    common_grid_metrics = (
+        formal_metrics
+        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE
+        else evaluate_fixed_anchor_common_grid(
+            model, dataset, normalizer, config, device, replay=replay
+        )
+    )
     return {
         "flights": len(series),
         "windows": len(dataset),
         "split_sha256": _split_sha256(series),
-        "metrics": evaluate_split(
-            model, dataset, normalizer, config, device, replay=replay
-        ),
-        "common_grid_metrics": evaluate_fixed_anchor_common_grid(
-            model, dataset, normalizer, config, device, replay=replay
-        ),
+        "metrics": formal_metrics,
+        # Retained as an artifact key for existing report readers. Under the formal ADE
+        # selector it is the same minimal contract, not a second evaluator.
+        "common_grid_metrics": common_grid_metrics,
     }
 
 
@@ -1884,16 +2017,37 @@ def _common_grid_validation_details(
         raise ValueError("validation replays do not match airport sets")
     details: dict[str, dict[str, Any]] = {}
     for airport, dataset in val_sets.items():
+        replay = (
+            replays_by_airport[airport]
+            if replays_by_airport is not None
+            else _predict_split(
+                model, dataset, normalizer, device, config.batch_size
+            )
+        )
+        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE:
+            block = fixed_anchor_common_grid_ade_metrics(
+                dataset.series,
+                config,
+                replay.anchors,
+                replay.predicted,
+                replay.predicted_time_s,
+                replay.segment_durations_s,
+                points=config.validation_common_grid_points,
+            )
+            details[airport] = {
+                "ade_m": block["ade_m"],
+                "fde_m": block["fde_m"],
+                "final_time_mae_s": block["final_time_mae_s"],
+                "flights": block["flights"],
+            }
+            continue
         block = evaluate_fixed_anchor_common_grid(
             model,
             dataset,
             normalizer,
             config,
             device,
-            replay=(
-                replays_by_airport[airport]
-                if replays_by_airport is not None else None
-            ),
+            replay=replay,
         )
         details[airport] = {
             "ade_m": block["ade_m"],
@@ -2831,17 +2985,20 @@ def train(
     if verbose:
         for split, block in split_metrics.items():
             print(f"  {split:5s}  ADE {block['ade_m']:7.1f} m   FDE {block['fde_m']:7.1f} m   "
+                  f"endpoint {block['airport_macro']['arrival_endpoint_error_m']:7.1f} m   "
                   f"cross-track p95 {block['cross_track_m']['p95_abs']:7.1f} m   "
-                  f"alt p95 {block['altitude_m']['p95_abs']:6.1f} m   "
+                  f"alt p95 {block['vertical_m']['p95_abs']:6.1f} m   "
                   f"time MAE {block['final_time_s']['mae']:5.1f} s")
             raw = block["raw_kinematics"]
+            observed_raw = block["raw_kinematics_observed_baseline"]
             print(
-                "         raw kinematics  "
-                f"pos/vel RMSE {raw['position_velocity_rmse_mps']:.2f} m/s   "
-                f"heading p95 {raw['heading_consistency_p95_deg']:.2f} deg   "
-                f"turn {raw['turn_rate_p95_deg_s']:.2f} deg/s   "
-                f"accel {raw['acceleration_p95_mps2']:.2f} m/s²   "
-                f"jerk {raw['jerk_p95_mps3']:.2f} m/s³"
+                "         raw kinematics prediction / observed baseline  "
+                f"turn {raw['turn_rate_p95_deg_s']:.2f}/"
+                f"{observed_raw['turn_rate_p95_deg_s']:.2f} deg/s   "
+                f"accel {raw['acceleration_p95_mps2']:.2f}/"
+                f"{observed_raw['acceleration_p95_mps2']:.2f} m/s²   "
+                f"jerk {raw['jerk_p95_mps3']:.2f}/"
+                f"{observed_raw['jerk_p95_mps3']:.2f} m/s³"
             )
         print(
             f"✓ wrote {out / CHECKPOINT_NAME}, {out / HISTORY_NAME} and "
