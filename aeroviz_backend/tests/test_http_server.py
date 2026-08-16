@@ -37,11 +37,15 @@ class TestAeroVizBackendApp(unittest.TestCase):
 
         status, payload = app.handle_get(
             "/trajectories?airport=krdu&runway=23R&verdict=fail&limit=200&seed=42"
+            "&flight_key=flight-b&flight_key=flight-a"
         )
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["czml"][0]["id"], "document")
-        self.assertEqual(observed_backend.calls, [("krdu", "23R", "fail", 200, 42)])
+        self.assertEqual(
+            observed_backend.calls,
+            [("krdu", "23R", "fail", 200, 42, ["flight-b", "flight-a"])],
+        )
 
     def test_trajectory_endpoint_reports_invalid_query(self):
         app = AeroVizBackendApp(
@@ -243,8 +247,17 @@ class FakeObservedTrajectoryBackend:
     def __init__(self):
         self.calls = []
 
-    def query(self, airport, *, runway=None, verdict=None, limit=200, seed=0):
-        self.calls.append((airport, runway, verdict, limit, seed))
+    def query(
+        self,
+        airport,
+        *,
+        runway=None,
+        verdict=None,
+        limit=200,
+        seed=0,
+        flight_keys=None,
+    ):
+        self.calls.append((airport, runway, verdict, limit, seed, flight_keys))
         return {
             "schemaVersion": "observed-trajectories-v1",
             "czml": [{"id": "document"}, {"id": "TEST"}],

@@ -26,9 +26,9 @@ import type { ComparisonLegendKind } from "../utils/comparisonLegend";
 import { isDrawableComparisonCategory } from "../data/airportData";
 import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
 import {
-  COMPARISON_KIND_COLORS,
   COMPARISON_KIND_ALPHA,
   COMPARISON_STATUS_STYLES,
+  comparisonKindSwatch,
 } from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
 import { useEffect } from "react";
@@ -387,7 +387,7 @@ export default function ControlPanel({
                         and are told apart by their alpha, so a solid swatch would make the two
                         rows look identical. Same source the paths are drawn with. */}
                     <i style={{
-                      background: COMPARISON_KIND_COLORS[kind],
+                      background: comparisonKindSwatch(kind),
                       opacity: COMPARISON_KIND_ALPHA[kind],
                     }} />
                     {COMPARISON_KIND_LABELS[kind]}

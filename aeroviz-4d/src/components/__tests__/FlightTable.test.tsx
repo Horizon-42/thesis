@@ -4,22 +4,22 @@ import { fireEvent, render, screen } from "@testing-library/react";
 type Datum = {
   initialVMps: number | null;
   massKg: number | null;
-  optimizedTimeS: number | null;
-  failed: boolean;
-  offTarget?: boolean;
+  resultTimeS: number | null;
+  status: "solved" | "offTarget" | "indeterminate" | "failed";
 };
 
-const { appState, optimizerData } = vi.hoisted(() => ({
+const { appState, comparisonData } = vi.hoisted(() => ({
   appState: { viewer: null, selectedFlightId: null as string | null, setSelectedFlightId: vi.fn() },
-  optimizerData: {
+  comparisonData: {
     byFlightKey: new Map<string, Datum>(),
     comparisonActive: false,
+    resultKind: "optimization" as "prediction" | "optimization" | null,
   },
 }));
 
 vi.mock("../../context/AppContext", () => ({ useApp: () => appState }));
-vi.mock("../../hooks/useFlightOptimizerData", () => ({
-  useFlightOptimizerData: () => optimizerData,
+vi.mock("../../hooks/useFlightComparisonData", () => ({
+  useFlightComparisonData: () => comparisonData,
 }));
 
 import FlightTable from "../FlightTable";
@@ -38,11 +38,12 @@ const flightSummaries = {
 describe("FlightTable", () => {
   beforeEach(() => {
     appState.selectedFlightId = null;
-    optimizerData.byFlightKey = new Map<string, Datum>([
-      [UPS, { initialVMps: 141.85, massKg: 66300, optimizedTimeS: 576, failed: false }],
-      [FDX, { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false }],
+    comparisonData.byFlightKey = new Map<string, Datum>([
+      [UPS, { initialVMps: 141.85, massKg: 66300, resultTimeS: 576, status: "solved" }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, resultTimeS: 309, status: "solved" }],
     ]);
-    optimizerData.comparisonActive = false;
+    comparisonData.comparisonActive = false;
+    comparisonData.resultKind = "optimization";
     vi.clearAllMocks();
   });
 
@@ -66,7 +67,7 @@ describe("FlightTable", () => {
   });
 
   it("adds the optimized-time column when the comparison is active", () => {
-    optimizerData.comparisonActive = true;
+    comparisonData.comparisonActive = true;
     render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
 
@@ -75,11 +76,11 @@ describe("FlightTable", () => {
   });
 
   it("shows V + mass for a FAILED flight and marks its id red (no optimized time)", () => {
-    optimizerData.comparisonActive = true;
-    optimizerData.byFlightKey = new Map<string, Datum>([
+    comparisonData.comparisonActive = true;
+    comparisonData.byFlightKey = new Map<string, Datum>([
       // failed: still has V + mass (from the scenario), but no optimized time.
-      [UPS, { initialVMps: 134.9, massKg: 136000, optimizedTimeS: null, failed: true }],
-      [FDX, { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false }],
+      [UPS, { initialVMps: 134.9, massKg: 136000, resultTimeS: null, status: "failed" }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, resultTimeS: 309, status: "solved" }],
     ]);
     render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
@@ -95,11 +96,11 @@ describe("FlightTable", () => {
   });
 
   it("marks an OFF-TARGET flight's id yellow but keeps its optimized time", () => {
-    optimizerData.comparisonActive = true;
-    optimizerData.byFlightKey = new Map<string, Datum>([
+    comparisonData.comparisonActive = true;
+    comparisonData.byFlightKey = new Map<string, Datum>([
       // solved but missed the evaluation gates: yellow flag, optimized time still shown.
-      [UPS, { initialVMps: 141.85, massKg: 66300, optimizedTimeS: 576, failed: false, offTarget: true }],
-      [FDX, { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false, offTarget: false }],
+      [UPS, { initialVMps: 141.85, massKg: 66300, resultTimeS: 576, status: "offTarget" }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, resultTimeS: 309, status: "solved" }],
     ]);
     render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
@@ -113,7 +114,7 @@ describe("FlightTable", () => {
   });
 
   it("shows a dash where the optimizer has no data for a flight", () => {
-    optimizerData.byFlightKey = new Map<string, Datum>(); // no optimizer record for any flight
+    comparisonData.byFlightKey = new Map<string, Datum>(); // no comparison record for any flight
     render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
     // Time still comes from the track; V + mass are blank without an optimizer record.
@@ -127,9 +128,10 @@ describe("FlightTable", () => {
     // both rows — the join must be the flight_key.
     const A = "ASA677_05R_a54aae_20260629T093123Z";
     const B = "ASA677_05R_a9e8ce_20260630T093925Z";
-    optimizerData.byFlightKey = new Map<string, Datum>([
-      [A, { initialVMps: 130, massKg: 78000, optimizedTimeS: 400, failed: false }],
-      [B, { initialVMps: 118, massKg: 64000, optimizedTimeS: 350, failed: true }],
+    comparisonData.comparisonActive = true;
+    comparisonData.byFlightKey = new Map<string, Datum>([
+      [A, { initialVMps: 130, massKg: 78000, resultTimeS: 400, status: "solved" }],
+      [B, { initialVMps: 118, massKg: 64000, resultTimeS: 350, status: "failed" }],
     ]);
     render(
       <FlightTable
@@ -148,5 +150,23 @@ describe("FlightTable", () => {
     expect(screen.getByText("130")).toBeTruthy();
     expect(screen.getByText("118")).toBeTruthy();
     expect(rows.filter((el) => el.className.includes("flight-table-failed")).length).toBe(1);
+  });
+
+  it("uses Pred plus baseline green/red for prediction pass and fail", () => {
+    comparisonData.comparisonActive = true;
+    comparisonData.resultKind = "prediction";
+    comparisonData.byFlightKey = new Map<string, Datum>([
+      [UPS, { initialVMps: 141.85, massKg: 66300, resultTimeS: 576, status: "solved" }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, resultTimeS: 309, status: "offTarget" }],
+    ]);
+
+    render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
+    fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
+
+    expect(screen.getByText("Pred")).toBeTruthy();
+    expect(screen.getByText("UPS1276").className).toContain("flight-table-pass");
+    expect(screen.getByText("UPS1276").getAttribute("title")).toContain("prediction passed");
+    expect(screen.getByText("FDX1738").className).toContain("flight-table-failed");
+    expect(screen.getByText("FDX1738").getAttribute("title")).toContain("prediction failed");
   });
 });

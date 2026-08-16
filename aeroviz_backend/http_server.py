@@ -64,12 +64,14 @@ class AeroVizBackendApp:
                 verdict = _query_value(query, "verdict")
                 limit = _query_int(query, "limit", default=200)
                 seed = _query_int(query, "seed", default=0)
+                flight_keys = query.get("flight_key")
                 return 200, self.observed_trajectory_backend.query(
                     airport,
                     runway=runway,
                     verdict=verdict,
                     limit=limit,
                     seed=seed,
+                    flight_keys=flight_keys,
                 )
             except FileNotFoundError as exc:
                 return 404, {"ok": False, "error": str(exc)}

@@ -2973,7 +2973,12 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 /* A flight whose optimization failed — its id is flagged red. */
 .flight-table td.flight-table-failed {
-  color: #ff6b6b;
+  color: rgb(230, 70, 70);
+}
+
+/* Prediction pass — exactly the Baseline pass colour. */
+.flight-table td.flight-table-pass {
+  color: rgb(60, 200, 90);
 }
 
 /* Solved but the final state failed the evaluation gates (off target) — matches the

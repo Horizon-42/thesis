@@ -10,9 +10,10 @@ import type { ComparisonIndex } from "../data/airportData";
 import type { ComparisonKind } from "../context/AppContext";
 
 export type ComparisonStatusLegend =
-  | "failedReference"
-  | "offTargetReference"
-  | "offTargetResult";
+  | "offTargetResult"
+  | "predictionPass"
+  | "predictionFail"
+  | "predictionIndeterminate";
 
 /** Optimizer state sequences are intentionally not user-facing comparison paths. */
 export type ComparisonLegendKind = Exclude<ComparisonKind, "optimizer">;
@@ -55,9 +56,10 @@ export function buildComparisonLegend(
     (group) => selectedRunway === null || group.runway === selectedRunway,
   );
   const availableKinds = new Set<ComparisonKind>();
-  let hasFailedReference = false;
-  let hasOffTargetReference = false;
   let hasOffTargetResult = false;
+  let hasPredictionPass = false;
+  let hasPredictionFail = false;
+  let hasPredictionIndeterminate = false;
 
   for (const group of groups) {
     const groupKinds = new Set(
@@ -67,23 +69,22 @@ export function buildComparisonLegend(
     );
     groupKinds.forEach((kind) => availableKinds.add(kind));
 
-    if (group.status === "failed" && groupKinds.has("reference")) {
-      hasFailedReference = true;
-    }
-    if (group.status === "offTarget" && groupKinds.has("reference")) {
-      hasOffTargetReference = true;
-    }
-    // Only the simulator/result schema bakes the yellow verdict colour. Prediction paths
-    // remain purple even when their index status is offTarget.
+    // Optimizer replay paths retain their yellow off-target result convention.
     if (group.status === "offTarget" && groupKinds.has("simulator")) {
       hasOffTargetResult = true;
+    }
+    if (groupKinds.has("predicted")) {
+      if (group.status === "solved") hasPredictionPass = true;
+      if (group.status === "offTarget") hasPredictionFail = true;
+      if (group.status === "indeterminate") hasPredictionIndeterminate = true;
     }
   }
 
   const statuses: ComparisonStatusLegend[] = [];
-  if (hasFailedReference) statuses.push("failedReference");
-  if (hasOffTargetReference) statuses.push("offTargetReference");
   if (hasOffTargetResult) statuses.push("offTargetResult");
+  if (hasPredictionPass) statuses.push("predictionPass");
+  if (hasPredictionFail) statuses.push("predictionFail");
+  if (hasPredictionIndeterminate) statuses.push("predictionIndeterminate");
 
   return {
     kinds: DISPLAY_KIND_ORDER.filter((kind) => availableKinds.has(kind)),

@@ -107,6 +107,48 @@ def test_query_sampling_is_stable_for_the_same_seed(tmp_path):
     ]
 
 
+def test_query_returns_exact_requested_flight_keys_in_request_order(tmp_path):
+    harvest_root = tmp_path / "harvest"
+    _write_harvest(harvest_root)
+    manifest = json.loads(
+        (harvest_root / "KAAA" / "tracks" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    keys = [row["flight_key"] for row in manifest["records"]]
+    backend = ObservedTrajectoryBackend(harvest_root=harvest_root)
+
+    response = backend.query(
+        "KAAA",
+        flight_keys=[keys[3], keys[0]],
+        # Exact selection is independent of the ordinary random-sample limit.
+        limit=1,
+        seed=999,
+    )
+
+    assert [packet["id"] for packet in response["czml"][1:]] == [
+        keys[3],
+        keys[0],
+    ]
+
+
+def test_query_rejects_missing_or_duplicate_exact_flight_keys(tmp_path):
+    harvest_root = tmp_path / "harvest"
+    _write_harvest(harvest_root)
+    manifest = json.loads(
+        (harvest_root / "KAAA" / "tracks" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    key = manifest["records"][0]["flight_key"]
+    backend = ObservedTrajectoryBackend(harvest_root=harvest_root)
+
+    with pytest.raises(ValueError, match="not found"):
+        backend.query("KAAA", flight_keys=[key, "missing-flight"])
+    with pytest.raises(ValueError, match="duplicate"):
+        backend.query("KAAA", flight_keys=[key, key])
+
+
 def test_query_filters_by_verdict_before_sampling_and_returns_metadata(tmp_path):
     harvest_root = tmp_path / "harvest"
     evaluation_root = tmp_path / "airports"

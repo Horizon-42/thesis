@@ -47,9 +47,8 @@ function FlightApp() {
     status: landingsStatus,
     error: landingsError,
   } = useLandingsManifest(activeAirportCode ?? "");
-  // Observed tracks are loaded AND painted only in Observe (see planObservedTracks): the
-  // runway profile samples them only in Observe too, so no other task needs them in memory
-  // — and loading them elsewhere would let the observed layer hijack the shared clock.
+  // The independently sampled Baseline source exists only in Observe/Baseline. Comparison
+  // loads its exact index-selected references in useComparisonTrajectoryLayer instead.
   const {
     fileUrl: observedFileUrl,
     visible: observedVisible,
@@ -64,20 +63,18 @@ function FlightApp() {
     landingsManifest,
     landingsStatus,
   });
-  const {
-    flightIds,
-    flightSummaries,
-    warning,
-    error,
-    observedVerdicts,
-    observedEvaluation,
-  } = useObservedTrajectoryLayer(
+  const observedLayer = useObservedTrajectoryLayer(
     observedFileUrl,
     observedVisible,
   );
-  useComparisonTrajectoryLayer();
-  const czmlError = landingsError ?? error;
-  const czmlStatus = czmlError ?? warning;
+  const comparisonLayer = useComparisonTrajectoryLayer();
+  const activeTrajectoryLayer = trajectoryComparison ? comparisonLayer : observedLayer;
+  const {
+    observedVerdicts,
+    observedEvaluation,
+  } = observedLayer;
+  const czmlError = landingsError ?? activeTrajectoryLayer.error;
+  const czmlStatus = czmlError ?? activeTrajectoryLayer.warning;
 
   return (
     <>
@@ -89,8 +86,8 @@ function FlightApp() {
       <WorkbenchShell
         left={
           <WorkbenchLeftDock
-            flightIds={flightIds}
-            flightSummaries={flightSummaries}
+            flightIds={activeTrajectoryLayer.flightIds}
+            flightSummaries={activeTrajectoryLayer.flightSummaries}
             observedVerdicts={observedVerdicts}
             observedEvaluation={observedEvaluation}
           />

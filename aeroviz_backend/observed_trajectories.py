@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from aeroviz_backend import paths
@@ -76,6 +77,7 @@ class ObservedTrajectoryBackend:
         verdict: str | None = None,
         limit: int = DEFAULT_LIMIT,
         seed: int = 0,
+        flight_keys: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         code = _normalize_airport(airport)
         runway_ident = _normalize_runway(runway)
@@ -85,6 +87,10 @@ class ObservedTrajectoryBackend:
             raise ValueError(
                 f"limit must be between 0 and {self.max_trajectories}"
             )
+        requested_keys = _normalize_flight_keys(
+            flight_keys,
+            max_trajectories=self.max_trajectories,
+        )
 
         harvest_paths = HarvestPaths(self.harvest_root, code)
         manifest = read_manifest(harvest_paths)
@@ -113,7 +119,21 @@ class ObservedTrajectoryBackend:
                     == verdict_filter
                 ]
 
-        if requested_limit == 0:
+        if requested_keys is not None:
+            eligible_by_key = {
+                str(row["flight_key"]): row
+                for row in eligible
+            }
+            missing = [key for key in requested_keys if key not in eligible_by_key]
+            if missing:
+                preview = ", ".join(missing[:3])
+                suffix = "" if len(missing) <= 3 else f" (+{len(missing) - 3} more)"
+                raise ValueError(
+                    f"{len(missing)} requested flight_key value(s) were not found in "
+                    f"{code} {runway_ident or 'eligible arrivals'}: {preview}{suffix}"
+                )
+            selected = [eligible_by_key[key] for key in requested_keys]
+        elif requested_limit == 0:
             if len(eligible) > self.max_trajectories:
                 raise ValueError(
                     f"{code} {runway_ident or 'all runways'} has {len(eligible)} "
@@ -275,6 +295,25 @@ def _normalize_verdict(value: str | None) -> str | None:
     if verdict not in _VERDICTS:
         raise ValueError("verdict must be all, pass, fail, or undecided")
     return verdict
+
+
+def _normalize_flight_keys(
+    values: Sequence[str] | None,
+    *,
+    max_trajectories: int,
+) -> list[str] | None:
+    if values is None:
+        return None
+    keys = [str(value).strip() for value in values]
+    if not keys or any(not key for key in keys):
+        raise ValueError("flight_key values must be non-empty")
+    if len(keys) > max_trajectories:
+        raise ValueError(
+            f"at most {max_trajectories} flight_key values may be requested"
+        )
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate flight_key values are not allowed")
+    return keys
 
 
 def _stable_sample(

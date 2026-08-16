@@ -18,31 +18,29 @@
 import { sampleSubset, type Rng } from "./sampleTrajectories";
 import type { ComparisonKind } from "../context/AppContext";
 import type { ComparisonStatusLegend } from "./comparisonLegend";
+import { OBSERVED_VERDICT_COLORS } from "./observedVerdictColors";
 
 /** Uniform path width for every trajectory (observed + comparison), in px. */
 export const TRAJECTORY_PATH_WIDTH = 2;
 
 /**
  * The single source of truth for the prediction-comparison kind colours. Both the legend
- * swatches (ControlPanel) and the rendered path/label colours (useComparisonTrajectoryLayer)
- * read this, so they can never drift. The CZML bakes its own colours in, but they vary by
- * category and don't necessarily match the legend, so the frontend overrides each opt/sim
- * path to these. Exceptions keep the CZML-baked verdict colours: the reference always
- * (white / dark-red `FAILED_COLOR` / dark-amber `OFF_TARGET_REF_COLOR`), and every path
- * of an off-target group (the builder bakes the simulator/result path bright yellow —
+ * base colours. Prediction outcomes override the purple fallback with the shared Baseline
+ * verdict palette; its checkbox uses a green/red/gray split swatch. The CZML bakes its own
+ * colours in, but they vary by category, so the frontend owns the final contract.
+ * References are always white. Optimizer paths keep the CZML-baked verdict
+ * colour for an off-target group (the builder bakes the simulator/result path bright yellow —
  * `OFF_TARGET_COLOR` — because the marking belongs on the trajectory that missed the
  * target). Keep these RGB values in sync with
- * `python/build_scenario_comparison_czml.py` (OPTIMIZER_COLOR / SIMULATOR_COLOR /
- * PREDICTION_COLOR / LOOKBACK_COLOR).
+ * `python/build_scenario_comparison_czml.py` for the optimizer and lookback base colours.
  */
 export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
   reference: "rgb(235, 235, 235)",
   optimizer: "rgb(255, 140, 0)", // "Optimize states"
   simulator: "rgb(40, 120, 255)", // "Optimize results"
-  predicted: "rgb(170, 90, 230)", // "Predicted" — ts_transformer forecast
-  // The forecast's INPUT window, deliberately the same hue as the forecast: it is one
-  // continuous track, and what distinguishes the given half from the predicted half is the
-  // alpha (COMPARISON_KIND_ALPHA), not the colour.
+  predicted: "rgb(170, 90, 230)", // fallback when no terminal verdict is available
+  // The forecast's input window is purple and faded; unlike the evaluated output, it does
+  // not carry pass/fail semantics.
   lookback: "rgb(170, 90, 230)",
 };
 
@@ -59,32 +57,44 @@ export const COMPARISON_KIND_ALPHA: Record<ComparisonKind, number> = {
   lookback: 85 / 255,
 };
 
+/** Checkbox swatches describe the rendered path. Prediction has outcome colours, not one hue. */
+export function comparisonKindSwatch(kind: ComparisonKind): string {
+  if (kind !== "predicted") return COMPARISON_KIND_COLORS[kind];
+  return `linear-gradient(90deg, ${OBSERVED_VERDICT_COLORS.pass} 0 46%, ` +
+    `${OBSERVED_VERDICT_COLORS.fail} 46% 92%, ${OBSERVED_VERDICT_COLORS.undecided} 92% 100%)`;
+}
+
 /**
- * Outcome colours that override a kind's normal colour. These exact RGB/alpha values are
- * shared by the rendered canonical references and the dynamic legend; the off-target result
- * is baked into simulator CZML and preserved by `applyComparisonRenderModel`.
+ * Outcome colours that override a kind's normal colour. Prediction uses the exact same
+ * pass/fail/undecided palette as Baseline; optimizer replay keeps its established yellow
+ * off-target result colour.
  *
- * Keep in sync with build_scenario_comparison_czml.py:
- * FAILED_COLOR / OFF_TARGET_REF_COLOR / OFF_TARGET_COLOR.
+ * Keep the optimizer result entry in sync with build_scenario_comparison_czml.py's
+ * OFF_TARGET_COLOR.
  */
 export const COMPARISON_STATUS_STYLES: Record<
   ComparisonStatusLegend,
   { label: string; color: string; alpha: number }
 > = {
-  failedReference: {
-    label: "Unsolved reference",
-    color: "rgb(200, 60, 60)",
-    alpha: 200 / 255,
-  },
-  offTargetReference: {
-    label: "Off-target reference",
-    color: "rgb(150, 118, 25)",
-    alpha: 200 / 255,
-  },
   offTargetResult: {
     label: "Off-target optimize result",
     color: "rgb(255, 205, 40)",
     alpha: 235 / 255,
+  },
+  predictionPass: {
+    label: "Prediction pass",
+    color: OBSERVED_VERDICT_COLORS.pass,
+    alpha: COMPARISON_KIND_ALPHA.predicted,
+  },
+  predictionFail: {
+    label: "Prediction fail",
+    color: OBSERVED_VERDICT_COLORS.fail,
+    alpha: COMPARISON_KIND_ALPHA.predicted,
+  },
+  predictionIndeterminate: {
+    label: "Prediction indeterminate",
+    color: OBSERVED_VERDICT_COLORS.undecided,
+    alpha: COMPARISON_KIND_ALPHA.predicted,
   },
 };
 

@@ -42,25 +42,35 @@ describe("buildComparisonLegend", () => {
     ]), null);
 
     expect(result.kinds).toEqual(["reference", "simulator"]);
-    expect(result.statuses).toEqual([
-      "failedReference",
-      "offTargetReference",
-      "offTargetResult",
-    ]);
+    expect(result.statuses).toEqual(["offTargetResult"]);
     expect(result.kinds).not.toContain("optimizer");
   });
 
-  it("uses prediction kinds without inventing the optimizer-result yellow", () => {
+  it("uses baseline-style prediction outcome colours without recolouring references", () => {
     const result = buildComparisonLegend(index([
+      group("pass", "05L", "solved", [
+        "ref-pass",
+        "look-pass",
+        "pred-pass",
+      ]),
       group("forecast", "05L", "offTarget", [
         "ref-forecast",
         "look-forecast",
         "pred-forecast",
       ]),
+      group("unknown", "05L", "indeterminate", [
+        "ref-unknown",
+        "look-unknown",
+        "pred-unknown",
+      ]),
     ]), null);
 
     expect(result.kinds).toEqual(["reference", "predicted", "lookback"]);
-    expect(result.statuses).toEqual(["offTargetReference"]);
+    expect(result.statuses).toEqual([
+      "predictionPass",
+      "predictionFail",
+      "predictionIndeterminate",
+    ]);
   });
 
   it("limits the legend to the selected runway", () => {
@@ -70,6 +80,6 @@ describe("buildComparisonLegend", () => {
     ]), "23R");
 
     expect(result.kinds).toEqual(["reference", "predicted", "lookback"]);
-    expect(result.statuses).toEqual([]);
+    expect(result.statuses).toEqual(["predictionPass"]);
   });
 });

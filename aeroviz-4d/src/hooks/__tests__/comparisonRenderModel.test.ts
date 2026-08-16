@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import * as Cesium from "cesium";
 import {
   applyComparisonRenderModel,
+  applyComparisonReferenceRenderModel,
   availabilityByEntityId,
-  captureObservedEntityStyle,
   isComparisonEntity,
   kindOfEntityId,
-  restoreObservedEntityStyle,
 } from "../useComparisonTrajectoryLayer";
 import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../../utils/trajectoryRenderModel";
+import { OBSERVED_VERDICT_COLORS } from "../../utils/observedVerdictColors";
 
 /**
  * Which paths get repainted from the legend, and which keep the colour the CZML baked in.
@@ -47,10 +47,31 @@ function expectLegendColor(e: Cesium.Entity, kind: keyof typeof COMPARISON_KIND_
 }
 
 describe("applyComparisonRenderModel path colouring", () => {
-  it("repaints a prediction from the legend even though its status is offTarget", () => {
+  it("draws a failed prediction red like a failed baseline", () => {
     const e = entity("pred-AAL542_05L", "offTarget");
     applyComparisonRenderModel(e, new Set());
-    expectLegendColor(e, "predicted");
+    const expected = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS.fail);
+    const actual = renderedColor(e);
+    expect([actual.red, actual.green, actual.blue])
+      .toEqual([expected.red, expected.green, expected.blue]);
+  });
+
+  it("draws a passing prediction green like a passing baseline", () => {
+    const e = entity("pred-AAL542_05L", "solved");
+    applyComparisonRenderModel(e, new Set());
+    const expected = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS.pass);
+    const actual = renderedColor(e);
+    expect([actual.red, actual.green, actual.blue])
+      .toEqual([expected.red, expected.green, expected.blue]);
+  });
+
+  it("draws an indeterminate prediction gray like an undecided baseline", () => {
+    const e = entity("pred-AAL542_05L", "indeterminate");
+    applyComparisonRenderModel(e, new Set());
+    const expected = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS.undecided);
+    const actual = renderedColor(e);
+    expect([actual.red, actual.green, actual.blue])
+      .toEqual([expected.red, expected.green, expected.blue]);
   });
 
   it("repaints optimizer and simulator paths from the legend when on target", () => {
@@ -161,39 +182,11 @@ describe("comparison entity availability", () => {
   });
 });
 
-describe("canonical observed style lifetime", () => {
-  it("restores the exact pre-comparison property objects", () => {
-    const originalMaterial = new Cesium.ColorMaterialProperty(Cesium.Color.BLUE);
-    const originalWidth = new Cesium.ConstantProperty(2);
-    const originalLabelColor = new Cesium.ConstantProperty(Cesium.Color.WHITE);
-    const originalLabelShow = new Cesium.ConstantProperty(true);
-    const originalAnimation = new Cesium.ConstantProperty(true);
-    const observed = new Cesium.Entity({
-      id: "AFR074_05L",
-      show: true,
-      path: new Cesium.PathGraphics({ material: originalMaterial, width: originalWidth }),
-      label: new Cesium.LabelGraphics({
-        fillColor: originalLabelColor,
-        show: originalLabelShow,
-      }),
-      model: new Cesium.ModelGraphics({ runAnimations: originalAnimation }),
-    });
-    const snapshot = captureObservedEntityStyle(observed);
+describe("comparison references", () => {
+  it("keeps exact observed references white regardless of prediction outcome", () => {
+    const observed = entity("AFR074_05L", "offTarget");
+    applyComparisonReferenceRenderModel(observed, new Set());
 
-    observed.show = false;
-    observed.path!.material = new Cesium.ColorMaterialProperty(Cesium.Color.RED);
-    observed.path!.width = new Cesium.ConstantProperty(9);
-    observed.label!.fillColor = new Cesium.ConstantProperty(Cesium.Color.YELLOW);
-    observed.label!.show = new Cesium.ConstantProperty(false);
-    observed.model!.runAnimations = new Cesium.ConstantProperty(false);
-
-    restoreObservedEntityStyle(observed, snapshot);
-
-    expect(observed.show).toBe(true);
-    expect(observed.path!.material).toBe(originalMaterial);
-    expect(observed.path!.width).toBe(originalWidth);
-    expect(observed.label!.fillColor).toBe(originalLabelColor);
-    expect(observed.label!.show).toBe(originalLabelShow);
-    expect(observed.model!.runAnimations).toBe(originalAnimation);
+    expectLegendColor(observed, "reference");
   });
 });

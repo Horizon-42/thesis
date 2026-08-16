@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isObservedTrajectoryResponse,
   decodeObservedVerdicts,
+  observedReferenceTracksUrl,
   planObservedTracks,
   type ObservedTrackInputs,
 } from "./observedTracks";
@@ -93,12 +94,9 @@ describe("planObservedTracks", () => {
     },
   );
 
-  it("hides observed tracks in Observe while the 3-colour comparison is on (still loaded)", () => {
+  it("releases the independently sampled baseline while comparison owns exact references", () => {
     const plan = planObservedTracks({ ...base, trajectoryComparison: true });
-    expect(plan.fileUrl).toBe(
-      `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0`,
-    );
-    expect(plan.visible).toBe(false);
+    expect(plan).toEqual({ fileUrl: "", visible: false });
   });
 
   it("puts sample-count changes in the request URL so the loader refetches", () => {
@@ -113,12 +111,12 @@ describe("planObservedTracks", () => {
     );
   });
 
-  it("does not apply the baseline verdict to comparison reference loading", () => {
+  it("does not keep a hidden verdict-filtered baseline behind comparison", () => {
     expect(planObservedTracks({
       ...base,
       trajectoryComparison: true,
       observedVerdictFilter: "fail",
-    }).fileUrl).toBe(`${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0`);
+    })).toEqual({ fileUrl: "", visible: false });
   });
 
   it("loads nothing when no airport is active", () => {
@@ -126,6 +124,27 @@ describe("planObservedTracks", () => {
       fileUrl: "",
       visible: true,
     });
+  });
+});
+
+describe("observedReferenceTracksUrl", () => {
+  it("requests the exact comparison roster with repeated encoded flight keys", () => {
+    expect(observedReferenceTracksUrl({
+      backendUrl: `${BACKEND_URL}/`,
+      airport: "KSJC",
+      flightKeys: ["SWA 1_12L", "UAL2_30R"],
+    })).toBe(
+      `${BACKEND_URL}/trajectories?airport=KSJC` +
+      "&flight_key=SWA+1_12L&flight_key=UAL2_30R",
+    );
+  });
+
+  it("returns no request for an empty roster", () => {
+    expect(observedReferenceTracksUrl({
+      backendUrl: BACKEND_URL,
+      airport: "KSJC",
+      flightKeys: [],
+    })).toBe("");
   });
 });
 

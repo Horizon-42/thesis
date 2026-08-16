@@ -7,7 +7,7 @@
  * **callsign** is the packet's `name` (the entity id is the full flight_key
  * `id_runway_icao24_landingTime` — unique but not what a human scans a list for). The
  * flight's **V** and **mass** are NOT re-estimated on the frontend — they come from the
- * optimizer's scenario initial state (see useFlightOptimizerData), the single source the
+ * comparison scenario initial state (see useFlightComparisonData), the single source the
  * optimizer itself started from.
  *
  * The observed packets carry position as `position.cartographicDegrees = [t, lon, lat, alt, …]`

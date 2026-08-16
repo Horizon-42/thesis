@@ -369,13 +369,13 @@ describe("ControlPanel", () => {
     expect(screen.getByText("campaign/stage/run/checkpoint.pt")).toBeTruthy();
   });
 
-  it("shows only optimizer-category paths, explains verdict overrides, and omits Optimize states", () => {
+  it("shows only optimizer-category paths, explains result overrides, and omits Optimize states", () => {
     appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = "runway";
     appState.comparisonCategories = [category("runway", false)];
     appState.comparisonLegend = {
       kinds: ["reference", "simulator"],
-      statuses: ["failedReference", "offTargetReference", "offTargetResult"],
+      statuses: ["offTargetResult"],
       status: "ready",
     };
 
@@ -385,8 +385,6 @@ describe("ControlPanel", () => {
     expect(screen.getByLabelText("Optimize results")).toBeTruthy();
     expect(screen.queryByLabelText("Optimize states")).toBeNull();
     expect(screen.queryByLabelText("Predicted")).toBeNull();
-    expect(screen.getByText("Unsolved reference")).toBeTruthy();
-    expect(screen.getByText("Off-target reference")).toBeTruthy();
     expect(screen.getByText("Off-target optimize result")).toBeTruthy();
   });
 
@@ -396,7 +394,7 @@ describe("ControlPanel", () => {
     appState.comparisonCategories = [category("ts_transformer", false)];
     appState.comparisonLegend = {
       kinds: ["reference", "predicted", "lookback"],
-      statuses: ["offTargetReference"],
+      statuses: ["predictionPass", "predictionFail", "predictionIndeterminate"],
       status: "ready",
     };
 
@@ -408,6 +406,9 @@ describe("ControlPanel", () => {
     expect(screen.queryByLabelText("Optimize results")).toBeNull();
     expect(screen.queryByLabelText("Optimize states")).toBeNull();
     expect(screen.queryByText("Off-target optimize result")).toBeNull();
+    expect(screen.getByText("Prediction pass")).toBeTruthy();
+    expect(screen.getByText("Prediction fail")).toBeTruthy();
+    expect(screen.getByText("Prediction indeterminate")).toBeTruthy();
   });
 
   // ── Approach-approach-view toggle (Feature B) ──────────────────────────────────────

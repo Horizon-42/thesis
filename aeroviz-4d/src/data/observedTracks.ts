@@ -14,8 +14,8 @@
  *     the shared viewer clock from the observed CZML's span; loading it behind a
  *     profile in Optimize/Fly would hijack the optimized playback's clock and make
  *     that track vanish — so we simply don't load it there.)
- *   • baseline styling is painted only in Observe with no comparison. Comparison
- *     temporarily owns the canonical observed entities it uses as references.
+ *   • baseline styling is painted only in Observe with no comparison. Comparison owns
+ *     a separate exact reference roster selected by its committed index.
  *   • sampled ONCE by the backend, after runway + terminal-verdict filtering. The
  *     browser therefore receives no discarded entities and never repeats selection.
  */
@@ -98,7 +98,7 @@ export function planObservedTracks({
   landingsManifest,
   landingsStatus,
 }: ObservedTrackInputs): ObservedTrackPlan {
-  const relevant = !!activeAirportCode && mode === "observe";
+  const relevant = !!activeAirportCode && mode === "observe" && !trajectoryComparison;
   let fileUrl = "";
   const publicationReady =
     landingsStatus === undefined || (landingsStatus === "ready" && !!landingsManifest);
@@ -113,13 +113,31 @@ export function planObservedTracks({
       seed: "0",
     });
     if (selectedRunway) params.set("runway", selectedRunway);
-    if (!trajectoryComparison && observedVerdictFilter !== "all") {
+    if (observedVerdictFilter !== "all") {
       params.set("verdict", observedVerdictFilter);
     }
     fileUrl = `${backendUrl.replace(/\/+$/, "")}/trajectories?${params.toString()}`;
   }
   const visible = observedTracksVisible({ mode, trajectoryComparison });
   return { fileUrl, visible };
+}
+
+export interface ObservedReferenceTrackRequest {
+  backendUrl: string;
+  airport: string;
+  flightKeys: string[];
+}
+
+/** Build one backend request for the exact groups sampled from a comparison index. */
+export function observedReferenceTracksUrl({
+  backendUrl,
+  airport,
+  flightKeys,
+}: ObservedReferenceTrackRequest): string {
+  if (!airport || flightKeys.length === 0) return "";
+  const params = new URLSearchParams({ airport });
+  for (const flightKey of flightKeys) params.append("flight_key", flightKey);
+  return `${backendUrl.replace(/\/+$/, "")}/trajectories?${params.toString()}`;
 }
 
 export function observedTracksVisible({
