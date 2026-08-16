@@ -23,6 +23,7 @@ import run_ts_pipeline as pipeline
 from channels import POSITION_IDX
 from config import PREDICTION_CONTROL_MIXTURE
 from control_mixture import ControlMixturePrediction
+from control_rollout import rollout_control_endpoints
 from dataset import (
     arrival_data_provenance,
     build_series,
@@ -30,7 +31,7 @@ from dataset import (
     require_matching_data_provenance,
 )
 from models import resolve_device
-from train import control_rollout_channels, usable_series
+from train import usable_series
 from run_ts_predictability_report import (
     common_truth,
     displacement_errors,
@@ -89,9 +90,12 @@ def evaluate_candidates(
             sampled_experts: list[np.ndarray] = []
             for expert in range(output.expert_count):
                 candidate = output.candidate(expert)
-                channels, _geodetic = control_rollout_channels(
-                    candidate, dynamics, run.config
-                )
+                channels = rollout_control_endpoints(
+                    candidate.controls,
+                    candidate.segment_durations,
+                    dynamics,
+                    run.config,
+                ).channels
                 decoded = channels.cpu().numpy().astype(np.float32)
                 durations = candidate.segment_durations.cpu().numpy().astype(np.float64)
                 sampled = []

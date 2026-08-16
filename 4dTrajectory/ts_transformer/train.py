@@ -57,10 +57,7 @@ from config import (
     uses_control_dynamics,
 )
 from control_mixture import ControlMixturePrediction
-from control_dynamics_backends import (
-    DenseControlRolloutChannels,
-    control_dynamics_backend,
-)
+import control_rollout
 from control_loss_components import (
     ControlStateLossResult,
     control_tracking_loss_terms,
@@ -311,55 +308,6 @@ def model_forward(
     dynamics: dict[str, torch.Tensor] | None,
 ):
     return model(history) if dynamics is None else model(history, dynamics)
-
-
-def control_rollout_channels(
-    prediction: ControlPrediction,
-    dynamics: dict[str, torch.Tensor],
-    config: TSConfig,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return physical chart channels and geodetic segment endpoints."""
-    # ECEF coordinates are O(6e6 m); float32 subtraction would quantize local offsets at
-    # roughly half-metre resolution and accumulate through a long rollout.  The dynamics
-    # contract therefore runs in float64 even when the network itself trains in float32;
-    # ``to(float64)`` remains differentiable and gradients return to the FP32 parameters.
-    rollout_dtype = torch.float64
-    rollout = control_dynamics_backend(config).endpoint_rollout(
-        dynamics["initial_state"].to(rollout_dtype),
-        prediction.controls.to(rollout_dtype),
-        prediction.segment_durations.to(rollout_dtype),
-        dynamics["aero_params"].to(rollout_dtype),
-        dynamics["frame_params"].to(rollout_dtype),
-        config,
-    )
-    return rollout.channels, rollout.geodetic_states
-
-
-def control_dense_rollout_channels(
-    prediction: ControlPrediction,
-    dynamics: dict[str, torch.Tensor],
-    query_offsets_s: torch.Tensor,
-    query_valid: torch.Tensor,
-    config: TSConfig,
-) -> DenseControlRolloutChannels:
-    """Return actual RK4 states at requested physical times and segment boundaries.
-
-    This is the deployable counterpart to :func:`control_rollout_channels`.  Callers that
-    need a trajectory curve must use query states from this function; segment endpoints are
-    intentionally too sparse to stand in for the integrated path.
-    """
-    rollout_dtype = torch.float64
-    return control_dynamics_backend(config).dense_rollout(
-        dynamics["initial_state"].to(rollout_dtype),
-        prediction.controls.to(rollout_dtype),
-        prediction.segment_durations.to(rollout_dtype),
-        dynamics["aero_params"].to(rollout_dtype),
-        dynamics["frame_params"].to(rollout_dtype),
-        query_offsets_s.to(dtype=rollout_dtype, device=prediction.controls.device),
-        query_valid.to(device=prediction.controls.device),
-        config,
-        segment_valid=None,
-    )
 
 
 def align_control_targets_to_prediction_clock(
@@ -626,9 +574,13 @@ def _native_endpoint_control_state_loss(
     del dense_supervision
     if segment_valid is not None:
         raise ValueError("native endpoint state loss does not support horizon curriculum")
-    physical_channels, _geodetic = control_rollout_channels(
-        prediction, dynamics, config
+    rollout = control_rollout.rollout_control_endpoints(
+        prediction.controls,
+        prediction.segment_durations,
+        dynamics,
+        config,
     )
+    physical_channels = rollout.channels
     dtype, device = physical_channels.dtype, physical_channels.device
     mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)
     scale = torch.as_tensor(normalizer.std, dtype=dtype, device=device)
@@ -1200,8 +1152,9 @@ def _prediction_batch_replay(
         predicted_total_s = deployable.segment_durations.to(torch.float64).sum(dim=1)
         query_offsets_s = predicted_total_s.unsqueeze(1) * progress.unsqueeze(0)
         query_valid = torch.ones_like(query_offsets_s, dtype=torch.bool)
-        rollout = control_dense_rollout_channels(
-            deployable,
+        rollout = control_rollout.rollout_control_dense(
+            deployable.controls,
+            deployable.segment_durations,
             dynamics,
             query_offsets_s,
             query_valid,

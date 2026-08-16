@@ -19,7 +19,7 @@ from config import (
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     TSConfig,
 )
-from control_dynamics_backends import control_dynamics_backend
+import control_rollout
 from control_loss_components import ControlStateLossResult
 from control_training_curriculum import ControlTrainingStage
 from dataset import Normalizer
@@ -113,13 +113,10 @@ def _roll_out_terminal_endpoints(
     config: TSConfig,
     normalizer: Normalizer,
 ) -> ControlStateLossResult:
-    rollout_dtype = torch.float64
-    rollout = control_dynamics_backend(config).endpoint_rollout(
-        dynamics["initial_state"].to(rollout_dtype),
-        controls.to(rollout_dtype),
-        durations.to(rollout_dtype),
-        dynamics["aero_params"].to(rollout_dtype),
-        dynamics["frame_params"].to(rollout_dtype),
+    rollout = control_rollout.rollout_control_endpoints(
+        controls,
+        durations,
+        dynamics,
         config,
     )
     dtype, device = rollout.channels.dtype, rollout.channels.device

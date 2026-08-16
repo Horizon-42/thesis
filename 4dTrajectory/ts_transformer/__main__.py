@@ -117,7 +117,7 @@ from evaluation_protocol import (  # noqa: E402
 )
 from experiment_index import begin_run, finish_run  # noqa: E402
 from flyability import report_for_records  # noqa: E402
-from forecast import forecast_approach  # noqa: E402
+from forecast import forecast_approaches  # noqa: E402
 from models import resolve_device  # noqa: E402
 from reference_velocity import REFERENCE_VELOCITY_SOURCES  # noqa: E402
 from train import (  # noqa: E402
@@ -1138,23 +1138,34 @@ def main(argv: list[str] | None = None) -> int:
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, flight_metrics = [], []
-    for index, s in enumerate(series):
-        forecast = forecast_approach(
-            model, s, config, normalizer, device=device, truncate=not args.no_truncate
+    rollout_batch_size = max(1, min(config.batch_size, len(series)))
+    print(f"  dense rollout batch size: {rollout_batch_size}")
+    for start in range(0, len(series), rollout_batch_size):
+        batch_series = series[start : start + rollout_batch_size]
+        forecasts = forecast_approaches(
+            model,
+            batch_series,
+            config,
+            normalizer,
+            device=device,
+            truncate=not args.no_truncate,
         )
-        records.append(build_prediction_record(
-            s,
-            forecast,
-            index=index,
-            model_name=config.model,
-            horizon_mode=config.horizon_mode,
-            split=args.split,
-        ))
-        flight_metrics.append(observed_series_metrics(
-            s,
-            forecast,
-            points=config.validation_common_grid_points,
-        ))
+        for offset, (s, forecast) in enumerate(
+            zip(batch_series, forecasts, strict=True)
+        ):
+            records.append(build_prediction_record(
+                s,
+                forecast,
+                index=start + offset,
+                model_name=config.model,
+                horizon_mode=config.horizon_mode,
+                split=args.split,
+            ))
+            flight_metrics.append(observed_series_metrics(
+                s,
+                forecast,
+                points=config.validation_common_grid_points,
+            ))
 
     paths = write_batch(
         records,

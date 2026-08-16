@@ -27,6 +27,7 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 import run_ts_predictability_report as common_report  # noqa: E402
 from config import PREDICTION_CONTROL  # noqa: E402
+from control_rollout import rollout_control_endpoints  # noqa: E402
 from dataset import (  # noqa: E402
     FlightSeries,
     arrival_data_provenance,
@@ -35,8 +36,7 @@ from dataset import (  # noqa: E402
     require_matching_data_provenance,
 )
 from models import resolve_device  # noqa: E402
-from prediction_outputs import ControlPrediction  # noqa: E402
-from train import control_rollout_channels, load_checkpoint, usable_series  # noqa: E402
+from train import load_checkpoint, usable_series  # noqa: E402
 
 
 SCHEMA_VERSION = "ts-control-clock-attribution-v1-validation-only"
@@ -96,12 +96,9 @@ def _rerollout(
     dynamics: dict[str, torch.Tensor],
     run: common_report.LoadedRun,
 ) -> np.ndarray:
-    prediction = ControlPrediction(
-        controls=controls,
-        segment_durations=durations_s,
-        final_time_s=durations_s.sum(dim=1),
-    )
-    channels, _geodetic = control_rollout_channels(prediction, dynamics, run.config)
+    channels = rollout_control_endpoints(
+        controls, durations_s, dynamics, run.config
+    ).channels
     return channels.detach().cpu().numpy().astype(np.float32)
 
 

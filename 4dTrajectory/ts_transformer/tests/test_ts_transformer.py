@@ -45,6 +45,7 @@ import batching  # noqa: E402
 import build_multiflight_capacity_report as capacity_report  # noqa: E402
 import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
+import control_rollout as control_rollout_module  # noqa: E402
 import dataset as dataset_module  # noqa: E402
 import batch_benchmark as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
@@ -140,7 +141,7 @@ from fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_common_truth,
     fixed_anchor_common_weights_and_terminal_velocity,
 )
-from forecast import Forecast, forecast_approach  # noqa: E402
+from forecast import Forecast, forecast_approach, forecast_approaches  # noqa: E402
 from metrics import (  # noqa: E402
     RAW_KINEMATIC_METRIC_KEYS, common_physical_time_flight_metrics,
     raw_kinematic_metrics, states_with_derived_velocity,
@@ -3219,7 +3220,7 @@ def test_fixed_dt_rollout_closes_duration_clock_without_training_stage(monkeypat
             )
 
     monkeypatch.setattr(
-        fixed_dt_loss_module,
+        control_rollout_module,
         "control_dynamics_backend",
         lambda config: CapturingBackend(),
     )
@@ -3561,11 +3562,11 @@ def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
         [[[1.0] * channel_count, [10.0] * channel_count]], dtype=torch.float64
     )
     monkeypatch.setattr(
-        train_module,
-        "control_rollout_channels",
-        lambda _prediction, _dynamics, _config: (
-            physical_rollout,
-            torch.zeros(1, 2, 7, dtype=torch.float64),
+        control_rollout_module,
+        "rollout_control_endpoints",
+        lambda _controls, _durations, _dynamics, _config: SimpleNamespace(
+            channels=physical_rollout,
+            geodetic_states=torch.zeros(1, 2, 7, dtype=torch.float64),
         ),
     )
     prediction = ControlPrediction(
@@ -3624,11 +3625,11 @@ def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monk
     physical_rollout[0, 1, ch.IDX["u"]] = 20.0
     physical_rollout[..., list(ch.VELOCITY_IDX)] = 1_000_000.0
     monkeypatch.setattr(
-        train_module,
-        "control_rollout_channels",
-        lambda _prediction, _dynamics, _config: (
-            physical_rollout,
-            torch.zeros(1, 2, 7, dtype=torch.float64),
+        control_rollout_module,
+        "rollout_control_endpoints",
+        lambda _controls, _durations, _dynamics, _config: SimpleNamespace(
+            channels=physical_rollout,
+            geodetic_states=torch.zeros(1, 2, 7, dtype=torch.float64),
         ),
     )
     prediction = ControlPrediction(
@@ -5824,6 +5825,98 @@ def test_raw_kinematic_metrics_detect_velocity_heading_disagreement():
 
 
 # ── Forecast ─────────────────────────────────────────────────────────────────
+
+def test_batched_control_forecasts_match_independent_dense_rollouts(monkeypatch):
+    series, config = _series(
+        n_flights=4,
+        prediction_output=PREDICTION_CONTROL,
+        n_segments=2,
+        seq_len=20,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    dense_batch_sizes: list[int] = []
+    original_dense_rollout = control_rollout_module.rollout_control_dense
+
+    def capture_dense_batch(controls, *args, **kwargs):
+        dense_batch_sizes.append(len(controls))
+        return original_dense_rollout(controls, *args, **kwargs)
+
+    monkeypatch.setattr(
+        control_rollout_module, "rollout_control_dense", capture_dense_batch
+    )
+
+    class HeterogeneousControlModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.batch_sizes = []
+
+        def forward(self, history, dynamics):
+            self.batch_sizes.append(len(history))
+            total = 2.0 + torch.sigmoid(history[:, -1, ch.IDX["e"]])
+            durations = total[:, None] * history.new_tensor([[0.375, 0.625]])
+            controls = 0.5 * (
+                dynamics["control_lower"] + dynamics["control_upper"]
+            )
+            return ControlPrediction(
+                controls=controls[:, None, :].expand(-1, 2, -1).contiguous(),
+                segment_durations=durations,
+                final_time_s=total,
+            )
+
+    batched_model = HeterogeneousControlModel()
+    batched = forecast_approaches(
+        batched_model,
+        series,
+        config,
+        normalizer,
+        device=torch.device("cpu"),
+    )
+    assert batched_model.batch_sizes == [1] * len(series)
+    assert dense_batch_sizes == [len(series)]
+
+    independent_model = HeterogeneousControlModel()
+    independent = [
+        forecast_approach(
+            independent_model,
+            item,
+            config,
+            normalizer,
+            device=torch.device("cpu"),
+        )
+        for item in series
+    ]
+    assert independent_model.batch_sizes == [1] * len(series)
+    assert dense_batch_sizes == [len(series)] + [1] * len(series)
+
+    for actual, expected in zip(batched, independent, strict=True):
+        assert actual.anchor == expected.anchor
+        assert actual.final_time_s == pytest.approx(expected.final_time_s, abs=1e-12)
+        assert actual.predicted_final_time_s == pytest.approx(
+            expected.predicted_final_time_s, abs=1e-12
+        )
+        np.testing.assert_allclose(actual.times, expected.times, rtol=0.0, atol=1e-12)
+        np.testing.assert_allclose(actual.values, expected.values, rtol=1e-12, atol=1e-9)
+        np.testing.assert_allclose(
+            actual.geodetic_values,
+            expected.geodetic_values,
+            rtol=1e-12,
+            atol=1e-10,
+        )
+        np.testing.assert_allclose(actual.controls, expected.controls, rtol=0.0, atol=0.0)
+        np.testing.assert_allclose(
+            actual.sample_durations_s,
+            expected.sample_durations_s,
+            rtol=0.0,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            actual.segment_durations_s,
+            expected.segment_durations_s,
+            rtol=0.0,
+            atol=0.0,
+        )
+
 
 def test_forecast_uses_n_normalized_points_and_the_predicted_final_time():
     series, config = _series(n_flights=2, n_segments=10, seq_len=20)

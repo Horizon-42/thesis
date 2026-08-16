@@ -35,6 +35,7 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 import run_ts_predictability_report as common_report  # noqa: E402
 from config import PREDICTION_CONTROL  # noqa: E402
+from control_rollout import rollout_control_endpoints  # noqa: E402
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightSeries,
@@ -46,7 +47,6 @@ from dataset import (  # noqa: E402
 from models import resolve_device  # noqa: E402
 from prediction_outputs import ControlPrediction  # noqa: E402
 from train import (  # noqa: E402
-    control_rollout_channels,
     load_checkpoint,
     move_dynamics,
     move_fixed_dt_supervision,
@@ -255,7 +255,12 @@ def _prediction_metrics(
     config: Any,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
     with torch.no_grad():
-        physical, _geodetic = control_rollout_channels(prediction, dynamics, config)
+        physical = rollout_control_endpoints(
+            prediction.controls,
+            prediction.segment_durations,
+            dynamics,
+            config,
+        ).channels
     durations = prediction.segment_durations.detach().cpu().numpy().astype(np.float64)
     ade, fde = _common_metrics(
         physical.detach().cpu().numpy().astype(np.float32),

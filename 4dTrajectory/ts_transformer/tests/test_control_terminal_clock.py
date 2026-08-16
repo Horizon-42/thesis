@@ -13,6 +13,7 @@ if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
 import control_terminal_clock as terminal_clock_module  # noqa: E402
+import control_rollout as control_rollout_module  # noqa: E402
 from config import (  # noqa: E402
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -68,7 +69,7 @@ class _DurationBackend:
 
 def test_predicted_terminal_clock_attaches_deployable_endpoints_and_gradients(monkeypatch):
     monkeypatch.setattr(
-        terminal_clock_module,
+        control_rollout_module,
         "control_dynamics_backend",
         lambda config: _DurationBackend(),
     )
@@ -108,7 +109,7 @@ def test_predicted_terminal_clock_attaches_deployable_endpoints_and_gradients(mo
 
 def test_detached_time_terminal_trains_partition_but_not_total_time(monkeypatch):
     monkeypatch.setattr(
-        terminal_clock_module,
+        control_rollout_module,
         "control_dynamics_backend",
         lambda config: _DurationBackend(),
     )
@@ -154,7 +155,7 @@ def test_detached_time_terminal_trains_partition_but_not_total_time(monkeypatch)
 
 def test_predicted_terminal_clock_keeps_observed_prefix_during_curriculum(monkeypatch):
     monkeypatch.setattr(
-        terminal_clock_module,
+        control_rollout_module,
         "control_dynamics_backend",
         lambda config: (_ for _ in ()).throw(AssertionError("rollout must not run")),
     )

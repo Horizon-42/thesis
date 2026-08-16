@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 
 from config import TSConfig
-from control_dynamics_backends import control_dynamics_backend
+import control_rollout
 from control_training_curriculum import close_duration_prefix
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
@@ -30,8 +30,7 @@ def fixed_dt_rollout_channels(
     segment_valid: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Return query/end states and their exact event-aligned segment clock."""
-    rollout_dtype = torch.float64
-    durations = prediction.segment_durations.to(rollout_dtype)
+    durations = prediction.segment_durations.to(control_rollout.ROLLOUT_DTYPE)
     active_segments = (
         torch.ones_like(durations, dtype=torch.bool)
         if segment_valid is None
@@ -40,15 +39,15 @@ def fixed_dt_rollout_channels(
     durations = close_duration_prefix(
         durations,
         active_segments,
-        prediction.final_time_s.to(dtype=rollout_dtype, device=durations.device),
+        prediction.final_time_s.to(
+            dtype=control_rollout.ROLLOUT_DTYPE, device=durations.device
+        ),
     )
-    rollout = control_dynamics_backend(config).dense_rollout(
-        dynamics["initial_state"].to(rollout_dtype),
-        prediction.controls.to(rollout_dtype),
+    rollout = control_rollout.rollout_control_dense(
+        prediction.controls,
         durations,
-        dynamics["aero_params"].to(rollout_dtype),
-        dynamics["frame_params"].to(rollout_dtype),
-        supervision.query_offsets_s.to(rollout_dtype),
+        dynamics,
+        supervision.query_offsets_s,
         supervision.valid,
         config,
         segment_valid=segment_valid,

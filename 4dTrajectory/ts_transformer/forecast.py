@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Callable
+from typing import Callable, Sequence
 
 import numpy as np
 import torch
@@ -19,11 +19,12 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
+import control_rollout
 from control_prediction_adapters import deployable_control_prediction
 from dataset import FlightSeries, Normalizer, dynamics_arrays
 from metrics import states_with_derived_velocity
+from prediction_outputs import ControlPrediction
 from time_grids import output_time_grid
-from train import control_dense_rollout_channels
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,17 @@ def _history_at_anchor(
     return encoded[anchor - config.seq_len + 1 : anchor + 1]
 
 
+def _history_batch(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    anchor: int,
+) -> np.ndarray:
+    return np.stack([
+        _history_at_anchor(item, config, normalizer, anchor) for item in series
+    ]).astype(np.float32, copy=False)
+
+
 def _forward(
     model: nn.Module,
     history: np.ndarray,
@@ -89,54 +101,114 @@ def _forward(
     )
 
 
-def _forecast_control(
+def _dynamics_batch(
+    series: Sequence[FlightSeries], anchor: int, device: torch.device
+) -> dict[str, torch.Tensor]:
+    rows = [dynamics_arrays(item, anchor) for item in series]
+    return {
+        name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
+        for name in rows[0]
+    }
+
+
+def _padded_dense_queries(
+    segment_durations_s: np.ndarray,
+    output_dt_s: float,
+) -> tuple[list[np.ndarray], np.ndarray, np.ndarray]:
+    offsets = [
+        _dense_control_query_offsets(row, output_dt_s)
+        for row in segment_durations_s
+    ]
+    width = max(len(row) for row in offsets)
+    padded = np.zeros((len(offsets), width), dtype=np.float64)
+    valid = np.zeros((len(offsets), width), dtype=bool)
+    for row, values in enumerate(offsets):
+        padded[row, : len(values)] = values
+        valid[row, : len(values)] = True
+    return offsets, padded, valid
+
+
+def _control_prediction_batch(
     model: nn.Module,
-    series: FlightSeries,
+    histories: np.ndarray,
+    dynamics: dict[str, torch.Tensor],
+    device: torch.device,
+) -> ControlPrediction:
+    """Preserve the original per-flight network arithmetic, then stack its schedules."""
+    predictions: list[ControlPrediction] = []
+    model.eval()
+    with torch.no_grad():
+        for row, history in enumerate(histories):
+            row_dynamics = {
+                name: value[row : row + 1] for name, value in dynamics.items()
+            }
+            predictions.append(deployable_control_prediction(
+                model(torch.from_numpy(history[None]).to(device), row_dynamics)
+            ))
+    return ControlPrediction(
+        controls=torch.cat([item.controls for item in predictions], dim=0),
+        segment_durations=torch.cat(
+            [item.segment_durations for item in predictions], dim=0
+        ),
+        final_time_s=torch.cat([item.final_time_s for item in predictions], dim=0),
+    )
+
+
+def _forecast_control_batch(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
     config: TSConfig,
     normalizer: Normalizer,
     anchor: int,
     device: torch.device,
-) -> Forecast:
-    """Predict bounded controls, then obtain states only through the shared dynamics."""
-    history = _history_at_anchor(series, config, normalizer, anchor)
-    tensor = torch.from_numpy(history[None, ...].astype(np.float32)).to(device)
-    dynamics = {
-        name: torch.from_numpy(value[None, ...]).to(device)
-        for name, value in dynamics_arrays(series, anchor).items()
-    }
-    model.eval()
-    with torch.no_grad():
-        prediction = deployable_control_prediction(model(tensor, dynamics))
-    durations = prediction.segment_durations[0].cpu().numpy().astype(np.float64)
-    offsets = _dense_control_query_offsets(
+) -> list[Forecast]:
+    """Predict and densely roll a heterogeneous batch of bounded control schedules."""
+    histories = _history_batch(series, config, normalizer, anchor)
+    dynamics = _dynamics_batch(series, anchor, device)
+    prediction = _control_prediction_batch(model, histories, dynamics, device)
+    durations = prediction.segment_durations.detach().cpu().numpy().astype(np.float64)
+    offsets, padded_offsets, query_valid = _padded_dense_queries(
         durations, config.control_rollout_integrator_dt_s
     )
-    query_offsets = torch.from_numpy(offsets[None, :]).to(device)
-    query_valid = torch.ones_like(query_offsets, dtype=torch.bool)
     with torch.no_grad():
-        rollout = control_dense_rollout_channels(
-            prediction, dynamics, query_offsets, query_valid, config
+        rollout = control_rollout.rollout_control_dense(
+            prediction.controls,
+            prediction.segment_durations,
+            dynamics,
+            torch.from_numpy(padded_offsets),
+            torch.from_numpy(query_valid),
+            config,
         )
-    final_time_s = float(offsets[-1])
-    return Forecast(
-        times=float(series.times[anchor]) + offsets,
-        values=rollout.query_channels[0].cpu().numpy().astype(np.float64),
-        normalized_progress=offsets / final_time_s,
-        anchor=anchor,
-        final_time_s=final_time_s,
-        predicted_final_time_s=float(prediction.final_time_s[0].cpu()),
-        horizon_mode=config.horizon_mode,
-        passes=1,
-        truncated_at_threshold=False,
-        horizon_capped=False,
-        controls=prediction.controls[0].cpu().numpy().astype(np.float64),
-        sample_durations_s=np.diff(np.concatenate(([0.0], offsets))),
-        segment_durations_s=durations,
-        geodetic_values=(
-            rollout.query_geodetic_states[0].cpu().numpy().astype(np.float64)
-        ),
-        prediction_output=config.prediction_output,
+    query_channels = rollout.query_channels.detach().cpu().numpy().astype(np.float64)
+    query_geodetic = (
+        rollout.query_geodetic_states.detach().cpu().numpy().astype(np.float64)
     )
+    controls = prediction.controls.detach().cpu().numpy().astype(np.float64)
+    predicted_final_time = (
+        prediction.final_time_s.detach().cpu().numpy().astype(np.float64)
+    )
+    forecasts: list[Forecast] = []
+    for row, (item, row_offsets) in enumerate(zip(series, offsets, strict=True)):
+        count = len(row_offsets)
+        final_time_s = float(row_offsets[-1])
+        forecasts.append(Forecast(
+            times=float(item.times[anchor]) + row_offsets,
+            values=query_channels[row, :count],
+            normalized_progress=row_offsets / final_time_s,
+            anchor=anchor,
+            final_time_s=final_time_s,
+            predicted_final_time_s=float(predicted_final_time[row]),
+            horizon_mode=config.horizon_mode,
+            passes=1,
+            truncated_at_threshold=False,
+            horizon_capped=False,
+            controls=controls[row],
+            sample_durations_s=np.diff(np.concatenate(([0.0], row_offsets))),
+            segment_durations_s=durations[row],
+            geodetic_values=query_geodetic[row, :count],
+            prediction_output=config.prediction_output,
+        ))
+    return forecasts
 
 
 def _dense_control_query_offsets(
@@ -323,24 +395,31 @@ def _forecast_state(
     return _POSTPROCESSORS[config.horizon_mode](forecast)
 
 
-def _forecast_control_strategy(
+def forecast_approaches(
     model: nn.Module,
-    series: FlightSeries,
+    series: Sequence[FlightSeries],
     config: TSConfig,
     normalizer: Normalizer,
-    anchor: int,
-    device: torch.device,
-    truncate: bool,
-) -> Forecast:
-    del truncate
-    return _forecast_control(model, series, config, normalizer, anchor, device)
-
-
-_OUTPUT_FORECASTERS: dict[str, Callable[..., Forecast]] = {
-    PREDICTION_STATE: _forecast_state,
-    PREDICTION_CONTROL: _forecast_control_strategy,
-    PREDICTION_CONTROL_MIXTURE: _forecast_control_strategy,
-}
+    *,
+    anchor: int | None = None,
+    device: torch.device | None = None,
+    truncate: bool = True,
+) -> list[Forecast]:
+    """Predict one inference batch through the same dense path used by fit evaluation."""
+    if not series:
+        return []
+    device = device or next(model.parameters()).device
+    anchor = default_anchor(config) if anchor is None else anchor
+    if config.prediction_output in (PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE):
+        return _forecast_control_batch(
+            model, series, config, normalizer, anchor, device
+        )
+    return [
+        _forecast_state(
+            model, item, config, normalizer, anchor, device, truncate
+        )
+        for item in series
+    ]
 
 
 def forecast_approach(
@@ -354,11 +433,15 @@ def forecast_approach(
     truncate: bool = True,
 ) -> Forecast:
     """Predict from one observed anchor using the configured output strategy."""
-    device = device or next(model.parameters()).device
-    anchor = default_anchor(config) if anchor is None else anchor
-    return _OUTPUT_FORECASTERS[config.prediction_output](
-        model, series, config, normalizer, anchor, device, truncate
-    )
+    return forecast_approaches(
+        model,
+        [series],
+        config,
+        normalizer,
+        anchor=anchor,
+        device=device,
+        truncate=truncate,
+    )[0]
 
 
 def truncate_at_threshold(forecast: Forecast) -> Forecast:
