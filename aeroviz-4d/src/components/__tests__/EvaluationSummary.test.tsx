@@ -49,11 +49,13 @@ const RUNWAY_CONSTRAINED: ComparisonCategory = {
   constrained: true,
 };
 const PREDICTED: ComparisonCategory = {
-  key: "ts_itr_full_test",
-  label: "Predicted (iTransformer, full, test split)",
-  dir: "ts_itr_full_test",
+  key: "prediction_itr_full_val",
+  label: "Predicted (iTransformer, full, validation split)",
+  dir: "prediction_itr_full_val",
   groups: 10,
   constrained: false,
+  datasetSplit: "val",
+  resultSource: "prediction",
 };
 const EXPERIMENT: ComparisonCategory = {
   key: "experiment_run_val",
@@ -245,13 +247,19 @@ describe("EvaluationSummary", () => {
         fdeM: { mean: 2082.4, p95: 6002.1 },
         arrivalEndpointErrorM: { mean: 1255.9, p95: 3976.8 },
       },
+      evaluation: {
+        total: 10,
+        solved: 8,
+        successful: 6,
+        successRate: 0.6,
+      },
     } satisfies ComparisonIndex);
     render(<EvaluationSummary />);
 
     expect(
       await screen.findByRole("region", { name: "Data-Driven Model Evaluation" }),
     ).toBeTruthy();
-    expect(within(metric("Runway-threshold pass rate")).getByText("75.0%")).toBeTruthy();
+    expect(within(metric("Runway-threshold pass rate")).getByText("60.0%")).toBeTruthy();
     expect(within(metric("Mean ADE")).getByText("1756 m")).toBeTruthy();
     expect(within(metric("95th-percentile ADE")).getByText("4656 m")).toBeTruthy();
     expect(within(metric("Mean FDE")).getByText("2082 m")).toBeTruthy();

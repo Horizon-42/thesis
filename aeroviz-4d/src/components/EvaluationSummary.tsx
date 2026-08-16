@@ -70,7 +70,11 @@ function row(label: string, value: string, available: boolean): SummaryRow {
 
 function evaluationKind(category: ComparisonCategory): EvaluationKind {
   if (category.key === OBSERVED_CATEGORY_KEY) return "observed";
-  if (category.resultSource === "experiment" || category.key.startsWith("ts_")) {
+  if (
+    category.resultSource === "prediction" ||
+    category.resultSource === "experiment" ||
+    category.key.startsWith("ts_")
+  ) {
     return "dataDriven";
   }
   return "optimization";
