@@ -48,9 +48,6 @@ The previous rule combined two real but differently scoped facts:
    §5.3.3.1.1.1(b) expects flight technical error to remain within one-half
    full-scale deflection during normal operation.
 
-The arithmetic was `0.5 × 15 m = 7.5 m`. It was not a unit conversion and it
-never meant `±7.5 ft`; `7.5 m` is about `24.6 ft`.
-
 That value is useful for assessing close-in LPV guidance tracking. It is not an
 official universal classifier for the altitude of a trajectory reference point
 at the threshold, nor for whether an aircraft landed. ICAO Doc 9613

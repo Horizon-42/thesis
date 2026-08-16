@@ -12,7 +12,7 @@ The implemented data path is deliberately narrow:
 - `pass`, `fail`, and `indeterminate` component/composite results.
 
 The normative rationale and source audit are in
-[FINAL_APPROACH_VERDICT_STANDARD.md](FINAL_APPROACH_VERDICT_STANDARD.md).
+[FINAL_APPROACH_VERDICT_STANDARD.md](docs/FINAL_APPROACH_VERDICT_STANDARD.md).
 
 ## Event flow
 
