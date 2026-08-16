@@ -61,6 +61,9 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_GRADIENT_CLIP_POLICIES,
+    CONTROL_RECIPE_NAMES,
+    CONTROL_RECIPE_CUSTOM,
+    CONTROL_RECIPE_SIMPLE_V1,
     CONTROL_VALUE_PARAMETERIZATIONS,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
@@ -69,8 +72,10 @@ from config import (  # noqa: E402
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     MODELS,
+    PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
     TSConfig,
+    control_simple_v1_overrides,
 )
 from approach_clustering.cli import (  # noqa: E402
     add_cli_arguments as add_approach_cohort_arguments,
@@ -200,6 +205,15 @@ def _positive_float_csv(value: str) -> tuple[float, ...]:
 
 
 def _add_training_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--control-recipe",
+        choices=CONTROL_RECIPE_NAMES,
+        default=None,
+        help=(
+            "named frozen control experiment recipe; simple-v1 fixes architecture, "
+            "uniform durations, physical position/time loss and ADE selection"
+        ),
+    )
     parser.add_argument("--model", choices=MODELS, default=MODELS[0])
     parser.add_argument(
         "--prediction-output",
@@ -311,7 +325,8 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "control duration head: total-time plus softmax fractions (factorized) "
-            "or direct positive segment seconds (direct)"
+            "or direct positive segment seconds (direct); uniform fixes every segment "
+            "to total-time/N"
         ),
     )
     parser.add_argument(
@@ -374,7 +389,8 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         help=(
             "control tracking objective: normalized-channel MSE (default), the smooth "
             "worst of physical fixed-dt ADE and terminal error, or separately weighted "
-            "dense state / terminal position / terminal velocity"
+            "dense state / terminal position / terminal velocity; true-time-position "
+            "is the minimal physical 3-D path and endpoint recipe"
         ),
     )
     parser.add_argument(
@@ -605,6 +621,46 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("use_norm", args.instance_norm), ("revin", args.instance_norm),
     )
     overrides.update({key: value for key, value in cli_values if value is not None})
+
+    override_recipe = overrides.get("control_recipe_name")
+    if (
+        args.control_recipe is not None
+        and override_recipe is not None
+        and args.control_recipe != override_recipe
+    ):
+        parser.error(
+            "--control-recipe conflicts with control_recipe_name in --config-overrides"
+        )
+    requested_recipe = args.control_recipe or override_recipe or CONTROL_RECIPE_CUSTOM
+    if requested_recipe not in CONTROL_RECIPE_NAMES:
+        parser.error(
+            f"unknown control recipe {requested_recipe!r}; choose from "
+            f"{CONTROL_RECIPE_NAMES}"
+        )
+    if requested_recipe == CONTROL_RECIPE_SIMPLE_V1:
+        if batch_auto:
+            parser.error("simple-v1 fixes --batch-size 512; 'auto' is not allowed")
+        frozen = control_simple_v1_overrides()
+        runtime_fields = {"control_recipe_name", "seed", "split_seed", "device", "notes"}
+        unsupported = sorted(set(overrides) - set(frozen) - runtime_fields)
+        if unsupported:
+            parser.error(
+                "simple-v1 allows only seed, split_seed, device and run identity "
+                f"outside its frozen fields; unsupported override {unsupported[0]!r}"
+            )
+        conflicts = {
+            name: (overrides[name], expected)
+            for name, expected in frozen.items()
+            if name in overrides and overrides[name] != expected
+        }
+        if conflicts:
+            details = ", ".join(
+                f"{name}={actual!r} (expected {expected!r})"
+                for name, (actual, expected) in sorted(conflicts.items())
+            )
+            parser.error(f"simple-v1 recipe fields are frozen: {details}")
+        overrides.update(frozen)
+    overrides["control_recipe_name"] = requested_recipe
     return TSConfig(**overrides), batch_auto
 
 
@@ -644,6 +700,32 @@ def split_keys_for_current_data(
     return [key for key in checkpoint_split_keys if key.startswith(prefixes)]
 
 
+def _teacher_pretrainer_from_args(
+    args: argparse.Namespace,
+    config: TSConfig,
+    parser: argparse.ArgumentParser,
+):
+    """Validate optional teacher initialization before a formal run is created."""
+    if not args.control_teacher_schedules:
+        return None
+    if config.prediction_output != PREDICTION_CONTROL:
+        parser.error(
+            "--control-teacher-schedules requires --prediction-output control"
+        )
+    from oracle_teacher.pretraining import CachedSchedulePretrainer
+
+    try:
+        return CachedSchedulePretrainer(
+            schedule_path=Path(args.control_teacher_schedules),
+            steps=args.control_teacher_steps,
+            learning_rate=args.control_teacher_learning_rate,
+            gradient_clip_norm=args.control_teacher_gradient_clip_norm,
+            recipe_name=config.control_recipe_name,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ts_transformer",
@@ -662,6 +744,19 @@ def main(argv: list[str] | None = None) -> int:
             "explicit train/validation flight roster; the resulting checkpoint is "
             "development-only and cannot release outer-test"
         ),
+    )
+    p_train.add_argument(
+        "--control-teacher-schedules",
+        default=None,
+        help=(
+            "cached outer-train-only control teacher .npz used for initialization; "
+            "omitting it runs the documented no-teacher ablation"
+        ),
+    )
+    p_train.add_argument("--control-teacher-steps", type=int, default=1000)
+    p_train.add_argument("--control-teacher-learning-rate", type=float, default=1e-4)
+    p_train.add_argument(
+        "--control-teacher-gradient-clip-norm", type=float, default=20.0
     )
 
     p_cv = sub.add_parser(
@@ -857,6 +952,11 @@ def main(argv: list[str] | None = None) -> int:
         config, batch_auto = _config_from_args(args, parser)
         if bool(args.campaign_id) != bool(args.experiment_id):
             parser.error("--campaign-id and --experiment-id must be supplied together")
+        model_pretrainer = (
+            _teacher_pretrainer_from_args(args, config, parser)
+            if args.command == "train"
+            else None
+        )
         data_provenance = _provenance_from_args(args)
         outer_split_keys = flight_keys_by_split(data_provenance, config)
         development_cohort = None
@@ -967,6 +1067,7 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 data_selection=data_selection,
                 auto_batch_size=batch_auto,
+                model_pretrainer=model_pretrainer,
             )
         except Exception as exc:
             if experiment_manifest is not None:

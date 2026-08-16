@@ -23,6 +23,7 @@ import torch.nn as nn
 from config import (
     CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
+    CONTROL_DURATION_UNIFORM,
     CONTROL_VALUE_ABSOLUTE,
     CONTROL_VALUE_TRIM_RESIDUAL,
     PREDICTION_CONTROL,
@@ -34,6 +35,7 @@ from control_models import ControlMixtureOutputModel, ControlOutputModel
 from direct_duration_control import DirectDurationControlOutputModel
 from prediction_outputs import StateOutputLayer
 from trim_residual_control import TrimResidualControlOutputModel
+from uniform_duration_control import UniformDurationControlOutputModel
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
 
@@ -143,6 +145,9 @@ def _build_control_output(config: TSConfig) -> nn.Module:
         (CONTROL_DURATION_FACTORIZED, CONTROL_VALUE_ABSOLUTE): ControlOutputModel,
         (CONTROL_DURATION_DIRECT, CONTROL_VALUE_ABSOLUTE): (
             DirectDurationControlOutputModel
+        ),
+        (CONTROL_DURATION_UNIFORM, CONTROL_VALUE_ABSOLUTE): (
+            UniformDurationControlOutputModel
         ),
         (CONTROL_DURATION_FACTORIZED, CONTROL_VALUE_TRIM_RESIDUAL): (
             TrimResidualControlOutputModel

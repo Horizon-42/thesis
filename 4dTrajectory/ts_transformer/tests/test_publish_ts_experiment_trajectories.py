@@ -99,6 +99,26 @@ def test_publication_plan_reuses_existing_prediction_evaluation_and_czml_contrac
     assert plan.experiment_metadata["horizonMode"] == "normalized"
 
 
+def test_prediction_source_uses_prediction_category_without_experiment_metadata(tmp_path):
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    plan = publisher.PublicationPlan(
+        experiment,
+        "KRDU",
+        "train",
+        result_source="prediction",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+    )
+
+    publish = dict(plan.commands())["publish-czml"]
+    assert publish[publish.index("--result-source") + 1] == "prediction"
+    assert "--experiment-id" not in publish
+    assert plan.category.startswith("prediction_")
+    assert "Predicted" in plan.category_label
+
+
 def test_refreshes_horizon_metadata_for_an_archived_publication(monkeypatch, tmp_path):
     index, _checkpoint = _indexed_checkpoint(tmp_path)
     experiment = publisher.discover_checkpoints(index)[0]

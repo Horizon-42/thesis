@@ -135,6 +135,17 @@ python $TS train \
     --batch-size auto \
     --output-dir 4dTrajectory/outputs/KRDU/ts_itr_control
 
+# frozen minimal control experiment: one total time, 64 equal-duration bounded controls,
+# physical 3-D path + endpoint + time loss, and common-true-time ADE selection
+python $TS train \
+    --data trajectory_data_process/outputs/harvest/KSJC/arrivals/manifest.json \
+    --eligibility-roster trajectory_data_process/outputs/harvest/KSJC/arrivals/lateral_pass_eligibility.json \
+    --airport KSJC --control-recipe simple-v1 \
+    --control-teacher-schedules \
+      4dTrajectory/outputs/KSJC/experiments/oracle_teacher_20260816_current_manifest/optimized_arc24_32/teacher_schedules.npz \
+    --seed 1337 --split-seed 1337 \
+    --output-dir 4dTrajectory/outputs/KSJC/experiments/control_simple_v1/seed1337
+
 # duration-head ablation: predict every positive segment duration directly and derive
 # final_time_s from their sum; the default remains factorized total-time + softmax fractions
 python $TS train \

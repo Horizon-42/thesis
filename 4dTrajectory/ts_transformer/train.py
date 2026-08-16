@@ -36,6 +36,7 @@ from config import (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
+    CONTROL_DURATION_UNIFORM,
     CONTROL_VALUE_TRIM_RESIDUAL,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_CLOCK_PREDICTED,
@@ -170,6 +171,21 @@ CONTROL_TARGET_CONTRACTS = {
         CONTROL_STATE_CLOCK_OBSERVED,
         CONTROL_STATE_LOSS_GRID_FIXED_DT,
     ): "bounded-control-direct-duration-fixed-dt-state-loss-v1",
+    (
+        CONTROL_DURATION_UNIFORM,
+        CONTROL_STATE_CLOCK_PREDICTED,
+        CONTROL_STATE_LOSS_GRID_NATIVE,
+    ): "bounded-control-uniform-duration-casadi-rollout-clock-aligned-v1",
+    (
+        CONTROL_DURATION_UNIFORM,
+        CONTROL_STATE_CLOCK_OBSERVED,
+        CONTROL_STATE_LOSS_GRID_NATIVE,
+    ): "bounded-control-uniform-duration-casadi-rollout-observed-clock-aligned-v1",
+    (
+        CONTROL_DURATION_UNIFORM,
+        CONTROL_STATE_CLOCK_OBSERVED,
+        CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    ): "bounded-control-uniform-duration-fixed-dt-state-loss-v1",
 }
 
 
@@ -191,24 +207,32 @@ def target_contract(config: TSConfig) -> str:
             config.control_state_loss_grid,
         )
     ]
-    base += (
-        f"+duration-uniform-floor={config.control_duration_uniform_floor:g}-v1"
-    )
+    if config.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
+        base += (
+            f"+duration-uniform-floor={config.control_duration_uniform_floor:g}-v1"
+        )
     if config.control_value_parameterization == CONTROL_VALUE_TRIM_RESIDUAL:
         base += "+trim-residual-control-v1"
     if config.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4:
         base += f"+dynamics={config.control_dynamics_backend}-v1"
-    if (
+    if config.control_duration_parameterization == CONTROL_DURATION_UNIFORM:
+        contract = (
+            base
+            if config.control_state_objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+            else f"{base}+{config.control_state_objective}"
+        )
+    elif (
         config.control_state_objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
         and config.control_state_duration_gradient
     ):
         return base
-    gradient_contract = (
-        "joint-duration-gradient"
-        if config.control_state_duration_gradient
-        else "detached-duration-gradient"
-    )
-    contract = f"{base}+{config.control_state_objective}+{gradient_contract}"
+    else:
+        gradient_contract = (
+            "joint-duration-gradient"
+            if config.control_state_duration_gradient
+            else "detached-duration-gradient"
+        )
+        contract = f"{base}+{config.control_state_objective}+{gradient_contract}"
     if config.control_horizon_curriculum_s:
         horizons = ",".join(f"{value:g}" for value in config.control_horizon_curriculum_s)
         contract += (
@@ -620,7 +644,22 @@ def _native_endpoint_control_state_loss(
         (normalized_states - aligned_targets) ** 2 * aligned_weights
     ).sum(dim=(1, 2))
     state_loss = state_error / aligned_weights.sum(dim=(1, 2)).clamp(min=1.0)
-    return ControlStateLossResult(state_loss, normalized_states)
+    position_indices = list(POSITION_IDX)
+    position_weights = aligned_weights[..., position_indices].sum(dim=-1)
+    physical_position_delta = (
+        normalized_states[..., position_indices]
+        - aligned_targets[..., position_indices]
+    ) * scale[position_indices]
+    physical_position_mse = (
+        (physical_position_delta.square().sum(dim=-1) * position_weights).sum(dim=1)
+        / position_weights.sum(dim=1).clamp(min=1.0)
+        / (config.position_loss_scale_m**2)
+    )
+    return ControlStateLossResult(
+        normalized_mse=state_loss,
+        normalized_segment_end_states=normalized_states,
+        physical_position_mse=physical_position_mse,
+    )
 
 
 def _fixed_dt_control_state_loss(

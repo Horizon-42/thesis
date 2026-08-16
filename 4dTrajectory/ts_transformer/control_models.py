@@ -58,14 +58,18 @@ def _initialize_control_head(
     head: ControlOutputHead, *, bank_rad: float = 0.0, feature_std: float = 0.0
 ) -> None:
     with torch.no_grad():
+        duration_projection = getattr(head, "duration_projection", None)
         if feature_std:
             nn.init.normal_(head.control_projection.weight, std=feature_std)
-            nn.init.normal_(head.duration_projection.weight, std=feature_std)
+            if duration_projection is not None:
+                nn.init.normal_(duration_projection.weight, std=feature_std)
         else:
             head.control_projection.weight.zero_()
-            head.duration_projection.weight.zero_()
+            if duration_projection is not None:
+                duration_projection.weight.zero_()
         head.control_projection.bias.copy_(_neutral_control_bias(head, bank_rad))
-        head.duration_projection.bias.zero_()
+        if duration_projection is not None:
+            duration_projection.bias.zero_()
 
 
 def _initialize_final_time_head(head: FinalTimeHead, raw_bias: float = 0.0) -> None:

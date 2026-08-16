@@ -24,6 +24,7 @@ from config import (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     TSConfig,
 )
 from dataset import Normalizer
@@ -48,6 +49,7 @@ class ControlStateLossResult:
     normalized_segment_end_states: torch.Tensor
     physical_query_states: torch.Tensor | None = None
     normalized_terminal_end_states: torch.Tensor | None = None
+    physical_position_mse: torch.Tensor | None = None
 
     @property
     def terminal_end_states(self) -> torch.Tensor:
@@ -154,6 +156,34 @@ def _physical_criteria_objective(
     zero = terminal_m.new_zeros(terminal_m.shape)
     return ControlTrackingLossTerms(
         physical_criteria_loss(ade_m, terminal_m), zero
+    )
+
+
+def _true_time_position_objective(
+    result: ControlStateLossResult,
+    normalized_anchor_state: torch.Tensor,
+    terminal_target: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dense_supervision: FixedDTControlSupervision | None,
+    runway_heading_rad: torch.Tensor,
+) -> ControlTrackingLossTerms:
+    """Minimal physical 3-D path plus soft observed endpoint objective."""
+
+    del normalized_anchor_state, dense_supervision, runway_heading_rad
+    if result.physical_position_mse is None:
+        raise ValueError(
+            "true-time-position requires native uniform-clock physical position loss"
+        )
+    terminal_position_m = terminal_position_error_m(
+        result.terminal_end_states, terminal_target, normalizer
+    )
+    endpoint_mse = (
+        terminal_position_m / config.position_loss_scale_m
+    ).square()
+    return ControlTrackingLossTerms(
+        state=result.physical_position_mse,
+        terminal_position=config.state_endpoint_loss_weight * endpoint_mse,
     )
 
 
@@ -316,6 +346,7 @@ _TRACKING_OBJECTIVES: dict[str, TrackingObjective] = {
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA: _physical_criteria_objective,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: _terminal_state_objective,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: _arc_length_geometry_objective,
+    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: _true_time_position_objective,
 }
 
 

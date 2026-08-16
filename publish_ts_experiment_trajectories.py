@@ -1,11 +1,12 @@
 #!/usr/bin/env python
-"""Publish train/validation trajectories for indexed TS experiment checkpoints.
+"""Publish train/validation trajectories for indexed TS checkpoints.
 
 The script is intentionally an orchestration layer.  It does not define another trajectory
 or evaluation format; every job calls the existing predictor, the shared ``evaluation`` package,
 and the existing comparison-CZML publisher in that order.  Publications are resumable and kept
-under a checkpoint-specific raw-output directory, while the frontend receives ordinary
-``categories.json`` / ``comparison_index.json`` / CZML assets marked as Experiment results.
+under a checkpoint-specific raw-output directory. ``--result-source prediction`` publishes a
+primary result under Prediction; the default ``experiment`` source includes checkpoint metadata
+for the Experiments picker.
 
 Outer-test is not a valid option here.  This command is for development train/validation
 inspection only.
@@ -102,6 +103,7 @@ class ExperimentCheckpoint:
     checkpoint: Path
     checkpoint_sha256: str
     arrival_manifests: dict[str, str]
+    eligibility_rosters: dict[str, str]
     config: dict[str, Any]
 
     @property
@@ -176,6 +178,14 @@ def discover_checkpoints(
             for key, value in manifests.items()
         ):
             raise ValueError(f"{metadata_path} has no valid arrival_manifests map")
+        rosters = metadata.get("eligibility_rosters")
+        if rosters is None:
+            rosters = {}
+        if not isinstance(rosters, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in rosters.items()
+        ):
+            raise ValueError(f"{metadata_path} has no valid eligibility_rosters map")
         declared_sha = metadata.get("checkpoint_sha256")
         checkpoint_sha = declared_sha if isinstance(declared_sha, str) else _sha256(checkpoint)
         checkpoints.append(ExperimentCheckpoint(
@@ -185,6 +195,7 @@ def discover_checkpoints(
             checkpoint=checkpoint,
             checkpoint_sha256=checkpoint_sha,
             arrival_manifests=dict(sorted(manifests.items())),
+            eligibility_rosters=dict(sorted(rosters.items())),
             config=_checkpoint_config(directory),
         ))
     return checkpoints
@@ -195,6 +206,7 @@ class PublicationPlan:
     experiment: ExperimentCheckpoint
     airport: str
     split: str
+    result_source: str = "experiment"
     raw_output_root: Path = RAW_OUTPUT_ROOT
     harvest_root: Path = HARVEST_ROOT
     frontend_airports_root: Path = FRONTEND_AIRPORTS_ROOT
@@ -207,6 +219,8 @@ class PublicationPlan:
                 f"experiment publication accepts development splits {DEVELOPMENT_SPLITS}, "
                 f"got {self.split!r}"
             )
+        if self.result_source not in {"prediction", "experiment"}:
+            raise ValueError(f"unknown result source {self.result_source!r}")
         if self.record_retention not in {"loose", "archive"}:
             raise ValueError(f"unknown record retention {self.record_retention!r}")
 
@@ -215,9 +229,17 @@ class PublicationPlan:
         return self.harvest_root / self.airport / "arrivals" / "manifest.json"
 
     @property
+    def eligibility_roster(self) -> Path:
+        return self.data_manifest.parent / "lateral_pass_eligibility.json"
+
+    @property
     def output_dir(self) -> Path:
         return (
-            self.raw_output_root / self.experiment.directory_name / self.airport / self.split
+            self.raw_output_root
+            / self.experiment.directory_name
+            / self.result_source
+            / self.airport
+            / self.split
         )
 
     @property
@@ -239,7 +261,7 @@ class PublicationPlan:
     @property
     def category(self) -> str:
         run = _safe_stem(self.experiment.run_id, limit=42).lower()
-        return f"experiment_{run}_{self.experiment.token}_{self.split}"
+        return f"{self.result_source}_{run}_{self.experiment.token}_{self.split}"
 
     @property
     def comparison_dir(self) -> Path:
@@ -255,8 +277,13 @@ class PublicationPlan:
         output = self.experiment.config.get("prediction_output") or "state"
         horizon = self.experiment.config.get("horizon_mode") or "normalized"
         horizon_label = HORIZON_LABELS.get(str(horizon), str(horizon))
+        source = (
+            f"Experiment {self.experiment.run_id}"
+            if self.result_source == "experiment"
+            else f"Predicted {self.experiment.run_id}"
+        )
         return (
-            f"{SPLIT_LABELS[self.split]} — Experiment {self.experiment.run_id} "
+            f"{SPLIT_LABELS[self.split]} — {source} "
             f"({model}, {output}, horizon: {horizon_label})"
         )
 
@@ -274,34 +301,43 @@ class PublicationPlan:
 
     def commands(self) -> list[tuple[str, list[str]]]:
         py = sys.executable
+        predict = [
+            py, str(TS_SCRIPT), "predict",
+            "--checkpoint", str(self.experiment.checkpoint),
+            "--data", str(self.data_manifest),
+        ]
+        if self.airport in self.experiment.eligibility_rosters:
+            predict += ["--eligibility-roster", str(self.eligibility_roster)]
+        predict += [
+            "--output-dir", str(self.output_dir),
+            "--split", self.split,
+            "--device", self.device,
+        ]
+        publish = [
+            py, str(CZML_SCRIPT),
+            "--summary", str(self.summary),
+            "--output-dir", str(self.comparison_dir),
+            "--airport", self.airport,
+            "--category", self.category,
+            "--category-label", self.category_label,
+            "--dataset-split", self.split,
+            "--evaluation-report", str(self.evaluation_report),
+            "--result-source", self.result_source,
+        ]
+        if self.result_source == "experiment":
+            publish += [
+                "--experiment-id", self.experiment.experiment_id,
+                "--experiment-group", self.experiment.campaign,
+                "--experiment-checkpoint", self.experiment.checkpoint_relative,
+            ]
         return [
-            ("predict", [
-                py, str(TS_SCRIPT), "predict",
-                "--checkpoint", str(self.experiment.checkpoint),
-                "--data", str(self.data_manifest),
-                "--output-dir", str(self.output_dir),
-                "--split", self.split,
-                "--device", self.device,
-            ]),
+            ("predict", predict),
             ("evaluate", [
                 py, "-m", "evaluation",
                 "--input", str(self.output_dir),
                 "--output", str(self.evaluation_report),
             ]),
-            ("publish-czml", [
-                py, str(CZML_SCRIPT),
-                "--summary", str(self.summary),
-                "--output-dir", str(self.comparison_dir),
-                "--airport", self.airport,
-                "--category", self.category,
-                "--category-label", self.category_label,
-                "--dataset-split", self.split,
-                "--evaluation-report", str(self.evaluation_report),
-                "--result-source", "experiment",
-                "--experiment-id", self.experiment.experiment_id,
-                "--experiment-group", self.experiment.campaign,
-                "--experiment-checkpoint", self.experiment.checkpoint_relative,
-            ]),
+            ("publish-czml", publish),
         ]
 
     def preflight_error(self) -> str | None:
@@ -320,6 +356,16 @@ class PublicationPlan:
                 f"arrival manifest SHA-256 mismatch for {self.airport}: "
                 f"checkpoint={expected}, current={actual}"
             )
+        expected_roster = self.experiment.eligibility_rosters.get(self.airport)
+        if expected_roster is not None:
+            if not self.eligibility_roster.is_file():
+                return f"missing eligibility roster {self.eligibility_roster}"
+            actual_roster = _sha256(self.eligibility_roster)
+            if actual_roster != expected_roster:
+                return (
+                    f"eligibility roster SHA-256 mismatch for {self.airport}: "
+                    f"checkpoint={expected_roster}, current={actual_roster}"
+                )
         return None
 
     def is_complete(self) -> bool:
@@ -332,6 +378,7 @@ class PublicationPlan:
         return (
             manifest.get("status") == "completed" and
             manifest.get("checkpointSha256") == self.experiment.checkpoint_sha256 and
+            manifest.get("resultSource") == self.result_source and
             self.summary.is_file() and
             self.evaluation_report.is_file() and
             self.comparison_index.is_file()
@@ -339,7 +386,7 @@ class PublicationPlan:
 
 
 def refresh_category_metadata(plan: PublicationPlan) -> bool:
-    """Refresh derived experiment labels/metadata without regenerating archived trajectories."""
+    """Refresh derived labels/metadata without regenerating archived trajectories."""
     manifest_path = plan.comparison_dir.parent / "categories.json"
     if not manifest_path.is_file():
         return False
@@ -359,8 +406,15 @@ def refresh_category_metadata(plan: PublicationPlan) -> bool:
         if updated.get("label") != plan.category_label:
             updated["label"] = plan.category_label
             changed = True
-        if updated.get("experiment") != plan.experiment_metadata:
-            updated["experiment"] = plan.experiment_metadata
+        if updated.get("resultSource") != plan.result_source:
+            updated["resultSource"] = plan.result_source
+            changed = True
+        if plan.result_source == "experiment":
+            if updated.get("experiment") != plan.experiment_metadata:
+                updated["experiment"] = plan.experiment_metadata
+                changed = True
+        elif "experiment" in updated:
+            del updated["experiment"]
             changed = True
         updated_categories.append(updated)
     if found and changed:
@@ -388,6 +442,7 @@ def _publication_document(
         "checkpointSha256": plan.experiment.checkpoint_sha256,
         "airport": plan.airport,
         "split": plan.split,
+        "resultSource": plan.result_source,
         "category": plan.category,
         "rawOutputDir": _path_for_manifest(plan.output_dir),
         "frontendDir": _path_for_manifest(plan.comparison_dir),
@@ -650,6 +705,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument(
+        "--result-source",
+        choices=("prediction", "experiment"),
+        default="experiment",
+        help="frontend result category (default: experiment)",
+    )
+    parser.add_argument(
         "--record-retention",
         choices=("archive", "loose"),
         default="archive",
@@ -698,6 +759,7 @@ def main(argv: list[str] | None = None) -> int:
                     checkpoint,
                     airport,
                     split,
+                    result_source=args.result_source,
                     raw_output_root=args.output_root.resolve(),
                     harvest_root=args.harvest_root.resolve(),
                     frontend_airports_root=args.frontend_airports_root.resolve(),
@@ -709,7 +771,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"{len(checkpoints)} checkpoint(s), {len(plans)} airport/split publication job(s); "
-        "outer-test is sealed"
+        f"source={args.result_source}; outer-test is sealed"
     )
     counts: dict[str, int] = {}
     for plan in plans:

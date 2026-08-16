@@ -66,11 +66,13 @@ CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE = "normalized-mse"
 CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA = "physical-criteria"
 CONTROL_STATE_OBJECTIVE_TERMINAL_STATE = "terminal-state"
 CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY = "arc-length-geometry"
+CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION = "true-time-position"
 CONTROL_STATE_OBJECTIVES = (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
 )
 CONTROL_ARC_TERMINAL_VECTOR_NORM = "vector-norm"
 CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS = "runway-components"
@@ -86,9 +88,11 @@ CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS = (
 )
 CONTROL_DURATION_FACTORIZED = "factorized"
 CONTROL_DURATION_DIRECT = "direct"
+CONTROL_DURATION_UNIFORM = "uniform"
 CONTROL_DURATION_PARAMETERIZATIONS = (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_DIRECT,
+    CONTROL_DURATION_UNIFORM,
 )
 CONTROL_VALUE_ABSOLUTE = "absolute"
 CONTROL_VALUE_TRIM_RESIDUAL = "trim-residual"
@@ -112,6 +116,10 @@ CONTROL_GRADIENT_CLIP_POLICIES = (
     CONTROL_GRADIENT_CLIP_GLOBAL,
     CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
 )
+
+CONTROL_RECIPE_CUSTOM = "custom"
+CONTROL_RECIPE_SIMPLE_V1 = "simple-v1"
+CONTROL_RECIPE_NAMES = (CONTROL_RECIPE_CUSTOM, CONTROL_RECIPE_SIMPLE_V1)
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
@@ -193,6 +201,75 @@ DEFAULT_CONTROL_DURATION_UNIFORM_FLOOR = 0.8
 DEFAULT_AIRCRAFT_TYPE = "A320"
 
 
+def control_simple_v1_overrides() -> dict[str, Any]:
+    """Return the frozen scientific definition of the minimal control recipe."""
+
+    return {
+        "model": "itransformer",
+        "prediction_output": PREDICTION_CONTROL,
+        "horizon_mode": HORIZON_NORMALIZED,
+        "dt_s": DEFAULT_DT_S,
+        "seq_len": DEFAULT_SEQ_LEN,
+        "n_segments": 64,
+        "channels": CHANNELS,
+        "aircraft_type": DEFAULT_AIRCRAFT_TYPE,
+        "aircraft_filter": AIRCRAFT_FILTER_OPENAP_DIRECT,
+        "coordinate_frame": "enu",
+        "reference_velocity_source": REFERENCE_VELOCITY_TRACK_FIT,
+        "d_model": 512,
+        "n_heads": 8,
+        "d_ff": 1024,
+        "e_layers": 4,
+        "dropout": 0.1,
+        "activation": "gelu",
+        "use_norm": False,
+        "batch_size": 512,
+        "epochs": 180,
+        "learning_rate": 3e-5,
+        "weight_decay": 0.0,
+        "lr_plateau_factor": 0.5,
+        "lr_plateau_patience": 8,
+        "patience": 20,
+        "val_fraction": 0.15,
+        "test_fraction": 0.15,
+        "random_train_anchor": False,
+        "training_cohort_min_future_s": 0.0,
+        "random_train_anchor_min_future_s": DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+        "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+        "validation_common_grid_points": DEFAULT_VALIDATION_COMMON_GRID_POINTS,
+        "fitted_tail_position_weight": 0.25,
+        "fitted_terminal_position_weight": 1.0,
+        "position_loss_scale_m": DEFAULT_POSITION_LOSS_SCALE_M,
+        "final_time_scale_s": DEFAULT_FINAL_TIME_SCALE_S,
+        "final_time_loss_weight": 1.0,
+        "state_endpoint_loss_weight": 0.25,
+        "kinematic_consistency_loss_weight": 0.0,
+        "terminal_loss_weight": 0.0,
+        "control_effort_loss_weight": 0.0,
+        "control_smoothness_loss_weight": 0.0,
+        "control_duration_parameterization": CONTROL_DURATION_UNIFORM,
+        "control_duration_uniform_floor": 0.0,
+        "control_value_parameterization": CONTROL_VALUE_ABSOLUTE,
+        "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+        "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
+        "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_NATIVE,
+        "control_state_objective": CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+        "control_dense_state_loss_weight": 0.0,
+        "control_geometry_loss_weight": 0.0,
+        "control_arc_horizontal_velocity_loss_weight": 0.0,
+        "control_arc_vertical_velocity_loss_weight": 0.0,
+        "control_arc_tangent_loss_weight": 0.0,
+        "control_terminal_position_loss_weight": 0.0,
+        "control_terminal_velocity_loss_weight": 0.0,
+        "control_terminal_supervision_clock": CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
+        "control_state_duration_gradient": False,
+        "control_horizon_curriculum_s": (),
+        "control_gradient_clip_norm": 20.0,
+        "control_gradient_clip_policy": CONTROL_GRADIENT_CLIP_GLOBAL,
+        "control_rollout_integrator_dt_s": 0.5,
+    }
+
+
 @dataclass(frozen=True)
 class TSConfig:
     """Everything that defines a run. Serialised whole into each checkpoint."""
@@ -200,6 +277,9 @@ class TSConfig:
     # ── what to train ────────────────────────────────────────────────────────
     model: str = MODELS[0]
     prediction_output: str = PREDICTION_STATE
+    # Named recipes freeze one complete scientific contract. ``custom`` preserves every
+    # historical experiment mode and remains the default for existing callers/checkpoints.
+    control_recipe_name: str = CONTROL_RECIPE_CUSTOM
     horizon_mode: str = HORIZON_NORMALIZED
     # ── the time grid + windowing (read by the data build AND both models) ──
     dt_s: float = DEFAULT_DT_S
@@ -419,6 +499,11 @@ class TSConfig:
     notes: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.control_recipe_name not in CONTROL_RECIPE_NAMES:
+            raise ValueError(
+                f"unknown control_recipe_name {self.control_recipe_name!r}; expected one "
+                f"of {CONTROL_RECIPE_NAMES}"
+            )
         if self.model not in MODELS:
             raise ValueError(f"unknown model {self.model!r}; expected one of {MODELS}")
         if self.prediction_output not in PREDICTION_OUTPUTS:
@@ -430,6 +515,21 @@ class TSConfig:
             object.__setattr__(
                 self, "n_segments", DEFAULT_N_SEGMENTS_BY_MODEL[self.model]
             )
+        if self.control_recipe_name == CONTROL_RECIPE_SIMPLE_V1:
+            expected = control_simple_v1_overrides()
+            mismatches = {
+                name: (getattr(self, name), value)
+                for name, value in expected.items()
+                if getattr(self, name) != value
+            }
+            if mismatches:
+                details = ", ".join(
+                    f"{name}={actual!r} (expected {wanted!r})"
+                    for name, (actual, wanted) in sorted(mismatches.items())
+                )
+                raise ValueError(
+                    f"{CONTROL_RECIPE_SIMPLE_V1} recipe fields are frozen: {details}"
+                )
         if self.horizon_mode not in HORIZON_MODES:
             raise ValueError(
                 f"unknown horizon_mode {self.horizon_mode!r}; expected one of {HORIZON_MODES}"
@@ -536,6 +636,25 @@ class TSConfig:
                 raise ValueError(
                     f"{self.control_state_objective} control objective requires "
                     "control_state_loss_grid='fixed-dt'"
+                )
+        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "true-time-position control objective is supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
+                raise ValueError(
+                    "true-time-position control objective requires "
+                    "control_state_loss_grid='native-segment-endpoints'"
+                )
+            if self.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
+                raise ValueError(
+                    "true-time-position control objective requires uniform control durations"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "true-time-position control objective requires observed state supervision"
                 )
         if (
             self.control_terminal_supervision_clock
@@ -746,6 +865,13 @@ class TSConfig:
         ):
             raise ValueError(
                 "direct control durations are supported only by prediction_output='control'"
+            )
+        if (
+            self.control_duration_parameterization == CONTROL_DURATION_UNIFORM
+            and self.prediction_output != PREDICTION_CONTROL
+        ):
+            raise ValueError(
+                "uniform control durations are supported only by prediction_output='control'"
             )
         if self.checkpoint_selection_metric not in CHECKPOINT_SELECTION_METRICS:
             raise ValueError(
@@ -1109,6 +1235,8 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "gradient_clip_norm": config.control_gradient_clip_norm,
         "gradient_clip_policy": config.control_gradient_clip_policy,
     }
+    if config.control_recipe_name != CONTROL_RECIPE_CUSTOM:
+        base["name"] = config.control_recipe_name
     extensions = {
         PREDICTION_CONTROL: {},
         PREDICTION_CONTROL_MIXTURE: {

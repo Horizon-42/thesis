@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-"""Refine a deterministic inverse-dynamics teacher cohort using outer-train only."""
+"""Refine a deterministic inverse-dynamics teacher cohort using outer-train only.
+
+With no ``--airport`` argument the cohort is balanced across every discovered K-airport.
+Repeating ``--airport`` restricts the same pooled workflow to an explicit airport set.
+"""
 
 from __future__ import annotations
 
@@ -43,6 +47,22 @@ from oracle_teacher.targets import build_inverse_dynamics_target  # noqa: E402
 SCHEMA = "ts-oracle-teacher-optimized-cohort-v1-train-only"
 
 
+def _balanced_cohort_sizes(airports: list[str], total: int) -> dict[str, int]:
+    """Allocate one fixed-size teacher cohort as evenly as possible by airport."""
+    if not airports:
+        raise ValueError("at least one airport is required")
+    ordered = sorted(set(airports))
+    if total < len(ordered):
+        raise ValueError(
+            f"cohort size {total} cannot cover all {len(ordered)} airports"
+        )
+    base, remainder = divmod(total, len(ordered))
+    return {
+        airport: base + (index < remainder)
+        for index, airport in enumerate(ordered)
+    }
+
+
 def _move_batch(batch, device: torch.device):
     x, target, weights, final_time, flight_weights, dynamics, supervision = batch
     del flight_weights
@@ -65,7 +85,15 @@ def _aggregate(rows: list[dict[str, object]], mode: str) -> dict[str, float]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--airport", default="KSJC")
+    parser.add_argument(
+        "--airport",
+        action="append",
+        default=None,
+        help=(
+            "airport to include; repeat for a selected pooled set "
+            "(default: every discovered K-airport)"
+        ),
+    )
     parser.add_argument("--cohort-size", type=int, default=32)
     parser.add_argument("--prefix-steps", type=int, default=30)
     parser.add_argument("--full-steps", type=int, default=150)
@@ -86,7 +114,19 @@ def main(argv: list[str] | None = None) -> int:
     if output_dir.exists():
         parser.error(f"output directory already exists: {output_dir}")
 
-    airport = args.airport.strip().upper()
+    airports = sorted(
+        {
+            value.strip().upper()
+            for value in (args.airport or pipeline.discover_k_airports())
+            if value.strip()
+        }
+    )
+    if not airports:
+        parser.error("no airports with arrivals manifests were selected")
+    try:
+        cohort_sizes = _balanced_cohort_sizes(airports, args.cohort_size)
+    except ValueError as exc:
+        parser.error(str(exc))
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
         aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT,
@@ -102,14 +142,31 @@ def main(argv: list[str] | None = None) -> int:
         split_seed=args.split_seed,
         device=args.device,
     )
-    cohort = select_outer_train_cohort(
-        pipeline.arrival_manifest_path(airport),
-        config,
-        airport=airport,
-        cohort_size=args.cohort_size,
+    cohort_series = []
+    cohort_audit = []
+    for airport in airports:
+        cohort = select_outer_train_cohort(
+            pipeline.arrival_manifest_path(airport),
+            config,
+            airport=airport,
+            cohort_size=cohort_sizes[airport],
+        )
+        cohort_series.extend(cohort.series)
+        cohort_audit.append({
+            "airport": airport,
+            "size": len(cohort.series),
+            "dataset_ids": [item.dataset_id for item in cohort.series],
+            "outer_split_identity_counts": {
+                name: len(keys) for name, keys in cohort.split_keys.items()
+            },
+            "ranked_candidates_opened": list(cohort.ranked_candidates_opened),
+        })
+    print(
+        "teacher cohort: "
+        + ", ".join(f"{row['airport']}={row['size']}" for row in cohort_audit)
     )
-    normalizer = Normalizer.fit(cohort.series, balance_airports_and_flights=True)
-    dataset = FixedAnchorTrajectoryWindows(cohort.series, config, normalizer)
+    normalizer = Normalizer.fit(cohort_series, balance_airports_and_flights=True)
+    dataset = FixedAnchorTrajectoryWindows(cohort_series, config, normalizer)
     targets = [build_inverse_dynamics_target(dataset, index) for index in range(len(dataset))]
     device = resolve_device(args.device)
     x, target, weights, final_time, dynamics, supervision = _move_batch(
@@ -179,12 +236,11 @@ def main(argv: list[str] | None = None) -> int:
         "test_policy": "outer-train values only; validation/test values unopened",
         "config": config.to_dict(),
         "cohort": {
-            "airport": airport,
+            "airports": airports,
             "size": len(targets),
             "dataset_ids": [item.dataset_id for item in targets],
-            "outer_split_identity_counts": {
-                name: len(keys) for name, keys in cohort.split_keys.items()
-            },
+            "allocation": cohort_sizes,
+            "by_airport": cohort_audit,
         },
         "recipe": {
             "initialization": "inverse-dynamics",

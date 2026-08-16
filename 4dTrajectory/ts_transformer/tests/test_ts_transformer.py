@@ -11,6 +11,7 @@ The end-to-end test trains for two epochs on synthetic data. That is a plumbing 
 (does a checkpoint round-trip into a gradeable batch), not a quality check.
 """
 
+import argparse
 import hashlib
 import importlib.util
 import itertools
@@ -49,6 +50,7 @@ import batch_benchmark as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
 import experiment_index  # noqa: E402
 import fixed_dt_control_loss as fixed_dt_loss_module  # noqa: E402
+import oracle_teacher.pretraining as teacher_pretraining  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
@@ -78,7 +80,7 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
-    CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED,
+    CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM,
     CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
     CONTROL_GRADIENT_CLIP_GLOBAL,
     CONTROL_VALUE_ABSOLUTE, CONTROL_VALUE_TRIM_RESIDUAL,
@@ -88,11 +90,13 @@ from config import (  # noqa: E402
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     CONTROL_TERMINAL_CLOCK_PREDICTED,
     CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
+    CONTROL_RECIPE_SIMPLE_V1,
     PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
-    TSConfig, control_recipe,
+    TSConfig, control_recipe, control_simple_v1_overrides,
 )
 from control_mixture import ControlMixturePrediction  # noqa: E402
 from control_loss_components import (  # noqa: E402
@@ -142,6 +146,7 @@ from metrics import (  # noqa: E402
     raw_kinematic_metrics, states_with_derived_velocity,
 )
 from models import build_model, parameter_count  # noqa: E402
+from oracle_teacher.pretraining import CachedSchedulePretrainer  # noqa: E402
 from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
@@ -151,6 +156,7 @@ from trim_residual_control import (  # noqa: E402
     trim_control_baseline,
 )
 from terminal_state_loss import terminal_state_errors  # noqa: E402
+from uniform_duration_control import UniformDurationControlHead  # noqa: E402
 from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
 from train import (  # noqa: E402
@@ -372,6 +378,55 @@ def test_development_cohort_rejects_incomplete_rebuild(monkeypatch, tmp_path):
             tmp_path,
             built_ids=("KRDU:train",),
         )
+
+
+def test_invalid_teacher_arguments_do_not_begin_a_formal_run(monkeypatch, tmp_path):
+    began_run = False
+    outer_splits = {
+        "train": ["KRDU:train"],
+        "val": ["KRDU:val"],
+        "test": ["KRDU:test"],
+    }
+    monkeypatch.setattr(
+        ts_cli, "arrival_data_provenance", lambda _data: _fake_data_provenance()
+    )
+    monkeypatch.setattr(
+        ts_cli, "flight_keys_by_split", lambda _provenance, _config: outer_splits
+    )
+    monkeypatch.setattr(ts_cli, "load_flight_dicts", lambda *_args, **_kwargs: [{}])
+    monkeypatch.setattr(
+        ts_cli,
+        "_build_series_or_exit",
+        lambda *_args: (
+            [SimpleNamespace(dataset_id="KRDU:train")],
+            SimpleNamespace(to_dict=lambda: {}),
+        ),
+    )
+    monkeypatch.setattr(ts_cli, "data_selection_audit", lambda *_args: {})
+
+    def record_begin(*_args, **_kwargs):
+        nonlocal began_run
+        began_run = True
+        return tmp_path / "run" / experiment_index.RUN_MANIFEST_NAME
+
+    monkeypatch.setattr(ts_cli, "begin_run", record_begin)
+    monkeypatch.setattr(
+        ts_cli, "train", lambda *_args, **_kwargs: pytest.fail("train must not start")
+    )
+
+    with pytest.raises(SystemExit):
+        ts_cli.main([
+            "train",
+            "--data", str(tmp_path / "manifest.json"),
+            "--output-dir", str(tmp_path / "run"),
+            "--prediction-output", PREDICTION_CONTROL,
+            "--control-teacher-schedules", str(tmp_path / "teacher_schedules.npz"),
+            "--control-teacher-steps", "0",
+            "--campaign-id", "teacher-contract",
+            "--experiment-id", "invalid-steps",
+        ])
+
+    assert not began_run
 
 
 def test_predict_cli_refuses_test_without_explicit_release(tmp_path):
@@ -2121,6 +2176,181 @@ def test_control_head_reserves_uniform_duration_mass_to_prevent_partition_collap
     assert fractions.sum().item() == pytest.approx(1.0)
 
 
+def test_uniform_duration_control_head_has_no_duration_parameters():
+    head = UniformDurationControlHead(input_dim=8, n_segments=4)
+    lower = torch.tensor([[0.0, -0.7, 0.5], [0.0, -0.5, 0.6]])
+    upper = torch.tensor([[200_000.0, 0.7, 2.0], [150_000.0, 0.5, 1.8]])
+    final_time = torch.tensor([80.0, 100.0], requires_grad=True)
+
+    prediction = head(
+        torch.randn(2, 8), final_time, lower=lower, upper=upper
+    )
+
+    assert not any("duration_projection" in name for name, _ in head.named_parameters())
+    torch.testing.assert_close(
+        prediction.segment_durations,
+        torch.tensor([[20.0] * 4, [25.0] * 4]),
+    )
+    torch.testing.assert_close(
+        prediction.segment_durations.sum(dim=1), prediction.final_time_s
+    )
+    assert torch.all(prediction.controls >= lower[:, None, :])
+    assert torch.all(prediction.controls <= upper[:, None, :])
+
+
+def test_control_simple_v1_is_a_frozen_serialized_recipe():
+    config = TSConfig(
+        control_recipe_name=CONTROL_RECIPE_SIMPLE_V1,
+        **control_simple_v1_overrides(),
+    )
+
+    assert config.control_duration_parameterization == CONTROL_DURATION_UNIFORM
+    assert config.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION
+    assert config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE
+    assert control_recipe(config)["name"] == CONTROL_RECIPE_SIMPLE_V1
+    assert TSConfig.from_dict(config.to_dict()) == config
+    assert "bounded-control-uniform-duration" in train_module.target_contract(config)
+    with pytest.raises(ValueError, match="simple-v1 recipe fields are frozen"):
+        replace(config, n_segments=32)
+
+
+def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts():
+    parser = argparse.ArgumentParser()
+    ts_cli._add_data_args(parser)
+    ts_cli._add_training_args(parser)
+    args = parser.parse_args(
+        [
+            "--data", "unused.json",
+            "--output-dir", "unused-output",
+            "--control-recipe", CONTROL_RECIPE_SIMPLE_V1,
+            "--seed", "2027",
+        ]
+    )
+
+    config, batch_auto = ts_cli._config_from_args(args, parser)
+
+    assert not batch_auto
+    assert config.control_recipe_name == CONTROL_RECIPE_SIMPLE_V1
+    assert config.seed == 2027
+    assert config.n_segments == 64
+    assert config.batch_size == 512
+    assert config.control_duration_parameterization == CONTROL_DURATION_UNIFORM
+
+    conflicting = parser.parse_args(
+        [
+            "--data", "unused.json",
+            "--output-dir", "unused-output",
+            "--control-recipe", CONTROL_RECIPE_SIMPLE_V1,
+            "--n-segments", "32",
+        ]
+    )
+    with pytest.raises(SystemExit):
+        ts_cli._config_from_args(conflicting, parser)
+
+
+def test_cached_teacher_pretrainer_accepts_native_control_batch(tmp_path):
+    series, config = _series(
+        n_flights=2,
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+        control_state_duration_gradient=False,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    batch = dataset.batch(np.arange(len(dataset)))
+    assert len(batch) == 6
+    final_time = batch[3]
+    dynamics = batch[5]
+    controls = (
+        dynamics["control_lower"][:, None, :]
+        + dynamics["control_upper"][:, None, :]
+    ).expand(-1, config.n_segments, -1) / 2.0
+    durations = final_time[:, None].expand(-1, config.n_segments) / config.n_segments
+    schedule_path = tmp_path / "teacher_schedules.npz"
+    np.savez_compressed(
+        schedule_path,
+        dataset_ids=np.asarray([item.dataset_id for item in series]),
+        controls=controls.numpy(),
+        segment_durations_s=durations.numpy(),
+    )
+
+    audit = CachedSchedulePretrainer(
+        schedule_path=schedule_path,
+        steps=1,
+        log_every=1,
+    )(
+        build_model(config),
+        series,
+        normalizer,
+        config,
+        torch.device("cpu"),
+    )
+
+    assert audit["dataset_ids"] == [item.dataset_id for item in series]
+    assert audit["steps"] == 1
+
+
+def _write_simple_v1_teacher_schedule(path, *, flights=32):
+    np.savez_compressed(
+        path,
+        dataset_ids=np.asarray([f"KSJC:teacher-{index}" for index in range(flights)]),
+        controls=np.zeros((flights, 64, 3), dtype=np.float32),
+        segment_durations_s=np.ones((flights, 64), dtype=np.float32),
+    )
+
+
+def test_simple_v1_teacher_rejects_optimizer_contract_drift(tmp_path, monkeypatch):
+    schedule_path = tmp_path / "teacher_schedules.npz"
+    _write_simple_v1_teacher_schedule(schedule_path)
+    monkeypatch.setattr(
+        teacher_pretraining,
+        "SIMPLE_V1_TEACHER_SCHEDULE_SHA256",
+        hashlib.sha256(schedule_path.read_bytes()).hexdigest(),
+    )
+
+    with pytest.raises(ValueError, match="1000 steps"):
+        CachedSchedulePretrainer(
+            schedule_path=schedule_path,
+            steps=1,
+            recipe_name=CONTROL_RECIPE_SIMPLE_V1,
+        )
+
+
+def test_simple_v1_teacher_rejects_schedule_hash_drift(tmp_path):
+    schedule_path = tmp_path / "teacher_schedules.npz"
+    _write_simple_v1_teacher_schedule(schedule_path)
+
+    with pytest.raises(ValueError, match="frozen schedule SHA-256"):
+        CachedSchedulePretrainer(
+            schedule_path=schedule_path,
+            recipe_name=CONTROL_RECIPE_SIMPLE_V1,
+        )
+
+
+def test_simple_v1_teacher_rejects_wrong_cohort_size(tmp_path, monkeypatch):
+    schedule_path = tmp_path / "teacher_schedules.npz"
+    _write_simple_v1_teacher_schedule(schedule_path, flights=1)
+    monkeypatch.setattr(
+        teacher_pretraining,
+        "SIMPLE_V1_TEACHER_SCHEDULE_SHA256",
+        hashlib.sha256(schedule_path.read_bytes()).hexdigest(),
+    )
+
+    with pytest.raises(ValueError, match="exactly 32 schedules"):
+        CachedSchedulePretrainer(
+            schedule_path=schedule_path,
+            recipe_name=CONTROL_RECIPE_SIMPLE_V1,
+        )
+
+
 @pytest.mark.parametrize(
     ("lower", "upper"),
     [
@@ -2348,6 +2578,15 @@ def test_direct_control_durations_reject_non_single_control_outputs(prediction_o
         TSConfig(
             prediction_output=prediction_output,
             control_duration_parameterization=CONTROL_DURATION_DIRECT,
+        )
+
+
+@pytest.mark.parametrize("prediction_output", ["state", PREDICTION_CONTROL_MIXTURE])
+def test_uniform_control_durations_reject_non_single_control_outputs(prediction_output):
+    with pytest.raises(ValueError, match="only by prediction_output='control'"):
+        TSConfig(
+            prediction_output=prediction_output,
+            control_duration_parameterization=CONTROL_DURATION_UNIFORM,
         )
 
 
@@ -3166,7 +3405,7 @@ def test_predicted_control_state_clock_preserves_original_training_behavior():
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
 @pytest.mark.parametrize(
     "duration_parameterization",
-    [CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_DIRECT],
+    [CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_DIRECT, CONTROL_DURATION_UNIFORM],
 )
 def test_control_models_use_per_sample_bounds_and_aircraft_condition(
     model_name, duration_parameterization
@@ -3356,6 +3595,75 @@ def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
     )
 
     assert components.state.item() == pytest.approx(0.0, abs=1e-12)
+
+
+def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monkeypatch):
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+        control_state_duration_gradient=False,
+        n_segments=2,
+        position_loss_scale_m=10_000.0,
+        final_time_scale_s=600.0,
+        state_endpoint_loss_weight=0.25,
+        control_effort_loss_weight=0.0,
+        control_smoothness_loss_weight=0.0,
+    )
+    normalizer = Normalizer(
+        mean=np.zeros(config.enc_in),
+        std=np.array([100.0, 200.0, 10.0, 2.0, 3.0, 4.0]),
+    )
+    # Physical position errors are [100, 200, 10] m and [0, 0, 20] m. Deliberately huge
+    # future velocity values prove that the minimal objective does not supervise velocity.
+    physical_rollout = torch.zeros(1, 2, config.enc_in, dtype=torch.float64)
+    physical_rollout[0, 0, list(ch.POSITION_IDX)] = torch.tensor(
+        [100.0, 200.0, 10.0], dtype=torch.float64
+    )
+    physical_rollout[0, 1, ch.IDX["u"]] = 20.0
+    physical_rollout[..., list(ch.VELOCITY_IDX)] = 1_000_000.0
+    monkeypatch.setattr(
+        train_module,
+        "control_rollout_channels",
+        lambda _prediction, _dynamics, _config: (
+            physical_rollout,
+            torch.zeros(1, 2, 7, dtype=torch.float64),
+        ),
+    )
+    prediction = ControlPrediction(
+        controls=torch.zeros(1, 2, 3),
+        segment_durations=torch.tensor([[5.0, 5.0]]),
+        final_time_s=torch.tensor([10.0]),
+    )
+    target = torch.zeros(1, 2, config.enc_in)
+    weights = torch.full_like(target, 1.0 / config.enc_in)
+    dynamics = {
+        "control_lower": torch.tensor([[0.0, -0.7, 0.5]]),
+        "control_upper": torch.tensor([[240_000.0, 0.7, 2.0]]),
+    }
+
+    components = train_module.control_prediction_loss_components(
+        prediction,
+        torch.zeros(1, config.enc_in),
+        target,
+        weights,
+        torch.tensor([8.0]),
+        torch.ones(1),
+        config,
+        normalizer,
+        dynamics,
+    )
+
+    expected_path = ((100.0**2 + 200.0**2 + 10.0**2) + 20.0**2) / 2.0
+    assert float(components.state) == pytest.approx(expected_path / 10_000.0**2)
+    assert float(components.terminal) == pytest.approx(
+        0.25 * 20.0**2 / 10_000.0**2
+    )
+    assert float(components.final_time) == pytest.approx((2.0 / 600.0) ** 2)
+    assert float(components.kinematic) == pytest.approx(0.0)
+    assert float(components.extras["control_effort"]) == pytest.approx(0.0)
+    assert float(components.extras["control_smoothness"]) == pytest.approx(0.0)
 
 
 def test_control_model_starts_from_neutral_uniform_rollout():
@@ -3594,6 +3902,61 @@ def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step(
         parameter.grad is not None and torch.count_nonzero(parameter.grad)
         for parameter in model.parameters()
     )
+
+
+def test_control_simple_loss_forms_one_real_dynamics_training_step():
+    series, config = _series(
+        n_flights=2,
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
+        control_dynamics_backend=CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+        control_state_duration_gradient=False,
+        control_effort_loss_weight=0.0,
+        control_smoothness_loss_weight=0.0,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        final_time_scale_s=2.0,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    x, target, weights, final_time, flight_weights, dynamics = dataset.batch(
+        np.array([0, 1])
+    )
+    model = build_model(config)
+
+    prediction = model(x, dynamics)
+    loss = prediction_loss(
+        prediction,
+        x[:, -1],
+        target,
+        weights,
+        final_time,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+    )
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert not any(
+        "duration_projection" in name for name, _ in model.named_parameters()
+    )
+    torch.testing.assert_close(
+        prediction.segment_durations,
+        prediction.final_time_s.unsqueeze(1).expand_as(
+            prediction.segment_durations
+        ) / config.n_segments,
+    )
+    assert model.control_head.control_projection.weight.grad is not None
+    assert model.final_time_head.network[-1].weight.grad is not None
 
 
 def test_pipeline_carries_and_names_transport_chart_dynamics():
@@ -5811,6 +6174,10 @@ def test_control_mixture_forecast_uses_selector_without_truth_access():
             CONTROL_DURATION_DIRECT,
             "bounded-control-direct-duration-casadi-rollout-clock-aligned-v1"
             "+duration-uniform-floor=0.8-v1",
+        ),
+        (
+            CONTROL_DURATION_UNIFORM,
+            "bounded-control-uniform-duration-casadi-rollout-clock-aligned-v1",
         ),
     ],
 )
