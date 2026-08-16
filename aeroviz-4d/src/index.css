@@ -3274,6 +3274,51 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .evaluation-summary dl { margin: 0; }
 
+.evaluation-summary-section {
+  margin-top: 3px;
+  border-top: 1px solid rgba(42, 53, 80, 0.72);
+}
+
+.evaluation-summary-section > summary,
+.evaluation-summary-notes > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.evaluation-summary-section > summary::-webkit-details-marker,
+.evaluation-summary-notes > summary::-webkit-details-marker {
+  display: none;
+}
+
+.evaluation-summary-section > summary {
+  padding: 5px 4px 3px;
+  color: #9fc3ff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.evaluation-summary-section > summary::after,
+.evaluation-summary-notes > summary::after {
+  content: "+";
+  color: #6f86a2;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.evaluation-summary-section[open] > summary::after,
+.evaluation-summary-notes[open] > summary::after {
+  content: "−";
+}
+
+.evaluation-summary-section > dl {
+  padding: 1px 0 4px;
+}
+
 .evaluation-summary-row {
   display: flex;
   justify-content: space-between;
@@ -3305,9 +3350,10 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   line-height: 1.4;
 }
 
-.evaluation-summary-notes strong {
+.evaluation-summary-notes summary {
   color: #b8cae2;
   font-size: 9px;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }

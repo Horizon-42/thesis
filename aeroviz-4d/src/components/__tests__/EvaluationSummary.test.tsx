@@ -243,12 +243,19 @@ describe("EvaluationSummary", () => {
       ...INDEX,
       prediction: {
         flights: 10,
-        adeM: { mean: 1755.6, p95: 4656.2 },
-        fdeM: { mean: 2082.4, p95: 6002.1 },
+        finalTimeS: { mae: 58.1, p95Abs: 120.2, meanSigned: -4.3 },
+        adeM: { median: 1200, mean: 1755.6, p95: 4656.2, max: 9012 },
+        fdeM: { median: 1500, mean: 2082.4, p95: 6002.1, max: 10024 },
         arrivalEndpointErrorM: { mean: 1255.9, p95: 3976.8 },
+        rawKinematics: {
+          predicted: {
+            positionVelocityRmseMps: { p95: 3.2 },
+          },
+        },
       },
       evaluation: {
         total: 10,
+        measured: 8,
         solved: 8,
         successful: 6,
         successRate: 0.6,
@@ -259,13 +266,28 @@ describe("EvaluationSummary", () => {
     expect(
       await screen.findByRole("region", { name: "Data-Driven Model Evaluation" }),
     ).toBeTruthy();
+    expect(within(metric("ADE mean / p95")).getByText("1756 / 4656 m")).toBeTruthy();
+    expect(within(metric("FDE mean / p95")).getByText("2082 / 6002 m")).toBeTruthy();
+    expect(
+      within(metric("Threshold event established")).getByText("80.0% · 8/10"),
+    ).toBeTruthy();
     expect(within(metric("Runway-threshold pass rate")).getByText("60.0%")).toBeTruthy();
-    expect(within(metric("Mean ADE")).getByText("1756 m")).toBeTruthy();
-    expect(within(metric("95th-percentile ADE")).getByText("4656 m")).toBeTruthy();
-    expect(within(metric("Mean FDE")).getByText("2082 m")).toBeTruthy();
-    expect(within(metric("95th-percentile FDE")).getByText("6002 m")).toBeTruthy();
-    expect(within(metric("Mean arrival endpoint error")).getByText("1256 m"))
-      .toBeTruthy();
+    expect(within(metric("Final-time error MAE")).getByText("58.1 s")).toBeTruthy();
+
+    for (const sectionTitle of [
+      "Trajectory accuracy",
+      "Terminal compliance",
+      "Timing",
+      "Kinematic quality",
+    ]) {
+      const section = screen.getByText(sectionTitle).closest("details") as HTMLDetailsElement;
+      expect(section.open).toBe(false);
+    }
+    const trajectorySection = screen.getByText("Trajectory accuracy")
+      .closest("details") as HTMLDetailsElement;
+    expect(within(trajectorySection).getByText("Mean arrival endpoint error")).toBeTruthy();
+    fireEvent.click(within(trajectorySection).getByText("Trajectory accuracy"));
+    expect(trajectorySection.open).toBe(true);
     expect(screen.queryByText("Solve rate")).toBeNull();
   });
 

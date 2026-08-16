@@ -52,11 +52,17 @@ interface SummaryRow {
   pending: boolean;
 }
 
+interface PresentationSection {
+  title: string;
+  rows: SummaryRow[];
+}
+
 interface Presentation {
   title: string;
   context: string;
   note: string;
   rows: SummaryRow[];
+  sections?: PresentationSection[];
 }
 
 function formatMetres(value: number | null | undefined): string {
@@ -66,6 +72,49 @@ function formatMetres(value: number | null | undefined): string {
 
 function row(label: string, value: string, available: boolean): SummaryRow {
   return { label, value, pending: !available };
+}
+
+function formatMetrePair(
+  first: number | null | undefined,
+  second: number | null | undefined,
+): string {
+  const firstValue = first == null || !Number.isFinite(first) ? "—" : Math.round(first);
+  const secondValue = second == null || !Number.isFinite(second) ? "—" : Math.round(second);
+  return `${firstValue} / ${secondValue} m`;
+}
+
+function formatRateCount(
+  count: number | null | undefined,
+  total: number | null | undefined,
+): string {
+  if (
+    count == null ||
+    total == null ||
+    !Number.isFinite(count) ||
+    !Number.isFinite(total) ||
+    total <= 0
+  ) {
+    return "—";
+  }
+  return `${formatPercent(count / total)} · ${Math.round(count).toLocaleString()}/${Math.round(total).toLocaleString()}`;
+}
+
+function SummaryRows({ rows }: { rows: SummaryRow[] }) {
+  return (
+    <dl>
+      {rows.map((summaryRow) => (
+        <div key={summaryRow.label} className="evaluation-summary-row">
+          <dt>{summaryRow.label}</dt>
+          <dd
+            className={summaryRow.pending ? "evaluation-summary-pending" : undefined}
+            title={summaryRow.pending ? "Evaluation data is not available" : undefined}
+          >
+            {summaryRow.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 function evaluationKind(category: ComparisonCategory): EvaluationKind {
@@ -224,6 +273,112 @@ function predictionPresentation(
   const lateral = evaluation?.lateralM;
   const vertical = evaluation?.verticalM;
   const evaluatedTime = evaluation?.finalTimeS;
+  const thresholdEventsAvailable =
+    evaluation?.measured != null &&
+    evaluation?.total != null &&
+    Number.isFinite(evaluation.measured) &&
+    Number.isFinite(evaluation.total) &&
+    evaluation.total > 0;
+  const trajectoryAccuracyRows = [
+    ...optionalRow("Median ADE", prediction?.adeM?.median, formatMetres(prediction?.adeM?.median)),
+    ...optionalRow("Maximum ADE", prediction?.adeM?.max, formatMetres(prediction?.adeM?.max)),
+    ...optionalRow("Median FDE", prediction?.fdeM?.median, formatMetres(prediction?.fdeM?.median)),
+    ...optionalRow("Maximum FDE", prediction?.fdeM?.max, formatMetres(prediction?.fdeM?.max)),
+    ...spreadRows("arrival endpoint error", prediction?.arrivalEndpointErrorM),
+    ...optionalRow(
+      "Mean per-flight cross-track p95",
+      prediction?.crossTrackP95M?.mean,
+      formatMetres(prediction?.crossTrackP95M?.mean),
+    ),
+    ...optionalRow(
+      "Mean per-flight altitude p95",
+      prediction?.altitudeP95M?.mean,
+      formatMetres(prediction?.altitudeP95M?.mean),
+    ),
+  ];
+  const terminalComplianceRows = [
+    ...optionalRow(
+      "Successful terminal verdicts",
+      evaluation?.successful,
+      formatCount(evaluation?.successful),
+    ),
+    ...optionalRow("Failed terminal verdicts", evaluation?.failed, formatCount(evaluation?.failed)),
+    ...optionalRow(
+      "Indeterminate terminal verdicts",
+      evaluation?.indeterminate,
+      formatCount(evaluation?.indeterminate),
+    ),
+    ...optionalRow(
+      "Mean lateral deviation at threshold",
+      lateral?.mean,
+      formatMetres(lateral?.mean),
+    ),
+    ...optionalRow(
+      "Lateral deviation p95 at threshold",
+      lateral?.p95,
+      formatMetres(lateral?.p95),
+    ),
+    ...optionalRow(
+      "Mean absolute vertical deviation at threshold",
+      vertical?.mean_abs,
+      formatMetres(vertical?.mean_abs),
+    ),
+    ...optionalRow(
+      "Vertical deviation p95 at threshold",
+      vertical?.p95_abs,
+      formatMetres(vertical?.p95_abs),
+    ),
+  ];
+  const timingRows = [
+    ...optionalRow(
+      "Final-time error p95",
+      prediction?.finalTimeS?.p95Abs,
+      formatScalar(prediction?.finalTimeS?.p95Abs, "s"),
+    ),
+    ...optionalRow(
+      "Final-time signed bias",
+      prediction?.finalTimeS?.meanSigned,
+      formatScalar(prediction?.finalTimeS?.meanSigned, "s"),
+    ),
+    ...optionalRow(
+      "Mean predicted duration",
+      evaluatedTime?.mean,
+      formatScalar(evaluatedTime?.mean, "s"),
+    ),
+  ];
+  const kinematicRows = [
+    ...optionalRow(
+      "Position–velocity consistency p95",
+      raw?.positionVelocityRmseMps?.p95,
+      formatScalar(raw?.positionVelocityRmseMps?.p95, "m/s"),
+    ),
+    ...optionalRow(
+      "Heading consistency p95",
+      raw?.headingConsistencyP95Deg?.p95,
+      formatScalar(raw?.headingConsistencyP95Deg?.p95, "deg"),
+    ),
+    ...optionalRow(
+      "Turn-rate p95",
+      raw?.turnRateP95DegS?.p95,
+      formatScalar(raw?.turnRateP95DegS?.p95, "deg/s"),
+    ),
+    ...optionalRow(
+      "Acceleration p95",
+      raw?.accelerationP95Mps2?.p95,
+      formatScalar(raw?.accelerationP95Mps2?.p95, "m/s²"),
+    ),
+    ...optionalRow(
+      "Jerk p95",
+      raw?.jerkP95Mps3?.p95,
+      formatScalar(raw?.jerkP95Mps3?.p95, "m/s³"),
+    ),
+  ];
+  const sections = [
+    { title: "Trajectory accuracy", rows: trajectoryAccuracyRows },
+    { title: "Terminal compliance", rows: terminalComplianceRows },
+    { title: "Timing", rows: timingRows },
+    { title: "Kinematic quality", rows: kinematicRows },
+  ].filter((section) => section.rows.length > 0);
 
   return {
     title: category.resultSource === "experiment"
@@ -240,94 +395,32 @@ function predictionPresentation(
     rows: [
       row("Trajectories", formatCount(prediction?.flights), prediction?.flights != null),
       row(
+        "ADE mean / p95",
+        formatMetrePair(prediction?.adeM?.mean, prediction?.adeM?.p95),
+        prediction?.adeM?.mean != null && prediction?.adeM?.p95 != null,
+      ),
+      row(
+        "FDE mean / p95",
+        formatMetrePair(prediction?.fdeM?.mean, prediction?.fdeM?.p95),
+        prediction?.fdeM?.mean != null && prediction?.fdeM?.p95 != null,
+      ),
+      row(
+        "Threshold event established",
+        formatRateCount(evaluation?.measured, evaluation?.total),
+        thresholdEventsAvailable,
+      ),
+      row(
         "Runway-threshold pass rate",
         formatPercent(targetPassRate),
         targetPassRate != null,
       ),
       ...optionalRow(
-        "Indeterminate terminal verdicts",
-        evaluation?.indeterminate,
-        formatCount(evaluation?.indeterminate),
-      ),
-      ...spreadRows("ADE", prediction?.adeM),
-      ...spreadRows("FDE", prediction?.fdeM),
-      ...spreadRows("arrival endpoint error", prediction?.arrivalEndpointErrorM),
-      ...optionalRow(
         "Final-time error MAE",
         prediction?.finalTimeS?.mae,
         formatScalar(prediction?.finalTimeS?.mae, "s"),
       ),
-      ...optionalRow(
-        "Final-time error p95",
-        prediction?.finalTimeS?.p95Abs,
-        formatScalar(prediction?.finalTimeS?.p95Abs, "s"),
-      ),
-      ...optionalRow(
-        "Final-time signed bias",
-        prediction?.finalTimeS?.meanSigned,
-        formatScalar(prediction?.finalTimeS?.meanSigned, "s"),
-      ),
-      ...optionalRow(
-        "Mean per-flight cross-track p95",
-        prediction?.crossTrackP95M?.mean,
-        formatMetres(prediction?.crossTrackP95M?.mean),
-      ),
-      ...optionalRow(
-        "Mean per-flight altitude p95",
-        prediction?.altitudeP95M?.mean,
-        formatMetres(prediction?.altitudeP95M?.mean),
-      ),
-      ...optionalRow(
-        "Mean lateral deviation at threshold",
-        lateral?.mean,
-        formatMetres(lateral?.mean),
-      ),
-      ...optionalRow(
-        "Lateral deviation p95 at threshold",
-        lateral?.p95,
-        formatMetres(lateral?.p95),
-      ),
-      ...optionalRow(
-        "Mean absolute vertical deviation at threshold",
-        vertical?.mean_abs,
-        formatMetres(vertical?.mean_abs),
-      ),
-      ...optionalRow(
-        "Vertical deviation p95 at threshold",
-        vertical?.p95_abs,
-        formatMetres(vertical?.p95_abs),
-      ),
-      ...optionalRow(
-        "Mean predicted duration",
-        evaluatedTime?.mean,
-        formatScalar(evaluatedTime?.mean, "s"),
-      ),
-      ...optionalRow(
-        "Position–velocity consistency p95",
-        raw?.positionVelocityRmseMps?.p95,
-        formatScalar(raw?.positionVelocityRmseMps?.p95, "m/s"),
-      ),
-      ...optionalRow(
-        "Heading consistency p95",
-        raw?.headingConsistencyP95Deg?.p95,
-        formatScalar(raw?.headingConsistencyP95Deg?.p95, "deg"),
-      ),
-      ...optionalRow(
-        "Turn-rate p95",
-        raw?.turnRateP95DegS?.p95,
-        formatScalar(raw?.turnRateP95DegS?.p95, "deg/s"),
-      ),
-      ...optionalRow(
-        "Acceleration p95",
-        raw?.accelerationP95Mps2?.p95,
-        formatScalar(raw?.accelerationP95Mps2?.p95, "m/s²"),
-      ),
-      ...optionalRow(
-        "Jerk p95",
-        raw?.jerkP95Mps3?.p95,
-        formatScalar(raw?.jerkP95Mps3?.p95, "m/s³"),
-      ),
     ],
+    sections,
   };
 }
 
@@ -512,23 +605,17 @@ export default function EvaluationSummary({
           <span className="evaluation-summary-summary-only">Aggregate statistics</span>
         )}
       </div>
-      <dl>
-        {presentation.rows.map((summaryRow) => (
-          <div key={summaryRow.label} className="evaluation-summary-row">
-            <dt>{summaryRow.label}</dt>
-            <dd
-              className={summaryRow.pending ? "evaluation-summary-pending" : undefined}
-              title={summaryRow.pending ? "Evaluation data is not available" : undefined}
-            >
-              {summaryRow.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      <aside className="evaluation-summary-notes" aria-label="Evaluation notes">
-        <strong>Evaluation Notes</strong>
+      <SummaryRows rows={presentation.rows} />
+      {presentation.sections?.map((section) => (
+        <details key={section.title} className="evaluation-summary-section">
+          <summary>{section.title}</summary>
+          <SummaryRows rows={section.rows} />
+        </details>
+      ))}
+      <details className="evaluation-summary-notes" aria-label="Evaluation notes">
+        <summary>Evaluation notes</summary>
         <p>{presentation.note}</p>
-      </aside>
+      </details>
       {error ? <p className="evaluation-summary-error">{error}</p> : null}
       {open && report ? (
         <EvaluationReportWindow

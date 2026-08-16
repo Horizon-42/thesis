@@ -72,10 +72,14 @@ describe("EvaluationReportWindow", () => {
     // cards
     expect(screen.getByText("solve rate 66.7%")).toBeTruthy();
     expect(screen.getByText("pass rate 33.3%")).toBeTruthy();
+    expect(screen.getByText("1/3")).toBeTruthy();
+    expect(screen.queryByText("1/2")).toBeNull();
     expect(screen.getByText("mean Δt vs observed (optimized − flown)")).toBeTruthy();
     expect(screen.getByText(/bounds are runway and benchmark specific/i)).toBeTruthy();
     // aggregates straight from the report
-    const aggregates = screen.getByRole("table", { name: /Aggregates/ });
+    const aggregates = screen.getByRole("table", {
+      name: "Aggregates (over 2 measured threshold events)",
+    });
     expect(aggregates.textContent).toContain("101.0");
     expect(aggregates.textContent).toContain("171.7");
     // The combined 3D view exposes both deviations for every measured flight

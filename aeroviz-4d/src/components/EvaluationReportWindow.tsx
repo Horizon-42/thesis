@@ -731,7 +731,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           label: `solve rate ${formatPct(report.solve_rate)}`,
         },
     {
-      value: `${report.successful}/${report.measured ?? report.total}`,
+      value: `${report.successful}/${report.total}`,
       label: `pass rate ${formatPct(report.success_rate)}`,
     },
     { value: String(report.failed), label: "failed" },
@@ -798,7 +798,9 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         ) : null}
 
         <table className="dyncmp-final-table eval-report-aggregates">
-          <caption>Aggregates (over {observed ? "measured arrivals" : "solved flights"})</caption>
+          <caption>
+            Aggregates (over {report.measured ?? measuredRows.length} measured threshold events)
+          </caption>
           <thead>
             <tr>
               <th scope="col">metric</th>
