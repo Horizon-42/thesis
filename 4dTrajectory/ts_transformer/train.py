@@ -93,6 +93,7 @@ from evaluation_protocol import (
     TEST_RELEASE_SCHEMA,
 )
 from fixed_anchor_validation import (
+    CommonGridTruth,
     fixed_anchor_common_truth,
     fixed_anchor_common_grid_ade_metrics,
     fixed_anchor_common_grid_metrics,
@@ -111,7 +112,7 @@ from training_performance import EpochProfiler
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v36-explicit-compute-precision"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v35-true-time-endpoint-loss"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-output-true-time-physical-position-duration-v1",
     HORIZON_FULL: "full-horizon-physical-position-duration-v1",
@@ -285,11 +286,7 @@ def model_forward(
     history: torch.Tensor,
     dynamics: dict[str, torch.Tensor] | None,
 ):
-    from training_precision import model_autocast, prediction_to_float32
-
-    with model_autocast(model, history):
-        prediction = model(history) if dynamics is None else model(history, dynamics)
-    return prediction_to_float32(prediction)
+    return model(history) if dynamics is None else model(history, dynamics)
 
 
 def control_rollout_channels(
@@ -1742,6 +1739,7 @@ class ValidationBatchPlan:
     dataset: TrajectoryWindows
     batches: tuple[ValidationBatch, ...]
     bucket_flights: dict[str, int]
+    common_truth: CommonGridTruth | None
 
     @property
     def flights(self) -> int:
@@ -1819,6 +1817,16 @@ def build_validation_batch_plan(
         dataset=dataset,
         batches=tuple(batches),
         bucket_flights=bucket_flights,
+        common_truth=(
+            fixed_anchor_common_truth(
+                dataset.series,
+                dataset.config,
+                dataset.config.validation_common_grid_points,
+            )
+            if dataset.config.checkpoint_selection_metric
+            == CHECKPOINT_SELECTION_COMMON_GRID_ADE
+            else None
+        ),
     )
 
 
@@ -2011,6 +2019,7 @@ def _common_grid_validation_details(
     val_by_airport: dict[str, float],
     precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
     replays_by_airport: dict[str, SplitPredictionReplay] | None = None,
+    common_truth_by_airport: dict[str, CommonGridTruth] | None = None,
 ) -> dict[str, dict[str, Any]]:
     del val_by_airport
     if precomputed_details_by_airport is not None:
@@ -2019,6 +2028,11 @@ def _common_grid_validation_details(
         return precomputed_details_by_airport
     if replays_by_airport is not None and set(replays_by_airport) != set(val_sets):
         raise ValueError("validation replays do not match airport sets")
+    if (
+        common_truth_by_airport is not None
+        and set(common_truth_by_airport) != set(val_sets)
+    ):
+        raise ValueError("validation common-truth caches do not match airport sets")
     details: dict[str, dict[str, Any]] = {}
     for airport, dataset in val_sets.items():
         replay = (
@@ -2037,6 +2051,11 @@ def _common_grid_validation_details(
                 replay.predicted_time_s,
                 replay.segment_durations_s,
                 points=config.validation_common_grid_points,
+                common_truth=(
+                    common_truth_by_airport[airport]
+                    if common_truth_by_airport is not None
+                    else None
+                ),
             )
             details[airport] = {
                 "ade_m": block["ade_m"],
@@ -2355,6 +2374,15 @@ def fit_model(
         airport: build_validation_batch_plan(dataset, config.batch_size)
         for airport, dataset in val_sets.items()
     }
+    val_common_truth_by_airport: dict[str, CommonGridTruth] | None = None
+    if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE:
+        val_common_truth_by_airport = {}
+        for airport, plan in val_batch_plans.items():
+            if plan.common_truth is None:
+                raise RuntimeError(
+                    f"validation plan for {airport} omitted required common-grid truth"
+                )
+            val_common_truth_by_airport[airport] = plan.common_truth
     val_window_count = sum(len(dataset) for dataset in val_sets.values())
     if not len(train_set) or not val_window_count:
         raise ValueError(
@@ -2607,6 +2635,7 @@ def fit_model(
                 device=device,
                 val_by_airport=val_by_airport,
                 replays_by_airport=replay_by_airport,
+                common_truth_by_airport=val_common_truth_by_airport,
             )
             profiler.add_cpu_seconds(
                 "val_checkpoint_selection_s",
@@ -2909,8 +2938,6 @@ def train(
         "validation_common_grid_points": config.validation_common_grid_points,
         "horizon_mode": config.horizon_mode,
         "prediction_output": config.prediction_output,
-        "training_precision": config.training_precision,
-        "float32_matmul_precision": config.float32_matmul_precision,
         "aircraft_filter": config.aircraft_filter,
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,

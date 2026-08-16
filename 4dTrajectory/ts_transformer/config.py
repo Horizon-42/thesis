@@ -39,18 +39,6 @@ PREDICTION_OUTPUTS = (
     PREDICTION_CONTROL,
     PREDICTION_CONTROL_MIXTURE,
 )
-TRAINING_PRECISION_FLOAT32 = "float32"
-TRAINING_PRECISION_BFLOAT16 = "bfloat16"
-TRAINING_PRECISIONS = (
-    TRAINING_PRECISION_FLOAT32,
-    TRAINING_PRECISION_BFLOAT16,
-)
-FLOAT32_MATMUL_PRECISION_HIGHEST = "highest"
-FLOAT32_MATMUL_PRECISION_HIGH = "high"
-FLOAT32_MATMUL_PRECISIONS = (
-    FLOAT32_MATMUL_PRECISION_HIGHEST,
-    FLOAT32_MATMUL_PRECISION_HIGH,
-)
 CONTROL_PREDICTION_OUTPUTS = frozenset(
     (PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE)
 )
@@ -177,10 +165,11 @@ DEFAULT_SEQ_LEN = 60
 # N is the number of learned non-uniform piecewise-constant control segments; deployment
 # samples the resulting dynamics densely rather than treating their endpoints as the path.
 # It is deliberately independent of ``dt_s``. Held-out state-output
-# N=64/128/256 ablations selected 64 for iTransformer but 256 for PatchTST; model-specific
-# defaults live in one mapping so callers do not reproduce architecture branches.
+# The frozen state-output search selected N=16 for iTransformer and N=256 for PatchTST.
+# Model-specific defaults live in one mapping so callers do not reproduce architecture
+# branches or silently drift from the selected final-training recipes.
 DEFAULT_N_SEGMENTS_BY_MODEL = {
-    "itransformer": 64,
+    "itransformer": 16,
     "patchtst": 256,
 }
 # Public shorthand for the primary model; derived from the mapping so it cannot drift.
@@ -291,12 +280,6 @@ class TSConfig:
     lr_plateau_patience: int = 3
     patience: int = 20              # early-stopping patience, in epochs without val improvement
     seed: int = 1337
-    # Network matrix kernels may use BF16, but every typed prediction is restored to FP32
-    # before the objective. Control rollout terms retain their explicit FP64 boundary.
-    training_precision: str = TRAINING_PRECISION_FLOAT32
-    # PyTorch's explicit CUDA FP32 matmul policy. ``high`` permits TF32 tensor-core
-    # kernels; the exact setting is checkpointed instead of being an ambient env choice.
-    float32_matmul_precision: str = FLOAT32_MATMUL_PRECISION_HIGHEST
     # ``seed`` controls model initialisation and epoch shuffling.  Leave this unset to
     # preserve the historical behaviour where the same seed also assigns outer splits;
     # set it explicitly when repeating an experiment with different training seeds so
@@ -442,17 +425,6 @@ class TSConfig:
             raise ValueError(
                 f"unknown prediction_output {self.prediction_output!r}; "
                 f"expected one of {PREDICTION_OUTPUTS}"
-            )
-        if self.training_precision not in TRAINING_PRECISIONS:
-            raise ValueError(
-                f"unknown training_precision {self.training_precision!r}; "
-                f"expected one of {TRAINING_PRECISIONS}"
-            )
-        if self.float32_matmul_precision not in FLOAT32_MATMUL_PRECISIONS:
-            raise ValueError(
-                "unknown float32_matmul_precision "
-                f"{self.float32_matmul_precision!r}; expected one of "
-                f"{FLOAT32_MATMUL_PRECISIONS}"
             )
         if self.n_segments is None:
             object.__setattr__(

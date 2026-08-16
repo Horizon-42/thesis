@@ -34,7 +34,6 @@ from control_models import ControlMixtureOutputModel, ControlOutputModel
 from direct_duration_control import DirectDurationControlOutputModel
 from prediction_outputs import StateOutputLayer
 from trim_residual_control import TrimResidualControlOutputModel
-from training_precision import configure_model_runtime
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
 
@@ -172,8 +171,7 @@ OUTPUT_MODEL_BUILDERS = {
 
 def build_model(config: TSConfig) -> nn.Module:
     """Build an explicitly registered output strategy."""
-    model = OUTPUT_MODEL_BUILDERS[config.prediction_output](config)
-    return configure_model_runtime(model, config)
+    return OUTPUT_MODEL_BUILDERS[config.prediction_output](config)
 
 
 def resolve_device(spec: str) -> torch.device:

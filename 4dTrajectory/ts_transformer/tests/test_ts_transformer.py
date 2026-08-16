@@ -91,7 +91,7 @@ from config import (  # noqa: E402
     CONTROL_TERMINAL_CLOCK_PREDICTED,
     CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
-    PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE, PREDICTION_STATE,
+    PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
     TSConfig, control_recipe,
 )
 from control_mixture import ControlMixturePrediction  # noqa: E402
@@ -133,6 +133,7 @@ from fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_arc_length_geometry_metrics,
     fixed_anchor_common_grid_ade_metrics,
     fixed_anchor_common_grid_metrics,
+    fixed_anchor_common_truth,
     fixed_anchor_common_weights_and_terminal_velocity,
 )
 from forecast import Forecast, forecast_approach  # noqa: E402
@@ -1786,6 +1787,43 @@ def test_common_grid_checkpoint_selection_still_validates_fixed_anchor():
     assert sum(profile["duration_bucket_flights"].values()) == len(val_series)
 
 
+def test_common_grid_checkpoint_selection_reuses_one_truth_cache(monkeypatch):
+    series, config = _series(
+        n_flights=12,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+        validation_common_grid_points=7,
+        epochs=2,
+        patience=2,
+        batch_size=32,
+        d_model=16,
+        d_ff=32,
+        n_heads=4,
+        e_layers=1,
+        seq_len=20,
+        n_segments=8,
+        device="cpu",
+    )
+    train_series, val_series, _test_series = split_by_flight(series, config)
+    cached_truth_ids: list[int] = []
+    original = train_module.fixed_anchor_common_grid_ade_metrics
+
+    def record_cache(*args, **kwargs):
+        cached_truth = kwargs.get("common_truth")
+        assert cached_truth is not None
+        cached_truth_ids.append(id(cached_truth))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        train_module,
+        "fixed_anchor_common_grid_ade_metrics",
+        record_cache,
+    )
+    train_module.fit_model(train_series, val_series, config, verbose=False)
+
+    assert len(cached_truth_ids) == config.epochs
+    assert len(set(cached_truth_ids)) == 1
+
+
 def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch):
     series, config = _series(
         n_flights=4,
@@ -2216,36 +2254,6 @@ def test_pipeline_preserves_control_mixture_recipe_in_commands_and_config(tmp_pa
     assert config.control_expert_count == 4
     assert config.control_mixture_selector_loss_weight == pytest.approx(0.2)
     assert config.control_mixture_diversity_loss_weight == pytest.approx(0.03)
-
-
-@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-@pytest.mark.parametrize("prediction_output", [PREDICTION_STATE, PREDICTION_CONTROL])
-def test_pipeline_uses_shared_optimized_compute_backend_without_renaming_cells(
-    model_name, prediction_output
-):
-    baseline = pipeline_module.TrainingPlan(
-        (AIRPORT,),
-        model_name,
-        training_mode="pooled",
-        prediction_output=prediction_output,
-        training_precision="float32",
-        float32_matmul_precision="highest",
-    )
-    optimized = pipeline_module.TrainingPlan(
-        (AIRPORT,),
-        model_name,
-        training_mode="pooled",
-        prediction_output=prediction_output,
-    )
-
-    recipe = optimized._recipe_args()
-    config, _source = optimized.resolved_train_config(use_best_config=False)
-
-    assert recipe[recipe.index("--training-precision") + 1] == "bfloat16"
-    assert recipe[recipe.index("--float32-matmul-precision") + 1] == "high"
-    assert config.training_precision == "bfloat16"
-    assert config.float32_matmul_precision == "high"
-    assert optimized.train_dir == baseline.train_dir
 
 
 def test_pipeline_carries_and_names_common_training_cohort():
@@ -4240,6 +4248,41 @@ def test_formal_common_grid_selector_returns_only_lean_position_time_metrics():
     assert not any(key.startswith("arc_length_") for key in metrics)
 
 
+def test_formal_common_grid_selector_reuses_identical_precomputed_truth():
+    series, config = _series(n_flights=3, seq_len=8, n_segments=4)
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    model = build_model(config).eval()
+    replay = train_module._predict_split(
+        model,
+        dataset,
+        normalizer,
+        torch.device("cpu"),
+        config.batch_size,
+    )
+    arguments = (
+        series,
+        config,
+        replay.anchors,
+        replay.predicted,
+        replay.predicted_time_s,
+        replay.segment_durations_s,
+    )
+    baseline = fixed_anchor_common_grid_ade_metrics(*arguments, points=7)
+    cached = fixed_anchor_common_grid_ade_metrics(
+        *arguments,
+        points=7,
+        common_truth=fixed_anchor_common_truth(series, config, 7),
+    )
+
+    assert baseline.keys() == cached.keys()
+    for key in baseline:
+        if isinstance(baseline[key], np.ndarray):
+            np.testing.assert_array_equal(cached[key], baseline[key])
+        else:
+            assert cached[key] == baseline[key]
+
+
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
 @pytest.mark.parametrize("integrator_dt_s", [2.0, 0.3])
 def test_fixed_dt_control_loss_forms_one_differentiable_training_step(
@@ -4489,7 +4532,7 @@ def test_config_rejects_a_head_count_that_does_not_divide_d_model():
 
 def test_default_config_uses_selected_normalized_output_and_physics_losses():
     config = TSConfig()
-    assert config.n_segments == 64
+    assert config.n_segments == 16
     assert TSConfig(model="patchtst").n_segments == 256
     assert config.epochs == 180
     assert config.patience == 20
@@ -4860,10 +4903,8 @@ def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
         "random_train_anchor_min_future_s": plan.random_train_anchor_min_future_s,
         "checkpoint_selection_metric": plan.checkpoint_selection_metric,
         "validation_common_grid_points": plan.validation_common_grid_points,
-            "prediction_output": config.prediction_output,
-            "training_precision": config.training_precision,
-            "float32_matmul_precision": config.float32_matmul_precision,
-            "aircraft_filter": config.aircraft_filter,
+        "prediction_output": config.prediction_output,
+        "aircraft_filter": config.aircraft_filter,
         "horizon_mode": config.horizon_mode,
         "pred_len": config.pred_len,
         "lr_scheduler": {
@@ -5525,7 +5566,7 @@ def test_config_keeps_three_horizon_output_lengths_separate():
     )
 
     assert normalized.horizon_mode == HORIZON_NORMALIZED
-    assert normalized.pred_len == normalized.n_segments == 64
+    assert normalized.pred_len == normalized.n_segments == 16
     assert full.pred_len == 300
     assert window.pred_len == 30
 
@@ -6401,10 +6442,8 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
             "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
             "validation_common_grid_points": 64,
         "horizon_mode": HORIZON_NORMALIZED,
-            "prediction_output": "state",
-            "training_precision": config.training_precision,
-            "float32_matmul_precision": config.float32_matmul_precision,
-            "aircraft_filter": "all",
+        "prediction_output": "state",
+        "aircraft_filter": "all",
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
         "lr_scheduler": {

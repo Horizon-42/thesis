@@ -24,6 +24,9 @@ from terminal_state_loss import terminal_state_metrics_numpy
 from time_grids import output_time_grid
 
 
+CommonGridTruth = tuple[np.ndarray, np.ndarray, np.ndarray]
+
+
 def fixed_anchor_common_truth(
     series: Sequence[FlightSeries],
     config: TSConfig,
@@ -362,6 +365,7 @@ def _fixed_anchor_common_position_arrays(
     segment_durations_s: np.ndarray,
     *,
     points: int,
+    common_truth: CommonGridTruth | None = None,
 ):
     """Validate and materialize only the arrays required by formal 3D ADE."""
     count = len(series)
@@ -389,7 +393,18 @@ def _fixed_anchor_common_position_arrays(
     if np.any(predicted_final_time_s <= 0.0) or np.any(segment_durations_s <= 0.0):
         raise ValueError("common-grid prediction clocks must be positive")
 
-    truth, true_duration_s, progress = fixed_anchor_common_truth(series, config, points)
+    if common_truth is None:
+        truth, true_duration_s, progress = fixed_anchor_common_truth(
+            series, config, points
+        )
+    else:
+        truth, true_duration_s, progress = common_truth
+        if truth.shape != (count, points, len(config.channels)):
+            raise ValueError("cached common-grid truth has the wrong state shape")
+        if true_duration_s.shape != (count,):
+            raise ValueError("cached common-grid truth has the wrong duration shape")
+        if progress.shape != (points,):
+            raise ValueError("cached common-grid truth has the wrong progress shape")
     common = np.empty_like(truth)
     capped = np.zeros(count, dtype=bool)
     for index in range(count):
@@ -415,6 +430,7 @@ def fixed_anchor_common_grid_ade_metrics(
     segment_durations_s: np.ndarray,
     *,
     points: int,
+    common_truth: CommonGridTruth | None = None,
 ) -> dict[str, Any]:
     """Lean formal selector: common true-time per-flight 3D ADE and FDE only."""
     (
@@ -432,6 +448,7 @@ def fixed_anchor_common_grid_ade_metrics(
         predicted_final_time_s,
         segment_durations_s,
         points=points,
+        common_truth=common_truth,
     )
     return _common_grid_ade_result(
         len(series),
