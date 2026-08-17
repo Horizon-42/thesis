@@ -120,6 +120,7 @@ def _computed_arrival(
         TrackPoint(final["lat"], final["lon"], final["alt"])
     )
     if abs(final_projected.along_m) <= plane_tolerance_m:
+        # No interpolation needed; the final state is already within the threshold plane tolerance.
         return ArrivalOutcome(
             _state_deviation(
                 final,
@@ -130,6 +131,7 @@ def _computed_arrival(
             "terminal_state",
         )
     if len(record.states) >= 2:
+        # The final segment may bracket the threshold plane, so interpolate to the crossing point.
         previous = record.states[-2]
         previous_projected = frame.project(
             TrackPoint(previous["lat"], previous["lon"], previous["alt"])

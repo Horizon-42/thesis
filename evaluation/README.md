@@ -203,3 +203,7 @@ must use `verdict` when distinguishing failure from indeterminate.
 conda run -n aeroviz python -m pytest evaluation/tests/ -q
 conda run -n aeroviz python -m pytest trajectory_data_process/harvest/tests/ -q
 ```
+
+
+## TODO
+evaluation/arrival.py 中 依然试图在 final segment 上做拟合；这个需要优化，在final_approach 中直接做插值即可。
