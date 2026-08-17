@@ -928,6 +928,31 @@ PREDICTION_STATE_DATA = {
     # meet the forecast with no gap.
     "observed_states": LOOKBACK_STATES + STATES,
 }
+# The observed CZML a comparison overlay is fed is the ARRIVAL WINDOW: the model slice,
+# t=0 at terminal-ring entry — the same origin every record carries. Its first sample is
+# therefore the group's first OBSERVED sample (the lookback's), not the anchor's. The
+# airport-wide trajectories.czml (ADSB_CZML above) is the other window and starts earlier
+# and further out; feeding it here is the misalignment `_require_reference_aligned` exists
+# to catch.
+ARRIVAL_WINDOW_CZML = [
+    {"id": "document", "clock": {}},
+    {
+        "id": "AFR074_05L",
+        "name": "AFR074",
+        "position": {
+            "cartographicDegrees": [
+                0.0, LOOKBACK_STATES[0]["lon"], LOOKBACK_STATES[0]["lat"], 2600.0,
+                2.0, LOOKBACK_STATES[1]["lon"], LOOKBACK_STATES[1]["lat"], 2550.0,
+                4.0, STATES[0]["lon"], STATES[0]["lat"], 2500.0,
+                9.0, STATES[1]["lon"], STATES[1]["lat"], 2400.0,
+            ]
+        },
+        "path": {
+            "leadTime": 0, "trailTime": 300,
+            "material": {"solidColor": {"color": {"rgba": [255, 140, 0, 200]}}},
+        },
+    },
+]
 
 
 def test_states_schema_distinguishes_the_two_producers():
@@ -952,7 +977,7 @@ def test_prediction_states_render_as_one_purple_path_plus_the_reference(tmp_path
     results = [{"id": "AFR074", "runway": "05L", "status": "solved",
                 "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
 
-    czml, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+    czml, index = build_runway_comparison(results, tmp_path, ARRIVAL_WINDOW_CZML, airport="KRDU")
     ids = [p["id"] for p in czml if p.get("id") != "document"]
     assert ids == ["ref-AFR074_05L", "look-AFR074_05L", "pred-AFR074_05L"]
 
@@ -973,7 +998,7 @@ def test_prediction_is_shifted_onto_the_references_timeline(tmp_path):
     results = [{"id": "AFR074", "runway": "05L", "status": "solved",
                 "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
 
-    czml, _ = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+    czml, _ = build_runway_comparison(results, tmp_path, ARRIVAL_WINDOW_CZML, airport="KRDU")
     lookback = next(p for p in czml if p["id"] == "look-AFR074_05L")
     prediction = next(p for p in czml if p["id"] == "pred-AFR074_05L")
 
@@ -983,6 +1008,28 @@ def test_prediction_is_shifted_onto_the_references_timeline(tmp_path):
     assert _offsets(prediction) == [4.0, 9.0]
     # The shared anchor sample is the same position in both — the join is exact, not merely close.
     assert _sample_at(lookback, -1) == _sample_at(prediction, 0)
+    # ...and the group now starts where its reference starts, which is the whole point of
+    # shifting: the lookback's first sample IS the reference's first sample.
+    reference = next(p for p in czml if p["id"] == "ref-AFR074_05L")
+    assert _offsets(reference)[0] == _offsets(lookback)[0] == 0.0
+    assert _sample_at(reference, 0)[:2] == _sample_at(lookback, 0)[:2]
+
+
+def test_a_full_track_reference_is_refused_for_a_prediction_group(tmp_path):
+    # The other half of the same alignment. `anchorTimeS` puts the group on the ARRIVAL
+    # window's origin (t=0 = terminal-ring entry); a reference copied from the airport-wide
+    # trajectories.czml is on the full track's origin (t=0 = first reception), a median 45 s
+    # and 5 km earlier on real KRDU data. Both start at t=0 and both name the right flight,
+    # so nothing downstream can tell — the group simply renders ahead of its own truth.
+    import pytest
+
+    (tmp_path / "AFR074_05L_states.json").write_text(
+        json.dumps(PREDICTION_STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+
+    with pytest.raises(ValueError, match="requires the arrival window"):
+        build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
 
 
 def test_lookback_is_faded_and_carries_its_own_kind(tmp_path):
@@ -993,7 +1040,7 @@ def test_lookback_is_faded_and_carries_its_own_kind(tmp_path):
     results = [{"id": "AFR074", "runway": "05L", "status": "solved",
                 "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
 
-    czml, _ = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+    czml, _ = build_runway_comparison(results, tmp_path, ARRIVAL_WINDOW_CZML, airport="KRDU")
     lookback = next(p for p in czml if p["id"] == "look-AFR074_05L")
 
     assert lookback["path"]["material"]["solidColor"]["color"]["rgba"] == list(LOOKBACK_COLOR)
@@ -1024,7 +1071,7 @@ def test_a_prediction_missing_the_gates_keeps_its_own_colour(tmp_path):
                                          "verdict": "fail",
                                          "lateral_m": 413.5, "vertical_m": 12.0}}
 
-    czml, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU",
+    czml, index = build_runway_comparison(results, tmp_path, ARRIVAL_WINDOW_CZML, airport="KRDU",
                                           verdicts=verdicts)
     prediction = next(p for p in czml if p["id"] == "pred-AFR074_05L")
     reference = next(p for p in czml if p["id"] == "ref-AFR074_05L")

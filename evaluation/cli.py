@@ -27,10 +27,7 @@ def contexts_from_args(
 ) -> dict[ContextKey, AssessmentContext]:
     airports: set[str] = set()
     for record in records:
-        value = record.source.get("arr_airport") or record.source.get("airport")
-        if not isinstance(value, str):
-            raise ValueError("every record requires source.arr_airport")
-        code = value.upper()
+        code = record.airport
         if not code.startswith("K"):
             raise ValueError(
                 f"{code}: this implementation is limited to U.S. FAA airport data"

@@ -39,12 +39,21 @@ class TestAeroVizBackendApp(unittest.TestCase):
             "/trajectories?airport=krdu&runway=23R&verdict=fail&limit=200&seed=42"
             "&flight_key=flight-b&flight_key=flight-a"
         )
+        # The comparison overlay's reference request: the same route, the arrival window.
+        window_status, window_payload = app.handle_get(
+            "/trajectories?airport=krdu&window=arrival&flight_key=flight-b"
+        )
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["czml"][0]["id"], "document")
+        self.assertEqual(window_status, 200)
+        self.assertEqual(window_payload["trackWindow"], "arrival")
         self.assertEqual(
             observed_backend.calls,
-            [("krdu", "23R", "fail", 200, 42, ["flight-b", "flight-a"])],
+            [
+                ("krdu", "23R", "fail", 200, 42, ["flight-b", "flight-a"], None),
+                ("krdu", None, None, 200, 0, ["flight-b"], "arrival"),
+            ],
         )
 
     def test_trajectory_endpoint_reports_invalid_query(self):
@@ -256,10 +265,14 @@ class FakeObservedTrajectoryBackend:
         limit=200,
         seed=0,
         flight_keys=None,
+        window=None,
     ):
-        self.calls.append((airport, runway, verdict, limit, seed, flight_keys))
+        self.calls.append(
+            (airport, runway, verdict, limit, seed, flight_keys, window)
+        )
         return {
-            "schemaVersion": "observed-trajectories-v1",
+            "schemaVersion": "observed-trajectories-v2",
+            "trackWindow": window or "full",
             "czml": [{"id": "document"}, {"id": "TEST"}],
             "verdicts": None,
             "evaluation": None,

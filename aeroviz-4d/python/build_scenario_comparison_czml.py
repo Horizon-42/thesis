@@ -46,6 +46,7 @@ DATASET_SPLITS = ("train", "val", "test")
 from data_layout import airport_data_path
 from flight_identity import flight_key
 from generate_czml import build_document_packet, build_position_property
+from geokit import haversine_m
 
 # Record-filename suffixes. MUST match 4dTrajectory/optimization/evaluation_export.py, which
 # is where they are defined and where both writers (the optimizer batch and ts_transformer)
@@ -167,6 +168,48 @@ def _lookback_states(observed_states: list[dict[str, Any]]) -> list[dict[str, An
     return [state for state in observed_states if state["t"] <= 0.0]
 
 
+# How far a copied reference's first sample may sit from the group's own first observed
+# sample. They are the SAME measurement — the record's series is that track resampled onto
+# the dt grid, whose first point is the slice's first sample — so agreement is metres, not
+# a fitted tolerance. The failure this separates is coarse: a full-track reference starts a
+# median 5 km away (p95 47 km on the KRDU 05L batch), so any threshold between "resampling
+# noise" and "a different time origin" reads the same. 50 m sits inside that gap.
+_REFERENCE_ALIGNMENT_TOLERANCE_M = 50.0
+
+
+def _require_reference_aligned(
+    reference: dict[str, Any],
+    observed_states: list[dict[str, Any]],
+    group: str,
+) -> None:
+    """Fail loudly when the reference is not the same window as the group beside it.
+
+    A prediction group's first entity sample is its first observed sample; an arrival-window
+    reference's is the same one. Both timelines start at ``t = 0`` either way, so a
+    full-track reference produces no schema error, no missing entity and no warning — only a
+    group drawn ahead of its own truth, which reads as a model artifact rather than a
+    publication bug. Checked positionally because position is the only place the mismatch
+    is visible.
+    """
+    if not observed_states:
+        return
+    degrees = reference.get("position", {}).get("cartographicDegrees", [])
+    if len(degrees) < 4:
+        raise ValueError(f"reference entity for {group} carries no sampled position")
+    first = observed_states[0]
+    offset_m = haversine_m(
+        float(degrees[2]), float(degrees[1]),
+        float(first["lat"]), float(first["lon"]),
+    )
+    if offset_m > _REFERENCE_ALIGNMENT_TOLERANCE_M:
+        raise ValueError(
+            f"reference for {group} starts {offset_m:.0f} m from the group's first "
+            f"observed sample (limit {_REFERENCE_ALIGNMENT_TOLERANCE_M:.0f} m); the "
+            "observed CZML is the full-track window, and the comparison reference "
+            "requires the arrival window (terminal-ring entry at t=0)"
+        )
+
+
 # ── copy the matching reference flight from the ADS-B CZML ─────────────────────
 
 def _reference_entity_from_adsb(
@@ -181,9 +224,19 @@ def _reference_entity_from_adsb(
 ) -> dict[str, Any] | None:
     """Find the observed flight in ``adsb_czml`` and copy it as the reference trajectory.
 
-    ``adsb_czml`` is the loaded ``trajectories.czml`` (element 0 is the ``"document"``
-    packet; the rest are flight entities whose ``id`` IS the flight_key
-    ``id_runway_icao24_landingTime``). ``flight_identity`` must be that same key — the
+    ``adsb_czml`` MUST be observed CZML in the **arrival window** — the model slice from
+    terminal-ring entry, ``t = 0`` at the entry — not the airport-wide
+    ``trajectories.czml``, whose entities are complete tracks starting at first reception.
+    The optimizer/prediction entities beside the reference are built from records anchored
+    at the entry, so a full-track reference puts the group a median 45 s and 5 km ahead of
+    it on the shared clock. Nothing downstream can detect the mix (both start at ``t = 0``
+    and both carry the right flight), which is why ``_require_reference_aligned`` checks it
+    where a group makes the mismatch measurable. The live overlay gets this window from
+    ``aeroviz_backend.observed_trajectories`` (``window=arrival``).
+
+    Element 0 of ``adsb_czml`` is the ``"document"`` packet; the rest are flight entities
+    whose ``id`` IS the flight_key ``id_runway_icao24_landingTime``.
+    ``flight_identity`` must be that same key — the
     comparison group key / record-filename stem, NOT the bare callsign: a callsign lookup
     resolved duplicated callsigns to whichever namesake came first, silently drawing the
     wrong flight as the white reference line. Find the matching entity, **deep-copy** it
@@ -506,9 +559,9 @@ def build_runway_comparison(
                 optimizer_states = simulator_states = None
                 # A prediction record rebases its own time so t=0 is the ANCHOR — the last
                 # observed sample the model was shown, typically `seq_len` samples into the
-                # approach. The reference copied from the ADS-B CZML still starts at t=0 = the
-                # start of the track, so writing the prediction's times through unshifted drew
-                # it `anchorTimeS` seconds EARLY on the shared clock: measured on KRDU 05L, the
+                # approach. Every other entity in the group is on the ARRIVAL window's origin
+                # (t=0 = terminal-ring entry), so writing the prediction's times through
+                # unshifted drew it `anchorTimeS` seconds EARLY: measured on KRDU 05L, the
                 # forecast's first sample (bit-identical to the reference's t=118 s sample) was
                 # plotted at t=0, 12.0 km from where the reference then was. Shifting both the
                 # forecast and its lookback back onto the observed timeline puts every entity
@@ -551,11 +604,17 @@ def build_runway_comparison(
                     show=show,
                 )
                 if reference is not None:
+                    if schema != "optimizer":
+                        _require_reference_aligned(
+                            reference, lookback_states, group
+                        )
                     entities.append(reference)
                     entity_ids.append(f"ref-{group}")
             else:
-                # Logical entity id: the frontend resolves this to the same flight in
-                # the canonical observed datasource instead of storing its CZML again.
+                # Logical entity id: the frontend resolves this to the same flight in the
+                # canonical observed datasource instead of storing its CZML again. That
+                # datasource must be the ARRIVAL window (the backend serves it with
+                # window=arrival) for the same reason the embedded copy must be.
                 entity_ids.append(f"ref-{group}")
             if schema == "optimizer":
                 entities.append(_build_trajectory_entity(

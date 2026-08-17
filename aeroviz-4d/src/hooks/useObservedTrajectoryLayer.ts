@@ -128,7 +128,7 @@ export function useObservedTrajectoryLayer(
     fetchJson<unknown>(responseUrl)
       .then((response) => {
         if (!isObservedTrajectoryResponse(response)) {
-          throw new Error(`${responseUrl} is not an observed-trajectories-v1 response`);
+          throw new Error(`${responseUrl} is not an observed-trajectories-v2 response`);
         }
         flightSummaries = summarizeObservedCzml(response.czml);
         const decodedVerdicts = decodeObservedVerdicts(response.verdicts);

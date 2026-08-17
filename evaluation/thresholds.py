@@ -12,13 +12,40 @@ import hashlib
 import json
 import math
 from dataclasses import asdict, dataclass
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, get_args
 
 Benchmark = Literal["lpv", "rnp_apch_lnav_vnav_baro"]
+BENCHMARKS = get_args(Benchmark)
 ComponentResult = Literal["pass", "fail", "indeterminate"]
 Verdict = Literal["pass", "fail", "indeterminate"]
 
-LNAV_FINAL_XTK_M = 0.15 * 1852.0
+# THE LATERAL CRITERION IS HALF THE PUBLISHED RUNWAY WIDTH -- and that is the whole
+# rule, deliberately.
+#
+# The obvious alternative is the procedure's own lateral containment: the LPV course
+# width at threshold (106.75 m = 350 ft, FAA Formula 3-1-1) or the RNP APCH LNAV
+# 0.15 NM (277.8 m) cross-track allowance. Measured over this project's entire fleet
+# -- 26 thresholds at five airports -- those are 2.3x to 18x wider than the runway,
+# so the previous ``min(guidance, runway_width / 2)`` rule selected the runway
+# half-width at 26 of 26 runways and the guidance term never once bound.
+#
+# A term that cannot change an answer is worse than absent: it invites the reader to
+# believe the verdict was a navigation-containment judgement, and it hides its own
+# mistakes. The version that carried it also divided the LPV course width by two --
+# that value is ALREADY a semi-width (centreline to full-scale deflection), so the
+# ``guidance_lateral_m`` every report published was wrong by a factor of two, and
+# nobody noticed precisely because it was inert.
+#
+# So the criterion is stated as what it is: did the extrapolated crossing land over
+# the pavement. That is a LANDING-GEOMETRY claim, not a navigation-containment one,
+# and ``evaluation.metrics.METHODOLOGY`` says so inside every report.
+LATERAL_CRITERION_ID = "runway_half_width_at_threshold"
+
+# Hashed into every ``evaluation_context_fingerprint``. Bump whenever the set of fields
+# below changes: the hash already moves on its own, but the label is what tells a reader
+# of an old report WHICH schema produced the digest they are holding.
+CONTEXT_SCHEMA_VERSION = "terminal-assessment-context-v2"
+
 # One common terminal-geometry acceptance bound for the vertically guided RNAV
 # benchmarks supported by this project.  ICAO Doc 9613, Volume II, Part C,
 # Chapter 5, Section A, §5.3.4.4.7 specifies +22 m/-22 m for Baro-VNAV
@@ -29,22 +56,20 @@ RNAV_TERMINAL_VERTICAL_BOUND_M = 22.0
 RNAV_TERMINAL_VERTICAL_STANDARD_ID = "icao_doc_9613_rnp_apch_fas_22m"
 
 
-def _positive(name: str, value: float | None, *, required: bool = True) -> float | None:
-    if value is None:
-        if required:
-            raise ValueError(f"{name} is required")
-        return None
-    numeric = float(value)
-    if not math.isfinite(numeric) or numeric <= 0.0:
-        raise ValueError(f"{name} must be finite and positive, got {value!r}")
-    return numeric
-
-
-def _finite(name: str, value: float) -> float:
-    numeric = float(value)
-    if not math.isfinite(numeric):
-        raise ValueError(f"{name} must be finite, got {value!r}")
-    return numeric
+# Every numeric field that can silently decide a verdict. These come from parsed FAA
+# files rather than from Python literals, and a NaN reaching ``metrics._component``
+# makes every ordered comparison False -- which reads out as a clean ``fail`` rather
+# than as the data error it is. This is the one shape check worth keeping.
+_FINITE_FIELDS = (
+    "threshold_lat",
+    "threshold_lon",
+    "runway_course_deg",
+    "runway_width_m",
+    "threshold_elevation_hae_m",
+    "threshold_elevation_msl_m",
+    "threshold_crossing_height_m",
+    "lpv_course_width_m",
+)
 
 
 @dataclass(frozen=True)
@@ -54,11 +79,20 @@ class AssessmentContext:
     No trajectory fit or verdict belongs here.  Published threshold elevations
     and TCH define the authoritative desired crossing altitude; vertical
     acceptance policy remains evaluation-owned and is not supplied by a trajectory.
+
+    ``threshold_lat``/``threshold_lon`` are the authoritative LANDING threshold, and
+    they are what every deviation is measured from -- not the position a record
+    happens to carry in its own ``target_state``. Without them here the evaluator had
+    to take the artifact's word for where the runway is, which is the shape of the
+    displaced-threshold bug: a target 775 m from the published point produces clean
+    near-zero deviations and no symptom anywhere downstream.
     """
 
     benchmark: Benchmark
     airport: str
     runway: str
+    threshold_lat: float
+    threshold_lon: float
     runway_course_deg: float
     runway_width_m: float
     runway_source: str
@@ -68,38 +102,38 @@ class AssessmentContext:
     threshold_elevation_hae_m: float | None = None
     threshold_elevation_msl_m: float | None = None
     threshold_crossing_height_m: float | None = None
-    lpv_lateral_fsd_m: float | None = None
+    # The published LPV course width at threshold. It selects the benchmark upstream
+    # (``assessment_for_runway``) and is recorded as procedure provenance; it does NOT
+    # bound the lateral result -- see LATERAL_CRITERION_ID above.
+    lpv_course_width_m: float | None = None
     baro_vnav_approved: bool = False
     threshold_frame_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
-        if self.benchmark not in ("lpv", "rnp_apch_lnav_vnav_baro"):
+        # Only what can silently change a verdict is checked. The field types are the
+        # dataclass's job, and every caller builds this from a typed ``Runway``.
+        if self.benchmark not in BENCHMARKS:
+            # ``limits()`` dispatches on this, and its second branch is a fallthrough:
+            # an unrecognised benchmark would quietly be graded as LNAV/VNAV.
             raise ValueError(f"unsupported benchmark {self.benchmark!r}")
-        for name in (
-            "airport", "runway", "runway_source", "runway_source_cycle",
-            "procedure_source", "procedure_source_cycle",
-        ):
-            if not isinstance(getattr(self, name), str) or not getattr(self, name).strip():
-                raise ValueError(f"{name} must be a non-empty string")
-        _finite("runway_course_deg", self.runway_course_deg)
-        _positive("runway_width_m", self.runway_width_m)
-        for name in ("threshold_elevation_hae_m", "threshold_elevation_msl_m"):
+        for name in _FINITE_FIELDS:
             value = getattr(self, name)
-            if value is not None:
-                _finite(name, value)
-        _positive(
-            "threshold_crossing_height_m",
-            self.threshold_crossing_height_m,
-            required=False,
-        )
-        _positive("lpv_lateral_fsd_m", self.lpv_lateral_fsd_m, required=False)
-        if not isinstance(self.baro_vnav_approved, bool):
-            raise ValueError("baro_vnav_approved must be boolean")
-        if self.threshold_frame_fingerprint is not None and (
-            not isinstance(self.threshold_frame_fingerprint, str)
-            or not self.threshold_frame_fingerprint.strip()
+            if value is not None and not math.isfinite(float(value)):
+                raise ValueError(f"{name} must be finite, got {value!r}")
+        if self.runway_width_m <= 0.0:
+            # The effective lateral bound is half of this; zero would fail everything.
+            raise ValueError(f"runway_width_m must be positive, got {self.runway_width_m!r}")
+        if (
+            self.threshold_crossing_height_m is not None
+            and self.threshold_crossing_height_m <= 0.0
         ):
-            raise ValueError("threshold_frame_fingerprint must be a non-empty string")
+            # The vertical REFERENCE PLANE is LTP elevation + this. Published values run
+            # 15.27-18.11 m across this fleet, so a zero or negative TCH would shift the
+            # plane by most of the +/-22 m window while every verdict still looked clean.
+            raise ValueError(
+                "threshold_crossing_height_m must be positive, got "
+                f"{self.threshold_crossing_height_m!r}"
+            )
         if self.benchmark == "lpv":
             for name in (
                 "threshold_elevation_hae_m",
@@ -127,44 +161,14 @@ class AssessmentContext:
             return None
         return self.threshold_elevation_hae_m - self.threshold_elevation_msl_m
 
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "AssessmentContext":
-        return cls(
-            benchmark=data["benchmark"],
-            airport=str(data["airport"]),
-            runway=str(data["runway"]),
-            runway_course_deg=float(data["runway_course_deg"]),
-            runway_width_m=float(data["runway_width_m"]),
-            runway_source=str(data["runway_source"]),
-            runway_source_cycle=str(data["runway_source_cycle"]),
-            procedure_source=str(data["procedure_source"]),
-            procedure_source_cycle=str(data["procedure_source_cycle"]),
-            threshold_elevation_hae_m=(
-                None if data.get("threshold_elevation_hae_m") is None
-                else float(data["threshold_elevation_hae_m"])
-            ),
-            threshold_elevation_msl_m=(
-                None if data.get("threshold_elevation_msl_m") is None
-                else float(data["threshold_elevation_msl_m"])
-            ),
-            threshold_crossing_height_m=(
-                None if data.get("threshold_crossing_height_m") is None
-                else float(data["threshold_crossing_height_m"])
-            ),
-            lpv_lateral_fsd_m=(
-                None if data.get("lpv_lateral_fsd_m") is None
-                else float(data["lpv_lateral_fsd_m"])
-            ),
-            baro_vnav_approved=data.get("baro_vnav_approved", False),
-            threshold_frame_fingerprint=data.get("threshold_frame_fingerprint"),
-        )
-
     @property
     def evaluation_context_fingerprint(self) -> str:
         """Hash every physical and policy fact that can change a verdict."""
         encoded = json.dumps(
             {
-                "schema_version": "terminal-assessment-context-v1",
+                # v2: gained threshold_lat/threshold_lon (the frame origin became
+                # authoritative) and renamed lpv_lateral_fsd_m -> lpv_course_width_m.
+                "schema_version": CONTEXT_SCHEMA_VERSION,
                 **asdict(self),
             },
             sort_keys=True,
@@ -181,18 +185,18 @@ class AssessmentContext:
         }
 
     def limits(self) -> "ResolvedLimits":
-        runway_half = self.runway_width_m / 2.0
+        """The two component bounds this context resolves to.
+
+        Lateral is benchmark-independent: it is the runway, and the runway does not
+        change width because the procedure did. Only the vertical bound depends on
+        which benchmark applies, and only because LNAV/VNAV needs approved Baro-VNAV
+        plus a published path reference before ±22 m means anything.
+        """
+        lateral_m = self.runway_width_m / 2.0
         if self.benchmark == "lpv":
-            guidance = (
-                None if self.lpv_lateral_fsd_m is None
-                else self.lpv_lateral_fsd_m / 2.0
-            )
-            lateral = None if guidance is None else min(guidance, runway_half)
             return ResolvedLimits(
                 benchmark=self.benchmark,
-                guidance_lateral_m=guidance,
-                runway_lateral_m=runway_half,
-                effective_lateral_m=lateral,
+                lateral_m=lateral_m,
                 vertical_lower_m=-RNAV_TERMINAL_VERTICAL_BOUND_M,
                 vertical_upper_m=RNAV_TERMINAL_VERTICAL_BOUND_M,
             )
@@ -213,9 +217,7 @@ class AssessmentContext:
             vertical_reason = None
         return ResolvedLimits(
             benchmark=self.benchmark,
-            guidance_lateral_m=LNAV_FINAL_XTK_M,
-            runway_lateral_m=runway_half,
-            effective_lateral_m=min(LNAV_FINAL_XTK_M, runway_half),
+            lateral_m=lateral_m,
             vertical_lower_m=(
                 -RNAV_TERMINAL_VERTICAL_BOUND_M if vertical_available else None
             ),
@@ -228,15 +230,18 @@ class AssessmentContext:
 
 @dataclass(frozen=True)
 class ResolvedLimits:
-    """Numeric component limits after resolving one assessment context."""
+    """Numeric component limits after resolving one assessment context.
+
+    ``lateral_m`` is always available (a runway always has a width), so a lateral
+    component is never indeterminate once a crossing was measured. The vertical
+    bound can be absent, and ``vertical_reason`` then says why.
+    """
 
     benchmark: Benchmark
-    guidance_lateral_m: float | None
-    runway_lateral_m: float
-    effective_lateral_m: float | None
+    lateral_m: float
     vertical_lower_m: float | None
     vertical_upper_m: float | None
     vertical_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {"lateral_criterion": LATERAL_CRITERION_ID, **asdict(self)}

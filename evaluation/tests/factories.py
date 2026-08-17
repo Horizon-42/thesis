@@ -33,6 +33,8 @@ def assessment_context(
         benchmark=benchmark,
         airport="KRDU",
         runway="05L",
+        threshold_lat=TARGET["lat"],
+        threshold_lon=TARGET["lon"],
         runway_course_deg=0.0,
         runway_width_m=45.72,
         runway_source="faa_nasr_apt_rwy",
@@ -44,7 +46,7 @@ def assessment_context(
         threshold_elevation_hae_m=130.0,
         threshold_elevation_msl_m=100.0,
         threshold_crossing_height_m=30.0,
-        lpv_lateral_fsd_m=106.75 if is_lpv else None,
+        lpv_course_width_m=106.75 if is_lpv else None,
         baro_vnav_approved=(
             not is_lpv if baro_vnav_approved is None else baro_vnav_approved
         ),

@@ -11,10 +11,15 @@ import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
 
 STATE_KEYS = ("lat", "lon", "alt", "V", "psi", "gamma", "m")
-SUBJECTS = ("optimized", "predicted", "observed")
+
+# The subject vocabulary, defined once: the type annotation and the runtime check
+# below are the same tuple, so a new subject cannot be accepted by one and not the
+# other.
+Subject = Literal["optimized", "predicted", "observed"]
+SUBJECTS = get_args(Subject)
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,22 @@ class TrajectoryRecord:
     @property
     def solved(self) -> bool:
         return bool(self.states)
+
+    @property
+    def airport(self) -> str:
+        """The arrival airport ICAO code, upper-cased.
+
+        Required on every record: it selects the runway data a verdict is measured
+        against, and producers that cannot name it (``evaluation_export`` copies
+        whatever the scenario carried) would otherwise be graded against nothing.
+        """
+        code = self.source.get("arr_airport")
+        if not isinstance(code, str):
+            raise ValueError(
+                f"record {self.path or self.source.get('id')!r} requires "
+                "source.arr_airport"
+            )
+        return code.upper()
 
 
 def _number(value: Any, path: str) -> float:
@@ -104,12 +125,10 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
                 f"{where}: final_time_s ({final_time}) must equal the last state "
                 f"sample's t ({states[-1]['t']})"
             )
-    else:
-        if final_time is not None:
-            raise ValueError(f"{where}: an unsolved record requires final_time_s == null")
-        if target is not None:
-            # A failed solve may retain its requested target.  It was validated above.
-            pass
+    # An unsolved record may still carry the target it was asked for (validated above);
+    # what it may not carry is a flight time, since nothing was flown.
+    elif final_time is not None:
+        raise ValueError(f"{where}: an unsolved record requires final_time_s == null")
 
     reference_file = data.get("reference_file")
     if reference_file is not None and not isinstance(reference_file, str):

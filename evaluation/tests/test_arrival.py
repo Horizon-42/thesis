@@ -80,6 +80,29 @@ def test_obsolete_hybrid_observed_method_is_rejected():
         )
 
 
+@pytest.mark.parametrize(
+    "dropped",
+    [("method",), ("observability",), ("method", "observability")],
+    ids=["no-method", "no-observability", "neither"],
+)
+def test_estimated_event_missing_its_discriminators_is_rejected(dropped):
+    """Dropping BOTH is the case a bare ``.get(method) != observability`` misses.
+
+    ``None != None`` is False, so such an event validated clean and then fell through
+    to the censored branch -- graded as a real crossing on the strength of two absent
+    fields. Each single-field case already failed; only the pair did not.
+    """
+    event = observed_event()
+    for key in dropped:
+        del event[key]
+
+    with pytest.raises(ValueError, match="unsupported"):
+        arrival_deviation(
+            record_from_dict(trajectory_payload(subject="observed", event=event)),
+            context=assessment_context(),
+        )
+
+
 def test_observed_record_datum_offset_must_match_authoritative_context():
     value = trajectory_payload(subject="observed", event=observed_event())
     value["source"]["hae_minus_msl_m"] = 31.0

@@ -63,7 +63,7 @@ def test_batch_serializes_context_methodology_and_three_way_counts():
     report = evaluate_batch(
         [record_from_dict(trajectory_payload())], contexts=contexts()
     )
-    assert report["schema_version"] == "terminal-approach-evaluation-v4"
+    assert report["schema_version"] == "terminal-approach-evaluation-v5"
     assert report["verdict_counts"] == {"pass": 1, "fail": 0, "indeterminate": 0}
     assert report["assessment_contexts"][0]["runway_source_cycle"] == "2026-08-06"
     assert report["assessment_contexts"][0]["desired_threshold_altitude_msl_m"] == 130.0

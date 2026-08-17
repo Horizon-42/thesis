@@ -86,6 +86,83 @@ def test_runway_edge_failure_controls_with_lpv_vertical_available():
     assert result.reason is None
 
 
+def test_lateral_bound_is_the_runway_half_width_under_both_benchmarks():
+    """The bound is the runway, not the procedure's containment.
+
+    Measured across the whole fleet the LPV course width (106.75 m) and the LNAV
+    0.15 NM allowance (277.8 m) are both far wider than any runway here, so a
+    ``min(guidance, runway/2)`` rule never once selected the guidance term. Keeping
+    only the runway half-width is what makes the reported number mean what it says.
+    """
+    for benchmark in ("lpv", "rnp_apch_lnav_vnav_baro"):
+        limits = assessment_context(benchmark=benchmark).limits()
+        assert limits.lateral_m == pytest.approx(45.72 / 2.0)
+        assert limits.to_dict()["lateral_criterion"] == "runway_half_width_at_threshold"
+
+
+def test_target_position_must_match_the_authoritative_landing_threshold():
+    """The displaced-threshold class of bug: a target 775 m off used to pass silently."""
+    payload = trajectory_payload()
+    payload["target_state"]["lon"] = TARGET["lon"] + 0.01  # ~900 m east
+
+    with pytest.raises(ValueError, match="from the authoritative KRDU 05L"):
+        evaluate_record(record_from_dict(payload), context=assessment_context())
+
+
+def test_a_target_that_is_not_the_published_threshold_is_not_cross_checked():
+    """``fitted_adsb_crossing`` aims at the flown crossing on purpose.
+
+    Its deviations are still measured in the AUTHORITATIVE runway frame, so the
+    record cannot be graded against its own target.
+    """
+    payload = trajectory_payload()
+    payload["source"]["target_source"] = "fitted_adsb_crossing"
+    payload["target_state"]["lon"] = TARGET["lon"] + 0.01
+
+    result = evaluate_record(record_from_dict(payload), context=assessment_context())
+
+    assert result.deviation is not None
+    assert result.deviation.cross_track_m == pytest.approx(0.0, abs=0.1)
+
+
+def test_a_null_target_source_gets_the_strict_reading_not_a_bypass():
+    """``source.get(key, DEFAULT)`` returns None for a key PRESENT with a null value.
+
+    So an explicit null used to take the "aims elsewhere on purpose" early return --
+    skipping the cross-check for precisely the record that declared nothing, which is
+    the opposite of the documented rule.
+    """
+    payload = trajectory_payload()
+    payload["source"]["target_source"] = None
+    payload["target_state"]["lon"] = TARGET["lon"] + 0.01
+
+    with pytest.raises(ValueError, match="from the authoritative KRDU 05L"):
+        evaluate_record(record_from_dict(payload), context=assessment_context())
+
+
+@pytest.mark.parametrize("tch_m", [0.0, -15.24])
+def test_a_non_positive_published_tch_cannot_move_the_reference_plane(tch_m):
+    """The vertical bound is measured from LTP + TCH, so this is verdict-changing."""
+    with pytest.raises(ValueError, match="threshold_crossing_height_m must be positive"):
+        AssessmentContext(
+            benchmark="lpv",
+            airport="KRDU",
+            runway="05L",
+            threshold_lat=TARGET["lat"],
+            threshold_lon=TARGET["lon"],
+            runway_course_deg=45.0,
+            runway_width_m=45.72,
+            runway_source="faa_nasr_apt_rwy",
+            runway_source_cycle="2026-08-06",
+            procedure_source="faa_cifp_path_point",
+            procedure_source_cycle="2026-08-06",
+            threshold_elevation_hae_m=144.76,
+            threshold_elevation_msl_m=114.76,
+            threshold_crossing_height_m=tch_m,
+            lpv_course_width_m=106.75,
+        )
+
+
 def test_lateral_point_estimate_controls_the_lateral_verdict():
     inside = observed_payload(cross_m=22.8)
     outside = observed_payload(cross_m=23.0)
@@ -102,6 +179,8 @@ def test_lnav_vnav_fallback_has_a_real_vertical_gate():
         benchmark="rnp_apch_lnav_vnav_baro",
         airport="KRDU",
         runway="05L",
+        threshold_lat=TARGET["lat"],
+        threshold_lon=TARGET["lon"],
         runway_course_deg=45.0,
         runway_width_m=45.72,
         runway_source="faa_nasr_apt_rwy",

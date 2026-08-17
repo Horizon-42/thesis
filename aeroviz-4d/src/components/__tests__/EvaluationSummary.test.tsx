@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComparisonCategory, ComparisonIndex } from "../../data/airportData";
-import type { EvaluationReport } from "../../data/evaluationReport";
+import {
+  EVALUATION_REPORT_SCHEMA_VERSION,
+  type EvaluationReport,
+} from "../../data/evaluationReport";
 import type { ObservedEvaluationSummary } from "../../data/observedTracks";
 
 const { appState, categoryState, fetchJsonMock } = vi.hoisted(() => ({
@@ -96,7 +99,7 @@ const METHODOLOGY = {
 };
 
 const REPORT: EvaluationReport = {
-  schema_version: "terminal-approach-evaluation-v4",
+  schema_version: EVALUATION_REPORT_SCHEMA_VERSION,
   methodology: METHODOLOGY, assessment_contexts: [], subject: "optimized",
   total: 10,
   measured: 8,

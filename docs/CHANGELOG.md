@@ -4,6 +4,265 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-17 — Comparison references were the wrong window: full track vs model arrival slice
+
+**Symptom.** In the comparison overlay the white observed reference did not start at the
+same time or the same place as the `look-`/`pred-` group beside it. Measured on the KRDU
+05L validation batch (471 groups): the group's first sample sat a median **5055 m** from
+the reference (p75 5281 m, p95 47.1 km, max 54.9 km).
+
+**Root cause — two time origins, only one of them reconciled.** Three timelines exist and
+the publisher accounted for two:
+
+1. a stored track's `samples[i][0]` is relative to first reception (`store.track_record`,
+   absolute time in `start_time_utc`) — this is what `trajectories.czml` and the
+   `/trajectories` backend served;
+2. the model **arrival slice** is rebased at `harvest/arrivals.py` `load_arrival_flights`
+   (`t0 = waypoints[0][0]`, `sample[0] - t0`), so every scenario, optimizer record and TS
+   record has `t = 0` at the 25 km terminal-ring entry, and `t0` is discarded;
+3. a prediction record rebases again to the anchor, recording the shift as
+   `source.anchorTimeS`.
+
+`build_scenario_comparison_czml` added ③ back (correctly — that was the 2026-07-20 anchor
+fix) but nothing ever added ② back, so every group rendered `t0` early. Measured `t0` over
+300 random KRDU arrivals: median **45.1 s**, p25 34.3, p75 55.6, p95 123.1, max 526.3 s.
+The same seam applies to optimizer groups (`opt-`/`sim-` also start at ring entry); no
+optimizer category happened to be published at the time, so it only showed on predictions.
+
+Nothing downstream could detect it: both timelines start at `t = 0`, both name the right
+flight, the schema is satisfied, and the drawn result reads as model error rather than a
+publication bug. Proof that the two were the same measurement: fitting a per-flight pure
+time shift dropped the lookback↔reference distance from a median 4900 m to **13.7 m** (2 s
+resampling error).
+
+**Fix — align the reference to the modeling window, at READ time.** The pre-entry segment
+is not model input, not a supervision target and not evaluated; drawing it as the white
+"truth" beside a forecast invites reading it as something the model failed to produce. So
+the reference is now the arrival slice on the arrival origin, rather than the group being
+pushed out onto the full track's origin.
+
+- `aeroviz_backend/observed_trajectories.py` gained `window` ∈ `full` | `arrival`. `full`
+  (default) is unchanged: the complete reconstructed track, rostered by
+  `tracks/manifest.json`, for Observe/Baseline. `arrival` rosters from
+  `arrivals/manifest.json` and builds flights through **`load_arrival_flights` itself** —
+  the same loader the scenario/optimizer/training paths use — so there is no second
+  implementation of the slice to drift from, and the source-hash check plus identity round
+  trip come along for free.
+- `tracks/` is untouched and no artifact is written: the slice is taken at read time, the
+  same rule the altitude-outlier repair follows.
+- Response schema bumped to `observed-trajectories-v2` with `trackWindow` echoed. The bump
+  is load-bearing: a v1 backend ignores an unknown `window` argument and answers a
+  comparison-reference request with full tracks, reproducing the bug silently. The
+  frontend refuses anything but `arrival` for the comparison reference.
+- `build_scenario_comparison_czml._require_reference_aligned` pins the embedded-reference
+  path (`include_reference_entities=True`, currently unused in publishing) at 50 m — inside
+  the gap between resampling noise (~14 m) and a wrong window (≥5 km).
+
+**Verified end-to-end on real data**: over all 471 KRDU 05L groups the group-start-to-
+reference distance is now **0.0 m** for every group (bit-identical samples), against a
+median 5055 m before.
+
+**No artifact is stale.** Published comparison CZMLs contain only `look-`/`pred-` (the
+publisher passes `include_reference_entities=False`) and the reference is served live, so
+restarting the backend is the whole deployment — no re-publish, no re-predict, no
+re-optimize.
+
+### 2026-08-17 — `final_approach` / `evaluation` design pass: one event validator, one lateral bound, authoritative threshold frame
+
+Review of the two packages for design and defensive code. Report schema bumps to
+`terminal-approach-evaluation-v5`.
+
+**What "stale" means here, measured — no number changes.** Every shipped
+`evaluation_report.json` must be regenerated, but only because its *shape and version*
+changed; re-running produces the same verdicts and the same deviations:
+
+- The effective lateral bound is unchanged. A shipped KRDU v4 row reads
+  `{guidance_lateral_m: 53.375, runway_lateral_m: 22.86, effective_lateral_m: 22.86}` —
+  the runway term won, as it does at all 26 thresholds — and v5 publishes `lateral_m:
+  22.86`. Same number; what disappears is the `53.375`, which was the 2×-wrong half of an
+  already-inert term.
+- The authoritative-frame change (C) moves nothing on disk. Probed 500 observed + 500
+  predicted KRDU records against the CIFP-resolved context: worst `target_state` offset
+  from the authoritative threshold is **0.0000 m** (altitude likewise), so no frame origin
+  moved and every deviation is bit-identical. Observed records carry no `target_source` at
+  all and therefore take the STRICT branch — and pass it.
+- So KRDU observed re-runs to the same `{pass: 14168, fail: 270, indeterminate: 1}`.
+
+What actually changes: `schema_version`, the `bounds` / `resolved_limits` field names, the
+new `methodology.terminal_lateral`, and `evaluation_context_fingerprint` (context v2 gained
+`threshold_lat`/`threshold_lon`). **Comparison CZML files do NOT need rebuilding** — their
+geometry comes from states and their `status`/colour from verdicts, and neither moved; only
+`evaluation_report*.json` and the `evaluation.schemaVersion` string inside
+`comparison_index.json` do.
+
+Scope on disk: all 34 published comparison trees are PREDICTION trees (`ts_pooled_*`,
+`prediction_ts_itr_*`, `experiment_*`) plus the per-airport `observed/` report. There is
+currently **no optimizer comparison tree published at all**, so the optimizer batches were
+not part of this regeneration.
+
+**Regeneration completed 2026-08-17.** Everything below is v5 on disk:
+
+- 5 observed batches via `--evaluate-only --no-czml` (harvest + published copy). Verdicts
+  reproduce the historical table exactly — KRDU 14168/270/1, KMSY 3892/257/1, KSJC
+  11144/7/6, KSMF 4221/8/2, KSTL 8485/280/4 — confirming the "no number changes" claim
+  end-to-end. CZML deliberately not re-rendered (unchanged, and already post-altitude-filter).
+- 34 prediction batches re-evaluated. 14 of them had their records archived into
+  `prediction_records.tar.gz`, so `python -m evaluation` failed on them until the tarball was
+  extracted, evaluated, and the extracted members removed again to restore the archived
+  layout (the tarball does carry the `*_eval.json`, 2166 of them in the KSJC/val case).
+- 34 published comparison trees refreshed report-only, following the publisher's own atomic
+  pattern (new generation-named report → atomic index replace → prune) and using its own
+  `publish_evaluation_report` / `evaluation_batch_stats` / `prune_unreferenced_outputs`, so
+  the shapes cannot drift. The index carries no source path and the itr/ptst variants of a
+  split share a flight set, so each tree was joined to its source by CONTENT — the exact
+  per-row `(file, cross_track_m)` fingerprint — which matched all 34 uniquely, 0 ambiguous.
+- 5 `lateral_pass_eligibility.json` rosters rebuilt (KRDU's was deleted by the arrivals
+  rebuild, which clears its directory; the other four pinned the old manifest hash and v4).
+
+Two things this surfaced, neither caused by the v5 work:
+
+- Re-running the harvest **changes every `arrivals/manifest.json` hash**, because the
+  altitude-outlier filter block (`altitude-outlier-filter-v1`) had never been written to
+  them. The reports also shed five stale `deviation` keys (`glidepath_deg`, and the four
+  `*_sigma_m`/`*_interval_m` fields) that the code had already stopped emitting. The on-disk
+  artifacts were behind the code in more ways than the schema version.
+- Prediction **checkpoint provenance was already broken before this session**: the KSJC
+  checkpoint pins arrival-manifest `687f5c6c1d94bb54` while the tree held `362b0dd97ff823ef`
+  even before the re-run. A full republish (`publish_ts_experiment_trajectories`) preflights
+  that hash and would refuse — which is why the refresh above is report-only. Anything
+  needing a real republish must re-run prediction against the current manifests first.
+  `publication.json`'s `evaluation.schema_version` therefore still reads v4: it records the
+  publish run that actually happened, and nothing validates it.
+
+**Contract consolidation (behaviour-preserving).**
+- The `observed_threshold_event` schema had TWO hand-rolled validators — `harvest
+  .threshold_event.require_current_threshold_event` and the inline block in
+  `evaluation.arrival._observed_arrival`, ~65 lines each over the same payload, free to
+  drift. One `final_approach.event_contract.validate_event(event) -> status` now owns
+  the schema; each side keeps only its own identity binding (producer: `Runway` frame
+  fingerprint + snapshot; evaluator: `AssessmentContext` runway + fingerprint). Both run
+  identity first, payload second, so a stale artifact reports as stale.
+- `INBOUND_TOLERANCE_M = 100.0` existed twice with a "same as the final-approach fitter"
+  comment; it is now imported from `final_approach`.
+- Removed: `evaluation.metrics._validate_deviation` (re-checked values the same function
+  produced three lines earlier); the 45-line self-consistency re-derivation in
+  `_validated_observed_availability` (the counts are measured upstream from a roster
+  evaluation never sees — now copied verbatim like `observed_threshold_event`, with only
+  the denominator LABEL checked); `AssessmentContext.from_dict` (unused); the
+  `source.get("arr_airport") or source.get("airport")` fallback duplicated in two modules
+  (no producer has ever written `"airport"` — replaced by `TrajectoryRecord.airport`);
+  `_line_inliers`' rejected-index half (both callers discarded and recomputed it); the
+  provably unreachable span check after `_straight_final_suffix`; and the type-shape half
+  of `AssessmentContext.__post_init__` (kept: benchmark whitelist, since `limits()`'s
+  second branch is a fallthrough; positive runway width; NaN; LPV completeness).
+  `METHODOLOGY` moved to module level. Net −115 lines with the new validator counted in.
+- Single-statement functions that only added an indirection: `arrival.subject_of`
+  (a `source["subject"]` lookup behind a cross-module import and a package export — now
+  read directly at its two call sites), `stats.mean` (a reimplementation of
+  `statistics.fmean`), and `thresholds._require_finite` (a module function taking the
+  one object that called it — inlined into `__post_init__` over a `_FINITE_FIELDS`
+  tuple). An AST sweep over both packages checked the rest: the ~13 remaining
+  one-statement definitions are dataclass properties naming a domain quantity
+  (`SegmentFit.cross_at_threshold_m`, `TrajectoryRecord.solved`), `to_dict`
+  serializers, or public helpers with three or more callers — kept. `event_contract
+  ._source_sample_range` returned a tuple no caller used; it is now
+  `_require_source_sample_range() -> None`.
+
+**Lateral criterion: one honest bound (methodology change).**
+`limits()` computed `min(guidance, runway_width/2)` where guidance was the LPV course
+width `/2` or LNAV 0.15 NM. Two findings: the LPV value 106.75 m is already a semiwidth,
+so halving it published `guidance_lateral_m` wrong by 2×; and measured over all 26
+thresholds at the five airports the guidance term bound **0 times** (2.3–18× wider than
+the runway). `ResolvedLimits` now carries a single `lateral_m` = runway half-width,
+tagged `LATERAL_CRITERION_ID = "runway_half_width_at_threshold"`, and the report's new
+`METHODOLOGY["terminal_lateral"]` states the claim boundary: landing geometry, not
+navigation containment. `lpv_lateral_fsd_m` → `lpv_course_width_m`, kept as procedure
+provenance that bounds nothing. Lateral is now never indeterminate once a crossing was
+measured, so the composite's only indeterminate route is a missing vertical reference.
+No verdict changes (the min already selected the runway half-width everywhere).
+
+**Deviations are measured in the authoritative runway frame.**
+`_computed_arrival` built its `RunwayFrame` at the record's own `target_state` lat/lon
+and cross-checked only the altitude against the published LTP+TCH. `AssessmentContext`
+gains required `threshold_lat`/`threshold_lon`; the frame origin is now authoritative,
+and `_require_target_agrees_with_runway_data` checks position AND altitude at 1 cm —
+gated on `source.target_source == "runway_threshold"`, because `fitted_adsb_crossing`
+and `track_end` (both in `run_scenario_optimization.ALL_MODES`) aim elsewhere by design.
+An undeclared `target_source` gets the strict reading. Two consequences worth recording:
+a fitted-ADS-B-target record used to be graded against its own flight's fitted crossing
+(~0 lateral by construction), and the repo's two threshold sources — NASR
+`runway_thresholds.json` vs CIFP Path Point LTP — sit **6.69 m apart at KRDU 05L**, which
+nothing had ever noticed. The real pipeline is internally consistent; only
+`ts_transformer/synthetic.py` builds on the NASR point, so its test context pins those
+coordinates explicitly.
+
+**Follow-up pass: the v5 bump reached the producer only, and two guards were over-deleted.**
+
+*Alignment.* `REPORT_SCHEMA_VERSION` v4 → v5 landed in `evaluation/metrics.py` alone.
+`4dTrajectory/ts_transformer/lateral_eligibility.py:18` and
+`aeroviz-4d/src/data/evaluationReport.ts` kept their own v4 literals, so
+`build_lateral_pass_roster` raised on every regenerated report and the frontend's
+`isEvaluationReport` rejected them — the panel surfaces `"evaluation report is malformed"`,
+which is a misleading message for what is purely a version disagreement. Both suites were green
+because their fixtures also said v4: **a version pinned in the fixture is a version the
+test cannot check**, and that is the whole reason this shipped. The ts seam now imports
+`REPORT_SCHEMA_VERSION` (it is the one ts module allowed to know evaluation policy — model,
+loss and loader code still must not); the frontend exports
+`EVALUATION_REPORT_SCHEMA_VERSION` as a declared MUST-match mirror; all four fixtures
+import the constant. `thresholds.CONTEXT_SCHEMA_VERSION` also became
+`terminal-assessment-context-v2`, since its hashed payload gained `threshold_lat/lon` and
+renamed `lpv_lateral_fsd_m`. Docs realigned: `FINAL_APPROACH_VERDICT_STANDARD.md` §3.3 now
+documents the single runway-half-width rule and why the guidance term went (its §2/§5 v4
+history is kept as history), plus `evaluation/README.md`, `BUG_FIX_GUIDE.md`, the zh
+implementation doc and the ts evaluation doc. `EvaluationReportWindow.tsx` still advertised
+"the tighter of the guidance bound and runway half-width" — the exact claim this pass
+deleted — while rendering a report whose `METHODOLOGY` said the opposite; its test now
+asserts the new claim and asserts the old wording is ABSENT.
+
+*Over-deletion (both verified by running the code, then covered by tests).*
+- `validate_event` compared `ESTIMATED_OBSERVABILITY_BY_METHOD.get(method) != observability`.
+  With NEITHER field present that is `None != None` → False: an `estimated` event carrying
+  no method and no observability validated clean, then fell through to the censored branch
+  and was graded as a real crossing. Each single-field case already failed, which is why
+  the gap survived. Now the lookup must resolve.
+- `record.source.get("target_source", THRESHOLD_TARGET_SOURCE)` returns `None`, not the
+  default, for a key present with a null value — so an explicit null took the "aims
+  elsewhere on purpose" early return, bypassing the cross-check exactly where the docstring
+  promised it could not be bypassed. Audited: all 144,764 shipped `*_eval.json` carry an
+  explicit `"runway_threshold"`, so nothing on disk was mis-graded.
+- Restored the positivity check on `threshold_crossing_height_m` (dropped with the type-shape
+  half of `__post_init__`). It sets the vertical REFERENCE PLANE, published values run
+  15.27–18.11 m, so a zero would move the plane by most of the ±22 m window with every
+  verdict still looking clean — the same "parsed FAA data, not a Python literal" argument
+  that kept the NaN check.
+
+*Kept deleted, on review:* the `hae_minus_msl_m` presence check (the harvest writes it
+unconditionally; `KeyError` is loud), the non-dict event check (a non-dict event is a corrupt
+artifact), the empty-`frames` guard in `assign_runway` and the duplicate `max_tracks` guard
+in `visualize` (both contracts documented, both still crash, and argparse rejects the latter
+first). `METHODOLOGY` being shared by reference is real aliasing but nothing mutates it —
+adding a deepcopy would re-add the defensive code this pass removed.
+
+*Symmetry.* `evaluationReport.ts` also stopped re-deriving the observed-availability
+arithmetic. `harvest/observed.py` computes `event_unavailable` and `event_estimated_rate`
+FROM `denominator` and `estimated` in the same expression, so those are identities, not
+invariants — and re-checking them cost a silent whole-report rejection. Both sides now check
+only the denominator LABEL, which is the one field that says which population the rate
+describes.
+
+Out-of-scope findings from this pass are recorded in `docs/code-health-followups.md`
+(duplicate `_iso` in harvest, `summary_row`'s explicit JSON nulls, the stale v2 fixture in
+the comparison-CZML tests, and the 12 pre-existing `test_ts_pipeline` failures).
+
+Deferred pending review: the dead `max(seed_scale, floor)` in `fit._straight_final_suffix`
+(the "adaptive" residual limit is a constant 31.9 m for every track), and replacing the
+O(n²) exact Theil–Sen seed in `_median_line`.
+
+Verified: 908 passed across the Python suites (13 failures all pre-existing — 12 in
+`test_ts_pipeline`/`test_download_landings`, plus the known numpy 2.x
+`test_fixed_time_objective_weights_control_effort_at_one`); frontend `tsc --noEmit`
+clean and 508 vitest tests passing.
+
 ### 2026-08-17 — ADS-B altitude outliers filtered in the view, not in the tracks
 
 **Symptom.** Observed trajectories rendered with needle-shaped vertical peaks: single

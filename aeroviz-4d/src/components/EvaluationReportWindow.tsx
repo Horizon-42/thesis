@@ -629,7 +629,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
     if (!finite.length || finite.length !== values.length) return null;
     return finite.every((value) => Math.abs(value - finite[0]) < 1e-9) ? finite[0] : null;
   };
-  const commonLateralBound = commonNumber(measuredRows.map((row) => row.bounds.effective_lateral_m));
+  const commonLateralBound = commonNumber(measuredRows.map((row) => row.bounds.lateral_m));
   const commonVerticalLower = commonNumber(measuredRows.map((row) => row.bounds.vertical_lower_m));
   const commonVerticalUpper = commonNumber(measuredRows.map((row) => row.bounds.vertical_upper_m));
   const lateralValues = useMemo(
@@ -781,10 +781,11 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         </div>
 
         <p className="eval-report-gates">
-          Terminal bounds are runway and benchmark specific and are shown in each row.
-          Lateral uses the tighter of the guidance bound and runway half-width. Vertical
-          uses the published-TCH path and the 22 m RNAV/RNP terminal bound. The result
-          grades terminal final-approach geometry, not touchdown or landing certification.
+          Terminal bounds are shown in each row. Lateral is half the published runway
+          width — did the crossing lie over the pavement — which is a landing-geometry
+          claim, not a navigation-containment one. Vertical is benchmark specific: the
+          published-TCH path and the 22 m RNAV/RNP terminal bound. The result grades
+          terminal final-approach geometry, not touchdown or landing certification.
         </p>
 
         {deviationAvailability.excluded > 0 ? (

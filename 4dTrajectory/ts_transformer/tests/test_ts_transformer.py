@@ -173,13 +173,18 @@ AIRPORT, RUNWAY = "KRDU", "05L"
 def _terminal_contexts():
     context = AssessmentContext(
         benchmark="lpv", airport=AIRPORT, runway=RUNWAY,
+        # The synthetic fixtures build their approaches on the runway_thresholds.json
+        # point (flight_scenarios.runway_target.find_threshold), which sits 6.7 m from
+        # the CIFP Path Point LTP a real KRDU context would carry. Pin the synthetic
+        # one so this context describes the data it is grading.
+        threshold_lat=35.8745003, threshold_lon=-78.802002,
         runway_course_deg=45.0, runway_width_m=45.72,
         runway_source="faa_nasr_apt_rwy", runway_source_cycle="2026-08-06",
         procedure_source="faa_cifp_path_point", procedure_source_cycle="2026-08-06",
         threshold_elevation_hae_m=141.86,
         threshold_elevation_msl_m=111.86,
         threshold_crossing_height_m=15.0,
-        lpv_lateral_fsd_m=106.75,
+        lpv_course_width_m=106.75,
     )
     return {(AIRPORT, RUNWAY): context}
 
