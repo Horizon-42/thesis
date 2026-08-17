@@ -8,6 +8,12 @@ that view through a second manifest; consumers never glob either directory.
 The record geometry remains HAE.  Cesium needs HAE, while the modeling plane converts it
 to MSL at ``flight_scenarios.datum``.  Moving that conversion here would silently apply
 the geoid correction twice to one of the two consumers.
+
+Both the writer and the loader hash the SOURCE bytes and then hand on the
+``altitude_filter`` view, in that order.  The roster therefore stays a statement about
+what the receiver recorded — indices and SHA-256 alike — while every model consumer reads
+altitudes with the unreachable single-sample outliers replaced.  The manifest reports how
+many that was; it never rewrites the track.
 """
 
 from __future__ import annotations
@@ -21,6 +27,11 @@ from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM, truncate_fl
 from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
+)
+from trajectory_data_process.harvest.altitude_filter import (
+    DEFAULT_POLICY,
+    FILTER_SCHEMA_VERSION,
+    filtered_track,
 )
 from trajectory_data_process.harvest.czml import czml_input_flight, verify_identity
 from trajectory_data_process.harvest.store import (
@@ -68,7 +79,9 @@ def write_arrival_records(
             continue
         assigned += 1
         source_bytes = (paths.tracks / row["file"]).read_bytes()
-        track = json.loads(source_bytes)
+        # Hash the SOURCE bytes, then filter: the roster pins what the receiver recorded,
+        # and the altitude repair is a property of the view every consumer reads back.
+        track = filtered_track(json.loads(source_bytes))
         runway = airport.runway(row["runway"])
 
         if runway.threshold_crossing_height_m is None:
@@ -97,6 +110,8 @@ def write_arrival_records(
         # The measured track may include rollout/taxi.  The supervised arrival ends at
         # the sample that defined landing_time_utc, never after it.
         flight["waypoints"] = track["samples"][: anchor + 1]
+        # Indices are into the SOURCE array and stay valid: the filter replaces altitudes
+        # and never adds or drops a row.
         flight["arr_airport"] = airport.code
         flight["runway_target"] = _runway_target(runway)
         verify_identity(flight, track["flight_key"])
@@ -137,6 +152,9 @@ def write_arrival_records(
                 "arrival_truncated": bool(arrival["arrival_truncated"]),
                 "cut_samples": int(arrival["cut_samples"]),
                 "arrival_duration_s": float(arrival["arrival_duration_s"]),
+                "altitude_outliers": _outliers_in_slice(
+                    track, first_sample_index, last_sample_index
+                ),
             }
         )
 
@@ -158,6 +176,14 @@ def write_arrival_records(
         "altitude_source": source["altitude_source"],
         "altitude_datum": source["altitude_datum"],
         "counts": counts,
+        # What the read layer repairs on the way out. Stated here because a training set
+        # whose altitudes were touched must say so in its own roster.
+        "altitude_filter": {
+            "schema_version": FILTER_SCHEMA_VERSION,
+            "policy": DEFAULT_POLICY.to_dict(),
+            "repaired_samples": sum(row["altitude_outliers"] for row in roster),
+            "repaired_records": sum(bool(row["altitude_outliers"]) for row in roster),
+        },
         "runway_targets": runway_targets,
         "excluded": excluded,
         "records": roster,
@@ -253,7 +279,9 @@ def load_arrival_flights(
                 f"{manifest_path}: canonical source track for flight {key!r} changed at "
                 f"{source_path}; regenerate arrivals from tracks/manifest.json"
             )
-        track = json.loads(source_bytes)
+        # Same order as the writer: verify the SOURCE bytes, then hand consumers the
+        # filtered view. Training, scenarios and benchmarks all arrive through here.
+        track = filtered_track(json.loads(source_bytes))
         first = row.get("first_sample_index")
         last = row.get("last_sample_index")
         if (
@@ -306,6 +334,14 @@ def resolve_arrival_manifest(path: str | Path) -> Path:
     raise FileNotFoundError(
         f"no arrival manifest at {nested} or {direct}; run a full harvest (or "
         "--evaluate-only on an existing tracks manifest) first"
+    )
+
+
+def _outliers_in_slice(track: dict[str, Any], first: int, last: int) -> int:
+    """How many altitudes the filter replaced inside this arrival's source slice."""
+    return sum(
+        first <= outlier["index"] <= last
+        for outlier in track["altitude_filter"]["outliers"]
     )
 
 

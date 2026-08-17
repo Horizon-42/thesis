@@ -22,6 +22,12 @@ ellipsoid (``src/types/czml.d.ts``), and the stored tracks are HAE as broadcast,
 this stage converts nothing. The MSL conversion belongs to ``observed.py``, which
 feeds the modeling plane — converting here would push the viewer 33 m off.
 
+WHAT IS REPAIRED is one thing and it is not the datum: single state vectors whose
+reported altitude is physically unreachable (measured extremes reach 35 km between
+neighbours at 560 m) are replaced by ``altitude_filter`` as the track is READ. That is
+the needle-shaped vertical peak in the observed layer. The stored track keeps the
+broadcast value; the render reports how many it replaced.
+
 RENDERING IS DELEGATED, not reimplemented: the CZML is built by
 ``aeroviz-4d/python/generate_czml.py`` exactly as the old pipeline built it, so entity
 ids, packet shape and clock handling cannot drift between the two. It is invoked as a
@@ -44,7 +50,8 @@ from typing import Any
 from flight_scenarios.identity import flight_key
 from geokit import haversine_m
 
-from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
+from trajectory_data_process.harvest.altitude_filter import outlier_count
+from trajectory_data_process.harvest.store import HarvestPaths, read_manifest, read_track_view
 from trajectory_data_process.harvest.threshold_event import (
     CENSORED_EVENT_METHOD,
     DIRECT_EVENT_METHOD,
@@ -64,6 +71,8 @@ class RenderedObserved:
     runway_counts: dict[str, int]
     manifest: Path
     flights: int
+    altitude_outliers: int
+    flights_with_altitude_outliers: int
 
 
 def czml_input_flight(track: dict[str, Any]) -> dict[str, Any]:
@@ -114,13 +123,19 @@ def observed_czml_flights(
     for row in source_rows:
         if row["outcome"] != "assigned":
             continue
-        track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
+        # A view, so the needle-like altitude outliers never reach the viewer; the
+        # extrapolated tail below anchors on the same repaired samples.
+        track = read_track_view(paths, row["file"])
         flight = czml_input_flight(track)
         verify_identity(flight, track["flight_key"])
         segment = _extrapolated_waypoints(track)
         if segment is not None:
             # Kept separate from measured waypoints: this is an inferred tail.
             flight["extrapolated_waypoints"] = segment
+        # How many of this flight's altitudes the filter replaced. ``generate_czml`` reads
+        # the keys it needs and ignores the rest; the renders report the total rather than
+        # repairing silently.
+        flight["altitude_outliers"] = outlier_count(track)
         yield flight
 
 
@@ -139,6 +154,8 @@ def render_observed_czml(
     combined = airport_dir / "trajectories.czml"
     runway_counts: dict[str, int] = {}
     flights = 0
+    outliers = 0
+    flights_with_outliers = 0
     max_offset = 0.0
     with tempfile.TemporaryDirectory(prefix=f"{paths.code}-observed-czml-") as work:
         source = Path(work) / "flights.jsonl"
@@ -166,6 +183,9 @@ def render_observed_czml(
                 runway = str(flight["runway"])
                 runway_counts[runway] = runway_counts.get(runway, 0) + 1
                 flights += 1
+                repaired = int(flight["altitude_outliers"])
+                outliers += repaired
+                flights_with_outliers += bool(repaired)
 
         if flights == 0:
             raise ValueError(
@@ -212,6 +232,8 @@ def render_observed_czml(
         runway_counts=runway_counts,
         manifest=manifest_path,
         flights=flights,
+        altitude_outliers=outliers,
+        flights_with_altitude_outliers=flights_with_outliers,
     )
 
 

@@ -240,7 +240,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(
         f"[harvest] model-ready arrivals: {arrivals['counts']} -> "
-        f"{arrival_manifest_path(paths)}"
+        f"{arrival_manifest_path(paths)} "
+        f"({arrivals['altitude_filter']['repaired_samples']} altitude outlier(s) "
+        f"repaired on read)"
     )
 
     summary = write_observed_records(airport, paths)
@@ -264,6 +266,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"[harvest] observed CZML: {rendered.flights} flights over "
               f"{len(rendered.runway_counts)} runway(s) -> {rendered.combined_czml}")
+        print(f"[harvest] altitude filter: {rendered.altitude_outliers} outlier(s) "
+              f"replaced in {rendered.flights_with_altitude_outliers} flight(s); "
+              f"tracks/ unchanged")
 
     if not args.no_publish and not staging_rebuild:
         published = publish_observed_report(

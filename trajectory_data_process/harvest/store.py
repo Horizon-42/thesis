@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
+from trajectory_data_process.harvest.altitude_filter import filtered_track
 from trajectory_data_process.harvest.classify import ClassifiedTrack
 
 TRACKS_DIR = "tracks"
@@ -248,8 +249,26 @@ def require_source_timed_manifest(
         )
 
 
+def read_track_view(paths: HarvestPaths, relative: str) -> dict[str, Any]:
+    """One stored track as a DERIVED VIEW, which is the only way to render or model it.
+
+    The bytes on disk stay the sensor reconstruction; what comes back has its altitude
+    outliers repaired by ``altitude_filter`` and carries that decision in
+    ``altitude_filter``. Anything that hashes the source record must read the bytes
+    itself and filter afterwards -- see ``arrivals.load_arrival_flights``.
+    """
+    return filtered_track(
+        json.loads((paths.tracks / relative).read_text(encoding="utf-8"))
+    )
+
+
 def iter_records(paths: HarvestPaths, *, outcome: str | None = None) -> Iterator[dict[str, Any]]:
-    """Yield stored track records via the manifest roster, optionally one bucket."""
+    """Yield stored track records via the manifest roster, optionally one bucket.
+
+    These are the RAW records, altitudes included, because the callers that reconstruct or
+    reclassify a harvest must see exactly what was stored. Derived views go through
+    :func:`read_track_view`.
+    """
     for row in read_manifest(paths)["records"]:
         if outcome is not None and row["outcome"] != outcome:
             continue

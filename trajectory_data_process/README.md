@@ -274,6 +274,35 @@ are MSL, so HAE → MSL conversion occurs exactly once at `flight_scenarios.datu
 the TS dataset builder before it reads bare waypoints). Moving the conversion into harvest
 would make the visualization wrong by the same geoid offset it fixes for modeling.
 
+## Altitude outliers
+
+A handful of state vectors report an altitude the aircraft cannot have been at — measured
+extremes reach 20 147 m between neighbours at 724 m, which renders as a needle-shaped
+vertical peak and drags any fit through it. `harvest/altitude_filter.py` replaces those
+altitudes **as a stored track is read into a derived view**, and only there: the observed
+CZML, the model-ready arrival slices, and the evaluation records. `tracks/` keeps the
+broadcast value, so the arrival roster's SHA-256 pins, `--reclassify-existing`, and
+`source_integrity` all still describe the bytes the receiver produced.
+
+The criterion is a deviation from the median of the ±2-sample window that exceeds both
+100 m and what `25 m/s` could fly in the tighter adjacent gap. Over the five harvested
+airports that is 561 samples in 451 of 44 622 assigned tracks (0.0027 %). Only
+`samples[i][3]` changes — count, times and horizontal positions are untouched, because
+`landing_sample_index`, the arrival slice bounds and the threshold event's
+`source_sample_range` all index this array.
+
+```bash
+# what would be replaced, per airport (read-only)
+conda run -n aeroviz python -m trajectory_data_process.altitude_outliers --airport KRDU
+# republish public/data/<ICAO>/trajectories.czml through the filter
+conda run -n aeroviz python -m trajectory_data_process.altitude_outliers --airport KRDU \
+  --rerender-czml
+```
+
+Stored `observed_threshold_event`s were fitted during assignment, before this filter; the
+audit reports outliers landing inside an event's source range so those cases can be
+judged, and `--reclassify-existing` is what re-derives them.
+
 ## Reference data and access
 
 - `config/runway_thresholds.json` supplies airport centers and every displaced landing

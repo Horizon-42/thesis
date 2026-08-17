@@ -4,6 +4,72 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-17 — ADS-B altitude outliers filtered in the view, not in the tracks
+
+**Symptom.** Observed trajectories rendered with needle-shaped vertical peaks: single
+samples reporting an altitude nowhere near their neighbours. Measured extremes across the
+five harvested airports are 20 147 m between neighbours at 724 m and 35 189 m at 556 m.
+
+**What was rejected.** A stop-gap `fix_altitude_spikes.py` edited `tracks/*.json` in place.
+That breaks three contracts at once — `arrivals/manifest.json` pins every source track by
+SHA-256 (the loader refuses a changed file), `--reclassify-existing` re-derives assignment
+from those exact samples, and `source_integrity.retained_rows` counts them. It also missed
+the point: `tracks/` is the sensor reconstruction, and a repair is a property of the view.
+
+**What shipped.** `trajectory_data_process/harvest/altitude_filter.py`, applied where a
+stored track becomes a derived view and nowhere else:
+
+- `store.read_track_view` → observed CZML (`czml.observed_czml_flights`, which also feeds
+  the backend trajectory sampler) and evaluation records (`observed.write_observed_records`);
+- `arrivals.write_arrival_records` / `load_arrival_flights` → all model input (ts training,
+  `flight_scenarios`, `batch_benchmark`). Both hash the SOURCE bytes first and filter after,
+  so the roster stays a statement about what the receiver recorded.
+
+`store.iter_records` deliberately stays raw — reconstruction and reclassification must see
+what was stored.
+
+**Detection.** Deviation from the median of the ±2-sample window exceeding BOTH 100 m AND
+`25 m/s × min(adjacent gap)`. Both halves earned their place on the data:
+
+- a chord/jump test (the stop-gap's approach) attributes one bad sample to three, because
+  the outlier's two neighbours have a chord running through it — 363 runs of exactly three
+  where the truth was 363 isolated samples;
+- the 100 m floor sits at 2× the largest residual genuine flight produces. Over 20 851 436
+  assigned samples the residual is < 25 m for 20 847 051, 3 625 fall in [25, 50) (the 25 ft
+  and 100 ft reporting lattices plus real motion), and only 189 exceed 50 m;
+- the rate bound spares 10 real descents that stepped 107–160 m across 9–14 s reception
+  gaps, which a bare deviation threshold "repairs" into a lie.
+
+Incidence: **561 samples in 451 of 44 622 assigned tracks (0.0027 %)**; 421 sat inside a
+model arrival slice. 479 isolated, longest run six.
+
+**Repair replaces the altitude and never drops the sample.** `landing_sample_index`, the
+arrival slice bounds, the threshold event's `source_sample_range` and the
+`reported_ground_speeds_m_s` parallel array all index that array; deleting a row silently
+renumbers every one of them. Replacement is a linear interpolation in time between the
+nearest retained samples; at a track edge it holds the nearest retained altitude
+(`held` vs `interpolated`, both labelled in the report).
+
+**Stated, never silent.** `arrivals/manifest.json` and `approach/summary.json` each carry an
+`altitude_filter` block (policy + repaired counts), arrival records carry a per-flight
+`altitude_outliers`, and `RenderedObserved` carries the render's totals.
+
+**Tooling.** `fix_altitude_spikes.py` deleted; `python -m trajectory_data_process.altitude_outliers`
+replaces it as a read-only audit (`--report-json` gives the full per-track trail) plus
+`--rerender-czml`, which republishes `public/data/<ICAO>/trajectories.czml` through the
+pipeline's own renderer.
+
+**Artifacts.** All five `trajectories.czml` republished. Batch comparison CZMLs resolve
+their observed reference by entity id inside that canonical file, so they follow without a
+rebuild. Training data needs no rebuild either — `load_arrival_flights` filters on the way
+out — so the next dataset build is already clean; `--evaluate-only` is what refreshes the
+roster counts and the evaluation records.
+
+**Known gap.** Stored `observed_threshold_event`s were fitted from raw samples during
+assignment, before this filter existed. 17 outliers (KRDU 15, KSTL 2) land inside an
+event's source range; the audit lists them and `--reclassify-existing` is what re-derives
+them.
+
 ### 2026-08-12 — Fail-closed pipeline cleaner
 
 - `clean_pipeline_data.py` now requires an explicit airport scope and constructs its
