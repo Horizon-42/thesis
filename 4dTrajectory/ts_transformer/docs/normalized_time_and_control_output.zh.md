@@ -1,5 +1,13 @@
 # 归一化时间轨迹与可切换控制输出设计
 
+> **已被取代（历史记录，不再更新）**：control 输出部分描述的是 2026-07-20
+> 前后的最初设计（单一 factorized duration、单一 rollout 后端、
+> `kinematic_consistency`/`terminal_loss` 联合目标）。当前代码已演化出
+> `control_recipe_name`（`custom`/`simple-v1`）机制与完整的消融矩阵，见
+> [`docs/control_parameter_prediction.zh.md`](control_parameter_prediction.zh.md)。
+> 本文第 1-5、9 节（归一化时间 / state 输出）仍然准确；第 6-10 节（control
+> 输出）请以新文档为准。
+
 ## 1. 当前实现结论
 
 `ts_transformer` 现在保留三种可以独立切换的预测时域：

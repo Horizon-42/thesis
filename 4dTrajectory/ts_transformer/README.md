@@ -62,9 +62,16 @@ kept where they are labelled as such, because two design decisions were made on 
 data and the real run either confirmed or corrected them.
 
 **Scope:** `prediction_output=state` remains the purely kinematic, single-aircraft baseline
-used by the recorded experiments below. `prediction_output=control` is a separate,
-checkpointed architecture; it adds per-flight aircraft conditioning and a differentiable
-dynamics rollout. See [the output architecture](#state-baseline-and-dynamics-constrained-control-output).
+used by the recorded experiments below. `prediction_output=control` (and the separate
+`control-mixture` strategy) is a checkpointed architecture that adds per-flight aircraft
+conditioning and a differentiable dynamics rollout. See
+[the output architecture](#state-baseline-and-dynamics-constrained-control-output).
+`control_recipe_name` selects between `custom` (every historical control ablation axis,
+still supported and validated) and `simple-v1` (a frozen, minimal recipe — construction
+rejects any field that drifts from it). The full ablation matrix, call graph, oracle-teacher
+warm-start pipeline, and a module-by-module live/ablation-only/orphan census live in
+[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md); this
+README states only what a reader needs to run and interpret it.
 
 ## Glossary
 
@@ -94,17 +101,25 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | `config.py` | `TSConfig` — the one namespace both vendored models read, serialised into every checkpoint |
 | `channels.py` | the feature contract: geodetic states ⇄ threshold-anchored ENU channels |
 | `dataset.py` | track loading, input resampling, mode-dispatched targets, by-flight split, normalisation |
-| `models.py` | model construction over the two vendored encoders and selected state/control head |
+| `models.py` | model construction over the two vendored encoders and selected state/control/control-mixture head |
 | `prediction_outputs.py` | typed state/control outputs, final-time head, bounded controls and duration partition |
 | `train.py` | state loss or differentiable control-rollout loss, early stopping, checkpoints |
 | `forecast.py` | independent normalized, one-pass full, and recursive-window inference strategies |
 | `metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
 | `export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
 | `flyability.py` | closed-form control inversion — what a predicted path would have required, vs the envelope |
+| `time_grids.py` | shared output-time grids for training, metrics and inference |
+| `batching.py` | resolves an efficient batch size against the actual model and CUDA device |
+| `reference_velocity.py` | reference chart-velocity construction, isolated from trajectory loading |
+| `coordinate_frames.py` | threshold-centred horizontal coordinate-frame implementations (ENU / runway-aligned) |
+| `anchor_eligibility.py` / `lateral_eligibility.py` | train-anchor policy and the evaluation-owned lateral-pass roster consumed by data loading |
+| `cross_validation.py` / `development_cohorts.py` / `experiment_index.py` | leak-free hyperparameter search, explicit dev rosters, and the run manifest index |
+| `fixed_anchor_validation.py` / `evaluation_protocol.py` | deterministic fixed-anchor metrics and the one-way outer-test release gate |
 | `approach_clustering/` | train-only approach geometry clustering and shared-cohort comparison CLI |
 | `batch_benchmark.py` | outer-train-only CUDA throughput benchmark used by `benchmark-batch` |
 | `synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
+| `control_*.py`, `oracle_teacher/` (~25 modules) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, terminal clocks, teacher warm-start) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |
 
 ## Running it
 
@@ -366,6 +381,14 @@ test prediction, the decision file is marked `outer_test_evaluation_started`; th
 then refuses to evaluate test again from the same experiment directory, including after a
 partially failed test stage.
 
+The four `run_ts_*.py` scripts above (repo root, alongside this package) are the general
+ones. There are 13 more — kinematic-loss/overfit diagnostics for the state path, and a family
+of control/oracle-teacher production and diagnostic drivers
+(`run_ts_oracle_teacher_optimize.py`, `run_ts_control_capacity_ceiling.py`,
+`run_ts_control_mixture_report.py`, …) — indexed with dates and one-line purposes in
+[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) (§7)
+rather than duplicated here.
+
 ## Data selection & flight identity
 
 The top-level pipeline first joins `arrivals/manifest.json` to the observed
@@ -625,7 +648,29 @@ Both initialize to uniform segments with total time `softplus(0) * final_time_sc
 Serialized control checkpoints must carry `control_duration_parameterization`; checkpoints
 that omit it are rejected and must be regenerated. Direct duration is a
 head-parameterization ablation, not a different public prediction output; both publish
-`predictionOutput=control`.
+`predictionOutput=control`. A third duration strategy, `uniform`, removes the duration head
+entirely (`final_time_s / N`, no learned partition) — it is what
+`control_recipe_name=simple-v1` uses.
+
+**`control_recipe_name`** (`custom` default / `simple-v1`) is the top-level switch over this
+whole design space. `custom` preserves every axis above plus several more not summarised in
+this README (tracking objective, loss grid, terminal-supervision clock, dynamics-rollout
+backend, horizon curriculum, gradient-clip policy — five registries, each a
+`config.<field> → implementation` dict, not scattered branching). `simple-v1` freezes one
+concrete point in that space (uniform duration, absolute controls, the
+`scaled-transport-chart-velocity` dynamics backend, a minimal "true-time-position" tracking
+objective, every auxiliary loss weight zeroed); `TSConfig.__post_init__` raises if any of its
+fields drift from the frozen values. A third prediction output, `control-mixture`
+(`prediction_output=control-mixture`), trains `K` independent control experts plus a
+history-only deployable selector on a best-of-K hindsight objective — a first attempt at the
+"deterministic point prediction" limitation in
+[Deliberate scope](#deliberate-scope--not-bugs-do-not-fix-without-deciding-to). All of this —
+the objective/backend/duration/clock registries, the exact call graph, the oracle-teacher
+warm-start pipeline behind `--control-teacher-schedules` (including how
+`teacher_schedules.npz` is actually produced — a root-level script, not a package
+subcommand), and which of the ~25 `control_*.py`/`oracle_teacher/` modules are live on the
+default path vs. ablation-only vs. genuinely unwired — is in
+[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
 
 Control mode currently requires `--horizon-mode normalized`. It needs no inverse-control
 labels. Uniform truth nodes are interpolated onto `cumsum(segment_durations)` before the
@@ -666,7 +711,13 @@ The repository now contains routes 1 and 4; routes 2 and 3 remain distinct alter
 4. **Predict controls and integrate them** — ✅ **DONE as an opt-in output strategy**. The
    differentiable Torch rollout is numerically contract-tested against CasADi for normal and
    stalled steps, non-uniform multi-segment endpoints, and gradients through controls and
-   durations.
+   durations. An optional warm-start layer sits on top: `--control-teacher-schedules` imitates
+   a cached per-flight control schedule (produced offline by direct-shooting gradient descent
+   through this same Torch dynamics, no casadi — `run_ts_oracle_teacher_optimize.py`) for
+   `--control-teacher-steps` Adam steps before ordinary rollout-loss training begins. Details,
+   including why it needs no second (casadi) environment despite optimizing a per-flight
+   trajectory, are in
+   [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
 
 ## Historical results on real KRDU data (pre-normalized-time architecture)
 
@@ -1002,6 +1053,9 @@ point that later work may choose to extend, but none is an accident:
   toward generative/probabilistic terminal models (CVAE, diffusion) precisely because runway
   configuration and vectoring make the future genuinely multimodal; these two models cannot
   represent that, and a point prediction is the honest baseline against which they are measured.
+  `prediction_output=control-mixture` (K independent control experts + a deployable selector,
+  best-of-K training) is a first, still-evaluated attempt at this specifically for the control
+  output — see [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
 
 ## Known gaps — actual unfinished work
 
@@ -1022,3 +1076,13 @@ point that later work may choose to extend, but none is an accident:
   flyability check first shipped doing exactly that and graded ~44% of flights against an
   A320's `Cl_max` and max thrust. What is still missing is coverage checking: how often the
   fallback is actually hit is not reported per batch.
+- **`prediction_output=control`, including the frozen `control_recipe_name=simple-v1`, has
+  no published accuracy results.** A month of dated experiments (2026-07-27 → 2026-08-16)
+  converged the recipe design and rejected several alternatives (direct/uniform duration
+  heads, trim-residual controls, an unscaled transport-chart dynamics backend, four earlier
+  tracking objectives, a K-expert mixture head — now paused), but no run has gone through a
+  full train → predict → `evaluate` cycle and published an ADE/FDE/gate-pass table the way
+  the state-output results above are published. `run_ts_simple_teacher_paired_cv.py` is the
+  in-flight experiment meant to produce that table. See
+  [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) for
+  the full design history and current module-by-module status.
