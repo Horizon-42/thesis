@@ -39,6 +39,8 @@ def assessment_for_runway(
         benchmark=selected,  # type: ignore[arg-type]
         airport=runway.airport,
         runway=runway.ident,
+        threshold_lat=runway.lat,
+        threshold_lon=runway.lon,
         runway_course_deg=runway.course_deg,
         runway_width_m=runway.width_m,
         runway_source=runway.width_source,
@@ -50,7 +52,7 @@ def assessment_for_runway(
         threshold_elevation_hae_m=runway.elevation_hae_m,
         threshold_elevation_msl_m=runway.elevation_msl_m,
         threshold_crossing_height_m=runway.threshold_crossing_height_m,
-        lpv_lateral_fsd_m=(
+        lpv_course_width_m=(
             runway.lpv_course_width_m if selected == "lpv" else None
         ),
         baro_vnav_approved=(baro_vnav_approved if selected != "lpv" else False),
@@ -69,16 +71,13 @@ def resolve_context(
     record: TrajectoryRecord,
     contexts: Mapping[ContextKey, AssessmentContext],
 ) -> AssessmentContext:
-    airport = record.source.get("arr_airport") or record.source.get("airport")
     runway = record.source.get("runway")
-    if not isinstance(airport, str) or not isinstance(runway, str):
+    if not isinstance(runway, str):
         raise ValueError(
-            f"record {record.path or record.source.get('id')!r} requires "
-            "source.arr_airport and source.runway"
+            f"record {record.path or record.source.get('id')!r} requires source.runway"
         )
-    key = (airport.upper(), runway)
+    key = (record.airport, runway)
     try:
-        context = contexts[key]
+        return contexts[key]
     except KeyError as exc:
         raise ValueError(f"no assessment context for {key[0]} runway {key[1]}") from exc
-    return context

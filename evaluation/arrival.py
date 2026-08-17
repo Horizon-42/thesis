@@ -4,30 +4,37 @@ Computed and predicted records use their terminal state.  Observed records
 consume the policy-free ``observed_threshold_event`` produced by runway
 assignment.  This module never selects ADS-B samples and never calls the final
 approach fitter.
+
+Every function here takes a SOLVED record (non-empty ``states``, hence a
+``target_state``): ``evaluation.records`` enforces that pairing at the file
+boundary and ``evaluate_record`` filters the unsolved ones out before calling in,
+so the shape is a precondition rather than something re-checked per record. The
+event payload's own schema is validated once, by the seam both packages share
+(``final_approach.event_contract.validate_event``); what stays here is only the
+two bindings evaluation alone can make -- the event's runway and physical frame
+against the assessment context, and the record's datum offset and target altitude
+against the authoritative runway data.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
 
-from final_approach.event_contract import (
-    CENSORED_EVENT_METHOD,
-    DIRECT_EVENT_METHOD,
-    ESTIMATED_OBSERVABILITY_BY_METHOD,
-    EVENT_SCHEMA_VERSION,
-    NO_EVENT_METHOD,
-    UNAVAILABLE_OBSERVABILITIES,
-)
+from final_approach.event_contract import validate_event
 from final_approach.frame import RunwayFrame, TrackPoint
+from geokit import haversine_m
 
 from evaluation.records import TrajectoryRecord
 from evaluation.thresholds import AssessmentContext
 
-Subject = Literal["optimized", "predicted", "observed"]
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
+
+# ``source.target_source`` value meaning "this scenario aimed at the published landing
+# threshold". The other modes (``fitted_adsb_crossing``, ``track_end``) aim elsewhere
+# by design, so only this one can be cross-checked against the runway data.
+THRESHOLD_TARGET_SOURCE = "runway_threshold"
 
 
 @dataclass(frozen=True)
@@ -52,36 +59,54 @@ class ArrivalOutcome:
     reason: str | None = None
 
 
-def subject_of(record: TrajectoryRecord) -> Subject:
-    subject = record.source.get("subject")
-    if subject not in ("optimized", "predicted", "observed"):
-        raise ValueError(
-            "source.subject must be 'optimized', 'predicted', or 'observed'; "
-            f"got {subject!r}"
-        )
-    return subject
-
-
 def arrival_deviation(
     record: TrajectoryRecord,
     *,
     context: AssessmentContext,
 ) -> ArrivalOutcome:
-    if subject_of(record) == "observed":
+    # ``record_from_dict`` already rejected any subject outside ``SUBJECTS``.
+    if record.source["subject"] == "observed":
         return _observed_arrival(record, context)
     return _computed_arrival(record, context)
 
 
-def _authoritative_target_altitude(
+def _require_target_agrees_with_runway_data(
     record: TrajectoryRecord,
     context: AssessmentContext,
-) -> float | None:
-    if record.target_state is None:
-        raise ValueError("solved trajectory requires target_state")
+) -> None:
+    """A record aiming at the published threshold must agree on where it is.
+
+    ``target_source`` names what the scenario aimed at, and only ``runway_threshold``
+    claims the published point: the fitted-ADS-B and track-end target modes aim
+    somewhere else on purpose and have nothing to cross-check. A record that declares
+    no source is held to the strict reading -- an unlabelled target gets MORE
+    checking, never a bypass.
+
+    Both coordinates are checked, and until now only one was. The altitude had to sit
+    on the published LTP+TCH plane while the POSITION was taken from the artifact
+    unexamined -- which is precisely the shape of the displaced-threshold bug: a
+    target 775 m from the published landing threshold yields clean near-zero
+    deviations and shows no symptom anywhere downstream.
+    """
+    # ``or``, not ``get(key, default)``: a key PRESENT with a null value returns None
+    # from the latter, which would take the early return -- bypassing the check for
+    # exactly the record that declared nothing, the opposite of what is promised above.
+    if (record.source.get("target_source") or THRESHOLD_TARGET_SOURCE) != THRESHOLD_TARGET_SOURCE:
+        return
+    target = record.target_state
+    offset_m = haversine_m(
+        target["lat"], target["lon"], context.threshold_lat, context.threshold_lon
+    )
+    if offset_m > TARGET_CONTEXT_TOLERANCE_M:
+        raise ValueError(
+            f"target_state lies {offset_m:.3f} m from the authoritative "
+            f"{context.airport} {context.runway} landing threshold; the record was "
+            "built against different runway data"
+        )
     desired = context.desired_threshold_altitude_msl_m
     if desired is None:
-        return None
-    supplied = float(record.target_state["alt"])
+        return
+    supplied = float(target["alt"])
     if not math.isclose(
         supplied,
         desired,
@@ -92,7 +117,6 @@ def _authoritative_target_altitude(
             f"target_state.alt {supplied:.6f} m disagrees with authoritative "
             f"LTP elevation + published TCH {desired:.6f} m"
         )
-    return desired
 
 
 def _computed_arrival(
@@ -102,12 +126,16 @@ def _computed_arrival(
     plane_tolerance_m: float = TERMINAL_PLANE_TOLERANCE_M,
 ) -> ArrivalOutcome:
     """Use the final state, or interpolate only the final bracketing segment."""
-    if not record.states or record.target_state is None:
-        raise ValueError("computed arrival requires a solved record and target_state")
     target = record.target_state
-    desired_altitude_msl_m = _authoritative_target_altitude(record, context)
+    _require_target_agrees_with_runway_data(record, context)
+    desired_altitude_msl_m = context.desired_threshold_altitude_msl_m
+    # Measured in the AUTHORITATIVE runway frame, not in one the artifact chose. A
+    # record whose target is the fitted crossing of its own flight would otherwise be
+    # graded against itself and score a near-zero deviation by construction.
     frame = RunwayFrame(
-        ident=context.runway, lat=target["lat"], lon=target["lon"],
+        ident=context.runway,
+        lat=context.threshold_lat,
+        lon=context.threshold_lon,
         elevation_m=(
             desired_altitude_msl_m
             if desired_altitude_msl_m is not None
@@ -188,128 +216,76 @@ def _state_deviation(
     )
 
 
-def _event_number(event: dict, key: str, *, nonnegative: bool = False) -> float:
-    value = event.get(key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"source.observed_threshold_event.{key} must be numeric")
-    number = float(value)
-    if not math.isfinite(number):
-        raise ValueError(f"source.observed_threshold_event.{key} must be finite")
-    if nonnegative and number < 0.0:
-        raise ValueError(f"source.observed_threshold_event.{key} must be non-negative")
-    return number
-
-
 def _observed_arrival(
     record: TrajectoryRecord,
     context: AssessmentContext,
 ) -> ArrivalOutcome:
+    """Read the producer's serialized crossing; never reselect or refit samples.
+
+    A record with no event is a legitimate input, not a broken one: optimizer and
+    ts_transformer reference tracks share the ``observed`` subject without ever
+    passing through runway assignment. They report ``unavailable`` and grade
+    indeterminate, which is what "we never measured a crossing for this" means.
+    """
     event = record.source.get("observed_threshold_event")
-    if not isinstance(event, dict):
+    if event is None:
         return ArrivalOutcome(None, "unavailable", "observed threshold event missing")
-    if event.get("schema_version") != EVENT_SCHEMA_VERSION:
-        raise ValueError(
-            f"observed threshold event must use {EVENT_SCHEMA_VERSION}; "
-            "run --reclassify-existing"
-        )
+    # Identity first, payload second -- same order as the producer's own check, so a
+    # stale artifact is reported as stale rather than as a field complaint.
     if event.get("runway") != context.runway:
         raise ValueError(
             "source.observed_threshold_event.runway disagrees with assessment context"
         )
-    frame_fingerprint = context.threshold_frame_fingerprint
-    if frame_fingerprint is not None and (
-        event.get("threshold_frame_fingerprint") != frame_fingerprint
+    if context.threshold_frame_fingerprint is not None and (
+        event.get("threshold_frame_fingerprint") != context.threshold_frame_fingerprint
     ):
         raise ValueError(
             "source.observed_threshold_event physical frame disagrees with "
             "assessment context; run --reclassify-existing"
         )
-    status = event.get("status")
-    if status == "unavailable":
-        if (
-            event.get("method") != NO_EVENT_METHOD
-            or event.get("observability") not in UNAVAILABLE_OBSERVABILITIES
-        ):
-            raise ValueError("unavailable observed threshold event has invalid discriminators")
-        reason = event.get("unavailable_reason")
-        return ArrivalOutcome(
-            None,
-            str(event["observability"]),
-            str(reason or "observed threshold event unavailable"),
-        )
-    if status != "estimated":
-        raise ValueError(f"observed threshold event has invalid status {status!r}")
-    method = event.get("method")
-    observability = event.get("observability")
-    expected_observability = ESTIMATED_OBSERVABILITY_BY_METHOD.get(method)
-    if expected_observability is None or observability != expected_observability:
-        raise ValueError(
-            "unsupported observed threshold-event method/observability "
-            f"{method!r}/{observability!r}"
-        )
-    source_range = event.get("source_sample_range")
-    if (
-        not isinstance(source_range, list)
-        or len(source_range) != 2
-        or not all(
-            isinstance(value, int) and not isinstance(value, bool)
-            for value in source_range
-        )
-        or source_range[0] < 0
-        or source_range[1] < source_range[0]
-    ):
-        raise ValueError("observed threshold event has invalid source_sample_range")
-    if event.get("altitude_datum") != "hae":
-        raise ValueError("observed threshold event altitude_datum must be 'hae'")
-    if record.target_state is None or not record.states:
-        raise ValueError("observed threshold event requires a solved record and target_state")
+    if validate_event(event) == "unavailable":
+        return ArrivalOutcome(None, event["observability"], event["unavailable_reason"])
 
     target, final = record.target_state, record.states[-1]
-    desired_altitude_msl_m = _authoritative_target_altitude(record, context)
+    _require_target_agrees_with_runway_data(record, context)
+    desired_altitude_msl_m = context.desired_threshold_altitude_msl_m
     vertical_m = None
     if desired_altitude_msl_m is not None:
-        geoid = record.source.get("hae_minus_msl_m")
-        if isinstance(geoid, bool) or not isinstance(geoid, (int, float)) \
-                or not math.isfinite(float(geoid)):
-            raise ValueError("observed record requires finite source.hae_minus_msl_m")
-        authoritative_geoid = context.hae_minus_msl_m
-        if authoritative_geoid is None:
-            raise ValueError("assessment context requires authoritative HAE and MSL elevations")
-        if not math.isclose(
-            float(geoid),
-            authoritative_geoid,
-            rel_tol=0.0,
-            abs_tol=TARGET_CONTEXT_TOLERANCE_M,
-        ):
-            raise ValueError(
-                f"source.hae_minus_msl_m {float(geoid):.6f} m disagrees with authoritative "
-                f"threshold datum offset {authoritative_geoid:.6f} m"
-            )
-        crossing_alt_msl = (
-            _event_number(event, "threshold_crossing_altitude_m") - authoritative_geoid
-        )
+        # The event is HAE as broadcast; the desired crossing is MSL. Both the record
+        # and the context carry the undulation, and disagreement between them is a
+        # ~33 m error with no other symptom -- so they are cross-checked, not merged.
+        geoid = _authoritative_datum_offset(record, context)
+        crossing_alt_msl = event["threshold_crossing_altitude_m"] - geoid
         vertical_m = crossing_alt_msl - desired_altitude_msl_m
-    if event.get("uncertainty") != {"status": "uncalibrated"}:
-        raise ValueError(
-            "source.observed_threshold_event uncertainty must be explicitly uncalibrated"
-        )
-    extrapolation_m = _event_number(
-        event, "extrapolation_distance_m", nonnegative=True
-    )
-    if method == DIRECT_EVENT_METHOD and extrapolation_m != 0.0:
-        raise ValueError("direct observed threshold event cannot be extrapolated")
-    if method == CENSORED_EVENT_METHOD and extrapolation_m <= 0.0:
-        raise ValueError("censored observed threshold event requires positive extrapolation")
     return ArrivalOutcome(
         ArrivalDeviation(
             # The event is evaluated at the threshold plane by construction.
             along_track_m=0.0,
-            cross_track_m=_event_number(event, "signed_cross_track_m"),
+            cross_track_m=event["signed_cross_track_m"],
             vertical_m=vertical_m,
             speed_ms=final["V"] - target["V"],
             heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
             flight_time_s=final["t"],
-            extrapolation_m=extrapolation_m,
+            extrapolation_m=event["extrapolation_distance_m"],
         ),
         "estimated",
     )
+
+
+def _authoritative_datum_offset(
+    record: TrajectoryRecord,
+    context: AssessmentContext,
+) -> float:
+    """The HAE-MSL undulation, agreed between the record and the runway data."""
+    supplied = record.source["hae_minus_msl_m"]
+    authoritative = context.hae_minus_msl_m
+    if authoritative is None:
+        raise ValueError("assessment context requires authoritative HAE and MSL elevations")
+    if not math.isclose(
+        float(supplied), authoritative, rel_tol=0.0, abs_tol=TARGET_CONTEXT_TOLERANCE_M
+    ):
+        raise ValueError(
+            f"source.hae_minus_msl_m {float(supplied):.6f} m disagrees with authoritative "
+            f"threshold datum offset {authoritative:.6f} m"
+        )
+    return authoritative

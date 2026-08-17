@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import asdict, dataclass
+from statistics import fmean
 from typing import Any, Iterable, Mapping
 
 from evaluation.arrival import (
@@ -11,7 +11,6 @@ from evaluation.arrival import (
     TERMINAL_PLANE_TOLERANCE_M,
     ArrivalDeviation,
     arrival_deviation,
-    subject_of,
 )
 from evaluation.context import ContextKey, resolve_context
 from evaluation.records import TrajectoryRecord
@@ -23,14 +22,106 @@ from evaluation.reference import (
     load_reference,
     reference_span,
 )
-from evaluation.stats import magnitude_spread, mean, signed_spread
+from evaluation.stats import magnitude_spread, signed_spread
 from evaluation.thresholds import (
+    LATERAL_CRITERION_ID,
     RNAV_TERMINAL_VERTICAL_BOUND_M,
     RNAV_TERMINAL_VERTICAL_STANDARD_ID,
     AssessmentContext,
     ComponentResult,
     Verdict,
 )
+
+REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v5"
+
+# The denominator every observed availability block is counted against. Evaluation
+# checks the LABEL, not the counts: the block is producer-owned audit output (the
+# harvest computed it from the unfiltered track roster, which evaluation never sees),
+# and a report that renamed the population would be claiming a different measurement.
+OBSERVED_AVAILABILITY_DENOMINATOR = "arrival_candidates_excluding_not_landing"
+
+# What this report claims and how it was produced -- static prose, serialized with
+# every batch so a report can be read years later without this source. It lives at
+# module level because none of it varies per batch; the constants interpolated into
+# it are the same ones the verdicts use.
+METHODOLOGY: dict[str, Any] = {
+    "event": {
+        "computed_predicted": "terminal_state_at_threshold_plane",
+        "observed": (
+            "serialized_runway_threshold_event_v1: direct 3D interpolation "
+            "inside observed support, otherwise the single winning "
+            "assignment fit for a right-censored pass; no evaluation refit"
+        ),
+        "terminal_plane_tolerance_m": TERMINAL_PLANE_TOLERANCE_M,
+    },
+    "uncertainty": {
+        "verdict_rule": "point_estimate_against_inclusive_component_bounds",
+        "observed_status": "uncalibrated",
+        "unmodelled_sources": [
+            "ADS-B geometric-altitude update alignment and measurement error",
+            "runway/FAS survey uncertainty",
+            "geoid/datum uncertainty", "model-form and extrapolation uncertainty",
+        ],
+    },
+    "observed_source_integrity": {
+        "required_track_schema": "harvest-tracks-v2-source-timing",
+        "position_time_basis": "lastposupdate",
+        "freshness": (
+            "state_time-lastcontact <= 15 s and "
+            "state_time-lastposupdate <= 15 s"
+        ),
+        "held_state_policy": (
+            "one state snapshot nearest each lastposupdate; asynchronous "
+            "geoaltitude changes are audited"
+        ),
+        "coverage_gap_policy": (
+            "do not bridge position-update gaps greater than 15 s"
+        ),
+    },
+    "terminal_lateral": {
+        "criterion": LATERAL_CRITERION_ID,
+        "bound_m": "runway_width_m / 2, per runway",
+        "reference": "authoritative published LANDING threshold (displaced where published)",
+        "claim_boundary": (
+            "landing geometry -- whether the crossing lay over the pavement. This is "
+            "NOT a navigation-containment result: the LPV course width at threshold "
+            "(106.75 m) and the RNP APCH LNAV 0.15 NM cross-track allowance (277.8 m) "
+            "are 2.3x-18x wider than the runway at every threshold in this fleet, so "
+            "they are reported as procedure provenance and never used as the bound"
+        ),
+    },
+    "terminal_vertical": {
+        "reference": "LTP elevation MSL + published FAS TCH",
+        "trajectory_altitude_datum": "msl",
+        "target_context_tolerance_m": TARGET_CONTEXT_TOLERANCE_M,
+        "common_rnav_terminal_acceptance": {
+            "standard_id": RNAV_TERMINAL_VERTICAL_STANDARD_ID,
+            "lower_m": -RNAV_TERMINAL_VERTICAL_BOUND_M,
+            "upper_m": RNAV_TERMINAL_VERTICAL_BOUND_M,
+            "source": {
+                "document": "ICAO Doc 9613, Fifth Edition (2023)",
+                "location": (
+                    "Volume II, Part C, Chapter 5, Section A, "
+                    "§5.3.4.4.7"
+                ),
+                "use": (
+                    "RNP APCH Baro-VNAV final-approach vertical-deviation "
+                    "limit used as the common RNAV/LPV terminal acceptance bound"
+                ),
+            },
+            "claim_boundary": (
+                "terminal final-approach geometry; not touchdown or "
+                "landing certification"
+            ),
+        },
+    },
+    "reference_comparison": {
+        "endpoint_tolerance_m": ENDPOINT_TOLERANCE_M,
+        "mismatched_span_policy": "skip_path_and_time_metrics",
+        "resampling": "common-endpoint horizontal arc fraction",
+    },
+}
+
 
 @dataclass(frozen=True)
 class TrajectoryEvaluation:
@@ -49,9 +140,7 @@ class TrajectoryEvaluation:
     benchmark: str
     airport: str
     runway: str
-    lateral_bound_m: float | None
-    guidance_lateral_bound_m: float | None
-    runway_lateral_bound_m: float
+    lateral_bound_m: float
     vertical_lower_bound_m: float | None
     vertical_upper_bound_m: float | None
     flight_key: str | None = None
@@ -75,25 +164,6 @@ def _composite(lateral: ComponentResult, vertical: ComponentResult) -> Verdict:
     return "indeterminate"
 
 
-def _validate_deviation(value: ArrivalDeviation) -> None:
-    required = {
-        "along_track_m": value.along_track_m,
-        "cross_track_m": value.cross_track_m,
-        "speed_ms": value.speed_ms,
-        "heading_rad": value.heading_rad,
-        "flight_time_s": value.flight_time_s,
-    }
-    optional = {
-        "vertical_m": value.vertical_m,
-        "extrapolation_m": value.extrapolation_m,
-    }
-    for name, number in {**required, **optional}.items():
-        if number is not None and not math.isfinite(float(number)):
-            raise ValueError(f"derived deviation {name} must be finite, got {number!r}")
-    if value.extrapolation_m is not None and value.extrapolation_m < 0.0:
-        raise ValueError("derived deviation extrapolation_m must be non-negative")
-
-
 def evaluate_record(
     record: TrajectoryRecord,
     *,
@@ -105,7 +175,7 @@ def evaluate_record(
         or (record.path.stem if record.path is not None else "trajectory")
     )
     file = record.path.name if record.path is not None else None
-    subject = subject_of(record)
+    subject = record.source["subject"]
     limits = context.limits()
     common = dict(
         record_id=record_id,
@@ -114,9 +184,7 @@ def evaluate_record(
         benchmark=context.benchmark,
         airport=context.airport,
         runway=context.runway,
-        lateral_bound_m=limits.effective_lateral_m,
-        guidance_lateral_bound_m=limits.guidance_lateral_m,
-        runway_lateral_bound_m=limits.runway_lateral_m,
+        lateral_bound_m=limits.lateral_m,
         vertical_lower_bound_m=limits.vertical_lower_m,
         vertical_upper_bound_m=limits.vertical_upper_m,
         flight_key=record.source.get("flight_key"),
@@ -141,12 +209,8 @@ def evaluate_record(
             reason=outcome.reason,
         )
     deviation = outcome.deviation
-    _validate_deviation(deviation)
-
     lateral_result = _component(
-        deviation.cross_track_m,
-        None if limits.effective_lateral_m is None else -limits.effective_lateral_m,
-        limits.effective_lateral_m,
+        deviation.cross_track_m, -limits.lateral_m, limits.lateral_m
     )
     vertical_result = _component(
         deviation.vertical_m,
@@ -159,17 +223,14 @@ def evaluate_record(
         violations.append("lateral")
     if vertical_result == "fail":
         violations.append("vertical")
-    reason = None
-    if verdict == "indeterminate":
-        reasons: list[str] = []
-        if lateral_result == "indeterminate":
-            reasons.append("lateral bound or estimate unavailable")
-        if vertical_result == "indeterminate":
-            reasons.append(
-                limits.vertical_reason
-                or "vertical bound or estimate unavailable"
-            )
-        reason = "; ".join(reasons) or None
+    # Lateral is always decidable once a crossing was measured -- a runway always has
+    # a width -- so the only route to an indeterminate composite is a missing vertical
+    # reference, and ``vertical_reason`` already says which one.
+    reason = (
+        (limits.vertical_reason or "vertical bound or estimate unavailable")
+        if verdict == "indeterminate"
+        else None
+    )
     return TrajectoryEvaluation(
         **common, solved=True, success=verdict == "pass", verdict=verdict,
         lateral_result=lateral_result, vertical_result=vertical_result,
@@ -215,8 +276,11 @@ def evaluate_batch(
                 "start_gap_m": span.start_gap_m,
                 "end_gap_m": span.end_gap_m,
             }
+            # ``comparable`` already implies both paths are non-empty; what it does
+            # not imply is that either MOVED, and an arc-length resample of a
+            # stationary path has nothing to parametrize by.
             if (
-                record.solved and span.comparable
+                span.comparable
                 and horizontal_arc_length_m(record.states) > 0.0
                 and horizontal_arc_length_m(reference.states) > 0.0
             ):
@@ -241,88 +305,25 @@ def evaluate_batch(
         for key in ("pass", "fail", "indeterminate")
     }
     subjects = {item.subject for item in evaluations}
-    observed_block = None
-    if observed_availability is not None:
-        if subjects != {"observed"}:
-            raise ValueError(
-                "observed_availability can be attached only to an observed-only batch"
-            )
-        observed_block = _validated_observed_availability(observed_availability)
+    if observed_availability is not None and subjects != {"observed"}:
+        raise ValueError(
+            "observed_availability can be attached only to an observed-only batch"
+        )
     total = len(evaluations)
     times = [item.deviation.flight_time_s for item in measured]
     return {
-        "schema_version": "terminal-approach-evaluation-v4",
-        "methodology": {
-            "event": {
-                "computed_predicted": "terminal_state_at_threshold_plane",
-                "observed": (
-                    "serialized_runway_threshold_event_v1: direct 3D interpolation "
-                    "inside observed support, otherwise the single winning "
-                    "assignment fit for a right-censored pass; no evaluation refit"
-                ),
-                "terminal_plane_tolerance_m": TERMINAL_PLANE_TOLERANCE_M,
-            },
-            "uncertainty": {
-                "verdict_rule": "point_estimate_against_inclusive_component_bounds",
-                "observed_status": "uncalibrated",
-                "unmodelled_sources": [
-                    "ADS-B geometric-altitude update alignment and measurement error",
-                    "runway/FAS survey uncertainty",
-                    "geoid/datum uncertainty", "model-form and extrapolation uncertainty",
-                ],
-            },
-            "observed_source_integrity": {
-                "required_track_schema": "harvest-tracks-v2-source-timing",
-                "position_time_basis": "lastposupdate",
-                "freshness": (
-                    "state_time-lastcontact <= 15 s and "
-                    "state_time-lastposupdate <= 15 s"
-                ),
-                "held_state_policy": (
-                    "one state snapshot nearest each lastposupdate; asynchronous "
-                    "geoaltitude changes are audited"
-                ),
-                "coverage_gap_policy": (
-                    "do not bridge position-update gaps greater than 15 s"
-                ),
-            },
-            "terminal_vertical": {
-                "reference": "LTP elevation MSL + published FAS TCH",
-                "trajectory_altitude_datum": "msl",
-                "target_context_tolerance_m": TARGET_CONTEXT_TOLERANCE_M,
-                "common_rnav_terminal_acceptance": {
-                    "standard_id": RNAV_TERMINAL_VERTICAL_STANDARD_ID,
-                    "lower_m": -RNAV_TERMINAL_VERTICAL_BOUND_M,
-                    "upper_m": RNAV_TERMINAL_VERTICAL_BOUND_M,
-                    "source": {
-                        "document": "ICAO Doc 9613, Fifth Edition (2023)",
-                        "location": (
-                            "Volume II, Part C, Chapter 5, Section A, "
-                            "§5.3.4.4.7"
-                        ),
-                        "use": (
-                            "RNP APCH Baro-VNAV final-approach vertical-deviation "
-                            "limit used as the common RNAV/LPV terminal acceptance bound"
-                        ),
-                    },
-                    "claim_boundary": (
-                        "terminal final-approach geometry; not touchdown or "
-                        "landing certification"
-                    ),
-                },
-            },
-            "reference_comparison": {
-                "endpoint_tolerance_m": ENDPOINT_TOLERANCE_M,
-                "mismatched_span_policy": "skip_path_and_time_metrics",
-                "resampling": "common-endpoint horizontal arc fraction",
-            },
-        },
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "methodology": METHODOLOGY,
         "assessment_contexts": [
             {**context.to_dict(), "resolved_limits": context.limits().to_dict()}
             for _key, context in sorted(used.items())
         ],
         "subject": sorted(subjects)[0] if len(subjects) == 1 else "mixed",
-        **({"observed": observed_block} if observed_block is not None else {}),
+        **(
+            {"observed": _observed_availability(observed_availability)}
+            if observed_availability is not None
+            else {}
+        ),
         "total": total,
         "measured": len(measured),
         "solved": len(solved),
@@ -339,61 +340,29 @@ def evaluate_batch(
             if item.deviation.vertical_m is not None
         ]),
         "final_time_s": (
-            {"mean": mean(times), "min": min(times), "max": max(times)} if times else None
+            {"mean": fmean(times), "min": min(times), "max": max(times)} if times else None
         ),
         "reference": _reference_aggregate(comparisons),
         "trajectories": rows,
     }
 
 
-def _validated_observed_availability(value: Mapping[str, Any]) -> dict[str, Any]:
-    expected = "arrival_candidates_excluding_not_landing"
-    if value.get("denominator") != expected:
-        raise ValueError(f"observed availability denominator must be {expected!r}")
+def _observed_availability(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Carry the harvest's event-availability block into the report.
 
-    def count(name: str) -> int:
-        item = value.get(name)
-        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
-            raise ValueError(f"observed availability {name} must be a non-negative integer")
-        return item
-
-    denominator = count("event_denominator")
-    estimated = count("event_estimated")
-    unavailable = count("event_unavailable")
-    excluded = count("excluded_not_landing")
-    integrity_excluded = value.get("source_integrity_excluded_candidates", 0)
-    if (
-        isinstance(integrity_excluded, bool)
-        or not isinstance(integrity_excluded, int)
-        or integrity_excluded < 0
-    ):
+    Copied verbatim, like ``observed_threshold_event``: the counts are measured
+    upstream from the unfiltered track roster (``harvest.observed
+    .source_event_availability``, which validates that roster and derives them),
+    and re-deriving them here from data evaluation cannot see would only be able to
+    restate them. What IS checked is the denominator label, because that names the
+    population the rate refers to and the report repeats the claim.
+    """
+    if value.get("denominator") != OBSERVED_AVAILABILITY_DENOMINATOR:
         raise ValueError(
-            "observed availability source_integrity_excluded_candidates must be "
-            "a non-negative integer"
+            "observed availability denominator must be "
+            f"{OBSERVED_AVAILABILITY_DENOMINATOR!r}"
         )
-    if integrity_excluded > unavailable:
-        raise ValueError(
-            "observed availability source-integrity exclusions exceed unavailable "
-            "events"
-        )
-    if estimated + unavailable != denominator:
-        raise ValueError("observed availability counts do not match event_denominator")
-    rate = value.get("event_estimated_rate")
-    if isinstance(rate, bool) or not isinstance(rate, (int, float)) \
-            or not math.isfinite(float(rate)):
-        raise ValueError("observed availability rate must be finite")
-    expected_rate = estimated / denominator if denominator else 0.0
-    if not math.isclose(float(rate), expected_rate, rel_tol=0.0, abs_tol=1e-12):
-        raise ValueError("observed availability rate disagrees with its counts")
-    return {
-        "denominator": expected,
-        "event_denominator": denominator,
-        "event_estimated": estimated,
-        "event_unavailable": unavailable,
-        "event_estimated_rate": expected_rate,
-        "excluded_not_landing": excluded,
-        "source_integrity_excluded_candidates": integrity_excluded,
-    }
+    return dict(value)
 
 
 def _reference_aggregate(comparisons: list[ReferenceComparison]) -> dict[str, Any] | None:
@@ -402,13 +371,13 @@ def _reference_aggregate(comparisons: list[ReferenceComparison]) -> dict[str, An
     deltas = [item.flight_time_delta_s for item in comparisons]
     return {
         "compared": len(comparisons),
-        "flight_time_delta_s": {"mean": mean(deltas), "min": min(deltas), "max": max(deltas)},
+        "flight_time_delta_s": {"mean": fmean(deltas), "min": min(deltas), "max": max(deltas)},
         "path_lateral_m": {
-            "mean": mean([item.path_lateral_m["mean"] for item in comparisons]),
+            "mean": fmean([item.path_lateral_m["mean"] for item in comparisons]),
             "max": max(item.path_lateral_m["max"] for item in comparisons),
         },
         "path_vertical_m": {
-            "mean_abs": mean([item.path_vertical_m["mean_abs"] for item in comparisons]),
+            "mean_abs": fmean([item.path_vertical_m["mean_abs"] for item in comparisons]),
             "max_abs": max(item.path_vertical_m["max_abs"] for item in comparisons),
         },
     }
@@ -431,9 +400,8 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
         "vertical_result": item.vertical_result,
         "violations": list(item.violations),
         "bounds": {
-            "guidance_lateral_m": item.guidance_lateral_bound_m,
-            "runway_lateral_m": item.runway_lateral_bound_m,
-            "effective_lateral_m": item.lateral_bound_m,
+            "lateral_criterion": LATERAL_CRITERION_ID,
+            "lateral_m": item.lateral_bound_m,
             "vertical_lower_m": item.vertical_lower_bound_m,
             "vertical_upper_m": item.vertical_upper_bound_m,
         },
