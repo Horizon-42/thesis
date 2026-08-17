@@ -1,9 +1,9 @@
 # 2026-07-27 归一化时间模型训练集/测试集评估
 
 > 历史结果说明：本文记录的是 2026-07-27 当时的实验与旧 evaluation gate。
-> 当前 runtime 已使用 `terminal-approach-evaluation-v4`：横向为跑道/程序特定界限，
+> 当前 runtime 已使用 `terminal-approach-evaluation-v5`：横向为跑道半宽（单一判据），
 > 垂直为 published-TCH path 的 `[-22,+22] m`。本文的旧 terminal pass 数量必须在
-> 重新发布 prediction 后更新，不能与 v4 observed pass rate 直接比较。
+> 重新发布 prediction 后更新，不能与当前 observed pass rate 直接比较。
 
 ## 1. 评估对象
 

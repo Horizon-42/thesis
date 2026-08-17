@@ -6,7 +6,11 @@
 
 > 标准更新说明：本文的事件估计器设计保持有效；垂直 verdict 已由
 > `terminal-approach-evaluation-v4` 统一改为 `±22 m` RNAV 终端几何界限。
-> 第 17.3–17.4 节的旧 pass/fail 数量是标准更新前的历史运行记录，不是当前结果。
+> **当前 runtime schema 为 `terminal-approach-evaluation-v5`**（横向单一判据 =
+> 跑道半宽；`min(guidance, runway/2)` 已删除，见
+> `evaluation/docs/FINAL_APPROACH_VERDICT_STANDARD.md` §3.3）。
+> 第 17.3–17.5 节的 pass/fail 数量都是当时的历史运行记录，不是当前结果；
+> v4→v5 未改变任何 verdict，但产物需重新生成。
 
 上位规范：[跑道阈值事件：第一性原理开发档案](threshold-event-first-principles-development.zh.md)
 

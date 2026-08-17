@@ -1,7 +1,7 @@
 # RNAV terminal-approach verdict standard
 
 Status: implemented by `evaluation`, report schema
-`terminal-approach-evaluation-v4`.
+`terminal-approach-evaluation-v5`.
 
 This document defines the small, project-wide terminal-geometry check used for
 observed, optimized, and predicted trajectories. It is deliberately not an
@@ -58,7 +58,7 @@ full-scale deflection is not a complete landing-outcome rule.
 
 The repository therefore no longer publishes or computes a `7.5 m` verdict,
 secondary grade, legacy fallback, or LPV vertical-FSD field. Derived reports
-must be regenerated as schema v4.
+must be regenerated against the current schema.
 
 ## 3. Mathematical definition
 
@@ -111,30 +111,35 @@ acceptance limits, or a verdict.
 
 ### 3.3 Lateral rule
 
-The existing lateral design is retained.
-
-For LPV:
+**v5 (current).** One bound, benchmark-independent:
 
 ```text
-B_guidance = 0.5 * published LPV lateral FSD at the LTP
-B_runway   = 0.5 * published runway width
-B_lateral  = min(B_guidance, B_runway)
+B_lateral = 0.5 * published runway width      # criterion id: runway_half_width_at_threshold
 lateral pass iff abs(y) <= B_lateral
 ```
 
-For the explicit RNP APCH LNAV/VNAV fallback:
+This is a **landing-geometry** claim — did the evaluated reference point lie
+over the pavement at the threshold — not a navigation-containment one, and not
+a claim that all aircraft extremities are inside the pavement. Because a runway
+always has a width, the lateral component is never `indeterminate` once a
+crossing has been measured.
 
-```text
-B_guidance = 0.15 NM = 277.8 m
-B_lateral  = min(B_guidance, 0.5 * runway width)
-```
+**Why the guidance term was removed (v4 → v5).** v4 computed
+`B_lateral = min(B_guidance, B_runway)` with `B_guidance` = half the published
+LPV lateral FSD, or `0.15 NM = 277.8 m` for the RNP APCH LNAV/VNAV fallback.
+Measured across all 26 thresholds at the five airports in this project, the
+guidance term selected the bound **0 times**: those widths are 2.3× to 18× the
+runway. A term that cannot change an answer is worse than an absent one — it
+invites the reader to treat the verdict as a navigation-containment judgement,
+and it conceals its own defects. It did conceal one: the published LPV course
+width `106.75 m` (350 ft, FAA Formula 3-1-1) is **already a semiwidth**
+(centreline to full-scale deflection), so halving it made every `guidance_lateral_m`
+v4 published wrong by a factor of two, unnoticed precisely because it was inert.
 
-The runway term is a project geometric guard: the evaluated reference point
-must not be outside the runway edge at the threshold. It does not claim that
-all aircraft extremities are inside the pavement.
-
-No `1/3` scale is used. ICAO supplies the one-half-FSD normal tracking factor;
-the runway half-width is an independent physical cap.
+No verdict changed at the v4 → v5 cut, since the `min` already selected the
+runway half-width everywhere. `lpv_course_width_m` (renamed from
+`lpv_lateral_fsd_m`) is retained in the assessment context as **procedure
+provenance** — it selects the benchmark upstream and bounds nothing.
 
 ### 3.4 Vertical rule
 
@@ -246,11 +251,12 @@ the evaluator must not tune the bound airport by airport.
 
 ## 6. Report and reproducibility contract
 
-Schema `terminal-approach-evaluation-v4` serializes:
+Schema `terminal-approach-evaluation-v5` serializes:
 
 - the threshold event method and provenance;
 - runway and procedure source cycles and fingerprints;
-- the published TCH reference and resolved lateral/vertical bounds;
+- the published TCH reference, the lateral criterion id
+  (`runway_half_width_at_threshold`), and the resolved lateral/vertical bounds;
 - standard id `icao_doc_9613_rnp_apch_fas_22m`;
 - exact ICAO source location and the non-certification claim boundary;
 - signed along-track, cross-track, and vertical deviations;
@@ -274,7 +280,7 @@ of the policy-free physical event, but requires regeneration of the report.
 
 The RTCA DO-229 full text is licence-controlled and is not redistributed here.
 Its LPV scale was reviewed only to explain the retired `7.5 m` derivation; it is
-not a dependency of the v4 verdict.
+not a dependency of this verdict.
 
 ## 8. Acceptance tests
 
@@ -283,9 +289,11 @@ Implementation acceptance requires:
 1. exact `±22 m` boundaries pass and the first representable outside values
    fail;
 2. LPV and approved LNAV/VNAV contexts resolve the same vertical bound;
-3. lateral logic remains unchanged;
+3. the lateral bound is the runway half-width under BOTH benchmarks, and no
+   guidance-derived term can select it;
 4. observed evaluation consumes the serialized event and never refits;
 5. unavailable observed events remain `indeterminate`;
 6. non-finite values are rejected;
-7. reports use schema v4 and contain the source/claim-boundary metadata; and
+7. reports use schema `terminal-approach-evaluation-v5` and contain the
+   source/claim-boundary metadata for both components; and
 8. the frontend preserves `pass`, `fail`, and `indeterminate` distinctly.

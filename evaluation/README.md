@@ -40,10 +40,23 @@ great-circle endpoint distance is not labelled lateral deviation.
 
 ## Bounds
 
-For LPV:
+Lateral, under BOTH benchmarks:
 
 ```text
-lateral = min(0.5 × published LPV lateral FSD, 0.5 × runway width)
+lateral = 0.5 × published runway width       # runway_half_width_at_threshold
+```
+
+That is the whole lateral rule. It is a LANDING-GEOMETRY claim — did the crossing
+lie over the pavement — not a navigation-containment one. The procedure's own
+containment (LPV course width 106.75 m, or the RNP APCH LNAV 0.15 NM = 277.8 m
+allowance) is 2.3×–18× wider than every runway in this fleet, so the former
+`min(guidance, runway/2)` rule never once selected the guidance term; it is now
+carried as procedure provenance (`lpv_course_width_m`) and bounds nothing. See
+[FINAL_APPROACH_VERDICT_STANDARD.md](FINAL_APPROACH_VERDICT_STANDARD.md#33-lateral-rule).
+
+Vertical, for LPV and approved LNAV/VNAV:
+
+```text
 vertical error = threshold-event altitude - (LTP elevation + published TCH)
 vertical bound = ±22 m
 ```
@@ -61,14 +74,9 @@ is a guidance-tracking scale, not a universal threshold-crossing or landing
 outcome standard, and is no longer computed or serialized. Trajectories and
 harvested threshold events do not carry evaluation policy.
 
-For the explicit LNAV/VNAV Baro-VNAV fallback:
-
-```text
-lateral = min(0.15 NM, 0.5 × runway width)
-vertical = ±22 m
-```
-
-The fallback is not selected silently. `baro_vnav_approved` must be true in the
+The explicit LNAV/VNAV Baro-VNAV fallback differs only in the vertical component;
+its lateral bound is the same runway half-width. The fallback is not selected
+silently. `baro_vnav_approved` must be true in the
 evaluation context. The ±22 m gate additionally requires an authoritative
 Baro-VNAV threshold-path altitude. The configured non-LPV runway fallback does
 not currently publish that reference, so evaluation still reports its lateral
@@ -174,9 +182,10 @@ normalize two different physical spans and report the result as path error.
 
 ## Report essentials
 
-`terminal-approach-evaluation-v4` contains:
+`terminal-approach-evaluation-v5` contains:
 
-- complete assessment contexts and resolved bounds;
+- complete assessment contexts and resolved bounds, tagged with the lateral
+  criterion id `runway_half_width_at_threshold`;
 - the published-TCH vertical reference, common `±22 m` RNAV terminal bound,
   exact ICAO source location, and non-certification claim boundary;
 - event/point-verdict/uncalibrated-uncertainty/reference-comparison methodology;
