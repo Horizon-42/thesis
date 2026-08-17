@@ -325,7 +325,17 @@ export function useComparisonTrajectoryLayer(): ComparisonTrajectoryLayerState {
         });
         const referenceResponse = await fetchJson<unknown>(referenceUrl);
         if (!isObservedTrajectoryResponse(referenceResponse)) {
-          throw new Error(`${referenceUrl} is not an observed-trajectories-v1 response`);
+          throw new Error(`${referenceUrl} is not an observed-trajectories-v2 response`);
+        }
+        // The comparison groups are drawn from records anchored at terminal-ring entry.
+        // A full-track reference answers the same request with a different time origin and
+        // nothing downstream can tell — it just renders the group kilometres ahead of its
+        // own reference — so refuse it here rather than draw a silently wrong overlay.
+        if (referenceResponse.trackWindow !== "arrival") {
+          throw new Error(
+            `${referenceUrl} returned the "${referenceResponse.trackWindow}" track window; ` +
+              "the comparison reference requires the arrival window",
+          );
         }
         const referenceSource = await new Cesium.CzmlDataSource(
           `comparison-reference-${categoryDir}`,

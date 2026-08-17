@@ -4,6 +4,69 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-17 — Comparison references were the wrong window: full track vs model arrival slice
+
+**Symptom.** In the comparison overlay the white observed reference did not start at the
+same time or the same place as the `look-`/`pred-` group beside it. Measured on the KRDU
+05L validation batch (471 groups): the group's first sample sat a median **5055 m** from
+the reference (p75 5281 m, p95 47.1 km, max 54.9 km).
+
+**Root cause — two time origins, only one of them reconciled.** Three timelines exist and
+the publisher accounted for two:
+
+1. a stored track's `samples[i][0]` is relative to first reception (`store.track_record`,
+   absolute time in `start_time_utc`) — this is what `trajectories.czml` and the
+   `/trajectories` backend served;
+2. the model **arrival slice** is rebased at `harvest/arrivals.py` `load_arrival_flights`
+   (`t0 = waypoints[0][0]`, `sample[0] - t0`), so every scenario, optimizer record and TS
+   record has `t = 0` at the 25 km terminal-ring entry, and `t0` is discarded;
+3. a prediction record rebases again to the anchor, recording the shift as
+   `source.anchorTimeS`.
+
+`build_scenario_comparison_czml` added ③ back (correctly — that was the 2026-07-20 anchor
+fix) but nothing ever added ② back, so every group rendered `t0` early. Measured `t0` over
+300 random KRDU arrivals: median **45.1 s**, p25 34.3, p75 55.6, p95 123.1, max 526.3 s.
+The same seam applies to optimizer groups (`opt-`/`sim-` also start at ring entry); no
+optimizer category happened to be published at the time, so it only showed on predictions.
+
+Nothing downstream could detect it: both timelines start at `t = 0`, both name the right
+flight, the schema is satisfied, and the drawn result reads as model error rather than a
+publication bug. Proof that the two were the same measurement: fitting a per-flight pure
+time shift dropped the lookback↔reference distance from a median 4900 m to **13.7 m** (2 s
+resampling error).
+
+**Fix — align the reference to the modeling window, at READ time.** The pre-entry segment
+is not model input, not a supervision target and not evaluated; drawing it as the white
+"truth" beside a forecast invites reading it as something the model failed to produce. So
+the reference is now the arrival slice on the arrival origin, rather than the group being
+pushed out onto the full track's origin.
+
+- `aeroviz_backend/observed_trajectories.py` gained `window` ∈ `full` | `arrival`. `full`
+  (default) is unchanged: the complete reconstructed track, rostered by
+  `tracks/manifest.json`, for Observe/Baseline. `arrival` rosters from
+  `arrivals/manifest.json` and builds flights through **`load_arrival_flights` itself** —
+  the same loader the scenario/optimizer/training paths use — so there is no second
+  implementation of the slice to drift from, and the source-hash check plus identity round
+  trip come along for free.
+- `tracks/` is untouched and no artifact is written: the slice is taken at read time, the
+  same rule the altitude-outlier repair follows.
+- Response schema bumped to `observed-trajectories-v2` with `trackWindow` echoed. The bump
+  is load-bearing: a v1 backend ignores an unknown `window` argument and answers a
+  comparison-reference request with full tracks, reproducing the bug silently. The
+  frontend refuses anything but `arrival` for the comparison reference.
+- `build_scenario_comparison_czml._require_reference_aligned` pins the embedded-reference
+  path (`include_reference_entities=True`, currently unused in publishing) at 50 m — inside
+  the gap between resampling noise (~14 m) and a wrong window (≥5 km).
+
+**Verified end-to-end on real data**: over all 471 KRDU 05L groups the group-start-to-
+reference distance is now **0.0 m** for every group (bit-identical samples), against a
+median 5055 m before.
+
+**No artifact is stale.** Published comparison CZMLs contain only `look-`/`pred-` (the
+publisher passes `include_reference_entities=False`) and the reference is served live, so
+restarting the backend is the whole deployment — no re-publish, no re-predict, no
+re-optimize.
+
 ### 2026-08-17 — ADS-B altitude outliers filtered in the view, not in the tracks
 
 **Symptom.** Observed trajectories rendered with needle-shaped vertical peaks: single

@@ -6,6 +6,25 @@ single-string limit. This backend reads the small harvest manifest first,
 filters the complete eligible roster by runway and terminal verdict, samples
 exactly once, and opens only the selected per-flight source records.
 
+Two windows of the same measurement are served, chosen by ``window``:
+
+``full``
+    The complete reconstructed track, from the first received state vector.
+    This is what the Observe/Baseline layer shows and what ``trajectories.czml``
+    contains.
+``arrival``
+    The model arrival slice only — terminal-ring entry to the landing anchor —
+    with time rebased so ``t = 0`` is the entry. This is the window every
+    modeling artifact lives in, so it is the one the comparison overlay's
+    reference must use: an optimizer/prediction group's ``t = 0`` is the entry,
+    while a full track's ``t = 0`` is the first reception, a median 45 s and
+    5 km earlier. Drawn against each other on one clock, the group renders that
+    far ahead of the reference it is supposed to be compared with.
+
+The slice is taken at READ time. ``tracks/`` is the canonical measurement store
+and is never edited (the same rule the altitude-outlier repair follows), and no
+derived artifact is written: the comparison reference is served live from here.
+
 The observed evaluation report is large too. It is parsed and cached server-side;
 the response carries only the selected flights' verdicts and the small aggregate
 needed by the baseline UI. The browser downloads the full report only on an
@@ -26,7 +45,12 @@ from collections.abc import Sequence
 from typing import Any
 
 from aeroviz_backend import paths
+from flight_scenarios.identity import flight_key
 from generate_czml import build_czml
+from trajectory_data_process.harvest.arrivals import (
+    arrival_manifest_path,
+    load_arrival_flights,
+)
 from trajectory_data_process.harvest.czml import observed_czml_flights
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
@@ -39,7 +63,14 @@ DEFAULT_EVALUATION_ROOT = (
 )
 DEFAULT_LIMIT = 200
 MAX_TRAJECTORIES_PER_RESPONSE = 1000
-RESPONSE_SCHEMA_VERSION = "observed-trajectories-v1"
+# v2 carries ``trackWindow``. The bump is load-bearing rather than cosmetic: a v1
+# backend ignores an unknown ``window`` argument and answers a comparison-reference
+# request with full tracks, which is exactly the misalignment this contract exists
+# to prevent — and it would look like a rendering quirk, not a version skew.
+RESPONSE_SCHEMA_VERSION = "observed-trajectories-v2"
+TRACK_WINDOW_FULL = "full"
+TRACK_WINDOW_ARRIVAL = "arrival"
+_TRACK_WINDOWS = (TRACK_WINDOW_FULL, TRACK_WINDOW_ARRIVAL)
 _START_DT = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
 _AIRPORT_RE = re.compile(r"^[A-Z0-9]{3,4}$")
 _RUNWAY_RE = re.compile(r"^[0-9]{2}[LRC]?$")
@@ -78,10 +109,12 @@ class ObservedTrajectoryBackend:
         limit: int = DEFAULT_LIMIT,
         seed: int = 0,
         flight_keys: Sequence[str] | None = None,
+        window: str | None = None,
     ) -> dict[str, Any]:
         code = _normalize_airport(airport)
         runway_ident = _normalize_runway(runway)
         verdict_filter = _normalize_verdict(verdict)
+        track_window = _normalize_window(window)
         requested_limit = int(limit)
         if requested_limit < 0 or requested_limit > self.max_trajectories:
             raise ValueError(
@@ -93,13 +126,7 @@ class ObservedTrajectoryBackend:
         )
 
         harvest_paths = HarvestPaths(self.harvest_root, code)
-        manifest = read_manifest(harvest_paths)
-        eligible = [
-            row
-            for row in manifest["records"]
-            if row["outcome"] == "assigned"
-            and (runway_ident is None or str(row["runway"]).upper() == runway_ident)
-        ]
+        eligible = _roster(harvest_paths, track_window, runway_ident)
 
         evaluation = self._evaluation(code)
         counts = {"pass": 0, "fail": 0, "undecided": 0}
@@ -152,7 +179,7 @@ class ObservedTrajectoryBackend:
         else:
             selected = eligible
 
-        flights = list(observed_czml_flights(harvest_paths, selected))
+        flights = _window_flights(harvest_paths, track_window, selected)
         czml = build_czml(flights, _START_DT)
         verdicts = None
         if evaluation is not None:
@@ -169,6 +196,7 @@ class ObservedTrajectoryBackend:
             }
         return {
             "schemaVersion": RESPONSE_SCHEMA_VERSION,
+            "trackWindow": track_window,
             "czml": czml,
             "verdicts": verdicts,
             "evaluation": evaluation.summary if evaluation is not None else None,
@@ -223,6 +251,71 @@ class ObservedTrajectoryBackend:
 
         self._evaluation_cache[airport] = (*signature, evaluation)
         return evaluation
+
+
+def _roster(
+    paths: HarvestPaths,
+    window: str,
+    runway_ident: str | None,
+) -> list[dict[str, Any]]:
+    """The flights a window can serve, read from the manifest that DEFINES that window.
+
+    ``full`` is rostered by ``tracks/manifest.json`` (every assigned landing) and
+    ``arrival`` by ``arrivals/manifest.json`` (the model-ready subset: assigned, with a
+    published TCH and glidepath, cropped to the final terminal entry). Taking the arrival
+    window's roster from the tracks manifest would offer flights that have no arrival
+    slice at all, and the loader would then raise on a request the caller had every
+    reason to believe was valid.
+    """
+    if window == TRACK_WINDOW_ARRIVAL:
+        manifest = json.loads(
+            arrival_manifest_path(paths).read_text(encoding="utf-8")
+        )
+        rows = list(manifest["records"])
+    else:
+        rows = [
+            row
+            for row in read_manifest(paths)["records"]
+            if row["outcome"] == "assigned"
+        ]
+    if runway_ident is None:
+        return rows
+    return [row for row in rows if str(row["runway"]).upper() == runway_ident]
+
+
+def _window_flights(
+    paths: HarvestPaths,
+    window: str,
+    selected: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Renderer-ready flight dicts for ``selected``, in request order.
+
+    The arrival window goes through ``load_arrival_flights`` — the SAME loader the
+    scenario, optimizer and training paths use — rather than re-slicing here. That is the
+    whole point: the reference cannot drift from the data the model was fed, because there
+    is no second implementation of the slice to drift from. It also inherits the loader's
+    source-hash check and identity round trip for free.
+
+    No fitted threshold extension is attached in the arrival window: the reference is the
+    measured slice, matching what the model consumed and what the evaluation graded.
+    """
+    if window != TRACK_WINDOW_ARRIVAL:
+        return list(observed_czml_flights(paths, selected))
+    keys = [str(row["flight_key"]) for row in selected]
+    flights = load_arrival_flights(
+        arrival_manifest_path(paths), include_flight_keys=set(keys)
+    )
+    by_key = {flight_key(flight, 0): flight for flight in flights}
+    return [by_key[key] for key in keys]
+
+
+def _normalize_window(value: str | None) -> str:
+    if value is None or not str(value).strip():
+        return TRACK_WINDOW_FULL
+    window = str(value).strip().lower()
+    if window not in _TRACK_WINDOWS:
+        raise ValueError(f"window must be one of {', '.join(_TRACK_WINDOWS)}")
+    return window
 
 
 def _normalize_airport(value: str) -> str:

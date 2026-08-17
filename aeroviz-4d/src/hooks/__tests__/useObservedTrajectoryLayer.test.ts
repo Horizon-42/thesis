@@ -17,7 +17,15 @@ function observedResponse(
   verdicts: unknown = null,
   evaluation: unknown = null,
 ) {
-  return { schemaVersion: "observed-trajectories-v1", czml, verdicts, evaluation };
+  // The baseline layer shows the complete recorded track; only the comparison overlay's
+  // reference asks for the arrival window.
+  return {
+    schemaVersion: "observed-trajectories-v2",
+    trackWindow: "full",
+    czml,
+    verdicts,
+    evaluation,
+  };
 }
 
 const {

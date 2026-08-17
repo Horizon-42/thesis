@@ -134,9 +134,20 @@ describe("observedReferenceTracksUrl", () => {
       airport: "KSJC",
       flightKeys: ["SWA 1_12L", "UAL2_30R"],
     })).toBe(
-      `${BACKEND_URL}/trajectories?airport=KSJC` +
+      `${BACKEND_URL}/trajectories?airport=KSJC&window=arrival` +
       "&flight_key=SWA+1_12L&flight_key=UAL2_30R",
     );
+  });
+
+  it("asks for the arrival window, which the comparison groups are anchored in", () => {
+    // The comparison entities come from records whose t=0 is terminal-ring entry. A full
+    // track's t=0 is first reception — a median 45 s and 5 km earlier — so requesting the
+    // default window would draw every group ahead of its own reference.
+    expect(observedReferenceTracksUrl({
+      backendUrl: BACKEND_URL,
+      airport: "KSJC",
+      flightKeys: ["UAL2_30R"],
+    })).toContain("window=arrival");
   });
 
   it("returns no request for an empty roster", () => {
@@ -150,7 +161,8 @@ describe("observedReferenceTracksUrl", () => {
 
 describe("observed trajectory response", () => {
   const response = {
-    schemaVersion: "observed-trajectories-v1",
+    schemaVersion: "observed-trajectories-v2",
+    trackWindow: "full",
     czml: [{ id: "document" }, { id: "flight-fail" }],
     verdicts: {
       counts: { pass: 4, fail: 1, undecided: 2 },
@@ -181,5 +193,19 @@ describe("observed trajectory response", () => {
       ...response,
       verdicts: { ...response.verdicts, byFlightId: { bad: "failed" } },
     })).toBe(false);
+  });
+
+  it("rejects a payload that does not declare which track window it is", () => {
+    // A v1 backend ignores the `window` argument and answers a comparison-reference
+    // request with full tracks. That is a silent misalignment, not a degraded response,
+    // so the version bump has to be refused rather than tolerated.
+    const { trackWindow, ...withoutWindow } = response;
+    expect(trackWindow).toBe("full");
+    expect(isObservedTrajectoryResponse(withoutWindow)).toBe(false);
+    expect(isObservedTrajectoryResponse({
+      ...response,
+      schemaVersion: "observed-trajectories-v1",
+    })).toBe(false);
+    expect(isObservedTrajectoryResponse({ ...response, trackWindow: "arrival" })).toBe(true);
   });
 });

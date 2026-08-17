@@ -55,8 +55,21 @@ interface ObservedVerdictPayload {
   total: number;
 }
 
+/**
+ * Which window of the measurement the backend returned.
+ *
+ * `full` is the complete reconstructed track (Observe/Baseline). `arrival` is the model
+ * arrival slice — terminal-ring entry to the landing anchor, time rebased so t=0 is the
+ * entry — which is the window every optimizer/prediction record lives in. The comparison
+ * overlay must use `arrival`: a full track's t=0 is the first reception, a median 45 s and
+ * 5 km before the entry, so on one shared clock the group would render that far ahead of
+ * the reference it is being compared with.
+ */
+export type ObservedTrackWindow = "full" | "arrival";
+
 export interface ObservedTrajectoryResponse {
-  schemaVersion: "observed-trajectories-v1";
+  schemaVersion: "observed-trajectories-v2";
+  trackWindow: ObservedTrackWindow;
   czml: unknown[];
   verdicts: ObservedVerdictPayload | null;
   evaluation: ObservedEvaluationSummary | null;
@@ -128,14 +141,20 @@ export interface ObservedReferenceTrackRequest {
   flightKeys: string[];
 }
 
-/** Build one backend request for the exact groups sampled from a comparison index. */
+/**
+ * Build one backend request for the exact groups sampled from a comparison index.
+ *
+ * `window=arrival` is required, not an optimisation: the comparison groups are drawn from
+ * records whose t=0 is the terminal-ring entry, so the reference has to be the same slice
+ * on the same origin. See ObservedTrackWindow.
+ */
 export function observedReferenceTracksUrl({
   backendUrl,
   airport,
   flightKeys,
 }: ObservedReferenceTrackRequest): string {
   if (!airport || flightKeys.length === 0) return "";
-  const params = new URLSearchParams({ airport });
+  const params = new URLSearchParams({ airport, window: "arrival" });
   for (const flightKey of flightKeys) params.append("flight_key", flightKey);
   return `${backendUrl.replace(/\/+$/, "")}/trajectories?${params.toString()}`;
 }
@@ -148,7 +167,8 @@ export function observedTracksVisible({
 }
 
 export function isObservedTrajectoryResponse(value: unknown): value is ObservedTrajectoryResponse {
-  if (!isRecord(value) || value.schemaVersion !== "observed-trajectories-v1") return false;
+  if (!isRecord(value) || value.schemaVersion !== "observed-trajectories-v2") return false;
+  if (value.trackWindow !== "full" && value.trackWindow !== "arrival") return false;
   if (!Array.isArray(value.czml)) return false;
   if (value.verdicts !== null && !isObservedVerdictPayload(value.verdicts)) return false;
   return value.evaluation === null || isObservedEvaluationSummary(value.evaluation);
