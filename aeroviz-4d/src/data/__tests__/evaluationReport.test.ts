@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { isEvaluationReport } from "../evaluationReport";
+import {
+  EVALUATION_REPORT_SCHEMA_VERSION,
+  isEvaluationReport,
+} from "../evaluationReport";
 
 function reportWith(observed: unknown) {
   return {
-    schema_version: "terminal-approach-evaluation-v4",
+    schema_version: EVALUATION_REPORT_SCHEMA_VERSION,
     methodology: {
       terminal_vertical: {
         reference: "LTP elevation MSL + published FAS TCH",
@@ -41,7 +44,7 @@ describe("isEvaluationReport observed availability contract", () => {
     })).toBe(false);
   });
 
-  it("rejects v4 without the auditable common RNAV vertical methodology", () => {
+  it("rejects the current schema without the auditable common RNAV vertical methodology", () => {
     expect(isEvaluationReport({
       ...reportWith(undefined),
       methodology: {},

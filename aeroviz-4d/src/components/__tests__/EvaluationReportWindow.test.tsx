@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import EvaluationReportWindow from "../EvaluationReportWindow";
-import type { EvaluationReport } from "../../data/evaluationReport";
+import {
+  EVALUATION_REPORT_SCHEMA_VERSION,
+  type EvaluationReport,
+} from "../../data/evaluationReport";
 
 const REPORT: EvaluationReport = {
-  schema_version: "terminal-approach-evaluation-v4",
+  schema_version: EVALUATION_REPORT_SCHEMA_VERSION,
   methodology: {}, assessment_contexts: [], subject: "optimized",
   total: 3,
   measured: 2,
@@ -29,7 +32,7 @@ const REPORT: EvaluationReport = {
       id: "FDX1738", file: "a_eval.json", solved: true, success: true, violations: [],
       subject: "optimized", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
       verdict: "pass", event_status: "terminal_state", lateral_result: "pass", vertical_result: "pass",
-      bounds: { guidance_lateral_m: 277.8, runway_lateral_m: 22.86, effective_lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
+      bounds: { lateral_criterion: "runway_half_width_at_threshold", lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
       lateral_m: 22.43, vertical_m: -1.68, final_time_s: 329.1,
       reference: { file: "r.json", comparison_status: "compared", endpoint_tolerance_m: 1,
         start_gap_m: 0, end_gap_m: 0, reference_flight_time_s: 536.0,
@@ -39,7 +42,7 @@ const REPORT: EvaluationReport = {
       id: "FDX1449", file: "b_eval.json", solved: true, success: false,
       subject: "optimized", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
       verdict: "fail", event_status: "terminal_state", lateral_result: "fail", vertical_result: "fail",
-      bounds: { guidance_lateral_m: 277.8, runway_lateral_m: 22.86, effective_lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
+      bounds: { lateral_criterion: "runway_half_width_at_threshold", lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
       violations: ["lateral", "vertical"],
       lateral_m: 179.53, vertical_m: -25.4, final_time_s: 400.2,
       reference: { file: "r2.json", comparison_status: "compared", endpoint_tolerance_m: 1,
@@ -50,7 +53,7 @@ const REPORT: EvaluationReport = {
       id: "UPS1276", file: "c_eval.json", solved: false, success: false,
       subject: "optimized", airport: "KRDU", runway: "05L", benchmark: "rnp_apch_lnav_vnav_baro",
       verdict: "fail", event_status: "unsolved", lateral_result: "indeterminate", vertical_result: "indeterminate",
-      bounds: { guidance_lateral_m: 277.8, runway_lateral_m: 22.86, effective_lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
+      bounds: { lateral_criterion: "runway_half_width_at_threshold", lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22 },
       violations: ["unsolved"], reason: "ValueError: Maximum_Iterations_Exceeded",
     },
   ],
@@ -75,7 +78,13 @@ describe("EvaluationReportWindow", () => {
     expect(screen.getByText("1/3")).toBeTruthy();
     expect(screen.queryByText("1/2")).toBeNull();
     expect(screen.getByText("mean Δt vs observed (optimized − flown)")).toBeTruthy();
-    expect(screen.getByText(/bounds are runway and benchmark specific/i)).toBeTruthy();
+    // The lateral claim, not just "some gate text exists": this paragraph used to
+    // advertise the min(guidance, runway/2) rule that no longer exists, contradicting
+    // the METHODOLOGY block of the very report it renders.
+    expect(
+      screen.getByText(/half the published runway width/i),
+    ).toBeTruthy();
+    expect(screen.queryByText(/guidance bound/i)).toBeNull();
     // aggregates straight from the report
     const aggregates = screen.getByRole("table", {
       name: "Aggregates (over 2 measured threshold events)",

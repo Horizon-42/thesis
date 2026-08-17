@@ -1,4 +1,13 @@
-/** Backend terminal-approach evaluation report (schema v4). */
+/** Backend terminal-approach evaluation report.
+ *
+ * MUST match `evaluation/metrics.py` → `REPORT_SCHEMA_VERSION`. The frontend cannot
+ * import the modeling tree, so this is a mirror; change both together. When the
+ * producer bumped v4 → v5 and this literal stayed, `isEvaluationReport` silently
+ * rejected every report the pipeline wrote — the panel simply rendered nothing, and
+ * the vitest fixtures (also pinned to v4) stayed green throughout. Test fixtures now
+ * import this constant instead of repeating the string.
+ */
+export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v5";
 
 export interface MagnitudeSpread {
   mean: number;
@@ -18,9 +27,10 @@ export type EvaluationVerdict = "pass" | "fail" | "indeterminate";
 export type EvaluationComponentResult = EvaluationVerdict;
 
 export interface EvaluationBounds {
-  guidance_lateral_m: number | null;
-  runway_lateral_m: number;
-  effective_lateral_m: number | null;
+  /** Always "runway_half_width_at_threshold" — the lateral bound is the runway, not
+   *  the procedure's containment width. See evaluation/thresholds.py. */
+  lateral_criterion: string;
+  lateral_m: number;
   vertical_lower_m: number | null;
   vertical_upper_m: number | null;
 }
@@ -82,7 +92,7 @@ export interface EvaluationReferenceAggregate {
 }
 
 export interface EvaluationReport {
-  schema_version: "terminal-approach-evaluation-v4";
+  schema_version: typeof EVALUATION_REPORT_SCHEMA_VERSION;
   methodology: Record<string, unknown>;
   assessment_contexts: Record<string, unknown>[];
   subject: EvaluationSubject | "mixed";
@@ -145,21 +155,20 @@ function isObservedAggregate(value: unknown): value is EvaluationObservedAggrega
     aggregate.event_unavailable,
     aggregate.excluded_not_landing,
   ];
-  if (
-    aggregate.denominator !== "arrival_candidates_excluding_not_landing" ||
-    !counts.every((count) => Number.isInteger(count) && Number(count) >= 0) ||
-    typeof aggregate.event_estimated_rate !== "number" ||
-    !Number.isFinite(aggregate.event_estimated_rate)
-  ) {
-    return false;
-  }
-  const denominator = Number(aggregate.event_denominator);
-  const estimated = Number(aggregate.event_estimated);
-  const unavailable = Number(aggregate.event_unavailable);
-  const expectedRate = denominator === 0 ? 0 : estimated / denominator;
+  // Shape only. The arithmetic (estimated + unavailable === denominator, and rate ===
+  // estimated / denominator) used to be re-derived here — but the producer computes
+  // `unavailable` and `rate` FROM `denominator` and `estimated` in the same expression
+  // (harvest/observed.py → source_event_availability), so those are identities, not
+  // invariants that data could violate. Re-checking them bought nothing and cost a
+  // silent whole-report rejection: this predicate gates rendering, so a mismatch would
+  // blank the panel with no message rather than name a field. The Python side dropped
+  // the same re-derivation; both now check only the denominator LABEL, which is the one
+  // thing that says WHICH population the rate describes.
   return (
-    estimated + unavailable === denominator &&
-    Math.abs(aggregate.event_estimated_rate - expectedRate) <= 1e-12
+    aggregate.denominator === "arrival_candidates_excluding_not_landing" &&
+    counts.every((count) => Number.isInteger(count) && Number(count) >= 0) &&
+    typeof aggregate.event_estimated_rate === "number" &&
+    Number.isFinite(aggregate.event_estimated_rate)
   );
 }
 
@@ -168,7 +177,7 @@ export function isEvaluationReport(value: unknown): value is EvaluationReport {
   const candidate = value as Record<string, unknown>;
   const counts = candidate.verdict_counts as Record<string, unknown> | undefined;
   return (
-    candidate.schema_version === "terminal-approach-evaluation-v4" &&
+    candidate.schema_version === EVALUATION_REPORT_SCHEMA_VERSION &&
     hasCommonRnavVerticalMethodology(candidate.methodology) &&
     typeof candidate.total === "number" &&
     typeof candidate.solved === "number" &&
