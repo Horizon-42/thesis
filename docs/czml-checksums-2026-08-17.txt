@@ -1,0 +1,14 @@
+# Observed CZML published 2026-08-17 through harvest/altitude_filter.py (altitude-outlier-filter-v1).
+# Deterministic render (generate_czml pins epoch 2026-04-01T08:00Z): same tracks/ + same code reproduce these bytes.
+# Verify:  sha256sum -c docs/czml-checksums-2026-08-17.txt
+# Rebuild: conda run -n aeroviz python -m trajectory_data_process.altitude_outliers --airport <ICAO> --rerender-czml
+4a8d2af16033c7a0c6838e21d09237e9c577627a60db755ee6fd39129ff1d02b  aeroviz-4d/public/data/airports/KMSY/trajectories.czml
+efb9d661a29846588200b12df0f1741ffbcc9febce601e1e708c32d5e8dfb044  aeroviz-4d/public/data/airports/KRDU/trajectories.czml
+2d45169339607fbd999ccc294ddfc7dc9ff15f2a4004272a8023e58d824d98fe  aeroviz-4d/public/data/airports/KSJC/trajectories.czml
+a487f84a6cd1edee2c81516c86627773e3a763ffefbca22bb2954ed347353ccd  aeroviz-4d/public/data/airports/KSMF/trajectories.czml
+2497dad5940ba18350d4e17c833378caf3343848d07b0bef40056e1de9c0fe7c  aeroviz-4d/public/data/airports/KSTL/trajectories.czml
+2876631356b0fd773f220da509adbae08316914facf1397dc6532f362fd06c2e  aeroviz-4d/public/data/airports/KMSY/landings/index.json
+23fda0ced7d510275b008a17abe15d11c2dbd37bdfff178f3589a11aee7c8515  aeroviz-4d/public/data/airports/KRDU/landings/index.json
+ed1c850957263a48d3c8ce9512321597d38a1973711f0683210aaf0e38cecb8c  aeroviz-4d/public/data/airports/KSJC/landings/index.json
+8889b96a4b954e37cb2dadbcc1c5ab7c0725d5944f40df3a4c2205baf066c247  aeroviz-4d/public/data/airports/KSMF/landings/index.json
+c4cb426e9978b57a914f82adc72295522d2d5a9db41cceb9cad181861c333b38  aeroviz-4d/public/data/airports/KSTL/landings/index.json

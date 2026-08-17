@@ -17,6 +17,11 @@ three things, none of which belongs upstream of it:
 Output lands in ``approach/``, apart from ``tracks/``, because this is an evaluation
 view: it converts datum, derives kinematics, supplies the benchmark target, and carries
 the already serialized threshold estimate into the evaluator.
+
+The samples arrive through ``store.read_track_view``, so a state vector reporting an
+unreachable altitude never reaches the least-squares velocity fit — one 20 km needle
+inside the fit window moves ``V``/``gamma`` for the whole record. The batch summary
+reports how many altitudes that filter replaced.
 """
 
 from __future__ import annotations
@@ -33,9 +38,14 @@ from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
 )
+from trajectory_data_process.harvest.altitude_filter import (
+    DEFAULT_POLICY,
+    FILTER_SCHEMA_VERSION,
+)
 from trajectory_data_process.harvest.store import (
     HarvestPaths,
     read_manifest,
+    read_track_view,
     require_source_timed_manifest,
 )
 from trajectory_data_process.harvest.threshold_event import require_current_threshold_event
@@ -148,10 +158,13 @@ def write_observed_records(
     roster: list[dict[str, Any]] = []
     skipped: list[SkippedTrack] = []
 
+    repaired_samples = 0
+    repaired_records = 0
+
     for row in source["records"]:
         if row["outcome"] != "assigned":
             continue
-        track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
+        track = read_track_view(paths, row["file"])
         runway = airport.runway(row["runway"])
         if runway.threshold_crossing_height_m is None:
             skipped.append(
@@ -159,6 +172,9 @@ def write_observed_records(
             )
             continue
         record = observed_record(track, runway, mass_kg=mass_kg)
+        repaired = int(track["altitude_filter"]["outlier_count"])
+        repaired_samples += repaired
+        repaired_records += bool(repaired)
         name = f"{row['flight_key']}_eval.json"
         (records_dir / name).write_text(
             json.dumps(record, separators=(",", ":"), allow_nan=False), encoding="utf-8"
@@ -180,6 +196,14 @@ def write_observed_records(
         "source_counts": source["counts"],
         "event_availability": availability,
         "altitude_source": MSL_ALTITUDE_SOURCE,
+        # A gate verdict is a claim about what was flown, so the batch states how much of
+        # its altitude data was a repaired view rather than a raw reading.
+        "altitude_filter": {
+            "schema_version": FILTER_SCHEMA_VERSION,
+            "policy": DEFAULT_POLICY.to_dict(),
+            "repaired_samples": repaired_samples,
+            "repaired_records": repaired_records,
+        },
         "mass_kg": mass_kg,
         "total": len(roster),
         "skipped": [{"flight_key": s.flight_key, "reason": s.reason} for s in skipped],
