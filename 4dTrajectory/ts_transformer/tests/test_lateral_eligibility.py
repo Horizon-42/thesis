@@ -19,6 +19,7 @@ for path in (TS_DIR, REPO_ROOT):
 import dataset  # noqa: E402
 import run_ts_pipeline  # noqa: E402
 from lateral_eligibility import (  # noqa: E402
+    EVALUATION_REPORT_SCHEMA,
     LATERAL_PASS_ROSTER_SCHEMA,
     build_lateral_pass_roster,
     default_evaluation_report_path,
@@ -43,7 +44,9 @@ def _write_sources(tmp_path: Path) -> tuple[Path, Path]:
     report.write_text(
         json.dumps(
             {
-                "schema_version": "terminal-approach-evaluation-v4",
+                # The producer's constant, not a literal: a fixture pinned to the old
+                # version is what let the v4 -> v5 bump ship green past this suite.
+                "schema_version": EVALUATION_REPORT_SCHEMA,
                 "subject": "observed",
                 "trajectories": [
                     {

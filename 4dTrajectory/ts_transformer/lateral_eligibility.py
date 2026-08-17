@@ -13,9 +13,14 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+# Imported, never re-declared. This module reads a report the evaluator wrote, so a
+# literal here is a second source of truth for the same string: the v4 -> v5 bump landed
+# in the producer alone and left this seam rejecting every report the pipeline produced.
+# This is the seam that is ALLOWED to know evaluation policy (see the docstring above);
+# the model, loss, and loader code still must not import it.
+from evaluation.metrics import REPORT_SCHEMA_VERSION as EVALUATION_REPORT_SCHEMA
 
 LATERAL_PASS_ROSTER_SCHEMA = "ts-lateral-pass-eligibility-v1"
-EVALUATION_REPORT_SCHEMA = "terminal-approach-evaluation-v4"
 LATERAL_PASS_POLICY = "evaluation.lateral_result == pass"
 LATERAL_RESULTS = {"pass", "fail", "indeterminate"}
 ROSTER_NAME = "lateral_pass_eligibility.json"
