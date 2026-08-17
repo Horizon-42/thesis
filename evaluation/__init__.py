@@ -1,16 +1,11 @@
 """Standards-informed runway-threshold trajectory evaluation."""
 
-from evaluation.arrival import (
-    ArrivalDeviation,
-    ArrivalOutcome,
-    Subject,
-    arrival_deviation,
-    subject_of,
-)
+from evaluation.arrival import ArrivalDeviation, ArrivalOutcome, arrival_deviation
 from evaluation.context import assessment_for_runway, contexts_for_airport, resolve_context
 from evaluation.metrics import TrajectoryEvaluation, evaluate_batch, evaluate_record
 from evaluation.records import (
     STATE_KEYS,
+    Subject,
     TrajectoryRecord,
     load_record,
     load_records,
@@ -56,5 +51,4 @@ __all__ = [
     "reference_span",
     "resample_by_arc_length",
     "resolve_context",
-    "subject_of",
 ]

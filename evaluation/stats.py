@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import math
+from statistics import fmean
 from typing import Sequence
-
-
-def mean(values: Sequence[float]) -> float:
-    return sum(values) / len(values)
 
 
 def percentile(values: Sequence[float], q: float) -> float:
@@ -32,7 +29,7 @@ def magnitude_spread(values: Sequence[float]) -> dict[str, float] | None:
     """
     if not values:
         return None
-    return {"mean": mean(values), "p95": percentile(values, 0.95), "max": max(values)}
+    return {"mean": fmean(values), "p95": percentile(values, 0.95), "max": max(values)}
 
 
 def signed_spread(values: Sequence[float]) -> dict[str, float] | None:
@@ -47,8 +44,8 @@ def signed_spread(values: Sequence[float]) -> dict[str, float] | None:
         return None
     magnitudes = [abs(v) for v in values]
     return {
-        "mean_signed": mean(values),
-        "mean_abs": mean(magnitudes),
+        "mean_signed": fmean(values),
+        "mean_abs": fmean(magnitudes),
         "p95_abs": percentile(magnitudes, 0.95),
         "max_abs": max(magnitudes),
     }

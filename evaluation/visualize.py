@@ -32,8 +32,6 @@ def build_payload(
     contexts: dict[ContextKey, AssessmentContext],
     max_tracks: int = DEFAULT_MAX_TRACKS,
 ) -> dict[str, Any]:
-    if max_tracks <= 0:
-        raise ValueError("max_tracks must be greater than zero")
     report = evaluate_batch(records, contexts=contexts)
     drawable = [
         record for record in records
@@ -126,14 +124,14 @@ _TEMPLATE = """<!doctype html>
 <title>__TITLE__</title><script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 <style>body{font:14px system-ui;margin:0;background:#f5f7fa;color:#18212b}.wrap{max-width:1180px;margin:auto;padding:24px}h1{font-size:24px}.meta,.note{color:#667085}.cards{display:flex;gap:12px;flex-wrap:wrap}.card{background:white;padding:12px 18px;border-radius:9px;box-shadow:0 1px 3px #0001}.num{font-size:22px;font-weight:700}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.chart,table{background:white;border-radius:9px}table{width:100%;border-collapse:collapse}th,td{padding:7px;border-bottom:1px solid #eee;text-align:right}th:first-child,td:first-child{text-align:left}.scroll{overflow:auto;max-height:520px}@media(max-width:850px){.grid{grid-template-columns:1fr}}</style></head>
 <body><div class="wrap"><h1>__TITLE__</h1><div class="meta">input: __SOURCE__</div>
-<p class="note">Runway-threshold geometric verdict. Vertical uses the published-TCH path and the 22 m RNAV/RNP terminal vertical bound. This is not touchdown or landing certification. Observed events reuse the producer-side threshold event, carry explicitly uncalibrated uncertainty, and are never refitted by evaluation.</p>
+<p class="note">Runway-threshold geometric verdict. Lateral is half the published runway width (did the crossing lie over the pavement) — not a navigation-containment bound. Vertical uses the published-TCH path and the 22 m RNAV/RNP terminal vertical bound. This is not touchdown or landing certification. Observed events reuse the producer-side threshold event, carry explicitly uncalibrated uncertainty, and are never refitted by evaluation.</p>
 <div id="cards" class="cards"></div><h2>Terminal deviations</h2><div class="grid"><div id="lat" class="chart"></div><div id="vert" class="chart"></div></div>
 <h2>Track overlay</h2><div id="trackNote" class="note"></div><select id="selector"></select><div class="grid"><div id="plan" class="chart"></div><div id="profile" class="chart"></div></div>
 <h2>Per-trajectory verdicts</h2><div class="scroll"><table id="rows"></table></div></div>
 <script>const DATA=__DATA__,R=DATA.report,ROWS=R.trajectories;const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const card=(n,l)=>`<div class="card"><div class="num">${n}</div><div>${l}</div></div>`;document.getElementById("cards").innerHTML=card(R.total,"total")+card(R.verdict_counts.pass,"pass")+card(R.verdict_counts.fail,"fail")+card(R.verdict_counts.indeterminate,"indeterminate");
 const M=ROWS.filter(r=>r.deviation);const colors=M.map(r=>r.verdict==="pass"?"#16864b":r.verdict==="fail"?"#c33":"#c68a12");
-Plotly.newPlot("lat",[{type:"bar",x:M.map(r=>r.file||r.id),y:M.map(r=>r.cross_track_m),marker:{color:colors},name:"cross-track"},{type:"scatter",mode:"markers",x:M.map(r=>r.file||r.id),y:M.map(r=>r.bounds.effective_lateral_m),marker:{symbol:"line-ew",size:14},name:"+ effective bound"}],{title:"Signed cross-track at threshold (m)",margin:{b:90}},{displayModeBar:false});
+Plotly.newPlot("lat",[{type:"bar",x:M.map(r=>r.file||r.id),y:M.map(r=>r.cross_track_m),marker:{color:colors},name:"cross-track"},{type:"scatter",mode:"markers",x:M.map(r=>r.file||r.id),y:M.map(r=>r.bounds.lateral_m),marker:{symbol:"line-ew",size:14},name:"+ runway half-width"}],{title:"Signed cross-track at threshold (m)",margin:{b:90}},{displayModeBar:false});
 Plotly.newPlot("vert",[{type:"bar",x:M.map(r=>r.file||r.id),y:M.map(r=>r.vertical_m),marker:{color:colors}}],{title:"Signed vertical deviation from published-TCH path (m)",margin:{b:90}},{displayModeBar:false});
 const sel=document.getElementById("selector");DATA.tracks.forEach((t,i)=>{const o=document.createElement("option");o.value=i;o.textContent=t.label;sel.appendChild(o)});document.getElementById("trackNote").textContent=`${DATA.tracksShown}/${DATA.tracksTotal} drawable tracks shown`;
 function draw(i){const t=DATA.tracks[i];if(!t)return;const plan=[],prof=[],f=t.trajectory.lat.map((_,k)=>k/(t.trajectory.lat.length-1));if(t.reference){plan.push({x:t.reference.lon,y:t.reference.lat,mode:"lines",name:"reference"});prof.push({x:f,y:t.reference.alt,mode:"lines",name:"reference"})}plan.push({x:t.trajectory.lon,y:t.trajectory.lat,mode:"lines",name:"trajectory"});prof.push({x:f,y:t.trajectory.alt,mode:"lines",name:"trajectory"});Plotly.react("plan",plan,{title:`Plan · ${t.label}`,xaxis:{title:"lon"},yaxis:{title:"lat",scaleanchor:"x"}},{displayModeBar:false});Plotly.react("profile",prof,{title:"Altitude by arc fraction",xaxis:{title:"arc fraction"},yaxis:{title:"m MSL"}},{displayModeBar:false})}sel.onchange=()=>draw(Number(sel.value));draw(0);
