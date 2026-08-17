@@ -63,7 +63,11 @@ DEFAULT_MIN_SPAN_M = 500.0
 # backward walk decides the aircraft was not on ONE inbound run (see _final_inbound_run).
 # One 1 Hz sample advances ~77 m on approach, so 100 m absorbs GPS jitter and the slight
 # along-track stall of a late centreline intercept without tolerating a real reversal.
-_INBOUND_TOLERANCE_M = 100.0
+#
+# Public because the harvest walks FORWARD from this fit's last sample to find the
+# closest observed support on the same pass, and that walk must accept exactly the
+# jitter this one does -- two 100.0 literals would be one edit away from disagreeing.
+INBOUND_TOLERANCE_M = 100.0
 
 # OpenSky geometric altitude is encoded on a 25 ft lattice.  A robust residual
 # scale may collapse to zero on a clean quantised descent, so half-distribution
@@ -204,7 +208,7 @@ def _final_inbound_run(
     for i in range(inner - 1, -1, -1):
         if projected[i].along_m < window_m[0]:
             break
-        if projected[i].along_m > suffix_min_along_m + _INBOUND_TOLERANCE_M:
+        if projected[i].along_m > suffix_min_along_m + INBOUND_TOLERANCE_M:
             break
         run.append((i, projected[i]))
         suffix_min_along_m = min(suffix_min_along_m, projected[i].along_m)
@@ -310,8 +314,6 @@ def _robust_seed_indices(sample_count: int) -> list[int]:
     scale with the square of source density.  The seed only proposes a line; the
     residual gate still checks every source row before the final OLS fit.
     """
-    if sample_count < 0:
-        raise ValueError("sample_count must be non-negative")
     if sample_count <= _MAX_ROBUST_SEED_SAMPLES:
         return list(range(sample_count))
     last = sample_count - 1
@@ -323,40 +325,18 @@ def _robust_seed_indices(sample_count: int) -> list[int]:
 
 def _line_inliers(
     xs: Sequence[float], values: Sequence[float], *, scale_floor_m: float
-) -> tuple[list[int], list[int]]:
-    """Select samples consistent with one line using a bounded robust seed."""
+) -> set[int]:
+    """Indices of the samples consistent with one line, via a bounded robust seed."""
     _intercept, _slope, residuals = _robust_line_residuals(xs, values)
     scale_m = max(
         _MAD_SCALE_FACTOR * statistics.median(abs(value) for value in residuals),
         scale_floor_m,
     )
-    kept = [
+    return {
         index
         for index, residual in enumerate(residuals)
         if abs(residual) <= _ROBUST_RESIDUAL_Z_MAX * scale_m
-    ]
-    kept_set = set(kept)
-    rejected = [index for index in range(len(xs)) if index not in kept_set]
-    return kept, rejected
-
-
-def _height_inliers(
-    xs: Sequence[float], heights: Sequence[float]
-) -> tuple[list[int], list[int]]:
-    """Select altitude-consistent samples without using TCH or verdict limits.
-
-    Runway assignment already uses the median lateral offset, which is robust to a
-    small number of position spikes.  The catastrophic failures observed in the
-    fixed cohort were isolated geometric-altitude values (for example 983 m and
-    10,828 m inside an otherwise normal descent).  Seed the vertical line with a
-    median slope/intercept, estimate scale with MAD, and run the reported OLS on the
-    retained samples.  The same retained indices are used for both fitted components.
-    """
-    return _line_inliers(
-        xs,
-        heights,
-        scale_floor_m=_ALTITUDE_RESIDUAL_SCALE_FLOOR_M,
-    )
+    }
 
 
 def fit_final_segment(
@@ -375,49 +355,52 @@ def fit_final_segment(
     leg), not an error. Producer-side callers classify and count it rather than drop
     it, since it is a statement about coverage, not about how the approach was flown.
 
-    Projection is done once; both lines are fitted over the same sample set, so the
-    cross-track and vertical answers always describe the same segment.
-
     ``points`` MUST be in time order -- ``along_progress_m`` reads its sign as the
     direction of travel, which is the only thing separating the two ends of one
     runway. Order is not verified here; the harvest sorts by timestamp upstream.
     """
+    # The two tuning knobs are checked once, here, because this is the package's
+    # public entry point: below this line they are invariants, not arguments.
     if min_samples < 3:
         raise ValueError("min_samples must be >= 3 (the line fit needs n - 2 degrees of freedom)")
     if min_span_m <= 0.0:
         raise ValueError("min_span_m must be > 0 (a zero-span segment cannot pin a slope)")
     projected = frame.project_all(points)
-    indexed = _final_inbound_run(projected, window_m)
     indexed = _straight_final_suffix(
-        indexed,
+        _final_inbound_run(projected, window_m),
         min_samples=min_samples,
         min_span_m=min_span_m,
     )
-    if len(indexed) < min_samples:
+    # The suffix, when it exists, already satisfies both minima by construction.
+    if not indexed:
         return None
     source_indices = [index for index, _ in indexed]
     source_projected = [point for _, point in indexed]
     source_alongs = [p.along_m for p in source_projected]
-    span = max(source_alongs) - min(source_alongs)
-    if span < min_span_m:
-        return None
 
-    height_kept, _height_rejected = _height_inliers(
-        source_alongs,
-        [point.height_m for point in source_projected],
+    # Both components are fitted over the SAME samples, so the cross-track and
+    # vertical answers always describe one segment. The catastrophic failures in the
+    # measured cohort were isolated geometric-altitude values (983 m and 10,828 m
+    # inside otherwise normal descents), which the vertical MAD scale rejects without
+    # any reference to TCH or to a verdict limit.
+    kept = sorted(
+        _line_inliers(
+            source_alongs,
+            [point.height_m for point in source_projected],
+            scale_floor_m=_ALTITUDE_RESIDUAL_SCALE_FLOOR_M,
+        )
+        & _line_inliers(
+            source_alongs,
+            [point.cross_m for point in source_projected],
+            scale_floor_m=_LATERAL_RESIDUAL_FLOOR_M,
+        )
     )
-    cross_kept, _cross_rejected = _line_inliers(
-        source_alongs,
-        [point.cross_m for point in source_projected],
-        scale_floor_m=_LATERAL_RESIDUAL_FLOOR_M,
-    )
-    kept = sorted(set(height_kept) & set(cross_kept))
+    if len(kept) < min_samples:
+        return None
     kept_set = set(kept)
     rejected = [
         index for index in range(len(source_projected)) if index not in kept_set
     ]
-    if len(kept) < min_samples:
-        return None
     projected = [source_projected[index] for index in kept]
     sample_indices = [source_indices[index] for index in kept]
     alongs = [point.along_m for point in projected]

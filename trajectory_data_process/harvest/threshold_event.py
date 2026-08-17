@@ -14,6 +14,7 @@ from typing import Any
 
 from final_approach import (
     AMBIGUITY_MARGIN_M,
+    INBOUND_TOLERANCE_M,
     Assignment,
     Projected,
     SegmentFit,
@@ -22,10 +23,10 @@ from final_approach import (
 from final_approach.event_contract import (
     CENSORED_EVENT_METHOD,
     DIRECT_EVENT_METHOD,
-    ESTIMATED_OBSERVABILITY_BY_METHOD,
     EVENT_SCHEMA_VERSION,
     NO_EVENT_METHOD,
     UNAVAILABLE_OBSERVABILITIES,
+    validate_event,
 )
 from geokit import haversine_m
 
@@ -47,12 +48,6 @@ MAX_SPEED_DISAGREEMENT_M_S = 25.0
 MIN_POSITION_TO_REPORTED_SPEED_RATIO = 0.5
 MAX_POSITION_TO_REPORTED_SPEED_RATIO = 1.5
 MAX_PARALLEL_COURSE_DELTA_DEG = 5.0
-
-# Continue from the assignment fit to the closest observed support on that same inbound
-# pass. This is the same one-sample jitter allowance used by the final-approach fitter;
-# comparing to the running maximum prevents a slow reversal accumulating indefinitely.
-_INBOUND_TOLERANCE_M = 100.0
-
 
 @dataclass(frozen=True)
 class ThresholdBracket:
@@ -202,18 +197,14 @@ def build_observed_threshold_event(
 
 
 def require_current_threshold_event(event: dict[str, Any], runway: Runway) -> None:
-    """Strictly validate the current discriminated event contract and frame."""
-    if event.get("schema_version") != EVENT_SCHEMA_VERSION:
-        raise ValueError(
-            f"track threshold event is not {EVENT_SCHEMA_VERSION}; "
-            "run --reclassify-existing"
-        )
-    status = event.get("status")
-    if status not in ("estimated", "unavailable"):
-        raise ValueError(
-            f"track threshold event has invalid status {status!r}; "
-            "run --reclassify-existing"
-        )
+    """Bind the event to THIS runway frame, then validate the shared event schema.
+
+    Identity first: a stale event should be reported as stale, not as a field
+    complaint about a payload that was fine for the runway data it was measured
+    against. The schema half lives in ``final_approach.event_contract`` so the
+    evaluator checks the identical payload rules; only the frame binding is
+    producer-side, because only the producer holds the ``Runway``.
+    """
     if event.get("runway") != runway.ident:
         raise ValueError(
             f"track threshold event is not for runway {runway.ident}; "
@@ -225,48 +216,7 @@ def require_current_threshold_event(event: dict[str, Any], runway: Runway) -> No
             "track threshold event physical-frame snapshot is stale or inconsistent; "
             "run --reclassify-existing"
         )
-
-    method = event.get("method")
-    observability = event.get("observability")
-    if status == "unavailable":
-        if method != NO_EVENT_METHOD or observability not in UNAVAILABLE_OBSERVABILITIES:
-            raise ValueError("unavailable threshold event has an invalid discriminator")
-        if not isinstance(event.get("unavailable_reason"), str):
-            raise ValueError("unavailable threshold event requires a reason")
-        return
-
-    expected_observability = ESTIMATED_OBSERVABILITY_BY_METHOD.get(method)
-    if expected_observability is None or observability != expected_observability:
-        raise ValueError(
-            "estimated threshold event has an invalid method/observability pair; "
-            "run --reclassify-existing"
-        )
-    if event.get("altitude_datum") != "hae":
-        raise ValueError("threshold event altitude_datum must be 'hae'")
-    _source_range(event.get("source_sample_range"))
-    for key in (
-        "threshold_crossing_lat",
-        "threshold_crossing_lon",
-        "threshold_crossing_altitude_m",
-        "signed_cross_track_m",
-        "extrapolation_distance_m",
-    ):
-        _finite_event_number(event, key)
-    uncertainty = event.get("uncertainty")
-    if uncertainty != {"status": "uncalibrated"}:
-        raise ValueError("threshold event uncertainty must be explicitly uncalibrated")
-    distance = float(event["extrapolation_distance_m"])
-    if method == DIRECT_EVENT_METHOD:
-        _finite_event_number(event, "event_time_s")
-        fraction = _finite_event_number(event, "interpolation_fraction")
-        if not 0.0 < fraction <= 1.0 or distance != 0.0:
-            raise ValueError("direct threshold event has invalid interpolation geometry")
-    elif (
-        event.get("event_time_s") is not None
-        or event.get("interpolation_fraction") is not None
-        or distance <= 0.0
-    ):
-        raise ValueError("censored threshold event has invalid extrapolation geometry")
+    validate_event(event)
 
 
 def _validated_brackets_for_runway(
@@ -527,7 +477,7 @@ def _right_censored_support(
     support_along_m = projected[support_index].along_m
     for index in range(fit.last_sample_index + 1, len(projected)):
         along_m = projected[index].along_m
-        if along_m < support_along_m - _INBOUND_TOLERANCE_M:
+        if along_m < support_along_m - INBOUND_TOLERANCE_M:
             break
         if along_m > support_along_m:
             support_index = index
@@ -619,28 +569,6 @@ def _line_audit(line: Any) -> dict[str, float]:
         "rms_residual_m": line.rms_residual_m,
         "max_abs_residual_m": line.max_abs_residual_m,
     }
-
-
-def _source_range(value: Any) -> tuple[int, int]:
-    if (
-        not isinstance(value, list)
-        or len(value) != 2
-        or not all(isinstance(item, int) and not isinstance(item, bool) for item in value)
-        or value[0] < 0
-        or value[1] < value[0]
-    ):
-        raise ValueError("threshold event has an invalid source_sample_range")
-    return value[0], value[1]
-
-
-def _finite_event_number(event: dict[str, Any], key: str) -> float:
-    value = event.get(key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"threshold event {key} must be numeric")
-    number = float(value)
-    if not math.isfinite(number):
-        raise ValueError(f"threshold event {key} must be finite")
-    return number
 
 
 def _course_difference_deg(left: float, right: float) -> float:

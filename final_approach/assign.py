@@ -161,11 +161,12 @@ def landing_screen_reason(
     This deliberately does no runway assignment and no fitting.  Producers that can
     assign from a measured threshold bracket use the same airport-level protection as
     ``assign_runway`` without first allowing a fit to choose the runway.
+
+    ``frames`` must be non-empty -- an airport with no thresholds is a configuration
+    error, and answering "not_landing" for every one of its tracks would hide it.
     """
     if len(points) < 2:
         return "fewer than 2 samples"
-    if not frames:
-        return "airport has no runway thresholds"
     frame, anchor_index, distance_m = _closest(points, frames)
     return _is_landing(points, frame, anchor_index, distance_m, screen)
 
