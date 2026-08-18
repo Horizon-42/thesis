@@ -29,10 +29,6 @@ nondimensionalises the seven point-mass coordinates and is all-ones for the phys
 variant.
 
 Controls are the COMMANDS, in the same units as the actuator states.
-
-Known gap: the point-mass backends cache a ``torch.compile``d CUDA step; this one does not,
-so it runs eager on GPU. That is a speed difference only — the eager step is the same
-arithmetic — but it is why a lagged run is slower per epoch than a point-mass one.
 """
 
 from __future__ import annotations
@@ -174,47 +170,120 @@ def rk4_lag_step(
     return state_lag + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
 
-# The rollout engine hands one ``step_context`` tensor to the step function. The lag model
-# needs three per-flight/per-run constants there, packed in a fixed order.
+# The rollout engine hands one ``step_context`` tensor to the step function, so every
+# per-run constant travels in it, in this fixed layout:
+#
+#     [ frame_params (4) | time_constants_s (3) | max_thrust_n (1) | state_scale (10) ]
+#
+# state_scale rides along rather than being captured in a closure specifically so the step
+# stays ONE module-level function. A closure would be a new code object per rollout, and
+# torch.compile caches per code object — the compiled step would be rebuilt every batch and
+# would exhaust Dynamo's recompile budget instead of paying off.
 _FRAME_WIDTH = 4
+_TAU_WIDTH = len(CONTROL_NAMES)
+_THRUST_AT = _FRAME_WIDTH + _TAU_WIDTH
+_SCALE_AT = _THRUST_AT + 1
 
 
 def _pack_context(
     frame_params: torch.Tensor,
     time_constants_s: torch.Tensor,
     max_thrust_n: torch.Tensor,
+    state_scale: torch.Tensor,
 ) -> torch.Tensor:
-    constants = time_constants_s.reshape(1, -1).expand(len(frame_params), -1)
+    rows = len(frame_params)
     return torch.cat(
         (
             frame_params,
-            constants.to(frame_params.dtype),
+            time_constants_s.reshape(1, -1).expand(rows, -1).to(frame_params.dtype),
             max_thrust_n.reshape(-1, 1).to(frame_params.dtype),
+            state_scale.reshape(1, -1).expand(rows, -1).to(frame_params.dtype),
         ),
         dim=-1,
     )
 
 
-def _make_step(state_scale: torch.Tensor):
-    def step(
-        state: torch.Tensor,
-        commands: torch.Tensor,
-        aero_params: torch.Tensor,
-        dt_s: torch.Tensor,
-        step_context: torch.Tensor,
-    ) -> torch.Tensor:
-        return rk4_lag_step(
-            state,
-            commands,
-            aero_params,
-            dt_s,
-            step_context[..., :_FRAME_WIDTH],
-            step_context[..., _FRAME_WIDTH : _FRAME_WIDTH + len(CONTROL_NAMES)],
-            step_context[..., -1],
-            state_scale,
-        )
+def _unpacked_step(
+    state: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    return rk4_lag_step(
+        state,
+        commands,
+        aero_params,
+        dt_s,
+        step_context[..., :_FRAME_WIDTH],
+        step_context[..., _FRAME_WIDTH:_THRUST_AT],
+        step_context[..., _THRUST_AT],
+        step_context[0, _SCALE_AT:],
+    )
 
-    return step
+
+_COMPILED_CUDA_INFERENCE_STEP = None
+_COMPILED_CUDA_AUTOGRAD_STEP = None
+
+
+def _cuda_inference_step(
+    state: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    """Distinct code object so no-grad shape caches do not consume VJP entries."""
+    return _unpacked_step(state, commands, aero_params, dt_s, step_context)
+
+
+def _cuda_autograd_step(
+    state: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    """Distinct code object for the grad-enabled local discrete-adjoint step."""
+    return _unpacked_step(state, commands, aero_params, dt_s, step_context)
+
+
+def _rollout_step(
+    state: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    """Eager on CPU, a fused Inductor graph on CUDA — as the point-mass backends do.
+
+    Measured before this: a lagged epoch cost ~95 s against the point-mass backend's ~15 s
+    on the same KSJC fold, entirely because this step ran eager while the others cached a
+    compiled one.
+    """
+    if not state.is_cuda:
+        return _unpacked_step(state, commands, aero_params, dt_s, step_context)
+    global _COMPILED_CUDA_INFERENCE_STEP, _COMPILED_CUDA_AUTOGRAD_STEP
+    grad_enabled = torch.is_grad_enabled()
+    compiled = (
+        _COMPILED_CUDA_AUTOGRAD_STEP
+        if grad_enabled
+        else _COMPILED_CUDA_INFERENCE_STEP
+    )
+    if compiled is None:
+        # ``dynamic=True`` in backward reproducibly segfaults on this Torch/CUDA stack
+        # (see torch_dynamics), so the autograd kernel stays static.
+        compiled = torch.compile(
+            _cuda_autograd_step if grad_enabled else _cuda_inference_step,
+            fullgraph=True,
+            dynamic=not grad_enabled,
+            mode="reduce-overhead",
+        )
+        if grad_enabled:
+            _COMPILED_CUDA_AUTOGRAD_STEP = compiled
+        else:
+            _COMPILED_CUDA_INFERENCE_STEP = compiled
+    return compiled(state, commands, aero_params, dt_s, step_context)
 
 
 def rollout_piecewise_constant(
@@ -240,8 +309,8 @@ def rollout_piecewise_constant(
         commands,
         segment_durations_s,
         aero_params,
-        _pack_context(frame_params, time_constants_s, max_thrust_n),
-        _make_step(state_scale),
+        _pack_context(frame_params, time_constants_s, max_thrust_n, state_scale),
+        _rollout_step,
         integrator_dt_s=integrator_dt_s,
         max_steps_per_segment=max_steps_per_segment,
     )
@@ -273,8 +342,8 @@ def rollout_piecewise_constant_at_times(
         commands,
         segment_durations_s,
         aero_params,
-        _pack_context(frame_params, time_constants_s, max_thrust_n),
-        _make_step(state_scale),
+        _pack_context(frame_params, time_constants_s, max_thrust_n, state_scale),
+        _rollout_step,
         query_offsets_s,
         query_valid,
         segment_valid=segment_valid,
