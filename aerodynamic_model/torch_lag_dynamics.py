@@ -29,6 +29,10 @@ nondimensionalises the seven point-mass coordinates and is all-ones for the phys
 variant.
 
 Controls are the COMMANDS, in the same units as the actuator states.
+
+Known gap: the point-mass backends cache a ``torch.compile``d CUDA step; this one does not,
+so it runs eager on GPU. That is a speed difference only — the eager step is the same
+arithmetic — but it is why a lagged run is slower per epoch than a point-mass one.
 """
 
 from __future__ import annotations

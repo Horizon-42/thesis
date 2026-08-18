@@ -43,7 +43,7 @@ from control_dynamics_backends import RolloutInputs, control_dynamics_backend  #
 from control_envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
 from geokit import METRES_PER_DEG_LAT  # noqa: E402
 from control_inverse_dynamics import (  # noqa: E402
-    _INVERSES,
+    CONTROL_INVERSES,
     actual_controls,
     reference_controls,
 )
@@ -117,7 +117,7 @@ def _dense_reference(config: TSConfig, controls: np.ndarray, initial_controls):
 
 
 def test_every_registered_dynamics_model_has_an_inverse():
-    assert set(_INVERSES) == set(CONTROL_DYNAMICS_MODELS)
+    assert set(CONTROL_INVERSES) == set(CONTROL_DYNAMICS_MODELS)
 
 
 @pytest.mark.parametrize("model", CONTROL_DYNAMICS_MODELS)

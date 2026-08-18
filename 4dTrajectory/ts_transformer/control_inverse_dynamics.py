@@ -293,7 +293,7 @@ def _first_order_lag_inverse(
     )
 
 
-_INVERSES = {
+CONTROL_INVERSES = {
     CONTROL_DYNAMICS_POINT_MASS: _point_mass_inverse,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG: _first_order_lag_inverse,
 }
@@ -309,7 +309,7 @@ def reference_controls(
     frame_params: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return the ``[M,3]`` control schedule the CONFIGURED forward model would need."""
-    return _INVERSES[config.control_dynamics_model](
+    return CONTROL_INVERSES[config.control_dynamics_model](
         states,
         times_s,
         aero_params=aero_params,
