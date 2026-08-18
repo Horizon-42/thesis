@@ -1,8 +1,8 @@
 """One control/dynamics rollout API shared by training, evaluation and forecasting.
 
-The selected backend owns the state representation and RK4 implementation.  This module
-owns the public tensor contract and the mandatory float64 dynamics boundary so callers do
-not reproduce dtype/device conversions or reach into backend implementations directly.
+The selected model/representation pair owns the state and the RK4 implementation. This
+module owns the public tensor contract and the mandatory float64 dynamics boundary, so
+callers never reproduce dtype/device conversions or reach into a backend directly.
 """
 
 from __future__ import annotations
@@ -13,11 +13,34 @@ from config import TSConfig
 from control_dynamics_backends import (
     DenseControlRolloutChannels,
     EndpointControlRollout,
+    RolloutInputs,
     control_dynamics_backend,
 )
 
 
 ROLLOUT_DTYPE = torch.float64
+
+
+def rollout_inputs(
+    controls: torch.Tensor,
+    segment_durations_s: torch.Tensor,
+    dynamics: dict[str, torch.Tensor],
+) -> RolloutInputs:
+    """Assemble the float64 dynamics boundary from a batch's dynamics dict."""
+    device = controls.device
+
+    def cast(value: torch.Tensor) -> torch.Tensor:
+        return value.to(dtype=ROLLOUT_DTYPE, device=device)
+
+    return RolloutInputs(
+        initial_state=cast(dynamics["initial_state"]),
+        initial_controls=cast(dynamics["initial_controls"]),
+        controls=controls.to(ROLLOUT_DTYPE),
+        segment_durations_s=segment_durations_s.to(ROLLOUT_DTYPE),
+        aero_params=cast(dynamics["aero_params"]),
+        frame_params=cast(dynamics["frame_params"]),
+        max_thrust_n=cast(dynamics["max_thrust_n"]),
+    )
 
 
 def rollout_control_endpoints(
@@ -28,12 +51,7 @@ def rollout_control_endpoints(
 ) -> EndpointControlRollout:
     """Roll a batch to every control boundary using the configured dynamics."""
     return control_dynamics_backend(config).endpoint_rollout(
-        dynamics["initial_state"].to(ROLLOUT_DTYPE),
-        controls.to(ROLLOUT_DTYPE),
-        segment_durations_s.to(ROLLOUT_DTYPE),
-        dynamics["aero_params"].to(ROLLOUT_DTYPE),
-        dynamics["frame_params"].to(ROLLOUT_DTYPE),
-        config,
+        rollout_inputs(controls, segment_durations_s, dynamics), config
     )
 
 
@@ -50,11 +68,7 @@ def rollout_control_dense(
     """Roll a batch once and return exact states at queries and control boundaries."""
     device = controls.device
     return control_dynamics_backend(config).dense_rollout(
-        dynamics["initial_state"].to(ROLLOUT_DTYPE),
-        controls.to(ROLLOUT_DTYPE),
-        segment_durations_s.to(ROLLOUT_DTYPE),
-        dynamics["aero_params"].to(ROLLOUT_DTYPE),
-        dynamics["frame_params"].to(ROLLOUT_DTYPE),
+        rollout_inputs(controls, segment_durations_s, dynamics),
         query_offsets_s.to(dtype=ROLLOUT_DTYPE, device=device),
         query_valid.to(device=device, dtype=torch.bool),
         config,

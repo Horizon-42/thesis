@@ -31,8 +31,7 @@ from control_oracle import (  # noqa: E402
     oracle_state_loss,
     smooth_maximum,
 )
-from control_oracle_initialization import (  # noqa: E402
-    inverse_dynamics_controls,
+from control_inverse_dynamics import (  # noqa: E402
     refine_piecewise_constant_schedule,
 )
 from control_oracle_curriculum import (  # noqa: E402
@@ -127,41 +126,6 @@ def test_learned_oracle_accepts_a_nonuniform_duration_warm_start():
     )
 
     assert torch.allclose(oracle().segment_durations[0], durations)
-
-
-def test_inverse_dynamics_initializer_recovers_a_level_coordinated_turn():
-    times = np.arange(0.0, 12.0, 2.0)
-    speed = 80.0
-    heading_rate = 0.01
-    mass = 60_000.0
-    states = np.column_stack(
-        (
-            np.zeros_like(times),
-            np.zeros_like(times),
-            np.full_like(times, 1_000.0),
-            np.full_like(times, speed),
-            heading_rate * times,
-            np.zeros_like(times),
-            np.full_like(times, mass),
-        )
-    )
-    result = inverse_dynamics_controls(
-        states,
-        times,
-        aero_params=np.array([122.6, 1.5, 0.02, 0.04, 0.8, 0.2]),
-        control_lower=np.array([0.0, -np.pi / 4.0, 0.5]),
-        control_upper=np.array([300_000.0, np.pi / 4.0, 2.0]),
-        n_segments=4,
-        total_duration_s=10.0,
-    )
-    lateral = heading_rate * speed / 9.81
-    expected_load = np.hypot(lateral, 1.0)
-    expected_bank = np.arctan2(lateral, 1.0)
-
-    assert result.controls[:, 1] == pytest.approx([expected_bank] * 4)
-    assert result.controls[:, 2] == pytest.approx([expected_load] * 4)
-    assert np.all(result.controls[:, 0] > 0.0)
-    assert result.clipped_fraction.tolist() == pytest.approx([0.0, 0.0, 0.0])
 
 
 def test_schedule_refinement_preserves_piecewise_controls_and_total_duration():

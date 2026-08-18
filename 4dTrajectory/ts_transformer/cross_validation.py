@@ -22,6 +22,8 @@ import torch
 
 from batching import resolve_batch_size
 from config import (
+    CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+    CONTROL_DYNAMICS_POINT_MASS,
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_OBJECTIVE,
@@ -67,6 +69,11 @@ CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {
     "n_heads": (4, 8),
     "dropout": (0.05, 0.1, 0.2),
     "weight_decay": (0.0, 1e-4),
+    # The lagged flight model's one open parameter. Bracketing 2 s covers the range a
+    # transport aircraft actually rolls in over: 1 s is a brisk roll, 4 s is a lazy one,
+    # and 0.5 s is close enough to instantaneous to double as the "does the lag help at
+    # all" arm. Inert unless control_dynamics_model='first-order-lag'.
+    "control_bank_time_constant_s": (0.5, 1.0, 2.0, 3.0, 4.0),
 }
 CV_OVERRIDE_FIELDS = (*CV_PARAMETER_GRIDS, "d_ff")
 DEFAULT_CV_PARAMETERS = (
@@ -93,17 +100,36 @@ def validate_cv_parameters(parameters: Sequence[str]) -> tuple[str, ...]:
     return selected
 
 
+# Axes that only mean something under one contract. Sweeping an inert one multiplies the
+# candidate count by its grid and returns identical folds, which reads as a converged
+# search over a parameter that never moved.
+_INERT_CV_PARAMETERS = {
+    "n_segments": lambda horizon_mode, dynamics_model: (
+        horizon_mode != HORIZON_NORMALIZED
+    ),
+    "control_bank_time_constant_s": lambda horizon_mode, dynamics_model: (
+        dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG
+    ),
+}
+
+
 def applicable_cv_parameters(
-    parameters: Sequence[str], horizon_mode: str
+    parameters: Sequence[str],
+    horizon_mode: str,
+    dynamics_model: str = CONTROL_DYNAMICS_POINT_MASS,
 ) -> tuple[str, ...]:
     """Return only parameters that affect the selected prediction contract."""
-    selected = validate_cv_parameters(parameters)
-    if horizon_mode != HORIZON_NORMALIZED:
-        selected = tuple(name for name in selected if name != "n_segments")
+    selected = tuple(
+        name
+        for name in validate_cv_parameters(parameters)
+        if not _INERT_CV_PARAMETERS.get(name, lambda *_: False)(
+            horizon_mode, dynamics_model
+        )
+    )
     if not selected:
         raise ValueError(
-            "n_segments only affects normalized-time output; fixed-horizon CV needs "
-            "at least one applicable parameter"
+            f"every requested CV parameter is inert under horizon_mode={horizon_mode!r} "
+            f"and control_dynamics_model={dynamics_model!r}; choose an applicable one"
         )
     return selected
 
@@ -118,7 +144,9 @@ def _candidate_overrides(
     parameters: Sequence[str] = DEFAULT_CV_PARAMETERS,
 ) -> list[dict[str, Any]]:
     """Return the complete, architecture-valid grid for the selected parameters."""
-    selected = applicable_cv_parameters(parameters, base.horizon_mode)
+    selected = applicable_cv_parameters(
+        parameters, base.horizon_mode, base.control_dynamics_model
+    )
     candidates: list[dict[str, Any]] = []
     value_grid = (CV_PARAMETER_GRIDS[name] for name in selected)
     for values in itertools.product(*value_grid):
@@ -357,7 +385,7 @@ def cross_validate(
     )
     folds = cross_validation_folds(outer_train, n_splits, seed=base_config.seed)
     selected_parameters = applicable_cv_parameters(
-        cv_parameters, base_config.horizon_mode
+        cv_parameters, base_config.horizon_mode, base_config.control_dynamics_model
     )
     candidates = _candidate_overrides(base_config, selected_parameters)
     outer_split = _split_audit(outer_train, outer_val, outer_test)

@@ -41,6 +41,7 @@ ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
 import channels as ch  # noqa: E402
+import control_models  # noqa: E402
 import batching  # noqa: E402
 import build_multiflight_capacity_report as capacity_report  # noqa: E402
 import coordinate_frames as frames  # noqa: E402
@@ -75,6 +76,8 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_METRICS,
     CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
     CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+    CONTROL_DYNAMICS_POINT_MASS,
+    CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
@@ -95,6 +98,7 @@ from config import (  # noqa: E402
     PREDICTION_STATE,
     TSConfig, control_recipe, control_simple_v1_overrides,
 )
+from control_envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
 from control_loss_components import (  # noqa: E402
     ControlStateLossResult,
     control_tracking_loss_terms,
@@ -669,8 +673,11 @@ def test_coordinate_frame_setting_selects_a_concrete_implementation():
     assert type(enu_series[0].frame) is frames.ENUFrame
     assert type(aligned_series[0].frame) is frames.RunwayAlignedFrame
 
-    enu_dynamics = dataset_module.dynamics_arrays(enu_series[0], 0)
-    aligned_dynamics = dataset_module.dynamics_arrays(aligned_series[0], 0)
+    # Any anchor the pipeline builds has the whole lookback behind it; the anchor-state
+    # control inversion differentiates that window, so it needs a real anchor, not 0.
+    anchor = dataset_module.ANCHOR_CONTROL_SAMPLES
+    enu_dynamics = dataset_module.dynamics_arrays(enu_series[0], anchor)
+    aligned_dynamics = dataset_module.dynamics_arrays(aligned_series[0], anchor)
     runway_heading = enu_series[0].scenario.target.psi
     assert enu_dynamics["frame_params"][3] == pytest.approx(0.0)
     assert aligned_dynamics["frame_params"][3] == pytest.approx(runway_heading)
@@ -2922,18 +2929,14 @@ def test_fixed_dt_rollout_closes_duration_clock_without_training_stage(monkeypat
     class CapturingBackend:
         def dense_rollout(
             self,
-            initial_state,
-            controls,
-            closed_durations,
-            aero_params,
-            frame_params,
+            inputs,
             query_offsets_s,
             query_valid,
             config,
             *,
             segment_valid,
         ):
-            total = closed_durations.cumsum(dim=1)[0, -1]
+            total = inputs.segment_durations_s.cumsum(dim=1)[0, -1]
             torch.testing.assert_close(
                 total,
                 torch.tensor(580.0, dtype=torch.float64),
@@ -2953,8 +2956,10 @@ def test_fixed_dt_rollout_closes_duration_clock_without_training_stage(monkeypat
     )
     dynamics = {
         "initial_state": torch.zeros(1, 7),
+        "initial_controls": torch.zeros(1, 3),
         "aero_params": torch.zeros(1, 1),
         "frame_params": torch.zeros(1, 1),
+        "max_thrust_n": torch.ones(1),
     }
 
     _queries, _endpoints, closed_durations = (
@@ -3236,8 +3241,8 @@ def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
         std=np.ones(channel_count, dtype=np.float64),
     )
     dynamics = {
-        "control_lower": torch.tensor([[0.0, -0.7, 0.5]]),
-        "control_upper": torch.tensor([[240_000.0, 0.7, 2.0]]),
+        "control_lower": torch.tensor([CONTROL_LOWER], dtype=torch.float32),
+        "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }
 
     components = train_module.prediction_loss_components(
@@ -3297,8 +3302,8 @@ def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monk
     target = torch.zeros(1, 2, config.enc_in)
     weights = torch.full_like(target, 1.0 / config.enc_in)
     dynamics = {
-        "control_lower": torch.tensor([[0.0, -0.7, 0.5]]),
-        "control_upper": torch.tensor([[240_000.0, 0.7, 2.0]]),
+        "control_lower": torch.tensor([CONTROL_LOWER], dtype=torch.float32),
+        "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }
 
     components = train_module.control_prediction_loss_components(
@@ -3337,8 +3342,8 @@ def test_control_model_starts_from_neutral_uniform_rollout():
     )
     model = build_model(config).eval()
     history = torch.randn(2, config.seq_len, config.enc_in)
-    lower = torch.tensor([[0.0, -math.pi / 4.0, 0.5], [0.0, -0.5, 0.5]])
-    upper = torch.tensor([[240_000.0, math.pi / 4.0, 2.0], [200_000.0, 0.5, 2.0]])
+    lower = torch.tensor([CONTROL_LOWER, CONTROL_LOWER], dtype=torch.float32)
+    upper = torch.tensor([CONTROL_UPPER, CONTROL_UPPER], dtype=torch.float32)
     dynamics = {
         "condition": torch.randn(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
         "control_lower": lower,
@@ -3346,11 +3351,14 @@ def test_control_model_starts_from_neutral_uniform_rollout():
     }
 
     prediction = model(history, dynamics)
-    unit_controls = (prediction.controls - lower[:, None]) / (upper - lower)[:, None]
-    expected_units = torch.tensor([0.2, 0.5, 1.0 / 3.0]).view(1, 1, 3)
+    # The untrained head emits the neutral physical control, not a fixed fraction of
+    # whatever the bounds happen to be: 20% thrust, wings level, load factor one.
+    expected = torch.tensor(control_models.NEUTRAL_CONTROLS).view(1, 1, 3)
     expected_time = math.log(2.0) * config.final_time_scale_s
 
-    torch.testing.assert_close(unit_controls, expected_units.expand_as(unit_controls))
+    torch.testing.assert_close(
+        prediction.controls, expected.expand_as(prediction.controls)
+    )
     torch.testing.assert_close(
         prediction.final_time_s,
         torch.full_like(prediction.final_time_s, expected_time),
@@ -3458,8 +3466,9 @@ def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step(
 
     assert torch.isfinite(loss)
     assert set(dynamics) == {
-        "condition", "initial_state", "aero_params", "control_lower",
-        "control_upper", "frame_params", "runway_heading_rad",
+        "condition", "initial_state", "initial_controls", "aero_params",
+        "control_lower", "control_upper", "max_thrust_n", "frame_params",
+        "runway_heading_rad",
     }
     assert any(
         parameter.grad is not None and torch.count_nonzero(parameter.grad)
@@ -5516,7 +5525,7 @@ def test_control_forecast_exports_optimizer_shaped_states_and_aligned_controls()
         def forward(self, history, dynamics):
             batch = len(history)
             controls = torch.tensor(
-                [[[40_000.0, 0.04, 1.01], [32_000.0, -0.02, 0.99]]],
+                [[[0.20, 0.04, 1.01], [0.16, -0.02, 0.99]]],
                 dtype=history.dtype,
                 device=history.device,
             ).expand(batch, -1, -1)
@@ -5552,10 +5561,13 @@ def test_control_forecast_exports_optimizer_shaped_states_and_aligned_controls()
         [0.5, 0.25, 0.25, 0.5, 0.5]
     )
     assert forecast.segment_durations_s.tolist() == pytest.approx([0.75, 1.25])
-    assert parsed.controls[0]["thrust"] == pytest.approx(40_000.0)
-    assert parsed.controls[2]["thrust"] == pytest.approx(40_000.0)
-    assert parsed.controls[3]["thrust"] == pytest.approx(32_000.0)
-    assert parsed.controls[-1]["thrust"] == pytest.approx(32_000.0)
+    # The model predicts thrust FRACTIONS; the exported record contract is newtons, so
+    # each row must come back multiplied by this flight's installed thrust.
+    max_thrust_n = series[0].scenario.aircraft.engine.max_thrust_total_n
+    assert parsed.controls[0]["thrust"] == pytest.approx(0.20 * max_thrust_n)
+    assert parsed.controls[2]["thrust"] == pytest.approx(0.20 * max_thrust_n)
+    assert parsed.controls[3]["thrust"] == pytest.approx(0.16 * max_thrust_n)
+    assert parsed.controls[-1]["thrust"] == pytest.approx(0.16 * max_thrust_n)
     assert [row["duration_s"] for row in record.states_payload["control_segments"]] \
         == pytest.approx([0.75, 1.25])
     assert parsed.final_time_s == pytest.approx(2.0)
@@ -5614,69 +5626,25 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
     assert loaded_config.prediction_output == PREDICTION_CONTROL
     assert isinstance(model(torch.zeros(1, config.seq_len, config.enc_in), {
         "condition": torch.ones(1, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
-        "control_lower": torch.tensor([[0.0, -0.5, 0.5]]),
-        "control_upper": torch.tensor([[100_000.0, 0.5, 2.0]]),
+        "control_lower": torch.tensor([CONTROL_LOWER], dtype=torch.float32),
+        "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }), ControlPrediction)
     assert payload["target_contract"] == expected_contract
     assert metadata["prediction_output"] == PREDICTION_CONTROL
-    assert metadata["control_recipe"] == {
-        "effort_loss_weight": config.control_effort_loss_weight,
-            "smoothness_loss_weight": config.control_smoothness_loss_weight,
-            "duration_parameterization": duration_parameterization,
-            "duration_uniform_floor": config.control_duration_uniform_floor,
-        "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
-        "reference_velocity_source": config.reference_velocity_source,
-        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
-        "state_supervision_clock": config.control_state_supervision_clock,
-        "state_loss_grid": config.control_state_loss_grid,
-            "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-            "dense_state_loss_weight": config.control_dense_state_loss_weight,
-            "geometry_loss_weight": config.control_geometry_loss_weight,
-            "arc_horizontal_velocity_loss_weight": (
-                config.control_arc_horizontal_velocity_loss_weight
-            ),
-            "arc_vertical_velocity_loss_weight": (
-                config.control_arc_vertical_velocity_loss_weight
-            ),
-            "arc_horizontal_velocity_scale_mps": (
-                config.control_arc_horizontal_velocity_scale_mps
-            ),
-            "arc_vertical_velocity_scale_mps": (
-                config.control_arc_vertical_velocity_scale_mps
-            ),
-            "arc_local_velocity_parameterization": (
-                config.control_arc_local_velocity_parameterization
-            ),
-            "arc_tangent_loss_weight": config.control_arc_tangent_loss_weight,
-            "arc_position_end_weight": config.control_arc_position_end_weight,
-            "arc_terminal_parameterization": config.control_arc_terminal_parameterization,
-            "arc_terminal_cross_track_emphasis": (
-                config.control_arc_terminal_cross_track_emphasis
-            ),
-            "arc_terminal_vertical_emphasis": (
-                config.control_arc_terminal_vertical_emphasis
-            ),
-            "terminal_position_loss_weight": (
-                config.control_terminal_position_loss_weight
-            ),
-            "terminal_velocity_loss_weight": (
-                config.control_terminal_velocity_loss_weight
-            ),
-            "terminal_position_scale_m": config.control_terminal_position_scale_m,
-            "terminal_velocity_scale_mps": (
-                config.control_terminal_velocity_scale_mps
-            ),
-            "terminal_supervision_clock": (
-                config.control_terminal_supervision_clock
-            ),
-        "state_duration_gradient": True,
-        "horizon_curriculum_s": [],
-        "horizon_curriculum_stage_epochs": (
-            config.control_horizon_curriculum_stage_epochs
-        ),
-        "gradient_clip_norm": 0.0,
-        "gradient_clip_policy": CONTROL_GRADIENT_CLIP_GLOBAL,
-    }
+    # control_recipe() IS the schema; restating it here would give a fixture that cannot
+    # detect the field it forgot to add. Assert the identity plus the values this
+    # particular run is meant to pin.
+    assert metadata["control_recipe"] == control_recipe(loaded_config)
+    assert metadata["control_recipe"]["duration_parameterization"] == (
+        duration_parameterization
+    )
+    assert metadata["control_recipe"]["dynamics_backend"] == (
+        CONTROL_DYNAMICS_REANCHORED_RK4
+    )
+    assert metadata["control_recipe"]["dynamics_model"] == CONTROL_DYNAMICS_POINT_MASS
+    assert metadata["control_recipe"]["state_objective"] == (
+        CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+    )
 
 
 def test_reference_comparison_detects_a_prediction_with_a_different_endpoint():

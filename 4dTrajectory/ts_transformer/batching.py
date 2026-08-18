@@ -62,7 +62,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
     """Run the real state/time/physics loss once or raise CUDA OOM."""
     # Local imports avoid a module cycle: train imports resolve_batch_size, while the probe
     # must share train's loss implementation so its retained CUDA graph cannot drift.
-    from dataset import Normalizer
+    from dataset import Normalizer, probe_dynamics
     from fixed_dt_supervision import FixedDTControlSupervision
     from train import model_forward, prediction_loss
 
@@ -99,35 +99,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
         dynamics = None
         dense_supervision = None
         if uses_control_dynamics(config.prediction_output):
-            dynamics = {
-                "condition": torch.tensor(
-                    [[0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5]],
-                    dtype=torch.float32,
-                    device=device,
-                ).expand(batch_size, -1),
-                "initial_state": torch.tensor(
-                    [[35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, 66_000.0]],
-                    dtype=torch.float32,
-                    device=device,
-                ).expand(batch_size, -1),
-                "aero_params": torch.tensor(
-                    [[122.6, 2.7, 0.02, 0.04, 0.9, 0.1]],
-                    dtype=torch.float32,
-                    device=device,
-                ).expand(batch_size, -1),
-                "control_lower": torch.tensor(
-                    [[0.0, -0.7853982, 0.5]], dtype=torch.float32, device=device
-                ).expand(batch_size, -1),
-                "control_upper": torch.tensor(
-                    [[240_000.0, 0.7853982, 2.0]], dtype=torch.float32, device=device
-                ).expand(batch_size, -1),
-                "frame_params": torch.tensor(
-                    [[35.9, -78.8, 100.0, 0.0]], dtype=torch.float32, device=device
-                ).expand(batch_size, -1),
-                "runway_heading_rad": torch.zeros(
-                    batch_size, dtype=torch.float32, device=device
-                ),
-            }
+            dynamics = probe_dynamics(batch_size, device)
             if config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
                 points = int(config.final_time_scale_s // config.dt_s)
                 offsets = (

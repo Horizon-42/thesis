@@ -42,17 +42,11 @@ def _config() -> TSConfig:
 
 
 class _DurationBackend:
-    def endpoint_rollout(
-        self,
-        initial_state,
-        controls,
-        durations,
-        aero_params,
-        frame_params,
-        config,
-    ):
-        del initial_state, controls, aero_params, frame_params, config
-        position = durations.cumsum(dim=1)
+    """Stand-in whose endpoint position is just cumulative time, so the CLOCK is visible."""
+
+    def endpoint_rollout(self, inputs, config):
+        del config
+        position = inputs.segment_durations_s.cumsum(dim=1)
         channels = torch.stack(
             (
                 position,
@@ -86,8 +80,10 @@ def test_predicted_terminal_clock_attaches_deployable_endpoints_and_gradients(mo
     )
     dynamics = {
         "initial_state": torch.zeros(1, 7),
+        "initial_controls": torch.zeros(1, 3),
         "aero_params": torch.zeros(1, 1),
         "frame_params": torch.zeros(1, 1),
+        "max_thrust_n": torch.ones(1),
     }
 
     dual = terminal_clock_module.apply_control_terminal_clock(
@@ -139,8 +135,10 @@ def test_detached_time_terminal_trains_partition_but_not_total_time(monkeypatch)
         prediction,
         {
             "initial_state": torch.zeros(1, 7),
+            "initial_controls": torch.zeros(1, 3),
             "aero_params": torch.zeros(1, 1),
             "frame_params": torch.zeros(1, 1),
+            "max_thrust_n": torch.ones(1),
         },
         config,
         Normalizer(mean=np.zeros(6), std=np.ones(6)),

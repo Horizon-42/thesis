@@ -16,7 +16,6 @@ import torch
 from aerodynamic_model.torch_dynamics import (
     AERO_PARAMETER_NAMES,
     CONTROL_NAMES,
-    STATE_NAMES,
     _rollout_step,
 )
 from aerodynamic_model.torch_piecewise_rollout import RolloutStep
@@ -398,8 +397,11 @@ def rollout_piecewise_constant_at_times_with_step(
     max_total_steps: int = 65536,
 ) -> DenseControlRollout:
     """Roll once and return exact RK4 states at fixed queries and control boundaries."""
-    if initial_states.ndim != 2 or initial_states.shape[-1] != len(STATE_NAMES):
-        raise ValueError("initial states must be [B,7]")
+    # The state width belongs to the step function, not to this engine: a lagged model
+    # carries actuator states alongside the point-mass ones. Only the batch/segment
+    # alignment below is this module's contract.
+    if initial_states.ndim != 2:
+        raise ValueError("initial states must be [B,S]")
     if controls.ndim != 3 or controls.shape[-1] != len(CONTROL_NAMES):
         raise ValueError("controls must be [B,N,3]")
     if segment_durations_s.shape != controls.shape[:2]:

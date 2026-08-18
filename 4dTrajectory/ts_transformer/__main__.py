@@ -59,11 +59,14 @@ from config import (  # noqa: E402
     CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
     CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
     CONTROL_DYNAMICS_BACKENDS,
+    CONTROL_DYNAMICS_MODELS,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_GRADIENT_CLIP_POLICIES,
     CONTROL_RECIPE_NAMES,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_SIMPLE_V1,
+    CONTROL_RECIPE_SIMPLE_V1_LAG,
+    TIME_CONSTANT_FIELDS,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_OBJECTIVES,
@@ -74,7 +77,7 @@ from config import (  # noqa: E402
     PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
     TSConfig,
-    control_simple_v1_overrides,
+    control_recipe_overrides,
 )
 from approach_clustering.cli import (  # noqa: E402
     add_cli_arguments as add_approach_cohort_arguments,
@@ -210,7 +213,9 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "named frozen control experiment recipe; simple-v1 fixes architecture, "
-            "uniform durations, physical position/time loss and ADE selection"
+            "uniform durations, physical position/time loss and ADE selection. "
+            "simple-v1-lag is the same recipe with the lagged flight model, leaving "
+            "only the actuator time constants free"
         ),
     )
     parser.add_argument("--model", choices=MODELS, default=MODELS[0])
@@ -345,6 +350,24 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
             "continuous full-transport chart/ENU-velocity dynamics"
         ),
     )
+    parser.add_argument(
+        "--control-dynamics-model",
+        choices=CONTROL_DYNAMICS_MODELS,
+        default=None,
+        help=(
+            "flight model: point-mass applies each control instantly; first-order-lag "
+            "drives thrust, bank and load factor towards their command with a time "
+            "constant, so they stay continuous across a segment boundary"
+        ),
+    )
+    parser.add_argument("--control-thrust-tau-s", type=float, default=None)
+    parser.add_argument(
+        "--control-bank-tau-s",
+        type=float,
+        default=None,
+        help="bank-angle time constant; the lagged model's swept parameter",
+    )
+    parser.add_argument("--control-load-tau-s", type=float, default=None)
     parser.add_argument(
         "--control-state-clock",
         choices=CONTROL_STATE_CLOCKS,
@@ -574,6 +597,10 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_duration_parameterization", args.control_duration_parameterization),
         ("control_duration_uniform_floor", args.control_duration_uniform_floor),
         ("control_dynamics_backend", args.control_dynamics_backend),
+        ("control_dynamics_model", args.control_dynamics_model),
+        ("control_thrust_time_constant_s", args.control_thrust_tau_s),
+        ("control_bank_time_constant_s", args.control_bank_tau_s),
+        ("control_load_time_constant_s", args.control_load_tau_s),
         ("control_state_supervision_clock", args.control_state_clock),
         ("control_state_loss_grid", args.control_state_loss_grid),
         ("control_state_objective", args.control_state_objective),
@@ -614,16 +641,26 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
             f"unknown control recipe {requested_recipe!r}; choose from "
             f"{CONTROL_RECIPE_NAMES}"
         )
-    if requested_recipe == CONTROL_RECIPE_SIMPLE_V1:
+    frozen = control_recipe_overrides(requested_recipe)
+    if frozen:
         if batch_auto:
-            parser.error("simple-v1 fixes --batch-size 512; 'auto' is not allowed")
-        frozen = control_simple_v1_overrides()
+            parser.error(f"{requested_recipe} fixes --batch-size 512; 'auto' is not allowed")
+        # Run identity, plus the axes a named recipe deliberately leaves open. simple-v1-lag
+        # exists to have its time constants swept, so pinning them would defeat it.
         runtime_fields = {"control_recipe_name", "seed", "split_seed", "device", "notes"}
-        unsupported = sorted(set(overrides) - set(frozen) - runtime_fields)
+        open_fields = (
+            TIME_CONSTANT_FIELDS
+            if requested_recipe == CONTROL_RECIPE_SIMPLE_V1_LAG
+            else set()
+        )
+        unsupported = sorted(
+            set(overrides) - set(frozen) - runtime_fields - open_fields
+        )
         if unsupported:
             parser.error(
-                "simple-v1 allows only seed, split_seed, device and run identity "
-                f"outside its frozen fields; unsupported override {unsupported[0]!r}"
+                f"{requested_recipe} allows only seed, split_seed, device and run "
+                f"identity outside its frozen fields; unsupported override "
+                f"{unsupported[0]!r}"
             )
         conflicts = {
             name: (overrides[name], expected)
@@ -635,7 +672,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
                 f"{name}={actual!r} (expected {expected!r})"
                 for name, (actual, expected) in sorted(conflicts.items())
             )
-            parser.error(f"simple-v1 recipe fields are frozen: {details}")
+            parser.error(f"{requested_recipe} recipe fields are frozen: {details}")
         overrides.update(frozen)
     overrides["control_recipe_name"] = requested_recipe
     return TSConfig(**overrides), batch_auto

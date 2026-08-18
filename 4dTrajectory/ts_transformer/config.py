@@ -80,6 +80,17 @@ CONTROL_DURATION_PARAMETERIZATIONS = (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
 )
+# The flight model itself, orthogonal to the state representation below. ``point-mass``
+# applies each piecewise-constant control instantly; ``first-order-lag`` makes the three
+# controls states that chase their command with a time constant, so bank, thrust and load
+# factor are continuous across a segment boundary instead of stepping.
+CONTROL_DYNAMICS_POINT_MASS = "point-mass"
+CONTROL_DYNAMICS_FIRST_ORDER_LAG = "first-order-lag"
+CONTROL_DYNAMICS_MODELS = (
+    CONTROL_DYNAMICS_POINT_MASS,
+    CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+)
+
 CONTROL_DYNAMICS_REANCHORED_RK4 = "reanchored-rk4"
 CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY = "transport-chart-velocity"
 CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY = (
@@ -99,7 +110,16 @@ CONTROL_GRADIENT_CLIP_POLICIES = (
 
 CONTROL_RECIPE_CUSTOM = "custom"
 CONTROL_RECIPE_SIMPLE_V1 = "simple-v1"
-CONTROL_RECIPE_NAMES = (CONTROL_RECIPE_CUSTOM, CONTROL_RECIPE_SIMPLE_V1)
+# simple-v1 with the lagged flight model substituted and nothing else changed, so the two
+# recipes differ by exactly one axis and a paired comparison measures the flight model
+# rather than a bundle of choices. The three time constants are deliberately NOT frozen:
+# tau_bank is the parameter the CV sweep resolves.
+CONTROL_RECIPE_SIMPLE_V1_LAG = "simple-v1-lag"
+CONTROL_RECIPE_NAMES = (
+    CONTROL_RECIPE_CUSTOM,
+    CONTROL_RECIPE_SIMPLE_V1,
+    CONTROL_RECIPE_SIMPLE_V1_LAG,
+)
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
@@ -177,6 +197,27 @@ DEFAULT_CONTROL_DURATION_UNIFORM_FLOOR = 0.8
 DEFAULT_AIRCRAFT_TYPE = "A320"
 
 
+# The three actuator constants, named once. simple-v1-lag deliberately leaves them open
+# (tau_bank is what the CV sweep resolves), and the checkpoint records the resolved values.
+TIME_CONSTANT_FIELDS = frozenset(
+    (
+        "control_thrust_time_constant_s",
+        "control_bank_time_constant_s",
+        "control_load_time_constant_s",
+    )
+)
+
+
+def control_recipe_overrides(name: str) -> dict[str, Any]:
+    """Return the frozen field values a named recipe pins, or {} for ``custom``."""
+    if name == CONTROL_RECIPE_CUSTOM:
+        return {}
+    overrides = control_simple_v1_overrides()
+    if name == CONTROL_RECIPE_SIMPLE_V1_LAG:
+        overrides["control_dynamics_model"] = CONTROL_DYNAMICS_FIRST_ORDER_LAG
+    return overrides
+
+
 def control_simple_v1_overrides() -> dict[str, Any]:
     """Return the frozen scientific definition of the minimal control recipe."""
 
@@ -226,6 +267,7 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_duration_parameterization": CONTROL_DURATION_UNIFORM,
         "control_duration_uniform_floor": 0.0,
         "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+        "control_dynamics_model": CONTROL_DYNAMICS_POINT_MASS,
         "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
         "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_NATIVE,
         "control_state_objective": CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -260,6 +302,10 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     "control_gradient_clip_norm",
     "control_gradient_clip_policy",
     "control_dynamics_backend",
+    "control_dynamics_model",
+    "control_thrust_time_constant_s",
+    "control_bank_time_constant_s",
+    "control_load_time_constant_s",
     "control_dense_state_loss_weight",
     "control_geometry_loss_weight",
     "control_arc_horizontal_velocity_loss_weight",
@@ -491,6 +537,19 @@ class TSConfig:
     # transport-chart-velocity integrates threshold-chart position plus moving-local-ENU
     # physical velocity with the full WGS84 transport rate.
     control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4
+    # Which flight model the rollout integrates. ``first-order-lag`` augments the state
+    # with the three actual control values and drives them towards the model's commands;
+    # it reduces to ``point-mass`` as the time constants go to zero, and reuses the same
+    # force equations, so the two are comparable rather than two separate models.
+    control_dynamics_model: str = CONTROL_DYNAMICS_POINT_MASS
+    # Actuator/autopilot time constants, in the control contract's order
+    # (thrust, bank, load factor). Bank is the slow one: rolling into and out of a
+    # vectored turn is what the meeting identified as the discontinuity worth fixing,
+    # and tau_bank is the parameter the CV sweep resolves. Thrust and load factor
+    # respond closer to instantly at this scale and are held fixed.
+    control_thrust_time_constant_s: float = 1.5
+    control_bank_time_constant_s: float = 2.0
+    control_load_time_constant_s: float = 0.8
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -516,8 +575,8 @@ class TSConfig:
             object.__setattr__(
                 self, "n_segments", DEFAULT_N_SEGMENTS_BY_MODEL[self.model]
             )
-        if self.control_recipe_name == CONTROL_RECIPE_SIMPLE_V1:
-            expected = control_simple_v1_overrides()
+        expected = control_recipe_overrides(self.control_recipe_name)
+        if expected:
             mismatches = {
                 name: (getattr(self, name), value)
                 for name, value in expected.items()
@@ -529,7 +588,7 @@ class TSConfig:
                     for name, (actual, wanted) in sorted(mismatches.items())
                 )
                 raise ValueError(
-                    f"{CONTROL_RECIPE_SIMPLE_V1} recipe fields are frozen: {details}"
+                    f"{self.control_recipe_name} recipe fields are frozen: {details}"
                 )
         if self.horizon_mode not in HORIZON_MODES:
             raise ValueError(
@@ -570,6 +629,46 @@ class TSConfig:
             raise ValueError(
                 "non-default control dynamics backend requires a control prediction output"
             )
+        if self.control_dynamics_model not in CONTROL_DYNAMICS_MODELS:
+            raise ValueError(
+                f"unknown control_dynamics_model {self.control_dynamics_model!r}; "
+                f"expected one of {CONTROL_DYNAMICS_MODELS}"
+            )
+        for name in (
+            "control_thrust_time_constant_s",
+            "control_bank_time_constant_s",
+            "control_load_time_constant_s",
+        ):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+            # The actuator ODE is integrated by the same explicit RK4 as the rest of the
+            # state, and explicit RK4 on y' = -y/tau is only stable for h/tau < 2.785.
+            # Below that the rollout does not degrade, it produces NaN, so a swept time
+            # constant shorter than the integrator step is refused at construction
+            # rather than discovered as a dead training run.
+            if (
+                self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG
+                and value < self.control_rollout_integrator_dt_s
+            ):
+                raise ValueError(
+                    f"{name}={value:g}s is shorter than the "
+                    f"{self.control_rollout_integrator_dt_s:g}s integrator step; explicit "
+                    "RK4 is unstable there"
+                )
+        if self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG:
+            if not uses_control_dynamics(self.prediction_output):
+                raise ValueError(
+                    "the lagged flight model requires prediction_output='control'"
+                )
+            # The lag is one RK4 over the coupled point-mass/actuator ODE, so it needs a
+            # backend that exposes a continuous chart RHS. The re-anchored baseline is a
+            # discrete map (it rebuilds a local ENU frame every substep) and has no such
+            # RHS to augment.
+            if self.control_dynamics_backend == CONTROL_DYNAMICS_REANCHORED_RK4:
+                raise ValueError(
+                    "the lagged flight model requires a transport-chart dynamics backend"
+                )
         if self.control_state_supervision_clock not in CONTROL_STATE_CLOCKS:
             raise ValueError(
                 "unknown control_state_supervision_clock "
@@ -1021,6 +1120,15 @@ class TSConfig:
         return self.seq_len * self.dt_s
 
     @property
+    def control_time_constants_s(self) -> tuple[float, float, float]:
+        """The three lag constants in the control contract's order."""
+        return (
+            self.control_thrust_time_constant_s,
+            self.control_bank_time_constant_s,
+            self.control_load_time_constant_s,
+        )
+
+    @property
     def resolved_split_seed(self) -> int:
         """Seed used only for the locked outer train/validation/test assignment."""
         return self.seed if self.split_seed is None else self.split_seed
@@ -1065,6 +1173,8 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "duration_parameterization": config.control_duration_parameterization,
         "duration_uniform_floor": config.control_duration_uniform_floor,
         "dynamics_backend": config.control_dynamics_backend,
+        "dynamics_model": config.control_dynamics_model,
+        "time_constants_s": list(config.control_time_constants_s),
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,

@@ -80,6 +80,8 @@ from config import (
     TSConfig,
     uses_control_dynamics,
 )
+from control_envelope import CONTROL_LOWER, CONTROL_UPPER
+from control_inverse_dynamics import actual_controls
 from coordinate_frames import CoordinateFrame, frame_for_state
 from fixed_dt_supervision import (
     FixedDTControlSupervision,
@@ -411,6 +413,54 @@ DYNAMICS_CONDITION_NAMES = (
 )
 
 
+# How much observed lookback the anchor-state control inversion differentiates. It needs
+# at least three samples for a second-order gradient; a few more absorb ADS-B jitter
+# without reaching back into a different phase of flight (11 x 2 s = 20 s).
+ANCHOR_CONTROL_SAMPLES = 11
+
+
+def anchor_controls(series: FlightSeries, anchor: int, mass_kg: float) -> np.ndarray:
+    """Return the controls the observed lookback implies are in effect at ``anchor``.
+
+    This is the lagged model's actuator initial condition. It reads only samples at or
+    before the anchor, so it is as deployable as the history window itself, and it is the
+    ACTUAL control (never a command) for every flight model — the commands that produced
+    it are a separate inversion in ``control_inverse_dynamics``.
+    """
+    start = max(0, anchor + 1 - ANCHOR_CONTROL_SAMPLES)
+    window = slice(start, anchor + 1)
+    times = series.times[window]
+    samples = states_from_channels(
+        times, series.values[window], series.frame, mass_kg=mass_kg
+    )
+    states = np.asarray(
+        [
+            [s.latitude, s.longitude, s.altitude, s.V, s.psi, s.gamma, s.m]
+            for _t, s in samples
+        ],
+        dtype=np.float64,
+    )
+    aero = series.scenario.aero
+    return actual_controls(
+        states,
+        times,
+        aero_params=np.array(
+            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
+            dtype=np.float64,
+        ),
+        max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
+        frame_params=np.array(
+            [
+                series.frame.lat0,
+                series.frame.lon0,
+                series.frame.alt0,
+                float(getattr(series.frame, "heading_rad", 0.0)),
+            ],
+            dtype=np.float64,
+        ),
+    )[-1]
+
+
 def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
     """Physical per-flight tensors required by a control model and its rollout."""
     scenario = series.scenario
@@ -455,8 +505,18 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
             [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
             dtype=np.float64,
         ),
-        "control_lower": np.array([0.0, -math.pi / 4.0, 0.5], dtype=np.float32),
-        "control_upper": np.array([max_thrust, math.pi / 4.0, 2.0], dtype=np.float32),
+        "max_thrust_n": np.array(max_thrust, dtype=np.float64),
+        # The dimensionless envelope is the same box on every airframe (see
+        # control_envelope); the flight's installed thrust enters through max_thrust_n.
+        "control_lower": CONTROL_LOWER.astype(np.float32),
+        "control_upper": CONTROL_UPPER.astype(np.float32),
+        # The lagged model's actuator initial condition. Emitted unconditionally so the
+        # batch contract does not depend on the flight model, and clipped to the same box
+        # the head predicts in — an anchor whose implied thrust is outside the envelope is
+        # a starting point the model could not have commanded.
+        "initial_controls": np.clip(
+            anchor_controls(series, anchor, mass_kg), CONTROL_LOWER, CONTROL_UPPER
+        ).astype(np.float64),
         "frame_params": np.array(
             [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
             dtype=np.float64,
@@ -466,6 +526,37 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
         # so ENU rollouts are decomposed along/across the actual runway, not east/north.
         "runway_heading_rad": np.array(float(scenario.target.psi), dtype=np.float64),
     }
+
+
+def probe_dynamics(batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
+    """One representative dynamics batch for shape/throughput probes.
+
+    Kept beside :func:`dynamics_arrays` so the batch-size probe and the gradient
+    diagnostics cannot carry a stale copy of the contract: a key added to the real batch
+    appears here in the same commit or the probe fails immediately.
+    """
+    rows = {
+        "condition": [0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5],
+        "initial_state": [35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, 66_000.0],
+        "aero_params": [122.6, 2.7, 0.02, 0.04, 0.9, 0.1],
+        "control_lower": CONTROL_LOWER.tolist(),
+        "control_upper": CONTROL_UPPER.tolist(),
+        "initial_controls": [0.2, 0.0, 1.0],
+        "frame_params": [35.9, -78.8, 100.0, 0.0],
+    }
+    dynamics = {
+        name: torch.tensor([value], dtype=torch.float32, device=device).expand(
+            batch_size, -1
+        )
+        for name, value in rows.items()
+    }
+    dynamics["max_thrust_n"] = torch.full(
+        (batch_size,), 240_000.0, dtype=torch.float32, device=device
+    )
+    dynamics["runway_heading_rad"] = torch.zeros(
+        batch_size, dtype=torch.float32, device=device
+    )
+    return dynamics
 
 
 @dataclass(frozen=True)

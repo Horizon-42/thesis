@@ -49,9 +49,9 @@ from control_oracle_curriculum import (  # noqa: E402
     build_horizon_curriculum,
     build_horizon_stage_view,
 )
-from control_oracle_initialization import (  # noqa: E402
-    inverse_dynamics_controls,
+from control_inverse_dynamics import (  # noqa: E402
     refine_piecewise_constant_schedule,
+    segment_controls,
 )
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
@@ -462,14 +462,17 @@ def main(argv: list[str] | None = None) -> int:
             ],
             dtype=np.float64,
         )
-        inverse = inverse_dynamics_controls(
+        inverse = segment_controls(
             reference_states,
             reference_times,
+            config=config,
             aero_params=dynamics["aero_params"][0].numpy(),
+            max_thrust_n=float(dynamics["max_thrust_n"][0]),
             control_lower=dynamics["control_lower"][0].numpy(),
             control_upper=dynamics["control_upper"][0].numpy(),
             n_segments=args.n_segments,
             total_duration_s=true_duration_s,
+            frame_params=dynamics["frame_params"][0].numpy(),
         )
         initial_controls = torch.from_numpy(inverse.controls).to(
             device=device, dtype=torch.float64

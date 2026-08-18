@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import math
-
+import numpy as np
 import torch
 import torch.nn as nn
 
 from config import TSConfig
+from control_envelope import CONTROL_LOWER, CONTROL_UPPER
 from dataset import DYNAMICS_CONDITION_NAMES
 from prediction_outputs import ControlOutputHead, FinalTimeHead
 
@@ -38,16 +38,21 @@ class ControlFeatureModel(nn.Module):
         return self.feature_fusion(torch.cat((encoded, condition), dim=-1))
 
 
+# What "doing nothing" means before any gradient arrives: 20% of installed thrust, wings
+# level, load factor one. Expressed as physical values and mapped through the envelope, so
+# a bound change moves the initialization with it instead of silently relocating it.
+NEUTRAL_CONTROLS = (0.2, 0.0, 1.0)
+
+
 def _neutral_control_bias(head: ControlOutputHead, bank_rad: float = 0.0) -> torch.Tensor:
-    thrust_fraction = 0.2
-    bank_fraction = (bank_rad + math.pi / 4.0) / (math.pi / 2.0)
-    load_fraction = (1.0 - 0.5) / (2.0 - 0.5)
+    """Sigmoid logits whose bounded output is :data:`NEUTRAL_CONTROLS`."""
+    neutral = np.array(NEUTRAL_CONTROLS, dtype=np.float64)
+    neutral[1] = bank_rad
+    unit = np.clip(
+        (neutral - CONTROL_LOWER) / (CONTROL_UPPER - CONTROL_LOWER), 1e-6, 1.0 - 1e-6
+    )
     return torch.tensor(
-        (
-            math.log(thrust_fraction / (1.0 - thrust_fraction)),
-            math.log(bank_fraction / (1.0 - bank_fraction)),
-            math.log(load_fraction / (1.0 - load_fraction)),
-        ),
+        np.log(unit / (1.0 - unit)),
         dtype=head.control_projection.bias.dtype,
         device=head.control_projection.bias.device,
     ).repeat(head.n_segments)

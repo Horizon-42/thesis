@@ -7,14 +7,13 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from channels import POSITION_IDX, states_from_channels
-from control_oracle_initialization import inverse_dynamics_controls
+from channels import states_from_channels
+from control_inverse_dynamics import segment_controls
+from control_models import NEUTRAL_CONTROLS
 from dataset import FixedAnchorTrajectoryWindows
 from prediction_outputs import ControlPrediction
-from reference_velocity import (
-    REFERENCE_VELOCITY_SMOOTHED_POSITION_DIFFERENCE,
-    rebuild_reference_velocities,
-)
+from reference_velocity import rebuild_reference_velocities
+from train import unpack_batch
 
 
 @dataclass(frozen=True)
@@ -50,9 +49,17 @@ def build_inverse_dynamics_target(
     velocity rows are rebuilt from the complete position reference before applying the
     algebraic inverse dynamics, which is an explicit teacher-only privilege.
     """
+    # unpack_batch, not a fixed-width tuple: dense supervision is present only under the
+    # fixed-dt loss grid, and hard-unpacking seven fields made this builder unusable under
+    # every native-grid recipe (simple-v1 among them) with a bare ValueError.
     x, _target, _weights, final_time, _flight_weights, dynamics, supervision = (
-        dataset.batch(np.array([index]))
+        unpack_batch(dataset.batch(np.array([index])))
     )
+    if supervision is None:
+        raise ValueError(
+            "inverse-dynamics teacher targets need the dense reference future; build the "
+            "cohort with control_state_loss_grid='fixed-dt'"
+        )
     valid = supervision.valid[0].numpy()
     anchor = dataset.normalizer.decode(x[0, -1].numpy().astype(np.float64))
     future = dataset.normalizer.decode(
@@ -68,7 +75,7 @@ def build_inverse_dynamics_target(
     reference_channels = rebuild_reference_velocities(
         reference_times,
         reference_channels,
-        source=REFERENCE_VELOCITY_SMOOTHED_POSITION_DIFFERENCE,
+        source=dataset.config.reference_velocity_source,
         valid_rows=np.ones(len(reference_times), dtype=bool),
     )
     mass_kg = float(dynamics["initial_state"][0, -1])
@@ -94,14 +101,19 @@ def build_inverse_dynamics_target(
         dtype=np.float64,
     )
     total_duration_s = float(final_time[0])
-    inverse = inverse_dynamics_controls(
+    # The inverse is selected by the SAME config field as the forward rollout, so a teacher
+    # can never be solved against equations the training rollout does not integrate.
+    inverse = segment_controls(
         physical_states,
         reference_times,
+        config=dataset.config,
         aero_params=dynamics["aero_params"][0].numpy(),
+        max_thrust_n=float(dynamics["max_thrust_n"][0]),
         control_lower=dynamics["control_lower"][0].numpy(),
         control_upper=dynamics["control_upper"][0].numpy(),
         n_segments=int(dataset.config.n_segments),
         total_duration_s=total_duration_s,
+        frame_params=dynamics["frame_params"][0].numpy(),
     )
     durations = np.full(
         int(dataset.config.n_segments),
@@ -127,10 +139,8 @@ def neutral_prediction(
     device: torch.device,
 ) -> ControlPrediction:
     """Return the deterministic control head's pre-training neutral schedule."""
-    lower = dynamics["control_lower"][0].to(device)
-    upper = dynamics["control_upper"][0].to(device)
-    unit = torch.tensor((0.2, 0.5, 1.0 / 3.0), device=device)
-    control = lower + unit * (upper - lower)
+    del dynamics
+    control = torch.tensor(NEUTRAL_CONTROLS, dtype=torch.float32, device=device)
     durations = torch.full(
         (1, n_segments), final_time_s / n_segments, device=device
     )

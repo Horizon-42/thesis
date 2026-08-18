@@ -49,6 +49,9 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DYNAMICS_BACKENDS,
+    CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+    CONTROL_DYNAMICS_MODELS,
+    CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
@@ -471,6 +474,8 @@ class TrainingPlan:
         control_terminal_clock: str = CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
         control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
         control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4,
+        control_dynamics_model: str = CONTROL_DYNAMICS_POINT_MASS,
+        control_bank_time_constant_s: float | None = None,
         control_state_clock: str = CONTROL_STATE_CLOCK_PREDICTED,
         control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE,
         control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
@@ -503,7 +508,9 @@ class TrainingPlan:
         self.coordinate_frame = coordinate_frame
         self.batch_size = batch_size
         self.cv_folds = cv_folds
-        self.cv_parameters = applicable_cv_parameters(cv_parameters, horizon_mode)
+        self.cv_parameters = applicable_cv_parameters(
+            cv_parameters, horizon_mode, control_dynamics_model
+        )
         self.cv_epochs = cv_epochs
         self.cv_patience = cv_patience
         self.random_train_anchor = random_train_anchor
@@ -544,6 +551,8 @@ class TrainingPlan:
         self.control_terminal_clock = control_terminal_clock
         self.control_duration_parameterization = control_duration_parameterization
         self.control_dynamics_backend = control_dynamics_backend
+        self.control_dynamics_model = control_dynamics_model
+        self.control_bank_time_constant_s = control_bank_time_constant_s
         self.control_state_clock = control_state_clock
         self.control_state_loss_grid = control_state_loss_grid
         self.control_state_objective = control_state_objective
@@ -730,6 +739,8 @@ class TrainingPlan:
             self.control_duration_parameterization,
             "--control-dynamics-backend",
             self.control_dynamics_backend,
+            "--control-dynamics-model",
+            self.control_dynamics_model,
         ]
         args += ["--control-state-clock", self.control_state_clock]
         args += ["--control-state-loss-grid", self.control_state_loss_grid]
@@ -1622,6 +1633,11 @@ def main() -> None:
         default=CONTROL_DYNAMICS_REANCHORED_RK4,
     )
     parser.add_argument(
+        "--control-dynamics-model",
+        choices=CONTROL_DYNAMICS_MODELS,
+        default=CONTROL_DYNAMICS_POINT_MASS,
+    )
+    parser.add_argument(
         "--control-state-clock",
         choices=CONTROL_STATE_CLOCKS,
         default=CONTROL_STATE_CLOCK_PREDICTED,
@@ -1813,6 +1829,7 @@ def main() -> None:
             control_terminal_clock=args.control_terminal_clock,
             control_duration_parameterization=args.control_duration_parameterization,
             control_dynamics_backend=args.control_dynamics_backend,
+            control_dynamics_model=args.control_dynamics_model,
             control_state_clock=args.control_state_clock,
             control_state_loss_grid=args.control_state_loss_grid,
             control_state_objective=args.control_state_objective,

@@ -19,6 +19,7 @@ from config import (
     TSConfig,
 )
 import control_rollout
+from control_envelope import physical_controls
 from dataset import FlightSeries, Normalizer, dynamics_arrays
 from metrics import states_with_derived_velocity
 from prediction_outputs import ControlPrediction
@@ -181,7 +182,15 @@ def _forecast_control_batch(
     query_geodetic = (
         rollout.query_geodetic_states.detach().cpu().numpy().astype(np.float64)
     )
-    controls = prediction.controls.detach().cpu().numpy().astype(np.float64)
+    # The head predicts in the dimensionless envelope; the exported record contract is
+    # newtons, and is shared with the CasADi optimizer and the evaluation package.
+    controls = (
+        physical_controls(prediction.controls, dynamics["max_thrust_n"])
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(np.float64)
+    )
     predicted_final_time = (
         prediction.final_time_s.detach().cpu().numpy().astype(np.float64)
     )
