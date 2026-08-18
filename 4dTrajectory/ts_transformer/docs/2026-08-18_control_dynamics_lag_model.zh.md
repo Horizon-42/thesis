@@ -1,7 +1,8 @@
 # control 动力学：一阶滞后模型与反求 teacher 的一致性
 
 日期：2026-08-18
-状态：已实现并通过定向测试；τ_μ 的 CV 扫描待跑
+状态：已实现并通过定向测试；τ_μ 的 CV 扫描已完成（§5b，结论为未分辨）；
+      point-mass vs lag 的成对发布实验进行中
 数据边界：只使用 outer-train / outer-validation；本文未读取、预测或评估 outer-test
 来源：`docs/MeetingNotes/note_8_17.md`
 
@@ -133,7 +134,7 @@ optimizer 产物过期**。
 optimizer 会报告 loss 在下降。它只是**复现不了任何东西**，而下游没有任何环节能发现。
 
 因此设计上：`control_inverse_dynamics.py` 的每个反解注册在**与其前向模型相同的
-config key** 下（`_INVERSES` 与 `control_dynamics_backends._BACKENDS` 同键），并且
+config key** 下（`CONTROL_INVERSES` 与 `control_dynamics_backends._BACKENDS` 同键），并且
 `tests/test_control_inverse_dynamics.py` 对**每一个注册的模型**做闭环：
 
 ```
@@ -200,6 +201,56 @@ CV 网格新增：
 **命名配方不能以自身身份做 CV**：`simple-v1`/`simple-v1-lag` 冻结了 `epochs`/`patience`，
 而搜索刻意用更短的预算。所以 CV 候选携带 `control_recipe_name='custom'`，父配方保留在
 run contract 的 `base_config` 里，正式训练仍从冻结配方构造。
+
+---
+
+## 5b. τ_μ CV 结果（2026-08-18 实测）
+
+产物：`4dTrajectory/outputs/KSJC/experiments/cv_tau_bank_20260818/cv_results.json`
+配置：KSJC，`simple-v1-lag`，3 folds × 36 epochs，selector = common true-time
+airport-macro 3D ADE。
+
+| τ_bank | mean ADE (m) | fold 0 | fold 1 | fold 2 |
+|---|---:|---:|---:|---:|
+| 0.5 s | 1029.5 | 1022.4 | 1101.8 | 964.3 |
+| 1.0 s | 1019.3 | 1011.9 | 1076.1 | 970.0 |
+| **2.0 s** | **1014.2** | 988.4 | 1083.0 | 971.3 |
+| 3.0 s | 1066.1 | 1028.3 | **1198.8** | 971.3 |
+| 4.0 s | 1072.3 | **1159.6** | 1088.9 | 968.3 |
+
+**结论：本轮未分辨。** 最优到最差只差 **5.7 %**，而同一 τ 内部的 fold 间离散度是
+**11–23 %**——噪声是信号的 2–4 倍。配对比较（同折同 seed）：τ=1.0 相对 τ=2.0 平均只差
+5.1 m 且 3 折里赢 2 折；τ=3/4 的劣势各自完全由一个 fold 撑起（分别是 fold 1 的 +115.9
+和 fold 0 的 +171.2），其余两折基本打平；**fold 2 上五个 τ 的跨度只有 0.7 %**。
+
+按 `2026-08-16_control_simple_v1_development.zh.md` §5 的判据（平均 ADE 差异 < 2 % 即判
+无可靠差异），τ ∈ {0.5, 1.0, 2.0} 相互差 ≤1.5 %，判定为**没有可靠差异**。取
+**τ_bank = 2.0 s** 作为默认值（赢了均值、量级符合真实运输机滚入时间、没有候选可靠地
+赢它），但必须记为"未分辨"而不是"CV 选定"。
+
+### 一个必须记住的坑：`--cv-patience` 不能用默认的 6
+
+第一轮扫描用 `--cv-patience 6`，全部作废。**两个飞行模型都会穿过一个早期 ADE 暂态凸包**
+（未改动的 point-mass `simple-v1` 实测：ep2 最优 1534 m → ep6 凸包顶 2132 m → ep13
+回到 1268 m 且仍在降），而训练 loss 的每一个分量在整个过程中单调下降。patience 6 正好
+停在凸包里：同一个 τ=0.5，被早停抓住的 fold 选出 1674.6 m，没被抓住的 fold 走到
+1234.4 m——**26 % 的差异纯粹是停止时机的产物**。凸包宽约 7 个 epoch，patience 15 可以
+留足余量；冻结配方自己的 patience=20 本来就够。
+
+---
+
+## 5c. 实验产物保留
+
+CV **不保存 fold checkpoint**（`cross_validate` 只写 `cv_results.json` /
+`best_config.json`），所以超参搜索的产物无法回放、无法发布到前端。需要可发布产物的实验
+必须走完整链路，`run_ts_flight_model_paired.py` 是这条链路的模板：
+
+```
+train    -> checkpoint.pt (+ history / fit_evaluation / checkpoint_metadata)
+predict  -> 逐航班 prediction record：states、controls、observed lookback
+evaluate -> evaluation_report.json / .html（与 optimizer 同一套 gate）
+publish  -> aeroviz-4d/public/data/airports/<ICAO>/comparison/<category>/ 的对比 CZML
+```
 
 ---
 
