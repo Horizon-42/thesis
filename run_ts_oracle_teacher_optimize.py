@@ -38,8 +38,8 @@ from oracle_teacher.cohort import select_outer_train_cohort  # noqa: E402
 from oracle_teacher.evaluation import evaluate_schedule, move_dynamics  # noqa: E402
 from oracle_teacher.optimization import (  # noqa: E402
     BatchedOracleTeacher,
-    TeacherOptimizationStage,
     optimize_teacher_controls,
+    teacher_optimization_stages,
 )
 from oracle_teacher.targets import build_inverse_dynamics_target  # noqa: E402
 
@@ -181,12 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         dynamics["control_upper"],
         final_time,
     ).to(device)
-    stages = (
-        TeacherOptimizationStage("60s", 60.0, args.prefix_steps),
-        TeacherOptimizationStage("120s", 120.0, args.prefix_steps),
-        TeacherOptimizationStage("240s", 240.0, args.prefix_steps),
-        TeacherOptimizationStage("full", None, args.full_steps),
-    )
+    stages = teacher_optimization_stages(args.prefix_steps, args.full_steps)
     history = optimize_teacher_controls(
         teacher,
         x=x,
@@ -246,7 +241,10 @@ def main(argv: list[str] | None = None) -> int:
             "initialization": "inverse-dynamics",
             "duration": "uniform true outer-train final time / N; frozen",
             "objective": "production arc-length-geometry 2+4",
-            "stages": [vars(stage) for stage in stages],
+            "stages": [
+                {"label": stage.label, "horizon_s": stage.horizon_s, "steps": steps}
+                for stage, steps in stages
+            ],
             "learning_rate": args.learning_rate,
             "gradient_clip_norm": args.gradient_clip_norm,
         },

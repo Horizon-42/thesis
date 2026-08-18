@@ -45,7 +45,7 @@ from config import (  # noqa: E402
     HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
     uses_control_dynamics,
 )
-from control_prediction_adapters import deployable_control_prediction  # noqa: E402
+
 from control_rollout import rollout_control_dense  # noqa: E402
 from dataset import (  # noqa: E402
     FlightSeries,
@@ -218,7 +218,7 @@ def predict_batch_nodes(
     """Return physical nodes, their clock, and the optional sparse control schedule."""
     if uses_control_dynamics(run.config.prediction_output):
         dynamics = batch_dynamics_tensors(series, run.config, device)
-        output = deployable_control_prediction(run.model(histories, dynamics))
+        output = run.model(histories, dynamics)
         points = run.config.validation_common_grid_points
         progress = torch.arange(
             1, points + 1, dtype=torch.float64, device=device

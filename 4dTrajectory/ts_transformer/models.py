@@ -21,20 +21,14 @@ import torch
 import torch.nn as nn
 
 from config import (
-    CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
-    CONTROL_VALUE_ABSOLUTE,
-    CONTROL_VALUE_TRIM_RESIDUAL,
     PREDICTION_CONTROL,
-    PREDICTION_CONTROL_MIXTURE,
     PREDICTION_STATE,
     TSConfig,
 )
-from control_models import ControlMixtureOutputModel, ControlOutputModel
-from direct_duration_control import DirectDurationControlOutputModel
+from control_models import ControlOutputModel
 from prediction_outputs import StateOutputLayer
-from trim_residual_control import TrimResidualControlOutputModel
 from uniform_duration_control import UniformDurationControlOutputModel
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
@@ -140,37 +134,21 @@ def _build_state_output(config: TSConfig) -> nn.Module:
     return StateOutputLayer(build_state_forecaster(config), config)
 
 
+CONTROL_OUTPUT_MODELS = {
+    CONTROL_DURATION_FACTORIZED: ControlOutputModel,
+    CONTROL_DURATION_UNIFORM: UniformDurationControlOutputModel,
+}
+
+
 def _build_control_output(config: TSConfig) -> nn.Module:
-    builders = {
-        (CONTROL_DURATION_FACTORIZED, CONTROL_VALUE_ABSOLUTE): ControlOutputModel,
-        (CONTROL_DURATION_DIRECT, CONTROL_VALUE_ABSOLUTE): (
-            DirectDurationControlOutputModel
-        ),
-        (CONTROL_DURATION_UNIFORM, CONTROL_VALUE_ABSOLUTE): (
-            UniformDurationControlOutputModel
-        ),
-        (CONTROL_DURATION_FACTORIZED, CONTROL_VALUE_TRIM_RESIDUAL): (
-            TrimResidualControlOutputModel
-        ),
-    }
-    return builders[
-        (
-            config.control_duration_parameterization,
-            config.control_value_parameterization,
-        )
-    ](
+    return CONTROL_OUTPUT_MODELS[config.control_duration_parameterization](
         config, build_state_forecaster(config)
     )
-
-
-def _build_control_mixture_output(config: TSConfig) -> nn.Module:
-    return ControlMixtureOutputModel(config, build_state_forecaster(config))
 
 
 OUTPUT_MODEL_BUILDERS = {
     PREDICTION_STATE: _build_state_output,
     PREDICTION_CONTROL: _build_control_output,
-    PREDICTION_CONTROL_MIXTURE: _build_control_mixture_output,
 }
 
 

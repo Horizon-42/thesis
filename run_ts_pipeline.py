@@ -41,9 +41,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-    CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
     CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
     CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
@@ -58,16 +56,13 @@ from config import (  # noqa: E402
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_GRADIENT_CLIP_GLOBAL,
     CONTROL_GRADIENT_CLIP_POLICIES,
-    CONTROL_VALUE_ABSOLUTE,
-    CONTROL_VALUE_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
-    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     CONTROL_STATE_OBJECTIVES,
     CONTROL_TERMINAL_CLOCKS,
     CONTROL_TERMINAL_CLOCK_PREDICTED,
@@ -80,7 +75,6 @@ from config import (  # noqa: E402
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     MODELS,
-    PREDICTION_CONTROL_MIXTURE,
     PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
     PREDICTION_STATE,
@@ -176,8 +170,6 @@ def _validation_selection_tag(metric: str) -> str:
     return {
         CHECKPOINT_SELECTION_COMMON_GRID_ADE: "",
         CHECKPOINT_SELECTION_OBJECTIVE: "_legacy_objective_selection",
-        CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: "_common_grid_criteria_selection",
-        CHECKPOINT_SELECTION_TERMINAL_STATE: "_terminal_state_selection",
         CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY: "_arc_length_selection",
     }.get(metric, "")
 
@@ -246,15 +238,6 @@ def _control_duration_tag(prediction_output: str, parameterization: str) -> str:
     return f"_{parameterization}_duration"
 
 
-def _control_value_tag(prediction_output: str, parameterization: str) -> str:
-    if (
-        not uses_control_dynamics(prediction_output)
-        or parameterization == CONTROL_VALUE_ABSOLUTE
-    ):
-        return ""
-    return f"_{parameterization.replace('-', '_')}"
-
-
 def _control_dynamics_tag(prediction_output: str, backend: str) -> str:
     if (
         not uses_control_dynamics(prediction_output)
@@ -315,9 +298,9 @@ def _terminal_tracking_recipe_tag(
     terminal_position_scale_m: float,
     terminal_velocity_scale_mps: float,
 ) -> str:
-    if prediction_output != PREDICTION_CONTROL or objective not in (
-        CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
-        CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+    if (
+        prediction_output != PREDICTION_CONTROL
+        or objective != CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
     ):
         return ""
 
@@ -325,7 +308,6 @@ def _terminal_tracking_recipe_tag(
         return f"{value:g}".replace(".", "p")
 
     tracking = {
-        CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: f"_d{compact(dense_weight)}",
         CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
             f"_g{compact(geometry_weight)}"
             f"_ahv{compact(arc_horizontal_velocity_weight)}"
@@ -420,6 +402,23 @@ HORIZON_LABELS = {
 }
 
 
+# ext4/APFS cap one path component at 255 bytes, and the recipe suffix outgrew that when
+# the arc-length-geometry weight block joined it (measured: 365 bytes). A name over the cap
+# therefore keeps its readable head and ends in a digest of the WHOLE name, so two recipes
+# whose heads happen to agree still land in different directories.
+MAX_PATH_COMPONENT_BYTES = 255
+
+
+def _bounded_component(name: str) -> str:
+    """Return ``name`` unchanged, or a head + content digest that fits one component."""
+    encoded = name.encode("utf-8")
+    if len(encoded) <= MAX_PATH_COMPONENT_BYTES:
+        return name
+    digest = hashlib.sha256(encoded).hexdigest()[:16]
+    head = encoded[: MAX_PATH_COMPONENT_BYTES - len(digest) - 1]
+    return f"{head.decode('utf-8', 'ignore')}_{digest}"
+
+
 class TrainingPlan:
     """One CV/final-training cell, shared by one or more airport predictions."""
 
@@ -471,11 +470,7 @@ class TrainingPlan:
         control_terminal_velocity_scale_mps: float = 10.0,
         control_terminal_clock: str = CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
         control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
-        control_value_parameterization: str = CONTROL_VALUE_ABSOLUTE,
         control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4,
-        control_experts: int | None = None,
-        control_selector_weight: float | None = None,
-        control_diversity_weight: float | None = None,
         control_state_clock: str = CONTROL_STATE_CLOCK_PREDICTED,
         control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE,
         control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
@@ -548,11 +543,7 @@ class TrainingPlan:
         self.control_terminal_velocity_scale_mps = control_terminal_velocity_scale_mps
         self.control_terminal_clock = control_terminal_clock
         self.control_duration_parameterization = control_duration_parameterization
-        self.control_value_parameterization = control_value_parameterization
         self.control_dynamics_backend = control_dynamics_backend
-        self.control_experts = control_experts
-        self.control_selector_weight = control_selector_weight
-        self.control_diversity_weight = control_diversity_weight
         self.control_state_clock = control_state_clock
         self.control_state_loss_grid = control_state_loss_grid
         self.control_state_objective = control_state_objective
@@ -574,9 +565,6 @@ class TrainingPlan:
             _prediction_output_tag(prediction_output)
             + _control_duration_tag(
                 prediction_output, control_duration_parameterization
-            )
-            + _control_value_tag(
-                prediction_output, control_value_parameterization
             )
             + _control_dynamics_filesystem_tag(
                 prediction_output, control_dynamics_backend
@@ -626,7 +614,9 @@ class TrainingPlan:
         self.train_dir = (
             Path(output_dir)
             if output_dir is not None
-            else OPT_OUTPUTS_ROOT / scope / f"ts_{model}_{HORIZON_TAGS[horizon_mode]}{suffix}"
+            else OPT_OUTPUTS_ROOT
+            / scope
+            / _bounded_component(f"ts_{model}_{HORIZON_TAGS[horizon_mode]}{suffix}")
         )
         self.cv_dir = self.train_dir / "cross_validation"
         self.cv_results = self.cv_dir / CV_RESULTS_NAME
@@ -738,17 +728,9 @@ class TrainingPlan:
         args += [
             "--control-duration-parameterization",
             self.control_duration_parameterization,
-            "--control-value-parameterization",
-            self.control_value_parameterization,
             "--control-dynamics-backend",
             self.control_dynamics_backend,
         ]
-        if self.control_experts is not None:
-            args += ["--control-experts", str(self.control_experts)]
-        if self.control_selector_weight is not None:
-            args += ["--control-selector-weight", str(self.control_selector_weight)]
-        if self.control_diversity_weight is not None:
-            args += ["--control-diversity-weight", str(self.control_diversity_weight)]
         args += ["--control-state-clock", self.control_state_clock]
         args += ["--control-state-loss-grid", self.control_state_loss_grid]
         args += ["--control-state-objective", self.control_state_objective]
@@ -959,7 +941,6 @@ class TrainingPlan:
             "control_gradient_clip_norm": self.control_gradient_clip_norm,
             "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
-            "control_value_parameterization": self.control_value_parameterization,
             "control_dynamics_backend": self.control_dynamics_backend,
         }
         if self.full_horizon_steps is not None:
@@ -980,16 +961,6 @@ class TrainingPlan:
             overrides["control_effort_loss_weight"] = self.control_effort_weight
         if self.control_smoothness_weight is not None:
             overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
-        if self.control_experts is not None:
-            overrides["control_expert_count"] = self.control_experts
-        if self.control_selector_weight is not None:
-            overrides["control_mixture_selector_loss_weight"] = (
-                self.control_selector_weight
-            )
-        if self.control_diversity_weight is not None:
-            overrides["control_mixture_diversity_loss_weight"] = (
-                self.control_diversity_weight
-            )
         if self.control_rollout_dt is not None:
             overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
@@ -1098,7 +1069,6 @@ class TrainingPlan:
             "control_gradient_clip_norm": self.control_gradient_clip_norm,
             "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
-            "control_value_parameterization": self.control_value_parameterization,
             "control_dynamics_backend": self.control_dynamics_backend,
         })
         if self.full_horizon_steps is not None:
@@ -1123,16 +1093,6 @@ class TrainingPlan:
             overrides["control_effort_loss_weight"] = self.control_effort_weight
         if self.control_smoothness_weight is not None:
             overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
-        if self.control_experts is not None:
-            overrides["control_expert_count"] = self.control_experts
-        if self.control_selector_weight is not None:
-            overrides["control_mixture_selector_loss_weight"] = (
-                self.control_selector_weight
-            )
-        if self.control_diversity_weight is not None:
-            overrides["control_mixture_diversity_loss_weight"] = (
-                self.control_diversity_weight
-            )
         if self.control_rollout_dt is not None:
             overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
@@ -1184,9 +1144,6 @@ class PredictionPlan:
         control_duration = _control_duration_tag(
             training.prediction_output, training.control_duration_parameterization
         )
-        control_value = _control_value_tag(
-            training.prediction_output, training.control_value_parameterization
-        )
         control_dynamics_filesystem = _control_dynamics_filesystem_tag(
             training.prediction_output, training.control_dynamics_backend
         )
@@ -1225,7 +1182,7 @@ class PredictionPlan:
         tag = f"_{experiment_tag}" if experiment_tag else ""
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
-            f"{scope}{training.model}{prediction_output}{control_duration}{control_value}"
+            f"{scope}{training.model}{prediction_output}{control_duration}"
             f"{control_dynamics_filesystem}"
             f"{control_clock}{control_terminal_clock_filesystem}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}"
@@ -1233,14 +1190,16 @@ class PredictionPlan:
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
-        self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
+        self.pred_dir = (
+            OPT_OUTPUTS_ROOT / self.airport / _bounded_component(f"ts_pred_{stem}")
+        )
         self.summary = self.pred_dir / "summary.json"
         self.report = self.pred_dir / "evaluation_report.json"
         self.report_html = self.pred_dir / "evaluation_report.html"
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
-            f"{control_duration}{control_value}{control_dynamics}"
+            f"{control_duration}{control_dynamics}"
             f"{control_terminal_clock}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}"
             f"{horizon_curriculum}{gradient_clip}"
@@ -1260,11 +1219,6 @@ class PredictionPlan:
         dynamics_label = _control_dynamics_label(
             training.prediction_output, training.control_dynamics_backend
         )
-        value_label = (
-            "trim-residual controls, "
-            if training.control_value_parameterization != CONTROL_VALUE_ABSOLUTE
-            else ""
-        )
         state_loss_label = (
             "fixed-dt state loss, "
             if training.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
@@ -1272,14 +1226,8 @@ class PredictionPlan:
         )
         objective_label = {
             CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE: "",
-            CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA: (
-                "physical ADE/FDE criterion, "
-            ),
-            CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: (
-                "dense state + terminal position/velocity criterion "
-                f"({training.control_dense_state_weight:g}/"
-                f"{training.control_terminal_position_weight:g}/"
-                f"{training.control_terminal_velocity_weight:g}), "
+            CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: (
+                "true-time physical position criterion, "
             ),
             CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
                 "horizontal-arc position/local-velocity + terminal criterion "
@@ -1315,7 +1263,7 @@ class PredictionPlan:
         )
         self.label = (
             f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
-            f"{output_label}{value_label}{dynamics_label}{state_loss_label}{objective_label}"
+            f"{output_label}{dynamics_label}{state_loss_label}{objective_label}"
             f"{duration_gradient_label}{terminal_clock_label}"
             f"{curriculum_label}{gradient_clip_label}"
             f"{anchor_label}{horizon_label}, {frame_label})"
@@ -1453,20 +1401,10 @@ def run_training(
                 f"   control   : effort={config.control_effort_loss_weight:g}, "
                 f"smoothness={config.control_smoothness_loss_weight:g}, "
                 f"duration={config.control_duration_parameterization}, "
-                f"values={config.control_value_parameterization}, "
                 f"dynamics={config.control_dynamics_backend}, "
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
-            if config.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE:
-                print(
-                    "   terminal-state: "
-                    f"dense={config.control_dense_state_loss_weight:g}, "
-                    f"position={config.control_terminal_position_loss_weight:g}/"
-                    f"{config.control_terminal_position_scale_m:g}m, "
-                    f"velocity={config.control_terminal_velocity_loss_weight:g}/"
-                    f"{config.control_terminal_velocity_scale_mps:g}mps"
-                )
             if (
                 config.control_state_objective
                 == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
@@ -1503,12 +1441,6 @@ def run_training(
                 print(
                     f"   stability : gradient clip={config.control_gradient_clip_norm:g}, "
                     f"policy={config.control_gradient_clip_policy}"
-                )
-            if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
-                print(
-                    f"   mixture   : experts={config.control_expert_count}, "
-                    f"selector={config.control_mixture_selector_loss_weight:g}, "
-                    f"diversity={config.control_mixture_diversity_loss_weight:g}"
                 )
         print(
             f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
@@ -1685,18 +1617,10 @@ def main() -> None:
         default=CONTROL_DURATION_FACTORIZED,
     )
     parser.add_argument(
-        "--control-value-parameterization",
-        choices=CONTROL_VALUE_PARAMETERIZATIONS,
-        default=CONTROL_VALUE_ABSOLUTE,
-    )
-    parser.add_argument(
         "--control-dynamics-backend",
         choices=CONTROL_DYNAMICS_BACKENDS,
         default=CONTROL_DYNAMICS_REANCHORED_RK4,
     )
-    parser.add_argument("--control-experts", type=int, default=None)
-    parser.add_argument("--control-selector-weight", type=float, default=None)
-    parser.add_argument("--control-diversity-weight", type=float, default=None)
     parser.add_argument(
         "--control-state-clock",
         choices=CONTROL_STATE_CLOCKS,
@@ -1888,11 +1812,7 @@ def main() -> None:
             ),
             control_terminal_clock=args.control_terminal_clock,
             control_duration_parameterization=args.control_duration_parameterization,
-            control_value_parameterization=args.control_value_parameterization,
             control_dynamics_backend=args.control_dynamics_backend,
-            control_experts=args.control_experts,
-            control_selector_weight=args.control_selector_weight,
-            control_diversity_weight=args.control_diversity_weight,
             control_state_clock=args.control_state_clock,
             control_state_loss_grid=args.control_state_loss_grid,
             control_state_objective=args.control_state_objective,

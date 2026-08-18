@@ -15,12 +15,10 @@ from config import (
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     PREDICTION_CONTROL,
-    PREDICTION_CONTROL_MIXTURE,
     PREDICTION_STATE,
     TSConfig,
 )
 import control_rollout
-from control_prediction_adapters import deployable_control_prediction
 from dataset import FlightSeries, Normalizer, dynamics_arrays
 from metrics import states_with_derived_velocity
 from prediction_outputs import ControlPrediction
@@ -142,9 +140,9 @@ def _control_prediction_batch(
             row_dynamics = {
                 name: value[row : row + 1] for name, value in dynamics.items()
             }
-            predictions.append(deployable_control_prediction(
+            predictions.append(
                 model(torch.from_numpy(history[None]).to(device), row_dynamics)
-            ))
+            )
     return ControlPrediction(
         controls=torch.cat([item.controls for item in predictions], dim=0),
         segment_durations=torch.cat(
@@ -410,7 +408,7 @@ def forecast_approaches(
         return []
     device = device or next(model.parameters()).device
     anchor = default_anchor(config) if anchor is None else anchor
-    if config.prediction_output in (PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE):
+    if config.prediction_output == PREDICTION_CONTROL:
         return _forecast_control_batch(
             model, series, config, normalizer, anchor, device
         )

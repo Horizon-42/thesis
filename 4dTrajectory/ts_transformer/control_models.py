@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 
 from config import TSConfig
-from control_mixture import ControlMixtureHead
 from dataset import DYNAMICS_CONDITION_NAMES
 from prediction_outputs import ControlOutputHead, FinalTimeHead
 
@@ -98,47 +97,6 @@ class ControlOutputModel(ControlFeatureModel):
         return self.control_head(
             features,
             self.final_time_head(history),
-            lower=dynamics["control_lower"],
-            upper=dynamics["control_upper"],
-        )
-
-
-class ControlMixtureOutputModel(ControlFeatureModel):
-    """K independent control/duration heads with one history-only selector."""
-
-    def __init__(self, config: TSConfig, feature_encoder: nn.Module):
-        super().__init__(config, feature_encoder)
-        self.final_time_heads = nn.ModuleList(
-            FinalTimeHead(config) for _ in range(config.control_expert_count)
-        )
-        self.mixture_head = ControlMixtureHead(
-            config.d_model,
-            int(config.n_segments),
-            config.control_expert_count,
-            duration_uniform_floor=config.control_duration_uniform_floor,
-        )
-        offsets = torch.linspace(-1.0, 1.0, config.control_expert_count).tolist()
-        for offset, time_head, control_head in zip(
-            offsets, self.final_time_heads, self.mixture_head.experts
-        ):
-            _initialize_final_time_head(time_head, raw_bias=0.1 * offset)
-            _initialize_control_head(
-                control_head,
-                bank_rad=math.radians(2.0) * offset,
-                feature_std=1e-4,
-            )
-        with torch.no_grad():
-            self.mixture_head.selector.weight.zero_()
-            self.mixture_head.selector.bias.zero_()
-
-    def forward(self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]):
-        features = self.fused_features(history, dynamics)
-        final_times = torch.stack(
-            [head(history) for head in self.final_time_heads], dim=1
-        )
-        return self.mixture_head(
-            features,
-            final_times,
             lower=dynamics["control_lower"],
             upper=dynamics["control_upper"],
         )

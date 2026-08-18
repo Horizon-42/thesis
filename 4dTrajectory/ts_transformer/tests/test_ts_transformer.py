@@ -55,7 +55,6 @@ import oracle_teacher.pretraining as teacher_pretraining  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
-import run_ts_control_fixed_dt_overfit as fixed_dt_overfit  # noqa: E402
 import train as train_module  # noqa: E402
 from arc_length_geometry import (  # noqa: E402
     arc_length_geometry_metrics,
@@ -72,34 +71,30 @@ from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_METRICS,
-    CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
     CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
-    CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM,
+    CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM,
     CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
     CONTROL_GRADIENT_CLIP_GLOBAL,
-    CONTROL_VALUE_ABSOLUTE, CONTROL_VALUE_TRIM_RESIDUAL,
     CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
-    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     CONTROL_TERMINAL_CLOCK_PREDICTED,
     CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     CONTROL_RECIPE_SIMPLE_V1,
-    PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
+    PREDICTION_CONTROL,
+    PREDICTION_STATE,
     TSConfig, control_recipe, control_simple_v1_overrides,
 )
-from control_mixture import ControlMixturePrediction  # noqa: E402
 from control_loss_components import (  # noqa: E402
     ControlStateLossResult,
     control_tracking_loss_terms,
@@ -150,11 +145,6 @@ from models import build_model, parameter_count  # noqa: E402
 from oracle_teacher.pretraining import CachedSchedulePretrainer  # noqa: E402
 from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
-)
-from trim_residual_control import (  # noqa: E402
-    bounded_trim_residual_controls,
-    interior_trim_controls,
-    trim_control_baseline,
 )
 from terminal_state_loss import terminal_state_errors  # noqa: E402
 from uniform_duration_control import UniformDurationControlHead  # noqa: E402
@@ -2394,104 +2384,6 @@ def test_transport_chart_dynamics_is_an_explicit_control_only_contract(backend):
         TSConfig(control_dynamics_backend=backend)
 
 
-def test_control_mixture_is_an_explicit_validated_mode():
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL_MIXTURE,
-        control_expert_count=3,
-    )
-
-    assert config.control_expert_count == 3
-    assert control_recipe(config) == {
-        "effort_loss_weight": config.control_effort_loss_weight,
-        "smoothness_loss_weight": config.control_smoothness_loss_weight,
-        "duration_parameterization": CONTROL_DURATION_FACTORIZED,
-        "duration_uniform_floor": config.control_duration_uniform_floor,
-        "value_parameterization": CONTROL_VALUE_ABSOLUTE,
-        "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
-        "reference_velocity_source": config.reference_velocity_source,
-        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
-        "state_supervision_clock": config.control_state_supervision_clock,
-        "state_loss_grid": config.control_state_loss_grid,
-            "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-            "dense_state_loss_weight": config.control_dense_state_loss_weight,
-            "geometry_loss_weight": config.control_geometry_loss_weight,
-            "arc_horizontal_velocity_loss_weight": (
-                config.control_arc_horizontal_velocity_loss_weight
-            ),
-            "arc_vertical_velocity_loss_weight": (
-                config.control_arc_vertical_velocity_loss_weight
-            ),
-            "arc_horizontal_velocity_scale_mps": (
-                config.control_arc_horizontal_velocity_scale_mps
-            ),
-            "arc_vertical_velocity_scale_mps": (
-                config.control_arc_vertical_velocity_scale_mps
-            ),
-            "arc_local_velocity_parameterization": (
-                config.control_arc_local_velocity_parameterization
-            ),
-            "arc_tangent_loss_weight": config.control_arc_tangent_loss_weight,
-            "arc_position_end_weight": config.control_arc_position_end_weight,
-            "arc_terminal_parameterization": config.control_arc_terminal_parameterization,
-            "arc_terminal_cross_track_emphasis": (
-                config.control_arc_terminal_cross_track_emphasis
-            ),
-            "arc_terminal_vertical_emphasis": (
-                config.control_arc_terminal_vertical_emphasis
-            ),
-            "terminal_position_loss_weight": (
-                config.control_terminal_position_loss_weight
-            ),
-            "terminal_velocity_loss_weight": (
-                config.control_terminal_velocity_loss_weight
-            ),
-            "terminal_position_scale_m": config.control_terminal_position_scale_m,
-            "terminal_velocity_scale_mps": (
-                config.control_terminal_velocity_scale_mps
-            ),
-            "terminal_supervision_clock": (
-                config.control_terminal_supervision_clock
-            ),
-        "state_duration_gradient": True,
-        "horizon_curriculum_s": [],
-        "horizon_curriculum_stage_epochs": (
-            config.control_horizon_curriculum_stage_epochs
-        ),
-        "gradient_clip_norm": 0.0,
-        "gradient_clip_policy": CONTROL_GRADIENT_CLIP_GLOBAL,
-        "expert_count": 3,
-        "selector_loss_weight": config.control_mixture_selector_loss_weight,
-        "diversity_loss_weight": config.control_mixture_diversity_loss_weight,
-    }
-    with pytest.raises(ValueError, match="expert_count >= 2"):
-        TSConfig(
-            prediction_output=PREDICTION_CONTROL_MIXTURE,
-            control_expert_count=1,
-        )
-
-
-def test_pipeline_preserves_control_mixture_recipe_in_commands_and_config(tmp_path):
-    plan = pipeline_module.TrainingPlan(
-        (AIRPORT,),
-        "itransformer",
-        training_mode="pooled",
-        prediction_output=PREDICTION_CONTROL_MIXTURE,
-        control_experts=4,
-        control_selector_weight=0.2,
-        control_diversity_weight=0.03,
-        output_dir=tmp_path / "mixture",
-    )
-    _label, command = plan.train_step(use_best_config=False)
-    config, _source = plan.resolved_train_config(use_best_config=False)
-
-    assert command[command.index("--control-experts") + 1] == "4"
-    assert command[command.index("--control-selector-weight") + 1] == "0.2"
-    assert command[command.index("--control-diversity-weight") + 1] == "0.03"
-    assert config.control_expert_count == 4
-    assert config.control_mixture_selector_loss_weight == pytest.approx(0.2)
-    assert config.control_mixture_diversity_loss_weight == pytest.approx(0.03)
-
-
 def test_pipeline_carries_and_names_common_training_cohort():
     fixed = pipeline_module.TrainingPlan(
         (AIRPORT,),
@@ -2521,44 +2413,6 @@ def test_pipeline_carries_and_names_common_training_cohort():
     assert "cohort_min60" in prediction.category
 
 
-@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_control_mixture_models_return_bounded_complete_candidates(model_name):
-    config = TSConfig(
-        model=model_name,
-        prediction_output=PREDICTION_CONTROL_MIXTURE,
-        control_expert_count=3,
-        seq_len=32,
-        n_segments=4,
-        d_model=32,
-        n_heads=4,
-        d_ff=64,
-        e_layers=1,
-    )
-    model = build_model(config)
-    lower = torch.tensor([[0.0, -0.5, 0.5], [0.0, -0.7, 0.6]])
-    upper = torch.tensor([[10_000.0, 0.5, 1.8], [250_000.0, 0.7, 2.0]])
-    dynamics = {
-        "condition": torch.rand(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
-        "control_lower": lower,
-        "control_upper": upper,
-    }
-
-    result = model(torch.randn(2, config.seq_len, config.enc_in), dynamics)
-    selected = result.selected(torch.tensor([2, 0]))
-
-    assert isinstance(result, ControlMixturePrediction)
-    assert result.controls.shape == (2, 3, 4, 3)
-    assert result.segment_durations.shape == (2, 3, 4)
-    assert result.selection_logits.shape == (2, 3)
-    assert torch.all(result.controls >= lower[:, None, None, :])
-    assert torch.all(result.controls <= upper[:, None, None, :])
-    torch.testing.assert_close(
-        result.segment_durations.sum(dim=-1), result.final_time_s
-    )
-    torch.testing.assert_close(selected.controls[0], result.controls[0, 2])
-    torch.testing.assert_close(selected.controls[1], result.controls[1, 0])
-
-
 def test_control_state_supervision_clock_rejects_unknown_value():
     with pytest.raises(ValueError, match="control_state_supervision_clock"):
         TSConfig(control_state_supervision_clock="future")
@@ -2572,26 +2426,16 @@ def test_fixed_dt_control_state_loss_requires_observed_single_control_clock():
         )
     with pytest.raises(ValueError, match="only by prediction_output='control'"):
         TSConfig(
-            prediction_output=PREDICTION_CONTROL_MIXTURE,
+            prediction_output=PREDICTION_STATE,
             control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
             control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
         )
 
 
-@pytest.mark.parametrize("prediction_output", ["state", PREDICTION_CONTROL_MIXTURE])
-def test_direct_control_durations_reject_non_single_control_outputs(prediction_output):
+def test_uniform_control_durations_reject_non_control_outputs():
     with pytest.raises(ValueError, match="only by prediction_output='control'"):
         TSConfig(
-            prediction_output=prediction_output,
-            control_duration_parameterization=CONTROL_DURATION_DIRECT,
-        )
-
-
-@pytest.mark.parametrize("prediction_output", ["state", PREDICTION_CONTROL_MIXTURE])
-def test_uniform_control_durations_reject_non_single_control_outputs(prediction_output):
-    with pytest.raises(ValueError, match="only by prediction_output='control'"):
-        TSConfig(
-            prediction_output=prediction_output,
+            prediction_output=PREDICTION_STATE,
             control_duration_parameterization=CONTROL_DURATION_UNIFORM,
         )
 
@@ -2624,7 +2468,6 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_horizon_curriculum_stage_epochs",
         "control_gradient_clip_norm",
         "control_gradient_clip_policy",
-        "control_value_parameterization",
         "control_dynamics_backend",
         "control_dense_state_loss_weight",
         "control_geometry_loss_weight",
@@ -2652,53 +2495,6 @@ def test_legacy_control_config_without_physical_criteria_recipe_is_rejected(fiel
 
     with pytest.raises(ValueError, match=f"missing {field}.*regenerate"):
         TSConfig.from_dict(serialized)
-
-
-def test_physical_criteria_requires_observed_fixed_dt_single_control():
-    with pytest.raises(ValueError, match="requires.*fixed-dt"):
-        TSConfig(
-            prediction_output=PREDICTION_CONTROL,
-            control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
-        )
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
-        control_state_duration_gradient=False,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
-    )
-
-    assert config.control_state_duration_gradient is False
-    assert "physical-criteria" in train_module.target_contract(config)
-    assert "detached-duration-gradient" in train_module.target_contract(config)
-
-
-def test_terminal_state_objective_requires_aligned_selection_and_terminal_weights():
-    common = {
-        "prediction_output": PREDICTION_CONTROL,
-        "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
-        "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        "control_state_objective": CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
-    }
-    with pytest.raises(ValueError, match="fixed-anchor-terminal-state"):
-        TSConfig(**common)
-    with pytest.raises(ValueError, match="velocity weight greater"):
-        TSConfig(
-            **common,
-            checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
-            control_dense_state_loss_weight=1.0,
-            control_terminal_position_loss_weight=2.0,
-            control_terminal_velocity_loss_weight=1.0,
-        )
-    config = TSConfig(
-        **common,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
-    )
-
-    assert config.control_terminal_position_loss_weight > config.control_dense_state_loss_weight
-    assert config.control_terminal_velocity_loss_weight > config.control_dense_state_loss_weight
-    assert "terminal-state" in train_module.target_contract(config)
 
 
 def test_arc_length_geometry_objective_requires_aligned_selection_and_weights():
@@ -2772,7 +2568,7 @@ def test_predicted_terminal_clock_requires_dual_clock_physical_objective():
             **common,
             control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         )
-    with pytest.raises(ValueError, match="terminal-state or arc-length-geometry"):
+    with pytest.raises(ValueError, match="requires the arc-length-geometry"):
         TSConfig(
             **common,
             control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
@@ -2824,7 +2620,8 @@ def test_control_horizon_curriculum_is_a_strict_physical_training_mode():
         prediction_output=PREDICTION_CONTROL,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
         control_horizon_curriculum_s=(60.0, 120.0, 240.0),
         control_horizon_curriculum_stage_epochs=10,
@@ -2877,7 +2674,7 @@ def test_final_time_decoupled_clip_requires_isolated_clock_gradients():
 
     assert config.control_gradient_clip_policy == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
     with pytest.raises(ValueError, match="requires factorized durations"):
-        replace(config, control_duration_parameterization=CONTROL_DURATION_DIRECT)
+        replace(config, control_duration_parameterization=CONTROL_DURATION_UNIFORM)
     with pytest.raises(ValueError, match="requires observed state clock"):
         replace(
             config,
@@ -2956,81 +2753,6 @@ def test_final_time_decoupled_clip_caps_control_backbone_only():
     assert postclip["backbone"] == pytest.approx(0.6)
     assert postclip["control_head"] == pytest.approx(0.8)
     assert postclip["final_time_head"] == pytest.approx(12.0)
-
-
-def test_trim_baseline_locally_holds_speed_heading_and_flight_path_angle():
-    state = torch.tensor(
-        [[35.8, -78.8, 1000.0, 100.0, 0.3, 0.0, 60_000.0]],
-        dtype=torch.float64,
-    )
-    aero = torch.tensor(
-        [[122.6, 1.5, 0.02, 0.04, 0.8, 0.1]], dtype=torch.float64
-    )
-    lower = torch.tensor([[0.0, -0.7, 0.5]], dtype=torch.float64)
-    upper = torch.tensor([[300_000.0, 0.7, 2.0]], dtype=torch.float64)
-
-    baseline = trim_control_baseline(state, aero, lower, upper)
-    enu_state = torch.stack(
-        (
-            torch.zeros(1, dtype=torch.float64),
-            torch.zeros(1, dtype=torch.float64),
-            state[:, 2],
-            state[:, 3],
-            state[:, 4],
-            state[:, 5],
-            state[:, 6],
-        ),
-        dim=-1,
-    )
-    derivative = enu_rhs(enu_state, baseline.controls, aero)
-
-    assert not baseline.stalled.any()
-    assert not baseline.clamped.any()
-    torch.testing.assert_close(
-        derivative[:, 3:6], torch.zeros_like(derivative[:, 3:6]), atol=1e-12, rtol=0
-    )
-
-
-def test_zero_trim_residual_reproduces_trim_and_has_zero_regularization_effort():
-    state = torch.tensor(
-        [[35.8, -78.8, 1000.0, 100.0, 0.3, 0.0, 60_000.0]],
-        dtype=torch.float32,
-    )
-    aero = torch.tensor(
-        [[122.6, 1.5, 0.02, 0.04, 0.8, 0.1]], dtype=torch.float32
-    )
-    lower = torch.tensor([[0.0, -0.7, 0.5]])
-    upper = torch.tensor([[300_000.0, 0.7, 2.0]])
-    baseline = trim_control_baseline(state, aero, lower, upper)
-    expected, _unit = interior_trim_controls(baseline.controls, lower, upper)
-    controls = bounded_trim_residual_controls(
-        torch.zeros(1, 4, 3), baseline.controls, lower, upper
-    )
-    prediction = ControlPrediction(
-        controls=controls,
-        segment_durations=torch.ones(1, 4),
-        final_time_s=torch.tensor([4.0]),
-    )
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL,
-        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
-    )
-    effort, smoothness = control_regularization_signals(
-        prediction,
-        {
-            "initial_state": state,
-            "aero_params": aero,
-            "control_lower": lower,
-            "control_upper": upper,
-        },
-        config,
-    )
-
-    torch.testing.assert_close(
-        controls, expected.unsqueeze(1).expand_as(controls), atol=1e-5, rtol=1e-6
-    )
-    torch.testing.assert_close(effort, torch.zeros_like(effort), atol=1e-6, rtol=0)
-    torch.testing.assert_close(smoothness, effort)
 
 
 def test_control_horizon_curriculum_builds_exact_batched_prefix_views():
@@ -3321,12 +3043,12 @@ def test_control_horizon_curriculum_selects_checkpoint_only_after_full_stage():
         prediction_output=PREDICTION_CONTROL,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
         control_horizon_curriculum_s=(2.0,),
         control_horizon_curriculum_stage_epochs=1,
         control_gradient_clip_norm=20.0,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
         epochs=2,
         patience=1,
         seq_len=8,
@@ -3346,7 +3068,7 @@ def test_control_horizon_curriculum_selects_checkpoint_only_after_full_stage():
     assert fit.history[0].validation_selection_metric == "curriculum-prefix-objective"
     assert (
         fit.history[1].validation_selection_metric
-        == CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA
+        == CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY
     )
     assert fit.best_validation_selection == pytest.approx(
         fit.history[1].validation_selection_value
@@ -3411,7 +3133,7 @@ def test_predicted_control_state_clock_preserves_original_training_behavior():
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
 @pytest.mark.parametrize(
     "duration_parameterization",
-    [CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_DIRECT, CONTROL_DURATION_UNIFORM],
+    [CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM],
 )
 def test_control_models_use_per_sample_bounds_and_aircraft_condition(
     model_name, duration_parameterization
@@ -3441,76 +3163,6 @@ def test_control_models_use_per_sample_bounds_and_aircraft_condition(
     assert result.controls.shape == (2, 4, 3)
     assert torch.all(result.controls >= lower[:, None, :])
     assert torch.all(result.controls <= upper[:, None, :])
-    assert torch.allclose(result.segment_durations.sum(dim=-1), result.final_time_s)
-
-
-def test_trim_residual_mode_is_explicit_factorized_single_control_only():
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL,
-        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
-    )
-
-    assert control_recipe(config)["value_parameterization"] == CONTROL_VALUE_TRIM_RESIDUAL
-    assert "trim-residual-control-v1" in train_module.target_contract(config)
-    with pytest.raises(ValueError, match="only by prediction_output='control'"):
-        TSConfig(control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL)
-    with pytest.raises(ValueError, match="require factorized durations"):
-        replace(config, control_duration_parameterization=CONTROL_DURATION_DIRECT)
-
-
-@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_trim_residual_head_is_backbone_agnostic_and_starts_at_trim(model_name):
-    config = TSConfig(
-        model=model_name,
-        prediction_output=PREDICTION_CONTROL,
-        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
-        seq_len=32,
-        n_segments=4,
-        d_model=32,
-        n_heads=4,
-        d_ff=64,
-        e_layers=1,
-        dropout=0.0,
-        fc_dropout=0.0,
-    )
-    model = build_model(config).eval()
-    lower = torch.tensor([[0.0, -0.7, 0.5], [0.0, -0.7, 0.5]])
-    upper = torch.tensor([[300_000.0, 0.7, 2.0], [250_000.0, 0.7, 2.0]])
-    state = torch.tensor(
-        [
-            [35.8, -78.8, 1000.0, 100.0, 0.3, 0.0, 60_000.0],
-            [38.7, -121.6, 1500.0, 110.0, -0.2, -0.01, 70_000.0],
-        ],
-        dtype=torch.float64,
-    )
-    aero = torch.tensor(
-        [
-            [122.6, 1.5, 0.02, 0.04, 0.8, 0.1],
-            [124.0, 1.6, 0.022, 0.045, 0.8, 0.1],
-        ],
-        dtype=torch.float64,
-    )
-    dynamics = {
-        "condition": torch.rand(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
-        "initial_state": state,
-        "aero_params": aero,
-        "control_lower": lower,
-        "control_upper": upper,
-    }
-
-    result = model(torch.randn(2, config.seq_len, config.enc_in), dynamics)
-    baseline = trim_control_baseline(
-        state.float(), aero.float(), lower, upper
-    )
-    expected, _unit = interior_trim_controls(baseline.controls, lower, upper)
-
-    assert isinstance(result, ControlPrediction)
-    torch.testing.assert_close(
-        result.controls,
-        expected.unsqueeze(1).expand_as(result.controls),
-        atol=1e-4,
-        rtol=1e-6,
-    )
     assert torch.allclose(result.segment_durations.sum(dim=-1), result.final_time_s)
 
 
@@ -3711,103 +3363,7 @@ def test_control_model_starts_from_neutral_uniform_rollout():
 
 
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_direct_duration_control_matches_factorized_initial_clock(model_name):
-    config = TSConfig(
-        model=model_name,
-        prediction_output=PREDICTION_CONTROL,
-        control_duration_parameterization=CONTROL_DURATION_DIRECT,
-        seq_len=32,
-        n_segments=8,
-        d_model=32,
-        n_heads=4,
-        d_ff=64,
-        e_layers=1,
-        final_time_scale_s=600.0,
-    )
-    model = build_model(config).eval()
-    history = torch.randn(2, config.seq_len, config.enc_in)
-    dynamics = {
-        "condition": torch.randn(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
-        "control_lower": torch.tensor(
-            [[0.0, -0.7, 0.5], [0.0, -0.5, 0.5]]
-        ),
-        "control_upper": torch.tensor(
-            [[240_000.0, 0.7, 2.0], [200_000.0, 0.5, 2.0]]
-        ),
-    }
-
-    prediction = model(history, dynamics)
-    expected_total = math.log(2.0) * config.final_time_scale_s
-
-    torch.testing.assert_close(
-        prediction.final_time_s,
-        torch.full_like(prediction.final_time_s, expected_total),
-    )
-    torch.testing.assert_close(
-        prediction.segment_durations,
-        torch.full_like(
-            prediction.segment_durations, expected_total / config.n_segments
-        ),
-    )
-
-
-@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_direct_duration_is_a_parameter_count_matched_head_ablation(model_name):
-    common = dict(
-        model=model_name,
-        prediction_output=PREDICTION_CONTROL,
-        seq_len=32,
-        n_segments=8,
-        d_model=32,
-        n_heads=4,
-        d_ff=64,
-        e_layers=1,
-    )
-    factorized = build_model(TSConfig(
-        **common,
-        control_duration_parameterization=CONTROL_DURATION_FACTORIZED,
-    ))
-    direct = build_model(TSConfig(
-        **common,
-        control_duration_parameterization=CONTROL_DURATION_DIRECT,
-    ))
-
-    assert parameter_count(direct) == parameter_count(factorized)
-
-
-def test_direct_duration_total_time_backpropagates_to_every_segment_logit():
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL,
-        control_duration_parameterization=CONTROL_DURATION_DIRECT,
-        seq_len=8,
-        n_segments=4,
-        d_model=16,
-        n_heads=4,
-        d_ff=32,
-        e_layers=1,
-    )
-    model = build_model(config)
-    history = torch.randn(2, config.seq_len, config.enc_in)
-    dynamics = {
-        "condition": torch.randn(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
-        "control_lower": torch.tensor(
-            [[0.0, -0.7, 0.5], [0.0, -0.5, 0.5]]
-        ),
-        "control_upper": torch.tensor(
-            [[240_000.0, 0.7, 2.0], [200_000.0, 0.5, 2.0]]
-        ),
-    }
-
-    model(history, dynamics).final_time_s.sum().backward()
-
-    gradient = model.control_head.duration_projection.bias.grad
-    assert gradient is not None
-    assert torch.isfinite(gradient).all()
-    assert torch.count_nonzero(gradient) == config.n_segments
-
-
-@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_physical_criteria_trains_both_backbones_without_duration_state_gradient(
+def test_fixed_dt_objective_trains_both_backbones_without_duration_state_gradient(
     model_name,
 ):
     series, config = _series(
@@ -3816,7 +3372,8 @@ def test_physical_criteria_trains_both_backbones_without_duration_state_gradient
         prediction_output=PREDICTION_CONTROL,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
         seq_len=8,
         n_segments=2,
@@ -4024,11 +3581,11 @@ def test_transport_chart_prediction_directory_stays_within_component_limit():
         "itransformer",
         training_mode="pooled",
         prediction_output=PREDICTION_CONTROL,
-        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
         control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
         control_horizon_curriculum_s=(60.0, 120.0, 240.0),
         control_horizon_curriculum_stage_epochs=1,
@@ -4406,67 +3963,6 @@ def test_terminal_state_runway_components_rotate_enu_and_apply_emphasis():
     assert errors.velocity_runway_components_mps.item() == pytest.approx(47.0)
 
 
-def test_terminal_state_components_use_last_reliable_velocity_and_explicit_weights():
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
-    )
-    states = torch.zeros(1, 3, len(ch.CHANNELS))
-    states[0, 0, list(ch.VELOCITY_IDX)] = torch.tensor([1.0, 2.0, 3.0])
-    states[0, 1, list(ch.VELOCITY_IDX)] = torch.tensor([4.0, 5.0, 6.0])
-    states[0, 2, list(ch.VELOCITY_IDX)] = 999.0
-    weights = torch.full_like(states, 1.0 / len(ch.CHANNELS))
-    weights[0, 2, list(ch.VELOCITY_IDX)] = 0.0
-    supervision = FixedDTControlSupervision(
-        query_offsets_s=torch.tensor([[2.0, 4.0, 6.0]], dtype=torch.float64),
-        states=states,
-        weights=weights,
-        valid=torch.ones(1, 3, dtype=torch.bool),
-    )
-    anchor = torch.zeros(1, len(ch.CHANNELS))
-    anchor[0, list(ch.VELOCITY_IDX)] = torch.tensor([-1.0, -2.0, -3.0])
-    endpoints = torch.zeros(1, 2, len(ch.CHANNELS))
-    endpoints[0, -1, list(ch.POSITION_IDX)] = torch.tensor([300.0, 400.0, 0.0])
-    endpoints[0, -1, list(ch.VELOCITY_IDX)] = torch.tensor([7.0, 9.0, 6.0])
-    endpoints.requires_grad_()
-    rollout = ControlStateLossResult(
-        normalized_mse=torch.tensor([2.0]),
-        normalized_segment_end_states=endpoints,
-        physical_query_states=torch.zeros(1, 3, len(ch.CHANNELS)),
-    )
-    normalizer = Normalizer(
-        mean=np.zeros(len(ch.CHANNELS)),
-        std=np.ones(len(ch.CHANNELS)),
-    )
-
-    target_velocity = last_reliable_terminal_velocity_target(anchor, supervision)
-    terms = control_tracking_loss_terms(
-        rollout,
-        anchor,
-        torch.zeros(1, len(ch.CHANNELS)),
-        config,
-        normalizer,
-        supervision,
-        torch.zeros(1),
-    )
-    total = terms.state + terms.terminal_position + terms.extras["terminal_velocity"]
-    total.backward()
-
-    torch.testing.assert_close(target_velocity, torch.tensor([[4.0, 5.0, 6.0]]))
-    assert terms.state.item() == pytest.approx(0.5)
-    assert terms.terminal_position.item() == pytest.approx(5.0)
-    assert terms.extras["terminal_velocity"].item() == pytest.approx(0.5)
-    assert torch.count_nonzero(
-        endpoints.grad[0, -1, list(ch.POSITION_IDX)]
-    ).item() > 0
-    assert torch.count_nonzero(
-        endpoints.grad[0, -1, list(ch.VELOCITY_IDX)]
-    ).item() > 0
-
-
 def test_terminal_velocity_target_falls_back_to_observed_anchor():
     states = torch.full((1, 2, len(ch.CHANNELS)), 999.0)
     weights = torch.zeros_like(states)
@@ -4513,80 +4009,6 @@ def test_validation_terminal_velocity_matches_fixed_dt_training_before_off_grid_
         validation_target, training_target.numpy(), rtol=0.0, atol=0.0
     )
     np.testing.assert_array_equal(validation_target[0], [10.0, 20.0, 30.0])
-
-
-def test_overfit_history_selection_uses_configured_checkpoint_metric():
-    terminal_metric = CHECKPOINT_SELECTION_TERMINAL_STATE
-    fit = SimpleNamespace(
-        config=SimpleNamespace(checkpoint_selection_metric=terminal_metric),
-        history=[
-            SimpleNamespace(
-                epoch=1,
-                val_loss=1.0,
-                validation_selection_metric=terminal_metric,
-                validation_selection_value=5.0,
-            ),
-            SimpleNamespace(
-                epoch=2,
-                val_loss=2.0,
-                validation_selection_metric=terminal_metric,
-                validation_selection_value=1.0,
-            ),
-        ],
-    )
-
-    assert fixed_dt_overfit._selected_checkpoint_history_row(fit).epoch == 2
-
-
-def test_terminal_state_common_grid_metrics_use_fixed_dt_terminal_velocity_target():
-    series, config = _series(
-        n_flights=1,
-        prediction_output=PREDICTION_CONTROL,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
-        seq_len=8,
-        n_segments=2,
-    )
-    item = series[0]
-    anchor = config.seq_len - 1
-    duration = float(item.supervision_times[-1] - item.times[anchor])
-    offsets = np.array([duration / 2.0, duration])
-    query_times = item.times[anchor] + offsets
-    predicted = np.column_stack([
-        np.interp(query_times, item.supervision_times, item.supervision_values[:, channel])
-        for channel in range(len(ch.CHANNELS))
-    ])[None, ...]
-
-    metrics = fixed_anchor_common_grid_metrics(
-        series,
-        config,
-        item.values[anchor][None, :],
-        predicted,
-        np.array([duration]),
-        np.diff(np.concatenate(([0.0], offsets)))[None, :],
-        points=2,
-        normalizer=Normalizer.fit(series),
-    )
-    fixed_dt = build_fixed_dt_supervision(
-        series,
-        [item.supervision_values],
-        [(0, anchor)],
-        dt_s=config.dt_s,
-    )
-    training_velocity_target = last_reliable_terminal_velocity_target(
-        torch.from_numpy(item.values[anchor][None].astype(np.float32)), fixed_dt
-    ).numpy()[0]
-    expected_terminal_velocity_error = np.linalg.norm(
-        predicted[0, -1, list(ch.VELOCITY_IDX)] - training_velocity_target
-    )
-
-    assert metrics["dense_state_loss"] == pytest.approx(0.0, abs=1e-10)
-    assert metrics["fde_m"] == pytest.approx(0.0, abs=1e-7)
-    assert metrics["terminal_velocity_error_mps"] == pytest.approx(
-        expected_terminal_velocity_error
-    )
 
 
 def test_formal_common_grid_selector_returns_only_lean_position_time_metrics():
@@ -4705,7 +4127,6 @@ def test_fixed_dt_control_loss_forms_one_differentiable_training_step(
 @pytest.mark.parametrize(
     ("objective", "selection"),
     [
-        (CONTROL_STATE_OBJECTIVE_TERMINAL_STATE, CHECKPOINT_SELECTION_TERMINAL_STATE),
         (
             CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
             CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
@@ -4787,7 +4208,6 @@ def test_terminal_tracking_losses_are_differentiable_with_transport_dynamics(
 @pytest.mark.parametrize(
     ("objective", "selection"),
     [
-        (CONTROL_STATE_OBJECTIVE_TERMINAL_STATE, CHECKPOINT_SELECTION_TERMINAL_STATE),
         (
             CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
             CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
@@ -4838,60 +4258,6 @@ def test_terminal_tracking_loss_cuda_transport_smoke(objective, selection):
 
     assert torch.isfinite(components.total)
     assert torch.isfinite(components.extras["terminal_velocity"])
-
-
-def test_control_mixture_dataset_and_best_of_k_loss_are_differentiable():
-    series, config = _series(
-        n_flights=2,
-        prediction_output=PREDICTION_CONTROL_MIXTURE,
-        control_expert_count=3,
-        seq_len=8,
-        n_segments=2,
-        d_model=16,
-        n_heads=4,
-        d_ff=32,
-        e_layers=1,
-        final_time_scale_s=2.0,
-        control_rollout_integrator_dt_s=0.5,
-    )
-    normalizer = Normalizer.fit(series)
-    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
-    x, target, weights, final_time, flight_weights, dynamics = dataset.batch(
-        np.array([0, 1])
-    )
-    model = build_model(config)
-    prediction = model(x, dynamics)
-    components = train_module.prediction_loss_components(
-        prediction,
-        x[:, -1],
-        target,
-        weights,
-        final_time,
-        flight_weights,
-        config,
-        normalizer,
-        dynamics,
-    )
-    components.total.backward()
-
-    assert torch.isfinite(components.total)
-    assert set(components.extras) == {
-        "control_effort",
-        "control_smoothness",
-        "mixture_selector",
-        "mixture_diversity",
-    }
-    assert model.mixture_head.selector.weight.grad is not None
-    assert torch.count_nonzero(model.mixture_head.selector.weight.grad)
-    assert any(
-        expert.control_projection.weight.grad is not None
-        for expert in model.mixture_head.experts
-    )
-    assert all(
-        time_head.network[-1].bias.grad is not None
-        and torch.count_nonzero(time_head.network[-1].bias.grad)
-        for time_head in model.final_time_heads
-    )
 
 
 def test_config_rejects_a_head_count_that_does_not_divide_d_model():
@@ -5135,10 +4501,10 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         batch_size="16",
         control_effort_weight=1e-4,
         control_smoothness_weight=1e-2,
-        control_duration_parameterization=CONTROL_DURATION_DIRECT,
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_NATIVE,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
         control_state_duration_gradient=False,
         control_rollout_dt=0.5,
         output_dir=tmp_path,
@@ -5151,32 +4517,37 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--split-seed") + 1] == "1337"
     assert recipe[recipe.index("--control-effort-weight") + 1] == "0.0001"
     assert recipe[recipe.index("--control-smoothness-weight") + 1] == "0.01"
-    assert recipe[recipe.index("--control-duration-parameterization") + 1] == "direct"
+    assert recipe[recipe.index("--control-duration-parameterization") + 1] == "uniform"
     assert recipe[recipe.index("--control-state-clock") + 1] == "observed"
-    assert recipe[recipe.index("--control-state-loss-grid") + 1] == "fixed-dt"
-    assert recipe[recipe.index("--control-state-objective") + 1] == "physical-criteria"
+    assert (
+        recipe[recipe.index("--control-state-loss-grid") + 1]
+        == "native-segment-endpoints"
+    )
+    assert (
+        recipe[recipe.index("--control-state-objective") + 1] == "true-time-position"
+    )
     assert "--no-control-state-duration-gradient" in recipe
     assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
     assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
     assert config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
     assert config.control_effort_loss_weight == pytest.approx(1e-4)
-    assert config.control_duration_parameterization == CONTROL_DURATION_DIRECT
+    assert config.control_duration_parameterization == CONTROL_DURATION_UNIFORM
     assert config.control_state_supervision_clock == CONTROL_STATE_CLOCK_OBSERVED
-    assert config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT
-    assert config.control_state_objective == CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA
+    assert config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_NATIVE
+    assert (
+        config.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION
+    )
     assert config.control_state_duration_gradient is False
     assert "control" in prediction.pred_dir.name
-    assert "direct_duration" in prediction.pred_dir.name
+    assert "uniform_duration" in prediction.pred_dir.name
     assert "observed_clock" in prediction.pred_dir.name
-    assert "fixed_dt_loss" in prediction.pred_dir.name
-    assert "physical_criteria" in prediction.pred_dir.name
+    assert "true_time_position" in prediction.pred_dir.name
     assert "detached_duration_gradient" in prediction.pred_dir.name
     assert "control" in prediction.category
     assert "openap_direct" in prediction.category
-    assert "direct durations" in prediction.label
-    assert "fixed-dt state loss" in prediction.label
-    assert "physical ADE/FDE criterion" in prediction.label
+    assert "uniform durations" in prediction.label
+    assert "true-time physical position criterion" in prediction.label
     assert "detached duration-state gradient" in prediction.label
 
 
@@ -5189,13 +4560,13 @@ def test_pipeline_carries_and_names_control_horizon_curriculum():
         epochs=4,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
         control_horizon_curriculum_s=(2.0, 4.0),
         control_horizon_curriculum_stage_epochs=1,
         control_gradient_clip_norm=20.0,
         control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
-        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
     )
     recipe = plan._recipe_args()
     config, _source = plan.resolved_train_config(use_best_config=False)
@@ -5212,25 +4583,20 @@ def test_pipeline_carries_and_names_control_horizon_curriculum():
         config.control_gradient_clip_policy
         == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
     )
-    assert config.control_value_parameterization == CONTROL_VALUE_TRIM_RESIDUAL
     assert recipe[recipe.index("--control-gradient-clip-norm") + 1] == "20"
     assert (
         recipe[recipe.index("--control-gradient-clip-policy") + 1]
         == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
     )
-    assert (
-        recipe[recipe.index("--control-value-parameterization") + 1]
-        == CONTROL_VALUE_TRIM_RESIDUAL
+    # The arc-length recipe suffix overruns the 255-byte path-component cap, so the
+    # directory name is head + digest; the readable recipe survives in category/label.
+    assert len(plan.train_dir.name.encode("utf-8")) <= (
+        pipeline_module.MAX_PATH_COMPONENT_BYTES
     )
-    assert "horizon_curriculum_2_4s_x1" in plan.train_dir.name
-    assert "gradient_clip20_final_time_decoupled" in plan.train_dir.name
-    assert "trim_residual" in plan.train_dir.name
     assert "horizon_curriculum_2_4s_x1" in prediction.category
     assert "gradient_clip20_final_time_decoupled" in prediction.category
-    assert "trim_residual" in prediction.category
     assert "horizon curriculum 2→4 s × 1 epochs" in prediction.label
     assert "gradient clip 20 (final-time head decoupled)" in prediction.label
-    assert "trim-residual controls" in prediction.label
 
 
 def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
@@ -5669,15 +5035,6 @@ def test_cross_validation_rejects_candidate_checkpoint_from_another_contract(
             cv_patience=1,
             verbose=False,
         )
-
-
-def test_cross_validation_describes_common_grid_criteria_selection():
-    assert cv.SELECTION_METRIC_DESCRIPTIONS[
-        CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA
-    ] == (
-        "mean outer-train-fold airport-macro smooth maximum of fixed-anchor "
-        "common physical-time ADE/100 m and FDE/100 m"
-    )
 
 
 def test_cross_validation_describes_every_checkpoint_selection_metric():
@@ -6204,73 +5561,12 @@ def test_control_forecast_exports_optimizer_shaped_states_and_aligned_controls()
     assert parsed.final_time_s == pytest.approx(2.0)
 
 
-def test_control_mixture_forecast_uses_selector_without_truth_access():
-    series, config = _series(
-        n_flights=1,
-        prediction_output=PREDICTION_CONTROL_MIXTURE,
-        control_expert_count=2,
-        n_segments=2,
-        control_rollout_integrator_dt_s=0.5,
-    )
-    normalizer = Normalizer.fit(series)
-
-    class FixedMixtureModel(torch.nn.Module):
-        def forward(self, history, dynamics):
-            batch = len(history)
-            first = torch.tensor(
-                [[40_000.0, 0.04, 1.01], [32_000.0, -0.02, 0.99]],
-                dtype=history.dtype,
-                device=history.device,
-            )
-            second = torch.tensor(
-                [[50_000.0, -0.03, 1.02], [28_000.0, 0.01, 0.98]],
-                dtype=history.dtype,
-                device=history.device,
-            )
-            controls = torch.stack((first, second))[None].expand(batch, -1, -1, -1)
-            durations = torch.tensor(
-                [[[1.0, 1.0], [0.75, 1.25]]],
-                dtype=history.dtype,
-                device=history.device,
-            ).expand(batch, -1, -1)
-            return ControlMixturePrediction(
-                controls=controls,
-                segment_durations=durations,
-                final_time_s=durations.sum(dim=-1),
-                selection_logits=torch.tensor(
-                    [[-1.0, 2.0]], dtype=history.dtype, device=history.device
-                ).expand(batch, -1),
-            )
-
-    forecast = forecast_approach(
-        FixedMixtureModel(),
-        series[0],
-        config,
-        normalizer,
-        device=torch.device("cpu"),
-    )
-    record = build_prediction_record(
-        series[0], forecast, index=0, model_name=config.model,
-        horizon_mode=config.horizon_mode,
-    )
-
-    assert forecast.prediction_output == PREDICTION_CONTROL_MIXTURE
-    assert forecast.controls[:, 0].tolist() == pytest.approx([50_000.0, 28_000.0])
-    assert forecast.segment_durations_s.tolist() == pytest.approx([0.75, 1.25])
-    assert record.source["predictionOutput"] == PREDICTION_CONTROL_MIXTURE
-
-
 @pytest.mark.parametrize(
     ("duration_parameterization", "expected_contract"),
     [
         (
             CONTROL_DURATION_FACTORIZED,
             "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
-            "+duration-uniform-floor=0.8-v1",
-        ),
-        (
-            CONTROL_DURATION_DIRECT,
-            "bounded-control-direct-duration-casadi-rollout-clock-aligned-v1"
             "+duration-uniform-floor=0.8-v1",
         ),
         (
@@ -6328,7 +5624,6 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
             "smoothness_loss_weight": config.control_smoothness_loss_weight,
             "duration_parameterization": duration_parameterization,
             "duration_uniform_floor": config.control_duration_uniform_floor,
-            "value_parameterization": CONTROL_VALUE_ABSOLUTE,
         "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
         "reference_velocity_source": config.reference_velocity_source,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,

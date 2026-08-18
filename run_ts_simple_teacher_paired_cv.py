@@ -60,7 +60,7 @@ from models import parameter_count, resolve_device  # noqa: E402
 from oracle_teacher.evaluation import evaluate_schedule, move_dynamics  # noqa: E402
 from oracle_teacher.optimization import (  # noqa: E402
     BatchedOracleTeacher,
-    TeacherOptimizationStage,
+    teacher_optimization_stages,
     optimize_teacher_controls,
 )
 from oracle_teacher.pretraining import CachedSchedulePretrainer  # noqa: E402
@@ -355,12 +355,7 @@ def optimize_fold_teacher(
         dynamics["control_upper"],
         final_time,
     ).to(device)
-    stages = (
-        TeacherOptimizationStage("60s", 60.0, prefix_steps),
-        TeacherOptimizationStage("120s", 120.0, prefix_steps),
-        TeacherOptimizationStage("240s", 240.0, prefix_steps),
-        TeacherOptimizationStage("full", None, full_steps),
-    )
+    stages = teacher_optimization_stages(prefix_steps, full_steps)
     history = optimize_teacher_controls(
         teacher,
         x=x,

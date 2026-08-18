@@ -22,18 +22,12 @@ from config import (
     CONTROL_ARC_TERMINAL_VECTOR_NORM,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
-    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     TSConfig,
 )
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
-from physical_criteria import (
-    fixed_dt_position_ade_m,
-    physical_criteria_loss,
-    terminal_position_error_m,
-)
+from physical_criteria import terminal_position_error_m
 from terminal_state_loss import (
     TerminalStateErrors,
     last_reliable_terminal_velocity_target,
@@ -135,30 +129,6 @@ def _normalized_mse_objective(
     return ControlTrackingLossTerms(result.normalized_mse, terminal)
 
 
-def _physical_criteria_objective(
-    result: ControlStateLossResult,
-    normalized_anchor_state: torch.Tensor,
-    terminal_target: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dense_supervision: FixedDTControlSupervision | None,
-    runway_heading_rad: torch.Tensor,
-) -> ControlTrackingLossTerms:
-    del normalized_anchor_state, config, runway_heading_rad
-    if result.physical_query_states is None or dense_supervision is None:
-        raise ValueError("physical-criteria requires fixed-dt control supervision")
-    ade_m = fixed_dt_position_ade_m(
-        result.physical_query_states, dense_supervision, normalizer
-    )
-    terminal_m = terminal_position_error_m(
-        result.terminal_end_states, terminal_target, normalizer
-    )
-    zero = terminal_m.new_zeros(terminal_m.shape)
-    return ControlTrackingLossTerms(
-        physical_criteria_loss(ade_m, terminal_m), zero
-    )
-
-
 def _true_time_position_objective(
     result: ControlStateLossResult,
     normalized_anchor_state: torch.Tensor,
@@ -184,44 +154,6 @@ def _true_time_position_objective(
     return ControlTrackingLossTerms(
         state=result.physical_position_mse,
         terminal_position=config.state_endpoint_loss_weight * endpoint_mse,
-    )
-
-
-def _terminal_state_objective(
-    result: ControlStateLossResult,
-    normalized_anchor_state: torch.Tensor,
-    terminal_target: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dense_supervision: FixedDTControlSupervision | None,
-    runway_heading_rad: torch.Tensor,
-) -> ControlTrackingLossTerms:
-    del runway_heading_rad
-    if dense_supervision is None:
-        raise ValueError("terminal-state requires fixed-dt control supervision")
-    terminal_position_m = terminal_position_error_m(
-        result.terminal_end_states, terminal_target, normalizer
-    )
-    terminal_velocity_mps = terminal_velocity_error_mps(
-        result.terminal_end_states,
-        normalized_anchor_state,
-        dense_supervision,
-        normalizer,
-    )
-    return ControlTrackingLossTerms(
-        state=config.control_dense_state_loss_weight * result.normalized_mse,
-        terminal_position=(
-            config.control_terminal_position_loss_weight
-            * terminal_position_m
-            / config.control_terminal_position_scale_m
-        ),
-        extras={
-            "terminal_velocity": (
-                config.control_terminal_velocity_loss_weight
-                * terminal_velocity_mps
-                / config.control_terminal_velocity_scale_mps
-            )
-        },
     )
 
 
@@ -343,8 +275,6 @@ def _arc_length_geometry_objective(
 
 _TRACKING_OBJECTIVES: dict[str, TrackingObjective] = {
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE: _normalized_mse_objective,
-    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA: _physical_criteria_objective,
-    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: _terminal_state_objective,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: _arc_length_geometry_objective,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: _true_time_position_objective,
 }

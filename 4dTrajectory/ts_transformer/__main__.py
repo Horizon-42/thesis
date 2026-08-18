@@ -64,7 +64,6 @@ from config import (  # noqa: E402
     CONTROL_RECIPE_NAMES,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_SIMPLE_V1,
-    CONTROL_VALUE_PARAMETERIZATIONS,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_OBJECTIVES,
@@ -324,9 +323,8 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
         default=None,
         help=(
-            "control duration head: total-time plus softmax fractions (factorized) "
-            "or direct positive segment seconds (direct); uniform fixes every segment "
-            "to total-time/N"
+            "control duration head: total-time plus softmax fractions (factorized), "
+            "or uniform, which fixes every segment to total-time/N"
         ),
     )
     parser.add_argument(
@@ -339,15 +337,6 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--control-value-parameterization",
-        choices=CONTROL_VALUE_PARAMETERIZATIONS,
-        default=None,
-        help=(
-            "predict absolute bounded controls (default) or bounded residuals around an "
-            "anchor-state aerodynamic trim baseline"
-        ),
-    )
-    parser.add_argument(
         "--control-dynamics-backend",
         choices=CONTROL_DYNAMICS_BACKENDS,
         default=None,
@@ -356,14 +345,6 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
             "continuous full-transport chart/ENU-velocity dynamics"
         ),
     )
-    parser.add_argument(
-        "--control-experts",
-        type=int,
-        default=None,
-        help="number of complete control/duration experts in control-mixture mode",
-    )
-    parser.add_argument("--control-selector-weight", type=float, default=None)
-    parser.add_argument("--control-diversity-weight", type=float, default=None)
     parser.add_argument(
         "--control-state-clock",
         choices=CONTROL_STATE_CLOCKS,
@@ -592,11 +573,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_terminal_supervision_clock", args.control_terminal_clock),
         ("control_duration_parameterization", args.control_duration_parameterization),
         ("control_duration_uniform_floor", args.control_duration_uniform_floor),
-        ("control_value_parameterization", args.control_value_parameterization),
         ("control_dynamics_backend", args.control_dynamics_backend),
-        ("control_expert_count", args.control_experts),
-        ("control_mixture_selector_loss_weight", args.control_selector_weight),
-        ("control_mixture_diversity_loss_weight", args.control_diversity_weight),
         ("control_state_supervision_clock", args.control_state_clock),
         ("control_state_loss_grid", args.control_state_loss_grid),
         ("control_state_objective", args.control_state_objective),

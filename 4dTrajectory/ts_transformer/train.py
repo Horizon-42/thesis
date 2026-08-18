@@ -26,43 +26,35 @@ from batching import resolve_batch_size
 from config import (
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_OBJECTIVE,
-    CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
     CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
     CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
     CONTROL_ARC_TERMINAL_VECTOR_NORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
-    CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
-    CONTROL_VALUE_TRIM_RESIDUAL,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     PREDICTION_CONTROL,
-    PREDICTION_CONTROL_MIXTURE,
     PREDICTION_STATE,
     TSConfig,
     control_recipe,
     uses_control_dynamics,
 )
-from control_mixture import ControlMixturePrediction
 import control_rollout
 from control_loss_components import (
     ControlStateLossResult,
     control_tracking_loss_terms,
 )
-from control_prediction_adapters import deployable_control_prediction
 from control_regularization import control_regularization_signals
 from control_training_curriculum import (
     ControlTrainingStage,
@@ -104,7 +96,6 @@ from metrics import (
 )
 from models import build_model, parameter_count, resolve_device
 from prediction_outputs import ControlPrediction, StatePrediction
-from physical_criteria import physical_criteria_loss
 from time_grids import batch_time_grid, numpy_inference_time_grid
 from training_performance import EpochProfiler
 
@@ -123,12 +114,6 @@ STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
 CONTROL_LOSS_COMPONENT_NAMES = (
     "state", "final_time", "kinematic", "terminal", "control_effort", "control_smoothness"
 )
-CONTROL_MIXTURE_LOSS_COMPONENT_NAMES = (
-    *CONTROL_LOSS_COMPONENT_NAMES,
-    "mixture_selector",
-    "mixture_diversity",
-)
-
 CONTROL_TARGET_CONTRACTS = {
     (
         CONTROL_DURATION_FACTORIZED,
@@ -145,29 +130,10 @@ CONTROL_TARGET_CONTRACTS = {
         "bounded-control-nonuniform-duration-casadi-rollout-observed-clock-aligned-v3"
     ),
     (
-        CONTROL_DURATION_DIRECT,
-        CONTROL_STATE_CLOCK_PREDICTED,
-        CONTROL_STATE_LOSS_GRID_NATIVE,
-    ): (
-        "bounded-control-direct-duration-casadi-rollout-clock-aligned-v1"
-    ),
-    (
-        CONTROL_DURATION_DIRECT,
-        CONTROL_STATE_CLOCK_OBSERVED,
-        CONTROL_STATE_LOSS_GRID_NATIVE,
-    ): (
-        "bounded-control-direct-duration-casadi-rollout-observed-clock-aligned-v1"
-    ),
-    (
         CONTROL_DURATION_FACTORIZED,
         CONTROL_STATE_CLOCK_OBSERVED,
         CONTROL_STATE_LOSS_GRID_FIXED_DT,
     ): "bounded-control-nonuniform-duration-fixed-dt-state-loss-v1",
-    (
-        CONTROL_DURATION_DIRECT,
-        CONTROL_STATE_CLOCK_OBSERVED,
-        CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    ): "bounded-control-direct-duration-fixed-dt-state-loss-v1",
     (
         CONTROL_DURATION_UNIFORM,
         CONTROL_STATE_CLOCK_PREDICTED,
@@ -189,14 +155,6 @@ CONTROL_TARGET_CONTRACTS = {
 def target_contract(config: TSConfig) -> str:
     if config.prediction_output == PREDICTION_STATE:
         return STATE_TARGET_CONTRACTS[config.horizon_mode]
-    if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
-        base = (
-            "bounded-control-mixture-best-of-k-selector-v1"
-            f"+duration-uniform-floor={config.control_duration_uniform_floor:g}-v1"
-        )
-        if config.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4:
-            base += f"+dynamics={config.control_dynamics_backend}-v1"
-        return base
     base = CONTROL_TARGET_CONTRACTS[
         (
             config.control_duration_parameterization,
@@ -208,8 +166,6 @@ def target_contract(config: TSConfig) -> str:
         base += (
             f"+duration-uniform-floor={config.control_duration_uniform_floor:g}-v1"
         )
-    if config.control_value_parameterization == CONTROL_VALUE_TRIM_RESIDUAL:
-        base += "+trim-residual-control-v1"
     if config.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4:
         base += f"+dynamics={config.control_dynamics_backend}-v1"
     if config.control_duration_parameterization == CONTROL_DURATION_UNIFORM:
@@ -247,13 +203,9 @@ def target_contract(config: TSConfig) -> str:
 
 
 def loss_component_names(config: TSConfig) -> tuple[str, ...]:
-    names = {
-        PREDICTION_STATE: STATE_LOSS_COMPONENT_NAMES,
-        PREDICTION_CONTROL: CONTROL_LOSS_COMPONENT_NAMES,
-        PREDICTION_CONTROL_MIXTURE: CONTROL_MIXTURE_LOSS_COMPONENT_NAMES,
-    }[config.prediction_output]
-    if config.prediction_output != PREDICTION_CONTROL:
-        return names
+    if config.prediction_output == PREDICTION_STATE:
+        return STATE_LOSS_COMPONENT_NAMES
+    names = CONTROL_LOSS_COMPONENT_NAMES
     arc_velocity_extensions = {
         CONTROL_ARC_LOCAL_VELOCITY_VECTOR: (
             "arc_horizontal_velocity",
@@ -266,7 +218,6 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
         ),
     }
     extensions = {
-        CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: ("terminal_velocity",),
         CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
             "terminal_velocity",
             *arc_velocity_extensions[
@@ -728,7 +679,7 @@ def control_prediction_loss_terms(
     )
 
     effort_signal, smoothness_signal = control_regularization_signals(
-        prediction, dynamics, config
+        prediction, dynamics
     )
     active_segments = (
         torch.ones_like(prediction.segment_durations, dtype=torch.bool)
@@ -959,50 +910,15 @@ def _control_loss_adapter(
     )
 
 
-def _mixture_loss_adapter(
-    prediction,
-    normalized_anchor_state,
-    target_states,
-    state_weights,
-    target_final_time_s,
-    flight_weights,
-    config,
-    normalizer,
-    dynamics,
-    dense_supervision,
-    training_stage,
-) -> LossComponents:
-    if dynamics is None:
-        raise ValueError("control-mixture loss requires per-flight dynamics")
-    if dense_supervision is not None:
-        raise ValueError("control-mixture does not support fixed-dt state supervision")
-    if training_stage is not None:
-        raise ValueError("horizon curriculum is not supported by control-mixture")
-    from control_mixture_loss import mixture_prediction_loss_components
-
-    return mixture_prediction_loss_components(
-        prediction,
-        normalized_anchor_state,
-        target_states,
-        state_weights,
-        target_final_time_s,
-        flight_weights,
-        config,
-        normalizer,
-        dynamics,
-    )
-
-
 PredictionLossHandler = Callable[..., LossComponents]
 PREDICTION_LOSS_HANDLERS: dict[type, PredictionLossHandler] = {
     StatePrediction: state_prediction_loss_components,
     ControlPrediction: _control_loss_adapter,
-    ControlMixturePrediction: _mixture_loss_adapter,
 }
 
 
 def prediction_loss_components(
-    prediction: StatePrediction | ControlPrediction | ControlMixturePrediction,
+    prediction: StatePrediction | ControlPrediction,
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
@@ -1037,7 +953,7 @@ def prediction_loss_components(
 
 
 def prediction_loss(
-    prediction: StatePrediction | ControlPrediction | ControlMixturePrediction,
+    prediction: StatePrediction | ControlPrediction,
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
@@ -1127,7 +1043,7 @@ class SplitPredictionReplay:
 
 
 def _prediction_batch_replay(
-    output: StatePrediction | ControlPrediction | ControlMixturePrediction,
+    output: StatePrediction | ControlPrediction,
     x: torch.Tensor,
     y: torch.Tensor,
     mask: torch.Tensor,
@@ -1139,7 +1055,7 @@ def _prediction_batch_replay(
     metric_targets = y
     metric_weights = mask
     if uses_control_dynamics(dataset.config.prediction_output):
-        deployable = deployable_control_prediction(output)
+        deployable = output
         if dynamics is None:
             raise ValueError("control replay requires per-flight dynamics")
         points = dataset.config.validation_common_grid_points
@@ -2158,78 +2074,6 @@ def _common_grid_validation_selection(
     )
 
 
-def _common_grid_criteria_validation_selection(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-) -> ValidationSelection:
-    details = _common_grid_validation_details(
-        model=model, val_sets=val_sets, normalizer=normalizer, config=config,
-        device=device, val_by_airport=val_by_airport,
-        precomputed_details_by_airport=precomputed_details_by_airport,
-    )
-    by_airport: dict[str, float] = {}
-    for airport, block in details.items():
-        criterion = physical_criteria_loss(
-            torch.tensor(float(block["ade_m"])),
-            torch.tensor(float(block["fde_m"])),
-        )
-        value = float(criterion)
-        by_airport[airport] = value
-        block["physical_criteria"] = value
-    return ValidationSelection(
-        metric=CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
-        value=float(np.mean(list(by_airport.values()))),
-        by_airport=by_airport,
-        details_by_airport=details,
-    )
-
-
-def _terminal_state_validation_selection(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-) -> ValidationSelection:
-    details = _common_grid_validation_details(
-        model=model,
-        val_sets=val_sets,
-        normalizer=normalizer,
-        config=config,
-        device=device,
-        val_by_airport=val_by_airport,
-        precomputed_details_by_airport=precomputed_details_by_airport,
-    )
-    by_airport: dict[str, float] = {}
-    for airport, block in details.items():
-        value = (
-            config.control_dense_state_loss_weight * block["dense_state_loss"]
-            + config.control_terminal_position_loss_weight
-            * block["fde_m"]
-            / config.control_terminal_position_scale_m
-            + config.control_terminal_velocity_loss_weight
-            * block["terminal_velocity_error_mps"]
-            / config.control_terminal_velocity_scale_mps
-        )
-        by_airport[airport] = float(value)
-        block["terminal_state_criterion"] = float(value)
-    return ValidationSelection(
-        metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
-        value=float(np.mean(list(by_airport.values()))),
-        by_airport=by_airport,
-        details_by_airport=details,
-    )
-
-
 def _arc_length_geometry_validation_selection(
     *,
     model: nn.Module,
@@ -2305,8 +2149,6 @@ def _arc_length_geometry_validation_selection(
 _VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
     CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
-    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: _common_grid_criteria_validation_selection,
-    CHECKPOINT_SELECTION_TERMINAL_STATE: _terminal_state_validation_selection,
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY: (
         _arc_length_geometry_validation_selection
     ),

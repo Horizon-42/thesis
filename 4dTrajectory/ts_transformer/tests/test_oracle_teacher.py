@@ -23,10 +23,6 @@ from config import (  # noqa: E402
 )
 from oracle_teacher.imitation import control_imitation_loss  # noqa: E402
 from oracle_teacher.evaluation import observed_clock_prediction  # noqa: E402
-from oracle_teacher.progressive_pretraining import (  # noqa: E402
-    coarsen_schedule,
-    refine_control_model,
-)
 from oracle_teacher.pretraining import validate_teacher_durations  # noqa: E402
 from prediction_outputs import ControlOutputHead, ControlPrediction  # noqa: E402
 
@@ -119,60 +115,6 @@ def test_uniform_recipe_rejects_nonuniform_teacher_durations():
         )
 
 
-def test_progressive_teacher_coarsening_preserves_time_and_weights_controls():
-    controls = torch.tensor(
-        [[
-            [0.0, 0.0, 0.0],
-            [2.0, 2.0, 2.0],
-            [4.0, 4.0, 4.0],
-            [8.0, 8.0, 8.0],
-        ]]
-    )
-    durations = torch.tensor([[1.0, 3.0, 2.0, 2.0]])
-
-    coarse_controls, coarse_durations = coarsen_schedule(
-        controls, durations, 2
-    )
-
-    torch.testing.assert_close(coarse_durations, torch.tensor([[4.0, 4.0]]))
-    torch.testing.assert_close(
-        coarse_controls,
-        torch.tensor([[[1.5, 1.5, 1.5], [6.0, 6.0, 6.0]]]),
-    )
-
-
-class _HeadContainer(nn.Module):
-    def __init__(self, segments: int):
-        super().__init__()
-        self.shared = nn.Linear(4, 4)
-        self.control_head = ControlOutputHead(4, segments)
-
-
-def test_progressive_head_refinement_preserves_rollout_schedule_exactly():
-    torch.manual_seed(7)
-    coarse = _HeadContainer(2)
-    fine = _HeadContainer(4)
-    refine_control_model(coarse, fine)
-    features = torch.randn(3, 4)
-    total_time = torch.tensor([20.0, 30.0, 40.0])
-    lower = torch.tensor([[0.0, -1.0, 0.5]]).expand(3, -1)
-    upper = torch.tensor([[200_000.0, 1.0, 2.0]]).expand(3, -1)
-
-    coarse_prediction = coarse.control_head(
-        features, total_time, lower=lower, upper=upper
-    )
-    fine_prediction = fine.control_head(
-        features, total_time, lower=lower, upper=upper
-    )
-
-    torch.testing.assert_close(
-        fine_prediction.controls,
-        coarse_prediction.controls.repeat_interleave(2, dim=1),
-    )
-    torch.testing.assert_close(
-        fine_prediction.segment_durations,
-        coarse_prediction.segment_durations.repeat_interleave(2, dim=1) / 2.0,
-    )
 
 
 def test_fold_teacher_selection_is_deterministic_and_train_local():

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import torch
 from torch import nn
 
@@ -15,11 +13,25 @@ from prediction_outputs import ControlPrediction
 from train import prediction_loss_components
 
 
-@dataclass(frozen=True)
-class TeacherOptimizationStage:
-    label: str
-    horizon_s: float | None
-    steps: int
+# The one short-to-long refinement schedule every teacher cohort is fitted with. Early
+# stages integrate a genuinely shorter RK4 chain (the prefix crop in
+# ``control_training_curriculum``), so a cohort converges before it ever sees a 600 s
+# adjoint. Both the production generator and the paired-CV ablation call this, so a
+# schedule change cannot land in one and not the other.
+TEACHER_REFINEMENT_HORIZONS_S = (60.0, 120.0, 240.0)
+
+
+def teacher_optimization_stages(
+    prefix_steps: int, full_steps: int
+) -> tuple[tuple[ControlTrainingStage, int], ...]:
+    """Return the canonical ``(stage, steps)`` refinement schedule."""
+    if prefix_steps < 1 or full_steps < 1:
+        raise ValueError("teacher stage steps must be positive")
+    prefix = tuple(
+        (ControlTrainingStage(f"{horizon_s:g}s", horizon_s, 1, None), prefix_steps)
+        for horizon_s in TEACHER_REFINEMENT_HORIZONS_S
+    )
+    return (*prefix, (ControlTrainingStage("full", None, 1, None), full_steps))
 
 
 class BatchedOracleTeacher(nn.Module):
@@ -67,7 +79,7 @@ def optimize_teacher_controls(
     supervision: FixedDTControlSupervision,
     config: TSConfig,
     normalizer: Normalizer,
-    stages: tuple[TeacherOptimizationStage, ...],
+    stages: tuple[tuple[ControlTrainingStage, int], ...],
     learning_rate: float,
     gradient_clip_norm: float,
     log_every: int,
@@ -77,11 +89,8 @@ def optimize_teacher_controls(
     flight_weights = torch.ones(len(x), dtype=x.dtype, device=x.device)
     history: list[dict[str, float | int | str]] = []
     global_step = 0
-    for stage in stages:
-        training_stage = ControlTrainingStage(
-            stage.label, stage.horizon_s, 1, None
-        )
-        for stage_step in range(1, stage.steps + 1):
+    for training_stage, stage_steps in stages:
+        for stage_step in range(1, stage_steps + 1):
             optimizer.zero_grad()
             components = prediction_loss_components(
                 teacher(),
@@ -102,10 +111,10 @@ def optimize_teacher_controls(
             )
             optimizer.step()
             global_step += 1
-            if stage_step == 1 or stage_step % log_every == 0 or stage_step == stage.steps:
+            if stage_step == 1 or stage_step % log_every == 0 or stage_step == stage_steps:
                 row: dict[str, float | int | str] = {
                     "step": global_step,
-                    "stage": stage.label,
+                    "stage": training_stage.label,
                     "stage_step": stage_step,
                     "loss": float(components.total.detach()),
                     "gradient_norm": float(gradient_norm.detach()),
@@ -118,7 +127,7 @@ def optimize_teacher_controls(
                 )
                 history.append(row)
                 print(
-                    f"teacher step {global_step:4d} {stage.label:>4s}: "
+                    f"teacher step {global_step:4d} {training_stage.label:>4s}: "
                     f"loss={row['loss']:.5f} grad={row['gradient_norm']:.3g}"
                 )
     return history

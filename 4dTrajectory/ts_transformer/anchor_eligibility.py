@@ -11,7 +11,6 @@ import numpy as np
 from channels import IDX
 from config import (
     PREDICTION_CONTROL,
-    PREDICTION_CONTROL_MIXTURE,
     PREDICTION_STATE,
     TSConfig,
 )
@@ -65,10 +64,6 @@ AnchorEligibility = Callable[["FlightSeries", Sequence[int]], list[int]]
 _POLICIES: dict[str, tuple[str, AnchorEligibility]] = {
     PREDICTION_STATE: ("temporal-only-v1", _all_temporal_candidates),
     PREDICTION_CONTROL: (
-        "airborne-1.10-stall-margin-v1",
-        _airborne_control_candidates,
-    ),
-    PREDICTION_CONTROL_MIXTURE: (
         "airborne-1.10-stall-margin-v1",
         _airborne_control_candidates,
     ),

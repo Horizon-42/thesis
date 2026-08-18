@@ -16,7 +16,6 @@ import numpy as np
 import torch
 
 from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, TSConfig, uses_control_dynamics
-from control_prediction_adapters import map_control_candidates
 from control_training_diagnostics import ControlTrainingDiagnosticsAccumulator
 from models import build_model
 from prediction_outputs import ControlPrediction
@@ -151,14 +150,8 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
         optimizer.zero_grad()
         prediction = model_forward(model, x, dynamics)
         if uses_control_dynamics(config.prediction_output):
-            prediction = map_control_candidates(
-                prediction, _heterogeneous_control_probe_prediction
-            )
+            prediction = _heterogeneous_control_probe_prediction(prediction)
             if config.control_gradient_clip_norm > 0.0:
-                if not isinstance(prediction, ControlPrediction) or dynamics is None:
-                    raise RuntimeError(
-                        "control gradient diagnostics require deterministic control output"
-                    )
                 control_diagnostics = ControlTrainingDiagnosticsAccumulator(
                     config.control_gradient_clip_norm,
                     policy=config.control_gradient_clip_policy,
