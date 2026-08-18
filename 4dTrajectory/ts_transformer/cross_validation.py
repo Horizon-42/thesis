@@ -23,6 +23,7 @@ import torch
 from batching import resolve_batch_size
 from config import (
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+    CONTROL_RECIPE_CUSTOM,
     CONTROL_DYNAMICS_POINT_MASS,
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
@@ -426,8 +427,13 @@ def cross_validate(
 
     for candidate_index in range(len(candidate_results), len(candidates)):
         overrides = candidates[candidate_index]
+        # A search is not a formal run: it deliberately trains on a shorter budget and
+        # varies the fields it is searching, both of which a named recipe pins. Candidates
+        # therefore carry ``custom``, while the recipe they came from stays in the run
+        # contract and in ``base_config``, which is what the formal run is built from.
         candidate_config = replace(
             base_config,
+            control_recipe_name=CONTROL_RECIPE_CUSTOM,
             **overrides,
             epochs=cv_epochs,
             patience=min(cv_patience, cv_epochs),

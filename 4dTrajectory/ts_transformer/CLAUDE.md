@@ -40,19 +40,67 @@ Everything below is serialised into every checkpoint.
   missing.
 - Aircraft-type resolution (`_resolve_aircraft`, `--aircraft-type`, why `"type": "UNK"` does not
   mean single-type): see `flight_scenarios/CLAUDE.md`.
+- **Controls are DIMENSIONLESS in this package** (`control_envelope.py`, the single source):
+  `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, the same box on
+  every airframe. Newtons appear in exactly two places — `physical_controls()` on the way into
+  the dynamics, and `forecast.py` on the way out to the evaluation record, whose contract stays
+  in newtons and is shared with the CasADi optimizer. **The thrust floor is negative on
+  purpose**: an approach needs net-negative force (idle + speedbrake/flaps/gear drag this
+  clean-configuration polar does not model), and with a 0 N floor **40 % of inverted teacher
+  segments pinned at the bound** on the KSJC cohort — 0.33 % after. This is NOT the optimizer's
+  envelope (`casadi_optimizer.make_control_bounds` keeps a non-negative floor and a 0.5 load
+  floor): that box is a flyability claim, this one is a learned head's search space.
+- **Two orthogonal dynamics axes.** `control_dynamics_model` ∈ `point-mass` |
+  `first-order-lag` is the physics; `control_dynamics_backend` ∈ `reanchored-rk4` |
+  `transport-chart-velocity` | `scaled-transport-chart-velocity` is the state representation the
+  long rollout carries. The registry in `control_dynamics_backends.py` is keyed by the PAIR.
 
 ## Gotchas (recurring, verified)
 
-- **ts_transformer is a purely kinematic BASELINE — no dynamics/aerodynamics is connected, by
-  design.** Channels in, channels out; the only symbol it imports from `aerodynamic_model` is the
-  `GeodeticState` dataclass (no equations), vs the optimizer's `CasadiSimulator` +
-  `rollout_piecewise_constant`. Predictions therefore carry NO flyability guarantee
-  (speeds/turn rates/thrust/`Cl_max` are unchecked) — the survey's "statistically plausible but
-  unflyable" problem. **Do NOT treat this as an unfinished TODO**; it is what lets the learned
-  component be measured on its own. The four routes if it is ever added (post-hoc flyability
-  check → post-hoc casadi projection → soft physical loss → differentiable torch dynamics) are
-  written up in the package README. Same for single-aircraft-only and deterministic
-  point-prediction: scope decisions, listed separately from real gaps in that README.
+- **The teacher inverse must be the inverse OF THE CONFIGURED FORWARD MODEL, and nothing else
+  can catch it if it is not.** A schedule solved against the wrong equations is finite, bounded,
+  the right shape, and its own optimizer reports a falling loss — it simply reproduces nothing.
+  So `control_inverse_dynamics.py` registers each inverse under the SAME config key as its
+  forward model, and `tests/test_control_inverse_dynamics.py` closes the loop numerically for
+  every registered model (roll a known schedule → invert the dense result → require the schedule
+  back: 5e-3 in thrust fraction and load factor, 0.5° in bank). A model added without an inverse
+  fails at registry lookup. Two live bugs this replaced: `build_inverse_dynamics_target`
+  hard-unpacked a 7-field batch, which only exists under `fixed-dt` — so the teacher builder was
+  **unusable under every native-grid recipe including simple-v1**; and it rebuilt reference
+  velocities with a hardcoded `smoothed-position-difference` regardless of
+  `config.reference_velocity_source`, inverting a different velocity definition from the one the
+  supervision uses. The inverse also adds back the `ω × v` transport term the chart RHS
+  subtracts (worth only ~1.6e-4 g, but it is what makes it the exact inverse rather than a close
+  one).
+- **The lagged model is the point-mass model plus three actuators, not a second flight model.**
+  `torch_lag_dynamics` *wraps* `transport_chart_rhs`, so the force equations, stall handling,
+  transport term and chart projection are the same code. Verified both ways: at τ = 0.1 s the
+  two trajectories end within 0.5 % of path length and the gap is first order in τ; at the 2 s
+  default they differ by **~3 km over a 240 s rollout**, so it is a materially different model,
+  not a smoothing pass. **τ shorter than the integrator step produces NaN, not a worse answer** —
+  explicit RK4 on `y' = -y/τ` is unstable above `h/τ = 2.785` — so `TSConfig` refuses it at
+  construction. Relevant when sweeping τ.
+- **The anchor's control state is inverted from the observed lookback, never from the first
+  command** (`dataset.anchor_controls`, 11 samples ≈ 20 s). Starting the actuators at the first
+  command would place the aircraft in a bank it has not rolled into, and the lag would be paid
+  twice. It reads only samples at or before the anchor, so it is as deployable as the history
+  window itself.
+- **A named recipe cannot be cross-validated as itself.** `simple-v1`/`simple-v1-lag` freeze
+  `epochs`/`patience`, which a search deliberately shortens, so CV candidates carry
+  `control_recipe_name='custom'` while the parent recipe stays in `base_config` inside the run
+  contract. `simple-v1-lag` additionally leaves the three time constants open — τ_bank is the
+  thing the sweep resolves — and `applicable_cv_parameters` drops that axis as inert under
+  `point-mass` rather than multiplying the grid by 5 for identical folds.
+- **`prediction_output` decides whether dynamics is connected at all, and the answer differs.**
+  `state` is the purely kinematic BASELINE — channels in, channels out, the only symbol it takes
+  from `aerodynamic_model` being the `GeodeticState` dataclass. Its predictions carry NO
+  flyability guarantee (speeds/turn rates/thrust/`Cl_max` unchecked), which is the survey's
+  "statistically plausible but unflyable" problem, and that is **deliberate, not an unfinished
+  TODO**: it is what lets the learned component be measured on its own. `control` is the
+  opposite — the model emits bounded controls and a differentiable RK4 rollout of the shared
+  point-mass equations turns them into the trajectory, so every prediction is dynamically
+  admissible by construction. The two are the experiment. Single-aircraft-only and deterministic
+  point-prediction remain scope decisions for both; see the package README.
 - **Flyability (`flyability.py`): read the DELTA against the observed tracks, never the absolute
   rate.** The closed-form control inversion (no casadi, no solver) judges against ONE
   clean-configuration drag polar, and real approaches are flown dirty — run on REAL flown tracks

@@ -4,6 +4,107 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-18 — ts_transformer: control-mode design pass, first-order control lag, teacher-inverse audit
+
+Three connected pieces of work on `4dTrajectory/ts_transformer`, driven by the 2026-08-17
+meeting note (`docs/MeetingNotes/note_8_17.md`).
+
+**1. The control path carried every historical experiment axis; simple-v1 walks one of them.**
+Removed, each with the recorded verdict that closed it: control-mixture (paused 2026-07-30),
+direct durations (ablated negative 2026-07-30, ADE +21.0 % / FDE +36.6 %), trim-residual
+controls (never published a result), the `physical-criteria` and `terminal-state` objectives and
+their checkpoint-selection metrics, progressive-N teacher pretraining (rejected 2026-08-02), the
+one-off rollout-finetuning gate, and `benchmark_validation_execution.py` (zero references, zero
+tests). That is −2 of 5 tracking objectives, −2 of 5 selection metrics, −1 of 3 duration
+parameterizations, the whole `control_value_parameterization` axis, and one of three prediction
+outputs. `oracle_teacher.optimization` also owned a second stage type that only converted itself
+into `ControlTrainingStage`, and the 60/120/240/full schedule was written out twice; both
+runners now call one `teacher_optimization_stages()`.
+
+Two live bugs surfaced only once the modes hiding them were gone: `run_ts_pipeline` had no
+`objective_label` entry for `true-time-position`, so `PredictionPlan` raised `KeyError` on the
+current frozen recipe; and the arc-length recipe builds a **365-byte** directory name against a
+255-byte path-component cap (names over the cap now keep their head and end in a digest of the
+whole name). `TSConfig.from_dict` restated the same missing-field check 25 times and is now one
+table.
+
+**2. A switchable flight model with first-order control lag.** The point-mass model applies a
+piecewise-constant control instantly, so a learned schedule steps the bank angle N times across
+an approach: curvature is discontinuous at every segment boundary and the implied roll rate is
+unbounded. The meeting asked for continuity. The three controls become states chasing their
+command — `d(mu)/dt = (mu_cmd - mu)/tau_mu`, likewise thrust and load factor — and
+`aerodynamic_model/torch_lag_dynamics.py` **wraps** `transport_chart_rhs` rather than restating
+it, so the force equations, stall handling, WGS84 transport term and chart projection are
+literally the same code.
+
+Measured both directions, because "it reduces to the old model" is a claim that has to be
+checked: at `tau = 0.1 s` the two trajectories end **within 0.5 % of path length** and the gap is
+first order in tau; at the 2 s default they differ by **~3 km over a 240 s rollout**. So it is a
+materially different model, not a smoothing pass.
+
+Switchable on one axis (`control_dynamics_model` ∈ `point-mass` | `first-order-lag`), orthogonal
+to the state representation, with a `simple-v1-lag` recipe that is simple-v1 with that one field
+changed so a paired comparison measures the flight model rather than a bundle. `tau_bank` joins
+the CV grid (0.5/1/2/3/4 s) and is dropped as inert under `point-mass`.
+
+**New numerical constraint, worth remembering:** explicit RK4 on `y' = -y/tau` is unstable above
+`h/tau = 2.785`, so a swept time constant shorter than the integrator step produces **NaN, not a
+degraded rollout**. `TSConfig` refuses it at construction rather than letting it be discovered as
+a dead training run.
+
+**3. Controls are dimensionless, and the thrust floor is negative.** `thrust_fraction = T/T_max`
+puts the three controls on one magnitude and makes the same box mean the same thing on every
+airframe — one sigmoid output used to mean 100 kN on a small jet and 400 kN on a heavy, so a
+teacher schedule or a learned bias was not transferable across the fleet. Newtons now appear in
+exactly two functions: into the dynamics, and out to the evaluation record (whose contract is
+unchanged and shared with the CasADi optimizer).
+
+The floor moved from 0 to **−0.2**, because a real approach needs net-negative force: idle thrust
+plus the drag of speedbrake, flaps and gear, none of which the clean-configuration polar models.
+This was measurable. On the KSJC outer-train cohort (24 flights × 64 segments), **39.7 % of
+inverted teacher thrust segments pinned at the 0 N bound** — the teacher structurally could not
+reproduce the deceleration the aircraft actually flew. After: **0.33 %**, with a median required
+thrust of 3.6 % of installed (idle) and p5 at −12 % (drag augmentation). `flyability.py` already
+treated negative required thrust as a SOFT violation for exactly this reason. The optimizer's own
+`make_control_bounds` is deliberately NOT changed — that box is a flyability claim, this one is a
+learned head's search space — so no optimizer artifact is restaled.
+
+**4. The teacher inverse is now the inverse of the configured forward model, by construction.**
+This was the specific thing asked for, and the audit found real problems.
+
+A schedule solved against equations the training rollout does not integrate is finite, bounded,
+the right shape, and its own optimizer reports a falling loss. It simply reproduces nothing, and
+nothing downstream can tell. So `control_inverse_dynamics.py` registers each inverse under the
+SAME config key as its forward model, and `tests/test_control_inverse_dynamics.py` closes the
+loop numerically for every registered model: roll a known schedule, invert the dense result,
+require the schedule back (recovered to 5e-3 in thrust fraction and load factor, 0.5° in bank).
+A model added without an inverse fails at registry lookup.
+
+Found and fixed in the old path:
+
+- `build_inverse_dynamics_target` hard-unpacked a 7-field batch. `dataset.batch()` returns 7
+  fields only under `control_state_loss_grid='fixed-dt'`, so under **every native-grid recipe,
+  simple-v1 included, the teacher builder died on a bare tuple `ValueError`**. It only ever
+  worked because `run_ts_oracle_teacher_optimize.py` builds its own `custom` fixed-dt config.
+- It rebuilt reference velocities with a hardcoded `smoothed-position-difference` regardless of
+  `config.reference_velocity_source`, i.e. it inverted a different velocity definition from the
+  one the supervision targets are built from.
+- The inversion was a hand-written numpy inverse of the flat-ENU RHS with no link to
+  `config.control_dynamics_backend`. It agreed with the transport-chart backend by accident
+  (measured 0.5 N / 1e-6 load factor), not by construction — and adding lag states would have
+  broken that silently. It now adds back the `omega x v` term the chart RHS subtracts.
+- The lagged inverse is the actual-control inverse plus `u_cmd = u + tau * du/dt`, sharing its
+  first stage, so the two cannot drift apart.
+
+The lagged model's actuator initial condition comes from the same inversion applied to the
+observed lookback (`dataset.anchor_controls`, 11 samples ≈ 20 s), so it reads no future and the
+"inverse must match the forward model" requirement is structural rather than teacher-only.
+
+**Stale artifacts.** Every existing control-output checkpoint. The control contract changed units
+(newtons → fraction) and `TSConfig` gained required serialized fields, so `load_checkpoint`
+refuses them rather than mis-scaling thrust by five orders of magnitude. `state`-output
+checkpoints are unaffected. No optimizer, harvest, evaluation or comparison artifact changes.
+
 ### 2026-08-17 — Comparison references were the wrong window: full track vs model arrival slice
 
 **Symptom.** In the comparison overlay the white observed reference did not start at the

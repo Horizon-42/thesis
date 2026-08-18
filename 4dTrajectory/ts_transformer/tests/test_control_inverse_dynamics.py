@@ -14,6 +14,7 @@ inverse drifts from its RHS fails the tolerance.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import sys
 
@@ -33,7 +34,9 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+    HORIZON_NORMALIZED,
     PREDICTION_CONTROL,
+    TIME_CONSTANT_FIELDS,
     TSConfig,
 )
 from control_dynamics_backends import RolloutInputs, control_dynamics_backend  # noqa: E402
@@ -315,3 +318,83 @@ def test_inverted_controls_stay_inside_the_envelope_on_a_benign_trajectory():
     interior = recovered[1:-1]
     assert np.all(interior >= CONTROL_LOWER - 1e-6)
     assert np.all(interior <= CONTROL_UPPER + 1e-6)
+
+
+def test_the_lagged_recipe_is_simple_v1_with_one_field_changed():
+    """A paired comparison is only about the flight model if nothing else moved."""
+    from config import (
+        CONTROL_RECIPE_SIMPLE_V1,
+        CONTROL_RECIPE_SIMPLE_V1_LAG,
+        control_recipe_overrides,
+    )
+
+    base = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
+    lagged = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1_LAG)
+    differing = {
+        name for name in base | lagged if base.get(name) != lagged.get(name)
+    }
+
+    assert differing == {"control_dynamics_model"}
+    assert lagged["control_dynamics_model"] == CONTROL_DYNAMICS_FIRST_ORDER_LAG
+    assert base["control_dynamics_model"] == CONTROL_DYNAMICS_POINT_MASS
+    # The time constants stay open: tau_bank is what the sweep resolves.
+    assert not TIME_CONSTANT_FIELDS & set(lagged)
+    frozen = TSConfig(
+        control_recipe_name=CONTROL_RECIPE_SIMPLE_V1_LAG, **lagged
+    )
+    assert (
+        replace(frozen, control_bank_time_constant_s=3.0).control_bank_time_constant_s
+        == 3.0
+    )
+    with pytest.raises(ValueError, match="recipe fields are frozen"):
+        replace(frozen, control_dynamics_model=CONTROL_DYNAMICS_POINT_MASS)
+
+
+def test_a_time_constant_below_the_integrator_step_is_refused_not_integrated():
+    """Explicit RK4 on y' = -y/tau produces NaN there, not a worse answer."""
+    config = _config(CONTROL_DYNAMICS_FIRST_ORDER_LAG)
+    assert config.control_rollout_integrator_dt_s == 0.1
+    replace(config, control_bank_time_constant_s=0.1)  # exactly at the step: allowed
+    with pytest.raises(ValueError, match="shorter than the .* integrator step"):
+        replace(config, control_bank_time_constant_s=0.05)
+    # The guard is specific to the lagged model; the constants are inert without it.
+    replace(
+        config,
+        control_dynamics_model=CONTROL_DYNAMICS_POINT_MASS,
+        control_bank_time_constant_s=0.05,
+    )
+
+
+def test_the_time_constant_axis_is_dropped_from_cv_when_the_lag_is_off():
+    """An inert axis multiplies the candidate grid and returns identical folds."""
+    from cross_validation import applicable_cv_parameters
+
+    requested = ("d_model", "control_bank_time_constant_s")
+
+    assert applicable_cv_parameters(
+        requested, HORIZON_NORMALIZED, CONTROL_DYNAMICS_FIRST_ORDER_LAG
+    ) == requested
+    assert applicable_cv_parameters(
+        requested, HORIZON_NORMALIZED, CONTROL_DYNAMICS_POINT_MASS
+    ) == ("d_model",)
+    with pytest.raises(ValueError, match="inert"):
+        applicable_cv_parameters(
+            ("control_bank_time_constant_s",),
+            HORIZON_NORMALIZED,
+            CONTROL_DYNAMICS_POINT_MASS,
+        )
+
+
+def test_the_exported_control_record_stays_in_newtons():
+    """The evaluation contract is shared with the optimizer and did not change units."""
+    from control_envelope import fraction_controls, physical_controls
+
+    controls = np.array([[[0.5, 0.1, 1.0], [-0.2, -0.1, 1.2]]])
+    max_thrust_n = np.array([MAX_THRUST_N])
+
+    newtons = physical_controls(controls, max_thrust_n)
+
+    assert newtons[0, 0, 0] == pytest.approx(0.5 * MAX_THRUST_N)
+    assert newtons[0, 1, 0] == pytest.approx(-0.2 * MAX_THRUST_N)
+    np.testing.assert_allclose(newtons[..., 1:], controls[..., 1:])
+    np.testing.assert_allclose(fraction_controls(newtons, max_thrust_n), controls)

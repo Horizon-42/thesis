@@ -226,7 +226,12 @@ Maintenance convention:
   pre-existing numpy 2.x failure in `test_optimizer.py`. → `4dTrajectory/CLAUDE.md`
 - ts_transformer: KRDU run DONE (three generations, quote current artifacts only); gate-pass
   conclusion needs re-deriving after the datum fix; only KRDU trained; flyability measured but
-  not fixed; single-aircraft + deterministic by scope. → `4dTrajectory/ts_transformer/CLAUDE.md`
+  not fixed; single-aircraft + deterministic by scope. **All control-output checkpoints are
+  stale as of 2026-08-18** — the control contract changed units (newtons → fraction of installed
+  thrust) and `TSConfig` gained required fields, so `load_checkpoint` refuses them; `state`
+  checkpoints are unaffected. The lagged flight model (`simple-v1-lag`) has no published
+  train→predict→evaluate result yet; its τ_bank CV sweep is the open experiment.
+  → `4dTrajectory/ts_transformer/CLAUDE.md`
 - Viewer: local terrain vs aircraft CZML disagree by ~33 m; Observe 3-colour comparison overlay
   not yet fed to the approach view (+ ungated `useCzmlLoader` clock write); approach-view
   interior-gap `break` latent. → `aeroviz-4d/CLAUDE.md`

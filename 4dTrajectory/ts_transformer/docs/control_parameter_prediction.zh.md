@@ -1,5 +1,23 @@
 # control 参数预测：架构、消融轴与模块状态
 
+> **2026-08-18 状态说明（先读这段）**
+>
+> 本文描述的是 **2026-08-16 的代码状态**。2026-08-18 的 control 设计梳理之后，下面
+> 第 2 节的消融矩阵有相当一部分已经被删除，第 6 节的模块状态表随之过期。仍然准确的
+> 是：第 1 节的两层配方机制、第 3 节的调用链、第 4 节的 oracle-teacher 生产链路结构
+> （其中的两个 bug 已修，见新文）、第 5 节的诊断脚本用途、第 8 节对架构本身的评价。
+>
+> 已删除的轴与模块（各自附有当时的否定结论）：`control-mixture`、`direct` duration、
+> `trim-residual`、`physical-criteria` 与 `terminal-state` objective 及其
+> checkpoint-selection metric、`progressive_pretraining`、`rollout_finetuning`、
+> `benchmark_validation_execution.py`、`control_oracle_curriculum` 的重复实现。
+> 第 8 节 a/b/c/d/e 五条建议均已落实。
+>
+> 新增的轴：`control_dynamics_model`（`point-mass` / `first-order-lag`）与配方
+> `simple-v1-lag`；控制量契约改为无量纲。
+>
+> 当前参考：**`docs/2026-08-18_control_dynamics_lag_model.zh.md`**。
+
 本文档取代 `docs/normalized_time_and_control_output.zh.md` 作为 `prediction_output=control`
 （学习控制量 + 可微动力学 rollout）的当前参考。旧文档描述的是最初版本（联合
 `kinematic_consistency`/`terminal_loss` 目标、单一 factorized duration、单一 rollout
