@@ -1,8 +1,8 @@
 # control 动力学：一阶滞后模型与反求 teacher 的一致性
 
 日期：2026-08-18
-状态：已实现并通过定向测试；τ_μ 的 CV 扫描已完成（§5b，结论为未分辨）；
-      point-mass vs lag 的成对发布实验进行中
+状态：已实现并通过定向测试；τ_μ CV 扫描完成（§5b，未分辨）；
+      point-mass vs lag 成对发布实验完成（§5d，滞后模型 jerk −28 %、ADE −3.4 %）
 数据边界：只使用 outer-train / outer-validation；本文未读取、预测或评估 outer-test
 来源：`docs/MeetingNotes/note_8_17.md`
 
@@ -251,6 +251,63 @@ predict  -> 逐航班 prediction record：states、controls、observed lookback
 evaluate -> evaluation_report.json / .html（与 optimizer 同一套 gate）
 publish  -> aeroviz-4d/public/data/airports/<ICAO>/comparison/<category>/ 的对比 CZML
 ```
+
+---
+
+## 5d. point-mass vs first-order-lag 成对结果（2026-08-19 实测）
+
+产物：`4dTrajectory/outputs/KSJC/experiments/flight_model_paired/`
+（两臂各含 `checkpoint.pt` / prediction records / evaluation report），
+前端：`aeroviz-4d/public/data/airports/KSJC/comparison/ts_ksjc_flight_model_{point_mass,first_order_lag}/`
+
+配置：KSJC，两个冻结配方各训 180 epochs，同一 manifest / roster / `split_seed=1337`，
+**两臂评分的是同一批 1083 条 validation 航班**，因此可以做逐航班配对检验（下面的 p 值
+是双侧符号检验）。
+
+### 精度：小幅改善，但极其一致
+
+| 指标 | point-mass | lag τ=2 | 配对中位差 | lag 更优的航班 | p |
+|---|---:|---:|---:|---:|---:|
+| **ADE（路径）** | 732.6 m | **707.8 m** | **−20.3 m** | **730/1083 = 67.4 %** | **7.9e-31** |
+| FDE | 891.8 | 856.2 | +2.5 | 49.2 % | 0.63 |
+| arrival endpoint error | 688.4 | 681.3 | +3.5 | 49.1 % | 0.58 |
+| \|final time error\| | 14.39 s | 14.29 s | −0.04 s | 53.9 % | 0.011 |
+
+ADE 平均改善 **−3.4 %**（bootstrap 95 % CI **[−32.7, −17.0] m**）。**终点没有改善**
+（FDE / endpoint 的胜率都是 49 %，即无差异）。这个组合是自洽的：滞后平滑的是沿途的
+转弯几何，不改变模型认为跑道在哪里。
+
+### 平滑性：这才是滞后模型要解决的问题
+
+| 指标 | point-mass | lag τ=2 | 变化 | lag 更低的航班 | p |
+|---|---:|---:|---:|---:|---:|
+| **jerk p95** | 1.267 m/s³ | **0.912** | **−28.0 %** | **99.8 %** | ~1e-320 |
+| turn rate p95 | 1.270 °/s | 1.193 | −6.0 % | 86.4 % | 5e-141 |
+| acceleration p95 | 3.869 m/s² | 3.658 | −5.5 % | 77.4 % | 2e-76 |
+
+**结论：滞后模型在不牺牲精度的前提下把 jerk 降低 28 %，而且精度还略有提升。**
+这一点很关键——README 记录过的陷阱是"更差的预测器因为画得更平淡而在 flyability 上
+得分更高"；这里没有掉进去，因为平滑与精度是同向改善的。
+
+### 必须同时记录的反面读数
+
+两个模型**本来就都比真实飞行轨迹更平滑**，滞后只是让它们更远离观测统计：
+
+| 指标 | 观测 | point-mass | lag τ=2 |
+|---|---:|---:|---:|
+| turn rate p95 | 1.360 °/s | 0.93× | 0.88× |
+| acceleration p95 | 4.806 m/s² | 0.81× | 0.76× |
+| jerk p95 | 4.253 m/s³ | 0.30× | **0.21×** |
+
+"更接近观测"的航班比例分别是 26.7 % / 43.0 % / **0.2 %**。所以**不能**把这个结果说成
+"滞后让预测更像真实飞行"。正确的说法是：滞后去掉的是一个**建模伪影**（分段常值控制在
+段边界上造成的曲率不连续），而观测 jerk 本身主要是 2 s ADS-B 位置采样三次微分后的
+量化噪声，不是真实飞机的 jerk——它不是一个可追的目标。
+
+### Gate
+
+两臂的 terminal-approach verdict 都是 **0 pass / 1083 fail**。与 README 既有结论一致
+（"forecast ≠ certifiable approach"）：换飞行模型不改变这一条。
 
 ---
 

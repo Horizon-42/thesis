@@ -80,6 +80,16 @@ Everything below is serialised into every checkpoint.
   not a smoothing pass. **τ shorter than the integrator step produces NaN, not a worse answer** —
   explicit RK4 on `y' = -y/τ` is unstable above `h/τ = 2.785` — so `TSConfig` refuses it at
   construction. Relevant when sweeping τ.
+- **The lagged model buys smoothness, and the honest reading is "artifact removed", not "more
+  realistic".** Paired on the same 1083 KSJC validation flights (2026-08-19): jerk p95 **−28 %**
+  (lower on 99.8 % of flights), turn rate −6 %, acceleration −5.5 %, and ADE **−3.4 %** (better
+  on 67.4 %, p=7.9e-31) — smoothness and accuracy move TOGETHER, which is what separates this
+  from the blandness trap flyability falls into. FDE and the arrival endpoint are ties (49 %): a
+  lag smooths the turn geometry, not where the model thinks the runway is. But both models were
+  already smoother than the flown tracks (jerk p95: observed 4.25, point-mass 0.30×, lag 0.21×),
+  so the lag moves them FURTHER from observed statistics. Observed jerk is 2 s ADS-B positions
+  differentiated three times — mostly quantisation noise, not a target. Gates are unchanged at
+  **0 pass / 1083 fail** on both arms.
 - **The anchor's control state is inverted from the observed lookback, never from the first
   command** (`dataset.anchor_controls`, 11 samples ≈ 20 s). Starting the actuators at the first
   command would place the aircraft in a bank it has not rolled into, and the lag would be paid
@@ -90,7 +100,14 @@ Everything below is serialised into every checkpoint.
   `control_recipe_name='custom'` while the parent recipe stays in `base_config` inside the run
   contract. `simple-v1-lag` additionally leaves the three time constants open — τ_bank is the
   thing the sweep resolves — and `applicable_cv_parameters` drops that axis as inert under
-  `point-mass` rather than multiplying the grid by 5 for identical folds.
+  `point-mass` rather than multiplying the grid by 5 for identical folds. **`DEFAULT_CV_PATIENCE
+  = 6` is too small here**: both flight models pass through an early ADE transient (point-mass:
+  1534 m at epoch 2 → 2132 m at epoch 6 → 1268 m at epoch 13, still falling) while every loss
+  component falls monotonically. Patience 6 stops inside it and the τ ranking becomes a stopping
+  artifact — measured, the same τ scored 1674.6 m on a caught fold and 1234.4 m on one that was
+  not. The frozen recipes' patience=20 clears it; a sweep must raise `--cv-patience` to match.
+  The τ sweep itself came out **unresolved**: best-to-worst 5.7 % against 11–23 % fold noise, so
+  τ=2.0 s is a defensible default, not a CV-selected value.
 - **`prediction_output` decides whether dynamics is connected at all, and the answer differs.**
   `state` is the purely kinematic BASELINE — channels in, channels out, the only symbol it takes
   from `aerodynamic_model` being the `GeodeticState` dataclass. Its predictions carry NO

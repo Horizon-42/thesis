@@ -100,6 +100,49 @@ The lagged model's actuator initial condition comes from the same inversion appl
 observed lookback (`dataset.anchor_controls`, 11 samples ≈ 20 s), so it reads no future and the
 "inverse must match the forward model" requirement is structural rather than teacher-only.
 
+**Measured on real data (2026-08-19), paired.** Both frozen recipes trained 180 epochs on
+KSJC with the same manifest, roster and `split_seed`, then predicted, evaluated and published;
+both arms scored the SAME 1083 validation flights, so the per-flight sign tests below are
+paired. Artifacts in `4dTrajectory/outputs/KSJC/experiments/flight_model_paired/`, published to
+`aeroviz-4d/public/data/airports/KSJC/comparison/ts_ksjc_flight_model_{point_mass,first_order_lag}/`.
+
+- **The lag does what it was added for.** jerk p95 **−28.0 %** (lower on 99.8 % of flights,
+  p≈1e-320), turn rate p95 −6.0 % (86.4 %, p=5e-141), acceleration p95 −5.5 % (77.4 %, p=2e-76).
+- **Without costing accuracy — it gains a little.** ADE **−3.4 %** (better on 67.4 % of flights,
+  p=7.9e-31, bootstrap 95 % CI on the mean delta [−32.7, −17.0] m). This is what separates the
+  result from the blandness trap the README documents for flyability, where a worse predictor
+  scores better by drawing straighter lines: here smoothness and accuracy move together.
+- **The endpoint does not move.** FDE and arrival-endpoint error are ties (49.1–49.2 % win rate,
+  p=0.58–0.63). Coherent: a lag smooths the turn geometry along the way, not where the model
+  believes the runway is.
+- **Read the smoothness as a modelling artifact removed, NOT as "more realistic".** Both models
+  were already smoother than the flown tracks (jerk p95: observed 4.253, point-mass 0.30×, lag
+  0.21×), so the lag moves them further from observed statistics — it is closer to observed jerk
+  on 0.2 % of flights. Observed jerk from 2 s ADS-B positions triple-differentiated is dominated
+  by quantisation noise and is not a target to chase; what the lag removes is the curvature
+  discontinuity a piecewise-constant control creates at every segment boundary.
+- **Gates are unchanged: 0 pass / 1083 fail on both arms**, consistent with the standing
+  "forecast ≠ certifiable approach" finding. Changing the flight model does not change that.
+
+**τ_bank cross-validation: not resolved.** 3 folds × 36 epochs over {0.5, 1, 2, 3, 4} s put the
+best (2.0 s, 1014.2 m) and worst (4.0 s, 1072.3 m) **5.7 %** apart against **11–23 %** fold noise;
+τ ∈ {0.5, 1, 2} lie within 1.5 % and τ=1.0 beats τ=2.0 on 2 of 3 folds. By the recipe's own rule
+(<2 % ⇒ no reliable difference) τ=2.0 is a defensible default, not a CV-selected value.
+
+**A CV trap worth remembering: `DEFAULT_CV_PATIENCE = 6` is too small for this recipe.** BOTH
+flight models pass through an early ADE transient while every loss component falls monotonically
+— on the unchanged point-mass recipe: best 1534 m at epoch 2, bump to 2132 m at epoch 6, then
+1268 m at epoch 13 and still falling. Patience 6 stops inside it, and the first τ sweep had to be
+discarded: the same τ=0.5 scored 1674.6 m on a fold early stopping caught and 1234.4 m on one it
+did not — a 26 % difference that was pure stopping artifact. The frozen recipes' own patience=20
+clears the ~7-epoch bump; a CV sweep needs patience raised to match.
+
+**Performance.** The lag step originally ran eager on CUDA while the point-mass backends cached a
+`torch.compile`d one: ~95 s vs ~15 s per epoch. The blocker was passing `state_scale` through a
+closure — `torch.compile` caches per code object, so a fresh closure per rollout rebuilt the
+kernel every batch. Moving it into `step_context` took the lagged epoch to **8.2 s (11.6×)** and
+the τ sweep from ~15 h to ~40 min.
+
 **Stale artifacts.** Every existing control-output checkpoint. The control contract changed units
 (newtons → fraction) and `TSConfig` gained required serialized fields, so `load_checkpoint`
 refuses them rather than mis-scaling thrust by five orders of magnitude. `state`-output
