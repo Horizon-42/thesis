@@ -302,13 +302,25 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
     assert not stale_ref.exists()
     assert written == [tmp_path / "references" /
                        "AFR074_05L_ad7f04_20260618T213736Z_reference_eval.json"]
-    record = json.loads(written[0].read_text(encoding="utf-8"))
-    assert record["controls"] == [] and len(record["states"]) == 4
-    assert record["final_time_s"] == pytest.approx(15.0)          # rebased to 0
-    assert record["states"][0]["t"] == 0.0 and record["states"][0]["lat"] == 35.6
-    assert record["states"][1]["V"] == pytest.approx(math.hypot(100.0, 10.0), rel=1e-3)
-    assert record["target_state"]["alt"] == 1850.0                # the scenario's target
-    assert record["states"][0]["m"] == scenario.initial.m
+    # Read the way every consumer does: the states live in the SHARED observed-track store
+    # and the record quotes them through `states_ref`, so resolving them is part of the
+    # contract, not an implementation detail this test may reach around.
+    from evaluation.records import load_record
+
+    raw = json.loads(written[0].read_text(encoding="utf-8"))
+    assert raw["states"] == [] and raw["states_ref"]["key"] == "states"
+    track = (written[0].parent.parent / so.OBSERVED_TRACKS_DIR
+             / "AFR074_05L_ad7f04_20260618T213736Z_track.json")
+    assert track.is_file()
+    assert (written[0].parent / raw["states_ref"]["file"]).resolve() == track.resolve()
+
+    record = load_record(written[0])
+    assert record.controls == [] and len(record.states) == 4
+    assert record.final_time_s == pytest.approx(15.0)             # rebased to 0
+    assert record.states[0]["t"] == 0.0 and record.states[0]["lat"] == 35.6
+    assert record.states[1]["V"] == pytest.approx(math.hypot(100.0, 10.0), rel=1e-3)
+    assert record.target_state["alt"] == 1850.0                   # the scenario's target
+    assert record.states[0]["m"] == scenario.initial.m
 
     # A scenario whose flight is missing from the landings fails loudly.
     orphan = _scenario(target=target)

@@ -32,6 +32,15 @@ STATES_SUFFIX = "_states.json"
 EVAL_SUFFIX = "_eval.json"
 REFERENCE_EVAL_SUFFIX = "_reference_eval.json"
 REFERENCES_DIR = "references"
+# One observed track, shared by every reference record that quotes it. The fitted-ADS-B and
+# runway-threshold datasets reference the SAME flights and differ only in `target_state`, so
+# writing the track twice duplicated ~67 KB per flight per dataset for a ~200-byte
+# difference. The record keeps its own identity and boundary states and points at the track
+# through the contract's existing `states_ref` indirection (`evaluation.records.load_record`
+# resolves it), so nothing downstream reads a reference differently.
+OBSERVED_TRACKS_DIR = "observed_tracks"
+OBSERVED_TRACK_SUFFIX = "_track.json"
+OBSERVED_TRACK_KEY = "states"
 
 
 def state_dict(state: GeodeticState) -> dict[str, float]:
@@ -76,6 +85,7 @@ def reference_evaluation_record(
     source: dict[str, Any],
     *,
     subject: str,
+    track_ref: str | None = None,
 ) -> dict[str, Any]:
     """An OBSERVED track as an evaluation record (the comparison reference).
 
@@ -83,15 +93,38 @@ def reference_evaluation_record(
     ``flight_scenarios.state_samples_from_track``). Observed data carries no
     control inputs, so ``controls`` is EMPTY — the contract's marker for a
     reference record (vs the aligned 1:1 list of a solver record).
+
+    ``track_ref`` (a path relative to the record) puts the state array in a shared file
+    instead of inline; the record then carries ``states_ref``, exactly as a solved record
+    does for its ``*_states.json``. Same states either way — see ``OBSERVED_TRACKS_DIR``.
     """
-    return {
+    record = {
         "source": {**source, "subject": _subject(subject)},
         "initial_state": state_dict(initial),
         "target_state": state_dict(target),
         "final_time_s": float(timed_states[-1][0]),
-        "states": [{"t": float(t), **state_dict(s)} for t, s in timed_states],
+        "states": [],
         "controls": [],
     }
+    if track_ref is None:
+        record["states"] = observed_track_states(timed_states)
+    else:
+        record["states_ref"] = {"file": track_ref, "key": OBSERVED_TRACK_KEY}
+    return record
+
+
+def observed_track_states(
+    timed_states: Sequence[tuple[float, GeodeticState]],
+) -> list[dict[str, Any]]:
+    """The timed observed states in the record contract's state shape."""
+    return [{"t": float(t), **state_dict(s)} for t, s in timed_states]
+
+
+def observed_track_document(
+    timed_states: Sequence[tuple[float, GeodeticState]],
+) -> dict[str, Any]:
+    """The shared observed-track file a reference record's ``states_ref`` points into."""
+    return {OBSERVED_TRACK_KEY: observed_track_states(timed_states)}
 
 
 def failed_evaluation_record(

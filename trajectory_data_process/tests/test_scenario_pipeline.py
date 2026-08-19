@@ -177,6 +177,15 @@ def test_skip_optimize_accepts_a_complete_solved_roster(tmp_path):
     (tmp_path / "references").mkdir()
     reference_path = tmp_path / reference_name
     reference_path.write_text("{}")
+    # The reference quotes its observed states from the shared sibling track store, so an
+    # intact reference means the track is intact too (contract v3).
+    tracks_dir = tmp_path / optimize.OBSERVED_TRACKS_DIR
+    tracks_dir.mkdir()
+    track_path = tracks_dir / (
+        reference_path.name.removesuffix(optimize.REFERENCE_EVAL_SUFFIX)
+        + optimize.OBSERVED_TRACK_SUFFIX
+    )
+    track_path.write_text('{"states": []}')
     (tmp_path / eval_name).write_text(json.dumps({
         "source": {"id": "AFR074", "runway": "05L"},
         "states": [],
@@ -199,7 +208,7 @@ def test_skip_optimize_accepts_a_complete_solved_roster(tmp_path):
         }],
     }))
     (tmp_path / "references" / "manifest.json").write_text(json.dumps({
-        "schema_version": "optimization-references-v2-sha256",
+        "schema_version": optimize.REFERENCE_CACHE_SCHEMA,
         "source_signature": {
             "scenarios_sha256": hashlib.sha256(plan.scenarios.read_bytes()).hexdigest(),
             "arrivals_manifest_sha256": hashlib.sha256(
@@ -216,11 +225,17 @@ def test_skip_optimize_accepts_a_complete_solved_roster(tmp_path):
                 "landing_time_utc": None,
             },
             "sha256": hashlib.sha256(reference_path.read_bytes()).hexdigest(),
+            "track_sha256": hashlib.sha256(track_path.read_bytes()).hexdigest(),
         }],
     }))
 
     assert plan.optimization_reuse_error() is None
     assert plan.optimization_exists() is True
+
+    # A reference whose shared track went missing is NOT reusable: the record on its own
+    # carries no states, so an absent track is an unreadable reference, not a cosmetic gap.
+    track_path.unlink()
+    assert "observed track" in (plan.optimization_reuse_error() or "")
 
 
 def test_skip_optimize_rejects_a_batch_from_a_different_solver_configuration(
@@ -254,3 +269,18 @@ def test_skip_optimize_rejects_a_batch_from_a_different_solver_configuration(
 def test_legacy_adsb_target_type_is_no_longer_a_mode():
     with pytest.raises(ValueError, match="unknown target type"):
         optimize.Plan("KRDU", "adsb", False, ("eval",))
+
+
+def test_runner_mirrors_the_reference_cache_contract():
+    # run_scenario_optimization validates reference caches that scenario_optimization
+    # writes. The suffixes are imported from the shared evaluation_export; the schema
+    # string is the one restated constant, so it is pinned here rather than trusted.
+    import sys
+    from pathlib import Path as _Path
+
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "4dTrajectory" / "optimization"))
+    import scenario_optimization as so
+
+    assert optimize.REFERENCE_CACHE_SCHEMA == so.REFERENCE_CACHE_SCHEMA
+    assert optimize.OBSERVED_TRACKS_DIR == so.OBSERVED_TRACKS_DIR
+    assert optimize.OBSERVED_TRACK_SUFFIX == so.OBSERVED_TRACK_SUFFIX

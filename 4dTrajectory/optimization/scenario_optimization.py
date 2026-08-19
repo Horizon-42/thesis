@@ -73,11 +73,14 @@ from collocation.optimizer import (  # noqa: E402
 from geokit import haversine_m  # noqa: E402
 from evaluation_export import (  # noqa: E402
     EVAL_SUFFIX as _EVAL_SUFFIX,
+    OBSERVED_TRACKS_DIR,
+    OBSERVED_TRACK_SUFFIX,
     REFERENCE_EVAL_SUFFIX as _REFERENCE_EVAL_SUFFIX,
     REFERENCES_DIR,
     STATES_SUFFIX as _STATES_SUFFIX,
     evaluation_record,
     failed_evaluation_record,
+    observed_track_document,
     reference_evaluation_record,
     summary_row,
 )
@@ -708,6 +711,56 @@ def _reference_filename(states_name: str) -> str:
     return states_name.removesuffix(_STATES_SUFFIX) + _REFERENCE_EVAL_SUFFIX
 
 
+def _observed_track_filename(states_name: str) -> str:
+    """``<flight>_states.json`` → ``<flight>_track.json`` (same identity key)."""
+    return states_name.removesuffix(_STATES_SUFFIX) + OBSERVED_TRACK_SUFFIX
+
+
+# The reference cache contract. v3 replaced each record's inline state array with a
+# `states_ref` into a shared observed-track store (see OBSERVED_TRACKS_DIR), so a v2
+# manifest no longer describes what is on disk and must not be reused.
+REFERENCE_CACHE_SCHEMA = "optimization-references-v3-shared-tracks"
+
+
+def _observed_track_path(reference_path: Path) -> Path:
+    """The shared track file a reference record quotes, from the record's own path."""
+    stem = reference_path.name.removesuffix(_REFERENCE_EVAL_SUFFIX)
+    return reference_path.parent.parent / OBSERVED_TRACKS_DIR / (
+        stem + OBSERVED_TRACK_SUFFIX
+    )
+
+
+def _cached_track_matches(reference_path: Path, expected_sha256: str) -> bool:
+    track = _observed_track_path(reference_path)
+    return track.is_file() and _file_sha256(track) == expected_sha256
+
+
+def _sweep_observed_tracks(tracks_dir: Path) -> None:
+    """Drop track files no sibling reference directory quotes any more.
+
+    The store is shared by every target dataset under the same anchor, so it must NOT be
+    swept against one dataset's roster — that would delete the other's tracks. The keep set
+    is the union over all sibling ``*_reference_eval.json`` names, which is exactly what a
+    reader can still resolve.
+    """
+    if not tracks_dir.is_dir():
+        return
+    keep = {
+        path.name.removesuffix(_REFERENCE_EVAL_SUFFIX) + OBSERVED_TRACK_SUFFIX
+        for sibling in tracks_dir.parent.iterdir()
+        if sibling.is_dir() and sibling != tracks_dir
+        for path in sibling.glob(f"*{_REFERENCE_EVAL_SUFFIX}")
+    }
+    stale = [
+        path for path in sorted(tracks_dir.glob(f"*{OBSERVED_TRACK_SUFFIX}"))
+        if path.name not in keep
+    ]
+    for path in stale:
+        path.unlink()
+    if stale:
+        print(f"… cleared {len(stale)} unreferenced observed track(s) from {tracks_dir}")
+
+
 def write_reference_records(
     scenarios: list[FlightScenario],
     observed_tracks: str | Path | list[dict[str, Any]],
@@ -755,7 +808,7 @@ def write_reference_records(
             cached = {}
         cached_rows = cached.get("records")
         cache_matches = (
-            cached.get("schema_version") == "optimization-references-v2-sha256"
+            cached.get("schema_version") == REFERENCE_CACHE_SCHEMA
             and cached.get("source_signature") == source_signature
             and isinstance(cached_rows, list)
             and len(cached_rows) == len(expected_cache_rows)
@@ -769,8 +822,10 @@ def write_reference_records(
                     or cached_row.get("file") != expected_row["file"]
                     or cached_row.get("identity") != expected_row["identity"]
                     or not isinstance(cached_row.get("sha256"), str)
+                    or not isinstance(cached_row.get("track_sha256"), str)
                     or not path.is_file()
                     or _file_sha256(path) != cached_row["sha256"]
+                    or not _cached_track_matches(path, cached_row["track_sha256"])
                 ):
                     cache_matches = False
                     break
@@ -794,7 +849,13 @@ def write_reference_records(
         path.unlink()
     if stale:
         print(f"… cleared {len(stale)} reference record(s) from a previous run in {out}")
+    # The observed track store is a SIBLING of the per-target reference dirs, so the
+    # fitted-ADS-B and runway datasets — which reference the same flights and differ only
+    # in target_state — quote one copy of each track instead of two.
+    tracks_dir = out.parent / OBSERVED_TRACKS_DIR
+    tracks_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
+    track_paths: list[Path] = []
     for index, scenario in enumerate(scenarios):
         src = scenario.source
         if scenario.target is None:
@@ -812,21 +873,30 @@ def write_reference_records(
             flight["waypoints"], mass_kg=scenario.initial.m,
             window_s=float(src.get("window_s") or DEFAULT_WINDOW_S),
         )
-        record = reference_evaluation_record(
-            scenario.initial, scenario.target, timed_states, src, subject="observed"
+        states_name = _scenario_filename(scenario, index)
+        track_path = tracks_dir / _observed_track_filename(states_name)
+        track_path.write_text(
+            json.dumps(observed_track_document(timed_states),
+                       separators=(",", ":"), allow_nan=False),
+            encoding="utf-8",
         )
-        path = out / _reference_filename(_scenario_filename(scenario, index))
+        track_paths.append(track_path)
+        record = reference_evaluation_record(
+            scenario.initial, scenario.target, timed_states, src, subject="observed",
+            track_ref=f"../{OBSERVED_TRACKS_DIR}/{track_path.name}",
+        )
+        path = out / _reference_filename(states_name)
         path.write_text(
             json.dumps(record, separators=(",", ":"), allow_nan=False), encoding="utf-8"
         )
         written.append(path)
     if source_signature is not None:
         records = [
-            {**row, "sha256": _file_sha256(path)}
-            for row, path in zip(expected_cache_rows, written)
+            {**row, "sha256": _file_sha256(path), "track_sha256": _file_sha256(track)}
+            for row, path, track in zip(expected_cache_rows, written, track_paths)
         ]
         manifest_payload = {
-            "schema_version": "optimization-references-v2-sha256",
+            "schema_version": REFERENCE_CACHE_SCHEMA,
             "source_signature": source_signature,
             "records": records,
         }
@@ -835,7 +905,9 @@ def write_reference_records(
             json.dumps(manifest_payload, indent=2), encoding="utf-8",
         )
         temporary.replace(cache_manifest)
+    _sweep_observed_tracks(tracks_dir)
     print(f"✓ wrote {len(written)} reference record(s) -> {out}")
+    print(f"  observed tracks -> {tracks_dir} ({len(track_paths)} shared)")
     return written
 
 

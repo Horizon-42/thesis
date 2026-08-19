@@ -91,6 +91,19 @@ HARVEST_TRACKS_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harve
 TARGET_TYPES = ("fitted-adsb", "runway")
 OUTPUT_KINDS = ("czml", "eval")
 
+# Reference-artifact naming + cache contract, IMPORTED from the module that writes them:
+# this validator's only job is to agree with that writer. Unlike the control-mesh defaults
+# below — which live in `collocation.optimizer` and would drag casadi in — `evaluation_export`
+# is deliberately casadi-free (numpy only), so the mirror rule does not apply and an import
+# is available. REFERENCE_CACHE_SCHEMA is the one true mirror here; a test pins it.
+sys.path.insert(0, str(REPO_ROOT / "4dTrajectory" / "optimization"))
+from evaluation_export import (  # noqa: E402
+    OBSERVED_TRACKS_DIR,
+    OBSERVED_TRACK_SUFFIX,
+    REFERENCE_EVAL_SUFFIX,
+)
+REFERENCE_CACHE_SCHEMA = "optimization-references-v3-shared-tracks"
+
 
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -325,8 +338,7 @@ class Plan:
                     return f"missing or unreadable reference cache manifest {cache_path}: {exc}"
                 if (
                     not isinstance(cache, dict)
-                    or cache.get("schema_version")
-                    != "optimization-references-v2-sha256"
+                    or cache.get("schema_version") != REFERENCE_CACHE_SCHEMA
                     or not isinstance(cache.get("records"), list)
                 ):
                     return f"reference cache manifest {cache_path} lacks SHA-256 contract"
@@ -366,6 +378,21 @@ class Plan:
                 or _file_sha256(reference_path) != expected_hash
             ):
                 return f"reference_file {reference_name!r} failed SHA-256 validation"
+            # The record quotes its observed states from the shared track store, so the
+            # store is part of what "this reference is intact" means.
+            track_hash = cached_row.get("track_sha256")
+            track_path = (
+                reference_path.parent.parent
+                / OBSERVED_TRACKS_DIR
+                / (reference_path.name.removesuffix(REFERENCE_EVAL_SUFFIX)
+                   + OBSERVED_TRACK_SUFFIX)
+            )
+            if (
+                not isinstance(track_hash, str)
+                or not track_path.is_file()
+                or _file_sha256(track_path) != track_hash
+            ):
+                return f"observed track for {reference_name!r} failed SHA-256 validation"
 
             states_name = row.get("states_file")
             states_ref = evaluation.get("states_ref")
