@@ -30,7 +30,11 @@ from control_inverse_dynamics import actual_controls  # noqa: E402
 
 AERO = np.array([122.6, 2.7, 0.023, 0.0334, 0.8, 0.2])
 MAX_THRUST_N = 240_000.0
-N_SEGMENTS = 64
+# Arms may use different segment counts (the n_segments experiment does), so both the
+# model and the observed bank are resampled onto ONE normalised-time grid of this width.
+# Without it a common-profile share computed at N=16 would not be comparable with one at
+# N=64 — and the scorer would silently skip every arm whose N differed from the constant.
+COMMON_GRID_POINTS = 64
 STRAIGHT_TORTUOSITY = 1.02
 
 
@@ -43,13 +47,14 @@ def _tortuosity(rows) -> float:
 
 
 def score(pred_dir: Path) -> dict | None:
-    model, observed, tortuosity = [], [], []
+    model, observed, tortuosity, segment_counts = [], [], [], set()
     for path in sorted(pred_dir.glob("*_states.json")):
         payload = json.loads(path.read_text())
         segments = payload["control_segments"]
         future = [r for r in payload["observed_states"] if r["t"] >= 0.0]
-        if len(segments) != N_SEGMENTS or len(future) < 8:
+        if len(segments) < 2 or len(future) < 8:
             continue
+        segment_counts.add(len(segments))
         states = np.array([[r["lat"], r["lon"], r["alt"], r["V"], r["psi"], r["gamma"],
                             r["m"]] for r in future], dtype=float)
         times = np.array([r["t"] for r in future], dtype=float)
@@ -60,9 +65,14 @@ def score(pred_dir: Path) -> dict | None:
                                    max_thrust_n=MAX_THRUST_N)[:, 1]
         except ValueError:
             continue
-        grid = (np.arange(N_SEGMENTS) + 0.5) / N_SEGMENTS * (times[-1] - times[0]) + times[0]
+        progress = (np.arange(COMMON_GRID_POINTS) + 0.5) / COMMON_GRID_POINTS
+        grid = progress * (times[-1] - times[0]) + times[0]
         observed.append(np.degrees(np.interp(grid, times, bank)))
-        model.append(np.degrees([s["bank_rad"] for s in segments]))
+        # Piecewise-constant controls: sample the schedule at the same normalised
+        # progress, so an N=16 arm and an N=64 arm are compared on one axis.
+        segment_bank = np.degrees([s["bank_rad"] for s in segments])
+        model.append(segment_bank[np.minimum(
+            (progress * len(segments)).astype(int), len(segments) - 1)])
         tortuosity.append(_tortuosity(future))
     if not model:
         return None
@@ -78,14 +88,18 @@ def score(pred_dir: Path) -> dict | None:
         for i in range(len(model_bank))
         if residual_model[i].std() > 1e-9 and residual_observed[i].std() > 1e-9
     ]
+    # Counted on the resampled grid, which is safe: upsampling a piecewise-constant
+    # schedule only repeats values, and a repeated value cannot change sign, so the count
+    # equals the one on the arm's own N boundaries.
     reversals = np.array([
         sum(1 for a, b in zip(row, row[1:]) if a * b < 0 and abs(a - b) > 1.0)
         for row in model_bank[straight]
-    ], dtype=float)
+    ], dtype=float) if straight.any() else np.array([], dtype=float)
     accuracy = json.loads((pred_dir / "summary.json").read_text())["accuracy"]
     return {
         "flights": len(model_bank),
         "straight": int(straight.sum()),
+        "n_segments": sorted(segment_counts),
         "common_share_pct": 100 * float(np.sum(common ** 2) * len(model_bank)
                                         / np.sum(model_bank ** 2)),
         "bank_rms_straight_deg": float(np.median(
@@ -142,6 +156,8 @@ def main(argv: list[str]) -> int:
     print(f"\n{'flights / straight refs':<30}{'':>9}"
           + "".join(f"{str(scored[k]['flights']) + '/' + str(scored[k]['straight']):>{width}}"
                     for k in scored))
+    print(f"{'segments per arm':<30}{'':>9}"
+          + "".join(f"{','.join(map(str, scored[k]['n_segments'])):>{width}}" for k in scored))
     return 0
 
 

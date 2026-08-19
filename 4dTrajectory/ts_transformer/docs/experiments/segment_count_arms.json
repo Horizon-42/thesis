@@ -1,8 +1,20 @@
 {
-  "_comment": "Experiment 2: is 64 segments too many? 64 piecewise-constant controls x 3 = 192 free values fitting 64 position points leaves room for a path that threads the points on a wandering route. Fewer knots make that geometrically harder. n_segments also sets the supervision grid (Q=N), so these arms are scored on the shared common-grid metric, not on their own N.",
+  "_comment": "Experiment 2: is 64 segments too many? 64 piecewise-constant controls x 3 = 192 free values fitting 64 position points leaves room for a path that threads the points on a wandering route; fewer knots make that geometrically harder. CONFOUND, stated rather than hidden: under true-time-position the supervision grid IS the segment grid (Q=N, endpoint q at true time q*T/N), so an N=16 arm also trains on 16 position points instead of 64. The two cannot be separated without changing the objective, so a positive result here means 'a coarser control AND supervision grid helps', not 'fewer controls help'. Checkpoint selection is unaffected: validation_common_grid_points stays 64 for every arm, so the selector compares like with like, and score_control_arms.py resamples every arm onto one 64-point grid.",
   "base_recipe": "simple-v1-lag",
   "arms": [
-    {"key": "n16", "label": "segments: N=16", "overrides": {"n_segments": 16}},
-    {"key": "n32", "label": "segments: N=32", "overrides": {"n_segments": 32}}
+    {
+      "key": "n16",
+      "label": "segments: N=16",
+      "overrides": {
+        "n_segments": 16
+      }
+    },
+    {
+      "key": "n32",
+      "label": "segments: N=32",
+      "overrides": {
+        "n_segments": 32
+      }
+    }
   ]
 }
