@@ -133,3 +133,16 @@ that divergence is a known open item (see the README's "Future Improvements").
   write is still ungated for the Observe+comparison two-writer case.
 - Approach-view interior-gap `break` is latent (current CZMLs are single-interval); the 07-07
   approach-view changes were verified via tests/tsc/build but not re-checked in-browser.
+
+## Comparison CZML is split by group count, not by runway alone
+
+- **One CZML per runway stops working at thesis scale.** At 38–54 KB of CZML per flight a
+  2,000-flight runway is a single ~100 MB file, and the viewer `JSON.parse`s a whole file to
+  show even one sampled group (the existing KRDU 23R prediction CZML is already 153 MB).
+  `build_scenario_comparison_czml.py --max-groups-per-czml N` splits each runway into
+  `comparison_<ICAO>_<RW>_pNNN_<generation>.czml`.
+- **The split is transparent to the frontend by construction**: every
+  `comparison_index.json` group record carries its own `czml` field and
+  `selectComparisonGroups` derives the file list from those (`[...new Set(groups.map(g =>
+  g.czml))]`). `prune_unreferenced_outputs` keeps files by the same set, so chunking needs no
+  change on either side.

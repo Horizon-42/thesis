@@ -20,10 +20,39 @@ one for anything torch-side.
   the backend HTTP path also has — several bugs (stale `_solve_iaf` unpack, trapezoidal left
   behind after the HS flip, missing `n_seg_per_phase`) came from updating one path and missing
   the other. When changing optimizer wiring, update BOTH and their seam tests.
+- **The constrained solve does NOT move its target, and must not.** `_iaf_setup` used to
+  snap it onto the procedure document's last waypoint; that waypoint and the arrival
+  manifest's `runway_target` are two renderings of one CIFP threshold and round differently
+  (0.05-0.22 m over the 25 runways in service; KRDU 32 = 2.98 m, KSMF 35R = 39.45 m), which
+  put every `runway_cons` record outside `evaluation`'s 1 cm target check and killed the
+  whole sweep. `_require_procedure_threshold_agrees` now validates the procedure AGAINST the
+  scenario target at `_FRAME_ANCHOR_TOLERANCE_M` (150 m) instead — the displaced-threshold
+  case the snap existed to catch (KSJC 12L, 390 m against the NASR config) still fails loudly.
+  The optimizer, the evaluator and the arrival manifest all read `harvest.airports.Runway`.
+- **`--max-iterations` is the batch's biggest cost lever.** Measured serially on KRDU: a
+  scenario that ends `Maximum_Iterations_Exceeded` costs ~56 s (the full 3000-iteration
+  budget) against ~4.3 s for one that solves — **6.7 % of the flights, ~48 % of an
+  unconstrained batch's CPU**. Plumbed from both runners through both solve paths, and
+  recorded in `summary.json`'s `optimization_config`: a lower cap turns slow successes into
+  failures, so it is a different experiment and `--skip-optimize` refuses to reuse across it.
+  The default stays 3000 — lowering it is a research decision, not a performance one.
+- **`--resume` exists because `summary.json` is written only at the end.** A 70k-solve batch
+  runs for tens of hours; before, a crash discarded every finished record with it. Resume
+  reads back complete record pairs whose identity matches a CURRENT scenario and solves the
+  rest. `_clear_stale_records` still sweeps orphans — resume narrows which files survive, it
+  never turns the sweep off — and summary counts come from the roster, not from what the
+  process happened to write (a roster that ends up incomplete raises).
+- **Reference records quote a SHARED observed track.** The two prepared target datasets
+  reference the same flights and their reference records differ only in `target_state`, so
+  the states live once in `shared_references/observed_tracks/` and each record points at
+  them through the contract's `states_ref` (134 KB/flight -> 64 KB). Cache contract
+  `optimization-references-v3-shared-tracks` hashes the track alongside the record; the store
+  is swept against the UNION of all sibling reference dirs, never one dataset's roster (that
+  would delete the other's tracks).
 - **Stale-artifact hygiene (write side)**: `_clear_stale_records` deletes top-level
   `*_states.json`/`*_eval.json` at optimization-batch start; `write_reference_records` clears
-  reference records when rebuilding and its v2 manifest anchors every record by source identity +
-  SHA-256. Comparison publication never pre-deletes the live batch: immutable
+  reference records when rebuilding and its v3 manifest anchors every record by source identity +
+  SHA-256 (record AND shared observed track). Comparison publication never pre-deletes the live batch: immutable
   generation-suffixed CZML/report files are written first, `comparison_index.json` is the atomic
   commit point, and only then are unreferenced generations pruned. `--skip-optimize` validates
   the complete summary/eval/states/reference roster, reference hashes, identities, and available
@@ -55,8 +84,9 @@ one for anything torch-side.
   branches). The third construction in that function is the `sqpmethod` backend, which
   **hardcodes `max_iter: 100` and ignores `max_iterations` entirely**. Linear solver:
   `AEROVIZ_IPOPT_LINSOL` (default `mumps`) + `AEROVIZ_IPOPT_HSLLIB` — HSL hook dormant (free MA27
-  measured 3–27× slower than MUMPS on these small NLPs; kept for a future MA57 attempt); batch
-  speed lever is `--jobs`.
+  measured 3–27× slower than MUMPS on these small NLPs; kept for a future MA57 attempt). Batch
+  speed levers, in order of measured effect: `--max-iterations` (see above), then `--jobs`
+  (the pipeline driver defaults to cores−4; the library auto is half the cores).
 - **Altitude floor**: `altitude_floor_m(target) = target − 5 m` (a real operational floor min-time
   solves ride; was −300 m which they dove to). Transition-phase floor = min(start alt, first
   leg's published entry floor `_first_leg_entry_floor_m`) − margin. Rollout guard:

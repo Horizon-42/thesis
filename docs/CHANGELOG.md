@@ -4,6 +4,108 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-19 — the optimizer pipeline: two blockers, a bounded population, and eight cost levers
+
+Audit of `run_scenario_optimization.py` and everything it shells out to, then the fixes.
+Measured throughout on the real harvest (42,725 rostered arrivals across 5 airports) rather
+than reasoned about; every number below was reproduced end-to-end.
+
+**Blocker 1 — `runway_cons` evaluation crashed on the first record, on every runway.**
+`_snap_target_to_procedure` moved the constrained solve's target onto the procedure
+document's last waypoint. That waypoint and the arrival manifest's `runway_target` are two
+renderings of the SAME CIFP threshold and round differently — measured 0.05–0.22 m over the
+25 runways in service (KRDU 32 = 2.98 m, KSMF 35R = 39.45 m, neither in the arrival set).
+On 2026-08-17 `evaluation.arrival._require_target_agrees_with_runway_data` gained its
+POSITION half at a 1 cm tolerance, so **25 of 25 runways failed**. It went unnoticed because
+that day's regeneration covered observed and prediction records only — the CHANGELOG entry
+says so: "There is currently no optimizer comparison tree published at all". `run_for_airport`
+uses `check=True` with no handler, so the first `runway_cons` cell would have aborted the
+whole sweep about 2 h into KMSY.
+*Fix:* the snap is gone. The scenario target is already the authoritative
+`harvest.airports.Runway` point (that is why the unconstrained `runway` mode always passed),
+so the constrained path now keeps it and VALIDATES the procedure against it at the
+optimizer's own `_FRAME_ANCHOR_TOLERANCE_M` (150 m) — the same displaced-threshold
+mis-anchor the snap existed to catch (KSJC 12L was 390 m off against the NASR config) still
+fails, loudly. `evaluation/tests/test_pipeline_integration.py` now pins both ends together
+across all of KRDU's runways; before, `_snap_target_to_procedure` was unit-tested only in
+isolation and no test ran a constrained record through `python -m evaluation`.
+
+**Blocker 2 — the fitted-ADS-B dataset could not be built for 4 of 5 airports.**
+`build_scenario` raises when a flight has no usable `final_approach` fit, which aborts the
+whole airport. Measured: **35 flights of 42,725 (0.08 %)** — KMSY 1, KRDU 1, KSJC 25,
+KSMF 8, KSTL 0. So 0.08 % of the fleet blocked 82 % of the dataset.
+*Fix:* `UnusableFittedApproach` (its own type, so nothing broader is swallowed) and a new
+`flight_scenarios.dataset` batch layer that drops exactly those flights, names each one, and
+writes the accounting to `<scenarios>.selection.json`.
+
+**Blocker 3 — the run did not fit on the disk.** At the full population the artifacts came
+to ~36 GB against 17.8 GiB free. `run_scenario_optimization.py` now estimates the footprint
+from measured per-flight sizes and refuses to start rather than filling the filesystem
+30 hours in (`--skip-space-check` overrides).
+
+**Population.** `--max-per-runway` (default 2000 in `prepare_scenario_inputs.py`) keeps N
+arrivals per runway, evenly spaced over landing time so a capped runway still spans the whole
+harvest window. The rostered fleet is wildly unbalanced (KSJC 30L 9,603 vs 12L 14), so an
+uncapped batch spends most of its compute re-measuring two runways. At 2000:
+**23,453 flights / 70,359 solves** (KMSY 3534, KRDU 7491, KSJC 3543, KSMF 3737, KSTL 5148),
+down from 42,725 / 128,175. The selection is derived from the ROSTER only — no source track
+is opened for a discarded flight — so it is target-independent, both prepared datasets pick
+the same flights, and KRDU's build dropped from 2.4 GB / 24 s to 0.9 GB / 7 s.
+
+**Cost levers, measured.** 120 random KRDU arrivals, `--jobs 20`: runway 159 s wall / 18.1
+CPU-s per flight, fitted_adsb 146 s / 17.6, runway_cons 175 s / 9.7.
+
+1. **IPOPT iteration cap is the dominant lever and had no knob.** Serial A/B: the 8 flights
+   that ended `Maximum_Iterations_Exceeded` cost 448 s (~56 s each, the full 3000-iteration
+   budget); 8 that solved cost 45 s (~4.3 s each). **6.7 % of the flights, ~48 % of the CPU.**
+   `--max-iterations` is now plumbed from both runners through both solve paths, and is
+   recorded in `summary.json`'s `optimization_config` — a lower cap converts slow successes
+   into failures, so it is a different experiment and `--skip-optimize` will not reuse across
+   the change. The DEFAULT is unchanged at 3000: that is a research decision, not a
+   performance one.
+2. **`--jobs`.** The library auto is half the cores (right for a call that should leave the
+   box usable); the pipeline driver, which owns the machine for the batch, now defaults to
+   `cores - 4` (24 here) instead of 14.
+3. Population cap, above.
+4. **`--rollout-dt`** exposed on the runner (default unchanged, 0.5 s). The simulator array
+   is ~75 % of every `*_states.json`; 1.0 s takes the estimated 2000/runway footprint from
+   16.6 GiB to 10.4 GiB.
+5. **The observed reference track was written twice.** The fitted-ADS-B and runway datasets
+   reference the same flights and their reference records differed only in `target_state` —
+   ~200 bytes of a ~67 KB record. The records now quote a shared sibling
+   `shared_references/observed_tracks/` store through the contract's existing `states_ref`
+   indirection, which `evaluation.records.load_record` already resolves. Measured
+   134 KB/flight → 64 KB. Cache contract bumps to
+   `optimization-references-v3-shared-tracks` and hashes the track alongside the record; the
+   store is swept against the union of all sibling reference dirs, never one dataset's roster.
+6. **`python -m evaluation` materialized every record.** `load_records` resolved each
+   `states_ref` into the full state list and held the batch — measured 0.5 MB per record, so
+   ~7 GB on uncapped KRDU. `summary_row` already carries `arr_airport`, so contexts resolve
+   from the roster and the records stream (`iter_records`). `evaluation.visualize` does the
+   same in two passes, remembering only which FILES were drawable and reloading the sampled
+   30. Verdicts identical (48/48, 44 pass) on the A/B.
+7. **`--max-groups-per-czml`.** One CZML per runway at 38–54 KB/flight makes a 2000-flight
+   runway a single ~100 MB file. The frontend already loads CZMLs named by each index group's
+   own `czml` field, so splitting is transparent to it.
+8. **Resilience.** `--resume` reuses complete record pairs for scenarios in the current
+   roster and solves only the rest (`_clear_stale_records` still sweeps orphans — resume
+   narrows which files survive, it never turns the sweep off); summary counts now come from
+   the roster rather than from what this process happened to write, and a roster that ends up
+   incomplete raises. `--continue-on-error` keeps the sweep going past one failed cell and
+   names the casualties at the end.
+
+**Also fixed:** every optimizer evaluation row reported `flight_key: null` while observed
+rows carried it — `build_scenario` never copied it onto `scenario.source`. It does now
+(only when the flight has an `id`, since `flight_key`'s fallback is a list index this
+function does not have).
+
+**Verified end-to-end** on 48 KRDU flights (cap 12/runway, binding on all four runways)
+through the real runner: 3/3 cells complete, `runway_cons` 44 pass / 4 fail — the mode that
+could not be evaluated at all before. Resume re-solved 6 deleted records in 4.15 s and
+reproduced the same 47/48. Suites: 1091 passed, 13 failed — the same 13 pre-existing
+failures as before the change (the documented numpy `test_optimizer` one, 11 `test_ts_pipeline`,
+1 `test_download_landings`), plus 153 aeroviz-4d python.
+
 ### 2026-08-19 — Viewer: the predictor-input window takes its forecast's verdict colour
 
 **Problem.** In Observe → prediction comparison, a group draws as two paths: the predictor

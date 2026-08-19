@@ -45,9 +45,15 @@ python aeroviz-4d/python/generate_czml.py --airport CYYC \
     --input path/to/flight_array.json \
     --output aeroviz-4d/public/data/airports/CYYC/trajectories.czml
 
-# Prepare inputs, then optimize all 3 modes per airport
-python prepare_scenario_inputs.py
-python run_scenario_optimization.py --jobs 6
+# Prepare inputs (default: 2000 arrivals per runway, evenly spaced over landing time;
+# --max-per-runway 0 takes everything, and the choice is written to <scenarios>.selection.json)
+python prepare_scenario_inputs.py --skip-observed
+# Optimize all 3 modes per airport. --jobs defaults to cores-4; the run pre-checks free disk
+# space and refuses to start if its estimate does not fit. --resume makes a crash cheap.
+python run_scenario_optimization.py --resume --max-groups-per-czml 500
+#   --max-iterations N   cap IPOPT per solve (biggest cost lever; default 3000)
+#   --rollout-dt 1.0     halve the on-disk footprint (coarsens the evaluated states)
+#   --continue-on-error  keep the sweep going past one failed airport/category
 
 # ts_transformer full chain (2 models × 2 horizon modes: train → predict → eval → CZML;
 # dataset build + split happen inside train, split persisted in the checkpoint)
@@ -212,18 +218,29 @@ Maintenance convention:
 
 ## Open Items (index; details in the linked file)
 
-- **ALL observed-derived artifacts on disk are STALE as of the 2026-07-20 datum/threshold/
-  assignment fixes** (see the CHANGELOG entry). Stale: `flight_scenarios/outputs`, every
-  `4dTrajectory/outputs/<ICAO>/{asdb,runway,runway_cons}`, every
-  `public/data/airports/*/comparison`, and the KRDU `ts_*` training data + checkpoints. Re-run
-  order: scenarios → optimizer batch → CZML/report tails → ts retrain. **KSJC and KSTL
-  additionally need a re-harvest** (the assignment fix changed runway assignment; offline de-dup
-  would cost KSJC 42 % of its flights, leaving 12L at 12 and 30R at 39). KRDU/KMSY/KSMF need no
-  re-harvest. OpenSky history access verified working from this Mac on 2026-07-20 (credentials
-  live in `~/Library/Application Support/pyopensky/settings.conf`, NOT `~/.config`).
+- **The optimizer batch has NOT been run since the harvest grew; nothing is on disk to reuse.**
+  `flight_scenarios/outputs` is empty and `4dTrajectory/outputs/<ICAO>` holds only ts artifacts,
+  so `--skip-optimize` has nothing to find and the run is from scratch. The arrival manifests
+  themselves ARE current (re-harvested 2026-08-15…17, all five airports — the old "KSJC and
+  KSTL need a re-harvest" item is closed), so `prepare_scenario_inputs.py --skip-observed` is
+  safe and skips rebuilding the observed CZML/report tail.
+  **Scale**: 42,725 rostered arrivals; at the default `--max-per-runway 2000` the batch is
+  **23,453 flights / 70,359 solves**, estimated ~30 h at `--jobs 24` and 16.6 GiB of artifacts
+  against 17.8 GiB free — thin, so prefer `--rollout-dt 1.0` (→ 10.4 GiB) or free space first.
+  The runner refuses to start if the estimate does not fit. Order: prepare → optimize
+  (`--resume` is cheap to restart) → the CZML/report tails run automatically per cell.
 - Optimizer: KRDU RW32 systematically hard (not a truncation artifact); per-leg RNP not extracted
   from CIFP; CIFP leg speed restrictions not extracted; HSL linear-solver hook dormant;
   pre-existing numpy 2.x failure in `test_optimizer.py`. → `4dTrajectory/CLAUDE.md`
+- Optimizer quality, measured 2026-08-19 and NOT fixed: on 120 random KRDU `runway` flights,
+  **15 of 120 (12.5 %) fail only because the replay stops 1–10 m short of the threshold
+  plane** (`event_status: not_reached` → lateral/vertical indeterminate → fail). Recovering
+  just those would move the pass rate 60 % → 72.5 %, so any quoted gate rate should say
+  whether it counts them. A further 18 solved flights end genuinely far short (median 610 m).
+- Optimizer determinism: `_limit_solver_threads()` only runs when `jobs > 1`, so BLAS threading
+  differs between `--jobs 1` and `--jobs N` and a borderline scenario can solve in one and hit
+  `Maximum_Iterations_Exceeded` in the other (observed once in a 120-flight sample). The
+  `optimize_scenarios` docstring still claims worker-count-independent output.
 - ts_transformer: KRDU run DONE (three generations, quote current artifacts only); gate-pass
   conclusion needs re-deriving after the datum fix; only KRDU trained; flyability measured but
   not fixed; single-aircraft + deterministic by scope. **All control-output checkpoints are

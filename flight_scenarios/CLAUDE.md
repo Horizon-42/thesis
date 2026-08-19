@@ -76,6 +76,32 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   integration drift is unbiased LSQ smoothing (~2.4–2.7 m/min median). **The two seams MUST move
   together**: fixing only the channels re-adds a +0.33% north systematic (measured 8.6 m/min).
 
+## Population: who gets into a dataset
+
+- **`build_scenarios_from_arrivals` is strict; `dataset.build_scenario_dataset` is the batch
+  layer.** The strict builder raises on any flight it cannot build, which is right for a
+  library and wrong for a batch: **35 flights of the 42,725 rostered arrivals (0.08 %) have
+  no usable fitted final approach** (KMSY 1, KRDU 1, KSJC 25, KSMF 8, KSTL 0) and aborted the
+  fitted-ADS-B dataset for 4 of the 5 airports. They now raise `UnusableFittedApproach` (its
+  own type, so a broad `except ValueError` cannot swallow a real contract violation next to
+  it) and the batch layer drops and NAMES them.
+- **`--max-per-runway` caps the population, and the cap is written down.** Default 2000 via
+  `prepare_scenario_inputs.py`; at that value the fleet is 23,453 flights / 70,359 solves
+  instead of 42,725 / 128,175. Selection is evenly spaced over landing time within each
+  runway, so a capped runway still spans the whole harvest window. It is derived from the
+  arrival ROSTER alone — no source track is opened for a discarded flight, which is also why
+  a capped KRDU build costs 0.9 GB / 7 s instead of 2.4 GB / 24 s — and therefore does not
+  depend on the target type: **both prepared datasets select the same flights**, which is
+  what keeps the per-flight comparison between `fitted_adsb` and `runway` paired. Every
+  decision lands in `<scenarios>.selection.json` (`flight-scenarios-selection-v1`): a bounded
+  population that is not stated reads as a full one, and every rate computed from it is then
+  quietly wrong.
+- **`source["flight_key"]` is populated here.** Optimizer evaluation rows used to report
+  `flight_key: null` while observed rows carried it, because `build_scenario` never copied
+  it. It does now — but only when the flight has an `id`, since `flight_key`'s fallback is
+  the caller's list index and this function does not have one; a key built on the wrong index
+  would disagree with the record filename `_scenario_filename` derives.
+
 ## Runway target
 
 - **THREE runway-threshold sources exist and two of them disagree by metres.**

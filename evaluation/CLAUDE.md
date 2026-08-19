@@ -91,3 +91,31 @@ Report schema: `terminal-approach-evaluation-v5`.
   +4.04 m at `[−2000,−300]`, with σ climbing to 2.50 m at the short end. Starting at the FAF
   biases HIGH (aircraft still intercepting from above); shrinking below ~3 km leaves too short a
   baseline to pin the slope. **Report the sensitivity table, never one number.**
+
+## The authoritative-threshold check is a SEAM, not a local rule
+
+- **`_require_target_agrees_with_runway_data` binds every producer that claims
+  `target_source == "runway_threshold"` to `harvest.airports.Runway` within 1 cm.** Its
+  position half landed 2026-08-17 and was validated against observed and prediction records
+  only — there was no optimizer comparison tree on disk — so it silently broke the one
+  producer that moved its target: the constrained-IAF optimizer snapped onto the procedure
+  document's rendering of the same CIFP threshold, 0.05–0.22 m away, and **every**
+  `runway_cons` record was rejected on the first row. Changing this tolerance, or any
+  producer's target, needs both ends checked together;
+  `tests/test_pipeline_integration.py::test_constrained_optimizer_target_is_graded_against_the_same_threshold`
+  is that pin.
+
+## Batches are STREAMED, not materialized
+
+- **`load_records` resolves each `states_ref` into the full state list, and a batch is now
+  tens of thousands of flights.** Measured 0.5 MB retained per record → ~7 GB on an uncapped
+  KRDU batch. `summary_row` already carries `arr_airport`, so `contexts_from_roster` resolves
+  the assessment contexts from `summary.json` alone and `iter_records` streams the records
+  past `evaluate_batch` one at a time; everything `evaluate_batch` retains
+  (`TrajectoryEvaluation`, rows, comparisons) is per-flight metadata, not trajectory arrays.
+- `evaluation.visualize` needs random access for its `--max-tracks` overlays, so it does the
+  same in TWO passes: pass one streams the metrics and remembers only which FILES were
+  drawable, pass two reloads the sampled few. Verdicts are identical either way (A/B pinned
+  at 48/48, 44 pass) — if they ever differ, the streaming path is wrong, not the report.
+- `load_records` is kept for callers that genuinely need the list; prefer `record_files` +
+  `iter_records`.

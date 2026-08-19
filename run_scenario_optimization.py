@@ -118,13 +118,22 @@ def _file_sha256(path: Path) -> str:
 DEFAULT_N_SEGMENTS = 8         # unconstrained: control segments over the whole trajectory
 DEFAULT_N_SEG_PER_PHASE = 3    # constrained: control segments PER procedure leg
 
-# Measured artifact footprint per flight per category on this pipeline (120 KRDU arrivals,
-# HS, rollout_dt 0.5 s): records 186 KB (states 108 + eval 42 + reports 36/3) + comparison
-# CZML 52 KB, plus 67 KB of observed reference record per prepared TARGET dataset. Used only
-# for the pre-flight estimate below — a batch that fills the disk at 90% loses everything it
-# has not yet committed, and the run is long enough that finding out at the end is expensive.
-_BYTES_PER_FLIGHT_PER_CATEGORY = 238 * 1024
-_BYTES_PER_FLIGHT_PER_TARGET = 67 * 1024
+# Measured artifact footprint per flight, KRDU end-to-end at the current defaults
+# (Hermite-Simpson, rollout_dt 0.5 s): records + comparison CZML + reports average 194 KB per
+# CATEGORY (runway 170, fitted_adsb 158, runway_cons 253 — the constrained trajectories are
+# the longest); each prepared TARGET dataset adds a 2 KB reference record per flight; and the
+# observed track those records quote is written ONCE per flight at 60 KB (see
+# OBSERVED_TRACKS_DIR). Scales with --rollout-dt: the simulator array is ~75% of a
+# *_states.json, so 1.0 s roughly halves the category term.
+# Used only for the pre-flight estimate — a batch that fills the disk mid-run loses
+# everything it has not committed, and this run is far too long to find that out at the end.
+# Split by what --rollout-dt actually moves: the simulator state array, its 1:1 control
+# list and the simulator CZML path all scale with the rollout step; the optimizer's dense
+# plan, the reports and the index do not.
+_BYTES_PER_FLIGHT_PER_CATEGORY_ROLLOUT = 160 * 1024
+_BYTES_PER_FLIGHT_PER_CATEGORY_FIXED = 34 * 1024
+_BYTES_PER_FLIGHT_PER_TARGET = 2 * 1024
+_BYTES_PER_FLIGHT_OBSERVED_TRACK = 60 * 1024
 _FREE_SPACE_HEADROOM = 1.15
 
 
@@ -520,14 +529,27 @@ def scenario_count(path: Path) -> int:
 
 
 def estimate_footprint_bytes(plans: list["Plan"]) -> int:
-    """Bytes the selected runs will add, from the measured per-flight artifact sizes."""
+    """Bytes the selected runs will add, from the measured per-flight artifact sizes.
+
+    Three terms, because the three artifact families have three different denominators:
+    per category (records + CZML), per prepared target dataset (the reference records), and
+    once per distinct flight (the shared observed track every reference quotes).
+    """
     per_target: dict[Path, int] = {}
+    by_airport: dict[str, int] = {}
     total = 0
     for plan in plans:
         flights = scenario_count(plan.scenarios)
-        total += flights * _BYTES_PER_FLIGHT_PER_CATEGORY
+        total += int(flights * (
+            _BYTES_PER_FLIGHT_PER_CATEGORY_FIXED
+            + _BYTES_PER_FLIGHT_PER_CATEGORY_ROLLOUT
+            * (DEFAULT_ROLLOUT_DT_S / plan.rollout_dt_s)
+        ))
         per_target[plan.scenarios] = flights
+        by_airport[plan.airport] = max(by_airport.get(plan.airport, 0), flights)
     total += sum(per_target.values()) * _BYTES_PER_FLIGHT_PER_TARGET
+    # One observed-track store per airport, sized by that airport's largest dataset.
+    total += sum(by_airport.values()) * _BYTES_PER_FLIGHT_OBSERVED_TRACK
     return total
 
 
