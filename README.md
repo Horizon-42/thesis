@@ -94,3 +94,33 @@ parser because it matches procedure legs and required fix coordinates while
 providing higher-level procedure, runway, terminal-waypoint, and enroute-waypoint
 objects. Keep `arinc424` as an audit/cross-check decoder because it is closer to
 raw ARINC 424 records.
+
+## Future Improvements
+
+### Align the comparison CZML's baked colours with the frontend contract
+
+The comparison CZML writes a colour into every path packet
+(`aeroviz-4d/python/build_scenario_comparison_czml.py`: `PREDICTION_COLOR`,
+`LOOKBACK_COLOR`, `OFF_TARGET_COLOR`, …), but the viewer repaints most of those paths
+from its own legend (`aeroviz-4d/src/utils/trajectoryRenderModel.ts` +
+`useComparisonTrajectoryLayer.ts`), so the two definitions can disagree without anything
+failing. They already do: the builder bakes both the prediction and its predictor-input
+window purple, while the frontend now draws each group in its terminal-verdict colour —
+green for a pass, red for a fail, gray for indeterminate — with the input window as the
+low-alpha version of that same colour, and keeps purple only as the no-verdict fallback.
+
+Anything that consumes the CZML *without* the viewer (an external CZML player, a figure
+exported straight from the file, a reviewer opening the JSON) therefore sees the old
+purple pair, not what the thesis screenshots show.
+
+Suggested fix, in order of preference:
+
+1. Generate the builder's colour table from the same source as the frontend legend — the
+   way `geoConstants.json` is generated from `geokit` — so there is one definition and
+   the CZML ships the colour that will actually be rendered.
+2. Failing that, have the builder bake the verdict colour it already knows (`status` is
+   written onto every entity's `properties`) and delete the frontend repaint for
+   prediction paths, leaving the repaint only where it genuinely adds information.
+
+Either way the goal is one colour contract, not two that happen to be reconciled at
+render time.

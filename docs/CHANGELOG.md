@@ -4,6 +4,43 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-19 — Viewer: the predictor-input window takes its forecast's verdict colour
+
+**Problem.** In Observe → prediction comparison, a group draws as two paths: the predictor
+input window (`look-`) and the forecast it produced (`pred-`). The forecast was painted from
+its terminal verdict — green pass / red fail / gray indeterminate — while the input window was
+painted a fixed faded purple. Purple is a colour nothing else in the legend uses, so the input
+half read as a THIRD kind of result rather than as the first half of the track it belongs to,
+and a viewer could not tell at a glance which input fed which forecast in a crowded scene.
+
+**Change (frontend rendering only).** `applyComparisonRenderModel` now resolves the outcome
+colour for `look-` exactly as it does for `pred-`, at the kind's own alpha:
+`predictionOutcomeColor(status, COMPARISON_KIND_ALPHA[kind])`. Both halves share the group key
+(`groupOfEntityId` strips the prefix), so one comparison-index entry colours both. Hue is now
+the group's verdict; **alpha alone** (85/255 vs 225/255) separates input from forecast. The
+purple `COMPARISON_KIND_COLORS.lookback`/`.predicted` survives only as the no-verdict fallback,
+which is why the two constants are deliberately equal.
+
+The "Predictor input" checkbox swatch follows: `comparisonKindSwatch` now returns the
+green/red/gray split gradient for `lookback` as well as `predicted`, and `ControlPanel` already
+multiplies each swatch by `COMPARISON_KIND_ALPHA[kind]`, so the input row renders as the faded
+version of the prediction row — the same relationship the two paths have in the scene.
+
+**Not changed: the CZML.** `build_scenario_comparison_czml.py` still bakes `PREDICTION_COLOR`
+and `LOOKBACK_COLOR` (both purple) into the packets; the viewer has always repainted prediction
+paths from the legend, so the file colours are unobserved in the app but ARE what any external
+CZML consumer sees. Logged as a future improvement in the root `README.md` ("Align the
+comparison CZML's baked colours with the frontend contract") with two suggested fixes: generate
+the builder's table from the frontend legend (the `geoConstants.json` pattern), or bake the
+verdict the builder already knows and drop the repaint.
+
+**Tests.** `comparisonRenderModel.test.ts`: the old "lookback keeps the legend purple on an
+offTarget group" expectation was the assertion of the behaviour being replaced and is now
+"repaints a failed lookback red"; added the no-verdict fallback case, an indexed-status-wins
+case, and an explicit input-hue == forecast-hue equality (the previous version compared the
+input against the purple constant, which passed trivially because both constants were purple).
+81 files / 510 tests pass; `tsc --noEmit` clean.
+
 ### 2026-08-18 — ts_transformer: control-mode design pass, first-order control lag, teacher-inverse audit
 
 Three connected pieces of work on `4dTrajectory/ts_transformer`, driven by the 2026-08-17

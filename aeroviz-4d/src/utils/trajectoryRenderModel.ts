@@ -39,8 +39,9 @@ export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
   optimizer: "rgb(255, 140, 0)", // "Optimize states"
   simulator: "rgb(40, 120, 255)", // "Optimize results"
   predicted: "rgb(170, 90, 230)", // fallback when no terminal verdict is available
-  // The forecast's input window is purple and faded; unlike the evaluated output, it does
-  // not carry pass/fail semantics.
+  // The forecast's input window takes the SAME hue as the forecast it feeds — its group's
+  // verdict colour — and is told apart by alpha alone. This entry is only the fallback used
+  // when that group carries no terminal verdict, and it matches the prediction fallback.
   lookback: "rgb(170, 90, 230)",
 };
 
@@ -48,6 +49,8 @@ export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
  * Per-kind path/label alpha. Everything renders at the same opacity as the CZML bakes in
  * (~220/255) except the lookback, which is observed input rather than a result and is faded
  * so a viewer can see at a glance where the model stopped being told and started guessing.
+ * Alpha is the ONLY thing separating the input window from the forecast: the hue is shared,
+ * so a red forecast is preceded by a faded-red input and a green one by a faded green.
  */
 export const COMPARISON_KIND_ALPHA: Record<ComparisonKind, number> = {
   reference: 200 / 255,
@@ -57,9 +60,14 @@ export const COMPARISON_KIND_ALPHA: Record<ComparisonKind, number> = {
   lookback: 85 / 255,
 };
 
-/** Checkbox swatches describe the rendered path. Prediction has outcome colours, not one hue. */
+/**
+ * Checkbox swatches describe the rendered path. Prediction has outcome colours, not one hue —
+ * and so does the predictor input, which now borrows its forecast's verdict colour (the
+ * checkbox row applies `COMPARISON_KIND_ALPHA` on top, so the input swatch reads as the faded
+ * version of the prediction swatch, exactly like the two paths do in the scene).
+ */
 export function comparisonKindSwatch(kind: ComparisonKind): string {
-  if (kind !== "predicted") return COMPARISON_KIND_COLORS[kind];
+  if (kind !== "predicted" && kind !== "lookback") return COMPARISON_KIND_COLORS[kind];
   return `linear-gradient(90deg, ${OBSERVED_VERDICT_COLORS.pass} 0 46%, ` +
     `${OBSERVED_VERDICT_COLORS.fail} 46% 92%, ${OBSERVED_VERDICT_COLORS.undecided} 92% 100%)`;
 }

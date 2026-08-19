@@ -89,15 +89,25 @@ function comparisonKindColor(kind: ComparisonKind): Cesium.Color {
   return cssColor(COMPARISON_KIND_COLORS[kind], COMPARISON_KIND_ALPHA[kind]);
 }
 
-function predictionOutcomeColor(status: ComparisonStatus | undefined): Cesium.Color | null {
+/**
+ * The terminal-verdict colour for a prediction group, at the caller's alpha.
+ *
+ * Both halves of a forecast — the predictor input window (`look-`) and the forecast itself
+ * (`pred-`) — take this colour, so the pair reads as one track whose hue is its verdict. The
+ * alpha is what separates them, which is why it is a parameter rather than a constant.
+ */
+function predictionOutcomeColor(
+  status: ComparisonStatus | undefined,
+  alpha: number,
+): Cesium.Color | null {
   if (status === "solved") {
-    return cssColor(OBSERVED_VERDICT_COLORS.pass, COMPARISON_KIND_ALPHA.predicted);
+    return cssColor(OBSERVED_VERDICT_COLORS.pass, alpha);
   }
   if (status === "offTarget" || status === "failed") {
-    return cssColor(OBSERVED_VERDICT_COLORS.fail, COMPARISON_KIND_ALPHA.predicted);
+    return cssColor(OBSERVED_VERDICT_COLORS.fail, alpha);
   }
   if (status === "indeterminate") {
-    return cssColor(OBSERVED_VERDICT_COLORS.undecided, COMPARISON_KIND_ALPHA.predicted);
+    return cssColor(OBSERVED_VERDICT_COLORS.undecided, alpha);
   }
   return null;
 }
@@ -117,8 +127,11 @@ function entityStatus(
 
 /**
  * Apply the result render policy. Prediction paths carry their terminal outcome:
- * pass is green, fail is red, and indeterminate is gray. Predictor input stays faded
- * purple because it is model input rather than an evaluated output.
+ * pass is green, fail is red, and indeterminate is gray. Predictor input takes the SAME
+ * outcome colour as the forecast it feeds, only faded (`COMPARISON_KIND_ALPHA.lookback`):
+ * an input window in an unrelated hue reads as a third kind of result rather than as the
+ * first half of the track it belongs to. Groups with no terminal verdict fall back to the
+ * shared purple, still faded on the input half.
  */
 export function applyComparisonRenderModel(
   entity: Cesium.Entity,
@@ -131,7 +144,10 @@ export function applyComparisonRenderModel(
 
   if (entity.path) {
     entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
-    const predictionColor = kind === "predicted" ? predictionOutcomeColor(status) : null;
+    const predictionColor =
+      kind === "predicted" || kind === "lookback"
+        ? predictionOutcomeColor(status, COMPARISON_KIND_ALPHA[kind])
+        : null;
     // Optimizer replay CZML deliberately bakes yellow into an off-target result.
     // Every other path is painted from the frontend's single colour contract.
     const keepBakedOptimizerFailure =

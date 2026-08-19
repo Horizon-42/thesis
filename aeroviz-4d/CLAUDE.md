@@ -113,6 +113,14 @@ orange/cyan. **The frontend repaint skip is keyed on "a verdict colour was baked
 ARE repainted from the legend — so `PREDICTION_COLOR` and the TS legend entry are not required to
 agree.
 
+**`look-` takes its forecast's verdict colour, faded — never a hue of its own.** The frontend
+paints BOTH prediction halves from the group status (pass green / fail red / indeterminate gray);
+the input window is separated from the forecast by `COMPARISON_KIND_ALPHA.lookback` (85/255)
+alone. The purple `COMPARISON_KIND_COLORS.predicted`/`.lookback` is only the no-verdict fallback.
+A distinct input hue reads as a third kind of result rather than as the first half of one track,
+which is why this is a contract and not a preference. The builder still bakes purple into both —
+that divergence is a known open item (see the README's "Future Improvements").
+
 ## Open items
 
 - **Local terrain and aircraft CZML disagree by ~33 m in the viewer.** `local-terrain` heightmaps

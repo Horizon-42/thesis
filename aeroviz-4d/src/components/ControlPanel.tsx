@@ -383,9 +383,9 @@ export default function ControlPanel({
                       checked={trajectoryComparisonKinds[kind]}
                       onChange={(event) => setTrajectoryComparisonKind(kind, event.target.checked)}
                     />
-                    {/* Opacity, not just hue: "Predicted" and "Predictor input" share a colour
-                        and are told apart by their alpha, so a solid swatch would make the two
-                        rows look identical. Same source the paths are drawn with. */}
+                    {/* Opacity, not just hue: "Predicted" and "Predictor input" draw the same
+                        outcome colours and are told apart by their alpha alone, so the swatch
+                        has to carry that alpha too. Same source the paths are drawn with. */}
                     <i style={{
                       background: comparisonKindSwatch(kind),
                       opacity: COMPARISON_KIND_ALPHA[kind],
