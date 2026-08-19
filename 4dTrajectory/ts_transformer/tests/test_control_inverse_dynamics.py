@@ -35,8 +35,10 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     HORIZON_NORMALIZED,
+    CONTROL_RECIPE_SIMPLE_V1,
     PREDICTION_CONTROL,
     TIME_CONSTANT_FIELDS,
+    control_recipe_overrides,
     TSConfig,
 )
 from control_dynamics_backends import RolloutInputs, control_dynamics_backend  # noqa: E402
@@ -322,11 +324,7 @@ def test_inverted_controls_stay_inside_the_envelope_on_a_benign_trajectory():
 
 def test_the_lagged_recipe_is_simple_v1_with_one_field_changed():
     """A paired comparison is only about the flight model if nothing else moved."""
-    from config import (
-        CONTROL_RECIPE_SIMPLE_V1,
-        CONTROL_RECIPE_SIMPLE_V1_LAG,
-        control_recipe_overrides,
-    )
+    from config import CONTROL_RECIPE_SIMPLE_V1_LAG
 
     base = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
     lagged = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1_LAG)
@@ -398,3 +396,70 @@ def test_the_exported_control_record_stays_in_newtons():
     assert newtons[0, 1, 0] == pytest.approx(-0.2 * MAX_THRUST_N)
     np.testing.assert_allclose(newtons[..., 1:], controls[..., 1:])
     np.testing.assert_allclose(fraction_controls(newtons, max_thrust_n), controls)
+
+
+def test_the_control_head_passes_gradient_to_the_backbone_at_initialisation():
+    """A zero output weight sends exactly zero gradient back through it.
+
+    The shipped initialisation zeroed `control_projection.weight` to make the untrained
+    model emit the neutral control. That works, but `dL/dfeatures = W^T . delta` is then
+    zero, so the whole trajectory backbone learned nothing on the first step and only
+    bootstrapped as W crawled off zero. Measured consequence after a full 180-epoch run:
+    70.7 % of the predicted bank energy was one profile shared by EVERY flight, flight-to-
+    flight SD 0.63 deg, and straight-in approaches were flown with 3.65 deg RMS bank and 7
+    sign reversals where inverting the observed track asks for 0.55 deg and none.
+    """
+    from dataset import probe_dynamics
+    from models import build_model
+
+    overrides = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
+    overrides.update(
+        seq_len=16, n_segments=8, d_model=32, d_ff=64, n_heads=4, e_layers=1
+    )
+    config = TSConfig(control_recipe_name="custom", **overrides)
+    model = build_model(config)
+
+    prediction = model(
+        torch.randn(4, config.seq_len, config.enc_in),
+        probe_dynamics(4, torch.device("cpu")),
+    )
+    # Both heads, since the duration head had the same zeroed output layer and the
+    # uniform-duration controls do not depend on it.
+    (prediction.controls.square().mean() + prediction.final_time_s.square().mean()).backward()
+
+    starved = [
+        name
+        for name, parameter in model.feature_encoder.named_parameters()
+        if parameter.grad is None or float(parameter.grad.abs().max()) == 0.0
+    ]
+    assert not starved, f"backbone tensors with no gradient at step 0: {starved}"
+    assert float(model.final_time_head.network[1].weight.grad.abs().max()) > 0.0
+
+
+def test_the_untrained_control_head_still_starts_at_the_neutral_control():
+    """The neutral start is the bias's job; the weights only need to be SMALL, not zero."""
+    from control_models import NEUTRAL_CONTROLS
+    from dataset import probe_dynamics
+    from models import build_model
+
+    overrides = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
+    overrides.update(
+        seq_len=16, n_segments=8, d_model=32, d_ff=64, n_heads=4, e_layers=1
+    )
+    config = TSConfig(control_recipe_name="custom", **overrides)
+    torch.manual_seed(0)
+    model = build_model(config).eval()
+
+    with torch.no_grad():
+        controls = model(
+            torch.randn(8, config.seq_len, config.enc_in),
+            probe_dynamics(8, torch.device("cpu")),
+        ).controls
+
+    neutral = torch.tensor(NEUTRAL_CONTROLS).view(1, 1, 3)
+    span = torch.tensor(CONTROL_UPPER - CONTROL_LOWER, dtype=controls.dtype).view(1, 1, 3)
+    # Measured deviation from neutral is 0.4 % of span on average and 1.7 % at worst,
+    # independent of d_model because the std scales as 1/sqrt(fan_in).
+    assert torch.all((controls - neutral).abs() < 0.03 * span)
+    # ...but NOT identical across flights, which is what "reads its input" means.
+    assert float(controls.std(dim=0).max()) > 0.0
