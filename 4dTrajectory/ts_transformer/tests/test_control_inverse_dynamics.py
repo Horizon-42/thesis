@@ -34,10 +34,12 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+    CONTROL_RECIPE_SIMPLE_V1,
     HORIZON_NORMALIZED,
     PREDICTION_CONTROL,
     TIME_CONSTANT_FIELDS,
     TSConfig,
+    control_recipe_overrides,
 )
 from control_dynamics_backends import RolloutInputs, control_dynamics_backend  # noqa: E402
 from control_envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
@@ -322,11 +324,7 @@ def test_inverted_controls_stay_inside_the_envelope_on_a_benign_trajectory():
 
 def test_the_lagged_recipe_is_simple_v1_with_one_field_changed():
     """A paired comparison is only about the flight model if nothing else moved."""
-    from config import (
-        CONTROL_RECIPE_SIMPLE_V1,
-        CONTROL_RECIPE_SIMPLE_V1_LAG,
-        control_recipe_overrides,
-    )
+    from config import CONTROL_RECIPE_SIMPLE_V1_LAG
 
     base = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
     lagged = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1_LAG)
@@ -398,3 +396,87 @@ def test_the_exported_control_record_stays_in_newtons():
     assert newtons[0, 1, 0] == pytest.approx(-0.2 * MAX_THRUST_N)
     np.testing.assert_allclose(newtons[..., 1:], controls[..., 1:])
     np.testing.assert_allclose(fraction_controls(newtons, max_thrust_n), controls)
+
+
+def _velocity_term_config(weight: float) -> TSConfig:
+    overrides = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
+    overrides.update(
+        seq_len=16, n_segments=8, d_model=32, d_ff=64, n_heads=4, e_layers=1,
+        control_velocity_loss_weight=weight,
+    )
+    return TSConfig(control_recipe_name="custom", **overrides)
+
+
+def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
+    """The true-time-position objective scored position only; this adds the velocity."""
+    import train as train_module
+    from control_loss_components import ControlStateLossResult, control_tracking_loss_terms
+    from dataset import Normalizer
+
+    normalizer = Normalizer(mean=np.zeros(6), std=np.ones(6))
+    result = ControlStateLossResult(
+        normalized_mse=torch.zeros(2, dtype=torch.float64),
+        normalized_segment_end_states=torch.zeros(2, 8, 6, dtype=torch.float64),
+        physical_position_mse=torch.tensor([0.25, 0.5], dtype=torch.float64),
+        physical_velocity_mse=torch.tensor([4.0, 9.0], dtype=torch.float64),
+    )
+    terminal = torch.zeros(2, 6, dtype=torch.float64)
+    anchor = torch.zeros(2, 6, dtype=torch.float64)
+    heading = torch.zeros(2, dtype=torch.float64)
+
+    off = control_tracking_loss_terms(
+        result, anchor, terminal, _velocity_term_config(0.0), normalizer, None, heading
+    )
+    assert "velocity" not in off.extras
+    assert "velocity" not in train_module.loss_component_names(_velocity_term_config(0.0))
+
+    on_config = _velocity_term_config(0.25)
+    on = control_tracking_loss_terms(
+        result, anchor, terminal, on_config, normalizer, None, heading
+    )
+    torch.testing.assert_close(
+        on.extras["velocity"], torch.tensor([1.0, 2.25], dtype=torch.float64)
+    )
+    # The position term is untouched, so turning the velocity term on is additive.
+    torch.testing.assert_close(on.state, off.state)
+    assert "velocity" in train_module.loss_component_names(on_config)
+
+
+def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
+    """Fitted-tail velocity weights are zero, so placeholders cannot enter the loss."""
+    import train as train_module
+    from dataset import Normalizer
+
+    config = _velocity_term_config(1.0)
+    channels = len(config.channels)
+    prediction_zero_weights = train_module._native_endpoint_control_state_loss
+
+    torch.manual_seed(0)
+    controls = torch.zeros(1, config.n_segments, 3, dtype=torch.float64, requires_grad=True)
+    from prediction_outputs import ControlPrediction
+    from dataset import probe_dynamics
+
+    durations = torch.full((1, config.n_segments), 20.0, dtype=torch.float64)
+    prediction = ControlPrediction(
+        controls=controls, segment_durations=durations,
+        final_time_s=durations.sum(dim=1),
+    )
+    targets = torch.zeros(1, config.n_segments, channels, dtype=torch.float64)
+    weights = torch.ones_like(targets)
+    weights[..., list(ch_velocity())] = 0.0          # every velocity row masked off
+    result = prediction_zero_weights(
+        prediction, torch.zeros(1, channels, dtype=torch.float64), targets, weights,
+        durations.sum(dim=1), config, Normalizer(mean=np.zeros(channels), std=np.ones(channels)),
+        probe_dynamics(1, torch.device("cpu")), None, None,
+    )
+    # With every velocity weight zero the term is exactly zero, not a division blow-up.
+    assert float(result.physical_velocity_mse[0]) == 0.0
+    assert torch.isfinite(result.physical_position_mse).all()
+
+    result.physical_velocity_mse.sum().backward(retain_graph=True)
+    assert controls.grad is not None
+
+
+def ch_velocity():
+    from channels import VELOCITY_IDX
+    return VELOCITY_IDX

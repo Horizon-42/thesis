@@ -7,9 +7,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from evaluation.cli import add_context_args, contexts_from_args
+from evaluation.cli import add_context_args, contexts_from_args, contexts_from_roster
 from evaluation.metrics import evaluate_batch
-from evaluation.records import load_records
+from evaluation.records import iter_records, load_records
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -22,8 +22,15 @@ def main(argv: list[str] | None = None) -> None:
     add_context_args(parser)
     args = parser.parse_args(argv)
 
-    records = load_records(args.input)
-    report = evaluate_batch(records, contexts=contexts_from_args(records, args))
+    # Roster first: when it names the airports (every batch since summary_row carried
+    # arr_airport), the records are streamed one at a time instead of held as a list.
+    contexts = contexts_from_roster(args.input, args)
+    if contexts is None:
+        records = load_records(args.input)
+        contexts = contexts_from_args(records, args)
+        report = evaluate_batch(records, contexts=contexts)
+    else:
+        report = evaluate_batch(iter_records(args.input), contexts=contexts)
     report["input"] = str(args.input)
     out = Path(args.output)
     out.write_text(json.dumps(report, indent=2, allow_nan=False), encoding="utf-8")

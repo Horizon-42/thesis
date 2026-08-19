@@ -196,6 +196,7 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
         "state_substeps": 5,
         "max_duration_s": so.DEFAULT_MAX_DURATION_S,
         "rollout_dt_s": 0.25,
+        "max_iterations": so.DEFAULT_MAX_ITERATIONS,
     }
 
 
@@ -640,18 +641,28 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
     assert captured["n_seg_per_phase"] == 5
 
 
-def test_snap_target_to_procedure_uses_the_cifp_threshold():
-    # The config-derived threshold can sit hundreds of metres from the procedure's
-    # CIFP threshold (displaced thresholds, e.g. KSJC 12L: 390 m) — the solve target
-    # must snap horizontally onto the procedure's last waypoint, keeping the vertical/
-    # kinematic components (threshold+TCH altitude, Vref, pavement heading, glidepath).
+def test_procedure_threshold_agreement_accepts_the_cifp_rounding_gap():
+    # The manifest's runway_target and the procedure document's last waypoint are two
+    # renderings of the SAME CIFP threshold and round differently — measured 0.05-0.22 m
+    # over the runways in service. The target must survive unmodified (it is what
+    # `evaluation` grades against, to 1 cm), and the gap is merely reported.
+    target = GeodeticState(37.3712, -121.9365, 26.58, 70.0, -0.9, -0.052, 60000.0)
+    pc = _pc([_wp("ROSTE", 37.30, -121.80), _wp("OMSEE", 37.34, -121.87),
+              _wp("RW12L", 37.37120100, -121.93650100)])
+    gap_m = so._require_procedure_threshold_agrees(target, [pc])
+    assert 0.0 < gap_m < 1.0
+
+
+def test_procedure_threshold_agreement_rejects_a_displaced_threshold():
+    # The guard the old horizontal snap provided: a target built against DIFFERENT runway
+    # data (the NASR config put KSJC 12L 390 m from the CIFP threshold) must fail loudly
+    # rather than be silently moved, because moving it desynchronises the solve target
+    # from the threshold `evaluation` measures against.
     config_target = GeodeticState(37.375, -121.94, 26.58, 70.0, -0.9, -0.052, 60000.0)
     pc = _pc([_wp("ROSTE", 37.30, -121.80), _wp("OMSEE", 37.34, -121.87),
               _wp("RW12L", 37.3712, -121.9365)])
-    snapped = so._snap_target_to_procedure(config_target, [pc])
-    assert (snapped.latitude, snapped.longitude) == (37.3712, -121.9365)
-    assert snapped.altitude == 26.58 and snapped.V == 70.0
-    assert snapped.psi == -0.9 and snapped.gamma == -0.052
+    with pytest.raises(ValueError, match="different runway data"):
+        so._require_procedure_threshold_agrees(config_target, [pc])
 
 
 def test_concat_to_runway_joins_transition_and_final():
@@ -695,3 +706,26 @@ def test_path_curve_length_ranks_shorter_path_lower():
     ])
     assert so._path_curve_length_m(short) < so._path_curve_length_m(long)
     assert so._path_curve_length_m(_pc([_wp("X", 36.0, -78.6)])) == float("inf")  # single point
+
+
+def test_pipeline_run_config_mirrors_the_optimizer_iteration_cap():
+    # optimization_run_config.py is import-light on purpose (the pipeline runner shells out
+    # and must not pull in casadi), so it restates DEFAULT_MAX_ITERATIONS with a "MUST
+    # match" comment instead of importing it. This is the check that comment promises.
+    from collocation.components import DEFAULT_MAX_ITERATIONS as optimizer_default
+    from optimization_run_config import DEFAULT_MAX_ITERATIONS as pipeline_mirror
+
+    assert pipeline_mirror == optimizer_default == so.DEFAULT_MAX_ITERATIONS
+
+
+def test_optimization_config_records_the_iteration_cap():
+    # A batch run at a different cap is a different experiment: a lower cap converts slow
+    # successes into failures, so --skip-optimize must not reuse across the change.
+    from optimization_run_config import build_optimization_config
+
+    base = dict(
+        constrained_iaf=False, fitting="hs", n_segments=8, n_seg_per_phase=3,
+        state_substeps=None, max_duration_s=2000.0, rollout_dt_s=0.5,
+    )
+    assert build_optimization_config(**base)["max_iterations"] == so.DEFAULT_MAX_ITERATIONS
+    assert build_optimization_config(**base, max_iterations=500) != build_optimization_config(**base)

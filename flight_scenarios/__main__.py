@@ -17,7 +17,7 @@ from pathlib import Path
 
 from trajectory_data_process.harvest.arrivals import resolve_arrival_manifest
 
-from .build import build_scenarios_from_arrivals
+from .dataset import build_scenario_dataset, write_selection
 from .scenario import save_scenarios
 from .start_state import DEFAULT_WINDOW_S
 
@@ -79,6 +79,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--mass-kg", type=float, default=None)
     parser.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
+    parser.add_argument(
+        "--max-per-runway", type=int, default=None, metavar="N",
+        help="keep at most N arrivals per runway, evenly spaced over landing time "
+             "(omit for every rostered arrival). The selection depends only on the "
+             "roster, so both target datasets pick the SAME flights; it is written to "
+             "<output>.selection.json and printed",
+    )
     args = parser.parse_args(argv)
 
     manifests = discover_arrival_manifests(
@@ -91,17 +98,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.output and len(manifests) != 1:
         parser.error("--output requires exactly one --input or --airport")
 
+    if args.max_per_runway is not None and args.max_per_runway < 1:
+        parser.error(f"--max-per-runway must be >= 1, got {args.max_per_runway}")
+    target = (
+        "runway" if args.target_from_threshold
+        else "fitted-adsb" if args.target_from_fitted_adsb
+        else "track-end"
+    )
+
     total = 0
     for manifest in manifests:
         airport = airport_for_manifest(manifest)
-        scenarios = build_scenarios_from_arrivals(
+        scenarios, selection = build_scenario_dataset(
             manifest,
             args.aircraft_type,
-            airport=airport,
+            target=target,
+            max_per_runway=args.max_per_runway,
             mass_kg=args.mass_kg,
             window_s=args.window_s,
-            target_from_threshold=args.target_from_threshold,
-            target_from_fitted_adsb=args.target_from_fitted_adsb,
         )
         output = (
             Path(args.output)
@@ -115,8 +129,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         output.parent.mkdir(parents=True, exist_ok=True)
         save_scenarios(scenarios, output)
+        selection_file = write_selection(selection, output)
         distribution = Counter(scenario.aircraft.code for scenario in scenarios)
         print(f"✓ {airport}: {len(scenarios)} scenario(s) -> {output}")
+        print(f"    population: {selection.summary_line()}")
+        for row in selection.excluded_unfittable:
+            print(f"      dropped {row['flight_key']} ({row['runway']}): {row['reason']}")
+        print(f"    selection: {selection_file}")
         print(f"    aircraft: {dict(distribution)}")
         total += len(scenarios)
 

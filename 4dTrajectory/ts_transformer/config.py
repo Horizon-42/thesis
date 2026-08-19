@@ -271,6 +271,8 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
         "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_NATIVE,
         "control_state_objective": CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+        "control_velocity_loss_weight": 0.0,
+        "control_velocity_loss_scale_mps": 10.0,
         "control_dense_state_loss_weight": 0.0,
         "control_geometry_loss_weight": 0.0,
         "control_arc_horizontal_velocity_loss_weight": 0.0,
@@ -306,6 +308,9 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     "control_thrust_time_constant_s",
     "control_bank_time_constant_s",
     "control_load_time_constant_s",
+    # control_velocity_loss_weight / _scale_mps are deliberately NOT here: their defaults
+    # (0.0 / 10.0) reproduce the behaviour of every checkpoint trained before the term
+    # existed, which is exactly the "safe stand-in" test this list applies.
     "control_dense_state_loss_weight",
     "control_geometry_loss_weight",
     "control_arc_horizontal_velocity_loss_weight",
@@ -490,6 +495,15 @@ class TSConfig:
     # horizontal-arc grid. Orthogonal ablation fields below change terminal decomposition,
     # local-velocity decomposition or progress weighting without creating more objectives.
     control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+    # The true-time-position objective scores POSITION only, so a rollout may thread the
+    # right places with the wrong heading and swing back between them — the measured
+    # signature of that is a bank profile shared by every flight (see
+    # docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md). This term scores the chart
+    # velocity at the same endpoints, on the same measured rows the position term uses:
+    # supervision weights are already zero on fitted-tail velocities, so the placeholder
+    # rows cannot enter. Zero keeps the frozen simple-v1 behaviour.
+    control_velocity_loss_weight: float = 0.0
+    control_velocity_loss_scale_mps: float = 10.0
     control_dense_state_loss_weight: float = 0.25
     control_geometry_loss_weight: float = 0.75
     control_arc_horizontal_velocity_loss_weight: float = 0.25
@@ -634,6 +648,16 @@ class TSConfig:
                 f"unknown control_dynamics_model {self.control_dynamics_model!r}; "
                 f"expected one of {CONTROL_DYNAMICS_MODELS}"
             )
+        if (
+            not math.isfinite(self.control_velocity_loss_weight)
+            or self.control_velocity_loss_weight < 0.0
+        ):
+            raise ValueError("control_velocity_loss_weight must be finite and non-negative")
+        if (
+            not math.isfinite(self.control_velocity_loss_scale_mps)
+            or self.control_velocity_loss_scale_mps <= 0.0
+        ):
+            raise ValueError("control_velocity_loss_scale_mps must be finite and positive")
         for name in (
             "control_thrust_time_constant_s",
             "control_bank_time_constant_s",
@@ -1179,6 +1203,8 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
         "state_objective": config.control_state_objective,
+        "velocity_loss_weight": config.control_velocity_loss_weight,
+        "velocity_loss_scale_mps": config.control_velocity_loss_scale_mps,
         "dense_state_loss_weight": config.control_dense_state_loss_weight,
         "geometry_loss_weight": config.control_geometry_loss_weight,
         "arc_horizontal_velocity_loss_weight": (

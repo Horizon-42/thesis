@@ -11,6 +11,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, Literal, get_args
 
 STATE_KEYS = ("lat", "lon", "alt", "V", "psi", "gamma", "m")
@@ -188,11 +189,15 @@ def load_record(path: str | Path) -> TrajectoryRecord:
     return record_from_dict(data, path=p)
 
 
-def load_records(path: str | Path) -> list[TrajectoryRecord]:
-    """Load one record file or the records rostered by a batch summary."""
+def record_files(path: str | Path) -> list[Path]:
+    """The record files at ``path``: one loose record, or a batch summary's roster.
+
+    Split out of :func:`load_records` so a caller can walk a batch without holding it: the
+    roster is a few hundred bytes per flight, the records it names are ~1 MB each.
+    """
     p = Path(path)
     if not p.is_dir():
-        return [load_record(p)]
+        return [p]
     manifest = p / "summary.json"
     if not manifest.exists():
         raise ValueError(
@@ -206,4 +211,47 @@ def load_records(path: str | Path) -> list[TrajectoryRecord]:
         if not isinstance(row, dict) or not isinstance(row.get("eval_file"), str):
             raise ValueError(f"{manifest}: results[{index}].eval_file must be a string")
         files.append(p / row["eval_file"])
-    return [load_record(file) for file in sorted(files)]
+    return sorted(files)
+
+
+def roster_context_keys(path: str | Path) -> list[tuple[str, str]] | None:
+    """``(airport, runway)`` pairs from a batch roster, or ``None`` for a loose record.
+
+    ``summary_row`` carries both, so the assessment contexts a batch needs can be resolved
+    from the roster alone — which is what lets the records themselves be streamed instead
+    of materialized just to collect their airport codes.
+    """
+    p = Path(path)
+    if not p.is_dir():
+        return None
+    rows = _load_json(p / "summary.json").get("results")
+    if not isinstance(rows, list):
+        return None
+    keys: list[tuple[str, str]] = []
+    for row in rows:
+        airport, runway = row.get("arr_airport"), row.get("runway")
+        if not isinstance(airport, str) or not isinstance(runway, str):
+            # A roster written before summary_row carried them: fall back to the records.
+            return None
+        keys.append((airport.upper(), runway))
+    return keys
+
+
+def iter_records(path: str | Path) -> Iterator[TrajectoryRecord]:
+    """Yield the rostered records one at a time, holding only one at a time.
+
+    A 2,000-flight batch is ~1 MB of resolved state per record (``load_record`` follows
+    ``states_ref`` into the full ``*_states.json``), so materializing the list peaked at
+    ~15 GB on the largest airport. Every consumer here reduces record-by-record.
+    """
+    for file in record_files(path):
+        yield load_record(file)
+
+
+def load_records(path: str | Path) -> list[TrajectoryRecord]:
+    """Load one record file or the records rostered by a batch summary.
+
+    Kept for callers that genuinely need random access (``evaluation.visualize`` samples
+    track overlays); the batch metrics path streams via :func:`iter_records`.
+    """
+    return [load_record(file) for file in record_files(path)]

@@ -944,6 +944,27 @@ def group_results_by_runway(
     return grouped
 
 
+def chunk_groups(
+    results: list[dict[str, Any]], max_groups: int | None
+) -> list[list[dict[str, Any]]]:
+    """Split one runway's results into the CZML files they will be written to.
+
+    One file per runway is the natural unit — until a runway has thousands of flights.
+    Measured at 52 KB of CZML per flight, a 2,000-flight runway is a single ~104 MB file,
+    and the frontend ``JSON.parse``s a whole file to show even one sampled group (it picks
+    files via each index group's own ``czml`` field, so the split is invisible to it).
+    ``None`` keeps the historical single file.
+    """
+    if max_groups is None:
+        return [results]
+    if max_groups < 1:
+        raise ValueError(f"max_groups must be >= 1, got {max_groups}")
+    return [
+        results[start:start + max_groups]
+        for start in range(0, max(len(results), 1), max_groups)
+    ] or [[]]
+
+
 def publish_comparison_batch(
     *,
     summary: dict[str, Any],
@@ -955,6 +976,7 @@ def publish_comparison_batch(
     scenario_initial: dict[str, dict[str, Any]] | None,
     evaluation_report: dict[str, Any] | None,
     generation: str | None = None,
+    max_groups_per_czml: int | None = None,
 ) -> dict[str, Any]:
     """Build and atomically publish one complete comparison generation.
 
@@ -993,33 +1015,37 @@ def publish_comparison_batch(
     created: list[Path] = []
     try:
         for (group_airport, runway), results in sorted(groups.items()):
-            czml, records = build_runway_comparison(
-                results,
-                states_dir,
-                [],
-                airport=group_airport,
-                start_hidden=start_hidden,
-                scenario_initial=scenario_initial,
-                verdicts=verdicts,
-                include_reference_entities=False,
-            )
-            out_path = (
-                out_dir / f"comparison_{group_airport}_{runway}_{generation}.czml"
-            )
-            _write_json_atomic(out_path, czml)
-            created.append(out_path)
-            for record in records:
-                record["czml"] = out_path.name
-            index["groups"].extend(records)
-            failed = sum(1 for record in records if record["status"] == "failed")
-            off_target = sum(
-                1 for record in records if record["status"] == "offTarget"
-            )
-            print(
-                f"✓ staged {out_path.name}: {len(records)} group(s), "
-                f"{failed} unsolved (red), {off_target} off-target (yellow) "
-                f"-> {len(czml)} packets"
-            )
+            parts = chunk_groups(results, max_groups_per_czml)
+            for part_index, part in enumerate(parts):
+                czml, records = build_runway_comparison(
+                    part,
+                    states_dir,
+                    [],
+                    airport=group_airport,
+                    start_hidden=start_hidden,
+                    scenario_initial=scenario_initial,
+                    verdicts=verdicts,
+                    include_reference_entities=False,
+                )
+                suffix = f"_p{part_index + 1:03d}" if len(parts) > 1 else ""
+                out_path = (
+                    out_dir
+                    / f"comparison_{group_airport}_{runway}{suffix}_{generation}.czml"
+                )
+                _write_json_atomic(out_path, czml)
+                created.append(out_path)
+                for record in records:
+                    record["czml"] = out_path.name
+                index["groups"].extend(records)
+                failed = sum(1 for record in records if record["status"] == "failed")
+                off_target = sum(
+                    1 for record in records if record["status"] == "offTarget"
+                )
+                print(
+                    f"✓ staged {out_path.name}: {len(records)} group(s), "
+                    f"{failed} unsolved (red), {off_target} off-target (yellow) "
+                    f"-> {len(czml)} packets"
+                )
 
         index["optimization"] = optimization_stats(summary, evaluation_report)
         index["evaluation"] = evaluation_batch_stats(evaluation_report)
@@ -1113,6 +1139,12 @@ def main() -> None:
     parser.add_argument("--adsb-czml", default=None, help="ADS-B CZML path override (single mode)")
     parser.add_argument("--output", default=None, help="Output CZML path (single mode)")
     parser.add_argument("--output-dir", default=None, help="Output dir for per-runway CZMLs (batch mode)")
+    parser.add_argument(
+        "--max-groups-per-czml", type=int, default=None, metavar="N",
+        help="batch mode: split each runway into CZML files of at most N flight groups "
+             "(omit for one file per runway). Each index group names its own file, so the "
+             "split is transparent to the frontend",
+    )
     parser.add_argument(
         "--start-visible", action="store_true",
         help="batch mode: emit entities with show=true (default hidden, so the frontend "
@@ -1221,12 +1253,17 @@ def main() -> None:
         start_hidden=not args.start_visible,
         scenario_initial=scenario_initial,
         evaluation_report=evaluation_report,
+        max_groups_per_czml=args.max_groups_per_czml,
     )
     groups = group_results_by_runway(summary, fallback_airport=args.airport)
+    files = len({
+        group["czml"] for group in index["groups"] if isinstance(group.get("czml"), str)
+    })
     rate = summary.get("failure_rate")
     rate_str = f"{rate:.1%}" if isinstance(rate, (int, float)) else "n/a"
-    print(f"✓ wrote {len(groups)} runway CZML(s) + index ({len(index['groups'])} groups) "
-          f"to {out_dir}; overall failure rate {rate_str}")
+    print(f"✓ wrote {files} CZML file(s) over {len(groups)} runway(s) + index "
+          f"({len(index['groups'])} groups) to {out_dir}; "
+          f"overall failure rate {rate_str}")
 
     if args.category:
         config = summary.get("config") if isinstance(summary.get("config"), dict) else {}

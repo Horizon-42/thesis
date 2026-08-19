@@ -6,12 +6,13 @@ import argparse
 import html
 import json
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, Sequence, TypeVar
 
-from evaluation.cli import add_context_args, contexts_from_args
+from evaluation.cli import add_context_args, contexts_from_args, contexts_from_roster
 from evaluation.context import ContextKey
 from evaluation.metrics import evaluate_batch
-from evaluation.records import TrajectoryRecord, load_records
+from evaluation.records import TrajectoryRecord, iter_records, load_record, load_records
 from evaluation.reference import N_RESAMPLE, horizontal_arc_length_m, load_reference, resample_by_arc_length
 from evaluation.thresholds import AssessmentContext
 
@@ -46,6 +47,49 @@ def build_payload(
     }
 
 
+def build_payload_streamed(
+    input_path: str | Path,
+    *,
+    contexts: dict[ContextKey, AssessmentContext],
+    max_tracks: int = DEFAULT_MAX_TRACKS,
+) -> dict[str, Any]:
+    """:func:`build_payload` over a batch, in two passes and one record at a time.
+
+    The report needs every record; the overlay needs only ``max_tracks`` of them. Holding
+    the whole batch to draw 30 tracks costs ~1 MB per flight of resolved state, so pass one
+    streams the metrics and remembers only which FILES were drawable, and pass two reloads
+    the sampled few.
+    """
+    report_records = _CountedStream(iter_records(input_path))
+    report = evaluate_batch(report_records, contexts=contexts)
+    drawable = report_records.drawable
+    selected = _sample_evenly(drawable, max_tracks) if drawable else []
+    return {
+        "report": report,
+        "tracks": [_track_entry(load_record(file)) for file in selected],
+        "tracksShown": len(selected),
+        "tracksTotal": len(drawable),
+    }
+
+
+class _CountedStream:
+    """Pass-through iterator that notes each drawable record's PATH as it goes by."""
+
+    def __init__(self, records: Iterator[TrajectoryRecord]) -> None:
+        self._records = records
+        self.drawable: list[Path] = []
+
+    def __iter__(self) -> Iterator[TrajectoryRecord]:
+        for record in self._records:
+            if (
+                record.path is not None
+                and record.solved
+                and horizontal_arc_length_m(record.states) > 0.0
+            ):
+                self.drawable.append(record.path)
+            yield record
+
+
 def render_html(payload: dict[str, Any], *, title: str, source_label: str) -> str:
     data = json.dumps(payload, allow_nan=False, separators=(",", ":")).replace("</", "<\\/")
     return (_TEMPLATE.replace("__TITLE__", html.escape(title))
@@ -61,10 +105,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-tracks", type=_positive_int, default=DEFAULT_MAX_TRACKS)
     add_context_args(parser)
     args = parser.parse_args(argv)
-    records = load_records(args.input)
-    payload = build_payload(
-        records, contexts=contexts_from_args(records, args), max_tracks=args.max_tracks
-    )
+    contexts = contexts_from_roster(args.input, args)
+    if contexts is None:
+        records = load_records(args.input)
+        payload = build_payload(
+            records, contexts=contexts_from_args(records, args),
+            max_tracks=args.max_tracks,
+        )
+    else:
+        payload = build_payload_streamed(
+            args.input, contexts=contexts, max_tracks=args.max_tracks
+        )
     out = Path(args.output)
     out.write_text(
         render_html(payload, title=args.title, source_label=str(args.input)),

@@ -26,6 +26,17 @@ from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 from .datum import HAE_ALTITUDE_SOURCE, MSL_ALTITUDE_SOURCES
 
 
+class UnusableFittedApproach(ValueError):
+    """One flight cannot be given a fitted-ADS-B target.
+
+    Its own type so a batch can drop exactly these flights and roster them (see
+    ``flight_scenarios.dataset``) without a broad ``except ValueError`` swallowing a real
+    contract violation next to it. Measured on the 42,725 rostered arrivals: 35 flights
+    (0.08 %) — but before this existed those 35 aborted the whole dataset build for 4 of
+    the 5 airports.
+    """
+
+
 @dataclass(frozen=True)
 class TimedFittedPoint:
     """One inferred MSL position on the uniform modeling time grid."""
@@ -60,7 +71,9 @@ class FittedApproach:
         conversion here.
         """
         if self.along_rate_mps is None:
-            raise ValueError("fitted approach has no usable along-track velocity")
+            raise UnusableFittedApproach(
+                "fitted approach has no usable along-track velocity"
+            )
         V, psi, gamma = _kinematics_on_fit(
             self.frame, self.fit, self.along_rate_mps
         )

@@ -64,6 +64,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -71,6 +73,7 @@ from typing import Any
 
 from optimization_run_config import (
     DEFAULT_MAX_DURATION_S,
+    DEFAULT_MAX_ITERATIONS,
     DEFAULT_ROLLOUT_DT_S,
     build_optimization_config,
 )
@@ -101,6 +104,25 @@ def _file_sha256(path: Path) -> str:
 # casadi), so it cannot import them; kept in sync by this comment.
 DEFAULT_N_SEGMENTS = 8         # unconstrained: control segments over the whole trajectory
 DEFAULT_N_SEG_PER_PHASE = 3    # constrained: control segments PER procedure leg
+
+# Measured artifact footprint per flight per category on this pipeline (120 KRDU arrivals,
+# HS, rollout_dt 0.5 s): records 186 KB (states 108 + eval 42 + reports 36/3) + comparison
+# CZML 52 KB, plus 67 KB of observed reference record per prepared TARGET dataset. Used only
+# for the pre-flight estimate below — a batch that fills the disk at 90% loses everything it
+# has not yet committed, and the run is long enough that finding out at the end is expensive.
+_BYTES_PER_FLIGHT_PER_CATEGORY = 238 * 1024
+_BYTES_PER_FLIGHT_PER_TARGET = 67 * 1024
+_FREE_SPACE_HEADROOM = 1.15
+
+
+def default_jobs() -> int:
+    """Worker processes for a batch that owns the machine.
+
+    ``scenario_optimization``'s own auto is half the cores — right for a library call that
+    should leave the box usable, wrong for the pipeline driver, whose whole job is this
+    batch. Four threads are still left for the parent's IO and the desktop.
+    """
+    return max(1, (os.cpu_count() or 4) - 4)
 
 # The full category sweep, run when --target-type is omitted: every mode the
 # frontend's comparison picker offers, as (target_type, with_constraint).
@@ -147,7 +169,11 @@ class Plan:
                  outputs: tuple[str, ...], jobs: int = 0,
                  fitting: str = "hs", state_substeps: int | None = None,
                  n_segments: int = DEFAULT_N_SEGMENTS,
-                 n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE) -> None:
+                 n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
+                 max_iterations: int = DEFAULT_MAX_ITERATIONS,
+                 rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+                 resume: bool = False,
+                 max_groups_per_czml: int | None = None) -> None:
         self.airport = airport.strip().upper()
         if target_type not in TARGET_TYPES:
             raise ValueError(f"unknown target type {target_type!r}; expected one of {TARGET_TYPES}")
@@ -172,6 +198,14 @@ class Plan:
         # State-collocation density M per control segment (scenario_optimization
         # --state-substeps); None = the optimizer's auto (~3 s state step, cap 16).
         self.state_substeps = state_substeps
+        # IPOPT iteration cap (see scenario_optimization.DEFAULT_MAX_ITERATIONS): the
+        # dominant cost lever, since an unconvergeable scenario pays it in full.
+        self.max_iterations = max_iterations
+        # Rollout sample step. The simulator array is ~75% of every *_states.json, so this
+        # is the disk lever; it is also the resolution the evaluation gates see.
+        self.rollout_dt_s = rollout_dt_s
+        self.resume = resume
+        self.max_groups_per_czml = max_groups_per_czml
         self.optimization_config = build_optimization_config(
             constrained_iaf=with_constraint,
             fitting=fitting,
@@ -179,7 +213,8 @@ class Plan:
             n_seg_per_phase=n_seg_per_phase,
             state_substeps=state_substeps,
             max_duration_s=DEFAULT_MAX_DURATION_S,
-            rollout_dt_s=DEFAULT_ROLLOUT_DT_S,
+            rollout_dt_s=rollout_dt_s,
+            max_iterations=max_iterations,
             iaf_selection="shortest",
         )
         self.threshold = target_type == "runway"
@@ -385,7 +420,11 @@ class Plan:
                 "--references-dir", self.references_dir,
                 "--jobs", str(self.jobs),
                 "--fitting", self.fitting,
+                "--max-iterations", str(self.max_iterations),
+                "--rollout-dt", str(self.rollout_dt_s),
             ]
+            if self.resume:
+                optimize_cmd.append("--resume")
             if self.state_substeps is not None:
                 optimize_cmd += ["--state-substeps", str(self.state_substeps)]
             if self.with_constraint:
@@ -427,6 +466,10 @@ class Plan:
             ]
             if self.with_constraint:
                 comparison_cmd.append("--constrained")
+            if self.max_groups_per_czml is not None:
+                comparison_cmd += [
+                    "--max-groups-per-czml", str(self.max_groups_per_czml)
+                ]
             comparison_cmd += ["--evaluation-report", str(self.report)]
             # Feed the scenario initial states so the index carries V + mass for EVERY
             # flight — including failed optimizations (which have no states file). A
@@ -437,6 +480,46 @@ class Plan:
 
         total = len(named)
         return [(f"{i}/{total} {name}", cmd) for i, (name, cmd) in enumerate(named, 1)]
+
+
+def scenario_count(path: Path) -> int:
+    """How many scenarios a prepared dataset holds (0 when it is not there yet)."""
+    if not path.is_file():
+        return 0
+    try:
+        return len(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return 0
+
+
+def estimate_footprint_bytes(plans: list["Plan"]) -> int:
+    """Bytes the selected runs will add, from the measured per-flight artifact sizes."""
+    per_target: dict[Path, int] = {}
+    total = 0
+    for plan in plans:
+        flights = scenario_count(plan.scenarios)
+        total += flights * _BYTES_PER_FLIGHT_PER_CATEGORY
+        per_target[plan.scenarios] = flights
+    total += sum(per_target.values()) * _BYTES_PER_FLIGHT_PER_TARGET
+    return total
+
+
+def check_free_space(plans: list["Plan"]) -> tuple[bool, str]:
+    """``(ok, message)`` — will the selected runs fit, with headroom?
+
+    Checked before the first solve because the failure mode is otherwise the worst one
+    available: tens of hours of compute, then a partially written record when the
+    filesystem fills, in a directory whose ``summary.json`` never gets written.
+    """
+    needed = int(estimate_footprint_bytes(plans) * _FREE_SPACE_HEADROOM)
+    free = shutil.disk_usage(REPO_ROOT).free
+    gib = 1024 ** 3
+    message = (
+        f"estimated new artifacts {needed / gib:.1f} GiB "
+        f"(incl. {(_FREE_SPACE_HEADROOM - 1) * 100:.0f}% headroom) "
+        f"vs {free / gib:.1f} GiB free on {REPO_ROOT}"
+    )
+    return needed <= free, message
 
 
 def run_for_airport(
@@ -452,6 +535,10 @@ def run_for_airport(
     state_substeps: int | None = None,
     n_segments: int = DEFAULT_N_SEGMENTS,
     n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    resume: bool = False,
+    max_groups_per_czml: int | None = None,
 ) -> bool:
     """Run (or preview) the pipeline for one airport. Returns True if it ran /
     would run, False if it was skipped (missing input and nothing to reuse).
@@ -459,7 +546,9 @@ def run_for_airport(
     Both the scenario JSON and arrival manifest are required prepared inputs."""
     plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs, fitting=fitting,
                 state_substeps=state_substeps, n_segments=n_segments,
-                n_seg_per_phase=n_seg_per_phase)
+                n_seg_per_phase=n_seg_per_phase, max_iterations=max_iterations,
+                rollout_dt_s=rollout_dt_s, resume=resume,
+                max_groups_per_czml=max_groups_per_czml)
     reuse_error = plan.optimization_reuse_error() if skip_optimize else None
     reuse = skip_optimize and reuse_error is None
 
@@ -537,8 +626,45 @@ def main() -> None:
     )
     parser.add_argument(
         "--jobs", type=int, default=0,
-        help="parallel optimizer worker processes (passed to scenario_optimization --jobs; "
-             "0 = auto = half the CPU cores, 1 = serial)",
+        help=f"parallel optimizer worker processes (passed to scenario_optimization --jobs; "
+             f"0 = auto = CPU cores - 4 = {default_jobs()} here, 1 = serial). The library's "
+             f"own auto is half the cores; this driver owns the machine for the batch",
+    )
+    parser.add_argument(
+        "--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS,
+        help=f"IPOPT iteration cap per solve (default {DEFAULT_MAX_ITERATIONS}). The single "
+             "biggest cost lever: a scenario that will not converge pays the cap in full "
+             "(measured ~13x a successful solve, ~48%% of an unconstrained batch's CPU for "
+             "6.7%% of its flights). Lowering it trades slow successes for failures, so it "
+             "is recorded in summary.json and --skip-optimize will not reuse across a change",
+    )
+    parser.add_argument(
+        "--rollout-dt", type=float, default=DEFAULT_ROLLOUT_DT_S, metavar="SECONDS",
+        help=f"true-dynamics rollout sample step (default {DEFAULT_ROLLOUT_DT_S}). The "
+             "simulator array is ~75%% of every *_states.json, so doubling this roughly "
+             "halves the on-disk footprint — and coarsens the states the gates measure",
+    )
+    parser.add_argument(
+        "--max-groups-per-czml", type=int, default=None, metavar="N",
+        help="split each runway's comparison CZML into files of at most N flight groups "
+             "(omit for one file per runway). The frontend loads CZMLs named by the index's "
+             "per-group 'czml' field, so splitting is transparent to it — and a 2000-flight "
+             "runway is otherwise a single ~100 MB file no browser will parse",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="reuse per-flight records already on disk for scenarios in the current roster "
+             "and solve only the rest (passed to scenario_optimization --resume). For a "
+             "multi-hour batch this is what makes an interrupted run cheap to restart",
+    )
+    parser.add_argument(
+        "--continue-on-error", action="store_true",
+        help="keep going when one airport/category fails, and report the failures at the "
+             "end (exit 1). Without it the first failure aborts the whole sweep",
+    )
+    parser.add_argument(
+        "--skip-space-check", action="store_true",
+        help="run even when the estimated artifact footprint exceeds the free disk space",
     )
     parser.add_argument(
         "--state-substeps", type=int, default=None, metavar="M",
@@ -582,6 +708,15 @@ def main() -> None:
         parser.error(f"--n-segments must be >= 2, got {args.n_segments}")
     if args.n_seg_per_phase < 1:
         parser.error(f"--n-seg-per-phase must be >= 1, got {args.n_seg_per_phase}")
+    if args.max_iterations < 1:
+        parser.error(f"--max-iterations must be >= 1, got {args.max_iterations}")
+    if args.rollout_dt <= 0.0:
+        parser.error(f"--rollout-dt must be > 0, got {args.rollout_dt}")
+    if args.max_groups_per_czml is not None and args.max_groups_per_czml < 1:
+        parser.error(
+            f"--max-groups-per-czml must be >= 1, got {args.max_groups_per_czml}"
+        )
+    jobs = args.jobs if args.jobs else default_jobs()
 
     if args.target_type is None:
         if args.with_constraint:
@@ -607,26 +742,64 @@ def main() -> None:
         print(f"no --airport given → running {len(airports)} K-airport(s): "
               f"{', '.join(airports)}")
 
-    ran = 0
     runs = [(airport, mode) for airport in airports for mode in modes]
+    settings = dict(
+        jobs=jobs, fitting=args.fitting_type, state_substeps=args.state_substeps,
+        n_segments=args.n_segments, n_seg_per_phase=args.n_seg_per_phase,
+        max_iterations=args.max_iterations, rollout_dt_s=args.rollout_dt,
+        resume=args.resume, max_groups_per_czml=args.max_groups_per_czml,
+    )
+    plans = [
+        Plan(airport, target_type, with_constraint, tuple(args.outputs), **settings)
+        for airport in airports
+        for target_type, with_constraint in modes
+    ]
+    fits, space = check_free_space(plans)
+    print(f"\ndisk: {space}")
+    if not fits and not args.dry_run:
+        if not args.skip_space_check:
+            parser.error(
+                f"not enough free disk space — {space}. Lower the population "
+                "(prepare_scenario_inputs.py --max-per-runway), raise --rollout-dt, drop "
+                "an output with --outputs, free space, or pass --skip-space-check"
+            )
+        print("⚠ continuing past the space check (--skip-space-check)")
+    print(f"jobs: {jobs} worker process(es)  ·  max-iterations: {args.max_iterations}"
+          f"  ·  rollout-dt: {args.rollout_dt}s")
+
+    ran = 0
+    failures: list[tuple[str, str]] = []
     for airport in airports:
         for target_type, with_constraint in modes:
-            if run_for_airport(
-                airport, target_type, with_constraint, tuple(args.outputs),
-                dry_run=args.dry_run, skip_optimize=args.skip_optimize,
-                jobs=args.jobs,
-                fitting=args.fitting_type,
-                state_substeps=args.state_substeps,
-                n_segments=args.n_segments,
-                n_seg_per_phase=args.n_seg_per_phase,
-            ):
-                ran += 1
+            cell = f"{airport} [{category_key(target_type, with_constraint)}]"
+            try:
+                if run_for_airport(
+                    airport, target_type, with_constraint, tuple(args.outputs),
+                    dry_run=args.dry_run, skip_optimize=args.skip_optimize,
+                    **settings,
+                ):
+                    ran += 1
+            except subprocess.CalledProcessError as exc:
+                # One cell failing used to abort the sweep and discard every airport after
+                # it. Each cell is an independent batch, so the default is still to stop
+                # (a broken recipe should not burn hours proving it), but --continue-on-error
+                # keeps the rest and names the casualties at the end.
+                failed_step = " ".join(exc.cmd) if isinstance(exc.cmd, list) else str(exc.cmd)
+                print(f"\n✗ {cell} failed (exit {exc.returncode}): {failed_step}")
+                failures.append((cell, f"exit {exc.returncode}"))
+                if not args.continue_on_error:
+                    raise
 
     verb = "previewed" if args.dry_run else "completed"
     print(f"\n✓ {verb} {ran}/{len(runs)} run(s) "
           f"({len(airports)} airport(s) × {len(modes)} mode(s))  "
           f"[modes={','.join(category_key(t, c) for t, c in modes)}, "
           f"outputs={','.join(args.outputs)}, skip-optimize={args.skip_optimize}]")
+    if failures:
+        print(f"✗ {len(failures)} run(s) failed:")
+        for cell, why in failures:
+            print(f"    {cell}: {why}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

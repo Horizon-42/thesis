@@ -41,6 +41,13 @@ HARVEST_TRACKS_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harve
 TARGET_TYPES = ("fitted-adsb", "runway")
 PROGRESS_INTERVAL_S = 30.0
 
+# Arrivals kept per runway. The rostered population is 42,725 flights over 25 runways and
+# is wildly unbalanced (KSJC 30L 9,603 vs 12L 14), so an uncapped batch spends most of its
+# compute re-measuring two runways. At 2,000 the population is 23,453 flights / 70,359
+# solves and every runway with fewer than 2,000 arrivals is kept whole. `--max-per-runway 0`
+# takes everything; either way the choice is printed and written to <scenarios>.selection.json.
+DEFAULT_MAX_PER_RUNWAY = 2000
+
 
 def _format_elapsed(seconds: float) -> str:
     total = int(seconds)
@@ -111,7 +118,9 @@ def discover_k_airports() -> list[str]:
     return airports
 
 
-def scenario_command(airport: str, target_type: str) -> list[str]:
+def scenario_command(
+    airport: str, target_type: str, *, max_per_runway: int | None = DEFAULT_MAX_PER_RUNWAY
+) -> list[str]:
     """Resolve the scenario-builder command for one airport and target dataset."""
     code = airport.strip().upper()
     output = scenario_output_path(code, target_type)
@@ -129,6 +138,8 @@ def scenario_command(airport: str, target_type: str) -> list[str]:
         if target_type == "fitted-adsb"
         else "--target-from-threshold"
     )
+    if max_per_runway:
+        cmd += ["--max-per-runway", str(max_per_runway)]
     return cmd
 
 
@@ -164,6 +175,7 @@ def run_for_airport(
     *,
     dry_run: bool,
     input_will_exist: bool = False,
+    max_per_runway: int | None = DEFAULT_MAX_PER_RUNWAY,
 ) -> bool:
     """Build one prepared scenario dataset; return False when its input is missing."""
     code = airport.strip().upper()
@@ -177,7 +189,7 @@ def run_for_airport(
         print(f"   ⚠ skip: missing input {manifest}")
         return False
 
-    cmd = scenario_command(code, target_type)
+    cmd = scenario_command(code, target_type, max_per_runway=max_per_runway)
     if dry_run:
         print(f"   [scenarios] {' '.join(cmd)}")
         return True
@@ -203,6 +215,18 @@ def main() -> None:
         help="prepare one target dataset; omit to prepare fitted-adsb and runway",
     )
     parser.add_argument(
+        "--max-per-runway",
+        type=int,
+        default=DEFAULT_MAX_PER_RUNWAY,
+        metavar="N",
+        help=(
+            f"keep at most N arrivals per runway, evenly spaced over landing time "
+            f"(default {DEFAULT_MAX_PER_RUNWAY}; 0 = every rostered arrival). Both target "
+            f"datasets select the SAME flights, and the choice is written to "
+            f"<scenarios>.selection.json"
+        ),
+    )
+    parser.add_argument(
         "--skip-observed",
         action="store_true",
         help="reuse the existing arrivals manifest without rebuilding observed evaluation/CZML",
@@ -214,9 +238,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.max_per_runway < 0:
+        parser.error(f"--max-per-runway must be >= 0, got {args.max_per_runway}")
     target_types = TARGET_TYPES if args.target_type is None else (args.target_type,)
     if args.target_type is None:
         print("no --target-type given → preparing fitted-adsb and runway inputs")
+    print(
+        f"population: {args.max_per_runway} arrival(s) per runway"
+        if args.max_per_runway
+        else "population: every rostered arrival (no per-runway cap)"
+    )
 
     if args.airport:
         airports = [args.airport.strip().upper()]
@@ -256,6 +287,7 @@ def main() -> None:
                 target_type,
                 dry_run=args.dry_run,
                 input_will_exist=args.dry_run and observed_scheduled,
+                max_per_runway=args.max_per_runway,
             ):
                 prepared += 1
 

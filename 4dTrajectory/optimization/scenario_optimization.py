@@ -59,9 +59,18 @@ from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
 from aerodynamic_model.rollout import RolloutSample, rollout_piecewise_constant  # noqa: E402
 from collocation import CollocationOptimizer  # noqa: E402
-from collocation.components import altitude_floor_m  # noqa: E402
-# Single source for the control-mesh defaults (mirrored by the CLI + the pipeline).
-from collocation.optimizer import DEFAULT_N_SEGMENTS, DEFAULT_N_SEG_PER_PHASE  # noqa: E402
+from collocation.components import (  # noqa: E402
+    DEFAULT_MAX_ITERATIONS as _DEFAULT_MAX_ITERATIONS,
+    altitude_floor_m,
+)
+# Single source for the control-mesh defaults (mirrored by the CLI + the pipeline) and for
+# the target-anchored frame tolerance the constrained path validates its procedure against.
+from collocation.optimizer import (  # noqa: E402
+    _FRAME_ANCHOR_TOLERANCE_M,
+    DEFAULT_N_SEGMENTS,
+    DEFAULT_N_SEG_PER_PHASE,
+)
+from geokit import haversine_m  # noqa: E402
 from evaluation_export import (  # noqa: E402
     EVAL_SUFFIX as _EVAL_SUFFIX,
     REFERENCE_EVAL_SUFFIX as _REFERENCE_EVAL_SUFFIX,
@@ -90,6 +99,17 @@ DEFAULT_DT = 1.0                 # optimizer dt (API parity; state mesh is auto-
 # "rk4" is the 4th-order EXPLICIT shooting defect (same one-step map family as the replay
 # integrator — playback-consistent by construction) at trapezoidal-like per-node cost.
 DEFAULT_FITTING = "hs"
+
+# IPOPT iteration cap for the batch. `components.DEFAULT_MAX_ITERATIONS` (3000) is the
+# interactive/backend default: it is the right budget when a human is waiting on ONE hard
+# solve, and the wrong one for a 70k-solve batch, where every unsolvable scenario pays the
+# cap in full before being skipped. Measured on 120 random KRDU arrivals (serial, HS,
+# n_segments=8): the 8 that ended `Maximum_Iterations_Exceeded` cost 448 s (~56 s each)
+# while the 8 solved ones cost 45 s (~4.3 s each) — 6.7% of the flights, ~48% of the CPU.
+# The batch therefore exposes `--max-iterations`; it does NOT change the default, because
+# lowering it converts slow successes into failures and that is a research decision, not a
+# performance one. Pass it explicitly to buy the time back.
+DEFAULT_MAX_ITERATIONS = _DEFAULT_MAX_ITERATIONS
 
 
 def _scheme_for_fitting(fitting: str) -> str:
@@ -186,6 +206,7 @@ def optimize_scenario(
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Optimize ``scenario`` and return its optimizer + simulator state sequences.
@@ -222,6 +243,7 @@ def optimize_scenario(
         max_duration=max_duration,
         min_speed_ms=min_speed_ms,
         state_substeps=state_substeps,
+        max_iterations=max_iterations,
         verbose=verbose,
     )
     final_time, node_control, _node_endpoints = optimizer.optimize_free_time(
@@ -414,7 +436,7 @@ def _limit_solver_threads() -> None:
 # — shared with ts_transformer/export.py, which writes the same directory shape.
 
 
-def _clear_stale_records(out: Path) -> None:
+def _clear_stale_records(out: Path, keep: set[str] | None = None) -> None:
     """Delete leftover per-trajectory records from a previous batch in ``out``.
 
     A fresh batch writes one ``*_states.json`` + ``*_eval.json`` per CURRENT scenario;
@@ -422,12 +444,66 @@ def _clear_stale_records(out: Path) -> None:
     pollute everything that scans the directory (``python -m evaluation`` once counted
     27 orphans into a KRDU report). The ``references/`` subdirectory is untouched —
     the CLI writes the reference records immediately before the batch.
+
+    ``keep`` (the resume path) spares the named files. Orphan removal is what makes the
+    directory a faithful image of the roster, so it happens either way — resume narrows
+    WHICH files survive, it never turns the sweep off.
     """
-    stale = sorted(out.glob(f"*{_STATES_SUFFIX}")) + sorted(out.glob(f"*{_EVAL_SUFFIX}"))
+    keep = keep or set()
+    stale = [
+        path
+        for path in sorted(out.glob(f"*{_STATES_SUFFIX}")) + sorted(out.glob(f"*{_EVAL_SUFFIX}"))
+        if path.name not in keep
+    ]
     for path in stale:
         path.unlink()
     if stale:
         print(f"… cleared {len(stale)} record file(s) from a previous batch in {out}")
+
+
+def _resumable_record(
+    out: Path, scenario: FlightScenario, index: int
+) -> tuple[str, dict[str, Any]] | None:
+    """The summary row for one scenario's already-complete record pair, or ``None``.
+
+    A 70k-solve batch runs for tens of hours and ``summary.json`` is only written at the
+    end, so a crash at hour 25 used to discard every finished record with it. This reads
+    one finished record back and rebuilds its roster row, so ``--resume`` re-runs only what
+    is genuinely missing. It is deliberately strict — identity must match the scenario, a
+    solved record must still have its states file — because a half-written record silently
+    reused is worse than one re-solved.
+    """
+    name = _scenario_filename(scenario, index)
+    eval_path = out / _eval_filename(name)
+    if not eval_path.is_file():
+        return None
+    try:
+        record = json.loads(eval_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    source = record.get("source")
+    if not isinstance(source, dict) or any(
+        source.get(key) != scenario.source.get(key)
+        for key in ("id", "runway", "icao24", "landing_time_utc")
+    ):
+        return None
+    final_time = record.get("final_time_s")
+    if final_time is None:
+        return (name, _summary_record(
+            scenario, status="failed", states_file=None,
+            eval_file=eval_path.name, final_time_s=None,
+            reason=record.get("reason") or "unsolved (resumed)",
+        ))
+    if not (out / name).is_file():
+        return None
+    row = _summary_record(
+        scenario, status="solved", states_file=name, eval_file=eval_path.name,
+        final_time_s=float(final_time), reason=None,
+    )
+    chosen_iaf = source.get("chosenIaf")
+    if chosen_iaf is not None:
+        row["chosenIaf"] = chosen_iaf
+    return (name, row)
 
 
 def optimize_scenarios(
@@ -440,10 +516,12 @@ def optimize_scenarios(
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
     references_dir: str | None = None,
+    resume: bool = False,
 ) -> list[Path]:
     """Optimize each scenario and write one ``*_states.json`` per scenario.
 
@@ -463,18 +541,35 @@ def optimize_scenarios(
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    _clear_stale_records(out)
+    # Resume BEFORE the stale sweep: the rows we keep are exactly the files it must spare.
+    records: dict[int, dict[str, Any]] = {}  # index -> summary record (parallel-safe ordering)
+    resumed_files: set[str] = set()
+    pending = list(range(len(scenarios)))
+    if resume:
+        pending = []
+        for index, scenario in enumerate(scenarios):
+            found = _resumable_record(out, scenario, index)
+            if found is None:
+                pending.append(index)
+                continue
+            name, row = found
+            records[index] = row
+            resumed_files.update({name, _eval_filename(name)})
+        if records:
+            print(f"… resuming: {len(records)} record(s) already complete, "
+                  f"{len(pending)} to solve")
+    _clear_stale_records(out, keep=resumed_files)
     params: dict[str, Any] = {
         "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
         "rollout_dt_s": rollout_dt_s, "fitting": fitting,
-        "state_substeps": state_substeps, "verbose": verbose,
+        "state_substeps": state_substeps, "max_iterations": max_iterations,
+        "verbose": verbose,
     }
-    payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
-    workers = _resolve_jobs(jobs, len(scenarios))
+    payloads = [(index, scenarios[index], params) for index in pending]
+    workers = _resolve_jobs(jobs, len(payloads))
 
     written: list[Path] = []
     failures: list[tuple[str, str]] = []
-    records: dict[int, dict[str, Any]] = {}  # index -> summary record (parallel-safe ordering)
 
     def _handle(
         record: tuple[int, str, dict[str, Any] | None, dict[str, Any] | None, str | None],
@@ -526,12 +621,14 @@ def optimize_scenarios(
             f"T={result_dict['final_time_s']:.1f}s"
         )
 
-    if workers == 1:
+    if not payloads:
+        pass
+    elif workers == 1:
         for payload in payloads:
             _handle(_optimize_one_scenario(payload))
     else:
         _limit_solver_threads()
-        print(f"… solving {len(scenarios)} scenario(s) across {workers} worker process(es)")
+        print(f"… solving {len(payloads)} scenario(s) across {workers} worker process(es)")
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(_optimize_one_scenario, payload) for payload in payloads]
             for future in as_completed(futures):
@@ -540,6 +637,7 @@ def optimize_scenarios(
     # One summary per run: the failure rate + which flights solved/failed, with the ids
     # needed to find each flight's reference (e.g. for the comparison CZML).
     total = len(scenarios)
+    solved_rows = sum(1 for row in records.values() if row["status"] == "solved")
     summary = {
         "scenarios": scenarios_label,
         "optimization_config": build_optimization_config(
@@ -550,13 +648,18 @@ def optimize_scenarios(
             state_substeps=state_substeps,
             max_duration_s=max_duration,
             rollout_dt_s=rollout_dt_s,
+            max_iterations=max_iterations,
         ),
         "total": total,
-        "solved": len(written),
-        "failed": len(failures),
-        "failure_rate": (len(failures) / total) if total else 0.0,
+        "solved": solved_rows,
+        "failed": total - solved_rows,
+        "failure_rate": ((total - solved_rows) / total) if total else 0.0,
         "results": [records[i] for i in sorted(records)],
     }
+    if len(records) != total:
+        raise RuntimeError(
+            f"roster is incomplete: {len(records)} row(s) for {total} scenario(s)"
+        )
     (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if failures:
@@ -565,7 +668,7 @@ def optimize_scenarios(
             print(f"    {flight_id}: {reason}")
         if len(failures) > 15:
             print(f"    … and {len(failures) - 15} more")
-    print(f"✓ solved {len(written)}/{total} scenario(s) "
+    print(f"✓ solved {solved_rows}/{total} scenario(s) "
           f"(failure rate {summary['failure_rate']:.1%}) -> {out}")
     print(f"  summary -> {out / 'summary.json'}")
     return written
@@ -817,7 +920,6 @@ def _resolve_procedure_path(procedure_root: str | Path, airport: str, runway: st
 
 def _recompute_distances(waypoints: list) -> list:
     """Recompute each waypoint's along-track ``distance_from_start_m`` over a merged path."""
-    from geokit import haversine_m
     out: list = []
     cumulative = 0.0
     previous = None
@@ -917,26 +1019,44 @@ def _path_curve_length_m(pc) -> float:
     return float(np.linalg.norm(np.diff(curve, axis=0), axis=1).sum())
 
 
-def _snap_target_to_procedure(target: GeodeticState, paths: list) -> GeodeticState:
-    """Anchor the constrained solve's target ON the procedure's CIFP threshold.
+def _require_procedure_threshold_agrees(target: GeodeticState, paths: list) -> float:
+    """Check the procedure ends where the scenario target is; return the gap in metres.
 
-    The CIFP landing threshold (the procedure's LAST waypoint — every IAF path of
-    one procedure shares it) is the authoritative landing point (CLAUDE.md
-    2026-07-03); the scenario's config-derived threshold can sit hundreds of
-    metres away (displaced thresholds, e.g. KSJC 12L: 390 m), which the
-    optimizer's target-anchored frame guard rightly rejects. Horizontal position
-    snaps to the CIFP fix; altitude (threshold + TCH), speed, heading (pavement
-    axis) and glidepath stay from the scenario target.
+    The constrained solve is anchored on ``target`` (``TargetFrame`` origin = LTP), so the
+    procedure's LAST waypoint — the CIFP landing threshold every IAF path of one procedure
+    shares — must describe the SAME point. It is a second rendering of the same CIFP datum
+    the arrival manifest's ``runway_target`` carries, and the two round differently:
+    measured over the 25 runways in service here the gap is 0.05–0.22 m (KRDU 32 = 2.98 m,
+    KSMF 35R = 39.45 m, neither in the arrival set).
+
+    This USED to snap ``target`` horizontally onto the waypoint, which is why constrained
+    records were rejected by ``evaluation.arrival._require_target_agrees_with_runway_data``
+    (1 cm) once that check gained its position half on 2026-08-17: the snap moved an
+    already-authoritative target off the threshold the evaluator grades against. The target
+    is now left alone — the optimizer, the evaluator and the arrival manifest all use
+    ``harvest.airports.Runway`` — and the procedure is checked against it instead. The
+    tolerance is the optimizer's own ``_FRAME_ANCHOR_TOLERANCE_M``, i.e. exactly the
+    displaced-threshold mis-anchor (KSJC 12L was 390 m against the NASR config) the snap was
+    introduced to catch, so nothing that used to be caught stops being caught.
     """
     runway_wp = paths[0].waypoints[-1]
-    return replace(target, latitude=runway_wp.lat_deg, longitude=runway_wp.lon_deg)
+    gap_m = haversine_m(
+        target.latitude, target.longitude, runway_wp.lat_deg, runway_wp.lon_deg
+    )
+    if gap_m > _FRAME_ANCHOR_TOLERANCE_M:
+        raise ValueError(
+            f"procedure threshold '{runway_wp.ident}' is {gap_m:.1f} m from the scenario "
+            f"target (limit {_FRAME_ANCHOR_TOLERANCE_M:.0f} m); the scenario and the "
+            "procedure were built against different runway data"
+        )
+    return gap_m
 
 
 def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path, airport: str | None):
     """Shared prologue for the IAF optimizers: resolve the runway's RNAV(GPS) procedure and return
-    ``(target, iaf_paths, aircraft, min_speed_ms)`` — the target snapped onto the procedure's
-    CIFP threshold (see :func:`_snap_target_to_procedure`). Raises if the procedure / paths are
-    missing."""
+    ``(target, iaf_paths, aircraft, min_speed_ms)``. ``target`` is the scenario's own
+    authoritative threshold state, unmodified — the procedure is validated against it (see
+    :func:`_require_procedure_threshold_agrees`). Raises if the procedure / paths are missing."""
     target = scenario.target
     if target is None:
         raise ValueError("scenario has no target state; build it with flight_scenarios first.")
@@ -950,7 +1070,7 @@ def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path, airport: st
     paths = _iaf_full_paths(document)
     if not paths:
         raise ValueError(f"no IAF->runway paths in the procedure for {apt} {runway}")
-    target = _snap_target_to_procedure(target, paths)
+    _require_procedure_threshold_agrees(target, paths)
     aircraft = scenario.aircraft
     min_speed_ms = min(
         _STALL_MARGIN * _stall_speed_ms(scenario.initial.m, scenario.aero),
@@ -965,6 +1085,7 @@ def _solve_iaf(
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
     n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
 ) -> _IafSolve:
     """Full CONSTRAINED solve from the scenario's OBSERVED start to the runway via one IAF path.
 
@@ -989,6 +1110,7 @@ def _solve_iaf(
         n_seg_per_phase=n_seg_per_phase,
         min_speed_ms=min_speed_ms,
         state_substeps=state_substeps,
+        max_iterations=max_iterations,
         verbose=verbose,
     )
     final_time, node_control, _ = optimizer.optimize_free_time(start_state, target, max_duration)
@@ -1004,9 +1126,9 @@ def _iaf_result(
 ) -> ScenarioOptimization:
     """Assemble the chosen IAF solve into a :class:`ScenarioOptimization` (dense export + rollout).
 
-    ``target`` is the SNAPPED solve target (CIFP threshold) — the evaluation record
-    must judge against the state the optimizer actually flew to, not the scenario's
-    config-derived threshold.
+    ``target`` is the scenario's own authoritative threshold state — the state the
+    optimizer flew to AND the one ``evaluation`` grades against, which are the same point
+    (see :func:`_require_procedure_threshold_agrees`).
     """
     initial_row = [best.initial.latitude, best.initial.longitude, best.initial.altitude,
                    best.initial.V, best.initial.psi, best.initial.gamma]
@@ -1047,6 +1169,7 @@ def optimize_scenario_min_time_iaf(
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
     n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Constrained, fastest-IAF optimization for one scenario (one trajectory out).
@@ -1066,7 +1189,7 @@ def optimize_scenario_min_time_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
                 fitting=fitting, state_substeps=state_substeps,
-                n_seg_per_phase=n_seg_per_phase,
+                n_seg_per_phase=n_seg_per_phase, max_iterations=max_iterations,
             )
         except Exception as exc:  # noqa: BLE001 — try the next IAF; fail only if all IAFs fail
             attempts.append((pc.waypoints[0].ident, type(exc).__name__))
@@ -1097,6 +1220,7 @@ def optimize_scenario_shortest_iaf(
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
     n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Cheap, naive IAF selection: pick the IAF whose 3D Lagrange-curve path to the runway is
@@ -1116,7 +1240,7 @@ def optimize_scenario_shortest_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
                 fitting=fitting, state_substeps=state_substeps,
-                n_seg_per_phase=n_seg_per_phase,
+                n_seg_per_phase=n_seg_per_phase, max_iterations=max_iterations,
             )
         except Exception as exc:  # noqa: BLE001 — fall through to the next-shortest IAF
             attempts.append((pc.waypoints[0].ident, type(exc).__name__))
@@ -1171,10 +1295,12 @@ def optimize_scenarios_constrained_iaf(
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
     n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
     references_dir: str | None = None,
+    resume: bool = False,
 ) -> list[Path]:
     """Batch constrained-IAF optimization — one trajectory per scenario, IAF chosen by ``selection``.
 
@@ -1187,21 +1313,37 @@ def optimize_scenarios_constrained_iaf(
         raise ValueError(f"unknown selection {selection!r}; choose from {sorted(_IAF_SELECTORS)}")
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    _clear_stale_records(out)
+    # Resume BEFORE the stale sweep: the rows we keep are exactly the files it must spare.
+    records: dict[int, dict[str, Any]] = {}  # index -> summary record (parallel-safe ordering)
+    resumed_files: set[str] = set()
+    pending = list(range(len(scenarios)))
+    if resume:
+        pending = []
+        for index, scenario in enumerate(scenarios):
+            found = _resumable_record(out, scenario, index)
+            if found is None:
+                pending.append(index)
+                continue
+            name, row = found
+            records[index] = row
+            resumed_files.update({name, _eval_filename(name)})
+        if records:
+            print(f"… resuming: {len(records)} record(s) already complete, "
+                  f"{len(pending)} to solve")
+    _clear_stale_records(out, keep=resumed_files)
     params: dict[str, Any] = {
         "selection": selection,
         "procedure_root": str(procedure_root), "airport": airport,
         "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
         "rollout_dt_s": rollout_dt_s, "fitting": fitting,
         "state_substeps": state_substeps, "n_seg_per_phase": n_seg_per_phase,
-        "verbose": verbose,
+        "max_iterations": max_iterations, "verbose": verbose,
     }
-    payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
-    workers = _resolve_jobs(jobs, len(scenarios))
+    payloads = [(index, scenarios[index], params) for index in pending]
+    workers = _resolve_jobs(jobs, len(payloads))
 
     written: list[Path] = []
     failures: list[tuple[str, str]] = []
-    records: dict[int, dict[str, Any]] = {}
 
     def _handle(
         record: tuple[int, str, dict[str, Any] | None, dict[str, Any] | None, str | None],
@@ -1251,12 +1393,14 @@ def optimize_scenarios_constrained_iaf(
         print(f"✓ {name}: IAF {result_dict['source'].get('chosenIaf')}, "
               f"T={result_dict['final_time_s']:.1f}s")
 
-    if workers == 1:
+    if not payloads:
+        pass
+    elif workers == 1:
         for payload in payloads:
             _handle(_optimize_one_scenario_iaf(payload))
     else:
         _limit_solver_threads()
-        print(f"… solving {len(scenarios)} scenario(s) [constrained IAF: {selection}] "
+        print(f"… solving {len(payloads)} scenario(s) [constrained IAF: {selection}] "
               f"across {workers} worker process(es)")
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(_optimize_one_scenario_iaf, payload) for payload in payloads]
@@ -1264,6 +1408,7 @@ def optimize_scenarios_constrained_iaf(
                 _handle(future.result())
 
     total = len(scenarios)
+    solved_rows = sum(1 for row in records.values() if row["status"] == "solved")
     summary = {
         "scenarios": scenarios_label,
         "mode": f"constrainedIaf:{selection}",
@@ -1275,14 +1420,19 @@ def optimize_scenarios_constrained_iaf(
             state_substeps=state_substeps,
             max_duration_s=max_duration,
             rollout_dt_s=rollout_dt_s,
+            max_iterations=max_iterations,
             iaf_selection=selection,
         ),
         "total": total,
-        "solved": len(written),
-        "failed": len(failures),
-        "failure_rate": (len(failures) / total) if total else 0.0,
+        "solved": solved_rows,
+        "failed": total - solved_rows,
+        "failure_rate": ((total - solved_rows) / total) if total else 0.0,
         "results": [records[i] for i in sorted(records)],
     }
+    if len(records) != total:
+        raise RuntimeError(
+            f"roster is incomplete: {len(records)} row(s) for {total} scenario(s)"
+        )
     (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if failures:
@@ -1291,7 +1441,7 @@ def optimize_scenarios_constrained_iaf(
             print(f"    {flight_id}: {reason}")
         if len(failures) > 15:
             print(f"    … and {len(failures) - 15} more")
-    print(f"✓ solved {len(written)}/{total} scenario(s) [constrained IAF: {selection}] "
+    print(f"✓ solved {solved_rows}/{total} scenario(s) [constrained IAF: {selection}] "
           f"(failure rate {summary['failure_rate']:.1%}) -> {out}")
     print(f"  summary -> {out / 'summary.json'}")
     return written
@@ -1321,6 +1471,19 @@ def main() -> None:
     parser.add_argument(
         "--jobs", type=int, default=0,
         help="parallel worker processes (0 = auto: half the CPU cores; 1 = serial)",
+    )
+    parser.add_argument(
+        "--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS,
+        help=f"IPOPT iteration cap per solve (default {DEFAULT_MAX_ITERATIONS}). A scenario "
+             "that will not converge pays this in full before being skipped — measured at "
+             "~13x the cost of a successful solve, ~48%% of an unconstrained batch's CPU for "
+             "6.7%% of its flights. Lowering it trades slow successes for failures",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="keep per-flight records already on disk for scenarios in THIS roster and "
+             "solve only the rest (records for flights not in the roster are still swept). "
+             "Without it every record is recomputed from scratch",
     )
     parser.add_argument(
         "--verbose", action="store_true",
@@ -1365,6 +1528,8 @@ def main() -> None:
         parser.error(f"--state-substeps must be >= 1, got {args.state_substeps}")
     if args.n_seg_per_phase < 1:
         parser.error(f"--n-seg-per-phase must be >= 1, got {args.n_seg_per_phase}")
+    if args.max_iterations < 1:
+        parser.error(f"--max-iterations must be >= 1, got {args.max_iterations}")
     scenarios = load_scenarios(args.scenarios)
     # Reference eval records come FIRST (the observed baseline exists whether or not a
     # solve succeeds); the batch then points every eval record at its reference.
@@ -1398,10 +1563,12 @@ def main() -> None:
             fitting=args.fitting,
             state_substeps=args.state_substeps,
             n_seg_per_phase=args.n_seg_per_phase,
+            max_iterations=args.max_iterations,
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,
             references_dir=references_dir,
+            resume=args.resume,
         )
     else:
         paths = optimize_scenarios(
@@ -1413,10 +1580,12 @@ def main() -> None:
             rollout_dt_s=args.rollout_dt,
             fitting=args.fitting,
             state_substeps=args.state_substeps,
+            max_iterations=args.max_iterations,
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,
             references_dir=references_dir,
+            resume=args.resume,
         )
     print(f"✓ wrote {len(paths)} state file(s) to {args.output_dir}")
 

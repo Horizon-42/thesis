@@ -115,3 +115,73 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(
     )
     assert rendered.flights == 1
     assert rendered.combined_czml.is_file()
+
+
+def test_constrained_optimizer_target_is_graded_against_the_same_threshold(tmp_path):
+    """The seam that broke: a CONSTRAINED-IAF record must survive the 1 cm target check.
+
+    ``evaluation.arrival._require_target_agrees_with_runway_data`` gained its POSITION half
+    on 2026-08-17 and was validated against observed and prediction records only — there was
+    no optimizer comparison tree on disk at the time. The constrained optimizer was the one
+    producer that moved its target (onto the procedure document's rendering of the same CIFP
+    threshold, 0.05-0.22 m away), so every ``runway_cons`` record was rejected on the first
+    row and took the whole sweep down with it. This pins the two ends together: the state
+    ``scenario_optimization`` hands the solver IS the state ``evaluation`` measures against.
+    """
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "4dTrajectory" / "optimization"))
+    import scenario_optimization as so
+    from aerodynamic_model.common import GeodeticState
+    from flight_scenarios.runway_target import threshold_target_state
+    from flight_scenarios.scenario import aircraft_for_code
+
+    airport = load_airport(
+        "KRDU",
+        config_file=REPO_ROOT / "trajectory_data_process/config/runway_thresholds.json",
+        cifp_file=REPO_ROOT / "data/CIFP/CIFP_260806/FAACIFP18",
+    )
+    contexts = contexts_for_airport(airport)
+    checked = 0
+
+    for runway in airport.runways:
+        try:
+            path = so._resolve_procedure_path(
+                so.DEFAULT_PROCEDURE_ROOT, "KRDU", runway.ident
+            )
+        except (ValueError, OSError):
+            continue                      # no published RNAV(GPS) procedure for this runway
+        import json as _json
+
+        paths = so._iaf_full_paths(_json.loads(path.read_text(encoding="utf-8")))
+        if not paths:
+            continue
+        context = contexts[("KRDU", runway.ident)]
+        # The scenario target, built exactly as the arrival manifest builds it.
+        target = threshold_target_state(
+            "KRDU", runway.ident, aircraft_for_code("A320"), mass_kg=60_000.0,
+            published_target={
+                "lat": runway.lat,
+                "lon": runway.lon,
+                "elevation_msl_m": runway.elevation_msl_m,
+                "course_deg": runway.course_deg,
+                "threshold_crossing_height_m": runway.threshold_crossing_height_m,
+                "published_glidepath_deg": runway.published_glidepath_deg,
+            },
+        )
+        if target is None:
+            continue    # no published TCH/glidepath — the arrival manifest excludes it too
+        assert isinstance(target, GeodeticState)
+        checked += 1
+        # (a) the constrained path leaves it alone, and only warns about the procedure gap
+        gap_m = so._require_procedure_threshold_agrees(target, paths)
+        assert gap_m <= so._FRAME_ANCHOR_TOLERANCE_M
+        # (b) that same state passes evaluation's authoritative-threshold check
+        from geokit import haversine_m
+
+        assert haversine_m(
+            target.latitude, target.longitude,
+            context.threshold_lat, context.threshold_lon,
+        ) <= 0.01
+
+    assert checked >= 4, f"expected KRDU's four in-service runways, checked {checked}"

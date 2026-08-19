@@ -246,12 +246,14 @@ def evaluate_batch(
     observed_availability: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate a batch and serialize every verdict-changing parameter."""
-    record_list = list(records)
+    # Iterated, never materialized: `records` may be a generator over a batch whose
+    # resolved states are ~1 MB per flight. Everything retained below (evaluations, rows,
+    # comparisons) is per-flight metadata, not trajectory arrays.
     evaluations: list[TrajectoryEvaluation] = []
     rows: list[dict[str, Any]] = []
     comparisons: list[ReferenceComparison] = []
     used: dict[ContextKey, AssessmentContext] = {}
-    for record in record_list:
+    for record in records:
         context = resolve_context(record, contexts)
         used[(context.airport, context.runway)] = context
         evaluation = evaluate_record(record, context=context)

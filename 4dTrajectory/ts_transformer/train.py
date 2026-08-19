@@ -21,7 +21,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from channels import CHANNELS, IDX, POSITION_IDX
+from channels import CHANNELS, IDX, POSITION_IDX, VELOCITY_IDX
 from batching import resolve_batch_size
 from config import (
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
@@ -40,6 +40,7 @@ from config import (
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
@@ -223,6 +224,9 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
             *arc_velocity_extensions[
                 config.control_arc_local_velocity_parameterization
             ],
+        ),
+        CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: (
+            ("velocity",) if config.control_velocity_loss_weight else ()
         ),
     }
     return (*names, *extensions.get(config.control_state_objective, ()))
@@ -547,21 +551,34 @@ def _native_endpoint_control_state_loss(
         (normalized_states - aligned_targets) ** 2 * aligned_weights
     ).sum(dim=(1, 2))
     state_loss = state_error / aligned_weights.sum(dim=(1, 2)).clamp(min=1.0)
-    position_indices = list(POSITION_IDX)
-    position_weights = aligned_weights[..., position_indices].sum(dim=-1)
-    physical_position_delta = (
-        normalized_states[..., position_indices]
-        - aligned_targets[..., position_indices]
-    ) * scale[position_indices]
-    physical_position_mse = (
-        (physical_position_delta.square().sum(dim=-1) * position_weights).sum(dim=1)
-        / position_weights.sum(dim=1).clamp(min=1.0)
-        / (config.position_loss_scale_m**2)
+    def physical_channel_mse(indices, physical_scale: float) -> torch.Tensor:
+        """Weighted per-flight MSE over one channel group, in its own physical unit.
+
+        The supervision weights carry the masking: fitted-tail velocity rows are already
+        zero, so a velocity term never trains on the extrapolated placeholders.
+        """
+        columns = list(indices)
+        weights = aligned_weights[..., columns].sum(dim=-1)
+        delta = (
+            normalized_states[..., columns] - aligned_targets[..., columns]
+        ) * scale[columns]
+        return (
+            (delta.square().sum(dim=-1) * weights).sum(dim=1)
+            / weights.sum(dim=1).clamp(min=1.0)
+            / (physical_scale**2)
+        )
+
+    physical_position_mse = physical_channel_mse(
+        POSITION_IDX, config.position_loss_scale_m
+    )
+    physical_velocity_mse = physical_channel_mse(
+        VELOCITY_IDX, config.control_velocity_loss_scale_mps
     )
     return ControlStateLossResult(
         normalized_mse=state_loss,
         normalized_segment_end_states=normalized_states,
         physical_position_mse=physical_position_mse,
+        physical_velocity_mse=physical_velocity_mse,
     )
 
 

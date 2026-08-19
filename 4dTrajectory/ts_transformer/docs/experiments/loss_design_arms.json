@@ -1,0 +1,16 @@
+{
+  "_comment": "Experiment 1 of the bank-wiggle queue: loss design. simple-v1's true-time-position objective scores POSITION only, and the converged baseline's chart-velocity error measures 24.12 m/s RMS - completely unconstrained. These arms are a dose-response on a velocity term, weighted against the MEASURED baseline operating point (position term 0.009055, raw velocity term 5.815438, ratio 642x), so 0.0008 makes velocity ~0.5x position and 0.003 makes it ~2x. The control-effort knob is deliberately NOT an arm: its scale divides load factor by its upper bound, so it would penalise the n~1 that level flight requires far harder than the spurious bank.",
+  "base_recipe": "simple-v1-lag",
+  "arms": [
+    {
+      "key": "velocity_half",
+      "label": "loss: velocity term at 0.5x position",
+      "overrides": {"control_velocity_loss_weight": 0.0008}
+    },
+    {
+      "key": "velocity_double",
+      "label": "loss: velocity term at 2x position",
+      "overrides": {"control_velocity_loss_weight": 0.003}
+    }
+  ]
+}

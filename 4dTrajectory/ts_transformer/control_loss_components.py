@@ -44,6 +44,7 @@ class ControlStateLossResult:
     physical_query_states: torch.Tensor | None = None
     normalized_terminal_end_states: torch.Tensor | None = None
     physical_position_mse: torch.Tensor | None = None
+    physical_velocity_mse: torch.Tensor | None = None
 
     @property
     def terminal_end_states(self) -> torch.Tensor:
@@ -151,9 +152,19 @@ def _true_time_position_objective(
     endpoint_mse = (
         terminal_position_m / config.position_loss_scale_m
     ).square()
+    extras: dict[str, torch.Tensor] = {}
+    if config.control_velocity_loss_weight:
+        if result.physical_velocity_mse is None:
+            raise ValueError(
+                "the velocity term needs the native uniform-clock physical velocity loss"
+            )
+        extras["velocity"] = (
+            config.control_velocity_loss_weight * result.physical_velocity_mse
+        )
     return ControlTrackingLossTerms(
         state=result.physical_position_mse,
         terminal_position=config.state_endpoint_loss_weight * endpoint_mse,
+        extras=extras,
     )
 
 

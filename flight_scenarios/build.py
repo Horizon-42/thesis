@@ -20,7 +20,8 @@ from aircraft.aircraft_sets import Aircraft
 from aircraft.identity import AircraftIdentity, get_default_identity_resolver
 
 from .datum import flight_to_msl, flights_to_msl
-from .fitted_approach import fit_flight_final_approach
+from .fitted_approach import UnusableFittedApproach, fit_flight_final_approach
+from .identity import flight_key
 from .runway_target import threshold_target_state
 from .scenario import (
     FlightScenario,
@@ -99,7 +100,7 @@ def build_scenario(
     elif target_from_fitted_adsb:
         fitted = fitted_hae
         if fitted is None:
-            raise ValueError(
+            raise UnusableFittedApproach(
                 f"flight {flight.get('id')!r} has no usable fitted final approach for "
                 f"runway {flight.get('runway')!r}"
             )
@@ -116,6 +117,14 @@ def build_scenario(
 
     source = {
         "id": flight.get("id"),
+        # The project's actual flight identity (``id`` is only the callsign). Carried on
+        # the scenario so every downstream record — including the optimizer's evaluation
+        # rows, which reported ``flight_key: null`` while the observed rows carried it —
+        # names WHICH flight it is without having to re-derive the key from a filename.
+        # Only when the flight HAS an id: ``flight_key``'s fallback is the caller's list
+        # index, which this function does not have, and a key built on the wrong index
+        # would disagree with the record filename ``_scenario_filename`` derives.
+        "flight_key": flight_key(flight, 0) if flight.get("id") else None,
         "callsign": flight.get("callsign"),
         "icao24": flight.get("icao24"),
         "arr_airport": arr_airport,
