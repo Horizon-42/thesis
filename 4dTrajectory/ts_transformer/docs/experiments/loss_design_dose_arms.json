@@ -1,0 +1,9 @@
+{
+  "_comment": "Experiment 1, continued: find where the velocity term stops helping. 0.5x and 2x both improved EVERY metric monotonically, so the useful weight is not yet bracketed; the first (aborted) attempt at 160x was clearly a velocity-fitter, so the turn is between 2x and 160x. A geometric ladder 8/32/128 brackets it in one launch. Weights follow the same measured calibration as the first two arms: 0.00156 makes the velocity term 1x the position term at the converged baseline operating point.",
+  "base_recipe": "simple-v1-lag",
+  "arms": [
+    {"key": "velocity_8x", "label": "loss: velocity term at 8x position", "overrides": {"control_velocity_loss_weight": 0.0125}},
+    {"key": "velocity_32x", "label": "loss: velocity term at 32x position", "overrides": {"control_velocity_loss_weight": 0.05}},
+    {"key": "velocity_128x", "label": "loss: velocity term at 128x position", "overrides": {"control_velocity_loss_weight": 0.2}}
+  ]
+}
