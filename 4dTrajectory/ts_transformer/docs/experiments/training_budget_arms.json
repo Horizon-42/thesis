@@ -1,0 +1,8 @@
+{
+  "_comment": "Experiment 3: is the model simply under-trained? batch 512 over ~5000 outer-train flights is ~10 optimizer steps per epoch, so 180 epochs is ~1800 updates at lr 3e-5. Each arm raises the number of updates a different way, so a shared improvement points at the budget rather than at either knob.",
+  "base_recipe": "simple-v1-lag",
+  "arms": [
+    {"key": "lr3x", "label": "budget: lr 1e-4", "overrides": {"learning_rate": 0.0001}},
+    {"key": "batch128", "label": "budget: batch 128 (4x the updates)", "overrides": {"batch_size": 128}}
+  ]
+}

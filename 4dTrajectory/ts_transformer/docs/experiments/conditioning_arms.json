@@ -1,0 +1,8 @@
+{
+  "_comment": "Experiment 4: does the conditioning information reach the head? All 64x3 outputs come from one 512-wide fused feature vector, so the head may lack the capacity to make each segment flight-specific. These arms widen and deepen that path. d_ff follows d_model at the recipe's 2x ratio.",
+  "base_recipe": "simple-v1-lag",
+  "arms": [
+    {"key": "wide", "label": "conditioning: d_model 1024", "overrides": {"d_model": 1024, "d_ff": 2048}},
+    {"key": "deep", "label": "conditioning: 6 encoder layers", "overrides": {"e_layers": 6}}
+  ]
+}

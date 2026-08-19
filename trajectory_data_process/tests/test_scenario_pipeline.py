@@ -66,10 +66,22 @@ def test_preparation_builds_each_distinct_target_dataset(tmp_path, monkeypatch):
 
     fitted = prepare.scenario_command("KRDU", "fitted-adsb")
     runway = prepare.scenario_command("KRDU", "runway")
-    assert fitted[-1] == "--target-from-fitted-adsb"
-    assert runway[-1] == "--target-from-threshold"
+    assert "--target-from-fitted-adsb" in fitted
+    assert "--target-from-threshold" in runway
     assert any(part.endswith("KRDU_arrivals_fitted_adsb_scenarios.json") for part in fitted)
     assert any(part.endswith("KRDU_arrivals_threshold_scenarios.json") for part in runway)
+
+    # Both target datasets carry the SAME per-runway cap: the selection is roster-derived
+    # and target-independent, so the two datasets must cover the same flights or the
+    # per-flight comparison between fitted_adsb and runway silently stops being paired.
+    for command in (fitted, runway):
+        assert command[command.index("--max-per-runway") + 1] == str(
+            prepare.DEFAULT_MAX_PER_RUNWAY
+        )
+    # 0 means "every rostered arrival" and must not emit a cap of zero.
+    assert "--max-per-runway" not in prepare.scenario_command(
+        "KRDU", "runway", max_per_runway=0
+    )
 
 
 def test_optimizer_uses_prepared_scenario_without_rebuilding_it(tmp_path, monkeypatch):
