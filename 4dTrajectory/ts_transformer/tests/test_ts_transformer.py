@@ -3352,36 +3352,21 @@ def test_control_model_starts_from_neutral_uniform_rollout():
 
     prediction = model(history, dynamics)
     # The untrained head emits the neutral physical control, not a fixed fraction of
-    # whatever the bounds happen to be: 20% thrust, wings level, load factor one. It is
-    # NEAR-neutral rather than exactly neutral on purpose — the projection carries a
-    # deliberate NEUTRAL_LOGIT_PERTURBATION so gradient reaches the backbone at step 0
-    # (see test_the_control_head_passes_gradient_to_the_backbone_at_initialisation).
+    # whatever the bounds happen to be: 20% thrust, wings level, load factor one.
     expected = torch.tensor(control_models.NEUTRAL_CONTROLS).view(1, 1, 3)
-    span = torch.tensor(CONTROL_UPPER - CONTROL_LOWER, dtype=prediction.controls.dtype)
     expected_time = math.log(2.0) * config.final_time_scale_s
 
-    assert torch.all(
-        (prediction.controls - expected).abs() < 0.03 * span.view(1, 1, 3)
+    torch.testing.assert_close(
+        prediction.controls, expected.expand_as(prediction.controls)
     )
-    # Same story for the duration head: softplus(0)*scale, moved by at most
-    # softplus'(0) * NEUTRAL_LOGIT_PERTURBATION * scale = 6 s (measured 4.6 s).
     torch.testing.assert_close(
         prediction.final_time_s,
         torch.full_like(prediction.final_time_s, expected_time),
-        rtol=0.02,
-        atol=0.0,
     )
-    # This config takes the FACTORIZED duration head, whose softmax was exactly uniform
-    # only because its logits were identically zero. Seeded logits make it uniform to
-    # within ~1 % instead (the 0.8 uniform floor caps how far the learned part can move
-    # it). The uniform-duration head, which has no duration projection at all, is still
-    # exact — asserted in test_uniform_duration_control_head_has_no_duration_parameters.
     torch.testing.assert_close(
         prediction.segment_durations,
         prediction.final_time_s[:, None].expand(-1, config.n_segments)
         / config.n_segments,
-        rtol=0.02,
-        atol=0.0,
     )
 
 

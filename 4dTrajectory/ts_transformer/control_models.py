@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -60,56 +58,28 @@ def _neutral_control_bias(head: ControlOutputHead, bank_rad: float = 0.0) -> tor
     ).repeat(head.n_segments)
 
 
-# How far, in logit units, the input-driven term is allowed to move the output away from
-# the neutral control at step 0. Small enough that training still starts from "do nothing";
-# NOT zero, because a zero output weight sends exactly zero gradient back through it.
-NEUTRAL_LOGIT_PERTURBATION = 0.02
-
-
-def _seed_projection(layer: nn.Linear, perturbation: float) -> None:
-    """Give a layer a near-zero but GRADIENT-CARRYING weight.
-
-    Zeroing an output layer's weight is a trap: the layer's own gradient is fine, but the
-    gradient it passes back is ``Wᵀ·δ``, which is exactly zero while ``W`` is zero. Every
-    parameter upstream — here the whole trajectory backbone — therefore receives no signal
-    at all on the first step and can only start learning once ``W`` has bootstrapped away
-    from zero on its own. Measured on the shipped initialisation: 20 of 20 backbone
-    tensors had an exactly-zero gradient, and after 180 epochs at lr 3e-5 the control
-    projection had grown to a weight norm of 0.55 against a bias norm of 5.84 — a head
-    that had learned the population-average schedule and barely read its input.
-
-    Scaling by ``1/sqrt(fan_in)`` keeps the initial output perturbation at
-    ``perturbation`` logits regardless of ``d_model``.
-    """
-    nn.init.normal_(layer.weight, std=perturbation / math.sqrt(layer.in_features))
-
-
 def _initialize_control_head(
-    head: ControlOutputHead,
-    *,
-    bank_rad: float = 0.0,
-    perturbation: float = NEUTRAL_LOGIT_PERTURBATION,
+    head: ControlOutputHead, *, bank_rad: float = 0.0, feature_std: float = 0.0
 ) -> None:
-    """Start the head at the neutral control — through its BIAS, not by muting its input."""
     with torch.no_grad():
-        _seed_projection(head.control_projection, perturbation)
-        head.control_projection.bias.copy_(_neutral_control_bias(head, bank_rad))
         duration_projection = getattr(head, "duration_projection", None)
+        if feature_std:
+            nn.init.normal_(head.control_projection.weight, std=feature_std)
+            if duration_projection is not None:
+                nn.init.normal_(duration_projection.weight, std=feature_std)
+        else:
+            head.control_projection.weight.zero_()
+            if duration_projection is not None:
+                duration_projection.weight.zero_()
+        head.control_projection.bias.copy_(_neutral_control_bias(head, bank_rad))
         if duration_projection is not None:
-            _seed_projection(duration_projection, perturbation)
             duration_projection.bias.zero_()
 
 
-def _initialize_final_time_head(
-    head: FinalTimeHead,
-    raw_bias: float = 0.0,
-    *,
-    perturbation: float = NEUTRAL_LOGIT_PERTURBATION,
-) -> None:
-    """Same contract for the duration head, whose hidden layer was equally starved."""
+def _initialize_final_time_head(head: FinalTimeHead, raw_bias: float = 0.0) -> None:
     with torch.no_grad():
         final_layer = head.network[-1]
-        _seed_projection(final_layer, perturbation)
+        final_layer.weight.zero_()
         final_layer.bias.fill_(raw_bias)
 
 
