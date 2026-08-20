@@ -8,7 +8,10 @@ judged the same way, so arms from different experiments are directly comparable:
   straight-ref bank RMS  bank on genuinely straight references   (truth: 0.55 deg)
   straight-ref reversals bank sign changes there                 (truth: 0)
   per-flight bank skill  correlation with the flown track's bank once both common
-                         profiles are removed                    (baseline: -0.073)
+                         profiles are removed. Read it against the two references
+                         printed with it, NOT against 1.0: a randomly chosen other real
+                         flight already scores the floor, and the best any predictor can
+                         do from the entry state is about what the same-runway twin gets.
   velocity RMS           chart-velocity error                    (baseline: 24.12 m/s)
   ADE / FDE              accuracy, so a "fix" that trades it away is visible
 
@@ -46,8 +49,56 @@ def _tortuosity(rows) -> float:
     return length / straight if straight > 1.0 else np.inf
 
 
+def _per_flight_skill(pred: np.ndarray, truth: np.ndarray) -> float:
+    gp, gt = pred.mean(axis=0), truth.mean(axis=0)
+    values = [
+        np.corrcoef(pred[i] - gp, truth[i] - gt)[0, 1]
+        for i in range(len(truth))
+        if (pred[i] - gp).std() > 1e-9 and (truth[i] - gt).std() > 1e-9
+    ]
+    return float(np.median(values)) if values else float("nan")
+
+
+def _reference_skills(observed: np.ndarray, runways: np.ndarray,
+                      entry: np.ndarray) -> tuple[float, float]:
+    """The floor and the ceiling this metric actually has, on THESE flights.
+
+    floor  a randomly chosen other real flight, scored as if it were the prediction.
+           Real bank profiles share one dominant mode, so this is well above zero and a
+           model below it is not merely weak -- it is not predicting the right object.
+    twin   the same-runway flight whose entry state is nearest. It had the same
+           information and then saw a real future, so it stands in for the best any
+           predictor could do from these inputs.
+    """
+    if len(observed) < 4:
+        return float("nan"), float("nan")
+    rng = np.random.default_rng(0)
+    draws = []
+    for _ in range(20):
+        order = rng.permutation(len(observed))
+        same = order == np.arange(len(observed))
+        order[same] = (order[same] + 1) % len(observed)
+        draws.append(_per_flight_skill(observed[order], observed))
+    features = (entry - entry.mean(axis=0)) / (entry.std(axis=0) + 1e-9)
+    twin = np.zeros_like(observed)
+    usable = np.zeros(len(observed), dtype=bool)
+    for runway in set(runways.tolist()):
+        rows = np.where(runways == runway)[0]
+        if len(rows) < 2:
+            continue
+        for i in rows:
+            others = rows[rows != i]
+            twin[i] = observed[others[np.argmin(((features[others] - features[i]) ** 2)
+                                                .sum(axis=1))]]
+            usable[i] = True
+    twin_skill = (_per_flight_skill(twin[usable], observed[usable])
+                  if usable.sum() >= 4 else float("nan"))
+    return float(np.mean(draws)), twin_skill
+
+
 def score(pred_dir: Path) -> dict | None:
     model, observed, tortuosity, segment_counts = [], [], [], set()
+    runways, entry = [], []
     for path in sorted(pred_dir.glob("*_states.json")):
         payload = json.loads(path.read_text())
         segments = payload["control_segments"]
@@ -74,6 +125,8 @@ def score(pred_dir: Path) -> dict | None:
         model.append(segment_bank[np.minimum(
             (progress * len(segments)).astype(int), len(segments) - 1)])
         tortuosity.append(_tortuosity(future))
+        runways.append(path.name.split("_")[1])
+        entry.append([states[0, 0], states[0, 1], float(times[-1] - times[0]) / 300.0])
     if not model:
         return None
 
@@ -88,6 +141,7 @@ def score(pred_dir: Path) -> dict | None:
         for i in range(len(model_bank))
         if residual_model[i].std() > 1e-9 and residual_observed[i].std() > 1e-9
     ]
+    del residual_observed
     # Counted on the resampled grid, which is safe: upsampling a piecewise-constant
     # schedule only repeats values, and a repeated value cannot change sign, so the count
     # equals the one on the arm's own N boundaries.
@@ -96,8 +150,11 @@ def score(pred_dir: Path) -> dict | None:
         for row in model_bank[straight]
     ], dtype=float) if straight.any() else np.array([], dtype=float)
     accuracy = json.loads((pred_dir / "summary.json").read_text())["accuracy"]
+    floor, twin = _reference_skills(observed_bank, np.array(runways), np.array(entry))
     return {
         "flights": len(model_bank),
+        "skill_floor": floor,
+        "skill_twin": twin,
         "straight": int(straight.sum()),
         "n_segments": sorted(segment_counts),
         "common_share_pct": 100 * float(np.sum(common ** 2) * len(model_bank)
@@ -113,8 +170,11 @@ def score(pred_dir: Path) -> dict | None:
     }
 
 
+# bank_skill has no "truth" column: 1.0 is unreachable because the future is only
+# partly determined by the entry state. Its floor and ceiling are measured per arm and
+# printed under the table instead.
 TRUTH = {"common_share_pct": 3.2, "bank_rms_straight_deg": 0.55,
-         "reversals_straight": 0.0, "bank_skill": 1.0}
+         "reversals_straight": 0.0}
 ROWS = [
     ("common-profile share (%)", "common_share_pct", "{:8.1f}"),
     ("straight-ref bank RMS (deg)", "bank_rms_straight_deg", "{:8.2f}"),
@@ -158,6 +218,11 @@ def main(argv: list[str]) -> int:
                     for k in scored))
     print(f"{'segments per arm':<30}{'':>9}"
           + "".join(f"{','.join(map(str, scored[k]['n_segments'])):>{width}}" for k in scored))
+    print(f"\n{'-- bank skill references --':<30}")
+    for label, key in (("random other flight (floor)", "skill_floor"),
+                       ("same-runway twin (ceiling)", "skill_twin")):
+        print(f"{label:<30}{'':>9}"
+              + "".join(f"{scored[k][key]:8.3f}".rjust(width) for k in scored))
     return 0
 
 
