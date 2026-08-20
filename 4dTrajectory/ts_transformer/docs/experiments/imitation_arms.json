@@ -1,10 +1,32 @@
 {
-  "_comment": "Design re-examination (docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md §12). The velocity term fixed the MAGNITUDE of the bank but not its STRUCTURE: the model's bank carries LESS information about the flown bank than a randomly chosen other flight (KSJC +0.197 vs +0.312), because position and velocity supervise derivative orders 0 and 1 while bank lives at order 2 and was never supervised at all. These arms add control_imitation_loss_weight, which scores the predicted schedule against the one control_inverse_dynamics reads off the flown track through the SAME registry the forward model dispatches on. The baseline arm is included because every earlier number in that document is KSJC and the comparison must be paired on the same KRDU flights. Weight ladder: the unweighted term measured 0.020 / 0.070 / 0.106 times the position term at epochs 1 / 2 / 3 and is still climbing as the position term falls, so w = 1 is about 1x position at convergence; 1 / 4 / 16 brackets the dose and shows the turn. KRDU is the airport: its random-flight floor is +0.109 against KSJC's +0.312 so the skill metric discriminates, and bank carries 41% of the box-normalised term there against 18% at KSJC.",
+  "_comment": "Design re-examination (docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md \u00a712). The velocity term fixed the MAGNITUDE of the bank but not its STRUCTURE: the model's bank carries LESS information about the flown bank than a randomly chosen other flight (KSJC +0.197 vs +0.312), because position and velocity supervise derivative orders 0 and 1 while bank lives at order 2 and was never supervised at all. These arms add control_imitation_loss_weight, which scores the predicted schedule against the one control_inverse_dynamics reads off the flown track through the SAME registry the forward model dispatches on. The baseline arm is included because every earlier number in that document is KSJC and the comparison must be paired on the same KRDU flights. Weight ladder: measured against the converged KRDU baseline (val parts state = 0.0417, unweighted imitation MSE 0.0308 over its 1404 val flights), w = 1.36 is exactly 1x the position term, so the arms are 0.74x / 2.95x / 11.8x position. The arm keys say 1x/4x/16x after the WEIGHT, not the multiple. KRDU is the airport: its random-flight floor is +0.109 against KSJC's +0.312 so the skill metric discriminates, and bank carries 41% of the box-normalised term there against 18% at KSJC.",
   "base_recipe": "simple-v2",
   "arms": [
-    {"key": "baseline", "label": "KRDU simple-v2 baseline (no imitation term)", "overrides": {}},
-    {"key": "imitation_1x", "label": "imitation term ~1x position", "overrides": {"control_imitation_loss_weight": 1.0}},
-    {"key": "imitation_4x", "label": "imitation term ~4x position", "overrides": {"control_imitation_loss_weight": 4.0}},
-    {"key": "imitation_16x", "label": "imitation term ~16x position", "overrides": {"control_imitation_loss_weight": 16.0}}
+    {
+      "key": "baseline",
+      "label": "KRDU simple-v2 baseline (no imitation term)",
+      "overrides": {}
+    },
+    {
+      "key": "imitation_1x",
+      "label": "imitation term ~1x position",
+      "overrides": {
+        "control_imitation_loss_weight": 1.0
+      }
+    },
+    {
+      "key": "imitation_4x",
+      "label": "imitation term ~4x position",
+      "overrides": {
+        "control_imitation_loss_weight": 4.0
+      }
+    },
+    {
+      "key": "imitation_16x",
+      "label": "imitation term ~16x position",
+      "overrides": {
+        "control_imitation_loss_weight": 16.0
+      }
+    }
   ]
 }

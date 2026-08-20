@@ -189,6 +189,38 @@ Everything below is serialised into every checkpoint.
   start of the approach. Lookback = the `t ≤ 0` slice; the anchor sample belongs to both halves,
   so the join is exact, not approximate.
 
+- **Bank was never supervised, and unsupervised it lands BELOW a trivial baseline.** Position is
+  derivative order 0 and `control_velocity_loss_weight` is order 1; bank lives at order 2, so no
+  term in the loss ever named it. Measured consequence: the model's bank carries *less*
+  information about the flown bank than a randomly chosen OTHER flight's does — per-flight skill
+  +0.197 vs a random-flight floor of +0.312 on KSJC, +0.124 vs +0.170 on KRDU. The flown
+  population's bank residual is dominated by one mode (55.2 % of the energy, same sign in 86 % of
+  flights — the turn onto final); the model concentrates its bank into a single mode too, but a
+  nearly orthogonal one (alignment 0.062). It learned that banking happens, never when.
+  **Always read bank skill against the floor and the same-runway twin ceiling that
+  `docs/score_control_arms.py` now prints per arm — never against 1.0**, which is unreachable
+  because the entry state only partly determines the future. Doing so inverts the earlier
+  loss-design reading: the velocity dose frozen into `simple-v2` is the only one below the floor.
+- **`control_imitation_loss_weight` supervises the schedule directly**, against
+  `control_inverse_dynamics` — the same registry the forward model dispatches on, so target and
+  rollout can never be different equations. The target is built in
+  `dataset.reference_control_supervision` on the training-only `_dynamics_arrays` path;
+  **`dynamics_arrays()` itself must stay free of it** because forecast/predict call it and there
+  is no future to invert there. Each channel is divided by half its box width
+  (`control_envelope.CONTROL_HALF_WIDTH`), which on KRDU splits the term 57 / 41 / 2 % across
+  thrust / bank / load — on KSJC it is 82 / 18 / 1, one reason KRDU is the better testbed.
+  Calibration convention: at the converged KRDU baseline (`state` = 0.0417, unweighted term
+  0.0308) **w = 1.36 is 1× the position term**.
+- **A new loss term must be added to `loss_component_names`**, not only to the objective's
+  `extras`. `fit_model` builds its accumulator from that list and then indexes it with whatever
+  keys came back, so an undeclared term raises `KeyError` on the first batch — *after* the dataset
+  build, which is the slow part. Covered by a test now.
+- **`random_train_anchor=True` + the imitation term is a performance cliff.**
+  `FixedAnchorTrajectoryWindows` caches `_dynamics_arrays` once, so the per-flight inverse is paid
+  at construction; `RandomAnchorTrajectoryWindows` does not override it, so the inverse would be
+  recomputed per sample per epoch. No current recipe uses random anchors, so this is a note, not a
+  guard.
+
 ## Open items
 
 - **The KRDU run is DONE (three generations; current = 2026-07-20 B3)** — artifacts in
