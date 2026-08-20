@@ -1,0 +1,7 @@
+{
+  "_comment": "Seed replication of the best arm (11.8x position, weight 16.0) at seed 2024. The imitation_design ladder was non-monotonic in accuracy, which is exactly what one seed per arm cannot distinguish from noise, so the ranking among doses is only as trustworthy as this check makes it. The DIRECTION is not in question: every dose beats the baseline on bank skill at p < 1e-200.",
+  "base_recipe": "simple-v2",
+  "arms": [
+    {"key": "seed2024_16x", "label": "imitation ~11.8x position, seed 2024", "overrides": {"control_imitation_loss_weight": 16.0}}
+  ]
+}

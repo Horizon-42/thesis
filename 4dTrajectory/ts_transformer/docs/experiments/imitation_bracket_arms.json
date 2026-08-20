@@ -1,0 +1,7 @@
+{
+  "_comment": "Fills the gap in the imitation_design ladder between 0.74x (free: ADE indistinguishable from baseline) and 2.95x (the accuracy dip). Weight 2.0 = 1.47x the position term on the converged KRDU baseline calibration (w = 1.36 is 1x). Seed 1337, matching the original ladder, so it is directly comparable. Purpose is the shape of the dose curve, not a new best: 11.8x already dominates 2.95x outright, so a dip at 2.95x is either real structure in the curve or one-seed noise, and a point between 0.74x and 2.95x says which.",
+  "base_recipe": "simple-v2",
+  "arms": [
+    {"key": "bracket_1p5x", "label": "imitation term ~1.47x position", "overrides": {"control_imitation_loss_weight": 2.0}}
+  ]
+}

@@ -45,20 +45,26 @@ plt.rcParams.update({
     "axes.spines.top": False, "axes.spines.right": False,
 })
 
-ORDER = ("baseline", "imitation_1x", "imitation_4x", "imitation_16x")
+# Ordered by dose, never alphabetically: a glob once put 16x between baseline and 1x.
+ORDER = ("baseline", "imitation_1x", "bracket_1p5x", "imitation_4x", "imitation_16x",
+         "seed2024_16x", "extend_47x")
 LABEL = {
     "baseline": "simple-v2 baseline\n(no imitation term)",
     "imitation_1x": "imitation 0.74x position",
-    "imitation_4x": "imitation 2.95x position",
+    "bracket_1p5x": "imitation 1.47x position",
+    "imitation_4x": "imitation 2.94x position",
     "imitation_16x": "imitation 11.8x position",
+    "seed2024_16x": "imitation 11.8x, seed 2024",
+    "extend_47x": "imitation 47x position",
 }
 
 
 def _finish(ax, title: str, subtitle: str | None = None) -> None:
-    ax.set_title(title, loc="left", pad=14 if subtitle else 8)
+    lines = subtitle.count("\n") + 1 if subtitle else 0
+    ax.set_title(title, loc="left", pad=8 + 11 * lines)
     if subtitle:
         ax.text(0.0, 1.02, subtitle, transform=ax.transAxes, fontsize=8.5,
-                color=INK_2, va="bottom")
+                color=INK_2, va="bottom", linespacing=1.35)
     ax.set_axisbelow(True)
 
 
@@ -80,7 +86,7 @@ def figure_skill_band(arms: dict[str, dict]) -> None:
     floor = arms[keys[0]]["skill_floor"]
     twin = arms[keys[0]]["skill_twin"]
 
-    fig, ax = plt.subplots(figsize=(7.4, 0.72 * len(keys) + 1.9))
+    fig, ax = plt.subplots(figsize=(8.4, 0.56 * len(keys) + 2.3))
     ax.axvspan(floor, twin, color=AQUA, alpha=0.10, lw=0)
     ax.axvline(floor, color=ORANGE, lw=2.0, zorder=3)
     ax.axvline(twin, color=AQUA, lw=2.0, zorder=3)
@@ -93,17 +99,25 @@ def figure_skill_band(arms: dict[str, dict]) -> None:
         ax.annotate(f"{value:+.3f}", (value, row), textcoords="offset points",
                     xytext=(0, 11), ha="center", fontsize=8.5, color=INK)
     ax.set_yticks(y, [LABEL[k] for k in keys], fontsize=8.5)
+    for row, key in zip(y, keys):
+        if key == "seed2024_16x":
+            ax.get_yticklabels()[list(y).index(row)].set_color(MUTED)
     ax.set_xlabel("per-flight bank skill  (correlation with the flown track's bank)")
-    ax.set_ylim(-0.7, len(keys) - 0.3)
-    top = len(keys) - 0.45
-    ax.annotate(f"random other flight\n{floor:+.3f}", (floor, top), ha="center",
-                va="bottom", fontsize=8, color=ORANGE, fontweight="bold")
-    ax.annotate(f"same-runway twin\n{twin:+.3f}", (twin, top), ha="center",
-                va="bottom", fontsize=8, color=AQUA, fontweight="bold")
-    _finish(ax, "Bank skill against the floor and ceiling this metric actually has",
-            "KRDU validation. Left of the orange line the model says less about the flown "
-            "bank than a random real flight does.")
-    fig.tight_layout()
+    # Headroom above the top row so the reference captions never sit on a marker.
+    ax.set_ylim(-0.7, len(keys) + 0.45)
+    top = len(keys) - 0.30
+    ax.annotate(f"random other flight  {floor:+.3f}", (floor, top), ha="left",
+                va="bottom", fontsize=8, color=ORANGE, fontweight="bold",
+                xytext=(4, 0), textcoords="offset points")
+    ax.annotate(f"same-runway twin  {twin:+.3f}", (twin, top), ha="right",
+                va="bottom", fontsize=8, color=AQUA, fontweight="bold",
+                xytext=(-4, 0), textcoords="offset points")
+    ax.text(0.995, 0.03, "the twin is a yardstick, not a bound", transform=ax.transAxes,
+            ha="right", va="bottom", fontsize=7.5, color=MUTED, style="italic")
+    _finish(ax, "Bank skill against the references this metric actually has",
+            "KRDU validation, 1404 flights. Left of the orange line the model says\n"
+            "less about the flown bank than a random real flight does.")
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     fig.savefig(FIGURES / "imitation_skill_band.png", dpi=170)
     plt.close(fig)
 

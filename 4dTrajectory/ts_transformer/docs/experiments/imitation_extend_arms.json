@@ -1,0 +1,7 @@
+{
+  "_comment": "Follow-up to imitation_design. The four-arm ladder was NOT monotonic in accuracy: 2.95x is a dip and 11.8x recovers and dominates it on every metric (ADE better on 56.7%, p=6e-7). 11.8x reaches bank skill 0.591 against a twin ceiling of 0.699 and a straight-reference bank RMS of 0.54 deg against the flown 0.55 deg, at an ADE indistinguishable from the 0.74x arm. Two things are unresolved and this run settles both: whether the curve keeps climbing toward the ceiling (arm extend_47x), and whether the non-monotonic dip at 2.95x is real or one-seed noise (arm seed_check, which repeats 11.8x -- run separately at seed 2024).",
+  "base_recipe": "simple-v2",
+  "arms": [
+    {"key": "extend_47x", "label": "imitation term ~47x position", "overrides": {"control_imitation_loss_weight": 64.0}}
+  ]
+}
