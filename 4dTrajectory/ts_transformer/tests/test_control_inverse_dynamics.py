@@ -480,3 +480,32 @@ def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
 def ch_velocity():
     from channels import VELOCITY_IDX
     return VELOCITY_IDX
+
+
+def test_simple_v2_is_the_settled_production_recipe():
+    """simple-v2 = simple-v1-lag + the velocity term, with nothing else left open."""
+    from config import (
+        CONTROL_RECIPE_SIMPLE_V1_LAG,
+        CONTROL_RECIPE_SIMPLE_V2,
+        SIMPLE_V2_VELOCITY_LOSS_WEIGHT,
+    )
+
+    lag = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1_LAG)
+    v2 = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V2)
+    differing = {name for name in lag | v2 if lag.get(name) != v2.get(name)}
+
+    # The velocity term is the change; the time constants move from open to pinned.
+    assert "control_velocity_loss_weight" in differing
+    assert v2["control_velocity_loss_weight"] == SIMPLE_V2_VELOCITY_LOSS_WEIGHT
+    assert v2["control_dynamics_model"] == CONTROL_DYNAMICS_FIRST_ORDER_LAG
+    # A production recipe names ONE configuration: unlike simple-v1-lag, nothing is open.
+    assert TIME_CONSTANT_FIELDS <= set(v2)
+    # The combination arm settled this: width adds nothing once the term is present.
+    assert v2["d_model"] == 512
+
+    config = TSConfig(control_recipe_name=CONTROL_RECIPE_SIMPLE_V2, **v2)
+    assert TSConfig.from_dict(config.to_dict()) == config
+    with pytest.raises(ValueError, match="recipe fields are frozen"):
+        replace(config, control_velocity_loss_weight=0.0)
+    with pytest.raises(ValueError, match="recipe fields are frozen"):
+        replace(config, control_bank_time_constant_s=3.0)

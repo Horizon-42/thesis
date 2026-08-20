@@ -115,11 +115,28 @@ CONTROL_RECIPE_SIMPLE_V1 = "simple-v1"
 # rather than a bundle of choices. The three time constants are deliberately NOT frozen:
 # tau_bank is the parameter the CV sweep resolves.
 CONTROL_RECIPE_SIMPLE_V1_LAG = "simple-v1-lag"
+# The production recipe as of 2026-08-20: simple-v1-lag plus the chart-velocity term that
+# the bank-wiggle investigation settled on. Measured against simple-v1-lag on the same
+# 1083 KSJC validation flights, it takes the flight-independent share of the predicted
+# bank from 70.7 % to 17.3 % (flown tracks: 3.2 %), the bank on straight-in references
+# from 3.65 to 0.79 deg (0.55), per-flight bank skill from -0.073 to +0.197, AND improves
+# ADE on 77.8 % of flights (median -58.2 m, p=4.7e-79). Everything is frozen here,
+# including the three time constants — a recipe that leaves a field open does not name one
+# configuration. See docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md.
+CONTROL_RECIPE_SIMPLE_V2 = "simple-v2"
 CONTROL_RECIPE_NAMES = (
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_SIMPLE_V1,
     CONTROL_RECIPE_SIMPLE_V1_LAG,
+    CONTROL_RECIPE_SIMPLE_V2,
 )
+
+# The velocity weight simple-v2 pins. Calibrated, not chosen: at the converged simple-v1
+# operating point the raw velocity and position terms differ by 642x, so this puts the
+# velocity term at ~2x the position term. The dose curve turns here — 8x and beyond keep
+# reducing the bank (below the flown tracks' own 0.55 deg) while ADE, FDE and final-time
+# all degrade, FDE from 818 to 1231 m at 128x.
+SIMPLE_V2_VELOCITY_LOSS_WEIGHT = 0.003
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
@@ -213,8 +230,19 @@ def control_recipe_overrides(name: str) -> dict[str, Any]:
     if name == CONTROL_RECIPE_CUSTOM:
         return {}
     overrides = control_simple_v1_overrides()
-    if name == CONTROL_RECIPE_SIMPLE_V1_LAG:
+    if name in (CONTROL_RECIPE_SIMPLE_V1_LAG, CONTROL_RECIPE_SIMPLE_V2):
         overrides["control_dynamics_model"] = CONTROL_DYNAMICS_FIRST_ORDER_LAG
+    if name == CONTROL_RECIPE_SIMPLE_V2:
+        overrides["control_velocity_loss_weight"] = SIMPLE_V2_VELOCITY_LOSS_WEIGHT
+        overrides["control_velocity_loss_scale_mps"] = 10.0
+        # Frozen, unlike simple-v1-lag: the tau sweep came out unresolved (best-to-worst
+        # 5.7 % against 11-23 % fold noise), so 2 s is a defensible default rather than a
+        # selected value, and a production recipe must still name one number.
+        overrides["control_thrust_time_constant_s"] = 1.5
+        overrides["control_bank_time_constant_s"] = 2.0
+        overrides["control_load_time_constant_s"] = 0.8
+        # d_model stays 512. Widening to 1024 was tried WITH this term and added nothing
+        # to the bank metrics (17.6 % vs 17.3 %) while costing ADE on 71.8 % of flights.
     return overrides
 
 
