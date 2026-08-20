@@ -45,6 +45,7 @@ class ControlStateLossResult:
     normalized_terminal_end_states: torch.Tensor | None = None
     physical_position_mse: torch.Tensor | None = None
     physical_velocity_mse: torch.Tensor | None = None
+    control_imitation_mse: torch.Tensor | None = None
 
     @property
     def terminal_end_states(self) -> torch.Tensor:
@@ -160,6 +161,14 @@ def _true_time_position_objective(
             )
         extras["velocity"] = (
             config.control_velocity_loss_weight * result.physical_velocity_mse
+        )
+    if config.control_imitation_loss_weight:
+        if result.control_imitation_mse is None:
+            raise ValueError(
+                "the imitation term needs the native uniform-clock control inversion"
+            )
+        extras["imitation"] = (
+            config.control_imitation_loss_weight * result.control_imitation_mse
         )
     return ControlTrackingLossTerms(
         state=result.physical_position_mse,

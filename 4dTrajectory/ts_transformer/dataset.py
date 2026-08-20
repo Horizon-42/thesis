@@ -81,7 +81,7 @@ from config import (
     uses_control_dynamics,
 )
 from control_envelope import CONTROL_LOWER, CONTROL_UPPER
-from control_inverse_dynamics import actual_controls
+from control_inverse_dynamics import actual_controls, segment_controls
 from coordinate_frames import CoordinateFrame, frame_for_state
 from fixed_dt_supervision import (
     FixedDTControlSupervision,
@@ -459,6 +459,72 @@ def anchor_controls(series: FlightSeries, anchor: int, mass_kg: float) -> np.nda
             dtype=np.float64,
         ),
     )[-1]
+
+
+def reference_control_supervision(
+    series: FlightSeries,
+    anchor: int,
+    config: TSConfig,
+    total_duration_s: float,
+    last_measured_time_s: float,
+) -> dict[str, np.ndarray]:
+    """Return the control schedule the flown track implies, as a TRAINING TARGET.
+
+    This is supervision, not dynamics: it reads the future, so it is deliberately built
+    here and not in :func:`dynamics_arrays`, which forecast and predict also call and which
+    must stay deployable from the lookback alone.
+
+    The schedule comes from the SAME inverse registry the forward rollout dispatches
+    through, keyed on ``config.control_dynamics_model``, so the lagged model is supervised
+    on COMMANDS and the point-mass model on actual controls -- a target can never be the
+    solution of equations the training rollout does not integrate.
+
+    ``total_duration_s`` is the full supervised horizon (fitted tail included) because the
+    model's segments span it, but the fitted tail has no measured velocity to differentiate.
+    Segments whose midpoint falls past ``last_measured_time_s`` therefore get weight zero,
+    the same masking the velocity term already relies on.
+    """
+    mass_kg = float(series.scenario.initial.m)
+    anchor_time = float(series.times[anchor])
+    times = series.times[anchor:] - anchor_time
+    samples = states_from_channels(
+        times, series.values[anchor:], series.frame, mass_kg=mass_kg
+    )
+    states = np.asarray(
+        [[s.latitude, s.longitude, s.altitude, s.V, s.psi, s.gamma, s.m]
+         for _t, s in samples],
+        dtype=np.float64,
+    )
+    aero = series.scenario.aero
+    n_segments = int(config.n_segments)
+    inverted = segment_controls(
+        states,
+        times,
+        config=config,
+        aero_params=np.array(
+            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
+            dtype=np.float64,
+        ),
+        max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
+        control_lower=CONTROL_LOWER,
+        control_upper=CONTROL_UPPER,
+        n_segments=n_segments,
+        total_duration_s=total_duration_s,
+        frame_params=np.array(
+            [series.frame.lat0, series.frame.lon0, series.frame.alt0,
+             float(getattr(series.frame, "heading_rad", 0.0))],
+            dtype=np.float64,
+        ),
+    )
+    midpoints = (np.arange(n_segments, dtype=np.float64) + 0.5) * (
+        total_duration_s / n_segments
+    )
+    return {
+        "reference_controls": inverted.controls.astype(np.float64),
+        "reference_control_weight": (
+            midpoints <= last_measured_time_s
+        ).astype(np.float64),
+    }
 
 
 def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
@@ -1284,7 +1350,27 @@ class TrajectoryWindows(Dataset, ABC):
 
     def _dynamics_arrays(self, i: int) -> dict[str, np.ndarray]:
         s_idx, anchor = self.index[i]
-        return dynamics_arrays(self.series[s_idx], anchor)
+        series = self.series[s_idx]
+        arrays = dynamics_arrays(series, anchor)
+        if self.config.control_imitation_loss_weight:
+            anchor_time = float(series.times[anchor])
+            arrays.update(
+                reference_control_supervision(
+                    series,
+                    anchor,
+                    self.config,
+                    total_duration_s=float(
+                        series.supervision_times[-1] - anchor_time
+                    ),
+                    last_measured_time_s=float(
+                        self.last_supervised_times[s_idx][
+                            self.kinematic_channels
+                        ].min()
+                        - anchor_time
+                    ),
+                )
+            )
+        return arrays
 
     def _fixed_dt_supervision(
         self, indices: Sequence[int] | np.ndarray

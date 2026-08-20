@@ -96,6 +96,7 @@ from metrics import (
     states_with_derived_velocity,
 )
 from models import build_model, parameter_count, resolve_device
+from control_envelope import CONTROL_HALF_WIDTH
 from prediction_outputs import ControlPrediction, StatePrediction
 from time_grids import batch_time_grid, numpy_inference_time_grid
 from training_performance import EpochProfiler
@@ -226,7 +227,8 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
             ],
         ),
         CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: (
-            ("velocity",) if config.control_velocity_loss_weight else ()
+            *(("velocity",) if config.control_velocity_loss_weight else ()),
+            *(("imitation",) if config.control_imitation_loss_weight else ()),
         ),
     }
     return (*names, *extensions.get(config.control_state_objective, ()))
@@ -513,6 +515,31 @@ def control_state_supervision_prediction(
     )
 
 
+def control_imitation_mse(
+    prediction: ControlPrediction,
+    config: TSConfig,
+    dynamics: dict[str, torch.Tensor],
+) -> torch.Tensor | None:
+    """Per-flight MSE between the predicted schedule and the one the flown track implies.
+
+    Both sides live in the dimensionless control box, and each channel is divided by half
+    its box width so a full-scale error costs the same in thrust, bank and load factor.
+    Segments past the last measured velocity carry zero weight (see
+    :func:`dataset.reference_control_supervision`).
+    """
+    if not config.control_imitation_loss_weight:
+        return None
+    target = dynamics["reference_controls"].to(prediction.controls.dtype)
+    weight = dynamics["reference_control_weight"].to(prediction.controls.dtype)
+    scale = torch.as_tensor(
+        CONTROL_HALF_WIDTH, dtype=prediction.controls.dtype, device=prediction.controls.device
+    )
+    delta = (prediction.controls - target) / scale
+    return (delta.square().mean(dim=-1) * weight).sum(dim=1) / weight.sum(dim=1).clamp(
+        min=1.0
+    )
+
+
 def _native_endpoint_control_state_loss(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
@@ -579,6 +606,7 @@ def _native_endpoint_control_state_loss(
         normalized_segment_end_states=normalized_states,
         physical_position_mse=physical_position_mse,
         physical_velocity_mse=physical_velocity_mse,
+        control_imitation_mse=control_imitation_mse(prediction, config, dynamics),
     )
 
 

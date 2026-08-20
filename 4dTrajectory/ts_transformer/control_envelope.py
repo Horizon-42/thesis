@@ -59,6 +59,11 @@ CONTROL_UPPER = np.array(
     [MAX_THRUST_FRACTION, MAX_BANK_RAD, MAX_LOAD_FACTOR], dtype=np.float64
 )
 
+# Half the box width per channel. An imitation MSE that compares a predicted schedule with
+# an inverted one divides by these, so a full-scale error costs the same in each channel
+# instead of thrust (span 1.2) drowning bank (span 1.57) and load factor (span 1.8).
+CONTROL_HALF_WIDTH = (CONTROL_UPPER - CONTROL_LOWER) / 2.0
+
 
 def _rescaled_thrust(controls, max_thrust_n, *, to_newtons: bool):
     """Replace the thrust column, leaving bank and load factor untouched."""

@@ -509,3 +509,119 @@ def test_simple_v2_is_the_settled_production_recipe():
         replace(config, control_velocity_loss_weight=0.0)
     with pytest.raises(ValueError, match="recipe fields are frozen"):
         replace(config, control_bank_time_constant_s=3.0)
+
+
+def _imitation_config(weight: float) -> TSConfig:
+    overrides = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
+    overrides.update(
+        seq_len=16, n_segments=8, d_model=32, d_ff=64, n_heads=4, e_layers=1,
+        control_imitation_loss_weight=weight,
+    )
+    return TSConfig(control_recipe_name="custom", **overrides)
+
+
+def test_the_imitation_term_scores_the_schedule_and_masks_the_fitted_tail():
+    """Bank is a second-order quantity; position and velocity supervision never see it.
+
+    A schedule equal to the inverted one must cost nothing, a full-box error must cost the
+    same in every channel, and segments past the last measured velocity must not enter --
+    the fitted tail has no kinematics to invert.
+    """
+    from control_envelope import CONTROL_HALF_WIDTH
+    from prediction_outputs import ControlPrediction
+    from train import control_imitation_mse
+
+    config = _imitation_config(0.05)
+    target = torch.zeros(2, 8, 3, dtype=torch.float64)
+    weight = torch.ones(2, 8, dtype=torch.float64)
+    weight[1, 4:] = 0.0  # flight 1's fitted tail
+
+    def predict(controls: torch.Tensor) -> ControlPrediction:
+        return ControlPrediction(
+            controls=controls,
+            segment_durations=torch.full((2, 8), 10.0, dtype=torch.float64),
+            final_time_s=torch.full((2,), 80.0, dtype=torch.float64),
+        )
+
+    dynamics = {"reference_controls": target, "reference_control_weight": weight}
+    exact = control_imitation_mse(predict(target.clone()), config, dynamics)
+    assert torch.allclose(exact, torch.zeros(2, dtype=torch.float64))
+
+    # One half-box error in every channel costs 1.0 regardless of the channel's units.
+    full = target + torch.as_tensor(CONTROL_HALF_WIDTH, dtype=torch.float64)
+    assert torch.allclose(
+        control_imitation_mse(predict(full), config, dynamics),
+        torch.ones(2, dtype=torch.float64),
+    )
+
+    # An error confined to the masked tail is invisible on flight 1 and visible on flight 0.
+    tail = target.clone()
+    tail[:, 4:] = torch.as_tensor(CONTROL_HALF_WIDTH, dtype=torch.float64)
+    scored = control_imitation_mse(predict(tail), config, dynamics)
+    assert scored[0] == pytest.approx(0.5)
+    assert scored[1] == pytest.approx(0.0)
+
+    assert control_imitation_mse(predict(full), _imitation_config(0.0), dynamics) is None
+
+
+def test_the_imitation_target_is_inverted_through_the_configured_flight_model():
+    """The lagged model is supervised on COMMANDS, the point-mass model on actual controls.
+
+    Same guarantee the teacher already has, now for the training loss: the target is built
+    by the registry entry the forward rollout dispatches through, so the two can never be
+    solutions of different equations.
+    """
+    import dataset as dataset_module
+
+    seen: dict[str, str] = {}
+    real = dataset_module.segment_controls
+
+    def spy(*args, **kwargs):
+        seen["model"] = kwargs["config"].control_dynamics_model
+        return real(*args, **kwargs)
+
+    for model in (CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_FIRST_ORDER_LAG):
+        overrides = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
+        overrides.update(control_dynamics_model=model, control_imitation_loss_weight=0.05)
+        config = TSConfig(control_recipe_name="custom", **overrides)
+        assert config.control_dynamics_model in CONTROL_INVERSES
+        seen.clear()
+        dataset_module.segment_controls = spy
+        try:
+            from dataset import build_series
+            from synthetic import synthetic_arrivals
+
+            flights = synthetic_arrivals("KRDU", "05L", n_flights=1, seed=3)
+            series, _report = build_series(flights, config, airport="KRDU")
+            dataset_module.reference_control_supervision(
+                series[0], config.seq_len - 1, config,
+                total_duration_s=120.0, last_measured_time_s=120.0,
+            )
+        finally:
+            dataset_module.segment_controls = real
+        assert seen["model"] == model
+
+
+def test_the_imitation_weight_is_not_a_required_serialized_field():
+    """Its default reproduces every checkpoint trained before the term existed."""
+    from config import REQUIRED_SERIALIZED_CONTROL_FIELDS
+
+    assert "control_imitation_loss_weight" not in REQUIRED_SERIALIZED_CONTROL_FIELDS
+    assert TSConfig(prediction_output=PREDICTION_CONTROL).control_imitation_loss_weight == 0.0
+
+
+def test_an_enabled_loss_term_is_reported_as_its_own_component():
+    """A term the trainer accumulates but never declared crashes the epoch loop.
+
+    fit_model builds its accumulator from loss_component_names and then indexes it with
+    whatever keys the objective actually returned, so an extra term with no name raises
+    KeyError on the first batch -- after dataset build, which is the slow part.
+    """
+    from train import loss_component_names
+
+    off = loss_component_names(_imitation_config(0.0))
+    on = loss_component_names(_imitation_config(0.05))
+
+    assert "imitation" not in off
+    assert "imitation" in on
+    assert set(off) < set(on)

@@ -301,6 +301,7 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_state_objective": CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
         "control_velocity_loss_weight": 0.0,
         "control_velocity_loss_scale_mps": 10.0,
+        "control_imitation_loss_weight": 0.0,
         "control_dense_state_loss_weight": 0.0,
         "control_geometry_loss_weight": 0.0,
         "control_arc_horizontal_velocity_loss_weight": 0.0,
@@ -336,9 +337,10 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     "control_thrust_time_constant_s",
     "control_bank_time_constant_s",
     "control_load_time_constant_s",
-    # control_velocity_loss_weight / _scale_mps are deliberately NOT here: their defaults
-    # (0.0 / 10.0) reproduce the behaviour of every checkpoint trained before the term
-    # existed, which is exactly the "safe stand-in" test this list applies.
+    # control_velocity_loss_weight / _scale_mps and control_imitation_loss_weight are
+    # deliberately NOT here: their defaults (0.0 / 10.0 / 0.0) reproduce the behaviour of
+    # every checkpoint trained before those terms existed, which is exactly the "safe
+    # stand-in" test this list applies.
     "control_dense_state_loss_weight",
     "control_geometry_loss_weight",
     "control_arc_horizontal_velocity_loss_weight",
@@ -532,6 +534,15 @@ class TSConfig:
     # rows cannot enter. Zero keeps the frozen simple-v1 behaviour.
     control_velocity_loss_weight: float = 0.0
     control_velocity_loss_scale_mps: float = 10.0
+    # Direct supervision of the control schedule against the one inverted from the flown
+    # track by control_inverse_dynamics -- the same registry the forward model dispatches
+    # through, so the target can never be the solution of different equations. Position and
+    # velocity supervision constrain derivative orders 0 and 1; bank lives at order 2 and is
+    # otherwise never told what it should be. Measured on KSJC val, an unsupervised bank
+    # carries LESS information about the flown bank than a randomly chosen other flight's
+    # (per-flight skill +0.197 against +0.312), while a same-runway twin reaches +0.598 --
+    # so the signal is there and only supervision was missing. Zero keeps simple-v1/v2.
+    control_imitation_loss_weight: float = 0.0
     control_dense_state_loss_weight: float = 0.25
     control_geometry_loss_weight: float = 0.75
     control_arc_horizontal_velocity_loss_weight: float = 0.25
@@ -686,6 +697,11 @@ class TSConfig:
             or self.control_velocity_loss_scale_mps <= 0.0
         ):
             raise ValueError("control_velocity_loss_scale_mps must be finite and positive")
+        if (
+            not math.isfinite(self.control_imitation_loss_weight)
+            or self.control_imitation_loss_weight < 0.0
+        ):
+            raise ValueError("control_imitation_loss_weight must be finite and non-negative")
         for name in (
             "control_thrust_time_constant_s",
             "control_bank_time_constant_s",
@@ -1233,6 +1249,7 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "state_objective": config.control_state_objective,
         "velocity_loss_weight": config.control_velocity_loss_weight,
         "velocity_loss_scale_mps": config.control_velocity_loss_scale_mps,
+        "imitation_loss_weight": config.control_imitation_loss_weight,
         "dense_state_loss_weight": config.control_dense_state_loss_weight,
         "geometry_loss_weight": config.control_geometry_loss_weight,
         "arc_horizontal_velocity_loss_weight": (
