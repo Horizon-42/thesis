@@ -1,0 +1,11 @@
+{
+  "_comment": "The one combination worth trying: velocity 2x (the confirmed fix) with d_model 1024 (the only non-loss axis that moved the shared profile). Their mechanisms differ - one constrains what the rollout may do, the other gives the head room to make each segment flight-specific - so they may compose. Both singles are already measured on the same cohort (velocity 2x: 17.3 % shared / +0.197 skill / 317.7 m median ADE; wide: 48.8 % / -0.000 / 343.9 m), which is what makes one arm sufficient to read composition.",
+  "base_recipe": "simple-v1-lag",
+  "arms": [
+    {
+      "key": "velocity2x_wide",
+      "label": "combination: velocity 2x + d_model 1024",
+      "overrides": {"control_velocity_loss_weight": 0.003, "d_model": 1024, "d_ff": 2048}
+    }
+  ]
+}
