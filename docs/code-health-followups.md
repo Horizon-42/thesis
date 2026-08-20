@@ -115,3 +115,29 @@ without a roster.
 the clear step preserve known derived siblings, or have the harvest rebuild the roster after
 writing arrivals. Low risk either way; the roster is cheap to regenerate
 (`ensure_lateral_pass_roster`).
+
+## `run_all_tests.sh` has 13 pre-existing failures, and they hide new ones
+
+**Verified** (2026-08-20, clean `git worktree` at `84725d6`, i.e. the commit this session
+started from — so none of them come from the `simple-v3` work):
+
+- `trajectory_data_process/tests/test_ts_pipeline.py` — **11 failures**. The runner's printed
+  summary no longer matches what the tests assert: they expect lines like
+  `loss      : final_time=1, kinematic=3, terminal=0.02` and a `config    : TSConfig defaults`
+  block, while the runner now prints a different banner. Also affected: the CV default grid,
+  fixed/random anchor artifact paths, and five `--skip-train` checkpoint-rejection cases.
+  Most likely stale since `dd6191d` / `13d14a6` changed the config and CLI surface — the
+  tests were not updated with them.
+- `trajectory_data_process/tests/test_download_landings.py::test_download_reuses_interrupted_checkpoint_start_for_cache_keys`
+  — 1 failure, not investigated.
+- `4dTrajectory/optimization/collocation/tests/test_optimizer.py::test_fixed_time_objective_weights_control_effort_at_one`
+  — 1 failure, already documented in `4dTrajectory/CLAUDE.md` as a numpy 2.x regression.
+
+**Judgement**: the eleven are assertion drift rather than broken behaviour — the pipeline
+itself runs — but that is inferred from the assertion text, not from exercising the runner.
+
+**Why this matters more than the count suggests**: `run_all_tests.sh` exits 1 either way, so
+its exit code currently carries no information, and a *new* failure in the modeling suite is
+invisible unless someone diffs the failure list by hand. The per-subsystem suites are still
+clean (`ts_transformer` 366 passed, `aeroviz-4d/python` 154 passed), so the working practice
+is to run those directly and treat the aggregate script as advisory until this is fixed.
