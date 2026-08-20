@@ -4,9 +4,15 @@
 Every experiment in the queue (docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md) is
 judged the same way, so arms from different experiments are directly comparable:
 
-  common-profile share   how much of the bank is the SAME on every flight (truth: 3 %)
-  straight-ref bank RMS  bank on genuinely straight references   (truth: 0.55 deg)
-  straight-ref reversals bank sign changes there                 (truth: 0)
+  common-profile share   how much of the bank is the SAME on every flight
+  straight-ref bank RMS  bank on genuinely straight references
+  straight-ref reversals bank sign changes there
+
+Each of those three is printed with the SAME metric applied to the flown tracks of that
+arm's own airport, because the reference is airport-specific and was previously hardcoded
+to KSJC's values (3.2 %, 0.55 deg). KRDU's flown tracks are 1.8 % and 0.41 deg, so scoring
+KRDU arms against the KSJC constants overstated how far they still had to go on the share
+and understated how far past the data the strongest doses had gone.
   per-flight bank skill  correlation with the flown track's bank once both common
                          profiles are removed. Read it against the two references
                          printed with it, NOT against 1.0: a randomly chosen other real
@@ -172,10 +178,22 @@ def score(pred_dir: Path) -> dict | None:
     ], dtype=float) if straight.any() else np.array([], dtype=float)
     accuracy = json.loads((pred_dir / "summary.json").read_text())["accuracy"]
     dose = _imitation_dose(pred_dir)
+    truth_common = 100 * float(
+        np.sum(observed_bank.mean(axis=0) ** 2) * len(observed_bank)
+        / np.sum(observed_bank ** 2)
+    )
+    truth_rms = float(np.median(np.sqrt((observed_bank[straight] ** 2).mean(axis=1))))
+    truth_reversals = float(np.median([
+        sum(1 for a, b in zip(row, row[1:]) if a * b < 0 and abs(a - b) > 1.0)
+        for row in observed_bank[straight]
+    ])) if straight.any() else float("nan")
     floor, twin = _reference_skills(observed_bank, np.array(runways), np.array(entry))
     return {
         "flights": len(model_bank),
         "dose": dose,
+        "truth_common_share_pct": truth_common,
+        "truth_bank_rms_straight_deg": truth_rms,
+        "truth_reversals_straight": truth_reversals,
         "skill_floor": floor,
         "skill_twin": twin,
         "straight": int(straight.sum()),
@@ -193,15 +211,16 @@ def score(pred_dir: Path) -> dict | None:
     }
 
 
-# bank_skill has no "truth" column: 1.0 is unreachable because the future is only
-# partly determined by the entry state. Its floor and ceiling are measured per arm and
-# printed under the table instead.
-TRUTH = {"common_share_pct": 3.2, "bank_rms_straight_deg": 0.55,
-         "reversals_straight": 0.0}
+# Every reference here is MEASURED on the arm's own flights, never hardcoded: the truth
+# values are airport-specific, and bank_skill has no 1.0 to aim at because the future is
+# only partly determined by the entry state.
 ROWS = [
     ("common-profile share (%)", "common_share_pct", "{:8.1f}"),
+    ("  \u2514 flown tracks", "truth_common_share_pct", "{:8.1f}"),
     ("straight-ref bank RMS (deg)", "bank_rms_straight_deg", "{:8.2f}"),
+    ("  \u2514 flown tracks", "truth_bank_rms_straight_deg", "{:8.2f}"),
     ("straight-ref sign reversals", "reversals_straight", "{:8.1f}"),
+    ("  \u2514 flown tracks", "truth_reversals_straight", "{:8.1f}"),
     ("per-flight bank skill", "bank_skill", "{:8.3f}"),
     ("ADE mean (m)", "ade_mean", "{:8.1f}"),
     ("ADE median (m)", "ade_median", "{:8.1f}"),
@@ -233,23 +252,21 @@ def main(argv: list[str]) -> int:
     # "imitation_1x", which is an easy column to misread. Order by dose instead.
     scored = dict(sorted(scored.items(), key=lambda kv: kv[1]["dose"]))
     width = max(len(k) for k in scored) + 2
-    print(f"{'metric':<30}{'truth':>9}" + "".join(f"{k:>{width}}" for k in scored))
+    print(f"{'metric':<30}" + "".join(f"{k:>{width}}" for k in scored))
     for label, key, fmt in ROWS:
-        truth = TRUTH.get(key)
-        cell = f"{truth:9.2f}" if truth is not None else " " * 9
-        print(f"{label:<30}{cell}"
+        print(f"{label:<30}"
               + "".join(f"{fmt.format(scored[k][key]):>{width}}" for k in scored))
-    print(f"\n{'flights / straight refs':<30}{'':>9}"
+    print(f"\n{'flights / straight refs':<30}"
           + "".join(f"{str(scored[k]['flights']) + '/' + str(scored[k]['straight']):>{width}}"
                     for k in scored))
-    print(f"{'segments per arm':<30}{'':>9}"
+    print(f"{'segments per arm':<30}"
           + "".join(f"{','.join(map(str, scored[k]['n_segments'])):>{width}}" for k in scored))
-    print(f"{'imitation dose (x position)':<30}{'':>9}"
+    print(f"{'imitation dose (x position)':<30}"
           + "".join(f"{scored[k]['dose']:8.2f}".rjust(width) for k in scored))
     print(f"\n{'-- bank skill references --':<30}")
     for label, key in (("random other flight (floor)", "skill_floor"),
                        ("same-runway twin (ceiling)", "skill_twin")):
-        print(f"{label:<30}{'':>9}"
+        print(f"{label:<30}"
               + "".join(f"{scored[k][key]:8.3f}".rjust(width) for k in scored))
     return 0
 
