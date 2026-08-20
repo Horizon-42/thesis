@@ -10,8 +10,9 @@ judged the same way, so arms from different experiments are directly comparable:
   per-flight bank skill  correlation with the flown track's bank once both common
                          profiles are removed. Read it against the two references
                          printed with it, NOT against 1.0: a randomly chosen other real
-                         flight already scores the floor, and the best any predictor can
-                         do from the entry state is about what the same-runway twin gets.
+                         flight already scores the floor, and the same-runway twin shows
+                         roughly how much of the future bank is knowable (a yardstick,
+                         not a bound -- the 47x arm exceeds it).
   velocity RMS           chart-velocity error                    (baseline: 24.12 m/s)
   ADE / FDE              accuracy, so a "fix" that trades it away is visible
 
@@ -49,6 +50,20 @@ def _tortuosity(rows) -> float:
     return length / straight if straight > 1.0 else np.inf
 
 
+# w = 1.36 is 1x the position term at the converged KRDU baseline; see
+# docs/experiments/imitation_arms.json for how that was measured.
+IMITATION_WEIGHT_PER_POSITION = 1.36
+
+
+def _imitation_dose(pred_dir: Path) -> float:
+    """The arm's imitation weight as a multiple of the position term, 0.0 if absent."""
+    config = pred_dir.parent / pred_dir.name.split("_pred_")[0] / "config.json"
+    if not config.is_file():
+        return 0.0
+    weight = json.loads(config.read_text()).get("control_imitation_loss_weight") or 0.0
+    return float(weight) / IMITATION_WEIGHT_PER_POSITION
+
+
 def _per_flight_skill(pred: np.ndarray, truth: np.ndarray) -> float:
     gp, gt = pred.mean(axis=0), truth.mean(axis=0)
     values = [
@@ -66,9 +81,15 @@ def _reference_skills(observed: np.ndarray, runways: np.ndarray,
     floor  a randomly chosen other real flight, scored as if it were the prediction.
            Real bank profiles share one dominant mode, so this is well above zero and a
            model below it is not merely weak -- it is not predicting the right object.
-    twin   the same-runway flight whose entry state is nearest. It had the same
-           information and then saw a real future, so it stands in for the best any
-           predictor could do from these inputs.
+    twin   the same-runway flight whose entry state is nearest. It had comparable
+           information and then saw a real future, so it is a useful yardstick for how
+           much of the future bank is knowable at all.
+
+           It is NOT an upper bound, and has been exceeded: the 47x imitation arm
+           reaches +0.735 against a twin of +0.699, because the model reads the whole
+           120 s lookback trajectory while the twin match uses only entry position,
+           heading and duration. Read it as "roughly where a good predictor should be",
+           not as a ceiling.
     """
     if len(observed) < 4:
         return float("nan"), float("nan")
@@ -150,9 +171,11 @@ def score(pred_dir: Path) -> dict | None:
         for row in model_bank[straight]
     ], dtype=float) if straight.any() else np.array([], dtype=float)
     accuracy = json.loads((pred_dir / "summary.json").read_text())["accuracy"]
+    dose = _imitation_dose(pred_dir)
     floor, twin = _reference_skills(observed_bank, np.array(runways), np.array(entry))
     return {
         "flights": len(model_bank),
+        "dose": dose,
         "skill_floor": floor,
         "skill_twin": twin,
         "straight": int(straight.sum()),
@@ -206,6 +229,9 @@ def main(argv: list[str]) -> int:
         print("no scored arms found")
         return 1
 
+    # Alphabetical glob order once put "imitation_16x" between "baseline" and
+    # "imitation_1x", which is an easy column to misread. Order by dose instead.
+    scored = dict(sorted(scored.items(), key=lambda kv: kv[1]["dose"]))
     width = max(len(k) for k in scored) + 2
     print(f"{'metric':<30}{'truth':>9}" + "".join(f"{k:>{width}}" for k in scored))
     for label, key, fmt in ROWS:
@@ -218,6 +244,8 @@ def main(argv: list[str]) -> int:
                     for k in scored))
     print(f"{'segments per arm':<30}{'':>9}"
           + "".join(f"{','.join(map(str, scored[k]['n_segments'])):>{width}}" for k in scored))
+    print(f"{'imitation dose (x position)':<30}{'':>9}"
+          + "".join(f"{scored[k]['dose']:8.2f}".rjust(width) for k in scored))
     print(f"\n{'-- bank skill references --':<30}")
     for label, key in (("random other flight (floor)", "skill_floor"),
                        ("same-runway twin (ceiling)", "skill_twin")):
