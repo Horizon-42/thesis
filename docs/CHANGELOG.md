@@ -22,8 +22,8 @@ it and there is no future to invert there. Default 0.0, so simple-v1/v2 stay bit
 
 `simple-v3` = `simple-v2` + `control_imitation_loss_weight = 64.0` (~47x the position term).
 On 1404 KRDU validation flights: bank skill 0.124 → **0.735**, flight-independent share of
-the bank 49.0 % → **3.3 %** (flown tracks 3.2 %), straight-in bank RMS 3.92 → **0.36°**
-(0.55°), sign reversals 5 → **0**, ADE better on **57.0 %** of flights (median 656 → 501 m,
+the bank 49.0 % → **3.3 %** (KRDU's own flown tracks: 1.8 %), straight-in bank RMS 3.92 →
+**0.36°** (0.41°), sign reversals 5 → **0**, ADE better on **57.0 %** of flights (656 → 501 m,
 p=1.9e-7), FDE unchanged. First change in this investigation that buys control structure
 without paying accuracy for it.
 
