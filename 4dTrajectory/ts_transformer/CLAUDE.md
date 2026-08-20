@@ -211,6 +211,17 @@ Everything below is serialised into every checkpoint.
   bank RMS 3.92° → **0.36°** (0.55°), sign reversals 5 → **0**, and improves ADE on **57.0 %**
   of flights (median 656 → 501 m, p=1.9e-7) with FDE unchanged — unlike the velocity term,
   this structure costs no accuracy.
+- **The inverse's transport term is keyed on the BACKEND, and `include_transport` is
+  required.** The chart backends integrate `v_dot = a_force − ω×v`, so their inverse must add
+  ω×v back; `reanchored-rk4` re-anchors into geodetic state every substep INSTEAD of carrying
+  that term, so adding one to its inverse would make it wrong. `TRANSPORT_BACKENDS` names
+  which is which. This was previously gated on `frame_params is not None` while
+  `_transport_rate` never read the array's values — a flag wearing a data parameter's
+  clothes, and the scoring scripts duly forgot it while the training target passed it, so the
+  measured "truth" bank was not the quantity being trained toward. It cost nothing measurable
+  (0.030 % of bank RMS on KRDU, median 0.0074° per flight) but it was silent, which is the
+  point. Note `dynamics_arrays`' own `frame_params` entry is unrelated and is a real rollout
+  input.
 - **The imitation dose curve is NOT a ramp, and the sign test is not an effect size.** Below
   ~11.8× position the ladder is a noisy plateau (the 1.47× arm came out worse than 0.74× on
   every metric), so sampling only that region concludes the term barely works — the geometric
