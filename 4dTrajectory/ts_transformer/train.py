@@ -51,20 +51,20 @@ from config import (
     control_recipe,
     uses_control_dynamics,
 )
-import control_rollout
-from control_loss_components import (
+from control.dynamics import rollout as control_rollout
+from control.loss.components import (
     ControlStateLossResult,
     control_tracking_loss_terms,
 )
-from control_regularization import control_regularization_signals
-from control_training_curriculum import (
+from control.loss.regularization import control_regularization_signals
+from control.training.curriculum import (
     ControlTrainingStage,
     build_control_training_stage_view,
     build_control_training_stages,
     control_training_stage_for_epoch,
 )
-from control_training_diagnostics import ControlTrainingDiagnosticsAccumulator
-from control_terminal_clock import apply_control_terminal_clock
+from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
+from control.loss.terminal_clock import apply_control_terminal_clock
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -96,7 +96,8 @@ from metrics import (
     states_with_derived_velocity,
 )
 from models import build_model, parameter_count, resolve_device
-from control_envelope import CONTROL_HALF_WIDTH
+from batch_contract import model_forward, unpack_batch
+from control.envelope import CONTROL_HALF_WIDTH
 from prediction_outputs import ControlPrediction, StatePrediction
 from time_grids import batch_time_grid, numpy_inference_time_grid
 from training_performance import EpochProfiler
@@ -247,24 +248,6 @@ def move_fixed_dt_supervision(
     device: torch.device,
 ) -> FixedDTControlSupervision | None:
     return None if supervision is None else supervision.to(device)
-
-
-def unpack_batch(batch: tuple) -> tuple:
-    if len(batch) == 5:
-        return (*batch, None, None)
-    if len(batch) == 6:
-        return (*batch, None)
-    if len(batch) == 7:
-        return batch
-    raise ValueError(f"unexpected trajectory batch with {len(batch)} fields")
-
-
-def model_forward(
-    model: nn.Module,
-    history: torch.Tensor,
-    dynamics: dict[str, torch.Tensor] | None,
-):
-    return model(history) if dynamics is None else model(history, dynamics)
 
 
 def align_control_targets_to_prediction_clock(
@@ -626,7 +609,7 @@ def _fixed_dt_control_state_loss(
     del normalized_anchor_state, target_states, state_weights, target_final_time_s
     if dense_supervision is None:
         raise ValueError("fixed-dt control state loss requires dense supervision targets")
-    from fixed_dt_control_loss import fixed_dt_control_state_loss
+    from control.loss.fixed_dt import fixed_dt_control_state_loss
 
     result = fixed_dt_control_state_loss(
         prediction,

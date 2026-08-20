@@ -20,9 +20,9 @@ from config import (
     TSConfig,
 )
 from dataset import FixedAnchorTrajectoryWindows, FlightSeries, Normalizer
-from oracle_teacher.evaluation import move_dynamics
-from oracle_teacher.imitation import control_imitation_loss
-from train import model_forward, unpack_batch
+from control.oracle.evaluation import move_dynamics
+from control.oracle.imitation import control_imitation_loss
+from batch_contract import model_forward, unpack_batch
 
 
 SIMPLE_V1_TEACHER_SCHEDULE_SHA256 = (

@@ -55,7 +55,7 @@ from config import (
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     TSConfig,
 )
-from control_envelope import physical_controls
+from control.envelope import physical_controls
 
 
 @dataclass(frozen=True)

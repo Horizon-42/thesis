@@ -7,8 +7,8 @@ from dataclasses import dataclass
 import torch
 
 from config import TSConfig
-import control_rollout
-from control_training_curriculum import close_duration_prefix
+from control.dynamics import rollout as control_rollout
+from control.training.curriculum import close_duration_prefix
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
 from prediction_outputs import ControlPrediction

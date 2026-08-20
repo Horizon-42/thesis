@@ -7,7 +7,7 @@ import torch
 
 from channels import POSITION_IDX
 from config import TSConfig
-from control_oracle import ORACLE_OBJECTIVE_PHYSICAL_CRITERIA, evaluate_control_prediction
+from control.oracle.shooting import ORACLE_OBJECTIVE_PHYSICAL_CRITERIA, evaluate_control_prediction
 from dataset import FixedAnchorTrajectoryWindows
 from prediction_outputs import ControlPrediction
 

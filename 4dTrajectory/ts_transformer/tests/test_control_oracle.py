@@ -18,7 +18,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from control_oracle import (  # noqa: E402
+from control.oracle.shooting import (  # noqa: E402
     ORACLE_DURATION_LEARNED,
     ORACLE_DURATION_UNIFORM,
     ORACLE_OBJECTIVE_ALL_STATE,
@@ -31,10 +31,10 @@ from control_oracle import (  # noqa: E402
     oracle_state_loss,
     smooth_maximum,
 )
-from control_inverse_dynamics import (  # noqa: E402
+from control.dynamics.inverse import (  # noqa: E402
     refine_piecewise_constant_schedule,
 )
-from control_oracle_curriculum import (  # noqa: E402
+from control.oracle.curriculum import (  # noqa: E402
     build_horizon_curriculum,
     build_horizon_stage_view,
     stage_terminal_target,
@@ -42,7 +42,7 @@ from control_oracle_curriculum import (  # noqa: E402
     truncate_supervision,
 )
 from dataset import Normalizer  # noqa: E402
-from fixed_dt_control_loss import FixedDTStateLossResult  # noqa: E402
+from control.loss.fixed_dt import FixedDTStateLossResult  # noqa: E402
 from fixed_dt_supervision import FixedDTControlSupervision  # noqa: E402
 from prediction_outputs import ControlPrediction  # noqa: E402
 import run_ts_control_oracle as oracle_runner  # noqa: E402

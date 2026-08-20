@@ -10,7 +10,7 @@ from __future__ import annotations
 import torch
 
 from config import TSConfig
-from control_dynamics_backends import (
+from control.dynamics.backends import (
     DenseControlRolloutChannels,
     EndpointControlRollout,
     RolloutInputs,

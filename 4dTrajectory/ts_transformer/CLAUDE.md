@@ -55,6 +55,29 @@ Everything below is serialised into every checkpoint.
   `transport-chart-velocity` | `scaled-transport-chart-velocity` is the state representation the
   long rollout carries. The registry in `control_dynamics_backends.py` is keyed by the PAIR.
 
+## Layout
+
+Control-specific code lives in **`control/`**, by role rather than behind a `control_`
+prefix: `envelope`, `heads`, `duration`, `conditioning`, `dynamics/{backends,rollout,inverse}`,
+`loss/{components,terminal_clock,fixed_dt,regularization}`, `training/{curriculum,diagnostics}`,
+`oracle/*` (which absorbed the old `oracle_teacher/` package — two halves of one idea).
+
+**Membership rule**: a module belongs in `control/` only if EVERY consumer of it is
+control-specific. `prediction_outputs` (holds `StatePrediction`), `terminal_state_loss`,
+`arc_length_geometry`, `fixed_dt_supervision` and `flyability` therefore stay at the top
+level — `fixed_anchor_validation` and `dataset` share them with the state path, and filing
+them under `control` would claim an ownership that does not exist.
+
+**Direction**: the training loop imports `control/`, never the reverse. `control/` may import
+`dataset` (`Normalizer` and the window types are data-plane values it genuinely consumes) but
+not `train`/`forecast`/`models`/`batching`. The oracle takes `train`'s objective dispatch as
+an injected `loss_components` argument for exactly this reason. `batch_contract.py` holds
+`unpack_batch`/`model_forward` so the train-only oracle can read a batch without importing
+the loop it runs inside. `tests/test_architecture.py` enforces all of it.
+
+`control/__init__.py` re-exports nothing on purpose — flattening forty names into one
+namespace would restore the undifferentiated listing the package exists to remove.
+
 ## Gotchas (recurring, verified)
 
 - **`simple-v3` is the control recipe to use.** It is `simple-v2` plus one field,

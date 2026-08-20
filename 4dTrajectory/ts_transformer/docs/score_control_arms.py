@@ -30,7 +30,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "4dTrajectory" / "ts_transformer"))
-from control_inverse_dynamics import actual_controls  # noqa: E402
+from control.dynamics.inverse import actual_controls  # noqa: E402
 
 AERO = np.array([122.6, 2.7, 0.023, 0.0334, 0.8, 0.2])
 MAX_THRUST_N = 240_000.0

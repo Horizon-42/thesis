@@ -726,7 +726,7 @@ def _teacher_pretrainer_from_args(
         parser.error(
             "--control-teacher-schedules requires --prediction-output control"
         )
-    from oracle_teacher.pretraining import CachedSchedulePretrainer
+    from control.oracle.pretraining import CachedSchedulePretrainer
 
     try:
         return CachedSchedulePretrainer(

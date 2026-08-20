@@ -17,7 +17,7 @@ from torch import nn
 from channels import POSITION_IDX
 from config import TSConfig
 from dataset import Normalizer
-from fixed_dt_control_loss import (
+from control.loss.fixed_dt import (
     FixedDTStateLossResult,
     fixed_dt_control_state_loss,
 )

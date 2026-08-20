@@ -21,9 +21,9 @@ from config import (  # noqa: E402
     PREDICTION_CONTROL,
     TSConfig,
 )
-from oracle_teacher.imitation import control_imitation_loss  # noqa: E402
-from oracle_teacher.evaluation import observed_clock_prediction  # noqa: E402
-from oracle_teacher.pretraining import validate_teacher_durations  # noqa: E402
+from control.oracle.imitation import control_imitation_loss  # noqa: E402
+from control.oracle.evaluation import observed_clock_prediction  # noqa: E402
+from control.oracle.pretraining import validate_teacher_durations  # noqa: E402
 from prediction_outputs import ControlOutputHead, ControlPrediction  # noqa: E402
 
 REPO_ROOT = TS_DIR.parents[1]

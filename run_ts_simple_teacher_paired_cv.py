@@ -57,14 +57,15 @@ from dataset import (  # noqa: E402
     provenance_manifest_digests,
 )
 from models import parameter_count, resolve_device  # noqa: E402
-from oracle_teacher.evaluation import evaluate_schedule, move_dynamics  # noqa: E402
-from oracle_teacher.optimization import (  # noqa: E402
+from control.oracle.evaluation import evaluate_schedule, move_dynamics  # noqa: E402
+from train import prediction_loss_components  # noqa: E402
+from control.oracle.optimization import (  # noqa: E402
     BatchedOracleTeacher,
     teacher_optimization_stages,
     optimize_teacher_controls,
 )
-from oracle_teacher.pretraining import CachedSchedulePretrainer  # noqa: E402
-from oracle_teacher.targets import build_inverse_dynamics_target  # noqa: E402
+from control.oracle.pretraining import CachedSchedulePretrainer  # noqa: E402
+from control.oracle.targets import build_inverse_dynamics_target  # noqa: E402
 from prediction_outputs import ControlPrediction  # noqa: E402
 from train import (  # noqa: E402
     evaluate_fixed_anchor_series,
@@ -370,6 +371,7 @@ def optimize_fold_teacher(
         learning_rate=learning_rate,
         gradient_clip_norm=gradient_clip_norm,
         log_every=log_every,
+        loss_components=prediction_loss_components,
     )
     with torch.no_grad():
         optimized = teacher()

@@ -41,15 +41,15 @@ from config import (  # noqa: E402
     TSConfig,
     control_recipe_overrides,
 )
-from control_dynamics_backends import (  # noqa: E402
+from control.dynamics.backends import (  # noqa: E402
     _BACKENDS,
     RolloutInputs,
     control_dynamics_backend,
 )
-from control_envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
 from geokit import METRES_PER_DEG_LAT  # noqa: E402
-import control_inverse_dynamics as inverse_module  # noqa: E402
-from control_inverse_dynamics import (  # noqa: E402
+import control.dynamics.inverse as inverse_module  # noqa: E402
+from control.dynamics.inverse import (  # noqa: E402
     CONTROL_INVERSES,
     actual_controls,
     reference_controls,
@@ -398,7 +398,7 @@ def test_the_time_constant_axis_is_dropped_from_cv_when_the_lag_is_off():
 
 def test_the_exported_control_record_stays_in_newtons():
     """The evaluation contract is shared with the optimizer and did not change units."""
-    from control_envelope import fraction_controls, physical_controls
+    from control.envelope import fraction_controls, physical_controls
 
     controls = np.array([[[0.5, 0.1, 1.0], [-0.2, -0.1, 1.2]]])
     max_thrust_n = np.array([MAX_THRUST_N])
@@ -423,7 +423,7 @@ def _velocity_term_config(weight: float) -> TSConfig:
 def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
     """The true-time-position objective scored position only; this adds the velocity."""
     import train as train_module
-    from control_loss_components import ControlStateLossResult, control_tracking_loss_terms
+    from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
     from dataset import Normalizer
 
     normalizer = Normalizer(mean=np.zeros(6), std=np.ones(6))
@@ -540,7 +540,7 @@ def test_the_imitation_term_scores_the_schedule_and_masks_the_fitted_tail():
     same in every channel, and segments past the last measured velocity must not enter --
     the fitted tail has no kinematics to invert.
     """
-    from control_envelope import CONTROL_HALF_WIDTH
+    from control.envelope import CONTROL_HALF_WIDTH
     from prediction_outputs import ControlPrediction
     from train import control_imitation_mse
 

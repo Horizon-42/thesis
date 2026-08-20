@@ -16,7 +16,7 @@ import numpy as np
 import torch
 
 from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, TSConfig, uses_control_dynamics
-from control_training_diagnostics import ControlTrainingDiagnosticsAccumulator
+from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from models import build_model
 from prediction_outputs import ControlPrediction
 

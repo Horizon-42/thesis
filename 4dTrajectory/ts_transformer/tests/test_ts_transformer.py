@@ -41,18 +41,18 @@ ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
 import channels as ch  # noqa: E402
-import control_models  # noqa: E402
+from control import heads as control_models  # noqa: E402
 import batching  # noqa: E402
 import build_multiflight_capacity_report as capacity_report  # noqa: E402
 import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
-import control_rollout as control_rollout_module  # noqa: E402
+import control.dynamics.rollout as control_rollout_module  # noqa: E402
 import dataset as dataset_module  # noqa: E402
 import batch_benchmark as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
 import experiment_index  # noqa: E402
-import fixed_dt_control_loss as fixed_dt_loss_module  # noqa: E402
-import oracle_teacher.pretraining as teacher_pretraining  # noqa: E402
+import control.loss.fixed_dt as fixed_dt_loss_module  # noqa: E402
+import control.oracle.pretraining as teacher_pretraining  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
@@ -98,24 +98,24 @@ from config import (  # noqa: E402
     PREDICTION_STATE,
     TSConfig, control_recipe, control_simple_v1_overrides,
 )
-from control_envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
-from control_loss_components import (  # noqa: E402
+from control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from control.loss.components import (  # noqa: E402
     ControlStateLossResult,
     control_tracking_loss_terms,
     last_reliable_terminal_velocity_target,
 )
-from control_training_curriculum import (  # noqa: E402
+from control.training.curriculum import (  # noqa: E402
     ControlTrainingStage,
     build_control_training_stage_view,
     build_control_training_stages,
 )
-from control_training_diagnostics import (  # noqa: E402
+from control.training.diagnostics import (  # noqa: E402
     ControlTrainingDiagnosticsAccumulator,
     clip_gradients_by_policy,
     clip_gradients_by_global_norm,
     gradient_norms,
 )
-from control_regularization import control_regularization_signals  # noqa: E402
+from control.loss.regularization import control_regularization_signals  # noqa: E402
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
     Normalizer, RandomAnchorTrajectoryWindows, arrival_data_provenance, build_series,
@@ -146,12 +146,12 @@ from metrics import (  # noqa: E402
     raw_kinematic_metrics, states_with_derived_velocity,
 )
 from models import build_model, parameter_count  # noqa: E402
-from oracle_teacher.pretraining import CachedSchedulePretrainer  # noqa: E402
+from control.oracle.pretraining import CachedSchedulePretrainer  # noqa: E402
 from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
 from terminal_state_loss import terminal_state_errors  # noqa: E402
-from uniform_duration_control import UniformDurationControlHead  # noqa: E402
+from control.duration import UniformDurationControlHead  # noqa: E402
 from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
 from train import (  # noqa: E402

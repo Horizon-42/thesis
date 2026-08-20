@@ -19,9 +19,9 @@ from config import (
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     TSConfig,
 )
-import control_rollout
-from control_loss_components import ControlStateLossResult
-from control_training_curriculum import ControlTrainingStage
+from control.dynamics import rollout as control_rollout
+from control.loss.components import ControlStateLossResult
+from control.training.curriculum import ControlTrainingStage
 from dataset import Normalizer
 from prediction_outputs import ControlPrediction
 

@@ -27,9 +27,9 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from control_models import ControlOutputModel
+from control.heads import ControlOutputModel
 from prediction_outputs import StateOutputLayer
-from uniform_duration_control import UniformDurationControlOutputModel
+from control.duration import UniformDurationControlOutputModel
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
 

@@ -38,7 +38,7 @@ from config import (
     CONTROL_DYNAMICS_POINT_MASS,
     TSConfig,
 )
-from control_envelope import CONTROL_NAMES, fraction_controls
+from control.envelope import CONTROL_NAMES, fraction_controls
 from geokit import WGS84_A, WGS84_E2
 
 # The command inversion differentiates a control signal that is itself built from second

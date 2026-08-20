@@ -8,12 +8,12 @@ import numpy as np
 import torch
 
 from channels import states_from_channels
-from control_inverse_dynamics import segment_controls
-from control_models import NEUTRAL_CONTROLS
+from control.dynamics.inverse import segment_controls
+from control.heads import NEUTRAL_CONTROLS
 from dataset import FixedAnchorTrajectoryWindows
 from prediction_outputs import ControlPrediction
 from reference_velocity import rebuild_reference_velocities
-from train import unpack_batch
+from batch_contract import unpack_batch
 
 
 @dataclass(frozen=True)

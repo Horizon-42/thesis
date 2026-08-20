@@ -35,7 +35,7 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 import run_ts_predictability_report as common_report  # noqa: E402
 from config import PREDICTION_CONTROL  # noqa: E402
-from control_rollout import rollout_control_endpoints  # noqa: E402
+from control.dynamics.rollout import rollout_control_endpoints  # noqa: E402
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightSeries,

@@ -80,8 +80,9 @@ from config import (
     TSConfig,
     uses_control_dynamics,
 )
-from control_envelope import CONTROL_LOWER, CONTROL_UPPER
-from control_inverse_dynamics import actual_controls, segment_controls
+from control.conditioning import DYNAMICS_CONDITION_NAMES, condition_vector
+from control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from control.dynamics.inverse import actual_controls, segment_controls
 from coordinate_frames import CoordinateFrame, frame_for_state
 from fixed_dt_supervision import (
     FixedDTControlSupervision,
@@ -398,19 +399,6 @@ class FlightSeries:
         return f"{self.airport}:{self.flight_id}" if self.airport else self.flight_id
 
 
-# Control-output conditioning is dimensionless and deliberately small.  The model still sees
-# the full observed state history; these values supply only what ADS-B cannot identify:
-# aircraft mass, installed thrust, and the aerodynamic model used by the rollout.
-DYNAMICS_CONDITION_NAMES = (
-    "mass_100t",
-    "max_thrust_1MN",
-    "wing_area_500m2",
-    "cl_max_3",
-    "cd0_0p1",
-    "induced_k_0p1",
-    "stall_threshold",
-    "stall_k_0p2",
-)
 
 
 # How much observed lookback the anchor-state control inversion differentiates. It needs
@@ -525,19 +513,7 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
     )[0][1]
     aero = scenario.aero
     max_thrust = float(scenario.aircraft.engine.max_thrust_total_n)
-    condition = np.array(
-        [
-            mass_kg / 100_000.0,
-            max_thrust / 1_000_000.0,
-            aero.S / 500.0,
-            aero.Cl_max / 3.0,
-            aero.Cd0 / 0.1,
-            aero.k / 0.1,
-            aero.stall_threshold,
-            aero.k_stall / 0.2,
-        ],
-        dtype=np.float32,
-    )
+    condition = condition_vector(mass_kg, max_thrust, aero)
     heading = float(getattr(series.frame, "heading_rad", 0.0))
     return {
         "condition": condition,

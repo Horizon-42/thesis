@@ -34,7 +34,7 @@ from config import (  # noqa: E402
     PREDICTION_CONTROL,
     TSConfig,
 )
-from control_oracle import (  # noqa: E402
+from control.oracle.shooting import (  # noqa: E402
     ORACLE_DURATION_LEARNED,
     ORACLE_DURATION_MODES,
     ORACLE_OBJECTIVE_ALL_STATE,
@@ -44,12 +44,12 @@ from control_oracle import (  # noqa: E402
     fit_control_oracle,
     evaluate_control_prediction,
 )
-from control_oracle_curriculum import (  # noqa: E402
+from control.oracle.curriculum import (  # noqa: E402
     HorizonCurriculumStage,
     build_horizon_curriculum,
     build_horizon_stage_view,
 )
-from control_inverse_dynamics import (  # noqa: E402
+from control.dynamics.inverse import (  # noqa: E402
     refine_piecewise_constant_schedule,
     segment_controls,
 )

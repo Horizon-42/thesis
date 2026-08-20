@@ -46,7 +46,7 @@ from config import (  # noqa: E402
     uses_control_dynamics,
 )
 
-from control_rollout import rollout_control_dense  # noqa: E402
+from control.dynamics.rollout import rollout_control_dense  # noqa: E402
 from dataset import (  # noqa: E402
     FlightSeries,
     arrival_data_provenance,

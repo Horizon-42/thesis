@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 
 from config import TSConfig
-from control_models import (
+from control.heads import (
     ControlFeatureModel,
     _initialize_control_head,
     _initialize_final_time_head,

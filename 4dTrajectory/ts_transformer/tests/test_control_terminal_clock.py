@@ -12,8 +12,8 @@ TS_DIR = Path(__file__).resolve().parents[1]
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
-import control_terminal_clock as terminal_clock_module  # noqa: E402
-import control_rollout as control_rollout_module  # noqa: E402
+import control.loss.terminal_clock as terminal_clock_module  # noqa: E402
+import control.dynamics.rollout as control_rollout_module  # noqa: E402
 from config import (  # noqa: E402
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -24,8 +24,8 @@ from config import (  # noqa: E402
     PREDICTION_CONTROL,
     TSConfig,
 )
-from control_loss_components import ControlStateLossResult  # noqa: E402
-from control_training_curriculum import ControlTrainingStage  # noqa: E402
+from control.loss.components import ControlStateLossResult  # noqa: E402
+from control.training.curriculum import ControlTrainingStage  # noqa: E402
 from dataset import Normalizer  # noqa: E402
 from prediction_outputs import ControlPrediction  # noqa: E402
 

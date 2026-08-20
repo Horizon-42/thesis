@@ -34,14 +34,15 @@ from config import (  # noqa: E402
 )
 from dataset import FixedAnchorTrajectoryWindows, Normalizer  # noqa: E402
 from models import resolve_device  # noqa: E402
-from oracle_teacher.cohort import select_outer_train_cohort  # noqa: E402
-from oracle_teacher.evaluation import evaluate_schedule, move_dynamics  # noqa: E402
-from oracle_teacher.optimization import (  # noqa: E402
+from control.oracle.cohort import select_outer_train_cohort  # noqa: E402
+from control.oracle.evaluation import evaluate_schedule, move_dynamics  # noqa: E402
+from train import prediction_loss_components  # noqa: E402
+from control.oracle.optimization import (  # noqa: E402
     BatchedOracleTeacher,
     optimize_teacher_controls,
     teacher_optimization_stages,
 )
-from oracle_teacher.targets import build_inverse_dynamics_target  # noqa: E402
+from control.oracle.targets import build_inverse_dynamics_target  # noqa: E402
 
 
 SCHEMA = "ts-oracle-teacher-optimized-cohort-v1-train-only"
@@ -196,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         learning_rate=args.learning_rate,
         gradient_clip_norm=args.gradient_clip_norm,
         log_every=args.log_every,
+        loss_components=prediction_loss_components,
     )
     with torch.no_grad():
         optimized = teacher()

@@ -17,7 +17,7 @@ import torch
 from arc_length_geometry import arc_length_geometry_metrics, arc_length_velocity_metrics
 from channels import POSITION_IDX, VELOCITY_IDX
 from config import HORIZON_NORMALIZED, TSConfig
-from control_loss_components import last_reliable_terminal_velocity_target
+from control.loss.components import last_reliable_terminal_velocity_target
 from dataset import FlightSeries, Normalizer
 from fixed_dt_supervision import build_fixed_dt_supervision
 from terminal_state_loss import terminal_state_metrics_numpy

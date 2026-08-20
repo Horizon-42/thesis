@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any, Callable
+
 import torch
 from torch import nn
 
 from config import TSConfig
-from control_training_curriculum import ControlTrainingStage
+from control.training.curriculum import ControlTrainingStage
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
 from prediction_outputs import ControlPrediction
-from train import prediction_loss_components
 
 
 # The one short-to-long refinement schedule every teacher cohort is fitted with. Early
@@ -19,6 +20,11 @@ from train import prediction_loss_components
 # adjoint. Both the production generator and the paired-CV ablation call this, so a
 # schedule change cannot land in one and not the other.
 TEACHER_REFINEMENT_HORIZONS_S = (60.0, 120.0, 240.0)
+
+
+# train.prediction_loss_components, injected. Typed loosely on purpose: spelling out the
+# eleven-argument signature here would duplicate a contract that already has one home.
+LossComponentsFn = Callable[..., Any]
 
 
 def teacher_optimization_stages(
@@ -83,8 +89,16 @@ def optimize_teacher_controls(
     learning_rate: float,
     gradient_clip_norm: float,
     log_every: int,
+    loss_components: LossComponentsFn,
 ) -> list[dict[str, float | int | str]]:
-    """Refine controls with the production loss while keeping every clock fixed."""
+    """Refine controls with the production loss while keeping every clock fixed.
+
+    ``loss_components`` is injected rather than imported: it is ``train``'s objective
+    dispatch, and importing the training loop from inside ``control`` would invert the
+    layering — the loop imports this package, not the other way round. Passing it also
+    makes it explicit at both call sites that the teacher is refined against exactly the
+    production objective, which is the whole point of the oracle.
+    """
     optimizer = torch.optim.Adam((teacher.control_logits,), lr=learning_rate)
     flight_weights = torch.ones(len(x), dtype=x.dtype, device=x.device)
     history: list[dict[str, float | int | str]] = []
@@ -92,7 +106,7 @@ def optimize_teacher_controls(
     for training_stage, stage_steps in stages:
         for stage_step in range(1, stage_steps + 1):
             optimizer.zero_grad()
-            components = prediction_loss_components(
+            components = loss_components(
                 teacher(),
                 x[:, -1],
                 target,

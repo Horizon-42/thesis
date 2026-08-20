@@ -157,7 +157,7 @@ def figure_mode_alignment(arms: dict[str, dict]) -> None:
 
 def _bank_matrices(pred_dir: Path):
     import json
-    from control_inverse_dynamics import actual_controls
+    from control.dynamics.inverse import actual_controls
     aero = np.array([122.6, 2.7, 0.023, 0.0334, 0.8, 0.2])
     grid = 64
     model, observed = [], []

@@ -7,8 +7,8 @@ import torch
 import torch.nn as nn
 
 from config import TSConfig
-from control_envelope import CONTROL_LOWER, CONTROL_UPPER
-from dataset import DYNAMICS_CONDITION_NAMES
+from control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from control.conditioning import DYNAMICS_CONDITION_NAMES
 from prediction_outputs import ControlOutputHead, FinalTimeHead
 
 

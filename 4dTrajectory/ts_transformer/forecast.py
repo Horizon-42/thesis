@@ -18,8 +18,8 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
-import control_rollout
-from control_envelope import physical_controls
+from control.dynamics import rollout as control_rollout
+from control.envelope import physical_controls
 from dataset import FlightSeries, Normalizer, dynamics_arrays
 from metrics import states_with_derived_velocity
 from prediction_outputs import ControlPrediction

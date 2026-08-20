@@ -30,9 +30,9 @@ from config import (  # noqa: E402
 )
 from dataset import FixedAnchorTrajectoryWindows, Normalizer  # noqa: E402
 from models import resolve_device  # noqa: E402
-from oracle_teacher.cohort import select_outer_train_cohort  # noqa: E402
-from oracle_teacher.evaluation import evaluate_schedule  # noqa: E402
-from oracle_teacher.targets import (  # noqa: E402
+from control.oracle.cohort import select_outer_train_cohort  # noqa: E402
+from control.oracle.evaluation import evaluate_schedule  # noqa: E402
+from control.oracle.targets import (  # noqa: E402
     build_inverse_dynamics_target,
     neutral_prediction,
 )
