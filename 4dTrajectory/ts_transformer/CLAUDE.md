@@ -57,8 +57,12 @@ Everything below is serialised into every checkpoint.
 
 ## Gotchas (recurring, verified)
 
-- **`simple-v2` is the control recipe to use; the objective must score VELOCITY, not just
-  position.** simple-v1's `true-time-position` objective scored position at 64 endpoints and
+- **`simple-v3` is the control recipe to use.** It is `simple-v2` plus one field,
+  `control_imitation_loss_weight = 64.0` (~47× the position term), which supervises the
+  control schedule directly — see the bank entry below for why that was the missing piece and
+  what it measures. `simple-v2` remains the correct reference point for anything that predates
+  it, and everything in the next paragraph is still true of it.
+- **The objective must score VELOCITY, not just position** (this is what `simple-v2` added). simple-v1's `true-time-position` objective scored position at 64 endpoints and
   nothing else, so a rollout was free to thread the right places on any route between them —
   and it did: **71 % of the predicted bank energy was one profile shared by every flight**
   (flown tracks: 3 %), that profile was not even the population mean (the flown tracks average
@@ -189,7 +193,8 @@ Everything below is serialised into every checkpoint.
   start of the approach. Lookback = the `t ≤ 0` slice; the anchor sample belongs to both halves,
   so the join is exact, not approximate.
 
-- **Bank was never supervised, and unsupervised it lands BELOW a trivial baseline.** Position is
+- **Bank was never supervised, and unsupervised it lands BELOW a trivial baseline —
+  `simple-v3` is the fix.** Position is
   derivative order 0 and `control_velocity_loss_weight` is order 1; bank lives at order 2, so no
   term in the loss ever named it. Measured consequence: the model's bank carries *less*
   information about the flown bank than a randomly chosen OTHER flight's does — per-flight skill
@@ -201,6 +206,20 @@ Everything below is serialised into every checkpoint.
   `docs/score_control_arms.py` now prints per arm — never against 1.0**, which is unreachable
   because the entry state only partly determines the future. Doing so inverts the earlier
   loss-design reading: the velocity dose frozen into `simple-v2` is the only one below the floor.
+  Measured on 1404 KRDU validation flights, `simple-v3` takes per-flight bank skill 0.124 →
+  **0.735**, the flight-independent share 49.0 % → **3.3 %** (flown tracks 3.2 %), straight-in
+  bank RMS 3.92° → **0.36°** (0.55°), sign reversals 5 → **0**, and improves ADE on **57.0 %**
+  of flights (median 656 → 501 m, p=1.9e-7) with FDE unchanged — unlike the velocity term,
+  this structure costs no accuracy.
+- **The imitation dose curve is NOT a ramp, and the sign test is not an effect size.** Below
+  ~11.8× position the ladder is a noisy plateau (the 1.47× arm came out worse than 0.74× on
+  every metric), so sampling only that region concludes the term barely works — the geometric
+  1/4/16/64 ladder is what made the effect visible. Past 47× the fit saturates and starts
+  overshooting: at 188× straight-in bank is 0.24° and the shared share 3.0 %, both past the
+  flown tracks' own 0.55° and 3.2 %, i.e. smoother than reality rather than closer to it.
+  And at n=1404 the paired sign test returns **p = 3e-16 for pure seed noise**, so read
+  magnitudes, never p: seed noise moves bank skill 0.019 and ADE 1.7 m, the dose effects 3-8×
+  and 13-52× that.
 - **`control_imitation_loss_weight` supervises the schedule directly**, against
   `control_inverse_dynamics` — the same registry the forward model dispatches on, so target and
   rollout can never be different equations. The target is built in

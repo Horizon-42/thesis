@@ -1,0 +1,7 @@
+{
+  "_comment": "Finds the far end of the imitation dose curve. At 47x (weight 64) the common-profile share already matches the flown tracks (3.3% vs 3.2%) and bank skill is still climbing steeply (+0.144 from 11.8x), so the curve has no visible turn yet and freezing a recipe means knowing which side of it we are on. Weight 256 = 188x the position term on the converged KRDU baseline calibration (w = 1.36 is 1x). Seed 1337, matching the rest of the ladder. Expect one of: a turn (structure metrics stop improving or accuracy degrades), or a collapse into a pure schedule-fitter that ignores position -- both are informative, and the ADE/FDE columns plus the paired test against 47x tell them apart.",
+  "base_recipe": "simple-v2",
+  "arms": [
+    {"key": "far_188x", "label": "imitation term ~188x position", "overrides": {"control_imitation_loss_weight": 256.0}}
+  ]
+}

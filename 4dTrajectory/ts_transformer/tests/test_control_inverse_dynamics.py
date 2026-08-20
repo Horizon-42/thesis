@@ -625,3 +625,42 @@ def test_an_enabled_loss_term_is_reported_as_its_own_component():
     assert "imitation" not in off
     assert "imitation" in on
     assert set(off) < set(on)
+
+
+def test_simple_v3_is_the_settled_production_recipe():
+    """simple-v3 = simple-v2 + direct supervision of the control schedule.
+
+    One field separates them, and it is the imitation weight: bank is an order-2
+    quantity that simple-v2's position and velocity terms never named, and unsupervised
+    it scored BELOW a random-other-flight baseline on KRDU (0.124 against a floor of
+    0.170). The weight is 47x the position term, chosen off an eight-point ladder where
+    the region below 11.8x is a noisy plateau and 188x overshoots the flown data.
+    """
+    from config import (
+        CONTROL_RECIPE_SIMPLE_V2,
+        CONTROL_RECIPE_SIMPLE_V3,
+        SIMPLE_V3_IMITATION_LOSS_WEIGHT,
+        SIMPLE_V2_VELOCITY_LOSS_WEIGHT,
+    )
+
+    v2 = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V2)
+    v3 = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V3)
+
+    assert {name for name in v2 | v3 if v2.get(name) != v3.get(name)} == {
+        "control_imitation_loss_weight"
+    }
+    assert v3["control_imitation_loss_weight"] == SIMPLE_V3_IMITATION_LOSS_WEIGHT
+    # Everything simple-v2 settled is inherited, not re-litigated.
+    assert v3["control_velocity_loss_weight"] == SIMPLE_V2_VELOCITY_LOSS_WEIGHT
+    assert v3["control_dynamics_model"] == CONTROL_DYNAMICS_FIRST_ORDER_LAG
+    assert TIME_CONSTANT_FIELDS <= set(v3)
+    assert v3["d_model"] == 512
+
+    config = TSConfig(control_recipe_name=CONTROL_RECIPE_SIMPLE_V3, **v3)
+    assert TSConfig.from_dict(config.to_dict()) == config
+    # The term must actually be wired into training, not merely stored.
+    from train import loss_component_names
+
+    assert "imitation" in loss_component_names(config)
+    with pytest.raises(ValueError, match="recipe fields are frozen"):
+        replace(config, control_imitation_loss_weight=0.0)

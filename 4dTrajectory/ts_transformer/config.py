@@ -124,11 +124,25 @@ CONTROL_RECIPE_SIMPLE_V1_LAG = "simple-v1-lag"
 # including the three time constants — a recipe that leaves a field open does not name one
 # configuration. See docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md.
 CONTROL_RECIPE_SIMPLE_V2 = "simple-v2"
+# simple-v2 plus direct supervision of the control schedule against the one
+# control_inverse_dynamics reads off the flown track. simple-v2 scored position (order 0)
+# and velocity (order 1) only, so bank -- an order-2 quantity -- was never named by the
+# loss, and unsupervised it landed BELOW a trivial baseline: on KRDU the predicted bank
+# carried less information about the flown bank than a randomly chosen other flight's did
+# (per-flight skill 0.124 against a random-flight floor of 0.170). On 1404 KRDU validation
+# flights this recipe takes that skill to 0.735, the flight-independent share of the bank
+# from 49.0 % to 3.3 % (flown tracks: 3.2 %), the bank on straight-in references from 3.92
+# to 0.36 deg (0.55), sign reversals there from 5 to 0, AND improves ADE on 57.0 % of
+# flights (median 656 -> 501 m, p=1.9e-7) with FDE unchanged. Unlike the velocity term,
+# whose doses bought bank structure at 18-50 % of FDE, this one costs no accuracy.
+# See docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md section 12.
+CONTROL_RECIPE_SIMPLE_V3 = "simple-v3"
 CONTROL_RECIPE_NAMES = (
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_SIMPLE_V1,
     CONTROL_RECIPE_SIMPLE_V1_LAG,
     CONTROL_RECIPE_SIMPLE_V2,
+    CONTROL_RECIPE_SIMPLE_V3,
 )
 
 # The velocity weight simple-v2 pins. Calibrated, not chosen: at the converged simple-v1
@@ -137,6 +151,20 @@ CONTROL_RECIPE_NAMES = (
 # reducing the bank (below the flown tracks' own 0.55 deg) while ADE, FDE and final-time
 # all degrade, FDE from 818 to 1231 m at 128x.
 SIMPLE_V2_VELOCITY_LOSS_WEIGHT = 0.003
+
+# The imitation weight simple-v3 pins, as a weight and not a multiple: at the converged
+# KRDU simple-v2 operating point (position term 0.0417, unweighted imitation term 0.0308)
+# w = 1.36 is 1x the position term, so 64 is ~47x it. Selected from an eight-point
+# geometric ladder, and the two neighbours are why it is this and not the extremes:
+#   - Below 11.8x the ladder is a NOISY PLATEAU, not a ramp: the 1.47x arm came out worse
+#     than the 0.74x arm on every metric. Sampling only that region would have concluded
+#     the term barely works.
+#   - At 188x the fit is saturating (unweighted term 0.00891 -> 0.00827, -7 %, against
+#     -31 % over the previous step) and starts OVERSHOOTING the data: straight-reference
+#     bank 0.24 deg and common-profile share 3.0 % are both past the flown tracks' own
+#     0.55 deg and 3.2 %, i.e. smoother than reality rather than closer to it.
+# 47x is the dose whose structure metrics land ON the measured truth.
+SIMPLE_V3_IMITATION_LOSS_WEIGHT = 64.0
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
@@ -230,9 +258,10 @@ def control_recipe_overrides(name: str) -> dict[str, Any]:
     if name == CONTROL_RECIPE_CUSTOM:
         return {}
     overrides = control_simple_v1_overrides()
-    if name in (CONTROL_RECIPE_SIMPLE_V1_LAG, CONTROL_RECIPE_SIMPLE_V2):
+    if name in (CONTROL_RECIPE_SIMPLE_V1_LAG, CONTROL_RECIPE_SIMPLE_V2,
+                CONTROL_RECIPE_SIMPLE_V3):
         overrides["control_dynamics_model"] = CONTROL_DYNAMICS_FIRST_ORDER_LAG
-    if name == CONTROL_RECIPE_SIMPLE_V2:
+    if name in (CONTROL_RECIPE_SIMPLE_V2, CONTROL_RECIPE_SIMPLE_V3):
         overrides["control_velocity_loss_weight"] = SIMPLE_V2_VELOCITY_LOSS_WEIGHT
         overrides["control_velocity_loss_scale_mps"] = 10.0
         # Frozen, unlike simple-v1-lag: the tau sweep came out unresolved (best-to-worst
@@ -243,6 +272,8 @@ def control_recipe_overrides(name: str) -> dict[str, Any]:
         overrides["control_load_time_constant_s"] = 0.8
         # d_model stays 512. Widening to 1024 was tried WITH this term and added nothing
         # to the bank metrics (17.6 % vs 17.3 %) while costing ADE on 71.8 % of flights.
+    if name == CONTROL_RECIPE_SIMPLE_V3:
+        overrides["control_imitation_loss_weight"] = SIMPLE_V3_IMITATION_LOSS_WEIGHT
     return overrides
 
 
