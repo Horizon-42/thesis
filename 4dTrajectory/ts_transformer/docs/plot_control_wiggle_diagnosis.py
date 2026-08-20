@@ -80,10 +80,7 @@ def load(campaign: str, arm: str = ARM) -> dict:
         states, times = states[keep], times[keep]
         try:
             bank = actual_controls(
-                states, times, aero_params=AERO, max_thrust_n=MAX_THRUST_N,
-                # These arms roll out on a transport chart, so the inverse must add
-                # omega x v back (control_inverse_dynamics.TRANSPORT_BACKENDS).
-                include_transport=True,
+                states, times, aero_params=AERO, max_thrust_n=MAX_THRUST_N
             )[:, 1]
         except ValueError:
             continue

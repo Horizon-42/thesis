@@ -68,8 +68,7 @@ def per_flight(pred_dir: Path) -> dict[str, dict]:
             np.interp(grid_t, tp, [r["lat"] for r in predicted])]) * scale
         try:
             bank = actual_controls(states, to, aero_params=AERO,
-                                   max_thrust_n=MAX_THRUST_N,
-                                   include_transport=True)[:, 1]
+                                   max_thrust_n=MAX_THRUST_N)[:, 1]
         except ValueError:
             continue
         progress = (np.arange(GRID) + 0.5) / GRID

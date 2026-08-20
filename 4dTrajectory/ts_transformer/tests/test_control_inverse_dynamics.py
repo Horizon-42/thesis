@@ -41,9 +41,14 @@ from config import (  # noqa: E402
     TSConfig,
     control_recipe_overrides,
 )
-from control_dynamics_backends import RolloutInputs, control_dynamics_backend  # noqa: E402
+from control_dynamics_backends import (  # noqa: E402
+    _BACKENDS,
+    RolloutInputs,
+    control_dynamics_backend,
+)
 from control_envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
 from geokit import METRES_PER_DEG_LAT  # noqa: E402
+import control_inverse_dynamics as inverse_module  # noqa: E402
 from control_inverse_dynamics import (  # noqa: E402
     CONTROL_INVERSES,
     actual_controls,
@@ -122,9 +127,21 @@ def test_every_registered_dynamics_model_has_an_inverse():
     assert set(CONTROL_INVERSES) == set(CONTROL_DYNAMICS_MODELS)
 
 
-@pytest.mark.parametrize("model", CONTROL_DYNAMICS_MODELS)
-def test_inverse_recovers_the_schedule_its_forward_model_was_rolled_with(model):
-    config = _config(model)
+@pytest.mark.parametrize(
+    "model,backend",
+    sorted(_BACKENDS),
+    ids=lambda value: value,
+)
+def test_inverse_recovers_the_schedule_its_forward_model_was_rolled_with(model, backend):
+    """Close the loop for EVERY registered (model, backend) pair, not just one backend.
+
+    This used to be parametrized over models only, with the backend pinned to
+    `transport-chart-velocity`, so the transport-FREE family (`reanchored-rk4`) was never
+    numerically inverted — the claim that it carries no transport term rested on reading
+    its forward code. Rolling each registered pair forward and inverting it is what turns
+    `TRANSPORT_BACKENDS` from an assertion into a measurement.
+    """
+    config = _config(model, control_dynamics_backend=backend)
     controls = _smooth_schedule(int(config.n_segments))
     # For the lagged model the actuators start where the first command asks, so the
     # recovered command at t=0 is the schedule's own first value rather than a transient.
@@ -144,7 +161,9 @@ def test_inverse_recovers_the_schedule_its_forward_model_was_rolled_with(model):
 
     # Tolerances are the finite-difference error of a 2 s grid against a control that
     # varies inside a 30 s segment, not a free parameter: a wrong equation misses by
-    # orders of magnitude more (a missing transport term alone would be ~1e-4 in load).
+    # orders of magnitude more. They are NOT sensitive to the transport term, which is
+    # ~1e-4 in load against a 5e-3 bound — verifying that needs the differential test
+    # below, and a mutation that mislabels a backend passes right through this one.
     error = np.abs(sampled - controls)
     assert error[:, 0].max() < 5e-3, f"thrust fraction: {error[:, 0]}"
     assert error[:, 1].max() < np.deg2rad(0.5), f"bank: {np.rad2deg(error[:, 1])}"
@@ -194,7 +213,6 @@ def test_lag_commands_lead_the_actual_controls_they_produce():
         times,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
-        include_transport=True,
     )
     commanded = reference_controls(
         states,
@@ -286,7 +304,6 @@ def test_the_lag_keeps_the_realised_bank_continuous_across_segment_boundaries():
         times,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
-        include_transport=True,
     )
     # The command steps 25 degrees instantly at a boundary. The realised bank cannot: over
     # one 2 s reference interval a first-order actuator can only cover
@@ -661,49 +678,52 @@ def test_simple_v3_is_the_settled_production_recipe():
     with pytest.raises(ValueError, match="recipe fields are frozen"):
         replace(config, control_imitation_loss_weight=0.0)
 
+@pytest.mark.parametrize("model,backend", sorted(_BACKENDS), ids=lambda value: value)
+def test_the_transport_term_is_required_by_every_backend(model, backend, monkeypatch):
+    """Measure that omega x v is needed, for every registered (model, backend) pair.
 
-def test_transport_is_a_backend_fact_and_must_be_stated():
-    """The inverse must add omega x v back for exactly the backends that subtract it.
+    Two things this exists to catch, both of which actually happened:
 
-    This used to be gated on ``frame_params is not None`` while ``_transport_rate`` never
-    read the array's values — a flag wearing a data parameter's clothes. Every caller that
-    forgot it silently inverted a DIFFERENT model: the training target passed it and the
-    scoring scripts did not, so the measured "truth" bank and the learned target were not
-    the same quantity (0.03 % of bank RMS on KRDU, but silently wrong is the defect).
+    1. The term used to be gated on ``frame_params is not None`` while ``_transport_rate``
+       never read that array's values. Callers that omitted it silently inverted a
+       different model -- the training target passed it and the scoring scripts did not.
+    2. The obvious repair, keying it on the backend, is WRONG. ``reanchored-rk4`` writes no
+       transport term in its RHS (it re-anchors into geodetic state each substep instead),
+       so it looks transport-free in the source -- but its rolled trajectories still invert
+       ~50x more accurately WITH the term, because the inverse works in a local ENU frame
+       and a curved-earth trajectory carries omega x v there regardless.
+
+    The round-trip test above cannot see any of this: the term moves recovered bank by
+    ~0.007 deg against a 0.5 deg tolerance, and a mutation mislabelling a backend passes it
+    unchanged (verified by trying exactly that). Zeroing the term and requiring the fit to
+    get worse is sensitive by construction, since nothing else changes.
     """
-    from config import (
-        CONTROL_DYNAMICS_REANCHORED_RK4,
-        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
-        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
-        CONTROL_RECIPE_SIMPLE_V1_LAG,
-        CONTROL_RECIPE_SIMPLE_V2,
-        CONTROL_RECIPE_SIMPLE_V3,
-    )
-    from control_inverse_dynamics import TRANSPORT_BACKENDS, actual_controls
-
-    # reanchored-rk4 re-anchors into geodetic state every substep INSTEAD of carrying a
-    # transport term, so adding one to its inverse would make the inverse wrong.
-    assert CONTROL_DYNAMICS_REANCHORED_RK4 not in TRANSPORT_BACKENDS
-    assert TRANSPORT_BACKENDS == {
-        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
-        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
-    }
-
-    config = _config(CONTROL_DYNAMICS_POINT_MASS)
+    config = _config(model, control_dynamics_backend=backend)
     controls = _smooth_schedule(int(config.n_segments))
     times, states = _dense_reference(config, controls, controls[0])
-    common = dict(aero_params=np.array(AERO), max_thrust_n=MAX_THRUST_N)
-    with_transport = actual_controls(states, times, include_transport=True, **common)
-    without = actual_controls(states, times, include_transport=False, **common)
+    midpoints = (np.arange(len(controls)) + 0.5) * (HORIZON_S / len(controls))
 
-    # It must be required — a caller cannot fall into one branch by omission.
-    with pytest.raises(TypeError):
-        actual_controls(states, times, **common)
-    # And it must actually change the answer, or the flag would be decorative.
-    assert not np.allclose(with_transport[:, 1], without[:, 1], atol=1e-12)
+    def residual() -> np.ndarray:
+        raw = reference_controls(
+            states, times, config=config,
+            aero_params=np.array(AERO), max_thrust_n=MAX_THRUST_N,
+        )
+        sampled = np.column_stack(
+            [np.interp(midpoints, times, raw[:, k]) for k in range(3)]
+        )
+        return np.abs(sampled - controls).mean(axis=0)
 
-    # Every production recipe rolls out on a chart, so every one of them inverts WITH it.
-    for recipe in (CONTROL_RECIPE_SIMPLE_V1, CONTROL_RECIPE_SIMPLE_V1_LAG,
-                   CONTROL_RECIPE_SIMPLE_V2, CONTROL_RECIPE_SIMPLE_V3):
-        overrides = control_recipe_overrides(recipe)
-        assert overrides["control_dynamics_backend"] in TRANSPORT_BACKENDS
+    with_transport = residual()
+    monkeypatch.setattr(
+        inverse_module, "_transport_rate",
+        lambda states: np.zeros((len(states), 3), dtype=np.float64),
+    )
+    without = residual()
+
+    # Load factor carries the term most directly and is least polluted by the
+    # finite-difference error the coarse round-trip tolerances are sized for.
+    assert with_transport[2] < without[2] / 10.0, (
+        f"{model}/{backend}: load residual {with_transport[2]:.2e} with the transport "
+        f"term vs {without[2]:.2e} without -- the term is not doing what it claims"
+    )
+    assert with_transport[1] < without[1], f"{model}/{backend}: bank"

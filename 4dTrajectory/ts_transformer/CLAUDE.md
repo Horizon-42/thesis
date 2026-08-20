@@ -211,17 +211,24 @@ Everything below is serialised into every checkpoint.
   bank RMS 3.92° → **0.36°** (0.55°), sign reversals 5 → **0**, and improves ADE on **57.0 %**
   of flights (median 656 → 501 m, p=1.9e-7) with FDE unchanged — unlike the velocity term,
   this structure costs no accuracy.
-- **The inverse's transport term is keyed on the BACKEND, and `include_transport` is
-  required.** The chart backends integrate `v_dot = a_force − ω×v`, so their inverse must add
-  ω×v back; `reanchored-rk4` re-anchors into geodetic state every substep INSTEAD of carrying
-  that term, so adding one to its inverse would make it wrong. `TRANSPORT_BACKENDS` names
-  which is which. This was previously gated on `frame_params is not None` while
-  `_transport_rate` never read the array's values — a flag wearing a data parameter's
-  clothes, and the scoring scripts duly forgot it while the training target passed it, so the
-  measured "truth" bank was not the quantity being trained toward. It cost nothing measurable
-  (0.030 % of bank RMS on KRDU, median 0.0074° per flight) but it was silent, which is the
-  point. Note `dynamics_arrays`' own `frame_params` entry is unrelated and is a real rollout
-  input.
+- **The inverse's transport term (ω×v) is UNCONDITIONAL, and that is a measured result.**
+  It used to be gated on `frame_params is not None` while `_transport_rate` never read that
+  array's values — a flag wearing a data parameter's clothes — so the scoring scripts
+  silently dropped it while the training target kept it, and the measured "truth" bank was
+  not the quantity being trained toward. The obvious repair, keying it on the backend, is
+  **wrong**: `reanchored-rk4` writes no transport term in its RHS (it re-anchors into
+  geodetic state each substep instead), so it reads as transport-free, but its rolled
+  trajectories invert **~50× more accurately WITH the term** (load residual 9.7e-6 vs
+  5.3e-4). The inverse works in a local ENU frame and a curved-earth trajectory carries ω×v
+  there no matter how the forward integrator is written. There is no correct "off", so there
+  is no longer a way to ask for one.
+  **The round-trip test cannot check any of this** — the term moves recovered bank by
+  ~0.007° against a 0.5° tolerance, and a mutation mislabelling a backend passes it
+  unchanged. `test_the_transport_term_is_required_by_every_backend` zeroes the term and
+  requires the fit to get 10× worse; it catches a dropped term and a flipped sign, but NOT
+  a spherical-earth simplification (eccentricity is ~0.3 % of the radius, far below its
+  margin). Note `dynamics_arrays`' own `frame_params` entry is unrelated and is a real
+  rollout input.
 - **The imitation dose curve is NOT a ramp, and the sign test is not an effect size.** Below
   ~11.8× position the ladder is a noisy plateau (the 1.47× arm came out worse than 0.74× on
   every metric), so sampling only that region concludes the term barely works — the geometric
