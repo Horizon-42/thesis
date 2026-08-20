@@ -1,0 +1,8 @@
+{
+  "_comment": "Cross-airport replication of the KRDU imitation result at KSJC. Everything measured in docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md section 12 comes from one airport, so the claim that simple-v3 fixes the straight-track curving is currently airport-scoped. Two arms, paired on the same KSJC val flights: the simple-v2 baseline, and simple-v2 + control_imitation_loss_weight = 64.0, which reproduces simple-v3 field-for-field (asserted by test_simple_v3_is_the_settled_production_recipe and re-checked before launch). Same seed 1337 as the KRDU ladder. What replication would look like: bank skill crossing from below the random-flight floor to well above it, common-profile share falling toward the flown tracks' own value, and ADE not degrading. KSJC is the harder read of the two -- its random-flight floor is +0.312 against KRDU's +0.170, and bank carries only 18 percent of the box-normalised imitation term there against 41 percent at KRDU -- so a weaker effect here would not by itself contradict KRDU.",
+  "base_recipe": "simple-v2",
+  "arms": [
+    {"key": "ksjc_baseline", "label": "KSJC simple-v2 baseline (no imitation term)", "overrides": {}},
+    {"key": "ksjc_v3", "label": "KSJC simple-v3 (imitation ~47x position)", "overrides": {"control_imitation_loss_weight": 64.0}}
+  ]
+}
