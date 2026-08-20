@@ -57,6 +57,38 @@ Everything below is serialised into every checkpoint.
 
 ## Gotchas (recurring, verified)
 
+- **`simple-v2` is the control recipe to use; the objective must score VELOCITY, not just
+  position.** simple-v1's `true-time-position` objective scored position at 64 endpoints and
+  nothing else, so a rollout was free to thread the right places on any route between them —
+  and it did: **71 % of the predicted bank energy was one profile shared by every flight**
+  (flown tracks: 3 %), that profile was not even the population mean (the flown tracks average
+  ~0°, as left and right turns must cancel; the model's swung −5.9 to +10.8°), and per-flight
+  bank skill was **−0.073**, i.e. nil. Straight-in references were flown with 3.65° RMS bank
+  and 7 sign reversals where inverting the flown track asks for 0.55° and none. Adding
+  `control_velocity_loss_weight` fixes it: 17.3 % shared, 0.79°, skill **+0.197**, and ADE
+  better on **77.8 %** of flights (median −58.2 m, p=7.9e-31→4.7e-79). Smoothness and accuracy
+  move TOGETHER, which is what separates this from the flyability blandness trap.
+  **The weight is calibrated, not chosen**: the raw velocity and position terms differ by
+  **642×** at the converged operating point, so 0.003 puts velocity at ~2× position. Past 8×
+  the bank drops BELOW the flown tracks' own 0.55° while FDE climbs 818 → 1231 m — over-
+  constraining looks exactly like the blandness trap, and only watching accuracy alongside
+  shows it.
+- **Three plausible causes of that wiggle were tested and are NOT it** — do not re-litigate
+  them without new evidence. Segment count (halving N moves the shared share 12 pp and is not
+  even monotone); training budget (the two ways of adding optimizer steps DISAGREE — `lr 1e-4`
+  makes straight-reference bank *worse* than baseline, so more optimisation just fits the
+  shared profile harder); conditioning capacity (depth does nothing; width was the best
+  non-loss axis at 70.7→48.8 % but per-flight skill stayed exactly 0.000, and **with the
+  velocity term present width adds nothing at all** while costing ADE on 71.8 % of flights).
+  A fourth, `_initialize_control_head`'s zeroed weight, genuinely starves the backbone of
+  gradient (0.000e+00, 20/20 tensors) but is also not the cause: seeding it raised the shared
+  share to 81 % and regressed ADE on 84.8 % of flights. Full write-up with figures:
+  `docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md`.
+- **The duration head cannot predict below ~125 s** against a true range starting at 21 s, so
+  a handful of flights whose anchor is already close to the runway (0.4 % on KSJC) fly a full
+  loop — the rollout runs five minutes when the threshold is thirty seconds away. Separate
+  from the bank wiggle, present in every flight model, unfixed.
+
 - **The teacher inverse must be the inverse OF THE CONFIGURED FORWARD MODEL, and nothing else
   can catch it if it is not.** A schedule solved against the wrong equations is finite, bounded,
   the right shape, and its own optimizer reports a falling loss — it simply reproduces nothing.
