@@ -1100,3 +1100,21 @@ def test_an_optimizer_result_missing_the_gates_still_goes_off_target_yellow(tmp_
     assert simulator["path"]["material"]["solidColor"]["color"]["rgba"] == list(OFF_TARGET_COLOR)
     assert reference["path"]["material"]["solidColor"]["color"]["rgba"] == list(OFF_TARGET_REF_COLOR)
     assert "(off target)" in simulator["name"]
+
+
+def test_czml_precision_mirrors_the_record_contract():
+    # The CZML rounding is a deliberate MIRROR of evaluation_export.STATE_DECIMALS (this
+    # package must not import the modeling tree). If the record contract moves and this
+    # does not, the plotted path and the judged path start disagreeing in the last digits.
+    import sys
+    from pathlib import Path as _Path
+
+    sys.path.insert(
+        0, str(_Path(__file__).resolve().parents[3] / "4dTrajectory" / "optimization")
+    )
+    from evaluation_export import STATE_DECIMALS
+
+    assert "t" not in STATE_DECIMALS and not hasattr(comparison_builder, "_T_DECIMALS")
+    assert (comparison_builder._DEG_DECIMALS
+            == STATE_DECIMALS["lat"] == STATE_DECIMALS["lon"])
+    assert comparison_builder._ALT_DECIMALS == STATE_DECIMALS["alt"]

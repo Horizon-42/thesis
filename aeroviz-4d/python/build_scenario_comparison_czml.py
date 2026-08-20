@@ -118,6 +118,20 @@ _TRAIL_TIME_S = 300
 
 
 # ── state sequence -> CZML geometry ───────────────────────────────────────────
+#
+# Serialized precision for `cartographicDegrees`. A MIRROR of the record contract's
+# `evaluation_export.STATE_DECIMALS` (t/lat/lon/alt) — this package is standalone frontend
+# tooling and must not import the modeling tree, same rule as `flight_identity.py` and
+# `vertical_datum.py`. Position arrays are 96% of a comparison CZML and were written at
+# full float repr: rounding halves the file for a 1.1 mm shift, which is nine orders below
+# anything visible on a globe. Time is left exact for the same reason the record contract
+# leaves it exact — CZML sample offsets must stay strictly increasing. Change these
+# together with STATE_DECIMALS.
+_DEG_DECIMALS = 8
+_ALT_DECIMALS = 3
+
+
+
 
 def _states_to_waypoints(
     states: list[dict[str, Any]], hae_minus_msl_m: float
@@ -137,7 +151,12 @@ def _states_to_waypoints(
     if not states:
         return []
     return [
-        (s["t"], s["lon"], s["lat"], float(s["alt"]) + hae_minus_msl_m)
+        (
+            s["t"],
+            round(s["lon"], _DEG_DECIMALS),
+            round(s["lat"], _DEG_DECIMALS),
+            round(float(s["alt"]) + hae_minus_msl_m, _ALT_DECIMALS),
+        )
         for s in states
     ]
 

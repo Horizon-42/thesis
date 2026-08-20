@@ -225,8 +225,9 @@ Maintenance convention:
   KSTL need a re-harvest" item is closed), so `prepare_scenario_inputs.py --skip-observed` is
   safe and skips rebuilding the observed CZML/report tail.
   **Scale**: 42,725 rostered arrivals; at the default `--max-per-runway 2000` the batch is
-  **23,453 flights / 70,359 solves**, estimated ~30 h at `--jobs 24` and 16.6 GiB of artifacts
-  against 17.8 GiB free — thin, so prefer `--rollout-dt 1.0` (→ 10.4 GiB) or free space first.
+  **23,453 flights / 70,359 solves**, estimated ~30 h at `--jobs 24` and **12.3 GiB** of
+  artifacts (`--rollout-dt 1.0` → 8.1 GiB). Free space is the binding constraint and moves
+  with the ts_transformer experiments, so check it right before launching.
   The runner refuses to start if the estimate does not fit. Order: prepare → optimize
   (`--resume` is cheap to restart) → the CZML/report tails run automatically per cell.
 - Optimizer: KRDU RW32 systematically hard (not a truncation artifact); per-leg RNP not extracted

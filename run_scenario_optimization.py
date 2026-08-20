@@ -119,21 +119,20 @@ DEFAULT_N_SEGMENTS = 8         # unconstrained: control segments over the whole 
 DEFAULT_N_SEG_PER_PHASE = 3    # constrained: control segments PER procedure leg
 
 # Measured artifact footprint per flight, KRDU end-to-end at the current defaults
-# (Hermite-Simpson, rollout_dt 0.5 s): records + comparison CZML + reports average 194 KB per
-# CATEGORY (runway 170, fitted_adsb 158, runway_cons 253 — the constrained trajectories are
-# the longest); each prepared TARGET dataset adds a 2 KB reference record per flight; and the
-# observed track those records quote is written ONCE per flight at 60 KB (see
-# OBSERVED_TRACKS_DIR). Scales with --rollout-dt: the simulator array is ~75% of a
-# *_states.json, so 1.0 s roughly halves the category term.
+# (Hermite-Simpson, rollout_dt 0.5 s, values written at evaluation_export.STATE_DECIMALS):
+# per CATEGORY, 89 KB of rollout-scaled arrays (simulator states + their 1:1 controls) +
+# 20 KB fixed (the optimizer's dense plan and headers) + 29 KB of comparison CZML, ~70 % of
+# which is also rollout-scaled. Plus a ~2 KB reference record per prepared TARGET dataset,
+# and the observed track those records quote, written ONCE per flight at ~61 KB (see
+# OBSERVED_TRACKS_DIR).
+# The split is by what --rollout-dt actually moves, which is the only knob here that trades
+# size against resolution.
 # Used only for the pre-flight estimate — a batch that fills the disk mid-run loses
 # everything it has not committed, and this run is far too long to find that out at the end.
-# Split by what --rollout-dt actually moves: the simulator state array, its 1:1 control
-# list and the simulator CZML path all scale with the rollout step; the optimizer's dense
-# plan, the reports and the index do not.
-_BYTES_PER_FLIGHT_PER_CATEGORY_ROLLOUT = 160 * 1024
-_BYTES_PER_FLIGHT_PER_CATEGORY_FIXED = 34 * 1024
+_BYTES_PER_FLIGHT_PER_CATEGORY_ROLLOUT = 109 * 1024   # 89 records + ~20 CZML
+_BYTES_PER_FLIGHT_PER_CATEGORY_FIXED = 29 * 1024      # 20 records + ~9 CZML
 _BYTES_PER_FLIGHT_PER_TARGET = 2 * 1024
-_BYTES_PER_FLIGHT_OBSERVED_TRACK = 60 * 1024
+_BYTES_PER_FLIGHT_OBSERVED_TRACK = 61 * 1024
 _FREE_SPACE_HEADROOM = 1.15
 
 

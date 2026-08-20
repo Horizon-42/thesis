@@ -4,6 +4,50 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-20 — `simple-v3`: the control schedule is now supervised directly
+
+`simple-v2` scored position (derivative order 0) and velocity (order 1). Bank lives at
+order 2, so nothing in the loss ever named it, and unsupervised it landed **below a
+trivial baseline**: on KRDU the predicted bank carried less information about the flown
+bank than a randomly chosen other flight's did (per-flight skill 0.124 against a
+random-flight floor of 0.170; a same-runway twin reaches 0.679). The visible symptom was
+the one reported from the viewer — curves and reversals on references that are dead straight.
+
+New `control_imitation_loss_weight` scores the predicted schedule against the one
+`control_inverse_dynamics` reads off the flown track, through the **same registry the
+forward model dispatches on**, so target and rollout can never be different equations. The
+target is built in `dataset.reference_control_supervision` on the training-only
+`_dynamics_arrays` path — `dynamics_arrays()` stays free of it because forecast/predict call
+it and there is no future to invert there. Default 0.0, so simple-v1/v2 stay bit-identical.
+
+`simple-v3` = `simple-v2` + `control_imitation_loss_weight = 64.0` (~47x the position term).
+On 1404 KRDU validation flights: bank skill 0.124 → **0.735**, flight-independent share of
+the bank 49.0 % → **3.3 %** (flown tracks 3.2 %), straight-in bank RMS 3.92 → **0.36°**
+(0.55°), sign reversals 5 → **0**, ADE better on **57.0 %** of flights (median 656 → 501 m,
+p=1.9e-7), FDE unchanged. First change in this investigation that buys control structure
+without paying accuracy for it.
+
+Dose chosen off an eight-point ladder (0 / 0.74 / 1.47 / 2.94 / 11.8 / 11.8-seed2024 / 47 /
+188x). Two things worth keeping: below ~11.8x the ladder is a **noisy plateau**, not a ramp —
+the 1.47x arm is worse than 0.74x on every metric, so sampling only that region concludes the
+term barely works. And at 188x the fit **saturates and overshoots** — 0.24° straight-in bank
+and a 3.0 % shared share are both past the flown tracks' own values, smoother than reality
+rather than closer to it.
+
+Methodology, recorded because it changed several readings: bank skill must be read against the
+random-flight floor and same-runway twin that `docs/score_control_arms.py` now prints per arm,
+never against 1.0 — doing so also inverted the earlier loss-design conclusion, since the
+velocity dose frozen into simple-v2 is the only one below the floor. The twin is a yardstick,
+not a bound (the 47x arm exceeds it). And at n=1404 the paired sign test returns p = 3e-16 for
+**pure seed noise**, so its p values mean "reproducible direction", never "large effect".
+
+Not done: KRDU only, `val` split only, and 47x has a single seed — the 11.8x seed pair shows
+seed noise is 3-8x smaller than the dose effects, which is an inference, not a measurement.
+Artifacts for all eight arms (checkpoints, 1404 predicted flights, evaluation reports,
+comparison CZML) are under `4dTrajectory/outputs/KRDU/experiments/imitation_design/` and
+published to the viewer. Full write-up:
+`4dTrajectory/ts_transformer/docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md` §12.
+
 ### 2026-08-19 — the optimizer pipeline: two blockers, a bounded population, and eight cost levers
 
 Audit of `run_scenario_optimization.py` and everything it shells out to, then the fixes.
@@ -93,6 +137,23 @@ CPU-s per flight, fitted_adsb 146 s / 17.6, runway_cons 175 s / 9.7.
    the roster rather than from what this process happened to write, and a roster that ends up
    incomplete raises. `--continue-on-error` keeps the sweep going past one failed cell and
    names the casualties at the end.
+
+**Serialized precision — 30 % of the footprint was decimal digits nobody reads.** Asked why
+the run needed 16.6 GiB, the answer turned out to be float text: a single state row is 185
+bytes at full repr (`"lat":35.766821578167715`, 17 significant digits for a quantity whose
+ADS-B source resolution is metres), and the timed arrays are ~98 % of a record. Records now
+serialize at a declared precision (`evaluation_export.STATE_DECIMALS`: 1.1 mm position, 1 ms
+time, 0.1 mm/s speed, 2e-9 rad angles) and the comparison CZML mirrors it. Measured: records
+**31 %** smaller, reference + observed track **21 %**, comparison CZML **40 %**, and the
+2000/runway estimate **16.6 GiB → 11.7 GiB**. A/B on a KRDU batch: **0 verdict or
+event_status changes**, largest deviation difference 0.63 mm — four orders below the
+metre-scale gates.
+Two things this deliberately does NOT touch: `initial_state`/`target_state`, because
+`_require_target_agrees_with_runway_data` measures them at **1 cm** and that budget cannot
+absorb a rounding step; and `final_time_s`, which is now read back OFF the serialized array
+rather than recomputed — the contract requires it to equal `states[-1]["t"]` to 1e-6, and
+writing the two independently made `record_from_dict` reject the entire batch on the first
+record (caught immediately, which is the contract doing its job).
 
 **Also fixed:** every optimizer evaluation row reported `flight_key: null` while observed
 rows carried it — `build_scenario` never copied it onto `scenario.source`. It does now

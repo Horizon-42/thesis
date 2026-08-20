@@ -43,6 +43,58 @@ OBSERVED_TRACK_SUFFIX = "_track.json"
 OBSERVED_TRACK_KEY = "states"
 
 
+# ── Serialized precision ──────────────────────────────────────────────────────
+#
+# Records are JSON, so every number costs its decimal text. Written at full float repr a
+# single state row is 185 bytes — `"lat":35.766821578167715` carries 17 significant digits
+# for a quantity whose SOURCE resolution (ADS-B position) is metres and whose gates are
+# metre-scale. Rounding to the precision below makes the timed arrays 30% smaller with a
+# worst-case position shift of 0.56 mm (measured over a KRDU batch), four orders below the
+# tightest thing anything downstream compares (`evaluation.arrival`'s 1 cm target check).
+#
+# It applies ONLY to the timed state/control ARRAYS. `initial_state` and `target_state` are
+# left at full precision deliberately: those ARE what the 1 cm check measures, and a 1 cm
+# budget is not somewhere to spend half a rounding step.
+#
+# `t` is deliberately NOT in the table. It is the one field carrying hard contracts —
+# `final_time_s == states[-1]["t"]` to 1e-6, and strictly increasing offsets — and
+# `ts_transformer` exports normalized clocks whose relative offsets are tiny by
+# construction (a regression test pins a 3.7e-13 s horizon surviving export). Quantizing
+# time would collapse those to ties for a further 7 percentage points of file size; not
+# worth putting an ordering invariant on a budget.
+STATE_DECIMALS = {
+    "lat": 8,      # 1.1 mm
+    "lon": 8,      # 1.1 mm
+    "alt": 3,      # 1 mm
+    "V": 4,        # 0.1 mm/s
+    "psi": 9,      # 2e-9 rad = 0.05 mm over the 25 km ring
+    "gamma": 9,
+    "m": 3,        # 1 g
+}
+TIME_KEY = "t"
+CONTROL_DECIMALS = {"thrust": 6, "bank_rad": 9, "load_factor": 9}
+
+
+def _quantize(row: dict[str, float], decimals: dict[str, int]) -> dict[str, float]:
+    """One row at the serialized precision above; unknown keys pass through untouched."""
+    return {
+        key: (round(value, decimals[key]) if key in decimals else value)
+        for key, value in row.items()
+    }
+
+
+def timed_state_row(t: float, state: GeodeticState) -> dict[str, float]:
+    """One timed state row of a record's ``states`` array, at serialized precision."""
+    return _quantize({"t": float(t), **state_dict(state)}, STATE_DECIMALS)
+
+
+def control_row(control: Any) -> dict[str, float]:
+    """One row of a record's ``controls`` array, at serialized precision."""
+    return _quantize(
+        {key: float(value) for key, value in asdict(control).items()}, CONTROL_DECIMALS
+    )
+
+
 def state_dict(state: GeodeticState) -> dict[str, float]:
     """A ``GeodeticState`` in the evaluation contract's key naming."""
     return {
@@ -65,16 +117,17 @@ def evaluation_record(
     subject: str,
 ) -> dict[str, Any]:
     """The solved-trajectory record: rollout states + their 1:1 aligned controls."""
+    states = [timed_state_row(s.t, s.state) for s in samples]
     return {
         "source": {**source, "subject": _subject(subject)},
         "initial_state": state_dict(initial),
         "target_state": state_dict(target),
-        "final_time_s": float(samples[-1].t),
-        "states": [{"t": float(s.t), **state_dict(s.state)} for s in samples],
-        "controls": [
-            {key: float(value) for key, value in asdict(s.control).items()}
-            for s in samples
-        ],
+        # Read back OFF the serialized array, never recomputed from the sample: the record
+        # contract requires `final_time_s == states[-1]["t"]` to 1e-6, and the array is
+        # quantized (see STATE_DECIMALS). Deriving it here is what makes that structural.
+        "final_time_s": states[-1]["t"],
+        "states": states,
+        "controls": [control_row(s.control) for s in samples],
     }
 
 
@@ -98,16 +151,19 @@ def reference_evaluation_record(
     instead of inline; the record then carries ``states_ref``, exactly as a solved record
     does for its ``*_states.json``. Same states either way — see ``OBSERVED_TRACKS_DIR``.
     """
+    states = observed_track_states(timed_states)
     record = {
         "source": {**source, "subject": _subject(subject)},
         "initial_state": state_dict(initial),
         "target_state": state_dict(target),
-        "final_time_s": float(timed_states[-1][0]),
+        # Off the serialized array, for the same reason as `evaluation_record` above — and
+        # here it must match the SHARED track file the record points at, not this list.
+        "final_time_s": states[-1]["t"],
         "states": [],
         "controls": [],
     }
     if track_ref is None:
-        record["states"] = observed_track_states(timed_states)
+        record["states"] = states
     else:
         record["states_ref"] = {"file": track_ref, "key": OBSERVED_TRACK_KEY}
     return record
@@ -117,7 +173,7 @@ def observed_track_states(
     timed_states: Sequence[tuple[float, GeodeticState]],
 ) -> list[dict[str, Any]]:
     """The timed observed states in the record contract's state shape."""
-    return [{"t": float(t), **state_dict(s)} for t, s in timed_states]
+    return [timed_state_row(t, s) for t, s in timed_states]
 
 
 def observed_track_document(

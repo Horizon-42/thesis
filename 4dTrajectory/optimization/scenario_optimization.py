@@ -72,6 +72,7 @@ from collocation.optimizer import (  # noqa: E402
 )
 from geokit import haversine_m  # noqa: E402
 from evaluation_export import (  # noqa: E402
+    STATE_DECIMALS,
     EVAL_SUFFIX as _EVAL_SUFFIX,
     OBSERVED_TRACKS_DIR,
     OBSERVED_TRACK_SUFFIX,
@@ -154,6 +155,14 @@ def _stall_speed_ms(mass_kg: float, aero: Any) -> float:
 
 # ── Output records (plumbing) ─────────────────────────────────────────────────
 
+def _quantized_sample(sample: "StateSample") -> dict[str, float]:
+    """One ``StateSample`` as a JSON row at the record contract's serialized precision."""
+    return {
+        key: round(value, STATE_DECIMALS[key]) if key in STATE_DECIMALS else value
+        for key, value in asdict(sample).items()
+    }
+
+
 @dataclass
 class StateSample:
     t: float
@@ -190,11 +199,18 @@ class ScenarioOptimization:
     evaluation: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        # Both arrays go out at the record contract's serialized precision (0.56 mm worst
+        # case, 30% smaller — see evaluation_export.STATE_DECIMALS). `simulator_states` is
+        # also what the eval record's `states_ref` resolves to, so the two views of the
+        # rollout have to be written the same way or they would disagree in the last digits.
         return {
             "source": self.source,
+            # `t` is deliberately NOT quantized (see evaluation_export.STATE_DECIMALS), so
+            # this header and the eval record's `final_time_s` — both read off the same
+            # rollout — agree exactly without either side rounding.
             "final_time_s": self.final_time_s,
-            "optimizer_states": [asdict(s) for s in self.optimizer_states],
-            "simulator_states": [asdict(s) for s in self.simulator_states],
+            "optimizer_states": [_quantized_sample(s) for s in self.optimizer_states],
+            "simulator_states": [_quantized_sample(s) for s in self.simulator_states],
         }
 
 

@@ -119,3 +119,31 @@ Report schema: `terminal-approach-evaluation-v5`.
   at 48/48, 44 pass) — if they ever differ, the streaming path is wrong, not the report.
 - `load_records` is kept for callers that genuinely need the list; prefer `record_files` +
   `iter_records`.
+
+## Records are written at a declared precision, and the boundary states are not
+
+- **`evaluation_export.STATE_DECIMALS` / `CONTROL_DECIMALS` round the VALUES in the timed
+  arrays.** JSON pays for every decimal digit: at full float repr one state row is 185 bytes
+  (`"lat":35.766821578167715` — 17 significant digits for a quantity whose ADS-B source
+  resolution is metres), and the arrays are ~98 % of a record. Rounding to 1.1 mm position /
+  1 mm altitude / 0.1 mm/s speed takes records from 151 to 110 KB per flight and the
+  comparison CZML from 45 to 32 KB; A/B on a KRDU batch: **0 verdict or event_status changes,
+  largest deviation difference 0.63 mm**.
+- **Three exemptions, each for a reason, not an oversight:**
+  - `initial_state` / `target_state` — `_require_target_agrees_with_runway_data` measures the
+    target against the authoritative threshold at **1 cm**; that budget cannot absorb half a
+    rounding step.
+  - **`t`** — the one field with hard contracts (`final_time_s == states[-1]["t"]` to 1e-6,
+    and strictly increasing offsets). `ts_transformer` exports normalized clocks whose
+    relative offsets are tiny by construction and pins a 3.7e-13 s horizon surviving export.
+    Quantizing it was worth 7 more percentage points of file size; an ordering invariant does
+    not go on a budget.
+  - `controls` use their own table (`CONTROL_DECIMALS`) — different units, different scale.
+- **`final_time_s` is read back OFF the serialized array, never recomputed.** With `t` exact
+  the two agree anyway, but deriving it makes the invariant structural rather than a
+  coincidence. Two writers got this wrong the moment precision entered the contract
+  (`evaluation_record`, and `ts_transformer/export.py`'s second unrounded copy of an array it
+  already had) — both were caught by `record_from_dict` rejecting the batch, loudly.
+- `aeroviz-4d/python/build_scenario_comparison_czml.py` mirrors the table
+  (`_DEG_DECIMALS`/`_ALT_DECIMALS`) because that package must not import the modeling tree;
+  a test pins the two together, including that neither rounds time. **Change them together.**

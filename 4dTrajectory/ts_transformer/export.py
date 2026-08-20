@@ -46,6 +46,7 @@ from evaluation_export import (  # noqa: E402
     REFERENCES_DIR,
     STATES_SUFFIX as _STATES_SUFFIX,
     evaluation_record,
+    observed_track_states,
     reference_evaluation_record,
     state_dict,
     summary_row,
@@ -157,7 +158,12 @@ def build_prediction_record(
         eval_record = reference_evaluation_record(
             initial_state, scenario.target, predicted_states, source, subject="predicted"
         )
-        predicted_state_rows = [{"t": t, **state_dict(s)} for t, s in predicted_states]
+        # From the eval record's OWN array, like the control branch below. Building a
+        # second copy here made the trajectory block and the eval record two independently
+        # serialized views of one trajectory — they disagreed the moment the record
+        # contract gained a serialized precision, and `final_time_s` is taken from the
+        # eval record while the rows came from here.
+        predicted_state_rows = list(eval_record["states"])
     else:
         if forecast.geodetic_values is None:
             raise ValueError("control forecast must carry dense geodetic states")
@@ -220,7 +226,7 @@ def build_prediction_record(
         # WHOLE track (negative t before the anchor) so a viewer can show the lookback the
         # model was given; the reference RECORD is span-matched instead.
         "predicted_states": predicted_state_rows,
-        "observed_states": [{"t": t, **state_dict(s)} for t, s in full_observed_states],
+        "observed_states": observed_track_states(full_observed_states),
         "control_segments": control_segments,
     }
 
