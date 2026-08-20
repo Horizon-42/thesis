@@ -101,9 +101,12 @@ def _forward(
 
 
 def _dynamics_batch(
-    series: Sequence[FlightSeries], anchor: int, device: torch.device
+    series: Sequence[FlightSeries],
+    anchor: int,
+    device: torch.device,
+    config: TSConfig,
 ) -> dict[str, torch.Tensor]:
-    rows = [dynamics_arrays(item, anchor) for item in series]
+    rows = [dynamics_arrays(item, anchor, config) for item in series]
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
@@ -163,7 +166,7 @@ def _forecast_control_batch(
 ) -> list[Forecast]:
     """Predict and densely roll a heterogeneous batch of bounded control schedules."""
     histories = _history_batch(series, config, normalizer, anchor)
-    dynamics = _dynamics_batch(series, anchor, device)
+    dynamics = _dynamics_batch(series, anchor, device, config)
     prediction = _control_prediction_batch(model, histories, dynamics, device)
     durations = prediction.segment_durations.detach().cpu().numpy().astype(np.float64)
     offsets, padded_offsets, query_valid = _padded_dense_queries(

@@ -136,7 +136,6 @@ def test_inverse_recovers_the_schedule_its_forward_model_was_rolled_with(model):
         config=config,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
-        frame_params=np.array(FRAME),
     )
     midpoints = (np.arange(len(controls)) + 0.5) * (HORIZON_S / len(controls))
     sampled = np.column_stack(
@@ -171,7 +170,6 @@ def test_the_state_representation_does_not_change_the_recovered_schedule(backend
         config=config,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
-        frame_params=np.array(FRAME),
     )
 
     assert np.all(np.isfinite(recovered))
@@ -196,7 +194,7 @@ def test_lag_commands_lead_the_actual_controls_they_produce():
         times,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
-        frame_params=np.array(FRAME),
+        include_transport=True,
     )
     commanded = reference_controls(
         states,
@@ -204,7 +202,6 @@ def test_lag_commands_lead_the_actual_controls_they_produce():
         config=config,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
-        frame_params=np.array(FRAME),
     )
 
     # The realised bank rolls in exponentially towards the command...
@@ -289,7 +286,7 @@ def test_the_lag_keeps_the_realised_bank_continuous_across_segment_boundaries():
         times,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
-        frame_params=np.array(FRAME),
+        include_transport=True,
     )
     # The command steps 25 degrees instantly at a boundary. The realised bank cannot: over
     # one 2 s reference interval a first-order actuator can only cover
@@ -314,7 +311,6 @@ def test_inverted_controls_stay_inside_the_envelope_on_a_benign_trajectory():
         config=config,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
-        frame_params=np.array(FRAME),
     )
 
     interior = recovered[1:-1]
@@ -664,3 +660,50 @@ def test_simple_v3_is_the_settled_production_recipe():
     assert "imitation" in loss_component_names(config)
     with pytest.raises(ValueError, match="recipe fields are frozen"):
         replace(config, control_imitation_loss_weight=0.0)
+
+
+def test_transport_is_a_backend_fact_and_must_be_stated():
+    """The inverse must add omega x v back for exactly the backends that subtract it.
+
+    This used to be gated on ``frame_params is not None`` while ``_transport_rate`` never
+    read the array's values — a flag wearing a data parameter's clothes. Every caller that
+    forgot it silently inverted a DIFFERENT model: the training target passed it and the
+    scoring scripts did not, so the measured "truth" bank and the learned target were not
+    the same quantity (0.03 % of bank RMS on KRDU, but silently wrong is the defect).
+    """
+    from config import (
+        CONTROL_DYNAMICS_REANCHORED_RK4,
+        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        CONTROL_RECIPE_SIMPLE_V1_LAG,
+        CONTROL_RECIPE_SIMPLE_V2,
+        CONTROL_RECIPE_SIMPLE_V3,
+    )
+    from control_inverse_dynamics import TRANSPORT_BACKENDS, actual_controls
+
+    # reanchored-rk4 re-anchors into geodetic state every substep INSTEAD of carrying a
+    # transport term, so adding one to its inverse would make the inverse wrong.
+    assert CONTROL_DYNAMICS_REANCHORED_RK4 not in TRANSPORT_BACKENDS
+    assert TRANSPORT_BACKENDS == {
+        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    }
+
+    config = _config(CONTROL_DYNAMICS_POINT_MASS)
+    controls = _smooth_schedule(int(config.n_segments))
+    times, states = _dense_reference(config, controls, controls[0])
+    common = dict(aero_params=np.array(AERO), max_thrust_n=MAX_THRUST_N)
+    with_transport = actual_controls(states, times, include_transport=True, **common)
+    without = actual_controls(states, times, include_transport=False, **common)
+
+    # It must be required — a caller cannot fall into one branch by omission.
+    with pytest.raises(TypeError):
+        actual_controls(states, times, **common)
+    # And it must actually change the answer, or the flag would be decorative.
+    assert not np.allclose(with_transport[:, 1], without[:, 1], atol=1e-12)
+
+    # Every production recipe rolls out on a chart, so every one of them inverts WITH it.
+    for recipe in (CONTROL_RECIPE_SIMPLE_V1, CONTROL_RECIPE_SIMPLE_V1_LAG,
+                   CONTROL_RECIPE_SIMPLE_V2, CONTROL_RECIPE_SIMPLE_V3):
+        overrides = control_recipe_overrides(recipe)
+        assert overrides["control_dynamics_backend"] in TRANSPORT_BACKENDS

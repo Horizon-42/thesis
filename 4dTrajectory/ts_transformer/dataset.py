@@ -81,7 +81,11 @@ from config import (
     uses_control_dynamics,
 )
 from control_envelope import CONTROL_LOWER, CONTROL_UPPER
-from control_inverse_dynamics import actual_controls, segment_controls
+from control_inverse_dynamics import (
+    TRANSPORT_BACKENDS,
+    actual_controls,
+    segment_controls,
+)
 from coordinate_frames import CoordinateFrame, frame_for_state
 from fixed_dt_supervision import (
     FixedDTControlSupervision,
@@ -419,7 +423,9 @@ DYNAMICS_CONDITION_NAMES = (
 ANCHOR_CONTROL_SAMPLES = 11
 
 
-def anchor_controls(series: FlightSeries, anchor: int, mass_kg: float) -> np.ndarray:
+def anchor_controls(
+    series: FlightSeries, anchor: int, mass_kg: float, config: TSConfig
+) -> np.ndarray:
     """Return the controls the observed lookback implies are in effect at ``anchor``.
 
     This is the lagged model's actuator initial condition. It reads only samples at or
@@ -449,15 +455,7 @@ def anchor_controls(series: FlightSeries, anchor: int, mass_kg: float) -> np.nda
             dtype=np.float64,
         ),
         max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
-        frame_params=np.array(
-            [
-                series.frame.lat0,
-                series.frame.lon0,
-                series.frame.alt0,
-                float(getattr(series.frame, "heading_rad", 0.0)),
-            ],
-            dtype=np.float64,
-        ),
+        include_transport=config.control_dynamics_backend in TRANSPORT_BACKENDS,
     )[-1]
 
 
@@ -510,11 +508,6 @@ def reference_control_supervision(
         control_upper=CONTROL_UPPER,
         n_segments=n_segments,
         total_duration_s=total_duration_s,
-        frame_params=np.array(
-            [series.frame.lat0, series.frame.lon0, series.frame.alt0,
-             float(getattr(series.frame, "heading_rad", 0.0))],
-            dtype=np.float64,
-        ),
     )
     midpoints = (np.arange(n_segments, dtype=np.float64) + 0.5) * (
         total_duration_s / n_segments
@@ -527,8 +520,14 @@ def reference_control_supervision(
     }
 
 
-def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
-    """Physical per-flight tensors required by a control model and its rollout."""
+def dynamics_arrays(
+    series: FlightSeries, anchor: int, config: TSConfig
+) -> dict[str, np.ndarray]:
+    """Physical per-flight tensors required by a control model and its rollout.
+
+    ``config`` selects the flight model whose actuator initial condition is inverted; the
+    ``frame_params`` entry below is unrelated to that and remains a genuine rollout input.
+    """
     scenario = series.scenario
     mass_kg = float(scenario.initial.m)
     initial = states_from_channels(
@@ -581,7 +580,9 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
         # the head predicts in — an anchor whose implied thrust is outside the envelope is
         # a starting point the model could not have commanded.
         "initial_controls": np.clip(
-            anchor_controls(series, anchor, mass_kg), CONTROL_LOWER, CONTROL_UPPER
+            anchor_controls(series, anchor, mass_kg, config),
+            CONTROL_LOWER,
+            CONTROL_UPPER,
         ).astype(np.float64),
         "frame_params": np.array(
             [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
@@ -1351,7 +1352,7 @@ class TrajectoryWindows(Dataset, ABC):
     def _dynamics_arrays(self, i: int) -> dict[str, np.ndarray]:
         s_idx, anchor = self.index[i]
         series = self.series[s_idx]
-        arrays = dynamics_arrays(series, anchor)
+        arrays = dynamics_arrays(series, anchor, self.config)
         if self.config.control_imitation_loss_weight:
             anchor_time = float(series.times[anchor])
             arrays.update(

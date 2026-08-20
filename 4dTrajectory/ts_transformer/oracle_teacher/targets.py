@@ -113,7 +113,6 @@ def build_inverse_dynamics_target(
         control_upper=dynamics["control_upper"][0].numpy(),
         n_segments=int(dataset.config.n_segments),
         total_duration_s=total_duration_s,
-        frame_params=dynamics["frame_params"][0].numpy(),
     )
     durations = np.full(
         int(dataset.config.n_segments),

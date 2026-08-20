@@ -472,7 +472,6 @@ def main(argv: list[str] | None = None) -> int:
             control_upper=dynamics["control_upper"][0].numpy(),
             n_segments=args.n_segments,
             total_duration_s=true_duration_s,
-            frame_params=dynamics["frame_params"][0].numpy(),
         )
         initial_controls = torch.from_numpy(inverse.controls).to(
             device=device, dtype=torch.float64

@@ -196,7 +196,7 @@ def batch_dynamics_tensors(
 ) -> dict[str, torch.Tensor]:
     """Build the exact per-flight conditioning/rollout tensors used by training."""
     anchor = config.seq_len - 1
-    rows = [dynamics_arrays(item, anchor) for item in series]
+    rows = [dynamics_arrays(item, anchor, config) for item in series]
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
@@ -396,7 +396,9 @@ def run_deterministic(
     )
     control_diagnostics = None
     if raw_controls:
-        dynamics = [dynamics_arrays(item, run.config.seq_len - 1) for item in series]
+        dynamics = [
+            dynamics_arrays(item, run.config.seq_len - 1, run.config) for item in series
+        ]
         control_diagnostics = control_distribution_statistics(
             np.concatenate(raw_controls),
             np.concatenate(raw_control_durations),

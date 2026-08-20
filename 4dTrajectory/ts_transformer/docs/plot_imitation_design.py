@@ -174,7 +174,8 @@ def _bank_matrices(pred_dir: Path):
                             r["m"]] for r, k in zip(future, keep) if k], float)
         try:
             bank = actual_controls(states, times, aero_params=aero,
-                                   max_thrust_n=240_000.0)[:, 1]
+                                   max_thrust_n=240_000.0,
+                                   include_transport=True)[:, 1]
         except ValueError:
             continue
         progress = (np.arange(grid) + 0.5) / grid

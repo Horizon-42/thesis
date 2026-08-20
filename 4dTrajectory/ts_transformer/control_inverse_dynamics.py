@@ -36,6 +36,8 @@ from aerodynamic_model.torch_dynamics import (
 from config import (
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     TSConfig,
 )
 from control_envelope import CONTROL_NAMES, fraction_controls
@@ -99,18 +101,35 @@ def _drag_force(
     return 0.5 * density * np.square(speed_mps) * cd * area
 
 
-def _transport_rate(
-    states: np.ndarray, frame_params: np.ndarray | None
-) -> np.ndarray:
-    """Return ``omega_transport x v`` in local ENU, or zero when the frame is absent.
+# Backends whose forward RHS carries the transport term, and whose inverse must therefore
+# add it back. `reanchored-rk4` is deliberately absent: it integrates the local-ENU RHS and
+# re-anchors into geodetic state every substep, which is how it handles curvature INSTEAD of
+# a transport term, so adding one to its inverse would make the inverse wrong.
+TRANSPORT_BACKENDS = frozenset(
+    {
+        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    }
+)
+
+
+def _transport_rate(states: np.ndarray, include_transport: bool) -> np.ndarray:
+    """Return ``omega_transport x v`` in local ENU, or zero for a transport-free backend.
 
     ``transport_chart_rhs`` integrates ``v_dot = a_force - omega x v``, so recovering the
     force from a measured ``v_dot`` has to add this back. It is small — of order ``v^2/R``,
-    ~1.6e-3 m/s^2 at 100 m/s, i.e. 1.6e-4 g — but including it is what makes this the exact
-    algebraic inverse of the chart RHS rather than a close one.
+    ~1.6e-3 m/s^2 at 100 m/s, i.e. 1.6e-4 g, and 0.03 % of the inverted bank RMS on KRDU —
+    but including it is what makes this the exact algebraic inverse of the chart RHS rather
+    than a close one.
+
+    It depends only on the STATE (latitude, altitude, velocity), never on the frame origin.
+    This used to be gated on ``frame_params is not None``, whose values were never read: the
+    argument was a flag wearing a data parameter's clothes, and every caller that forgot it
+    silently got a different quantity — which is exactly what happened to the scoring
+    scripts while the training target was correct.
     """
     latitude, _lon, altitude, speed, psi, gamma, _mass = states.T
-    if frame_params is None:
+    if not include_transport:
         return np.zeros((len(states), 3), dtype=np.float64)
     cos_gamma = np.cos(gamma)
     velocity = np.column_stack(
@@ -140,9 +159,13 @@ def actual_controls(
     *,
     aero_params: np.ndarray,
     max_thrust_n: float,
-    frame_params: np.ndarray | None = None,
+    include_transport: bool,
 ) -> np.ndarray:
     """Return the ``[M,3]`` control the aircraft was flying at each reference sample.
+
+    ``include_transport`` says whether the forward backend this inverts carries the
+    transport term (see :data:`TRANSPORT_BACKENDS`). It is required, not defaulted: getting
+    it wrong changes the answer silently, and the two forward families genuinely differ.
 
     ``states`` is ``[M,7] = (lat, lon, alt, V, psi, gamma, mass)``. The result is in the
     dimensionless envelope contract and is NOT clipped — clipping is a bound decision the
@@ -175,7 +198,7 @@ def actual_controls(
     # Body-frame components of the specific force, exactly as the forward RHS composes it:
     # tangent -> speed rate, gamma-normal -> g(n cos mu - cos gamma), heading-normal ->
     # g n sin mu. The transport term is expressed in the same basis before inverting.
-    transport = _transport_rate(states, frame_params)
+    transport = _transport_rate(states, include_transport)
     tangent = np.column_stack(
         (cos_gamma * np.cos(heading), cos_gamma * np.sin(heading), np.sin(gamma))
     )
@@ -230,7 +253,7 @@ def commanded_controls(
     aero_params: np.ndarray,
     max_thrust_n: float,
     time_constants_s: np.ndarray,
-    frame_params: np.ndarray | None = None,
+    include_transport: bool,
 ) -> np.ndarray:
     """Invert the first-order lag: ``u_cmd = u + tau * du/dt``.
 
@@ -244,7 +267,7 @@ def commanded_controls(
         times_s,
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
-        frame_params=frame_params,
+        include_transport=include_transport,
     )
     tau = np.asarray(time_constants_s, dtype=np.float64).reshape(-1)
     if tau.shape != (len(CONTROL_NAMES),) or not np.all(tau > 0.0):
@@ -261,16 +284,14 @@ def _point_mass_inverse(
     *,
     aero_params: np.ndarray,
     max_thrust_n: float,
-    frame_params: np.ndarray | None,
     config: TSConfig,
 ) -> np.ndarray:
-    del config
     return actual_controls(
         states,
         times_s,
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
-        frame_params=frame_params,
+        include_transport=config.control_dynamics_backend in TRANSPORT_BACKENDS,
     )
 
 
@@ -280,7 +301,6 @@ def _first_order_lag_inverse(
     *,
     aero_params: np.ndarray,
     max_thrust_n: float,
-    frame_params: np.ndarray | None,
     config: TSConfig,
 ) -> np.ndarray:
     return commanded_controls(
@@ -289,7 +309,7 @@ def _first_order_lag_inverse(
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
         time_constants_s=config.control_time_constants_s,
-        frame_params=frame_params,
+        include_transport=config.control_dynamics_backend in TRANSPORT_BACKENDS,
     )
 
 
@@ -306,7 +326,6 @@ def reference_controls(
     config: TSConfig,
     aero_params: np.ndarray,
     max_thrust_n: float,
-    frame_params: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return the ``[M,3]`` control schedule the CONFIGURED forward model would need."""
     return CONTROL_INVERSES[config.control_dynamics_model](
@@ -314,7 +333,6 @@ def reference_controls(
         times_s,
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
-        frame_params=frame_params,
         config=config,
     )
 
@@ -330,7 +348,6 @@ def segment_controls(
     control_upper: np.ndarray,
     n_segments: int,
     total_duration_s: float,
-    frame_params: np.ndarray | None = None,
 ) -> InvertedControls:
     """Sample the inverted schedule at uniform segment midpoints and clip to the box."""
     if n_segments < 1 or total_duration_s <= 0.0:
@@ -346,7 +363,6 @@ def segment_controls(
         config=config,
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
-        frame_params=frame_params,
     )
     midpoints = (np.arange(n_segments, dtype=np.float64) + 0.5) * (
         total_duration_s / n_segments

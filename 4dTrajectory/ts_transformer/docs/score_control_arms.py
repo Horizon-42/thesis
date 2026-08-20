@@ -134,7 +134,8 @@ def score(pred_dir: Path) -> dict | None:
         states, times = states[keep], times[keep]
         try:
             bank = actual_controls(states, times, aero_params=AERO,
-                                   max_thrust_n=MAX_THRUST_N)[:, 1]
+                                   max_thrust_n=MAX_THRUST_N,
+                                   include_transport=True)[:, 1]
         except ValueError:
             continue
         progress = (np.arange(COMMON_GRID_POINTS) + 0.5) / COMMON_GRID_POINTS

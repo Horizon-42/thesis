@@ -668,16 +668,20 @@ def test_coordinate_frame_setting_selects_a_concrete_implementation():
     with pytest.raises(ValueError, match="unknown coordinate frame"):
         frames.frame_for_state(target, "other")
 
-    enu_series, _ = _series(n_flights=1, coordinate_frame="enu")
-    aligned_series, _ = _series(n_flights=1, coordinate_frame="runway-aligned")
+    enu_series, enu_config = _series(n_flights=1, coordinate_frame="enu")
+    aligned_series, aligned_config = _series(
+        n_flights=1, coordinate_frame="runway-aligned"
+    )
     assert type(enu_series[0].frame) is frames.ENUFrame
     assert type(aligned_series[0].frame) is frames.RunwayAlignedFrame
 
     # Any anchor the pipeline builds has the whole lookback behind it; the anchor-state
     # control inversion differentiates that window, so it needs a real anchor, not 0.
     anchor = dataset_module.ANCHOR_CONTROL_SAMPLES
-    enu_dynamics = dataset_module.dynamics_arrays(enu_series[0], anchor)
-    aligned_dynamics = dataset_module.dynamics_arrays(aligned_series[0], anchor)
+    enu_dynamics = dataset_module.dynamics_arrays(enu_series[0], anchor, enu_config)
+    aligned_dynamics = dataset_module.dynamics_arrays(
+        aligned_series[0], anchor, aligned_config
+    )
     runway_heading = enu_series[0].scenario.target.psi
     assert enu_dynamics["frame_params"][3] == pytest.approx(0.0)
     assert aligned_dynamics["frame_params"][3] == pytest.approx(runway_heading)
