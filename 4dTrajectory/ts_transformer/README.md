@@ -119,7 +119,7 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | `batch_benchmark.py` | outer-train-only CUDA throughput benchmark used by `benchmark-batch` |
 | `synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
-| `control_*.py`, `oracle_teacher/` (~25 modules) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, terminal clocks, teacher warm-start) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |
+| `control/` (package: envelope, heads, duration, conditioning, dynamics/, loss/, training/, oracle/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, terminal clocks, teacher warm-start) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |
 
 ## Running it
 
@@ -668,7 +668,7 @@ history-only deployable selector on a best-of-K hindsight objective — a first 
 the objective/backend/duration/clock registries, the exact call graph, the oracle-teacher
 warm-start pipeline behind `--control-teacher-schedules` (including how
 `teacher_schedules.npz` is actually produced — a root-level script, not a package
-subcommand), and which of the ~25 `control_*.py`/`oracle_teacher/` modules are live on the
+subcommand), and which of the `control/` package's modules are live on the
 default path vs. ablation-only vs. genuinely unwired — is in
 [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
 

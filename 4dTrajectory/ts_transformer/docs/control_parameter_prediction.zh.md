@@ -13,6 +13,12 @@
 > `benchmark_validation_execution.py`、`control_oracle_curriculum` 的重复实现。
 > 第 8 节 a/b/c/d/e 五条建议均已落实。
 >
+> **2026-08-21 补充**：control 相关模块已从顶层 `control_*.py` 平铺改为 `control/` 包
+> （按角色分子模块，原 `oracle_teacher/` 并入 `control/oracle/`）。本文正文中的所有模块
+> 路径因此都是**旧路径**——这是当时代码状态的记录，未作改写。新布局与"什么模块可以进
+> `control/`"的判定规则见 `ts_transformer/CLAUDE.md` 的 Layout 一节，由
+> `tests/test_architecture.py` 强制。
+>
 > 新增的轴：`control_dynamics_model`（`point-mass` / `first-order-lag`）与配方
 > `simple-v1-lag`；控制量契约改为无量纲。
 >

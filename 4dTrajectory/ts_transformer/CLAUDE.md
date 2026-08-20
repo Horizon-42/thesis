@@ -40,7 +40,7 @@ Everything below is serialised into every checkpoint.
   missing.
 - Aircraft-type resolution (`_resolve_aircraft`, `--aircraft-type`, why `"type": "UNK"` does not
   mean single-type): see `flight_scenarios/CLAUDE.md`.
-- **Controls are DIMENSIONLESS in this package** (`control_envelope.py`, the single source):
+- **Controls are DIMENSIONLESS in this package** (`control/envelope.py`, the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, the same box on
   every airframe. Newtons appear in exactly two places — `physical_controls()` on the way into
   the dynamics, and `forecast.py` on the way out to the evaluation record, whose contract stays
@@ -53,7 +53,7 @@ Everything below is serialised into every checkpoint.
 - **Two orthogonal dynamics axes.** `control_dynamics_model` ∈ `point-mass` |
   `first-order-lag` is the physics; `control_dynamics_backend` ∈ `reanchored-rk4` |
   `transport-chart-velocity` | `scaled-transport-chart-velocity` is the state representation the
-  long rollout carries. The registry in `control_dynamics_backends.py` is keyed by the PAIR.
+  long rollout carries. The registry in `control/dynamics/backends.py` is keyed by the PAIR.
 
 ## Layout
 
@@ -119,7 +119,7 @@ namespace would restore the undifferentiated listing the package exists to remov
 - **The teacher inverse must be the inverse OF THE CONFIGURED FORWARD MODEL, and nothing else
   can catch it if it is not.** A schedule solved against the wrong equations is finite, bounded,
   the right shape, and its own optimizer reports a falling loss — it simply reproduces nothing.
-  So `control_inverse_dynamics.py` registers each inverse under the SAME config key as its
+  So `control/dynamics/inverse.py` registers each inverse under the SAME config key as its
   forward model, and `tests/test_control_inverse_dynamics.py` closes the loop numerically for
   every registered model (roll a known schedule → invert the dense result → require the schedule
   back: 5e-3 in thrust fraction and load factor, 0.5° in bank). A model added without an inverse
@@ -262,12 +262,12 @@ namespace would restore the undifferentiated listing the package exists to remov
   magnitudes, never p: seed noise moves bank skill 0.019 and ADE 1.7 m, the dose effects 3-8×
   and 13-52× that.
 - **`control_imitation_loss_weight` supervises the schedule directly**, against
-  `control_inverse_dynamics` — the same registry the forward model dispatches on, so target and
+  `control/dynamics/inverse.py` — the same registry the forward model dispatches on, so target and
   rollout can never be different equations. The target is built in
   `dataset.reference_control_supervision` on the training-only `_dynamics_arrays` path;
   **`dynamics_arrays()` itself must stay free of it** because forecast/predict call it and there
   is no future to invert there. Each channel is divided by half its box width
-  (`control_envelope.CONTROL_HALF_WIDTH`), which on KRDU splits the term 57 / 41 / 2 % across
+  (`control.envelope.CONTROL_HALF_WIDTH`), which on KRDU splits the term 57 / 41 / 2 % across
   thrust / bank / load — on KSJC it is 82 / 18 / 1, one reason KRDU is the better testbed.
   Calibration convention: at the converged KRDU baseline (`state` = 0.0417, unweighted term
   0.0308) **w = 1.36 is 1× the position term**.
