@@ -131,8 +131,8 @@ CONTROL_RECIPE_SIMPLE_V2 = "simple-v2"
 # carried less information about the flown bank than a randomly chosen other flight's did
 # (per-flight skill 0.124 against a random-flight floor of 0.170). On 1404 KRDU validation
 # flights this recipe takes that skill to 0.735, the flight-independent share of the bank
-# from 49.0 % to 3.3 % (flown tracks: 3.2 %), the bank on straight-in references from 3.92
-# to 0.36 deg (0.55), sign reversals there from 5 to 0, AND improves ADE on 57.0 % of
+# from 49.0 % to 3.3 % (KRDU's own flown tracks: 1.8 %), the bank on straight-in references
+# from 3.92 to 0.36 deg (0.41), sign reversals there from 5 to 0, AND improves ADE on 57.0 % of
 # flights (median 656 -> 501 m, p=1.9e-7) with FDE unchanged. Unlike the velocity term,
 # whose doses bought bank structure at 18-50 % of FDE, this one costs no accuracy.
 # See docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md section 12.
@@ -160,10 +160,20 @@ SIMPLE_V2_VELOCITY_LOSS_WEIGHT = 0.003
 #     than the 0.74x arm on every metric. Sampling only that region would have concluded
 #     the term barely works.
 #   - At 188x the fit is saturating (unweighted term 0.00891 -> 0.00827, -7 %, against
-#     -31 % over the previous step) and starts OVERSHOOTING the data: straight-reference
-#     bank 0.24 deg and common-profile share 3.0 % are both past the flown tracks' own
-#     0.55 deg and 3.2 %, i.e. smoother than reality rather than closer to it.
-# 47x is the dose whose structure metrics land ON the measured truth.
+#     -31 % over the previous step) and its straight-reference bank, 0.24 deg, is 41 % BELOW
+#     what the flown tracks themselves fly (0.41) -- smoother than reality rather than
+#     closer to it, where 47x sits 12 % below.
+# 47x is chosen on that margin plus the saturation and the better FDE mean, NOT on the
+# common-profile share, where 188x is marginally closer (3.0 vs 3.3 % against 1.8 %).
+# NOTE both airports' flown values differ and neither dose reaches KRDU's 1.8 % share.
+#
+# **64.0 IS A KRDU-CALIBRATED NUMBER, NOT A UNIVERSAL ONE.** Replicated on KSJC the
+# mechanism holds and is if anything stronger (bank skill 0.197 -> 0.678, past that
+# airport's 0.543 twin), but the same weight overshoots there: straight-in bank 0.18 deg
+# against a flown 0.53, and FDE degrades on 68 % of flights (p=9e-33) where KRDU paid
+# nothing. The cause is already measured -- bank carries 18 % of the box-normalised term at
+# KSJC against 41 % at KRDU -- so a new airport should recalibrate off that channel split
+# rather than inherit 64.0.
 SIMPLE_V3_IMITATION_LOSS_WEIGHT = 64.0
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"

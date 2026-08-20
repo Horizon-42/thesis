@@ -230,8 +230,8 @@ namespace would restore the undifferentiated listing the package exists to remov
   because the entry state only partly determines the future. Doing so inverts the earlier
   loss-design reading: the velocity dose frozen into `simple-v2` is the only one below the floor.
   Measured on 1404 KRDU validation flights, `simple-v3` takes per-flight bank skill 0.124 →
-  **0.735**, the flight-independent share 49.0 % → **3.3 %** (flown tracks 3.2 %), straight-in
-  bank RMS 3.92° → **0.36°** (0.55°), sign reversals 5 → **0**, and improves ADE on **57.0 %**
+  **0.735**, the flight-independent share 49.0 % → **3.3 %** (KRDU's own flown tracks: 1.8 %),
+  straight-in bank RMS 3.92° → **0.36°** (0.41°), sign reversals 5 → **0**, and ADE on **57.0 %**
   of flights (median 656 → 501 m, p=1.9e-7) with FDE unchanged — unlike the velocity term,
   this structure costs no accuracy.
 - **The inverse's transport term (ω×v) is UNCONDITIONAL, and that is a measured result.**
@@ -252,12 +252,23 @@ namespace would restore the undifferentiated listing the package exists to remov
   a spherical-earth simplification (eccentricity is ~0.3 % of the radius, far below its
   margin). Note `dynamics_arrays`' own `frame_params` entry is unrelated and is a real
   rollout input.
+- **`simple-v3` replicates across airports; its WEIGHT does not.** On KSJC the mechanism is
+  if anything stronger (bank skill 0.197 → **0.678**, past that airport's 0.543 twin, better
+  on 94.7 % of flights, p=1e-230) — but the same 64.0 overshoots: straight-in bank 0.18°
+  against a flown 0.53°, and **FDE degrades on 68 % of flights** (p=9e-33) where KRDU paid
+  nothing. The cause is the already-measured channel split — bank carries 18 % of the
+  box-normalised term at KSJC against 41 % at KRDU — so **recalibrate the weight per airport
+  off that split; do not inherit 64.0**.
 - **The imitation dose curve is NOT a ramp, and the sign test is not an effect size.** Below
   ~11.8× position the ladder is a noisy plateau (the 1.47× arm came out worse than 0.74× on
   every metric), so sampling only that region concludes the term barely works — the geometric
   1/4/16/64 ladder is what made the effect visible. Past 47× the fit saturates and starts
   overshooting: at 188× straight-in bank is 0.24° and the shared share 3.0 %, both past the
-  flown tracks' own 0.55° and 3.2 %, i.e. smoother than reality rather than closer to it.
+  flown tracks' own 0.41° — smoother than reality rather than closer to it, where 47× sits
+  12 % below. **The truth values are per-airport and must be measured, never assumed**:
+  `score_control_arms.py` now prints them as a "flown tracks" row under each metric, because
+  they used to be hardcoded to KSJC's 3.2 % / 0.55° and every KRDU number was read against
+  the wrong reference.
   And at n=1404 the paired sign test returns **p = 3e-16 for pure seed noise**, so read
   magnitudes, never p: seed noise moves bank skill 0.019 and ADE 1.7 m, the dose effects 3-8×
   and 13-52× that.
