@@ -23,7 +23,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM, truncate_flights
+from trajectory_data_process.arrival_segment import (
+    ENTRY_RADIUS_KM,
+    GROUND_START_AGL_M,
+    truncate_flights,
+)
 from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
@@ -35,6 +39,7 @@ from trajectory_data_process.harvest.altitude_filter import (
 )
 from trajectory_data_process.harvest.czml import czml_input_flight, verify_identity
 from trajectory_data_process.harvest.store import (
+    ALTITUDE_DATUM,
     HarvestPaths,
     read_manifest,
     require_source_timed_manifest,
@@ -43,7 +48,10 @@ from trajectory_data_process.harvest.threshold_event import require_current_thre
 
 ARRIVALS_DIR = "arrivals"
 MANIFEST_NAME = "manifest.json"
-SCHEMA_VERSION = "harvest-arrivals-v4-source-timed-track-slices"
+# v5 excludes segments that begin on the ground (``takeoff_in_segment``). The bump is
+# what makes an existing v4 manifest fail loudly instead of quietly feeding a model
+# split that still contains 75 takeoffs -- the roster's MEANING changed, not its shape.
+SCHEMA_VERSION = "harvest-arrivals-v5-takeoff-excluded"
 
 
 def arrival_manifest_path(paths: HarvestPaths) -> Path:
@@ -61,10 +69,20 @@ def write_arrival_records(
     Only ``assigned`` source tracks can enter. Tracks without a published per-runway TCH
     or glidepath remain in ``tracks/`` and the observed CZML, but are excluded here because
     a scenario/TS target would otherwise fall back to an invented vertical reference.
-    Local circuits are also excluded after the terminal-entry cut.
+    Local circuits and segments that begin on the ground (a takeoff from a field inside the
+    terminal-entry ring) are also excluded after the terminal-entry cut.
     """
     source = read_manifest(paths)
     require_source_timed_manifest(source, path=paths.manifest)
+    if source["altitude_datum"] != ALTITUDE_DATUM:
+        # The takeoff test compares a stored sample altitude against the runway's
+        # elevation_hae_m. Read against an MSL track it would be off by the geoid
+        # separation (~33 m over this fleet) and would still return an answer.
+        raise ValueError(
+            f"{paths.manifest}: altitude_datum is {source['altitude_datum']!r}, "
+            f"expected {ALTITUDE_DATUM!r}; the arrival ground test compares stored "
+            "altitudes against the runway's HAE elevation"
+        )
     root = paths.airport / ARRIVALS_DIR
     _clear(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -116,8 +134,14 @@ def write_arrival_records(
         flight["runway_target"] = _runway_target(runway)
         verify_identity(flight, track["flight_key"])
 
-        arrivals, locals_ = truncate_flights(
-            [flight], airport.lat, airport.lon, entry_radius_km=entry_radius_km
+        arrivals, locals_, takeoffs = truncate_flights(
+            [flight],
+            airport.lat,
+            airport.lon,
+            # Both sides HAE: the stored samples by the datum asserted above, the
+            # runway by its own field name.  Nothing converts here.
+            field_elevation_m=runway.elevation_hae_m,
+            entry_radius_km=entry_radius_km,
         )
         if locals_:
             excluded.append(
@@ -126,6 +150,21 @@ def write_arrival_records(
                     "outcome": "local_circuit",
                     "runway": runway.ident,
                     "reason": "track starts at the field and never leaves the terminal-entry ring",
+                }
+            )
+            continue
+        if takeoffs:
+            excluded.append(
+                {
+                    "flight_key": row["flight_key"],
+                    "outcome": "takeoff_in_segment",
+                    "runway": runway.ident,
+                    "reason": (
+                        "arrival segment starts within "
+                        f"{GROUND_START_AGL_M:g} m of the runway elevation: it begins on "
+                        "the ground at a field inside the terminal-entry ring, so it "
+                        "contains a takeoff rather than a terminal-area arrival"
+                    ),
                 }
             )
             continue
@@ -173,6 +212,10 @@ def write_arrival_records(
         "source_manifest": "../tracks/manifest.json",
         "source_counts": source["counts"],
         "entry_radius_km": entry_radius_km,
+        # The height above the landing runway below which a segment's first sample
+        # counts as on the ground, excluding it as ``takeoff_in_segment``. Stated
+        # here because a roster that dropped flights must say on what criterion.
+        "ground_start_agl_m": GROUND_START_AGL_M,
         "altitude_source": source["altitude_source"],
         "altitude_datum": source["altitude_datum"],
         "counts": counts,

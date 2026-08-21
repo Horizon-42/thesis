@@ -38,6 +38,19 @@ Everything below is serialised into every checkpoint.
 - `summary.json` carries an `accuracy` block (mean AND p95) plus per-row `ade_m`/`fde_m`;
   `overlap` is a REQUIRED arg to `write_batch` — an optional metric is one that silently goes
   missing.
+- **A per-airport ADE without its ROUTE MIX is not a comparison** (`approach_difficulty.py`).
+  Every row carries `route_tortuosity`, `remaining_path_m`, `anchor_range_m`,
+  `anchor_cross_track_m`, `established_at_anchor`, and `accuracy.difficulty` carries the
+  batch mix + the thresholds the flag encodes. Measured 2026-08-20 on the pooled checkpoint:
+  **inside a matched stratum every airport scores the same** (412–509 m median ADE on
+  "straight, <13 km left"), and the whole spread between airports is the share of flights in
+  that stratum — 78.6 % at KSJC against 41.8–61.0 % elsewhere. Reweighted to the pooled mix
+  KSJC goes **483 → 1526 m, from best of five to worst**, and on its own vectored flights it
+  IS the worst (3931 m vs 2000–2249 m at KSTL/KRDU). The signature to recognise: ADE and
+  cross-track improve while **FDE does not** (KSJC 1000 m vs KRDU 1019 m) — a straight route
+  makes only the lateral channel easy. Covariates come from the OBSERVED track the error is
+  scored against, never the prediction, and are frame-independent (world EN, not chart axes).
+  → `docs/2026-08-21_ksjc_route_mix_and_ade.md`
 - Aircraft-type resolution (`_resolve_aircraft`, `--aircraft-type`, why `"type": "UNK"` does not
   mean single-type): see `flight_scenarios/CLAUDE.md`.
 - **Controls are DIMENSIONLESS in this package** (`control/envelope.py`, the single source):

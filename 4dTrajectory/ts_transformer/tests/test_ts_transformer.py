@@ -154,6 +154,11 @@ from terminal_state_loss import terminal_state_errors  # noqa: E402
 from control.duration import UniformDurationControlHead  # noqa: E402
 from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
+# Imported, never restated: a schema version pinned by hand in a fixture is a version
+# the fixture cannot check, and this one gates every loader that reads the roster.
+from trajectory_data_process.harvest.arrivals import (  # noqa: E402
+    SCHEMA_VERSION as ARRIVAL_MANIFEST_SCHEMA,
+)
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
     evaluate_fit_splits,
@@ -1428,7 +1433,7 @@ def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU"
     manifest.write_text(
         json.dumps(
             {
-                "schema_version": "harvest-arrivals-v4-source-timed-track-slices",
+                "schema_version": ARRIVAL_MANIFEST_SCHEMA,
                 "airport": airport,
                 "source_manifest": "../tracks/manifest.json",
                 "altitude_source": "opensky_history_geoaltitude_m",
@@ -5790,6 +5795,13 @@ def test_accuracy_block_emits_empty_raw_metric_stats_when_all_values_are_nan():
         "true_final_time_s": 1.0,
         "final_time_error_s": 0.0,
         "raw_kinematics": raw,
+        "difficulty": {
+            "anchor_range_m": 12000.0,
+            "remaining_path_m": 12500.0,
+            "route_tortuosity": 12500.0 / 12000.0,
+            "anchor_cross_track_m": -40.0,
+            "established_at_anchor": True,
+        },
     }
 
     block = accuracy_block([row])
