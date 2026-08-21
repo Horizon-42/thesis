@@ -120,3 +120,21 @@ store, roster.
   takeoffs). Loaders compare exactly, so a v4 manifest on disk fails loudly; rebuild with
   `python -m trajectory_data_process.harvest --airport <ICAO> --evaluate-only`, which
   re-rosters from stored `tracks/` without downloading or reassigning anything.
+- **Rebuilding `arrivals/` DELETES `lateral_pass_eligibility.json`, which nothing rebuilds
+  for you.** `arrivals._clear()` unlinks every `*.json` under the directory before writing
+  the new manifest, and the lateral-pass roster lives there but is owned by
+  `ts_transformer/lateral_eligibility.py`. So any `--evaluate-only` or
+  `--reclassify-existing` silently removes a file every TS train/predict requires, and the
+  failure surfaces later as `FileNotFoundError` from whichever run touches it next — on
+  2026-08-21 that was mid-campaign, after one arm had already trained. Rebuild it right
+  after the harvest, from the regenerated approach report:
+  `lateral_eligibility.ensure_lateral_pass_roster(<arrivals>/manifest.json)`.
+- **`--reclassify-existing` is NOT the rebuild command** — it re-derives runway assignment
+  and is only for a changed runway-data cycle or assignment method. For a schema bump or an
+  evaluation-policy change use `--evaluate-only`; reaching for the heavier one risks a
+  different roster for no reason.
+- **A harvest killed with SIGTERM can still finish its write.** On 2026-08-21 a
+  `--reclassify-existing` run killed mid-flight completed several minutes later, cleared the
+  directory again, and overwrote a manifest a training job was already reading — the arm had
+  to be discarded. Confirm the process is actually gone (`kill -0`) before rebuilding
+  anything downstream of it.
