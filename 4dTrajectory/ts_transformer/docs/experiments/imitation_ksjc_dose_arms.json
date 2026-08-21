@@ -1,0 +1,8 @@
+{
+  "_comment": "Tests the recalibration recipe recorded in config.py, rather than just trying a smaller number. At KSJC the KRDU-calibrated weight 64 overshoots: straight-in bank 0.18 deg against a flown 0.53, and FDE worse on 68 percent of flights (p=9e-33), while bank skill is excellent (0.678). The stated cause is the channel split - bank carries 18 percent of the box-normalised imitation term at KSJC against 41 percent at KRDU - which predicts KSJC's equivalent of KRDU's 47x is about 47 / (41/18) = 20.6x, i.e. weight 28. Two arms: weight 28 tests that prediction directly, and weight 16 (11.8x) is the KRDU ladder point, included because on KRDU 11.8x sat ABOVE the flown bank (0.54 vs 0.41) while 47x sat below, so the pair brackets the crossing on both airports and makes the two ladders comparable at a shared dose. Pre-registered reading: if the recipe is right, weight 28 lands near KSJC's flown 0.53 deg with FDE recovered toward baseline while keeping most of the skill; if instead weight 16 is needed, the channel-share rule under-corrects and config.py should say so.",
+  "base_recipe": "simple-v2",
+  "arms": [
+    {"key": "ksjc_w28", "label": "KSJC imitation weight 28 (channel-share predicted)", "overrides": {"control_imitation_loss_weight": 28.0}},
+    {"key": "ksjc_w16", "label": "KSJC imitation weight 16 (KRDU ladder point 11.8x)", "overrides": {"control_imitation_loss_weight": 16.0}}
+  ]
+}
