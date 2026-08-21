@@ -1,0 +1,9 @@
+{
+  "_comment": "The three arms still owed after the KSJC v5 ladder was stopped on 2026-08-21 with v5_baseline complete. Identical to imitation_ksjc_v5_arms.json minus the baseline, because run_ts_control_arms.py has no resume or skip logic and would otherwise retrain a finished arm. Write into the SAME campaign directory so all four are scored together. Pre-registered reading, unchanged: weight 28 is what the box-normalised bank-share ratio (41 percent at KRDU against 18 percent at KSJC) predicts as KSJC's equivalent of KRDU's 47x; if it lands near KSJC's flown straight-in bank of 0.53 deg with FDE recovered toward baseline and most of the skill kept, the recalibration recipe in config.py stands; if 16 is needed instead, the rule under-corrects and config.py must be rewritten to say so.",
+  "base_recipe": "simple-v2",
+  "arms": [
+    {"key": "v5_w16", "label": "KSJC v5 imitation weight 16 (KRDU 11.8x point)", "overrides": {"control_imitation_loss_weight": 16.0}},
+    {"key": "v5_w28", "label": "KSJC v5 imitation weight 28 (channel-share predicted)", "overrides": {"control_imitation_loss_weight": 28.0}},
+    {"key": "v5_w64", "label": "KSJC v5 imitation weight 64 (KRDU calibrated)", "overrides": {"control_imitation_loss_weight": 64.0}}
+  ]
+}
