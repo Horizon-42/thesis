@@ -1,0 +1,10 @@
+{
+  "_comment": "The whole KSJC dose ladder, re-run on the v5 cohort. The earlier KSJC pair (baseline vs weight 64) was trained on the v4 roster, which the takeoff-filter merge showed contained 64 ground-start departures out of 11,146 - so those numbers cannot be compared against arms trained on v5, and the dose question needs all four on one cohort. Arms: baseline (no imitation term), weight 64 (KRDU's calibrated 47x, which overshot here), weight 28 (what the 41/18 percent box-normalised bank-share ratio predicts as KSJC's equivalent), weight 16 (the KRDU ladder's 11.8x point, above the flown bank there while 64 was below). Pre-registered reading unchanged: if the channel-share recipe is right, 28 lands near KSJC's flown straight-in bank with FDE recovered toward baseline and most of the skill kept; if 16 is needed instead, the rule under-corrects and config.py must say so. Note the v5 run also writes the new approach_difficulty covariates onto every prediction row, so this ladder can additionally be read inside a matched route-mix stratum rather than across KSJC's unusually easy mix.",
+  "base_recipe": "simple-v2",
+  "arms": [
+    {"key": "v5_baseline", "label": "KSJC v5 simple-v2 baseline", "overrides": {}},
+    {"key": "v5_w16", "label": "KSJC v5 imitation weight 16 (KRDU 11.8x point)", "overrides": {"control_imitation_loss_weight": 16.0}},
+    {"key": "v5_w28", "label": "KSJC v5 imitation weight 28 (channel-share predicted)", "overrides": {"control_imitation_loss_weight": 28.0}},
+    {"key": "v5_w64", "label": "KSJC v5 imitation weight 64 (KRDU calibrated)", "overrides": {"control_imitation_loss_weight": 64.0}}
+  ]
+}
