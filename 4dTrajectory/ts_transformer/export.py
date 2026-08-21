@@ -52,6 +52,9 @@ from evaluation_export import (  # noqa: E402
     summary_row,
 )
 
+from approach_difficulty import (  # noqa: E402
+    approach_difficulty, difficulty_block,
+)
 from channels import states_from_channels  # noqa: E402
 from dataset import FlightSeries, flight_key  # noqa: E402
 from forecast import Forecast  # noqa: E402
@@ -355,6 +358,9 @@ def accuracy_block(flight_metrics: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "cross_track_p95_m": stats("cross_track_p95_m"),
         "altitude_p95_m": stats("altitude_p95_m"),
         "raw_kinematics": raw_block,
+        # The route mix these errors were earned on. Beside the errors, not in a separate
+        # file, because comparing two batches' ADE without it compares two problems.
+        "difficulty": difficulty_block([row["difficulty"] for row in finite]),
     }
 
 
@@ -449,6 +455,7 @@ def write_batch(
             ),
             "metric_steps": metrics["n_steps"],
             "raw_kinematics": _json_optional_metrics(metrics["raw_kinematics"]),
+            **metrics["difficulty"],
         })
         rows.append(row)
 
@@ -521,4 +528,7 @@ def observed_series_metrics(
         "raw_kinematics": raw_metrics,
         "true_final_time_s": block["true_final_time_s"],
         "final_time_error_s": block["final_time_error_s"],
+        # What the error above has to be read against: an airport whose flights are
+        # already established straight-in poses an easier problem, not a solved one.
+        "difficulty": approach_difficulty(series, forecast.anchor).to_dict(),
     }

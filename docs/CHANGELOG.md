@@ -4,6 +4,73 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-21 — KSJC's ADE advantage is a route-mix artifact; 75 takeoffs were in the arrivals
+
+Investigating why KSJC trajectories looked "weirdly short" and its ADE/FDE remarkably better
+than the other four airports. Two separate findings; full write-up with every table in
+`docs/2026-08-21_ksjc_route_mix_and_ade.md`.
+
+**The ADE gap is composition, not skill, and it reverses under standardisation.** KSJC's data
+is not truncated — it is *straight*. Its reception is the best of the five (99.0 % of tracks
+start at the 30 km crop edge, max sample gap p50 2.1 s against KMSY's 6.6 s, 1 coverage gap in
+400 tracks), and the arrival slice cuts the same ~5.1 km annulus everywhere. What differs is
+the flying: whole-segment tortuosity p75 is **1.017** at KSJC against 1.96–2.38 elsewhere,
+96.6 % are established on the centreline at 20 km to go (KSTL 38.7 %), and at 15 km out the
+interquartile cross-track spread is **12 m**. It is visible before any slicing — median path
+inside the raw 30 km crop is 29.1 km at KSJC against 34.6–44.8 km — and at the crop edge
+44.8 % are already within 15° of the approach course (KSTL 3.2 %, median 126°, still outbound).
+Cause is operational: 86 % of arrivals on 30L, Santa Clara valley plus SFO/OAK Class B funnel
+traffic onto the centreline outside 30 km.
+
+Stratifying evaluation flights by post-anchor tortuosity × remaining path, **ADE inside a
+stratum is equal across airports** (412–509 m median on "straight, <13 km left"). KSJC simply
+has 78.6 % of its flights there against 41.8–61.0 % elsewhere. Reweighted to the pooled mix,
+KSJC's ADE median goes **483 → 1526 m — from best of five to worst**, and on its own vectored
+flights it already was the worst (3931 m against 2000–2249 m at KSTL/KRDU). The recognisable
+signature: ADE and cross-track improve while **FDE does not** (1000 m against KRDU's 1019 m),
+because a straight route makes only the lateral channel easy.
+
+Fixed by making the mix impossible to omit: new `ts_transformer/approach_difficulty.py` writes
+`route_tortuosity`, `remaining_path_m`, `anchor_range_m`, `anchor_cross_track_m` and
+`established_at_anchor` onto every prediction row, plus an `accuracy.difficulty` batch block
+carrying the mix and the thresholds the flag encodes. Computed from the observed track the
+error is scored against — never the prediction — and in world EN rather than chart axes, so
+the numbers do not change meaning across a `coordinate_frame` ablation. Verified against the
+independent measurement: KSJC 78.2 % established (78.3 % standalone), KSTL 53.8 % (54.0 %).
+
+**Separately: 75 rostered "arrivals" were takeoffs.** `arrival_segment.py` classified a
+never-left-the-ring track as a local circuit only if it started within
+`LOCAL_START_RADIUS_KM = 5` of the DESTINATION, so a takeoff from a neighbouring field inside
+the 25 km ring passed and was kept whole — first sample on a runway a few km away, on the
+ground. **64 of the 75 are KSJC** (KRHV ×28 at 7 km, KPAO ×20 at 21 km, KNUQ ×16 at 11 km),
+KSMF 8, KMSY 3, KRDU and KSTL zero; KSJC is the only one of the five ringed by satellite
+fields. Every one was long enough to reach the TS dataset. Impact on the metrics is small
+(0.24 % of KSJC evaluation flights anchor within 5 km of the threshold against 0.10–0.16 %
+elsewhere) — a correctness fix, not the ADE explanation, though it overlaps the known
+"duration head cannot predict below ~125 s" item.
+
+`arrival_segment` gained a required `field_elevation_m` (no default — the rows are HAE and a
+silently MSL reference would shift the test by the geoid separation without failing) and a
+third outcome `"takeoff"`, rostered as `excluded.outcome = "takeoff_in_segment"` with
+`ground_start_agl_m` published in the manifest. `truncate_flights` now returns
+`(arrivals, locals, takeoffs)`.
+
+Two decisions worth keeping. **The criterion is altitude alone**: over 42 725 arrivals the
+first-sample height above the landing runway is bimodal with an empty band — 75 at or below 82.1 m,
+**zero between 100 and 150 m**, next at 175.3 m — while ground speed does NOT separate the
+populations, because a jet at rotation reads 71–80 m/s on the runway; a speed-and-altitude
+rule would have kept 29 of the 75. **The test reads the segment the ring cut produced**, not
+the raw track, so a flight that departs a neighbour, leaves the ring and comes back stays a
+genuine arrival.
+
+**Stale outputs.** The manifest schema is bumped to `harvest-arrivals-v5-takeoff-excluded`;
+loaders compare exactly, so every on-disk v4 manifest now fails loudly. Rebuild with
+`python -m trajectory_data_process.harvest --airport <ICAO> --evaluate-only` (re-rosters from
+stored `tracks/`; no download, no reassignment). KSJC drops 11 146 → 11 082. Existing ts
+checkpoints were trained on cohorts containing the removed flights, and published per-airport
+ADE/FDE tables should be re-derived standardised, or at minimum quoted alongside
+`established_at_anchor_fraction`.
+
 ### 2026-08-20 — `simple-v3`: the control schedule is now supervised directly
 
 `simple-v2` scored position (derivative order 0) and velocity (order 1). Bank lives at

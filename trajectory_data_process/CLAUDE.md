@@ -21,6 +21,19 @@ store, roster.
   does not crash — it turns a 3.06° approach into a 9.94° one (observed).
   `harvest.reconstruct_tracks` therefore takes a **required** `altitude_units` argument with no
   default and no sniffing.
+- **An arrival segment must not BEGIN on the ground, and the local-circuit test cannot catch
+  that on its own.** `LOCAL_START_RADIUS_KM` measures distance from the DESTINATION, so a
+  takeoff from a NEIGHBOURING field inside the 25 km ring passed it and entered the dataset
+  as a "coverage-limited arrival" starting on a runway a few km away. Measured: **75 flights,
+  64 of them KSJC** (KRHV ×28 at 7 km, KPAO ×20 at 21 km, KNUQ ×16 at 11 km), KSMF 8, KMSY 3,
+  KRDU and KSTL **zero** — KSJC is the only airport of the five ringed by satellite fields.
+  Every one was long enough to reach the TS dataset. `arrival_segment` now returns a third
+  kind, `"takeoff"`, rostered as `excluded.outcome = "takeoff_in_segment"`.
+  **The test is ALTITUDE ONLY and must stay that way**: a jet at rotation reads 71–80 m/s on
+  the runway, inside the approach-speed range, so adding a ground-speed condition would keep
+  29 of the 75. It is applied to the segment the ring cut PRODUCED, not the raw track — a
+  flight that departs a neighbour, leaves the ring and comes back is a genuine arrival whose
+  takeoff was already cut away. Full analysis: `docs/2026-08-21_ksjc_route_mix_and_ade.md`.
 - **Track reconstruction: a landing ends at a sustained ON-GROUND run, and a spatial crop must
   keep only the final contiguous run.** An aircraft that lands keeps transmitting from the gate,
   so state vectors are continuous across a turnaround and the >900 s gap rule never fires; the
@@ -95,4 +108,15 @@ store, roster.
   `altitude_filter`, and `RenderedObserved.altitude_outliers`.
 - Arrival truncation (`trajectory_data_process/arrival_segment.py`): `ENTRY_RADIUS_KM = 25`
   (builder `--entry-radius-km`, in (0, 30)), `ENTRY_HYSTERESIS_SAMPLES = 3`,
-  `LOCAL_START_RADIUS_KM = 5`.
+  `LOCAL_START_RADIUS_KM = 5`, `GROUND_START_AGL_M = 100` (published per manifest as
+  `ground_start_agl_m`). The 100 m sits in an EMPTY band: over 42 725 rostered arrivals the
+  first-sample height above the landing runway is bimodal — 75 flights at or below 82.1 m, **zero
+  between 100 and 150 m**, next at 175.3 m — so no flight in the fleet is near the boundary.
+  `arrival_segment` takes `field_elevation_m` as a REQUIRED argument with no default: the
+  waypoint rows are HAE and a silently MSL reference would shift the test by the geoid
+  separation (~33 m) without failing. `harvest/arrivals.py` asserts the datum once, at the
+  boundary.
+- Arrival manifest schema: **`harvest-arrivals-v5-takeoff-excluded`** (v4 excluded no
+  takeoffs). Loaders compare exactly, so a v4 manifest on disk fails loudly; rebuild with
+  `python -m trajectory_data_process.harvest --airport <ICAO> --evaluate-only`, which
+  re-rosters from stored `tracks/` without downloading or reassigning anything.

@@ -218,12 +218,26 @@ Maintenance convention:
 
 ## Open Items (index; details in the linked file)
 
+- **Every arrival manifest on disk is stale as of 2026-08-21 and must be re-rostered before
+  anything reads it.** The schema is now `harvest-arrivals-v5-takeoff-excluded` (v4 admitted
+  75 takeoffs from satellite fields inside the ring, 64 of them KSJC); loaders compare the
+  version exactly, so a v4 manifest raises. Rebuild — no download, no reassignment:
+  `python -m trajectory_data_process.harvest --airport <ICAO> --evaluate-only` for each of the
+  five. KSJC drops 11,146 → 11,082; fleet 42,725 → 42,650. **Existing ts checkpoints were
+  trained on cohorts containing the removed flights.** →
+  `trajectory_data_process/CLAUDE.md`, `docs/2026-08-21_ksjc_route_mix_and_ade.md`
+- **Per-airport ADE/FDE must be quoted with its route mix, never bare.** KSJC's apparent 1.7×
+  advantage is composition: reweighted to the pooled stratum mix it goes 483 → 1526 m, best of
+  five to worst. `summary.json` now carries the covariates per row and an
+  `accuracy.difficulty` block; published tables predate them and need re-deriving. →
+  `4dTrajectory/ts_transformer/CLAUDE.md`
 - **The optimizer batch has NOT been run since the harvest grew; nothing is on disk to reuse.**
   `flight_scenarios/outputs` is empty and `4dTrajectory/outputs/<ICAO>` holds only ts artifacts,
   so `--skip-optimize` has nothing to find and the run is from scratch. The arrival manifests
-  themselves ARE current (re-harvested 2026-08-15…17, all five airports — the old "KSJC and
-  KSTL need a re-harvest" item is closed), so `prepare_scenario_inputs.py --skip-observed` is
-  safe and skips rebuilding the observed CZML/report tail.
+  were re-harvested 2026-08-15…17 for all five airports (the old "KSJC and KSTL need a
+  re-harvest" item is closed) but need the v5 re-roster above first; after it,
+  `prepare_scenario_inputs.py --skip-observed` is safe and skips rebuilding the observed
+  CZML/report tail.
   **Scale**: 42,725 rostered arrivals; at the default `--max-per-runway 2000` the batch is
   **23,453 flights / 70,359 solves**, estimated ~30 h at `--jobs 24` and **12.3 GiB** of
   artifacts (`--rollout-dt 1.0` → 8.1 GiB). Free space is the binding constraint and moves
