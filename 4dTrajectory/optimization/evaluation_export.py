@@ -15,7 +15,9 @@ then (correctly) fails the evaluation gates.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Sequence
 
 from aerodynamic_model.common import GeodeticState
@@ -41,6 +43,35 @@ REFERENCES_DIR = "references"
 OBSERVED_TRACKS_DIR = "observed_tracks"
 OBSERVED_TRACK_SUFFIX = "_track.json"
 OBSERVED_TRACK_KEY = "states"
+
+# The reference cache contract, beside the record shapes it anchors (this module is the
+# casadi-free single source both the optimizer batch and the pipeline runner import — the
+# runner used to restate it as a comment-pinned mirror). v3 replaced each record's inline
+# state array with a `states_ref` into the shared observed-track store above, so a v2
+# manifest no longer describes what is on disk and must not be reused.
+REFERENCE_CACHE_SCHEMA = "optimization-references-v3-shared-tracks"
+
+
+def file_sha256(path: str | Path) -> str:
+    """SHA-256 of a file's bytes — the integrity primitive of the reference cache."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def observed_track_path(reference_path: Path) -> Path:
+    """The shared track file a reference record quotes, from the record's own path.
+
+    The store is a SIBLING of the per-target reference directories (see
+    ``OBSERVED_TRACKS_DIR``), so the mapping is pure path arithmetic — shared by the
+    writer (the optimizer batch) and every validator of the cache contract.
+    """
+    stem = reference_path.name.removesuffix(REFERENCE_EVAL_SUFFIX)
+    return reference_path.parent.parent / OBSERVED_TRACKS_DIR / (
+        stem + OBSERVED_TRACK_SUFFIX
+    )
 
 
 # ── Serialized precision ──────────────────────────────────────────────────────

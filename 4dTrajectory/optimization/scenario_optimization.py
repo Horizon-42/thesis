@@ -30,7 +30,6 @@ TODOs. See ``flight_scenarios/README.md`` and the comments below.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -77,12 +76,15 @@ from evaluation_export import (  # noqa: E402
     EVAL_SUFFIX as _EVAL_SUFFIX,
     OBSERVED_TRACKS_DIR,
     OBSERVED_TRACK_SUFFIX,
+    REFERENCE_CACHE_SCHEMA,
     REFERENCE_EVAL_SUFFIX as _REFERENCE_EVAL_SUFFIX,
     REFERENCES_DIR,
     STATES_SUFFIX as _STATES_SUFFIX,
     evaluation_record,
     failed_evaluation_record,
+    file_sha256 as _file_sha256,
     observed_track_document,
+    observed_track_path as _observed_track_path,
     reference_evaluation_record,
     summary_row,
 )
@@ -275,7 +277,8 @@ def optimize_scenario(
     initial_row = [initial.latitude, initial.longitude, initial.altitude,
                    initial.V, initial.psi, initial.gamma]
     dense_rows = [list(row) for row in optimizer.last_dense_states_geo]
-    optimizer_states = _node_states_to_samples([initial_row] + dense_rows, final_time, initial.m)
+    dense_times = [0.0] + [float(t) for t in optimizer.last_dense_state_times_s]
+    optimizer_states = _node_states_to_samples([initial_row] + dense_rows, dense_times, initial.m)
     rollout = _require_usable_rollout(rollout_controls(
         initial, node_control, final_time, aircraft, dt=rollout_dt_s,
         min_altitude_m=rollout_guard_altitude_m(target.altitude),
@@ -291,19 +294,21 @@ def optimize_scenario(
 
 
 def _node_states_to_samples(
-    node_state: Any, final_time: float, mass: float
+    node_state: Any, times: list[float], mass: float
 ) -> list[StateSample]:
     """Reshape the optimizer's node states into timed samples (provided plumbing).
 
-    The boundary nodes are evenly spaced in time over ``[0, final_time]``.
+    ``times`` aligns 1:1 with ``node_state`` and comes from the optimizer's own
+    ``last_dense_state_times_s`` (prefixed with the caller's t=0 initial state).
+    Multiphase solves have per-phase node spacing — free per-phase durations AND
+    per-phase auto substep counts — so spreading the nodes evenly over the horizon
+    time-warped every constrained plan export.
     """
-    states = list(node_state)
-    count = len(states)
     samples: list[StateSample] = []
-    for index, values in enumerate(states):
+    for values, t in zip(node_state, times, strict=True):
         lat, lon, alt, V, psi, gamma = (float(v) for v in values)
-        t = (index / (count - 1)) * final_time if count > 1 else 0.0
-        samples.append(StateSample(t=t, lat=lat, lon=lon, alt=alt, V=V, psi=psi, gamma=gamma, m=mass))
+        samples.append(StateSample(t=float(t), lat=lat, lon=lon, alt=alt, V=V,
+                                   psi=psi, gamma=gamma, m=mass))
     return samples
 
 
@@ -423,7 +428,18 @@ def _optimize_one_scenario(
     except Exception as exc:  # noqa: BLE001 — batch tool: skip + log per-scenario failures
         return (index, flight_id, None, None,
                 f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
-    return (index, flight_id, result.to_dict(), result.evaluation, None)
+    return (index, flight_id, result.to_dict(), _shipped_evaluation(result), None)
+
+
+def _shipped_evaluation(result: ScenarioOptimization) -> dict[str, Any]:
+    """The eval record as the worker ships it to the parent: states emptied.
+
+    The parent writes the rollout once (the states file) and points the eval record at
+    it via ``states_ref``, so pickling the same ~90 KB array a second time inside the
+    eval dict was pure IPC waste. ``final_time_s`` was already read off the array."""
+    evaluation = dict(result.evaluation)
+    evaluation["states"] = []
+    return evaluation
 
 
 def _resolve_jobs(jobs: int, n_tasks: int) -> int:
@@ -480,7 +496,8 @@ def _clear_stale_records(out: Path, keep: set[str] | None = None) -> None:
 
 
 def _resumable_record(
-    out: Path, scenario: FlightScenario, index: int
+    out: Path, scenario: FlightScenario, index: int,
+    expected_config: dict[str, Any],
 ) -> tuple[str, dict[str, Any]] | None:
     """The summary row for one scenario's already-complete record pair, or ``None``.
 
@@ -488,8 +505,13 @@ def _resumable_record(
     end, so a crash at hour 25 used to discard every finished record with it. This reads
     one finished record back and rebuilds its roster row, so ``--resume`` re-runs only what
     is genuinely missing. It is deliberately strict — identity must match the scenario, a
-    solved record must still have its states file — because a half-written record silently
-    reused is worse than one re-solved.
+    solved record must still have its states file, and the record's stamped
+    ``optimization_config`` must equal THIS batch's — because a half-written record
+    silently reused is worse than one re-solved. The config check is what keeps the
+    ``--skip-optimize`` guarantee honest: without it, a resume across a changed
+    ``--max-iterations``/``--fitting``/``--rollout-dt`` absorbed the old records and
+    stamped the new config over the whole roster (records with no stamp — pre-guard
+    batches — are re-solved for the same reason).
     """
     name = _scenario_filename(scenario, index)
     eval_path = out / _eval_filename(name)
@@ -504,6 +526,8 @@ def _resumable_record(
         source.get(key) != scenario.source.get(key)
         for key in ("id", "runway", "icao24", "landing_time_utc")
     ):
+        return None
+    if record.get("optimization_config") != expected_config:
         return None
     final_time = record.get("final_time_s")
     if final_time is None:
@@ -524,38 +548,43 @@ def _resumable_record(
     return (name, row)
 
 
-def optimize_scenarios(
+def _run_batch(
     scenarios: list[FlightScenario],
     *,
     output_dir: str | Path,
-    n_segments: int = DEFAULT_N_SEGMENTS,
-    dt: float = DEFAULT_DT,
-    max_duration: float = DEFAULT_MAX_DURATION_S,
-    rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
-    fitting: str = DEFAULT_FITTING,
-    state_substeps: int | None = None,
-    max_iterations: int = DEFAULT_MAX_ITERATIONS,
-    jobs: int = 0,
-    verbose: bool = False,
-    scenarios_label: str | None = None,
-    references_dir: str | None = None,
-    resume: bool = False,
+    worker: Any,
+    params: dict[str, Any],
+    optimization_config: dict[str, Any],
+    mode: str | None,
+    progress: str,
+    jobs: int,
+    scenarios_label: str | None,
+    references_dir: str | None,
+    resume: bool,
 ) -> list[Path]:
-    """Optimize each scenario and write one ``*_states.json`` per scenario.
+    """The ONE batch driver behind both public entry points (unconstrained +
+    constrained-IAF).
 
-    ``references_dir`` (a directory name under ``output_dir``, see
-    :func:`write_reference_records`) makes every eval record — solved and failed —
-    carry a ``reference_file`` pointer at its observed-track reference record.
+    ``worker`` is the process-pool function (payload → picklable record), ``params``
+    its per-scenario keyword dict, ``optimization_config`` the persisted solver recipe —
+    stamped into every eval record (what ``--resume`` verifies) and into
+    ``summary.json`` (what ``--skip-optimize`` verifies). The two entry points used to
+    be ~150-line near-duplicates, and several real bugs came from updating one and
+    missing the other (the "batch edition" seam class in CLAUDE.md).
 
     Each scenario is an independent NLP solve, so they run across a process pool
     (``jobs`` workers; ``0`` ⇒ half the CPU cores). Processes — not threads — because
     the IPOPT solve is CPU-bound C++; a pool sidesteps the GIL entirely. All file IO
-    and logging stay in the parent (collected as workers finish), so the output is the
-    same regardless of worker count, only the per-scenario order differs.
+    and logging stay in the parent (collected as workers finish). Per-scenario ORDER
+    varies with worker count, and a pooled run additionally pins each worker's BLAS
+    pools to one thread (:func:`_limit_solver_threads`) while a serial run does not —
+    a borderline scenario can tip between solving and ``Maximum_Iterations_Exceeded``
+    across that difference (a known open item; do not read bit-identical output into
+    ``--jobs``).
 
     Infeasible / failed scenarios are **skipped and logged** (a real landings file mixes
-    feasible approaches with too-slow or noisy ones), so one bad scenario never aborts the
-    batch. A summary of failures is printed at the end.
+    feasible approaches with too-slow or noisy ones), so one bad scenario never aborts
+    the batch. A summary of failures is printed at the end.
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -566,7 +595,7 @@ def optimize_scenarios(
     if resume:
         pending = []
         for index, scenario in enumerate(scenarios):
-            found = _resumable_record(out, scenario, index)
+            found = _resumable_record(out, scenario, index, optimization_config)
             if found is None:
                 pending.append(index)
                 continue
@@ -577,12 +606,6 @@ def optimize_scenarios(
             print(f"… resuming: {len(records)} record(s) already complete, "
                   f"{len(pending)} to solve")
     _clear_stale_records(out, keep=resumed_files)
-    params: dict[str, Any] = {
-        "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
-        "rollout_dt_s": rollout_dt_s, "fitting": fitting,
-        "state_substeps": state_substeps, "max_iterations": max_iterations,
-        "verbose": verbose,
-    }
     payloads = [(index, scenarios[index], params) for index in pending]
     workers = _resolve_jobs(jobs, len(payloads))
 
@@ -607,6 +630,7 @@ def optimize_scenarios(
                 scenario.initial, scenario.target, scenario.source, error,
                 subject="optimized",
             )
+            failed_record["optimization_config"] = optimization_config
             if reference_file:
                 failed_record["reference_file"] = reference_file
             (out / eval_name).write_text(
@@ -623,32 +647,44 @@ def optimize_scenarios(
         eval_dict = dict(eval_dict)
         eval_dict["states_ref"] = {"file": name, "key": "simulator_states"}
         eval_dict["states"] = []
+        eval_dict["optimization_config"] = optimization_config
         if reference_file:
             eval_dict["reference_file"] = reference_file
         (out / eval_name).write_text(
             json.dumps(eval_dict, separators=(",", ":"), allow_nan=False), encoding="utf-8"
         )
         written.append(path)
-        records[index] = _summary_record(
+        # The roster quotes the EVAL record's final_time_s — the replay's LAST sample. A
+        # guard-truncated replay ends earlier than the planned NLP horizon, and resumed
+        # rows are rebuilt from the eval record, so quoting the plan's horizon here made
+        # a fresh row disagree with the same flight's resumed row.
+        row = _summary_record(
             scenario, status="solved", states_file=name, eval_file=eval_name,
-            final_time_s=float(result_dict["final_time_s"]), reason=None,
+            final_time_s=float(eval_dict["final_time_s"]), reason=None,
         )
-        print(
-            f"✓ {path.name}: optimizer {len(result_dict['optimizer_states'])} states, "
-            f"simulator {len(result_dict['simulator_states'])} states, "
-            f"T={result_dict['final_time_s']:.1f}s"
-        )
+        chosen_iaf = result_dict["source"].get("chosenIaf")
+        if chosen_iaf is not None:
+            row["chosenIaf"] = chosen_iaf
+            print(f"✓ {name}: IAF {chosen_iaf}, T={result_dict['final_time_s']:.1f}s")
+        else:
+            print(
+                f"✓ {path.name}: optimizer {len(result_dict['optimizer_states'])} states, "
+                f"simulator {len(result_dict['simulator_states'])} states, "
+                f"T={result_dict['final_time_s']:.1f}s"
+            )
+        records[index] = row
 
     if not payloads:
         pass
     elif workers == 1:
         for payload in payloads:
-            _handle(_optimize_one_scenario(payload))
+            _handle(worker(payload))
     else:
         _limit_solver_threads()
-        print(f"… solving {len(payloads)} scenario(s) across {workers} worker process(es)")
+        print(f"… solving {len(payloads)} scenario(s){progress} "
+              f"across {workers} worker process(es)")
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_optimize_one_scenario, payload) for payload in payloads]
+            futures = [pool.submit(worker, payload) for payload in payloads]
             for future in as_completed(futures):
                 _handle(future.result())
 
@@ -656,9 +692,70 @@ def optimize_scenarios(
     # needed to find each flight's reference (e.g. for the comparison CZML).
     total = len(scenarios)
     solved_rows = sum(1 for row in records.values() if row["status"] == "solved")
-    summary = {
-        "scenarios": scenarios_label,
-        "optimization_config": build_optimization_config(
+    summary: dict[str, Any] = {"scenarios": scenarios_label}
+    if mode is not None:
+        summary["mode"] = mode
+    summary.update({
+        "optimization_config": optimization_config,
+        "total": total,
+        "solved": solved_rows,
+        "failed": total - solved_rows,
+        "failure_rate": ((total - solved_rows) / total) if total else 0.0,
+        "results": [records[i] for i in sorted(records)],
+    })
+    if len(records) != total:
+        raise RuntimeError(
+            f"roster is incomplete: {len(records)} row(s) for {total} scenario(s)"
+        )
+    (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    if failures:
+        print(f"\n⚠ {len(failures)}/{total} scenario(s) skipped:")
+        for flight_id, reason in failures[:15]:
+            print(f"    {flight_id}: {reason}")
+        if len(failures) > 15:
+            print(f"    … and {len(failures) - 15} more")
+    print(f"✓ solved {solved_rows}/{total} scenario(s){progress} "
+          f"(failure rate {summary['failure_rate']:.1%}) -> {out}")
+    print(f"  summary -> {out / 'summary.json'}")
+    return written
+
+
+def optimize_scenarios(
+    scenarios: list[FlightScenario],
+    *,
+    output_dir: str | Path,
+    n_segments: int = DEFAULT_N_SEGMENTS,
+    dt: float = DEFAULT_DT,
+    max_duration: float = DEFAULT_MAX_DURATION_S,
+    rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    fitting: str = DEFAULT_FITTING,
+    state_substeps: int | None = None,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    jobs: int = 0,
+    verbose: bool = False,
+    scenarios_label: str | None = None,
+    references_dir: str | None = None,
+    resume: bool = False,
+) -> list[Path]:
+    """Optimize each scenario (unconstrained) and write one ``*_states.json`` per scenario.
+
+    ``references_dir`` (a directory name under ``output_dir``, see
+    :func:`write_reference_records`) makes every eval record — solved and failed —
+    carry a ``reference_file`` pointer at its observed-track reference record.
+    Batch mechanics (pooling, resume, stale sweep, summary): :func:`_run_batch`.
+    """
+    return _run_batch(
+        scenarios,
+        output_dir=output_dir,
+        worker=_optimize_one_scenario,
+        params={
+            "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
+            "rollout_dt_s": rollout_dt_s, "fitting": fitting,
+            "state_substeps": state_substeps, "max_iterations": max_iterations,
+            "verbose": verbose,
+        },
+        optimization_config=build_optimization_config(
             constrained_iaf=False,
             fitting=fitting,
             n_segments=n_segments,
@@ -668,28 +765,13 @@ def optimize_scenarios(
             rollout_dt_s=rollout_dt_s,
             max_iterations=max_iterations,
         ),
-        "total": total,
-        "solved": solved_rows,
-        "failed": total - solved_rows,
-        "failure_rate": ((total - solved_rows) / total) if total else 0.0,
-        "results": [records[i] for i in sorted(records)],
-    }
-    if len(records) != total:
-        raise RuntimeError(
-            f"roster is incomplete: {len(records)} row(s) for {total} scenario(s)"
-        )
-    (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-
-    if failures:
-        print(f"\n⚠ {len(failures)}/{len(scenarios)} scenario(s) skipped:")
-        for flight_id, reason in failures[:15]:
-            print(f"    {flight_id}: {reason}")
-        if len(failures) > 15:
-            print(f"    … and {len(failures) - 15} more")
-    print(f"✓ solved {solved_rows}/{total} scenario(s) "
-          f"(failure rate {summary['failure_rate']:.1%}) -> {out}")
-    print(f"  summary -> {out / 'summary.json'}")
-    return written
+        mode=None,
+        progress="",
+        jobs=jobs,
+        scenarios_label=scenarios_label,
+        references_dir=references_dir,
+        resume=resume,
+    )
 
 
 def _summary_record(
@@ -731,18 +813,9 @@ def _observed_track_filename(states_name: str) -> str:
     return states_name.removesuffix(_STATES_SUFFIX) + OBSERVED_TRACK_SUFFIX
 
 
-# The reference cache contract. v3 replaced each record's inline state array with a
-# `states_ref` into a shared observed-track store (see OBSERVED_TRACKS_DIR), so a v2
-# manifest no longer describes what is on disk and must not be reused.
-REFERENCE_CACHE_SCHEMA = "optimization-references-v3-shared-tracks"
-
-
-def _observed_track_path(reference_path: Path) -> Path:
-    """The shared track file a reference record quotes, from the record's own path."""
-    stem = reference_path.name.removesuffix(_REFERENCE_EVAL_SUFFIX)
-    return reference_path.parent.parent / OBSERVED_TRACKS_DIR / (
-        stem + OBSERVED_TRACK_SUFFIX
-    )
+# The reference cache contract (REFERENCE_CACHE_SCHEMA) and its integrity primitives
+# (file_sha256, observed_track_path) are single-sourced in evaluation_export.py — imported
+# above, shared with the pipeline runner's reuse validator.
 
 
 def _cached_track_matches(reference_path: Path, expected_sha256: str) -> bool:
@@ -926,14 +999,6 @@ def write_reference_records(
     return written
 
 
-def _file_sha256(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _remove_legacy_category_references(output_dir: str | Path) -> None:
     """Drop only the old per-category reference copies after moving to a sibling anchor."""
     legacy = Path(output_dir) / REFERENCES_DIR
@@ -988,6 +1053,7 @@ class _IafSolve:
     initial: GeodeticState  # the IAF initial state
     controls: Any           # node controls (for the rollout)
     dense_states: Any       # the optimizer's dense planned states
+    dense_times: Any        # the dense states' OWN times (non-uniform across phases)
     segment_durations: Any  # per-control-segment durations (multiphase non-uniform)
 
 
@@ -1018,13 +1084,23 @@ def _recompute_distances(waypoints: list) -> list:
     return out
 
 
+def _identifier_match(a: str, b: str) -> bool:
+    """Two waypoint identifiers name the same fix — only when BOTH are present.
+
+    ``ProcedureConstraint`` defaults a missing ``fixId`` to ``""``, so a plain equality
+    read two identifier-less waypoints as the same fix (the "two optional fields compared
+    to each other" trap in the coding conventions)."""
+    return bool(a) and a == b
+
+
 def _concat_to_runway(trans_pc, final_pc):
     """Join a transition (IAF→connecting fix) to the final (connecting fix→runway) into one
     IAF→runway ``ProcedureConstraint``, recomputing along-track distances. Returns ``None`` when
     the transition does not end at the final's first fix (so it doesn't feed this final)."""
     join = trans_pc.waypoints[-1]
     final_start = final_pc.waypoints[0]
-    if join.fix_id != final_start.fix_id and join.ident != final_start.ident:
+    if not (_identifier_match(join.fix_id, final_start.fix_id)
+            or _identifier_match(join.ident, final_start.ident)):
         return None
     merged = list(trans_pc.waypoints[:-1]) + list(final_pc.waypoints)
     return replace(
@@ -1062,28 +1138,16 @@ def _iaf_full_paths(document: dict[str, Any]) -> list:
     return paths
 
 
-def _lagrange_eval(xs, ys, query):
-    """Evaluate the Lagrange polynomial through ``(xs, ys)`` at ``query`` (vectorized numpy)."""
-    import numpy as np
-    xs = np.asarray(xs, dtype=float)
-    ys = np.asarray(ys, dtype=float)
-    query = np.asarray(query, dtype=float)
-    out = np.zeros_like(query)
-    for i in range(len(xs)):
-        basis = np.ones_like(query)
-        for j in range(len(xs)):
-            if j != i:
-                basis *= (query - xs[j]) / (xs[i] - xs[j])
-        out += ys[i] * basis
-    return out
+def _path_length_m(pc) -> float:
+    """3D polyline length of the IAF→runway waypoints, for ranking IAFs (NO NLP solve).
 
-
-def _path_curve_length_m(pc) -> float:
-    """A cheap 3D path-length proxy for ranking IAFs (NO NLP solve).
-
-    Fits a Lagrange curve through the IAF→runway waypoints in a runway-anchored metric frame
-    ``(north, east, alt)`` and returns its arc length. Falls back to the straight 3D polyline
-    length if the chord parameterisation is degenerate (coincident waypoints).
+    Deliberately the straight polyline in a runway-anchored metric frame
+    ``(north, east, alt)`` — NOT a fitted curve. The previous proxy fitted a Lagrange
+    polynomial through the waypoints, and a high-degree fit oscillates on cornered
+    routes (measured: +38% arc length on a two-corner T-arrival, +7% on a mild dogleg,
+    exact on straight ones), so it could rank a genuinely shorter cornered IAF behind a
+    longer straight one. A flown fly-by path only ever CUTS corners, so the polyline is
+    the tighter, monotone proxy for what "shortest" claims.
     """
     import numpy as np
     from geokit import FT_M, METRES_PER_DEG_LAT, metres_per_deg_lon
@@ -1098,12 +1162,7 @@ def _path_curve_length_m(pc) -> float:
          (w.altitude_ref_ft if w.altitude_ref_ft is not None else (w.geometry_alt_ft or 0.0)) * FT_M]
         for w in wps
     ])
-    chord = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))])
-    if chord[-1] <= 0.0 or np.any(np.diff(chord) <= 0.0):
-        return float(chord[-1])
-    samples = np.linspace(chord[0], chord[-1], 200)
-    curve = np.stack([_lagrange_eval(chord, points[:, dim], samples) for dim in range(3)], axis=1)
-    return float(np.linalg.norm(np.diff(curve, axis=0), axis=1).sum())
+    return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
 
 
 def _require_procedure_threshold_agrees(target: GeodeticState, paths: list) -> float:
@@ -1203,7 +1262,8 @@ def _solve_iaf(
     final_time, node_control, _ = optimizer.optimize_free_time(start_state, target, max_duration)
     return _IafSolve(
         float(final_time), pc, start_state, node_control,
-        optimizer.last_dense_states_geo, list(optimizer.segment_durations_s),
+        optimizer.last_dense_states_geo, list(optimizer.last_dense_state_times_s),
+        list(optimizer.segment_durations_s),
     )
 
 
@@ -1220,8 +1280,11 @@ def _iaf_result(
     initial_row = [best.initial.latitude, best.initial.longitude, best.initial.altitude,
                    best.initial.V, best.initial.psi, best.initial.gamma]
     dense_rows = [list(row) for row in best.dense_states]
+    # The solver's own node times: multiphase durations are free and the substep count is
+    # auto-selected PER PHASE, so an even spread over [0, T] time-warps the plan overlay.
+    dense_times = [0.0] + [float(t) for t in best.dense_times]
     optimizer_states = _node_states_to_samples(
-        [initial_row] + dense_rows, best.final_time, best.initial.m,
+        [initial_row] + dense_rows, dense_times, best.initial.m,
     )
     rollout = _require_usable_rollout(rollout_controls(
         best.initial, best.controls, best.final_time, aircraft, dt=rollout_dt_s,
@@ -1310,7 +1373,7 @@ def optimize_scenario_shortest_iaf(
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     verbose: bool = False,
 ) -> ScenarioOptimization:
-    """Cheap, naive IAF selection: pick the IAF whose 3D Lagrange-curve path to the runway is
+    """Cheap, naive IAF selection: pick the IAF whose 3D polyline path to the runway is
     SHORTEST, then run the full constrained optimization once for it.
 
     Avoids :func:`optimize_scenario_min_time_iaf`'s solve-every-IAF cost: the IAF is chosen by a
@@ -1321,7 +1384,7 @@ def optimize_scenario_shortest_iaf(
     target, paths, aircraft, min_speed_ms = _iaf_setup(scenario, procedure_root, airport)
 
     attempts: list[tuple[str, str]] = []
-    for pc in sorted(paths, key=_path_curve_length_m):   # shortest 3D path first
+    for pc in sorted(paths, key=_path_length_m):   # shortest 3D path first
         try:
             best = _solve_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
@@ -1365,7 +1428,7 @@ def _optimize_one_scenario_iaf(
     except Exception as exc:  # noqa: BLE001 — skip + log per-scenario failures
         return (index, flight_id, None, None,
                 f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
-    return (index, flight_id, result.to_dict(), result.evaluation, None)
+    return (index, flight_id, result.to_dict(), _shipped_evaluation(result), None)
 
 
 def optimize_scenarios_constrained_iaf(
@@ -1392,114 +1455,25 @@ def optimize_scenarios_constrained_iaf(
     """Batch constrained-IAF optimization — one trajectory per scenario, IAF chosen by ``selection``.
 
     ``selection``: ``"minTime"`` solves every IAF and keeps the fastest (exact, slow);
-    ``"shortest"`` picks the shortest 3D path and solves once (naive, fast). Same output shape/IO
-    as :func:`optimize_scenarios` (``*_states.json`` + ``summary.json``, parallel across
-    scenarios), reusing its summary/filename/jobs helpers; each scenario reports the chosen IAF.
+    ``"shortest"`` picks the shortest 3D polyline path and solves once (naive, fast). Same
+    output shape/IO as :func:`optimize_scenarios` — both are thin fronts over
+    :func:`_run_batch` — and each solved row/record reports the chosen IAF.
     """
     if selection not in _IAF_SELECTORS:
         raise ValueError(f"unknown selection {selection!r}; choose from {sorted(_IAF_SELECTORS)}")
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    # Resume BEFORE the stale sweep: the rows we keep are exactly the files it must spare.
-    records: dict[int, dict[str, Any]] = {}  # index -> summary record (parallel-safe ordering)
-    resumed_files: set[str] = set()
-    pending = list(range(len(scenarios)))
-    if resume:
-        pending = []
-        for index, scenario in enumerate(scenarios):
-            found = _resumable_record(out, scenario, index)
-            if found is None:
-                pending.append(index)
-                continue
-            name, row = found
-            records[index] = row
-            resumed_files.update({name, _eval_filename(name)})
-        if records:
-            print(f"… resuming: {len(records)} record(s) already complete, "
-                  f"{len(pending)} to solve")
-    _clear_stale_records(out, keep=resumed_files)
-    params: dict[str, Any] = {
-        "selection": selection,
-        "procedure_root": str(procedure_root), "airport": airport,
-        "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
-        "rollout_dt_s": rollout_dt_s, "fitting": fitting,
-        "state_substeps": state_substeps, "n_seg_per_phase": n_seg_per_phase,
-        "max_iterations": max_iterations, "verbose": verbose,
-    }
-    payloads = [(index, scenarios[index], params) for index in pending]
-    workers = _resolve_jobs(jobs, len(payloads))
-
-    written: list[Path] = []
-    failures: list[tuple[str, str]] = []
-
-    def _handle(
-        record: tuple[int, str, dict[str, Any] | None, dict[str, Any] | None, str | None],
-    ) -> None:
-        index, flight_id, result_dict, eval_dict, error = record
-        scenario = scenarios[index]
-        name = _scenario_filename(scenario, index)
-        eval_name = _eval_filename(name)
-        reference_file = (
-            f"{references_dir}/{_reference_filename(name)}" if references_dir else None
-        )
-        if error is not None:
-            failures.append((flight_id, error))
-            failed_record = failed_evaluation_record(
-                scenario.initial, scenario.target, scenario.source, error,
-                subject="optimized",
-            )
-            if reference_file:
-                failed_record["reference_file"] = reference_file
-            (out / eval_name).write_text(
-                json.dumps(failed_record, separators=(",", ":"), allow_nan=False), encoding="utf-8"
-            )
-            records[index] = _summary_record(
-                scenario, status="failed", states_file=None, eval_file=eval_name,
-                final_time_s=None, reason=error,
-            )
-            print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
-            return
-        (out / name).write_text(
-            json.dumps(result_dict, separators=(",", ":")), encoding="utf-8"
-        )
-        eval_dict = dict(eval_dict)
-        eval_dict["states_ref"] = {"file": name, "key": "simulator_states"}
-        eval_dict["states"] = []
-        if reference_file:
-            eval_dict["reference_file"] = reference_file
-        (out / eval_name).write_text(
-            json.dumps(eval_dict, separators=(",", ":"), allow_nan=False), encoding="utf-8"
-        )
-        written.append(out / name)
-        record_row = _summary_record(
-            scenario, status="solved", states_file=name, eval_file=eval_name,
-            final_time_s=float(result_dict["final_time_s"]), reason=None,
-        )
-        record_row["chosenIaf"] = result_dict["source"].get("chosenIaf")
-        records[index] = record_row
-        print(f"✓ {name}: IAF {result_dict['source'].get('chosenIaf')}, "
-              f"T={result_dict['final_time_s']:.1f}s")
-
-    if not payloads:
-        pass
-    elif workers == 1:
-        for payload in payloads:
-            _handle(_optimize_one_scenario_iaf(payload))
-    else:
-        _limit_solver_threads()
-        print(f"… solving {len(payloads)} scenario(s) [constrained IAF: {selection}] "
-              f"across {workers} worker process(es)")
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_optimize_one_scenario_iaf, payload) for payload in payloads]
-            for future in as_completed(futures):
-                _handle(future.result())
-
-    total = len(scenarios)
-    solved_rows = sum(1 for row in records.values() if row["status"] == "solved")
-    summary = {
-        "scenarios": scenarios_label,
-        "mode": f"constrainedIaf:{selection}",
-        "optimization_config": build_optimization_config(
+    return _run_batch(
+        scenarios,
+        output_dir=output_dir,
+        worker=_optimize_one_scenario_iaf,
+        params={
+            "selection": selection,
+            "procedure_root": str(procedure_root), "airport": airport,
+            "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
+            "rollout_dt_s": rollout_dt_s, "fitting": fitting,
+            "state_substeps": state_substeps, "n_seg_per_phase": n_seg_per_phase,
+            "max_iterations": max_iterations, "verbose": verbose,
+        },
+        optimization_config=build_optimization_config(
             constrained_iaf=True,
             fitting=fitting,
             n_segments=n_segments,
@@ -1510,28 +1484,13 @@ def optimize_scenarios_constrained_iaf(
             max_iterations=max_iterations,
             iaf_selection=selection,
         ),
-        "total": total,
-        "solved": solved_rows,
-        "failed": total - solved_rows,
-        "failure_rate": ((total - solved_rows) / total) if total else 0.0,
-        "results": [records[i] for i in sorted(records)],
-    }
-    if len(records) != total:
-        raise RuntimeError(
-            f"roster is incomplete: {len(records)} row(s) for {total} scenario(s)"
-        )
-    (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-
-    if failures:
-        print(f"\n⚠ {len(failures)}/{total} scenario(s) skipped:")
-        for flight_id, reason in failures[:15]:
-            print(f"    {flight_id}: {reason}")
-        if len(failures) > 15:
-            print(f"    … and {len(failures) - 15} more")
-    print(f"✓ solved {solved_rows}/{total} scenario(s) [constrained IAF: {selection}] "
-          f"(failure rate {summary['failure_rate']:.1%}) -> {out}")
-    print(f"  summary -> {out / 'summary.json'}")
-    return written
+        mode=f"constrainedIaf:{selection}",
+        progress=f" [constrained IAF: {selection}]",
+        jobs=jobs,
+        scenarios_label=scenarios_label,
+        references_dir=references_dir,
+        resume=resume,
+    )
 
 
 def main() -> None:

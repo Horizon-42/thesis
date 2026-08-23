@@ -40,7 +40,8 @@ def _scenario(*, target: GeodeticState | None) -> FlightScenario:
     )
 
 
-def _fake_optimizer(dense_states_geo, final_time, controls, *, on_init=None, segment_durations_s=None):
+def _fake_optimizer(dense_states_geo, final_time, controls, *, on_init=None,
+                    segment_durations_s=None, dense_times_s=None):
     """A minimal CollocationOptimizer stand-in for seam tests — the one shared shape
     (``monkeypatch.setattr(so, "CollocationOptimizer", _fake_optimizer(...))``), so an
     interface change to the real optimizer is chased in one place."""
@@ -50,6 +51,11 @@ def _fake_optimizer(dense_states_geo, final_time, controls, *, on_init=None, seg
             if on_init is not None:
                 on_init(*args, **kwargs)
             self.last_dense_states_geo = dense_states_geo
+            count = len(dense_states_geo)
+            self.last_dense_state_times_s = (
+                dense_times_s if dense_times_s is not None
+                else [final_time * (i + 1) / count for i in range(count)]
+            )
             if segment_durations_s is not None:
                 self.segment_durations_s = segment_durations_s
 
@@ -72,16 +78,31 @@ def _rollout_samples(initial: GeodeticState) -> list[RolloutSample]:
     ]
 
 
-def test_node_states_to_samples_assigns_even_times():
+def test_node_states_to_samples_uses_supplied_times():
     node_state = [
         [35.0, -78.0, 2000.0, 130.0, 1.0, -0.05],
         [35.1, -78.1, 1500.0, 120.0, 1.0, -0.05],
         [35.2, -78.2, 1000.0, 110.0, 1.0, -0.05],
     ]
-    samples = so._node_states_to_samples(node_state, final_time=100.0, mass=78000.0)
-    assert [s.t for s in samples] == pytest.approx([0.0, 50.0, 100.0])
+    # NON-uniform on purpose: multiphase solves space their nodes per phase (free
+    # durations × per-phase auto substeps), so the serializer takes the optimizer's own
+    # node times — an even spread over [0, T] time-warped every constrained plan export.
+    samples = so._node_states_to_samples(node_state, [0.0, 30.0, 100.0], mass=78000.0)
+    assert [s.t for s in samples] == pytest.approx([0.0, 30.0, 100.0])
     assert samples[0].lat == 35.0 and samples[0].m == 78000.0
     assert samples[-1].alt == 1000.0
+    with pytest.raises(ValueError):   # times must align 1:1 with the nodes
+        so._node_states_to_samples(node_state, [0.0, 30.0], mass=78000.0)
+
+
+def test_dense_node_times_are_per_phase():
+    from collocation.optimizer import dense_node_times
+
+    # Two phases, 1 control segment each, 2 vs 1 substeps: the node step is
+    # (T_p / n_seg) / m_sub PER PHASE — 10s/2 then 30s/1 — never a global even spread.
+    assert dense_node_times([10.0, 30.0], [1, 1], [2, 1]) == pytest.approx(
+        [5.0, 10.0, 40.0]
+    )
 
 
 def test_scenario_optimization_serialization():
@@ -188,6 +209,13 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
 
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert all(row["eval_file"].endswith("_eval.json") for row in summary["results"])
+    # The roster quotes the EVAL record's final_time_s (the replay's last sample: 10.0 s
+    # here) — never the plan horizon (12.0 s). Resumed rows are rebuilt from the eval
+    # record, so anything else made a fresh row disagree with its own resumed twin.
+    solved_row = next(r for r in summary["results"] if r["status"] == "solved")
+    assert solved_row["final_time_s"] == pytest.approx(10.0)
+    # Every record carries the batch's config — the stamp --resume verifies.
+    assert all(p["optimization_config"] == summary["optimization_config"] for p in payloads)
     assert summary["optimization_config"] == {
         "mode": "unconstrained",
         "fitting": "rk4",
@@ -198,6 +226,42 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
         "rollout_dt_s": 0.25,
         "max_iterations": so.DEFAULT_MAX_ITERATIONS,
     }
+
+
+def test_resume_rejects_records_from_a_different_configuration(monkeypatch, tmp_path):
+    # --resume used to check identity only, so records solved under a different
+    # --max-iterations/--fitting/--rollout-dt were silently absorbed and summary.json
+    # stamped the NEW config over the whole roster — laundering exactly the difference
+    # --skip-optimize's config check exists to catch. Any config change re-solves.
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    scenario = _scenario(target=target)
+    solves = {"n": 0}
+
+    def fake_optimize_scenario(s, **kwargs):
+        solves["n"] += 1
+        return so.ScenarioOptimization(
+            s.source, 12.0, [], [],
+            evaluation=ee.evaluation_record(
+                s.initial, s.target, _rollout_samples(s.initial), s.source,
+                subject="optimized",
+            ),
+        )
+
+    monkeypatch.setattr(so, "optimize_scenario", fake_optimize_scenario)
+    so.optimize_scenarios([scenario], output_dir=tmp_path, jobs=1)
+    assert solves["n"] == 1
+
+    # Same config -> the finished record is resumed, nothing re-solved.
+    so.optimize_scenarios([scenario], output_dir=tmp_path, jobs=1, resume=True)
+    assert solves["n"] == 1
+
+    # A different iteration cap is a different experiment -> re-solved despite --resume,
+    # and the fresh record carries the new stamp.
+    so.optimize_scenarios([scenario], output_dir=tmp_path, jobs=1, resume=True,
+                          max_iterations=500)
+    assert solves["n"] == 2
+    record = json.loads((tmp_path / "AFR074_05L_eval.json").read_text(encoding="utf-8"))
+    assert record["optimization_config"]["max_iterations"] == 500
 
 
 def test_resolve_jobs_auto_and_explicit():
@@ -598,10 +662,10 @@ def _pc(waypoints, *, branch_id="branch:X", nominal_kt=140.0):
     )
 
 
-def _wp(ident, lat, lon, *, alt_ft=None):
+def _wp(ident, lat, lon, *, alt_ft=None, fix_id=None):
     from aeroviz_backend.procedure_constraint import ProcedureConstraintWaypoint
     return ProcedureConstraintWaypoint(
-        fix_id=ident, ident=ident, role="IF", leg_type="TF",
+        fix_id=ident if fix_id is None else fix_id, ident=ident, role="IF", leg_type="TF",
         lon_deg=lon, lat_deg=lat, altitude=None, altitude_ref_ft=alt_ft,
         geometry_alt_ft=None, speed_max_kt=None, distance_from_start_m=0.0,
     )
@@ -691,6 +755,15 @@ def test_concat_to_runway_joins_transition_and_final():
     stray = _pc([_wp("CHWDR", 36.10, -78.70), _wp("ELSEW", 36.20, -78.90)], branch_id="branch:T")
     assert so._concat_to_runway(stray, final) is None
 
+    # Two identifier-LESS endpoints ("" is the constraint layer's missing-fixId default)
+    # must not read as the same fix — "" == "" used to satisfy the fix_id half of the
+    # check and concatenate a transition onto a final it does not feed.
+    blank_end = _pc([_wp("CHWDR", 36.10, -78.70),
+                     _wp("SCHOO", 36.00, -78.60, fix_id="")], branch_id="branch:T")
+    blank_start = _pc([_wp("ELSEW", 36.05, -78.65, fix_id=""),
+                       _wp("RW05L", 35.88, -78.78)], branch_id="branch:R")
+    assert so._concat_to_runway(blank_end, blank_start) is None
+
 
 def test_resolve_procedure_path_picks_rnav_gps(tmp_path):
     details = tmp_path / "KRDU" / "procedure-details"
@@ -708,16 +781,17 @@ def test_resolve_procedure_path_picks_rnav_gps(tmp_path):
         so._resolve_procedure_path(tmp_path, "KRDU", "99X")
 
 
-def test_path_curve_length_ranks_shorter_path_lower():
-    # The naive selector ranks IAFs by this 3D path length (no solve). A near, direct path
-    # must score lower than a longer one that enters farther out.
+def test_path_length_ranks_shorter_path_lower():
+    # The naive selector ranks IAFs by this 3D polyline length (no solve; the old
+    # Lagrange-curve proxy inflated cornered routes and could invert the ranking).
+    # A near, direct path must score lower than a longer one that enters farther out.
     short = _pc([_wp("SCHOO", 36.00, -78.60, alt_ft=3000.0), _wp("RW05L", 35.88, -78.78, alt_ft=400.0)])
     long = _pc([
         _wp("OTTOS", 36.30, -78.40, alt_ft=6000.0), _wp("CHWDR", 36.15, -78.55, alt_ft=5000.0),
         _wp("SCHOO", 36.00, -78.60, alt_ft=3000.0), _wp("RW05L", 35.88, -78.78, alt_ft=400.0),
     ])
-    assert so._path_curve_length_m(short) < so._path_curve_length_m(long)
-    assert so._path_curve_length_m(_pc([_wp("X", 36.0, -78.6)])) == float("inf")  # single point
+    assert so._path_length_m(short) < so._path_length_m(long)
+    assert so._path_length_m(_pc([_wp("X", 36.0, -78.6)])) == float("inf")  # single point
 
 
 def test_pipeline_run_config_mirrors_the_optimizer_iteration_cap():

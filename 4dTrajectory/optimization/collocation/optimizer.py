@@ -170,6 +170,27 @@ def _fac_alignment_rows(nodes, join, tight_rad, loose_rad):
     return [(dev - limit, -_INF, 0.0), (-dev - limit, -_INF, 0.0)]
 
 
+def dense_node_times(
+    phase_durations_s: list[float], phase_nseg: list[int], phase_msub: list[int]
+) -> list[float]:
+    """The time of every dense collocation node, phase by phase (t=0 excluded).
+
+    Within phase ``p`` the ``n_seg·m_sub`` nodes are evenly spaced over that phase's
+    OWN duration — node step ``(T_p / n_seg) / m_sub`` — so across phases the spacing
+    is non-uniform (durations are free decision variables and ``m_sub`` is auto-selected
+    per phase). Pure list arithmetic, exported so the batch's plan serializer stamps the
+    solver's real timeline instead of assuming an even spread.
+    """
+    times: list[float] = []
+    start = 0.0
+    for duration, n_seg, m_sub in zip(phase_durations_s, phase_nseg, phase_msub):
+        count = n_seg * m_sub
+        step = duration / count
+        times += [start + step * (i + 1) for i in range(count)]
+        start += duration
+    return times
+
+
 def _first_leg_entry_floor_m(seg) -> float:
     """The published minimum crossing altitude at the first leg's START fix.
 
@@ -288,6 +309,11 @@ class CollocationOptimizer:
         # Outputs of the most recent solve.
         self.segment_durations_s: list[float] | None = None
         self.last_dense_states_geo: np.ndarray | None = None
+        # Per-node times of the dense states above (excludes t=0). NOT uniform: each
+        # phase has its own duration AND its own auto-selected substep count, so an
+        # exporter that spreads the nodes evenly over [0, T] time-warps every
+        # multiphase plan.
+        self.last_dense_state_times_s: list[float] | None = None
         self.last_solve_timings: dict[str, float] | None = None
 
     # ------------------------------------------------------------------ public
@@ -699,6 +725,9 @@ class CollocationOptimizer:
             base += cpp + spp
         self.segment_durations_s = seg_durations
         self.last_dense_states_geo = np.array(dense)
+        self.last_dense_state_times_s = dense_node_times(
+            [float(d) for d in durations], phase_nseg, phase_msub
+        )
         return float(np.sum(durations)), np.array(controls), np.array(states)
 
     @staticmethod
