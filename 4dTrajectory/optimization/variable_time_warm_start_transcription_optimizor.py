@@ -75,11 +75,16 @@ class VariableTimeWarmStartTranscriptionOptimizor(TranscriptionOptimizor):
     ) -> np.ndarray:
         # Use the same straight-line state mesh and trim-inspired controls as
         # the other transcription optimizers. The only extra value is the
-        # frontend arrival time, used here as the initial final_time guess.
+        # frontend arrival time, used here as the initial final_time guess —
+        # CLAMPED into build_final_time_bound()'s box: scipy.least_squares
+        # rejects an out-of-bound x0 outright ("x0 is infeasible"), which any
+        # arrival guess beyond _MAX_FINAL_TIME_S used to trigger before a
+        # single iteration ran.
         node_state_guess = self.build_state_guess(initial_state, target_state)
         node_control_guess = self.build_control_guess(initial_state, node_state_guess)
+        lower, upper = self.build_final_time_bound()
         return np.hstack((
-            self.arrival_time_s,
+            min(max(self.arrival_time_s, lower), upper),
             node_control_guess.flatten(),
             node_state_guess.flatten(),
         ))

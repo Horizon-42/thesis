@@ -9,7 +9,8 @@ from aerodynamic_model.common import GeodeticState
 def radians_expr(degrees):
     return degrees * ca.pi / 180.0
 
-def segement_integrate_expr(step_func, x_start, u, aero_params, dt:float, duration, n_steps: int):
+def segement_integrate_expr(step_func, x_start, u, aero_params, duration, n_steps: int):
+    # The step length is duration/n_steps — the caller fixes n_steps from its dt budget.
     dt_step = duration / n_steps
     xk = x_start
     for k in range(n_steps):
@@ -73,7 +74,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
         seg_controls.append(uk)
 
         cur_geo_state = decision_vector_to_state_vector(xk, start_state[6]) # reconstruct the full geodetic state with mass for integration
-        cur_geo_state = segement_integrate_expr(step_func, cur_geo_state, uk, aero_params, dt, segment_duration, segment_substeps)
+        cur_geo_state = segement_integrate_expr(step_func, cur_geo_state, uk, aero_params, segment_duration, segment_substeps)
         xk_next = state_vector_to_decision_vector(cur_geo_state) # convert back to optimization state format for the next segment
         xk_next_sym = ca.SX.sym(f'x_{k+1}', 6)
 
@@ -101,8 +102,14 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     lbw.extend(state_lb) # exclude initial state bounds
     ubw.extend(state_ub)
     
-    # final state constraint
-    defects.append(seg_states[-1] - target_state[:6])
+    # final state constraint. psi is periodic and the decision heading is boxed to
+    # [-pi, pi] (make_state_bounds), so a plain difference read a due-west target
+    # (psi = ±pi) reached on the other branch as a 2*pi violation and IPOPT reported
+    # infeasible. sin(dpsi/2) = 0 accepts every 2*pi branch and is smooth at the
+    # solution (the collocation optimizer solves this by unwrapping instead; this
+    # NLP's target is a symbolic parameter, so the wrap lives in the expression).
+    terminal = seg_states[-1] - target_state[:6]
+    defects.append(ca.vertcat(terminal[0:4], ca.sin(terminal[4] / 2.0), terminal[5]))
 
     g = ca.vertcat(*defects)
     lbg = [0.0] * g.shape[0] # equality constraints
@@ -145,11 +152,7 @@ class CasadiOptimizer:
     @staticmethod
     def geo_state_to_decision_vector(state: GeodeticState):
         return [state.latitude, state.longitude, state.altitude, state.V, state.psi, state.gamma, state.m]
-    
-    @staticmethod    
-    def decision_vector_to_geo_state(vec):
-        return GeodeticState(*vec.tolist())
-    
+
     def build_initial_guess(self, initial, target):
         control_guess = [
             self.aircraft.approach.thrust_guess_n,

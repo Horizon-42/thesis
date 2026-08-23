@@ -42,7 +42,6 @@ def test_segment_integrate_expr_uses_integer_substeps_for_numeric_duration():
         ca.DM.zeros(6),
         ca.DM.zeros(3),
         ca.DM.zeros(6),
-        dt=0.4,
         duration=1.0,
         n_steps=3,
     )
@@ -94,7 +93,7 @@ def test_make_multiple_shooting_solver_uses_pure_symbolic_parameters(monkeypatch
     module = load_casadi_optimizer_module()
     captured = {}
 
-    def fake_segment_integrate(step_func, x_start, u, aero_params, dt, duration, n_steps=None):
+    def fake_segment_integrate(step_func, x_start, u, aero_params, duration, n_steps=None):
         return ca.SX.sym("predicted_next", 6)
 
     def fake_nlpsol(name, plugin, nlp):
