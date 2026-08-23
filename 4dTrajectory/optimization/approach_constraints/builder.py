@@ -70,20 +70,23 @@ class ConstraintReport:
         """True if every metre row holds within ``tol_m`` AND every radian row within ``tol_rad``."""
         return self.max_violation() <= tol_m and self.max_angular_violation() <= tol_rad
 
-    def summary(self) -> str:
+    def summary(self, tol_m: float = DEFAULT_TOL_M, tol_rad: float = DEFAULT_TOL_RAD) -> str:
+        """Per-row report. Pass the SAME tolerances the caller judges feasibility with —
+        the headline ``feasible=`` and the per-row flags use them, so a custom-tolerance
+        caller no longer gets a printout that contradicts its own verdict."""
         lines = [
             f"max violation = {self.max_violation():+.2f} m / "
             f"{math.degrees(self.max_angular_violation()):+.3f} deg  "
-            f"(feasible={self.is_feasible()})"
+            f"(feasible={self.is_feasible(tol_m, tol_rad)})"
         ]
         for name, v in self.violations.items():
             v = np.ravel(v)
             worst = float(v.max()) if v.size else 0.0
             if name.endswith(_ANGULAR_SUFFIX):
-                flag = "  <-- VIOLATED" if worst > DEFAULT_TOL_RAD else ""
+                flag = "  <-- VIOLATED" if worst > tol_rad else ""
                 lines.append(f"  {name:<40s} worst={math.degrees(worst):+9.3f} deg{flag}")
             else:
-                flag = "  <-- VIOLATED" if worst > DEFAULT_TOL_M else ""
+                flag = "  <-- VIOLATED" if worst > tol_m else ""
                 lines.append(f"  {name:<40s} worst={worst:+9.2f} m{flag}")
         return "\n".join(lines)
 
@@ -103,6 +106,13 @@ class ConstraintSet:
                 f"expected {len(self.segments)} node-groups, got {len(segment_nodes)}"
             )
         violations: dict[str, np.ndarray] = {}
-        for seg, nodes in zip(self.segments, segment_nodes):
-            violations.update(segment_violations(seg, np.asarray(nodes, dtype=float)))
+        for index, (seg, nodes) in enumerate(zip(self.segments, segment_nodes)):
+            for name, value in segment_violations(seg, np.asarray(nodes, dtype=float)).items():
+                # Violation names embed the segment's idents, which default to "" — two
+                # same-kind default-ident legs (or a route through the same fix pair
+                # twice) collide, and a dict update silently DROPPED the earlier leg's
+                # rows, reading a violating trajectory as feasible. Disambiguate by
+                # segment position — as a PREFIX, so the ".descent" suffix keeps
+                # classifying the radian-unit rows.
+                violations[name if name not in violations else f"seg{index}:{name}"] = value
         return ConstraintReport(violations)

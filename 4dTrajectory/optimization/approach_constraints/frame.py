@@ -47,11 +47,22 @@ class TargetFrame:
         """Convert geodetic ``lat/lon`` (degrees) to ``(n, e)`` metres in this frame.
 
         Accepts scalars or array-likes; returns shape ``(..., 2)`` (``(2,)`` for scalars).
+
+        Raises for input on the far side of the antimeridian from the target: the raw
+        ``lon − lon_t`` difference maps such a fix tens of thousands of km away, and the
+        optimizer's ``_normalization_cb`` shares the same non-wrapping assumption — a TMA
+        straddling ±180° needs BOTH transforms taught to wrap, not a silent fix here.
         """
         lat = np.asarray(lat_deg, dtype=float)
         lon = np.asarray(lon_deg, dtype=float)
+        dlon = lon - self.lon_t_deg
+        if np.any(np.abs(dlon) > 180.0):
+            raise ValueError(
+                "TargetFrame does not span the antimeridian: |lon - lon_t| > 180 deg "
+                f"(target lon {self.lon_t_deg})"
+            )
         n = (lat - self.lat_t_deg) * DEG2RAD * self.radius_m
-        e = (lon - self.lon_t_deg) * DEG2RAD * self.radius_m * self._cos_lat_t
+        e = dlon * DEG2RAD * self.radius_m * self._cos_lat_t
         return np.stack([n, e], axis=-1)
 
     def to_latlon(self, ne) -> np.ndarray:

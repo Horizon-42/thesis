@@ -76,6 +76,9 @@ class LpvFinalSpec:
     below_m: float = DEFAULT_GLIDEPATH_BELOW_M
     above_m: float = DEFAULT_GLIDEPATH_ABOVE_M
     d_faf_m: float | None = None
+    # NOTE: as a SEGMENT ROW the pre-FAF floor is emitted only when d_faf_m gates it
+    # (below); without d_faf_m the field still matters — the optimizer's
+    # _first_leg_entry_floor_m reads it as the transition phase's entry floor.
     prefaf_floor_m: float | None = None
 
 
@@ -153,12 +156,24 @@ def segment_violations_from_components(seg: SegmentSpec, n, e, h, gamma, *, incl
         out[f"{tag}.glidepath_high"] = high
     else:
         if include_lateral:
-            right, left = lateral.box_corridor_violation(
+            # Report labels are FLIGHT-direction sides. cross_track's positive side is
+            # LEFT of its axis; a box leg's axis (start→end) IS the flight direction, so
+            # the +e_xt row is the LEFT edge here — the final's axis (GARP→LTP) OPPOSES
+            # flight, which is why the LPV branch above binds the same pair the other
+            # way round. Feasibility is unaffected (the rows are symmetric); only the
+            # report's side naming was inverted for box legs.
+            left, right = lateral.box_corridor_violation(
                 n, e, seg.start_ne, seg.end_ne, seg.halfwidth_m, seg.k_margin
             )
             out[f"{tag}.lateral_right"] = right
             out[f"{tag}.lateral_left"] = left
-        s = geo.along_track(n, e, seg.start_ne, seg.end_ne)   # from the segment start
+        # From the segment start, projected onto the LEG CENTERLINE. With
+        # include_lateral=False the path is free to leave that centerline, yet the
+        # step-down staircase stays keyed to this projection — a wide off-axis path can
+        # advance s past a step-down and shed its floor at the wrong geographic point.
+        # Accepted modeling choice for the pre-final legs (the published floors are
+        # coded along the procedure's own track).
+        s = geo.along_track(n, e, seg.start_ne, seg.end_ne)
         out[f"{tag}.floor"] = vertical.moc_floor_violation(
             h, s, seg.step_downs, seg.base_floor_m
         )

@@ -110,8 +110,11 @@ def intercept_angle_deg(track_bearing_rad, course_bearing_rad):
     For the ≤ 30° final-course intercept at the PFAF (design-doc §4.4). Both arguments must be
     in the model convention (0 = East, CCW) — pass the state heading ``psi`` directly and a
     course from :func:`course_bearing`. ``track_bearing_rad`` may be the *variable* heading, so
-    use ``mathx.*``. Wrap the difference into ``(−π, π]`` before taking the magnitude (so 350°
-    vs 10° reads as 20°, not 340°)::
+    use ``mathx.*`` — but treat this as **numeric validation only**: the ``fabs`` kink sits
+    exactly at the aligned-heading optimum (the same kink the corridor rows are split in two to
+    avoid), so an NLP constraint must use a linear ψ-branch box instead, as
+    ``collocation/optimizer.py``'s intercept rows do. Wrap the difference into ``(−π, π]``
+    before taking the magnitude (so 350° vs 10° reads as 20°, not 340°)::
 
         d = atan2(sin(track − course), cos(track − course)); use unit circle trig to wrap into (−π, π]
         angle = |d| · (180/π)
