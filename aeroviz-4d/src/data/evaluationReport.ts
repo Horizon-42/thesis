@@ -98,6 +98,10 @@ export interface EvaluationRow {
   along_track_m?: number | null;
   vertical_m?: number | null;
   speed_ms?: number;
+  /** v6: airspeed at the graded threshold crossing — the value the speed gate judges
+   *  (`speed_ms` above is the record's final-state speed). Null when not speed-gradable;
+   *  absent in legacy v5 reports. */
+  crossing_speed_ms?: number | null;
   heading_rad?: number;
   final_time_s?: number;
   reason?: string;

@@ -27,6 +27,12 @@ Two regressions the Observe panel had accumulated, both verified in-browser on K
   banners a legacy report as pre-speed-gate — its verdicts grade lateral+vertical only —
   instead of refusing to open. v4-and-earlier stay rejected (shape changes, not just
   grading).
+- **Follow-up: the Details window now renders the v6 speed-gate statistics** — a
+  pass/graded summary card (with the ungraded count), a crossing-speed aggregates row,
+  the speed-gate sentence in the gates note, and per-row `speed_result` + `V crossing`
+  columns whose tooltip carries the flight's own stall-anchored window (the bounds are
+  mass-dependent, so no common band exists to chart). All of it keys on the schema
+  version, so a legacy v5 report renders exactly as before, banner included.
 
 ### 2026-08-23 — Optimization-tree review: batch-driver merge, resume config guard, plan-timeline fix
 

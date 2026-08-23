@@ -717,6 +717,12 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
   // approach?) replaces it rather than joining it.
   const observed = report.observed;
   const isObserved = report.subject === "observed";
+  // The schema version IS the contract: a v6 report always carries the speed-gate
+  // surface (counts, per-row results, bounds); a legacy v5 one never does, so the
+  // speed card/row/columns are omitted rather than rendered as dashes.
+  const hasSpeedGate = !isLegacyEvaluationReport(report);
+  const speedCounts = report.speed_result_counts;
+  const speedGraded = speedCounts ? speedCounts.pass + speedCounts.fail : 0;
   const cards: { value: string; label: string }[] = [
     {
       value: String(report.total),
@@ -738,6 +744,14 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
     { value: String(report.failed), label: "failed" },
     { value: String(report.indeterminate), label: "indeterminate" },
   ];
+  if (hasSpeedGate && speedCounts) {
+    // Observed batches are never speed-graded (policy), so all-indeterminate is the
+    // expected shape there, not a data problem.
+    cards.push({
+      value: `${speedCounts.pass}/${speedGraded}`,
+      label: `speed gate pass ${formatPct(speedGraded > 0 ? speedCounts.pass / speedGraded : null)} · ${speedCounts.indeterminate} ungraded`,
+    });
+  }
   if (report.final_time_s) {
     cards.push({ value: `${formatNum(report.final_time_s.mean)} s`, label: "mean flight time" });
   }
@@ -796,6 +810,11 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           claim, not a navigation-containment one. Vertical is benchmark specific: the
           published-TCH path and the 22 m RNAV/RNP terminal bound. The result grades
           terminal final-approach geometry, not touchdown or landing certification.
+          {hasSpeedGate
+            ? " Speed is the stall-anchored crossing window [1.23·Vs1g, 1.23·Vs1g + 20 kt]" +
+              " at the record's crossing mass; observed subjects are never speed-graded" +
+              " (their V is ground speed and no crossing airspeed was measured)."
+            : ""}
         </p>
 
         {deviationAvailability.excluded > 0 ? (
@@ -853,6 +872,15 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                   <td className="eval-report-na">—</td>
                 </tr>
               </>
+            ) : null}
+            {hasSpeedGate && report.crossing_speed_ms ? (
+              <tr>
+                <th scope="row">crossing speed (m/s)</th>
+                <td>{formatNum(report.crossing_speed_ms.mean)}</td>
+                <td>{formatNum(report.crossing_speed_ms.p95)}</td>
+                <td className="eval-report-na">—</td>
+                <td>{formatNum(report.crossing_speed_ms.max)}</td>
+              </tr>
             ) : null}
             {report.final_time_s ? (
               <tr>
@@ -932,10 +960,12 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                 <th scope="col">event</th>
                 <th scope="col">lateral</th>
                 <th scope="col">vertical</th>
+                {hasSpeedGate ? <th scope="col">speed</th> : null}
                 <th scope="col">overall</th>
                 <th scope="col">deviation status</th>
                 <th scope="col">lateral (m)</th>
                 <th scope="col">vertical (m)</th>
+                {hasSpeedGate ? <th scope="col">V crossing (m/s)</th> : null}
                 <th scope="col">T (s)</th>
                 <th scope="col">Δt vs obs (s)</th>
                 <th scope="col">notes</th>
@@ -952,12 +982,23 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                   <td>{row.event_status}</td>
                   <td>{row.lateral_result}</td>
                   <td>{row.vertical_result}</td>
+                  {hasSpeedGate ? <td>{row.speed_result}</td> : null}
                   <td>{row.verdict}</td>
                   <td className={`eval-deviation-status ${deviationStatusClass(deviationStatus(row))}`}>
                     {deviationStatus(row)}
                   </td>
                   <td>{formatNum(row.lateral_m, 2)}</td>
                   <td>{formatNum(row.vertical_m, 2)}</td>
+                  {hasSpeedGate ? (
+                    <td
+                      title={row.bounds.speed_lower_ms != null && row.bounds.speed_upper_ms != null
+                        ? `window ${formatNum(row.bounds.speed_lower_ms)}–${formatNum(row.bounds.speed_upper_ms)} m/s` +
+                          ` · Vs1g ${formatNum(row.bounds.stall_speed_ms)} m/s`
+                        : undefined}
+                    >
+                      {formatNum(row.crossing_speed_ms)}
+                    </td>
+                  ) : null}
                   <td>{formatNum(row.final_time_s)}</td>
                   <td>{formatNum(row.reference?.flight_time_delta_s)}</td>
                   <td className="eval-row-why">{rowWhy(row)}</td>

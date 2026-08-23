@@ -37,7 +37,7 @@ const REPORT: EvaluationReport = {
       speed_result: "pass",
       bounds: { lateral_criterion: "runway_half_width_at_threshold", lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22,
         speed_criterion: "vref_1p23_vs1g_to_vref_plus_20kt", stall_speed_ms: 53.9, speed_lower_ms: 66.3, speed_upper_ms: 76.6 },
-      lateral_m: 22.43, vertical_m: -1.68, final_time_s: 329.1,
+      lateral_m: 22.43, vertical_m: -1.68, crossing_speed_ms: 69.9, final_time_s: 329.1,
       reference: { file: "r.json", comparison_status: "compared", endpoint_tolerance_m: 1,
         start_gap_m: 0, end_gap_m: 0, reference_flight_time_s: 536.0,
         flight_time_delta_s: -206.9 },
@@ -50,7 +50,7 @@ const REPORT: EvaluationReport = {
       bounds: { lateral_criterion: "runway_half_width_at_threshold", lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22,
         speed_criterion: "vref_1p23_vs1g_to_vref_plus_20kt", stall_speed_ms: 53.9, speed_lower_ms: 66.3, speed_upper_ms: 76.6 },
       violations: ["lateral", "vertical"],
-      lateral_m: 179.53, vertical_m: -25.4, final_time_s: 400.2,
+      lateral_m: 179.53, vertical_m: -25.4, crossing_speed_ms: 71.2, final_time_s: 400.2,
       reference: { file: "r2.json", comparison_status: "compared", endpoint_tolerance_m: 1,
         start_gap_m: 0, end_gap_m: 0, reference_flight_time_s: 281.0,
         flight_time_delta_s: 119.2 },
@@ -170,6 +170,76 @@ describe("EvaluationReportWindow", () => {
     expect(cellsOf("path-shape deviation, lateral (m)")).toEqual(
       { mean: "11142.1", p95: "—", min: "—", max: "21541.1" },
     );
+    // v6 crossing speed reports p95, never min.
+    expect(cellsOf("crossing speed (m/s)")).toEqual(
+      { mean: "70.6", p95: "71.1", min: "—", max: "71.2" },
+    );
+  });
+
+  it("surfaces the v6 speed gate and omits it entirely for a legacy v5 report", () => {
+    const { unmount } = render(
+      <EvaluationReportWindow
+        report={REPORT}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
+    // card: 2 of 2 graded pass, 1 ungraded (unsolved row)
+    expect(screen.getByText("speed gate pass 100.0% · 1 ungraded")).toBeTruthy();
+    expect(screen.getByText("2/2")).toBeTruthy();
+    // gates paragraph names the stall-anchored window
+    expect(screen.getByText(/stall-anchored crossing window/)).toBeTruthy();
+    // per-row: verdict column + graded crossing speed with its per-flight window
+    const table = screen.getByRole("table", { name: "Per-trajectory verdicts" });
+    const headers = Array.from(table.querySelectorAll("thead th")).map((h) => h.textContent);
+    expect(headers).toContain("speed");
+    expect(headers).toContain("V crossing (m/s)");
+    const passRow = screen.getByText("FDX1738").closest("tr")!;
+    const passCells = Array.from(passRow.children).map((cell) => cell.textContent);
+    expect(passCells[headers.indexOf("speed")]).toBe("pass");
+    expect(passCells[headers.indexOf("V crossing (m/s)")]).toBe("69.9");
+    expect(
+      (passRow.children[headers.indexOf("V crossing (m/s)")] as HTMLElement).title,
+    ).toBe("window 66.3–76.6 m/s · Vs1g 53.9 m/s");
+    unmount();
+
+    // A legacy v5 report (pre-speed-gate artifacts still published on disk) renders
+    // the banner and NO speed surface — not dashes in speed columns.
+    const legacy: EvaluationReport = {
+      ...REPORT,
+      schema_version: "terminal-approach-evaluation-v5",
+      speed_result_counts: undefined,
+      crossing_speed_ms: undefined,
+      trajectories: REPORT.trajectories.map((row) => ({
+        ...row,
+        speed_result: undefined,
+        crossing_speed_ms: undefined,
+        bounds: {
+          lateral_criterion: row.bounds.lateral_criterion,
+          lateral_m: row.bounds.lateral_m,
+          vertical_lower_m: row.bounds.vertical_lower_m,
+          vertical_upper_m: row.bounds.vertical_upper_m,
+        },
+      })),
+    };
+    render(
+      <EvaluationReportWindow
+        report={legacy}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Pre-speed-gate report/)).toBeTruthy();
+    expect(screen.queryByText(/speed gate pass/)).toBeNull();
+    expect(screen.queryByText("crossing speed (m/s)")).toBeNull();
+    expect(screen.queryByText(/stall-anchored crossing window/)).toBeNull();
+    const legacyHeaders = Array.from(
+      screen.getByRole("table", { name: "Per-trajectory verdicts" }).querySelectorAll("thead th"),
+    ).map((h) => h.textContent);
+    expect(legacyHeaders).not.toContain("speed");
+    expect(legacyHeaders).not.toContain("V crossing (m/s)");
   });
 
   it("closes via the Close button", () => {
