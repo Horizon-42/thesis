@@ -178,13 +178,10 @@ def test_skip_optimize_accepts_a_complete_solved_roster(tmp_path):
     reference_path = tmp_path / reference_name
     reference_path.write_text("{}")
     # The reference quotes its observed states from the shared sibling track store, so an
-    # intact reference means the track is intact too (contract v3).
-    tracks_dir = tmp_path / optimize.OBSERVED_TRACKS_DIR
-    tracks_dir.mkdir()
-    track_path = tracks_dir / (
-        reference_path.name.removesuffix(optimize.REFERENCE_EVAL_SUFFIX)
-        + optimize.OBSERVED_TRACK_SUFFIX
-    )
+    # intact reference means the track is intact too (contract v3). The record→track path
+    # mapping is the shared evaluation_export helper the validator itself uses.
+    track_path = optimize.observed_track_path(reference_path)
+    track_path.parent.mkdir()
     track_path.write_text('{"states": []}')
     (tmp_path / eval_name).write_text(json.dumps({
         "source": {"id": "AFR074", "runway": "05L"},
@@ -271,16 +268,50 @@ def test_legacy_adsb_target_type_is_no_longer_a_mode():
         optimize.Plan("KRDU", "adsb", False, ("eval",))
 
 
-def test_runner_mirrors_the_reference_cache_contract():
+def test_footprint_estimate_tracks_outputs_and_existing_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setattr(optimize, "HARVEST_TRACKS_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(optimize, "SCENARIOS_DIR", tmp_path / "scenarios")
+    monkeypatch.setattr(optimize, "OPT_OUTPUTS_ROOT", tmp_path / "optimization")
+    monkeypatch.setattr(optimize, "COMPARISON_AIRPORTS_ROOT", tmp_path / "frontend")
+    scenarios = optimize.SCENARIOS_DIR / "KRDU_arrivals_threshold_scenarios.json"
+    scenarios.parent.mkdir(parents=True)
+    scenarios.write_text(json.dumps([{}, {}]), encoding="utf-8")   # two prepared flights
+
+    both = optimize.Plan("KRDU", "runway", False, ("czml", "eval"))
+    full = optimize.estimate_footprint_bytes([both])
+    assert full > 0
+
+    # Dropping the CZML output must shrink the estimate — the space-check refusal message
+    # suggests exactly that remedy, and it used to change real usage but not the estimate.
+    eval_only = optimize.Plan("KRDU", "runway", False, ("eval",))
+    assert optimize.estimate_footprint_bytes([eval_only]) < full
+
+    # Artifacts already on disk are netted per family: a --resume restart or a
+    # --skip-optimize rebuild no longer demands the full footprint again.
+    both.opt_dir.mkdir(parents=True)
+    (both.opt_dir / "existing_states.json").write_bytes(
+        b"x" * (2 * (optimize._RECORD_BYTES_FIXED + optimize._RECORD_BYTES_ROLLOUT))
+    )
+    netted = optimize.estimate_footprint_bytes([both])
+    assert netted < full
+    # ...and a family never goes negative, however large the existing tree is.
+    (both.opt_dir / "huge_leftover.json").write_bytes(b"x" * (4 * 1024 * 1024))
+    assert optimize.estimate_footprint_bytes([both]) >= 0
+
+
+def test_runner_and_batch_share_the_reference_cache_contract():
     # run_scenario_optimization validates reference caches that scenario_optimization
-    # writes. The suffixes are imported from the shared evaluation_export; the schema
-    # string is the one restated constant, so it is pinned here rather than trusted.
+    # writes. Both now IMPORT the whole contract — schema string, hash primitive, and
+    # record→track path mapping — from evaluation_export, so this seam test pins that
+    # neither side has regrown a restated copy.
     import sys
     from pathlib import Path as _Path
 
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "4dTrajectory" / "optimization"))
+    import evaluation_export as ee
     import scenario_optimization as so
 
-    assert optimize.REFERENCE_CACHE_SCHEMA == so.REFERENCE_CACHE_SCHEMA
-    assert optimize.OBSERVED_TRACKS_DIR == so.OBSERVED_TRACKS_DIR
-    assert optimize.OBSERVED_TRACK_SUFFIX == so.OBSERVED_TRACK_SUFFIX
+    assert optimize.REFERENCE_CACHE_SCHEMA == so.REFERENCE_CACHE_SCHEMA == ee.REFERENCE_CACHE_SCHEMA
+    assert optimize.OBSERVED_TRACKS_DIR == so.OBSERVED_TRACKS_DIR == ee.OBSERVED_TRACKS_DIR
+    assert optimize.observed_track_path is ee.observed_track_path
+    assert optimize.file_sha256 is ee.file_sha256

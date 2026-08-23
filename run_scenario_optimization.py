@@ -62,7 +62,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -91,26 +90,34 @@ HARVEST_TRACKS_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harve
 TARGET_TYPES = ("fitted-adsb", "runway")
 OUTPUT_KINDS = ("czml", "eval")
 
-# Reference-artifact naming + cache contract, IMPORTED from the module that writes them:
-# this validator's only job is to agree with that writer. Unlike the control-mesh defaults
-# below — which live in `collocation.optimizer` and would drag casadi in — `evaluation_export`
-# is deliberately casadi-free (numpy only), so the mirror rule does not apply and an import
-# is available. REFERENCE_CACHE_SCHEMA is the one true mirror here; a test pins it.
+# Reference-artifact naming, cache contract and integrity primitives, IMPORTED from the
+# casadi-free module that writes them (`evaluation_export`): this validator's only job is
+# to agree with that writer, and — unlike the control-mesh defaults below, which live in
+# `collocation.optimizer` and would drag casadi in — an import is available, so nothing
+# here is a mirror.
 sys.path.insert(0, str(REPO_ROOT / "4dTrajectory" / "optimization"))
 from evaluation_export import (  # noqa: E402
     OBSERVED_TRACKS_DIR,
-    OBSERVED_TRACK_SUFFIX,
-    REFERENCE_EVAL_SUFFIX,
+    REFERENCE_CACHE_SCHEMA,
+    file_sha256,
+    observed_track_path,
 )
-REFERENCE_CACHE_SCHEMA = "optimization-references-v3-shared-tracks"
+
+# SHA-256 memo keyed by (mtime_ns, size): runway and runway_cons validate the SAME shared
+# reference set and observed tracks, so without it a full-sweep --skip-optimize re-hashes
+# ~63 KB per flight a second time for files this same process just verified.
+_SHA256_CACHE: dict[Path, tuple[tuple[int, int], str]] = {}
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _cached_file_sha256(path: Path) -> str:
+    stat = path.stat()
+    key = (stat.st_mtime_ns, stat.st_size)
+    hit = _SHA256_CACHE.get(path)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    digest = file_sha256(path)
+    _SHA256_CACHE[path] = (key, digest)
+    return digest
 
 # Control-mesh defaults — MUST mirror CollocationOptimizer's (collocation/optimizer.py:
 # DEFAULT_N_SEGMENTS / DEFAULT_N_SEG_PER_PHASE). The pipeline shells out (import-light: no
@@ -119,18 +126,21 @@ DEFAULT_N_SEGMENTS = 8         # unconstrained: control segments over the whole 
 DEFAULT_N_SEG_PER_PHASE = 3    # constrained: control segments PER procedure leg
 
 # Measured artifact footprint per flight, KRDU end-to-end at the current defaults
-# (Hermite-Simpson, rollout_dt 0.5 s, values written at evaluation_export.STATE_DECIMALS):
-# per CATEGORY, 89 KB of rollout-scaled arrays (simulator states + their 1:1 controls) +
-# 20 KB fixed (the optimizer's dense plan and headers) + 29 KB of comparison CZML, ~70 % of
-# which is also rollout-scaled. Plus a ~2 KB reference record per prepared TARGET dataset,
-# and the observed track those records quote, written ONCE per flight at ~61 KB (see
-# OBSERVED_TRACKS_DIR).
-# The split is by what --rollout-dt actually moves, which is the only knob here that trades
-# size against resolution.
+# (Hermite-Simpson, rollout_dt 0.5 s, values written at evaluation_export.STATE_DECIMALS).
+# Split TWO ways, because the estimate has to move with two different knobs:
+#   * records vs comparison CZML — the CZML terms apply only when 'czml' is in --outputs
+#     (the refusal message suggests dropping an output as a remedy, so the estimate must
+#     actually shrink when one is dropped);
+#   * rollout-scaled vs fixed — what --rollout-dt actually moves, the only knob here that
+#     trades size against resolution.
+# Plus a ~2 KB reference record per prepared TARGET dataset, and the observed track those
+# records quote, written ONCE per flight at ~61 KB (see OBSERVED_TRACKS_DIR).
 # Used only for the pre-flight estimate — a batch that fills the disk mid-run loses
 # everything it has not committed, and this run is far too long to find that out at the end.
-_BYTES_PER_FLIGHT_PER_CATEGORY_ROLLOUT = 109 * 1024   # 89 records + ~20 CZML
-_BYTES_PER_FLIGHT_PER_CATEGORY_FIXED = 29 * 1024      # 20 records + ~9 CZML
+_RECORD_BYTES_ROLLOUT = 89 * 1024   # simulator states + their 1:1 controls
+_RECORD_BYTES_FIXED = 20 * 1024     # the optimizer's dense plan and headers
+_CZML_BYTES_ROLLOUT = 20 * 1024     # comparison CZML, rollout-scaled share
+_CZML_BYTES_FIXED = 9 * 1024
 _BYTES_PER_FLIGHT_PER_TARGET = 2 * 1024
 _BYTES_PER_FLIGHT_OBSERVED_TRACK = 61 * 1024
 _FREE_SPACE_HEADROOM = 1.15
@@ -251,6 +261,10 @@ class Plan:
         # observed references are byte-for-byte identical. Keep one sibling anchor.
         reference_target = "runway" if self.threshold else "fitted_adsb"
         self.references_dir = f"../shared_references/{reference_target}"
+        # Absolute anchors of the shared reference set and the observed-track store —
+        # the disk estimate nets what these directories already hold.
+        self.references_path = (self.opt_dir / self.references_dir).resolve()
+        self.observed_tracks_path = self.references_path.parent / OBSERVED_TRACKS_DIR
         self.summary = self.opt_dir / "summary.json"
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category
@@ -354,12 +368,12 @@ class Plan:
                 if not isinstance(signature, dict):
                     return f"reference cache manifest {cache_path} lacks source_signature"
                 if self.scenarios.is_file() and (
-                    signature.get("scenarios_sha256") != _file_sha256(self.scenarios)
+                    signature.get("scenarios_sha256") != _cached_file_sha256(self.scenarios)
                 ):
                     return f"reference cache {cache_path} does not match prepared scenarios"
                 if self.arrivals_manifest.is_file() and (
                     signature.get("arrivals_manifest_sha256")
-                    != _file_sha256(self.arrivals_manifest)
+                    != _cached_file_sha256(self.arrivals_manifest)
                 ):
                     return f"reference cache {cache_path} does not match arrival manifest"
                 reference_manifests[cache_path] = cache
@@ -383,22 +397,17 @@ class Plan:
             expected_hash = cached_row.get("sha256")
             if (
                 not isinstance(expected_hash, str)
-                or _file_sha256(reference_path) != expected_hash
+                or _cached_file_sha256(reference_path) != expected_hash
             ):
                 return f"reference_file {reference_name!r} failed SHA-256 validation"
             # The record quotes its observed states from the shared track store, so the
             # store is part of what "this reference is intact" means.
             track_hash = cached_row.get("track_sha256")
-            track_path = (
-                reference_path.parent.parent
-                / OBSERVED_TRACKS_DIR
-                / (reference_path.name.removesuffix(REFERENCE_EVAL_SUFFIX)
-                   + OBSERVED_TRACK_SUFFIX)
-            )
+            track_path = observed_track_path(reference_path)
             if (
                 not isinstance(track_hash, str)
                 or not track_path.is_file()
-                or _file_sha256(track_path) != track_hash
+                or _cached_file_sha256(track_path) != track_hash
             ):
                 return f"observed track for {reference_name!r} failed SHA-256 validation"
 
@@ -527,28 +536,52 @@ def scenario_count(path: Path) -> int:
         return 0
 
 
+def _tree_bytes(root: Path) -> int:
+    """Total size of the files under ``root`` (0 when the directory is absent)."""
+    if not root.is_dir():
+        return 0
+    return sum(entry.stat().st_size for entry in root.rglob("*") if entry.is_file())
+
+
 def estimate_footprint_bytes(plans: list["Plan"]) -> int:
-    """Bytes the selected runs will add, from the measured per-flight artifact sizes.
+    """Bytes the selected runs will ADD, from the measured per-flight artifact sizes.
 
     Three terms, because the three artifact families have three different denominators:
-    per category (records + CZML), per prepared target dataset (the reference records), and
-    once per distinct flight (the shared observed track every reference quotes).
+    per category (records, plus comparison CZML only when 'czml' is among the plan's
+    outputs), per prepared target dataset (the reference records), and once per distinct
+    flight (the shared observed track every reference quotes).
+
+    Each family is netted against what its target directory ALREADY holds: a ``--resume``
+    restart rewrites only the missing records (and a stale batch is swept before being
+    rewritten, freeing its bytes first), a ``--skip-optimize`` rebuild keeps the records
+    entirely — so demanding the full footprint again used to refuse reruns that fit.
     """
-    per_target: dict[Path, int] = {}
-    by_airport: dict[str, int] = {}
+    per_target: dict[Path, tuple[int, Path]] = {}   # scenarios file -> (flights, refs dir)
+    per_store: dict[Path, int] = {}                 # observed-track store -> max flights
     total = 0
     for plan in plans:
         flights = scenario_count(plan.scenarios)
-        total += int(flights * (
-            _BYTES_PER_FLIGHT_PER_CATEGORY_FIXED
-            + _BYTES_PER_FLIGHT_PER_CATEGORY_ROLLOUT
-            * (DEFAULT_ROLLOUT_DT_S / plan.rollout_dt_s)
+        rollout_scale = DEFAULT_ROLLOUT_DT_S / plan.rollout_dt_s
+        records = int(flights * (
+            _RECORD_BYTES_FIXED + _RECORD_BYTES_ROLLOUT * rollout_scale
         ))
-        per_target[plan.scenarios] = flights
-        by_airport[plan.airport] = max(by_airport.get(plan.airport, 0), flights)
-    total += sum(per_target.values()) * _BYTES_PER_FLIGHT_PER_TARGET
+        total += max(0, records - _tree_bytes(plan.opt_dir))
+        if "czml" in plan.outputs:
+            czml = int(flights * (
+                _CZML_BYTES_FIXED + _CZML_BYTES_ROLLOUT * rollout_scale
+            ))
+            total += max(0, czml - _tree_bytes(plan.comparison_dir))
+        per_target[plan.scenarios] = (flights, plan.references_path)
+        per_store[plan.observed_tracks_path] = max(
+            per_store.get(plan.observed_tracks_path, 0), flights
+        )
+    for flights, references_path in per_target.values():
+        total += max(
+            0, flights * _BYTES_PER_FLIGHT_PER_TARGET - _tree_bytes(references_path)
+        )
     # One observed-track store per airport, sized by that airport's largest dataset.
-    total += sum(by_airport.values()) * _BYTES_PER_FLIGHT_OBSERVED_TRACK
+    for store, flights in per_store.items():
+        total += max(0, flights * _BYTES_PER_FLIGHT_OBSERVED_TRACK - _tree_bytes(store))
     return total
 
 
@@ -570,33 +603,14 @@ def check_free_space(plans: list["Plan"]) -> tuple[bool, str]:
     return needed <= free, message
 
 
-def run_for_airport(
-    airport: str,
-    target_type: str,
-    with_constraint: bool,
-    outputs: tuple[str, ...],
-    *,
-    dry_run: bool,
-    skip_optimize: bool,
-    jobs: int = 0,
-    fitting: str = "hs",
-    state_substeps: int | None = None,
-    n_segments: int = DEFAULT_N_SEGMENTS,
-    n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
-    max_iterations: int = DEFAULT_MAX_ITERATIONS,
-    rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
-    resume: bool = False,
-    max_groups_per_czml: int | None = None,
-) -> bool:
-    """Run (or preview) the pipeline for one airport. Returns True if it ran /
-    would run, False if it was skipped (missing input and nothing to reuse).
+def run_for_airport(plan: Plan, *, dry_run: bool, skip_optimize: bool) -> bool:
+    """Run (or preview) the pipeline for one airport/category plan. Returns True if it
+    ran / would run, False if it was skipped (missing input and nothing to reuse).
 
-    Both the scenario JSON and arrival manifest are required prepared inputs."""
-    plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs, fitting=fitting,
-                state_substeps=state_substeps, n_segments=n_segments,
-                n_seg_per_phase=n_seg_per_phase, max_iterations=max_iterations,
-                rollout_dt_s=rollout_dt_s, resume=resume,
-                max_groups_per_czml=max_groups_per_czml)
+    Takes the SAME ``Plan`` the pre-flight space check was computed from (main builds
+    each plan exactly once). Both the scenario JSON and arrival manifest are required
+    prepared inputs."""
+    outputs = plan.outputs
     reuse_error = plan.optimization_reuse_error() if skip_optimize else None
     reuse = skip_optimize and reuse_error is None
 
@@ -790,13 +804,13 @@ def main() -> None:
         print(f"no --airport given → running {len(airports)} K-airport(s): "
               f"{', '.join(airports)}")
 
-    runs = [(airport, mode) for airport in airports for mode in modes]
     settings = dict(
         jobs=jobs, fitting=args.fitting_type, state_substeps=args.state_substeps,
         n_segments=args.n_segments, n_seg_per_phase=args.n_seg_per_phase,
         max_iterations=args.max_iterations, rollout_dt_s=args.rollout_dt,
         resume=args.resume, max_groups_per_czml=args.max_groups_per_czml,
     )
+    # One Plan per airport×mode cell — the SAME objects feed the space check and the run.
     plans = [
         Plan(airport, target_type, with_constraint, tuple(args.outputs), **settings)
         for airport in airports
@@ -817,29 +831,25 @@ def main() -> None:
 
     ran = 0
     failures: list[tuple[str, str]] = []
-    for airport in airports:
-        for target_type, with_constraint in modes:
-            cell = f"{airport} [{category_key(target_type, with_constraint)}]"
-            try:
-                if run_for_airport(
-                    airport, target_type, with_constraint, tuple(args.outputs),
-                    dry_run=args.dry_run, skip_optimize=args.skip_optimize,
-                    **settings,
-                ):
-                    ran += 1
-            except subprocess.CalledProcessError as exc:
-                # One cell failing used to abort the sweep and discard every airport after
-                # it. Each cell is an independent batch, so the default is still to stop
-                # (a broken recipe should not burn hours proving it), but --continue-on-error
-                # keeps the rest and names the casualties at the end.
-                failed_step = " ".join(exc.cmd) if isinstance(exc.cmd, list) else str(exc.cmd)
-                print(f"\n✗ {cell} failed (exit {exc.returncode}): {failed_step}")
-                failures.append((cell, f"exit {exc.returncode}"))
-                if not args.continue_on_error:
-                    raise
+    for plan in plans:
+        cell = f"{plan.airport} [{plan.category}]"
+        try:
+            if run_for_airport(plan, dry_run=args.dry_run,
+                               skip_optimize=args.skip_optimize):
+                ran += 1
+        except subprocess.CalledProcessError as exc:
+            # One cell failing used to abort the sweep and discard every airport after
+            # it. Each cell is an independent batch, so the default is still to stop
+            # (a broken recipe should not burn hours proving it), but --continue-on-error
+            # keeps the rest and names the casualties at the end.
+            failed_step = " ".join(exc.cmd) if isinstance(exc.cmd, list) else str(exc.cmd)
+            print(f"\n✗ {cell} failed (exit {exc.returncode}): {failed_step}")
+            failures.append((cell, f"exit {exc.returncode}"))
+            if not args.continue_on_error:
+                raise
 
     verb = "previewed" if args.dry_run else "completed"
-    print(f"\n✓ {verb} {ran}/{len(runs)} run(s) "
+    print(f"\n✓ {verb} {ran}/{len(plans)} run(s) "
           f"({len(airports)} airport(s) × {len(modes)} mode(s))  "
           f"[modes={','.join(category_key(t, c) for t, c in modes)}, "
           f"outputs={','.join(args.outputs)}, skip-optimize={args.skip_optimize}]")
