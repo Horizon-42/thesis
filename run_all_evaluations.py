@@ -28,7 +28,7 @@ Notes:
 Usage:
     python run_all_evaluations.py                      # everything found
     python run_all_evaluations.py --airport KRDU KSJC  # subset of airports
-    python run_all_evaluations.py --kind baseline      # one family only
+    python run_all_evaluations.py --kind observed      # one family only
     python run_all_evaluations.py --html               # also render HTML
 """
 
@@ -161,14 +161,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--airport", nargs="+", metavar="ICAO",
                         help="airports to sweep (default: every one found on disk)")
-    parser.add_argument("--kind", nargs="+", default=list(KINDS),
-                        choices=("baseline", *KINDS),
-                        help="batch families to evaluate (baseline = observed)")
+    parser.add_argument("--kind", nargs="+", default=list(KINDS), choices=KINDS,
+                        help="batch families to evaluate; 'observed' is the ADS-B "
+                             "baseline the computed results are compared against")
     parser.add_argument("--html", action="store_true",
                         help="also render the HTML overlay report per batch")
     args = parser.parse_args(argv)
 
-    kinds = {"observed" if kind == "baseline" else kind for kind in args.kind}
+    kinds = set(args.kind)
     airports = [code.upper() for code in args.airport] if args.airport else None
     batches = discover(airports, kinds)
     if not batches:
