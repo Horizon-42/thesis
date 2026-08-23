@@ -8,6 +8,7 @@ from dataclasses import replace
 import pytest
 
 from final_approach import Assignment, Projected, TrackPoint, fit_final_segment
+from final_approach.event_contract import validate_event
 from evaluation.context import assessment_for_runway
 from trajectory_data_process.harvest.airports import (
     Airport,
@@ -123,6 +124,7 @@ def test_direct_event_interpolates_time_lateral_and_vertical_with_one_fraction(
     assert event["event_time_s"] == pytest.approx(80.25)
     assert event["signed_cross_track_m"] == pytest.approx(10.0)
     assert event["threshold_crossing_altitude_m"] == pytest.approx(140.0)
+    assert event["crossing_ground_speed_m_s"] == pytest.approx(80.0)
     assert event["extrapolation_distance_m"] == 0.0
     assert event["uncertainty"] == {"status": "uncalibrated"}
     assert "candidate_fits" not in event
@@ -192,6 +194,108 @@ def test_censored_event_reuses_winning_assignment_fit_without_refitting(
         "rms_residual_m",
         "max_abs_residual_m",
     }
+    # Constant reported ground speed extrapolates to itself at the threshold.
+    assert event["crossing_ground_speed_m_s"] == pytest.approx(80.0)
+    assert "omitted_reason" not in event["diagnostics"]["ground_speed_fit"]
+
+
+def test_direct_event_interpolates_the_crossing_ground_speed_at_the_same_fraction() -> None:
+    runway = _runway()
+    base = _direct_track()
+    samples = list(base.samples)
+    samples[-1] = replace(samples[-1], reported_ground_speed_m_s=70.0)
+    classified = classify_track(
+        Track(base.icao24, base.callsign, tuple(samples)),
+        Airport("KFIT", 35.0, -78.0, 90.0, (runway,)),
+    )
+
+    event = classified.observed_threshold_event
+    assert event["method"] == "direct_linear_bracket"
+    assert event["interpolation_fraction"] == pytest.approx(0.5)
+    # before 80 m/s, after 70 m/s, at the position's own fraction.
+    assert event["crossing_ground_speed_m_s"] == pytest.approx(75.0)
+    validate_event(event)
+
+
+def _censored_track(runway: Runway, speed_of_along) -> Track:
+    slope = math.tan(math.radians(3.0))
+    return Track(
+        "abc123",
+        "FIT123",
+        tuple(
+            _sample(
+                runway,
+                time_s=float(index),
+                along_m=float(along_m),
+                cross_m=2.0,
+                height_m=15.0 - slope * along_m,
+                speed_m_s=speed_of_along(along_m),
+            )
+            for index, along_m in enumerate(range(-5_000, 0, 100))
+        ),
+    )
+
+
+def _censored_event_for(track: Track, runway: Runway) -> dict:
+    points = [
+        TrackPoint(sample.lat, sample.lon, sample.alt_hae_m)
+        for sample in track.samples
+    ]
+    fit = fit_final_segment(points, runway.frame("hae"))
+    assert fit is not None
+    return build_observed_threshold_event(
+        track,
+        runway,
+        Assignment("assigned", runway.ident, fit, {}, None, None),
+    )
+
+
+def test_censored_event_extrapolates_a_decelerating_ground_speed_to_the_plane() -> None:
+    runway = _runway()
+    # Linear deceleration toward the threshold: 60 m/s at -5 km, 80 m/s at the plane.
+    event = _censored_event_for(
+        _censored_track(runway, lambda along_m: 80.0 + 0.004 * along_m), runway
+    )
+
+    assert event["method"] == "censored_robust_line"
+    assert event["crossing_ground_speed_m_s"] == pytest.approx(80.0)
+    audit = event["diagnostics"]["ground_speed_fit"]
+    assert audit["slope_m_s_per_m"] == pytest.approx(0.004)
+    assert "omitted_reason" not in audit
+    validate_event(event)
+
+
+def test_censored_event_omits_the_crossing_speed_when_no_sample_reports_one() -> None:
+    runway = _runway()
+    event = _censored_event_for(_censored_track(runway, lambda along_m: None), runway)
+
+    assert event["method"] == "censored_robust_line"
+    assert "crossing_ground_speed_m_s" not in event
+    audit = event["diagnostics"]["ground_speed_fit"]
+    assert audit["n_speed_samples"] == 0
+    assert "speed-bearing samples" in audit["omitted_reason"]
+    # Absent stays a valid event: events serialized before the field existed and
+    # post-change events without a fittable speed share one contract.
+    validate_event(event)
+
+
+def test_contract_rejects_a_present_nonpositive_crossing_speed_and_reads_null_as_absent() -> None:
+    runway = _runway()
+    event = _censored_event_for(
+        _censored_track(runway, lambda along_m: 80.0), runway
+    )
+    validate_event(event)
+
+    event["crossing_ground_speed_m_s"] = None
+    validate_event(event)
+
+    event["crossing_ground_speed_m_s"] = -1.0
+    with pytest.raises(ValueError, match="crossing_ground_speed_m_s"):
+        validate_event(event)
+
+    event["crossing_ground_speed_m_s"] = math.inf
+    with pytest.raises(ValueError, match="crossing_ground_speed_m_s"):
+        validate_event(event)
 
 
 def test_physical_frame_fingerprint_excludes_evaluation_policy() -> None:

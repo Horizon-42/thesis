@@ -14,11 +14,14 @@ from typing import Any
 
 from final_approach import (
     AMBIGUITY_MARGIN_M,
+    DEFAULT_MIN_SAMPLES,
+    DEFAULT_MIN_SPAN_M,
     INBOUND_TOLERANCE_M,
     Assignment,
     Projected,
     SegmentFit,
     TrackPoint,
+    fit_line,
 )
 from final_approach.event_contract import (
     CENSORED_EVENT_METHOD,
@@ -390,6 +393,12 @@ def _direct_event(
     rejections: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
     crossing = runway.frame("hae").unproject(bracket.projected)
+    # The same interpolation as the position, applied to the reported ground speeds
+    # the bracket's source-integrity checks already required to be present and sane.
+    # GROUND-referenced (ADS-B velocity, wind unmodelled): an audit datum, never an
+    # input to evaluation's stall-anchored airspeed gate.
+    before_speed = bracket.diagnostics["reported_ground_speed_before_m_s"]
+    after_speed = bracket.diagnostics["reported_ground_speed_after_m_s"]
     return {
         **_event_common(runway),
         "status": "estimated",
@@ -401,6 +410,9 @@ def _direct_event(
         "threshold_crossing_altitude_m": crossing.alt_m,
         "altitude_datum": "hae",
         "signed_cross_track_m": bracket.projected.cross_m,
+        "crossing_ground_speed_m_s": (
+            before_speed + bracket.fraction * (after_speed - before_speed)
+        ),
         "source_sample_range": list(bracket.source_sample_range),
         "interpolation_fraction": bracket.fraction,
         "extrapolation_distance_m": 0.0,
@@ -436,7 +448,8 @@ def _censored_event(
     crossing = runway.frame("hae").unproject(
         Projected(0.0, fit.cross_at_threshold_m, fit.height_at_threshold_m)
     )
-    return {
+    crossing_speed_m_s, speed_audit = _fitted_crossing_ground_speed(track, runway, fit)
+    event = {
         **_event_common(runway),
         "status": "estimated",
         "observability": "right_censored",
@@ -454,11 +467,86 @@ def _censored_event(
         "source_integrity": _source_integrity(track, None),
         "diagnostics": {
             "fit": _fit_audit(fit),
+            "ground_speed_fit": speed_audit,
             "closest_support_sample_index": support_index,
             "closest_support_along_m": support_along_m,
             "bracket_rejections": list(rejections),
         },
     }
+    if crossing_speed_m_s is not None:
+        event["crossing_ground_speed_m_s"] = crossing_speed_m_s
+    return event
+
+
+def _fitted_crossing_ground_speed(
+    track: Track,
+    runway: Runway,
+    fit: SegmentFit,
+) -> tuple[float | None, dict[str, Any]]:
+    """OLS-extrapolate the reported ground speed to the threshold plane (along = 0).
+
+    Same estimator family and the same kept samples as the position components, so
+    the speed answer describes the segment the event's geometry came from. The
+    source is the ADS-B ``velocity`` field, so the result is GROUND-referenced
+    (wind unmodelled) — an audit datum on the event, never an input to evaluation's
+    stall-anchored airspeed gate (``evaluation/docs/THRESHOLD_SPEED_GATE.md``).
+
+    Returns ``(value, audit)``; the value is None when the speed-bearing subset of
+    the kept samples cannot support the position fit's own sample/span standard, or
+    when the extrapolation leaves the source-integrity range — the audit names the
+    reason, so a post-change event without the field is distinguishable from one
+    serialized before the field existed.
+    """
+    kept = sorted(
+        set(range(fit.first_sample_index, fit.last_sample_index + 1))
+        - set(fit.rejected_sample_indices)
+    )
+    frame = runway.frame("hae")
+    alongs: list[float] = []
+    speeds: list[float] = []
+    for index in kept:
+        sample = track.samples[index]
+        speed = sample.reported_ground_speed_m_s
+        if (
+            speed is None
+            or not math.isfinite(speed)
+            or speed <= 0.0
+            or speed > MAX_REPORTED_GROUND_SPEED_M_S
+        ):
+            continue
+        projected = frame.project(
+            TrackPoint(sample.lat, sample.lon, sample.alt_hae_m)
+        )
+        alongs.append(projected.along_m)
+        speeds.append(float(speed))
+    audit: dict[str, Any] = {
+        "n_position_fit_samples": len(kept),
+        "n_speed_samples": len(speeds),
+    }
+    if len(speeds) < DEFAULT_MIN_SAMPLES:
+        audit["omitted_reason"] = (
+            "fewer speed-bearing samples than the fit's sample standard"
+        )
+        return None, audit
+    span_m = max(alongs) - min(alongs)
+    audit["span_m"] = span_m
+    if span_m < DEFAULT_MIN_SPAN_M:
+        audit["omitted_reason"] = (
+            "speed-bearing samples span too short a baseline to pin a slope"
+        )
+        return None, audit
+    line = fit_line(alongs, speeds)
+    audit["slope_m_s_per_m"] = line.slope
+    audit["rms_residual_m_s"] = line.rms_residual_m
+    audit["max_abs_residual_m_s"] = line.max_abs_residual_m
+    value = line.intercept
+    if not math.isfinite(value) or value <= 0.0 or value > MAX_REPORTED_GROUND_SPEED_M_S:
+        audit["omitted_reason"] = (
+            "extrapolated crossing ground speed is outside the integrity range"
+        )
+        audit["rejected_value_m_s"] = value
+        return None, audit
+    return value, audit
 
 
 def _right_censored_support(

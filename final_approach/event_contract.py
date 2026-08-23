@@ -80,6 +80,21 @@ def validate_event(event: Mapping[str, Any]) -> str:
     if event.get("uncertainty") != {"status": "uncalibrated"}:
         raise ValueError("threshold event uncertainty must be explicitly uncalibrated")
 
+    # Additive within v1 (2026-08-24): the estimated crossing GROUND speed from the
+    # ADS-B velocity source — interpolated between the bracketing samples for a
+    # direct event, OLS-extrapolated over the fitted segment for a censored one.
+    # OPTIONAL both ways: events serialized before the field existed lack it, and a
+    # censored fit whose speed-bearing samples cannot meet the position fit's own
+    # standard omits it (the event's diagnostics name the reason). An explicit null
+    # reads as unspecified, same as absent; a present number must be finite and
+    # positive. Ground-referenced (wind unmodelled): an audit datum, never an input
+    # to evaluation's stall-anchored airspeed gate.
+    if event.get("crossing_ground_speed_m_s") is not None:
+        if _finite(event, "crossing_ground_speed_m_s") <= 0.0:
+            raise ValueError(
+                "threshold event crossing_ground_speed_m_s must be positive"
+            )
+
     # The two estimators are distinguished by geometry, not only by their name: a
     # direct event interpolates inside observed support (fraction in (0, 1], nothing
     # extrapolated), a censored one extrapolates past the last sample (no fraction).

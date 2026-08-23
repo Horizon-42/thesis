@@ -4,6 +4,36 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — Threshold event carries the estimated crossing ground speed (audit-only)
+
+The observed threshold event now serializes `crossing_ground_speed_m_s` — additive
+within `runway-threshold-event-v1`, optional on read (every stored event predates it):
+
+- **Direct events** interpolate the bracketing samples' `reported_ground_speed_m_s` at
+  the position's own crossing fraction; those speeds were already required by the
+  bracket's source-integrity checks, so the field exists for every direct event.
+- **Censored events** OLS-extrapolate speed vs along-track to the plane over the SAME
+  kept samples as the position fit, using the same estimator (`final_approach.fit_line`,
+  the previously-private `_fit_line` made public — one OLS, not two) and the fit's own
+  sample/span standard. When the speed-bearing subset cannot meet it, the field is
+  omitted and `diagnostics.ground_speed_fit.omitted_reason` says why — distinguishing a
+  post-change unfittable event from a pre-change one.
+- The shared contract (`final_approach.event_contract.validate_event`) accepts
+  absent/null as unspecified and rejects a present non-finite or non-positive value.
+- **It is GROUND-referenced (ADS-B velocity, wind unmodelled) and audit-only**: nothing
+  feeds it to evaluation's stall-anchored airspeed gate, observed subjects stay
+  speed-ungraded, and no verdict anywhere changes.
+- **Blast radius, verified before building**: ts_transformer training never reads the
+  event (`dataset.py` computes its own crossing from waypoints) and optimizer targets
+  come from `flight_scenarios/fitted_approach.py` / runway data — no retraining, no
+  re-solving, no schema bump. Existing harvests gain the field only via
+  `--reclassify-existing` (`--evaluate-only` re-rosters stored events unchanged).
+- Suites: final_approach + harvest + evaluation + flight_scenarios + backend green. The
+  14 `test_ts_pipeline.py` reuse-guard failures observed alongside are PRE-EXISTING
+  disk state, not code: every airport's `arrivals/lateral_pass_eligibility.json` is
+  missing (the documented re-roster deletion footgun) and those guards read the real
+  harvest tree — rebuild via `lateral_eligibility.ensure_lateral_pass_roster`.
+
 ### 2026-08-23 — Observe: Optimization result source restored; legacy v5 reports displayable again
 
 Two regressions the Observe panel had accumulated, both verified in-browser on KRDU:

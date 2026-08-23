@@ -11,6 +11,17 @@ store, roster.
   `arrivals/manifest.json` rosters only assigned, CIFP-targeted, final-entry-cropped model
   inputs and records every exclusion. Scenario, optimizer-reference, and TS loaders follow that
   roster and never glob, so an orphan/rejected/stale JSON cannot enter a model split.
+- **The threshold event carries `crossing_ground_speed_m_s` (additive within
+  `runway-threshold-event-v1`, 2026-08-24), and it is GROUND speed, audit-only.** Direct
+  events interpolate the bracketing samples' `reported_ground_speed_m_s` at the position's
+  own fraction; censored events OLS-extrapolate speed vs along-track over the SAME kept
+  samples as the position fit (`final_approach.fit_line`, the shared estimator), with the
+  fit's own sample/span standard — an unfittable speed omits the field and
+  `diagnostics.ground_speed_fit.omitted_reason` says why. OPTIONAL on read: every event
+  stored before this date lacks it, and only a NEW harvest or `--reclassify-existing`
+  populates it (`--evaluate-only` re-rosters stored events unchanged). Wind is unmodelled,
+  so it must never feed evaluation's stall-anchored airspeed gate
+  (`evaluation/docs/THRESHOLD_SPEED_GATE.md`); observed subjects stay speed-ungraded.
 - **`unassignable` (the receiver lost it) and `not_established` (the approach was not
   stabilised) must stay distinct outcomes.** Conflating them charges a reception gap to the
   pilot. Both are counted and reported; neither is ever dropped (established rate is 21–54 % on

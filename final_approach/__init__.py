@@ -49,6 +49,7 @@ from final_approach.fit import (
     LineFit,
     SegmentFit,
     fit_final_segment,
+    fit_line,
 )
 from final_approach.frame import (
     Projected,
@@ -63,6 +64,7 @@ __all__ = [
     "LineFit",
     "SegmentFit",
     "fit_final_segment",
+    "fit_line",
     "DEFAULT_WINDOW_M",
     "DEFAULT_MIN_SAMPLES",
     "DEFAULT_MIN_SPAN_M",

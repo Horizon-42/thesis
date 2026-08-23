@@ -152,8 +152,15 @@ class SegmentFit:
         return self.along_progress_m > 0.0
 
 
-def _fit_line(xs: Sequence[float], ys: Sequence[float]) -> LineFit:
-    """Fit one OLS line and retain only diagnostics serialized by the producer."""
+def fit_line(xs: Sequence[float], ys: Sequence[float]) -> LineFit:
+    """Fit one OLS line and retain only diagnostics serialized by the producer.
+
+    Public because the harvest's threshold-event producer extrapolates the reported
+    ground speed to the threshold with the SAME estimator the position components
+    use — two OLS implementations would be one edit away from disagreeing. The
+    ``*_m`` diagnostic names read as metres here; a caller fitting another quantity
+    relabels them when it serializes.
+    """
     n = len(xs)
     x_bar = sum(xs) / n
     y_bar = sum(ys) / n
@@ -416,8 +423,8 @@ def fit_final_segment(
         window_m=window_m,
         first_sample_index=sample_indices[0],
         last_sample_index=sample_indices[-1],
-        cross=_fit_line(alongs, crosses),
-        height=_fit_line(alongs, [p.height_m for p in projected]),
+        cross=fit_line(alongs, crosses),
+        height=fit_line(alongs, [p.height_m for p in projected]),
         median_abs_cross_m=statistics.median(abs(c) for c in crosses),
         nearest_sample_along_m=max(alongs),
         # Time-ordered, so the SIGN is direction of travel (see SegmentFit.approaching).
