@@ -225,13 +225,29 @@ describe("ControlPanel", () => {
     ];
     appState.trajectoryComparisonCategory = "observed";
 
+    appState.trajectoryComparisonCategory = "fitted_adsb";
+
     render(<ControlPanel />);
 
-    const selector = screen.getByLabelText("Prediction result") as HTMLSelectElement;
+    const selector = screen.getByLabelText("Optimization result") as HTMLSelectElement;
     expect([...selector.options].map((option) => option.value)).toEqual([
       "fitted_adsb",
       "runway",
     ]);
+  });
+
+  it("defaults a report-only selection to the first drawable category", async () => {
+    appState.layers.trajectories = true;
+    appState.trajectoryComparison = true;
+    appState.comparisonCategories = [
+      category("observed", false, 0),
+      category("fitted_adsb", false, 10),
+      category("runway", false, 10),
+    ];
+    appState.trajectoryComparisonCategory = "observed";
+
+    render(<ControlPanel />);
+
     await waitFor(() =>
       expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("fitted_adsb"),
     );
@@ -296,6 +312,39 @@ describe("ControlPanel", () => {
     fireEvent.change(source, { target: { value: "experiment" } });
     expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("experiment_run_val");
     expect(setTrajectoryComparison).toHaveBeenCalledWith(true);
+  });
+
+  it("offers Optimization as its own result source and routes selection to its categories", () => {
+    appState.layers.trajectories = true;
+    appState.comparisonCategories = [
+      category("runway", false, 10),
+      category("ts_model_val", false, 5),
+    ];
+
+    render(<ControlPanel />);
+
+    const source = screen.getByLabelText("Result source") as HTMLSelectElement;
+    const optionValues = [...source.options].map((option) => option.value);
+    expect(optionValues).toEqual(["baseline", "optimization", "prediction", "experiment"]);
+    const optimizationOption = source.options[optionValues.indexOf("optimization")];
+    expect(optimizationOption.disabled).toBe(false);
+
+    fireEvent.change(source, { target: { value: "optimization" } });
+    expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("runway");
+    expect(setTrajectoryComparison).toHaveBeenCalledWith(true);
+  });
+
+  it("disables the Optimization source when no optimizer batch is published", () => {
+    appState.layers.trajectories = true;
+    appState.comparisonCategories = [category("ts_model_val", false, 5)];
+
+    render(<ControlPanel />);
+
+    const source = screen.getByLabelText("Result source") as HTMLSelectElement;
+    const optimizationOption = [...source.options].find(
+      (option) => option.value === "optimization",
+    );
+    expect(optimizationOption?.disabled).toBe(true);
   });
 
   it("explains that each baseline verdict is sampled independently", () => {

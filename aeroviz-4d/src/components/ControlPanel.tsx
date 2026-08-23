@@ -78,6 +78,10 @@ export default function ControlPanel({
   const drawableComparisonCategories = comparisonCategories.filter(
     isDrawableComparisonCategory,
   );
+  const optimizationCategories = categoriesForResultSource(
+    drawableComparisonCategories,
+    "optimization",
+  );
   const predictionCategories = categoriesForResultSource(
     drawableComparisonCategories,
     "prediction",
@@ -150,7 +154,12 @@ export default function ControlPanel({
       setTrajectoryComparison(false);
       return;
     }
-    const candidates = source === "experiment" ? experimentCategories : predictionCategories;
+    const candidates =
+      source === "experiment"
+        ? experimentCategories
+        : source === "optimization"
+          ? optimizationCategories
+          : predictionCategories;
     const currentStillMatches = candidates.some(
       (category) => category.dir === trajectoryComparisonCategory,
     );
@@ -194,6 +203,9 @@ export default function ControlPanel({
                   selectResultSource(event.target.value as TrajectoryResultSource)}
               >
                 <option value="baseline">Baseline</option>
+                <option value="optimization" disabled={optimizationCategories.length === 0}>
+                  Optimization
+                </option>
                 <option value="prediction" disabled={predictionCategories.length === 0}>
                   Prediction
                 </option>
@@ -249,6 +261,24 @@ export default function ControlPanel({
                   </div>
                 ) : null}
               </div>
+            ) : null}
+            {resultSource === "optimization" ? (
+              /* Non-empty by construction: this source is only active while an
+                 optimization category is the selected comparison category. */
+              <label className="control-panel-airport-selector">
+                <span>Optimization result</span>
+                <select
+                  className="control-panel-airport-selector-input"
+                  value={trajectoryComparisonCategory ?? ""}
+                  onChange={(event) => setTrajectoryComparisonCategory(event.target.value || null)}
+                >
+                  {optimizationCategories.map((category) => (
+                    <option key={category.key} value={category.dir}>
+                      {category.label} ({category.groups})
+                    </option>
+                  ))}
+                </select>
+              </label>
             ) : null}
             {resultSource === "prediction" ? (
               predictionCategories.length > 0 ? (

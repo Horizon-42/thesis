@@ -9,6 +9,23 @@
  */
 export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v6";
 
+/**
+ * Still-displayable older report versions. v5 predates the stall-anchored
+ * crossing-speed gate: its verdicts compose lateral+vertical only and its rows
+ * carry none of the speed fields. Published v5 artifacts remain on disk because
+ * the record batches behind them were cleaned up, so they cannot be re-graded
+ * until the optimizer batch is rerun — the report window labels them as
+ * pre-speed-gate instead of refusing to open them (`isLegacyEvaluationReport`).
+ * Versions before v5 changed shape, not just grading, and stay rejected.
+ */
+export const LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS = [
+  "terminal-approach-evaluation-v5",
+] as const;
+
+export type EvaluationReportSchemaVersion =
+  | typeof EVALUATION_REPORT_SCHEMA_VERSION
+  | (typeof LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS)[number];
+
 export interface MagnitudeSpread {
   mean: number;
   p95: number;
@@ -35,11 +52,12 @@ export interface EvaluationBounds {
   vertical_upper_m: number | null;
   /** v6: stall-anchored crossing-speed window (evaluation/speed_gate.py). The three
    *  numbers are null when the record was not speed-gradable (observed subjects,
-   *  unsolved records, or a record without source.landing_aero). */
-  speed_criterion: string;
-  stall_speed_ms: number | null;
-  speed_lower_ms: number | null;
-  speed_upper_ms: number | null;
+   *  unsolved records, or a record without source.landing_aero). Absent entirely in
+   *  legacy v5 reports. */
+  speed_criterion?: string;
+  stall_speed_ms?: number | null;
+  speed_lower_ms?: number | null;
+  speed_upper_ms?: number | null;
 }
 
 export interface EvaluationRowReference {
@@ -70,8 +88,9 @@ export interface EvaluationRow {
   lateral_result: EvaluationComponentResult;
   vertical_result: EvaluationComponentResult;
   /** v6: "indeterminate" for observed subjects by policy (no crossing airspeed is
-   *  measured); composes into `verdict` for optimized/predicted only. */
-  speed_result: EvaluationComponentResult;
+   *  measured); composes into `verdict` for optimized/predicted only. Absent in
+   *  legacy v5 reports, whose verdicts never graded speed. */
+  speed_result?: EvaluationComponentResult;
   violations: string[];
   bounds: EvaluationBounds;
   lateral_m?: number | null;
@@ -102,7 +121,7 @@ export interface EvaluationReferenceAggregate {
 }
 
 export interface EvaluationReport {
-  schema_version: typeof EVALUATION_REPORT_SCHEMA_VERSION;
+  schema_version: EvaluationReportSchemaVersion;
   methodology: Record<string, unknown>;
   assessment_contexts: Record<string, unknown>[];
   subject: EvaluationSubject | "mixed";
@@ -118,9 +137,10 @@ export interface EvaluationReport {
   success_rate: number;
   lateral_m: MagnitudeSpread | null;
   vertical_m: SignedSpread | null;
-  /** v6: batch speed-gate tallies and crossing-speed spread (see EvaluationRow.speed_result). */
-  speed_result_counts: Record<EvaluationVerdict, number>;
-  crossing_speed_ms: MagnitudeSpread | null;
+  /** v6: batch speed-gate tallies and crossing-speed spread (see
+   *  EvaluationRow.speed_result). Absent in legacy v5 reports. */
+  speed_result_counts?: Record<EvaluationVerdict, number>;
+  crossing_speed_ms?: MagnitudeSpread | null;
   final_time_s: { mean: number; min: number; max: number } | null;
   reference: EvaluationReferenceAggregate | null;
   trajectories: EvaluationRow[];
@@ -185,12 +205,21 @@ function isObservedAggregate(value: unknown): value is EvaluationObservedAggrega
   );
 }
 
+export function isLegacyEvaluationReport(report: EvaluationReport): boolean {
+  return report.schema_version !== EVALUATION_REPORT_SCHEMA_VERSION;
+}
+
 export function isEvaluationReport(value: unknown): value is EvaluationReport {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   const counts = candidate.verdict_counts as Record<string, unknown> | undefined;
+  const versionAccepted =
+    candidate.schema_version === EVALUATION_REPORT_SCHEMA_VERSION ||
+    (LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS as readonly string[]).includes(
+      String(candidate.schema_version),
+    );
   return (
-    candidate.schema_version === EVALUATION_REPORT_SCHEMA_VERSION &&
+    versionAccepted &&
     hasCommonRnavVerticalMethodology(candidate.methodology) &&
     typeof candidate.total === "number" &&
     typeof candidate.solved === "number" &&

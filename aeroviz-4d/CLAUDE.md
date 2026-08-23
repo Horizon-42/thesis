@@ -51,7 +51,18 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   `geoConstants.json`; regenerated from `geokit` — see `geokit/CLAUDE.md`)
 - `src/data/evaluationReport.ts` exports `EVALUATION_REPORT_SCHEMA_VERSION` as a declared
   MUST-match mirror of `evaluation.metrics.REPORT_SCHEMA_VERSION`; fixtures import it, never
-  restate it (see `evaluation/CLAUDE.md`).
+  restate it (see `evaluation/CLAUDE.md`). The reader ALSO accepts the enumerated
+  `LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS` (currently v5, pre-speed-gate): the published
+  reports on disk are v5 and their optimizer record batches are gone until the batch rerun,
+  so the report window shows them behind an explicit legacy banner rather than refusing —
+  a bare version bump therefore no longer blanks Details, but v6-only fields must stay
+  optional in the TS types until every published report is regenerated.
+- `utils/trajectoryResultSources.ts` → `categoryResultSource` is the ONE classifier
+  splitting comparison categories into `optimization | prediction | experiment` (Observe's
+  "Result source" selector and `EvaluationSummary`'s presentation both key off it).
+  Optimizer publishes never stamp `resultSource` — absent field + non-`ts_` key ⇒
+  optimization; the `ts_` prefix is the legacy marker for pre-`resultSource` data-driven
+  publishes. Don't re-derive this split locally.
 
 ## Build config
 

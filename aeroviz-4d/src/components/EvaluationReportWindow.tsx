@@ -24,11 +24,12 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import type {
-  EvaluationComponentResult,
-  EvaluationReport,
-  EvaluationRow,
-  EvaluationVerdict,
+import {
+  isLegacyEvaluationReport,
+  type EvaluationComponentResult,
+  type EvaluationReport,
+  type EvaluationRow,
+  type EvaluationVerdict,
 } from "../data/evaluationReport";
 import {
   createDeviationScatterRenderer,
@@ -779,6 +780,15 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
             </div>
           ))}
         </div>
+
+        {isLegacyEvaluationReport(report) ? (
+          <p className="eval-report-deviation-warning" role="status">
+            Pre-speed-gate report ({report.schema_version}): its verdicts grade lateral and
+            vertical deviation only — the stall-anchored crossing-speed gate did not exist
+            when this batch was evaluated. Rerun the optimizer batch to regenerate it under
+            the current schema.
+          </p>
+        ) : null}
 
         <p className="eval-report-gates">
           Terminal bounds are shown in each row. Lateral is half the published runway

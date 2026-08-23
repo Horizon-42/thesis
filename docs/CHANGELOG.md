@@ -4,6 +4,30 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-23 — Observe: Optimization result source restored; legacy v5 reports displayable again
+
+Two regressions the Observe panel had accumulated, both verified in-browser on KRDU:
+
+- **The optimizer categories had no home in the result-source selector.** The 07-29
+  experiment refactor partitioned categories into only `prediction | experiment`, so
+  fitted_adsb / runway / runway_cons (whose manifest entries predate `resultSource` and
+  never stamp it) fell through to the Prediction dropdown's "Other evaluation results",
+  mixed in with the ts model outputs. `trajectoryResultSources.categoryResultSource` is
+  now the single three-way classifier (`optimization | prediction | experiment`; absent
+  `resultSource` + non-`ts_` key ⇒ optimization — the same legacy rule
+  `EvaluationSummary.evaluationKind` already used, which now delegates to it), and the
+  ControlPanel gained an "Optimization" source with its own category selector.
+- **"Details" failed with "evaluation report is malformed" for every published category.**
+  The 08-23 speed-gate commit bumped the report schema to v6 in all four homes, which made
+  `isEvaluationReport`'s exact-version check reject every report on disk — all still v5,
+  and the optimization ones cannot be regenerated (their record batches were cleaned up;
+  the batch rerun is a standing open item). The reader now accepts the enumerated
+  `LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS` (v5 only; the v6 speed fields are typed
+  optional and nothing in the window renders them yet), and `EvaluationReportWindow`
+  banners a legacy report as pre-speed-gate — its verdicts grade lateral+vertical only —
+  instead of refusing to open. v4-and-earlier stay rejected (shape changes, not just
+  grading).
+
 ### 2026-08-23 — Threshold speed gate (report schema v6) + evaluation review
 
 **A third component joins the terminal verdict: the crossing speed must lie in

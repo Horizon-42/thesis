@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   EVALUATION_REPORT_SCHEMA_VERSION,
+  LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS,
   isEvaluationReport,
+  isLegacyEvaluationReport,
+  type EvaluationReport,
 } from "../evaluationReport";
 
 function reportWith(observed: unknown) {
@@ -42,6 +45,21 @@ describe("isEvaluationReport observed availability contract", () => {
       ...reportWith(undefined),
       schema_version: "terminal-approach-evaluation-v2",
     })).toBe(false);
+  });
+
+  it("accepts published pre-speed-gate v5 reports and flags them as legacy", () => {
+    const v5 = {
+      ...reportWith(undefined),
+      schema_version: "terminal-approach-evaluation-v5",
+    };
+    expect(isEvaluationReport(v5)).toBe(true);
+    expect(isLegacyEvaluationReport(v5 as unknown as EvaluationReport)).toBe(true);
+    expect(
+      isLegacyEvaluationReport(reportWith(undefined) as unknown as EvaluationReport),
+    ).toBe(false);
+    expect(LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS).toContain(
+      "terminal-approach-evaluation-v5",
+    );
   });
 
   it("rejects the current schema without the auditable common RNAV vertical methodology", () => {

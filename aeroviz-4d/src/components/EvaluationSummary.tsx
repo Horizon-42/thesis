@@ -31,6 +31,7 @@ import {
 import { isEvaluationReport, type EvaluationReport } from "../data/evaluationReport";
 import type { ObservedEvaluationSummary } from "../data/observedTracks";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
+import { categoryResultSource } from "../utils/trajectoryResultSources";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { formatDuration, formatPercent } from "../utils/flightListFormat";
 import EvaluationReportWindow from "./EvaluationReportWindow";
@@ -119,14 +120,7 @@ function SummaryRows({ rows }: { rows: SummaryRow[] }) {
 
 function evaluationKind(category: ComparisonCategory): EvaluationKind {
   if (category.key === OBSERVED_CATEGORY_KEY) return "observed";
-  if (
-    category.resultSource === "prediction" ||
-    category.resultSource === "experiment" ||
-    category.key.startsWith("ts_")
-  ) {
-    return "dataDriven";
-  }
-  return "optimization";
+  return categoryResultSource(category) === "optimization" ? "optimization" : "dataDriven";
 }
 
 function isFittedAdsbTarget(category: ComparisonCategory): boolean {

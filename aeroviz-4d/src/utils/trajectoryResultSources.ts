@@ -4,7 +4,17 @@ import type {
   ExperimentPredictionOutput,
 } from "../data/airportData";
 
-export type TrajectoryResultSource = "baseline" | ComparisonResultSource;
+/**
+ * UI-level partition of the comparison categories. The manifest's `resultSource`
+ * field only exists for data-driven publishes ("prediction" | "experiment");
+ * optimizer publishes (`run_scenario_optimization.py` → fitted_adsb / runway /
+ * runway_cons) predate the field and never stamp it. The `ts_` key prefix is the
+ * legacy marker for data-driven categories published before `resultSource`
+ * existed — the same rule EvaluationSummary keys its presentation off.
+ */
+export type ComparisonCategoryKind = ComparisonResultSource | "optimization";
+
+export type TrajectoryResultSource = "baseline" | ComparisonCategoryKind;
 
 export function isExperimentCategory(category: ComparisonCategory): boolean {
   return category.resultSource === "experiment" && category.experiment !== undefined;
@@ -12,13 +22,17 @@ export function isExperimentCategory(category: ComparisonCategory): boolean {
 
 export function categoryResultSource(
   category: ComparisonCategory,
-): ComparisonResultSource {
-  return isExperimentCategory(category) ? "experiment" : "prediction";
+): ComparisonCategoryKind {
+  if (isExperimentCategory(category)) return "experiment";
+  if (category.resultSource === "prediction" || category.key.startsWith("ts_")) {
+    return "prediction";
+  }
+  return "optimization";
 }
 
 export function categoriesForResultSource(
   categories: ComparisonCategory[],
-  source: ComparisonResultSource,
+  source: ComparisonCategoryKind,
 ): ComparisonCategory[] {
   return categories.filter((category) => categoryResultSource(category) === source);
 }
