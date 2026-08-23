@@ -744,9 +744,12 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
     { value: String(report.failed), label: "failed" },
     { value: String(report.indeterminate), label: "indeterminate" },
   ];
-  if (hasSpeedGate && speedCounts) {
-    // Observed batches are never speed-graded (policy), so all-indeterminate is the
-    // expected shape there, not a data problem.
+  if (hasSpeedGate && speedCounts && !isObserved) {
+    // No card for an OBSERVED batch: its speed gate can never bind (no crossing
+    // airspeed is measured, by policy), so the card could only ever read
+    // "— · N ungraded" — noise that looks like a data problem. The gates note and
+    // the per-row speed column still state the policy. For computed subjects the
+    // ungraded count IS informative (e.g. records predating source.landing_aero).
     cards.push({
       value: `${speedCounts.pass}/${speedGraded}`,
       label: `speed gate pass ${formatPct(speedGraded > 0 ? speedCounts.pass / speedGraded : null)} · ${speedCounts.indeterminate} ungraded`,

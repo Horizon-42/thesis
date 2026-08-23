@@ -340,6 +340,15 @@ describe("EvaluationReportWindow", () => {
     expect(screen.getByText(/2 solved flights excluded from deviation charts/i).textContent)
       .toContain("1 not measured; 1 invalid/non-finite");
 
+    // Observed subjects are never speed-graded (policy), so the speed-gate card
+    // would always read "— · N ungraded" — it must not render; the per-row speed
+    // column still shows the indeterminate results.
+    expect(screen.queryByText(/speed gate pass/)).toBeNull();
+    const verdictHeaders = Array.from(
+      screen.getByRole("table", { name: "Per-trajectory verdicts" }).querySelectorAll("thead th"),
+    ).map((h) => h.textContent);
+    expect(verdictHeaders).toContain("speed");
+
     const lateralChart = screen.getByRole("img", {
       name: "Final lateral deviation, worst → best",
     });

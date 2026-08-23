@@ -32,7 +32,10 @@ Two regressions the Observe panel had accumulated, both verified in-browser on K
   the speed-gate sentence in the gates note, and per-row `speed_result` + `V crossing`
   columns whose tooltip carries the flight's own stall-anchored window (the bounds are
   mass-dependent, so no common band exists to chart). All of it keys on the schema
-  version, so a legacy v5 report renders exactly as before, banner included.
+  version, so a legacy v5 report renders exactly as before, banner included. The card is
+  additionally suppressed for OBSERVED-subject reports (the regenerated observed
+  baseline is already v6): observed tracks are never speed-graded by policy, so the card
+  could only ever read "— · N ungraded" and was mistaken for a data problem on sight.
 
 ### 2026-08-23 — Optimization-tree review: batch-driver merge, resume config guard, plan-timeline fix
 
