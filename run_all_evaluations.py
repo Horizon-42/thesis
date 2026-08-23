@@ -11,8 +11,12 @@ nothing else. Three batch families, one report written INTO each batch directory
 Observed batches are evaluated the way the harvest itself does it (streamed
 records, airport-loaded contexts, the producer's event-availability block) —
 their roster does not name airports per row, so the generic CLI would
-materialize the whole batch. Computed batches go through the standard
-``python -m evaluation`` path, which streams via the summary.json roster.
+materialize the whole batch — and their report is then PUBLISHED to the
+frontend comparison tree (``publish_observed_report``), because the viewer
+reads the published copy, not the batch directory. Computed batches go through
+the standard ``python -m evaluation`` path, which streams via the summary.json
+roster; their frontend publication belongs to the comparison-CZML tail
+(``run_scenario_optimization --outputs czml``), not to this sweep.
 
 Nothing is rebuilt or downloaded: this judges the records that exist. Bounded
 coverage, stated: experiment trees (4dTrajectory/outputs/POOLED training runs,
@@ -50,11 +54,13 @@ from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG  # noqa: E402
 from evaluation.context import contexts_for_airport  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from trajectory_data_process.harvest.airports import load_airport  # noqa: E402
+from trajectory_data_process.harvest.__main__ import DEFAULT_FRONTEND_DATA  # noqa: E402
 from trajectory_data_process.harvest.observed import (  # noqa: E402
     REPORT_NAME,
     SUMMARY_NAME,
     iter_observed_records,
 )
+from trajectory_data_process.harvest.publish import publish_observed_report  # noqa: E402
 from trajectory_data_process.harvest.store import HarvestPaths  # noqa: E402
 
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
@@ -125,6 +131,13 @@ def evaluate_observed(batch: Batch, *, html: bool) -> None:
     print(f"evaluated {report['total']} trajectories -> {out}")
     print(f"  verdicts      pass {counts['pass']}  fail {counts['fail']}  "
           f"indeterminate {counts['indeterminate']}")
+    # The frontend reads the PUBLISHED copy, not the batch directory — same seam the
+    # harvest uses. Computed categories are published by their own pipeline tails
+    # (comparison CZML publication), deliberately not here.
+    published = publish_observed_report(
+        report, frontend_data_root=DEFAULT_FRONTEND_DATA, airport=batch.airport
+    )
+    print(f"  published     -> {published}")
     if html:
         payload = evaluation_visualize.build_payload_streamed(
             paths.approach, contexts=contexts
