@@ -141,3 +141,77 @@ its exit code currently carries no information, and a *new* failure in the model
 invisible unless someone diffs the failure list by hand. The per-subsystem suites are still
 clean (`ts_transformer` 366 passed, `aeroviz-4d/python` 154 passed), so the working practice
 is to run those directly and treat the aggregate script as advisory until this is fixed.
+
+---
+
+Opened 2026-08-23, during the `evaluation` review that accompanied the threshold speed
+gate (schema v6).
+
+## 7. `evaluation.records.roster_context_keys` leaks a raw FileNotFoundError
+
+**Verified** (reproduced): `python -m evaluation --input <dir-without-summary.json>`
+raises `FileNotFoundError: .../summary.json` with a bare traceback. The crafted message
+for exactly this case lives in `record_files` ("has no summary.json manifest; pass a
+record file for a loose record"), but the CLI calls `contexts_from_roster` →
+`roster_context_keys` FIRST, and that function reads `p / "summary.json"` without an
+existence check (`records.py:227`); `_load_json` only converts `ValueError`.
+
+**Suggested:** in `roster_context_keys`, return `None` (the documented "roster cannot
+name them" outcome) when `summary.json` does not exist — the CLI then falls through to
+`record_files`, which raises the intended message. Error-path quality only; no verdict
+can change.
+
+## 8. `record_from_dict` does not enforce strictly-increasing `t`
+
+**Verified**: a record whose `states` carry `t = [0, 10, 5]` and `final_time_s = 5.0`
+passes `record_from_dict`. The contract says `t` is "the one field with hard contracts —
+`final_time_s == states[-1]['t']` to 1e-6, and strictly increasing offsets"
+(`evaluation/CLAUDE.md`, `evaluation_export.py`), but only the first half is validated
+at the boundary; producers enforce ordering on the write side only. A non-monotonic
+record would corrupt `flight_time_delta_s` and the interpolated crossing's `t` silently.
+
+**Judgement:** add `t[i] > t[i-1]` to the `_state` loop in `record_from_dict` (one pass,
+already iterating). Cheap, and it makes the documented invariant structural on the read
+side too.
+
+## 9. `evaluation/arrival.py` restates `STATE_KEYS` as a literal tuple
+
+**Verified**: the crossing-interpolation dict comprehension iterates
+`("t", "lat", "lon", "alt", "V", "psi", "gamma", "m")` (`arrival.py`,
+`_computed_arrival`) — a mirror of `records.STATE_KEYS` restated without a mirror
+comment. The project rule is "a schema literal in a consumer is a mirror — import it"
+(`CLAUDE.md`). Adding a state key would silently skip it in interpolated crossings.
+
+**Suggested:** `("t", *STATE_KEYS)` imported from `evaluation.records`.
+
+## 10. `evaluate_batch` on an EMPTY iterable reports `subject: "mixed"`
+
+**Verified**: with zero records, `sorted(subjects)[0] if len(subjects) == 1 else
+"mixed"` takes the else branch, so an empty batch serializes `subject: "mixed"`,
+`solve_rate: 0.0`. Not reachable through the CLI (`record_files` raises on an empty
+roster), only via direct library calls.
+
+**Judgement:** label it `"empty"` or raise; cosmetic until someone streams a filtered
+generator that comes up empty and reads "mixed" as two subjects having been present.
+
+## 11. Observed rows publish last-sample kinematics under event-flavoured names
+
+**Judgement** (mechanism verified, impact assessed): for observed records the
+deviation's `speed_ms`, `heading_rad`, and `final_time_s` are LAST-SAMPLE quantities
+(median 325 m before the threshold), while `cross_track_m`/`vertical_m` in the same row
+are event-based estimates AT the threshold. `_row` publishes all five flat with no
+distinction, so a consumer can read `speed_ms`/`final_time_s` as crossing quantities.
+The v6 speed gate sidesteps this (observed `crossing_speed_ms` is `None`), but the
+pre-existing three fields keep the ambiguity.
+
+**Suggested:** either rename on the row (`final_sample_*`) for observed subjects or
+document the split in `methodology.event`; renaming touches report consumers, so it
+should ride the next schema bump.
+
+## 12. `_reference_aggregate` reports an unweighted mean of per-flight means
+
+**Judgement**: `path_lateral_m.mean` in the batch reference aggregate is
+`fmean(per-flight means)` — every flight weighs equally regardless of its resample
+count (fixed at 101, so today the two definitions coincide; the p95 is dropped
+entirely at the aggregate level). Worth a one-line comment stating the weighting so a
+future variable-N resample does not silently change the metric's meaning.
