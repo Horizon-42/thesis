@@ -55,6 +55,7 @@ from flight_scenarios import (  # noqa: E402
     state_samples_from_track,
 )
 from flight_scenarios.start_state import DEFAULT_WINDOW_S  # noqa: E402
+from aircraft.aero_params import stall_speed_ms  # noqa: E402
 from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
 from aerodynamic_model.rollout import RolloutSample, rollout_piecewise_constant  # noqa: E402
@@ -128,8 +129,6 @@ def _scheme_for_fitting(fitting: str) -> str:
 # optimizer admits realistic touchdown-speed targets instead of forcing V >= Vref. Capped at
 # Vref so it never raises the optimizer's default floor.
 _STALL_MARGIN = 1.10
-_RHO_SEA_LEVEL = 1.225
-_GRAVITY = 9.81
 
 # The replay ground guard sits this far BELOW the NLP's altitude floor. The guard exists
 # to truncate DIVERGED replays (tens of metres to kilometres below the floor); but
@@ -149,8 +148,8 @@ def rollout_guard_altitude_m(target_altitude_m: float) -> float:
 
 
 def _stall_speed_ms(mass_kg: float, aero: Any) -> float:
-    """Level-flight stall speed: V = sqrt(2 m g / (rho S Cl_max))."""
-    return math.sqrt(2.0 * mass_kg * _GRAVITY / (_RHO_SEA_LEVEL * aero.S * aero.Cl_max))
+    """The project stall model's 1-g stall speed (``aircraft.aero_params`` is the source)."""
+    return stall_speed_ms(mass_kg, wing_area_m2=aero.S, cl_max=aero.Cl_max)
 
 
 # ── Output records (plumbing) ─────────────────────────────────────────────────
