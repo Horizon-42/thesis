@@ -255,7 +255,8 @@ Maintenance convention:
 - Optimizer determinism: `_limit_solver_threads()` only runs when `jobs > 1`, so BLAS threading
   differs between `--jobs 1` and `--jobs N` and a borderline scenario can solve in one and hit
   `Maximum_Iterations_Exceeded` in the other (observed once in a 120-flight sample). The
-  `optimize_scenarios` docstring still claims worker-count-independent output.
+  batch driver's docstring now states this caveat instead of claiming worker-count-independent
+  output; the threading difference itself remains open.
 - ts_transformer: KRDU run DONE (three generations, quote current artifacts only); gate-pass
   conclusion needs re-deriving after the datum fix; only KRDU trained; flyability measured but
   not fixed; single-aircraft + deterministic by scope. **All control-output checkpoints are

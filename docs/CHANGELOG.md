@@ -28,6 +28,80 @@ Two regressions the Observe panel had accumulated, both verified in-browser on K
   instead of refusing to open. v4-and-earlier stay rejected (shape changes, not just
   grading).
 
+### 2026-08-23 — Optimization-tree review: batch-driver merge, resume config guard, plan-timeline fix
+
+Full review of `4dTrajectory/optimization/` + the pipeline runner; every confirmed finding
+fixed in one pass (suites re-run green; the two pre-existing known failures — numpy 2.x
+`test_fixed_time_objective_weights_control_effort_at_one`, `test_optimizer.py` — unchanged).
+
+**Correctness fixes**
+
+- **`--resume` now verifies the solver configuration, not just identity.** Every eval
+  record (solved AND failed) is stamped with the batch's `optimization_config`;
+  `_resumable_record` rejects a mismatch or a missing stamp, so a resume across a changed
+  `--max-iterations`/`--fitting`/`--rollout-dt` re-solves instead of silently absorbing the
+  old records and stamping the new config over the whole roster (which `--skip-optimize`
+  would then have trusted). Records written before this date carry no stamp → a resumed
+  batch over them re-solves everything, deliberately.
+- **Summary rows quote the eval record's `final_time_s`** (the replay's last sample), not
+  the planned NLP horizon — for guard-truncated replays (the `not_reached` family, 12.5 %
+  of a measured KRDU runway batch) the two differ by seconds, and resumed rows (rebuilt
+  from eval records) disagreed with their own fresh twins.
+- **Constrained plan exports carried time-warped timestamps.** `_node_states_to_samples`
+  spread the dense nodes evenly over `[0, T]`, but multiphase node spacing is
+  `(T_p/n_seg)/m_sub_p` with per-phase auto `m_sub` — the orange "Optimizer plan" CZML
+  track for every runway_cons flight animated wrong. `CollocationOptimizer._extract` now
+  exports `last_dense_state_times_s` (pure helper `dense_node_times`), and both export
+  paths use it. Positions were always right; existing states files have wrong
+  `optimizer_states[].t` only.
+- **Shortest-IAF ranking is now the 3D polyline length.** The old Lagrange-curve proxy
+  inflated cornered routes (measured +38 % on a two-corner T-arrival, +7 % mild dogleg,
+  exact on straight) and could pick a genuinely longer IAF; a fly-by path only cuts
+  corners, so the polyline is the tighter monotone proxy (`_path_curve_length_m` →
+  `_path_length_m`).
+- **`_concat_to_runway` no longer treats two missing fixIds as a match** ("" == "" passed
+  the fix_id half; mismatch now requires no PRESENT identifier to match) — the
+  optional-fields-compared-to-each-other trap from the coding conventions.
+- **Space pre-check refuses only runs that genuinely don't fit**: the estimate now drops
+  the CZML family when 'czml' is not in `--outputs` (the refusal message already suggested
+  that remedy without it working), and nets each artifact family against what its target
+  directory already holds — a `--resume` restart or `--skip-optimize` rebuild no longer
+  re-demands the full footprint (which forced `--skip-space-check` on a 98 %-full disk).
+- `casadi_optimizer.py` (legacy multiple-shooting, live via the backend): terminal ψ pin
+  is now `sin(Δψ/2) = 0` — the plain difference against ψ boxed to [−π, π] read a due-west
+  target reached on the other branch as a 2π violation. Also removed the dead `dt` param
+  of `segement_integrate_expr` and the broken dead `decision_vector_to_geo_state`.
+- `variable_time_warm_start_transcription_optimizor`: the final-time guess is clamped into
+  `build_final_time_bound()`'s box — any `arrival_time_s > 1000 s` used to make
+  scipy.least_squares reject x0 outright (masked in production by the backend input clamp).
+- `approach_constraints`: `ConstraintSet.evaluate` disambiguates colliding violation names
+  by segment position (same-kind default-ident legs silently DROPPED the earlier leg's
+  rows from the NumPy report; optimizer path unaffected); box-leg `lateral_left/right`
+  labels un-inverted (box axis = flight direction, final axis opposes it — feasibility
+  unaffected, only report naming); `ConstraintReport.summary(tol_m, tol_rad)` takes the
+  caller's tolerances; `TargetFrame.to_ne` fails loudly across the antimeridian (both
+  transforms share the non-wrapping assumption); `intercept_angle_deg` documented
+  numeric-validation-only (its `fabs` kink sits at the aligned optimum).
+- Experiment scripts: `transport_term_comparison` ψ-cross check is now relative
+  (the 1e-18 absolute tolerance passed the committed run by 8.6e-19);
+  `fixed_enu_frame_error --max-range-km` honoured by the grid radii; scheme-comparison
+  orders derived from the fitting name (7-entry hand-list covered 7 of 16 schemes);
+  30 km-study docstring named a nonexistent function for system A.
+
+**Structure**
+
+- `optimize_scenarios` / `optimize_scenarios_constrained_iaf` are thin fronts over ONE
+  `_run_batch` driver — the "batch edition seam class" (three past bugs from updating one
+  copy) is gone.
+- `REFERENCE_CACHE_SCHEMA`, `file_sha256`, and the record→track path mapping
+  (`observed_track_path`) live in `evaluation_export.py`; the batch AND the runner import
+  them (the runner's restated mirror + pin test replaced by a shared-import seam test).
+- Workers no longer ship the rollout states twice across the process boundary (the eval
+  copy is emptied worker-side; the parent's `states_ref` points at the states file).
+- The runner builds each `Plan` once (space check and run share the objects), and its
+  reuse validator memoizes SHA-256 by (path, mtime, size) — runway/runway_cons validate
+  the same shared reference set, which was ~1.5 GB re-hashed per category.
+
 ### 2026-08-23 — Threshold speed gate (report schema v6) + evaluation review
 
 **A third component joins the terminal verdict: the crossing speed must lie in

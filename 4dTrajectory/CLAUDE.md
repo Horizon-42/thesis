@@ -19,7 +19,17 @@ one for anything torch-side.
 - **"Batch edition" seam class**: the batch callers in `scenario_optimization.py` duplicate wiring
   the backend HTTP path also has — several bugs (stale `_solve_iaf` unpack, trapezoidal left
   behind after the HS flip, missing `n_seg_per_phase`) came from updating one path and missing
-  the other. When changing optimizer wiring, update BOTH and their seam tests.
+  the other. When changing optimizer wiring, update BOTH and their seam tests. The worst
+  intra-file instance is gone: `optimize_scenarios` and `optimize_scenarios_constrained_iaf`
+  are thin fronts over ONE `_run_batch` driver (2026-08-23) — batch mechanics changes go there,
+  once.
+- **The dense plan export carries the solver's OWN node times, never an even spread.**
+  Multiphase node spacing is `(T_p/n_seg)/m_sub_p` with `m_sub` auto-selected per phase, so
+  spreading dense nodes evenly over `[0, T]` time-warps every constrained plan (the orange
+  "Optimizer plan" CZML track animated wrong until 2026-08-23). `CollocationOptimizer`
+  exposes `last_dense_state_times_s` (pure helper `dense_node_times`); any new exporter of
+  `last_dense_states_geo` must consume it. States files written before the fix have wrong
+  `optimizer_states[].t` (positions correct; eval/rollout records unaffected).
 - **The constrained solve does NOT move its target, and must not.** `_iaf_setup` used to
   snap it onto the procedure document's last waypoint; that waypoint and the arrival
   manifest's `runway_target` are two renderings of one CIFP threshold and round differently
@@ -42,6 +52,14 @@ one for anything torch-side.
   rest. `_clear_stale_records` still sweeps orphans — resume narrows which files survive, it
   never turns the sweep off — and summary counts come from the roster, not from what the
   process happened to write (a roster that ends up incomplete raises).
+- **Resume verifies the solver CONFIG, not just identity** (2026-08-23): every eval record
+  (solved and failed) is stamped with the batch's `optimization_config`, and
+  `_resumable_record` rejects a mismatch or a missing stamp — a resume across a changed
+  `--max-iterations`/`--fitting`/`--rollout-dt` re-solves instead of laundering the old
+  records into a summary that claims the new config (which `--skip-optimize` would then
+  trust). Pre-stamp records are therefore never resumable. Summary rows quote the EVAL
+  record's `final_time_s` (the replay's last sample, shorter than the plan for
+  guard-truncated replays), so fresh and resumed rows agree.
 - **Reference records quote a SHARED observed track.** The two prepared target datasets
   reference the same flights and their reference records differ only in `target_state`, so
   the states live once in `shared_references/observed_tracks/` and each record points at
@@ -57,8 +75,10 @@ one for anything torch-side.
   commit point, and only then are unreferenced generations pruned. `--skip-optimize` validates
   the complete summary/eval/states/reference roster, reference hashes, identities, and available
   prepared-input signatures before reuse. Record-filename suffixes + `REFERENCES_DIR` + the
-  `summary.json` row shape (`summary_row`) remain single-sourced in
-  `optimization/evaluation_export.py`.
+  `summary.json` row shape (`summary_row`) + the reference cache contract
+  (`REFERENCE_CACHE_SCHEMA`, `file_sha256`, `observed_track_path`) are single-sourced in
+  `optimization/evaluation_export.py` — the pipeline runner imports them (its restated
+  mirror is gone).
 - Stale docs (historically inaccurate, kept): `4dTrajectory/docs/direct_collocation_hermite_simpson.zh.md`
   §5 and `geodetic_dynamics_transport.zh.html` describe the old HS-planner + RK4-polish pipeline.
 
