@@ -46,6 +46,12 @@ class ArrivalDeviation:
     heading_rad: float
     flight_time_s: float
     extrapolation_m: float | None = None
+    # Absolute state AT the graded event, for the speed gate: the computed path fills
+    # both from the crossing state; observed leaves them None — the event estimators
+    # extrapolate POSITION only, so no observed crossing speed or mass was measured
+    # (the ``speed_ms`` DEVIATION above already quotes the last sample for observed).
+    crossing_speed_ms: float | None = None
+    crossing_mass_kg: float | None = None
 
     @property
     def lateral_m(self) -> float:
@@ -213,6 +219,8 @@ def _state_deviation(
         speed_ms=state["V"] - target["V"],
         heading_rad=math.remainder(state["psi"] - target["psi"], math.tau),
         flight_time_s=state["t"],
+        crossing_speed_ms=state["V"],
+        crossing_mass_kg=state["m"],
     )
 
 

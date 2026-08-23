@@ -22,6 +22,16 @@ from evaluation.reference import (
     load_reference,
     reference_span,
 )
+from evaluation.speed_gate import (
+    LANDING_AERO_KEY,
+    MISSING_LANDING_AERO_REASON,
+    OBSERVED_SPEED_POLICY,
+    SPEED_CRITERION_ID,
+    SPEED_GATE_UPPER_ADDITIVE_MS,
+    VREF_STALL_MULTIPLIER,
+    SpeedGateBounds,
+    speed_gate_bounds,
+)
 from evaluation.stats import magnitude_spread, signed_spread
 from evaluation.thresholds import (
     LATERAL_CRITERION_ID,
@@ -32,7 +42,7 @@ from evaluation.thresholds import (
     Verdict,
 )
 
-REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v5"
+REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v6"
 
 # The denominator every observed availability block is counted against. Evaluation
 # checks the LABEL, not the counts: the block is producer-owned audit output (the
@@ -115,6 +125,41 @@ METHODOLOGY: dict[str, Any] = {
             ),
         },
     },
+    "terminal_speed": {
+        "criterion": SPEED_CRITERION_ID,
+        "bound_ms": (
+            "[1.23 x Vs1g(crossing mass), 1.23 x Vs1g + 20 kt] inclusive, per record"
+        ),
+        "stall_model": (
+            "Vs1g = sqrt(2 m g / (rho0 S Cl_max_landing)); ISA sea-level rho0, the "
+            "model's landing Cl_max (aircraft.aero_params, shared with the optimizer's "
+            "velocity floor); S and Cl_max from the record's source.landing_aero"
+        ),
+        "vref_stall_multiplier": VREF_STALL_MULTIPLIER,
+        "upper_additive_ms": SPEED_GATE_UPPER_ADDITIVE_MS,
+        "sources": [
+            {
+                "document": "14 CFR 25.125(b)(2)(i)",
+                "use": "V_REF may not be less than 1.23 V_SR0 (the lower bound anchor)",
+            },
+            {
+                "document": (
+                    "FSF ALAR Briefing Note 7.1 'Stabilized Approach', Table 1 "
+                    "element 3 (Flight Safety Digest, Aug-Nov 2000)"
+                ),
+                "use": (
+                    "speed not more than V_REF + 20 kt and not less than V_REF "
+                    "(the window)"
+                ),
+            },
+        ],
+        "subjects": "optimized and predicted only; " + OBSERVED_SPEED_POLICY,
+        "claim_boundary": (
+            "model-consistent threshold-crossing energy, judged in TAS with TAS "
+            "treated as CAS (<1% at this fleet's threshold elevations, all below "
+            "200 m); not an operational or certification speed check"
+        ),
+    },
     "reference_comparison": {
         "endpoint_tolerance_m": ENDPOINT_TOLERANCE_M,
         "mismatched_span_policy": "skip_path_and_time_metrics",
@@ -133,6 +178,7 @@ class TrajectoryEvaluation:
     verdict: Verdict
     lateral_result: ComponentResult
     vertical_result: ComponentResult
+    speed_result: ComponentResult
     deviation: ArrivalDeviation | None
     event_status: str
     violations: tuple[str, ...]
@@ -143,6 +189,9 @@ class TrajectoryEvaluation:
     lateral_bound_m: float
     vertical_lower_bound_m: float | None
     vertical_upper_bound_m: float | None
+    # Per-record (mass-anchored), unlike the two context-owned bounds above; None when
+    # the record was not speed-gradable (unsolved, observed, or no landing_aero block).
+    speed_bounds: SpeedGateBounds | None = None
     flight_key: str | None = None
 
 
@@ -156,10 +205,21 @@ def _component(
     return "pass" if lower <= estimate <= upper else "fail"
 
 
-def _composite(lateral: ComponentResult, vertical: ComponentResult) -> Verdict:
-    if "fail" in (lateral, vertical):
+def _composite(
+    lateral: ComponentResult,
+    vertical: ComponentResult,
+    speed: ComponentResult | None,
+) -> Verdict:
+    """Compose the components that are IN SCOPE for this record.
+
+    ``speed`` is ``None`` for observed subjects — the gate is out of scope there (no
+    crossing airspeed was measured; see ``speed_gate.OBSERVED_SPEED_POLICY``), which is
+    different from an in-scope component that came back ``indeterminate``.
+    """
+    components = (lateral, vertical) if speed is None else (lateral, vertical, speed)
+    if "fail" in components:
         return "fail"
-    if lateral == "pass" and vertical == "pass":
+    if all(component == "pass" for component in components):
         return "pass"
     return "indeterminate"
 
@@ -193,6 +253,7 @@ def evaluate_record(
         return TrajectoryEvaluation(
             **common, solved=False, success=False, verdict="fail",
             lateral_result="indeterminate", vertical_result="indeterminate",
+            speed_result="indeterminate",
             deviation=None, event_status="unsolved", violations=("unsolved",),
             reason=record.reason or "trajectory unsolved",
         )
@@ -204,6 +265,7 @@ def evaluate_record(
             **common, solved=True, success=False,
             verdict="fail" if computed_failure else "indeterminate",
             lateral_result="indeterminate", vertical_result="indeterminate",
+            speed_result="indeterminate",
             deviation=None, event_status=outcome.event_status,
             violations=((outcome.event_status,) if computed_failure else ()),
             reason=outcome.reason,
@@ -217,23 +279,47 @@ def evaluate_record(
         limits.vertical_lower_m,
         limits.vertical_upper_m,
     )
-    verdict = _composite(lateral_result, vertical_result)
+    # The speed gate is IN SCOPE only for computed subjects (``speed_in_scope`` stays
+    # None for observed — no crossing airspeed was measured; the policy is serialized
+    # in METHODOLOGY["terminal_speed"]). Absent/null landing_aero reads "unspecified"
+    # and grades indeterminate; a PRESENT malformed block raises in speed_gate_bounds.
+    speed_in_scope: ComponentResult | None = None
+    speed_bounds: SpeedGateBounds | None = None
+    speed_reason: str | None = None
+    if subject != "observed":
+        landing_aero = record.source.get(LANDING_AERO_KEY)
+        if landing_aero is None:
+            speed_in_scope = "indeterminate"
+            speed_reason = MISSING_LANDING_AERO_REASON
+        else:
+            speed_bounds = speed_gate_bounds(deviation.crossing_mass_kg, landing_aero)
+            speed_in_scope = _component(
+                deviation.crossing_speed_ms, speed_bounds.lower_ms, speed_bounds.upper_ms
+            )
+    verdict = _composite(lateral_result, vertical_result, speed_in_scope)
     violations: list[str] = []
     if lateral_result == "fail":
         violations.append("lateral")
     if vertical_result == "fail":
         violations.append("vertical")
+    if speed_in_scope == "fail":
+        violations.append("speed")
     # Lateral is always decidable once a crossing was measured -- a runway always has
-    # a width -- so the only route to an indeterminate composite is a missing vertical
-    # reference, and ``vertical_reason`` already says which one.
-    reason = (
-        (limits.vertical_reason or "vertical bound or estimate unavailable")
-        if verdict == "indeterminate"
-        else None
-    )
+    # a width -- so an indeterminate composite means a missing vertical reference, a
+    # missing landing_aero block, or both; name every one that applies.
+    reason = None
+    if verdict == "indeterminate":
+        parts = []
+        if vertical_result == "indeterminate":
+            parts.append(limits.vertical_reason or "vertical bound or estimate unavailable")
+        if speed_in_scope == "indeterminate" and speed_reason is not None:
+            parts.append(speed_reason)
+        reason = "; ".join(parts) or None
     return TrajectoryEvaluation(
         **common, solved=True, success=verdict == "pass", verdict=verdict,
         lateral_result=lateral_result, vertical_result=vertical_result,
+        speed_result=speed_in_scope if speed_in_scope is not None else "indeterminate",
+        speed_bounds=speed_bounds,
         deviation=deviation, event_status=outcome.event_status,
         violations=tuple(violations), reason=reason,
     )
@@ -306,6 +392,10 @@ def evaluate_batch(
         key: sum(item.verdict == key for item in evaluations)
         for key in ("pass", "fail", "indeterminate")
     }
+    speed_result_counts = {
+        key: sum(item.speed_result == key for item in evaluations)
+        for key in ("pass", "fail", "indeterminate")
+    }
     subjects = {item.subject for item in evaluations}
     if observed_availability is not None and subjects != {"observed"}:
         raise ValueError(
@@ -340,6 +430,12 @@ def evaluate_batch(
             item.deviation.vertical_m
             for item in measured
             if item.deviation.vertical_m is not None
+        ]),
+        "speed_result_counts": speed_result_counts,
+        "crossing_speed_ms": magnitude_spread([
+            item.deviation.crossing_speed_ms
+            for item in measured
+            if item.deviation.crossing_speed_ms is not None
         ]),
         "final_time_s": (
             {"mean": fmean(times), "min": min(times), "max": max(times)} if times else None
@@ -400,12 +496,23 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
         "event_status": item.event_status,
         "lateral_result": item.lateral_result,
         "vertical_result": item.vertical_result,
+        "speed_result": item.speed_result,
         "violations": list(item.violations),
         "bounds": {
             "lateral_criterion": LATERAL_CRITERION_ID,
             "lateral_m": item.lateral_bound_m,
             "vertical_lower_m": item.vertical_lower_bound_m,
             "vertical_upper_m": item.vertical_upper_bound_m,
+            **(
+                item.speed_bounds.to_dict()
+                if item.speed_bounds is not None
+                else {
+                    "speed_criterion": SPEED_CRITERION_ID,
+                    "stall_speed_ms": None,
+                    "speed_lower_ms": None,
+                    "speed_upper_ms": None,
+                }
+            ),
         },
     }
     if item.deviation is not None:
@@ -415,6 +522,8 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             "cross_track_m": deviation.cross_track_m,
             "vertical_m": deviation.vertical_m,
             "speed_ms": deviation.speed_ms,
+            "crossing_speed_ms": deviation.crossing_speed_ms,
+            "crossing_mass_kg": deviation.crossing_mass_kg,
             "heading_rad": deviation.heading_rad,
             "final_time_s": deviation.flight_time_s,
             "extrapolated": bool(

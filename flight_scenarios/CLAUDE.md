@@ -96,6 +96,12 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   decision lands in `<scenarios>.selection.json` (`flight-scenarios-selection-v1`): a bounded
   population that is not stated reads as a full one, and every rate computed from it is then
   quietly wrong.
+- **`source["landing_aero"]` is populated here** (`{wing_area_m2, cl_max_landing}`, from
+  the same `AeroParams` the optimizer/replay fly). It is what `evaluation`'s v6
+  threshold speed gate anchors on; a computed record without it grades
+  speed-indeterminate (loud, by design). Both record producers (optimizer batch and
+  ts_transformer export) copy `scenario.source`, so this one write covers both —
+  records built before 2026-08-23 lack it. → `evaluation/docs/THRESHOLD_SPEED_GATE.md`
 - **`source["flight_key"]` is populated here.** Optimizer evaluation rows used to report
   `flight_key: null` while observed rows carried it, because `build_scenario` never copied
   it. It does now — but only when the flight has an `id`, since `flight_key`'s fallback is

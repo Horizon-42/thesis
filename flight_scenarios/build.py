@@ -148,6 +148,14 @@ def build_scenario(
         "altitude_source": flight.get("altitude_source"),
         "hae_minus_msl_m": (flight.get("runway_target") or {}).get("hae_minus_msl_m"),
         "vertical_source": (flight.get("runway_target") or {}).get("vertical_source"),
+        # The stall-model facts evaluation's threshold speed gate anchors on (same
+        # AeroParams the optimizer and replay fly with, so the gate judges the record
+        # against the model that produced it). Producer-supplied like hae_minus_msl_m:
+        # a computed record without this block grades speed-indeterminate, loudly.
+        "landing_aero": {
+            "wing_area_m2": aero.S,
+            "cl_max_landing": aero.Cl_max,
+        },
         **aircraft_selection.audit_fields(),
     }
     return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source, target=target)

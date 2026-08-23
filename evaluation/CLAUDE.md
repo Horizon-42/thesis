@@ -1,10 +1,10 @@
 # evaluation — file-based trajectory judging + batch metrics
 
-`geokit` + stdlib only. Judges records against published approach geometry; the harvest
-(`final_approach`) decides *which* runway, this tree decides *how good*.
-Report schema: `terminal-approach-evaluation-v5`.
+`geokit` + stdlib + the (stdlib-only) `aircraft` parameter package. Judges records against
+published approach geometry; the harvest (`final_approach`) decides *which* runway, this
+tree decides *how good*. Report schema: `terminal-approach-evaluation-v6`.
 
-## Gates & batch metrics (`evaluation/thresholds.py`)
+## Gates & batch metrics (`evaluation/thresholds.py`, `evaluation/speed_gate.py`)
 
 - **Lateral = half the published runway width, and that is the whole rule**
   (`LATERAL_CRITERION_ID = "runway_half_width_at_threshold"`, 15.24–22.86 m across this fleet).
@@ -13,6 +13,19 @@ Report schema: `terminal-approach-evaluation-v5`.
 - **Vertical ∈ [−22, +22] m** from the published LTP+TCH path (ICAO Doc 9613 Vol II Pt C Ch5
   §5.3.4.4.7, RNP APCH Baro-VNAV FAS), available for LPV always and for LNAV/VNAV only with
   approved Baro-VNAV + a published reference. Gates judge the TRUE-dynamics rollout's final state.
+- **Speed ∈ [1.23·Vs1g, 1.23·Vs1g + 20 kt] at the crossing, per record** (v6;
+  `evaluation/speed_gate.py`, design + sources in `docs/THRESHOLD_SPEED_GATE.md`).
+  Vs1g = the project stall model at the record's crossing mass
+  (`aircraft.aero_params.stall_speed_ms` — the SAME function as the optimizer's velocity
+  floor); S/Cl_max from producer-written `source.landing_aero`
+  (`flight_scenarios.build_scenario`). 1.23 = 14 CFR 25.125(b)(2)(i); +20 kt = FSF ALAR
+  BN 7.1. **Composed into the verdict for optimized/predicted only; observed is reported
+  `indeterminate` and never composed** (observed V is ground speed and coverage ends
+  before the threshold — no crossing airspeed exists). A computed record without
+  `landing_aero` grades indeterminate LOUDLY (absent = data gap); a malformed block
+  raises. The optimizer floor (1.10·Vs) sits BELOW the gate on purpose — floor-riding
+  and observed-speed-target solves can legitimately fail speed; quote speed rates per
+  `target_source`.
 - Batch metrics: solve/success rates, lateral mean/p95/max, vertical spreads, flight times;
   path-shape deviation vs reference = both paths resampled at 101 fractions of their own
   horizontal arc length.

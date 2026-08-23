@@ -21,6 +21,7 @@ from evaluation.reference import (
     reference_span,
     resample_by_arc_length,
 )
+from evaluation.speed_gate import SpeedGateBounds, speed_gate_bounds
 from evaluation.stats import percentile
 from evaluation.thresholds import AssessmentContext, ResolvedLimits
 
@@ -33,6 +34,7 @@ __all__ = [
     "ReferenceComparison",
     "ReferenceSpan",
     "ResolvedLimits",
+    "SpeedGateBounds",
     "Subject",
     "TrajectoryEvaluation",
     "TrajectoryRecord",
@@ -51,4 +53,5 @@ __all__ = [
     "reference_span",
     "resample_by_arc_length",
     "resolve_context",
+    "speed_gate_bounds",
 ]

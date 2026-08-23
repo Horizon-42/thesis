@@ -7,7 +7,7 @@
  * the vitest fixtures (also pinned to v4) stayed green throughout. Test fixtures now
  * import this constant instead of repeating the string.
  */
-export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v5";
+export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v6";
 
 export interface MagnitudeSpread {
   mean: number;
@@ -33,6 +33,13 @@ export interface EvaluationBounds {
   lateral_m: number;
   vertical_lower_m: number | null;
   vertical_upper_m: number | null;
+  /** v6: stall-anchored crossing-speed window (evaluation/speed_gate.py). The three
+   *  numbers are null when the record was not speed-gradable (observed subjects,
+   *  unsolved records, or a record without source.landing_aero). */
+  speed_criterion: string;
+  stall_speed_ms: number | null;
+  speed_lower_ms: number | null;
+  speed_upper_ms: number | null;
 }
 
 export interface EvaluationRowReference {
@@ -62,6 +69,9 @@ export interface EvaluationRow {
   event_status: string;
   lateral_result: EvaluationComponentResult;
   vertical_result: EvaluationComponentResult;
+  /** v6: "indeterminate" for observed subjects by policy (no crossing airspeed is
+   *  measured); composes into `verdict` for optimized/predicted only. */
+  speed_result: EvaluationComponentResult;
   violations: string[];
   bounds: EvaluationBounds;
   lateral_m?: number | null;
@@ -108,6 +118,9 @@ export interface EvaluationReport {
   success_rate: number;
   lateral_m: MagnitudeSpread | null;
   vertical_m: SignedSpread | null;
+  /** v6: batch speed-gate tallies and crossing-speed spread (see EvaluationRow.speed_result). */
+  speed_result_counts: Record<EvaluationVerdict, number>;
+  crossing_speed_ms: MagnitudeSpread | null;
   final_time_s: { mean: number; min: number; max: number } | null;
   reference: EvaluationReferenceAggregate | null;
   trajectories: EvaluationRow[];

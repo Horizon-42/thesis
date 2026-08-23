@@ -4,6 +4,45 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-23 — Threshold speed gate (report schema v6) + evaluation review
+
+**A third component joins the terminal verdict: the crossing speed must lie in
+[1.23·Vs1g, 1.23·Vs1g + 20 kt]**, with Vs1g the project's own 1-g stall model at the
+record's crossing mass. 1.23 anchors on 14 CFR 25.125(b)(2)(i) (V_REF ≥ 1.23 V_SR0);
+the +20 kt window on FSF ALAR Briefing Note 7.1's stabilized-approach speed element.
+Design, worked numbers, rejected alternatives, and trackable sources:
+`evaluation/docs/THRESHOLD_SPEED_GATE.md`. Mechanics:
+
+- `aircraft.aero_params.stall_speed_ms` is the ONE stall-speed definition — the
+  optimizer's velocity floor (`scenario_optimization._stall_speed_ms`, now a thin
+  wrapper) and the new gate import it, so admitted solves and their judge share one
+  stall model by construction.
+- `flight_scenarios.build_scenario` writes `source.landing_aero =
+  {wing_area_m2, cl_max_landing}`; both record producers copy `scenario.source`, so
+  optimizer and ts records carry it going forward. A computed record WITHOUT the block
+  grades speed-indeterminate loudly (absent = unspecified, incl. explicit null);
+  a malformed block raises. Records written before this date lack it.
+- **Observed subjects are reported `indeterminate` and never composed** — their V is
+  ground speed (wind unmodelled) and ADS-B ends a median 325 m short of the threshold,
+  so no crossing airspeed was ever measured; observed composites are bit-identical to
+  v5. `ArrivalDeviation` gained `crossing_speed_ms`/`crossing_mass_kg` (None for
+  observed).
+- Report schema v5 → v6 in all four homes (producer, ts seam import, frontend mirror
+  + fixtures via the constant). **Every on-disk v5 report is stale**; regenerate
+  before the ts pipeline or frontend reads it. New surface: per-row `speed_result` +
+  speed bounds in `bounds`, batch `speed_result_counts` + `crossing_speed_ms` spread,
+  `methodology.terminal_speed`.
+- Known interaction, deliberate: the optimizer floor (1.10·Vs, admits observed
+  touchdown-speed targets) sits BELOW the gate's 1.23·Vs — floor-riding min-time
+  solves and fitted-ADS-B/track-end-target solves can legitimately fail speed; and the
+  category-default 145 kt target V_ref exceeds the window top for light narrow-bodies
+  (E75L-class tops at ~137.5 kt), so `runway`-target solves for those types will fail
+  speed until the per-type approach data is refined (follow-up recorded).
+
+Also: an `evaluation` package review (this change's findings that were NOT fixed here
+are in `docs/code-health-followups.md` — roster FileNotFoundError path, missing
+monotonic-t validation, STATE_KEYS mirror in `arrival.py`, and more).
+
 ### 2026-08-21 — KSJC's ADE advantage is a route-mix artifact; 75 takeoffs were in the arrivals
 
 Investigating why KSJC trajectories looked "weirdly short" and its ADE/FDE remarkably better

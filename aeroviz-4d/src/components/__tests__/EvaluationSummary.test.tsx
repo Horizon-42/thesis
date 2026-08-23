@@ -112,6 +112,8 @@ const REPORT: EvaluationReport = {
   success_rate: 0.6,
   lateral_m: { mean: 12.4, p95: 30, max: 40 },
   vertical_m: { mean_signed: 1.2, mean_abs: 4.6, p95_abs: 7, max_abs: 9 },
+  speed_result_counts: { pass: 6, fail: 2, indeterminate: 2 },
+  crossing_speed_ms: { mean: 70.2, p95: 74.8, max: 75.9 },
   final_time_s: { mean: 305, min: 250, max: 360 },
   reference: null,
   trajectories: [],

@@ -24,6 +24,11 @@ TARGET = {
     "m": 60_000.0,
 }
 
+# A320-class stall facts (aero_params_for_aircraft: S = 122.6 m², landing Cl_max = 2.7).
+# At the TARGET mass of 60 t the speed window is [66.3, 76.6] m/s, so the default
+# crossing V of 70.0 m/s passes with margin on both sides.
+LANDING_AERO = {"wing_area_m2": 122.6, "cl_max_landing": 2.7}
+
 
 def assessment_context(
     *, benchmark: Benchmark = "lpv", baro_vnav_approved: bool | None = None
@@ -105,6 +110,10 @@ def trajectory_payload(
     }
     if subject == "observed":
         source["hae_minus_msl_m"] = 30.0
+    else:
+        # Computed records carry the producer-written stall facts the speed gate
+        # anchors on; without them the composite verdict is indeterminate by design.
+        source["landing_aero"] = dict(LANDING_AERO)
     if event is not None:
         source["observed_threshold_event"] = event
     return {

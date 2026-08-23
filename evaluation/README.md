@@ -74,6 +74,22 @@ is a guidance-tracking scale, not a universal threshold-crossing or landing
 outcome standard, and is no longer computed or serialized. Trajectories and
 harvested threshold events do not carry evaluation policy.
 
+Speed, for optimized and predicted subjects (v6):
+
+```text
+Vs1g  = sqrt(2 m g / (rho0 × S × Cl_max_landing))   # the project's own stall model
+speed window = [1.23 × Vs1g, 1.23 × Vs1g + 20 kt]   # inclusive, at the crossing
+```
+
+The multiplier is the 14 CFR 25.125(b)(2)(i) landing reference-speed floor
+(V_REF ≥ 1.23 V_SR0); the window is the FSF ALAR Briefing Note 7.1 stabilized-approach
+speed element (not less than V_REF, not more than V_REF + 20 kt). `S` and `Cl_max`
+come from the record's producer-written `source.landing_aero` block; the mass is the
+crossing state's own. Observed records are never speed-graded — their V is ground
+speed and ADS-B coverage ends before the threshold — so the observed composite stays
+lateral + vertical. Full rationale, worked numbers, and trackable sources:
+[THRESHOLD_SPEED_GATE.md](docs/THRESHOLD_SPEED_GATE.md).
+
 The explicit LNAV/VNAV Baro-VNAV fallback differs only in the vertical component;
 its lateral bound is the same runway half-width. The fallback is not selected
 silently. `baro_vnav_approved` must be true in the
@@ -182,12 +198,15 @@ normalize two different physical spans and report the result as path error.
 
 ## Report essentials
 
-`terminal-approach-evaluation-v5` contains:
+`terminal-approach-evaluation-v6` contains:
 
 - complete assessment contexts and resolved bounds, tagged with the lateral
   criterion id `runway_half_width_at_threshold`;
 - the published-TCH vertical reference, common `±22 m` RNAV terminal bound,
   exact ICAO source location, and non-certification claim boundary;
+- the stall-anchored crossing-speed window per record (criterion id
+  `vref_1p23_vs1g_to_vref_plus_20kt`), its `speed_result`, and the
+  `methodology.terminal_speed` source audit;
 - event/point-verdict/uncalibrated-uncertainty/reference-comparison methodology;
 - three-way verdict counts;
 - per-flight signed along-track, cross-track, and vertical deviations;
