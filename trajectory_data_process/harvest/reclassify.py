@@ -8,6 +8,8 @@ import math
 import re
 import shutil
 import tempfile
+from concurrent.futures import Executor, ProcessPoolExecutor
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
@@ -52,13 +54,22 @@ def reclassify_stored_tracks(
     metadata_lookup_many: StateMetadataBatchLookup | None = None,
     batch_tracks: int = DEFAULT_RECLASSIFY_BATCH_TRACKS,
     screen: LandingScreen = LandingScreen(),
+    jobs: int = 1,
 ) -> dict[str, Any]:
     """Reclassify every rostered track, staging all output before the swap.
 
     The existing ``tracks/`` directory remains intact until every source record has
     parsed, classified, and serialized successfully in a sibling temporary directory.
     No acquisition module is imported or called.
+
+    ``jobs`` fans the per-track parse + classification (the multi-runway robust
+    fits, the CPU-heavy part) out over worker processes; roster validation,
+    sidecar metadata lookups, and record serialization stay in this process. The
+    output is IDENTICAL at any value — batches are mapped in roster order — so
+    the choice is throughput only, never an experiment parameter.
     """
+    if jobs < 1:
+        raise ValueError("jobs must be at least one")
     source = read_manifest(paths)
     _validate_source_manifest(source, paths)
     source_manifest_sha256 = hashlib.sha256(paths.manifest.read_bytes()).hexdigest()
@@ -77,6 +88,7 @@ def reclassify_stored_tracks(
         "source_manifest_sha256": source_manifest_sha256,
         "adsb_metadata": dict(metadata_provenance),
         "batch_tracks": batch_tracks,
+        "jobs": jobs,
         "runway_data_fingerprints": {
             runway.ident: runway_data_fingerprint(runway)
             for runway in airport.runways
@@ -84,9 +96,18 @@ def reclassify_stored_tracks(
     }
 
     paths.root.mkdir(parents=True, exist_ok=True)
+    executor_context = (
+        ProcessPoolExecutor(
+            max_workers=jobs,
+            initializer=_init_classification_worker,
+            initargs=(airport, screen),
+        )
+        if jobs > 1
+        else nullcontext(None)
+    )
     with tempfile.TemporaryDirectory(
         prefix=f".{paths.code}-reclassify-", dir=paths.root
-    ) as temporary:
+    ) as temporary, executor_context as executor:
         staged = HarvestPaths(Path(temporary), paths.code)
         manifest = write_tracks(
             _classified_records(
@@ -97,6 +118,7 @@ def reclassify_stored_tracks(
                 metadata_lookup=metadata_lookup,
                 metadata_lookup_many=metadata_lookup_many,
                 batch_tracks=batch_tracks,
+                executor=executor,
             ),
             staged,
             provenance=provenance,
@@ -139,6 +161,7 @@ def _classified_records(
     metadata_lookup: StateMetadataLookup | None,
     metadata_lookup_many: StateMetadataBatchLookup | None,
     batch_tracks: int,
+    executor: Executor | None = None,
 ) -> Iterator[ClassifiedTrack]:
     if batch_tracks < 1:
         raise ValueError("batch_tracks must be at least one")
@@ -148,8 +171,7 @@ def _classified_records(
     # so callsign ordering would repeatedly evict and reload the same Parquet partitions.
     ordered = sorted(source["records"], key=_reclassification_order)
     for offset in range(0, len(ordered), batch_tracks):
-        loaded: list[tuple[Path, Track, int]] = []
-        queries: list[tuple[str, float]] = []
+        tasks: list[tuple[str, str]] = []
         for index, row in enumerate(
             ordered[offset : offset + batch_tracks], start=offset
         ):
@@ -166,18 +188,30 @@ def _classified_records(
                 raise ValueError(
                     f"{paths.manifest}: record {index} escapes tracks directory"
                 )
-            record = _strict_json(record_path)
-            if record.get("flight_key") != key:
-                raise ValueError(f"{record_path}: flight_key disagrees with manifest")
-            stored = _stored_track(record, record_path)
-            query_count = 0
-            if stored.source_integrity is None:
-                query_count = len(stored.samples)
-                queries.extend(
-                    (stored.icao24, sample.time_s) for sample in stored.samples
-                )
-            loaded.append((record_path, stored, query_count))
+            tasks.append((str(record_path), key))
 
+        # Parse + classify each record — in worker processes when an executor is
+        # given, in this process otherwise; ``map`` preserves roster order either
+        # way, so the manifest is byte-identical at any worker count. A track that
+        # still needs the sidecar metadata (no stored source_integrity) comes back
+        # UNclassified and takes the batched-lookup path below.
+        if executor is None:
+            results: list[ClassifiedTrack | Track] = [
+                _load_and_maybe_classify(task, airport, screen) for task in tasks
+            ]
+        else:
+            results = list(executor.map(
+                _classify_in_worker,
+                tasks,
+                chunksize=max(1, batch_tracks // 32),
+            ))
+
+        queries: list[tuple[str, float]] = []
+        for result in results:
+            if isinstance(result, Track):
+                queries.extend(
+                    (result.icao24, sample.time_s) for sample in result.samples
+                )
         if metadata_lookup_many is not None:
             resolved = metadata_lookup_many(queries)
         else:
@@ -190,23 +224,57 @@ def _classified_records(
         if len(resolved) != len(queries):
             raise ValueError("ADS-B batch lookup returned the wrong result count")
         cursor = 0
-        for record_path, stored, query_count in loaded:
-            if stored.source_integrity is not None:
-                fresh = stored
-            else:
-                fresh, _integrity = source_timed_track_from_metadata(
-                    stored, resolved[cursor : cursor + query_count]
-                )
-                cursor += query_count
+        for (path_text, _key), result in zip(tasks, results):
+            if isinstance(result, ClassifiedTrack):
+                yield result
+                continue
+            query_count = len(result.samples)
+            fresh, _integrity = source_timed_track_from_metadata(
+                result, resolved[cursor : cursor + query_count]
+            )
+            cursor += query_count
             if fresh is None:
                 raise ValueError(
-                    f"{record_path}: final fresh position block has fewer than two "
+                    f"{path_text}: final fresh position block has fewer than two "
                     "samples; use --rebuild-fresh-from with a new staging output to "
                     "retain the exclusion in the source denominator"
                 )
             yield classify_track(fresh, airport, screen=screen)
         if cursor != len(resolved):
             raise AssertionError("ADS-B batch results were not consumed exactly once")
+
+
+def _load_and_maybe_classify(
+    task: tuple[str, str], airport: Airport, screen: LandingScreen
+) -> ClassifiedTrack | Track:
+    """Parse one stored record; classify it unless it needs the sidecar metadata."""
+    path_text, key = task
+    record_path = Path(path_text)
+    record = _strict_json(record_path)
+    if record.get("flight_key") != key:
+        raise ValueError(f"{record_path}: flight_key disagrees with manifest")
+    stored = _stored_track(record, record_path)
+    if stored.source_integrity is None:
+        return stored
+    return classify_track(stored, airport, screen=screen)
+
+
+# Worker-process state for ``jobs > 1``: the airport (with its runway frames) and
+# the landing screen are pickled ONCE per worker via the pool initializer instead
+# of once per task chunk.
+_WORKER_AIRPORT: Airport | None = None
+_WORKER_SCREEN: LandingScreen | None = None
+
+
+def _init_classification_worker(airport: Airport, screen: LandingScreen) -> None:
+    global _WORKER_AIRPORT, _WORKER_SCREEN
+    _WORKER_AIRPORT = airport
+    _WORKER_SCREEN = screen
+
+
+def _classify_in_worker(task: tuple[str, str]) -> ClassifiedTrack | Track:
+    assert _WORKER_AIRPORT is not None and _WORKER_SCREEN is not None
+    return _load_and_maybe_classify(task, _WORKER_AIRPORT, _WORKER_SCREEN)
 
 
 def _reclassification_order(row: Any) -> tuple[str, str]:

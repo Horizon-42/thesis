@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -94,6 +95,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--reclassify-existing",
         action="store_true",
         help="skip download; rerun assignment/fitting from stored tracks, then rebuild",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=max(1, (os.cpu_count() or 1) - 4),
+        help=(
+            "worker processes for --reclassify-existing's per-track classification "
+            "(default: cores-4, min 1). Output is identical at any value; other "
+            "modes ignore it."
+        ),
     )
     mode.add_argument(
         "--merge-source",
@@ -206,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             metadata_lookup=metadata.lookup,
             metadata_provenance=metadata.provenance,
             metadata_lookup_many=metadata.lookup_many,
+            jobs=args.jobs,
         )
         print(f"[harvest] reclassified stored tracks without download: {manifest['counts']}")
     elif args.evaluate_only:

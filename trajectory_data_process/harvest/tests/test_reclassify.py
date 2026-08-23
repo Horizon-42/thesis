@@ -28,6 +28,7 @@ from trajectory_data_process.harvest.tracks import (
     Sample,
     SourceIntegrity,
     Track,
+    source_timed_final_block,
 )
 
 
@@ -116,6 +117,99 @@ def test_cli_exposes_an_exclusive_no_download_reclassification_mode():
     parser = build_parser()
     args = parser.parse_args(["--airport", "KAAA", "--reclassify-existing"])
     assert args.reclassify_existing is True
+    assert args.jobs >= 1
+
+
+def _classified_source_timed():
+    """A source-timed track (integrity present), classified — the worker-side path."""
+    runway = _airport().runway("18")
+    frame = runway.frame("hae")
+    slope = math.tan(math.radians(3.0))
+    raw = []
+    for index, along_m in enumerate(range(-8_000, -100, 100)):
+        point = frame.unproject(Projected(
+            float(along_m), 0.0,
+            runway.threshold_crossing_height_m - slope * along_m,
+        ))
+        time_s = 1_786_496_400.0 + index
+        raw.append(Sample(
+            time_s, point.lat, point.lon, point.alt_m, False,
+            70.0, time_s, time_s,
+        ))
+    samples, integrity = source_timed_final_block(raw)
+    return classify_track(
+        Track("abc124", "TEST2", tuple(samples), integrity), _airport()
+    )
+
+
+def _write_two_record_root(root) -> HarvestPaths:
+    paths = HarvestPaths(root, "KAAA")
+    rows = []
+    for classified in (_classified(), _classified_source_timed()):
+        record = track_record(classified)
+        relative = f"assigned/18/{record['flight_key']}.json"
+        path = paths.tracks / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record), encoding="utf-8")
+        rows.append({
+            "flight_key": record["flight_key"], "file": relative,
+            "outcome": "assigned", "runway": "18",
+            "icao24": record["icao24"], "callsign": record["callsign"],
+            "landing_time_utc": record["landing_time_utc"],
+            "landing_sample_index": record["landing_sample_index"],
+        })
+    paths.manifest.write_text(json.dumps({
+        "airport": "KAAA",
+        "altitude_source": "opensky_history_geoaltitude_m",
+        "altitude_datum": "hae",
+        "counts": {"assigned": 2, "ambiguous": 0, "unassignable": 0, "not_landing": 0},
+        "total": 2,
+        "provenance": {"original": True},
+        "records": rows,
+    }), encoding="utf-8")
+    return paths
+
+
+def test_parallel_reclassification_is_byte_identical_to_serial(tmp_path):
+    """jobs is throughput only: same manifest, same record bytes, any worker count.
+
+    The two-record roster covers both worker outcomes: the source-timed track is
+    classified INSIDE a worker, while the legacy track (no source_integrity) comes
+    back unclassified for the parent's batched metadata path.
+    """
+    serial_paths = _write_two_record_root(tmp_path / "serial")
+    parallel_paths = _write_two_record_root(tmp_path / "parallel")
+
+    serial = reclassify_stored_tracks(
+        _airport(), serial_paths,
+        metadata_lookup=_metadata, metadata_provenance={"test": True},
+    )
+    parallel = reclassify_stored_tracks(
+        _airport(), parallel_paths,
+        metadata_lookup=_metadata, metadata_provenance={"test": True},
+        jobs=2,
+    )
+
+    assert serial["provenance"]["reclassification"].pop("jobs") == 1
+    assert parallel["provenance"]["reclassification"].pop("jobs") == 2
+    for manifest in (serial, parallel):
+        manifest["provenance"]["reclassification"].pop("completed_utc")
+    assert serial == parallel
+    for row in serial["records"]:
+        assert (serial_paths.tracks / row["file"]).read_bytes() == \
+            (parallel_paths.tracks / row["file"]).read_bytes()
+
+    # The worker-classified track went through the CURRENT estimator: its censored
+    # event carries the extrapolated crossing ground speed (constant 70 m/s track).
+    timed_row = next(
+        row for row in parallel["records"] if row["icao24"] == "abc124"
+    )
+    rewritten = json.loads(
+        (parallel_paths.tracks / timed_row["file"]).read_text(encoding="utf-8")
+    )
+    event = rewritten["observed_threshold_event"]
+    assert event["method"] == "censored_robust_line"
+    assert event["crossing_ground_speed_m_s"] == pytest.approx(70.0)
 
 
 def test_source_timed_track_round_trip_preserves_subsecond_time_and_speed(tmp_path):
