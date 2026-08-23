@@ -510,7 +510,10 @@ def main(argv: list[str] | None = None) -> int:
         altitude=args.reference_alt,
     )
 
-    radii_m = [r * 1000.0 for r in (0.5, 1.0, 2.0, 3.0, 4.0, args.max_range_km)]
+    # Honour --max-range-km for the grid too (it used to cap only the kinematic half):
+    # keep the fixed inner rings below the cap and end exactly at the cap, no duplicates.
+    radii_m = [r * 1000.0 for r in (0.5, 1.0, 2.0, 3.0, 4.0) if r < args.max_range_km]
+    radii_m.append(args.max_range_km * 1000.0)
     bearings_deg = list(range(0, 360, 45))
     altitudes_m = [0.0, 500.0, 1500.0]
     grid = _enumerate_grid(radii_m, bearings_deg, altitudes_m)

@@ -4,8 +4,9 @@ We fly ONE trajectory (one start state + one constant control) for ~30 km and
 integrate it four different ways, then measure how far each lands from the
 physically faithful reference at every point along the path:
 
-  (A) fixed local-tangent ENU, anchored at the TARGET  (make_local_enu_step_integrator)
-        - one ENU tangent plane for the whole 30 km, ref_geo = target.
+  (A) fixed local-tangent ENU, anchored at the TARGET
+        - one ENU tangent plane for the whole 30 km, ref_geo = target (the flat
+          ``make_dynamics_model`` RHS integrated in that fixed frame).
   (B) per-step re-anchored ENU                          (make_geo_step_from_enu_integrator)
         - rebuilds the tangent frame every step (ref = current point).  This is
           the most faithful discrete integrator, so it is the REFERENCE.

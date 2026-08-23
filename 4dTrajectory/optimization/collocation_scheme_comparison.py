@@ -132,9 +132,11 @@ def main(argv=None) -> int:
           f"{'PLAYBACK→tgt[m]':>17}{'replay min-alt[m]':>19}")
     print("  " + "-" * 82)
 
-    orders = {"trapezoidal": 2, "hermiteSimpson": 4, "rk4": 4,
-              "reanchoredEnu": 4, "localEnu": 4,
-              "localEnuTrapezoidal": 2, "localEnuHermiteSimpson": 4}
+    # Order comes from the FITTING, which every scheme carries in its name (trapezoidal
+    # is the only 2nd-order fitting; HS / rk4 / the ENU shooting steppers are all 4th) —
+    # derived instead of a hand-list, so new dynamics variants stay covered.
+    def scheme_order(scheme: str) -> int:
+        return 2 if "trapezoidal" in scheme.lower() else 4
     for scheme in _SCHEMES:
         opt = CollocationOptimizer(
             aircraft, scheme=scheme,
@@ -146,10 +148,10 @@ def main(argv=None) -> int:
             ok = True   # optimize_trajectory raises on solver failure, so reaching here == success
             node_miss = _horiz_m(states[-1][0], states[-1][1], target)
             pb, min_alt = _replay_terminal(aircraft, init, controls, args.horizon)
-            print(f"  {scheme:<16}{orders.get(scheme, '?'):>6}{('yes' if ok else 'no'):>11}"
+            print(f"  {scheme:<16}{scheme_order(scheme):>6}{('yes' if ok else 'no'):>11}"
                   f"{node_miss:>13.3f}{_horiz_m(pb.latitude, pb.longitude, target):>17.2f}{min_alt:>19.1f}")
         except ValueError as exc:
-            print(f"  {scheme:<16}{orders.get(scheme, '?'):>6}{'FAIL':>11}   {str(exc).split(': ')[-1][:40]}")
+            print(f"  {scheme:<16}{scheme_order(scheme):>6}{'FAIL':>11}   {str(exc).split(': ')[-1][:40]}")
 
     print("\nInterpretation: every scheme pins its own NODES on the target (node→tgt≈0),")
     print("but replaying the controls reveals the scheme's true accuracy. The crude")

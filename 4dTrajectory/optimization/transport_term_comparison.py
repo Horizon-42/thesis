@@ -170,7 +170,12 @@ def compare(
         "labels": labels,
         "diff": [float(v) for v in rhs_diff],
         "analyticCross": cross,
-        "psiMatchesCross": bool(abs(rhs_diff[4] - cross) < 1e-18),
+        # Relative check: the quantity is ~1e-9 and the two sides come from different
+        # computation graphs, so a 1e-18 ABSOLUTE tolerance passed the committed run by
+        # only 8.6e-19 — other CLI params could fail a correct model on FP rounding.
+        "psiMatchesCross": bool(
+            math.isclose(rhs_diff[4], cross, rel_tol=1e-6, abs_tol=1e-15)
+        ),
         "nonPsiAllZero": bool(np.array_equal(np.delete(rhs_diff, 4), np.zeros(6))),
     }
 
