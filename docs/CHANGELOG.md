@@ -4,6 +4,33 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — Fleet reclassified: every stored event now carries the crossing ground speed
+
+All five airports ran `--reclassify-existing` (267,194 stored tracks), so the
+`crossing_ground_speed_m_s` field from today's harvest change is now IN the data:
+
+- **Rosters unchanged, as required**: tracks and arrivals counts are identical to the
+  saved before-state at every airport (assignment is deterministic; only the event
+  payload gained the field). Spot checks (400 assigned tracks/airport): **100 % of
+  estimated events carry the speed**, direct and censored alike, medians 65.6–72.7 m/s
+  (≈ 128–141 kt). KRDU is ~95 % censored events where KMSY/KSMF are ~99 % direct —
+  the coverage-ends-short signature, visible per airport for the first time.
+- KMSY/KSMF/KSTL/KRDU ran serial (~210 tracks/s, 91 s–7 min 21 s each); KSJC ran on
+  the new `--jobs` path (24 workers) in **5 min 0 s** end-to-end for 106k tracks —
+  the classify fan-out is no longer the bottleneck, the serial arrivals/CZML/report
+  tail is.
+- KSJC's first attempt died on `ENOSPC`: the stage-then-swap needs the airport's
+  tracks footprint free (2.2 GiB) and the disk was at 100 %. Staging unwound cleanly
+  (`tracks/` untouched — the design working as intended). Freed by deleting pure
+  caches only (conda tarballs + unused packages, pip, vscode-cpptools; user-approved);
+  `~/.cache/opensky` (18 G) deliberately untouched. Disk now ~14 G free — the pending
+  optimizer batch (12.3 GiB) fits again.
+- The five `lateral_pass_eligibility.json` rosters (deleted by the re-roster footgun,
+  missing since 2026-08-21) were rebuilt via `ensure_lateral_pass_roster`. That fixed
+  the 3 `test_ts_pipeline` failures that read the real harvest root; the other 11 are
+  fixture rot at HEAD (hermetic fixtures predate the roster requirement) — recorded as
+  code-health follow-up **13**, left to the active ts-pipeline workstream.
+
 ### 2026-08-24 — Threshold event carries the estimated crossing ground speed (audit-only)
 
 The observed threshold event now serializes `crossing_ground_speed_m_s` — additive

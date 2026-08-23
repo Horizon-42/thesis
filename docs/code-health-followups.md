@@ -215,3 +215,22 @@ should ride the next schema bump.
 count (fixed at 101, so today the two definitions coincide; the p95 is dropped
 entirely at the aggregate level). Worth a one-line comment stating the weighting so a
 future variable-N resample does not silently change the metric's meaning.
+
+## 13. Eleven `test_ts_pipeline.py` reuse-guard tests fail at HEAD: fixtures predate the roster requirement
+
+**Verified** (2026-08-24, while running the fleet reclassify). `TrainingPlan.cv_reuse_error`
+and `checkpoint_reuse_error` in `run_ts_pipeline.py` require every airport's
+`lateral_pass_eligibility.json` beside its arrival manifest, but the hermetic tests
+(`monkeypatch HARVEST_ROOT` → tmp dir) build their harvest fixture with `_manifest(...)`
+only — no roster — so 11 tests fail with "one or more lateral-pass eligibility rosters
+are missing" on a clean tree, independent of disk state. (Three OTHER tests in the same
+file read the REAL harvest root and were failing for the opposite reason — the rosters
+really were missing after the 2026-08-21 re-roster; rebuilding them via
+`ensure_lateral_pass_roster` fixed exactly those three, confirming the split.) A few of
+the 11 fail on assertion text that has drifted for other reasons (candidate counts, loss
+line format), so this is fixture rot, not one missing file.
+
+**Suggested:** give `_manifest` a companion that also writes a minimal roster (or have
+the fixture call `ensure_lateral_pass_roster` against a stub approach report), and
+re-derive the drifted assertion strings. Owned by whoever is actively working the ts
+pipeline; not fixed here to avoid colliding with in-flight changes.
