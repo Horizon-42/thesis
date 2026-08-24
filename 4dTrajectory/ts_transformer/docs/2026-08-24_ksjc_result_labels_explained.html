@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Rendered companion of 2026-08-24_ksjc_result_labels_explained.md (same content,
+     designed page). Also published as a Claude artifact; this copy is standalone. -->
+<title>KSJC Label Decoder</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #F5F7F8;
+    --surface: #FFFFFF;
+    --ink: #1B2430;
+    --muted: #5A6878;
+    --rule: #D9E0E6;
+    --accent: #2456A6;
+    --slot-output: #2456A6;
+    --slot-backbone: #0E7C7B;
+    --slot-dynamics: #A85E22;
+    --slot-loss: #8A3D8F;
+    --slot-meta: #5A6878;
+    --chip-alpha: 0.09;
+    --good: #1D7A46;
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #121820;
+      --surface: #1A222C;
+      --ink: #E6ECF2;
+      --muted: #98A6B5;
+      --rule: #2B3642;
+      --accent: #7FA9E8;
+      --slot-output: #7FA9E8;
+      --slot-backbone: #55BDB5;
+      --slot-dynamics: #DFA05E;
+      --slot-loss: #CE8BD2;
+      --slot-meta: #9AA8B6;
+      --chip-alpha: 0.14;
+      --good: #63C388;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #121820;
+    --surface: #1A222C;
+    --ink: #E6ECF2;
+    --muted: #98A6B5;
+    --rule: #2B3642;
+    --accent: #7FA9E8;
+    --slot-output: #7FA9E8;
+    --slot-backbone: #55BDB5;
+    --slot-dynamics: #DFA05E;
+    --slot-loss: #CE8BD2;
+    --slot-meta: #9AA8B6;
+    --chip-alpha: 0.14;
+    --good: #63C388;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Newsreader", Georgia, serif;
+    font-size: 17px;
+    line-height: 1.62;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 96px; }
+  .prose { max-width: 72ch; }
+
+  h1, h2, h3 {
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    text-wrap: balance;
+    line-height: 1.15;
+  }
+  h1 { font-size: 2.3rem; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 10px; }
+  h2 { font-size: 1.45rem; font-weight: 650; margin: 0 0 14px; }
+  h3 { font-size: 1.08rem; font-weight: 600; margin: 0 0 8px; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .lede { font-size: 1.08rem; color: var(--muted); max-width: 66ch; margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  section { margin-top: 64px; }
+  .sec-head {
+    display: flex; align-items: baseline; gap: 14px;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 10px; margin-bottom: 22px;
+  }
+  .sec-head .no {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.78rem; color: var(--muted); letter-spacing: 0.08em;
+  }
+  .sec-head h2 { margin: 0; }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.86em;
+  }
+  code {
+    background: color-mix(in srgb, var(--ink) 6%, transparent);
+    border-radius: 3px;
+    padding: 0.08em 0.32em;
+  }
+
+  /* ── label specimens: slot-coloured token chips ─────────────────── */
+  .specimen {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 16px 18px;
+    margin: 18px 0;
+    overflow-x: auto;
+  }
+  .specimen .pre {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+  .chips .dot { color: var(--muted); }
+  .chip {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.8rem;
+    padding: 3px 9px;
+    border-radius: 4px;
+    white-space: nowrap;
+    border: 1px solid var(--c, var(--rule));
+    color: var(--c, var(--ink));
+    background: color-mix(in srgb, var(--c, var(--ink)) calc(var(--chip-alpha) * 100%), transparent);
+  }
+  .chip.output   { --c: var(--slot-output); }
+  .chip.backbone { --c: var(--slot-backbone); }
+  .chip.dynamics { --c: var(--slot-dynamics); }
+  .chip.loss     { --c: var(--slot-loss); }
+  .chip.meta     { --c: var(--slot-meta); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 14px; }
+  .legend .key {
+    display: flex; align-items: center; gap: 8px;
+    font-family: "Archivo", sans-serif; font-size: 0.8rem; font-weight: 600;
+  }
+  .legend .swatch { width: 12px; height: 12px; border-radius: 3px; background: var(--c); }
+
+  /* ── tables ─────────────────────────────────────────────────────── */
+  .tablewrap { overflow-x: auto; margin: 14px 0 6px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.92rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+  }
+  th, td { padding: 9px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+  th {
+    font-family: "Archivo", sans-serif;
+    font-size: 0.75rem; font-weight: 650;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--ink) 3.5%, var(--surface));
+  }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td code { white-space: nowrap; }
+
+  /* ── family cards ───────────────────────────────────────────────── */
+  .family {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+    padding: 20px 22px 18px;
+    margin: 22px 0;
+  }
+  .family .count {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem; color: var(--muted); letter-spacing: 0.08em;
+    float: right; margin-top: 4px;
+  }
+  .family p { max-width: 70ch; }
+  .ade { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .win { color: var(--good); font-weight: 600; }
+  .note {
+    font-size: 0.92rem; color: var(--muted);
+    border-left: 3px solid var(--rule);
+    padding-left: 14px; margin: 14px 0;
+    max-width: 68ch;
+  }
+  .foot { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.9rem; }
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: color 120ms ease; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">AeroViz-4D · ts_transformer · KSJC</div>
+    <h1>KSJC Label Decoder</h1>
+    <p class="lede">Every entry in the Observe panel's <strong>Prediction</strong> and
+    <strong>Experiments</strong> pickers is named by one grammar, derived mechanically from the
+    run's stored config. This page expands each part of that grammar, then walks all
+    <strong>27 KSJC categories</strong> family by family. Single source of the grammar:
+    <code>4dTrajectory/ts_transformer/run_naming.py</code>.</p>
+  </header>
+
+  <!-- ── anatomy ── -->
+  <section>
+    <div class="sec-head"><span class="no">01</span><h2>Anatomy of a label</h2></div>
+    <div class="specimen">
+      <div class="pre">Validation split (model selection) — Predicted:</div>
+      <div class="chips">
+        <span class="chip output">control</span><span class="dot">·</span>
+        <span class="chip backbone">iTransformer</span><span class="dot">·</span>
+        <span class="chip dynamics">first-order-lag @scaled-transport-chart-velocity</span><span class="dot">·</span>
+        <span class="chip loss">simple-v2+(vel=0.05)</span><span class="dot">·</span>
+        <span class="chip meta">d-model=512, d-ff=1024, layers=4, N=64, batch=512, lr=3e-05, +4 more, wiggle_loss_design/velocity_32x</span>
+      </div>
+      <div class="legend">
+        <span class="key" style="--c: var(--slot-output)"><span class="swatch"></span>1 output</span>
+        <span class="key" style="--c: var(--slot-backbone)"><span class="swatch"></span>2 backbone</span>
+        <span class="key" style="--c: var(--slot-dynamics)"><span class="swatch"></span>3 dynamics</span>
+        <span class="key" style="--c: var(--slot-loss)"><span class="swatch"></span>4 loss design</span>
+        <span class="key" style="--c: var(--slot-meta)"><span class="swatch"></span>5 meta</span>
+      </div>
+    </div>
+    <div class="prose">
+      <p>The prefix says <em>which data the numbers describe</em>: <strong>Training split
+      (in-sample)</strong> — flights the checkpoint saw, error measures fit, not skill;
+      <strong>Validation split (model selection)</strong> — held-back flights, the number to
+      compare models on. The split is by flight, never by window, and is persisted inside the
+      checkpoint (<code>config.py</code>, <code>dataset.py</code>).
+      <strong>Predicted:</strong> marks a primary result under the Prediction source;
+      <strong>Experiment:</strong> marks an arm of a sweep published with checkpoint metadata for
+      the grouped picker — a publisher flag (<code>--result-source</code>), not a property of the
+      model. The five slot colours above are used for the same slots throughout this page.</p>
+    </div>
+  </section>
+
+  <!-- ── slot 1+2 ── -->
+  <section>
+    <div class="sec-head"><span class="no">02</span><h2>Output &amp; backbone</h2></div>
+    <div class="tablewrap"><table>
+      <tr><th style="width:11rem">Token</th><th>Meaning</th></tr>
+      <tr><td><span class="chip output">state</span></td>
+        <td>The purely <strong>kinematic baseline</strong>: chart channels in, future chart
+        channels out, no dynamics anywhere — deliberately, so the learned component is measured
+        on its own. No flyability guarantee.</td></tr>
+      <tr><td><span class="chip output">control</span></td>
+        <td>The model emits a <strong>bounded control schedule</strong> — thrust fraction ∈
+        [−0.2, 1.0], bank ∈ ±45°, load factor ∈ [0.2, 2.0] (<code>control/envelope.py</code>) —
+        and a differentiable RK4 rollout of the shared point-mass equations turns it into the
+        trajectory. Every prediction is dynamically admissible by construction.</td></tr>
+      <tr><td><span class="chip backbone">iTransformer</span></td>
+        <td>Attention across <em>channels</em> (variate tokens). Vendored byte-identical in
+        <code>vendor/itransformer/</code>.</td></tr>
+      <tr><td><span class="chip backbone">PatchTST</span></td>
+        <td>Channel-independent patched attention along <em>time</em>
+        (<code>vendor/patchtst/</code>). Channel independence cannot represent a turn's
+        east/north coupling — one reason it trails at long horizons.</td></tr>
+    </table></div>
+    <p class="note">Defined in <code>config.py</code>: <code>PREDICTION_STATE</code> /
+    <code>PREDICTION_CONTROL</code>, <code>MODELS</code>; instantiation in
+    <code>models.py</code>. Rationale: the "<code>prediction_output</code> decides whether
+    dynamics is connected at all" entry in the package CLAUDE.md.</p>
+  </section>
+
+  <!-- ── slot 3 ── -->
+  <section>
+    <div class="sec-head"><span class="no">03</span><h2>Dynamics — the flight model behind the rollout</h2></div>
+    <div class="tablewrap"><table>
+      <tr><th style="width:15rem">Token</th><th>Meaning</th></tr>
+      <tr><td><span class="chip dynamics">kinematic</span></td>
+        <td>State output only: no dynamics attached (see slot 1).</td></tr>
+      <tr><td><span class="chip dynamics">point-mass</span></td>
+        <td>Each commanded control is applied <strong>instantly</strong> — controls have no
+        derivative.</td></tr>
+      <tr><td><span class="chip dynamics">first-order-lag</span></td>
+        <td>The three controls become actuator states driven toward the commands through
+        first-order ODEs — <strong>controls have a derivative</strong>. τ = 1.5 / 2.0 / 0.8 s
+        (thrust / bank / load); a non-default τ appears inline, e.g.
+        <code>first-order-lag(τ-bank=4s)</code>. It <em>wraps</em> the same force equations as
+        point-mass: one flight model plus three actuators, not a second model.</td></tr>
+      <tr><td><span class="chip dynamics">@scaled-transport-chart-velocity</span></td>
+        <td>The <strong>rollout backend</strong> — the state representation the long rollout
+        integrates — shown only when it differs from the default <code>reanchored-rk4</code>
+        (local-ENU RK4, re-anchored into geodetic state each sub-step). The scaled chart
+        variant integrates threshold-chart position + moving-local-ENU physical velocity with
+        the full WGS84 transport rate, normalized. Every KSJC control run uses it.</td></tr>
+    </table></div>
+    <p class="note">Defined in <code>config.py</code> (<code>CONTROL_DYNAMICS_MODELS</code> /
+    <code>CONTROL_DYNAMICS_BACKENDS</code>); the registry keyed by the
+    <em>(model,&nbsp;backend)</em> pair is <code>control/dynamics/backends.py</code>. The two
+    axes are orthogonal — physics vs state representation.</p>
+  </section>
+
+  <!-- ── slot 4 ── -->
+  <section>
+    <div class="sec-head"><span class="no">04</span><h2>Loss design — what training scored</h2></div>
+    <div class="tablewrap"><table>
+      <tr><th style="width:9.5rem">Recipe</th><th>What it scores</th></tr>
+      <tr><td><span class="chip loss">simple-v1</span></td>
+        <td>True-time <strong>position</strong> at the 64 segment endpoints + final time +
+        endpoint term; point-mass dynamics. Its measured failure: position-only supervision let
+        71&nbsp;% of predicted bank energy collapse into one shared wiggle profile.</td></tr>
+      <tr><td><span class="chip loss">simple-v1-lag</span></td>
+        <td>Same objective, first-order-lag dynamics. The τ_bank CV sweep ran on this.</td></tr>
+      <tr><td><span class="chip loss">simple-v2</span></td>
+        <td>v1-lag + <strong>velocity term</strong> (<code>vel = 0.003</code> ≈ 2× the position
+        term at convergence). Fixed the shared-wiggle profile: 71&nbsp;% → 17.3&nbsp;% shared.</td></tr>
+      <tr><td><span class="chip loss">simple-v3</span></td>
+        <td>v2 + <strong>direct control imitation</strong> (<code>imit = 64</code> ≈ 47×
+        position) against the inverse-dynamics teacher
+        (<code>control/dynamics/inverse.py</code>). Current recommended recipe; the weight is
+        per-airport — 64 overshoots on KSJC.</td></tr>
+      <tr><td><span class="chip loss">state-v1</span></td>
+        <td>The state output's formal objective — normalized position MSE + duration + endpoint
+        term — at its frozen coefficients.</td></tr>
+    </table></div>
+    <div class="prose">
+      <p><strong>Custom runs are named against their <em>nearest</em> recipe</strong> — the one
+      whose frozen loss fields need the fewest edits to reproduce the run, edits in
+      parentheses: <code>simple-v2+(vel=0.05)</code> is exactly simple-v2's loss with the
+      velocity weight moved 0.003 → 0.05. A run matching a recipe exactly is shown as that
+      recipe bare, even though its config says <code>custom</code> (CV/dev runs are always
+      stamped custom — a named recipe cannot be cross-validated as itself). More than four
+      edits collapse to a stable content hash: <code>custom-3f2a91bc</code>.</p>
+      <p>Edit abbreviations: <code>vel</code>&nbsp;=&nbsp;<code>control_velocity_loss_weight</code>,
+      <code>imit</code>&nbsp;=&nbsp;<code>control_imitation_loss_weight</code>,
+      <code>obj</code>&nbsp;=&nbsp;<code>control_state_objective</code>,
+      <code>grid</code>&nbsp;=&nbsp;<code>control_state_loss_grid</code>,
+      <code>clock</code>&nbsp;=&nbsp;<code>control_state_supervision_clock</code>
+      (full map: <code>run_naming._ABBREV</code>). Recipes: <code>config.py</code>
+      <code>CONTROL_RECIPE_*</code> + <code>control_recipe_overrides()</code> — frozen fields
+      raise on mismatch.</p>
+
+      <h3 style="margin-top:28px">What "direct control imitation" is — and what <code>imit</code> sets</h3>
+      <p><strong>The gap it closes.</strong> Every earlier term scored what the controls
+      <em>produce</em>: position is derivative order 0, the v2 velocity term order 1 — but bank
+      lives at order 2, so no term ever named the controls themselves. Measured on the pre-v3
+      models: the predicted bank carried <em>less</em> information about the flown bank than a
+      randomly chosen <em>other</em> flight's bank did (per-flight skill +0.124 vs a
+      random-flight floor of +0.170 on KRDU) — the model learned <em>that</em> banking happens,
+      never <em>when</em>.</p>
+      <p><strong>The mechanism.</strong> For every training flight, the <em>observed</em>
+      trajectory is pushed through the exact <strong>inverse of the configured forward
+      dynamics</strong> (<code>control/dynamics/inverse.py</code>) to recover the control
+      schedule — thrust fraction, bank, load factor per segment — that would reproduce the
+      flown track under that flight model. The network's emitted schedule is then penalized for
+      deviating from this recovered schedule, channel by channel: it supervises the
+      <strong>controls themselves</strong>, not only the trajectory they roll out to. The
+      inverse is registered under the same config key as the forward model (target and rollout
+      can never be different equations; round-trip-tested in
+      <code>tests/test_control_inverse_dynamics.py</code>), and the target is built on the
+      training-only path (<code>dataset.reference_control_supervision</code>) — inference has
+      no future track to invert. Each channel is divided by half its envelope width
+      (<code>control/envelope.py</code>), which gives the term a per-airport split:
+      thrust/bank/load carry 57/41/2&nbsp;% on KRDU but 82/18/1&nbsp;% on KSJC — the root of the
+      "recalibrate the weight per airport" rule.</p>
+      <p><strong>What the <code>imit</code> number is.</strong> The raw value of
+      <code>control_imitation_loss_weight</code>, the multiplier on this term in the total
+      loss. The "≈&nbsp;47× position" gloss is a calibration at the converged KRDU baseline
+      where <strong>w&nbsp;=&nbsp;1.36 equals 1× the position term</strong> — so
+      <code>imit=64</code>&nbsp;≈&nbsp;47×, <code>imit=16</code>&nbsp;≈&nbsp;12×,
+      <code>imit=256</code>&nbsp;≈&nbsp;188×. The dose curve is not a ramp: below ~12× a noisy
+      plateau, ~47× the sweet spot frozen into <code>simple-v3</code>, past it saturation and
+      overshoot — at ≈188× the predicted bank comes out <em>smoother than the flown tracks
+      themselves</em>. At the frozen 64, on 1404 KRDU validation flights: bank skill
+      0.124&nbsp;→&nbsp;<strong>0.735</strong>, flight-independent bank share
+      49&nbsp;%&nbsp;→&nbsp;<strong>3.3&nbsp;%</strong> (flown: 1.8&nbsp;%), straight-in bank RMS
+      3.92°&nbsp;→&nbsp;<strong>0.36°</strong>, ADE better on 57&nbsp;% of flights, FDE
+      unchanged.</p>
+      <p class="note">Not the same thing as the <strong>oracle teacher</strong> of the teacher
+      ablation below: the imitation term is a <em>loss component</em> whose weight is recorded
+      in the config (hence <code>imit</code> edits appear in the loss slot); the oracle teacher
+      (<code>control/oracle/*</code>) is a <em>training-time curriculum</em> invisible to
+      <code>TSConfig</code>, which is why teacher vs no-teacher runs carry identical configs and
+      differ only in their run-id tails.</p>
+    </div>
+  </section>
+
+  <!-- ── slot 5 ── -->
+  <section>
+    <div class="sec-head"><span class="no">05</span><h2>Meta — everything else, possibly empty</h2></div>
+    <div class="prose">
+      <p>Three kinds of items, in order: <strong>horizon</strong> when not the default
+      normalized-time (<em>full horizon</em>, <em>recursive window</em>);
+      <strong>config deviations from today's dataclass defaults</strong> (seed first, at most
+      six spelled out, the rest folded into <code>+N&nbsp;more</code>) — fields frozen by a
+      <em>named</em> recipe are excluded, which is why a <code>simple-v1-lag</code> arm shows a
+      clean tail while a <code>custom</code> arm at the same capacity spells it out; and
+      <strong>caller extras</strong>: <code>campaign/arm</code> for legacy runs, the run id for
+      publisher-managed ones, <code>pooled cohort</code> for pooled trainings.</p>
+    </div>
+    <div class="tablewrap"><table>
+      <tr><th>Item</th><th>Field (default)</th><th>Meaning</th></tr>
+      <tr><td><code>d-model=512</code></td><td><code>d_model</code> (256)</td><td>Transformer embedding width.</td></tr>
+      <tr><td><code>d-ff=1024</code></td><td><code>d_ff</code> (512)</td><td>Feed-forward width.</td></tr>
+      <tr><td><code>layers=4</code></td><td><code>e_layers</code> (3)</td><td>Encoder depth.</td></tr>
+      <tr><td><code>N=64</code></td><td><code>n_segments</code> (16 iTransformer / 256 PatchTST)</td>
+        <td>Normalized-progress segments; for control runs, also the control-segment count.
+        Per-model default — the same 64 is a deviation on PatchTST but not visible on a
+        named-recipe run that froze it.</td></tr>
+      <tr><td><code>batch=512</code></td><td><code>batch_size</code> (2048)</td><td>Training batch size (128 = 4× the updates).</td></tr>
+      <tr><td><code>lr=3e-05</code></td><td><code>learning_rate</code> (5e-4)</td><td>Adam learning rate.</td></tr>
+      <tr><td><code>seed</code> / <code>split-seed</code></td><td><code>seed</code> (1337) / <code>split_seed</code> (= seed)</td>
+        <td>Init / flight-split seeds. <code>split-seed</code> shows only when it differs from
+        <code>seed</code> — same split, different init.</td></tr>
+      <tr><td><code>fleet=openap-direct</code></td><td><code>aircraft_filter</code> ("all")</td><td>Only flights whose type OpenAP models directly.</td></tr>
+      <tr><td><code>duration=uniform</code></td><td><code>control_duration_parameterization</code> ("factorized")</td><td>One total time + equal segments, vs learned softmax partition.</td></tr>
+      <tr><td><code>duration-floor=0</code></td><td><code>control_duration_uniform_floor</code> (0.8)</td><td>Uniform-duration reserve fraction.</td></tr>
+      <tr><td><code>grad-clip=20</code></td><td><code>control_gradient_clip_norm</code> (0 = off)</td><td>Global gradient-norm cap.</td></tr>
+    </table></div>
+    <p class="note">The <code>+4 more</code> on every legacy KSJC control arm is always the
+    same four items — <code>fleet=openap-direct, duration=uniform, duration-floor=0,
+    grad-clip=20</code> — the campaign-wide dev settings, identical across arms, so they never
+    distinguish two KSJC entries.</p>
+  </section>
+
+  <!-- ── catalog ── -->
+  <section>
+    <div class="sec-head"><span class="no">06</span><h2>The KSJC catalog — 27 entries in six families</h2></div>
+    <p class="prose">ADE figures are the batch <strong>mean ADE on that category's split</strong>
+    from <code>categories.json</code> (<code>accuracy.adeM.mean</code>) — the same numbers the
+    "Sort results" control ranks by.</p>
+
+    <div class="family">
+      <span class="count">4 entries · Prediction</span>
+      <h3>Pooled state baselines</h3>
+      <div class="chips" style="margin:10px 0 6px">
+        <span class="chip output">state</span><span class="dot">·</span>
+        <span class="chip backbone">iTransformer / PatchTST</span><span class="dot">·</span>
+        <span class="chip dynamics">kinematic</span><span class="dot">·</span>
+        <span class="chip loss">state-v1</span><span class="dot">·</span>
+        <span class="chip meta">pooled cohort</span>
+      </div>
+      <p>Both backbones trained as pure kinematic predictors on the pooled five-airport cohort
+      — the "statistically plausible but unflyable" reference the control models are measured
+      against. <code>N=64</code> appears only on PatchTST: the iTransformer run trained at its
+      default N=16, the PatchTST run at 64 against its default 256. Checkpoints:
+      <code>outputs/POOLED/ts_{itransformer,patchtst}_normalized_time/</code>.
+      Val ADE: <span class="ade win">iTransformer 925 m</span> ·
+      <span class="ade">PatchTST 1361 m</span>.</p>
+    </div>
+
+    <div class="family">
+      <span class="count">2 entries · Prediction</span>
+      <h3>Pooled control model (with oracle teacher)</h3>
+      <div class="chips" style="margin:10px 0 6px">
+        <span class="chip output">control</span><span class="dot">·</span>
+        <span class="chip backbone">iTransformer</span><span class="dot">·</span>
+        <span class="chip dynamics">point-mass @scaled-transport-chart-velocity</span><span class="dot">·</span>
+        <span class="chip loss">simple-v1</span><span class="dot">·</span>
+        <span class="chip meta">ts_itr_control_simple_v1_teacher_all_airports_seed1337</span>
+      </div>
+      <p>The all-airports control checkpoint, trained <em>with</em> the oracle teacher
+      (<code>control/oracle/*</code>). The teacher is a training-time curriculum, not a
+      <code>TSConfig</code> field — two runs differing only in teacher use have byte-identical
+      configs, which is exactly why the run id stays in the label. Val ADE (KSJC slice):
+      <span class="ade">814 m</span>.</p>
+    </div>
+
+    <div class="family">
+      <span class="count">4 entries · Experiments</span>
+      <h3>Teacher ablation — campaign <code>control_simple_v1_20260816</code></h3>
+      <p>The controlled pair behind the design choice above: same recipe, seed, and data
+      manifest — only the oracle teacher differs, visible only in the run-id tail
+      (<code>…_teacher_…</code> vs <code>…_no_teacher_…</code>). Measured on KSJC:</p>
+      <div class="tablewrap"><table>
+        <tr><th>Arm</th><th class="num">Train ADE</th><th class="num">Val ADE</th></tr>
+        <tr><td>with teacher</td><td class="num win">602 m</td><td class="num win">696 m</td></tr>
+        <tr><td>without teacher</td><td class="num">776 m</td><td class="num">864 m</td></tr>
+      </table></div>
+      <p>Runs: <code>outputs/KSJC/experiments/control_simple_v1_20260816/</code>.</p>
+    </div>
+
+    <div class="family">
+      <span class="count">2 entries · Prediction</span>
+      <h3>Flight-model pair — campaign <code>flight_model_paired</code></h3>
+      <p><span class="chip dynamics">point-mass</span> + <span class="chip loss">simple-v1</span>
+      vs <span class="chip dynamics">first-order-lag</span> +
+      <span class="chip loss">simple-v1-lag</span>, paired on the same 1083 validation flights.
+      The lag arm is smoother (jerk p95 −28&nbsp;%) <em>and</em> slightly more accurate — val ADE
+      <span class="ade win">776 m</span> vs <span class="ade">815 m</span>, better on 67.4&nbsp;%
+      of flights — "artifact removed", not "more realistic"; gates unchanged 0/1083 on both.
+      These arms ran as true named recipes, so every capacity field is recipe-frozen and the
+      meta tail is clean.</p>
+    </div>
+
+    <div class="family">
+      <span class="count">3 entries · Prediction</span>
+      <h3>Imitation replication — campaigns <code>imitation_replication</code>, <code>imitation_v5</code></h3>
+      <p>Does KRDU's simple-v3 result replicate here? The loss slot answers directly:
+      <code>ksjc_baseline</code> is exactly <span class="chip loss">simple-v2</span>
+      (<span class="ade">640 m</span>), <code>ksjc_v3</code> exactly
+      <span class="chip loss">simple-v3</span> (<span class="ade">664 m</span>);
+      <code>v5_baseline</code> re-ran the v2 baseline on a later manifest generation
+      (<span class="ade">656 m</span>). The <em>mechanism</em> replicates and is stronger (bank
+      skill 0.197 → 0.678, past the 0.543 same-runway twin ceiling) — but imitation weight 64
+      overshoots on KSJC (straight-in bank 0.18° vs flown 0.53°; FDE degrades on 68&nbsp;% of
+      flights), because bank carries only 18&nbsp;% of the imitation term here vs 41&nbsp;% at
+      KRDU. Standing rule: recalibrate the weight per airport.</p>
+    </div>
+
+    <div class="family">
+      <span class="count">9 entries · Prediction</span>
+      <h3>The bank-wiggle diagnosis — campaigns <code>wiggle_*</code></h3>
+      <p>Under simple-v1(-lag), position-only supervision let the model share one bank profile
+      across flights. Four candidate causes were tested on identical data; the velocity dose was
+      the one that mattered. Full write-up:
+      <code>docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md</code>.</p>
+      <div class="tablewrap"><table>
+        <tr><th>Loss slot (arm)</th><th class="num">vel weight</th><th class="num">≈ × position</th><th class="num">Val ADE</th></tr>
+        <tr><td><code>simple-v2+(vel=0.0008)</code> — velocity_half</td><td class="num">0.0008</td><td class="num">0.5×</td><td class="num">696 m</td></tr>
+        <tr><td><code>simple-v2</code> — velocity_double</td><td class="num">0.003</td><td class="num">2×</td><td class="num win">640 m</td></tr>
+        <tr><td><code>simple-v2+(vel=0.0125)</code> — velocity_8x</td><td class="num">0.0125</td><td class="num">8×</td><td class="num">665 m</td></tr>
+        <tr><td><code>simple-v2+(vel=0.05)</code> — velocity_32x</td><td class="num">0.05</td><td class="num">32×</td><td class="num">671 m</td></tr>
+        <tr><td><code>simple-v2+(vel=0.2)</code> — velocity_128x</td><td class="num">0.2</td><td class="num">128×</td><td class="num">688 m</td></tr>
+      </table></div>
+      <p>The mechanical naming exposed something the old labels hid: the "velocity 2×" arm
+      <em>is exactly simple-v2</em> — 0.003 was frozen into the recipe because this ladder showed
+      the 2× dose is the sweet spot (past 8× the bank drops below the flown tracks' own level
+      while FDE climbs).</p>
+      <p>The other axes, all ruled out: <strong>conditioning</strong> —
+      <code>deep</code> (<code>layers=6</code>, 725 m) and <code>wide</code>
+      (<code>d-model=1024</code>, 686 m): width moved the shared share but per-flight skill
+      stayed 0.000; <strong>segment count</strong> — <code>n16</code> (710 m) and
+      <code>n32</code> (673 m): 12 pp shift, not even monotone (n16 shows no <code>N=</code>
+      item — 16 is today's iTransformer default); <strong>training budget</strong> —
+      <code>batch128</code> (695 m) and <code>lr3x</code> (<code>lr=0.0001</code>, 670 m): the
+      two ways of adding optimizer steps disagree; and the <strong>combination</strong> arm
+      <code>velocity2x_wide</code> (689 m): with the velocity term present, width adds
+      nothing.</p>
+    </div>
+  </section>
+
+  <!-- ── definitions ── -->
+  <section>
+    <div class="sec-head"><span class="no">07</span><h2>Where everything is defined</h2></div>
+    <div class="tablewrap"><table>
+      <tr><th>Concern</th><th>Definition</th></tr>
+      <tr><td>Grammar, abbreviations, nearest-recipe rule, meta cap</td>
+        <td><code>4dTrajectory/ts_transformer/run_naming.py</code> (tests: <code>tests/test_run_naming.py</code>)</td></tr>
+      <tr><td>Recipes and every config field/default</td>
+        <td><code>config.py</code> — <code>CONTROL_RECIPE_*</code>, <code>control_recipe_overrides</code>, <code>TSConfig</code></td></tr>
+      <tr><td>Dynamics models/backends registry</td>
+        <td><code>config.py</code> <code>CONTROL_DYNAMICS_*</code>; <code>control/dynamics/backends.py</code></td></tr>
+      <tr><td>Control box</td><td><code>control/envelope.py</code></td></tr>
+      <tr><td>Label producers</td>
+        <td><code>publish_ts_experiment_trajectories.py</code> (+ <code>--refresh-labels-only</code>),
+        <code>run_ts_pipeline.py</code>, <code>docs/relabel_published_categories.py</code></td></tr>
+      <tr><td>Picker classification &amp; ranking</td>
+        <td><code>aeroviz-4d/src/utils/trajectoryResultSources.ts</code></td></tr>
+      <tr><td>Per-category ADE/FDE aggregates</td>
+        <td><code>categories.json</code> <code>accuracy</code> block, stamped by
+        <code>build_scenario_comparison_czml.category_accuracy_summary</code></td></tr>
+      <tr><td>Run directories behind each arm</td>
+        <td><code>4dTrajectory/outputs/KSJC/experiments/&lt;campaign&gt;/&lt;arm&gt;/</code>
+        (index: <code>…/experiments/INDEX.md</code>)</td></tr>
+    </table></div>
+  </section>
+
+  <div class="foot">
+    Companion of the repo doc
+    <code>4dTrajectory/ts_transformer/docs/2026-08-24_ksjc_result_labels_explained.md</code>.
+    Labels are recomputable from stored configs at any time — nothing here is hand-maintained.
+  </div>
+</div>
+</body>
+</html>
