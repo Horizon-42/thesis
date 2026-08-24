@@ -84,6 +84,8 @@ records/checkpoints: `publish_ts_experiment_trajectories.py --refresh-labels-onl
 `docs/relabel_published_categories.py` (the 2026-08-24 one-off for legacy `ts_*` keys).
 **On-disk run/category directories are historical record — never rename them**;
 `run_slug()` is the grammar's filesystem form for FUTURE directories.
+Worked vocabulary — every KSJC label expanded, slot by slot, with the campaigns'
+meaning and codebase pointers: `docs/2026-08-24_ksjc_result_labels_explained.md`.
 
 ## Layout
 
