@@ -80,9 +80,11 @@ describe("EvaluationReportWindow", () => {
 
     expect(screen.getByRole("dialog", { name: "Optimization Evaluation Report" })).toBeTruthy();
     expect(screen.getByText("KRDU · runway_cons")).toBeTruthy();
-    // cards
+    // cards — the default view is two-gate (the label says so); for THIS fixture
+    // the two- and three-gate counts coincide (no speed-only failure).
     expect(screen.getByText("solve rate 66.7%")).toBeTruthy();
-    expect(screen.getByText("pass rate 33.3%")).toBeTruthy();
+    expect(screen.getByText(/pass rate 33.3%/)).toBeTruthy();
+    expect(screen.getByText(/two-gate view/)).toBeTruthy();
     expect(screen.getByText("1/3")).toBeTruthy();
     expect(screen.queryByText("1/2")).toBeNull();
     expect(screen.getByText("mean Δt vs observed (optimized − flown)")).toBeTruthy();
@@ -314,15 +316,8 @@ describe("EvaluationReportWindow", () => {
       />,
     );
 
-    // Three-gate default: published verdicts.
-    expect(screen.getByText("pass rate 33.3%")).toBeTruthy();
-    expect(screen.getByText("FDX1449").closest("tr")!.textContent).toContain("fail");
-
-    fireEvent.click(
-      screen.getByLabelText(/Include the speed gate in verdicts/),
-    );
-
-    // Two-gate view: the speed-only failure passes; the unsolved fail stays.
+    // DEFAULT is the two-gate view: the speed-only failure passes; the unsolved
+    // fail (whose verdict never came from the gate composite) stays.
     expect(screen.getByText(/pass rate 66.7%/)).toBeTruthy();
     expect(screen.getByText(/two-gate view/)).toBeTruthy();
     const speedRow = screen.getByText("FDX1449").closest("tr")!;
@@ -330,11 +325,19 @@ describe("EvaluationReportWindow", () => {
     const unsolvedRow = screen.getByText("UPS1276").closest("tr")!;
     expect(unsolvedRow.textContent).toContain("fail");
 
-    // Back on: published three-gate verdicts return.
+    // Toggle ON: the published three-gate verdicts.
     fireEvent.click(
       screen.getByLabelText(/Include the speed gate in verdicts/),
     );
     expect(screen.getByText("pass rate 33.3%")).toBeTruthy();
+    expect(screen.queryByText(/two-gate view/)).toBeNull();
+    expect(screen.getByText("FDX1449").closest("tr")!.className).toContain("eval-row-fail");
+
+    // And off again: back to the two-gate default.
+    fireEvent.click(
+      screen.getByLabelText(/Include the speed gate in verdicts/),
+    );
+    expect(screen.getByText(/pass rate 66.7%/)).toBeTruthy();
   });
 
   it("closes via the Close button", () => {

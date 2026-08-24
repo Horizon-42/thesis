@@ -608,12 +608,13 @@ function deviationStatusClass(status: DeviationStatus): string {
 export default function EvaluationReportWindow({ report, title, subtitle, onClose }: Props) {
   // The speed-gate toggle: verdicts re-derived CLIENT-SIDE from the per-row
   // component results the report deliberately serializes — no refetch, no
-  // schema change. Three-gate (the published verdicts) is the default; the
-  // two-gate view recomposes lateral+vertical per row, but ONLY for rows whose
+  // schema change. The TWO-GATE view (lateral + vertical) is the default, per
+  // the owner's reading preference; switching the gate on shows the published
+  // three-gate verdicts. The two-gate recomposition applies ONLY to rows whose
   // published verdict actually came from the gate composite (self-checked by
   // reproducing it) — an unsolved or crossing-less row keeps its verdict, since
   // speed never participated in it.
-  const [includeSpeedGate, setIncludeSpeedGate] = useState(true);
+  const [includeSpeedGate, setIncludeSpeedGate] = useState(false);
   const speedToggleAvailable = !isLegacyEvaluationReport(report);
   const useThreeGate = !speedToggleAvailable || includeSpeedGate;
   const verdictOf = useMemo(() => {
