@@ -242,23 +242,19 @@ describe("EvaluationReportWindow", () => {
     expect(legacyHeaders).not.toContain("V crossing (m/s)");
   });
 
-  it("shows the audit crossing ground speed for observed rows without grading it", () => {
+  it("shows the graded ground-speed proxy for observed baselines, card included", () => {
     const observedSpeeds: EvaluationReport = {
       ...REPORT,
       subject: "observed",
-      speed_result_counts: { pass: 0, fail: 0, indeterminate: 3 },
+      speed_result_counts: { pass: 2, fail: 0, indeterminate: 1 },
       crossing_speed_ms: null,
       crossing_ground_speed_ms: { mean: 70.2, p95: 74.8, max: 75.9 },
       trajectories: REPORT.trajectories.map((row) => ({
         ...row,
         subject: "observed" as const,
-        speed_result: "indeterminate" as const,
+        speed_result: (row.solved ? "pass" : "indeterminate") as "pass" | "indeterminate",
         crossing_speed_ms: null,
         crossing_ground_speed_ms: row.solved ? 70.2 : null,
-        bounds: {
-          ...row.bounds,
-          stall_speed_ms: null, speed_lower_ms: null, speed_upper_ms: null,
-        },
       })),
     };
     render(
@@ -270,23 +266,25 @@ describe("EvaluationReportWindow", () => {
       />,
     );
 
+    // The baseline is speed-graded now: the card is a real pass rate.
+    expect(screen.getByText("speed gate pass 100.0% · 1 ungraded")).toBeTruthy();
     // Aggregate row from the batch spread, explicitly labeled as ground speed.
     const aggregates = screen.getByRole("table", { name: /Aggregates/ });
     const groundRow = within(aggregates)
       .getByText("crossing ground speed (m/s, ADS-B)").closest("tr")!;
     expect(Array.from(groundRow.querySelectorAll("td")).map((td) => td.textContent))
       .toEqual(["70.2", "74.8", "—", "75.9"]);
-    // No graded crossing-speed row (null) and no speed-gate card (observed).
+    // No graded-AIRSPEED aggregate (null for observed batches).
     expect(within(aggregates).queryByText("crossing speed (m/s)")).toBeNull();
-    expect(screen.queryByText(/speed gate pass/)).toBeNull();
 
-    // Per-row: the V crossing cell falls back to the audit value with its label.
+    // Per-row: the V crossing cell shows the graded ground speed with its window.
     const table = screen.getByRole("table", { name: "Per-trajectory verdicts" });
     const headers = Array.from(table.querySelectorAll("thead th")).map((h) => h.textContent);
     const solvedRow = screen.getByText("FDX1738").closest("tr")!;
+    expect(solvedRow.children[headers.indexOf("speed")].textContent).toBe("pass");
     const cell = solvedRow.children[headers.indexOf("V crossing (m/s)")] as HTMLElement;
     expect(cell.textContent).toBe("70.2");
-    expect(cell.title).toBe("ADS-B ground speed — audit only, not graded");
+    expect(cell.title).toBe("window 66.3–76.6 m/s · Vs1g 53.9 m/s");
   });
 
   it("closes via the Close button", () => {
@@ -387,10 +385,9 @@ describe("EvaluationReportWindow", () => {
     expect(screen.getByText(/2 solved flights excluded from deviation charts/i).textContent)
       .toContain("1 not measured; 1 invalid/non-finite");
 
-    // Observed subjects are never speed-graded (policy), so the speed-gate card
-    // would always read "— · N ungraded" — it must not render; the per-row speed
-    // column still shows the indeterminate results.
-    expect(screen.queryByText(/speed gate pass/)).toBeNull();
+    // Observed baselines are speed-graded (ground-speed proxy), so the card shows
+    // for them too, and the per-row speed column carries the results.
+    expect(screen.getByText(/speed gate pass/)).toBeTruthy();
     const verdictHeaders = Array.from(
       screen.getByRole("table", { name: "Per-trajectory verdicts" }).querySelectorAll("thead th"),
     ).map((h) => h.textContent);

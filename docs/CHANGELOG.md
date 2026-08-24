@@ -4,6 +4,30 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — The baseline runs the speed gate: three gates for every subject
+
+Owner decision, superseding v6's observed exclusion: the observed baseline is judged
+on the SAME three gates as its modeled twins. The fitted crossing GROUND speed is
+graded against the stall-anchored window as a STATED PROXY for airspeed — the wind
+caveat (10 kt headwind = half the window) travels with a distinct criterion id
+(`vref_1p23_vs1g_to_vref_plus_20kt_ground_speed_proxy` on every observed row's
+bounds) and `methodology.terminal_speed.observed_proxy_caveat`, never silently.
+
+- **The window anchors on the flight's own airframe**: `harvest/observed.py` resolves
+  each record's icao24 through `flight_scenarios.resolve_landing_aero` (the scenarios'
+  identity→OpenAP chain, no fallback type) and writes `source.landing_aero` + the
+  type's landing mass — so baseline and modeled twins share one set of stall
+  assumptions. Unresolvable airframe: NOMINAL_MASS_KG, no landing_aero, speed grades
+  indeterminate loudly (reason named), composite indeterminate.
+- **Composition**: speed ∧ lateral ∧ vertical for observed exactly as for computed —
+  the headline baseline pass rates MOVE (previously two-gate). `crossing_speed_ms`
+  (airspeed) stays null on observed rows; the proxy lives in
+  `crossing_ground_speed_ms` — two quantities, two names, never mixed.
+- Frontend: the observed Details speed-gate card returns (it is a real pass rate
+  now); the gates note explains the proxy; per-row speed verdicts + windows render.
+- `evaluation/docs/THRESHOLD_SPEED_GATE.md` §5 records the override and the caveats;
+  the pipeline-integration test now pins the unresolved-airframe outcome.
+
 ### 2026-08-24 — Unified record design: observed records say where their crossing lives
 
 Evaluation now grades every subject through ONE state interpolation. The design

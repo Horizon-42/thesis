@@ -25,7 +25,10 @@ from evaluation.reference import (
 from evaluation.speed_gate import (
     LANDING_AERO_KEY,
     MISSING_LANDING_AERO_REASON,
+    OBSERVED_NO_CROSSING_SPEED_REASON,
+    OBSERVED_SPEED_CRITERION_ID,
     OBSERVED_SPEED_POLICY,
+    OBSERVED_UNRESOLVED_AIRFRAME_REASON,
     SPEED_CRITERION_ID,
     SPEED_GATE_UPPER_ADDITIVE_MS,
     VREF_STALL_MULTIPLIER,
@@ -153,7 +156,16 @@ METHODOLOGY: dict[str, Any] = {
                 ),
             },
         ],
-        "subjects": "optimized and predicted only; " + OBSERVED_SPEED_POLICY,
+        "subjects": (
+            "all subjects; optimized/predicted are judged on the crossing model "
+            "airspeed, and " + OBSERVED_SPEED_POLICY
+        ),
+        "observed_proxy_criterion": OBSERVED_SPEED_CRITERION_ID,
+        "observed_proxy_caveat": (
+            "wind is unmodelled: an ordinary 10 kt headwind is half the 20 kt "
+            "window, so an observed speed fail can reflect the day's wind rather "
+            "than the flight; quote observed speed rates with this caveat"
+        ),
         "claim_boundary": (
             "model-consistent threshold-crossing energy, judged in TAS with TAS "
             "treated as CAS (<1% at this fleet's threshold elevations, all below "
@@ -298,15 +310,18 @@ def evaluate_record(
         limits.vertical_lower_m,
         limits.vertical_upper_m,
     )
-    # The speed gate is IN SCOPE only for computed subjects (``speed_in_scope`` stays
-    # None for observed — no crossing airspeed was measured; the policy is serialized
-    # in METHODOLOGY["terminal_speed"]). Absent/null landing_aero reads "unspecified"
-    # and grades indeterminate; a PRESENT malformed block raises in speed_gate_bounds.
+    # Every subject is speed-graded against the stall-anchored window; the two
+    # branches differ only in WHICH measured quantity is judged. Computed subjects:
+    # the crossing state's model airspeed. Observed subjects: the event's fitted
+    # crossing GROUND speed as a STATED PROXY (wind unmodelled — declared in the
+    # proxy criterion id and METHODOLOGY["terminal_speed"], never silently equated
+    # with airspeed). Absent/null landing_aero reads "unspecified" and grades
+    # indeterminate; a PRESENT malformed block raises in speed_gate_bounds.
     speed_in_scope: ComponentResult | None = None
     speed_bounds: SpeedGateBounds | None = None
     speed_reason: str | None = None
+    landing_aero = record.source.get(LANDING_AERO_KEY)
     if subject != "observed":
-        landing_aero = record.source.get(LANDING_AERO_KEY)
         if landing_aero is None:
             speed_in_scope = "indeterminate"
             speed_reason = MISSING_LANDING_AERO_REASON
@@ -314,6 +329,20 @@ def evaluate_record(
             speed_bounds = speed_gate_bounds(deviation.crossing_mass_kg, landing_aero)
             speed_in_scope = _component(
                 deviation.crossing_speed_ms, speed_bounds.lower_ms, speed_bounds.upper_ms
+            )
+    else:
+        if landing_aero is None:
+            speed_in_scope = "indeterminate"
+            speed_reason = OBSERVED_UNRESOLVED_AIRFRAME_REASON
+        elif deviation.crossing_ground_speed_ms is None:
+            speed_in_scope = "indeterminate"
+            speed_reason = OBSERVED_NO_CROSSING_SPEED_REASON
+        else:
+            speed_bounds = speed_gate_bounds(deviation.crossing_mass_kg, landing_aero)
+            speed_in_scope = _component(
+                deviation.crossing_ground_speed_ms,
+                speed_bounds.lower_ms,
+                speed_bounds.upper_ms,
             )
     verdict = _composite(lateral_result, vertical_result, speed_in_scope)
     violations: list[str] = []
@@ -531,10 +560,18 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             "vertical_lower_m": item.vertical_lower_bound_m,
             "vertical_upper_m": item.vertical_upper_bound_m,
             **(
-                item.speed_bounds.to_dict()
+                item.speed_bounds.to_dict(
+                    OBSERVED_SPEED_CRITERION_ID
+                    if item.subject == "observed"
+                    else SPEED_CRITERION_ID
+                )
                 if item.speed_bounds is not None
                 else {
-                    "speed_criterion": SPEED_CRITERION_ID,
+                    "speed_criterion": (
+                        OBSERVED_SPEED_CRITERION_ID
+                        if item.subject == "observed"
+                        else SPEED_CRITERION_ID
+                    ),
                     "stall_speed_ms": None,
                     "speed_lower_ms": None,
                     "speed_upper_ms": None,

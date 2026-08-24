@@ -87,9 +87,11 @@ export interface EvaluationRow {
   event_status: string;
   lateral_result: EvaluationComponentResult;
   vertical_result: EvaluationComponentResult;
-  /** v6: "indeterminate" for observed subjects by policy (no crossing airspeed is
-   *  measured); composes into `verdict` for optimized/predicted only. Absent in
-   *  legacy v5 reports, whose verdicts never graded speed. */
+  /** v6: composes into `verdict` for every subject. Computed subjects are judged on
+   *  the crossing model airspeed; observed baselines on the fitted crossing GROUND
+   *  speed as a stated proxy (bounds carry the `_ground_speed_proxy` criterion id).
+   *  Indeterminate when the airframe is unresolvable or no crossing speed exists.
+   *  Absent in legacy v5 reports, whose verdicts never graded speed. */
   speed_result?: EvaluationComponentResult;
   violations: string[];
   bounds: EvaluationBounds;
@@ -102,9 +104,10 @@ export interface EvaluationRow {
    *  (`speed_ms` above is the record's final-state speed). Null when not speed-gradable;
    *  absent in legacy v5 reports. */
   crossing_speed_ms?: number | null;
-  /** v6-additive (2026-08-24): the event's audit-only ADS-B GROUND speed at the
-   *  crossing (observed subjects). Never graded — wind is unmodelled. Null on rows
-   *  whose event predates the field or could not fit a speed. */
+  /** v6-additive (2026-08-24): the event's ADS-B GROUND speed at the crossing
+   *  (observed subjects) — the value the speed gate judges for baselines, as a
+   *  stated proxy for airspeed (wind unmodelled). Null on rows whose event predates
+   *  the field or could not fit a speed. */
   crossing_ground_speed_ms?: number | null;
   heading_rad?: number;
   final_time_s?: number;

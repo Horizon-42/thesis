@@ -12,22 +12,26 @@ store, roster.
   inputs and records every exclusion. Scenario, optimizer-reference, and TS loaders follow that
   roster and never glob, so an orphan/rejected/stale JSON cannot enter a model split.
 - **The threshold event carries `crossing_ground_speed_m_s` (additive within
-  `runway-threshold-event-v1`, 2026-08-24), and it is GROUND speed, audit-only.** Direct
-  events interpolate the bracketing samples' `reported_ground_speed_m_s` at the position's
+  `runway-threshold-event-v1`, 2026-08-24), and it is GROUND speed.** Direct events
+  interpolate the bracketing samples' `reported_ground_speed_m_s` at the position's
   own fraction; censored events OLS-extrapolate speed vs along-track over the SAME kept
   samples as the position fit (`final_approach.fit_line`, the shared estimator), with the
   fit's own sample/span standard — an unfittable speed omits the field and
-  `diagnostics.ground_speed_fit.omitted_reason` says why. OPTIONAL on read: every event
-  stored before this date lacks it, and only a NEW harvest or `--reclassify-existing`
-  populates it (`--evaluate-only` re-rosters stored events unchanged). Wind is unmodelled,
-  so it must never feed evaluation's stall-anchored airspeed gate
-  (`evaluation/docs/THRESHOLD_SPEED_GATE.md`); observed subjects stay speed-ungraded.
-- **Observed evaluation records carry a `crossing_span` (2026-08-24)** —
-  `harvest/observed.py` marks the event's direct bracket or appends the one inferred
-  crossing row (built by `flight_scenarios.crossing_span`), so evaluation grades the
-  STATES through one shared interpolation instead of re-reading the event. Target
-  kinematics and `final_time_s` stay anchored to the last MEASURED row. Records in
-  `approach/records/` from before this date fail evaluation loudly ("no
+  `diagnostics.ground_speed_fit.omitted_reason` says why. OPTIONAL on read: only a NEW
+  harvest or `--reclassify-existing` populates stored events (`--evaluate-only`
+  re-rosters them unchanged). Evaluation judges the observed baseline on it as a STATED
+  ground-speed proxy (owner decision 2026-08-24 — see `evaluation/CLAUDE.md`); the
+  wind caveat travels with the proxy criterion id, never silently.
+- **Observed evaluation records carry a `crossing_span` and their resolved airframe's
+  stall facts (2026-08-24)** — `harvest/observed.py` marks the event's direct bracket or
+  appends the one inferred crossing row (built by `flight_scenarios.crossing_span`), so
+  evaluation grades the STATES through one shared interpolation instead of re-reading
+  the event; and it resolves each flight's airframe from its icao24
+  (`flight_scenarios.resolve_landing_aero`, the scenarios' own chain) to write
+  `source.landing_aero` + the landing mass the baseline speed gate anchors on
+  (unresolvable → `NOMINAL_MASS_KG`, no landing_aero, speed grades indeterminate).
+  Target kinematics and `final_time_s` stay anchored to the last MEASURED row. Records
+  in `approach/records/` from before this date fail evaluation loudly ("no
   crossing_span") — rebuild with `--evaluate-only`.
 - **`unassignable` (the receiver lost it) and `not_established` (the approach was not
   stabilised) must stay distinct outcomes.** Conflating them charges a reception gap to the

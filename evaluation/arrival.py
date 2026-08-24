@@ -318,8 +318,10 @@ def _observed_arrival(
             # time an appended tail row carries.
             flight_time_s=float(record.final_time_s),
             extrapolation_m=event["extrapolation_distance_m"],
-            # Observed crossing speed and mass stay ungradable (no airspeed was
-            # measured); the event's ground speed remains the audit statistic.
+            # No crossing AIRSPEED was measured (crossing_speed_ms stays None); the
+            # gate judges observed subjects on the GROUND speed below as a stated
+            # proxy, anchored on the record's resolved-airframe crossing mass.
+            crossing_mass_kg=crossing["m"],
             crossing_ground_speed_ms=event.get("crossing_ground_speed_m_s"),
         ),
         "estimated",

@@ -14,6 +14,7 @@ from evaluation.speed_gate import (
 from evaluation.tests.factories import (
     LANDING_AERO,
     assessment_context,
+    observed_event,
     observed_payload,
     trajectory_payload,
 )
@@ -123,18 +124,52 @@ def test_a_present_but_malformed_landing_aero_raises(block):
         evaluate_record(record_from_dict(value), context=assessment_context())
 
 
-def test_observed_records_are_never_speed_graded_and_keep_their_verdict():
-    """No observed crossing airspeed exists (ground speed + truncated coverage), so the
-    speed gate is OUT OF SCOPE for observed subjects — reported indeterminate, and the
-    composite stays the lateral+vertical verdict it was before v6."""
+def test_observed_records_are_speed_graded_on_the_ground_speed_proxy():
+    """The baseline runs the SAME three gates as its modeled twins (owner decision
+    2026-08-24): the fitted crossing GROUND speed is judged against the stall window
+    at the resolved airframe's mass, as a stated proxy — the wind caveat lives in the
+    criterion id and the methodology, not in a refusal to grade."""
     result = evaluate_record(
         record_from_dict(observed_payload()), context=assessment_context()
     )
-    assert result.speed_result == "indeterminate"
-    assert result.speed_bounds is None
+    # Default fixture: 70 m/s ground speed inside [66.3, 76.6] at 60 t.
+    assert result.speed_result == "pass"
+    assert result.speed_bounds is not None
     assert result.verdict == "pass"
-    assert "speed" not in result.violations
     assert result.reason is None
+
+    slow = trajectory_payload(
+        subject="observed", event=observed_event(ground_speed_m_s=60.0)
+    )
+    result = evaluate_record(
+        record_from_dict(slow), context=assessment_context()
+    )
+    assert result.speed_result == "fail"
+    assert result.verdict == "fail"
+    assert "speed" in result.violations
+
+
+def test_observed_speed_grades_indeterminate_without_resolved_airframe_or_speed():
+    """The two honest gaps stay loud: no stall window without an airframe, nothing to
+    judge without a fitted crossing speed — and either one composes indeterminate."""
+    unresolved = observed_payload()
+    del unresolved["source"]["landing_aero"]
+    result = evaluate_record(
+        record_from_dict(unresolved), context=assessment_context()
+    )
+    assert result.speed_result == "indeterminate"
+    assert result.verdict == "indeterminate"
+    assert "airframe" in (result.reason or "")
+
+    speedless = trajectory_payload(
+        subject="observed", event=observed_event(ground_speed_m_s=None)
+    )
+    result = evaluate_record(
+        record_from_dict(speedless), context=assessment_context()
+    )
+    assert result.speed_result == "indeterminate"
+    assert result.verdict == "indeterminate"
+    assert "no crossing ground speed" in (result.reason or "")
 
 
 def test_report_serializes_the_speed_window_and_counts():

@@ -104,7 +104,13 @@ def test_current_faa_krdu_observed_pipeline_reuses_one_threshold_event(
     row = report["trajectories"][0]
     assert row["lateral_result"] == "pass"
     assert row["vertical_result"] == "pass"
-    assert row["verdict"] == "pass"
+    # The synthetic icao24 resolves to no airframe, so the baseline speed gate has
+    # no stall window: the geometry passes, speed grades indeterminate with the
+    # reason named, and the three-gate composite is honestly indeterminate — the
+    # real-fleet outcome for an unregistered airframe.
+    assert row["speed_result"] == "indeterminate"
+    assert row["verdict"] == "indeterminate"
+    assert "airframe" in (row.get("reason") or "")
     assert row["bounds"]["vertical_lower_m"] == -22.0
     assert row["bounds"]["vertical_upper_m"] == 22.0
     assert row["observed_threshold_event"] == classified.observed_threshold_event

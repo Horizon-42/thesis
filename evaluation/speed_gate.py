@@ -43,17 +43,34 @@ SPEED_GATE_UPPER_ADDITIVE_MS = kt_to_ms(20.0)
 # Producer-written aircraft facts on the record (flight_scenarios.build_scenario).
 LANDING_AERO_KEY = "landing_aero"
 
-# Why observed subjects are never speed-graded (serialized into the methodology and
-# used as the per-row result reason): the record's V is ground-referenced (wind is not
-# modelled), and ADS-B coverage ends a median ~325 m before the threshold, so no
-# observed crossing speed was ever measured.
+# Observed subjects are judged on their estimated crossing GROUND speed as a STATED
+# PROXY for airspeed (owner decision 2026-08-24, superseding the original exclusion):
+# wind is unmodelled, so an ordinary 10 kt headwind is half the 20 kt window and a
+# baseline speed fail can be the day's wind rather than the flight. The proxy is
+# declared everywhere it appears — its own criterion id, the methodology block, and
+# this string — never silently equated with the airspeed the computed subjects are
+# judged on. The mass anchoring the window is the flight's own resolved airframe's
+# landing mass (the same identity→OpenAP chain the scenarios use), so baseline and
+# modeled twins share one set of stall assumptions.
 OBSERVED_SPEED_POLICY = (
-    "observed records are not speed-graded: track V is ground speed (wind unmodelled) "
-    "and coverage ends before the threshold, so no crossing airspeed was measured"
+    "observed records are speed-graded on the fitted crossing GROUND speed as a "
+    "stated proxy for airspeed (wind unmodelled); the window is anchored on the "
+    "resolved airframe's landing mass — the same stall assumptions the flight's "
+    "modeled twins fly with"
 )
+# Distinct criterion id for the proxy, mirroring how the lateral criterion is named:
+# a reader of one row can tell WHAT was judged without consulting the subject.
+OBSERVED_SPEED_CRITERION_ID = SPEED_CRITERION_ID + "_ground_speed_proxy"
 MISSING_LANDING_AERO_REASON = (
     "record carries no source.landing_aero block; crossing speed cannot be judged "
     "against a stall-anchored window"
+)
+OBSERVED_UNRESOLVED_AIRFRAME_REASON = (
+    "airframe could not be resolved from icao24, so no stall-anchored window exists; "
+    "crossing ground speed is not judged"
+)
+OBSERVED_NO_CROSSING_SPEED_REASON = (
+    "the threshold event fitted no crossing ground speed; nothing to judge"
 )
 
 
@@ -65,9 +82,9 @@ class SpeedGateBounds:
     lower_ms: float
     upper_ms: float
 
-    def to_dict(self) -> dict[str, float | str]:
+    def to_dict(self, criterion: str = SPEED_CRITERION_ID) -> dict[str, float | str]:
         return {
-            "speed_criterion": SPEED_CRITERION_ID,
+            "speed_criterion": criterion,
             "stall_speed_ms": self.stall_speed_ms,
             "speed_lower_ms": self.lower_ms,
             "speed_upper_ms": self.upper_ms,

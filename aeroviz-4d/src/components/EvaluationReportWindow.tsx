@@ -744,12 +744,12 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
     { value: String(report.failed), label: "failed" },
     { value: String(report.indeterminate), label: "indeterminate" },
   ];
-  if (hasSpeedGate && speedCounts && !isObserved) {
-    // No card for an OBSERVED batch: its speed gate can never bind (no crossing
-    // airspeed is measured, by policy), so the card could only ever read
-    // "— · N ungraded" — noise that looks like a data problem. The gates note and
-    // the per-row speed column still state the policy. For computed subjects the
-    // ungraded count IS informative (e.g. records predating source.landing_aero).
+  if (hasSpeedGate && speedCounts) {
+    // Observed batches are graded too (2026-08-24): the fitted crossing GROUND
+    // speed judged against the stall window as a stated proxy — so the card is a
+    // real pass rate for every subject. The ungraded count stays informative:
+    // unresolvable airframes and speedless events for observed, records predating
+    // source.landing_aero for computed.
     cards.push({
       value: `${speedCounts.pass}/${speedGraded}`,
       label: `speed gate pass ${formatPct(speedGraded > 0 ? speedCounts.pass / speedGraded : null)} · ${speedCounts.indeterminate} ungraded`,
@@ -815,8 +815,10 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           terminal final-approach geometry, not touchdown or landing certification.
           {hasSpeedGate
             ? " Speed is the stall-anchored crossing window [1.23·Vs1g, 1.23·Vs1g + 20 kt]" +
-              " at the record's crossing mass; observed subjects are never speed-graded" +
-              " (their V is ground speed and no crossing airspeed was measured)."
+              " at the record's resolved-airframe crossing mass. Computed subjects are" +
+              " judged on the crossing model airspeed; observed baselines on the fitted" +
+              " crossing GROUND speed as a stated proxy (wind unmodelled — an ordinary" +
+              " 10 kt headwind is half the window), under its own criterion id."
             : ""}
         </p>
 

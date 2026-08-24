@@ -140,28 +140,40 @@ Absent-vs-invalid follows the observed-event pattern:
 
 ## 5. Subjects and scope
 
-| Subject | Speed gate | Why |
+| Subject | Speed gate | Judged quantity |
 |---|---|---|
-| `optimized` | composed into the verdict | crossing V and m are model outputs at the event |
+| `optimized` | composed into the verdict | crossing model airspeed (state V at the event) |
 | `predicted` | composed into the verdict | same record contract, same crossing interpolation |
-| `observed` | **reported `indeterminate`, never composed** | see below |
+| `observed` | **composed into the verdict (2026-08-24)** | fitted crossing **ground speed**, a stated proxy — see below |
 
-Observed records are excluded from the composite for two measured reasons
-(`speed_gate.OBSERVED_SPEED_POLICY`, serialized in the methodology):
+**History.** The original v6 design excluded observed subjects entirely (no crossing
+speed existed, and ground speed is not airspeed). The owner overrode the exclusion on
+2026-08-24 — the whole point of the baseline is to run the SAME three gates the
+models run — after the prerequisites were built: the harvest now serializes a fitted
+crossing ground speed on every estimated event, and observed records carry their
+resolved airframe's `landing_aero` + landing mass (the same identity→OpenAP chain
+`build_scenario` uses), so baseline and modeled twins share one set of stall
+assumptions.
 
-1. **No observed crossing speed exists.** The threshold event estimators extrapolate
-   *position only*; ADS-B coverage ends a median **325 m before the threshold**
-   (966/996 KRDU tracks — `evaluation/CLAUDE.md`). The only available V is the last
-   sample's, taken at a different point on the approach.
-2. **Observed V is ground speed.** Wind is unmodelled, and a 10 kt headwind — entirely
-   ordinary — is half the window. Grading GS against a CAS-anchored window would
-   measure the day's wind, not the flight.
+**The proxy, stated rather than hidden** (`speed_gate.OBSERVED_SPEED_POLICY`,
+`OBSERVED_SPEED_CRITERION_ID = …_ground_speed_proxy`, and
+`methodology.terminal_speed.observed_proxy_caveat`):
 
-`ArrivalDeviation.crossing_speed_ms`/`crossing_mass_kg` are therefore `None` on
-observed records: the honest statement is "not measured", not a proxy number.
-Composing an always-indeterminate component would also have flipped every observed
-`pass` to `indeterminate` and destroyed the observed gate-rate measurement — so for
-observed subjects the composite remains exactly the pre-v6 lateral+vertical verdict.
+1. The judged value is GROUND speed — wind is unmodelled, and a 10 kt headwind is
+   half the 20 kt window, so an observed speed fail can reflect the day's wind
+   rather than the flight. Quote observed speed rates with that caveat, and never
+   compare them to computed speed rates as if they measured the same quantity —
+   the distinct criterion id on every row is what keeps that honest.
+2. The value is the censored fit's extrapolation (or the direct bracket's
+   interpolation) of ADS-B reported ground speed — a measured-derived estimate,
+   not a sample.
+3. `crossing_speed_ms` (airspeed) stays `None` on observed rows — no crossing
+   airspeed was ever measured; the proxy lives in its own field
+   (`crossing_ground_speed_ms`), so the two quantities can never be silently mixed.
+
+An observed record whose airframe cannot be resolved from its icao24 has no stall
+window and grades speed-`indeterminate` (loudly, reason named), as does one whose
+event fitted no crossing speed; either composes the verdict to indeterminate.
 
 ## 6. Worked numbers (landing mass, the model's Cl_max classes)
 

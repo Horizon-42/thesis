@@ -19,18 +19,25 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v6`.
   (`aircraft.aero_params.stall_speed_ms` — the SAME function as the optimizer's velocity
   floor); S/Cl_max from producer-written `source.landing_aero`
   (`flight_scenarios.build_scenario`). 1.23 = 14 CFR 25.125(b)(2)(i); +20 kt = FSF ALAR
-  BN 7.1. **Composed into the verdict for optimized/predicted only; observed is reported
-  `indeterminate` and never composed** (observed V is ground speed and coverage ends
-  before the threshold — no crossing airspeed exists). A computed record without
-  `landing_aero` grades indeterminate LOUDLY (absent = data gap); a malformed block
-  raises. The optimizer floor (1.10·Vs) sits BELOW the gate on purpose — floor-riding
-  and observed-speed-target solves can legitimately fail speed; quote speed rates per
-  `target_source`. **Observed rows DO report the event's `crossing_ground_speed_m_s`
-  as `crossing_ground_speed_ms` (row + batch spread, additive within v6,
-  `METHODOLOGY["observed_crossing_ground_speed"]`) — an audit statistic: ADS-B
-  ground-referenced, never composed, never fed to the gate.** Both crossing speeds
-  are also FLAT on the row (the frontend verdict table reads them there, not only
-  under `deviation`).
+  BN 7.1. **Composed into the verdict for ALL subjects (owner decision 2026-08-24,
+  superseding the original observed exclusion).** Computed subjects are judged on
+  the crossing model airspeed (`crossing_speed_ms`); observed baselines on the
+  fitted crossing GROUND speed (`crossing_ground_speed_ms`) as a STATED PROXY —
+  wind is unmodelled (10 kt headwind = half the window), declared by its own
+  criterion id (`…_ground_speed_proxy` on every row's bounds) and
+  `methodology.terminal_speed.observed_proxy_caveat`; never compare observed and
+  computed speed rates as one quantity. The observed window anchors on the
+  flight's RESOLVED airframe's landing mass + `landing_aero` (icao24 → OpenAP,
+  written by `harvest/observed.py` via `flight_scenarios.resolve_landing_aero` —
+  the same chain the scenarios use, so baseline and twins share one stall model).
+  Unresolvable airframe or speedless event ⇒ speed indeterminate, loudly,
+  composing the verdict to indeterminate. A computed record without
+  `landing_aero` grades indeterminate LOUDLY; a malformed block raises. The
+  optimizer floor (1.10·Vs) sits BELOW the gate on purpose — floor-riding and
+  observed-speed-target solves can legitimately fail speed; quote speed rates per
+  `target_source`. `crossing_speed_ms` (airspeed) stays null on observed rows —
+  the two speeds live in two fields and are never mixed; both are FLAT on the row
+  (the frontend verdict table reads them there, not only under `deviation`).
 - Batch metrics: solve/success rates, lateral mean/p95/max, vertical spreads, flight times;
   path-shape deviation vs reference = both paths resampled at 101 fractions of their own
   horizontal arc length.

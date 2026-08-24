@@ -64,14 +64,12 @@ def observed_event(
     *,
     cross_m: float = 0.0,
     vertical_m: float = 0.0,
-    ground_speed_m_s: float | None = None,
+    # In the window at the default 60 t A320-class mass ([66.3, 76.6] m/s), so a
+    # default observed fixture passes all three gates; pass None to model an event
+    # that fitted no speed (pre-field or too few speed-bearing samples).
+    ground_speed_m_s: float | None = 70.0,
 ) -> dict[str, Any]:
-    if ground_speed_m_s is not None:
-        return {
-            **observed_event(cross_m=cross_m, vertical_m=vertical_m),
-            "crossing_ground_speed_m_s": ground_speed_m_s,
-        }
-    return {
+    event: dict[str, Any] = {
         "schema_version": EVENT_SCHEMA_VERSION,
         "status": "estimated",
         "method": CENSORED_EVENT_METHOD,
@@ -94,6 +92,9 @@ def observed_event(
         "extrapolation_distance_m": 325.0,
         "uncertainty": {"status": "uncalibrated"},
     }
+    if ground_speed_m_s is not None:
+        event["crossing_ground_speed_m_s"] = ground_speed_m_s
+    return event
 
 
 def trajectory_payload(
@@ -126,6 +127,9 @@ def trajectory_payload(
     states = [first, last]
     if subject == "observed":
         source["hae_minus_msl_m"] = 30.0
+        # The resolved-airframe stall facts the baseline speed gate anchors on —
+        # the same block the producer writes for a resolvable icao24.
+        source["landing_aero"] = dict(LANDING_AERO)
         if event is not None and event.get("status") == "estimated":
             # The span the real producer serializes: marker + (for censored
             # events) the appended inferred crossing row. final_time_s below
