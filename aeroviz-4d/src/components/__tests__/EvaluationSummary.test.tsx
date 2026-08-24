@@ -183,7 +183,7 @@ describe("EvaluationSummary", () => {
       screen.getByRole("region", { name: "Observed Baseline Evaluation" }),
     ).toBeTruthy();
     expect(await within(metric("Threshold-event availability")).findByText("80.0%")).toBeTruthy();
-    expect(within(metric("Terminal-verdict pass rate")).getByText("60.0%")).toBeTruthy();
+    expect(within(metric("Terminal-verdict pass rate (3-gate)")).getByText("60.0%")).toBeTruthy();
     expect(
       within(metric("Mean lateral deviation at threshold")).getByText("12 m"),
     ).toBeTruthy();

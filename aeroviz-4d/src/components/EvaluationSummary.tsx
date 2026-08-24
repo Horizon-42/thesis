@@ -164,15 +164,22 @@ function observedPresentation(report: ObservedEvaluationSummary | null): Present
       "Runway assignment produces one policy-free threshold-event estimate by direct " +
       "bracket interpolation or a censored final-approach fit; evaluation consumes it " +
       "without refitting ADS-B. Vertical uses the published-TCH path and the common " +
-      "22 m RNAV/RNP terminal bound; this is not landing certification.",
+      "22 m RNAV/RNP terminal bound; this is not landing certification. The pass " +
+      "rate composes all three gates (lateral, vertical, and the ground-speed " +
+      "proxy); the Details window opens in a two-gate view and can toggle the " +
+      "speed gate back in.",
     rows: [
       row(
         "Threshold-event availability",
         formatPercent(eventRate ?? null),
         eventRate != null,
       ),
+      // The PUBLISHED composite — all three gates (lateral, vertical, speed proxy).
+      // Labelled so it cannot be confused with the Details window's default
+      // two-gate reading view, which re-derives verdicts client-side from rows
+      // this bounded summary deliberately does not carry.
       row(
-        "Terminal-verdict pass rate",
+        "Terminal-verdict pass rate (3-gate)",
         formatPercent(crossingPassRate),
         crossingPassRate != null,
       ),
