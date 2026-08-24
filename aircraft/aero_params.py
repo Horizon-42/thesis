@@ -21,17 +21,34 @@ class AeroParams:
     k_stall: float = 0.1
 
 
+# Landing-configuration Cl_max for the A320 family, replacing the generic
+# narrow-body bucket below. The calibration source is Airbus's own speed logic:
+# on final in CONF FULL the FBW lowest selectable speed IS VLS = 1.23·Vs1g, and
+# published VLS figures (≈128 kt CAS at 64 t for the A320) invert through this
+# module's stall formula to Cl_max ≈ 2.9–3.0 — the slats + fowler-flap high-lift
+# system genuinely outperforms the 737's. Measured consequence of the old shared
+# 2.7 (evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md §5): the family's
+# crossing-speed windows sat ~7 kt high and 45–92 % of its real crossings graded
+# "too slow", while the 737 family measured healthy at 2.7 — weather cannot tell
+# Airbus from Boeing, so the anchor was the error. 3.0 centres the measured fleet.
+_A320_FAMILY = frozenset({"A318", "A319", "A320", "A321", "A19N", "A20N", "A21N"})
+_A320_FAMILY_LANDING_CL_MAX = 3.0
+
+
 def aero_params_for_aircraft(aircraft: Aircraft) -> AeroParams:
-    """AeroParams for an aircraft with a mass-based maximum lift coefficient.
+    """AeroParams for an aircraft with a landing-configuration maximum lift coefficient.
 
     The single source of truth for the stall model: the optimiser AND the
     playback (``CasadiSimulator``) must use the SAME ``Cl_max`` or an optimized
-    trajectory will not replay consistently.  Heavier types reach a lower
-    terminal Cl_max; A320/737-class fly ~2.7 with landing flaps deployed.
+    trajectory will not replay consistently. The A320 family carries its own
+    calibrated value (above); other types keep the mass-class buckets — heavier
+    types reach a lower terminal Cl_max; 737-class flies ~2.7 with landing flaps.
     """
-    if aircraft.mass.max_takeoff_kg > 100_000.0:
+    if aircraft.code in _A320_FAMILY:
+        cl_max = _A320_FAMILY_LANDING_CL_MAX
+    elif aircraft.mass.max_takeoff_kg > 100_000.0:
         cl_max = 2.4
-    elif aircraft.mass.max_takeoff_kg >= 30_000.0:   # e.g. A320, 737
+    elif aircraft.mass.max_takeoff_kg >= 30_000.0:   # e.g. 737, E-jets, CRJs
         cl_max = 2.7
     else:
         cl_max = 2.2

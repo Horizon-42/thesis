@@ -153,10 +153,11 @@ def test_negative_required_thrust_is_reported_but_not_counted_as_unflyable():
 def test_envelope_reads_its_limits_from_the_aircraft_and_aero_params():
     envelope = Envelope.for_aircraft(A320, AERO)
     assert envelope.max_thrust_n == A320.engine.max_thrust_total_n == 240_000.0
-    # Cl_max comes from aero_params_for_aircraft (2.7 for an A320), NOT from
-    # LoadFactorSimulator's hardcoded 1.5 — the two disagree by 80% and aero_params.py
-    # documents itself as the source of truth for the stall model.
-    assert envelope.cl_max == AERO.Cl_max == 2.7
+    # Cl_max comes from aero_params_for_aircraft (3.0 for the A320 family since the
+    # 2026-08-24 anchor calibration), NOT from LoadFactorSimulator's hardcoded 1.5 —
+    # the two disagree wildly and aero_params.py documents itself as the source of
+    # truth for the stall model.
+    assert envelope.cl_max == AERO.Cl_max == 3.0
 
 
 def test_isa_density_matches_the_repo_atmosphere():
@@ -206,7 +207,7 @@ def test_batch_roll_up_records_the_envelope_it_judged_against():
 
     assert batch["trajectories"] == 1 and batch["fully_flyable"] == 1
     assert batch["fleet"] == {"A320": 1}
-    assert batch["envelopes"]["A320"]["cl_max"] == 2.7
+    assert batch["envelopes"]["A320"]["cl_max"] == 3.0
     # The bounds that are the project's working numbers rather than certified limits say so.
     assert "working values" in batch["envelopes"]["A320"]["note"]
 

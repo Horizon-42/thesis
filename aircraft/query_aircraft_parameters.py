@@ -90,6 +90,26 @@ def resolve_typecode(aircraft_id: str, parameters: dict[str, Any], lookup: dict[
     raise AircraftLookupError(f"Aircraft id {normalized} was not found in {LOOKUP_PATH.name}.")
 
 
+# OpenAP substitutes a SURROGATE performance model for types it lacks
+# (``openap_performance_typecode`` in the cache). That is fine for what the
+# surrogate exists for — engine/drag performance — but it must not misstate the
+# AIRFRAME's identity facts. For C56X the surrogate is the much smaller Citation II
+# (C550): MTOW 6,849 kg against the real Citation Excel/XLS's ~9,100 kg — a 25 %
+# mass understatement that placed the speed gate's stall-anchored window ~13 kt
+# low and mislabelled half the type's real crossings "too fast"
+# (evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md §5). The corrections below
+# restore the certificated airframe facts (Cessna 560XL series: MTOW 20,000 lb =
+# 9,072 kg, MLW 18,700 lb = 8,482 kg, wing area 369.7 sq ft = 34.35 m²); the
+# surrogate keeps supplying performance, and
+# ``aircraft_dynamics_surrogate_typecode`` still reports it for audit.
+_AIRFRAME_IDENTITY_CORRECTIONS: dict[str, dict[str, dict[str, float]]] = {
+    "C56X": {
+        "geometry": {"wing_area_m2": 34.35},
+        "mass": {"mtow_kg": 9072.0, "mlw_kg": 8482.0},
+    },
+}
+
+
 def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
     """Resolve ``aircraft_id`` to an :class:`Aircraft` built from the OpenAP cache."""
     parameters = load_json(PARAMETERS_PATH)
@@ -104,11 +124,15 @@ def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
         raise AircraftLookupError(f"{aircraft_id} resolves to {typecode}, but {reason}")
 
     data = record["parameters"]
-    geometry = data.get("geometry", {})
-    mass = data.get("mass", {})
+    geometry = dict(data.get("geometry", {}))
+    mass = dict(data.get("mass", {}))
     drag = data.get("drag", {})
     engine = data.get("engine", {})
     category = data.get("category")
+    correction = _AIRFRAME_IDENTITY_CORRECTIONS.get(typecode)
+    if correction is not None:
+        geometry.update(correction.get("geometry", {}))
+        mass.update(correction.get("mass", {}))
 
     return Aircraft(
         code=typecode,
