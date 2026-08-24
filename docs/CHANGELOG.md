@@ -4,6 +4,22 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — Anchor calibration landed: manufacturer cluster gone; speed-gate toggle in the viewer
+
+A320-family landing Cl_max 2.7 → 3.0 (calibrated from Airbus's VLS = 1.23·Vs1g +
+published VLS figures; pin test holds the modeled floor at-or-just-below published
+VLS) and the C56X airframe restored from OpenAP's C550 surrogate to certificated
+facts (`6e31f2d`). Republished: A319/A320/A321 speed-pass 46.6/54.8/41.5 % →
+**78.9/85.4/80.3 %**, C56X fast-fail 53.5 → 20.7 %, composite of-decided now nearly
+uniform across airports (71.2–75.8 %) — confirming airport spread was anchor ×
+fleet mix. Residuals documented, not patched: A21N/A20N (neo subfleet lands far
+below MLW — needs an operational landing-mass model), B763, E75L. Results doc §8;
+follow-up 14 resolved to those residuals. The same commit family adds the Details
+window's **speed-gate toggle** (`af32454`): two-gate/three-gate verdicts re-derived
+client-side from per-row component results via `composeVerdict` (a declared mirror
+of `_composite`, truth-table pinned) — no schema change, published reports stay
+three-gate.
+
 ### 2026-08-24 — First baseline speed-gate measurement: the anchor, not the weather, dominates
 
 `evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md` — full statistics of the first

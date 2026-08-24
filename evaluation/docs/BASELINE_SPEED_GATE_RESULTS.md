@@ -174,3 +174,44 @@ python -m trajectory_data_process.harvest --airport <ICAO> --evaluate-only
 
 Margins are `(bound − v)` resp. `(v − bound)` in knots; "of decided" =
 pass / (total − indeterminate); type table pools all five airports.
+
+## 8. After the anchor calibration (2026-08-24, commits `6e31f2d` + republish)
+
+The fixes §5 called for landed the same day: A320-family landing Cl_max 2.7 → 3.0
+(calibrated from Airbus's definitional VLS = 1.23·Vs1g + published VLS figures, pinned
+by `aircraft/tests/test_aero_anchors.py`), and the C56X airframe restored from the
+C550 surrogate's masses to certificated values. Republished results:
+
+| | 3-gate pass (2.7 era) | 3-gate pass (calibrated) | of decided | speed pass / graded | slow | fast |
+|---|---|---|---|---|---|---|
+| KMSY | 57.8 % | **61.1 %** | 72.1 % | 2,718 / 3,501 (77.6 %) | 195 | 588 |
+| KRDU | 46.0 % | **53.8 %** | 74.9 % | 7,825 / 10,194 (76.8 %) | 1,299 | 1,070 |
+| KSJC | 45.8 % | **47.8 %** | 71.2 % | 5,331 / 7,481 (71.3 %) | 1,863 | 287 |
+| KSMF | 64.4 % | **67.3 %** | 74.3 % | 2,848 / 3,825 (74.5 %) | 714 | 263 |
+| KSTL | 59.3 % | **62.4 %** | 75.8 % | 5,651 / 7,190 (78.6 %) | 494 | 1,045 |
+
+Per type (graded ≥ 200), after calibration:
+
+| type | graded | pass | slow | fast | | type | graded | pass | slow | fast |
+|---|---|---|---|---|---|---|---|---|---|---|
+| B38M | 5,864 | 75.6 % | 6.5 % | 17.8 % | | A321 | 1,202 | **80.3 %** | 17.1 % | 2.7 % |
+| B737 | 5,537 | 79.1 % | 16.7 % | 4.3 % | | A320 | 1,000 | **85.4 %** | 11.1 % | 3.5 % |
+| B738 | 4,962 | 75.7 % | 5.9 % | 18.4 % | | A21N | 881 | **33.6 %** | 66.4 % | 0.0 % |
+| E75L | 3,401 | 74.3 % | 22.1 % | 3.5 % | | B39M | 713 | 83.6 % | 4.9 % | 11.5 % |
+| B739 | 2,249 | 82.0 % | 5.9 % | 12.0 % | | A20N | 535 | **71.0 %** | 27.3 % | 1.7 % |
+| A319 | 1,895 | **78.9 %** | 19.2 % | 2.0 % | | C56X | 314 | **73.6 %** | 5.7 % | 20.7 % |
+| CRJ9 | 1,650 | 84.1 % | 5.1 % | 10.8 % | | B763 | 239 | 64.9 % | 33.9 % | 1.3 % |
+
+Reading:
+
+- **The manufacturer cluster is gone**: A319/A320/A321 now pass 78.9–85.4 %, in line
+  with the Boeing family — confirming §5's diagnosis that the anchor, not the fleet,
+  produced the old 45–58 % slow-fail rates. C56X's fast-fail collapsed 53.5 → 20.7 %.
+- **The "of decided" composite is now nearly uniform across airports (71.2–75.8 %)**
+  where the 2.7-era spread was wider — airport-level variation was largely anchor ×
+  fleet-mix, as predicted.
+- **Remaining residuals, deliberate**: A21N (33.6 % pass, all-slow — the fleet lands
+  far below the MLW the window is anchored at; needs an operational landing-mass
+  model, not another Cl tweak), A20N (27 % slow, same direction, milder), B763
+  (33.9 % slow, n=239, heavy-bucket Cl 2.4 uncertain), E75L (22 % slow). These stay
+  documented rather than patched — each needs its own evidence.

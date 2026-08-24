@@ -254,8 +254,14 @@ window, not the fleet: the `aircraft` package's landing `Cl_max` and/or OpenAP
 landing mass for the A320 family place 1.23·Vs1g above real crossing speeds
 (conversely B738/B38M/C56X anchors may sit slightly low).
 
-**Suggested:** review A320-family (and B738/C56X) `Cl_max_landing`/landing-mass
-against published Vref tables. NOTE the blast radius: `stall_speed_ms` is also the
-optimizer's velocity-floor anchor, so a correction moves solver behaviour and every
-speed-graded artifact — re-derive the results doc (and any optimizer batch) after a
-change. Until reviewed, quote speed rates per TYPE, never per airport.
+**RESOLVED 2026-08-24** (`6e31f2d` + republished results in
+`BASELINE_SPEED_GATE_RESULTS.md` §8): A320-family landing Cl_max calibrated to 3.0
+(from Airbus's VLS = 1.23·Vs1g + published VLS figures, pinned by
+`aircraft/tests/test_aero_anchors.py`); C56X airframe facts restored from the C550
+surrogate's to certificated values. Post-fix the manufacturer cluster is gone
+(A319/A320/A321 pass 78.9–85.4 %; C56X fast-fail 53.5 → 20.7 %). REMAINING
+residuals, each needing its own evidence: **A21N 66 % slow / A20N 27 % slow** (the
+neo subfleet lands far below the MLW the window anchors on — needs an operational
+landing-mass model, not a Cl tweak), **B763** 34 % slow (heavy-bucket Cl 2.4
+uncertain, n = 239), **E75L** 22 % slow. Per-TYPE quoting remains the rule for the
+residual types.
