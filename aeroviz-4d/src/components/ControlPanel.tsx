@@ -347,11 +347,7 @@ export default function ControlPanel({
                             .filter((experiment) => experiment.group === group)
                             .map((experiment) => (
                               <option key={experiment.id} value={experiment.id}>
-                                {experiment.label} · {experiment.predictionOutput ?? "state"}
-                                {experiment.horizonMode === "normalized" ? " · normalized time" : ""}
-                                {experiment.horizonMode === "full" ? " · full horizon" : ""}
-                                {experiment.horizonMode === "window" ? " · recursive window" : ""}
-                                {experiment.seed == null ? "" : ` · seed ${experiment.seed}`}
+                                {experiment.label}
                               </option>
                             ))}
                         </optgroup>

@@ -29,6 +29,12 @@ from typing import Any, Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parent
+_TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
+if str(_TS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TS_DIR))
+
+from run_naming import category_display_label, run_display_name  # noqa: E402
+
 EXPERIMENT_ROOT = REPO_ROOT / "4dTrajectory" / "outputs" / "POOLED" / "experiments"
 EXPERIMENT_INDEX = EXPERIMENT_ROOT / "index.json"
 RAW_OUTPUT_ROOT = (
@@ -43,15 +49,6 @@ PUBLICATION_SCHEMA = "ts-experiment-publication-v1"
 PUBLICATION_INDEX_SCHEMA = "ts-experiment-publication-index-v1"
 PUBLICATION_MANIFEST = "publication.json"
 DEVELOPMENT_SPLITS = ("train", "val")
-SPLIT_LABELS = {
-    "train": "Training split (in-sample)",
-    "val": "Validation split (model selection)",
-}
-HORIZON_LABELS = {
-    "normalized": "normalized time",
-    "full": "full horizon (one pass)",
-    "window": "recursive window",
-}
 
 
 def _utc_now() -> str:
@@ -273,31 +270,19 @@ class PublicationPlan:
 
     @property
     def category_label(self) -> str:
-        model = self.experiment.config.get("model") or "model"
-        output = self.experiment.config.get("prediction_output") or "state"
-        horizon = self.experiment.config.get("horizon_mode") or "normalized"
-        horizon_label = HORIZON_LABELS.get(str(horizon), str(horizon))
-        source = (
-            f"Experiment {self.experiment.run_id}"
-            if self.result_source == "experiment"
-            else f"Predicted {self.experiment.run_id}"
-        )
-        return (
-            f"{SPLIT_LABELS[self.split]} — {source} "
-            f"({model}, {output}, horizon: {horizon_label})"
+        return _publication_label(
+            self.split, self.result_source, self.experiment.config, self.experiment.run_id
         )
 
     @property
     def experiment_metadata(self) -> dict[str, Any]:
-        return {
-            "id": self.experiment.experiment_id,
-            "group": self.experiment.campaign,
-            "checkpoint": self.experiment.checkpoint_relative,
-            "model": self.experiment.config.get("model"),
-            "predictionOutput": self.experiment.config.get("prediction_output", "state"),
-            "horizonMode": self.experiment.config.get("horizon_mode", "normalized"),
-            "seed": self.experiment.config.get("seed"),
-        }
+        return _publication_experiment_metadata(
+            experiment_id=self.experiment.experiment_id,
+            campaign=self.experiment.campaign,
+            checkpoint=self.experiment.checkpoint_relative,
+            config=self.experiment.config,
+            run_id=self.experiment.run_id,
+        )
 
     def commands(self) -> list[tuple[str, list[str]]]:
         py = sys.executable
@@ -385,9 +370,43 @@ class PublicationPlan:
         )
 
 
-def refresh_category_metadata(plan: PublicationPlan) -> bool:
-    """Refresh derived labels/metadata without regenerating archived trajectories."""
-    manifest_path = plan.comparison_dir.parent / "categories.json"
+def _publication_label(
+    split: str, result_source: str, config: dict[str, Any], run_id: str
+) -> str:
+    kind = "Experiment" if result_source == "experiment" else "Predicted"
+    return category_display_label(
+        split, run_display_name(config, extra=(run_id,)), kind=kind
+    )
+
+
+def _publication_experiment_metadata(
+    *,
+    experiment_id: str,
+    campaign: str | None,
+    checkpoint: str,
+    config: dict[str, Any],
+    run_id: str,
+) -> dict[str, Any]:
+    return {
+        "id": experiment_id,
+        "group": campaign,
+        "checkpoint": checkpoint,
+        "label": run_display_name(config, extra=(run_id,)),
+        "model": config.get("model"),
+        "predictionOutput": config.get("prediction_output", "state"),
+        "horizonMode": config.get("horizon_mode", "normalized"),
+        "seed": config.get("seed"),
+    }
+
+
+def _apply_category_refresh(
+    manifest_path: Path,
+    category_key: str,
+    label: str,
+    result_source: str,
+    experiment_metadata: dict[str, Any] | None,
+) -> bool:
+    """Patch one category's derived label/metadata in a categories.json; True if found."""
     if not manifest_path.is_file():
         return False
     document = _load_object(manifest_path)
@@ -398,20 +417,20 @@ def refresh_category_metadata(plan: PublicationPlan) -> bool:
     found = False
     updated_categories: list[Any] = []
     for value in categories:
-        if not isinstance(value, dict) or value.get("key") != plan.category:
+        if not isinstance(value, dict) or value.get("key") != category_key:
             updated_categories.append(value)
             continue
         found = True
         updated = dict(value)
-        if updated.get("label") != plan.category_label:
-            updated["label"] = plan.category_label
+        if updated.get("label") != label:
+            updated["label"] = label
             changed = True
-        if updated.get("resultSource") != plan.result_source:
-            updated["resultSource"] = plan.result_source
+        if updated.get("resultSource") != result_source:
+            updated["resultSource"] = result_source
             changed = True
-        if plan.result_source == "experiment":
-            if updated.get("experiment") != plan.experiment_metadata:
-                updated["experiment"] = plan.experiment_metadata
+        if experiment_metadata is not None:
+            if updated.get("experiment") != experiment_metadata:
+                updated["experiment"] = experiment_metadata
                 changed = True
         elif "experiment" in updated:
             del updated["experiment"]
@@ -421,6 +440,67 @@ def refresh_category_metadata(plan: PublicationPlan) -> bool:
         document["categories"] = updated_categories
         _write_json_atomic(manifest_path, document)
     return found
+
+
+def refresh_category_metadata(plan: PublicationPlan) -> bool:
+    """Refresh derived labels/metadata without regenerating archived trajectories."""
+    return _apply_category_refresh(
+        plan.comparison_dir.parent / "categories.json",
+        plan.category,
+        plan.category_label,
+        plan.result_source,
+        plan.experiment_metadata if plan.result_source == "experiment" else None,
+    )
+
+
+def refresh_labels_from_manifests(
+    output_root: Path, frontend_airports_root: Path
+) -> tuple[int, int]:
+    """Recompute labels/metadata for every completed publication under ``output_root``.
+
+    Reads only the stored publication manifests (which carry the run's exact config), so
+    it needs neither the experiment index nor the checkpoints and never regenerates
+    trajectories — a pure metadata refresh for already-published categories.
+    """
+    seen = 0
+    patched = 0
+    for manifest_path in sorted(output_root.rglob(PUBLICATION_MANIFEST)):
+        document = _load_object(manifest_path)
+        if (
+            document.get("schemaVersion") != PUBLICATION_SCHEMA
+            or document.get("status") != "completed"
+        ):
+            continue
+        seen += 1
+        config = document.get("config") or {}
+        run_id = document.get("runId") or ""
+        split = document.get("split") or ""
+        result_source = document.get("resultSource") or "experiment"
+        metadata = None
+        if result_source == "experiment":
+            metadata = _publication_experiment_metadata(
+                experiment_id=document.get("experimentId") or run_id,
+                campaign=document.get("campaign"),
+                checkpoint=document.get("checkpoint") or "",
+                config=config,
+                run_id=run_id,
+            )
+        found = _apply_category_refresh(
+            frontend_airports_root / document["airport"] / "comparison" / "categories.json",
+            document["category"],
+            _publication_label(split, result_source, config, run_id),
+            result_source,
+            metadata,
+        )
+        if found:
+            patched += 1
+            print(f"  ✓ refreshed {document['airport']}/{document['category']}")
+        else:
+            print(
+                f"  ⚠ no category {document['category']} at "
+                f"{document['airport']} (publication {manifest_path})"
+            )
+    return seen, patched
 
 
 def _publication_document(
@@ -720,7 +800,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument(
+        "--refresh-labels-only",
+        action="store_true",
+        help=(
+            "recompute frontend labels/metadata for every completed publication under "
+            "--output-root from its stored manifest; no prediction, no CZML, no archive"
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.refresh_labels_only:
+        seen, patched = refresh_labels_from_manifests(
+            args.output_root, args.frontend_airports_root
+        )
+        print(f"refreshed {patched} of {seen} completed publications under {args.output_root}")
+        return 0
 
     if args.max_checkpoints is not None and args.max_checkpoints <= 0:
         parser.error("--max-checkpoints must be positive")

@@ -12,9 +12,16 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:  # run_naming -> config -> aerodynamic_model
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from run_naming import run_display_name  # noqa: E402
 
 
 RUN_MANIFEST_NAME = "experiment_manifest.json"
@@ -187,6 +194,7 @@ def _legacy_entry(directory: Path, root: Path) -> dict[str, Any]:
         "kind": kind,
         "status": status,
         "legacy": True,
+        "display_name": run_display_name(config) if config else None,
         "prediction_output": config.get("prediction_output") or metadata.get("prediction_output"),
         "aircraft_filter": config.get("aircraft_filter", "legacy-unspecified"),
         "seed": config.get("seed"),
@@ -206,6 +214,7 @@ def _manifest_entry(directory: Path, root: Path, manifest: dict[str, Any]) -> di
         "kind": "training",
         "status": manifest.get("status", "unknown"),
         "legacy": False,
+        "display_name": run_display_name(config) if config else None,
         "prediction_output": config.get("prediction_output"),
         "aircraft_filter": config.get("aircraft_filter"),
         "seed": config.get("seed"),
@@ -262,17 +271,17 @@ def rebuild_index(root: str | Path) -> dict[str, Any]:
         "",
         f"Generated: `{document['generated_at_utc']}`",
         "",
-        "| Status | Kind | Campaign | Run | Aircraft policy | Seed | Directory |",
+        "| Status | Kind | Campaign | Run | Name | Seed | Directory |",
         "| --- | --- | --- | --- | --- | ---: | --- |",
     ]
     for entry in entries:
         lines.append(
-            "| {status} | {kind} | {campaign} | {run} | {policy} | {seed} | [{path}]({path}) |".format(
+            "| {status} | {kind} | {campaign} | {run} | {name} | {seed} | [{path}]({path}) |".format(
                 status=entry["status"],
                 kind=entry["kind"],
                 campaign=entry.get("campaign_id") or "legacy",
                 run=entry["run_id"],
-                policy=entry.get("aircraft_filter") or "—",
+                name=entry.get("display_name") or "—",
                 seed=entry.get("seed") if entry.get("seed") is not None else "—",
                 path=entry["path"],
             )

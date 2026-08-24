@@ -3559,7 +3559,7 @@ def test_pipeline_carries_and_names_transport_chart_dynamics():
     assert plan.train_dir.name.endswith("_tcv")
     assert "transport_chart_velocity" not in plan.train_dir.name
     assert "transport_chart_velocity" in prediction.category
-    assert "transport-chart-velocity dynamics" in prediction.label
+    assert "@transport-chart-velocity" in prediction.label
 
 
 def test_pipeline_carries_and_names_scaled_transport_chart_dynamics():
@@ -3586,7 +3586,7 @@ def test_pipeline_carries_and_names_scaled_transport_chart_dynamics():
     )
     assert plan.train_dir.name.endswith("_stcv")
     assert "scaled_transport_chart_velocity" in prediction.category
-    assert "scaled-transport-chart-velocity dynamics" in prediction.label
+    assert "@scaled-transport-chart-velocity" in prediction.label
 
 
 def test_transport_chart_prediction_directory_stays_within_component_limit():
@@ -3615,7 +3615,7 @@ def test_transport_chart_prediction_directory_stays_within_component_limit():
     assert len(plan.train_dir.name.encode("utf-8")) <= 255
     assert len(prediction.pred_dir.name.encode("utf-8")) <= 255
     assert "transport_chart_velocity" in prediction.category
-    assert "transport-chart-velocity dynamics" in prediction.label
+    assert "@transport-chart-velocity" in prediction.label
 
 
 def test_terminal_clock_artifact_keys_are_compact_and_collision_free():
@@ -3639,6 +3639,9 @@ def test_terminal_clock_artifact_keys_are_compact_and_collision_free():
             control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
             control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
             control_state_duration_gradient=False,
+            # PredictionPlan derives its label from the plan's full TSConfig, which
+            # enforces the arc-length objective's paired selection metric.
+            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         )
         prediction = pipeline_module.PredictionPlan(
             plan, AIRPORT, ("eval",), split="val"
@@ -4560,9 +4563,9 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert "detached_duration_gradient" in prediction.pred_dir.name
     assert "control" in prediction.category
     assert "openap_direct" in prediction.category
-    assert "uniform durations" in prediction.label
-    assert "true-time physical position criterion" in prediction.label
-    assert "detached duration-state gradient" in prediction.label
+    assert "duration=uniform" in prediction.label
+    assert "obj=true-time-position" in prediction.label
+    assert "duration-grad=off" in prediction.label
 
 
 def test_pipeline_carries_and_names_control_horizon_curriculum():
@@ -4609,8 +4612,10 @@ def test_pipeline_carries_and_names_control_horizon_curriculum():
     )
     assert "horizon_curriculum_2_4s_x1" in prediction.category
     assert "gradient_clip20_final_time_decoupled" in prediction.category
-    assert "horizon curriculum 2→4 s × 1 epochs" in prediction.label
-    assert "gradient clip 20 (final-time head decoupled)" in prediction.label
+    assert "curriculum=2/4" in prediction.label
+    assert "curriculum-epochs=1" in prediction.label
+    assert "grad-clip=20" in prediction.label
+    assert "grad-clip-policy=final-time-decoupled" in prediction.label
 
 
 def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(

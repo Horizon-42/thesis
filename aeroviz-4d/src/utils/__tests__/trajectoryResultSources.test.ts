@@ -72,7 +72,7 @@ describe("trajectory result sources", () => {
     expect(experimentOptions(categories)).toEqual([{
       id: "campaign/stage/run_seed1337",
       group: "campaign",
-      label: "run_seed1337",
+      label: "run_seed1337 · control · normalized time · seed 1337",
       model: "itransformer",
       predictionOutput: "control",
       horizonMode: "normalized",
@@ -80,6 +80,18 @@ describe("trajectory result sources", () => {
     }]);
     expect(categoryForExperimentSplit(categories, "campaign/stage/run_seed1337", "train")?.datasetSplit)
       .toBe("train");
+  });
+
+  it("prefers the publisher's canonical run label when stamped", () => {
+    const canonical = experiment("val");
+    canonical.experiment = {
+      ...canonical.experiment!,
+      label: "control · iTransformer · point-mass · simple-v1 · run_seed1337",
+    };
+
+    expect(experimentOptions([canonical])[0]?.label).toBe(
+      "control · iTransformer · point-mass · simple-v1 · run_seed1337",
+    );
   });
 
   it("preserves the control-mixture output identity in experiment options", () => {

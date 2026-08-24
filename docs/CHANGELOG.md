@@ -4,6 +4,34 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — One naming grammar for every ts_transformer run and published category
+
+The frontend's learned-prediction categories carried three label dialects (verbose
+pipeline concatenations, publisher `run_id (model, output, horizon)` strings, ad-hoc
+hand labels like "budget: lr 1e-4"), and the Experiments picker showed raw run-directory
+names — none of which said what was actually experimented. New
+`ts_transformer/run_naming.py` is the single source of a canonical grammar derived
+mechanically from a run's serialized config: `output · backbone · dynamics · loss ·
+meta`. Dynamics distinguishes control-derivative handling (`point-mass` vs
+`first-order-lag`, `@backend` when non-default); loss names a `custom` run against its
+NEAREST recipe (fewest loss-field edits, e.g. `simple-v3+(imit=16)`; >4 edits → stable
+`custom-<hash>` version); meta lists deviations from today's defaults (seed first,
+capped, `+N more`) plus caller extras (run id, campaign/arm, cohort). Wired into
+`run_ts_pipeline.py` (replacing ~60 lines of label concatenation and five dead label
+helpers), `publish_ts_experiment_trajectories.py` (labels + a stamped
+`experiment.label` the frontend now prefers; new `--refresh-labels-only` walks stored
+publication manifests and re-derives labels without predicting anything), and
+`experiment_index.py` (`display_name` + INDEX.md Name column). Applied on disk as
+metadata-only edits — 45 legacy `ts_*` categories via the one-off
+`docs/relabel_published_categories.py`, 14 publisher-managed categories via the refresh
+mode, indexes rebuilt; no record, CZML, checkpoint, or directory was renamed or
+deleted (category keys/dirs are historical record; `run_slug()` covers future ones).
+Notable relabel finds: the "velocity 2x" wiggle arm is exactly `simple-v2`'s frozen
+dose, and the imitation "~47x" arm is exactly `simple-v3`. Verified: ts_transformer
+suite 407 pass (label-assertion tests updated to the new grammar; the terminal-clock
+collision test now passes the arc-length selection metric its synthetic plan always
+implied), frontend 520 pass + tsc clean.
+
 ### 2026-08-24 — Anchor calibration landed: manufacturer cluster gone; speed-gate toggle in the viewer
 
 A320-family landing Cl_max 2.7 → 3.0 (calibrated from Airbus's VLS = 1.23·Vs1g +

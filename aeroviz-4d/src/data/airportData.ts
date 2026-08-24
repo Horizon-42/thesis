@@ -139,6 +139,12 @@ export interface ExperimentCategoryMetadata {
   group: string;
   /** Repository-relative checkpoint path; presentation/provenance only. */
   checkpoint: string;
+  /**
+   * Canonical self-describing display name (the `run_naming` grammar:
+   * output · backbone · dynamics · loss · meta). Publishes that predate it omit it and
+   * the picker falls back to composing a label from the fields below.
+   */
+  label?: string | null;
   model?: string | null;
   predictionOutput?: ExperimentPredictionOutput | null;
   horizonMode?: "normalized" | "full" | "window" | null;
@@ -192,6 +198,8 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
       typeof experiment.id === "string" &&
       typeof experiment.group === "string" &&
       typeof experiment.checkpoint === "string" &&
+      (experiment.label === undefined || experiment.label === null ||
+        typeof experiment.label === "string") &&
       (experiment.model === undefined || experiment.model === null ||
         typeof experiment.model === "string") &&
       (experiment.predictionOutput === undefined || experiment.predictionOutput === null ||

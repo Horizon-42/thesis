@@ -1008,6 +1008,45 @@ torch env.)
 `final_time_s` is predicted explicitly. The N sample timestamps are reconstructed from it,
 so the last predicted state's `t` equals `final_time_s`; N and `dt` never determine duration.
 
+## How runs are named (`run_naming.py`)
+
+Every surface that names a trained run — the frontend's comparison-category labels and
+Experiments picker, publication manifests, `INDEX.md` — renders ONE grammar, derived
+mechanically from the run's serialized config (the dict in `history.json['config']` /
+the checkpoint / the run manifest), so any run ever trained can be renamed without
+touching its artifacts:
+
+```
+<output> · <backbone> · <dynamics> · <loss design> · <meta, …>
+ state      iTransformer  kinematic     state-v1        (possibly empty)
+ control    PatchTST      point-mass    simple-v3
+                          first-order-lag @<backend>    simple-v3+(imit=16)
+                                                        custom-3f2a91bc
+```
+
+- **output** — `prediction_output`: `state` (kinematic baseline, no dynamics attached)
+  or `control` (bounded controls through the shared dynamics rollout).
+- **dynamics** — `point-mass` applies commands instantly (no control derivative);
+  `first-order-lag` integrates them through first-order actuator ODEs (with control
+  derivative; non-default τ shown inline). A non-default rollout backend is appended
+  (`@scaled-transport-chart-velocity`).
+- **loss design** — the named recipe when one is set; a `custom` run is named against
+  its **nearest recipe** (fewest loss-field edits, later recipe wins ties):
+  `simple-v3+(imit=16)`. Past 4 edits it collapses to a stable content-hash version
+  (`custom-3f2a91bc`). State runs use `state-v1` (+ edits) the same way.
+- **meta** — non-default horizon, then config fields deviating from **today's**
+  defaults (seed first, capped at 6, rest `+N more`), then caller extras (run id,
+  `campaign/arm`, cohort scope). Names describe a run relative to the current
+  baseline on purpose: they answer "what was special about this run".
+
+`run_slug()` is the same grammar in filesystem form (`control_itr_lag-stcv_simple-v3`) —
+use it for NEW run/category directories; existing directories are historical record and
+are never renamed. Relabeling already-published categories is metadata-only:
+`publish_ts_experiment_trajectories.py --refresh-labels-only` re-derives every
+publisher-managed category label from its stored manifest, and
+`docs/relabel_published_categories.py` was the 2026-08-24 one-off for the legacy
+hand-published `ts_*` categories.
+
 ## Vendored code
 
 `vendor/itransformer/` (MIT, commit `c2426e6`) and `vendor/patchtst/` (Apache-2.0, commit

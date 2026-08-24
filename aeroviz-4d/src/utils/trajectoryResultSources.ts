@@ -48,6 +48,7 @@ export function activeTrajectoryResultSource(
 export interface ExperimentOption {
   id: string;
   group: string;
+  /** Ready-to-render display label — see {@link experimentOptionLabel}. */
   label: string;
   model?: string | null;
   predictionOutput?: ExperimentPredictionOutput | null;
@@ -55,17 +56,38 @@ export interface ExperimentOption {
   seed?: number | null;
 }
 
+const HORIZON_SUFFIX = {
+  normalized: " · normalized time",
+  full: " · full horizon",
+  window: " · recursive window",
+} as const;
+
+/**
+ * The picker label for one experiment. The publisher stamps a canonical
+ * self-describing `label` (run_naming grammar: output · backbone · dynamics · loss ·
+ * meta) — use it verbatim. Publishes that predate it fall back to the run-directory
+ * name decorated with the metadata fields.
+ */
+export function experimentOptionLabel(
+  experiment: NonNullable<ComparisonCategory["experiment"]>,
+): string {
+  if (experiment.label) return experiment.label;
+  const identityParts = experiment.id.split("/").filter(Boolean);
+  const runName = identityParts[identityParts.length - 1] ?? experiment.id;
+  const horizon = experiment.horizonMode ? HORIZON_SUFFIX[experiment.horizonMode] : "";
+  const seed = experiment.seed == null ? "" : ` · seed ${experiment.seed}`;
+  return `${runName} · ${experiment.predictionOutput ?? "state"}${horizon}${seed}`;
+}
+
 export function experimentOptions(categories: ComparisonCategory[]): ExperimentOption[] {
   const byId = new Map<string, ExperimentOption>();
   for (const category of categories) {
     const experiment = category.experiment;
     if (!isExperimentCategory(category) || !experiment || byId.has(experiment.id)) continue;
-    const identityParts = experiment.id.split("/").filter(Boolean);
-    const runName = identityParts[identityParts.length - 1] ?? experiment.id;
     byId.set(experiment.id, {
       id: experiment.id,
       group: experiment.group,
-      label: runName,
+      label: experimentOptionLabel(experiment),
       model: experiment.model,
       predictionOutput: experiment.predictionOutput,
       horizonMode: experiment.horizonMode,

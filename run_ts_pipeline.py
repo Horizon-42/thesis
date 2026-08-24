@@ -65,7 +65,6 @@ from config import (  # noqa: E402
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     CONTROL_STATE_OBJECTIVES,
     CONTROL_TERMINAL_CLOCKS,
     CONTROL_TERMINAL_CLOCK_PREDICTED,
@@ -101,6 +100,10 @@ from lateral_eligibility import (  # noqa: E402
     default_lateral_pass_roster_path,
     ensure_lateral_pass_roster,
 )
+from run_naming import (  # noqa: E402
+    category_display_label,
+    run_display_name,
+)
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_NAME,
     CHECKPOINT_METADATA_SCHEMA,
@@ -109,14 +112,8 @@ from train import (  # noqa: E402
 
 TRAINING_MODES = ("per-airport", "pooled")
 MODEL_SHORT = {"itransformer": "itr", "patchtst": "ptst"}
-MODEL_LABEL = {"itransformer": "iTransformer", "patchtst": "PatchTST"}
 OUTPUT_KINDS = ("czml", "eval")
 PREDICTION_SPLITS = ("train", "val", "test")
-SPLIT_LABELS = {
-    "train": "Training split (in-sample)",
-    "val": "Validation split (model selection)",
-    "test": "Test split (held-out)",
-}
 
 
 def _file_sha256(path: Path) -> str:
@@ -216,16 +213,6 @@ def _control_terminal_clock_filesystem_tag(
     return _CONTROL_TERMINAL_CLOCK_FILESYSTEM_TAGS[terminal_clock]
 
 
-def _control_terminal_clock_label(terminal_clock: str) -> str:
-    if terminal_clock == CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION:
-        return ""
-    if terminal_clock == CONTROL_TERMINAL_CLOCK_PREDICTED:
-        return "deployable predicted-clock terminal (joint time gradient), "
-    if terminal_clock == CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME:
-        return "deployable predicted-clock terminal (detached total-time gradient), "
-    raise ValueError(f"unknown control terminal clock {terminal_clock!r}")
-
-
 def _control_state_loss_grid_tag(prediction_output: str, loss_grid: str) -> str:
     if not uses_control_dynamics(prediction_output) or loss_grid == CONTROL_STATE_LOSS_GRID_NATIVE:
         return ""
@@ -261,15 +248,6 @@ def _control_dynamics_filesystem_tag(prediction_output: str, backend: str) -> st
     if not uses_control_dynamics(prediction_output):
         return ""
     return _CONTROL_DYNAMICS_FILESYSTEM_TAGS[backend]
-
-
-def _control_dynamics_label(prediction_output: str, backend: str) -> str:
-    if (
-        not uses_control_dynamics(prediction_output)
-        or backend == CONTROL_DYNAMICS_REANCHORED_RK4
-    ):
-        return ""
-    return f"{backend} dynamics, "
 
 
 def _control_objective_tag(prediction_output: str, objective: str) -> str:
@@ -351,15 +329,6 @@ def _control_horizon_curriculum_tag(
     return f"_horizon_curriculum_{horizons}s_x{stage_epochs}"
 
 
-def _control_horizon_curriculum_label(
-    horizons_s: tuple[float, ...], stage_epochs: int
-) -> str:
-    if not horizons_s:
-        return ""
-    horizons = "→".join(f"{value:g}" for value in horizons_s)
-    return f"horizon curriculum {horizons} s × {stage_epochs} epochs, "
-
-
 def _control_gradient_clip_tag(max_norm: float, policy: str) -> str:
     if max_norm <= 0.0:
         return ""
@@ -370,23 +339,6 @@ def _control_gradient_clip_tag(max_norm: float, policy: str) -> str:
         else f"_{policy.replace('-', '_')}"
     )
     return f"_gradient_clip{compact}{policy_tag}"
-
-
-def _control_gradient_clip_label(max_norm: float, policy: str) -> str:
-    if max_norm <= 0.0:
-        return ""
-    policy_label = (
-        ""
-        if policy == CONTROL_GRADIENT_CLIP_GLOBAL
-        else " (final-time head decoupled)"
-    )
-    return f"gradient clip {max_norm:g}{policy_label}, "
-
-
-def _control_duration_label(prediction_output: str, parameterization: str) -> str:
-    if not uses_control_dynamics(prediction_output):
-        return ""
-    return f"{parameterization} durations, "
 
 
 def _aircraft_filter_tag(aircraft_filter: str) -> str:
@@ -1217,67 +1169,17 @@ class PredictionPlan:
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
-        model_label = MODEL_LABEL[training.model]
-        pooled_label = "pooled, " if training.pooled else ""
-        anchor_label = "random-anchor training, " if training.random_train_anchor else ""
-        frame_label = "ENU" if training.coordinate_frame == "enu" else "runway-aligned"
-        horizon_label = HORIZON_LABELS[training.horizon_mode]
-        duration_label = _control_duration_label(
-            training.prediction_output,
-            training.control_duration_parameterization,
-        )
-        output_label = f"{training.prediction_output} output, {duration_label}"
-        dynamics_label = _control_dynamics_label(
-            training.prediction_output, training.control_dynamics_backend
-        )
-        state_loss_label = (
-            "fixed-dt state loss, "
-            if training.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
-            else ""
-        )
-        objective_label = {
-            CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE: "",
-            CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: (
-                "true-time physical position criterion, "
+        # The label is the canonical run grammar (run_naming, single source), derived
+        # from the exact config this cell trains with; scope and tag ride as meta.
+        scope_note = "pooled cohort" if training.pooled else f"{training.label} cohort"
+        label_extra = [scope_note]
+        if experiment_tag:
+            label_extra.append(experiment_tag)
+        self.label = category_display_label(
+            self.split,
+            run_display_name(
+                training._expected_cv_base_config(), extra=tuple(label_extra)
             ),
-            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
-                "horizontal-arc position/local-velocity + terminal criterion "
-                f"({training.control_geometry_weight:g}/"
-                f"{training.control_arc_horizontal_velocity_weight:g}/"
-                f"{training.control_arc_vertical_velocity_weight:g}/"
-                f"{training.control_terminal_position_weight:g}/"
-                f"{training.control_terminal_velocity_weight:g}), "
-                f"local={training.control_arc_local_velocity}, "
-                f"tangent={training.control_arc_tangent_weight:g}, "
-                f"position-end={training.control_arc_position_end_weight:g}, "
-                f"terminal={training.control_arc_terminal}, "
-                "terminal-emphasis="
-                f"cross×{training.control_arc_terminal_cross_track_emphasis:g}/"
-                f"vertical×{training.control_arc_terminal_vertical_emphasis:g}, "
-            ),
-        }[training.control_state_objective]
-        duration_gradient_label = (
-            "detached duration-state gradient, "
-            if not training.control_state_duration_gradient
-            else ""
-        )
-        terminal_clock_label = _control_terminal_clock_label(
-            training.control_terminal_clock
-        )
-        curriculum_label = _control_horizon_curriculum_label(
-            training.control_horizon_curriculum_s,
-            training.control_horizon_curriculum_stage_epochs,
-        )
-        gradient_clip_label = _control_gradient_clip_label(
-            training.control_gradient_clip_norm,
-            training.control_gradient_clip_policy,
-        )
-        self.label = (
-            f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
-            f"{output_label}{dynamics_label}{state_loss_label}{objective_label}"
-            f"{duration_gradient_label}{terminal_clock_label}"
-            f"{curriculum_label}{gradient_clip_label}"
-            f"{anchor_label}{horizon_label}, {frame_label})"
         )
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category

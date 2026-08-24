@@ -95,8 +95,13 @@ def test_publication_plan_reuses_existing_prediction_evaluation_and_czml_contrac
         == "val"
     assert plan.category.endswith("_val")
     assert "comparison" in plan.comparison_dir.parts
-    assert "horizon: normalized time" in plan.category_label
+    # The label is the canonical run grammar (run_naming) plus the run id as meta.
+    assert plan.category_label.startswith(
+        "Validation split (model selection) — Experiment: control · "
+    )
+    assert plan.category_label.endswith("run_seed1337")
     assert plan.experiment_metadata["horizonMode"] == "normalized"
+    assert plan.experiment_metadata["label"].endswith("run_seed1337")
 
 
 def test_prediction_source_uses_prediction_category_without_experiment_metadata(tmp_path):
@@ -143,6 +148,45 @@ def test_refreshes_horizon_metadata_for_an_archived_publication(monkeypatch, tmp
     category = json.loads(manifest.read_text())["categories"][0]
     assert category["label"] == plan.category_label
     assert category["experiment"] == plan.experiment_metadata
+
+
+def test_refresh_labels_only_walks_publication_manifests(monkeypatch, tmp_path):
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = publisher.PublicationPlan(
+        experiment,
+        "KRDU",
+        "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+    )
+    _write_json(plan.publication_manifest, {
+        "schemaVersion": publisher.PUBLICATION_SCHEMA,
+        "status": "completed",
+        "experimentId": experiment.experiment_id,
+        "campaign": experiment.campaign,
+        "runId": experiment.run_id,
+        "checkpoint": experiment.checkpoint_relative,
+        "airport": "KRDU",
+        "split": "val",
+        "resultSource": "experiment",
+        "category": plan.category,
+        "config": experiment.config,
+    })
+    manifest = plan.comparison_dir.parent / "categories.json"
+    _write_json(manifest, {"categories": [{"key": plan.category, "label": "legacy"}]})
+
+    seen, patched = publisher.refresh_labels_from_manifests(
+        tmp_path / "published", tmp_path / "frontend"
+    )
+
+    assert (seen, patched) == (1, 1)
+    category = json.loads(manifest.read_text())["categories"][0]
+    assert category["label"] == plan.category_label
+    assert category["experiment"]["label"] == plan.experiment_metadata["label"]
+    assert category["resultSource"] == "experiment"
 
 
 def test_publication_plan_cannot_access_outer_test(tmp_path):

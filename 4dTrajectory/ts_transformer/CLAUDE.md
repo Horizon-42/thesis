@@ -68,6 +68,23 @@ Everything below is serialised into every checkpoint.
   `transport-chart-velocity` | `scaled-transport-chart-velocity` is the state representation the
   long rollout carries. The registry in `control/dynamics/backends.py` is keyed by the PAIR.
 
+## Run & category naming — `run_naming.py` is the single source
+
+Every surface that names a trained run (frontend category labels + Experiments picker,
+publication manifests, `INDEX.md`) renders ONE grammar derived from the run's serialized
+config: `output · backbone · dynamics · loss · meta`. Loss = named recipe, else
+**nearest recipe + edits** (`simple-v3+(imit=16)` — fewest loss-field edits, later recipe
+wins ties), else `custom-<8-hex>`; meta = fields deviating from TODAY'S defaults (seed
+first, capped at 6, `+N more`) plus caller extras (run id / campaign/arm / cohort) —
+so a default change shifts old runs' names, deliberately. The frontend prefers the
+stamped `experiment.label` and falls back to composing from metadata for pre-label
+publishes. Relabeling published categories is metadata-only and never touches
+records/checkpoints: `publish_ts_experiment_trajectories.py --refresh-labels-only`
+(publisher-managed, from stored publication manifests) and
+`docs/relabel_published_categories.py` (the 2026-08-24 one-off for legacy `ts_*` keys).
+**On-disk run/category directories are historical record — never rename them**;
+`run_slug()` is the grammar's filesystem form for FUTURE directories.
+
 ## Layout
 
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
