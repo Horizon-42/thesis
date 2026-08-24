@@ -241,3 +241,21 @@ writes a checkpoint fixture with `"version": 2` (correct when `3008baf` bumped i
 07-23) but `runner.CHECKPOINT_VERSION` is now 4, so `checkpoint_start` rejects the
 fixture and the test fails at HEAD. The fixture should import the constant instead of
 restating it — the version-pinned-in-a-test trap, again.
+
+## 14. A320-family speed-gate windows exclude most of the real fleet's crossings
+
+**Verified** (2026-08-24, first fleet baseline speed-gate measurement —
+`evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md` §5). Speed-fail structure clusters by
+manufacturer, which weather cannot produce: A21N 91.9 % too-slow (0 fast) of 881
+graded, A20N 66.4 %, A321 58.2 %, A319 53.2 %, A320 44.7 % — while every 737-family
+type passes 75–84 % with a mild FAST skew (B738/B38M ≈18 %), same days, same
+airports. A window whose floor excludes 92 % of a type's real crossings measures the
+window, not the fleet: the `aircraft` package's landing `Cl_max` and/or OpenAP
+landing mass for the A320 family place 1.23·Vs1g above real crossing speeds
+(conversely B738/B38M/C56X anchors may sit slightly low).
+
+**Suggested:** review A320-family (and B738/C56X) `Cl_max_landing`/landing-mass
+against published Vref tables. NOTE the blast radius: `stall_speed_ms` is also the
+optimizer's velocity-floor anchor, so a correction moves solver behaviour and every
+speed-graded artifact — re-derive the results doc (and any optimizer batch) after a
+change. Until reviewed, quote speed rates per TYPE, never per airport.

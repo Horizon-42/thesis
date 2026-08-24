@@ -4,6 +4,20 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — First baseline speed-gate measurement: the anchor, not the weather, dominates
+
+`evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md` — full statistics of the first
+three-gate fleet baseline (per airport, per runway, per airframe type, slow/fast
+margins, wind-explainable bands). Headlines: fleet speed pass 22,473/32,191 graded
+(69.8 %); fails split 66 % slow / 34 % fast with median margins 3–5 kt; ungraded is
+almost entirely unresolvable airframes (10,306 — GA-heavy KRDU/KSJC hit hardest);
+**the fail structure clusters by MANUFACTURER** (A21N 91.9 % slow vs B738 75.7 %
+pass, same days, same airports), so the per-type stall-model anchor — not wind — is
+the dominant effect, recorded as code-health follow-up 14 (review A320-family
+Cl_max/landing mass; the same anchor is the optimizer's velocity floor). Airport
+inversion (KMSY/KSTL fast-skewed vs KSJC 88 % slow) is fleet mix, the KSJC-ADE
+lesson again: quote speed rates per type, never bare.
+
 ### 2026-08-24 — The baseline runs the speed gate: three gates for every subject
 
 Owner decision, superseding v6's observed exclusion: the observed baseline is judged

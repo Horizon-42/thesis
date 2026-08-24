@@ -4,6 +4,9 @@
 **Code:** `evaluation/speed_gate.py` (policy), `evaluation/metrics.py` (composition),
 `aircraft/aero_params.stall_speed_ms` (the stall model, single source),
 `flight_scenarios/build.py` (the producer-written `source.landing_aero` block).
+**Measured results:** `BASELINE_SPEED_GATE_RESULTS.md` (2026-08-24 fleet baseline —
+read its §5 before quoting any speed-fail rate: the per-type window anchor, not
+weather, dominates the fail structure).
 
 ## 1. What the gate claims — and what it does not
 
