@@ -25,7 +25,12 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v6`.
   `landing_aero` grades indeterminate LOUDLY (absent = data gap); a malformed block
   raises. The optimizer floor (1.10·Vs) sits BELOW the gate on purpose — floor-riding
   and observed-speed-target solves can legitimately fail speed; quote speed rates per
-  `target_source`.
+  `target_source`. **Observed rows DO report the event's `crossing_ground_speed_m_s`
+  as `crossing_ground_speed_ms` (row + batch spread, additive within v6,
+  `METHODOLOGY["observed_crossing_ground_speed"]`) — an audit statistic: ADS-B
+  ground-referenced, never composed, never fed to the gate.** Both crossing speeds
+  are also FLAT on the row (the frontend verdict table reads them there, not only
+  under `deviation`).
 - Batch metrics: solve/success rates, lateral mean/p95/max, vertical spreads, flight times;
   path-shape deviation vs reference = both paths resampled at 101 fractions of their own
   horizontal arc length.

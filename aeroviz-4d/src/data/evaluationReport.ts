@@ -102,6 +102,10 @@ export interface EvaluationRow {
    *  (`speed_ms` above is the record's final-state speed). Null when not speed-gradable;
    *  absent in legacy v5 reports. */
   crossing_speed_ms?: number | null;
+  /** v6-additive (2026-08-24): the event's audit-only ADS-B GROUND speed at the
+   *  crossing (observed subjects). Never graded — wind is unmodelled. Null on rows
+   *  whose event predates the field or could not fit a speed. */
+  crossing_ground_speed_ms?: number | null;
   heading_rad?: number;
   final_time_s?: number;
   reason?: string;
@@ -145,6 +149,9 @@ export interface EvaluationReport {
    *  EvaluationRow.speed_result). Absent in legacy v5 reports. */
   speed_result_counts?: Record<EvaluationVerdict, number>;
   crossing_speed_ms?: MagnitudeSpread | null;
+  /** v6-additive: spread of the rows' audit-only crossing GROUND speeds
+   *  (`methodology.observed_crossing_ground_speed`). Null when no row carries one. */
+  crossing_ground_speed_ms?: MagnitudeSpread | null;
   final_time_s: { mean: number; min: number; max: number } | null;
   reference: EvaluationReferenceAggregate | null;
   trajectories: EvaluationRow[];

@@ -59,8 +59,16 @@ def assessment_context(
 
 
 def observed_event(
-    *, cross_m: float = 0.0, vertical_m: float = 0.0
+    *,
+    cross_m: float = 0.0,
+    vertical_m: float = 0.0,
+    ground_speed_m_s: float | None = None,
 ) -> dict[str, Any]:
+    if ground_speed_m_s is not None:
+        return {
+            **observed_event(cross_m=cross_m, vertical_m=vertical_m),
+            "crossing_ground_speed_m_s": ground_speed_m_s,
+        }
     return {
         "schema_version": EVENT_SCHEMA_VERSION,
         "status": "estimated",

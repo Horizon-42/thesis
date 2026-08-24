@@ -160,6 +160,25 @@ METHODOLOGY: dict[str, Any] = {
             "200 m); not an operational or certification speed check"
         ),
     },
+    # Additive within v6 (2026-08-24). Descriptive only — the row/batch fields it
+    # describes carry a measured quantity, never a verdict component.
+    "observed_crossing_ground_speed": {
+        "source": (
+            "harvest threshold event `crossing_ground_speed_m_s`: ADS-B reported "
+            "ground speed interpolated at a direct bracket, or OLS-extrapolated over "
+            "the same kept samples as the position fit (final_approach.fit_line)"
+        ),
+        "reference": "ground-referenced; wind is unmodelled",
+        "use": (
+            "audit statistic on observed subjects only; never composed into any "
+            "verdict and never an input to the stall-anchored airspeed gate"
+        ),
+        "availability": (
+            "rows whose serialized event carries the field; events written before "
+            "2026-08-24, and censored fits without enough speed-bearing samples, "
+            "report null"
+        ),
+    },
     "reference_comparison": {
         "endpoint_tolerance_m": ENDPOINT_TOLERANCE_M,
         "mismatched_span_policy": "skip_path_and_time_metrics",
@@ -437,6 +456,14 @@ def evaluate_batch(
             for item in measured
             if item.deviation.crossing_speed_ms is not None
         ]),
+        # Additive within v6 (2026-08-24): spread of the events' audit-only ADS-B
+        # ground speeds (observed subjects; see METHODOLOGY
+        # ["observed_crossing_ground_speed"]). Null when no row carries one.
+        "crossing_ground_speed_ms": magnitude_spread([
+            item.deviation.crossing_ground_speed_ms
+            for item in measured
+            if item.deviation.crossing_ground_speed_ms is not None
+        ]),
         "final_time_s": (
             {"mean": fmean(times), "min": min(times), "max": max(times)} if times else None
         ),
@@ -524,6 +551,7 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             "speed_ms": deviation.speed_ms,
             "crossing_speed_ms": deviation.crossing_speed_ms,
             "crossing_mass_kg": deviation.crossing_mass_kg,
+            "crossing_ground_speed_ms": deviation.crossing_ground_speed_ms,
             "heading_rad": deviation.heading_rad,
             "final_time_s": deviation.flight_time_s,
             "extrapolated": bool(
@@ -532,13 +560,19 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             ),
             "extrapolation_m": deviation.extrapolation_m,
         }
-        # Keep common descriptive columns flat for simple report consumers.
+        # Keep common descriptive columns flat for simple report consumers. The two
+        # crossing speeds are flat too (the frontend's verdict table reads them here):
+        # ``crossing_speed_ms`` is the gate-graded model airspeed (computed subjects),
+        # ``crossing_ground_speed_ms`` the event's audit-only ADS-B ground speed
+        # (observed subjects) — different physical quantities, never merged.
         row.update(
             lateral_m=deviation.lateral_m,
             cross_track_m=deviation.cross_track_m,
             along_track_m=deviation.along_track_m,
             vertical_m=deviation.vertical_m,
             speed_ms=deviation.speed_ms,
+            crossing_speed_ms=deviation.crossing_speed_ms,
+            crossing_ground_speed_ms=deviation.crossing_ground_speed_ms,
             heading_rad=deviation.heading_rad,
             final_time_s=deviation.flight_time_s,
         )

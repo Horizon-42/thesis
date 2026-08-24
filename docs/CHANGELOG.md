@@ -4,6 +4,26 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — Observed crossing ground speed wired through the report to the Details window
+
+The event's audit speed now actually reaches a reader — the missing consumer half of
+today's harvest change (additive within report schema v6):
+
+- `ArrivalDeviation.crossing_ground_speed_ms` is filled by `_observed_arrival` from the
+  event; rows carry it flat + under `deviation`, batches carry a
+  `crossing_ground_speed_ms` spread, and `METHODOLOGY["observed_crossing_ground_speed"]`
+  declares it: ADS-B ground-referenced, audit-only, never composed, never fed to the
+  stall-anchored gate (the graded-airspeed slots stay untouched — pinned by test).
+- **Flat-row bug fixed on the way**: `crossing_speed_ms` lived only under
+  `row["deviation"]` while the frontend verdict table reads it flat, so the "V crossing"
+  column would have shown dashes on real v6 reports. Both crossing speeds are now flat.
+- Details window: a "crossing ground speed (m/s, ADS-B)" aggregates row, and the
+  per-row V-crossing cell falls back to the audit value with an explicit
+  "audit only, not graded" tooltip. Observed reports still show no speed-gate card.
+- Observed evaluation reports republished for all five airports (`--evaluate-only`)
+  so the on-disk v6 artifacts carry the new fields; lateral-pass rosters rebuilt after
+  (the `arrivals._clear` deletion footgun, again).
+
 ### 2026-08-24 — Fleet reclassified: every stored event now carries the crossing ground speed
 
 All five airports ran `--reclassify-existing` (267,194 stored tracks), so the

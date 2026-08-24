@@ -15,6 +15,7 @@ from evaluation import (
 )
 from evaluation.tests.factories import (
     assessment_context,
+    observed_event,
     observed_payload,
     trajectory_payload,
 )
@@ -136,6 +137,39 @@ def test_observed_report_copies_the_policy_free_event_for_audit():
     copied = report["trajectories"][0]["observed_threshold_event"]
     assert copied == record.source["observed_threshold_event"]
     assert "verdict" not in copied and "benchmark" not in copied
+
+
+def test_observed_crossing_ground_speed_is_reported_but_never_graded():
+    """The event's audit speed reaches the row and batch; the verdict ignores it."""
+    payload = trajectory_payload(
+        subject="observed", event=observed_event(ground_speed_m_s=71.5)
+    )
+    record = record_from_dict(payload)
+    report = evaluate_batch(
+        [record], contexts={("KRDU", "05L"): assessment_context()}
+    )
+    [row] = report["trajectories"]
+    assert row["crossing_ground_speed_ms"] == pytest.approx(71.5)
+    assert row["deviation"]["crossing_ground_speed_ms"] == pytest.approx(71.5)
+    assert report["crossing_ground_speed_ms"] == {
+        "mean": pytest.approx(71.5), "p95": pytest.approx(71.5),
+        "max": pytest.approx(71.5),
+    }
+    # Ground speed stays out of every gate surface: the graded-airspeed slots are
+    # untouched and the observed speed component remains policy-indeterminate.
+    assert row["speed_result"] == "indeterminate"
+    assert row["deviation"]["crossing_speed_ms"] is None
+    assert report["crossing_speed_ms"] is None
+
+
+def test_pre_field_observed_events_report_null_ground_speed():
+    record = record_from_dict(observed_payload())
+    report = evaluate_batch(
+        [record], contexts={("KRDU", "05L"): assessment_context()}
+    )
+    [row] = report["trajectories"]
+    assert row["crossing_ground_speed_ms"] is None
+    assert report["crossing_ground_speed_ms"] is None
 
 
 def _write_pair(tmp_path, *, reference_end_lat: float):

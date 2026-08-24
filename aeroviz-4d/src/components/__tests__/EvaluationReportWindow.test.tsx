@@ -242,6 +242,53 @@ describe("EvaluationReportWindow", () => {
     expect(legacyHeaders).not.toContain("V crossing (m/s)");
   });
 
+  it("shows the audit crossing ground speed for observed rows without grading it", () => {
+    const observedSpeeds: EvaluationReport = {
+      ...REPORT,
+      subject: "observed",
+      speed_result_counts: { pass: 0, fail: 0, indeterminate: 3 },
+      crossing_speed_ms: null,
+      crossing_ground_speed_ms: { mean: 70.2, p95: 74.8, max: 75.9 },
+      trajectories: REPORT.trajectories.map((row) => ({
+        ...row,
+        subject: "observed" as const,
+        speed_result: "indeterminate" as const,
+        crossing_speed_ms: null,
+        crossing_ground_speed_ms: row.solved ? 70.2 : null,
+        bounds: {
+          ...row.bounds,
+          stall_speed_ms: null, speed_lower_ms: null, speed_upper_ms: null,
+        },
+      })),
+    };
+    render(
+      <EvaluationReportWindow
+        report={observedSpeeds}
+        title="Observed Baseline Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Aggregate row from the batch spread, explicitly labeled as ground speed.
+    const aggregates = screen.getByRole("table", { name: /Aggregates/ });
+    const groundRow = within(aggregates)
+      .getByText("crossing ground speed (m/s, ADS-B)").closest("tr")!;
+    expect(Array.from(groundRow.querySelectorAll("td")).map((td) => td.textContent))
+      .toEqual(["70.2", "74.8", "—", "75.9"]);
+    // No graded crossing-speed row (null) and no speed-gate card (observed).
+    expect(within(aggregates).queryByText("crossing speed (m/s)")).toBeNull();
+    expect(screen.queryByText(/speed gate pass/)).toBeNull();
+
+    // Per-row: the V crossing cell falls back to the audit value with its label.
+    const table = screen.getByRole("table", { name: "Per-trajectory verdicts" });
+    const headers = Array.from(table.querySelectorAll("thead th")).map((h) => h.textContent);
+    const solvedRow = screen.getByText("FDX1738").closest("tr")!;
+    const cell = solvedRow.children[headers.indexOf("V crossing (m/s)")] as HTMLElement;
+    expect(cell.textContent).toBe("70.2");
+    expect(cell.title).toBe("ADS-B ground speed — audit only, not graded");
+  });
+
   it("closes via the Close button", () => {
     const onClose = vi.fn();
     render(

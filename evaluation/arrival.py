@@ -48,10 +48,16 @@ class ArrivalDeviation:
     extrapolation_m: float | None = None
     # Absolute state AT the graded event, for the speed gate: the computed path fills
     # both from the crossing state; observed leaves them None — the event estimators
-    # extrapolate POSITION only, so no observed crossing speed or mass was measured
+    # extrapolate POSITION only, so no observed crossing AIRSPEED or mass was measured
     # (the ``speed_ms`` DEVIATION above already quotes the last sample for observed).
     crossing_speed_ms: float | None = None
     crossing_mass_kg: float | None = None
+    # The event's estimated GROUND speed at the crossing (ADS-B velocity source;
+    # interpolated at a direct bracket, OLS-extrapolated for a censored fit). Observed
+    # subjects only; None on events serialized before 2026-08-24. AUDIT DATUM: wind is
+    # unmodelled, so it never feeds the stall-anchored airspeed gate and never
+    # composes into a verdict — it is reported, not judged.
+    crossing_ground_speed_ms: float | None = None
 
     @property
     def lateral_m(self) -> float:
@@ -275,6 +281,7 @@ def _observed_arrival(
             heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
             flight_time_s=final["t"],
             extrapolation_m=event["extrapolation_distance_m"],
+            crossing_ground_speed_ms=event.get("crossing_ground_speed_m_s"),
         ),
         "estimated",
     )

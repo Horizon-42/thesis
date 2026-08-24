@@ -885,6 +885,20 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                 <td>{formatNum(report.crossing_speed_ms.max)}</td>
               </tr>
             ) : null}
+            {report.crossing_ground_speed_ms ? (
+              <tr>
+                <th
+                  scope="row"
+                  title="ADS-B reported ground speed at the estimated crossing — audit statistic, never graded (wind unmodelled)"
+                >
+                  crossing ground speed (m/s, ADS-B)
+                </th>
+                <td>{formatNum(report.crossing_ground_speed_ms.mean)}</td>
+                <td>{formatNum(report.crossing_ground_speed_ms.p95)}</td>
+                <td className="eval-report-na">—</td>
+                <td>{formatNum(report.crossing_ground_speed_ms.max)}</td>
+              </tr>
+            ) : null}
             {report.final_time_s ? (
               <tr>
                 <th scope="row">flight time (s)</th>
@@ -997,9 +1011,11 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                       title={row.bounds.speed_lower_ms != null && row.bounds.speed_upper_ms != null
                         ? `window ${formatNum(row.bounds.speed_lower_ms)}–${formatNum(row.bounds.speed_upper_ms)} m/s` +
                           ` · Vs1g ${formatNum(row.bounds.stall_speed_ms)} m/s`
-                        : undefined}
+                        : row.crossing_speed_ms == null && row.crossing_ground_speed_ms != null
+                          ? "ADS-B ground speed — audit only, not graded"
+                          : undefined}
                     >
-                      {formatNum(row.crossing_speed_ms)}
+                      {formatNum(row.crossing_speed_ms ?? row.crossing_ground_speed_ms)}
                     </td>
                   ) : null}
                   <td>{formatNum(row.final_time_s)}</td>
