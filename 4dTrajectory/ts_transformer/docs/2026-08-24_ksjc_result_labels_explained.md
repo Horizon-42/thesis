@@ -131,6 +131,59 @@ For **state** runs the loss slot is `state-v1`: the formal direct-state objectiv
 (normalized position MSE + duration + endpoint term) at its frozen coefficients;
 deviations would appear the same way (`state-v1(endpoint=0.5)`).
 
+#### What "direct control imitation" is — and what `imit` sets
+
+**The gap it closes.** Every earlier term scored what the controls *produce*: position
+is derivative order 0, the v2 velocity term is order 1 — but bank lives at order 2, so
+no term in the loss ever named the controls themselves. Measured consequence on the
+pre-v3 models: the model's predicted bank carried *less* information about the flown
+bank than a randomly chosen **other** flight's bank did (per-flight skill +0.124
+against a random-flight floor of +0.170 on KRDU) — it had learned *that* banking
+happens, never *when*.
+
+**The mechanism.** For every training flight, the *observed* trajectory is pushed
+through the exact **inverse of the configured forward dynamics**
+(`control/dynamics/inverse.py`) to recover the control schedule — thrust fraction,
+bank, load factor per segment — that would reproduce the flown track under that
+flight model. The network's emitted schedule is then penalized for deviating from
+this recovered schedule, channel by channel. "Direct imitation" because it supervises
+the **controls themselves**, not only the trajectory they roll out to. Two contracts
+keep it honest:
+
+- The inverse is registered under the **same config key as the forward model**, so
+  target and rollout can never be different equations; every registered pair is closed
+  numerically (roll a known schedule → invert → require it back;
+  `tests/test_control_inverse_dynamics.py`). The inverse also carries the ω×v
+  transport term unconditionally — that is what makes it the exact inverse.
+- The target is built in `dataset.reference_control_supervision` on the
+  **training-only** `_dynamics_arrays` path: inference has no future track to invert,
+  so the term never leaks into prediction.
+
+Each channel is divided by half its envelope width
+(`control/envelope.py`, `CONTROL_HALF_WIDTH`), making the term dimensionless across
+mixed aircraft — and giving it a **per-airport channel split**: thrust/bank/load carry
+57/41/2 % of the term on KRDU but 82/18/1 % on KSJC, which is the root of the
+"recalibrate the weight per airport" rule in §2.5.
+
+**What the `imit` number is.** The raw value of
+`control_imitation_loss_weight` — the multiplier on this term in the total loss.
+The "≈ 47× position" gloss is a calibration at the converged KRDU baseline, where
+**w = 1.36 equals 1× the position term** (state loss 0.0417, unweighted imitation
+term 0.0308), so `imit=64` ≈ 47×, `imit=16` ≈ 12×, `imit=256` ≈ 188×. The dose curve
+is **not a ramp**: below ~12× the ladder is a noisy plateau; ~47× is the sweet spot
+frozen into `simple-v3`; past it the fit saturates and overshoots — at ≈188× the
+predicted bank comes out *smoother than the flown tracks themselves* (0.24° straight-in
+vs the flown 0.41° on KRDU). At the frozen 64, measured on 1404 KRDU validation
+flights: per-flight bank skill 0.124 → **0.735**, the flight-independent bank share
+49 % → **3.3 %** (flown tracks: 1.8 %), straight-in bank RMS 3.92° → **0.36°**, ADE
+better on 57 % of flights, FDE unchanged.
+
+**Not the same thing as the "oracle teacher"** of §2.2–§2.3. The imitation term is a
+*loss component* whose weight is recorded in the config — which is why `imit` edits
+show up in the loss slot. The oracle teacher (`control/oracle/*`) is a *training-time
+curriculum* that is invisible to `TSConfig`, which is why teacher vs no-teacher runs
+carry identical configs and are distinguished only by their run-id tails.
+
 ### 1.7 Slot 5 — meta: everything else worth knowing, possibly empty
 
 Three kinds of items, in order:
