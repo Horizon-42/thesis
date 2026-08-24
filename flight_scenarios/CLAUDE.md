@@ -108,6 +108,19 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   the caller's list index and this function does not have one; a key built on the wrong index
   would disagree with the record filename `_scenario_filename` derives.
 
+## Crossing span (observed records say where their crossing lives)
+
+- **`crossing_span.crossing_span_from_event` is the producer half of the marker
+  contract** (`final_approach.crossing` owns the schema + validator; see its
+  `CLAUDE.md`). A direct event becomes a `measured_bracket` marker (no new rows);
+  a censored event appends ONE inferred crossing row — event position, HAE→MSL via
+  the caller's `hae_minus_msl_m` (converted exactly once, here), V = the event's
+  crossing ground speed (fallback: last measured V, recorded as `v_source`),
+  ψ/γ/m carried from the last established sample, t = trapezoidal
+  `extrapolation / mean(V_last, V_cross)`. Consumed by
+  `trajectory_data_process/harvest/observed.py` (the only span-producing record
+  writer today — optimizer/ts references carry no event and stay markerless).
+
 ## Runway target
 
 - **THREE runway-threshold sources exist and two of them disagree by metres.**

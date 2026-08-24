@@ -22,6 +22,13 @@ store, roster.
   populates it (`--evaluate-only` re-rosters stored events unchanged). Wind is unmodelled,
   so it must never feed evaluation's stall-anchored airspeed gate
   (`evaluation/docs/THRESHOLD_SPEED_GATE.md`); observed subjects stay speed-ungraded.
+- **Observed evaluation records carry a `crossing_span` (2026-08-24)** —
+  `harvest/observed.py` marks the event's direct bracket or appends the one inferred
+  crossing row (built by `flight_scenarios.crossing_span`), so evaluation grades the
+  STATES through one shared interpolation instead of re-reading the event. Target
+  kinematics and `final_time_s` stay anchored to the last MEASURED row. Records in
+  `approach/records/` from before this date fail evaluation loudly ("no
+  crossing_span") — rebuild with `--evaluate-only`.
 - **`unassignable` (the receiver lost it) and `not_established` (the approach was not
   stabilised) must stay distinct outcomes.** Conflating them charges a reception gap to the
   pilot. Both are counted and reported; neither is ever dropped (established rate is 21–54 % on

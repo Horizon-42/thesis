@@ -162,6 +162,73 @@ def test_observed_crossing_ground_speed_is_reported_but_never_graded():
     assert report["crossing_speed_ms"] is None
 
 
+def _direct_bracket_payload(*, cross_m: float = 0.0) -> dict:
+    """An observed record whose crossing lies INSIDE the states (asdb_raw kind)."""
+    from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
+
+    from evaluation.tests.factories import TARGET
+
+    lat_step = 100.0 / METRES_PER_DEG_LAT
+    payload = trajectory_payload(subject="observed")
+    lon = TARGET["lon"] + cross_m / metres_per_deg_lon(TARGET["lat"])
+    states = [
+        {"t": 0.0, **TARGET, "lat": TARGET["lat"] - 20 * lat_step, "alt": 1_000.0},
+        {"t": 98.0, **TARGET, "lat": TARGET["lat"] - lat_step, "lon": lon, "alt": 128.0},
+        {"t": 100.0, **TARGET, "lat": TARGET["lat"] + lat_step, "lon": lon, "alt": 132.0},
+    ]
+    payload["states"] = states
+    payload["final_time_s"] = 100.0
+    payload["source"]["observed_threshold_event"] = {
+        **observed_event(cross_m=cross_m),
+        "method": "direct_linear_bracket",
+        "observability": "within_observed_support",
+        "event_time_s": 99.0,
+        "interpolation_fraction": 0.5,
+        "extrapolation_distance_m": 0.0,
+        "source_sample_range": [1, 2],
+    }
+    payload["source"]["crossing_span"] = {
+        "kind": "measured_bracket", "left_index": 1, "fraction": 0.5,
+    }
+    return payload
+
+
+def test_measured_bracket_span_grades_the_interpolated_state():
+    report = evaluate_batch(
+        [record_from_dict(_direct_bracket_payload(cross_m=5.0))],
+        contexts={("KRDU", "05L"): assessment_context()},
+    )
+    [row] = report["trajectories"]
+    assert row["event_status"] == "estimated"
+    assert row["verdict"] == "pass"
+    # The interpolated midpoint of the bracketing pair: on-plane, 5 m right of
+    # centreline, altitude blend 128/132 -> exactly the desired 130 m crossing.
+    assert row["lateral_m"] == pytest.approx(5.0, abs=0.01)
+    assert row["vertical_m"] == pytest.approx(0.0, abs=0.01)
+    # No appended rows for a measured bracket; flight time is the record's own.
+    assert row["final_time_s"] == pytest.approx(100.0)
+
+
+def test_estimated_event_without_a_crossing_span_is_stale_and_raises():
+    payload = observed_payload()
+    del payload["source"]["crossing_span"]
+    payload["states"] = payload["states"][:-1]  # drop the appended crossing row
+    with pytest.raises(ValueError, match="crossing_span"):
+        evaluate_batch(
+            [record_from_dict(payload)],
+            contexts={("KRDU", "05L"): assessment_context()},
+        )
+
+
+def test_crossing_span_is_observed_only():
+    payload = trajectory_payload()
+    payload["source"]["crossing_span"] = {
+        "kind": "measured_bracket", "left_index": 0, "fraction": 0.5,
+    }
+    with pytest.raises(ValueError, match="observed-only"):
+        record_from_dict(payload)
+
+
 def test_pre_field_observed_events_report_null_ground_speed():
     record = record_from_dict(observed_payload())
     report = evaluate_batch(

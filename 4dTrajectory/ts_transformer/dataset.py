@@ -44,6 +44,7 @@ from aircraft.query_aircraft_parameters import (
 # flight_key is the identity ``id_runway_icao24_landingTime`` — single-sourced in
 # flight_scenarios.identity because the optimizer batch derives its record filenames from
 # the SAME function; the split key here and both writers' filename stems cannot drift.
+from final_approach import bracket_fraction
 from flight_scenarios import (
     FittedApproach,
     FlightScenario,
@@ -950,7 +951,9 @@ def _observed_threshold_crossing(
         left_along = along[left_index]
         right_along = along[right_index]
         if left_along <= 0.0 <= right_along and right_along > left_along:
-            fraction = -left_along / (right_along - left_along)
+            # The project's single crossing-fraction definition (final_approach) —
+            # the same two-point operation the harvest bracket and the evaluator use.
+            fraction = bracket_fraction(float(left_along), float(right_along))
             crossing_time = measured_times[left_index] + fraction * (
                 measured_times[right_index] - measured_times[left_index]
             )

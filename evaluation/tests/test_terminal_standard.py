@@ -251,7 +251,9 @@ def test_subject_is_required_instead_of_guessed():
 
 def test_non_finite_state_is_rejected_at_the_record_boundary():
     payload = observed_payload()
+    # The last row is the appended fitted crossing — inferred rows are validated
+    # exactly like measured ones.
     payload["states"][-1]["alt"] = math.nan
 
-    with pytest.raises(ValueError, match=r"states\[1\]\.alt.*finite"):
+    with pytest.raises(ValueError, match=r"states\[2\]\.alt.*finite"):
         record_from_dict(payload)

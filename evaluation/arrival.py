@@ -20,9 +20,20 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Any
 
+from final_approach.crossing import (
+    CROSSING_SPAN_KEY,
+    MEASURED_BRACKET_KIND,
+    bracket_fraction,
+    interpolate_channels,
+)
 from final_approach.event_contract import validate_event
 from final_approach.frame import RunwayFrame, TrackPoint
+
+# Every state channel a crossing interpolation blends; ψ is the one that wraps.
+_STATE_KEYS = ("t", "lat", "lon", "alt", "V", "psi", "gamma", "m")
+_ANGULAR_STATE_KEYS = ("psi",)
 from geokit import haversine_m
 
 from evaluation.records import TrajectoryRecord
@@ -177,15 +188,13 @@ def _computed_arrival(
             TrackPoint(previous["lat"], previous["lon"], previous["alt"])
         )
         if previous_projected.along_m <= 0.0 <= final_projected.along_m:
-            span = final_projected.along_m - previous_projected.along_m
-            fraction = -previous_projected.along_m / span
-            crossing = {
-                key: previous[key] + (final[key] - previous[key]) * fraction
-                for key in ("t", "lat", "lon", "alt", "V", "psi", "gamma", "m")
-            }
-            crossing["psi"] = previous["psi"] + math.remainder(
-                final["psi"] - previous["psi"], math.tau
-            ) * fraction
+            crossing = interpolate_channels(
+                previous,
+                final,
+                bracket_fraction(previous_projected.along_m, final_projected.along_m),
+                keys=_STATE_KEYS,
+                angular_keys=_ANGULAR_STATE_KEYS,
+            )
             return ArrivalOutcome(
                 _state_deviation(
                     crossing,
@@ -234,7 +243,14 @@ def _observed_arrival(
     record: TrajectoryRecord,
     context: AssessmentContext,
 ) -> ArrivalOutcome:
-    """Read the producer's serialized crossing; never reselect or refit samples.
+    """Resolve the observed crossing from the record's own states via its marker.
+
+    The record says WHERE its crossing lives (``source.crossing_span``: the
+    instrument-selected measured bracket, or the appended fitted-tail row), and
+    grading is the same state interpolation the computed path uses — the datum
+    conversion and the crossing estimation both happened at the producing seam,
+    never here. The event stays on the record for identity/staleness validation
+    and audit; it is no longer the graded payload.
 
     A record with no event is a legitimate input, not a broken one: optimizer and
     ts_transformer reference tracks share the ``observed`` subject without ever
@@ -260,31 +276,70 @@ def _observed_arrival(
     if validate_event(event) == "unavailable":
         return ArrivalOutcome(None, event["observability"], event["unavailable_reason"])
 
-    target, final = record.target_state, record.states[-1]
+    marker = record.source.get(CROSSING_SPAN_KEY)
+    if marker is None:
+        raise ValueError(
+            "record carries an estimated threshold event but no crossing_span; "
+            "rebuild the observed records (--evaluate-only)"
+        )
+    # The record's states are MSL by the producing seam's conversion; the
+    # cross-check below still guards the ~33 m datum class without re-applying it.
+    _authoritative_datum_offset(record, context)
+    target = record.target_state
     _require_target_agrees_with_runway_data(record, context)
+    crossing = _marker_crossing(record.states, marker)
     desired_altitude_msl_m = context.desired_threshold_altitude_msl_m
-    vertical_m = None
-    if desired_altitude_msl_m is not None:
-        # The event is HAE as broadcast; the desired crossing is MSL. Both the record
-        # and the context carry the undulation, and disagreement between them is a
-        # ~33 m error with no other symptom -- so they are cross-checked, not merged.
-        geoid = _authoritative_datum_offset(record, context)
-        crossing_alt_msl = event["threshold_crossing_altitude_m"] - geoid
-        vertical_m = crossing_alt_msl - desired_altitude_msl_m
+    frame = RunwayFrame(
+        ident=context.runway,
+        lat=context.threshold_lat,
+        lon=context.threshold_lon,
+        elevation_m=(
+            desired_altitude_msl_m
+            if desired_altitude_msl_m is not None
+            else float(target["alt"])
+        ),
+        course_deg=context.runway_course_deg,
+    )
+    deviation = _state_deviation(
+        crossing,
+        target,
+        frame,
+        desired_altitude_msl_m=desired_altitude_msl_m,
+    )
     return ArrivalOutcome(
         ArrivalDeviation(
-            # The event is evaluated at the threshold plane by construction.
-            along_track_m=0.0,
-            cross_track_m=event["signed_cross_track_m"],
-            vertical_m=vertical_m,
-            speed_ms=final["V"] - target["V"],
-            heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
-            flight_time_s=final["t"],
+            along_track_m=deviation.along_track_m,
+            cross_track_m=deviation.cross_track_m,
+            vertical_m=deviation.vertical_m,
+            speed_ms=deviation.speed_ms,
+            heading_rad=deviation.heading_rad,
+            # The flight time of the MEASURED trajectory (the record contract pins
+            # final_time_s to the last measured row), not the estimated crossing
+            # time an appended tail row carries.
+            flight_time_s=float(record.final_time_s),
             extrapolation_m=event["extrapolation_distance_m"],
+            # Observed crossing speed and mass stay ungradable (no airspeed was
+            # measured); the event's ground speed remains the audit statistic.
             crossing_ground_speed_ms=event.get("crossing_ground_speed_m_s"),
         ),
         "estimated",
     )
+
+
+def _marker_crossing(
+    states: list[dict[str, float]], marker: dict[str, Any]
+) -> dict[str, float]:
+    """The crossing state the record's own marker names — interpolated or appended."""
+    if marker["kind"] == MEASURED_BRACKET_KIND:
+        left = states[marker["left_index"]]
+        return interpolate_channels(
+            left,
+            states[marker["left_index"] + 1],
+            float(marker["fraction"]),
+            keys=_STATE_KEYS,
+            angular_keys=_ANGULAR_STATE_KEYS,
+        )
+    return states[marker["start_index"]]
 
 
 def _authoritative_datum_offset(

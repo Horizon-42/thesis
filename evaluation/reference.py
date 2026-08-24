@@ -90,15 +90,19 @@ def reference_span(
     """Require both paths to share their physical endpoints before comparison."""
     if tolerance_m < 0.0:
         raise ValueError("reference endpoint tolerance must be non-negative")
-    if not record.states or not reference.states:
+    # MEASURED paths only: an appended fitted-tail crossing row is a modeling
+    # boundary, not flown trajectory, and must not move a span or shape metric.
+    ours_states = record.measured_states
+    theirs_states = reference.measured_states
+    if not ours_states or not theirs_states:
         return ReferenceSpan(False, None, None, tolerance_m, "empty path")
     start_gap = haversine_m(
-        record.states[0]["lat"], record.states[0]["lon"],
-        reference.states[0]["lat"], reference.states[0]["lon"],
+        ours_states[0]["lat"], ours_states[0]["lon"],
+        theirs_states[0]["lat"], theirs_states[0]["lon"],
     )
     end_gap = haversine_m(
-        record.states[-1]["lat"], record.states[-1]["lon"],
-        reference.states[-1]["lat"], reference.states[-1]["lon"],
+        ours_states[-1]["lat"], ours_states[-1]["lon"],
+        theirs_states[-1]["lat"], theirs_states[-1]["lon"],
     )
     comparable = start_gap <= tolerance_m and end_gap <= tolerance_m
     return ReferenceSpan(
@@ -144,8 +148,8 @@ def compare_to_reference(
             "cannot compare paths over different physical spans: "
             f"start gap {start}, end gap {end}"
         )
-    ours = resample_by_arc_length(record.states, n)
-    theirs = resample_by_arc_length(reference.states, n)
+    ours = resample_by_arc_length(record.measured_states, n)
+    theirs = resample_by_arc_length(reference.measured_states, n)
     lateral = [haversine_m(a[0], a[1], b[0], b[1]) for a, b in zip(ours, theirs)]
     vertical = [a[2] - b[2] for a, b in zip(ours, theirs)]
     return ReferenceComparison(

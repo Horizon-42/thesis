@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
+from flight_scenarios.crossing_span import CROSSING_SPAN_KEY, crossing_span_from_event
 from flight_scenarios.datum import MSL_ALTITUDE_SOURCE
 from flight_scenarios.start_state import state_samples_from_track
 
@@ -103,6 +104,8 @@ def observed_record(
         }
         for t, s in samples
     ]
+    # Target kinematics and final_time_s come from the last MEASURED row; the
+    # crossing-span rows appended below are inferred data and must not move them.
     target = {
         "lat": runway.lat,
         "lon": runway.lon,
@@ -112,6 +115,18 @@ def observed_record(
         "gamma": states[-1]["gamma"],
         "m": mass_kg,
     }
+    final_time_s = states[-1]["t"]
+    # The record says WHERE its crossing lives (`crossing_span`), so evaluation
+    # grades the states through one shared interpolation instead of re-reading the
+    # event: a direct bracket marks its sample pair, a censored fit appends the one
+    # inferred crossing row. `state_samples_from_track` yields one state per stored
+    # sample, which is the 1:1 alignment the event's sample indices rely on.
+    crossing_span = None
+    if event.get("status") == "estimated":
+        crossing_span, appended_rows = crossing_span_from_event(
+            event, states, hae_minus_msl_m=runway.hae_minus_msl_m
+        )
+        states = states + appended_rows
     return {
         "source": {
             "id": track["callsign"] or track["icao24"],
@@ -131,10 +146,11 @@ def observed_record(
             # Copy policy-free producer output verbatim.  Benchmark selection and
             # limits remain evaluation-owned.
             "observed_threshold_event": event,
+            **({CROSSING_SPAN_KEY: crossing_span} if crossing_span is not None else {}),
         },
         "initial_state": {k: v for k, v in states[0].items() if k != "t"},
         "target_state": target,
-        "final_time_s": states[-1]["t"],
+        "final_time_s": final_time_s,
         "states": states,
         "controls": [],
     }

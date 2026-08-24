@@ -14,6 +14,8 @@ from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, Literal, get_args
 
+from final_approach.crossing import FITTED_TAIL_KIND, validate_crossing_span
+
 STATE_KEYS = ("lat", "lon", "alt", "V", "psi", "gamma", "m")
 
 # The subject vocabulary, defined once: the type annotation and the runtime check
@@ -38,6 +40,20 @@ class TrajectoryRecord:
     @property
     def solved(self) -> bool:
         return bool(self.states)
+
+    @property
+    def measured_states(self) -> list[dict[str, float]]:
+        """The states that are MEASUREMENTS: a fitted_tail's inferred rows excluded.
+
+        Path-shape and span comparisons must run over these — an appended crossing
+        row is a modeling boundary, not flown trajectory. Records without a
+        crossing span (every computed record, and observed records whose crossing
+        lies inside the data) return the full state list.
+        """
+        span = self.source.get("crossing_span")
+        if isinstance(span, dict) and span.get("kind") == FITTED_TAIL_KIND:
+            return self.states[: int(span["start_index"])]
+        return self.states
 
     @property
     def airport(self) -> str:
@@ -114,6 +130,25 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
         raise ValueError(
             f"{where}: controls ({len(controls)}) must align 1:1 with states ({len(states)})"
         )
+    # The crossing-span marker (final_approach.crossing): observed records may say
+    # WHERE their threshold crossing lives — a measured bracket inside the states,
+    # or a fitted tail appended after them. Computed subjects must not carry one:
+    # the artifact under test does not author the quantity it is graded on.
+    span = source.get("crossing_span")
+    span_kind: str | None = None
+    if span is not None:
+        if subject != "observed":
+            raise ValueError(
+                f"{where}: crossing_span is observed-only; a {subject!r} record's "
+                "crossing is derived from its states"
+            )
+        if not isinstance(span, dict):
+            raise ValueError(f"{where}: source.crossing_span must be an object")
+        try:
+            span_kind = validate_crossing_span(span, len(states))
+        except ValueError as exc:
+            raise ValueError(f"{where}: {exc}") from exc
+
     final_time = data.get("final_time_s")
     if states:
         if target is None:
@@ -121,10 +156,18 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
         if final_time is None:
             raise ValueError(f"{where}: a solved record requires final_time_s")
         final_numeric = _number(final_time, f"{where}: final_time_s")
-        if abs(final_numeric - float(states[-1]["t"])) > 1e-6:
+        # A fitted tail is inferred data appended past the measurement, so the
+        # flight time stays anchored to the last MEASURED row — no flight-time or
+        # Δt-vs-observed statistic moves when a tail is added.
+        last_measured = (
+            states[int(span["start_index"]) - 1]
+            if span_kind == FITTED_TAIL_KIND
+            else states[-1]
+        )
+        if abs(final_numeric - float(last_measured["t"])) > 1e-6:
             raise ValueError(
-                f"{where}: final_time_s ({final_time}) must equal the last state "
-                f"sample's t ({states[-1]['t']})"
+                f"{where}: final_time_s ({final_time}) must equal the last "
+                f"measured state sample's t ({last_measured['t']})"
             )
     # An unsolved record may still carry the target it was asked for (validated above);
     # what it may not carry is a flight time, since nothing was flown.

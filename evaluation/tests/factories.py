@@ -12,6 +12,8 @@ from typing import Any
 from evaluation import AssessmentContext
 from evaluation.thresholds import Benchmark
 from final_approach.event_contract import CENSORED_EVENT_METHOD, EVENT_SCHEMA_VERSION
+from flight_scenarios.crossing_span import CROSSING_SPAN_KEY, crossing_span_from_event
+from geokit import metres_per_deg_lon
 
 
 TARGET = {
@@ -75,8 +77,13 @@ def observed_event(
         "method": CENSORED_EVENT_METHOD,
         "observability": "right_censored",
         "runway": "05L",
+        # The crossing position ENCODES the cross-track offset (runway course 0°:
+        # cross-track = east), so grading the position recovers ``cross_m`` — the
+        # payload is physically self-consistent, not two disagreeing claims.
         "threshold_crossing_lat": TARGET["lat"],
-        "threshold_crossing_lon": TARGET["lon"],
+        "threshold_crossing_lon": (
+            TARGET["lon"] + cross_m / metres_per_deg_lon(TARGET["lat"])
+        ),
         # HAE = desired MSL crossing altitude + 30 m geoid offset.
         "threshold_crossing_altitude_m": TARGET["alt"] + 30.0 + vertical_m,
         "altitude_datum": "hae",
@@ -116,8 +123,18 @@ def trajectory_payload(
         "landing_time_utc": "2026-08-12T00:00:00Z",
         "flight_key": "TEST1_05L_abc123_20260812T000000Z",
     }
+    states = [first, last]
     if subject == "observed":
         source["hae_minus_msl_m"] = 30.0
+        if event is not None and event.get("status") == "estimated":
+            # The span the real producer serializes: marker + (for censored
+            # events) the appended inferred crossing row. final_time_s below
+            # stays anchored to the last MEASURED row, per the record contract.
+            span, appended = crossing_span_from_event(
+                event, states, hae_minus_msl_m=30.0
+            )
+            source[CROSSING_SPAN_KEY] = span
+            states = states + appended
     else:
         # Computed records carry the producer-written stall facts the speed gate
         # anchors on; without them the composite verdict is indeterminate by design.
@@ -129,7 +146,7 @@ def trajectory_payload(
         "initial_state": {key: value for key, value in first.items() if key != "t"},
         "target_state": target,
         "final_time_s": final_t,
-        "states": [first, last],
+        "states": states,
         "controls": (
             [] if subject == "observed" else [{"thrust": 1.0}, {"thrust": 1.0}]
         ),

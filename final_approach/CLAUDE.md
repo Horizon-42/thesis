@@ -1,8 +1,23 @@
 # final_approach — the single final-approach geometry
 
-Runway frame, segment fit, arg-min runway assignment, threshold-event contract.
-Pure `geokit` + stdlib: **no I/O, no regulation constants**. Imported by BOTH
-`trajectory_data_process/harvest` and `evaluation/arrival.py`.
+Runway frame, segment fit, arg-min runway assignment, threshold-event contract,
+and (`crossing.py`) the ONE crossing-fraction/channel-interpolation pair plus the
+**crossing-span marker contract**. Pure `geokit` + stdlib: **no I/O, no regulation
+constants**. Imported by BOTH `trajectory_data_process/harvest` and
+`evaluation/arrival.py`.
+
+- **`crossing.bracket_fraction` / `interpolate_channels` are the single definition of
+  "where a sampled path crosses the plane"** — the harvest's direct bracket, the
+  evaluator's crossing (computed AND observed), and the ts dataset's supervision
+  truncation all call them; three hand-rolled copies used to exist.
+- **`crossing_span` (validated here by `validate_crossing_span`, produced by
+  `flight_scenarios.crossing_span`) is how an OBSERVED record says where its
+  crossing lives**: `measured_bracket` (the instrument-selected direct bracket:
+  left_index + fraction, reproduced from the event, never re-derived) or
+  `fitted_tail` (exactly one inferred crossing row appended after the measured
+  states; `start_index` marks it). Computed subjects must NOT carry one — the
+  artifact under test does not author the quantity it is graded on
+  (`evaluation.records.record_from_dict` enforces this).
 
 The split of responsibility is deliberate: **assignment asks *which* runway (relative),
 `evaluation/arrival.py` asks *how good* (absolute).**

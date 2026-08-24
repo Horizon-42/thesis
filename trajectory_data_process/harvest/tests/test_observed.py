@@ -79,6 +79,54 @@ def test_observed_record_preserves_a_current_unavailable_event_for_indeterminate
     record = observed_record(track, runway)
 
     assert record["source"]["observed_threshold_event"] == event
+    # No crossing was estimable, so there is nothing to mark.
+    assert "crossing_span" not in record["source"]
+
+
+def test_estimated_censored_event_appends_the_crossing_row_behind_a_span():
+    runway = _runway()
+    event = {
+        "schema_version": "runway-threshold-event-v1",
+        "status": "estimated",
+        "method": "censored_robust_line",
+        "observability": "right_censored",
+        "runway": runway.ident,
+        "threshold_frame_snapshot": threshold_frame_snapshot(runway),
+        "threshold_frame_fingerprint": threshold_frame_fingerprint(runway),
+        "threshold_crossing_lat": 35.0,
+        "threshold_crossing_lon": -78.0,
+        "threshold_crossing_altitude_m": 145.0,
+        "altitude_datum": "hae",
+        "signed_cross_track_m": 2.0,
+        "source_sample_range": [0, 1],
+        "event_time_s": None,
+        "interpolation_fraction": None,
+        "extrapolation_distance_m": 300.0,
+        "crossing_ground_speed_m_s": 70.0,
+        "uncertainty": {"status": "uncalibrated"},
+    }
+    track = {
+        "flight_key": "TEST_18_abc123_20260812T000000Z",
+        "callsign": "TEST",
+        "icao24": "abc123",
+        "landing_time_utc": "2026-08-12T00:00:00Z",
+        "observed_threshold_event": event,
+        "samples": [[0.0, -78.0, 35.05, 500.0], [60.0, -78.0, 35.04, 450.0]],
+    }
+
+    record = observed_record(track, runway)
+
+    span = record["source"]["crossing_span"]
+    assert span["kind"] == "fitted_tail"
+    assert span["start_index"] == 2
+    assert len(record["states"]) == 3
+    crossing = record["states"][-1]
+    # Event HAE → the record's MSL datum, and the ground speed rides as V.
+    assert crossing["alt"] == pytest.approx(145.0 - runway.hae_minus_msl_m)
+    assert crossing["V"] == pytest.approx(70.0)
+    # final_time_s and the target kinematics stay anchored to the MEASURED end.
+    assert record["final_time_s"] == pytest.approx(60.0)
+    assert record["target_state"]["V"] == pytest.approx(record["states"][1]["V"])
 
 
 def test_event_availability_counts_ambiguous_and_unassignable_candidates():

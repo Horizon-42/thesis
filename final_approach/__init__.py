@@ -41,6 +41,14 @@ from final_approach.assign import (
     assign_runway,
     landing_screen_reason,
 )
+from final_approach.crossing import (
+    CROSSING_SPAN_KEY,
+    FITTED_TAIL_KIND,
+    MEASURED_BRACKET_KIND,
+    bracket_fraction,
+    interpolate_channels,
+    validate_crossing_span,
+)
 from final_approach.fit import (
     DEFAULT_MIN_SAMPLES,
     DEFAULT_MIN_SPAN_M,
@@ -65,6 +73,12 @@ __all__ = [
     "SegmentFit",
     "fit_final_segment",
     "fit_line",
+    "bracket_fraction",
+    "interpolate_channels",
+    "validate_crossing_span",
+    "CROSSING_SPAN_KEY",
+    "MEASURED_BRACKET_KIND",
+    "FITTED_TAIL_KIND",
     "DEFAULT_WINDOW_M",
     "DEFAULT_MIN_SAMPLES",
     "DEFAULT_MIN_SPAN_M",

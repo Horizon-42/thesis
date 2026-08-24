@@ -79,6 +79,25 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v6`.
 
 ## Judging observed (ADS-B) data
 
+- **Observed grading is the SAME state interpolation as computed grading (2026-08-24).**
+  The record's `source.crossing_span` says where its crossing lives
+  (`final_approach.crossing`): a `measured_bracket` marker interpolates the marked
+  state pair at the event's own fraction; a `fitted_tail` marker points at the one
+  inferred crossing row the producer appended (MSL, timed by a trapezoidal
+  ground-speed estimate — audit metadata, nothing grades on its clock).
+  `_observed_arrival` no longer reads the event's geometry: the event stays for
+  identity/staleness validation, the datum cross-check, the audit copy, and
+  `crossing_ground_speed_ms`. **`final_time_s` stays pinned to the last MEASURED
+  row** (span-aware contract in `records.py`), so flight-time and Δt-vs-observed
+  statistics did not move; `TrajectoryRecord.measured_states` is what path-shape
+  and span comparisons run over (an appended row is a modeling boundary, not flown
+  trajectory). An estimated event on a record WITHOUT a span is a stale artifact
+  and raises with its cure (`--evaluate-only`); a record with no event at all
+  (optimizer/ts references) still reads `unavailable` → indeterminate. The two
+  retained subject branches are POLICY, not plumbing: missing-crossing outcome
+  (reception gap ≠ model shortfall) and the speed-gate scope (observed V is ground
+  speed).
+
 - **An observed track's `states[-1]` is NOT its arrival at the target.** A solve terminates at
   its target by construction; a harvested arrival is a truncated recording of a flight that
   continues — 966/996 KRDU tracks end a median **325 m short** of the threshold, still airborne.

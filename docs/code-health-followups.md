@@ -234,3 +234,10 @@ line format), so this is fixture rot, not one missing file.
 the fixture call `ensure_lateral_pass_roster` against a stub approach report), and
 re-derive the drifted assertion strings. Owned by whoever is actively working the ts
 pipeline; not fixed here to avoid colliding with in-flight changes.
+
+Same family, found 2026-08-24:
+`test_download_landings.py::test_download_reuses_interrupted_checkpoint_start_for_cache_keys`
+writes a checkpoint fixture with `"version": 2` (correct when `3008baf` bumped it on
+07-23) but `runner.CHECKPOINT_VERSION` is now 4, so `checkpoint_start` rejects the
+fixture and the test fails at HEAD. The fixture should import the constant instead of
+restating it — the version-pinned-in-a-test trap, again.

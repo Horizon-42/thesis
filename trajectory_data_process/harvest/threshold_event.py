@@ -21,6 +21,7 @@ from final_approach import (
     Projected,
     SegmentFit,
     TrackPoint,
+    bracket_fraction,
     fit_line,
 )
 from final_approach.event_contract import (
@@ -240,7 +241,8 @@ def _validated_brackets_for_runway(
         if not (before.along_m < 0.0 <= after.along_m):
             continue
 
-        fraction = -before.along_m / (after.along_m - before.along_m)
+        # The project's single crossing-fraction definition (final_approach.crossing).
+        fraction = bracket_fraction(before.along_m, after.along_m)
         crossing = Projected(
             0.0,
             before.cross_m + fraction * (after.cross_m - before.cross_m),

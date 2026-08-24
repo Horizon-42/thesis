@@ -4,6 +4,43 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — Unified record design: observed records say where their crossing lives
+
+Evaluation now grades every subject through ONE state interpolation. The design
+("2b"): an observed record's `source.crossing_span` marks its crossing —
+`measured_bracket` (the instrument-selected direct bracket: left_index + fraction,
+reproduced from the event) or `fitted_tail` (exactly one inferred crossing row
+appended after the measured states; MSL, V = event ground speed with a recorded
+fallback, t = trapezoidal estimate nothing grades on). Computed records carry no
+marker — the artifact under test cannot author the quantity it is graded on
+(`record_from_dict` enforces observed-only).
+
+- **One crossing definition fleet-wide**: `final_approach.crossing.bracket_fraction`
+  + `interpolate_channels` replace three hand-rolled copies (harvest direct bracket,
+  evaluator computed path, ts dataset supervision truncation). The marker schema +
+  `validate_crossing_span` live beside the event contract — the same
+  producer/evaluator seam pattern.
+- **Producer half**: `flight_scenarios.crossing_span.crossing_span_from_event`;
+  `harvest/observed.py` is the one span-producing writer (optimizer/ts references
+  carry no event and stay markerless → still `unavailable`/indeterminate, unchanged).
+- **`_observed_arrival` no longer reads event geometry** — the event remains for
+  identity/staleness validation, the datum cross-check, audit copy, and the
+  ground-speed audit stat. `final_time_s` stays pinned to the last MEASURED row
+  (span-aware contract), so flight-time and Δt-vs-observed statistics do not move;
+  `TrajectoryRecord.measured_states` keeps path-shape/span comparisons on flown
+  trajectory only. Two subject branches remain BY POLICY: missing-crossing outcome
+  (reception gap ≠ model shortfall) and speed-gate scope (ground speed never graded).
+- Deliberate small semantic changes, all in descriptive columns: observed rows'
+  `speed_ms`/`heading_rad` now measure the crossing state against the measured-end
+  target (previously tautologically 0), and `along_track_m` is the projected ≈0
+  instead of exactly 0. Verdict-bearing quantities (lateral, vertical, verdicts,
+  flight times, ground speed) are preserved — pinned by the republish diff below.
+- Fixtures made physically self-consistent: the test event's crossing position now
+  ENCODES its cross-track offset instead of contradicting it (the old event-based
+  reader never noticed; honest geometry does).
+- Pre-span records in `approach/records/` fail loudly with the cure
+  (`--evaluate-only`); all five airports republished after the change.
+
 ### 2026-08-24 — Observed crossing ground speed wired through the report to the Details window
 
 The event's audit speed now actually reaches a reader — the missing consumer half of
