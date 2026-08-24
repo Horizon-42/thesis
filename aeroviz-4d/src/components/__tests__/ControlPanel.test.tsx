@@ -285,6 +285,48 @@ describe("ControlPanel", () => {
     ]);
   });
 
+  it("ranks a split's prediction results by the chosen accuracy metric", () => {
+    appState.layers.trajectories = true;
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = "ts_weak_val";
+    appState.comparisonCategories = [
+      {
+        ...category("ts_weak_val", false, 5),
+        label: "Weak model",
+        datasetSplit: "val",
+        accuracy: { adeM: { mean: 1400, p95: 4100 }, fdeM: { mean: 900, p95: 5900 } },
+      },
+      {
+        ...category("ts_strong_val", false, 5),
+        label: "Strong model",
+        datasetSplit: "val",
+        accuracy: { adeM: { mean: 480, p95: 1500 }, fdeM: { mean: 1700, p95: 5000 } },
+      },
+    ];
+
+    const { container } = render(<ControlPanel />);
+    const optionValues = () =>
+      [...container.querySelectorAll("optgroup option")].map((option) =>
+        (option as HTMLOptionElement).value,
+      );
+
+    // Default: manifest order, no metric decoration.
+    expect(optionValues()).toEqual(["ts_weak_val", "ts_strong_val"]);
+
+    fireEvent.change(screen.getByLabelText("Sort results"), {
+      target: { value: "adeMean" },
+    });
+    expect(optionValues()).toEqual(["ts_strong_val", "ts_weak_val"]);
+    const first = container.querySelector("optgroup option") as HTMLOptionElement;
+    expect(first.textContent).toContain("ADE mean 480 m");
+
+    // FDE mean flips the ranking — the metrics are independent axes.
+    fireEvent.change(screen.getByLabelText("Sort results"), {
+      target: { value: "fdeMean" },
+    });
+    expect(optionValues()).toEqual(["ts_weak_val", "ts_strong_val"]);
+  });
+
   it("uses an exclusive result-source selector and keeps checkboxes for visibility only", () => {
     appState.layers.trajectories = true;
     appState.comparisonCategories = [

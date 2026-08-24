@@ -3,9 +3,11 @@ import type { ComparisonCategory } from "../../data/airportData";
 import {
   activeTrajectoryResultSource,
   categoriesForResultSource,
+  categoryAccuracyValue,
   categoryForExperimentSplit,
   categoryResultSource,
   experimentOptions,
+  sortCategoriesByAccuracy,
 } from "../trajectoryResultSources";
 
 const prediction: ComparisonCategory = {
@@ -77,9 +79,49 @@ describe("trajectory result sources", () => {
       predictionOutput: "control",
       horizonMode: "normalized",
       seed: 1337,
+      metricValue: null,
     }]);
     expect(categoryForExperimentSplit(categories, "campaign/stage/run_seed1337", "train")?.datasetSplit)
       .toBe("train");
+  });
+
+  it("ranks one split's categories best-first by the chosen metric, unknowns last", () => {
+    const worse = { ...prediction, key: "b_val", dir: "b_val",
+      accuracy: { adeM: { mean: 1400, p95: 4100 }, fdeM: { mean: 1700, p95: 5900 } } };
+    const better = { ...prediction, key: "a_val", dir: "a_val",
+      accuracy: { adeM: { mean: 480, p95: 1500 }, fdeM: { mean: 1750, p95: 5000 } } };
+    const unranked = { ...prediction, key: "c_val", dir: "c_val" };
+
+    expect(sortCategoriesByAccuracy([worse, better, unranked], null))
+      .toEqual([worse, better, unranked]); // no metric → manifest order untouched
+    expect(sortCategoriesByAccuracy([worse, better, unranked], "adeMean")
+      .map((category) => category.key)).toEqual(["a_val", "b_val", "c_val"]);
+    // FDE flips the ranking — the two metrics are independent axes.
+    expect(sortCategoriesByAccuracy([worse, better, unranked], "fdeMean")
+      .map((category) => category.key)).toEqual(["b_val", "a_val", "c_val"]);
+    expect(categoryAccuracyValue(better, "adeP95")).toBe(1500);
+    expect(categoryAccuracyValue(unranked, "adeMean")).toBeNull();
+  });
+
+  it("ranks experiments within a campaign by the preferred split's metric", () => {
+    const strong = experiment("val");
+    strong.experiment = { ...strong.experiment!, id: "campaign/strong" };
+    strong.key = "experiment_strong_val";
+    strong.dir = "experiment_strong_val";
+    strong.accuracy = { adeM: { mean: 480, p95: 1500 } };
+    const weak = experiment("val");
+    weak.experiment = { ...weak.experiment!, id: "campaign/aaa_weak" };
+    weak.key = "experiment_weak_val";
+    weak.dir = "experiment_weak_val";
+    weak.accuracy = { adeM: { mean: 1400, p95: 4100 } };
+
+    // Default: label order (aaa_weak first). Sorted: the strong model leads.
+    expect(experimentOptions([weak, strong]).map((option) => option.id))
+      .toEqual(["campaign/aaa_weak", "campaign/strong"]);
+    const ranked = experimentOptions([weak, strong], "adeMean", "val");
+    expect(ranked.map((option) => option.id))
+      .toEqual(["campaign/strong", "campaign/aaa_weak"]);
+    expect(ranked[0]?.metricValue).toBe(480);
   });
 
   it("prefers the publisher's canonical run label when stamped", () => {

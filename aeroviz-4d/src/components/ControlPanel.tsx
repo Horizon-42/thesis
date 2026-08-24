@@ -31,12 +31,16 @@ import {
   comparisonKindSwatch,
 } from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   activeTrajectoryResultSource,
   categoriesForResultSource,
+  categoryAccuracyValue,
   categoryForExperimentSplit,
   experimentOptions,
+  RESULT_ACCURACY_SORT_LABELS,
+  sortCategoriesByAccuracy,
+  type ResultAccuracySortKey,
   type TrajectoryResultSource,
 } from "../utils/trajectoryResultSources";
 
@@ -105,7 +109,18 @@ export default function ControlPanel({
     trajectoryComparison,
     activeComparisonCategory,
   );
-  const experiments = experimentOptions(experimentCategories);
+  // Ranking metric for the result pickers (session-local presentation state). Categories
+  // are ranked within their split group; experiments by the split currently in view.
+  const [resultSortBy, setResultSortBy] = useState<ResultAccuracySortKey | "default">(
+    "default",
+  );
+  const resultSortKey = resultSortBy === "default" ? null : resultSortBy;
+  const activeSplit = activeComparisonCategory?.datasetSplit ?? "val";
+  const metricSuffix = (value: number | null | undefined): string =>
+    resultSortKey && value != null
+      ? ` — ${RESULT_ACCURACY_SORT_LABELS[resultSortKey]} ${Math.round(value).toLocaleString()} m`
+      : "";
+  const experiments = experimentOptions(experimentCategories, resultSortKey, activeSplit);
   const activeExperimentId = activeComparisonCategory?.experiment?.id ?? "";
   const activeExperimentCategories = experimentCategories.filter(
     (category) => category.experiment?.id === activeExperimentId,
@@ -214,6 +229,26 @@ export default function ControlPanel({
                 </option>
               </select>
             </label>
+            {resultSource === "prediction" || resultSource === "experiment" ? (
+              <label className="control-panel-airport-selector">
+                <span>Sort results</span>
+                <select
+                  className="control-panel-airport-selector-input"
+                  value={resultSortBy}
+                  onChange={(event) =>
+                    setResultSortBy(event.target.value as ResultAccuracySortKey | "default")}
+                >
+                  <option value="default">Default (name)</option>
+                  {(Object.keys(RESULT_ACCURACY_SORT_LABELS) as ResultAccuracySortKey[]).map(
+                    (key) => (
+                      <option key={key} value={key}>
+                        {RESULT_ACCURACY_SORT_LABELS[key]} (best first)
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+            ) : null}
             {resultSource === "baseline" && observedVerdicts.counts ? (
               <div className="control-panel-verdict-legend" aria-label="Approach verdict legend">
                 <div className="control-panel-verdict-title">
@@ -289,31 +324,45 @@ export default function ControlPanel({
                     value={trajectoryComparisonCategory ?? ""}
                     onChange={(event) => setTrajectoryComparisonCategory(event.target.value || null)}
                   >
+                    {/* Ranked within each split group — cross-split error comparisons
+                        are meaningless, so the sort never mixes the groups. */}
                     {heldOutTestCategories.length > 0 ? (
                       <optgroup label="Held-out test results">
-                        {heldOutTestCategories.map((category) => (
-                          <option key={category.key} value={category.dir}>
-                            {category.label} ({category.groups})
-                          </option>
-                        ))}
+                        {sortCategoriesByAccuracy(heldOutTestCategories, resultSortKey)
+                          .map((category) => (
+                            <option key={category.key} value={category.dir}>
+                              {category.label} ({category.groups})
+                              {resultSortKey
+                                ? metricSuffix(categoryAccuracyValue(category, resultSortKey))
+                                : ""}
+                            </option>
+                          ))}
                       </optgroup>
                     ) : null}
                     {trainingCategories.length > 0 ? (
                       <optgroup label="Training results (in-sample)">
-                        {trainingCategories.map((category) => (
-                          <option key={category.key} value={category.dir}>
-                            {category.label} ({category.groups})
-                          </option>
-                        ))}
+                        {sortCategoriesByAccuracy(trainingCategories, resultSortKey)
+                          .map((category) => (
+                            <option key={category.key} value={category.dir}>
+                              {category.label} ({category.groups})
+                              {resultSortKey
+                                ? metricSuffix(categoryAccuracyValue(category, resultSortKey))
+                                : ""}
+                            </option>
+                          ))}
                       </optgroup>
                     ) : null}
                     {otherComparisonCategories.length > 0 ? (
                       <optgroup label="Other evaluation results">
-                        {otherComparisonCategories.map((category) => (
-                          <option key={category.key} value={category.dir}>
-                            {category.label} ({category.groups})
-                          </option>
-                        ))}
+                        {sortCategoriesByAccuracy(otherComparisonCategories, resultSortKey)
+                          .map((category) => (
+                            <option key={category.key} value={category.dir}>
+                              {category.label} ({category.groups})
+                              {resultSortKey
+                                ? metricSuffix(categoryAccuracyValue(category, resultSortKey))
+                                : ""}
+                            </option>
+                          ))}
                       </optgroup>
                     ) : null}
                   </select>
@@ -348,6 +397,7 @@ export default function ControlPanel({
                             .map((experiment) => (
                               <option key={experiment.id} value={experiment.id}>
                                 {experiment.label}
+                                {metricSuffix(experiment.metricValue)}
                               </option>
                             ))}
                         </optgroup>

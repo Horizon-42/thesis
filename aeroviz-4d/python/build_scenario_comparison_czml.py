@@ -1107,11 +1107,36 @@ def _load_adsb(airport: str, override: str | None) -> list[dict[str, Any]]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def category_accuracy_summary(prediction: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Compact per-category accuracy for ``categories.json`` (mean + p95 of ADE/FDE).
+
+    A subset of the index's ``prediction`` block, small enough to live on every category
+    entry — it is what lets the frontend rank a split's results without fetching each
+    category's full comparison index. ``None`` for optimizer batches (no such metric).
+    """
+    if not isinstance(prediction, dict):
+        return None
+    summary: dict[str, Any] = {}
+    for name in ("adeM", "fdeM"):
+        block = prediction.get(name)
+        if not isinstance(block, dict):
+            continue
+        values = {
+            key: float(block[key])
+            for key in ("mean", "p95")
+            if isinstance(block.get(key), (int, float))
+        }
+        if values:
+            summary[name] = values
+    return summary or None
+
+
 def _upsert_category(
     manifest_path: Path, *, key: str, label: str, directory: str, group_count: int,
     constrained: bool, dataset_split: str | None = None,
     result_source: str | None = None,
     experiment: dict[str, Any] | None = None,
+    accuracy: dict[str, Any] | None = None,
 ) -> int:
     """Add/replace one category in the shared ``categories.json`` manifest.
 
@@ -1142,6 +1167,8 @@ def _upsert_category(
         entry["resultSource"] = result_source
     if experiment is not None:
         entry["experiment"] = experiment
+    if accuracy is not None:
+        entry["accuracy"] = accuracy
     kept.append(entry)
     manifest["categories"] = sorted(kept, key=lambda c: c["key"])
     _write_json_atomic(manifest_path, manifest, pretty=True)
@@ -1305,6 +1332,7 @@ def main() -> None:
             dataset_split=args.dataset_split,
             result_source=args.result_source,
             experiment=experiment,
+            accuracy=category_accuracy_summary(index.get("prediction")),
         )
         print(f"✓ registered category {args.category!r} -> {out_dir.parent / 'categories.json'} "
               f"({total} categor{'y' if total == 1 else 'ies'})")

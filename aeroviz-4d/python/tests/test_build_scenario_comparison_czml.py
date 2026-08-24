@@ -861,6 +861,49 @@ def test_upsert_prediction_category_stamps_dataset_split(tmp_path):
     assert category["datasetSplit"] == "train"
 
 
+def test_upsert_category_stamps_compact_accuracy_for_result_ranking(tmp_path):
+    # The frontend ranks a split's results by mean/p95 ADE/FDE from categories.json
+    # alone — without fetching each category's full comparison index.
+    from build_scenario_comparison_czml import category_accuracy_summary
+
+    prediction_block = {
+        "flights": 1404,
+        "adeM": {"mean": 1406.6, "p95": 4113.4, "median": 662.8, "max": 10651.5},
+        "fdeM": {"mean": 1697.0, "p95": 5922.9},
+        "finalTimeS": {"mae": 26.2},
+    }
+    accuracy = category_accuracy_summary(prediction_block)
+    assert accuracy == {
+        "adeM": {"mean": 1406.6, "p95": 4113.4},
+        "fdeM": {"mean": 1697.0, "p95": 5922.9},
+    }
+    # Optimizer batches have no prediction block and must not grow the field.
+    assert category_accuracy_summary(None) is None
+
+    manifest = tmp_path / "categories.json"
+    _upsert_category(
+        manifest,
+        key="ts_pooled_itr_normalized_time_val",
+        label="Validation split",
+        directory="ts_pooled_itr_normalized_time_val",
+        group_count=12,
+        constrained=False,
+        dataset_split="val",
+        accuracy=accuracy,
+    )
+    _upsert_category(
+        manifest,
+        key="runway",
+        label="Runway target",
+        directory="runway",
+        group_count=12,
+        constrained=False,
+    )
+    categories = {c["key"]: c for c in json.loads(manifest.read_text())["categories"]}
+    assert categories["ts_pooled_itr_normalized_time_val"]["accuracy"] == accuracy
+    assert "accuracy" not in categories["runway"]
+
+
 def test_upsert_experiment_category_stamps_grouped_checkpoint_metadata(tmp_path):
     manifest = tmp_path / "categories.json"
     experiment = {

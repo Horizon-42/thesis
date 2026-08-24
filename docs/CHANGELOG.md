@@ -4,6 +4,27 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-08-24 — Result pickers rank a split's results by mean/p95 ADE/FDE
+
+The Prediction and Experiments pickers listed a split's results in name order only —
+no way to see which model/arm actually scored best. Each category's aggregate accuracy
+existed only inside its own `comparison_index.json` `prediction` block, too heavy to
+fetch per category just to order a dropdown, so `build_scenario_comparison_czml.py`'s
+`category_accuracy_summary` now stamps a compact `accuracy` block (`adeM`/`fdeM`, each
+mean + p95 — a SUBSET of the index block, never recomputed) onto every prediction
+category entry in `categories.json`, and
+`ts_transformer/docs/backfill_category_accuracy.py` backfilled the 59 published
+categories from their own indexes (idempotent, metadata-only). The frontend gains a
+"Sort results" selector (Default / ADE mean / ADE p95 / FDE mean / FDE p95) shown for
+the Prediction and Experiments sources: prediction categories are ranked best-first
+WITHIN their split optgroup (cross-split error comparisons are meaningless, so the sort
+never mixes groups), experiments are ranked within their campaign by the split
+currently in view (val fallback), options show the metric value inline, and entries
+without a value keep their order at the end. An earlier misread of this request
+(per-trajectory ADE/FDE sorting inside one category, incl. a 140k-record group-level
+backfill) was fully reverted the same day — group records carry no `adeM`/`fdeM`.
+Verified: frontend 523 pass + tsc clean, aeroviz-4d python suite 155 pass.
+
 ### 2026-08-24 — One naming grammar for every ts_transformer run and published category
 
 The frontend's learned-prediction categories carried three label dialects (verbose

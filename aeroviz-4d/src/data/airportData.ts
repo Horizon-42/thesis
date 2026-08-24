@@ -151,6 +151,23 @@ export interface ExperimentCategoryMetadata {
   seed?: number | null;
 }
 
+/** mean/p95 of one accuracy metric, in metres. */
+export interface CategoryAccuracyMetric {
+  mean?: number | null;
+  p95?: number | null;
+}
+
+/**
+ * Compact per-category prediction accuracy (subset of the comparison index's
+ * `prediction` block, stamped into `categories.json` so a split's results can be
+ * RANKED without fetching every category's full index). Present only on
+ * learned-prediction categories; older publishes were backfilled 2026-08-24.
+ */
+export interface CategoryAccuracy {
+  adeM?: CategoryAccuracyMetric | null;
+  fdeM?: CategoryAccuracyMetric | null;
+}
+
 /** One evaluation category, as listed in `comparison/categories.json`. */
 export interface ComparisonCategory {
   /** Stable key, e.g. "asdb" / "runway" / "runway_cons". */
@@ -174,6 +191,8 @@ export interface ComparisonCategory {
   resultSource?: ComparisonResultSource;
   /** Present only for categories published from the checkpoint experiment sweep. */
   experiment?: ExperimentCategoryMetadata;
+  /** Batch mean/p95 ADE/FDE for ranking results; prediction categories only. */
+  accuracy?: CategoryAccuracy | null;
 }
 
 /** Report-only categories have no comparison groups or CZML to draw. */
@@ -221,6 +240,9 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
     (candidate.resultSource === undefined ||
       candidate.resultSource === "prediction" ||
       candidate.resultSource === "experiment") &&
+    (candidate.accuracy === undefined ||
+      candidate.accuracy === null ||
+      typeof candidate.accuracy === "object") &&
     validExperiment &&
     (candidate.resultSource !== "experiment" || experiment !== undefined)
   );
