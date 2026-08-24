@@ -25,6 +25,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  composeVerdict,
   isLegacyEvaluationReport,
   type EvaluationComponentResult,
   type EvaluationReport,
@@ -605,6 +606,34 @@ function deviationStatusClass(status: DeviationStatus): string {
 }
 
 export default function EvaluationReportWindow({ report, title, subtitle, onClose }: Props) {
+  // The speed-gate toggle: verdicts re-derived CLIENT-SIDE from the per-row
+  // component results the report deliberately serializes — no refetch, no
+  // schema change. Three-gate (the published verdicts) is the default; the
+  // two-gate view recomposes lateral+vertical per row, but ONLY for rows whose
+  // published verdict actually came from the gate composite (self-checked by
+  // reproducing it) — an unsolved or crossing-less row keeps its verdict, since
+  // speed never participated in it.
+  const [includeSpeedGate, setIncludeSpeedGate] = useState(true);
+  const speedToggleAvailable = !isLegacyEvaluationReport(report);
+  const useThreeGate = !speedToggleAvailable || includeSpeedGate;
+  const verdictOf = useMemo(() => {
+    if (useThreeGate) return (row: EvaluationRow): EvaluationVerdict => row.verdict;
+    return (row: EvaluationRow): EvaluationVerdict => {
+      const speed = row.speed_result ?? "indeterminate";
+      const threeGate = composeVerdict([row.lateral_result, row.vertical_result, speed]);
+      if (threeGate !== row.verdict) return row.verdict;
+      return composeVerdict([row.lateral_result, row.vertical_result]);
+    };
+  }, [useThreeGate]);
+  // Always derived (identical to the report's own counts in three-gate mode).
+  const verdictCounts = useMemo(() => {
+    const counts: Record<EvaluationVerdict, number> = {
+      pass: 0, fail: 0, indeterminate: 0,
+    };
+    for (const row of report.trajectories) counts[verdictOf(row)] += 1;
+    return counts;
+  }, [report, verdictOf]);
+
   const solvedRows = useMemo(() => report.trajectories.filter((r) => r.solved), [report]);
   const measuredRows = useMemo(
     () => solvedRows.filter(hasFiniteDeviations),
@@ -657,9 +686,9 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         label: r.id,
         observed: r.reference!.reference_flight_time_s ?? 0,
         optimized: r.final_time_s ?? 0,
-        verdict: r.verdict,
+        verdict: verdictOf(r),
       })),
-    [referenceRows],
+    [referenceRows, verdictOf],
   );
   const deviation3DPoints = useMemo(
     () =>
@@ -667,9 +696,9 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         label: row.id,
         lateral: row.lateral_m,
         vertical: row.vertical_m,
-        verdict: row.verdict,
+        verdict: verdictOf(row),
       })),
-    [measuredRows],
+    [measuredRows, verdictOf],
   );
 
   // Draggable floating window (same pattern as DynamicsComparisonCharts):
@@ -738,11 +767,12 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           label: `solve rate ${formatPct(report.solve_rate)}`,
         },
     {
-      value: `${report.successful}/${report.total}`,
-      label: `pass rate ${formatPct(report.success_rate)}`,
+      value: `${verdictCounts.pass}/${report.total}`,
+      label: `pass rate ${formatPct(report.total > 0 ? verdictCounts.pass / report.total : null)}`
+        + (useThreeGate ? "" : " (two-gate view)"),
     },
-    { value: String(report.failed), label: "failed" },
-    { value: String(report.indeterminate), label: "indeterminate" },
+    { value: String(verdictCounts.fail), label: "failed" },
+    { value: String(verdictCounts.indeterminate), label: "indeterminate" },
   ];
   if (hasSpeedGate && speedCounts) {
     // Observed batches are graded too (2026-08-24): the fitted crossing GROUND
@@ -797,6 +827,23 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
             </div>
           ))}
         </div>
+
+        {speedToggleAvailable ? (
+          <label
+            className="eval-report-gate-toggle"
+            title="Verdicts are re-derived in the viewer from each row's per-component results; the published report always carries the three-gate verdicts"
+          >
+            <input
+              type="checkbox"
+              checked={includeSpeedGate}
+              onChange={(event) => setIncludeSpeedGate(event.target.checked)}
+            />
+            Include the speed gate in verdicts
+            {includeSpeedGate
+              ? null
+              : " — showing two-gate (lateral + vertical) verdicts; the published rate is three-gate"}
+          </label>
+        ) : null}
 
         {isLegacyEvaluationReport(report) ? (
           <p className="eval-report-deviation-warning" role="status">
@@ -994,7 +1041,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
               {report.trajectories.map((row, i) => (
                 <tr
                   key={`${row.file ?? row.id}-${i}`}
-                  className={!row.solved ? "eval-row-unsolved" : row.verdict === "fail" ? "eval-row-fail" : ""}
+                  className={!row.solved ? "eval-row-unsolved" : verdictOf(row) === "fail" ? "eval-row-fail" : ""}
                 >
                   <th scope="row">{row.id}</th>
                   <td>{row.solved ? "✓" : "✗"}</td>
@@ -1002,7 +1049,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                   <td>{row.lateral_result}</td>
                   <td>{row.vertical_result}</td>
                   {hasSpeedGate ? <td>{row.speed_result}</td> : null}
-                  <td>{row.verdict}</td>
+                  <td>{verdictOf(row)}</td>
                   <td className={`eval-deviation-status ${deviationStatusClass(deviationStatus(row))}`}>
                     {deviationStatus(row)}
                   </td>

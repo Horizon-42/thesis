@@ -160,6 +160,21 @@ export interface EvaluationReport {
   trajectories: EvaluationRow[];
 }
 
+/** Compose component verdicts into an overall verdict.
+ *
+ * MUST match `evaluation.metrics._composite` (a declared mirror — the frontend
+ * cannot import the modeling tree): any `fail` dominates, else any
+ * `indeterminate`, else `pass`. Used by the Details window's speed-gate toggle
+ * to re-derive two-gate verdicts client-side from the per-row component
+ * results the report deliberately serializes. */
+export function composeVerdict(
+  components: readonly EvaluationComponentResult[],
+): EvaluationVerdict {
+  if (components.includes("fail")) return "fail";
+  if (components.includes("indeterminate")) return "indeterminate";
+  return "pass";
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }

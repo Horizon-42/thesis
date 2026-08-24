@@ -287,6 +287,56 @@ describe("EvaluationReportWindow", () => {
     expect(cell.title).toBe("window 66.3–76.6 m/s · Vs1g 53.9 m/s");
   });
 
+  it("toggling the speed gate off re-derives two-gate verdicts client-side", () => {
+    // FDX1449 becomes a SPEED-ONLY failure; UPS1276 stays an unsolved fail whose
+    // verdict never came from the gate composite and must not move.
+    const speedOnlyFail: EvaluationReport = {
+      ...REPORT,
+      verdict_counts: { pass: 1, fail: 2, indeterminate: 0 },
+      trajectories: REPORT.trajectories.map((row) =>
+        row.id === "FDX1449"
+          ? {
+              ...row,
+              lateral_result: "pass" as const,
+              vertical_result: "pass" as const,
+              speed_result: "fail" as const,
+              verdict: "fail" as const,
+              violations: ["speed"],
+            }
+          : row),
+    };
+    render(
+      <EvaluationReportWindow
+        report={speedOnlyFail}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Three-gate default: published verdicts.
+    expect(screen.getByText("pass rate 33.3%")).toBeTruthy();
+    expect(screen.getByText("FDX1449").closest("tr")!.textContent).toContain("fail");
+
+    fireEvent.click(
+      screen.getByLabelText(/Include the speed gate in verdicts/),
+    );
+
+    // Two-gate view: the speed-only failure passes; the unsolved fail stays.
+    expect(screen.getByText(/pass rate 66.7%/)).toBeTruthy();
+    expect(screen.getByText(/two-gate view/)).toBeTruthy();
+    const speedRow = screen.getByText("FDX1449").closest("tr")!;
+    expect(speedRow.className).not.toContain("eval-row-fail");
+    const unsolvedRow = screen.getByText("UPS1276").closest("tr")!;
+    expect(unsolvedRow.textContent).toContain("fail");
+
+    // Back on: published three-gate verdicts return.
+    fireEvent.click(
+      screen.getByLabelText(/Include the speed gate in verdicts/),
+    );
+    expect(screen.getByText("pass rate 33.3%")).toBeTruthy();
+  });
+
   it("closes via the Close button", () => {
     const onClose = vi.fn();
     render(

@@ -3052,6 +3052,17 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   margin-bottom: 10px;
 }
 
+.eval-report-gate-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #b7c1d4;
+  cursor: pointer;
+  user-select: none;
+}
+
 .eval-report-card {
   background: #16223a;
   border: 1px solid #2a3550;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   EVALUATION_REPORT_SCHEMA_VERSION,
   LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS,
+  composeVerdict,
   isEvaluationReport,
   isLegacyEvaluationReport,
   type EvaluationReport,
@@ -38,6 +39,18 @@ function reportWith(observed: unknown) {
     observed,
   };
 }
+
+describe("composeVerdict (mirror of evaluation.metrics._composite)", () => {
+  it("lets fail dominate, then indeterminate, else pass — for any gate subset", () => {
+    expect(composeVerdict(["pass", "pass", "pass"])).toBe("pass");
+    expect(composeVerdict(["pass", "pass"])).toBe("pass");
+    expect(composeVerdict(["pass", "indeterminate", "pass"])).toBe("indeterminate");
+    expect(composeVerdict(["pass", "indeterminate", "fail"])).toBe("fail");
+    expect(composeVerdict(["fail", "pass"])).toBe("fail");
+    expect(composeVerdict(["indeterminate", "indeterminate"])).toBe("indeterminate");
+  });
+});
+
 
 describe("isEvaluationReport observed availability contract", () => {
   it("rejects the retired v2 report contract", () => {
