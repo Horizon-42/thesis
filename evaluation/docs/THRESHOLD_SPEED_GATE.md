@@ -31,8 +31,15 @@ and **not** a certification statement about any real aircraft. The report says t
 For a record crossing the threshold at mass `m` (kg), with the aircraft's wing area `S`
 (m²) and landing-configuration maximum lift coefficient `Cl_max`:
 
+## Stall? lift coefficient is larger then the maximum lift coefficient, then the aircraft is in stall, and the speed gate will fail.
+
 ```text
 V_s1g  = sqrt(2 m g / (rho0 · S · Cl_max))      # 1-g level stall speed, TAS (m/s)
+# Real stall speed; thrust, bank angle;
+
+# validate for 3 airplanes, look up stall speeds is match to the real aircraft; Cessna 53 flaps up, flaps down 48;
+# flight envolope; 
+
 V_ref  = 1.23 × V_s1g                            # reference landing speed
 gate   : V_ref ≤ V_crossing ≤ V_ref + 20 kt      # inclusive at both edges
 ```

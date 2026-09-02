@@ -4,3 +4,8 @@ simple: 0.75/1.61 km; 1.390 km;
 constraints: given the goal branches;
 
 the potential path: Mode-query Transformer;
+
+conditional based on the procedure, and runway; additional input; 
+
+speed gate, stall speed;
+
