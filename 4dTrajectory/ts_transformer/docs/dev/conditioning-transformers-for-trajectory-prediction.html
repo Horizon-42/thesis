@@ -1,0 +1,2034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conditioning Transformers for Trajectory Prediction</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Spectral:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+  onload="hljs.highlightAll()"></script>
+
+<style>
+:root{
+  --sans:'Archivo',system-ui,sans-serif;
+  --serif:'Spectral',Georgia,serif;
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+
+  --paper:#F3F6F6;
+  --panel:#FFFFFF;
+  --ink:#101A20;
+  --ink-2:#4C5D66;
+  --ink-3:#7A8B93;
+  --rule:#C7D2D5;
+  --rule-2:#E2E9EA;
+
+  --magenta:#B31C63;
+  --teal:#0B6C7C;
+  --sand:#8A6A2F;
+
+  --code-bg:#0E1A20;
+  --nav-w:264px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#0D1418; --panel:#131F25; --ink:#DEE7E9; --ink-2:#9EB0B7; --ink-3:#71858D;
+    --rule:#2C3E46; --rule-2:#1E2C33;
+    --magenta:#F2679F; --teal:#4FC3D6; --sand:#D3AC5E; --code-bg:#081015;
+  }
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--serif);font-size:17px;line-height:1.72;
+  font-variant-numeric:oldstyle-nums;
+}
+
+/* ---------- masthead : built like a chart identification block ---------- */
+.plate{
+  border-bottom:3px solid var(--ink);
+  background:
+    repeating-linear-gradient(0deg,transparent 0 23px,var(--rule-2) 23px 24px),
+    repeating-linear-gradient(90deg,transparent 0 23px,var(--rule-2) 23px 24px),
+    var(--panel);
+}
+.plate-in{max-width:1180px;margin:0 auto;padding:36px 28px 0}
+.plate h1{
+  font-family:var(--sans);font-weight:700;font-size:clamp(1.9rem,4.4vw,3.15rem);
+  line-height:1.04;letter-spacing:-.022em;margin:0 0 .35em;max-width:19ch;
+}
+.plate .deck{
+  font-size:1.05rem;color:var(--ink-2);max-width:60ch;margin:0 0 30px;
+}
+.fields{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+  border-top:1px solid var(--ink);border-left:1px solid var(--rule);
+}
+.fields div{border-right:1px solid var(--rule);border-bottom:1px solid var(--ink);padding:9px 12px 11px}
+.fields dt{
+  font-family:var(--sans);font-size:.61rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 3px;
+}
+.fields dd{margin:0;font-family:var(--mono);font-size:.79rem;color:var(--ink);line-height:1.35}
+
+/* ---------- shell ---------- */
+.shell{max-width:1180px;margin:0 auto;padding:0 28px;display:grid;
+  grid-template-columns:var(--nav-w) minmax(0,1fr);gap:52px;align-items:start}
+
+nav.toc{position:sticky;top:0;max-height:100vh;overflow-y:auto;padding:38px 0 60px;
+  border-right:1px solid var(--rule);margin-right:-26px}
+nav.toc h2{font-family:var(--sans);font-size:.63rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 14px;font-weight:600}
+nav.toc ol{list-style:none;margin:0;padding:0}
+nav.toc li{margin:0}
+nav.toc a{display:flex;gap:9px;text-decoration:none;color:var(--ink-2);padding:4px 18px 4px 0;
+  font-family:var(--sans);font-size:.83rem;line-height:1.3;border-left:2px solid transparent;
+  padding-left:11px;margin-left:-13px}
+nav.toc a .n{font-family:var(--mono);font-size:.72rem;color:var(--ink-3);flex:none;min-width:20px}
+nav.toc a:hover{color:var(--ink)}
+nav.toc a.on{color:var(--magenta);border-left-color:var(--magenta)}
+nav.toc a.on .n{color:var(--magenta)}
+nav.toc .lv2{padding-left:32px;font-size:.79rem}
+nav.toc .grp{margin-top:16px}
+
+main{padding:38px 0 120px;max-width:74ch}
+
+/* ---------- typography ---------- */
+h2.part{
+  font-family:var(--sans);font-weight:700;font-size:1.95rem;letter-spacing:-.015em;
+  line-height:1.12;margin:82px 0 6px;padding-top:26px;border-top:3px solid var(--ink);
+}
+h2.part:first-of-type{margin-top:12px}
+h2.part .pn{display:block;font-size:.66rem;letter-spacing:.15em;color:var(--magenta);
+  margin-bottom:9px;font-weight:600}
+.part-sub{color:var(--ink-2);font-size:1rem;margin:0 0 34px;max-width:62ch}
+h3{font-family:var(--sans);font-weight:600;font-size:1.32rem;letter-spacing:-.01em;
+  margin:52px 0 12px;line-height:1.22;scroll-margin-top:14px}
+h3 .hn{font-family:var(--mono);font-size:.82rem;color:var(--magenta);margin-right:.5em;font-weight:500}
+h4{font-family:var(--sans);font-weight:600;font-size:1.02rem;margin:30px 0 8px;letter-spacing:-.005em}
+p{margin:0 0 1.05em}
+main > p, section > p{max-width:70ch}
+a{color:var(--magenta);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--magenta) 35%,transparent)}
+a:hover{border-bottom-color:var(--magenta)}
+strong{font-weight:600}
+em{font-style:italic}
+ul,ol{margin:0 0 1.15em;padding-left:1.3em;max-width:70ch}
+li{margin:0 0 .42em}
+li::marker{color:var(--ink-3)}
+hr{border:0;border-top:1px solid var(--rule);margin:44px 0}
+code{font-family:var(--mono);font-size:.86em;background:var(--rule-2);padding:.08em .32em;
+  border-radius:2px;color:var(--ink)}
+pre{background:var(--code-bg);border-radius:3px;padding:16px 18px;overflow-x:auto;
+  margin:20px 0 24px;border-left:3px solid var(--teal);font-size:.82rem;line-height:1.62}
+pre code{background:none;padding:0;font-size:1em;color:#c9d6dc}
+.hljs{background:transparent!important;padding:0!important}
+.katex{font-size:1.02em}
+.katex-display{margin:1.1em 0;overflow-x:auto;overflow-y:hidden;padding:2px 0}
+
+/* ---------- structural devices ---------- */
+.lede{font-size:1.06rem;color:var(--ink-2);border-left:3px solid var(--magenta);
+  padding:2px 0 2px 20px;margin:0 0 32px;max-width:64ch}
+
+.note{border:1px solid var(--rule);border-left:3px solid var(--teal);background:var(--panel);
+  padding:15px 20px 16px;margin:24px 0;font-size:.95rem}
+.note.warn{border-left-color:var(--magenta)}
+.note.do{border-left-color:var(--sand)}
+.note .tag{font-family:var(--sans);font-size:.62rem;letter-spacing:.13em;text-transform:uppercase;
+  font-weight:600;color:var(--teal);display:block;margin-bottom:6px}
+.note.warn .tag{color:var(--magenta)}
+.note.do .tag{color:var(--sand)}
+.note p:last-child,.note ul:last-child{margin-bottom:0}
+
+table{border-collapse:collapse;width:100%;margin:24px 0 28px;font-family:var(--sans);
+  font-size:.86rem;line-height:1.45}
+th{text-align:left;font-weight:600;border-bottom:2px solid var(--ink);padding:9px 12px 8px;
+  vertical-align:bottom}
+td{border-bottom:1px solid var(--rule-2);padding:9px 12px;vertical-align:top}
+tbody tr:hover{background:var(--panel)}
+.tw{overflow-x:auto;margin:0 -4px}
+
+figure{margin:30px 0 34px}
+.fig{border:1px solid var(--rule);background:var(--panel);padding:18px 20px 12px}
+.fig svg{width:100%;height:auto;display:block}
+figcaption{font-family:var(--sans);font-size:.78rem;color:var(--ink-2);line-height:1.5;
+  margin-top:10px;padding-top:9px;border-top:1px solid var(--rule)}
+figcaption b{color:var(--ink);font-weight:600}
+
+/* svg drawing vocabulary */
+.fig .s{fill:none;stroke:var(--ink);stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.fig .s2{fill:none;stroke:var(--rule);stroke-width:1}
+.fig .m{fill:none;stroke:var(--magenta);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.fig .t{fill:none;stroke:var(--teal);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.fig .sd{fill:none;stroke:var(--sand);stroke-width:1.6;stroke-linecap:round}
+.fig .dash{stroke-dasharray:5 4}
+.fig .dot{stroke-dasharray:1.5 3}
+.fig .box{fill:var(--panel);stroke:var(--ink);stroke-width:1.15}
+.fig .boxq{fill:none;stroke:var(--rule);stroke-width:1}
+.fig .fillp{fill:var(--panel)}
+.fig text{font-family:var(--sans);font-size:11.5px;fill:var(--ink)}
+.fig .lbl{font-family:var(--sans);font-size:9.5px;letter-spacing:.11em;fill:var(--ink-3);
+  text-transform:uppercase;font-weight:600}
+.fig .mn{font-family:var(--mono);font-size:10.5px;fill:var(--ink-2)}
+.fig .sm{font-size:10px;fill:var(--ink-2)}
+.fig .fm{fill:var(--magenta)}
+.fig .ft{fill:var(--teal)}
+.fig .fs{fill:var(--sand)}
+.fig .f3{fill:var(--ink-3)}
+
+.reads{border:1px solid var(--rule);background:var(--panel);padding:0;margin:26px 0 34px}
+.reads h4{margin:0;padding:12px 18px 11px;border-bottom:1px solid var(--rule);font-size:.92rem}
+.reads ul{margin:0;padding:14px 18px 16px 34px;font-family:var(--sans);font-size:.87rem}
+.reads li{margin-bottom:.5em}
+
+.refs h4{font-family:var(--sans);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--magenta);margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+.refs ul{list-style:none;padding:0;font-family:var(--sans);font-size:.85rem;line-height:1.5}
+.refs li{margin-bottom:.62em;padding-left:1.15em;text-indent:-1.15em}
+.refs .yr{font-family:var(--mono);font-size:.78rem;color:var(--ink-3)}
+
+dl.gloss{margin:20px 0;font-size:.94rem}
+dl.gloss dt{font-family:var(--sans);font-weight:600;font-size:.9rem;margin-top:13px}
+dl.gloss dd{margin:1px 0 0;color:var(--ink-2)}
+
+footer{border-top:3px solid var(--ink);margin-top:70px;padding:24px 0 0;
+  font-family:var(--sans);font-size:.78rem;color:var(--ink-3);max-width:70ch}
+
+/* ---------- responsive ---------- */
+@media(max-width:940px){
+  .shell{grid-template-columns:1fr;gap:0;padding:0 20px}
+  nav.toc{position:static;max-height:none;border-right:0;border-bottom:1px solid var(--rule);
+    margin-right:0;padding:22px 0}
+  nav.toc ol{columns:2;column-gap:26px}
+  nav.toc .lv2{display:none}
+  main{padding-top:26px;max-width:none}
+  .plate-in{padding:26px 20px 0}
+  body{font-size:16.5px}
+}
+@media print{
+  nav.toc{display:none}.shell{display:block}
+  body{background:#fff;font-size:10.5pt}
+  pre{background:#f4f4f4;color:#000;border-left-color:#999}
+  pre code{color:#000}
+  h2.part{page-break-after:avoid}figure{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<header class="plate">
+  <div class="plate-in">
+    <h1>Conditioning Transformers for Trajectory Prediction</h1>
+    <p class="deck">How side information gets into a transformer — and how that machinery
+      becomes a forecaster for aircraft on approach.</p>
+    <dl class="fields">
+      <div><dt>Document</dt><dd>Tutorial + reference</dd></div>
+      <div><dt>Scope</dt><dd>Conditioning · trajectory prediction · ATM</dd></div>
+      <div><dt>Assumed background</dt><dd>Transformers, basic PyTorch</dd></div>
+      <div><dt>Application</dt><dd>Landing / approach 4D forecasting</dd></div>
+      <div><dt>Figures</dt><dd>13</dd></div>
+      <div><dt>Compiled</dt><dd>2026-08-31</dd></div>
+    </dl>
+  </div>
+</header>
+
+<div class="shell">
+
+<nav class="toc" aria-label="Contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#orient"><span class="n">0</span><span>Orientation</span></a></li>
+    <li><a href="#cheat"><span class="n">·</span><span>Cheat sheet</span></a></li>
+
+    <li class="grp"><a href="#partA"><span class="n">A</span><span>Conditioning mechanisms</span></a></li>
+    <li><a href="#a1" class="lv2">A.1 &nbsp;Where c enters</a></li>
+    <li><a href="#a2" class="lv2">A.2 &nbsp;Input level</a></li>
+    <li><a href="#a3" class="lv2">A.3 &nbsp;Cross-attention</a></li>
+    <li><a href="#a4" class="lv2">A.4 &nbsp;FiLM &amp; adaLN-Zero</a></li>
+    <li><a href="#a5" class="lv2">A.5 &nbsp;Timestep embeddings</a></li>
+    <li><a href="#a6" class="lv2">A.6 &nbsp;Attention bias</a></li>
+    <li><a href="#a7" class="lv2">A.7 &nbsp;Guidance</a></li>
+    <li><a href="#a8" class="lv2">A.8 &nbsp;Adapters &amp; LoRA</a></li>
+    <li><a href="#a9" class="lv2">A.9 &nbsp;Choosing · failures</a></li>
+
+    <li class="grp"><a href="#partB"><span class="n">B</span><span>Trajectory prediction</span></a></li>
+    <li><a href="#b1" class="lv2">B.1 &nbsp;Problem setup</a></li>
+    <li><a href="#b2" class="lv2">B.2 &nbsp;What is the condition</a></li>
+    <li><a href="#b3" class="lv2">B.3 &nbsp;Architectures</a></li>
+    <li><a href="#b4" class="lv2">B.4 &nbsp;Goal conditioning</a></li>
+    <li><a href="#b5" class="lv2">B.5 &nbsp;Multi-agent</a></li>
+    <li><a href="#b6" class="lv2">B.6 &nbsp;Return conditioning</a></li>
+    <li><a href="#b7" class="lv2">B.7 &nbsp;Metrics</a></li>
+
+    <li class="grp"><a href="#partC"><span class="n">C</span><span>Aviation &amp; ATM</span></a></li>
+    <li><a href="#c1" class="lv2">C.1 &nbsp;Data sources</a></li>
+    <li><a href="#c2" class="lv2">C.2 &nbsp;What differs</a></li>
+    <li><a href="#c3" class="lv2">C.3 &nbsp;The literature</a></li>
+    <li><a href="#c4" class="lv2">C.4 &nbsp;Conditions in ATM</a></li>
+    <li><a href="#c5" class="lv2">C.5 &nbsp;Building at your scale</a></li>
+    <li><a href="#c6" class="lv2">C.6 &nbsp;Aviation metrics</a></li>
+
+    <li class="grp"><a href="#partD"><span class="n">D</span><span>Further reading</span></a></li>
+    <li><a href="#gloss"><span class="n">·</span><span>Glossary</span></a></li>
+    <li><a href="#caveats"><span class="n">·</span><span>Caveats</span></a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section id="orient">
+<p class="lede">Conditioning is the difference between a model that predicts what aircraft
+usually do and one that predicts what <em>this</em> aircraft will do, on <em>this</em> runway,
+in <em>this</em> wind, with <em>that</em> traffic ahead of it. Part A is the general toolbox,
+Part B is how the trajectory-prediction field uses it, Part C is your ATM problem.</p>
+
+<div class="reads">
+  <h4>Three ways to read this</h4>
+  <ul>
+    <li><b>Just tell me what to build.</b> Cheat sheet below → §A.4 (adaLN-Zero) →
+      §B.4 (goal conditioning) → §C.5 (staged plan). About twenty minutes.</li>
+    <li><b>I want the mechanisms.</b> Read Part A end to end. Every mechanism has an
+      equation, a figure, and code you can paste.</li>
+    <li><b>I want the field.</b> Part B is a guided tour of the architectures that win
+      benchmarks, Part C is what survives contact with aviation data.</li>
+  </ul>
+</div>
+
+<p>A note on honesty before we start. The conditioning literature (Part A) is mature and
+well-replicated. The generic trajectory-prediction literature (Part B) is competitive and
+benchmarked. The aviation literature (Part C) is neither — results are reported on private
+datasets against each paper's own baselines. I flag this wherever it matters rather than
+quietly averaging over it.</p>
+</section>
+
+<section id="cheat">
+<h3><span class="hn">§</span>Cheat sheet</h3>
+<p>If you remember five things from this document:</p>
+<div class="tw">
+<table>
+<thead><tr><th style="width:26%">Situation</th><th style="width:30%">Use</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>Condition is a scalar or short vector — runway id, wind, aircraft type, time-to-touchdown</td>
+    <td><b>adaLN-Zero</b> (§A.4)</td>
+    <td>Cheapest of the four mechanisms DiT compared, and the most accurate. Zero-init means the
+        block starts as identity and learns to open up.</td></tr>
+<tr><td>Condition is a variable-length set — neighbouring aircraft, STAR waypoints, map lanes</td>
+    <td><b>Cross-attention</b> (§A.3)</td>
+    <td>Handles arbitrary length; the condition supplies keys and values.</td></tr>
+<tr><td>Condition is geometric or relational — who may interact with whom</td>
+    <td><b>Attention bias / mask</b> (§A.6)</td>
+    <td>Encodes separation minima and relative geometry without adding tokens.</td></tr>
+<tr><td>The future is genuinely multimodal</td>
+    <td><b>Goal conditioning</b> (§B.4)</td>
+    <td>Factorises the problem: predict where it lands, then the path becomes near-unimodal.</td></tr>
+<tr><td>You have ~1000 trajectories per airport</td>
+    <td><b>A small model first</b> (§C.5)</td>
+    <td>Published terminal-airspace results show transformers merely matching LSTMs, and larger
+        configurations doing measurably worse at long horizons.</td></tr>
+</tbody></table>
+</div>
+</section>
+
+<h2 class="part" id="partA"><span class="pn">PART A</span>Conditioning mechanisms</h2>
+<p class="part-sub">The general toolbox, independent of application. Six places a condition
+can enter a transformer, what each costs, and how to tell whether the model is actually
+listening.</p>
+
+<section id="a1">
+<h3><span class="hn">A.1</span>Where the condition enters</h3>
+
+<p>A transformer computes a function of a sequence of tokens. Conditioning means we also have
+side information \(c\) — a label, a scalar, a vector, a sequence, a set, a graph — and we want
+the output to depend on it. Formally we move from \(p(x)\) to \(p(x \mid c)\), or from
+\(f(x)\) to \(f(x; c)\).</p>
+
+<p>What makes this tractable to learn is that there are only a handful of <em>places</em> a
+condition can physically enter a transformer block. Every published method is a variation on
+one of them.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 400" role="img" aria-label="Diagram of a transformer block showing six points where conditioning information can be injected">
+  <rect class="boxq" x="24" y="18" width="232" height="332"/>
+  <text class="lbl" x="34" y="368">transformer block</text>
+  <text class="mn" x="140" y="386" text-anchor="middle">x  (B, T, d)</text>
+  <path class="s" d="M140 376 L140 348"/><path class="s" d="M134 354 L140 348 L146 354"/>
+  <rect class="box" x="54" y="316" width="172" height="26"/>
+  <text x="140" y="333" text-anchor="middle">token embeddings</text>
+  <path class="s" d="M140 316 L140 298"/><path class="s" d="M134 304 L140 298 L146 304"/>
+  <rect class="box" x="70" y="270" width="140" height="26"/>
+  <text x="140" y="287" text-anchor="middle">LayerNorm</text>
+  <path class="s" d="M140 270 L140 252"/><path class="s" d="M134 258 L140 252 L146 258"/>
+  <rect class="box" x="54" y="222" width="172" height="28"/>
+  <text x="140" y="240" text-anchor="middle">self-attention</text>
+  <path class="s" d="M140 222 L140 202"/><path class="s" d="M134 208 L140 202 L146 208"/>
+  <circle class="box" cx="140" cy="190" r="10"/><text x="140" y="194" text-anchor="middle" font-size="13">+</text>
+  <path class="s2 dash" d="M140 310 L38 310 L38 190 L130 190"/>
+  <path class="s" d="M140 180 L140 162"/><path class="s" d="M134 168 L140 162 L146 168"/>
+  <rect class="box" x="70" y="132" width="140" height="26"/>
+  <text x="140" y="149" text-anchor="middle">LayerNorm</text>
+  <path class="s" d="M140 132 L140 114"/><path class="s" d="M134 120 L140 114 L146 120"/>
+  <rect class="box" x="70" y="84" width="140" height="28"/>
+  <text x="140" y="102" text-anchor="middle">MLP</text>
+  <path class="s" d="M140 84 L140 66"/><path class="s" d="M134 72 L140 66 L146 72"/>
+  <circle class="box" cx="140" cy="56" r="10"/><text x="140" y="60" text-anchor="middle" font-size="13">+</text>
+  <path class="s2 dash" d="M140 176 L38 176 L38 56 L130 56"/>
+  <path class="s" d="M140 46 L140 28"/><path class="s" d="M134 34 L140 28 L146 34"/>
+  <text class="mn" x="140" y="14" text-anchor="middle">out</text>
+  <g>
+    <circle class="fm" cx="300" cy="30" r="9"/><text x="300" y="34" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="700">6</text>
+    <text x="320" y="27">steer at sampling time</text>
+    <text class="sm" x="320" y="42">§A.7 · classifier-free guidance</text>
+    <path class="m dash" d="M290 30 L156 30"/><path class="m" d="M162 26 L156 30 L162 34"/>
+  </g>
+  <g>
+    <circle class="fm" cx="300" cy="98" r="9"/><text x="300" y="102" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="700">5</text>
+    <text x="320" y="95">edit the weights</text>
+    <text class="sm" x="320" y="110">§A.8 · adapters · LoRA · hypernetwork</text>
+    <path class="m dash" d="M290 98 L218 98"/><path class="m" d="M224 94 L218 98 L224 102"/>
+  </g>
+  <g>
+    <circle class="fm" cx="300" cy="152" r="9"/><text x="300" y="156" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="700">4</text>
+    <text x="320" y="149">scale and shift the norm</text>
+    <text class="sm" x="320" y="164">§A.4 · FiLM · adaLN-Zero</text>
+    <path class="m dash" d="M290 152 L276 152 L276 145 L218 145"/><path class="m" d="M224 141 L218 145 L224 149"/>
+    <path class="m dash" d="M276 152 L276 283 L218 283"/><path class="m" d="M224 279 L218 283 L224 287"/>
+  </g>
+  <g>
+    <circle class="fm" cx="300" cy="212" r="9"/><text x="300" y="216" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="700">2</text>
+    <text x="320" y="209">supply keys and values</text>
+    <text class="sm" x="320" y="224">§A.3 · cross-attention · Perceiver</text>
+    <path class="m dash" d="M290 212 L266 212 L266 230 L234 230"/><path class="m" d="M240 226 L234 230 L240 234"/>
+  </g>
+  <g>
+    <circle class="fm" cx="300" cy="266" r="9"/><text x="300" y="270" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="700">3</text>
+    <text x="320" y="263">bias the attention logits</text>
+    <text class="sm" x="320" y="278">§A.6 · relative · ALiBi · graph mask</text>
+    <path class="m dash" d="M290 266 L258 266 L258 244 L234 244"/><path class="m" d="M240 240 L234 244 L240 248"/>
+  </g>
+  <g>
+    <circle class="fm" cx="300" cy="330" r="9"/><text x="300" y="334" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="700">1</text>
+    <text x="320" y="327">prepend or add tokens</text>
+    <text class="sm" x="320" y="342">§A.2 · prompt tuning · prefix tuning</text>
+    <path class="m dash" d="M290 330 L234 330"/><path class="m" d="M240 326 L234 330 L240 334"/>
+  </g>
+</svg>
+</div>
+<figcaption><b>Fig. A1 — Six injection points.</b> Magenta paths carry the condition. Points 1–5
+change the forward pass; point 6 changes only how you sample from a trained generative model.
+Most real systems combine two or three: a scalar condition through 4, a set condition through
+2, and interaction structure through 3.</figcaption>
+</figure>
+
+<div class="note">
+<span class="tag">The anchor result</span>
+<p>The DiT paper (Peebles &amp; Xie, <em>Scalable Diffusion Models with Transformers</em>,
+ICCV 2023, <a href="https://arxiv.org/abs/2212.09748">arXiv:2212.09748</a>) directly compared
+four of these on identical models: in-context tokens, cross-attention, adaLN, and adaLN-Zero.
+<b>adaLN-Zero won on both quality and cost.</b> Per-block compute was 118.6 GFLOPs against
+119.4 for in-context tokens and 137.6 for cross-attention, and at 400K training iterations its
+FID was roughly half the in-context model's. If your condition is low-dimensional, that is
+your default. Note the scope, though: this was established for class-conditional image
+generation, not for rich set-valued conditions.</p>
+</div>
+</section>
+
+<section id="a2">
+<h3><span class="hn">A.2</span>Input-level conditioning</h3>
+
+<h4>Prepending condition tokens</h4>
+<p>The simplest idea in the whole field: turn \(c\) into one or more tokens and put them at the
+front of the sequence. Self-attention then lets every real token read them.</p>
+
+<pre><code class="language-python">cond_tok = c_emb.unsqueeze(1)              # (B, 1, d)
+seq      = torch.cat([cond_tok, x], dim=1)  # (B, T+1, d)
+h        = transformer(seq)                 # every token can attend to cond_tok</code></pre>
+
+<p>DiT calls this <em>in-context conditioning</em>. It is trivial to implement and it handles
+both scalar and sequence conditions. It also costs extra sequence length — attention is
+quadratic — and it was the weakest of DiT's four options.</p>
+
+<h4>Adding to embeddings</h4>
+<p>For a condition attached to each position (a timestep, an agent-type label), just add:
+\(h = x + c_{\text{emb}}\). This is exactly the mechanism behind absolute positional encoding.
+Conditioning is the same operation with a different source for the vector.</p>
+
+<h4>Prompt tuning and prefix tuning</h4>
+<p>These are the parameter-efficient cousins of prepending. <b>Prompt tuning</b>
+(<a href="https://arxiv.org/abs/2104.08691">Lester, Al-Rfou &amp; Constant, EMNLP 2021</a>)
+prepends a handful of learned soft-prompt vectors to the input embeddings only, freezing the
+model; it becomes competitive with full fine-tuning at around 11B parameters.
+<b>Prefix tuning</b> (<a href="https://arxiv.org/abs/2101.00190">Li &amp; Liang, ACL 2021</a>)
+goes further and prepends trainable vectors to the keys and values at <em>every</em> layer:</p>
+
+$$K' = [\,P_K \,;\, XW_K\,], \qquad V' = [\,P_V \,;\, XW_V\,], \qquad
+\mathrm{Attn}(XW_Q,\, K',\, V')$$
+
+<p>Li &amp; Liang tune roughly 0.1% of parameters while matching full fine-tuning on generation,
+and reparameterise the prefix through a small MLP for training stability.</p>
+
+<p>The conceptual bridge worth carrying forward: <b>a prefix is a learned, task-specific
+condition</b>. If instead of learning \(P_K, P_V\) per task you <em>generate</em> them from a
+condition \(c\) through a small MLP, you have a general conditioning mechanism that reaches
+every layer. That trick is under-used in trajectory work.</p>
+</section>
+
+<section id="a3">
+<h3><span class="hn">A.3</span>Cross-attention</h3>
+
+<p>Cross-attention is the canonical way to condition on a <em>sequence or set</em>
+\(c = (c_1,\dots,c_M)\). Queries come from the data stream; keys and values come from the
+condition:</p>
+
+$$\mathrm{CrossAttn}(x, c) = \mathrm{softmax}\!\left(\frac{(xW_Q)(cW_K)^{\top}}{\sqrt{d}}\right)(cW_V)$$
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 226" role="img" aria-label="Cross-attention diagram: queries from the data stream, keys and values from the condition">
+  <text class="lbl" x="24" y="26">data stream</text>
+  <rect class="box" x="24" y="36" width="26" height="26"/>
+  <rect class="box" x="54" y="36" width="26" height="26"/>
+  <rect class="box" x="84" y="36" width="26" height="26"/>
+  <rect class="box" x="114" y="36" width="26" height="26"/>
+  <text class="mn" x="82" y="80" text-anchor="middle">x  (B, T, d)</text>
+  <path class="s" d="M150 49 L200 49"/><path class="s" d="M194 45 L200 49 L194 53"/>
+  <rect class="box" x="200" y="35" width="46" height="28"/><text x="223" y="53" text-anchor="middle">W_Q</text>
+
+  <text class="lbl" x="24" y="150">condition c</text>
+  <g style="stroke:var(--magenta)">
+    <rect class="box" x="24" y="160" width="26" height="26" style="stroke:var(--magenta)"/>
+    <rect class="box" x="54" y="160" width="26" height="26" style="stroke:var(--magenta)"/>
+    <rect class="box" x="84" y="160" width="26" height="26" style="stroke:var(--magenta)"/>
+    <rect class="box" x="114" y="160" width="26" height="26" style="stroke:var(--magenta)"/>
+    <rect class="box" x="144" y="160" width="26" height="26" style="stroke:var(--magenta)"/>
+  </g>
+  <text class="mn" x="24" y="204">neighbours · waypoints · map  (B, M, d)</text>
+  <path class="m" d="M180 173 L192 173 L192 130 L214 130"/><path class="m" d="M208 126 L214 130 L208 134"/>
+  <path class="m" d="M192 173 L214 173"/><path class="m" d="M208 169 L214 173 L208 177"/>
+  <rect class="box" x="214" y="116" width="46" height="28" style="stroke:var(--magenta)"/><text x="237" y="134" text-anchor="middle">W_K</text>
+  <rect class="box" x="214" y="159" width="46" height="28" style="stroke:var(--magenta)"/><text x="237" y="177" text-anchor="middle">W_V</text>
+
+  <rect class="boxq" x="310" y="26" width="182" height="176"/>
+  <text class="lbl" x="320" y="196">attention</text>
+  <path class="s" d="M246 49 L400 49 L400 90"/><path class="s" d="M396 84 L400 90 L404 84"/>
+  <text class="mn" x="408" y="62">Q</text>
+  <rect class="box" x="330" y="92" width="140" height="32"/>
+  <text x="400" y="113" text-anchor="middle">softmax(QKᵀ / √d)</text>
+  <path class="m" d="M260 130 L322 130"/><path class="m" d="M316 126 L322 130 L316 134"/>
+  <text class="mn" x="278" y="124">K</text>
+  <path class="s" d="M400 124 L400 148"/><path class="s" d="M396 142 L400 148 L404 142"/>
+  <rect class="box" x="330" y="150" width="140" height="32"/>
+  <text x="400" y="171" text-anchor="middle">A · V</text>
+  <path class="m" d="M260 173 L322 173"/><path class="m" d="M316 169 L322 173 L316 177"/>
+  <text class="mn" x="278" y="167">V</text>
+
+  <path class="s" d="M492 114 L540 114"/><path class="s" d="M534 110 L540 114 L534 118"/>
+  <rect class="box" x="546" y="101" width="26" height="26"/>
+  <rect class="box" x="576" y="101" width="26" height="26"/>
+  <rect class="box" x="606" y="101" width="26" height="26"/>
+  <rect class="box" x="636" y="101" width="26" height="26"/>
+  <text class="mn" x="604" y="146" text-anchor="middle">(B, T, d)</text>
+  <text class="sm" x="604" y="164" text-anchor="middle">length follows x, not c</text>
+</svg>
+</div>
+<figcaption><b>Fig. A2 — Cross-attention.</b> The output keeps the length of the data stream
+while reading a condition of any length \(M\). This is the only mechanism in Part A that handles
+variable-size set conditions natively, which is why every serious multi-agent model uses it
+somewhere.</figcaption>
+</figure>
+
+<pre><code class="language-python">class CrossAttnBlock(nn.Module):
+    def __init__(self, d, n_heads):
+        super().__init__()
+        self.norm_x = nn.LayerNorm(d)
+        self.norm_c = nn.LayerNorm(d)
+        self.attn   = nn.MultiheadAttention(d, n_heads, batch_first=True)
+
+    def forward(self, x, c, c_pad_mask=None):
+        # x: (B, T, d) data      c: (B, M, d) condition set
+        # c_pad_mask: (B, M) True where padded -- essential for ragged neighbour sets
+        q = self.norm_x(x)
+        kv = self.norm_c(c)
+        out, _ = self.attn(q, kv, kv, key_padding_mask=c_pad_mask, need_weights=False)
+        return x + out</code></pre>
+
+<h4>Latent cross-attention (Perceiver)</h4>
+<p>To tame quadratic cost over a huge input, the
+<a href="https://arxiv.org/abs/2103.03206">Perceiver</a> (Jaegle et al., ICML 2021) introduces a
+small learned latent array \(z \in \mathbb{R}^{N \times D}\) with \(N \ll M\) that cross-attends
+to the large input, then self-attends among itself. Complexity drops from \(\mathcal{O}(M^2)\)
+to \(\mathcal{O}(NM)\). <a href="https://arxiv.org/abs/2107.14795">Perceiver IO</a> adds a
+decoder cross-attention where an output query array reads the processed latents, producing
+arbitrarily structured outputs. Wayformer uses exactly this pattern to subsample large scene
+encodings.</p>
+
+<h4>The Stable Diffusion pattern</h4>
+<p>Latent Diffusion (<a href="https://arxiv.org/abs/2112.10752">Rombach et al., CVPR 2022</a>)
+injects a text embedding into the denoiser via cross-attention at every block: spatial features
+query, CLIP tokens supply keys and values. Nothing about this is image-specific. Swap CLIP
+tokens for map polylines, neighbour tracks, or procedure waypoints and the mechanism is
+unchanged.</p>
+</section>
+
+<section id="a4">
+<h3><span class="hn">A.4</span>FiLM, conditional LayerNorm, and adaLN-Zero</h3>
+
+<p><a href="https://arxiv.org/abs/1709.07871">FiLM</a> (Perez et al., AAAI 2018) is the
+foundational idea: modulate features with a per-channel affine transform whose parameters are
+predicted from the condition.</p>
+
+$$\mathrm{FiLM}(F \mid c) = \gamma(c) \odot F + \beta(c), \qquad [\gamma, \beta] = \mathrm{MLP}(c)$$
+
+<p>Two numbers per channel. It does not scale with resolution or sequence length, and it
+generalises conditional batch norm from style transfer and BigGAN. In transformers you apply
+the same idea to LayerNorm outputs, which is what adaptive LayerNorm means.</p>
+
+<p>DiT's <b>adaLN-Zero</b> adds two refinements that matter more than they look. First, the
+modulation MLP produces six vectors per block — shift, scale, and a <em>residual gate</em> for
+each of the two sublayers. Second, that MLP is <b>zero-initialised</b>, so every gate starts at
+zero and the whole block starts as an identity function. Training then gradually opens the
+conditioning path instead of fighting through a randomly scrambled one.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="adaLN-Zero: a conditioning vector produces a scale, a shift and a zero-initialised gate for one sublayer">
+  <rect class="box" x="20" y="120" width="86" height="30" style="stroke:var(--magenta)"/>
+  <text x="63" y="139" text-anchor="middle">c</text>
+  <text class="sm" x="63" y="166" text-anchor="middle">timestep + runway</text>
+  <text class="sm" x="63" y="181" text-anchor="middle">+ wind + type</text>
+  <path class="m" d="M106 135 L132 135"/><path class="m" d="M126 131 L132 135 L126 139"/>
+  <rect class="box" x="134" y="114" width="78" height="42" style="stroke:var(--magenta)"/>
+  <text x="173" y="130" text-anchor="middle">SiLU +</text>
+  <text x="173" y="145" text-anchor="middle">Linear</text>
+  <text class="lbl fm" x="134" y="174">zero-init</text>
+
+  <path class="m" d="M212 135 L236 135"/>
+  <path class="m" d="M236 62 L236 208"/>
+  <g class="m"><path d="M236 62 L282 62"/><path d="M236 135 L282 135"/><path d="M236 208 L282 208"/></g>
+  <g class="fm"><path d="M276 58 L282 62 L276 66"/><path d="M276 131 L282 135 L276 139"/><path d="M276 204 L282 208 L276 212"/></g>
+  <text class="mn fm" x="248" y="56">γ</text>
+  <text class="mn fm" x="248" y="129">β</text>
+  <text class="mn fm" x="248" y="202">α</text>
+  <text class="sm fm" x="134" y="190">scale, shift, gate</text>
+
+  <rect class="boxq" x="286" y="20" width="212" height="262"/>
+  <text class="mn" x="392" y="296" text-anchor="middle">x  (B, T, d)</text>
+  <path class="s" d="M392 284 L392 258"/><path class="s" d="M386 264 L392 258 L398 264"/>
+  <rect class="box" x="308" y="222" width="168" height="34"/>
+  <text x="392" y="243" text-anchor="middle">LayerNorm → γ, β</text>
+  <path class="s" d="M392 222 L392 198"/><path class="s" d="M386 204 L392 198 L398 204"/>
+  <rect class="box" x="332" y="164" width="120" height="34"/>
+  <text x="392" y="185" text-anchor="middle">attention</text>
+  <path class="s" d="M392 164 L392 142"/><path class="s" d="M386 148 L392 142 L398 148"/>
+  <rect class="box" x="354" y="110" width="76" height="32" style="stroke:var(--magenta)"/>
+  <text class="fm" x="392" y="131" text-anchor="middle">× α</text>
+  <path class="s" d="M392 110 L392 88"/><path class="s" d="M386 94 L392 88 L398 94"/>
+  <circle class="box" cx="392" cy="76" r="11"/><text x="392" y="81" text-anchor="middle" font-size="14">+</text>
+  <path class="s2 dash" d="M392 268 L486 268 L486 76 L403 76"/>
+  <path class="s" d="M392 65 L392 42"/><path class="s" d="M386 48 L392 42 L398 48"/>
+  <text class="mn" x="392" y="34" text-anchor="middle">out</text>
+
+  <text class="lbl" x="518" y="46">at initialisation</text>
+  <text class="sm" x="518" y="66">α = 0, so the sublayer</text>
+  <text class="sm" x="518" y="81">is an identity map</text>
+  <path class="s2" d="M518 98 L678 98"/>
+  <text class="lbl" x="518" y="122">while training</text>
+  <text class="sm" x="518" y="142">the gate opens as far</text>
+  <text class="sm" x="518" y="157">as the loss rewards</text>
+  <path class="s2" d="M518 196 L678 196"/>
+  <path class="m" d="M518 228 C 558 228, 570 202, 664 196"/>
+  <circle class="fm" cx="518" cy="228" r="3"/>
+  <text class="mn f3" x="518" y="248">α over training</text>
+  <path class="s2" d="M518 262 L678 262"/>
+  <text class="sm f3" x="518" y="280">the MLP sublayer does</text>
+  <text class="sm f3" x="518" y="294">the same, with γ₂ β₂ α₂</text>
+</svg>
+</div>
+<figcaption><b>Fig. A3 — adaLN-Zero, one sublayer.</b> The conditioning vector produces a
+scale, a shift, and a gate; the full block runs this twice, once for attention and once for the
+MLP, from six parameters in total. Because the gate starts at exactly zero, the residual path is
+untouched at initialisation. A follow-up analysis attributes most of the benefit to that
+zero-initialisation rather than to the block's structure.</figcaption>
+</figure>
+
+<pre><code class="language-python">def modulate(x, shift, scale):
+    # x: (B, T, d)   shift, scale: (B, d)
+    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+
+
+class AdaLNZeroBlock(nn.Module):
+    def __init__(self, d, n_heads, mlp_ratio=4.0):
+        super().__init__()
+        # affine=False: the *condition* supplies the scale and shift, not the layer
+        self.norm1 = nn.LayerNorm(d, elementwise_affine=False, eps=1e-6)
+        self.attn  = nn.MultiheadAttention(d, n_heads, batch_first=True)
+        self.norm2 = nn.LayerNorm(d, elementwise_affine=False, eps=1e-6)
+        self.mlp   = nn.Sequential(nn.Linear(d, int(d * mlp_ratio)), nn.GELU(),
+                                   nn.Linear(int(d * mlp_ratio), d))
+        self.modulation = nn.Sequential(nn.SiLU(), nn.Linear(d, 6 * d))
+        nn.init.zeros_(self.modulation[-1].weight)   # <- the "Zero"
+        nn.init.zeros_(self.modulation[-1].bias)
+
+    def forward(self, x, c):                          # x: (B,T,d)   c: (B,d)
+        s1, g1, a1, s2, g2, a2 = self.modulation(c).chunk(6, dim=-1)
+        h = modulate(self.norm1(x), s1, g1)
+        x = x + a1.unsqueeze(1) * self.attn(h, h, h, need_weights=False)[0]
+        h = modulate(self.norm2(x), s2, g2)
+        x = x + a2.unsqueeze(1) * self.mlp(h)
+        return x</code></pre>
+
+<div class="note do">
+<span class="tag">For your model</span>
+<p>This is the mechanism I would reach for first. Runway identifier, wind vector, wake category,
+aircraft type, and distance-to-go all collapse to a single \(d\)-dimensional vector. Embed each,
+sum them, feed the sum to <code>modulation</code>. Adding a new scalar condition later costs one
+embedding table and no architectural change.</p>
+</div>
+</section>
+
+<section id="a5">
+<h3><span class="hn">A.5</span>Timestep and multi-condition fusion</h3>
+
+<p>Diffusion models must know which noise level they are denoising. The standard recipe is a
+sinusoidal embedding of the timestep through a small MLP, then into adaLN:</p>
+
+<pre><code class="language-python">def timestep_embedding(t, dim, max_period=10000):
+    half  = dim // 2
+    freqs = torch.exp(-math.log(max_period) * torch.arange(half, device=t.device) / half)
+    args  = t[:, None].float() * freqs[None]
+    return torch.cat([torch.cos(args), torch.sin(args)], dim=-1)   # (B, dim)
+
+# Fusing several conditions is just addition in embedding space:
+c = (self.t_mlp(timestep_embedding(t, d))     # noise level
+     + self.runway_emb(runway_id)             # categorical
+     + self.type_emb(actype_id)               # categorical
+     + self.wind_mlp(wind_uv)                 # continuous, 2-vector
+     + self.togo_mlp(dist_to_threshold))      # continuous, scalar
+# c -> AdaLNZeroBlock</code></pre>
+
+<p>Summing embeddings is not a hack — it is how DiT combines timestep and class, and it is what
+makes the mechanism extensible. Each condition gets its own encoder, and the block sees one
+vector. Keep the encoders small; the MLP after the sum does the mixing.</p>
+</section>
+
+<section id="a6">
+<h3><span class="hn">A.6</span>Attention bias and masking</h3>
+
+<p>Rather than adding tokens, you can add a term to the attention logits. This is the natural
+home for <em>relational</em> conditions — relative geometry, map structure, who is allowed to
+influence whom.</p>
+
+$$\mathrm{Attn}(Q,K,V) = \mathrm{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d}} + B\right)V$$
+
+<p>where \(B_{ij}\) encodes the relationship between elements \(i\) and \(j\).</p>
+
+<ul>
+<li><b>Relative position bias</b> (Shaw et al. 2018; T5's scalar variant) makes \(B_{ij}\) a
+learned function of \(i-j\).</li>
+<li><b>ALiBi</b> (<a href="https://arxiv.org/abs/2108.12409">Press, Smith &amp; Lewis, ICLR
+2022</a>) uses a fixed linear penalty \(B_{ij} = -m\,|i-j|\) with a per-head slope \(m\). No
+learned parameters, a recency prior, and it extrapolates to sequences longer than those seen in
+training — train on short approach segments, run on long ones.</li>
+<li><b>Graph and adjacency masks</b> restrict which agents may interact. This is how the
+aviation literature encodes separation: both B-STAR and the BST-Transformer build the
+inter-aircraft interaction graph with a <b>10 km threshold</b> and let each aircraft attend only
+within it.</li>
+</ul>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 260" role="img" aria-label="An aircraft interaction graph with a 10 km radius, and the corresponding attention mask matrix">
+  <text class="lbl" x="20" y="18">airspace  ·  10 km interaction radius</text>
+  <rect class="boxq" x="20" y="28" width="300" height="204"/>
+  <!-- radius circle around ego -->
+  <circle cx="150" cy="128" r="66" fill="none" stroke="var(--teal)" stroke-width="1.1" stroke-dasharray="4 4"/>
+  <text class="mn ft" x="150" y="52" text-anchor="middle">10 km</text>
+  <!-- aircraft glyphs -->
+  <g class="s">
+    <path d="M150 128 l10 4 l-10 -14 l-10 14 z" fill="var(--magenta)" stroke="var(--magenta)"/>
+    <path d="M104 96 l8 3 l-8 -11 l-8 11 z" fill="var(--ink)"/>
+    <path d="M196 160 l8 3 l-8 -11 l-8 11 z" fill="var(--ink)"/>
+    <path d="M118 176 l8 3 l-8 -11 l-8 11 z" fill="var(--ink)"/>
+    <path d="M272 68 l8 3 l-8 -11 l-8 11 z" fill="var(--ink-3)" stroke="var(--ink-3)"/>
+    <path d="M282 196 l8 3 l-8 -11 l-8 11 z" fill="var(--ink-3)" stroke="var(--ink-3)"/>
+  </g>
+  <g class="t"><path d="M150 122 L106 98"/><path d="M150 130 L192 156"/><path d="M146 132 L122 172"/></g>
+  <text class="mn fm" x="162" y="140">i</text>
+  <text class="mn" x="82" y="86">j₁</text>
+  <text class="mn" x="208" y="150">j₂</text>
+  <text class="mn" x="96" y="192">j₃</text>
+  <text class="mn f3" x="250" y="64">j₄</text>
+  <text class="mn f3" x="260" y="192">j₅</text>
+  <text class="sm f3" x="158" y="224">outside the radius — masked</text>
+
+  <!-- matrix -->
+  <text class="lbl" x="400" y="18">bias matrix B</text>
+  <g>
+    <!-- 6x6 grid -->
+    <g class="s2">
+      <path d="M420 28 h150 v150 h-150 z"/>
+      <path d="M445 28 v150"/><path d="M470 28 v150"/><path d="M495 28 v150"/>
+      <path d="M520 28 v150"/><path d="M545 28 v150"/>
+      <path d="M420 53 h150"/><path d="M420 78 h150"/><path d="M420 103 h150"/>
+      <path d="M420 128 h150"/><path d="M420 153 h150"/>
+    </g>
+    <!-- filled cells: row i=3rd row (y 78-103) -->
+    <g fill="var(--teal)" opacity="0.30">
+      <rect x="420" y="103" width="25" height="25"/>
+      <rect x="445" y="103" width="25" height="25"/>
+      <rect x="470" y="103" width="25" height="25"/>
+      <rect x="495" y="103" width="25" height="25"/>
+    </g>
+    <g fill="var(--magenta)" opacity="0.16">
+      <rect x="520" y="103" width="25" height="25"/>
+      <rect x="545" y="103" width="25" height="25"/>
+    </g>
+    <rect x="420" y="103" width="150" height="25" fill="none" stroke="var(--magenta)" stroke-width="1.4"/>
+    <text class="mn fm" x="412" y="121" text-anchor="end">row i</text>
+    <text class="mn" x="432" y="196" text-anchor="middle">j₁</text>
+    <text class="mn" x="457" y="196" text-anchor="middle">j₂</text>
+    <text class="mn" x="482" y="196" text-anchor="middle">j₃</text>
+    <text class="mn" x="507" y="196" text-anchor="middle">i</text>
+    <text class="mn f3" x="532" y="196" text-anchor="middle">j₄</text>
+    <text class="mn f3" x="557" y="196" text-anchor="middle">j₅</text>
+  </g>
+  <rect x="420" y="216" width="14" height="12" fill="var(--teal)" opacity="0.30"/>
+  <text class="sm" x="440" y="226">0 — attends freely</text>
+  <rect x="546" y="216" width="14" height="12" fill="var(--magenta)" opacity="0.16"/>
+  <text class="sm" x="566" y="226">−∞ — masked</text>
+</svg>
+</div>
+<figcaption><b>Fig. A4 — Separation as an attention mask.</b> Distance thresholding turns the
+airspace geometry into a bias matrix. Nothing is added to the sequence, so cost is unchanged;
+the model simply cannot route information between aircraft that are too far apart to matter.
+A soft distance-decaying bias is often better than a hard cut — see the code below.</figcaption>
+</figure>
+
+<pre><code class="language-python">def separation_bias(pos, r_km=10.0, soft=True, tau=4.0):
+    """pos: (B, N, 2) aircraft positions in km, local ENU.  returns (B, N, N)."""
+    d = torch.cdist(pos, pos)                       # pairwise great-circle approx in km
+    if soft:
+        bias = -d / tau                             # smooth decay, keeps gradients everywhere
+        return bias.masked_fill(d > 3 * r_km, float('-inf'))
+    return torch.zeros_like(d).masked_fill(d > r_km, float('-inf'))
+
+# usage: logits = q @ k.transpose(-1, -2) / d ** 0.5 + separation_bias(pos).unsqueeze(1)</code></pre>
+
+<div class="note warn">
+<span class="tag">Watch the hard cut</span>
+<p>A hard 10 km mask makes the loss discontinuous in aircraft position: a neighbour crossing the
+threshold flips from full influence to none. It works in the published models, but if training
+is unstable, the soft variant above is the first thing to try.</p>
+</div>
+</section>
+
+<section id="a7">
+<h3><span class="hn">A.7</span>Guidance: controlling how hard the model listens</h3>
+
+<p>These apply only to <em>generative</em> models — diffusion, mainly — and they control how
+strongly a sample obeys the condition. Uniquely among the six mechanisms, guidance is a
+sampling-time knob: you can turn it after training.</p>
+
+<p><b>Classifier guidance</b> (Dhariwal &amp; Nichol, NeurIPS 2021) uses the gradient of a
+separately trained noise-robust classifier \(p(c \mid x_t)\) to push samples toward \(c\). It
+requires training that classifier, and it struggles with rich continuous conditions.</p>
+
+<p><b>Classifier-free guidance</b> (<a href="https://arxiv.org/abs/2207.12598">Ho &amp;
+Salimans</a>) replaced it almost entirely. Train one network to be both conditional and
+unconditional by dropping the condition at random, then extrapolate at sampling time:</p>
+
+$$\hat{\varepsilon}(x_t, c) = (1+w)\,\varepsilon_\theta(x_t, c) \;-\; w\,\varepsilon_\theta(x_t, \varnothing)$$
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 214" role="img" aria-label="Classifier-free guidance shown as extrapolation away from the unconditional prediction">
+  <path class="s2" d="M40 178 L660 178"/>
+  <path class="s2" d="M40 178 L40 24"/>
+  <!-- points -->
+  <circle class="f3" cx="150" cy="140" r="5"/>
+  <text class="mn f3" x="150" y="162" text-anchor="middle">ε(x, ∅)</text>
+  <text class="sm f3" x="150" y="176" text-anchor="middle">unconditional</text>
+
+  <circle class="ft" cx="330" cy="98" r="5"/>
+  <text class="mn ft" x="330" y="82" text-anchor="middle">ε(x, c)</text>
+  <text class="sm" x="330" y="68" text-anchor="middle">w = 0</text>
+
+  <circle class="fm" cx="510" cy="56" r="5"/>
+  <text class="mn fm" x="510" y="40" text-anchor="middle">ε̂ at w = 1</text>
+
+  <circle cx="600" cy="35" r="4" fill="var(--magenta)" opacity=".5"/>
+  <text class="sm fm" x="612" y="32">w = 1.5</text>
+
+  <path class="t" d="M156 137 L322 101"/><path class="t" d="M314 96 L322 101 L315 106"/>
+  <path class="m dash" d="M336 95 L502 59"/><path class="m" d="M494 54 L502 59 L495 64"/>
+  <path class="m dot" d="M516 53 L594 37"/>
+
+  <text class="sm" x="236" y="154" text-anchor="middle">the direction c adds</text>
+  <text class="sm fm" x="430" y="116" text-anchor="middle">keep going in it</text>
+
+  <text class="lbl" x="40" y="200">low w  ·  diverse, weakly conditioned</text>
+  <text class="lbl" x="660" y="200" text-anchor="end">high w  ·  faithful, low diversity, artefacts</text>
+</svg>
+</div>
+<figcaption><b>Fig. A5 — Guidance as extrapolation.</b> The conditional and unconditional
+predictions define a direction; guidance walks further along it. For trajectories, small \(w\)
+gives realistic spread, large \(w\) collapses everything onto the nominal procedure. Sweep it
+and look at the diversity you lose.</figcaption>
+</figure>
+
+<pre><code class="language-python"># --- training: drop the condition sometimes so the model learns both modes
+if torch.rand(1).item() < p_uncond:          # p_uncond ~ 0.1 is typical
+    c = self.null_cond.expand_as(c)
+loss = F.mse_loss(model(x_t, t, c), noise)
+
+# --- sampling: extrapolate away from the unconditional prediction
+eps_c   = model(x_t, t, c)
+eps_unc = model(x_t, t, null_cond)
+eps     = (1 + w) * eps_c - w * eps_unc</code></pre>
+
+<p>Guidance generalises far beyond images. MotionDiffuser and the language-guided traffic
+simulator CTG++ both apply guidance — classifier-free or cost-function-based — to enforce
+constraints on generated trajectories. In an ATM setting you could condition on the assigned
+runway and sweep \(w\) to control how tightly generated approaches hug the nominal STAR, which
+is a genuinely useful dial for what-if analysis.</p>
+</section>
+
+<section id="a8">
+<h3><span class="hn">A.8</span>Adapters, LoRA, hypernetworks</h3>
+
+<p>These condition by changing the <em>weights</em> rather than the activations.
+<b>Adapters</b> (Houlsby et al., ICML 2019) insert small bottleneck MLPs into each block and
+train only those. <b>LoRA</b> (<a href="https://arxiv.org/abs/2106.09685">Hu et al., ICLR
+2022</a>) adds a low-rank update to frozen weight matrices:</p>
+
+$$W' = W + \Delta W = W + BA, \qquad B \in \mathbb{R}^{d \times r},\; A \in \mathbb{R}^{r \times k},\; r \ll d$$
+
+<p>Only \(A\) and \(B\) train. Different adapters mean different conditions, swappable at
+inference with no change to the backbone. <b>Hypernetworks</b> take this to its conclusion: a
+small network <em>generates</em> the main network's weights — or its FiLM parameters, or its
+LoRA factors — from \(c\). Seen this way, FiLM is a hypernetwork that generates only affine
+parameters.</p>
+
+<div class="note do">
+<span class="tag">For your model</span>
+<p>This is the clean answer to "one model or one per airport?". Pretrain a shared backbone on
+many airports in runway-relative coordinates, then attach a small per-airport LoRA. You get
+airport-specific behaviour at a few percent of the parameters, and a new airport costs a short
+fine-tune rather than a full training run. See §C.5.</p>
+</div>
+</section>
+
+<section id="a9">
+<h3><span class="hn">A.9</span>Choosing a mechanism, and how conditioning fails</h3>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="Decision flowchart for choosing a conditioning mechanism based on the shape of the condition">
+  <rect class="box" x="228" y="14" width="244" height="30"/>
+  <text x="350" y="33" text-anchor="middle">What shape is the condition?</text>
+
+  <path class="s" d="M350 44 L350 62"/>
+  <path class="s" d="M120 62 L580 62"/>
+  <path class="s" d="M120 62 L120 84"/><path class="s" d="M116 78 L120 84 L124 78"/>
+  <path class="s" d="M350 62 L350 84"/><path class="s" d="M346 78 L350 84 L354 78"/>
+  <path class="s" d="M580 62 L580 84"/><path class="s" d="M576 78 L580 84 L584 78"/>
+
+  <!-- three branches -->
+  <g>
+    <rect class="box" x="30" y="84" width="180" height="42"/>
+    <text x="120" y="102" text-anchor="middle">a scalar or vector</text>
+    <text class="sm" x="120" y="117" text-anchor="middle">runway · wind · type · t</text>
+    <path class="s" d="M120 126 L120 148"/><path class="s" d="M116 142 L120 148 L124 142"/>
+    <rect class="box" x="30" y="148" width="180" height="34" style="stroke:var(--magenta);stroke-width:1.8"/>
+    <text class="fm" x="120" y="169" text-anchor="middle" font-weight="600">adaLN-Zero  §A.4</text>
+  </g>
+  <g>
+    <rect class="box" x="260" y="84" width="180" height="42"/>
+    <text x="350" y="102" text-anchor="middle">a variable-length set</text>
+    <text class="sm" x="350" y="117" text-anchor="middle">neighbours · waypoints</text>
+    <path class="s" d="M350 126 L350 148"/><path class="s" d="M346 142 L350 148 L354 142"/>
+    <rect class="box" x="260" y="148" width="180" height="34" style="stroke:var(--magenta);stroke-width:1.8"/>
+    <text class="fm" x="350" y="169" text-anchor="middle" font-weight="600">cross-attention  §A.3</text>
+  </g>
+  <g>
+    <rect class="box" x="490" y="84" width="180" height="42"/>
+    <text x="580" y="102" text-anchor="middle">a pairwise relation</text>
+    <text class="sm" x="580" y="117" text-anchor="middle">distance · adjacency</text>
+    <path class="s" d="M580 126 L580 148"/><path class="s" d="M576 142 L580 148 L584 142"/>
+    <rect class="box" x="490" y="148" width="180" height="34" style="stroke:var(--magenta);stroke-width:1.8"/>
+    <text class="fm" x="580" y="169" text-anchor="middle" font-weight="600">attention bias  §A.6</text>
+  </g>
+
+  <!-- second row -->
+  <path class="s2" d="M40 202 L660 202"/>
+  <g>
+    <rect class="boxq" x="34" y="218" width="200" height="62"/>
+    <text class="lbl" x="44" y="236">many discrete domains</text>
+    <text class="sm" x="44" y="254">one airport, one fleet, one</text>
+    <text class="sm" x="44" y="268">season → LoRA per domain  §A.8</text>
+  </g>
+  <g>
+    <rect class="boxq" x="250" y="218" width="200" height="62"/>
+    <text class="lbl" x="260" y="236">the future is multimodal</text>
+    <text class="sm" x="260" y="254">condition on the endpoint,</text>
+    <text class="sm" x="260" y="268">not just the past  §B.4</text>
+  </g>
+  <g>
+    <rect class="boxq" x="466" y="218" width="200" height="62"/>
+    <text class="lbl" x="476" y="236">generative, needs a dial</text>
+    <text class="sm" x="476" y="254">train with condition dropout,</text>
+    <text class="sm" x="476" y="268">sweep w at sampling  §A.7</text>
+  </g>
+</svg>
+</div>
+<figcaption><b>Fig. A6 — Picking a mechanism.</b> The shape of the condition decides, not the
+domain. Most real models sit in all three top boxes at once; the bottom row are additions, not
+alternatives.</figcaption>
+</figure>
+
+<div class="tw">
+<table>
+<thead><tr><th style="width:22%">Mechanism</th><th style="width:14%">Cost</th>
+<th style="width:20%">Condition shape</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Prepend tokens</td><td>+O(T·M)</td><td>anything</td>
+    <td>Easiest to write. Weakest in DiT's comparison. Fine for a quick baseline.</td></tr>
+<tr><td>Cross-attention</td><td>+O(T·M)</td><td>set or sequence</td>
+    <td>The only one that natively handles ragged sets. Most expensive per block.</td></tr>
+<tr><td>FiLM / adaLN-Zero</td><td>+O(d²) once</td><td>fixed vector</td>
+    <td>Cheapest and strongest for low-dimensional conditions. Cannot take a set.</td></tr>
+<tr><td>Attention bias</td><td>≈ free</td><td>pairwise relation</td>
+    <td>Encodes geometry without lengthening the sequence. Hard masks can destabilise.</td></tr>
+<tr><td>LoRA / adapters</td><td>+r·(d+k)</td><td>discrete domain</td>
+    <td>Swappable at inference. Not for per-sample conditions.</td></tr>
+<tr><td>Guidance</td><td>2× sampling</td><td>any, generative only</td>
+    <td>Post-hoc dial. Doubles inference cost. Too much collapses diversity.</td></tr>
+</tbody></table>
+</div>
+
+<h4>How conditioning fails</h4>
+
+<p><b>The condition is ignored.</b> The model learns to predict well on average while routing
+nothing through \(c\). This is the most common failure and the easiest to miss, because your
+loss curve looks fine. Detect it with a <em>condition-shuffle test</em>: permute the conditions
+across the batch at evaluation and see whether the metric moves.</p>
+
+<pre><code class="language-python">@torch.no_grad()
+def condition_shuffle_test(model, batch, metric):
+    """If shuffling the condition barely hurts, the model is not using it."""
+    y = batch['future']
+    base = metric(model(batch['history'], batch['cond']), y)
+    perm = torch.randperm(batch['cond'].size(0))
+    shuf = metric(model(batch['history'], batch['cond'][perm]), y)
+    return base, shuf, (shuf - base) / base       # want a large relative gap</code></pre>
+
+<p><b>Posterior collapse.</b> In CVAE-style models the latent \(z\) is ignored because a strong
+decoder can model the data without it, and the KL term happily drives \(q(z \mid x,y)\) to the
+prior. Mitigations: KL annealing, free bits, a weaker decoder, or a discrete latent — Trajectron++
+uses a 25-way categorical latent partly for this reason.</p>
+
+<p><b>Over-conditioning and leakage.</b> If you feed a ground-truth goal at training time, the
+model becomes trivially dependent on it and collapses when goals are estimated at test time.
+Always report results with <em>predicted</em> goals; reporting oracle-goal numbers alongside is
+informative, reporting them alone is misleading.</p>
+
+<p><b>Guidance artefacts.</b> Large \(w\) reduces diversity and produces physically implausible
+samples. Sweep it and report the accuracy–diversity trade-off rather than picking the value that
+flatters one metric.</p>
+
+<div class="note warn">
+<span class="tag">Minimum verification set</span>
+<p>Before believing any conditional model: (1) ablate each conditioning input separately;
+(2) run the condition-shuffle test; (3) sweep the guidance scale if generative; (4) report the
+oracle-goal versus predicted-goal gap if goal-conditioned; (5) look at attention maps. AgentFormer
+does this last one and shows attention concentrating on the target's own recent timesteps and on
+nearby agents — which is what you want to see.</p>
+</div>
+</section>
+
+<h2 class="part" id="partB"><span class="pn">PART B</span>Trajectory prediction</h2>
+<p class="part-sub">Where the toolbox meets the problem. Trajectory forecasting is unusual in
+that conditioning is not a refinement — it is the entire modelling strategy.</p>
+
+<section id="b1">
+<h3><span class="hn">B.1</span>The problem, and why one output is not enough</h3>
+
+<p>Given observed history \(X = \{x_i^t\}\) for agents \(i = 1,\dots,N\) over past steps
+\(t = 1,\dots,T_{\text{obs}}\), predict futures \(Y = \{y_i^t\}\) over
+\(t = 1,\dots,T_{\text{pred}}\).</p>
+
+<p>The naive approach outputs one trajectory and trains with L2. It fails for a structural
+reason, not a capacity reason: when the future is genuinely bimodal — this aircraft will be
+vectored onto either the left or the right downwind — the L2-optimal single prediction is the
+<em>average</em> of the two, which is a path no aircraft would ever fly. Mode averaging is the
+defining pathology of the field.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 262" role="img" aria-label="Trajectory prediction setup showing observed history, multiple predicted futures, ground truth, and the ADE and FDE metrics">
+  <text class="lbl" x="20" y="18">observed</text>
+  <text class="lbl" x="266" y="18">predicted horizon</text>
+  <path class="s2 dash" d="M256 26 L256 214"/>
+  <path class="s2" d="M20 214 L676 214"/>
+  <text class="sm f3" x="20" y="232">t = −T_obs</text>
+  <text class="sm f3" x="256" y="232" text-anchor="middle">now</text>
+  <text class="sm f3" x="676" y="232" text-anchor="end">t = +T_pred</text>
+
+  <!-- history -->
+  <path class="s" d="M28 172 C 90 168, 150 152, 256 128"/>
+  <g class="s" fill="var(--ink)">
+    <circle cx="28" cy="172" r="2.6"/><circle cx="86" cy="167" r="2.6"/>
+    <circle cx="144" cy="153" r="2.6"/><circle cx="200" cy="141" r="2.6"/>
+    <circle cx="256" cy="128" r="3.4"/>
+  </g>
+
+  <!-- K predicted futures -->
+  <path class="m dash" d="M256 128 C 340 118, 420 74, 556 46"/>
+  <path class="m dash" d="M256 128 C 340 126, 430 116, 556 104"/>
+  <path class="m dash" d="M256 128 C 350 142, 440 168, 556 186"/>
+  <path class="m dash" d="M256 128 C 340 132, 430 138, 556 148" opacity=".45"/>
+  <path class="m dash" d="M256 128 C 344 110, 424 92, 556 76" opacity=".45"/>
+  <text class="mn fm" x="566" y="44">ŷ¹</text>
+  <text class="mn fm" x="566" y="102">ŷ²</text>
+  <text class="mn fm" x="566" y="190">ŷᴷ</text>
+
+  <!-- ground truth -->
+  <path class="t" d="M256 128 C 342 122, 424 106, 556 92"/>
+  <circle class="ft" cx="556" cy="92" r="4"/>
+  <text class="mn ft" x="566" y="80">y  (truth)</text>
+
+  <!-- FDE bracket -->
+  <path class="s2" d="M600 92 L620 92"/><path class="s2" d="M600 104 L620 104"/>
+  <path class="s" d="M614 92 L614 104"/>
+  <text class="sm" x="626" y="102">FDE</text>
+
+  <!-- ADE ticks -->
+  <g class="s2">
+    <path d="M340 120 L340 128"/><path d="M400 113 L400 120"/><path d="M470 108 L470 112"/>
+  </g>
+  <text class="sm" x="330" y="176" text-anchor="middle">ADE averages these gaps</text>
+
+  <!-- mean-of-modes warning -->
+  <path class="sd dot" d="M256 128 C 350 128, 440 128, 556 122"/>
+  <text class="sm fs" x="392" y="200" text-anchor="middle">an L2-trained single output lands here — between the modes, on no real path</text>
+</svg>
+</div>
+<figcaption><b>Fig. B1 — The setup and its trap.</b> Magenta: \(K\) sampled futures. Teal: the
+realised one. Sand: what a single-output L2 model converges to. <b>minADE</b> and <b>minFDE</b>
+score only the closest of the \(K\) — which is why they must never be reported alone
+(§B.7).</figcaption>
+</figure>
+
+<p>So the output is a <em>distribution</em>, and the families differ in how they represent it:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th style="width:20%">Family</th><th style="width:30%">Output</th><th>Trained with</th></tr></thead>
+<tbody>
+<tr><td>Mixture / GMM head</td><td>\(K\) trajectories, each with a probability and per-step Gaussian</td>
+    <td>Winner-takes-all: only the mode closest to ground truth is regressed, so modes specialise
+        instead of averaging. Used by MTR and most Waymo entries.</td></tr>
+<tr><td>CVAE</td><td>latent \(z\) for intent, decode \(p(y \mid x, z)\)</td>
+    <td>ELBO. Watch for posterior collapse (§A.9). Trajectron++, TrajAirNet.</td></tr>
+<tr><td>Diffusion</td><td>denoise a trajectory from noise, conditioned on context</td>
+    <td>Denoising loss. Most expressive, slowest — see LED's leapfrog fix.</td></tr>
+<tr><td>Anchor / goal-conditioned</td><td>endpoint distribution, then completion</td>
+    <td>Two-stage. The most interpretable and, for aviation, the most natural (§B.4).</td></tr>
+</tbody></table>
+</div>
+</section>
+
+<section id="b2">
+<h3><span class="hn">B.2</span>What actually gets used as the condition</h3>
+
+<ul>
+<li><b>Past observed trajectory</b> — always present, usually via a temporal encoder.</li>
+<li><b>Agent type and kinematics</b> — vehicle versus pedestrian; aircraft type, wake category,
+performance envelope.</li>
+<li><b>Goal or endpoint</b> — the strongest single lever on multimodality (§B.4).</li>
+<li><b>Map or scene context</b> — vectorised HD-map lanes for driving; runway geometry, STAR
+waypoints and the approach corridor for aviation.</li>
+<li><b>Social context</b> — the other agents, through interaction attention (§B.5).</li>
+<li><b>Weather</b> — marginal in driving, first-order in aviation.</li>
+<li><b>Control or intent variables</b> — turn signals, ATC clearances, or a desired return in the
+RL framing (§B.6).</li>
+</ul>
+</section>
+
+<section id="b3">
+<h3><span class="hn">B.3</span>The architectures worth knowing</h3>
+
+<p>Read this section as a genealogy rather than a list. Three ideas recur: encode the scene in a
+relative frame, attend along agent and time axes separately, and decode with learned queries that
+each own a mode.</p>
+
+<h4>Interaction-first</h4>
+<ul>
+<li><b>AgentFormer</b> (<a href="https://arxiv.org/abs/2103.14023">Yuan et al., ICCV 2021</a>)
+flattens multi-agent trajectories across <em>both</em> time and agents into one sequence, then uses
+<em>agent-aware attention</em> that treats elements of the same agent differently from elements of
+other agents — preserving identity that naive flattening destroys. A CVAE latent supplies
+stochasticity. This is the closest generic ancestor of what you need.</li>
+<li><b>Scene Transformer</b> (<a href="https://arxiv.org/abs/2106.08417">Ngiam et al., ICLR
+2022</a>) uses a scene-centric representation with <em>factorised attention</em> alternating
+between the time and agent dimensions, and a masked-sequence formulation that lets one model do
+marginal, conditional, and goal-conditioned prediction. The factorisation is the template I
+recommend for multi-aircraft (§B.5).</li>
+<li><b>Social-LSTM</b> (Alahi et al., CVPR 2016) and <b>Social-GAN</b> (Gupta et al., CVPR 2018)
+are the origin of "social" modelling — pooling neighbour hidden states, and GAN-based
+multimodality with a variety loss. Historical, but the vocabulary comes from here.</li>
+</ul>
+
+<h4>Map- and goal-first</h4>
+<ul>
+<li><b>VectorNet</b> (Gao et al., CVPR 2020) represents map and agents as polylines in a
+hierarchical graph — the move that made HD maps tractable for learning.</li>
+<li><b>TNT</b> (Zhao et al., CoRL 2020) and <b>DenseTNT</b>
+(<a href="https://arxiv.org/abs/2108.09640">Gu, Sun &amp; Zhao, ICCV 2021</a>) build on it.
+TNT predicts discrete endpoints then completes trajectories conditioned on them; DenseTNT drops
+the heuristic anchors and regresses a dense goal probability distribution. DenseTNT ranked first
+on Argoverse and won the 2021 Waymo Motion Prediction Challenge.</li>
+</ul>
+
+<h4>Query-based decoding — the current mainstream</h4>
+<ul>
+<li><b>Wayformer</b> (<a href="https://arxiv.org/abs/2207.05844">Nayakanti et al.</a>) is
+deliberately simple: a scene encoder with early, late, or hierarchical fusion plus latent-query
+attention for efficiency, then a cross-attention decoder where learned queries produce \(K\)
+trajectories. A good architecture to read first because it strips away everything optional.</li>
+<li><b>MTR</b> (Shi et al., NeurIPS 2022) and <b>MTR++</b>
+(<a href="https://arxiv.org/abs/2306.17770">arXiv:2306.17770</a>) introduce <em>motion query
+pairs</em>: a static intention query, obtained by k-means over ground-truth endpoints, handles
+global intention; a dynamic searching query refines locally across decoder layers. MTR-A won the
+2022 Waymo challenge. Note what an intention query is — a learned goal anchor, i.e. goal
+conditioning wearing a transformer's clothes.</li>
+<li><b>QCNet</b> (<a href="https://github.com/ZikangZhou/QCNet">Zhou et al., CVPR 2023</a>)
+encodes every scene element in its <em>own</em> local relative spacetime frame, which makes the
+encoding roto-translation invariant, reusable across timesteps for streaming inference, and
+parallel across agents. Anchor-free proposals then anchor-based refinement. Ranked first on
+Argoverse 1 and 2.</li>
+<li><b>mmTransformer</b> (<a href="https://arxiv.org/abs/2103.11624">Liu et al., CVPR 2021</a>)
+aggregates history, map, and social context onto fixed trajectory proposals, with a region-based
+training strategy to induce multimodality.</li>
+</ul>
+
+<h4>Generative</h4>
+<ul>
+<li><b>Trajectron++</b> (<a href="https://arxiv.org/abs/2001.03093">Salzmann et al., ECCV
+2020</a>) — the canonical CVAE baseline. Graph-structured recurrent model, discrete 25-way
+categorical latent for intent, GMM output pushed through a dynamics model so the outputs are
+dynamically feasible. Still the baseline to beat for probabilistic quality.</li>
+<li><b>MID</b> (Gu et al., CVPR 2022) brought diffusion to pedestrian trajectories, framing the
+reverse process as motion going from indeterminate to determinate.</li>
+<li><b>LED</b> (<a href="https://arxiv.org/abs/2303.10895">Mao et al., CVPR 2023</a>) makes it
+practical: a trainable leapfrog initialiser skips most denoising steps, reporting speedups of
+19.3× to 30.8× across NBA, NFL, SDD and ETH-UCY, with a 23.7% / 21.9% ADE/FDE improvement on
+NFL at the 3.2 s horizon. If you want diffusion in an operational system, start here.</li>
+<li><b>MotionDiffuser</b> (<a href="https://arxiv.org/abs/2306.03083">Jiang et al., CVPR
+2023</a>) does joint multi-agent diffusion with a permutation-invariant set formulation, a
+PCA-compressed trajectory representation, and constrained sampling for physical priors.</li>
+</ul>
+</section>
+
+<section id="b4">
+<h3><span class="hn">B.4</span>Goal conditioning, and why it works so well</h3>
+
+<p>Future uncertainty is dominated by <em>where</em>, not <em>how</em>. Once the destination is
+fixed, the remaining path is close to unimodal and easy to regress. Goal-conditioned methods
+exploit this by factorising:</p>
+
+$$p(Y \mid X) \;=\; \sum_{g} \underbrace{p(g \mid X)}_{\text{a discrete, learnable choice}}\;
+\cdot\; \underbrace{p(Y \mid X, g)}_{\text{nearly unimodal}}$$
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 250" role="img" aria-label="Goal conditioning: a distribution over candidate endpoints, then near-unimodal completions to each">
+  <!-- stage 1 -->
+  <text class="lbl" x="20" y="18">1 · where does it end?</text>
+  <rect class="boxq" x="20" y="28" width="312" height="182"/>
+  <path class="s" d="M40 176 C 90 172, 130 160, 172 146"/>
+  <circle cx="172" cy="146" r="3.4" fill="var(--ink)"/>
+  <!-- candidate goals with probability -->
+  <g>
+    <circle cx="276" cy="72" r="15" fill="var(--magenta)" opacity=".55"/>
+    <circle cx="288" cy="122" r="9" fill="var(--magenta)" opacity=".3"/>
+    <circle cx="266" cy="170" r="12" fill="var(--magenta)" opacity=".42"/>
+    <circle cx="230" cy="104" r="6" fill="var(--magenta)" opacity=".2"/>
+  </g>
+  <text class="mn" x="298" y="76">0.48</text>
+  <text class="mn f3" x="302" y="126">0.11</text>
+  <text class="mn" x="284" y="188">0.31</text>
+  <text class="sm" x="176" y="204" text-anchor="middle">p(g | X) over candidate endpoints</text>
+
+  <path class="s" d="M344 118 L378 118"/><path class="s" d="M372 114 L378 118 L372 122"/>
+
+  <!-- stage 2 -->
+  <text class="lbl" x="392" y="18">2 · how does it get there?</text>
+  <rect class="boxq" x="392" y="28" width="286" height="182"/>
+  <path class="s" d="M410 176 C 452 172, 486 160, 522 146"/>
+  <circle cx="522" cy="146" r="3.4" fill="var(--ink)"/>
+  <path class="m" d="M522 146 C 566 132, 594 100, 636 74"/>
+  <path class="m" d="M522 146 C 566 152, 596 162, 632 172"/>
+  <path class="m dot" d="M522 146 C 568 140, 596 128, 644 122" opacity=".5"/>
+  <circle cx="636" cy="74" r="4" fill="var(--magenta)"/>
+  <circle cx="632" cy="172" r="4" fill="var(--magenta)"/>
+  <circle cx="644" cy="122" r="3" fill="var(--magenta)" opacity=".5"/>
+  <text class="sm" x="535" y="204" text-anchor="middle">p(Y | X, g) — one smooth path each</text>
+</svg>
+</div>
+<figcaption><b>Fig. B2 — The factorisation.</b> All the branching lives in stage one, where it is
+a tractable classification problem. Stage two becomes regression. In an ATM terminal area the
+candidate goals are not abstract: they are runway thresholds, and the intermediate ones are
+approach fixes.</figcaption>
+</figure>
+
+<pre><code class="language-python">class GoalConditionedDecoder(nn.Module):
+    """Stage 2. The goal enters as an adaLN condition, not as an extra token."""
+    def __init__(self, d, n_layers, horizon):
+        super().__init__()
+        self.goal_mlp = nn.Sequential(nn.Linear(3, d), nn.SiLU(), nn.Linear(d, d))
+        self.blocks   = nn.ModuleList([AdaLNZeroBlock(d, 8) for _ in range(n_layers)])
+        self.head     = nn.Linear(d, 3)
+        self.queries  = nn.Parameter(torch.randn(horizon, d) * 0.02)
+
+    def forward(self, ctx, goal):            # ctx: (B,d) history+scene   goal: (B,3) ENU xyz
+        c = ctx + self.goal_mlp(goal)
+        h = self.queries.unsqueeze(0).expand(goal.size(0), -1, -1)
+        for blk in self.blocks:
+            h = blk(h, c)
+        return self.head(h)                  # (B, horizon, 3)</code></pre>
+
+<div class="note warn">
+<span class="tag">The evaluation trap</span>
+<p>Training this with ground-truth goals is fine. Evaluating with them is not — an oracle goal
+makes almost any decoder look excellent. Report predicted-goal numbers as the headline. The gap
+between the two is itself a useful diagnostic: a large gap means your stage-one classifier, not
+your decoder, is the bottleneck.</p>
+</div>
+</section>
+
+<section id="b5">
+<h3><span class="hn">B.5</span>Multi-agent modelling</h3>
+
+<p>You have \(A\) agents over \(T\) timesteps, so the natural tensor is \((B, A, T, d)\).
+Attending over the flattened \(A \cdot T\) sequence costs \(\mathcal{O}((AT)^2)\) and scrambles
+agent identity. <b>Factorised (axial) attention</b> alternates instead: attend along time within
+each agent, then along agents within each timestep. Cost drops to
+\(\mathcal{O}(AT^2 + TA^2)\), and each pass has a clean interpretation — one is dynamics, the
+other is interaction.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 218" role="img" aria-label="Factorised axial attention alternating between the time axis and the agent axis of an agent-by-time grid">
+  <!-- grid 1 -->
+  <text class="lbl" x="26" y="18">pass 1 · along time</text>
+  <text class="sm f3" x="26" y="34">dynamics within each aircraft</text>
+  <g class="s2">
+    <path d="M26 46 h176 v112 h-176 z"/>
+    <path d="M26 74 h176"/><path d="M26 102 h176"/><path d="M26 130 h176"/>
+    <path d="M54 46 v112"/><path d="M82 46 v112"/><path d="M110 46 v112"/>
+    <path d="M138 46 v112"/><path d="M166 46 v112"/>
+  </g>
+  <rect x="26" y="74" width="176" height="28" fill="var(--magenta)" opacity=".18"/>
+  <rect x="26" y="74" width="176" height="28" fill="none" stroke="var(--magenta)" stroke-width="1.6"/>
+  <text class="mn f3" x="114" y="176" text-anchor="middle">time  →</text>
+  <text class="mn f3" x="16" y="102" text-anchor="middle" transform="rotate(-90 16 102)">agents</text>
+
+  <path class="s" d="M222 102 L256 102"/><path class="s" d="M250 98 L256 102 L250 106"/>
+
+  <!-- grid 2 -->
+  <text class="lbl" x="276" y="18">pass 2 · along agents</text>
+  <text class="sm f3" x="276" y="34">interaction at each instant</text>
+  <g class="s2">
+    <path d="M276 46 h176 v112 h-176 z"/>
+    <path d="M276 74 h176"/><path d="M276 102 h176"/><path d="M276 130 h176"/>
+    <path d="M304 46 v112"/><path d="M332 46 v112"/><path d="M360 46 v112"/>
+    <path d="M388 46 v112"/><path d="M416 46 v112"/>
+  </g>
+  <rect x="332" y="46" width="28" height="112" fill="var(--teal)" opacity=".2"/>
+  <rect x="332" y="46" width="28" height="112" fill="none" stroke="var(--teal)" stroke-width="1.6"/>
+  <text class="mn f3" x="364" y="176" text-anchor="middle">time  →</text>
+
+  <!-- cost note -->
+  <rect class="boxq" x="486" y="46" width="192" height="112"/>
+  <text class="lbl" x="498" y="66">cost</text>
+  <text class="mn" x="498" y="88">flat:  O((A·T)²)</text>
+  <text class="mn ft" x="498" y="108">axial: O(A·T² + T·A²)</text>
+  <text class="sm" x="498" y="132">at A = 12, T = 60 that is</text>
+  <text class="sm" x="498" y="147">an order of magnitude</text>
+</svg>
+</div>
+<figcaption><b>Fig. B3 — Factorised attention.</b> Scene Transformer's core move. Each pass is
+permutation-equivariant over the axis it does not attend along, so agent ordering never leaks into
+the output.</figcaption>
+</figure>
+
+<pre><code class="language-python">def axial_block(x, time_attn, agent_attn, agent_bias=None):
+    """x: (B, A, T, d) -- A agents, T timesteps."""
+    B, A, T, d = x.shape
+    # --- along time, independently per agent
+    x = time_attn(x.reshape(B * A, T, d)).reshape(B, A, T, d)
+    # --- along agents, independently per timestep
+    x = x.transpose(1, 2).reshape(B * T, A, d)
+    x = agent_attn(x, attn_bias=agent_bias)        # separation_bias() goes here
+    return x.reshape(B, T, A, d).transpose(1, 2)</code></pre>
+
+<h4>Coordinate frames</h4>
+<p>An under-appreciated decision that affects accuracy more than most architecture choices.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 214" role="img" aria-label="Three coordinate frame choices: scene-centric, agent-centric and query-centric">
+  <g>
+    <text class="lbl" x="24" y="18">scene-centric</text>
+    <rect class="boxq" x="24" y="28" width="196" height="128"/>
+    <g class="s"><path d="M52 130 L52 60"/><path d="M52 130 L120 130"/></g>
+    <text class="mn f3" x="42" y="54">N</text>
+    <g fill="var(--ink)">
+      <path d="M104 88 l7 3 l-7 -10 l-7 10 z"/>
+      <path d="M156 116 l7 3 l-7 -10 l-7 10 z"/>
+      <path d="M132 62 l7 3 l-7 -10 l-7 10 z"/>
+    </g>
+    <text class="sm" x="24" y="174">one frame, one pass per scene</text>
+    <text class="sm f3" x="24" y="190">model must learn the transforms</text>
+  </g>
+  <g>
+    <text class="lbl" x="252" y="18">agent-centric</text>
+    <rect class="boxq" x="252" y="28" width="196" height="128"/>
+    <g class="t"><path d="M330 116 L330 62"/><path d="M330 116 L384 116"/></g>
+    <path d="M330 92 l7 3 l-7 -10 l-7 10 z" fill="var(--magenta)"/>
+    <g fill="var(--ink-3)">
+      <path d="M282 74 l6 2 l-6 -9 l-6 9 z"/>
+      <path d="M400 134 l6 2 l-6 -9 l-6 9 z"/>
+    </g>
+    <text class="sm" x="252" y="174">accurate, data-efficient</text>
+    <text class="sm f3" x="252" y="190">one pass per agent — redundant</text>
+  </g>
+  <g>
+    <text class="lbl" x="480" y="18">query-centric</text>
+    <rect class="boxq" x="480" y="28" width="196" height="128"/>
+    <g class="t" opacity=".8">
+      <path d="M524 108 L524 82"/><path d="M524 108 L550 108"/>
+      <path d="M594 128 L594 102"/><path d="M594 128 L620 128"/>
+      <path d="M566 72 L566 46"/><path d="M566 72 L592 72"/>
+    </g>
+    <g fill="var(--ink)">
+      <path d="M524 96 l6 2 l-6 -9 l-6 9 z"/>
+      <path d="M594 116 l6 2 l-6 -9 l-6 9 z"/>
+      <path d="M566 60 l6 2 l-6 -9 l-6 9 z"/>
+    </g>
+    <path class="m dash" d="M530 94 L588 114"/>
+    <path class="m dash" d="M560 62 L530 90"/>
+    <text class="sm" x="480" y="174">every element in its own frame,</text>
+    <text class="sm f3" x="480" y="190">relations carried on the edges</text>
+  </g>
+</svg>
+</div>
+<figcaption><b>Fig. B4 — Frames.</b> Query-centric (QCNet) is the current best of both: local
+frames give invariance and reusable encodings, while pairwise relative poses on the edges keep
+the geometry the local frames would otherwise throw away. For aircraft, a runway-relative
+variant is the practical choice (§C.5).</figcaption>
+</figure>
+
+<p>Whatever you choose, aircraft have no intrinsic order, so the model's output must not depend on
+how you index them. Relative pairwise encodings and set-based attention give you
+permutation-equivariance for free; anything that indexes agents absolutely does not.</p>
+</section>
+
+<section id="b6">
+<h3><span class="hn">B.6</span>Return conditioning: a useful outsider</h3>
+
+<p><b>Decision Transformer</b> (<a href="https://arxiv.org/abs/2106.01345">Chen et al., NeurIPS
+2021</a>) recasts reinforcement learning as sequence modelling: feed tokens of (return-to-go,
+state, action), and at test time <em>condition on a desired return</em> to generate actions that
+achieve it. <b>Trajectory Transformer</b>
+(<a href="https://arxiv.org/abs/2106.02039">Janner, Li &amp; Levine</a>) models whole trajectories
+as token sequences and plans with beam search.</p>
+
+<p>The transferable lesson is not the RL. It is that <b>a desired outcome can be prepended as a
+token, and the model will generate a trajectory consistent with it.</b> Replace return-to-go with
+a target touchdown time, a runway assignment, or a required time of arrival at a metering fix, and
+you have a controllable ATM model — one you can query with "what would this approach look like if
+I needed it on the ground ninety seconds earlier?" That is a different and more operationally
+interesting product than a point forecast.</p>
+</section>
+
+<section id="b7">
+<h3><span class="hn">B.7</span>Metrics, and what they hide</h3>
+
+<ul>
+<li><b>ADE</b> — mean \(L_2\) error over all predicted steps.</li>
+<li><b>FDE</b> — \(L_2\) error at the final step.</li>
+<li><b>minADE\(_K\)</b> / <b>minFDE\(_K\)</b> — the minimum over \(K\) sampled trajectories.
+Standard for multimodal evaluation, usually \(K = 6\).</li>
+<li><b>Miss rate</b> — fraction of predictions whose FDE exceeds a threshold.</li>
+<li><b>NLL</b> — negative log-likelihood of the ground truth under the predicted distribution.
+The only one of these that rewards calibration.</li>
+</ul>
+
+$$\mathrm{minADE}_K = \min_{k \in \{1..K\}} \frac{1}{T_{\text{pred}}}
+\sum_{t=1}^{T_{\text{pred}}} \left\lVert \hat{y}^{\,k}_{t} - y_{t} \right\rVert_2$$
+
+<div class="note warn">
+<span class="tag">Four things minADE will not tell you</span>
+<ul>
+<li>It scores the closest sample and ignores the other \(K-1\). A model can post a good number
+while producing \(K-1\) implausible trajectories.</li>
+<li>It says nothing about calibration — whether the mode probabilities mean anything.</li>
+<li>It rewards spreading samples out, which is easy to game.</li>
+<li>It is a per-agent metric. It cannot see whether the joint prediction is scene-consistent, or
+whether your predicted aircraft fly through each other.</li>
+</ul>
+<p>Always pair it with miss rate, NLL, and — for multi-agent work — a joint metric and a
+separation-violation rate.</p>
+</div>
+</section>
+
+<h2 class="part" id="partC"><span class="pn">PART C</span>Aviation and ATM</h2>
+<p class="part-sub">What survives contact with real approach data — the sources, the differences
+from road and pedestrian forecasting, the published work, and an honest plan for a dataset of a
+few thousand trajectories.</p>
+
+<section id="c1">
+<h3><span class="hn">C.1</span>Where the data comes from</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th style="width:20%">Source</th><th style="width:14%">Access</th><th>What it gives you</th></tr></thead>
+<tbody>
+<tr><td><a href="https://opensky-network.org">OpenSky Network</a></td><td>open, free for research</td>
+    <td>The primary crowdsourced ADS-B and Mode-S archive, running since 2013 with Mode-S downlink
+    capture added in March 2017. The <a href="https://arxiv.org/abs/2505.06254">OpenSky Report
+    2025</a> puts the archive beyond 40 trillion Mode-S replies, supporting roughly 600 academic
+    publications. Live REST API plus a historical database.</td></tr>
+<tr><td><a href="https://traffic-viz.github.io">traffic</a> (Python)</td><td>open</td>
+    <td>The standard toolbox (Olive, JOSS 2019). Parses and queries ADS-B from OpenSky and
+    Eurocontrol DDR files, with cleaning, resampling, clustering, and
+    <code>arrival()</code>/<code>departure()</code> helpers keyed by airport. Start here rather
+    than writing your own parser.</td></tr>
+<tr><td>pyopensky · pyModeS</td><td>open</td>
+    <td>Python interfaces to the OpenSky live and historical databases, and Mode-S EHS decoding
+    (true airspeed, selected altitude, indicated airspeed) — the latter is how you infer wind
+    aloft from the traffic itself.</td></tr>
+<tr><td>Eurocontrol DDR2 / R&amp;D archive</td><td><b>restricted</b></td>
+    <td>Pan-European ECAC traffic from about 2012. SO6 trajectory files in M1 (last-filed flight
+    plan) and M3 (radar-updated) models, plus aircraft type, origin–destination, times and ATFM
+    delay. Requires permission; tooling is NEST and SAAM.</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2109.15158">TrajAir</a></td><td>open</td>
+    <td>111 days around a non-towered airport, ADS-B matched to METAR — the first 3D <em>social</em>
+    aerial dataset. Baseline TrajAirNet is TCN + graph attention + CVAE, 11 s observation and
+    120 s prediction. The closest public analogue to your problem.</td></tr>
+</tbody></table>
+</div>
+
+<div class="note warn">
+<span class="tag">Two practical traps</span>
+<p>For OpenSky <em>historical</em> data you must authenticate and query through Trino — the REST
+API only serves live state vectors, and a surprising number of people lose a day to this. And
+unlike driving, <b>there is no standard public benchmark for aircraft 4D trajectory
+prediction</b>. The DA-STGCN paper says so explicitly. Nearly every group builds its own dataset,
+which is why cross-paper numbers in §C.3 cannot be compared.</p>
+</div>
+</section>
+
+<section id="c2">
+<h3><span class="hn">C.2</span>How aviation differs from cars and pedestrians</h3>
+
+<p>Borrowing architectures from the driving literature is right. Borrowing assumptions is not.</p>
+
+<ul>
+<li><b>Strong procedural structure.</b> Arrivals follow STARs and published approach procedures.
+Trajectories are far more constrained than pedestrian paths — but the constraint is a
+<em>branching</em> one, with discrete decision points (which runway, which downwind, extend or
+turn base). That is a gift to goal-conditioned models and a problem for regression.</li>
+<li><b>Runway assignment is a dominant latent variable</b> and shapes the whole approach.</li>
+<li><b>Genuinely 4D.</b> Latitude, longitude, altitude and time. The vertical profile has its own
+constraints and its own error budget; treating altitude as a third position channel with the same
+loss weight as horizontal position is a common and costly shortcut.</li>
+<li><b>Control from outside the system.</b> ATC vectoring injects behaviour that is invisible in
+the kinematics. You are frequently modelling \(p(Y \mid X)\) when the real process is
+\(p(Y \mid X, \text{clearance})\) and the clearance is unobserved.</li>
+<li><b>Longer horizons, sparser interactions.</b> Minutes rather than seconds, and interaction is
+governed by separation minima — typically about 3–5 NM laterally and 1000 ft vertically — rather
+than dense short-range social forces.</li>
+<li><b>Weather is first-order.</b> Wind shifts the whole trajectory; convective cells reroute it.</li>
+</ul>
+</section>
+
+<section id="c3">
+<h3><span class="hn">C.3</span>The aviation literature</h3>
+
+<h4>Multi-aircraft interaction — closest to your problem</h4>
+<ul>
+<li><b>B-STAR</b> (Pang, Zhao, Hu, Yan &amp; Liu, <em>Knowledge-Based Systems</em> 249:108998,
+2022). A Bayesian spatio-temporal graph transformer, described by its authors as the first
+graph-based deep model for multi-aircraft interactive trajectory prediction. Spatial and temporal
+transformers interleaved in an encoder–decoder; the interaction graph is built from Haversine
+distance with a 10 km threshold; uncertainty is inferred from the data rather than preset.
+Evaluated on ETH/UCY and on real near-terminal ASDE-X data, with a separation-distance
+sensitivity study.</li>
+<li><b>BST-Transformer</b> (Li, Tian, Xie, Zhi &amp; Wan, <em>Aerospace</em> 12(9):855, 2025).
+Terminal-area prediction with probabilistic conflict alerting. Two stages: an ST-Transformer
+combining temporal multi-head self-attention with a GCN over the same 10 km interaction graph,
+then a Bayesian variational decoder producing trajectory <em>distributions</em>. Monte Carlo
+sampling of that predictive distribution yields conflict probabilities against 0.6 and 0.8 alert
+thresholds. On Guangzhou TMA secondary-radar data the paper reports a 60.3% reduction in mean
+absolute displacement error against a deterministic ST-Transformer, with comparable reductions in
+the horizontal and vertical components. This is the single most relevant paper for your project;
+read it before you design anything.</li>
+<li><b>Social ST-GCN</b> (Xu et al., <em>J. Aerospace Information Systems</em> 20(6), 2023) —
+each aircraft a graph node, spatiotemporal graph convolution over time and interaction.</li>
+<li><b>DA-STGCN</b> (<a href="https://arxiv.org/abs/2503.04823">arXiv:2503.04823</a>, 2025) —
+reconstructs the adjacency matrix through self-attention and graph attention, with probabilistic
+output; reports roughly 20% / 30% ADE / FDE reduction against prior 4D methods on self-built
+ADS-B data near BOS and JFK.</li>
+</ul>
+
+<h4>Conditioning and intent</h4>
+<ul>
+<li><b>Yin, Zhang et al.</b>, <em>Neurocomputing</em> 615:128843, 2025 — introduces a
+model-agnostic <em>intention latent</em> derived from local flight history that can be used as an
+additional condition by any trajectory prediction model. Robust to normalised inputs, improves
+generalisation to unseen areas, and is evaluated in both towered and non-towered terminal
+airspace. This is precisely the "add a condition" question you asked, answered inside your
+domain.</li>
+<li><b>Context-aware Aircraft Trajectory Prediction with Diffusion Models</b> (Yin et al., IEEE
+ITSC 2023) — trajectory encoder plus context encoder feeding a transformer-based diffusion decoder
+conditioned on pilot and controller intent and environmental conditions. Builds on MID.</li>
+<li><b>Goal-oriented Diffusion Model for Flight Trajectory Prediction</b> — two-stage goal
+estimation followed by a transformer diffusion model conditioned on the intention estimates,
+separating macro flight-pattern uncertainty from micro uncertainty. The aviation instantiation of
+§B.4.</li>
+<li><b>Weather-conditioned Bayesian prediction</b> (Pang, Zhao, Yan &amp; Liu, <em>Transportation
+Research Part C</em> 130:103326, 2021) — the canonical weather-conditioning reference, using
+Seq2Seq plus CNN over convective weather products with Bayesian uncertainty quantification.</li>
+</ul>
+
+<h4>Sequence-modelling approaches</h4>
+<ul>
+<li><b>FlightBERT</b> (Guo et al., 2022) and <b>FlightBERT++</b> (AAAI 2024,
+<a href="https://arxiv.org/abs/2305.01658">arXiv:2305.01658</a>) represent trajectory attributes as
+binary — later Gray — codes and predict by multi-binary classification. The ++ version is
+non-autoregressive and predicts differential values, reporting 29.0% and 21.8% mean-deviation-error
+reductions at horizons 1 and 15. Two caveats: it trains on a proprietary industrial ATC dataset, so
+it is not reproducible; and a single high-bit misclassification produces a large decimal error,
+which is a real failure mode rather than a theoretical one.</li>
+<li><b>FlightPatchNet</b> (<a href="https://arxiv.org/abs/2405.16200">arXiv:2405.16200</a>)
+critiques that binary encoding directly and uses differential coding with multi-scale patch mixing
+for direct multi-step prediction.</li>
+<li><b>Zhang, Payan &amp; Mavris</b> (AIAA Aviation 2024) on Zurich terminal data — a transformer
+<em>matches</em> an LSTM while training faster, and cluster-based prediction beats training on the
+whole set. Read that result carefully: the gain came from structure, not scale.</li>
+</ul>
+</section>
+
+<section id="c4">
+<h3><span class="hn">C.4</span>What to condition on in ATM</h3>
+
+<div class="tw">
+<table>
+<thead><tr><th style="width:24%">Condition</th><th style="width:16%">Shape</th>
+<th style="width:18%">Mechanism</th><th>Where it comes from</th></tr></thead>
+<tbody>
+<tr><td>Runway in use</td><td>categorical</td><td>adaLN §A.4</td>
+    <td>Inferred from the touchdown point of each historical trajectory. Dominant discrete
+    variable.</td></tr>
+<tr><td>Wind and METAR</td><td>2–4 vector</td><td>adaLN §A.4</td>
+    <td>METAR archives, or inferred from Mode-S EHS via pyModeS.</td></tr>
+<tr><td>Aircraft type / wake category</td><td>categorical</td><td>adaLN §A.4</td>
+    <td>ADS-B aircraft database; drives approach speed and descent rate.</td></tr>
+<tr><td>Distance or time to threshold</td><td>scalar</td><td>adaLN §A.4</td>
+    <td>Computed. Behaves like a phase variable — the analogue of return-to-go (§B.6).</td></tr>
+<tr><td>STAR / approach procedure</td><td>set of waypoints</td><td>cross-attention §A.3</td>
+    <td>AIP charts or an open navigation database. Variable length, so it must be a set.</td></tr>
+<tr><td>Neighbouring traffic</td><td>ragged set + graph</td><td>agent-axis attention + bias §A.6</td>
+    <td>The other aircraft in the same time window.</td></tr>
+<tr><td>Traffic density / arrival rate</td><td>scalar</td><td>adaLN §A.4</td>
+    <td>Counted from the data. A cheap proxy for the holding and vectoring you cannot observe.</td></tr>
+<tr><td>ATC clearances</td><td>sequence</td><td>cross-attention §A.3</td>
+    <td>Rarely available. If you can get assigned heading, altitude and speed, they are the single
+    most informative condition in this table.</td></tr>
+</tbody></table>
+</div>
+</section>
+
+<section id="c5">
+<h3><span class="hn">C.5</span>Building this at your data scale</h3>
+
+<p>You have on the order of a thousand landing trajectories per airport, with room to download
+more. The honest answer to "should I use a large transformer?" is <b>not yet</b>, and the evidence
+is specific rather than a general appeal to caution.</p>
+
+<div class="note warn">
+<span class="tag">Evidence on model size</span>
+<ul>
+<li>On Zurich terminal data, a transformer merely <em>matched</em> an LSTM (Zhang, Payan &amp;
+Mavris, AIAA 2024). The improvement came from clustering the data, not from the architecture.</li>
+<li>Shan et al. (<em>Scientific Reports</em> 15:43100, 2025) swept configurations for HiFormer and
+found a moderate one — 64 CNN, 256 LSTM, 128 transformer, 4 heads — gave the lowest error at every
+horizon, while a higher-dimensional variant showed <b>up to 49% higher RMSE at long horizons</b>.
+Bigger was measurably worse.</li>
+<li>A separate 2025 transformer study needed explicit noise injection to control overfitting.</li>
+</ul>
+</div>
+
+<h4>Get the representation right first</h4>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 212" role="img" aria-label="Transforming trajectories from a global latitude-longitude frame into a runway-relative local ENU frame">
+  <text class="lbl" x="24" y="18">global lat / lon / alt</text>
+  <rect class="boxq" x="24" y="28" width="252" height="150"/>
+  <g class="s2 dot">
+    <path d="M24 66 h252"/><path d="M24 104 h252"/><path d="M24 142 h252"/>
+    <path d="M86 28 v150"/><path d="M148 28 v150"/><path d="M210 28 v150"/>
+  </g>
+  <path class="s" d="M52 50 C 92 76, 118 94, 142 102"/><path class="s" d="M136 96 L144 103 L134 105"/>
+  <path class="s" d="M246 58 C 206 82, 180 96, 158 102"/><path class="s" d="M166 96 L156 103 L166 108"/>
+  <path class="s" d="M62 162 C 100 140, 128 118, 148 108"/><path class="s" d="M144 100 L150 108 L140 110"/>
+  <path class="m" d="M138 112 L168 98" stroke-width="4"/>
+  <text class="mn f3" x="24" y="196">same runway, three headings, no shared frame</text>
+
+  <path class="s" d="M296 104 L338 104"/><path class="s" d="M332 100 L338 104 L332 108"/>
+  <text class="sm" x="317" y="94" text-anchor="middle">rotate + translate</text>
+
+  <text class="lbl" x="356" y="18">runway-relative ENU</text>
+  <rect class="boxq" x="356" y="28" width="320" height="150"/>
+  <g class="s2 dot"><path d="M356 66 h320"/><path d="M356 104 h320"/><path d="M356 142 h320"/></g>
+  <path class="m" d="M380 104 L440 104" stroke-width="4"/>
+  <circle class="fm" cx="380" cy="104" r="4"/>
+  <text class="mn fm" x="378" y="126">threshold = origin</text>
+  <path class="s" d="M660 66 C 570 76, 480 92, 440 102"/>
+  <path class="s" d="M660 104 C 566 104, 486 102, 440 104"/>
+  <path class="s" d="M660 142 C 572 132, 484 112, 440 106"/>
+  <path class="s2 dash" d="M440 104 L676 104"/>
+  <text class="mn f3" x="668" y="170" text-anchor="end">along-track axis  →</text>
+  <text class="sm ft" x="356" y="196">the geometry is now stationary across flights</text>
+</svg>
+</div>
+<figcaption><b>Fig. C1 — Runway-relative coordinates.</b> Rotating each trajectory so the runway
+centreline is the \(x\)-axis and the threshold is the origin removes a nuisance variable the model
+would otherwise spend capacity learning. It also makes along-track and cross-track error fall out
+directly (§C.6). At your data scale this transformation is worth more than any architectural
+choice.</figcaption>
+</figure>
+
+<ul>
+<li><b>Frame.</b> Convert lat/lon/alt to a local ENU frame anchored at the runway threshold,
+rotated to the centreline. For multi-aircraft, layer a query-centric relative encoding (§B.5) on
+top.</li>
+<li><b>Resampling.</b> Fixed rate — 1 to 5 s; OpenSky studies commonly use 5 to 10 s. Interpolate
+gaps, filter with <code>traffic</code>, and clip to the approach segment rather than the whole
+flight.</li>
+<li><b>Targets.</b> Predict <em>differences</em>, not absolute positions. This is FlightPatchNet's
+critique of FlightBERT and it matters more than the encoding scheme.</li>
+<li><b>Splitting.</b> Split by <em>time</em>, not at random. Flights on the same day share weather,
+runway configuration and traffic; a random split leaks all three and will flatter your numbers by
+a wide margin.</li>
+<li><b>Augmentation.</b> Small rotations and translations within the corridor, noise injection,
+time warping. Then simply download more — a hundred airports at a thousand flights each is a
+different regime from one airport.</li>
+</ul>
+
+<h4>A staged plan</h4>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 234" role="img" aria-label="A four-stage build plan from a kinematic baseline to a probabilistic interaction model">
+  <path class="s2" d="M40 122 L664 122"/>
+  <g>
+    <circle class="box" cx="90" cy="122" r="13"/><text x="90" y="127" text-anchor="middle" class="mn">0</text>
+    <text x="90" y="60" text-anchor="middle" font-weight="600">baseline</text>
+    <text class="sm" x="90" y="78" text-anchor="middle">constant velocity</text>
+    <text class="sm" x="90" y="92" text-anchor="middle">or BADA kinematics</text>
+    <text class="sm f3" x="90" y="160" text-anchor="middle">report it forever</text>
+  </g>
+  <g>
+    <circle class="box" cx="278" cy="122" r="13" style="stroke:var(--magenta)"/><text x="278" y="127" text-anchor="middle" class="mn fm">1</text>
+    <text x="278" y="60" text-anchor="middle" font-weight="600">conditional, deterministic</text>
+    <text class="sm" x="278" y="78" text-anchor="middle">axial attention · adaLN on runway,</text>
+    <text class="sm" x="278" y="92" text-anchor="middle">wind, type · goal = threshold</text>
+    <text class="sm fm" x="278" y="160" text-anchor="middle">1–5 M parameters</text>
+    <text class="sm f3" x="278" y="176" text-anchor="middle">run the shuffle test here</text>
+  </g>
+  <g>
+    <circle class="box" cx="466" cy="122" r="13" style="stroke:var(--magenta)"/><text x="466" y="127" text-anchor="middle" class="mn fm">2</text>
+    <text x="466" y="60" text-anchor="middle" font-weight="600">multimodal</text>
+    <text class="sm" x="466" y="78" text-anchor="middle">GMM head + winner-takes-all,</text>
+    <text class="sm" x="466" y="92" text-anchor="middle">or CVAE, or leapfrog diffusion</text>
+    <text class="sm f3" x="466" y="160" text-anchor="middle">now minADE means something</text>
+  </g>
+  <g>
+    <circle class="box" cx="608" cy="122" r="13" style="stroke:var(--teal)"/><text x="608" y="127" text-anchor="middle" class="mn ft">3</text>
+    <text x="608" y="60" text-anchor="middle" font-weight="600">interaction + UQ</text>
+    <text class="sm" x="608" y="78" text-anchor="middle">separation bias,</text>
+    <text class="sm" x="608" y="92" text-anchor="middle">Bayesian decoder</text>
+    <text class="sm ft" x="608" y="160" text-anchor="middle">conflict probabilities</text>
+  </g>
+  <path class="s2" d="M186 116 L186 128"/><path class="s2" d="M372 116 L372 128"/><path class="s2" d="M546 116 L546 128"/>
+  <text class="lbl" x="40" y="216">each stage must beat the one before it on held-out time-split data</text>
+</svg>
+</div>
+<figcaption><b>Fig. C2 — Build order.</b> The temptation is to start at stage 3 because that is
+what the papers do. Don't: without stage 0 you cannot tell whether your model has learned anything
+beyond straight-line extrapolation, and on approach segments a constant-velocity model is a
+genuinely strong competitor.</figcaption>
+</figure>
+
+<p><b>On transfer.</b> Pretrain one backbone across many airports in runway-relative coordinates,
+then attach a per-airport LoRA (§A.8) or fine-tune briefly. MA-BERT
+(<a href="https://arxiv.org/abs/2401.14421">arXiv:2401.14421</a>) demonstrates the pretrain-then-
+fine-tune pattern for ATM tasks. This is how a thousand trajectories per airport becomes a hundred
+thousand trajectories of shared structure plus a thousand of local idiosyncrasy — which is the only
+honest route to a model large enough to be interesting.</p>
+
+<div class="note do">
+<span class="tag">Red flags while training</span>
+<p>Widening train/validation gap as you scale; the condition-shuffle test showing runway or wind
+being ignored; larger models degrading specifically at long horizons. Any of these means shrink
+the model and spend the effort on data and representation instead.</p>
+</div>
+</section>
+
+<section id="c6">
+<h3><span class="hn">C.6</span>Metrics that mean something to a controller</h3>
+
+<p>A single Euclidean ADE mixes together three errors with completely different operational
+consequences. Decompose it.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 700 220" role="img" aria-label="Decomposition of aircraft trajectory error into along-track, cross-track and vertical components">
+  <text class="lbl" x="24" y="18">plan view</text>
+  <rect class="boxq" x="24" y="28" width="330" height="150"/>
+  <path class="m" d="M56 158 L316 158" stroke-width="3"/>
+  <text class="mn fm" x="56" y="174">extended centreline</text>
+  <path class="t" d="M300 132 C 240 118, 160 104, 76 96"/>
+  <circle class="ft" cx="180" cy="110" r="4"/>
+  <text class="mn ft" x="170" y="86" text-anchor="middle">truth at t</text>
+  <circle cx="234" cy="128" r="4" fill="var(--sand)"/>
+  <text class="mn fs" x="248" y="138">prediction</text>
+  <path class="s dash" d="M234 128 L234 110"/>
+  <path class="s dash" d="M234 110 L180 110"/>
+  <path class="s" d="M180 110 L234 128"/>
+  <text class="sm" x="207" y="102" text-anchor="middle">along-track</text>
+  <text class="sm" x="244" y="118">cross-track</text>
+
+  <text class="lbl" x="386" y="18">profile view</text>
+  <rect class="boxq" x="386" y="28" width="290" height="150"/>
+  <path class="s2" d="M406 152 L656 152"/>
+  <path class="m" d="M406 152 L446 152" stroke-width="3"/>
+  <path class="t" d="M640 62 C 570 82, 490 122, 446 150"/>
+  <path class="sd dash" d="M640 62 C 560 110, 486 142, 446 150"/>
+  <circle class="ft" cx="546" cy="96" r="4"/>
+  <circle cx="546" cy="114" r="4" fill="var(--sand)"/>
+  <path class="s" d="M546 96 L546 114"/>
+  <text class="sm" x="558" y="106">vertical</text>
+  <text class="mn ft" x="602" y="58">truth</text>
+  <text class="mn fs" x="546" y="140">prediction</text>
+  <text class="sm f3" x="406" y="170">glide path</text>
+</svg>
+</div>
+<figcaption><b>Fig. C3 — Error that a controller recognises.</b> Along-track error is a
+<em>schedule</em> error — it changes sequencing and spacing. Cross-track error is a
+<em>conformance</em> error. Vertical error is a <em>profile</em> error. They have different
+tolerances and different consequences, and a model can be excellent at one while failing at
+another. Reporting only combined ADE hides exactly the information an operational user
+needs.</figcaption>
+</figure>
+
+<p>So the reporting set for an ATM model is: along-track, cross-track and vertical error separately;
+time error at a fixed point for true 4D; then minADE, minFDE, miss rate and NLL from §B.7; then a
+separation-violation rate for the multi-aircraft case; and the constant-velocity baseline beside
+all of it.</p>
+</section>
+
+<h2 class="part" id="partD"><span class="pn">PART D</span>Further reading</h2>
+<p class="part-sub">Grouped by what you would be trying to learn. Within each group the order is
+roughly the order I would read them.</p>
+
+<div class="reads">
+  <h4>If you read only five things</h4>
+  <ul>
+    <li><b>DiT</b> — for the conditioning ablation that justifies adaLN-Zero.</li>
+    <li><b>Scene Transformer</b> — for factorised time/agent attention.</li>
+    <li><b>DenseTNT</b> — for goal conditioning done properly.</li>
+    <li><b>BST-Transformer</b> — the closest published system to what you are building.</li>
+    <li><b>TrajAir / TrajAirNet</b> — the one open aviation dataset with social structure.</li>
+  </ul>
+</div>
+
+<div class="refs">
+
+<h4>Conditioning mechanisms</h4>
+<ul>
+<li>Peebles &amp; Xie. Scalable Diffusion Models with Transformers. ICCV <span class="yr">2023</span>. <a href="https://arxiv.org/abs/2212.09748">arXiv:2212.09748</a></li>
+<li>Perez, Strub, de Vries, Dumoulin &amp; Courville. FiLM: Visual Reasoning with a General Conditioning Layer. AAAI <span class="yr">2018</span>. <a href="https://arxiv.org/abs/1709.07871">arXiv:1709.07871</a></li>
+<li>Ho &amp; Salimans. Classifier-Free Diffusion Guidance. <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2207.12598">arXiv:2207.12598</a></li>
+<li>Dhariwal &amp; Nichol. Diffusion Models Beat GANs on Image Synthesis. NeurIPS <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2105.05233">arXiv:2105.05233</a></li>
+<li>Li &amp; Liang. Prefix-Tuning: Optimizing Continuous Prompts for Generation. ACL <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2101.00190">arXiv:2101.00190</a></li>
+<li>Lester, Al-Rfou &amp; Constant. The Power of Scale for Parameter-Efficient Prompt Tuning. EMNLP <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2104.08691">arXiv:2104.08691</a></li>
+<li>Hu et al. LoRA: Low-Rank Adaptation of Large Language Models. ICLR <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2106.09685">arXiv:2106.09685</a></li>
+<li>Houlsby et al. Parameter-Efficient Transfer Learning for NLP. ICML <span class="yr">2019</span>. <a href="https://arxiv.org/abs/1902.00751">arXiv:1902.00751</a></li>
+<li>Jaegle et al. Perceiver: General Perception with Iterative Attention. ICML <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2103.03206">arXiv:2103.03206</a></li>
+<li>Jaegle et al. Perceiver IO. ICLR <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2107.14795">arXiv:2107.14795</a></li>
+<li>Rombach et al. High-Resolution Image Synthesis with Latent Diffusion Models. CVPR <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2112.10752">arXiv:2112.10752</a></li>
+<li>Press, Smith &amp; Lewis. Train Short, Test Long: Attention with Linear Biases. ICLR <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2108.12409">arXiv:2108.12409</a></li>
+<li>Vaswani et al. Attention Is All You Need. NeurIPS <span class="yr">2017</span>. <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></li>
+</ul>
+
+<h4>Trajectory prediction — transformers and attention</h4>
+<ul>
+<li>Yuan, Weng, Ou &amp; Kitani. AgentFormer. ICCV <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2103.14023">arXiv:2103.14023</a></li>
+<li>Ngiam et al. Scene Transformer. ICLR <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2106.08417">arXiv:2106.08417</a></li>
+<li>Nayakanti et al. Wayformer: Motion Forecasting via Simple &amp; Efficient Attention Networks. <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2207.05844">arXiv:2207.05844</a></li>
+<li>Shi et al. Motion Transformer with Global Intention Localization. NeurIPS <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2209.13508">arXiv:2209.13508</a> · MTR++ <a href="https://arxiv.org/abs/2306.17770">arXiv:2306.17770</a></li>
+<li>Zhou et al. Query-Centric Trajectory Prediction (QCNet). CVPR <span class="yr">2023</span>. <a href="https://github.com/ZikangZhou/QCNet">github.com/ZikangZhou/QCNet</a></li>
+<li>Liu et al. Multimodal Motion Prediction with Stacked Transformers. CVPR <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2103.11624">arXiv:2103.11624</a></li>
+<li>Gao et al. VectorNet. CVPR <span class="yr">2020</span>. <a href="https://arxiv.org/abs/2005.04259">arXiv:2005.04259</a></li>
+<li>Zhao et al. TNT: Target-driveN Trajectory Prediction. CoRL <span class="yr">2020</span>. <a href="https://arxiv.org/abs/2008.08294">arXiv:2008.08294</a></li>
+<li>Gu, Sun &amp; Zhao. DenseTNT. ICCV <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2108.09640">arXiv:2108.09640</a></li>
+<li>Salzmann et al. Trajectron++. ECCV <span class="yr">2020</span>. <a href="https://arxiv.org/abs/2001.03093">arXiv:2001.03093</a></li>
+<li>Alahi et al. Social LSTM. CVPR <span class="yr">2016</span>. · Gupta et al. Social GAN. CVPR <span class="yr">2018</span>. <a href="https://arxiv.org/abs/1803.10892">arXiv:1803.10892</a></li>
+</ul>
+
+<h4>Diffusion for trajectories</h4>
+<ul>
+<li>Gu et al. Stochastic Trajectory Prediction via Motion Indeterminacy Diffusion (MID). CVPR <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2203.13777">arXiv:2203.13777</a></li>
+<li>Mao et al. Leapfrog Diffusion Model for Stochastic Trajectory Prediction. CVPR <span class="yr">2023</span>. <a href="https://arxiv.org/abs/2303.10895">arXiv:2303.10895</a> · <a href="https://github.com/MediaBrain-SJTU/LED">code</a></li>
+<li>Jiang et al. MotionDiffuser. CVPR <span class="yr">2023</span>. <a href="https://arxiv.org/abs/2306.03083">arXiv:2306.03083</a></li>
+<li>Zhong et al. Language-Guided Traffic Simulation via Scene-Level Diffusion (CTG++). <span class="yr">2023</span>. <a href="https://arxiv.org/abs/2306.06344">arXiv:2306.06344</a></li>
+<li>Janner et al. Planning with Diffusion for Flexible Behavior Synthesis. ICML <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2205.09991">arXiv:2205.09991</a></li>
+</ul>
+
+<h4>Return-conditioned sequence models</h4>
+<ul>
+<li>Chen et al. Decision Transformer. NeurIPS <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2106.01345">arXiv:2106.01345</a></li>
+<li>Janner, Li &amp; Levine. Reinforcement Learning as One Big Sequence Modeling Problem. NeurIPS <span class="yr">2021</span>. <a href="https://arxiv.org/abs/2106.02039">arXiv:2106.02039</a></li>
+</ul>
+
+<h4>Aviation and ATM</h4>
+<ul>
+<li>Pang, Zhao, Hu, Yan &amp; Liu. B-STAR: Bayesian Spatio-Temporal Graph Transformer for Multi-Aircraft Trajectory Prediction. <em>Knowledge-Based Systems</em> 249:108998, <span class="yr">2022</span>.</li>
+<li>Li, Tian, Xie, Zhi &amp; Wan. Bayesian Spatio-Temporal Trajectory Prediction and Conflict Alerting in the Terminal Area. <em>Aerospace</em> 12(9):855, <span class="yr">2025</span>.</li>
+<li>Yin, Zhang et al. Aircraft trajectory prediction in terminal airspace with intentions derived from local history. <em>Neurocomputing</em> 615:128843, <span class="yr">2025</span>.</li>
+<li>Yin et al. Context-aware Aircraft Trajectory Prediction with Diffusion Models. IEEE ITSC <span class="yr">2023</span>.</li>
+<li>Pang, Zhao, Yan &amp; Liu. Data-driven trajectory prediction with weather uncertainties. <em>Transportation Research Part C</em> 130:103326, <span class="yr">2021</span>.</li>
+<li>Guo et al. FlightBERT++. AAAI <span class="yr">2024</span>. <a href="https://arxiv.org/abs/2305.01658">arXiv:2305.01658</a></li>
+<li>FlightPatchNet. <span class="yr">2024</span>. <a href="https://arxiv.org/abs/2405.16200">arXiv:2405.16200</a></li>
+<li>DA-STGCN: 4D Trajectory Prediction with Dual-Attention Graph Convolution. <span class="yr">2025</span>. <a href="https://arxiv.org/abs/2503.04823">arXiv:2503.04823</a></li>
+<li>Zhang, Payan &amp; Mavris. Aircraft Trajectory Prediction in Terminal Airspace Through Deep Learning. AIAA Aviation <span class="yr">2024</span>.</li>
+<li>Patrikar et al. Predicting Like A Pilot (TrajAir / TrajAirNet). ICRA <span class="yr">2022</span>. <a href="https://arxiv.org/abs/2109.15158">arXiv:2109.15158</a> · <a href="https://github.com/castacks/trajairnet">code</a></li>
+<li>Shan et al. A deep learning framework for predicting aircraft trajectories from sparse satellite observations. <em>Scientific Reports</em> 15:43100, <span class="yr">2025</span>.</li>
+<li>MA-BERT: Transfer learning for air traffic management tasks. <span class="yr">2024</span>. <a href="https://arxiv.org/abs/2401.14421">arXiv:2401.14421</a></li>
+<li>Sun, Olive, Strohmeier &amp; Lenders. The OpenSky Report 2025. <a href="https://arxiv.org/abs/2505.06254">arXiv:2505.06254</a></li>
+<li>Zeng et al. Aircraft 4D Trajectory Prediction in Civil Aviation: A Review. <em>Aerospace</em> 9(2):91, <span class="yr">2022</span>.</li>
+</ul>
+
+<h4>Datasets, tools and benchmarks</h4>
+<ul>
+<li><a href="https://opensky-network.org">OpenSky Network</a> — ADS-B and Mode-S archive, free for research.</li>
+<li><a href="https://traffic-viz.github.io">traffic</a> — the Python library for air traffic data. Start every project here.</li>
+<li><a href="https://mode-s.org">pyModeS</a> — Mode-S EHS decoding.</li>
+<li><a href="https://www.eurocontrol.int/ddr">Eurocontrol DDR2</a> — European traffic, restricted access.</li>
+<li><a href="https://www.argoverse.org">Argoverse 1 &amp; 2</a> · <a href="https://www.nuscenes.org">nuScenes</a> · <a href="https://waymo.com/open">Waymo Open Motion</a> — the driving benchmarks whose leaderboards drive Part B.</li>
+<li>ETH / UCY — the pedestrian benchmark almost every Part B paper reports on.</li>
+<li>Code: <a href="https://github.com/sshaoshuai/MTR">MTR</a> · <a href="https://github.com/ZikangZhou/QCNet">QCNet</a> · <a href="https://github.com/MediaBrain-SJTU/LED">LED</a> · <a href="https://github.com/StanfordASL/Trajectron-plus-plus">Trajectron++</a></li>
+</ul>
+
+</div>
+
+<section id="gloss">
+<h3><span class="hn">§</span>Glossary</h3>
+<dl class="gloss">
+<dt>adaLN-Zero</dt><dd>Adaptive LayerNorm whose modulation network is zero-initialised, so each block begins as an identity map.</dd>
+<dt>ADS-B</dt><dd>Automatic Dependent Surveillance–Broadcast. Aircraft broadcast their own position; the basis of OpenSky.</dd>
+<dt>Along-track / cross-track error</dt><dd>Prediction error resolved parallel to and perpendicular to the intended path. Schedule error versus conformance error.</dd>
+<dt>CFG</dt><dd>Classifier-free guidance. Trains one model to be both conditional and unconditional, then extrapolates between them at sampling time.</dd>
+<dt>CVAE</dt><dd>Conditional variational autoencoder. Represents multimodality with a latent variable.</dd>
+<dt>ENU</dt><dd>East–North–Up. A local Cartesian frame; here anchored at a runway threshold.</dd>
+<dt>FiLM</dt><dd>Feature-wise Linear Modulation. Per-channel scale and shift predicted from the condition.</dd>
+<dt>minADE\(_K\)</dt><dd>Average displacement error of the best of \(K\) sampled trajectories.</dd>
+<dt>Mode-S EHS</dt><dd>Enhanced Surveillance. Carries airspeed, selected altitude and heading — useful for inferring wind.</dd>
+<dt>Posterior collapse</dt><dd>A CVAE failure where the latent is ignored because the decoder models the data without it.</dd>
+<dt>Query-centric</dt><dd>Encoding every scene element in its own local frame, with relative poses on the edges between them.</dd>
+<dt>STAR</dt><dd>Standard Terminal Arrival Route. The published procedure linking en-route airspace to the approach.</dd>
+<dt>TMA</dt><dd>Terminal Manoeuvring Area. The controlled airspace around a major airport where arrivals are sequenced.</dd>
+<dt>Winner-takes-all loss</dt><dd>Regressing only the predicted mode closest to ground truth, so modes specialise rather than average.</dd>
+</dl>
+</section>
+
+<section id="caveats">
+<h3><span class="hn">§</span>Caveats on the evidence</h3>
+
+<div class="note warn">
+<span class="tag">Read before citing anything above</span>
+<ul>
+<li><b>Aviation numbers are not comparable across papers.</b> There is no standard public 4D
+benchmark; most papers use self-built or proprietary data. B-STAR's results, the BST-Transformer's
+60.3% MADE reduction, and DA-STGCN's 20% / 30% figures are each relative to that paper's own
+baselines. Treat them as directional.</li>
+<li><b>Two specific figures I could not verify from primary tables:</b> exact ADE/FDE values for
+B-STAR's aviation case, and for the 2025 <em>Neurocomputing</em> intentions paper. Both report
+beating baselines by a wide margin; confirm from the PDFs before quoting numbers.</li>
+<li><b>The OpenSky receiver count</b> often quoted elsewhere is not stated in the 2025 report, so
+I have given only the reply-count figure.</li>
+<li><b>DiT's adaLN-Zero result is from class-conditional image generation.</b> It is an excellent
+default for low-dimensional conditions. Its superiority over cross-attention for rich set-valued
+conditions — maps, many agents — has not been established in the trajectory domain, and I would
+not assume it.</li>
+<li><b>Several 2025–2026 items are recent preprints</b> and are neither peer-reviewed nor
+independently replicated.</li>
+<li><b>The scale advice in §C.5 rests on two studies</b>, not a broad meta-analysis. It points the
+same way as general small-data practice, but it is not settled science — and if you scale your
+dataset by two orders of magnitude, it stops applying.</li>
+</ul>
+</div>
+</section>
+
+<footer>
+  Compiled 31 August 2026. Figures are original; equations follow the cited sources.
+  Where the literature disagrees or the evidence is thin, that is said in the text rather than
+  smoothed over.
+</footer>
+
+</main>
+</div>
+
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var map = {};
+  links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+  var targets = Object.keys(map)
+    .map(function (id) { return document.getElementById(id); })
+    .filter(Boolean);
+  if (!('IntersectionObserver' in window) || !targets.length) return;
+
+  var visible = new Set();
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { visible.add(e.target.id); } else { visible.delete(e.target.id); }
+    });
+    var first = targets.filter(function (t) { return visible.has(t.id); })[0];
+    if (!first) return;
+    links.forEach(function (a) { a.classList.remove('on'); });
+    if (map[first.id]) map[first.id].classList.add('on');
+  }, { rootMargin: '-8% 0px -70% 0px', threshold: 0 });
+
+  targets.forEach(function (t) { obs.observe(t); });
+})();
+</script>
+</body>
+</html>
