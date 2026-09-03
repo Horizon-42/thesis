@@ -1,0 +1,19 @@
+{
+  "_comment": "Airport-center frame ablation, docs/2026-09-03_airport_frame_ablation_plan.md. One fixed recipe (TSConfig state-v1 defaults, iTransformer, full horizon, all aircraft) across every arm; NO per-arm cross-validation, because selecting hyperparameters separately per arm would confound the frame with the search. Arm A anchors the chart at the assigned threshold (the target is the origin); arm B anchors it at the airport reference point (the target is a point the model is never told); arm C is B plus the target's chart position and runway course fed as input-only constant channels. The fourth arm is the free control from plan Phase 3.4: A plus the conditioning mechanism, under which the extra channels are one constant row per run — if it moves any metric the plumbing is wrong, not the science. Same manifest, same eligibility roster, same split seed: the arms are paired flight-by-flight on the validation split; outer-test stays sealed.",
+  "base": {
+    "prediction_output": "state",
+    "model": "itransformer",
+    "horizon_mode": "full",
+    "aircraft_filter": "all"
+  },
+  "arms": [
+    {"key": "A_threshold_enu", "label": "arm A: threshold-anchored ENU (baseline)",
+     "overrides": {"coordinate_frame": "enu"}},
+    {"key": "B_airport_enu", "label": "arm B: airport-anchored ENU, target never given",
+     "overrides": {"coordinate_frame": "airport-enu"}},
+    {"key": "C_airport_enu_target", "label": "arm C: airport-anchored ENU + target conditioning channels",
+     "overrides": {"coordinate_frame": "airport-enu", "target_conditioning": "channels"}},
+    {"key": "A_threshold_enu_target", "label": "control: threshold ENU + conditioning (expected = arm A)",
+     "overrides": {"coordinate_frame": "enu", "target_conditioning": "channels"}}
+  ]
+}

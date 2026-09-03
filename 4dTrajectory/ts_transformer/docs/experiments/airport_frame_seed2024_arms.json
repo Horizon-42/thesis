@@ -1,0 +1,19 @@
+{
+  "_comment": "Second-seed replicates of the airport-frame ablation's three scientific arms (plan Phase 4: bound seed noise on THIS axis). Only the model/shuffle seed changes; split_seed stays 1337 so the cohort, the split and the flight-by-flight pairing are identical to the seed-1337 arms in the same campaign directory.",
+  "base": {
+    "prediction_output": "state",
+    "model": "itransformer",
+    "horizon_mode": "full",
+    "aircraft_filter": "all",
+    "seed": 2024,
+    "split_seed": 1337
+  },
+  "arms": [
+    {"key": "A_threshold_enu_s2024", "label": "arm A (seed 2024)",
+     "overrides": {"coordinate_frame": "enu"}},
+    {"key": "B_airport_enu_s2024", "label": "arm B (seed 2024)",
+     "overrides": {"coordinate_frame": "airport-enu"}},
+    {"key": "C_airport_enu_target_s2024", "label": "arm C (seed 2024)",
+     "overrides": {"coordinate_frame": "airport-enu", "target_conditioning": "channels"}}
+  ]
+}
