@@ -47,6 +47,14 @@ Everything below is serialised into every checkpoint.
   `x[:, -1]` anchor read goes through `batch_contract.anchor_state` so the conditioning
   columns never pose as state. Measured: the attention backbone ignores them for the
   trajectory; only the flattening duration head reads them (−10 % time MAE).
+- **`state_position_reference`** (state output only): `absolute` (default, state-v1) or
+  `anchor-relative` — `StateOutputLayer` adds the anchor's normalized position back onto the
+  forecaster's position channels, so the network's zero output means "stay where the
+  aircraft is". Measured 2026-09-03 (`docs/2026-09-03_state_v2_anchor_relative_results.md`):
+  it removes the first-step translation (KRDU straight-in lateral miss +204 → +21 m, FDE
+  643 → 492 m) but gives up the absolute output's implicit "end at the origin" prior —
+  KRDU vectored FDE +350 m on both seeds, endpoint lateral p95 ×1.4 — so it is NOT the
+  default. The two parametrizations are two priors; the next candidate must keep both.
 - **Horizon trap**: the horizon was sized from the MEASURED duration distribution (p50 328 s /
   p95 651 s), covering **97.8 %** of flights — the old "an arrival is ~3.5–5 min" straight-line
   estimate was WRONG (real arrivals are vectored), do not resize from it. The ~2 % over the
@@ -368,6 +376,10 @@ namespace would restore the undifferentiated listing the package exists to remov
   straight-in is ~9e-4 per point against a ~0.08 pooled loss dominated by vectored
   kilometres, and the state output has no continuity to the anchor and no cross-track
   term. Read every arm-A per-runway cross-track number with this translation in mind.
+  The anchor-relative output (state-v2 candidate, same doc set) fixes the start of the
+  path and the straight-in stratum but loses ~350 m of vectored FDE at KRDU on both
+  seeds — vetoed by its own pre-registered rule; a continuity term on an absolute output
+  (keeping the endpoint prior) is the open next candidate.
 - **Airport-frame ablation DONE 2026-09-03 (14 runs, KRDU + KSJC, two seeds; keep `enu`).**
   Removing the threshold anchor makes the model average across each parallel pair (KRDU:
   endpoints nearer the sibling 1.5 % → 12–15 %, minority runway pulled ~600 m, its FDE

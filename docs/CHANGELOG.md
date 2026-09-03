@@ -4,6 +4,23 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-03 — state-v2 candidate: anchor-relative state positions (mechanism fixed, recipe vetoed)
+
+`TSConfig.state_position_reference` (`absolute` default | `anchor-relative`):
+`StateOutputLayer` can read the forecaster's position channels as displacements from the
+anchor and add the anchor's normalized position back, so "start where the aircraft is"
+is the zero output. `compare_frame_arms.py` now reports the first predicted step against
+the anchor's kinematic extrapolation and takes `--only`; `run_ts_frame_ablation.py`
+gains `--informal` (no experiment manifest / clean-tree guard, as
+`run_ts_control_arms.py` runs). Four runs (KRDU + KSJC, two seeds) paired against arm A
+(`docs/2026-09-03_state_v2_anchor_relative_results.md`): the first-step jump collapses
+(KRDU established flights −348…+239 m → 0…7 m lateral), straight-in FDE 643 → 492 m and
+lateral miss +204 → +21 m, KSJC pooled ADE −55…−86 m on both seeds — but KRDU vectored
+FDE +350 m on both seeds (worse on 78–82 % of them), endpoint lateral p95 ×1.4, so the
+pre-registered veto fires and `absolute` stays the default. Reading: absolute output
+= "end at the origin" prior, anchor-relative = "start where you are"; each stratum
+wants a different one. Next candidate: absolute output + first-step continuity term.
+
 ### 2026-09-03 — Runway-hypothesis expansion: what the runway label is worth, and what recovers it
 
 `run_ts_runway_hypotheses.py` runs a trained threshold-anchored checkpoint once per
