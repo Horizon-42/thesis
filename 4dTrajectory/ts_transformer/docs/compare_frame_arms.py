@@ -68,7 +68,21 @@ def endpoint_geometry(pred_dir: Path, row: dict) -> dict:
     lat0, lon0, psi = float(target["lat"]), float(target["lon"]), float(target["psi"])
     east, north = _world_en(float(last["lat"]), float(last["lon"]), lat0, lon0)
     cosine, sine = math.cos(psi), math.sin(psi)
+    # The first predicted step against the kinematic extrapolation of the anchor state:
+    # a model that is not anchored to the aircraft shows up HERE, as a jump at t = dt
+    # (the KRDU NW translation, docs/2026-09-03_krdu_nw_endpoint_bias.md).
+    anchor = eval_record["initial_state"]
+    first = states["predicted_states"][1]
+    a_e, a_n = _world_en(float(anchor["lat"]), float(anchor["lon"]), lat0, lon0)
+    p_e, p_n = _world_en(float(first["lat"]), float(first["lon"]), lat0, lon0)
+    ground_speed = float(anchor["V"]) * math.cos(float(anchor["gamma"]))
+    dt = float(first["t"])
+    off_e = p_e - (a_e + ground_speed * dt * math.cos(float(anchor["psi"])))
+    off_n = p_n - (a_n + ground_speed * dt * math.sin(float(anchor["psi"])))
     result = {
+        "first_step_along_m": off_e * cosine + off_n * sine,
+        "first_step_lateral_m": off_e * sine - off_n * cosine,
+        "first_step_offset_m": math.hypot(off_e, off_n),
         # Same convention as approach_difficulty: positive to the RIGHT of the inbound
         # course; along positive PAST the threshold.
         "endpoint_cross_track_m": east * sine - north * cosine,
@@ -136,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", type=Path, default=None, help="write every number here")
     parser.add_argument("--reference", default=None,
                         help="arm every paired difference is taken against (default: first A_*)")
+    parser.add_argument("--only", default=None,
+                        help="comma-separated arm names to read (their _s2024 replicates included)")
     args = parser.parse_args(argv)
 
     arms: dict[str, dict[str, dict]] = {}
@@ -148,6 +164,12 @@ def main(argv: list[str] | None = None) -> int:
                 rows = load_arm(pred_dir)
                 if rows:
                     arms[pred_dir.name.split("_pred_")[0]] = rows
+    if args.only:
+        wanted = {name.strip() for name in args.only.split(",") if name.strip()}
+        arms = {
+            name: rows for name, rows in arms.items()
+            if name in wanted or name.removesuffix("_s2024") in wanted
+        }
     if not arms:
         print("no arms with difficulty covariates found")
         return 1
@@ -212,7 +234,11 @@ def main(argv: list[str] | None = None) -> int:
         sibling = np.array([arms[name][k]["closer_to_sibling"] for k in shared], dtype=object)
         has_sibling = np.array([s is not None for s in sibling])
         closer = np.array([bool(s) for s in sibling[has_sibling]]) if has_sibling.any() else np.array([])
+        first_lateral = metric(name, "first_step_lateral_m", masks["all"])
+        first_offset = metric(name, "first_step_offset_m", masks["all"])
         block = {
+            "first_step_lateral_median": float(np.median(first_lateral)),
+            "first_step_offset_median": float(np.median(first_offset)),
             "cross_track_median": float(np.median(cross)), "cross_track_mean_abs": float(np.abs(cross).mean()),
             "cross_track_p25": float(np.percentile(cross, 25)), "cross_track_p75": float(np.percentile(cross, 75)),
             "cross_track_p95_abs": float(np.percentile(np.abs(cross), 95)),
@@ -221,15 +247,16 @@ def main(argv: list[str] | None = None) -> int:
             "closer_to_sibling_share": float(closer.mean()) if len(closer) else None,
         }
         out["arms"][name] = block
-        rows.append([name, _fmt(block["cross_track_median"]), _fmt(block["cross_track_p25"]),
+        rows.append([name, f"{block['first_step_lateral_median']:+.0f} / {block['first_step_offset_median']:.0f}",
+                     _fmt(block["cross_track_median"]), _fmt(block["cross_track_p25"]),
                      _fmt(block["cross_track_p75"]), _fmt(block["cross_track_mean_abs"]),
                      _fmt(block["cross_track_p95_abs"]), _fmt(block["along_track_median"]),
                      f"{block['closer_to_sibling_share'] * 100:.1f}% of {block['flights_with_sibling']}"
                      if block["closer_to_sibling_share"] is not None else "n/a"])
     print_table(
         "H1 smoking gun — predicted endpoint vs the ASSIGNED runway centreline (m; + = right of inbound course)",
-        ["arm", "cross med", "p25", "p75", "mean |cross|", "p95 |cross|", "along med (+ past thr)",
-         "endpoint closer to sibling runway"],
+        ["arm", "1st-step lateral / |offset| med", "cross med", "p25", "p75", "mean |cross|",
+         "p95 |cross|", "along med (+ past thr)", "endpoint closer to sibling runway"],
         rows,
     )
     # per runway, for the parallel pairs

@@ -13,7 +13,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from config import TSConfig
+from batch_contract import anchor_state
+from channels import POSITION_IDX
+from config import STATE_POSITION_ANCHOR_RELATIVE, TSConfig
 
 CONTROL_NAMES = ("thrust_N", "bank_rad", "load_factor")
 
@@ -69,16 +71,34 @@ class FinalTimeHead(nn.Module):
 
 
 class StateOutputLayer(nn.Module):
-    """Attach the state forecast and duration prediction to one structured contract."""
+    """Attach the state forecast and duration prediction to one structured contract.
+
+    Under ``state_position_reference="anchor-relative"`` the forecaster's position
+    channels are read as displacements from the anchor (the history's last observed row)
+    and the anchor's normalized position is added back here, so ``states`` keeps the same
+    contract downstream — absolute normalized chart coordinates — while the network's
+    zero output means "the aircraft stays where it is" instead of "the chart origin".
+    """
 
     def __init__(self, state_forecaster: nn.Module, config: TSConfig):
         super().__init__()
         self.state_forecaster = state_forecaster
         self.final_time_head = FinalTimeHead(config)
+        self.anchor_relative = (
+            config.state_position_reference == STATE_POSITION_ANCHOR_RELATIVE
+        )
+        self.channel_count = len(config.channels)
+        offset_mask = torch.zeros(self.channel_count)
+        offset_mask[list(POSITION_IDX)] = 1.0
+        self.register_buffer("offset_mask", offset_mask)
 
     def forward(self, history: torch.Tensor) -> StatePrediction:
+        states = self.state_forecaster(history)
+        if self.anchor_relative:
+            anchor = anchor_state(history, self.channel_count)
+            states = states + (anchor * self.offset_mask).unsqueeze(1)
         return StatePrediction(
-            states=self.state_forecaster(history),
+            states=states,
             final_time_s=self.final_time_head(history),
         )
 

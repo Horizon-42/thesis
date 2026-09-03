@@ -55,6 +55,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
+    STATE_POSITION_REFERENCES,
     TARGET_CONDITIONINGS,
     CHECKPOINT_SELECTION_METRICS,
     CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
@@ -461,6 +462,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--device", default=None, help='"auto" (default), "cpu", "cuda"')
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default=None)
     parser.add_argument(
+        "--state-position-reference",
+        choices=STATE_POSITION_REFERENCES,
+        default=None,
+        help=(
+            "state output only: 'anchor-relative' reads the position channels as "
+            "displacements from the anchor; default: absolute chart coordinates"
+        ),
+    )
+    parser.add_argument(
         "--target-conditioning",
         choices=TARGET_CONDITIONINGS,
         default=None,
@@ -627,6 +637,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
         ("target_conditioning", args.target_conditioning),
+        ("state_position_reference", args.state_position_reference),
         ("aircraft_filter", args.aircraft_filter),
         ("random_train_anchor", args.random_train_anchor),
         ("training_cohort_min_future_s", args.training_cohort_min_future_s),

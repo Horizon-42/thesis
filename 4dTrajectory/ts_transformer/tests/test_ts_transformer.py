@@ -840,6 +840,60 @@ def test_conditioned_checkpoint_round_trips_and_refuses_a_different_input_contra
         load_checkpoint(tmp_path / "stale.pt")
 
 
+def test_anchor_relative_state_output_starts_where_the_aircraft_is():
+    from prediction_outputs import StateOutputLayer
+
+    config = TSConfig(state_position_reference="anchor-relative", seq_len=4, n_segments=3)
+
+    class Zero(torch.nn.Module):
+        def forward(self, history):
+            return torch.zeros(len(history), config.pred_len, len(ch.CHANNELS))
+
+    history = torch.randn(2, config.seq_len, len(ch.CHANNELS))
+    states = StateOutputLayer(Zero(), config)(history).states
+    position = list(ch.POSITION_IDX)
+    # A zero network output means "stay at the anchor": every predicted row's position is
+    # the history's last observed position; velocities pass through untouched.
+    assert torch.allclose(
+        states[:, :, position],
+        history[:, -1:, position].expand(-1, config.pred_len, -1),
+    )
+    assert torch.all(states[:, :, list(ch.VELOCITY_IDX)] == 0.0)
+    # ...and with conditioning columns appended, only the state part of the anchor is used.
+    conditioned = TSConfig(
+        state_position_reference="anchor-relative", target_conditioning="channels",
+        seq_len=4, n_segments=3,
+    )
+    augmented = torch.cat([history, torch.ones(2, config.seq_len, 5)], dim=2)
+    assert torch.allclose(
+        StateOutputLayer(Zero(), conditioned)(augmented).states[:, :, position],
+        history[:, -1:, position].expand(-1, config.pred_len, -1),
+    )
+    # The default is the absolute contract: the raw output is the prediction.
+    plain = StateOutputLayer(Zero(), TSConfig(seq_len=4, n_segments=3))(history).states
+    assert torch.all(plain == 0.0)
+    with pytest.raises(ValueError, match="unknown state_position_reference"):
+        TSConfig(state_position_reference="origin")
+
+
+def test_anchor_relative_checkpoint_round_trips(tmp_path):
+    series, config = _series(
+        n_flights=12, epochs=1, patience=1, batch_size=32, d_model=16, n_heads=4,
+        d_ff=32, e_layers=1, seq_len=20, n_segments=8, device="cpu",
+        state_position_reference="anchor-relative",
+    )
+    train(
+        series, config, output_dir=tmp_path,
+        data_provenance=_fake_data_provenance(), verbose=False,
+    )
+    model, loaded, normalizer, _payload = load_checkpoint(tmp_path / "checkpoint.pt")
+    assert loaded.state_position_reference == "anchor-relative"
+    forecast = forecast_approach(
+        model, series[0], loaded, normalizer, device=torch.device("cpu")
+    )
+    assert forecast.values.shape[1] == len(ch.CHANNELS)
+
+
 def test_target_chart_is_exactly_the_origin_under_threshold_anchored_frames():
     # Every consumer that used to say "the origin" now measures from target_chart. Under the
     # threshold-anchored frames that must be EXACTLY (0, 0, 0) — not approximately — so the

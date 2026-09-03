@@ -34,6 +34,16 @@ from reference_velocity import (
 )
 
 MODELS = ("itransformer", "patchtst")
+# How the state output's POSITION channels are read. ``absolute``: the network emits the
+# chart position itself (state-v1). ``anchor-relative``: it emits the displacement from
+# the anchor (the last observed row), which is added back in normalized space — so
+# "start where the aircraft is" is the zero output rather than something the network
+# must reconstruct from a 120 s history. Measured motivation: the absolute form put every
+# KRDU forecast ~250 m NW of the aircraft from its first step
+# (docs/2026-09-03_krdu_nw_endpoint_bias.md).
+STATE_POSITION_ABSOLUTE = "absolute"
+STATE_POSITION_ANCHOR_RELATIVE = "anchor-relative"
+STATE_POSITION_REFERENCES = (STATE_POSITION_ABSOLUTE, STATE_POSITION_ANCHOR_RELATIVE)
 AIRCRAFT_FILTER_ALL = "all"
 AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
 AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
@@ -452,6 +462,9 @@ class TSConfig:
     # which runway it is flying to. The OUTPUT contract stays ``channels``. iTransformer
     # only: a channel-independent backbone cannot route a conditioning token anywhere.
     target_conditioning: str = TARGET_CONDITIONING_NONE
+    # State output only: position channels as absolute chart coordinates (state-v1) or as
+    # displacements from the anchor added back in normalized space (see the constant).
+    state_position_reference: str = STATE_POSITION_ABSOLUTE
     # Velocity-state supervision may retain the upstream centred track fit or be rebuilt
     # causally from the uniform chart positions.  This changes both model inputs and
     # measured velocity targets, so it is an explicit checkpoint recipe field.
@@ -715,6 +728,11 @@ class TSConfig:
             raise ValueError(
                 f"unknown coordinate_frame {self.coordinate_frame!r}; "
                 f"expected one of {COORDINATE_FRAMES}"
+            )
+        if self.state_position_reference not in STATE_POSITION_REFERENCES:
+            raise ValueError(
+                f"unknown state_position_reference {self.state_position_reference!r}; "
+                f"expected one of {STATE_POSITION_REFERENCES}"
             )
         if self.target_conditioning not in TARGET_CONDITIONINGS:
             raise ValueError(

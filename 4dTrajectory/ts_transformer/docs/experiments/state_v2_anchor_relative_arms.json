@@ -1,0 +1,16 @@
+{
+  "_comment": "state-v2 candidate: the state output's position channels read as displacements from the anchor (state_position_reference='anchor-relative'), everything else the state-v1 recipe. Motivation: docs/2026-09-03_krdu_nw_endpoint_bias.md — the absolute form places every KRDU forecast ~250 m NW of the aircraft from its first predicted step. Paired against the airport-frame campaign's A_threshold_enu arms (same manifest, roster, split seed) via compare_frame_arms.py --only. Pre-registered reading: the first-step jump and the straight-in lateral miss should collapse toward zero on both seeds; ADE/FDE on the straight-in stratum should improve by about the translation (~200 m FDE); vectored flights are the open question — a residual parametrization can also make long forecasts drift, so a vectored-stratum regression on both seeds would veto the recipe.",
+  "base": {
+    "prediction_output": "state",
+    "model": "itransformer",
+    "horizon_mode": "full",
+    "aircraft_filter": "all",
+    "state_position_reference": "anchor-relative"
+  },
+  "arms": [
+    {"key": "A_anchor_relative", "label": "state-v2 candidate: threshold ENU, anchor-relative positions",
+     "overrides": {"coordinate_frame": "enu"}},
+    {"key": "A_anchor_relative_s2024", "label": "state-v2 candidate (seed 2024)",
+     "overrides": {"coordinate_frame": "enu", "seed": 2024, "split_seed": 1337}}
+  ]
+}

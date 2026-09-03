@@ -66,6 +66,9 @@ def test_frame_and_target_conditioning_land_in_meta():
     name = run_display_name(config)
     assert "frame=airport-enu" in name and "target=channels" in name
     assert run_slug(config).endswith("_frame-airport-enu_target-channels")
+    config = _state_defaults()
+    config["state_position_reference"] = "anchor-relative"
+    assert "pos-ref=anchor-relative" in run_display_name(config)
 
 
 def test_named_recipe_is_the_loss_field():
