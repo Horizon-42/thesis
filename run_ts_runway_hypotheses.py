@@ -51,6 +51,7 @@ for path in (TS_DIR, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from approach_difficulty import approach_difficulty  # noqa: E402
 from channels import IDX, channels_from_states, states_from_channels  # noqa: E402
 from coordinate_frames import COORDINATE_FRAME_AIRPORT_ENU  # noqa: E402
 from dataset import (  # noqa: E402
@@ -62,11 +63,17 @@ from dataset import (  # noqa: E402
 )
 from export import observed_series_metrics  # noqa: E402
 from forecast import Forecast, default_anchor, forecast_approaches  # noqa: E402
+from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402
 from lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
 from models import resolve_device  # noqa: E402
 from train import load_checkpoint  # noqa: E402
 
-SCHEMA = "ts-runway-hypotheses-v1"
+SCHEMA = "ts-runway-hypotheses-v2-mirror-control"
+# A pseudo-candidate per flight: the assigned threshold mirrored to the far side of its
+# parallel sibling's offset (same separation, same course). An oracle that gains as much
+# from this fake alternative as from the real sibling is picking the luckiest of K noisy
+# forecasts, not using runway knowledge.
+MIRROR = "MIRROR"
 STRAIGHT_TORTUOSITY = 1.05
 # A candidate whose inbound course is more than this far from the aircraft's track at the
 # anchor is not being flown to; the parallel sibling stays inside the gate by construction.
@@ -132,10 +139,33 @@ def hypothesis_row(
         "closest_approach_m": closest_m,
         "endpoint_cross_track_true_m": east * math.sin(psi) - north * math.cos(psi),
         "endpoint_along_track_true_m": east * math.cos(psi) + north * math.sin(psi),
+        "course_deg": math.degrees(course),
         "course_delta_deg": abs(_wrap_deg(
             track_course_deg(truth, forecast.anchor) - math.degrees(course)
         )),
     }
+
+
+def parallel_sibling(runway: str, targets: dict[str, dict[str, Any]]) -> str | None:
+    """The nearest other threshold with the same inbound course (within 30 deg)."""
+    own = targets[runway]
+    same = [
+        other for other, target in targets.items()
+        if other != runway and abs(_wrap_deg(target["course_deg"] - own["course_deg"])) <= 30.0
+    ]
+    if not same:
+        return None
+    return min(same, key=lambda other: math.hypot(
+        (targets[other]["lon"] - own["lon"]) * metres_per_deg_lon(own["lat"]),
+        (targets[other]["lat"] - own["lat"]) * METRES_PER_DEG_LAT,
+    ))
+
+
+def mirror_target(own: dict[str, Any], sibling: dict[str, Any]) -> dict[str, Any]:
+    """The assigned threshold displaced by the sibling's offset, in the opposite direction."""
+    d_lat = sibling["lat"] - own["lat"]
+    d_lon = sibling["lon"] - own["lon"]
+    return {**own, "lat": own["lat"] - d_lat, "lon": own["lon"] - d_lon}
 
 
 def active_configuration(
@@ -167,19 +197,21 @@ def select(
     config_runway: str | None,
 ) -> dict[str, str]:
     """Every selection rule's pick for one flight."""
-    available = [r for r in candidates if r in rows]
+    available = [r for r in candidates if r in rows and r != MIRROR]
     gated = [r for r in available if rows[r]["course_delta_deg"] <= COURSE_GATE_DEG] or available
+    # The parallel sibling(s) of the assigned runway: same inbound course within 30 deg.
     same_direction = [
         r for r in available
-        if abs(_wrap_deg(rows[r]["course_delta_deg"] - rows[assigned]["course_delta_deg"])) < 1e-9
-        or r == assigned
+        if abs(_wrap_deg(rows[r]["course_deg"] - rows[assigned]["course_deg"])) <= 30.0
     ]
+    mirror_pool = [assigned] + ([MIRROR] if MIRROR in rows else [])
     by_closest = lambda pool: min(pool, key=lambda r: rows[r]["closest_approach_m"])  # noqa: E731
     picks = {
         "assigned": assigned,
         "oracle_fde": min(available, key=lambda r: rows[r]["fde_m"]),
         "oracle_ade": min(available, key=lambda r: rows[r]["ade_m"]),
         "oracle_same_direction": min(same_direction, key=lambda r: rows[r]["fde_m"]),
+        "oracle_mirror_control": min(mirror_pool, key=lambda r: rows[r]["fde_m"]),
         "self_consistency": by_closest(available),
         "course_gate_then_self": by_closest(gated),
         "active_config": config_runway if config_runway in available else by_closest(gated),
@@ -295,11 +327,24 @@ def main(argv: list[str] | None = None) -> int:
     points = config.validation_common_grid_points
     # Build + forecast once per candidate; every clone keeps the ORIGINAL dict untouched.
     per_candidate: dict[str, dict[str, tuple[FlightSeries, Forecast]]] = {}
-    for runway in candidates:
-        clones = [
-            {**flight, "runway": runway, "runway_target": manifest["runway_targets"][runway]}
-            for flight in raw_flights
-        ]
+    targets = manifest["runway_targets"]
+    mirrors = {
+        runway: mirror_target(targets[runway], targets[sibling])
+        for runway in candidates
+        if (sibling := parallel_sibling(runway, targets)) is not None
+    }
+    for runway in [*candidates, MIRROR]:
+        if runway == MIRROR:
+            clones = [
+                {**flight, "runway": f"{flight['runway']}{MIRROR}",
+                 "runway_target": mirrors[flight["runway"]]}
+                for flight in raw_flights if flight["runway"] in mirrors
+            ]
+        else:
+            clones = [
+                {**flight, "runway": runway, "runway_target": targets[runway]}
+                for flight in raw_flights
+            ]
         series, report = build_series(clones, config, airport=airport,
                                       aircraft_type=config.aircraft_type)
         print(f"  {runway}: {report.format().splitlines()[0]}")
@@ -310,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
 
     selectors = [
         "assigned", "oracle_fde", "oracle_ade", "oracle_same_direction",
-        "self_consistency", "course_gate_then_self", "active_config",
+        "oracle_mirror_control", "self_consistency", "course_gate_then_self", "active_config",
         "active_config_then_gate",
     ]
     flights: list[dict[str, Any]] = []
@@ -321,17 +366,15 @@ def main(argv: list[str] | None = None) -> int:
         if key not in per_candidate[assigned]:
             continue  # unbuildable under its own runway: not in the baseline either
         truth, _ = per_candidate[assigned][key]
-        rows = {
-            runway: hypothesis_row(f, s, truth, points=points)
-            for runway, table in per_candidate.items()
-            if (pair := table.get(key)) is not None
-            for s, f in (pair,)
-        }
+        rows: dict[str, dict[str, Any]] = {}
+        for runway, table in per_candidate.items():
+            if key in table:  # a hypothesis can be unbuildable (track cut too short)
+                series, forecast = table[key]
+                rows[runway] = hypothesis_row(forecast, series, truth, points=points)
         config_runway, context_count = config_lookup(flight["entry_time_utc"])
         missing_context += context_count == 0
         picks = select(rows, candidates, assigned=assigned, config_runway=config_runway)
-        difficulty = observed_series_metrics(truth, per_candidate[assigned][key][1],
-                                             points=points)["difficulty"]
+        difficulty = approach_difficulty(truth, anchor).to_dict()
         flights.append({
             "identity": key,
             "flight_key": flight.get("flight_key"),
@@ -359,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
         "checkpoint": str(args.checkpoint),
         "config": config.to_dict(),
         "candidates": candidates,
+        "mirror_pseudo_candidates": mirrors,
         "selectors": selectors,
         "course_gate_deg": COURSE_GATE_DEG,
         "context_window_min": args.context_window_min,
