@@ -1,0 +1,2 @@
+# The PDFs (~140 MB) are not tracked; re-fetch them with ./download.sh. README.md is the index.
+*.pdf
