@@ -351,6 +351,9 @@ namespace would restore the undifferentiated listing the package exists to remov
 
 ## Open items
 
+- **Index of the 2026-09-03 frame / runway / state-output experiments (four docs, one
+  narrative, Chinese): `docs/2026-09-03_runway_frame_experiments_index.zh.md`; the
+  runway-assignment reading list is `docs/literature/runway_assignment/README.md`.**
 - **Runway-hypothesis expansion DONE 2026-09-03 (`run_ts_runway_hypotheses.py`, no training):**
   one threshold-anchored forecast per candidate runway, scored in the true runway's chart.
   The assigned label reproduces the baseline bit-for-bit (the chain check). What the label is
