@@ -343,6 +343,22 @@ namespace would restore the undifferentiated listing the package exists to remov
 
 ## Open items
 
+- **Runway-hypothesis expansion DONE 2026-09-03 (`run_ts_runway_hypotheses.py`, no training):**
+  one threshold-anchored forecast per candidate runway, scored in the true runway's chart.
+  The assigned label reproduces the baseline bit-for-bit (the chain check). What the label is
+  worth: at KRDU a causal "active configuration" rule (most-used runway among development
+  landings in the 30 min before entry) recovers the DIRECTION (majority runways 80–83 %) but
+  guesses the majority sibling for the minority runway (05R/23L 29–31 %), costing +19 %
+  pooled FDE (+30 % straight-in), i.e. ~500–800 m on those flights; at KSJC the same rule is
+  93.8 % right and costs nothing (30L/30R are 230 m apart). An oracle over the real sibling
+  gains 79 m of median FDE at KRDU against 32 m for a mirror-image fake sibling at the same
+  separation, so about half of a K=2 sibling oracle is picking the luckier forecast, not
+  runway knowledge; at KSJC the fake sibling gains MORE than the real one. The forecast's own
+  closest approach to its hypothesised runway is useless as a selector (37–45 %). Left/right
+  between parallels is the genuine unresolved mode; direction is not. Side observation:
+  arm A's endpoints carry a ~150–200 m lateral bias toward the NW side of the runway on
+  every KRDU runway (both directions), unexplained. →
+  `docs/2026-09-03_runway_hypothesis_expansion.md`
 - **Airport-frame ablation DONE 2026-09-03 (14 runs, KRDU + KSJC, two seeds; keep `enu`).**
   Removing the threshold anchor makes the model average across each parallel pair (KRDU:
   endpoints nearer the sibling 1.5 % → 12–15 %, minority runway pulled ~600 m, its FDE

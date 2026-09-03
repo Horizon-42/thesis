@@ -4,6 +4,26 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-03 — Runway-hypothesis expansion: what the runway label is worth, and what recovers it
+
+`run_ts_runway_hypotheses.py` runs a trained threshold-anchored checkpoint once per
+candidate runway for every validation flight (clone the flight dict with that runway's
+CIFP target, same `build_series`/`forecast` chain, forecast mapped back to world
+coordinates and scored in the true runway's chart) and evaluates selection rules over
+the K hypotheses; the assigned label reproduces the baseline exactly. Includes a
+mirror-image pseudo-sibling per flight (same separation and course as the real parallel
+sibling, opposite side) as the noise control for any oracle. Result
+(`4dTrajectory/ts_transformer/docs/2026-09-03_runway_hypothesis_expansion.md`, KRDU +
+KSJC, two seeds each): a causal active-configuration rule from co-temporal development
+landings recovers the runway DIRECTION (KSJC 93.8 % overall; KRDU majority runways
+80–83 %) but not the parallel side (KRDU 05R/23L 29–31 %), which costs +19 % pooled FDE
+at KRDU (+30 % on straight-in flights, ~500–800 m on the minority runways) and nothing at
+KSJC (230 m separation). The real-sibling oracle gains 79 m median FDE at KRDU against
+32 m for the fake sibling, so roughly half of a K=2 sibling oracle is luck; the
+forecast's own closest approach is not a usable selector. The parallel side is the one
+genuine unresolved mode. Also noted: arm A's endpoints sit 150–200 m toward the NW side
+of every KRDU runway, unexplained.
+
 ### 2026-09-03 — Airport-center frame ablation: the threshold anchor IS the target conditioning
 
 Asked whether the ts_transformer's only runway knowledge — the chart being anchored at
