@@ -96,7 +96,7 @@ from metrics import (
     states_with_derived_velocity,
 )
 from models import build_model, parameter_count, resolve_device
-from batch_contract import model_forward, unpack_batch
+from batch_contract import anchor_state, model_forward, unpack_batch
 from control.envelope import CONTROL_HALF_WIDTH
 from prediction_outputs import ControlPrediction, StatePrediction
 from time_grids import batch_time_grid, numpy_inference_time_grid
@@ -1108,7 +1108,7 @@ def _prediction_batch_replay(
             rollout.query_channels.detach().cpu().numpy().astype(np.float32)
         )
         metric_targets, metric_weights = align_control_targets_to_query_clock(
-            x[:, -1],
+            anchor_state(x, len(dataset.config.channels)),
             y,
             mask,
             query_offsets_s,
@@ -1140,7 +1140,8 @@ def _prediction_batch_replay(
         metric_targets.detach().cpu().numpy().astype(np.float64)
     ).astype(np.float32)
     anchors = dataset.normalizer.decode(
-        x[:, -1].detach().cpu().numpy().astype(np.float64)
+        anchor_state(x, len(dataset.config.channels))
+        .detach().cpu().numpy().astype(np.float64)
     ).astype(np.float32)
     if not uses_control_dynamics(dataset.config.prediction_output):
         predicted_physical = states_with_derived_velocity(
@@ -1817,7 +1818,7 @@ def _evaluate_validation_airport(
                 prediction = model_forward(model, x, dynamics)
                 components = prediction_loss_components(
                     prediction,
-                    x[:, -1],
+                    anchor_state(x, len(dataset.config.channels)),
                     y,
                     mask,
                     final_time_s,
@@ -1899,7 +1900,7 @@ def _dataset_loss_components(
             prediction = model_forward(model, x, dynamics)
             components = prediction_loss_components(
                 prediction,
-                x[:, -1],
+                anchor_state(x, len(dataset.config.channels)),
                 y,
                 mask,
                 final_time_s,
@@ -2729,6 +2730,10 @@ def train(
         "target_contract": target_contract(config),
         TEST_RELEASE_PROTOCOL_FIELD: TEST_RELEASE_SCHEMA,
         "config": config.to_dict(),
+        # The model INPUT contract: state channels + input-only conditioning columns.
+        # Stored beside ``channels`` for the same reason — load_checkpoint refuses a
+        # mismatch, so a renamed or reordered conditioning channel cannot load silently.
+        "input_channels": list(config.input_channels),
         "model_state": model.state_dict(),
         "normalizer": normalizer.to_dict(),
         "split": {
@@ -2923,6 +2928,17 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
             f"contract, the data build the new one, and a same-length mismatch would load "
             f"cleanly but silently mis-map (or mis-scale: ve/vn/vu -> edot/ndot/udot was a "
             f"semantics change) every channel. Re-train, or run the matching code version."
+        )
+    # Checkpoints written before target conditioning existed carry no input_channels
+    # key; they were trained with none, so their input contract IS the channel contract.
+    stored_inputs = payload.get("input_channels", list(config.channels))
+    if list(stored_inputs) != list(config.input_channels):
+        raise ValueError(
+            f"checkpoint input channel contract {list(stored_inputs)} != this build's "
+            f"{list(config.input_channels)} for target_conditioning="
+            f"{config.target_conditioning!r} — the conditioning columns the model was "
+            "trained on are not the ones this build would feed it. Re-train, or run the "
+            "matching code version."
         )
     normalizer = Normalizer.from_dict(payload["normalizer"])
     model = build_model(config)

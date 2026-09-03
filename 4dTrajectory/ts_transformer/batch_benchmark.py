@@ -49,6 +49,7 @@ from dataset import (  # noqa: E402
     iter_batches,
     split_name_for_dataset_id,
 )
+from batch_contract import anchor_state  # noqa: E402
 from models import build_model, parameter_count, resolve_device  # noqa: E402
 from train import prediction_loss, usable_series  # noqa: E402
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
@@ -245,7 +246,7 @@ def benchmark_candidate(
             prediction = model(x)
             loss = prediction_loss(
                 prediction,
-                x[:, -1],
+                anchor_state(x, len(config.channels)),
                 y,
                 weights,
                 final_time_s,

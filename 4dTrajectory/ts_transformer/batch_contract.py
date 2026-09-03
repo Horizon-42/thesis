@@ -27,6 +27,17 @@ def unpack_batch(batch: tuple) -> tuple:
     raise ValueError(f"unexpected trajectory batch with {len(batch)} fields")
 
 
+def anchor_state(history: torch.Tensor, channel_count: int) -> torch.Tensor:
+    """The normalized observed state at the anchor: the history's last row, state part.
+
+    A history is ``[B, L, C + K]`` — the state contract followed by ``K`` input-only
+    conditioning columns (``target_conditioning``; ``K = 0`` when off). Everything that
+    scores or rolls out from the anchor wants the ``C`` state columns, never the
+    conditioning, so the slice lives here rather than as ``x[:, -1]`` at every call site.
+    """
+    return history[:, -1, :channel_count]
+
+
 def model_forward(
     model: nn.Module,
     history: torch.Tensor,

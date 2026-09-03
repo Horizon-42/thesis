@@ -59,6 +59,15 @@ def test_state_horizon_and_deviations_land_in_meta():
     assert "seed=2024" in name
 
 
+def test_frame_and_target_conditioning_land_in_meta():
+    config = _state_defaults()
+    config["coordinate_frame"] = "airport-enu"
+    config["target_conditioning"] = "channels"
+    name = run_display_name(config)
+    assert "frame=airport-enu" in name and "target=channels" in name
+    assert run_slug(config).endswith("_frame-airport-enu_target-channels")
+
+
 def test_named_recipe_is_the_loss_field():
     config = _control_config(control_recipe_name=CONTROL_RECIPE_SIMPLE_V3)
     config.update(control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V3))

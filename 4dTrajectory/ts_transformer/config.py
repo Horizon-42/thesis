@@ -22,6 +22,12 @@ from typing import Any
 # It lives in channels.py; imported here so the default cannot drift from it.
 from channels import CHANNELS
 from coordinate_frames import COORDINATE_FRAMES
+from target_conditioning import (
+    TARGET_CONDITIONING_CHANNELS,
+    TARGET_CONDITIONING_NONE,
+    TARGET_CONDITIONINGS,
+    conditioning_channel_names,
+)
 from reference_velocity import (
     REFERENCE_VELOCITY_SOURCES,
     REFERENCE_VELOCITY_TRACK_FIT,
@@ -440,6 +446,12 @@ class TSConfig:
     # which the target is an ordinary point rather than the origin (the target-
     # conditioning ablation, docs/2026-09-03_airport_frame_ablation_plan.md).
     coordinate_frame: str = "enu"
+    # ``channels`` appends the target's chart position and runway course to the observed
+    # history as INPUT-ONLY constant channels (target_conditioning.CONDITIONING_CHANNELS),
+    # so a model whose chart no longer puts the target at the origin can still be told
+    # which runway it is flying to. The OUTPUT contract stays ``channels``. iTransformer
+    # only: a channel-independent backbone cannot route a conditioning token anywhere.
+    target_conditioning: str = TARGET_CONDITIONING_NONE
     # Velocity-state supervision may retain the upstream centred track fit or be rebuilt
     # causally from the uniform chart positions.  This changes both model inputs and
     # measured velocity targets, so it is an explicit checkpoint recipe field.
@@ -703,6 +715,20 @@ class TSConfig:
             raise ValueError(
                 f"unknown coordinate_frame {self.coordinate_frame!r}; "
                 f"expected one of {COORDINATE_FRAMES}"
+            )
+        if self.target_conditioning not in TARGET_CONDITIONINGS:
+            raise ValueError(
+                f"unknown target_conditioning {self.target_conditioning!r}; "
+                f"expected one of {TARGET_CONDITIONINGS}"
+            )
+        if (
+            self.target_conditioning == TARGET_CONDITIONING_CHANNELS
+            and self.model != "itransformer"
+        ):
+            raise ValueError(
+                f"target_conditioning={TARGET_CONDITIONING_CHANNELS!r} requires the "
+                f"itransformer backbone: {self.model!r} is channel-independent, so a "
+                "conditioning channel could never reach the state channels"
             )
         if self.reference_velocity_source not in REFERENCE_VELOCITY_SOURCES:
             raise ValueError(
@@ -1200,10 +1226,21 @@ class TSConfig:
                     "than local velocity weights"
                 )
 
-    # PatchTST reads configs.enc_in; iTransformer infers the count from the tensor.
+    @property
+    def input_channels(self) -> tuple[str, ...]:
+        """What the model SEES: the channel contract plus any input-only conditioning.
+
+        Serialised into every checkpoint beside ``channels``; ``load_checkpoint`` refuses
+        a mismatch, the same lock that keeps a renamed state channel from loading.
+        """
+        return self.channels + conditioning_channel_names(self.target_conditioning)
+
+    # The model INPUT width. PatchTST reads configs.enc_in; iTransformer infers the token
+    # count from the tensor, but its duration head and the control feature head flatten
+    # over exactly this many channels.
     @property
     def enc_in(self) -> int:
-        return len(self.channels)
+        return len(self.input_channels)
 
     @property
     def pred_len(self) -> int:

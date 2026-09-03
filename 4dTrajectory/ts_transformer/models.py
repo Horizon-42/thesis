@@ -45,18 +45,33 @@ class ITransformerAdapter(nn.Module):
     def __init__(self, config: TSConfig):
         super().__init__()
         self.inner = VendoredITransformer(config)
+        self.channel_count = len(config.channels)
+
+    def _split(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """State columns, and the input-only conditioning columns (if any) as covariates.
+
+        The vendored model already implements covariate tokens: ``x_mark_enc`` is
+        concatenated on the VARIATE axis, attends with the state tokens, and its projector
+        outputs are filtered away (``[:, :, :N]``) — so the conditioning shapes the six
+        state forecasts without ever being forecast itself.
+        """
+        if x.shape[-1] == self.channel_count:
+            return x, None
+        return x[..., : self.channel_count], x[..., self.channel_count :]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x_mark_enc=None: no calendar covariates. Time enters this project's data as the
-        # uniform grid itself (dt is constant), not as an embedded timestamp feature.
-        return self.inner(x, None, None, None)
+        # No calendar covariates: time enters this project's data as the uniform grid
+        # itself (dt is constant). The only covariate tokens are target conditioning.
+        x_enc, x_mark = self._split(x)
+        return self.inner(x_enc, x_mark, None, None)
 
     def encode_features(self, x: torch.Tensor) -> torch.Tensor:
         """Flatten encoder tokens in channel-contract order before the state projector."""
+        x, x_mark = self._split(x)
         if self.inner.use_norm:
             x = x - x.mean(1, keepdim=True).detach()
             x = x / torch.sqrt(torch.var(x, dim=1, keepdim=True, unbiased=False) + 1e-5)
-        encoded = self.inner.enc_embedding(x, None)
+        encoded = self.inner.enc_embedding(x, x_mark)
         encoded, _attentions = self.inner.encoder(encoded, attn_mask=None)
         # iTransformer has no channel-index embedding: averaging these permutation-
         # equivariant tokens erases which latent came from e/n/u or its derivative. Keep

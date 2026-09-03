@@ -20,9 +20,10 @@ from config import (
 )
 from control.dynamics import rollout as control_rollout
 from control.envelope import physical_controls
-from dataset import FlightSeries, Normalizer, dynamics_arrays
+from dataset import FlightSeries, Normalizer, dynamics_arrays, series_conditioning
 from metrics import states_with_derived_velocity
 from prediction_outputs import ControlPrediction
+from target_conditioning import conditioned_history
 from time_grids import output_time_grid
 
 
@@ -70,7 +71,10 @@ def _history_at_anchor(
             f"anchor {anchor} has no full lookback window (needs at least {config.seq_len - 1})"
         )
     encoded = normalizer.encode(series.values)
-    return encoded[anchor - config.seq_len + 1 : anchor + 1]
+    return conditioned_history(
+        encoded[anchor - config.seq_len + 1 : anchor + 1],
+        series_conditioning(series, config, normalizer),
+    )
 
 
 def _history_batch(
@@ -330,12 +334,18 @@ def _forecast_window(
     anchor: int,
     device: torch.device,
 ) -> Forecast:
-    history = _history_at_anchor(series, config, normalizer, anchor)
+    # The recursion feeds predicted STATE rows back as history; the conditioning row is
+    # a per-flight constant, so it is re-appended to every pass rather than recursed.
+    conditioning = series_conditioning(series, config, normalizer)
+    encoded = normalizer.encode(series.values)
+    history = encoded[anchor - config.seq_len + 1 : anchor + 1]
     chunks: list[np.ndarray] = []
     predicted_final_time_s = 0.0
     produced = 0
     while produced < config.full_horizon_steps:
-        states, pass_final_time_s = _forward(model, history, device)
+        states, pass_final_time_s = _forward(
+            model, conditioned_history(history, conditioning), device
+        )
         if not chunks:
             predicted_final_time_s = pass_final_time_s
         physical_anchor = normalizer.decode(history[-1:])[0]

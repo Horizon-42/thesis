@@ -757,6 +757,89 @@ def test_airport_enu_needs_the_arrival_airport():
     assert report.built == 1 and type(series[0].frame) is frames.AirportENUFrame
 
 
+def test_target_conditioning_appends_input_only_channels():
+    from target_conditioning import CONDITIONING_CHANNELS
+
+    config = TSConfig(target_conditioning="channels")
+    assert config.input_channels == ch.CHANNELS + CONDITIONING_CHANNELS
+    assert config.enc_in == len(ch.CHANNELS) + len(CONDITIONING_CHANNELS)
+    assert config.channels == ch.CHANNELS  # the OUTPUT contract does not grow
+    assert TSConfig().input_channels == ch.CHANNELS
+    with pytest.raises(ValueError, match="requires the itransformer backbone"):
+        TSConfig(model="patchtst", target_conditioning="channels")
+    with pytest.raises(ValueError, match="unknown target_conditioning"):
+        TSConfig(target_conditioning="tokens")
+
+
+def test_conditioned_windows_carry_the_target_and_the_model_still_predicts_six_channels():
+    from forecast import _history_at_anchor
+
+    series, config = _series(
+        n_flights=3, seq_len=20, n_segments=4, coordinate_frame="airport-enu",
+        target_conditioning="channels", d_model=16, n_heads=4, d_ff=32, e_layers=1,
+    )
+    normalizer = Normalizer.fit(series)
+    windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    extra = len(config.input_channels) - len(ch.CHANNELS)
+    x, y, _weights, _final_time_s, _flight_weight = windows[0]
+    assert x.shape == (config.seq_len, len(ch.CHANNELS) + extra)
+    assert y.shape == (config.pred_len, len(ch.CHANNELS))
+    # Constant over the history, and exactly the flight's normalized target + course.
+    row = windows.conditioning[0]
+    assert np.allclose(x[:, len(ch.CHANNELS):].numpy(), row[None, :])
+    position = list(ch.POSITION_IDX)
+    assert np.allclose(
+        row[:3],
+        (series[0].target_chart - normalizer.mean[position]) / normalizer.std[position],
+    )
+    psi = series[0].scenario.target.psi
+    assert row[3:] == pytest.approx([math.cos(psi), math.sin(psi)])
+    batch = windows.batch(np.arange(len(windows)))
+    assert batch[0].shape == (len(windows), config.seq_len, len(ch.CHANNELS) + extra)
+    prediction = build_model(config)(batch[0])
+    assert prediction.states.shape == (len(windows), config.pred_len, len(ch.CHANNELS))
+    assert prediction.final_time_s.shape == (len(windows),)
+    # Inference builds the SAME augmented history the training windows carried.
+    history = _history_at_anchor(series[0], config, normalizer, config.seq_len - 1)
+    assert np.allclose(history, x.numpy())
+
+
+def test_conditioning_is_one_constant_row_under_a_threshold_frame():
+    series, config = _series(n_flights=2, target_conditioning="channels")
+    normalizer = Normalizer.fit(series)
+    rows = [dataset_module.series_conditioning(s, config, normalizer) for s in series]
+    position = list(ch.POSITION_IDX)
+    for row in rows:
+        assert np.allclose(row[:3], -normalizer.mean[position] / normalizer.std[position])
+    # Same runway, threshold at the origin: the rows are identical — the mechanism carries
+    # no per-flight information here, which is what makes it a free control under arm A.
+    assert np.allclose(rows[0], rows[1])
+    assert dataset_module.series_conditioning(series[0], TSConfig(), normalizer) is None
+
+
+def test_conditioned_checkpoint_round_trips_and_refuses_a_different_input_contract(tmp_path):
+    series, config = _series(
+        n_flights=12, epochs=1, patience=1, batch_size=32, d_model=16, n_heads=4,
+        d_ff=32, e_layers=1, seq_len=20, n_segments=8, device="cpu",
+        coordinate_frame="airport-enu", target_conditioning="channels",
+    )
+    train(
+        series, config, output_dir=tmp_path,
+        data_provenance=_fake_data_provenance(), verbose=False,
+    )
+    model, loaded, normalizer, payload = load_checkpoint(tmp_path / "checkpoint.pt")
+    assert loaded.target_conditioning == "channels"
+    assert payload["input_channels"] == list(config.input_channels)
+    forecast = forecast_approach(
+        model, series[0], loaded, normalizer, device=torch.device("cpu")
+    )
+    assert forecast.values.shape[1] == len(ch.CHANNELS)
+    payload["input_channels"] = list(ch.CHANNELS)
+    torch.save(payload, tmp_path / "stale.pt")
+    with pytest.raises(ValueError, match="input channel contract"):
+        load_checkpoint(tmp_path / "stale.pt")
+
+
 def test_target_chart_is_exactly_the_origin_under_threshold_anchored_frames():
     # Every consumer that used to say "the origin" now measures from target_chart. Under the
     # threshold-anchored frames that must be EXACTLY (0, 0, 0) — not approximately — so the

@@ -7,6 +7,7 @@ from typing import Any, Callable
 import torch
 from torch import nn
 
+from batch_contract import anchor_state
 from config import TSConfig
 from control.training.curriculum import ControlTrainingStage
 from dataset import Normalizer
@@ -108,7 +109,7 @@ def optimize_teacher_controls(
             optimizer.zero_grad()
             components = loss_components(
                 teacher(),
-                x[:, -1],
+                anchor_state(x, len(config.channels)),
                 target,
                 weights,
                 final_time_s,

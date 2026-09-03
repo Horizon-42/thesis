@@ -55,6 +55,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
+    TARGET_CONDITIONINGS,
     CHECKPOINT_SELECTION_METRICS,
     CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
     CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
@@ -460,6 +461,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--device", default=None, help='"auto" (default), "cpu", "cuda"')
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default=None)
     parser.add_argument(
+        "--target-conditioning",
+        choices=TARGET_CONDITIONINGS,
+        default=None,
+        help=(
+            "'channels' feeds the target's chart position + runway course to the model as "
+            "input-only constant channels (iTransformer only); default: none"
+        ),
+    )
+    parser.add_argument(
         "--random-train-anchor",
         action="store_true",
         default=None,
@@ -616,6 +626,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
+        ("target_conditioning", args.target_conditioning),
         ("aircraft_filter", args.aircraft_filter),
         ("random_train_anchor", args.random_train_anchor),
         ("training_cohort_min_future_s", args.training_cohort_min_future_s),

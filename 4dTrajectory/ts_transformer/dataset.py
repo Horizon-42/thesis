@@ -100,6 +100,11 @@ from fixed_dt_supervision import (
     cache_fixed_dt_supervision_rows,
     pack_fixed_dt_supervision_rows,
 )
+from target_conditioning import (
+    TARGET_CONDITIONING_NONE,
+    conditioned_history,
+    conditioning_vector,
+)
 from time_grids import output_time_grid
 from reference_velocity import rebuild_reference_velocities
 
@@ -1090,6 +1095,26 @@ def _build_supervision(
 
 # ── Windowing ────────────────────────────────────────────────────────────────
 
+def series_conditioning(
+    series: FlightSeries, config: TSConfig, normalizer: Normalizer
+) -> np.ndarray | None:
+    """The flight's constant input-only conditioning row, or ``None`` when off.
+
+    Built here, beside the windows, because it is a per-flight INPUT value in the
+    normalizer's space — the same row is appended to every history window of the flight
+    at training time (``TrajectoryWindows``) and at inference (``forecast``).
+    """
+    if config.target_conditioning == TARGET_CONDITIONING_NONE:
+        return None
+    position = list(POSITION_IDX)
+    return conditioning_vector(
+        series.target_chart,
+        float(series.scenario.target.psi),
+        position_mean=normalizer.mean[position],
+        position_std=normalizer.std[position],
+    )
+
+
 def window_anchors(
     series: FlightSeries,
     config: TSConfig,
@@ -1198,6 +1223,10 @@ class TrajectoryWindows(Dataset, ABC):
         # (a few hundred rows each) and this is read on every epoch.
         self.encoded = [
             normalizer.encode(s.supervision_values).astype(np.float32) for s in self.series
+        ]
+        # Input-only target conditioning, one constant row per flight (None when off).
+        self.conditioning = [
+            series_conditioning(s, config, normalizer) for s in self.series
         ]
         # Public diagnostic for normalized-time experiments. Actual query times come from
         # the shared clock below, which also defines fixed-time loss and inference timing.
@@ -1328,7 +1357,9 @@ class TrajectoryWindows(Dataset, ABC):
         series = self.series[s_idx]
         L = self.config.seq_len
 
-        x = values[anchor - L + 1 : anchor + 1]
+        x = conditioned_history(
+            values[anchor - L + 1 : anchor + 1], self.conditioning[s_idx]
+        )
         anchor_time = float(series.times[anchor])
         final_time_s = float(series.supervision_times[-1] - anchor_time)
         time_grid = output_time_grid(final_time_s, self.config)
@@ -1428,7 +1459,9 @@ class TrajectoryWindows(Dataset, ABC):
         """Build one contiguous batch without per-sample Tensor creation and collation."""
         batch_size = len(indices)
         L, N, C = self.config.seq_len, self.config.pred_len, len(self.config.channels)
-        x = np.empty((batch_size, L, C), dtype=np.float32)
+        # The history carries the input contract (state channels + any conditioning);
+        # the targets carry the state contract only.
+        x = np.empty((batch_size, L, len(self.config.input_channels)), dtype=np.float32)
         y = np.empty((batch_size, N, C), dtype=np.float32)
         weights = np.empty_like(y)
         final_time_s = np.empty(batch_size, dtype=np.float32)

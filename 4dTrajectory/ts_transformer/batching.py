@@ -75,7 +75,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
         )
         x = torch.zeros(
-            (batch_size, config.seq_len, len(config.channels)),
+            (batch_size, config.seq_len, len(config.input_channels)),
             dtype=torch.float32,
             device=device,
         )
