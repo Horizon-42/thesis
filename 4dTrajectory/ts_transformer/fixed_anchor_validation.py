@@ -319,8 +319,15 @@ def resample_prediction_to_physical_time(
     config: TSConfig,
     query_offsets_s: np.ndarray,
     segment_durations_s: np.ndarray | None = None,
+    *,
+    target_chart: np.ndarray,
 ) -> tuple[np.ndarray, bool]:
-    """Interpolate one prediction onto physical offsets after its observed anchor."""
+    """Interpolate one prediction onto physical offsets after its observed anchor.
+
+    Fixed-time forecasts are cut at their closest horizontal approach to the TARGET
+    (``FlightSeries.target_chart``), the same rule ``forecast.truncate_at_threshold``
+    applies at inference, so checkpoint selection and prediction agree on the endpoint.
+    """
     if config.horizon_mode == HORIZON_NORMALIZED:
         offsets = (
             np.cumsum(np.asarray(segment_durations_s, dtype=np.float64))
@@ -334,7 +341,9 @@ def resample_prediction_to_physical_time(
             np.arange(1, len(predicted_values) + 1, dtype=np.float64) * config.dt_s
         )
         closest = int(np.argmin(np.linalg.norm(
-            np.asarray(predicted_values)[:, list(POSITION_IDX[:2])], axis=-1
+            np.asarray(predicted_values)[:, list(POSITION_IDX[:2])]
+            - np.asarray(target_chart, dtype=np.float64)[:2],
+            axis=-1,
         )))
         capped = closest == len(predicted_values) - 1
         offsets = offsets[: closest + 1]
@@ -415,6 +424,7 @@ def _fixed_anchor_common_position_arrays(
             config,
             progress * true_duration_s[index],
             segment_durations_s[index],
+            target_chart=series[index].target_chart,
         )
     delta = common[..., list(POSITION_IDX)] - truth[..., list(POSITION_IDX)]
     error = np.linalg.norm(delta, axis=-1)
@@ -560,6 +570,7 @@ def fixed_anchor_common_grid_report_metrics(
             config,
             np.asarray([predicted_final_time_s[index]], dtype=np.float64),
             segment_durations_s[index],
+            target_chart=series[index].target_chart,
         )
         predicted_arrival[index] = arrival[0, list(POSITION_IDX)]
     endpoint_error = np.linalg.norm(

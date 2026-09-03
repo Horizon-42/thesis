@@ -148,6 +148,8 @@ def resample_prediction(
     config: TSConfig,
     query_offsets_s: np.ndarray,
     segment_durations_s: np.ndarray | None = None,
+    *,
+    target_chart: np.ndarray,
 ) -> tuple[np.ndarray, bool]:
     return resample_prediction_to_physical_time(
         anchor_values,
@@ -156,6 +158,7 @@ def resample_prediction(
         config,
         query_offsets_s,
         segment_durations_s,
+        target_chart=target_chart,
     )
 
 
@@ -383,6 +386,7 @@ def run_deterministic(
                     run.config,
                     progress * true_duration_s[absolute],
                     durations[local],
+                    target_chart=series[absolute].target_chart,
                 )
                 common.append(sampled)
                 capped.append(was_capped)
@@ -461,6 +465,7 @@ def mc_dropout_coverage(
                     candidate, _capped = resample_prediction(
                         anchors[absolute], decoded[local], float(predicted_time[local]),
                         run.config, progress * true_duration_s[absolute], durations[local],
+                        target_chart=series[absolute].target_chart,
                     )
                     sampled.append(candidate)
                 error = displacement_errors(np.stack(sampled), truth[start:stop])

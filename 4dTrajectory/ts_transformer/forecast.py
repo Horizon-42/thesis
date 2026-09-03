@@ -367,12 +367,13 @@ _FORECASTERS: dict[str, Callable[..., Forecast]] = {
 }
 
 
-def _keep_complete_forecast(forecast: Forecast) -> Forecast:
+def _keep_complete_forecast(forecast: Forecast, series: FlightSeries) -> Forecast:
+    del series
     return forecast
 
 
-def _truncate_fixed_forecast(forecast: Forecast) -> Forecast:
-    truncated = truncate_at_threshold(forecast)
+def _truncate_fixed_forecast(forecast: Forecast, series: FlightSeries) -> Forecast:
+    truncated = truncate_at_threshold(forecast, series.target_chart)
     if truncated.truncated_at_threshold:
         return truncated
     return replace(truncated, horizon_capped=True)
@@ -399,7 +400,7 @@ def _forecast_state(
     )
     if not truncate:
         return forecast
-    return _POSTPROCESSORS[config.horizon_mode](forecast)
+    return _POSTPROCESSORS[config.horizon_mode](forecast, series)
 
 
 def forecast_approaches(
@@ -451,9 +452,14 @@ def forecast_approach(
     )[0]
 
 
-def truncate_at_threshold(forecast: Forecast) -> Forecast:
-    """Cut a fixed-time forecast at its closest horizontal approach to the threshold."""
-    distance = horizontal_distance_m(forecast.values)
+def truncate_at_threshold(forecast: Forecast, target_chart: np.ndarray) -> Forecast:
+    """Cut a fixed-time forecast at its closest horizontal approach to the threshold.
+
+    ``target_chart`` is the threshold's chart position (``FlightSeries.target_chart``) —
+    the closest approach is to the TARGET, which is the origin only under the
+    threshold-anchored frames.
+    """
+    distance = horizontal_distance_m(forecast.values, target_chart)
     closest = int(np.argmin(distance))
     if closest == len(distance) - 1:
         return forecast

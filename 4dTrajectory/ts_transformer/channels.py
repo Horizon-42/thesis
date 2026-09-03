@@ -215,6 +215,22 @@ def resample_uniform(times: np.ndarray, values: np.ndarray, dt_s: float) -> tupl
     return grid, out
 
 
-def horizontal_distance_m(values: np.ndarray) -> np.ndarray:
-    """Horizontal distance from the runway-threshold frame origin, in metres."""
-    return np.hypot(values[:, IDX["e"]], values[:, IDX["n"]])
+def target_chart_position(target: GeodeticState, frame: CoordinateFrame) -> np.ndarray:
+    """The scenario target projected into ``frame``: ``(e, n, u)`` metres.
+
+    This is the ONE value that names the distinction between "the chart origin" and "the
+    runway threshold". Under the threshold-anchored frames the two coincide and this is
+    identically ``(0, 0, 0)``; under a frame anchored elsewhere (``airport-enu``) every
+    consumer that judges distance-to-go, crossing planes or approach geometry must measure
+    from HERE, never from the origin. ``channels_from_states`` is reused so the target sits
+    in exactly the projection the track channels use.
+    """
+    _times, values = channels_from_states([(0.0, target)], frame)
+    return values[0, list(POSITION_IDX)].copy()
+
+
+def horizontal_distance_m(values: np.ndarray, target_chart: np.ndarray) -> np.ndarray:
+    """Horizontal distance from the target's chart position, in metres."""
+    return np.hypot(
+        values[:, IDX["e"]] - target_chart[0], values[:, IDX["n"]] - target_chart[1]
+    )

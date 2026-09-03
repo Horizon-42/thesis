@@ -690,6 +690,20 @@ def test_coordinate_frame_setting_selects_a_concrete_implementation():
     assert aligned_dynamics["runway_heading_rad"] == pytest.approx(runway_heading)
 
 
+def test_target_chart_is_exactly_the_origin_under_threshold_anchored_frames():
+    # Every consumer that used to say "the origin" now measures from target_chart. Under the
+    # threshold-anchored frames that must be EXACTLY (0, 0, 0) — not approximately — so the
+    # refactor is bit-identical for them (x - 0.0 is x).
+    for frame_name in ("enu", "runway-aligned"):
+        series, _ = _series(n_flights=1, coordinate_frame=frame_name)
+        assert np.array_equal(series[0].target_chart, np.zeros(3)), frame_name
+    values = np.zeros((2, len(ch.CHANNELS)))
+    values[1, ch.IDX["e"]], values[1, ch.IDX["n"]] = 3.0, 4.0
+    assert ch.horizontal_distance_m(values, np.zeros(3)) == pytest.approx([0.0, 5.0])
+    # ...and from a displaced target it is the distance to THAT point, not to the origin.
+    assert ch.horizontal_distance_m(values, np.array([3.0, 4.0, 0.0])) == pytest.approx([5.0, 0.0])
+
+
 def test_resample_lands_on_a_regular_grid_without_extrapolating():
     times = np.array([0.0, 1.0, 3.0, 7.5])
     values = np.tile(np.arange(len(times), dtype=float)[:, None], (1, len(ch.CHANNELS)))
@@ -4736,6 +4750,7 @@ def test_common_grid_resampling_uses_explicit_nonuniform_control_clock():
         config,
         np.array([1.0, 2.0, 3.0]),
         segment_durations_s=np.array([1.0, 2.0]),
+        target_chart=np.zeros(3),
     )
 
     assert not capped

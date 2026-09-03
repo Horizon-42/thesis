@@ -87,7 +87,10 @@ def approach_difficulty(series: "FlightSeries", anchor: int) -> ApproachDifficul
     future = series.supervision_times > anchor_time
     truth = np.asarray(series.supervision_values, dtype=np.float64)[future][:, POSITION_IDX]
     anchor_state = np.asarray(series.values[anchor], dtype=np.float64)
-    path = np.vstack([anchor_state[list(POSITION_IDX)], truth])
+    # Positions RELATIVE TO THE TARGET: range, cross-track and distance-to-go are all
+    # measured from the threshold, which is the chart origin only under the
+    # threshold-anchored frames.
+    path = np.vstack([anchor_state[list(POSITION_IDX)], truth]) - series.target_chart
 
     anchor_range_m = float(np.hypot(*path[0, :2]))
     if anchor_range_m <= 0.0:

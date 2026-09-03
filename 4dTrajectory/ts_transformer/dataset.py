@@ -66,6 +66,7 @@ from channels import (
     channels_from_states,
     resample_uniform,
     states_from_channels,
+    target_chart_position,
 )
 from anchor_eligibility import (
     eligible_random_train_anchors,
@@ -398,6 +399,13 @@ class FlightSeries:
     def dataset_id(self) -> str:
         """Cross-airport split/checkpoint identity; export stems remain ``flight_id``."""
         return f"{self.airport}:{self.flight_id}" if self.airport else self.flight_id
+
+    @property
+    def target_chart(self) -> np.ndarray:
+        """The runway target's chart position ``(e, n, u)`` — where "distance to go" is
+        measured from. ``(0, 0, 0)`` under the threshold-anchored frames; the frame's
+        anchor and the target are different points under ``airport-enu``."""
+        return target_chart_position(self.scenario.target, self.frame)
 
 
 
@@ -869,6 +877,7 @@ def build_series(
 
         samples = state_samples_from_track(waypoints, mass_kg=scenario.initial.m)
         frame = frame_for_state(scenario.target, config.coordinate_frame)
+        target_chart = target_chart_position(scenario.target, frame)
         times, values = channels_from_states(samples, frame)
         grid, resampled = resample_uniform(times, values, config.dt_s)
         # Not redundant with the span pre-check: for a non-dyadic dt the multiply and
@@ -882,6 +891,7 @@ def build_series(
             times,
             values,
             frame,
+            target_chart=target_chart,
             runway_heading_rad=scenario.target.psi,
             fitted=fitted,
         )
@@ -932,16 +942,25 @@ def _observed_threshold_crossing(
     measured_values: np.ndarray,
     frame: CoordinateFrame,
     *,
+    target_chart: np.ndarray,
     runway_heading_rad: float,
     fitted: FittedApproach | None,
 ) -> tuple[float, np.ndarray] | None:
-    """Interpolate the measured final's first crossing of the runway threshold plane."""
+    """Interpolate the measured final's first crossing of the runway threshold plane.
+
+    The plane passes through the TARGET (``target_chart``), normal to the runway course —
+    not through the frame origin, which only coincides with the threshold under the
+    threshold-anchored frames.
+    """
     cosine = np.cos(runway_heading_rad)
     sine = np.sin(runway_heading_rad)
     along = np.asarray([
         east * cosine + north * sine
         for east, north in (
-            frame.to_world_horizontal(float(row[0]), float(row[1]))
+            frame.to_world_horizontal(
+                float(row[0]) - float(target_chart[0]),
+                float(row[1]) - float(target_chart[1]),
+            )
             for row in measured_values
         )
     ])
