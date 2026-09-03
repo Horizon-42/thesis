@@ -21,13 +21,13 @@ from typing import Any
 # Channel order is a hard contract between the data build, the model, and the export.
 # It lives in channels.py; imported here so the default cannot drift from it.
 from channels import CHANNELS
+from coordinate_frames import COORDINATE_FRAMES
 from reference_velocity import (
     REFERENCE_VELOCITY_SOURCES,
     REFERENCE_VELOCITY_TRACK_FIT,
 )
 
 MODELS = ("itransformer", "patchtst")
-COORDINATE_FRAMES = ("enu", "runway-aligned")
 AIRCRAFT_FILTER_ALL = "all"
 AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
 AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
@@ -435,7 +435,10 @@ class TSConfig:
     aircraft_filter: str = AIRCRAFT_FILTER_ALL
     # ``runway-aligned`` rotates the horizontal plane so every threshold course points
     # along the first axis. It keeps the six-channel tensor shape while removing a major
-    # source of cross-airport orientation variance.
+    # source of cross-airport orientation variance. ``airport-enu`` moves the ANCHOR to
+    # the airport reference point: one chart per airport, shared by all its runways, in
+    # which the target is an ordinary point rather than the origin (the target-
+    # conditioning ablation, docs/2026-09-03_airport_frame_ablation_plan.md).
     coordinate_frame: str = "enu"
     # Velocity-state supervision may retain the upstream centred track fit or be rebuilt
     # causally from the uniform chart positions.  This changes both model inputs and

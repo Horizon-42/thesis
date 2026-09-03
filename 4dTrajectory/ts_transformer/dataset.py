@@ -21,6 +21,7 @@ flights is the only honest option, and it is done here rather than left to the c
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -85,7 +86,13 @@ from config import (
 from control.conditioning import DYNAMICS_CONDITION_NAMES, condition_vector
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.dynamics.inverse import actual_controls, segment_controls
-from coordinate_frames import CoordinateFrame, frame_for_state
+from coordinate_frames import (
+    COORDINATE_FRAME_AIRPORT_ENU,
+    AirportReference,
+    CoordinateFrame,
+    frame_for_state,
+)
+from flight_scenarios.runway_target import airport_reference_point
 from fixed_dt_supervision import (
     FixedDTControlSupervision,
     FixedDTSupervisionRow,
@@ -778,6 +785,33 @@ class BuildReport:
         }
 
 
+@functools.lru_cache(maxsize=None)
+def _airport_reference(airport: str) -> AirportReference:
+    """The airport-fixed frame's anchor, from the harvest's own airport roster."""
+    point = airport_reference_point(airport)
+    return AirportReference(
+        code=airport,
+        lat=point["lat"],
+        lon=point["lon"],
+        elevation_msl_m=point["elevation_m"],
+    )
+
+
+def _frame_for_scenario(scenario: FlightScenario, config: TSConfig) -> CoordinateFrame:
+    """Resolve the chart once per flight; ``airport-enu`` needs the arrival airport."""
+    airport_ref = None
+    if config.coordinate_frame == COORDINATE_FRAME_AIRPORT_ENU:
+        code = str(scenario.source.get("arr_airport") or "").strip().upper()
+        if not code:
+            raise ValueError(
+                f"flight {scenario.source.get('id')!r}: coordinate frame "
+                f"{config.coordinate_frame!r} needs the arrival airport, but the flight "
+                "carries no arr_airport and build_series was given none"
+            )
+        airport_ref = _airport_reference(code)
+    return frame_for_state(scenario.target, config.coordinate_frame, airport_ref=airport_ref)
+
+
 def build_series(
     flights: Sequence[dict[str, Any]],
     config: TSConfig,
@@ -876,7 +910,7 @@ def build_series(
             continue
 
         samples = state_samples_from_track(waypoints, mass_kg=scenario.initial.m)
-        frame = frame_for_state(scenario.target, config.coordinate_frame)
+        frame = _frame_for_scenario(scenario, config)
         target_chart = target_chart_position(scenario.target, frame)
         times, values = channels_from_states(samples, frame)
         grid, resampled = resample_uniform(times, values, config.dt_s)

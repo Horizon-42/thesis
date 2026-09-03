@@ -49,6 +49,33 @@ def find_threshold(
     return None
 
 
+def airport_reference_point(
+    airport: str, *, path: Path = _THRESHOLDS_PATH
+) -> dict[str, float]:
+    """``{lat, lon, elevation_m}`` of ``airport``'s reference point, MSL metres.
+
+    The same ``airports[CODE]`` entry ``trajectory_data_process.harvest.airports.load_airport``
+    reads into ``Airport.lat/lon/elevation_msl_m`` — one source for the harvest, the
+    evaluator and the airport-anchored chart (the frontend's ``airport.json`` is a copy).
+    Raises for an unknown airport or an incomplete entry: an airport-anchored chart with a
+    guessed anchor would be silently wrong everywhere.
+    """
+    record = _load_airports(path).get(airport.upper())
+    if record is None:
+        raise KeyError(f"no airport {airport!r} in {path}")
+    try:
+        return {
+            "lat": float(record["lat"]),
+            "lon": float(record["lon"]),
+            "elevation_m": float(record["elevation_m"]),
+        }
+    except KeyError as exc:
+        raise ValueError(
+            f"{airport}: airport entry lacks {exc.args[0]!r}; the reference point needs "
+            "lat, lon and elevation_m"
+        ) from exc
+
+
 def threshold_target_state(
     airport: str | None,
     runway: str | None,

@@ -9,6 +9,11 @@ import numpy as np
 import torch
 
 from channels import POSITION_IDX, VELOCITY_IDX
+from coordinate_frames import (
+    COORDINATE_FRAME_AIRPORT_ENU,
+    COORDINATE_FRAME_ENU,
+    COORDINATE_FRAME_RUNWAY_ALIGNED,
+)
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
 
@@ -77,8 +82,9 @@ def _rotate_horizontal_torch(
 _TORCH_HORIZONTAL_COMPONENTS: dict[
     str, Callable[[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
 ] = {
-    "enu": _rotate_horizontal_torch,
-    "runway-aligned": _identity_horizontal_torch,
+    COORDINATE_FRAME_ENU: _rotate_horizontal_torch,
+    COORDINATE_FRAME_AIRPORT_ENU: _rotate_horizontal_torch,
+    COORDINATE_FRAME_RUNWAY_ALIGNED: _identity_horizontal_torch,
 }
 
 
@@ -170,7 +176,7 @@ def terminal_state_metrics_numpy(
     velocity_delta = np.asarray(predicted_terminal)[list(VELOCITY_IDX)] - np.asarray(
         terminal_velocity_target
     )
-    if coordinate_frame == "runway-aligned":
+    if coordinate_frame == COORDINATE_FRAME_RUNWAY_ALIGNED:
         position_along, position_cross = position_delta[:2]
         velocity_along, velocity_cross = velocity_delta[:2]
     else:

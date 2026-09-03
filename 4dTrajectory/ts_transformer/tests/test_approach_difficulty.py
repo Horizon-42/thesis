@@ -29,7 +29,8 @@ from approach_difficulty import (  # noqa: E402
     approach_difficulty,
     difficulty_block,
 )
-from coordinate_frames import ENUFrame, RunwayAlignedFrame  # noqa: E402
+from channels import target_chart_position  # noqa: E402
+from coordinate_frames import AirportENUFrame, ENUFrame, RunwayAlignedFrame  # noqa: E402
 from dataset import FlightSeries  # noqa: E402
 
 THRESHOLD_LAT, THRESHOLD_LON, THRESHOLD_ALT = 35.8745, -78.802, 132.0
@@ -53,15 +54,22 @@ def _series_in_frame(
     """One flight whose horizontal path is ``world_en``, expressed in ``frame``'s axes.
 
     The caller gives world east/north metres from the threshold; every series is built by
-    projecting THOSE through the frame, so the two frames describe one physical flight.
+    projecting THOSE through the frame, so the three frames describe one physical flight.
+    Under the airport-anchored frame the threshold itself sits away from the origin, so
+    the projected path is shifted by the target's chart position.
     """
+    target = _target(frame_course(frame))
+    shift = target_chart_position(target, frame)
     values = []
     for east, north in world_en:
         first, second = frame.from_world_horizontal(east, north)
         vel_first, vel_second = frame.from_world_horizontal(
             speed * math.cos(track_rad), speed * math.sin(track_rad)
         )
-        values.append([first, second, 400.0, vel_first, vel_second, -3.0])
+        values.append([
+            first + shift[0], second + shift[1], 400.0 + shift[2],
+            vel_first, vel_second, -3.0,
+        ])
     times = np.arange(len(world_en), dtype=np.float64) * 2.0
     return FlightSeries(
         flight_id="TEST1_05L_abc123_20260101T000000Z",
@@ -82,6 +90,11 @@ def _frames():
     return [
         ENUFrame(**common),
         RunwayAlignedFrame(**common, heading_rad=APPROACH_COURSE_RAD),
+        # Anchored ~2 km from the threshold: the covariates must not notice.
+        AirportENUFrame(
+            lat0=THRESHOLD_LAT + 0.015, lon0=THRESHOLD_LON - 0.012,
+            alt0=THRESHOLD_ALT - 20.0, code="KTST",
+        ),
     ]
 
 
@@ -94,7 +107,7 @@ def _inbound(distance_m: float, cross_m: float) -> tuple[float, float]:
     )
 
 
-@pytest.mark.parametrize("frame", _frames(), ids=["enu", "runway-aligned"])
+@pytest.mark.parametrize("frame", _frames(), ids=["enu", "runway-aligned", "airport-enu"])
 def test_a_straight_in_scores_unit_tortuosity_in_either_frame(frame) -> None:
     path = [_inbound(d, 0.0) for d in (12_000.0, 8_000.0, 4_000.0, 0.0)]
     series = _series_in_frame(path, frame=frame, track_rad=APPROACH_COURSE_RAD)
@@ -108,7 +121,7 @@ def test_a_straight_in_scores_unit_tortuosity_in_either_frame(frame) -> None:
     assert difficulty.established_at_anchor
 
 
-@pytest.mark.parametrize("frame", _frames(), ids=["enu", "runway-aligned"])
+@pytest.mark.parametrize("frame", _frames(), ids=["enu", "runway-aligned", "airport-enu"])
 def test_a_downwind_and_base_scores_the_ratio_of_the_two_legs(frame) -> None:
     # 12 km to go in a straight line, flown as a 10 km + 10 km dogleg: exactly 5/3.
     path = [_inbound(12_000.0, 0.0), _inbound(6_000.0, -8_000.0), _inbound(0.0, 0.0)]
@@ -120,7 +133,7 @@ def test_a_downwind_and_base_scores_the_ratio_of_the_two_legs(frame) -> None:
     assert difficulty.route_tortuosity == pytest.approx(5.0 / 3.0, rel=1e-9)
 
 
-@pytest.mark.parametrize("frame", _frames(), ids=["enu", "runway-aligned"])
+@pytest.mark.parametrize("frame", _frames(), ids=["enu", "runway-aligned", "airport-enu"])
 def test_cross_track_is_signed_right_of_the_inbound_course(frame) -> None:
     right = _series_in_frame(
         [_inbound(12_000.0, 900.0), _inbound(0.0, 0.0)],
@@ -168,20 +181,23 @@ def test_an_anchor_past_the_threshold_is_not_established() -> None:
     assert not approach_difficulty(series, 0).established_at_anchor
 
 
-def test_the_two_frames_agree_on_every_covariate() -> None:
+def test_every_frame_agrees_on_every_covariate() -> None:
     path = [_inbound(14_000.0, 400.0), _inbound(7_000.0, -6_000.0), _inbound(0.0, 0.0)]
-    enu, runway = _frames()
+    enu, *others = _frames()
     left = approach_difficulty(
         _series_in_frame(path, frame=enu, track_rad=APPROACH_COURSE_RAD), 0
     )
-    right = approach_difficulty(
-        _series_in_frame(path, frame=runway, track_rad=APPROACH_COURSE_RAD), 0
-    )
-    assert left.anchor_range_m == pytest.approx(right.anchor_range_m, rel=1e-9)
-    assert left.remaining_path_m == pytest.approx(right.remaining_path_m, rel=1e-9)
-    assert left.route_tortuosity == pytest.approx(right.route_tortuosity, rel=1e-9)
-    assert left.anchor_cross_track_m == pytest.approx(right.anchor_cross_track_m, abs=1e-6)
-    assert left.established_at_anchor == right.established_at_anchor
+    for other in others:
+        right = approach_difficulty(
+            _series_in_frame(path, frame=other, track_rad=APPROACH_COURSE_RAD), 0
+        )
+        assert left.anchor_range_m == pytest.approx(right.anchor_range_m, rel=1e-9)
+        assert left.remaining_path_m == pytest.approx(right.remaining_path_m, rel=1e-9)
+        assert left.route_tortuosity == pytest.approx(right.route_tortuosity, rel=1e-9)
+        assert left.anchor_cross_track_m == pytest.approx(
+            right.anchor_cross_track_m, abs=1e-6
+        )
+        assert left.established_at_anchor == right.established_at_anchor
 
 
 def test_the_covariates_describe_the_route_after_the_anchor_not_the_whole_track() -> None:

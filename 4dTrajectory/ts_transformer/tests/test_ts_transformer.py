@@ -70,7 +70,8 @@ from anchor_eligibility import (  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
-    AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
+    AIRCRAFT_FILTER_OPENAP_DIRECT, COORDINATE_FRAMES, HORIZON_FULL, HORIZON_NORMALIZED,
+    HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_METRICS,
@@ -688,6 +689,72 @@ def test_coordinate_frame_setting_selects_a_concrete_implementation():
     assert aligned_dynamics["frame_params"][3] == pytest.approx(runway_heading)
     assert enu_dynamics["runway_heading_rad"] == pytest.approx(runway_heading)
     assert aligned_dynamics["runway_heading_rad"] == pytest.approx(runway_heading)
+
+
+def test_airport_enu_frame_is_anchored_at_the_airport_reference_point():
+    target = _state(psi=0.73)
+    with pytest.raises(ValueError, match="requires an airport reference"):
+        frames.frame_for_state(target, "airport-enu")
+    reference = frames.AirportReference(
+        code="KRDU", lat=35.878659, lon=-78.7873, elevation_msl_m=132.59
+    )
+    frame = frames.frame_for_state(target, "airport-enu", airport_ref=reference)
+    assert type(frame) is frames.AirportENUFrame
+    assert (frame.lat0, frame.lon0, frame.alt0, frame.code) == (
+        reference.lat, reference.lon, reference.elevation_msl_m, "KRDU"
+    )
+    # The threshold-anchored modes ignore the reference; the airport mode never anchors
+    # at a state.
+    assert frames.frame_for_state(target, "enu", airport_ref=reference).lat0 == target.latitude
+    with pytest.raises(TypeError, match="for_airport"):
+        frames.AirportENUFrame.for_state(target)
+    assert "airport-enu" in COORDINATE_FRAMES
+
+
+def test_airport_enu_series_differ_from_threshold_enu_only_by_the_anchor():
+    enu_series, _ = _series(n_flights=2, coordinate_frame="enu")
+    airport_series, _ = _series(n_flights=2, coordinate_frame="airport-enu")
+    for enu, apt in zip(enu_series, airport_series):
+        assert type(apt.frame) is frames.AirportENUFrame and apt.frame.code == AIRPORT
+        assert np.array_equal(enu.times, apt.times)
+        assert np.array_equal(enu.target_chart, np.zeros(3))
+        # KRDU 05L's threshold sits kilometres from the reference point: the target is a
+        # real point in this chart, not the origin.
+        assert np.linalg.norm(apt.target_chart[:2]) > 1_000.0
+        # Positions differ by ONE constant vector — the threshold's chart position — up to
+        # the east-scale change from cos(lat0) (~1e-4 relative, metres over a 25 km ring).
+        offset = apt.values[:, list(ch.POSITION_IDX)] - enu.values[:, list(ch.POSITION_IDX)]
+        assert np.allclose(offset, apt.target_chart, atol=5.0)
+        assert np.allclose(offset[:, 1:], apt.target_chart[1:], atol=1e-6)
+        # Velocities carry the same scale factor and nothing else.
+        assert np.allclose(
+            apt.values[:, list(ch.VELOCITY_IDX)],
+            enu.values[:, list(ch.VELOCITY_IDX)],
+            rtol=1e-3, atol=1e-6,
+        )
+        # The observed threshold crossing is found at the SAME time: the plane goes through
+        # the target, not the origin, so the supervision span does not move.
+        assert apt.n_samples == enu.n_samples
+        assert apt.supervision_times[-1] == pytest.approx(enu.supervision_times[-1], abs=1e-3)
+        assert np.allclose(apt.supervision_weights, enu.supervision_weights)
+        anchor = dataset_module.ANCHOR_CONTROL_SAMPLES
+        dynamics = dataset_module.dynamics_arrays(apt, anchor)
+        assert dynamics["frame_params"][:3] == pytest.approx(
+            [apt.frame.lat0, apt.frame.lon0, apt.frame.alt0]
+        )
+        assert dynamics["frame_params"][3] == pytest.approx(0.0)
+        assert dynamics["runway_heading_rad"] == pytest.approx(apt.scenario.target.psi)
+
+
+def test_airport_enu_needs_the_arrival_airport():
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=1, seed=3)
+    flights[0]["arr_airport"] = None
+    with pytest.raises(ValueError, match="needs the arrival airport"):
+        build_series(flights, TSConfig(coordinate_frame="airport-enu"))
+    series, report = build_series(
+        flights, TSConfig(coordinate_frame="airport-enu"), airport=AIRPORT
+    )
+    assert report.built == 1 and type(series[0].frame) is frames.AirportENUFrame
 
 
 def test_target_chart_is_exactly_the_origin_under_threshold_anchored_frames():

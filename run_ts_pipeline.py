@@ -151,8 +151,11 @@ def _eligibility_digests(airports: tuple[str, ...]) -> dict[str, str]:
     }
 
 
+_FRAME_TAGS = {"enu": "", "runway-aligned": "_runway_aligned", "airport-enu": "_airport_enu"}
+
+
 def _frame_tag(coordinate_frame: str) -> str:
-    return "" if coordinate_frame == "enu" else "_runway_aligned"
+    return _FRAME_TAGS[coordinate_frame]
 
 
 def _anchor_tag(random_train_anchor: bool) -> str:
