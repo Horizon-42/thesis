@@ -30,6 +30,23 @@ Everything below is serialised into every checkpoint.
   checkpoints after the transport-consistency change). The velocity channels are the EXACT chart
   derivatives of the position channels (full-transport Jacobian, `geokit.wgs84_curvature_radii`),
   not raw physical ENU components — see the velocity seam in `flight_scenarios/CLAUDE.md`.
+- **The chart origin is NOT "the threshold"; `FlightSeries.target_chart` is.** Three frames:
+  `enu` / `runway-aligned` anchor at the assigned threshold (target_chart ≡ 0) and
+  `airport-enu` anchors at the airport reference point (`AirportENUFrame`, resolved from the
+  same `runway_thresholds.json` entry the harvest reads). Every consumer that judges
+  distance-to-go — the observed crossing plane, `forecast.truncate_at_threshold`, the
+  fixed-anchor common-grid truncation that SELECTS checkpoints, `approach_difficulty`,
+  `horizontal_distance_m` — measures from `target_chart`; a new one that reads `hypot(e, n)`
+  is silently wrong under the airport frame and only there (2026-09-03).
+- **`target_conditioning="channels"` appends five INPUT-ONLY channels** (`e/n/u_tgt`
+  standardised with the position stats, `cos/sin ψ_rwy`) after normalization —
+  `config.input_channels` is what the model sees, `config.channels` what it predicts,
+  `enc_in` is the input width, and the checkpoint stores `input_channels` beside `channels`
+  (`load_checkpoint` refuses a mismatch). iTransformer consumes them as covariate variate
+  tokens (the vendored `x_mark_enc` path); PatchTST is refused (channel-independent). Every
+  `x[:, -1]` anchor read goes through `batch_contract.anchor_state` so the conditioning
+  columns never pose as state. Measured: the attention backbone ignores them for the
+  trajectory; only the flattening duration head reads them (−10 % time MAE).
 - **Horizon trap**: the horizon was sized from the MEASURED duration distribution (p50 328 s /
   p95 651 s), covering **97.8 %** of flights — the old "an arrival is ~3.5–5 min" straight-line
   estimate was WRONG (real arrivals are vectored), do not resize from it. The ~2 % over the
@@ -326,6 +343,17 @@ namespace would restore the undifferentiated listing the package exists to remov
 
 ## Open items
 
+- **Airport-frame ablation DONE 2026-09-03 (14 runs, KRDU + KSJC, two seeds; keep `enu`).**
+  Removing the threshold anchor makes the model average across each parallel pair (KRDU:
+  endpoints nearer the sibling 1.5 % → 12–15 %, minority runway pulled ~600 m, its FDE
+  +30–45 %); target coordinates as input channels change none of that; the vectored-stratum
+  gain (H2) flipped sign on the second seed. Seed floor on this axis: the threshold arm moves
+  5–22 m pooled ADE across seeds, the airport arms up to 107 m — read every margin against
+  that. Runner `run_ts_frame_ablation.py` (state arms, val split, resumable, no CV, no CZML;
+  `--experiment-id` runs refuse a dirty worktree at EVERY arm start), readout
+  `docs/compare_frame_arms.py`, results
+  `docs/2026-09-03_airport_frame_ablation_results.md`. Not done: PatchTST A/B, control
+  output, a KSJC cohort with enough 30R/12L flights to test the parallel pair there.
 - **The KRDU run is DONE (three generations; current = 2026-07-20 B3)** — artifacts in
   `4dTrajectory/outputs/KRDU/ts_{model}_{mode}/` + `ts_pred_*` (B3 transport-consistent channels
   + physical-velocity fit; the previous generation is parked in `outputs/KRDU/_pre_b3_transport/`,

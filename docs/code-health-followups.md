@@ -265,3 +265,20 @@ neo subfleet lands far below the MLW the window anchors on — needs an operatio
 landing-mass model, not a Cl tweak), **B763** 34 % slow (heavy-bucket Cl 2.4
 uncertain, n = 239), **E75L** 22 % slow. Per-TYPE quoting remains the rule for the
 residual types.
+
+## 2026-09-03 — 14 pre-existing failures in `trajectory_data_process/tests`
+
+**Verified** (reproduced at commit `abfb8b9`, before the airport-frame work, in a throwaway
+worktree; identical list on the current tree). `test_ts_pipeline.py` (13): the tests assert
+the pre-2026-08-24 label grammar (`'ENU' in label`, `'loss      : final_time=1, …'`,
+`'position/local-velocity'`), a `(27 candidates)` CV grid that is now 45, and
+`checkpoint_reuse_error()` / `cv_reuse_error()` on fixtures that carry no
+`lateral_pass_eligibility.json` (the roster check was added later and fires first).
+`test_download_landings.py::test_download_reuses_interrupted_checkpoint_start_for_cache_keys`
+(1): expects a checkpoint start time that comes back `None`. None of these is exercised by
+`run_ts_frame_ablation.py`, which calls `__main__.py` directly.
+
+**Suggested:** rewrite the label assertions against `run_naming.run_display_name`, give the
+reuse-check fixtures a roster (or assert the roster message first), and re-check the
+download checkpoint contract. `run_all_tests.sh` currently exits 1 on these plus the known
+numpy-2.x optimizer failure, so a green run needs them addressed or quarantined.

@@ -218,13 +218,12 @@ Maintenance convention:
 
 ## Open Items (index; details in the linked file)
 
-- **Every arrival manifest on disk is stale as of 2026-08-21 and must be re-rostered before
-  anything reads it.** The schema is now `harvest-arrivals-v5-takeoff-excluded` (v4 admitted
-  75 takeoffs from satellite fields inside the ring, 64 of them KSJC); loaders compare the
-  version exactly, so a v4 manifest raises. Rebuild — no download, no reassignment:
-  `python -m trajectory_data_process.harvest --airport <ICAO> --evaluate-only` for each of the
-  five. KSJC drops 11,146 → 11,082; fleet 42,725 → 42,650. **Existing ts checkpoints were
-  trained on cohorts containing the removed flights.** →
+- **The v5 re-roster is DONE (verified on disk 2026-09-03):** all five
+  `outputs/harvest/<ICAO>/arrivals/manifest.json` are `harvest-arrivals-v5-takeoff-excluded`
+  (KRDU 14,435 · KSJC 11,082 · KSTL 8,767 · KSMF 4,219 · KMSY 4,147) and every one has its
+  `lateral_pass_eligibility.json`. Do NOT run `--evaluate-only` again without need — it
+  deletes that roster. **ts checkpoints trained before 2026-08-24 still predate the v5
+  cohort**; the 2026-09-03 airport-frame arms are the first state checkpoints on it. →
   `trajectory_data_process/CLAUDE.md`, `docs/2026-08-21_ksjc_route_mix_and_ade.md`
 - **Per-airport ADE/FDE must be quoted with its route mix, never bare.** KSJC's apparent 1.7×
   advantage is composition: reweighted to the pooled stratum mix it goes 483 → 1526 m, best of
@@ -257,6 +256,13 @@ Maintenance convention:
   `Maximum_Iterations_Exceeded` in the other (observed once in a 120-flight sample). The
   batch driver's docstring now states this caveat instead of claiming worker-count-independent
   output; the threading difference itself remains open.
+- ts_transformer: **the threshold anchor is target conditioning, measured 2026-09-03** —
+  an airport-anchored chart (`coordinate_frame="airport-enu"`) makes the deterministic model
+  average across each parallel-runway pair at KRDU (endpoints nearer the sibling runway
+  1.5 % → 12–15 %, minority runway pulled ~600 m), feeding the target's coordinates as input
+  channels (`target_conditioning="channels"`) does not undo it, and the "route stability"
+  gain for vectored flights did not survive a second seed. Keep `enu`. →
+  `4dTrajectory/ts_transformer/docs/2026-09-03_airport_frame_ablation_results.md`
 - ts_transformer: KRDU run DONE (three generations, quote current artifacts only); gate-pass
   conclusion needs re-deriving after the datum fix; only KRDU trained; flyability measured but
   not fixed; single-aircraft + deterministic by scope. **All control-output checkpoints are

@@ -4,6 +4,41 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-03 — Airport-center frame ablation: the threshold anchor IS the target conditioning
+
+Asked whether the ts_transformer's only runway knowledge — the chart being anchored at
+the assigned threshold — is a prior worth keeping (plan
+`4dTrajectory/ts_transformer/docs/2026-09-03_airport_frame_ablation_plan.md`). Three
+commits of mechanism, one of tooling, then 14 runs. (1) `channels.target_chart_position` /
+`FlightSeries.target_chart` names the target's chart position; the five consumers that had
+silently equated it with the origin (observed crossing plane, inference truncation,
+`horizontal_distance_m`, and two the plan missed — the fixed-anchor common-grid truncation
+that selects checkpoints, and the difficulty covariates) now measure from it; verified
+bit-identical on 300 real KRDU arrivals in both threshold frames. (2)
+`coordinate_frame="airport-enu"`: `AirportENUFrame` anchored at the airport reference
+point from the harvest's own `runway_thresholds.json` entry
+(`flight_scenarios.runway_target.airport_reference_point`); `COORDINATE_FRAMES` moved to
+`coordinate_frames.py`, config imports it. (3) `target_conditioning="channels"`: five
+input-only channels through iTransformer's vendored covariate-token path;
+`TSConfig.input_channels` / `enc_in` = input width; checkpoints serialise
+`input_channels`; `batch_contract.anchor_state` replaces every `x[:, -1]`; PatchTST refused.
+(4) `run_ts_frame_ablation.py` (state arms, paired split, resumable, no per-arm CV, no
+CZML) + `docs/compare_frame_arms.py` (pre-registered stratified/paired readout with the
+endpoint's cross-track against the assigned centreline).
+Result (`docs/2026-09-03_airport_frame_ablation_results.md`): at KRDU the airport frame
+makes the deterministic model average across each parallel pair — endpoints nearer the
+sibling runway 1.5 % → 12–15 % on both seeds, the minority runway (05R, 23L) pulled
+570–680 m toward its majority sibling, its median FDE +30–45 %, p95 lateral endpoint
+error ~2× — and the target coordinates fed as data change none of it; the vectored-stratum
+gain the plan hypothesised flipped sign on the second seed (KSJC −184 → +62 m); the only
+consistent effect of the conditioning is −10 % final-time MAE (the flattening duration
+head reads it, the attention backbone does not). Seed floor: threshold arm 5–22 m pooled
+ADE, airport arms up to 107 m. Decision: keep `enu`. Also verified: the v5 re-roster
+CLAUDE.md still called pending was already on disk for all five airports with rosters;
+the 14 failures in `trajectory_data_process/tests/test_ts_pipeline.py` /
+`test_download_landings.py` reproduce at the pre-change commit (recorded in
+`docs/code-health-followups.md`). ts_transformer suite 419 pass.
+
 ### 2026-08-24 — Result pickers rank a split's results by mean/p95 ADE/FDE
 
 The Prediction and Experiments pickers listed a split's results in name order only —
