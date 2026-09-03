@@ -70,6 +70,7 @@ def arm_config(base: dict, overrides: dict, destination: Path) -> tuple[Path, TS
 def arm_steps(
     key: str, label: str, config_path: Path, config: TSConfig, *, airport: str,
     campaign: Path, split: str, device: str, seed: int | None, split_seed: int | None,
+    formal: bool = True,
 ) -> list[tuple[str, list[str], Path]]:
     """(step label, command, artifact whose existence means the step is done)."""
     manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
@@ -84,13 +85,16 @@ def arm_steps(
         identity += ["--seed", str(seed)]
     if "split_seed" not in json.loads(config_path.read_text()) and split_seed is not None:
         identity += ["--split-seed", str(split_seed)]
+    # A formal run stamps an experiment manifest (git commit, command, data selection) and
+    # refuses a dirty worktree — including untracked files that are not this campaign's.
+    formal_identity = ["--campaign-id", campaign.name, "--experiment-id", key] if formal else []
     return [
         (f"{key}: train", [
             py, str(TS_SCRIPT), "train",
             "--data", str(manifest), "--eligibility-roster", str(roster),
             "--airport", airport, "--config-overrides", str(config_path),
             *identity, "--device", device, "--output-dir", str(train_dir),
-            "--campaign-id", campaign.name, "--experiment-id", key,
+            *formal_identity,
         ], train_dir / "checkpoint.pt"),
         (f"{key}: predict ({split})", [
             py, str(TS_SCRIPT), "predict",
@@ -121,6 +125,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--split-seed", type=int, default=1337)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--informal", action="store_true",
+        help="skip the experiment manifest (and its clean-worktree guard); the checkpoint "
+             "metadata still records the data and recipe, but not the git commit",
+    )
     args = parser.parse_args(argv)
 
     declaration = json.loads(args.arms.read_text(encoding="utf-8"))
@@ -148,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         steps += arm_steps(
             key, arm.get("label", key), config_path, config, airport=airport,
             campaign=campaign, split=args.split, device=args.device,
-            seed=args.seed, split_seed=args.split_seed,
+            seed=args.seed, split_seed=args.split_seed, formal=not args.informal,
         )
 
     pending = [step for step in steps if not step[2].exists()]
