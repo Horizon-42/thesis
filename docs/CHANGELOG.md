@@ -4,6 +4,23 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-04 — Procedure constraints for the learned model: adherence measurement, design, method survey
+
+No code path changed. `4dTrajectory/ts_transformer/docs/measure_procedure_adherence.py`
+(read-only over the harvest + CIFP procedure documents, every 3rd rostered arrival) measures
+how observed flights sit against the optimizer's constraint rows: 0.0 % pass an off-axis
+IAF at either airport, 85–97 % (KRDU) are established in the k=0.5 LPV cone by the FAF, and
+once established 87–99 % of samples satisfy the cone and the −60/+120 m glidepath window
+(±22 m over the whole final: 14–69 %). `docs/2026-09-04_procedure_constraints_design.zh.md`
+turns that into the design (final-segment corridor + glidepath only, gated by the flight's
+own join distance, runway-scale hinge in training + projection / casadi tracking at
+inference, shared geometry via a torch dispatch in `approach_constraints.mathx`);
+`docs/2026-09-04_constraint_methods_survey.zh.md` surveys the alternatives (bounded output
+reparametrization, differentiable projection layers, primal-dual training, sampling +
+filtering, two-stage predictor + optimizer, data-side) with reading lists and the P0–P3
+implementation order (shared geometry → projection arm → bounded reparametrization paired
+with a primal-dual penalty arm → optimizer tracking objective).
+
 ### 2026-09-03 — state-v2 candidate: anchor-relative state positions (mechanism fixed, recipe vetoed)
 
 `TSConfig.state_position_reference` (`absolute` default | `anchor-relative`):

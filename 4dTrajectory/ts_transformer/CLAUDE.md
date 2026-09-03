@@ -351,6 +351,19 @@ namespace would restore the undifferentiated listing the package exists to remov
 
 ## Open items
 
+- **Procedure constraints in the learned model (2026-09-04, design only, nothing trained):**
+  measured on every 3rd rostered arrival (`docs/measure_procedure_adherence.py`) that **0.0 %**
+  of observed KRDU/KSJC flights pass an off-axis IAF of their runway's RNAV(GPS) procedure,
+  that 85–97 % (KRDU) / 38–83 % (KSJC) are established in the k=0.5 LPV cone by the FAF,
+  and that once established 87–99 % of samples sit inside the cone and the −60/+120 m
+  glidepath window (the ±22 m gate is met over the whole final by only 14–69 %). So the
+  only data-consistent procedure constraint is the final segment (corridor + glidepath,
+  gated by each flight's own join distance, never `d_faf`); IAF legs / pre-FAF join
+  window / fix discs are normative and must not enter a loss. Design + measurements:
+  `docs/2026-09-04_procedure_constraints_design.zh.md`; the method survey (penalty,
+  bounded reparametrization, projection layers, primal-dual, sampling, two-stage with the
+  optimizer) with reading list and the P0–P3 order:
+  `docs/2026-09-04_constraint_methods_survey.zh.md`.
 - **Index of the 2026-09-03 frame / runway / state-output experiments (four docs, one
   narrative, Chinese): `docs/2026-09-03_runway_frame_experiments_index.zh.md`; the
   runway-assignment reading list is `docs/literature/runway_assignment/README.md`.**
