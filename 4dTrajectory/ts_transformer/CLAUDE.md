@@ -355,10 +355,19 @@ namespace would restore the undifferentiated listing the package exists to remov
   separation, so about half of a K=2 sibling oracle is picking the luckier forecast, not
   runway knowledge; at KSJC the fake sibling gains MORE than the real one. The forecast's own
   closest approach to its hypothesised runway is useless as a selector (37–45 %). Left/right
-  between parallels is the genuine unresolved mode; direction is not. Side observation:
-  arm A's endpoints carry a ~150–200 m lateral bias toward the NW side of the runway on
-  every KRDU runway (both directions), unexplained. →
+  between parallels is the genuine unresolved mode; direction is not. →
   `docs/2026-09-03_runway_hypothesis_expansion.md`
+- **The state model's KRDU endpoints sit ~250 m NW of every runway, and it is the model,
+  not the data** (`docs/2026-09-03_krdu_nw_endpoint_bias.md`): a world-fixed translation of
+  the whole predicted path present from the FIRST predicted step (240–350 m off the
+  aircraft's actual position, path then parallel to the truth within 1.3°), on straight-in
+  flights (established +204 m lateral miss, vectored +24 m), reproduced by noise-free
+  synthetic straight-in histories, both seeds. Sign = KRDU's population-mean lateral drift
+  (63 % of anchors SE of the centreline; observed +60 s drift median 0, mean +192 m NW);
+  KSJC's drift is SE-ward and shows no bias. The objective cannot see it: 300 m on a
+  straight-in is ~9e-4 per point against a ~0.08 pooled loss dominated by vectored
+  kilometres, and the state output has no continuity to the anchor and no cross-track
+  term. Read every arm-A per-runway cross-track number with this translation in mind.
 - **Airport-frame ablation DONE 2026-09-03 (14 runs, KRDU + KSJC, two seeds; keep `enu`).**
   Removing the threshold anchor makes the model average across each parallel pair (KRDU:
   endpoints nearer the sibling 1.5 % → 12–15 %, minority runway pulled ~600 m, its FDE

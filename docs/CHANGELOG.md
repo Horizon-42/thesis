@@ -21,8 +21,11 @@ at KRDU (+30 % on straight-in flights, ~500–800 m on the minority runways) and
 KSJC (230 m separation). The real-sibling oracle gains 79 m median FDE at KRDU against
 32 m for the fake sibling, so roughly half of a K=2 sibling oracle is luck; the
 forecast's own closest approach is not a usable selector. The parallel side is the one
-genuine unresolved mode. Also noted: arm A's endpoints sit 150–200 m toward the NW side
-of every KRDU runway, unexplained.
+genuine unresolved mode. The 150–200 m NW endpoint bias of arm A at KRDU was then traced
+(`docs/2026-09-03_krdu_nw_endpoint_bias.md`): a model-side, world-fixed translation of
+the whole predicted path from the first step, on straight-in flights, with the sign of
+KRDU's population-mean lateral drift and below the objective's resolution; observed
+tracks and CIFP geometry are on the centreline to metres.
 
 ### 2026-09-03 — Airport-center frame ablation: the threshold anchor IS the target conditioning
 
