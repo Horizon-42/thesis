@@ -43,6 +43,8 @@ def _batch(config: TSConfig, n_flights: int = 3, segments: int = 6):
 
 
 class _Identity:
+    needs_reference = False
+
     def __init__(self):
         self.calls = 0
 
@@ -57,6 +59,8 @@ class _Identity:
 
 
 class _StateDependentBank:
+    needs_reference = False
+
     """Add a bank proportional to the cross-track position: a hook that READS the state."""
 
     def __call__(self, state: RolloutStateView, command: torch.Tensor, segment_index: int):

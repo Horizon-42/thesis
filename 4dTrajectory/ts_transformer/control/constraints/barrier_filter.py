@@ -102,6 +102,8 @@ def soft_min(x: torch.Tensor, bound: torch.Tensor, softness: float) -> torch.Ten
 
 
 class BarrierFilter:
+    needs_reference = False   # reads the hooked state only
+
     def __init__(self, config: TSConfig, dynamics: dict[str, torch.Tensor], *, hard: bool):
         self.runway_heading = dynamics["runway_heading_rad"]
         self.alpha = config.control_barrier_alpha

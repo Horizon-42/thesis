@@ -25,6 +25,7 @@ class RunwayAxesView:
     speed: torch.Tensor             # [B] airspeed magnitude, floored
     path_angle: torch.Tensor        # [B] γ from the chart velocity
     height: torch.Tensor            # [B] chart height u
+    mass: torch.Tensor              # [B] aircraft mass (kg)
     hold_s: torch.Tensor            # [B] the segment hold: how long the returned command is flown
     hold_rate: torch.Tensor         # [B] 1 / hold (1/s): the fastest rate a hold can realise
 
@@ -47,7 +48,7 @@ def runway_axes_view(state: RolloutStateView, runway_heading_rad: torch.Tensor) 
     return RunwayAxesView(
         d=d, xt=xt, heading_error=heading_error,
         cos_align=cos_align, ground_speed=ground_speed, speed=speed,
-        path_angle=torch.atan2(vu, ground_speed), height=u,
+        path_angle=torch.atan2(vu, ground_speed), height=u, mass=chart[:, 6],
         hold_s=hold, hold_rate=1.0 / hold,
     )
 

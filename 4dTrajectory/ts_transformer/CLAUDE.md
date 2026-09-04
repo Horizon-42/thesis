@@ -114,7 +114,17 @@ Everything below is serialised into every checkpoint.
   the threshold on one flight), and **a rate rule on a held command with a lagged actuator
   limit-cycles** — the barrier's heading layer therefore asks for a heading CHANGE over the
   hold, credits the bank already flown (`state.actuators[:, 1]`) and evaluates the corridor
-  margins at the lag-lead position (v2, 2026-09-06; heading gain default 0.3 → 0.1).
+  margins at the lag-lead position (v2, 2026-09-06; heading gain default 0.3 → 0.1);
+  (6) **the nominal law needs a third law on thrust, and the network's intent is only in
+  its own rollout** — a trim load factor reads as "hold the current path angle" at ANY
+  path angle, so a hook that steers the glidepath cannot recover the schedule's intended
+  speed from the segment's command (v1 measured: pulled up to the glidepath, 58 vs 88 m/s,
+  584 m short). A hook declaring `needs_reference = True` gets `RolloutStateView.reference`,
+  the unhooked schedule's state integrated alongside (an endpoint rollout per segment
+  more: ~2× the hooked rollout's wall time and adjoint memory), and the nominal law holds
+  thrust to that rollout's speed (`control_nominal_speed_gain`, 0.1/s, capped at `1/Δt`
+  like every other rate gain — uncapped it bangs between the envelope corners at 8
+  segments).
   Predict-time: `predict --command-hook barrier --hook-saturation hard` on any lag checkpoint.
   Campaigns `docs/experiments/control_hooks_arms.json` → `control_hooks_20260906` (v1, commit
   cd981f4; its trained `F_barrier_soft` checkpoint predates v2 and would run v2 at predict

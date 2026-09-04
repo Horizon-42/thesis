@@ -4,6 +4,27 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-06 — Nominal-law hook v2: thrust held to the unhooked rollout's speed (the third law)
+
+The first campaign's `R_nominal_residual` arm (KRDU) lost the endpoint: pooled FDE 1650 →
+2334 m, straight-in FDE median 703 → 1461 m, while its lateral was the most realistic of
+any hook (bank skill 0.659, straight-reference bank RMS 0.54° against the flown 0.41°).
+Endpoint analysis: the glidepath law pulled the aircraft up from below the glidepath
+(endpoint height error −167 → −87 m) with the thrust passed through, the speed fell to
+58 m/s (baseline 88) and the rollout ended 584 m short. A coordination that pays back
+only each hold's path-angle change does not fix it: a trim load factor reads as "hold the
+current path angle" at any path angle, so the network's intended path — and speed — is
+unobservable from a segment's command. The engine
+(`rollout_piecewise_constant_hooked_with_step(track_reference=True)`) now integrates the
+schedule UNHOOKED alongside for hooks that declare `needs_reference`, the lag backend
+passes it as `RolloutStateView.reference`, and the nominal law's thrust is
+`T' = T + k·m·(V_reference − V)` (`guidance_laws.speed_hold_thrust`,
+`control_nominal_speed_gain` = 0.1/s): the schedule's own deceleration is kept and only
+the hook's energy cost is paid back. Tests: the speed-hold law, the thrust at and below
+the reference speed, and the convergence rollout ending within 3 m/s of the unhooked
+rollout's speed where the passthrough was more than 10 m/s off. R reruns in
+`control_hooks_v2_20260906` (the first campaign's copies are removed).
+
 ### 2026-09-06 — Barrier filter v2: lag-aware, evaluated at the lead position, load-coordinated (after the first campaign's predict-only readout)
 
 The first campaign's predict-only arms (hard / soft barrier on the `simple-v3` baseline, KRDU)

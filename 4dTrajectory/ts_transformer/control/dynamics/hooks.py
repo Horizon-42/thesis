@@ -30,14 +30,24 @@ class RolloutStateView:
     actually doing, or None for a backend without actuator states. ``duration_s`` is
     ``[B]``, how long the command returned for this segment will be held — a hook that
     reasons in rates must not ask for one faster than the hold can realise.
+    ``reference`` is the same view of the UNHOOKED schedule — where the network's own
+    commands would have the aircraft now — for hooks that declare ``needs_reference``
+    (None otherwise). A segment's command alone does not say which path or speed it was
+    trimmed for; the schedule's own rollout does.
     """
 
     chart: torch.Tensor
     actuators: torch.Tensor | None
     duration_s: torch.Tensor
+    reference: RolloutStateView | None = None
 
 
 class CommandHook(Protocol):
+    # Every hook declares it: True on a hook that reads ``RolloutStateView.reference``; the
+    # rollout then integrates the network's schedule unhooked alongside (an endpoint
+    # rollout per segment more — about 2× the hooked rollout's wall time and memory).
+    needs_reference: bool
+
     def __call__(
         self, state: RolloutStateView, command: torch.Tensor, segment_index: int
     ) -> torch.Tensor:

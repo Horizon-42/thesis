@@ -1191,9 +1191,9 @@ class EpochResult:
     )
     # The procedure penalty's epoch record: gated rows, violation rates, λ after the update.
     procedure: dict[str, float] = field(default_factory=dict)
-    # The command hook's epoch record: every ``hook_*`` count divided by the step count —
-    # per-step shares (gated, clamped / saturated) and the mean bank change per step
-    # (``bank_change_rad``) — plus ``steps`` itself.
+    # The command hook's epoch record: every ``hook_*`` count the hook reports, divided by
+    # the step count (per-step shares and per-step means, whatever the hook counts), plus
+    # ``steps`` itself.
     command_hook: dict[str, float] = field(default_factory=dict)
 
 

@@ -368,15 +368,20 @@ class FirstOrderLagBackend(ControlDynamicsBackend):
         """Segment-end augmented states and the effective commands under the hook."""
         state_scale = lag_state_scale(self.chart_scale, inputs.frame_params)
 
-        def raw_hook(
-            state: torch.Tensor, command: torch.Tensor, duration_s: torch.Tensor, segment: int
-        ) -> torch.Tensor:
-            view = RolloutStateView(
+        def view_of(state: torch.Tensor, duration_s: torch.Tensor, reference: RolloutStateView | None) -> RolloutStateView:
+            return RolloutStateView(
                 chart=lag_state_to_transport_chart(state, state_scale),
                 actuators=lag_actuator_states(state, state_scale),
                 duration_s=duration_s,
+                reference=reference,
             )
-            return command_hook(view, command, segment)
+
+        def raw_hook(
+            state: torch.Tensor, command: torch.Tensor, duration_s: torch.Tensor, segment: int,
+            reference: torch.Tensor | None,
+        ) -> torch.Tensor:
+            reference_view = None if reference is None else view_of(reference, duration_s, None)
+            return command_hook(view_of(state, duration_s, reference_view), command, segment)
 
         return lag_hooked_rollout(
             inputs.initial_state,
@@ -388,6 +393,7 @@ class FirstOrderLagBackend(ControlDynamicsBackend):
             inputs.frame_params.new_tensor(config.control_time_constants_s),
             inputs.max_thrust_n,
             raw_hook,
+            track_reference=command_hook.needs_reference,
             chart_scale=self.chart_scale,
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )

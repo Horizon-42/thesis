@@ -22,11 +22,12 @@ from config import (  # noqa: E402
     HOOK_SATURATION_HARD, PREDICTION_CONTROL, TSConfig, recipe_settings,
 )
 from control.constraints import BarrierFilter, NominalResidual, build_command_hook  # noqa: E402
+import control.constraints.nominal_residual as nominal_residual_module  # noqa: E402
 from control.constraints.gates import on_final_weight, runway_axes_view  # noqa: E402
 from control.dynamics import rollout as control_rollout  # noqa: E402
 from control.dynamics.hooks import RolloutStateView  # noqa: E402
 from control.envelope import MAX_BANK_RAD  # noqa: E402
-from control.guidance_laws import glidepath_load_factor, l1_bank  # noqa: E402
+from control.guidance_laws import glidepath_load_factor, l1_bank, speed_hold_thrust  # noqa: E402
 from coordinate_frames import ENUFrame  # noqa: E402
 from dataset import Normalizer, build_series, dynamics_arrays  # noqa: E402
 from evaluation.records import record_from_dict  # noqa: E402
@@ -47,8 +48,9 @@ HOLD_S = 5.0   # about the deployed hold: 64 segments over a p50 328 s arrival
 
 
 def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0, psi_rwy=0.0,
-          vertical_speed=None, hold_s=HOLD_S, bank_now_rad=0.0) -> RolloutStateView:
-    """A chart state (runway course psi_rwy) at ``d`` back, ``xt`` right, on the final."""
+          vertical_speed=None, hold_s=HOLD_S, bank_now_rad=0.0, reference_speed=None) -> RolloutStateView:
+    """A chart state (runway course psi_rwy) at ``d`` back, ``xt`` right, on the final. The
+    reference (the unhooked schedule's state) is the same state, at ``reference_speed`` if given."""
     d, xt = torch.as_tensor(d_m, dtype=torch.float64), torch.as_tensor(xt_m, dtype=torch.float64)
     ue, un = math.cos(psi_rwy), math.sin(psi_rwy)
     e, n = -d * ue + xt * un, -d * un - xt * ue
@@ -60,12 +62,17 @@ def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0
     # Actuators being flown: trim thrust, the given bank, a level-flight load factor (the
     # barrier reads the lift factor n·cos μ from here — zeros would halve every bound).
     actuators = torch.tensor([[0.1, bank_now_rad, 1.0]], dtype=torch.float64).expand(len(d), -1).clone()
-    return RolloutStateView(chart=chart, actuators=actuators, duration_s=torch.full_like(d, hold_s))
+    reference_chart = chart.clone()
+    if reference_speed is not None:
+        reference_chart[:, 3:6] *= reference_speed / speed
+    reference = RolloutStateView(chart=reference_chart, actuators=actuators.clone(), duration_s=torch.full_like(d, hold_s))
+    return RolloutStateView(chart=chart, actuators=actuators, duration_s=torch.full_like(d, hold_s), reference=reference)
 
 
 def _context(batch: int) -> dict[str, torch.Tensor]:
     return {"runway_heading_rad": torch.zeros(batch, dtype=torch.float64),
-            "glidepath_tan": torch.full((batch,), TAN_GPA, dtype=torch.float64)}
+            "glidepath_tan": torch.full((batch,), TAN_GPA, dtype=torch.float64),
+            "max_thrust_n": torch.full((batch,), 2.0e5, dtype=torch.float64)}
 
 
 def _command(bank_rad, load=1.0, thrust=0.3) -> torch.Tensor:
@@ -259,6 +266,17 @@ def test_guidance_laws_point_back_to_the_centreline_and_glidepath():
                                     glidepath_tan=gp, lookahead_m=2000.0, gain_per_s=0.2, load_limits=(0.2, 2.0))
     assert float(high) < float(on_path) < float(low)                  # high → push over, low → pull up
     assert float(on_path) == pytest.approx(math.cos(float(gamma)))
+    # Energy: slower than the unhooked schedule would be → more thrust, faster → less, the
+    # same → the command's own; k·m·ΔV over the installed thrust, saturated at the box.
+    mass, t_max = torch.tensor([66_000.0], dtype=torch.float64), torch.tensor([2.0e5], dtype=torch.float64)
+    thrust = torch.tensor([0.1], dtype=torch.float64)
+    def held(reference_speed):
+        return speed_hold_thrust(thrust, speed, torch.tensor([reference_speed], dtype=torch.float64), gain_per_s=0.1,
+                                 mass_kg=mass, max_thrust_n=t_max, thrust_limits=(-0.2, 1.0))
+    assert float(held(70.0)) == pytest.approx(0.1)
+    assert float(held(80.0)) == pytest.approx(0.1 + 0.1 * 66_000.0 * 10.0 / 2.0e5)
+    assert float(held(60.0)) < 0.1
+    assert float(held(200.0)) == 1.0 and float(held(0.0)) == -0.2
 
 
 def test_nominal_residual_is_identity_off_the_final_and_a_bounded_band_on_it():
@@ -276,9 +294,13 @@ def test_nominal_residual_is_identity_off_the_final_and_a_bounded_band_on_it():
     assert torch.all(bank_nom > 0.0)
     assert torch.allclose(out[:, 1], bank_nom + torch.tensor([1.0, -1.0], dtype=torch.float64) * config.control_nominal_residual_bank_max_rad)
     assert torch.allclose(out[:, 2], load_nom + config.control_nominal_residual_load_max)
-    assert torch.allclose(out[:, 0], command[:, 0])                   # thrust passes through
+    assert torch.allclose(out[:, 0], command[:, 0])                   # at the unhooked schedule's speed: thrust untouched
+    # 10 m/s slower than the unhooked schedule would be: the thrust comes up by k·m·ΔV.
+    slow = hook(_view([8_000.0, 8_000.0], [0.0, 0.0], reference_speed=80.0), command, 2)
+    assert torch.allclose(slow[:, 0], command[:, 0] + config.control_nominal_speed_gain * 66_000.0 * 10.0 / 2.0e5, atol=2e-3)
+    assert hook.diagnostics()["hook_thrust_change"] > 0.0
     diagnostics = hook.diagnostics()
-    assert diagnostics["hook_gated_steps"] == 2.0 and diagnostics["hook_bank_residual_saturated_steps"] == 2.0
+    assert diagnostics["hook_gated_steps"] == 4.0 and diagnostics["hook_bank_residual_saturated_steps"] == 4.0
 
 
 def test_nominal_residual_gradients_flow_through_the_residual_and_the_state():
@@ -288,18 +310,20 @@ def test_nominal_residual_gradients_flow_through_the_residual_and_the_state():
     command = torch.stack([torch.full_like(bank, 0.3), bank, torch.ones_like(bank)], dim=-1)
     view = _view([8_000.0], [300.0])
     chart = view.chart.clone().requires_grad_(True)
-    out = hook(RolloutStateView(chart=chart, actuators=view.actuators, duration_s=view.duration_s), command, 0)
+    out = hook(RolloutStateView(chart=chart, actuators=view.actuators, duration_s=view.duration_s, reference=view.reference), command, 0)
     out[:, 1].sum().backward()
     assert bank.grad is not None and float(bank.grad) > 0.0
     assert chart.grad is not None and torch.count_nonzero(chart.grad) > 0
 
 
-def test_nominal_law_converges_to_the_centreline_and_glidepath_through_the_rollout():
-    """Residuals pinned near zero: from 300 m right and 80 m high, the tracked rollout ends
-    much closer to both than the untracked one."""
+@pytest.mark.parametrize("height_above_gp_m", [80.0, -120.0])
+def test_nominal_law_converges_to_the_centreline_and_glidepath_through_the_rollout(monkeypatch, height_above_gp_m):
+    """Residuals pinned near zero: from 300 m right and 80 m high (or 120 m low — the
+    direction the first campaign's arm failed in), the tracked rollout ends much closer to
+    both than the untracked one, at the untracked one's speed."""
     config = _hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL,
                           control_nominal_residual_bank_max_rad=1e-4, control_nominal_residual_load_max=1e-4)
-    dynamics, controls, durations = _final_batch(config, xt_m=300.0, d_m=12_000.0, height_above_gp_m=80.0, segments=32)
+    dynamics, controls, durations = _final_batch(config, xt_m=300.0, d_m=12_000.0, height_above_gp_m=height_above_gp_m, segments=32)
     hook = build_command_hook(config, dynamics)
     tracked = control_rollout.rollout_control_endpoints(controls, durations, dynamics, config, command_hook=hook)
     plain = control_rollout.rollout_control_endpoints(controls, durations, dynamics, config)
@@ -312,6 +336,21 @@ def test_nominal_law_converges_to_the_centreline_and_glidepath_through_the_rollo
     height_error = tracked.channels[..., 2] - fag.glidepath_height(d_t, dynamics["glidepath_tan"].to(d_t.dtype))
     assert torch.all(_at(height_error.abs(), last) < 40.0)
     assert torch.all(_at(height_error.abs(), last) < height_error[:, 0].abs())
+    # Energy: the plain rollout flies parallel to the glidepath at its offset; the law's
+    # descent onto it (from above) releases height the schedule did not mean to release
+    # and the climb onto it (from below) spends speed the schedule did not mean to spend —
+    # with the thrust passed through the tracked rollout ends more than 10 m/s off the
+    # plain one's speed, in opposite directions for the two starts (the first campaign's
+    # arm, pulled up, arrived 30 m/s slow). The speed hold on the unhooked rollout keeps
+    # it within 3 m/s.
+    monkeypatch.setattr(nominal_residual_module, "speed_hold_thrust", lambda thrust, *args, **kwargs: thrust)
+    passthrough = control_rollout.rollout_control_endpoints(
+        controls, durations, dynamics, config, command_hook=build_command_hook(config, dynamics))
+    speed_t = _at(torch.hypot(tracked.channels[..., 3], tracked.channels[..., 4]), last)
+    speed_p = _at(torch.hypot(plain.channels[..., 3], plain.channels[..., 4]), last)
+    speed_x = _at(torch.hypot(passthrough.channels[..., 3], passthrough.channels[..., 4]), last)
+    assert torch.all((speed_x - speed_p).abs() > 10.0)
+    assert torch.all((speed_t - speed_p).abs() < 3.0)
 
 
 # ── batch fixture on the final ───────────────────────────────────────────────
@@ -406,6 +445,8 @@ def test_prediction_exports_the_effective_schedule_and_names_the_hook(monkeypatc
     normalizer = Normalizer.fit(series)
 
     class RewritingHook:
+        needs_reference = False
+
         def __call__(self, state, command, segment_index):
             return torch.stack((command[:, 0], torch.full_like(command[:, 1], 0.25), command[:, 2]), dim=-1)
 

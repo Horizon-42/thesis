@@ -329,6 +329,7 @@ def rollout_piecewise_constant_hooked(
     max_thrust_n: torch.Tensor,
     command_hook: RawCommandHook,
     *,
+    track_reference: bool = False,
     chart_scale: tuple[float, ...] | None = None,
     integrator_dt_s: float = 0.5,
     max_steps_per_segment: int = 4096,
@@ -346,6 +347,7 @@ def rollout_piecewise_constant_hooked(
         _pack_context(frame_params, time_constants_s, max_thrust_n, state_scale),
         _rollout_step,
         command_hook,
+        track_reference=track_reference,
         integrator_dt_s=integrator_dt_s,
         max_steps_per_segment=max_steps_per_segment,
     )

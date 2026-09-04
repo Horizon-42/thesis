@@ -236,6 +236,7 @@ _ABBREV = {
     "control_nominal_vertical_gain": "vert-gain",
     "control_nominal_residual_bank_max_rad": "res-bank",
     "control_nominal_residual_load_max": "res-load",
+    "control_nominal_speed_gain": "speed-gain",
 }
 
 #: Split prefixes shared by every category-label producer (publisher, pipeline,

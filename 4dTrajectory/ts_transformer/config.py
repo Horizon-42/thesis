@@ -331,6 +331,7 @@ CONTROL_HOOK_FIELDS = (
     "control_nominal_vertical_gain",
     "control_nominal_residual_bank_max_rad",
     "control_nominal_residual_load_max",
+    "control_nominal_speed_gain",
 )
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
@@ -785,6 +786,9 @@ class TSConfig:
     control_nominal_vertical_gain: float = 0.2
     control_nominal_residual_bank_max_rad: float = math.radians(5.0)
     control_nominal_residual_load_max: float = 0.1
+    # Thrust coordination of the nominal-law hook: T' = T + k·m·(V_reference − V), the
+    # reference being the network's own unhooked rollout (1/k = 10 s).
+    control_nominal_speed_gain: float = 0.1
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -914,7 +918,7 @@ class TSConfig:
             for name in ("control_barrier_alpha", "control_barrier_heading_gain",
                          "control_nominal_l1_distance_m", "control_nominal_vertical_lookahead_m",
                          "control_nominal_vertical_gain", "control_nominal_residual_bank_max_rad",
-                         "control_nominal_residual_load_max"):
+                         "control_nominal_residual_load_max", "control_nominal_speed_gain"):
                 if getattr(self, name) <= 0.0:
                     raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
         if (
