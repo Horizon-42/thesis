@@ -62,7 +62,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
     """Run the real state/time/physics loss once or raise CUDA OOM."""
     # Local imports avoid a module cycle: train imports resolve_batch_size, while the probe
     # must share train's loss implementation so its retained CUDA graph cannot drift.
-    from dataset import Normalizer, probe_dynamics
+    from dataset import Normalizer, probe_dynamics, probe_final_approach
     from fixed_dt_supervision import FixedDTControlSupervision
     from train import model_forward, prediction_loss
 
@@ -98,6 +98,8 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
         )
         dynamics = None
         dense_supervision = None
+        if config.uses_final_approach_context:
+            dynamics = probe_final_approach(batch_size, device)
         if uses_control_dynamics(config.prediction_output):
             dynamics = probe_dynamics(batch_size, device)
             if config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:

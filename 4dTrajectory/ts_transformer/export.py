@@ -146,6 +146,9 @@ def build_prediction_record(
         "durationHeadFinalTimeS": forecast.predicted_final_time_s,
         "truncatedAtThreshold": forecast.truncated_at_threshold,
         "horizonCapped": forecast.horizon_capped,
+        # The inference-time corridor projection (forecast.project_onto_final), by gate;
+        # None means the states are the model's own output.
+        "projectedOntoFinal": forecast.projected_onto_final,
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,

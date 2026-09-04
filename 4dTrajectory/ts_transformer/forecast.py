@@ -9,8 +9,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from channels import horizontal_distance_m
+from batch_contract import model_forward
+from channels import IDX, horizontal_distance_m
 from config import (
+    CORRIDOR_GATES,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -20,7 +22,24 @@ from config import (
 )
 from control.dynamics import rollout as control_rollout
 from control.envelope import physical_controls
-from dataset import FlightSeries, Normalizer, dynamics_arrays, series_conditioning
+from dataset import (
+    FlightSeries,
+    Normalizer,
+    bounded_output_gate,
+    dynamics_arrays,
+    final_approach_arrays,
+    final_approach_fix_distance,
+    series_conditioning,
+)
+from final_approach_geometry import (
+    alignment_cosine,
+    bound_to_final,
+    chart_from_axes,
+    membership,
+    position_direction,
+    runway_axes,
+    stays_mask,
+)
 from metrics import states_with_derived_velocity
 from prediction_outputs import ControlPrediction
 from target_conditioning import conditioned_history
@@ -49,6 +68,9 @@ class Forecast:
     controls: np.ndarray | None = None
     geodetic_values: np.ndarray | None = None
     prediction_output: str = PREDICTION_STATE
+    # The corridor gate the inference-time projection applied (``project_onto_final``),
+    # or None: the values are the model's own.
+    projected_onto_final: str | None = None
 
     @property
     def n_steps(self) -> int:
@@ -88,16 +110,33 @@ def _history_batch(
     ]).astype(np.float32, copy=False)
 
 
+def _final_approach_context(
+    series: FlightSeries, config: TSConfig, device: torch.device
+) -> dict[str, torch.Tensor] | None:
+    """The one-flight context a corridor-bounded output needs; None for every other recipe."""
+    if not config.uses_final_approach_context:
+        return None
+    rows = final_approach_arrays(
+        series,
+        fix_distance_m=final_approach_fix_distance(series, gate=bounded_output_gate(config)),
+    )
+    return {
+        name: torch.from_numpy(np.asarray(value)[None]).to(device)
+        for name, value in rows.items()
+    }
+
+
 def _forward(
     model: nn.Module,
     history: np.ndarray,
     device: torch.device,
+    context: dict[str, torch.Tensor] | None = None,
 ) -> tuple[np.ndarray, float]:
     """Run one deterministic pass in normalized channel space."""
     model.eval()
     tensor = torch.from_numpy(history[None, ...].astype(np.float32)).to(device)
     with torch.no_grad():
-        prediction = model(tensor)
+        prediction = model_forward(model, tensor, context)
     return (
         prediction.states[0].cpu().numpy().astype(np.float64),
         float(prediction.final_time_s[0].cpu()),
@@ -286,7 +325,9 @@ def _forecast_normalized(
     device: torch.device,
 ) -> Forecast:
     history = _history_at_anchor(series, config, normalizer, anchor)
-    states, predicted_final_time_s = _forward(model, history, device)
+    states, predicted_final_time_s = _forward(
+        model, history, device, _final_approach_context(series, config, device)
+    )
     time_grid = output_time_grid(predicted_final_time_s, config)
     offsets = time_grid.offsets_s
     final_time_s = float(offsets[-1]) if len(offsets) else 0.0
@@ -320,7 +361,9 @@ def _forecast_full(
     device: torch.device,
 ) -> Forecast:
     history = _history_at_anchor(series, config, normalizer, anchor)
-    states, predicted_final_time_s = _forward(model, history, device)
+    states, predicted_final_time_s = _forward(
+        model, history, device, _final_approach_context(series, config, device)
+    )
     return _forecast_from_fixed_states(
         states, predicted_final_time_s, series, config, normalizer, anchor, passes=1
     )
@@ -337,6 +380,7 @@ def _forecast_window(
     # The recursion feeds predicted STATE rows back as history; the conditioning row is
     # a per-flight constant, so it is re-appended to every pass rather than recursed.
     conditioning = series_conditioning(series, config, normalizer)
+    context = _final_approach_context(series, config, device)
     encoded = normalizer.encode(series.values)
     history = encoded[anchor - config.seq_len + 1 : anchor + 1]
     chunks: list[np.ndarray] = []
@@ -344,7 +388,7 @@ def _forecast_window(
     produced = 0
     while produced < config.full_horizon_steps:
         states, pass_final_time_s = _forward(
-            model, conditioned_history(history, conditioning), device
+            model, conditioned_history(history, conditioning), device, context
         )
         if not chunks:
             predicted_final_time_s = pass_final_time_s
@@ -396,6 +440,53 @@ _POSTPROCESSORS = {
 }
 
 
+def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> Forecast:
+    """Clamp a state forecast into the final-approach corridor and glidepath window.
+
+    The rows bound are the forecast's OWN established tail under ``gate``: from the last
+    row after which every row is on the final (``on-final``: inside the full-scale cone
+    and aligned with the course; ``faf``: inside the coded FAF distance) to the end.
+    Along-track distance is untouched, cross-track is clamped into ``±k·hw(d)``, height
+    into the glidepath window, and the velocity channels are re-derived from the moved
+    positions so the record stays one trajectory.  Nothing is learned here: this is the
+    ceiling of what the final-segment constraint can recover after the fact, and the
+    deployment fallback — it satisfies the rows and pays for it in kinks.
+    """
+    if forecast.prediction_output != PREDICTION_STATE:
+        raise ValueError("project_onto_final applies to state forecasts only")
+    if gate not in CORRIDOR_GATES:
+        raise ValueError(f"unknown corridor gate {gate!r}; expected one of {CORRIDOR_GATES}")
+    rows = final_approach_arrays(
+        series, fix_distance_m=final_approach_fix_distance(series, gate=gate)
+    )
+    values = torch.as_tensor(forecast.values, dtype=torch.float64)[None]
+    psi = torch.as_tensor(rows["runway_heading_rad"], dtype=torch.float64)[None]
+    tan_gpa = torch.as_tensor(rows["glidepath_tan"], dtype=torch.float64)[None]
+    d_faf = torch.as_tensor(rows["final_approach_fix_m"], dtype=torch.float64)[None]
+    d, xt = runway_axes(values[..., IDX["e"]], values[..., IDX["n"]], psi)
+    anchor = torch.as_tensor(series.values[forecast.anchor], dtype=torch.float64)
+    step_e, step_n = position_direction(
+        values[..., IDX["e"]], values[..., IDX["n"]],
+        anchor[IDX["e"]][None], anchor[IDX["n"]][None],
+    )
+    cos_align = alignment_cosine(step_e, step_n, psi)
+    on_final = membership(gate, d=d, xt=xt, cos_align=cos_align, d_faf=d_faf, hard=True)
+    tail = stays_mask(on_final, torch.ones_like(on_final))
+    xt_bounded, u_bounded = bound_to_final(
+        d=d, xt=xt, u=values[..., IDX["u"]], weight=tail.to(torch.float64),
+        tan_gpa=tan_gpa, hard=True,
+    )
+    e_bounded, n_bounded = chart_from_axes(d, xt_bounded, psi)
+    projected = np.array(forecast.values, dtype=np.float64, copy=True)
+    projected[:, IDX["e"]] = e_bounded[0].numpy()
+    projected[:, IDX["n"]] = n_bounded[0].numpy()
+    projected[:, IDX["u"]] = u_bounded[0].numpy()
+    projected = states_with_derived_velocity(
+        series.values[forecast.anchor], projected, forecast.sample_durations_s
+    )
+    return replace(forecast, values=projected, projected_onto_final=gate)
+
+
 def _forecast_state(
     model: nn.Module,
     series: FlightSeries,
@@ -404,13 +495,16 @@ def _forecast_state(
     anchor: int,
     device: torch.device,
     truncate: bool,
+    project_final: str | None,
 ) -> Forecast:
     forecast = _FORECASTERS[config.horizon_mode](
         model, series, config, normalizer, anchor, device
     )
-    if not truncate:
-        return forecast
-    return _POSTPROCESSORS[config.horizon_mode](forecast, series)
+    if truncate:
+        forecast = _POSTPROCESSORS[config.horizon_mode](forecast, series)
+    if project_final is not None:
+        forecast = project_onto_final(forecast, series, project_final)
+    return forecast
 
 
 def forecast_approaches(
@@ -422,19 +516,27 @@ def forecast_approaches(
     anchor: int | None = None,
     device: torch.device | None = None,
     truncate: bool = True,
+    project_final: str | None = None,
 ) -> list[Forecast]:
-    """Predict one inference batch through the same dense path used by fit evaluation."""
+    """Predict one inference batch through the same dense path used by fit evaluation.
+
+    ``project_final`` names a corridor gate to clamp each state forecast into the
+    final-approach corridor after truncation (``project_onto_final``); None = the
+    model's own output.
+    """
     if not series:
         return []
     device = device or next(model.parameters()).device
     anchor = default_anchor(config) if anchor is None else anchor
     if config.prediction_output == PREDICTION_CONTROL:
+        if project_final is not None:
+            raise ValueError("the final-approach projection applies to state forecasts only")
         return _forecast_control_batch(
             model, series, config, normalizer, anchor, device
         )
     return [
         _forecast_state(
-            model, item, config, normalizer, anchor, device, truncate
+            model, item, config, normalizer, anchor, device, truncate, project_final
         )
         for item in series
     ]
@@ -449,6 +551,7 @@ def forecast_approach(
     anchor: int | None = None,
     device: torch.device | None = None,
     truncate: bool = True,
+    project_final: str | None = None,
 ) -> Forecast:
     """Predict from one observed anchor using the configured output strategy."""
     return forecast_approaches(
@@ -459,6 +562,7 @@ def forecast_approach(
         anchor=anchor,
         device=device,
         truncate=truncate,
+        project_final=project_final,
     )[0]
 
 

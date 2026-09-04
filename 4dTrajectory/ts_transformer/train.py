@@ -95,6 +95,7 @@ from metrics import (
     raw_kinematic_metrics,
     states_with_derived_velocity,
 )
+from final_approach_geometry import corridor_violations, runway_axes, truth_final_gate
 from models import build_model, parameter_count, resolve_device
 from batch_contract import anchor_state, model_forward, unpack_batch
 from control.envelope import CONTROL_HALF_WIDTH
@@ -113,7 +114,7 @@ STATE_TARGET_CONTRACTS = {
 HISTORY_NAME = "history.json"
 FIT_EVALUATION_NAME = "fit_evaluation.json"
 FIT_EVALUATION_SCHEMA = "ts-fit-evaluation-v3-common-true-time-endpoint"
-STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
+STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal", "procedure")
 CONTROL_LOSS_COMPONENT_NAMES = (
     "state", "final_time", "kinematic", "terminal", "control_effort", "control_smoothness"
 )
@@ -368,6 +369,9 @@ class LossComponents:
     kinematic: torch.Tensor
     terminal: torch.Tensor
     extras: dict[str, torch.Tensor] = field(default_factory=dict)
+    # Batch-level COUNTS that are not part of the objective (the procedure penalty's gated
+    # rows and violations, which the dual update turns into a rate over the epoch).
+    diagnostics: dict[str, torch.Tensor] = field(default_factory=dict)
 
     @property
     def total(self) -> torch.Tensor:
@@ -808,6 +812,102 @@ def _sample_uniform_progress_nodes(
     return left_values + fraction * (right_values - left_values)
 
 
+@dataclass
+class ProcedureMultipliers:
+    """The procedure penalty's weights λ, one per constraint family.
+
+    Fixed at the configured weights when ``procedure_loss_dual_step`` is zero; otherwise
+    the dual variables of ``min L_pred  s.t.  violation rate ≤ ε``, raised once per epoch
+    by the measured excess (dual ascent on the RATE, with the hinge² as the primal
+    surrogate), so the weight is found rather than swept.
+    """
+
+    lateral: float
+    vertical: float
+
+    @classmethod
+    def from_config(cls, config: TSConfig) -> "ProcedureMultipliers | None":
+        if not config.procedure_loss_active:
+            return None
+        return cls(
+            lateral=config.procedure_loss_lateral_weight,
+            vertical=config.procedure_loss_vertical_weight,
+        )
+
+    def update(self, lateral_rate: float, vertical_rate: float, config: TSConfig) -> None:
+        step = config.procedure_loss_dual_step
+        if step <= 0.0:
+            return
+        self.lateral = max(0.0, self.lateral + step * (lateral_rate - config.procedure_loss_epsilon))
+        self.vertical = max(0.0, self.vertical + step * (vertical_rate - config.procedure_loss_epsilon))
+
+    def to_dict(self) -> dict[str, float]:
+        return {"lateral": self.lateral, "vertical": self.vertical}
+
+
+PROCEDURE_DIAGNOSTICS = (
+    "procedure_gated_rows", "procedure_lateral_violations", "procedure_vertical_violations",
+)
+
+
+def procedure_loss(
+    prediction: StatePrediction,
+    target_states: torch.Tensor,
+    point_weights: torch.Tensor,
+    flight_weights: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dynamics: dict[str, torch.Tensor] | None,
+    multipliers: ProcedureMultipliers | None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """The final-approach penalty: metres outside the corridor / glidepath window, squared
+    at the runway scale, on rows where the OBSERVED track is established (the truth gate),
+    weighted by λ — and the counts the dual update needs.
+
+    Rows are paired by index: the same physical time under the ``full``/``window`` grids,
+    the same progress fraction under ``normalized``. The gate is decided by the truth row
+    (and a predicted row already past the threshold, ``d ≤ 0``, is not charged — it is
+    truncated at inference), the violation measured on the predicted row, so a model that
+    is early or late onto the final is charged where the flight actually was on it.
+    """
+    zero = flight_weights.new_zeros(())
+    if not config.procedure_loss_active:
+        return zero, {}
+    if dynamics is None:
+        raise ValueError(
+            "the procedure loss needs the per-flight final-approach context in the batch"
+        )
+    dtype, device = prediction.states.dtype, prediction.states.device
+    mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)
+    std = torch.as_tensor(normalizer.std, dtype=dtype, device=device)
+    predicted = prediction.states * std + mean
+    truth = target_states.to(dtype) * std + mean
+    psi = dynamics["runway_heading_rad"].to(dtype)
+    tan_gpa = dynamics["glidepath_tan"].to(dtype)
+    valid = point_weights > 0.0
+    d_truth, xt_truth = runway_axes(truth[..., IDX["e"]], truth[..., IDX["n"]], psi)
+    d_pred, xt_pred = runway_axes(predicted[..., IDX["e"]], predicted[..., IDX["n"]], psi)
+    gate = truth_final_gate(d_truth, xt_truth, valid) & (d_pred > 0.0)
+    lateral_m, vertical_m = corridor_violations(d_pred, xt_pred, predicted[..., IDX["u"]], tan_gpa)
+    gate_weight = gate.to(dtype)
+    gated_rows = gate_weight.sum(dim=1)
+    lateral_sq = ((lateral_m / config.procedure_loss_lateral_scale_m) ** 2 * gate_weight).sum(dim=1)
+    vertical_sq = ((vertical_m / config.procedure_loss_vertical_scale_m) ** 2 * gate_weight).sum(dim=1)
+    per_flight_lateral = lateral_sq / gated_rows.clamp(min=1.0)
+    per_flight_vertical = vertical_sq / gated_rows.clamp(min=1.0)
+    weights = multipliers or ProcedureMultipliers.from_config(config)
+    term = (
+        (weights.lateral * per_flight_lateral + weights.vertical * per_flight_vertical)
+        * flight_weights
+    ).mean()
+    diagnostics = {
+        "procedure_gated_rows": gate.sum().detach(),
+        "procedure_lateral_violations": ((lateral_m > 0.0) & gate).sum().detach(),
+        "procedure_vertical_violations": ((vertical_m > 0.0) & gate).sum().detach(),
+    }
+    return term, diagnostics
+
+
 def state_prediction_loss_components(
     prediction: StatePrediction,
     normalized_anchor_state: torch.Tensor,
@@ -820,9 +920,11 @@ def state_prediction_loss_components(
     dynamics: dict[str, torch.Tensor] | None = None,
     dense_supervision: FixedDTControlSupervision | None = None,
     training_stage: ControlTrainingStage | None = None,
+    *,
+    multipliers: ProcedureMultipliers | None = None,
 ) -> LossComponents:
     """Return the direct-state physical-position/time airport-macro objective."""
-    del dynamics, dense_supervision
+    del dense_supervision
     if training_stage is not None:
         raise ValueError("horizon curriculum is not supported by state prediction")
     if prediction.states.shape != target_states.shape:
@@ -896,6 +998,17 @@ def state_prediction_loss_components(
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
     zero = state_loss.new_zeros(state_loss.shape)
+    # On the row grid (not the resampled progress nodes): the gate is a per-row decision.
+    procedure, procedure_diagnostics = procedure_loss(
+        prediction,
+        target_states,
+        state_weights[..., position_indices].sum(dim=-1),
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+        multipliers,
+    )
 
     def weighted_mean(values: torch.Tensor) -> torch.Tensor:
         return (values * flight_weights).mean()
@@ -905,6 +1018,8 @@ def state_prediction_loss_components(
         final_time=config.final_time_loss_weight * weighted_mean(time_loss),
         kinematic=weighted_mean(zero),
         terminal=config.state_endpoint_loss_weight * weighted_mean(endpoint_loss),
+        extras={"procedure": procedure},
+        diagnostics=procedure_diagnostics,
     )
 
 
@@ -920,7 +1035,10 @@ def _control_loss_adapter(
     dynamics,
     dense_supervision,
     training_stage,
+    *,
+    multipliers: ProcedureMultipliers | None = None,
 ) -> LossComponents:
+    del multipliers  # the procedure penalty is a state-output term (TSConfig refuses it here)
     if dynamics is None:
         raise ValueError("control prediction loss requires per-flight dynamics")
     return control_prediction_loss_components(
@@ -957,6 +1075,8 @@ def prediction_loss_components(
     dynamics: dict[str, torch.Tensor] | None = None,
     dense_supervision: FixedDTControlSupervision | None = None,
     training_stage: ControlTrainingStage | None = None,
+    *,
+    multipliers: ProcedureMultipliers | None = None,
 ) -> LossComponents:
     """Dispatch the configured output contract to its isolated objective."""
     try:
@@ -977,6 +1097,7 @@ def prediction_loss_components(
         dynamics,
         dense_supervision,
         training_stage,
+        multipliers=multipliers,
     )
 
 
@@ -1033,6 +1154,8 @@ class EpochResult:
     validation_profile_by_airport: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    # The procedure penalty's epoch record: gated rows, violation rates, λ after the update.
+    procedure: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -1049,6 +1172,7 @@ class FitResult:
     train_windows: int
     val_windows: int
     model_pretraining: dict[str, Any] | None = None
+    procedure_multipliers: dict[str, float] | None = None
 
 
 ModelPretrainer = Callable[
@@ -1782,6 +1906,7 @@ def _evaluate_validation_airport(
     *,
     include_deployable_replay: bool,
     profiler: EpochProfiler | None = None,
+    multipliers: ProcedureMultipliers | None = None,
 ) -> ValidationAirportEvaluation:
     """Evaluate both validation clocks from one model forward per cached batch."""
     dataset = plan.dataset
@@ -1828,6 +1953,7 @@ def _evaluate_validation_airport(
                     dynamics,
                     dense_supervision,
                     training_stage,
+                    multipliers=multipliers,
                 )
             for name, value in components.tensors().items():
                 component_totals[name] += float(value) * len(flight_weights)
@@ -1877,6 +2003,8 @@ def _dataset_loss_components(
     device: torch.device,
     batch_size: int,
     training_stage: ControlTrainingStage | None = None,
+    *,
+    multipliers: ProcedureMultipliers | None = None,
 ) -> dict[str, float]:
     names = loss_component_names(dataset.config)
     component_totals = {name: 0.0 for name in names}
@@ -1910,6 +2038,7 @@ def _dataset_loss_components(
                 dynamics,
                 dense_supervision,
                 training_stage,
+                multipliers=multipliers,
             )
             for name, value in components.tensors().items():
                 component_totals[name] += float(value) * len(flight_weights)
@@ -2254,7 +2383,8 @@ def fit_model(
             "leaves no future remainder in these tracks"
         )
 
-    model = build_model(config).to(device)
+    model = build_model(config, normalizer).to(device)
+    multipliers = ProcedureMultipliers.from_config(config)
     model_pretraining = (
         model_pretrainer(model, train_series, normalizer, config, device)
         if model_pretrainer is not None
@@ -2337,6 +2467,7 @@ def fit_model(
     best_val = math.inf
     best_val_loss_at_selection = math.inf
     best_state: dict[str, torch.Tensor] | None = None
+    best_multipliers: dict[str, float] | None = None
     epochs_without_improvement = 0
     optimizer_updates = 0
     component_names = loss_component_names(config)
@@ -2373,6 +2504,7 @@ def fit_model(
 
         model.train()
         train_component_totals = {name: 0.0 for name in component_names}
+        train_diagnostic_totals = {name: 0.0 for name in PROCEDURE_DIAGNOSTICS}
         train_weight_total = 0.0
         control_diagnostics = (
             ControlTrainingDiagnosticsAccumulator(
@@ -2432,6 +2564,7 @@ def fit_model(
                     dynamics,
                     dense_supervision,
                     training_stage,
+                    multipliers=multipliers,
                 )
             loss = components.total
             with profiler.section("train_backward_step_s"):
@@ -2442,6 +2575,8 @@ def fit_model(
             optimizer_updates += 1
             for name, value in components.tensors().items():
                 train_component_totals[name] += float(value.detach()) * batch_count
+            for name, value in components.diagnostics.items():
+                train_diagnostic_totals[name] += float(value)
             train_weight_total += batch_weight
 
         model.eval()
@@ -2454,6 +2589,7 @@ def fit_model(
                 training_stage,
                 include_deployable_replay=include_deployable_replay,
                 profiler=profiler,
+                multipliers=multipliers,
             )
             for airport, plan in val_batch_plans.items()
         }
@@ -2461,6 +2597,27 @@ def fit_model(
             airport: evaluation.components
             for airport, evaluation in val_evaluations.items()
         }
+        # The dual update, AFTER the validation pass so this epoch's train and val
+        # ``procedure`` components were both scored with the same λ (``lambda_*``); the
+        # updated value (``lambda_*_next``) is what the next epoch trains with.
+        procedure_epoch: dict[str, float] = {}
+        if multipliers is not None:
+            gated = train_diagnostic_totals["procedure_gated_rows"]
+            lateral_rate = train_diagnostic_totals["procedure_lateral_violations"] / max(gated, 1.0)
+            vertical_rate = train_diagnostic_totals["procedure_vertical_violations"] / max(gated, 1.0)
+            procedure_epoch = {
+                "train_gated_rows": gated,
+                "train_lateral_violation_rate": lateral_rate,
+                "train_vertical_violation_rate": vertical_rate,
+                "lambda_lateral": multipliers.lateral,
+                "lambda_vertical": multipliers.vertical,
+            }
+            epoch_multipliers = multipliers.to_dict()
+            multipliers.update(lateral_rate, vertical_rate, config)
+            procedure_epoch["lambda_lateral_next"] = multipliers.lateral
+            procedure_epoch["lambda_vertical_next"] = multipliers.vertical
+        else:
+            epoch_multipliers = None
         train_components = {
             name: value / max(train_weight_total, 1.0)
             for name, value in train_component_totals.items()
@@ -2564,6 +2721,7 @@ def fit_model(
                 airport: evaluation.profile
                 for airport, evaluation in val_evaluations.items()
             },
+            procedure=procedure_epoch,
         ))
 
         if (
@@ -2573,6 +2731,7 @@ def fit_model(
             best_val = validation_selection.value
             best_val_loss_at_selection = val_loss
             best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+            best_multipliers = epoch_multipliers
             epochs_without_improvement = 0
             marker = " *"
         elif curriculum_stage.is_full_horizon:
@@ -2649,6 +2808,9 @@ def fit_model(
         train_windows=len(train_set),
         val_windows=val_window_count,
         model_pretraining=model_pretraining,
+        # The λ the SELECTED epoch trained with, i.e. the one belonging to the restored
+        # weights (the history carries the whole trajectory).
+        procedure_multipliers=best_multipliers,
     )
 
 
@@ -2755,6 +2917,10 @@ def train(
     }
     if fit.model_pretraining is not None:
         checkpoint_payload["model_pretraining"] = fit.model_pretraining
+    if fit.procedure_multipliers is not None:
+        # The λ the selected epoch trained with: what a reader of the history needs to
+        # weigh the logged ``procedure`` component, and where the dual run stood.
+        checkpoint_payload["procedure_multipliers"] = fit.procedure_multipliers
     checkpoint_path = out / CHECKPOINT_NAME
     checkpoint_tmp = out / f"{CHECKPOINT_NAME}.tmp"
     # Freeze-test may be run by another process while fitting. Recheck immediately before
@@ -2942,6 +3108,12 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
         )
     normalizer = Normalizer.from_dict(payload["normalizer"])
     model = build_model(config)
-    model.load_state_dict(payload["model_state"])
+    # ``StateOutputLayer.offset_mask`` is a pure function of the channel contract and is
+    # no longer persisted; checkpoints of the 2026-09-03 generation (2f7f746 … 388574f:
+    # the state-v2 anchor-relative arms) stored it. Drop that one key, keep the load
+    # strict for everything else.
+    state = dict(payload["model_state"])
+    state.pop("offset_mask", None)
+    model.load_state_dict(state)
     model.eval()
     return model, config, normalizer, payload

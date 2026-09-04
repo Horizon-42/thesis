@@ -33,10 +33,11 @@ from geokit import FT_M, NM_M
 import approach_constraints as ac
 from approach_constraints import geometry as _geo
 from aeroviz_backend.procedure_constraint import ProcedureConstraint
+# The FAS cone (FPAP/GARP distances, course width) is defined ONCE in the data→modeling
+# seam, because the learned model's final-approach corridor evaluates the same cone.
+from flight_scenarios.fas_geometry import fas_course_geometry
 
 _DEFAULT_RNP_NM = 1.0          # RNP APCH initial/intermediate lateral accuracy
-_FPAP_FLOOR_M = 9023.0 * FT_M  # FAS: distance LTP→FPAP = max(runway length, 9023 ft)
-_GARP_BEYOND_M = 1000.0 * FT_M
 _DEFAULT_GPA_DEG = 3.0
 _DEFAULT_TCH_M = 50.0 * FT_M
 _INTERMEDIATE_CAP_DEG = 3.0    # ≈ 318 ft/NM
@@ -72,10 +73,11 @@ def _lpv_spec(faf_ne: np.ndarray, target_alt_m: float, pc: ProcedureConstraint,
     norm = float(np.hypot(faf_ne[0], faf_ne[1]))
     # inbound unit vector: from the FAF toward the LTP (= -faf_ne / |faf_ne|)
     inbound = (-faf_ne / norm) if norm > 0.0 else np.array([1.0, 0.0])
-    fpap = _FPAP_FLOOR_M * inbound                     # FPAP is past the LTP, inbound direction
-    d_garp = _FPAP_FLOOR_M + _GARP_BEYOND_M            # |LTP → GARP|
-    garp = d_garp * inbound
-    course_width = max(350.0 * FT_M, math.tan(math.radians(1.5)) * d_garp)
+    # Runway length is not carried by the runway target, so the 9023 ft FPAP floor applies.
+    fas = fas_course_geometry()
+    fpap = fas.d_fpap_m * inbound                      # FPAP is past the LTP, inbound direction
+    garp = fas.d_garp_m * inbound                      # |LTP → GARP|
+    course_width = fas.course_width_m
     gpa = pc.glidepath.angle_deg if pc.glidepath else _DEFAULT_GPA_DEG
     tch_m = (
         pc.glidepath.tch_ft * FT_M

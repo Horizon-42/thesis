@@ -7,6 +7,7 @@ import pytest
 
 from aeroviz_backend import paths  # noqa: F401  (puts the optimization dir on sys.path)
 from aeroviz_backend.procedure_constraint import ProcedureConstraint
+from flight_scenarios import procedure_final
 from aeroviz_backend.procedure_segments import build_constraint_segments
 
 import approach_constraints as ac
@@ -99,3 +100,34 @@ def test_warns_on_excessive_pfaf_intercept():
     pc = ProcedureConstraint.from_payload(payload)
     with pytest.warns(UserWarning, match="intercept angle"):
         build_constraint_segments(pc, TARGET_LAT, TARGET_LON, TARGET_ALT)
+
+
+@pytest.mark.skipif(
+    not (procedure_final.DEFAULT_PROCEDURE_ROOT / "KRDU" / "procedure-details" / "index.json").is_file(),
+    reason="local procedure documents (git-ignored aeroviz-4d/public/data) not present",
+)
+def test_the_seam_faf_read_agrees_with_this_parser_on_the_local_documents():
+    """``flight_scenarios.procedure_final`` reads the FAF distance from the vertical
+    profile; this parser recomputes waypoint distances geodetically from the legs. Two
+    readings of one document: they must agree to coding precision on every KRDU/KSJC
+    runway, or the learned model's FAF gate and the optimizer's FAF are different fixes."""
+    import json
+
+    checked = 0
+    for airport in ("KRDU", "KSJC"):
+        root = procedure_final.DEFAULT_PROCEDURE_ROOT / airport / "procedure-details"
+        for entry in json.loads((root / "index.json").read_text())["runways"]:
+            runway = entry["runwayIdent"][2:]
+            fix = procedure_final.final_approach_fix(airport, runway)
+            document = json.loads(
+                procedure_final.rnav_gps_procedure_path(airport, runway).read_text()
+            )
+            waypoints = ProcedureConstraint.from_detail_document(document).waypoints
+            faf = next(wp for wp in waypoints if "FAF" in wp.role.upper())
+            parser_distance = waypoints[-1].distance_from_start_m - faf.distance_from_start_m
+            assert faf.ident == fix.ident, (airport, runway)
+            assert fix.distance_to_threshold_m == pytest.approx(parser_distance, abs=30.0), (
+                airport, runway, fix.distance_to_threshold_m, parser_distance
+            )
+            checked += 1
+    assert checked >= 8

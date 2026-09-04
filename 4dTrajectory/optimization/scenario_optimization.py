@@ -54,6 +54,10 @@ from flight_scenarios import (  # noqa: E402
     state_samples_from_track,
 )
 from flight_scenarios.start_state import DEFAULT_WINDOW_S  # noqa: E402
+from flight_scenarios.procedure_final import (  # noqa: E402
+    DEFAULT_PROCEDURE_ROOT as _PROCEDURE_ROOT,
+    rnav_gps_procedure_path,
+)
 from aircraft.aero_params import stall_speed_ms  # noqa: E402
 from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
@@ -1041,7 +1045,7 @@ def _scenario_filename(scenario: FlightScenario, index: int) -> str:
 # leg, fixes pinned, exact per-leg constraints), and this module's dense-export / rollout / batch-IO
 # helpers. The functions above are untouched.
 
-DEFAULT_PROCEDURE_ROOT = _REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
+DEFAULT_PROCEDURE_ROOT = _PROCEDURE_ROOT  # flight_scenarios.procedure_final owns the path
 DEFAULT_AIRPORT = "KRDU"
 
 
@@ -1058,17 +1062,11 @@ class _IafSolve:
 
 
 def _resolve_procedure_path(procedure_root: str | Path, airport: str, runway: str) -> Path:
-    """Path to the runway's RNAV(GPS) procedure detail document, via the airport's index.json."""
-    root = Path(procedure_root) / airport.upper() / "procedure-details"
-    index = json.loads((root / "index.json").read_text(encoding="utf-8"))
-    runway_ident = f"RW{runway.upper()}"
-    for entry in index.get("runways", []):
-        if entry.get("runwayIdent") != runway_ident:
-            continue
-        for proc in entry.get("procedures", []):
-            if proc.get("procedureFamily") == "RNAV_GPS":
-                return root / f"{proc['procedureUid']}.json"
-    raise ValueError(f"no RNAV(GPS) procedure for {airport} {runway_ident}")
+    """Path to the runway's RNAV(GPS) procedure detail document, via the airport's index.json.
+
+    Resolution lives in ``flight_scenarios.procedure_final`` so the learned model's FAF
+    read and this batch read the same document the same way."""
+    return rnav_gps_procedure_path(airport, runway, root=procedure_root)
 
 
 def _recompute_distances(waypoints: list) -> list:

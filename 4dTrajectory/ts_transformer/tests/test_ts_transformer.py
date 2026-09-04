@@ -162,6 +162,7 @@ from trajectory_data_process.harvest.arrivals import (  # noqa: E402
 )
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
+    STATE_LOSS_COMPONENT_NAMES,
     evaluate_fit_splits,
     load_checkpoint, masked_mse, position_velocity_consistency_loss,
     prediction_loss, state_prediction_loss_components, train,
@@ -6420,12 +6421,9 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
             for split in ("train", "val", "test")
         },
     }
-    assert set(summary["history"][0]["train_components"]) == {
-        "state", "final_time", "kinematic", "terminal"
-    }
-    assert set(summary["history"][0]["val_components"]) == {
-        "state", "final_time", "kinematic", "terminal"
-    }
+    # Imported, never restated: the state objective's component list is one source.
+    assert set(summary["history"][0]["train_components"]) == set(STATE_LOSS_COMPONENT_NAMES)
+    assert set(summary["history"][0]["val_components"]) == set(STATE_LOSS_COMPONENT_NAMES)
     assert summary["history"][0]["learning_rate"] == config.learning_rate
     assert summary["history"][0]["optimizer_updates"] > 0
     objective = fit_evaluation["diagnostics"]["training_objective"]

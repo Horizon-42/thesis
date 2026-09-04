@@ -76,10 +76,12 @@ from anchor_eligibility import (
 from config import (
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CORRIDOR_GATE_FAF,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
+    STATE_POSITION_CORRIDOR_BOUNDED,
     TSConfig,
     uses_control_dynamics,
 )
@@ -92,6 +94,8 @@ from coordinate_frames import (
     CoordinateFrame,
     frame_for_state,
 )
+from final_approach_geometry import FINAL_APPROACH_KEYS
+from flight_scenarios.procedure_final import final_approach_fix
 from flight_scenarios.runway_target import airport_reference_point
 from fixed_dt_supervision import (
     FixedDTControlSupervision,
@@ -522,6 +526,74 @@ def reference_control_supervision(
     }
 
 
+# The per-flight final-approach context (final_approach_geometry.FINAL_APPROACH_KEYS):
+# what the corridor-bounded state output and the procedure penalty need to place a chart
+# row on the runway's final. One row per flight, NEVER a model input (it rides in the
+# batch's context slot beside the control dynamics).
+
+
+def bounded_output_gate(config: TSConfig) -> str | None:
+    """The gate the trained output layer applies, or ``None`` when it bounds nothing."""
+    if config.state_position_reference == STATE_POSITION_CORRIDOR_BOUNDED:
+        return config.corridor_gate
+    return None
+
+
+def final_approach_fix_distance(series: FlightSeries, *, gate: str | None) -> float | None:
+    """The coded FAF distance when ``gate`` is the FAF gate, else ``None``.
+
+    Only ``corridor_gate="faf"`` reads it (the bounded output layer, or the inference-time
+    projection); the deployable ``on-final`` gate and the penalty's truth gate need no
+    procedure document at all. Raises when the flight cannot name its runway's RNAV(GPS)
+    FAF — a FAF gate on a guessed distance would be silently wrong.
+    """
+    if gate != CORRIDOR_GATE_FAF:
+        return None
+    runway = str(series.scenario.source.get("runway") or "").strip().upper()
+    if not series.airport or not runway:
+        raise ValueError(
+            f"flight {series.flight_id}: corridor_gate={CORRIDOR_GATE_FAF!r} needs the "
+            "arrival airport and runway to read the coded FAF, and the flight carries "
+            f"arr_airport={series.airport!r} runway={runway!r}"
+        )
+    return final_approach_fix(series.airport, runway).distance_to_threshold_m
+
+
+def final_approach_arrays(
+    series: FlightSeries, *, fix_distance_m: float | None
+) -> dict[str, np.ndarray]:
+    """``FINAL_APPROACH_KEYS`` for one flight: the runway course (math-ENU, the direction
+    of travel on final), tan of the coded glidepath, and the FAF distance (NaN = unresolved)."""
+    target = series.scenario.target
+    rows = {
+        # The rollout frame rotation and the runway heading coincide only for the
+        # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
+        # so ENU rollouts are decomposed along/across the actual runway, not east/north.
+        "runway_heading_rad": np.array(float(target.psi), dtype=np.float64),
+        # The target's gamma is the coded glidepath DESCENT (negative); the chart height of
+        # the glidepath at distance d back from the threshold is d · tan(GPA).
+        "glidepath_tan": np.array(math.tan(-float(target.gamma)), dtype=np.float64),
+        "final_approach_fix_m": np.array(
+            math.nan if fix_distance_m is None else float(fix_distance_m), dtype=np.float64
+        ),
+    }
+    assert tuple(rows) == FINAL_APPROACH_KEYS
+    return rows
+
+
+def probe_final_approach(batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
+    """One representative final-approach context for shape/throughput probes."""
+    rows = {
+        "runway_heading_rad": 0.0,
+        "glidepath_tan": math.tan(math.radians(3.0)),
+        "final_approach_fix_m": 10_000.0,
+    }
+    return {
+        name: torch.full((batch_size,), value, dtype=torch.float32, device=device)
+        for name, value in rows.items()
+    }
+
+
 def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
     """Physical per-flight tensors required by a control model and its rollout."""
     scenario = series.scenario
@@ -573,7 +645,10 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
         # The rollout frame rotation and the runway heading coincide only for the
         # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
         # so ENU rollouts are decomposed along/across the actual runway, not east/north.
-        "runway_heading_rad": np.array(float(scenario.target.psi), dtype=np.float64),
+        # One definition with the state path's final-approach context.
+        "runway_heading_rad": final_approach_arrays(series, fix_distance_m=None)[
+            "runway_heading_rad"
+        ],
     }
 
 
@@ -602,9 +677,9 @@ def probe_dynamics(batch_size: int, device: torch.device) -> dict[str, torch.Ten
     dynamics["max_thrust_n"] = torch.full(
         (batch_size,), 240_000.0, dtype=torch.float32, device=device
     )
-    dynamics["runway_heading_rad"] = torch.zeros(
-        batch_size, dtype=torch.float32, device=device
-    )
+    dynamics["runway_heading_rad"] = probe_final_approach(batch_size, device)[
+        "runway_heading_rad"
+    ]
     return dynamics
 
 
@@ -1228,6 +1303,21 @@ class TrajectoryWindows(Dataset, ABC):
         self.conditioning = [
             series_conditioning(s, config, normalizer) for s in self.series
         ]
+        # The per-flight final-approach context (never a model input), when the recipe
+        # bounds or penalises the corridor. Resolved once: the FAF read is a document load.
+        self.final_approach = (
+            [
+                final_approach_arrays(
+                    s,
+                    fix_distance_m=final_approach_fix_distance(
+                        s, gate=bounded_output_gate(config)
+                    ),
+                )
+                for s in self.series
+            ]
+            if config.uses_final_approach_context
+            else None
+        )
         # Public diagnostic for normalized-time experiments. Actual query times come from
         # the shared clock below, which also defines fixed-time loss and inference timing.
         self.progress = (
@@ -1484,17 +1574,22 @@ class TrajectoryWindows(Dataset, ABC):
             torch.from_numpy(array)
             for array in (x, y, weights, final_time_s, flight_weights)
         )
-        if not uses_control_dynamics(self.config.prediction_output):
+        # The context slot: the control dynamics (which already carry the final-approach
+        # keys), or the final-approach keys alone for a state recipe that needs them.
+        if uses_control_dynamics(self.config.prediction_output):
+            context_rows = [self._dynamics_arrays(int(index)) for index in indices]
+        elif self.final_approach is not None:
+            context_rows = [self.final_approach[self.index[int(index)][0]] for index in indices]
+        else:
             return result
-        dynamics_rows = [self._dynamics_arrays(int(index)) for index in indices]
-        dynamics = {
-            key: torch.from_numpy(np.stack([row[key] for row in dynamics_rows]))
-            for key in dynamics_rows[0]
+        context = {
+            key: torch.from_numpy(np.stack([row[key] for row in context_rows]))
+            for key in context_rows[0]
         }
         if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
-            return (*result, dynamics)
+            return (*result, context)
         dense = self._fixed_dt_supervision(indices)
-        return (*result, dynamics, dense)
+        return (*result, context, dense)
 
 
 class FixedAnchorTrajectoryWindows(TrajectoryWindows):

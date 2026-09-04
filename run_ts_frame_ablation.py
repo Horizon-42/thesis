@@ -17,6 +17,15 @@ Arms are declared in a JSON file::
      "arms": [{"key": "B_airport_enu", "label": "airport-anchored ENU",
                "overrides": {"coordinate_frame": "airport-enu"}}]}
 
+A PREDICT-ONLY arm reuses an existing checkpoint (no training) and may add predict
+options — the inference-time projection arm of the final-approach constraint campaign::
+
+    {"key": "A_project_on_final", "label": "arm A + corridor projection",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/airport_frame_20260903/A_threshold_enu/checkpoint.pt",
+     "predict_args": ["--project-final", "on-final"]}
+
+``{airport}`` in the checkpoint path is substituted with the campaign's airport.
+
 Every arm shares the manifest, the eligibility roster and ``--split-seed``, so the outer
 split is identical and the arms are paired flight-by-flight. Development scope: predicts
 train or validation, never outer-test. Deliberately NO per-arm cross-validation (a
@@ -67,6 +76,43 @@ def arm_config(base: dict, overrides: dict, destination: Path) -> tuple[Path, TS
     return destination, config
 
 
+def _evaluation_steps(key: str, pred_dir: Path) -> list[tuple[str, list[str], Path]]:
+    report = pred_dir / "evaluation_report.json"
+    py = sys.executable
+    return [
+        (f"{key}: evaluation report",
+         [py, "-m", "evaluation", "--input", str(pred_dir), "--output", str(report)],
+         report),
+        (f"{key}: evaluation HTML", [
+            py, "-m", "evaluation.visualize", "--input", str(pred_dir),
+            "--output", str(pred_dir / "evaluation_report.html"),
+        ], pred_dir / "evaluation_report.html"),
+    ]
+
+
+def predict_only_steps(
+    key: str, checkpoint: Path, predict_args: list[str], *, airport: str, campaign: Path,
+    split: str, device: str,
+) -> list[tuple[str, list[str], Path]]:
+    """Predict + evaluate from an EXISTING checkpoint: no training, no config of its own."""
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"{key}: checkpoint {checkpoint} does not exist")
+    manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
+    roster = HARVEST_ROOT / airport / "arrivals" / "lateral_pass_eligibility.json"
+    pred_dir = campaign / f"{key}_pred_{split}"
+    return [
+        (f"{key}: predict ({split}, from {checkpoint.parent.name})", [
+            sys.executable, str(TS_SCRIPT), "predict",
+            "--checkpoint", str(checkpoint),
+            "--data", str(manifest), "--eligibility-roster", str(roster),
+            "--airport", airport,
+            "--output-dir", str(pred_dir), "--split", split, "--device", device,
+            *predict_args,
+        ], pred_dir / "summary.json"),
+        *_evaluation_steps(key, pred_dir),
+    ]
+
+
 def arm_steps(
     key: str, label: str, config_path: Path, config: TSConfig, *, airport: str,
     campaign: Path, split: str, device: str, seed: int | None, split_seed: int | None,
@@ -77,7 +123,6 @@ def arm_steps(
     roster = HARVEST_ROOT / airport / "arrivals" / "lateral_pass_eligibility.json"
     train_dir = campaign / key
     pred_dir = campaign / f"{key}_pred_{split}"
-    report = pred_dir / "evaluation_report.json"
     py = sys.executable
     identity: list[str] = []
     # ``seed``/``split_seed`` inside the arm's overrides win; the CLI supplies defaults.
@@ -103,13 +148,7 @@ def arm_steps(
             "--airport", airport,
             "--output-dir", str(pred_dir), "--split", split, "--device", device,
         ], pred_dir / "summary.json"),
-        (f"{key}: evaluation report",
-         [py, "-m", "evaluation", "--input", str(pred_dir), "--output", str(report)],
-         report),
-        (f"{key}: evaluation HTML", [
-            py, "-m", "evaluation.visualize", "--input", str(pred_dir),
-            "--output", str(pred_dir / "evaluation_report.html"),
-        ], pred_dir / "evaluation_report.html"),
+        *_evaluation_steps(key, pred_dir),
     ]
 
 
@@ -147,8 +186,22 @@ def main(argv: list[str] | None = None) -> int:
     print(f"frame-ablation campaign · {airport} · split={args.split}\ncampaign: {campaign}")
 
     steps: list[tuple[str, list[str], Path]] = []
+    trained_arms = 0
     for arm in arms:
         key = arm["key"]
+        if "checkpoint" in arm:
+            if "overrides" in arm:
+                parser.error(f"arm {key}: a predict-only arm takes the checkpoint's config, "
+                             "not overrides")
+            checkpoint = REPO_ROOT / arm["checkpoint"].format(airport=airport)
+            print(f"  arm {key:<26s} predict-only from {checkpoint} "
+                  f"{' '.join(arm.get('predict_args', []))}")
+            steps += predict_only_steps(
+                key, checkpoint, list(arm.get("predict_args", [])), airport=airport,
+                campaign=campaign, split=args.split, device=args.device,
+            )
+            continue
+        trained_arms += 1
         config_path, config = arm_config(
             base, arm.get("overrides", {}), campaign / key / "config.json"
         )

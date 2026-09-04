@@ -75,6 +75,7 @@ from config import (  # noqa: E402
     CONTROL_TERMINAL_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
+    CORRIDOR_GATES,
     MODELS,
     PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
@@ -873,6 +874,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="keep full/window forecasts past closest threshold approach",
     )
+    p_predict.add_argument(
+        "--project-final", choices=CORRIDOR_GATES, default=None, metavar="GATE",
+        help="after truncation, clamp each state forecast's established tail (under this "
+             "corridor gate) into the LPV corridor and glidepath window — the post-hoc "
+             "projection arm; records carry source.projectedOntoFinal",
+    )
     p_predict.add_argument("--split", choices=("test", "val", "train"), default="val",
                            help="which checkpoint split to predict (default: validation)")
     p_predict.add_argument(
@@ -1185,6 +1192,7 @@ def main(argv: list[str] | None = None) -> int:
             normalizer,
             device=device,
             truncate=not args.no_truncate,
+            project_final=args.project_final,
         )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)
@@ -1212,6 +1220,8 @@ def main(argv: list[str] | None = None) -> int:
         split=args.split,
     )
 
+    if args.project_final is not None:
+        print(f"  projected every state forecast onto the final ({args.project_final} gate)")
     capped = sum(record.source.get("horizonCapped", False) for record in records)
     if capped:
         print(

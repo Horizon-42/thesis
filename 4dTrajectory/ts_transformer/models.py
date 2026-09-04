@@ -17,6 +17,8 @@ non-uniform time partition.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn as nn
 
@@ -32,6 +34,9 @@ from prediction_outputs import StateOutputLayer
 from control.duration import UniformDurationControlOutputModel
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
+
+if TYPE_CHECKING:  # a data-plane value type; the builders only pass it through
+    from dataset import Normalizer
 
 
 class ITransformerAdapter(nn.Module):
@@ -145,8 +150,8 @@ def build_state_forecaster(config: TSConfig) -> nn.Module:
     return BUILDERS[config.model](config)
 
 
-def _build_state_output(config: TSConfig) -> nn.Module:
-    return StateOutputLayer(build_state_forecaster(config), config)
+def _build_state_output(config: TSConfig, normalizer: Normalizer | None) -> nn.Module:
+    return StateOutputLayer(build_state_forecaster(config), config, normalizer)
 
 
 CONTROL_OUTPUT_MODELS = {
@@ -155,7 +160,8 @@ CONTROL_OUTPUT_MODELS = {
 }
 
 
-def _build_control_output(config: TSConfig) -> nn.Module:
+def _build_control_output(config: TSConfig, normalizer: Normalizer | None) -> nn.Module:
+    del normalizer  # controls are rolled out in physical units already
     return CONTROL_OUTPUT_MODELS[config.control_duration_parameterization](
         config, build_state_forecaster(config)
     )
@@ -167,9 +173,14 @@ OUTPUT_MODEL_BUILDERS = {
 }
 
 
-def build_model(config: TSConfig) -> nn.Module:
-    """Build an explicitly registered output strategy."""
-    return OUTPUT_MODEL_BUILDERS[config.prediction_output](config)
+def build_model(config: TSConfig, normalizer: Normalizer | None = None) -> nn.Module:
+    """Build an explicitly registered output strategy.
+
+    ``normalizer`` gives an output layer that works in physical units (the
+    corridor-bounded state output) its scale; a checkpoint restores it with the weights,
+    so loading passes none.
+    """
+    return OUTPUT_MODEL_BUILDERS[config.prediction_output](config, normalizer)
 
 
 def resolve_device(spec: str) -> torch.device:

@@ -21,7 +21,7 @@ from typing import Any
 # Channel order is a hard contract between the data build, the model, and the export.
 # It lives in channels.py; imported here so the default cannot drift from it.
 from channels import CHANNELS
-from coordinate_frames import COORDINATE_FRAMES
+from coordinate_frames import COORDINATE_FRAME_ENU, COORDINATE_FRAMES
 from target_conditioning import (
     TARGET_CONDITIONING_CHANNELS,
     TARGET_CONDITIONING_NONE,
@@ -43,7 +43,20 @@ MODELS = ("itransformer", "patchtst")
 # (docs/2026-09-03_krdu_nw_endpoint_bias.md).
 STATE_POSITION_ABSOLUTE = "absolute"
 STATE_POSITION_ANCHOR_RELATIVE = "anchor-relative"
-STATE_POSITION_REFERENCES = (STATE_POSITION_ABSOLUTE, STATE_POSITION_ANCHOR_RELATIVE)
+# The absolute output, with the position channels bounded to the final-approach corridor
+# and glidepath window on the rows the output itself places on the final
+# (final_approach_geometry): a hard constraint by construction, no weight to calibrate.
+STATE_POSITION_CORRIDOR_BOUNDED = "corridor-bounded"
+STATE_POSITION_REFERENCES = (
+    STATE_POSITION_ABSOLUTE, STATE_POSITION_ANCHOR_RELATIVE, STATE_POSITION_CORRIDOR_BOUNDED,
+)
+# Which rows the corridor binds. ``on-final``: rows inside the full-scale cone and aligned
+# with the course, read from the prediction itself (deployable). ``faf``: every row inside
+# the coded FAF distance — the optimizer's convention and the ablation the measured join
+# distances argue against (docs/2026-09-04_procedure_constraints_design.zh.md).
+CORRIDOR_GATE_ON_FINAL = "on-final"
+CORRIDOR_GATE_FAF = "faf"
+CORRIDOR_GATES = (CORRIDOR_GATE_ON_FINAL, CORRIDOR_GATE_FAF)
 AIRCRAFT_FILTER_ALL = "all"
 AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
 AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
@@ -462,9 +475,24 @@ class TSConfig:
     # which runway it is flying to. The OUTPUT contract stays ``channels``. iTransformer
     # only: a channel-independent backbone cannot route a conditioning token anywhere.
     target_conditioning: str = TARGET_CONDITIONING_NONE
-    # State output only: position channels as absolute chart coordinates (state-v1) or as
-    # displacements from the anchor added back in normalized space (see the constant).
+    # State output only: position channels as absolute chart coordinates (state-v1), as
+    # displacements from the anchor added back in normalized space, or absolute and
+    # bounded to the final-approach corridor (see the constants).
     state_position_reference: str = STATE_POSITION_ABSOLUTE
+    corridor_gate: str = CORRIDOR_GATE_ON_FINAL
+    # State output only: the final-approach penalty (train.procedure_loss). Hinge² on the
+    # metres outside the k-cone / glidepath window, on rows where the OBSERVED track is
+    # established (final_approach_geometry.truth_final_gate), each family divided by its
+    # runway-scale length. Weights are the multipliers λ: fixed when ``dual_step`` is 0,
+    # else updated once per epoch, λ ← max(0, λ + dual_step·(violation rate − epsilon)),
+    # i.e. the primal-dual recipe with the violation RATE as the constraint. Zero weights
+    # and zero step = off (the state-v1 objective).
+    procedure_loss_lateral_weight: float = 0.0
+    procedure_loss_vertical_weight: float = 0.0
+    procedure_loss_dual_step: float = 0.0
+    procedure_loss_epsilon: float = 0.02
+    procedure_loss_lateral_scale_m: float = 100.0
+    procedure_loss_vertical_scale_m: float = 30.0
     # Velocity-state supervision may retain the upstream centred track fit or be rebuilt
     # causally from the uniform chart positions.  This changes both model inputs and
     # measured velocity targets, so it is an explicit checkpoint recipe field.
@@ -733,6 +761,38 @@ class TSConfig:
             raise ValueError(
                 f"unknown state_position_reference {self.state_position_reference!r}; "
                 f"expected one of {STATE_POSITION_REFERENCES}"
+            )
+        if self.corridor_gate not in CORRIDOR_GATES:
+            raise ValueError(
+                f"unknown corridor_gate {self.corridor_gate!r}; expected one of {CORRIDOR_GATES}"
+            )
+        for name in ("procedure_loss_lateral_weight", "procedure_loss_vertical_weight",
+                     "procedure_loss_dual_step"):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
+        if not 0.0 <= self.procedure_loss_epsilon < 1.0:
+            raise ValueError(
+                f"procedure_loss_epsilon is a violation RATE in [0, 1), got "
+                f"{self.procedure_loss_epsilon!r}"
+            )
+        for name in ("procedure_loss_lateral_scale_m", "procedure_loss_vertical_scale_m"):
+            if getattr(self, name) <= 0.0:
+                raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
+        if self.uses_final_approach_context and self.coordinate_frame != COORDINATE_FRAME_ENU:
+            raise ValueError(
+                "the final-approach corridor (corridor-bounded output / procedure loss) is "
+                "written in the threshold-anchored ENU chart — the target at the origin, "
+                f"east/north axes; coordinate_frame={self.coordinate_frame!r} would measure "
+                "it from the wrong point or rotate it twice"
+            )
+        if self.prediction_output != PREDICTION_STATE and (
+            self.state_position_reference != STATE_POSITION_ABSOLUTE
+            or self.procedure_loss_active
+        ):
+            raise ValueError(
+                "state_position_reference and the procedure loss belong to the state "
+                f"output; prediction_output={self.prediction_output!r} rolls its states "
+                "out of controls and has no position channels to reparametrize"
             )
         if self.target_conditioning not in TARGET_CONDITIONINGS:
             raise ValueError(
@@ -1243,6 +1303,22 @@ class TSConfig:
                     "arc-length-geometry requires terminal velocity weight greater "
                     "than local velocity weights"
                 )
+
+    @property
+    def procedure_loss_active(self) -> bool:
+        return (
+            self.procedure_loss_lateral_weight > 0.0
+            or self.procedure_loss_vertical_weight > 0.0
+            or self.procedure_loss_dual_step > 0.0
+        )
+
+    @property
+    def uses_final_approach_context(self) -> bool:
+        """Whether batches carry the per-flight runway course / glidepath / FAF row."""
+        return (
+            self.state_position_reference == STATE_POSITION_CORRIDOR_BOUNDED
+            or self.procedure_loss_active
+        )
 
     @property
     def input_channels(self) -> tuple[str, ...]:
