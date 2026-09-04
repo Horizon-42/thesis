@@ -184,8 +184,8 @@ def test_config_guards_and_naming():
         TSConfig(procedure_loss_epsilon=1.5)
     with pytest.raises(ValueError, match="state output"):
         TSConfig(prediction_output="control", state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED)
-    with pytest.raises(ValueError, match="state output"):
-        TSConfig(prediction_output="control", procedure_loss_dual_step=0.1)
+    # The penalty is allowed on the control path (it acts on the rollout), native grid only.
+    assert TSConfig(prediction_output="control", procedure_loss_dual_step=0.1).procedure_loss_active
     name = run_display_name(
         TSConfig(state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED, corridor_gate=CORRIDOR_GATE_FAF).to_dict()
     )

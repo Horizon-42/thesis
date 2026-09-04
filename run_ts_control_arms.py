@@ -44,7 +44,7 @@ if str(TS_DIR) not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from config import CONTROL_RECIPE_NAMES, control_recipe_overrides  # noqa: E402
+from config import CONTROL_RECIPE_NAMES, recipe_settings  # noqa: E402
 
 
 def arm_config_file(base_recipe: str, overrides: dict, destination: Path) -> Path:
@@ -54,10 +54,9 @@ def arm_config_file(base_recipe: str, overrides: dict, destination: Path) -> Pat
     experiment varies, so running under the name would be refused. The recipe CONTENT is
     still what every arm starts from, and the base name is recorded beside it.
     """
-    settings = control_recipe_overrides(base_recipe)
+    settings = recipe_settings(base_recipe, keep_name=False)
     unknown = sorted(set(overrides) - set(settings))
     settings.update(overrides)
-    settings["channels"] = list(settings["channels"])
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(settings, indent=1), encoding="utf-8")
     if unknown:

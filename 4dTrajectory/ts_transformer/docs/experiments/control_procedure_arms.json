@@ -1,0 +1,27 @@
+{
+  "_comment": "The final-approach penalty on the CONTROL path (follow-up to docs/2026-09-05_final_constraint_results.zh.md, where the penalty on the state output was vetoed). Here the hinge acts on the rollout's segment-endpoint states, so the constraint reaches the controls through the point-mass dynamics: the path stays dynamically admissible and is pushed toward the corridor rather than clamped. Base = simple-v3 (the control recipe to use), one seed, both airports; arm A is a fresh baseline because every earlier control checkpoint predates the v5 roster. Weights are FIXED (no dual: the state campaign showed an unreachable rate target turns the multiplier into a ramp), at 1e-3 (the weight that put the penalty at about the position term on the STATE path; the per-flight mean keeps the term scale comparable, but the gated rows differ — 64 segment endpoints ~9 s apart on the normalized horizon vs the state grid — so this is a starting point, not parity) and a 5x dose, so the reading is a two-point dose curve against the baseline. Pre-registered reading: the penalty should lower corridor/glidepath violation rows on truth-established rows; if it costs ADE/FDE at both doses the state-path conclusion ('changes the violation rate, not the endpoint error') transfers to control; if 1e-3 helps and 5e-3 hurts, the effect is real but weight-limited. Read the bank/imitation metrics too (docs/score_control_arms.py) — a penalty that smooths the corridor by flattening the schedule is the blandness trap. Readout caveat: control records export the 0.5 s grid plus every control-switch boundary, so compare_constraint_arms.py's claimed_* columns are over a denser, non-uniform grid and are only comparable within this campaign; the truth-gated rates match by time and are comparable to the state campaign.",
+  "base_recipe": "simple-v3",
+  "arms": [
+    {
+      "key": "A_control_v3",
+      "label": "simple-v3 baseline (fresh, v5 roster)",
+      "overrides": {}
+    },
+    {
+      "key": "C_control_1e-3",
+      "label": "simple-v3 + procedure penalty, lambda 1e-3 (parity)",
+      "overrides": {
+        "procedure_loss_lateral_weight": 0.001,
+        "procedure_loss_vertical_weight": 0.001
+      }
+    },
+    {
+      "key": "C_control_5e-3",
+      "label": "simple-v3 + procedure penalty, lambda 5e-3",
+      "overrides": {
+        "procedure_loss_lateral_weight": 0.005,
+        "procedure_loss_vertical_weight": 0.005
+      }
+    }
+  ]
+}

@@ -233,7 +233,11 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
             *(("imitation",) if config.control_imitation_loss_weight else ()),
         ),
     }
-    return (*names, *extensions.get(config.control_state_objective, ()))
+    return (
+        *names,
+        *extensions.get(config.control_state_objective, ()),
+        *(("procedure",) if config.procedure_loss_active else ()),
+    )
 
 
 def move_dynamics(
@@ -400,6 +404,8 @@ class ControlLossTerms:
     effort: torch.Tensor
     smoothness: torch.Tensor
     extras: dict[str, torch.Tensor] = field(default_factory=dict)
+    # Batch-level counts that are not objectives (see LossComponents.diagnostics).
+    diagnostics: dict[str, torch.Tensor] = field(default_factory=dict)
 
     @property
     def total(self) -> torch.Tensor:
@@ -594,6 +600,8 @@ def _native_endpoint_control_state_loss(
         physical_position_mse=physical_position_mse,
         physical_velocity_mse=physical_velocity_mse,
         control_imitation_mse=control_imitation_mse(prediction, config, dynamics),
+        aligned_targets=aligned_targets,
+        aligned_weights=aligned_weights,
     )
 
 
@@ -647,6 +655,8 @@ def control_prediction_loss_terms(
     dynamics: dict[str, torch.Tensor],
     dense_supervision: FixedDTControlSupervision | None = None,
     training_stage: ControlTrainingStage | None = None,
+    *,
+    multipliers: "ProcedureMultipliers | None" = None,
 ) -> ControlLossTerms:
     """Per-flight state/control terms through the differentiable dynamics rollout."""
     state_prediction = control_state_supervision_prediction(
@@ -691,6 +701,24 @@ def control_prediction_loss_terms(
         normalizer,
         active_stage,
     )
+    # The final-approach penalty on the ROLLED-OUT states: the same hinge as the state
+    # path, gated by the truth rows aligned to the segment endpoints, so the constraint
+    # reaches the controls through the dynamics — a dynamically admissible path that is
+    # pushed toward the corridor, never a clamped one.
+    procedure_extra: dict[str, torch.Tensor] = {}
+    procedure_diagnostics: dict[str, torch.Tensor] = {}
+    if config.procedure_loss_active:
+        # TSConfig admits the penalty on the native grid only, which fills these.
+        procedure, procedure_diagnostics = procedure_loss(
+            rollout_loss.normalized_segment_end_states,
+            rollout_loss.aligned_targets,
+            rollout_loss.aligned_weights[..., list(POSITION_IDX)].sum(dim=-1),
+            config,
+            normalizer,
+            dynamics,
+            multipliers,
+        )
+        procedure_extra = {"procedure": procedure}
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
@@ -742,7 +770,8 @@ def control_prediction_loss_terms(
         terminal=tracking.terminal_position,
         effort=config.control_effort_loss_weight * effort,
         smoothness=config.control_smoothness_loss_weight * smoothness,
-        extras=tracking.extras,
+        extras={**tracking.extras, **procedure_extra},
+        diagnostics=procedure_diagnostics,
     )
 
 
@@ -758,6 +787,8 @@ def control_prediction_loss_components(
     dynamics: dict[str, torch.Tensor],
     dense_supervision: FixedDTControlSupervision | None = None,
     training_stage: ControlTrainingStage | None = None,
+    *,
+    multipliers: "ProcedureMultipliers | None" = None,
 ) -> LossComponents:
     terms = control_prediction_loss_terms(
         prediction,
@@ -770,6 +801,7 @@ def control_prediction_loss_components(
         dynamics,
         dense_supervision,
         training_stage,
+        multipliers=multipliers,
     )
 
     def weighted_mean(values: torch.Tensor) -> torch.Tensor:
@@ -790,6 +822,7 @@ def control_prediction_loss_components(
                 for name, value in terms.extras.items()
             },
         },
+        diagnostics=terms.diagnostics,
     )
 
 
@@ -851,18 +884,19 @@ PROCEDURE_DIAGNOSTICS = (
 
 
 def procedure_loss(
-    prediction: StatePrediction,
+    predicted_states: torch.Tensor,
     target_states: torch.Tensor,
     point_weights: torch.Tensor,
-    flight_weights: torch.Tensor,
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor] | None,
     multipliers: ProcedureMultipliers | None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-    """The final-approach penalty: metres outside the corridor / glidepath window, squared
-    at the runway scale, on rows where the OBSERVED track is established (the truth gate),
-    weighted by λ — and the counts the dual update needs.
+    """The final-approach penalty, PER FLIGHT ``[B]``: metres outside the corridor /
+    glidepath window, squared at the runway scale, on rows where the OBSERVED track is
+    established (the truth gate), weighted by λ — and the counts the dual update needs.
+    ``predicted_states`` are normalized rows aligned index-for-index with ``target_states``
+    (the state output, or a control rollout's segment endpoints).
 
     Rows are paired by index: the same physical time under the ``full``/``window`` grids,
     the same progress fraction under ``normalized``. The gate is decided by the truth row
@@ -870,17 +904,16 @@ def procedure_loss(
     truncated at inference), the violation measured on the predicted row, so a model that
     is early or late onto the final is charged where the flight actually was on it.
     """
-    zero = flight_weights.new_zeros(())
     if not config.procedure_loss_active:
-        return zero, {}
+        return point_weights.new_zeros(point_weights.shape[0]), {}
     if dynamics is None:
         raise ValueError(
             "the procedure loss needs the per-flight final-approach context in the batch"
         )
-    dtype, device = prediction.states.dtype, prediction.states.device
+    dtype, device = predicted_states.dtype, predicted_states.device
     mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)
     std = torch.as_tensor(normalizer.std, dtype=dtype, device=device)
-    predicted = prediction.states * std + mean
+    predicted = predicted_states * std + mean
     truth = target_states.to(dtype) * std + mean
     psi = dynamics["runway_heading_rad"].to(dtype)
     tan_gpa = dynamics["glidepath_tan"].to(dtype)
@@ -896,10 +929,7 @@ def procedure_loss(
     per_flight_lateral = lateral_sq / gated_rows.clamp(min=1.0)
     per_flight_vertical = vertical_sq / gated_rows.clamp(min=1.0)
     weights = multipliers or ProcedureMultipliers.from_config(config)
-    term = (
-        (weights.lateral * per_flight_lateral + weights.vertical * per_flight_vertical)
-        * flight_weights
-    ).mean()
+    term = weights.lateral * per_flight_lateral + weights.vertical * per_flight_vertical
     diagnostics = {
         "procedure_gated_rows": gate.sum().detach(),
         "procedure_lateral_violations": ((lateral_m > 0.0) & gate).sum().detach(),
@@ -1000,10 +1030,9 @@ def state_prediction_loss_components(
     zero = state_loss.new_zeros(state_loss.shape)
     # On the row grid (not the resampled progress nodes): the gate is a per-row decision.
     procedure, procedure_diagnostics = procedure_loss(
-        prediction,
+        prediction.states,
         target_states,
         state_weights[..., position_indices].sum(dim=-1),
-        flight_weights,
         config,
         normalizer,
         dynamics,
@@ -1018,7 +1047,7 @@ def state_prediction_loss_components(
         final_time=config.final_time_loss_weight * weighted_mean(time_loss),
         kinematic=weighted_mean(zero),
         terminal=config.state_endpoint_loss_weight * weighted_mean(endpoint_loss),
-        extras={"procedure": procedure},
+        extras={"procedure": weighted_mean(procedure)},
         diagnostics=procedure_diagnostics,
     )
 
@@ -1038,7 +1067,6 @@ def _control_loss_adapter(
     *,
     multipliers: ProcedureMultipliers | None = None,
 ) -> LossComponents:
-    del multipliers  # the procedure penalty is a state-output term (TSConfig refuses it here)
     if dynamics is None:
         raise ValueError("control prediction loss requires per-flight dynamics")
     return control_prediction_loss_components(
@@ -1053,6 +1081,7 @@ def _control_loss_adapter(
         dynamics,
         dense_supervision,
         training_stage,
+        multipliers=multipliers,
     )
 
 

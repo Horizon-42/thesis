@@ -168,3 +168,18 @@ def test_slug_is_filesystem_safe():
     slug = run_slug(config)
     assert slug.startswith("control_itr_lag-stcv_")
     assert all(c.isalnum() or c in "_-" for c in slug)
+
+
+def test_a_named_recipe_with_an_open_field_edit_is_named_recipe_plus_edits():
+    """The final-approach penalty is open under every recipe; a run that sets it must not
+    wear the bare recipe name (two different objectives would share one name)."""
+    from config import TSConfig, recipe_settings
+
+    plain = TSConfig(**recipe_settings("simple-v3", keep_name=True))
+    assert run_display_name(plain.to_dict()).split(" · ")[3] == "simple-v3"
+    edited = TSConfig(**recipe_settings("simple-v3", keep_name=True),
+                      procedure_loss_lateral_weight=0.001, procedure_loss_vertical_weight=0.001)
+    assert run_display_name(edited.to_dict()).split(" · ")[3] == "simple-v3+(proc-lat=0.001, proc-vert=0.001)"
+    assert run_slug(edited.to_dict()) != run_slug(plain.to_dict())
+    # ``custom`` semantics for a runner that varies a frozen field are unchanged.
+    assert recipe_settings("simple-v3", keep_name=False)["control_recipe_name"] == "custom"

@@ -192,9 +192,10 @@ def test_procedure_loss_charges_predicted_rows_where_the_truth_is_established():
     shifted = torch.tensor(_straight_in_rows(d, offset_m=300.0), dtype=torch.float32)[None]
     prediction = StatePrediction(states=shifted, final_time_s=torch.tensor([100.0]))
     term, diagnostics = procedure_loss(
-        prediction, truth, weights[..., list(ch.POSITION_IDX)].sum(-1), flight_weights,
+        prediction.states, truth, weights[..., list(ch.POSITION_IDX)].sum(-1),
         config, normalizer, context, None,
     )
+    term = term[0]
     gated = (d > fag.NEAR_THRESHOLD_M)                                     # truth on the centreline: all but the 200 m row
     violating = gated & (300.0 > fag.K_MARGIN * halfwidth)
     assert int(diagnostics["procedure_gated_rows"]) == int(gated.sum())
@@ -203,18 +204,18 @@ def test_procedure_loss_charges_predicted_rows_where_the_truth_is_established():
     expected = np.mean(np.where(violating, ((300.0 - fag.K_MARGIN * halfwidth) / 100.0) ** 2, 0.0)[gated])
     assert float(term) == pytest.approx(expected, rel=1e-4)
     # Multipliers, not the config weights, scale the term when supplied.
-    doubled, _ = procedure_loss(prediction, truth, weights[..., :3].sum(-1), flight_weights,
+    doubled, _ = procedure_loss(prediction.states, truth, weights[..., :3].sum(-1),
                                 config, normalizer, context, ProcedureMultipliers(2.0, 5.0))
-    assert float(doubled) == pytest.approx(2.0 * expected, rel=1e-4)
+    assert float(doubled[0]) == pytest.approx(2.0 * expected, rel=1e-4)
     # An inactive recipe contributes exactly zero and no diagnostics; a missing context raises.
-    zero, none = procedure_loss(prediction, truth, weights[..., :3].sum(-1), flight_weights,
+    zero, none = procedure_loss(prediction.states, truth, weights[..., :3].sum(-1),
                                 TSConfig(seq_len=4, n_segments=len(d)), normalizer, None, None)
-    assert float(zero) == 0.0 and none == {}
+    assert zero.shape == (1,) and float(zero[0]) == 0.0 and none == {}
     with pytest.raises(ValueError, match="context"):
-        procedure_loss(prediction, truth, weights[..., :3].sum(-1), flight_weights, config, normalizer, None, None)
+        procedure_loss(prediction.states, truth, weights[..., :3].sum(-1), config, normalizer, None, None)
     # A truth that never establishes (4 km right the whole way) gates nothing.
     off = torch.tensor(_straight_in_rows(d, offset_m=4_000.0), dtype=torch.float32)[None]
-    _, empty = procedure_loss(prediction, off, weights[..., :3].sum(-1), flight_weights, config, normalizer, context, None)
+    _, empty = procedure_loss(prediction.states, off, weights[..., :3].sum(-1), config, normalizer, context, None)
     assert int(empty["procedure_gated_rows"]) == 0
     # The state objective reports it as its fifth component.
     assert STATE_LOSS_COMPONENT_NAMES[-1] == "procedure"
@@ -440,10 +441,9 @@ def test_procedure_loss_does_not_charge_predicted_rows_past_the_threshold():
     # A fast forecast that is already 2 km PAST the threshold on every row, 400 m off.
     past = torch.tensor(_straight_in_rows(np.full(len(d), -2_000.0), offset_m=400.0), dtype=torch.float32)[None]
     term, diagnostics = procedure_loss(
-        StatePrediction(states=past, final_time_s=torch.tensor([10.0])), truth,
-        weights[..., :3].sum(-1), torch.ones(1), config, normalizer, _context(1), None,
+        past, truth, weights[..., :3].sum(-1), config, normalizer, _context(1), None,
     )
-    assert float(term) == 0.0 and int(diagnostics["procedure_gated_rows"]) == 0
+    assert float(term[0]) == 0.0 and int(diagnostics["procedure_gated_rows"]) == 0
 
 
 def test_dual_history_records_the_lambda_used_and_the_next_one(tmp_path):
@@ -458,3 +458,88 @@ def test_dual_history_records_the_lambda_used_and_the_next_one(tmp_path):
     _model, _config, _normalizer, payload = load_checkpoint(tmp_path / "checkpoint.pt")
     selected = payload["procedure_multipliers"]
     assert selected["lateral"] in {e["procedure"]["lambda_lateral"] for e in epochs}
+
+
+# ── The penalty on the control path ─────────────────────────────────────────
+
+def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
+    from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, PREDICTION_CONTROL
+    from train import loss_component_names
+
+    config = TSConfig(prediction_output=PREDICTION_CONTROL, procedure_loss_lateral_weight=1e-3)
+    assert config.procedure_loss_active and "procedure" in loss_component_names(config)
+    assert "procedure" not in loss_component_names(TSConfig(prediction_output=PREDICTION_CONTROL))
+    with pytest.raises(ValueError, match="native"):
+        TSConfig(prediction_output=PREDICTION_CONTROL, procedure_loss_lateral_weight=1e-3,
+                 control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT)
+    with pytest.raises(ValueError, match="state output"):
+        TSConfig(prediction_output=PREDICTION_CONTROL, state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED)
+
+
+def test_control_dynamics_carry_the_glidepath_for_the_rollout_penalty():
+    from dataset import dynamics_arrays
+
+    series, config = _series(n_flights=1)
+    rows = dynamics_arrays(series[0], config.seq_len - 1)
+    assert rows["glidepath_tan"] == pytest.approx(math.tan(-series[0].scenario.target.gamma))
+    assert "final_approach_fix_m" not in rows
+    assert "glidepath_tan" in probe_dynamics(2, torch.device("cpu"))
+
+
+def test_control_training_with_the_penalty_charges_the_rollout_and_logs_the_counts(tmp_path):
+    from config import PREDICTION_CONTROL
+
+    _small_train(tmp_path, prediction_output=PREDICTION_CONTROL, n_segments=4,
+                 procedure_loss_lateral_weight=0.5, procedure_loss_vertical_weight=0.5)
+    import json
+    epochs = json.loads((tmp_path / "history.json").read_text())["history"]
+    assert "procedure" in epochs[0]["train_components"] and "procedure" in epochs[0]["val_components"]
+    record = epochs[0]["procedure"]
+    assert record["train_gated_rows"] > 0 and record["lambda_lateral"] == 0.5
+    _model, config, _normalizer, payload = load_checkpoint(tmp_path / "checkpoint.pt")
+    assert config.prediction_output == PREDICTION_CONTROL
+    assert payload["procedure_multipliers"] == {"lateral": 0.5, "vertical": 0.5}
+
+
+def test_procedure_loss_is_per_flight_and_the_state_path_applies_the_airport_weights():
+    normalizer = Normalizer(mean=np.zeros(C), std=np.ones(C))
+    d = np.array([12_000.0, 8_000.0, 4_000.0, 1_000.0])
+    truth = torch.tensor(np.stack([_straight_in_rows(d, offset_m=0.0)] * 2), dtype=torch.float32)
+    shifted = torch.tensor(np.stack([_straight_in_rows(d, offset_m=300.0), _straight_in_rows(d, offset_m=0.0)]), dtype=torch.float32)
+    config = TSConfig(procedure_loss_lateral_weight=1.0, seq_len=4, n_segments=len(d))
+    term, _ = procedure_loss(shifted, truth, torch.ones(2, len(d)), config, normalizer, _context(2), None)
+    assert term.shape == (2,) and float(term[0]) > 0.0 and float(term[1]) == 0.0
+    components = state_prediction_loss_components(
+        StatePrediction(states=shifted, final_time_s=torch.tensor([100.0, 100.0])), truth[:, -1], truth,
+        torch.ones_like(truth), torch.tensor([100.0, 100.0]), torch.tensor([2.0, 0.0]), config, normalizer, _context(2),
+    )
+    # Airport weights (2, 0): the weighted mean is the first flight's term.
+    assert float(components.extras["procedure"]) == pytest.approx(float(term[0]), rel=1e-5)
+
+
+def test_recipe_content_survives_a_json_round_trip_under_its_frozen_check(tmp_path):
+    """A campaign arm file is JSON: tuples come back as lists, and BOTH readers — the
+    dataclass and the CLI's raw frozen-recipe comparison — must accept the recipe's own
+    content plus the open penalty fields."""
+    import json
+    import subprocess
+    from config import recipe_settings
+
+    settings = recipe_settings("simple-v3", keep_name=True)
+    settings.update({"procedure_loss_lateral_weight": 0.001, "procedure_loss_vertical_weight": 0.001})
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(settings))
+    config = TSConfig(**json.loads(path.read_text()))
+    assert config.control_recipe_name == "simple-v3"
+    assert config.channels == tuple(ch.CHANNELS) and config.control_horizon_curriculum_s == ()
+    assert config.procedure_loss_active and config.prediction_output == "control"
+    # The CLI path: it must get past the recipe check and fail only on the missing data.
+    completed = subprocess.run(
+        [sys.executable, str(TS_DIR / "__main__.py"), "train", "--config-overrides", str(path),
+         "--data", str(tmp_path / "nonexistent" / "manifest.json"),
+         "--output-dir", str(tmp_path / "out"), "--device", "cpu"],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert completed.returncode != 0
+    assert "frozen" not in completed.stderr and "unsupported override" not in completed.stderr, completed.stderr
+    assert "nonexistent" in completed.stderr, completed.stderr

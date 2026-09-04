@@ -3692,7 +3692,7 @@ def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step(
     assert set(dynamics) == {
         "condition", "initial_state", "initial_controls", "aero_params",
         "control_lower", "control_upper", "max_thrust_n", "frame_params",
-        "runway_heading_rad",
+        "runway_heading_rad", "glidepath_tan",
     }
     assert any(
         parameter.grad is not None and torch.count_nonzero(parameter.grad)

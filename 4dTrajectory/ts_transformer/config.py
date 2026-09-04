@@ -290,6 +290,43 @@ TIME_CONSTANT_FIELDS = frozenset(
         "control_load_time_constant_s",
     )
 )
+# The final-approach penalty's fields: an objective on BOTH output paths (the state rows,
+# or the control rollout's segment endpoints), added after the control recipes were
+# frozen, so a named recipe leaves them OPEN — the CLI accepts them as overrides and
+# run_naming lists them as recipe edits. One source for both.
+PROCEDURE_LOSS_FIELDS = (
+    "procedure_loss_lateral_weight",
+    "procedure_loss_vertical_weight",
+    "procedure_loss_dual_step",
+    "procedure_loss_epsilon",
+    "procedure_loss_lateral_scale_m",
+    "procedure_loss_vertical_scale_m",
+)
+# Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
+# hands them back as lists; every reader that compares them against recipe content must
+# coerce them first, through this one function, or ``[] != ()`` refuses a faithful copy.
+SEQUENCE_FIELDS = ("channels", "control_horizon_curriculum_s")
+
+
+def coerce_sequence_fields(settings: dict[str, Any]) -> dict[str, Any]:
+    """Return ``settings`` with every ``SEQUENCE_FIELDS`` entry present as a tuple."""
+    return {
+        name: tuple(value) if name in SEQUENCE_FIELDS else value
+        for name, value in settings.items()
+    }
+
+
+def recipe_settings(name: str, *, keep_name: bool) -> dict[str, Any]:
+    """A named recipe's content as a complete override set for a campaign arm.
+
+    ``keep_name=True`` runs under the recipe name (only its OPEN fields — the penalty,
+    a lag recipe's time constants — may be overridden; run names read
+    ``recipe+(edits)``); ``keep_name=False`` carries ``custom``, for an experiment that
+    varies a field the recipe freezes. One helper for every arm runner.
+    """
+    settings = dict(control_recipe_overrides(name))
+    settings["control_recipe_name"] = name if keep_name else CONTROL_RECIPE_CUSTOM
+    return settings
 
 
 def control_recipe_overrides(name: str) -> dict[str, Any]:
@@ -709,6 +746,10 @@ class TSConfig:
     notes: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # Sequence fields arrive as lists from JSON; the contract is tuples (see
+        # SEQUENCE_FIELDS / coerce_sequence_fields — the CLI's recipe check uses the same).
+        for name in SEQUENCE_FIELDS:
+            object.__setattr__(self, name, tuple(getattr(self, name)))
         if self.control_recipe_name not in CONTROL_RECIPE_NAMES:
             raise ValueError(
                 f"unknown control_recipe_name {self.control_recipe_name!r}; expected one "
@@ -785,14 +826,24 @@ class TSConfig:
                 f"east/north axes; coordinate_frame={self.coordinate_frame!r} would measure "
                 "it from the wrong point or rotate it twice"
             )
-        if self.prediction_output != PREDICTION_STATE and (
-            self.state_position_reference != STATE_POSITION_ABSOLUTE
-            or self.procedure_loss_active
+        if (
+            self.prediction_output != PREDICTION_STATE
+            and self.state_position_reference != STATE_POSITION_ABSOLUTE
         ):
             raise ValueError(
-                "state_position_reference and the procedure loss belong to the state "
-                f"output; prediction_output={self.prediction_output!r} rolls its states "
-                "out of controls and has no position channels to reparametrize"
+                "state_position_reference belongs to the state output; "
+                f"prediction_output={self.prediction_output!r} rolls its states out of "
+                "controls and has no position channels to reparametrize"
+            )
+        if (
+            self.prediction_output == PREDICTION_CONTROL
+            and self.procedure_loss_active
+            and self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
+        ):
+            raise ValueError(
+                "the procedure penalty on the control path is implemented on the native "
+                "segment-endpoint rollout (its aligned targets carry the truth gate); "
+                f"control_state_loss_grid={self.control_state_loss_grid!r} is not supported"
             )
         if self.target_conditioning not in TARGET_CONDITIONINGS:
             raise ValueError(

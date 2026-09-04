@@ -17,6 +17,9 @@ Arms are declared in a JSON file::
      "arms": [{"key": "B_airport_enu", "label": "airport-anchored ENU",
                "overrides": {"coordinate_frame": "airport-enu"}}]}
 
+A control campaign names ``"base_recipe": "simple-v3"`` instead of (or under) ``base``:
+the recipe's content becomes the base and the arms override only fields it leaves open.
+
 A PREDICT-ONLY arm reuses an existing checkpoint (no training) and may add predict
 options — the inference-time projection arm of the final-approach constraint campaign::
 
@@ -57,7 +60,7 @@ if str(TS_DIR) not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from config import TSConfig  # noqa: E402
+from config import TSConfig, recipe_settings  # noqa: E402
 from run_naming import run_display_name, run_slug  # noqa: E402
 
 # A state arm on one airport: ~50 MB of checkpoint/history + ~0.3 GB of validation records.
@@ -173,6 +176,11 @@ def main(argv: list[str] | None = None) -> int:
 
     declaration = json.loads(args.arms.read_text(encoding="utf-8"))
     base = declaration.get("base", {})
+    # A control campaign starts from a NAMED recipe's content and keeps the name, so an
+    # arm may only touch fields the recipe leaves open (TSConfig refuses the rest).
+    base_recipe = declaration.get("base_recipe")
+    if base_recipe:
+        base = {**recipe_settings(base_recipe, keep_name=True), **base}
     arms = declaration["arms"]
     if not arms:
         parser.error("the arm declaration is empty")

@@ -46,6 +46,10 @@ class ControlStateLossResult:
     physical_position_mse: torch.Tensor | None = None
     physical_velocity_mse: torch.Tensor | None = None
     control_imitation_mse: torch.Tensor | None = None
+    # The normalized targets and weights aligned to ``normalized_segment_end_states`` rows
+    # (the native grid fills them); the procedure penalty gates on these truth rows.
+    aligned_targets: torch.Tensor | None = None
+    aligned_weights: torch.Tensor | None = None
 
     @property
     def terminal_end_states(self) -> torch.Tensor:

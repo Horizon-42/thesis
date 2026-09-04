@@ -68,7 +68,9 @@ from config import (  # noqa: E402
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_SIMPLE_V1,
     CONTROL_RECIPE_SIMPLE_V1_LAG,
+    PROCEDURE_LOSS_FIELDS,
     TIME_CONSTANT_FIELDS,
+    coerce_sequence_fields,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_OBJECTIVES,
@@ -541,7 +543,8 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         allowed = {field.name for field in fields(TSConfig)}
         if not isinstance(loaded, dict) or any(key not in allowed for key in loaded):
             parser.error("--config-overrides must be a JSON object containing TSConfig fields")
-        overrides.update(loaded)
+        # Tuples came back as lists; the frozen-recipe comparison below is on raw values.
+        overrides.update(coerce_sequence_fields(loaded))
 
     batch_auto = args.batch_size == "auto"
     cli_values = (
@@ -671,8 +674,9 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         # Run identity, plus the axes a named recipe deliberately leaves open. simple-v1-lag
         # exists to have its time constants swept, so pinning them would defeat it.
         runtime_fields = {"control_recipe_name", "seed", "split_seed", "device", "notes"}
-        open_fields = (
-            TIME_CONSTANT_FIELDS
+        # …and the final-approach penalty, which every recipe leaves open.
+        open_fields = set(PROCEDURE_LOSS_FIELDS) | (
+            set(TIME_CONSTANT_FIELDS)
             if requested_recipe == CONTROL_RECIPE_SIMPLE_V1_LAG
             else set()
         )
@@ -681,9 +685,9 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         )
         if unsupported:
             parser.error(
-                f"{requested_recipe} allows only seed, split_seed, device and run "
-                f"identity outside its frozen fields; unsupported override "
-                f"{unsupported[0]!r}"
+                f"{requested_recipe} allows only seed, split_seed, device, run identity "
+                f"and the final-approach penalty fields outside its frozen fields; "
+                f"unsupported override {unsupported[0]!r}"
             )
         conflicts = {
             name: (overrides[name], expected)

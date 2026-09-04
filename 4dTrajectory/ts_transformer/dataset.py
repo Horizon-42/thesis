@@ -645,10 +645,14 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
         # The rollout frame rotation and the runway heading coincide only for the
         # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
         # so ENU rollouts are decomposed along/across the actual runway, not east/north.
-        # One definition with the state path's final-approach context.
-        "runway_heading_rad": final_approach_arrays(series, fix_distance_m=None)[
-            "runway_heading_rad"
-        ],
+        # Runway course and glidepath: one definition with the state path's
+        # final-approach context (the procedure penalty on the rollout reads both). The
+        # FAF distance is not carried: no control recipe gates at the FAF.
+        **{
+            key: value
+            for key, value in final_approach_arrays(series, fix_distance_m=None).items()
+            if key in ("runway_heading_rad", "glidepath_tan")
+        },
     }
 
 
@@ -677,9 +681,9 @@ def probe_dynamics(batch_size: int, device: torch.device) -> dict[str, torch.Ten
     dynamics["max_thrust_n"] = torch.full(
         (batch_size,), 240_000.0, dtype=torch.float32, device=device
     )
-    dynamics["runway_heading_rad"] = probe_final_approach(batch_size, device)[
-        "runway_heading_rad"
-    ]
+    probe = probe_final_approach(batch_size, device)
+    dynamics["runway_heading_rad"] = probe["runway_heading_rad"]
+    dynamics["glidepath_tan"] = probe["glidepath_tan"]
     return dynamics
 
 

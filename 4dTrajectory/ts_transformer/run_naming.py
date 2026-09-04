@@ -41,6 +41,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from config import (
+    PROCEDURE_LOSS_FIELDS,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
@@ -108,6 +109,9 @@ CONTROL_LOSS_FIELDS = (
     "final_time_loss_weight",
     "final_time_scale_s",
     "position_loss_scale_m",
+    # The final-approach penalty is an objective on BOTH paths (it acts on the control
+    # rollout's segment endpoints too): a control run that carries it is a recipe edit.
+    *PROCEDURE_LOSS_FIELDS,
 )
 STATE_LOSS_FIELDS = (
     "fitted_tail_position_weight",
@@ -118,12 +122,7 @@ STATE_LOSS_FIELDS = (
     "final_time_loss_weight",
     "final_time_scale_s",
     "position_loss_scale_m",
-    "procedure_loss_lateral_weight",
-    "procedure_loss_vertical_weight",
-    "procedure_loss_dual_step",
-    "procedure_loss_epsilon",
-    "procedure_loss_lateral_scale_m",
-    "procedure_loss_vertical_scale_m",
+    *PROCEDURE_LOSS_FIELDS,
 )
 META_FIELDS = (
     # Tuple order is display priority: the first _MAX_LISTED_META deviations are spelled
@@ -332,7 +331,13 @@ def loss_design_name(config: Mapping[str, Any]) -> str:
         return _with_state_diffs(config)
     recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
     if recipe != CONTROL_RECIPE_CUSTOM:
-        return recipe
+        # A named recipe freezes its own fields, but leaves later-added objective fields
+        # (the final-approach penalty) open: a run that sets one is the recipe plus that
+        # edit, and must not wear the bare name.
+        edits = _loss_diffs_against(config, control_recipe_overrides(recipe))
+        if not edits:
+            return recipe
+        return f"{recipe}+({', '.join(_diff_items(edits))})"
     # Name the custom run against its nearest recipe: fewest loss-field edits wins,
     # a later recipe wins ties (CONTROL_RECIPE_NAMES is oldest→newest, custom first).
     best_name, best_diffs = CONTROL_RECIPE_CUSTOM, _loss_diffs_against(config, {})
