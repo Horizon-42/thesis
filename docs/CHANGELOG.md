@@ -4,6 +4,27 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-05 — Procedure penalty on the control rollout (wired, measured, not adopted); control constraint design
+
+Code (9d9e66e): `procedure_loss` now charges the control path's native-grid rollout
+endpoints against their aligned targets (`ControlStateLossResult.aligned_targets/weights`),
+per-flight term + diagnostics through `ControlLossTerms`; TSConfig admits `procedure_loss_*`
+on control (native grid only); control dynamics carry `glidepath_tan`; `PROCEDURE_LOSS_FIELDS`
+is one source, open under named recipes (CLI + `run_naming` render `recipe+(edits)`);
+`config.recipe_settings` is the single recipe-content helper for both arm runners;
+`coerce_sequence_fields` makes the JSON round trip of tuple fields lossless for the dataclass
+and the CLI's frozen-recipe check (subprocess-tested).
+
+Campaign `control_procedure_20260905` (simple-v3, openap-direct cohort, KRDU + KSJC, one
+seed, λ = 1e-3 / 5e-3): the penalty pulls the endpoint into the corridor (pooled FDE −101 /
+−39 m, straight-in FDE −50 / −58 m, KRDU endpoint |xt| p95 2769→2203 m; KSJC's tail does not
+improve) but pushes the vectored path middle away (vectored ADE +581 / +245 m), the violation
+rate barely moves, and 5e-3 collapses the bank schedule at KRDU (bank skill 0.728→0.280). Report
+`4dTrajectory/ts_transformer/docs/2026-09-05_control_penalty_results.zh.md`. Design for the
+control path's own constraint mechanisms (rollout `command_hook`, barrier filter, nominal law
++ bounded residual; reference path deprioritised):
+`docs/2026-09-05_control_constraint_design.zh.md`.
+
 ### 2026-09-05 — Final-approach corridor in the learned model: bounded output adopted, penalty vetoed, projection as fallback
 
 Code (5b54fae): `flight_scenarios/fas_geometry.py` (FAS cone, one definition; the backend

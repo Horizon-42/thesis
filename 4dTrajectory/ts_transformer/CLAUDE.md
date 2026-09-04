@@ -74,7 +74,23 @@ Everything below is serialised into every checkpoint.
   (`TSConfig` refuses the others). Diagnostic scripts that call `model(x)` directly
   (`batch_benchmark`, `run_ts_overfit_diagnostic`, `run_ts_predictability_report`) cannot run a
   corridor-bounded checkpoint; go through `batch_contract.model_forward` with the context.
-- **The procedure PENALTY is not the way (same campaign).** `procedure_loss_*` (runway-scale
+- **The procedure penalty on the CONTROL rollout (2026-09-05, `control_procedure_20260905`,
+  simple-v3, one seed, KRDU + KSJC, openap-direct cohort — NOT the state campaign's flight
+  set; `docs/2026-09-05_control_penalty_results.zh.md`) improves the endpoint and worsens the
+  path middle.** λ = 1e-3 on the segment-endpoint rollout: pooled FDE −101 / −39 m, straight-in
+  FDE −50 / −58 m, endpoint |xt| p95 2769→2203 m at KRDU (KSJC's tail does not improve),
+  first-step offset ≈ 0 by construction — but vectored ADE +581 / +245 m (the rollout is
+  sequential, so a penalty on the last rows reaches every earlier control and the cheapest fix
+  is to turn earlier) and the corridor-violation rate barely moves (55→45 %, 27→25 %; ~60 % of
+  the remaining rows are vectored flights kilometres away when the truth is on the final,
+  the rest straight-ins). λ = 5e-3 collapses the bank schedule at KRDU (common-profile share
+  3.8→13.7 %, bank skill 0.728→0.280). Relative to its own position term the hinge on rollout
+  rows is 5.6× the state path's at epoch 1 and 2.4–2.9× at the end, so the state-path "parity"
+  weight is not parity here. Not adopted; kept as an option. The control
+  path has NO bounded-output counterpart yet — the candidates (per-step barrier filter,
+  nominal tracking law + bounded residual, both as a rollout `command_hook`) are in
+  `docs/2026-09-05_control_constraint_design.zh.md`.
+- **The procedure PENALTY is not the way on the state path (same campaign).** `procedure_loss_*` (runway-scale
   hinge² on truth-gated rows, `ProcedureMultipliers` fixed or dual-ascended on the violation
   rate) is kept as an option with the weights at 0. Dual ascent toward `epsilon=0.05` diverged
   on all four runs (λ ×50 in 74 epochs, common-grid ADE 2420/2749 at KRDU, 2258/2195 at KSJC vs
