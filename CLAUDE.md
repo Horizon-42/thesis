@@ -263,6 +263,14 @@ Maintenance convention:
   channels (`target_conditioning="channels"`) does not undo it, and the "route stability"
   gain for vectored flights did not survive a second seed. Keep `enu`. →
   `4dTrajectory/ts_transformer/docs/2026-09-03_airport_frame_ablation_results.md`
+- ts_transformer: **the final-approach corridor as a bounded output works; as a penalty it does
+  not (2026-09-05).** `state_position_reference="corridor-bounded"` improves pooled FDE on all
+  four runs (KRDU/KSJC × two seeds) without triggering the pre-registered veto (a vectored
+  regression on both seeds) and is the candidate default; the
+  runway-scale hinge penalty diverges under dual ascent and costs accuracy at parity; the
+  row-by-row on-final projection recovers most of B's KRDU FDE gain post hoc but not its
+  violation rate, and the FAF-gated projection wrecks vectored flights. →
+  `4dTrajectory/ts_transformer/docs/2026-09-05_final_constraint_results.zh.md`
 - ts_transformer: KRDU run DONE (three generations, quote current artifacts only); gate-pass
   conclusion needs re-deriving after the datum fix; only KRDU trained; flyability measured but
   not fixed; single-aircraft + deterministic by scope. **All control-output checkpoints are

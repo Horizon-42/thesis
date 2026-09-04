@@ -58,9 +58,9 @@ GLIDEPATH_ABOVE_M = 120.0     # approach_constraints.segments.DEFAULT_GLIDEPATH_
 ALIGNMENT_MAX_DEG = 30.0      # approach_constraints.segments.STANDARD_INTERCEPT_MAX_DEG
 
 MEMBERSHIP_K = 1.0            # "on the final" = inside the FULL-SCALE cone …
-MEMBERSHIP_FLOOR_M = 500.0    # … or within 500 m of the centreline: the cone is 107 m wide at the
-                              # threshold, and a forecast biased by the measured 250–350 m NW
-                              # translation must still count as on the final to be bound at all
+MEMBERSHIP_FLOOR_M = 500.0    # … or within 500 m of the centreline: the cone's HALF-width is 107 m
+                              # at the threshold, and a forecast biased by the measured 250–350 m
+                              # NW translation must still count as on the final to be bound at all
 NEAR_THRESHOLD_M = 300.0      # the truth gate ignores the last 300 m (ground-effect ADS-B rows)
 LATERAL_SOFTNESS = 0.05       # soft-gate width across the cone edge, as a fraction of the half-width:
                               # a row inside the k=0.5 design corridor is fully bound (σ(10) ≈ 1)

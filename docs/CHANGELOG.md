@@ -4,6 +4,34 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-05 — Final-approach corridor in the learned model: bounded output adopted, penalty vetoed, projection as fallback
+
+Code (5b54fae): `flight_scenarios/fas_geometry.py` (FAS cone, one definition; the backend
+bridge imports it), `flight_scenarios/procedure_final.py` (RNAV(GPS) document + FAF read;
+`scenario_optimization` delegates), `ts_transformer/final_approach_geometry.py` (torch
+corridor geometry tested against `approach_constraints`), `state_position_reference=
+"corridor-bounded"` + `corridor_gate` (`StateOutputLayer` saturates cross-track/height on
+the rows the output places on the final, direction from predicted positions),
+`procedure_loss_*` with `ProcedureMultipliers` (fixed or dual on the violation rate,
+"procedure" is the state objective's fifth component, λ logged per epoch and the selected
+epoch's stored), `predict --project-final GATE`, per-flight final-approach context in the
+batch context slot (`enu` chart required), predict-only arms in `run_ts_frame_ablation.py`,
+readout `docs/compare_constraint_arms.py`. `StateOutputLayer.offset_mask` is no longer
+persisted and `load_checkpoint` tolerates checkpoints that stored it (both 2026-09-03
+generations load). Reviewed by a subagent before the commit.
+
+Campaign `final_constraint_20260904` (KRDU + KSJC, val split, paired with the 2026-09-03 arm A,
+two seeds): the bounded output improves pooled FDE −51…−91 m and pooled ADE −8…−71 m on all
+four runs (two airports × two seeds) with corridor-violation rows 77→48 % (KRDU) / 34→21 % (KSJC) and the pre-registered
+veto (a vectored regression on both seeds) not triggered at either airport (KRDU vectored ADE
+−7 / +49 m, KSJC −28 / −204 m); the dual-ascent penalty diverged on all four runs (an
+unreachable ε turns the multiplier into a ramp) and the fixed parity penalty pays 42 m of ADE
+for the same violation drop; the row-by-row on-final projection (the layer's gate, hard) recovers most of B's KRDU
+FDE gain post hoc but not its violation rate or endpoint tail (a first, tail-only version moved
+1.35 % of rows and was replaced), the FAF-gated projection is the straight-in ceiling (KRDU FDE
+643→455) at the price of vectored flights.
+Report `4dTrajectory/ts_transformer/docs/2026-09-05_final_constraint_results.zh.md`.
+
 ### 2026-09-04 — Procedure constraints for the learned model: adherence measurement, design, method survey
 
 No code path changed. `4dTrajectory/ts_transformer/docs/measure_procedure_adherence.py`

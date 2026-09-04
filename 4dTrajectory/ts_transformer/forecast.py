@@ -38,7 +38,6 @@ from final_approach_geometry import (
     membership,
     position_direction,
     runway_axes,
-    stays_mask,
 )
 from metrics import states_with_derived_velocity
 from prediction_outputs import ControlPrediction
@@ -443,14 +442,18 @@ _POSTPROCESSORS = {
 def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> Forecast:
     """Clamp a state forecast into the final-approach corridor and glidepath window.
 
-    The rows bound are the forecast's OWN established tail under ``gate``: from the last
-    row after which every row is on the final (``on-final``: inside the full-scale cone
-    and aligned with the course; ``faf``: inside the coded FAF distance) to the end.
+    Every row the forecast itself places on the final under ``gate`` is bound
+    (``on-final``: inside the membership cone and the predicted path aligned with the
+    course; ``faf``: inside the coded FAF distance) — row by row, the same gate the
+    corridor-bounded output layer applies softly, so the post-hoc projection is the hard
+    counterpart of that layer.  (An earlier version bound only the suffix from which every
+    later row was on the final; on arm A that moved 1.35 % of the rows, because one off-final
+    row near the end cancelled the whole tail, and was not comparable to the layer.)
     Along-track distance is untouched, cross-track is clamped into ``±k·hw(d)``, height
     into the glidepath window, and the velocity channels are re-derived from the moved
-    positions so the record stays one trajectory.  Nothing is learned here: this is the
-    ceiling of what the final-segment constraint can recover after the fact, and the
-    deployment fallback — it satisfies the rows and pays for it in kinks.
+    positions so the record stays one trajectory.  Nothing is learned here: it is what the
+    constraint recovers after the fact, and the deployment fallback — it satisfies the rows
+    and pays for it in kinks.
     """
     if forecast.prediction_output != PREDICTION_STATE:
         raise ValueError("project_onto_final applies to state forecasts only")
@@ -471,9 +474,8 @@ def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> F
     )
     cos_align = alignment_cosine(step_e, step_n, psi)
     on_final = membership(gate, d=d, xt=xt, cos_align=cos_align, d_faf=d_faf, hard=True)
-    tail = stays_mask(on_final, torch.ones_like(on_final))
     xt_bounded, u_bounded = bound_to_final(
-        d=d, xt=xt, u=values[..., IDX["u"]], weight=tail.to(torch.float64),
+        d=d, xt=xt, u=values[..., IDX["u"]], weight=on_final.to(torch.float64),
         tan_gpa=tan_gpa, hard=True,
     )
     e_bounded, n_bounded = chart_from_axes(d, xt_bounded, psi)

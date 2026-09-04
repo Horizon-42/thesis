@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -283,7 +284,7 @@ def test_corridor_bounded_checkpoint_round_trips_and_projection_marks_records(tm
         build_model(TSConfig(seq_len=4, n_segments=3)).bind_normalizer(normalizer)
 
 
-def test_project_onto_final_clamps_only_the_established_tail_and_rederives_velocity():
+def test_project_onto_final_clamps_every_on_final_row_and_rederives_velocity():
     series, _config = _series(n_flights=1)
     item = series[0]
     psi = float(item.scenario.target.psi)
@@ -313,9 +314,9 @@ def test_project_onto_final_clamps_only_the_established_tail_and_rederives_veloc
     halfwidth = fag.FAS.course_width_m * (np.clip(d_out, 0, None) + fag.FAS.d_garp_m) / fag.FAS.d_garp_m
     assert np.allclose(projected.values[:2, :3], rows[:2, :3])                         # downwind untouched
     assert np.allclose(d_out[2:], d)
-    # The established tail: the first final row's direction is read against the
-    # downwind row before it (a sideways jump in this fixture), so the tail begins one
-    # row later; from there every row is clamped to the left edge / the floor.
+    # Row by row: the first final row's direction is read against the downwind row before
+    # it (a sideways jump in this fixture), so it is not on the final and stays; every
+    # later row is on the final and is clamped to the left edge / the floor.
     assert np.allclose(xt_out[2], xt) and np.allclose(u[2], rows[2, ch.IDX["u"]])
     assert np.allclose(xt_out[3:], -fag.K_MARGIN * halfwidth[3:])                       # clamped to the left edge
     assert np.allclose(u[3:] - d[1:] * math.tan(math.radians(3.0)), -fag.GLIDEPATH_BELOW_M)  # clamped to the floor
@@ -325,6 +326,16 @@ def test_project_onto_final_clamps_only_the_established_tail_and_rederives_veloc
     assert projected.projected_onto_final == CORRIDOR_GATE_ON_FINAL
     with pytest.raises(ValueError, match="unknown corridor gate"):
         project_onto_final(forecast, item, "never")
+    # An off-final row in the middle (5 km abeam) is left alone and does NOT cancel the
+    # on-final rows before it — the gate is per row, like the bounded output layer's.
+    broken = rows.copy()
+    broken[5, ch.IDX["e"]] = -d[3] * ue + 5_000.0 * un
+    broken[5, ch.IDX["n"]] = -d[3] * un - 5_000.0 * ue
+    projected_broken = project_onto_final(replace(forecast, values=broken), item, CORRIDOR_GATE_ON_FINAL)
+    e_b, n_b = projected_broken.values[:, ch.IDX["e"]], projected_broken.values[:, ch.IDX["n"]]
+    xt_b = e_b * un - n_b * ue
+    assert np.allclose(xt_b[3], -fag.K_MARGIN * halfwidth[3])          # before the break: bound
+    assert np.allclose(projected_broken.values[5, :3], broken[5, :3])  # the break itself: untouched
 
 
 def test_synthetic_fixture_manifest_schema_is_current():

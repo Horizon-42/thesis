@@ -11,6 +11,8 @@
 
 配套：`docs/literature/runway_assignment/README.md`（跑道分配的官方文件与文献索引，回答"跑道规划是否属于调度层"）。
 
+后续（2026-09-04/05）：`2026-09-04_procedure_constraints_design.zh.md`（约束的定义与前置测量）、`2026-09-04_constraint_methods_survey.zh.md`（方法综述与优先级）、`2026-09-05_final_constraint_results.zh.md`（实验报告：有界输出采纳、罚项否决、投影作上限）。
+
 ## 贯穿四项实验的主线
 
 1. 模型只有一种方式知道自己要去哪条跑道：坐标系的原点。这既是目标条件（第 1 项 H1），也是"终点在原点"的先验（第 4 项）。

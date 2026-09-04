@@ -55,6 +55,47 @@ Everything below is serialised into every checkpoint.
   643 → 492 m) but gives up the absolute output's implicit "end at the origin" prior —
   KRDU vectored FDE +350 m on both seeds, endpoint lateral p95 ×1.4 — so it is NOT the
   default. The two parametrizations are two priors; the next candidate must keep both.
+- **`state_position_reference="corridor-bounded"` (state-v1 + the final-approach corridor by
+  construction, measured 2026-09-04/05, ADOPTED as a candidate default —
+  `docs/2026-09-05_final_constraint_results.zh.md`).** `StateOutputLayer` decodes with the
+  normalizer statistics it carries as buffers, reads each row in runway axes
+  (`final_approach_geometry`: `d` back from the threshold, `xt` right of the course), and on the
+  rows the output itself places on the final — inside the full-scale LPV cone floored at 500 m
+  AND the predicted PATH (position differences, never the unsupervised velocity channels)
+  within 30° of the course — saturates `xt` inside `±k·hw(d)` and the height inside the
+  `[−60, +120] m` glidepath window (`corridor_gate="on-final"`; `"faf"` binds by distance and is
+  the ablation). Four seeds (KRDU/KSJC × 1337/2024): pooled FDE −51…−91 m, pooled ADE
+  −8…−71 m, straight-in FDE −18…−96 m, corridor-violation rows on truth-established rows
+  77→48 % / 34→21 %, no seed regresses; it does NOT touch the start of the path (first-step
+  jump unchanged) and the KRDU endpoint now sits ON the corridor edge (+54 m) — the NW pull is
+  capped, not removed. Needs a per-flight context row in the batch (`FINAL_APPROACH_KEYS`:
+  runway course, tan GPA, FAF distance) — `dataset.batch()` puts it in the context slot for
+  state recipes, `forecast` builds it per series, and the `enu` chart is REQUIRED
+  (`TSConfig` refuses the others). Diagnostic scripts that call `model(x)` directly
+  (`batch_benchmark`, `run_ts_overfit_diagnostic`, `run_ts_predictability_report`) cannot run a
+  corridor-bounded checkpoint; go through `batch_contract.model_forward` with the context.
+- **The procedure PENALTY is not the way (same campaign).** `procedure_loss_*` (runway-scale
+  hinge² on truth-gated rows, `ProcedureMultipliers` fixed or dual-ascended on the violation
+  rate) is kept as an option with the weights at 0. Dual ascent toward `epsilon=0.05` diverged
+  on all four runs (λ ×50 in 74 epochs, common-grid ADE 2420/2749 at KRDU, 2258/2195 at KSJC vs
+  1383/1361/870/865): the tolerated rate must be REACHABLE (arm A sits at 0.77, the bounded
+  output at 0.48) or the multiplier is a ramp, and the hinge is ~20× larger early in training
+  than at the converged operating point the calibration used. At the calibrated parity weight
+  (1e-3, no dual) it buys the same violation-rate drop as the bounded output but pays 42 m of
+  pooled ADE for it (KSJC).
+- **Inference-time projection (`predict --project-final GATE`) is row-by-row, the hard
+  counterpart of the bounded layer's gate, and at KRDU it recovers most of arm B's FDE gain
+  post hoc** (pooled FDE 1163→1090 vs B 1072, straight-in 643→545 vs 548) but not the
+  violation rate (56 % vs 48 %) nor the endpoint |xt| p95 (480 vs 305 m), and less at KSJC
+  (FDE 748 vs 725). A first version bound only the suffix from which every later row was on
+  the final; it moved 1.35 % of the rows (one off-final row cancelled the tail) — a gate that
+  is not the layer's gate is not a ceiling for it. FAF-gated it is the straight-in ceiling
+  (KRDU FDE 643→455) at the cost of vectored flights (ADE 2599→4665 at KRDU, 2536→5281 at
+  KSJC where 30L's FAF is 15 km out).
+- **`StateOutputLayer.offset_mask` is a non-persistent buffer** (a pure function of the channel
+  contract) and `load_checkpoint` drops that key if a checkpoint stored it — both the
+  2026-09-03 generations (arm A without it, state-v2 with it) load. A new buffer that IS
+  learned scale (`channel_mean/std`) stays persistent.
 - **Horizon trap**: the horizon was sized from the MEASURED duration distribution (p50 328 s /
   p95 651 s), covering **97.8 %** of flights — the old "an arrival is ~3.5–5 min" straight-line
   estimate was WRONG (real arrivals are vectored), do not resize from it. The ~2 % over the
@@ -351,7 +392,14 @@ namespace would restore the undifferentiated listing the package exists to remov
 
 ## Open items
 
-- **Procedure constraints in the learned model (2026-09-04, design only, nothing trained):**
+- **Final-approach constraint campaign DONE 2026-09-04/05 (`final_constraint_20260904`, KRDU +
+  KSJC, 3 predict-only + 5 trained arms per airport; report
+  `docs/2026-09-05_final_constraint_results.zh.md`, readout `docs/compare_constraint_arms.py`).**
+  Bounded output adopted as candidate default (see the config entry above); penalty vetoed;
+  projection kept as deployment fallback. Not done: making `corridor-bounded` THE default
+  (decide together with the state-v3 continuity term, which addresses the start of the path
+  the corridor does not), PatchTST, control output.
+- **Procedure constraints in the learned model (2026-09-04 design + measurement):**
   measured on every 3rd rostered arrival (`docs/measure_procedure_adherence.py`) that **0.0 %**
   of observed KRDU/KSJC flights pass an off-axis IAF of their runway's RNAV(GPS) procedure,
   that 85–97 % (KRDU) / 38–83 % (KSJC) are established in the k=0.5 LPV cone by the FAF,
