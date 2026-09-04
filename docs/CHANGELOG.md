@@ -4,6 +4,54 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-06 — Command hooks on the control rollout: barrier filter and nominal law + bounded residual (implemented; campaign `control_hooks_20260906`)
+
+The control path's own constraint mechanism, per `docs/2026-09-05_control_constraint_design.zh.md`
+P0 + P1. A **command hook** is called once per control segment, at the segment's start, with
+the physical state the rollout carries there and the network's command, and returns the
+command actually flown; the rollout integrates each segment on its own
+(`aerodynamic_model.torch_piecewise_rollout.rollout_piecewise_constant_hooked_with_step`),
+so the per-segment discrete adjoint stays exact and the hook's dependence on the state is
+ordinary autograd across segments (finite-difference checked by the reviewer to ≤ 7e-7).
+The hooked dense rollout settles the effective schedule first and then integrates it, so
+dense and endpoint rollouts agree, and the **effective schedule is what a record carries**
+(`EndpointControlRollout.controls`, `forecast` exports it in newtons, `source.commandHook`
+names the hook). Only the first-order-lag backends support hooks (their state carries the
+actuators; the point-mass backends refuse). Backends expose the state through
+`control/dynamics/hooks.RolloutStateView` (transport chart + actuators + the segment's
+hold `duration_s`).
+
+Two hooks in `control/constraints/`, sharing the runway-axes adapter and the on-final gate
+(`gates.py`; membership cone floored at 500 m + path alignment, read from the rollout's own
+velocity): **`barrier`** — the corridor's two barriers `h = k·hw(d) ∓ xt` bound the sine
+of the heading error, the heading interval is a second barrier pair
+(`−β(ψ_err − lo) ≤ ψ̇ ≤ β(hi − ψ_err)`, one continuous rule — an earlier form that only
+acted outside the interval clamped a centred aligned command to zero bank), the level-turn
+relation makes that a bank interval, and the command's bank is saturated into it (scaled
+softplus in training, hard clamp at inference), lateral only; **`nominal-residual`** — L1
+lateral guidance + a glidepath flight-path-angle law (`control/guidance_laws.py`) give the
+nominal bank and load factor, the command is a tanh-bounded residual on them (±5°, ±0.1).
+Both are **discrete-time** rules: the command is held for Δt, so every rate gain is used as
+`min(gain, 1/Δt)` (a faster rate crosses the edge inside the hold it protects). `hard`
+selects the hard saturation AND the hard gate (a deployed filter has no partially-gated
+rows); training refuses it. The closing term reads `corridor_halfwidth_slope`, the
+derivative of the same half-width the corridor uses (zero past the threshold).
+
+Config: `control_command_hook` (`off|barrier|nominal-residual`), `control_hook_gate`
+(`on-final` only), `control_hook_saturation`, `control_barrier_alpha/heading_gain`,
+`control_nominal_*`; needs control output, first-order-lag, native grid, `enu`. Predict:
+`--command-hook`, `--hook-saturation` apply a hook to any lag checkpoint (the
+`F_barrier_infer` arms). Epoch diagnostics `EpochResult.command_hook` (per-step gated /
+clamped / saturated shares, mean bank change). Readout `compare_constraint_arms.py` gained
+the outside-corridor recovery columns (first claimed on-final row outside → last inside).
+Tests: `tests/test_command_hook.py` (identity hook bit-exact, state-reading hook
+differentiable, point-mass refusal), `tests/test_control_constraints.py` (geometry adapter,
+barrier bounds and continuity, adversarial rollout stays inside, nominal law converges
+through the rollout, config guards, training refuses hard + logs the hook, export contract).
+Arms: `docs/experiments/control_hooks_arms.json` (baseline + hard filter at prediction,
++ soft filter at prediction, trained through the soft filter, trained through the nominal
+law; simple-v3, paired against `control_procedure_20260905/A_control_v3`).
+
 ### 2026-09-05 — Procedure penalty on the control rollout (wired, measured, not adopted); control constraint design
 
 Code (9d9e66e): `procedure_loss` now charges the control path's native-grid rollout

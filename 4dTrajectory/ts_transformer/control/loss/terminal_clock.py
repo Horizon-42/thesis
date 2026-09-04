@@ -19,6 +19,7 @@ from config import (
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     TSConfig,
 )
+from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from control.loss.components import ControlStateLossResult
 from control.training.curriculum import ControlTrainingStage
@@ -118,6 +119,7 @@ def _roll_out_terminal_endpoints(
         durations,
         dynamics,
         config,
+        command_hook=build_command_hook(config, dynamics),
     )
     dtype, device = rollout.channels.dtype, rollout.channels.device
     mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)

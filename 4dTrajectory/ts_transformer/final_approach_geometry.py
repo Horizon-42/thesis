@@ -98,6 +98,12 @@ def corridor_halfwidth(d: torch.Tensor) -> torch.Tensor:
     return course_halfwidth_m(d.clamp(min=0.0), FAS)
 
 
+def corridor_halfwidth_slope(d: torch.Tensor) -> torch.Tensor:
+    """``d corridor_halfwidth / d d``: the cone's closing rate per metre flown toward the
+    threshold, zero at and past it where the half-width is the LTP width."""
+    return (FAS.course_width_m / FAS.d_garp_m) * (d > 0.0).to(d.dtype)
+
+
 def glidepath_height(d: torch.Tensor, tan_gpa: torch.Tensor) -> torch.Tensor:
     """Chart height of the glidepath at ``d`` (zero at and past the threshold)."""
     return d.clamp(min=0.0) * tan_gpa.unsqueeze(-1)

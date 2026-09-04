@@ -3159,7 +3159,9 @@ def test_fixed_dt_rollout_closes_duration_clock_without_training_stage(monkeypat
             config,
             *,
             segment_valid,
+            command_hook=None,
         ):
+            del command_hook
             total = inputs.segment_durations_s.cumsum(dim=1)[0, -1]
             torch.testing.assert_close(
                 total,
@@ -3450,7 +3452,7 @@ def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
     monkeypatch.setattr(
         control_rollout_module,
         "rollout_control_endpoints",
-        lambda _controls, _durations, _dynamics, _config: SimpleNamespace(
+        lambda _controls, _durations, _dynamics, _config, command_hook=None: SimpleNamespace(
             channels=physical_rollout,
             geodetic_states=torch.zeros(1, 2, 7, dtype=torch.float64),
         ),
@@ -3513,7 +3515,7 @@ def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monk
     monkeypatch.setattr(
         control_rollout_module,
         "rollout_control_endpoints",
-        lambda _controls, _durations, _dynamics, _config: SimpleNamespace(
+        lambda _controls, _durations, _dynamics, _config, command_hook=None: SimpleNamespace(
             channels=physical_rollout,
             geodetic_states=torch.zeros(1, 2, 7, dtype=torch.float64),
         ),

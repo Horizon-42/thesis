@@ -41,6 +41,8 @@ from aerodynamic_model.torch_dense_rollout import (
 )
 from aerodynamic_model.torch_dynamics import CONTROL_NAMES, STATE_NAMES
 from aerodynamic_model.torch_piecewise_rollout import (
+    RawCommandHook,
+    rollout_piecewise_constant_hooked_with_step,
     rollout_piecewise_constant_with_step,
 )
 from aerodynamic_model.torch_transport_chart_dynamics import (
@@ -311,6 +313,39 @@ def rollout_piecewise_constant(
         aero_params,
         _pack_context(frame_params, time_constants_s, max_thrust_n, state_scale),
         _rollout_step,
+        integrator_dt_s=integrator_dt_s,
+        max_steps_per_segment=max_steps_per_segment,
+    )
+
+
+def rollout_piecewise_constant_hooked(
+    initial_geodetic_states: torch.Tensor,
+    initial_controls: torch.Tensor,
+    commands: torch.Tensor,
+    segment_durations_s: torch.Tensor,
+    aero_params: torch.Tensor,
+    frame_params: torch.Tensor,
+    time_constants_s: torch.Tensor,
+    max_thrust_n: torch.Tensor,
+    command_hook: RawCommandHook,
+    *,
+    chart_scale: tuple[float, ...] | None = None,
+    integrator_dt_s: float = 0.5,
+    max_steps_per_segment: int = 4096,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Augmented segment-end states ``[B,N,10]`` and the effective commands ``[B,N,3]``
+    when a hook rewrites each segment's command from the (scaled, augmented) state."""
+    state_scale = lag_state_scale(chart_scale, frame_params)
+    return rollout_piecewise_constant_hooked_with_step(
+        lag_state_from_geodetic(
+            initial_geodetic_states, initial_controls, frame_params, state_scale
+        ),
+        commands,
+        segment_durations_s,
+        aero_params,
+        _pack_context(frame_params, time_constants_s, max_thrust_n, state_scale),
+        _rollout_step,
+        command_hook,
         integrator_dt_s=integrator_dt_s,
         max_steps_per_segment=max_steps_per_segment,
     )

@@ -24,6 +24,8 @@ import torch.nn as nn
 from channels import CHANNELS, IDX, POSITION_IDX, VELOCITY_IDX
 from batching import resolve_batch_size
 from config import (
+    CONTROL_HOOK_OFF,
+    HOOK_SATURATION_HARD,
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_OBJECTIVE,
@@ -52,6 +54,7 @@ from config import (
     uses_control_dynamics,
 )
 from control.dynamics import rollout as control_rollout
+from control.constraints import build_command_hook
 from control.loss.components import (
     ControlStateLossResult,
     control_tracking_loss_terms,
@@ -549,11 +552,13 @@ def _native_endpoint_control_state_loss(
     del dense_supervision
     if segment_valid is not None:
         raise ValueError("native endpoint state loss does not support horizon curriculum")
+    command_hook = build_command_hook(config, dynamics)
     rollout = control_rollout.rollout_control_endpoints(
         prediction.controls,
         prediction.segment_durations,
         dynamics,
         config,
+        command_hook=command_hook,
     )
     physical_channels = rollout.channels
     dtype, device = physical_channels.dtype, physical_channels.device
@@ -602,6 +607,7 @@ def _native_endpoint_control_state_loss(
         control_imitation_mse=control_imitation_mse(prediction, config, dynamics),
         aligned_targets=aligned_targets,
         aligned_weights=aligned_weights,
+        hook_diagnostics=command_hook.diagnostics() if command_hook is not None else {},
     )
 
 
@@ -771,7 +777,7 @@ def control_prediction_loss_terms(
         effort=config.control_effort_loss_weight * effort,
         smoothness=config.control_smoothness_loss_weight * smoothness,
         extras={**tracking.extras, **procedure_extra},
-        diagnostics=procedure_diagnostics,
+        diagnostics={**rollout_loss.hook_diagnostics, **procedure_diagnostics},
     )
 
 
@@ -1185,6 +1191,10 @@ class EpochResult:
     )
     # The procedure penalty's epoch record: gated rows, violation rates, λ after the update.
     procedure: dict[str, float] = field(default_factory=dict)
+    # The command hook's epoch record: every ``hook_*`` count divided by the step count —
+    # per-step shares (gated, clamped / saturated) and the mean bank change per step
+    # (``bank_change_rad``) — plus ``steps`` itself.
+    command_hook: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -1256,6 +1266,7 @@ def _prediction_batch_replay(
             query_offsets_s,
             query_valid,
             dataset.config,
+            command_hook=build_command_hook(dataset.config, dynamics),
         )
         predicted_physical = (
             rollout.query_channels.detach().cpu().numpy().astype(np.float32)
@@ -2367,6 +2378,14 @@ def fit_model(
             f"predeclared {cohort_floor:g} s cohort floor; filter the train cohort before fit"
         )
 
+    if (
+        config.control_command_hook != CONTROL_HOOK_OFF
+        and config.control_hook_saturation == HOOK_SATURATION_HARD
+    ):
+        raise ValueError(
+            "hard hook saturation is for inference-only arms: a clamped command has no "
+            "gradient, so training would learn nothing on the clamped steps"
+        )
     device = resolve_device(config.device)
     batch_size = resolve_batch_size(config, device, auto=auto_batch_size, verbose=verbose)
     config = replace(config, batch_size=batch_size)
@@ -2533,7 +2552,7 @@ def fit_model(
 
         model.train()
         train_component_totals = {name: 0.0 for name in component_names}
-        train_diagnostic_totals = {name: 0.0 for name in PROCEDURE_DIAGNOSTICS}
+        train_diagnostic_totals: dict[str, float] = {name: 0.0 for name in PROCEDURE_DIAGNOSTICS}
         train_weight_total = 0.0
         control_diagnostics = (
             ControlTrainingDiagnosticsAccumulator(
@@ -2605,7 +2624,7 @@ def fit_model(
             for name, value in components.tensors().items():
                 train_component_totals[name] += float(value.detach()) * batch_count
             for name, value in components.diagnostics.items():
-                train_diagnostic_totals[name] += float(value)
+                train_diagnostic_totals[name] = train_diagnostic_totals.get(name, 0.0) + float(value)
             train_weight_total += batch_weight
 
         model.eval()
@@ -2647,6 +2666,17 @@ def fit_model(
             procedure_epoch["lambda_vertical_next"] = multipliers.vertical
         else:
             epoch_multipliers = None
+        # The command hook's epoch record: how often it was gated on and how hard it acted
+        # (per-step shares over the epoch's rollouts; the step count beside them).
+        hook_steps = train_diagnostic_totals.get("hook_steps", 0.0)
+        hook_epoch: dict[str, float] = {}
+        if hook_steps > 0.0:
+            hook_epoch = {
+                name.removeprefix("hook_"): value / hook_steps
+                for name, value in train_diagnostic_totals.items()
+                if name.startswith("hook_") and name != "hook_steps"
+            }
+            hook_epoch["steps"] = hook_steps
         train_components = {
             name: value / max(train_weight_total, 1.0)
             for name, value in train_component_totals.items()
@@ -2751,6 +2781,7 @@ def fit_model(
                 for airport, evaluation in val_evaluations.items()
             },
             procedure=procedure_epoch,
+            command_hook=hook_epoch,
         ))
 
         if (

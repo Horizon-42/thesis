@@ -302,6 +302,36 @@ PROCEDURE_LOSS_FIELDS = (
     "procedure_loss_lateral_scale_m",
     "procedure_loss_vertical_scale_m",
 )
+# The rollout command hook: a constraint module that rewrites each control segment's
+# command from the state at the segment's start (control/dynamics/hooks.py). ``barrier``
+# is the per-step safety layer (a barrier on the corridor gives a bank interval the command
+# is saturated into); ``nominal-residual`` is a fixed tracking law toward the centreline
+# and glidepath with the command as a bounded residual around it
+# (docs/2026-09-05_control_constraint_design.zh.md). Both act only where the corridor gate
+# says the aircraft is on the final; ``soft`` saturation keeps gradients in the training
+# loop, ``hard`` is for inference-only arms.
+CONTROL_HOOK_OFF = "off"
+CONTROL_HOOK_BARRIER = "barrier"
+CONTROL_HOOK_NOMINAL_RESIDUAL = "nominal-residual"
+CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL)
+HOOK_SATURATION_SOFT = "soft"
+HOOK_SATURATION_HARD = "hard"
+HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
+# The hook gates on the rollout state itself; the FAF gate is not carried by the control
+# dynamics, so ``on-final`` is the only gate a hook can use.
+HOOK_GATES = (CORRIDOR_GATE_ON_FINAL,)
+CONTROL_HOOK_FIELDS = (
+    "control_command_hook",
+    "control_hook_gate",
+    "control_hook_saturation",
+    "control_barrier_alpha",
+    "control_barrier_heading_gain",
+    "control_nominal_l1_distance_m",
+    "control_nominal_vertical_lookahead_m",
+    "control_nominal_vertical_gain",
+    "control_nominal_residual_bank_max_rad",
+    "control_nominal_residual_load_max",
+)
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
 # coerce them first, through this one function, or ``[] != ()`` refuses a faithful copy.
@@ -737,6 +767,24 @@ class TSConfig:
     control_thrust_time_constant_s: float = 1.5
     control_bank_time_constant_s: float = 2.0
     control_load_time_constant_s: float = 0.8
+    # The rollout command hook (see the CONTROL_HOOK_* constants). Open under every named
+    # recipe like the procedure penalty; first-order-lag dynamics and the native state-loss
+    # grid only (the hook rides the segmented endpoint rollout).
+    control_command_hook: str = CONTROL_HOOK_OFF
+    control_hook_gate: str = CORRIDOR_GATE_ON_FINAL
+    control_hook_saturation: str = HOOK_SATURATION_SOFT
+    # Barrier filter: the barrier's decay rate α (1/s; the allowed closing rate toward a
+    # corridor edge is α × the remaining margin) and the heading gain that turns a heading
+    # error outside the admissible interval into a turn-rate demand (1/s).
+    control_barrier_alpha: float = 0.1
+    control_barrier_heading_gain: float = 0.3
+    # Nominal law + residual: L1 lateral lookahead, the vertical lookahead and gain of the
+    # glidepath law, and the residual bounds around the nominal command.
+    control_nominal_l1_distance_m: float = 3000.0
+    control_nominal_vertical_lookahead_m: float = 2000.0
+    control_nominal_vertical_gain: float = 0.2
+    control_nominal_residual_bank_max_rad: float = math.radians(5.0)
+    control_nominal_residual_load_max: float = 0.1
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -835,6 +883,40 @@ class TSConfig:
                 f"prediction_output={self.prediction_output!r} rolls its states out of "
                 "controls and has no position channels to reparametrize"
             )
+        if self.control_command_hook not in CONTROL_HOOKS:
+            raise ValueError(
+                f"unknown control_command_hook {self.control_command_hook!r}; expected one "
+                f"of {CONTROL_HOOKS}"
+            )
+        if self.control_hook_saturation not in HOOK_SATURATIONS:
+            raise ValueError(
+                f"unknown control_hook_saturation {self.control_hook_saturation!r}; "
+                f"expected one of {HOOK_SATURATIONS}"
+            )
+        if self.control_hook_gate not in HOOK_GATES:
+            raise ValueError(
+                f"unknown control_hook_gate {self.control_hook_gate!r}; a command hook gates "
+                f"on the rollout state itself, expected one of {HOOK_GATES}"
+            )
+        if self.control_command_hook != CONTROL_HOOK_OFF:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError("a control command hook needs the control output")
+            if self.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
+                raise ValueError(
+                    "the command hook is implemented on the first-order-lag dynamics (its "
+                    f"state carries the actuators a hook reads); "
+                    f"control_dynamics_model={self.control_dynamics_model!r}"
+                )
+            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
+                raise ValueError("the command hook rides the native segment-endpoint rollout")
+            if self.coordinate_frame != COORDINATE_FRAME_ENU:
+                raise ValueError("the command hook reads the threshold-anchored ENU chart")
+            for name in ("control_barrier_alpha", "control_barrier_heading_gain",
+                         "control_nominal_l1_distance_m", "control_nominal_vertical_lookahead_m",
+                         "control_nominal_vertical_gain", "control_nominal_residual_bank_max_rad",
+                         "control_nominal_residual_load_max"):
+                if getattr(self, name) <= 0.0:
+                    raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
         if (
             self.prediction_output == PREDICTION_CONTROL
             and self.procedure_loss_active

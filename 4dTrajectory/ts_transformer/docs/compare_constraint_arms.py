@@ -101,6 +101,15 @@ def corridor_metrics(pred_dir: Path, row: dict) -> dict:
     )
     claimed = fag.hard_on_final(d_p, xt_p, cos_align)[0].numpy()
 
+    # Recovery (the hook campaign's R-vs-F question): among flights whose FIRST claimed
+    # on-final row (before the threshold) is outside the k-corridor, the share whose LAST
+    # such row is inside. Read on the prediction's own gate, since that is where a hook acts.
+    claimed_approach = np.flatnonzero(claimed & (d_p[0].numpy() > 0.0))
+    outside_at_gate_start = bool(lat_v[claimed_approach[0]] > 0) if len(claimed_approach) else None
+    recovered = (
+        bool(lat_v[claimed_approach[-1]] == 0) if outside_at_gate_start else None
+    )
+
     gated_index = np.flatnonzero(gate)
     matched = [pred_by_time.get(round(float(truth_rows[i]["t"]), 3)) for i in gated_index]
     covered = np.array([m for m in matched if m is not None], dtype=int)
@@ -123,7 +132,10 @@ def corridor_metrics(pred_dir: Path, row: dict) -> dict:
         "claimed_rows": int(claimed.sum()),
         "claimed_lateral_violation_rows": int(((lat_v > 0) & claimed).sum()),
         "claimed_vertical_violation_rows": int(((vert_v > 0) & claimed).sum()),
+        "outside_at_gate_start": outside_at_gate_start,
+        "recovered": recovered,
         "projected": states["source"].get("projectedOntoFinal"),
+        "command_hook": states["source"].get("commandHook"),
     }
 
 
@@ -167,6 +179,15 @@ def _stratum_block(rows: list[dict]) -> dict[str, float]:
         "claimed_lateral_violation_rate": _rate(
             np.array([r["claimed_lateral_violation_rows"] for r in rows], dtype=float),
             np.array([r["claimed_rows"] for r in rows], dtype=float),
+        ),
+        "outside_at_gate_start_share": (
+            float(np.mean([r["outside_at_gate_start"] for r in rows if r["outside_at_gate_start"] is not None]))
+            if any(r["outside_at_gate_start"] is not None for r in rows) else math.nan
+        ),
+        "recovery_candidates": int(sum(bool(r["outside_at_gate_start"]) for r in rows)),
+        "recovery_rate": (
+            float(np.mean([r["recovered"] for r in rows if r["recovered"] is not None]))
+            if any(r["recovered"] is not None for r in rows) else math.nan
         ),
         "ade_mean_m": float(np.mean([r["ade_m"] for r in rows])),
         "fde_mean_m": float(np.mean([r["fde_m"] for r in rows])),
@@ -212,7 +233,8 @@ def main(argv: list[str] | None = None) -> int:
               f"{ref['truth_vertical_violation_rate']:.1%}) ==")
         header = ["arm", "ADE", "FDE mean", "FDE p50", "xt@thr p50", "|xt| p95", "1st-step",
                   "coverage", "lat viol rows", "flights any lat", "lat excess mean/p95",
-                  "vert viol rows", "flights any vert", "hinge lat/vert", "claimed rows", "claimed lat viol"]
+                  "vert viol rows", "flights any vert", "hinge lat/vert", "claimed rows", "claimed lat viol",
+                  "outside@gate", "recovered (n)"]
         table = []
         for label, b in blocks.items():
             table.append([
@@ -224,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{b['vertical_violation_rate']:.1%}", f"{b['flights_any_vertical']:.1%}",
                 f"{b['lateral_hinge_mean']:.3f}/{b['vertical_hinge_mean']:.3f}",
                 str(b["claimed_rows"]), f"{b['claimed_lateral_violation_rate']:.1%}",
+                f"{b['outside_at_gate_start_share']:.1%}", f"{b['recovery_rate']:.1%} ({b['recovery_candidates']})",
             ])
         cfa.print_table("", header, table)
         # Paired deltas against the reference on the same flights.

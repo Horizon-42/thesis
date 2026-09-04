@@ -20,6 +20,7 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
+from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from control.envelope import physical_controls
 from dataset import (
@@ -70,6 +71,8 @@ class Forecast:
     # The corridor gate the inference-time projection applied (``project_onto_final``),
     # or None: the values are the model's own.
     projected_onto_final: str | None = None
+    # The rollout command hook that rewrote the schedule (``hook/saturation``), or None.
+    command_hook: str | None = None
 
     @property
     def n_steps(self) -> int:
@@ -211,6 +214,7 @@ def _forecast_control_batch(
     offsets, padded_offsets, query_valid = _padded_dense_queries(
         durations, config.control_rollout_integrator_dt_s
     )
+    command_hook = build_command_hook(config, dynamics)
     with torch.no_grad():
         rollout = control_rollout.rollout_control_dense(
             prediction.controls,
@@ -219,6 +223,7 @@ def _forecast_control_batch(
             torch.from_numpy(padded_offsets),
             torch.from_numpy(query_valid),
             config,
+            command_hook=command_hook,
         )
     query_channels = rollout.query_channels.detach().cpu().numpy().astype(np.float64)
     query_geodetic = (
@@ -226,8 +231,11 @@ def _forecast_control_batch(
     )
     # The head predicts in the dimensionless envelope; the exported record contract is
     # newtons, and is shared with the CasADi optimizer and the evaluation package.
+    # The schedule FLOWN (a hook may have rewritten the network's commands), in newtons.
     controls = (
-        physical_controls(prediction.controls, dynamics["max_thrust_n"])
+        physical_controls(
+            rollout.controls.to(prediction.controls.dtype), dynamics["max_thrust_n"]
+        )
         .detach()
         .cpu()
         .numpy()
@@ -256,6 +264,10 @@ def _forecast_control_batch(
             segment_durations_s=durations[row],
             geodetic_values=query_geodetic[row, :count],
             prediction_output=config.prediction_output,
+            command_hook=(
+                None if command_hook is None
+                else f"{config.control_command_hook}/{config.control_hook_saturation}"
+            ),
         ))
     return forecasts
 

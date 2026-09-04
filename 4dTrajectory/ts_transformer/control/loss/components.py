@@ -50,6 +50,8 @@ class ControlStateLossResult:
     # (the native grid fills them); the procedure penalty gates on these truth rows.
     aligned_targets: torch.Tensor | None = None
     aligned_weights: torch.Tensor | None = None
+    # The command hook's counts over this batch's rollout (empty without a hook).
+    hook_diagnostics: dict[str, torch.Tensor] = field(default_factory=dict)
 
     @property
     def terminal_end_states(self) -> torch.Tensor:

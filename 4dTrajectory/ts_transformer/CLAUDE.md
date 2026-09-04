@@ -87,9 +87,30 @@ Everything below is serialised into every checkpoint.
   3.8→13.7 %, bank skill 0.728→0.280). Relative to its own position term the hinge on rollout
   rows is 5.6× the state path's at epoch 1 and 2.4–2.9× at the end, so the state-path "parity"
   weight is not parity here. Not adopted; kept as an option. The control
-  path has NO bounded-output counterpart yet — the candidates (per-step barrier filter,
-  nominal tracking law + bounded residual, both as a rollout `command_hook`) are in
-  `docs/2026-09-05_control_constraint_design.zh.md`.
+  path's own mechanism is the rollout **command hook** below (design:
+  `docs/2026-09-05_control_constraint_design.zh.md`).
+- **Command hooks (`control_command_hook`, 2026-09-06): a constraint module called once per
+  control SEGMENT, at its start, with the rollout's own state, returning the command flown.**
+  Per segment, never per substep — the hand-written adjoints cover whole schedules, so the
+  hooked engine integrates one segment at a time and the hook's state dependence is plain
+  autograd (`aerodynamic_model.torch_piecewise_rollout.rollout_piecewise_constant_hooked_with_step`).
+  Only the first-order-lag backends support it (`_refuse_hook` on the point-mass ones); the
+  dense rollout settles the effective schedule first and re-integrates it; **the record
+  carries the schedule FLOWN**, not the network's (`forecast` exports
+  `rollout.controls`, `source.commandHook` = `hook/saturation`). Two modules in
+  `control/constraints/`: `barrier` (corridor barriers → heading interval → bank interval,
+  lateral only) and `nominal-residual` (L1 + glidepath law, tanh-bounded residual, both axes),
+  sharing `gates.py` (on-final on the rollout's velocity). Gotchas: (1) the command is HELD
+  for Δt, so every rate gain is `min(gain, 1/Δt)` — `RolloutStateView.duration_s` exists for
+  this; (2) `hard` = hard saturation AND hard gate, training refuses it, so a trained arm is
+  compared with the SOFT predict-only arm (`F_barrier_infer_soft`) for "training through the
+  hook" and with the hard one for hardness; (3) the heading layer is a continuous barrier
+  pair — a version that acted only outside the interval clamped a centred command to zero
+  bank; (4) diagnostics are per-step shares in `EpochResult.command_hook` (`gated`,
+  `clamped` / `*_residual_saturated`, `bank_change_rad`), the "lazy network" reading is
+  clamped > 20 % with bank skill below baseline. Predict-time: `predict --command-hook
+  barrier --hook-saturation hard` on any lag checkpoint. Campaign
+  `docs/experiments/control_hooks_arms.json` → `control_hooks_20260906`.
 - **The procedure PENALTY is not the way on the state path (same campaign).** `procedure_loss_*` (runway-scale
   hinge² on truth-gated rows, `ProcedureMultipliers` fixed or dual-ascended on the violation
   rate) is kept as an option with the weights at 0. Dual ascent toward `epsilon=0.05` diverged

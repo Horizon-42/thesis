@@ -298,6 +298,59 @@ class _PiecewiseRolloutAdjoint(torch.autograd.Function):
         )
 
 
+RawCommandHook = Callable[[torch.Tensor, torch.Tensor, torch.Tensor, int], torch.Tensor]
+
+
+def rollout_piecewise_constant_hooked_with_step(
+    initial_states: torch.Tensor,
+    controls: torch.Tensor,
+    segment_durations_s: torch.Tensor,
+    aero_params: torch.Tensor,
+    step_context: torch.Tensor,
+    step_function: RolloutStep,
+    command_hook: RawCommandHook,
+    *,
+    integrator_dt_s: float = 0.5,
+    max_steps_per_segment: int = 4096,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Segment endpoints when a hook may rewrite each segment's command from the state.
+
+    ``command_hook(state, command, duration_s, segment_index)`` sees the backend state
+    ``[B,S]`` at the start of the segment, the segment's command and its hold ``[B]``
+    (seconds), and returns the command ``[B,C]`` actually flown. Each
+    segment is then integrated by :func:`rollout_piecewise_constant_with_step` on its own,
+    so the per-segment discrete adjoint stays exact while the hook's dependence on the
+    state is ordinary autograd across segments. The control contract is unchanged —
+    piecewise constant per segment — and the second return value is the effective
+    schedule ``[B,N,C]`` a record must carry instead of the network's commands.
+    """
+    if controls.ndim != 3 or segment_durations_s.shape != controls.shape[:2]:
+        raise ValueError("controls must be [B,N,C] and durations must be [B,N]")
+    state = initial_states
+    endpoints: list[torch.Tensor] = []
+    effective: list[torch.Tensor] = []
+    for segment in range(controls.shape[1]):
+        command = command_hook(
+            state, controls[:, segment], segment_durations_s[:, segment], segment
+        )
+        if command.shape != controls[:, segment].shape:
+            raise ValueError("a command hook must return a [B,C] command")
+        endpoint = rollout_piecewise_constant_with_step(
+            state,
+            command.unsqueeze(1),
+            segment_durations_s[:, segment : segment + 1],
+            aero_params,
+            step_context,
+            step_function,
+            integrator_dt_s=integrator_dt_s,
+            max_steps_per_segment=max_steps_per_segment,
+        )
+        state = endpoint[:, 0]
+        endpoints.append(state)
+        effective.append(command)
+    return torch.stack(endpoints, dim=1), torch.stack(effective, dim=1)
+
+
 def rollout_piecewise_constant_with_step(
     initial_states: torch.Tensor,
     controls: torch.Tensor,

@@ -44,8 +44,8 @@ def _config() -> TSConfig:
 class _DurationBackend:
     """Stand-in whose endpoint position is just cumulative time, so the CLOCK is visible."""
 
-    def endpoint_rollout(self, inputs, config):
-        del config
+    def endpoint_rollout(self, inputs, config, *, command_hook=None):
+        del config, command_hook
         position = inputs.segment_durations_s.cumsum(dim=1)
         channels = torch.stack(
             (
@@ -58,7 +58,7 @@ class _DurationBackend:
             ),
             dim=-1,
         )
-        return SimpleNamespace(channels=channels, geodetic_states=channels)
+        return SimpleNamespace(channels=channels, geodetic_states=channels, controls=inputs.controls)
 
 
 def test_predicted_terminal_clock_attaches_deployable_endpoints_and_gradients(monkeypatch):

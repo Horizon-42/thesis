@@ -38,7 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 # Same bootstrap as 4dTrajectory/optimization/*.py: the repo root for the shared packages
@@ -77,7 +77,11 @@ from config import (  # noqa: E402
     CONTROL_TERMINAL_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
+    CONTROL_HOOKS,
+    CONTROL_HOOK_FIELDS,
+    CONTROL_HOOK_OFF,
     CORRIDOR_GATES,
+    HOOK_SATURATIONS,
     MODELS,
     PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
@@ -675,7 +679,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         # exists to have its time constants swept, so pinning them would defeat it.
         runtime_fields = {"control_recipe_name", "seed", "split_seed", "device", "notes"}
         # …and the final-approach penalty, which every recipe leaves open.
-        open_fields = set(PROCEDURE_LOSS_FIELDS) | (
+        open_fields = set(PROCEDURE_LOSS_FIELDS) | set(CONTROL_HOOK_FIELDS) | (
             set(TIME_CONSTANT_FIELDS)
             if requested_recipe == CONTROL_RECIPE_SIMPLE_V1_LAG
             else set()
@@ -877,6 +881,16 @@ def main(argv: list[str] | None = None) -> int:
         "--no-truncate",
         action="store_true",
         help="keep full/window forecasts past closest threshold approach",
+    )
+    p_predict.add_argument(
+        "--command-hook", choices=[hook for hook in CONTROL_HOOKS if hook != CONTROL_HOOK_OFF],
+        default=None, metavar="HOOK",
+        help="run the control rollout through this command hook at prediction time "
+             "(the inference-only arms); the checkpoint's own hook applies otherwise",
+    )
+    p_predict.add_argument(
+        "--hook-saturation", choices=HOOK_SATURATIONS, default=None,
+        help="with --command-hook: soft (tanh / softplus) or hard (clamp) saturation",
     )
     p_predict.add_argument(
         "--project-final", choices=CORRIDOR_GATES, default=None, metavar="GATE",
@@ -1182,6 +1196,17 @@ def main(argv: list[str] | None = None) -> int:
         )
     flights = [indexed[key] for key in split_keys]
     series, _build_report = _build_series_or_exit(args, config, parser, flights)
+    if args.command_hook is not None:
+        if args.hook_saturation is None:
+            parser.error("--command-hook needs --hook-saturation")
+        config = replace(
+            config,
+            control_command_hook=args.command_hook,
+            control_hook_saturation=args.hook_saturation,
+        )
+        print(f"  command hook at prediction time: {args.command_hook} ({args.hook_saturation})")
+    elif args.hook_saturation is not None:
+        parser.error("--hook-saturation needs --command-hook")
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, flight_metrics = [], []

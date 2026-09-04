@@ -10,6 +10,7 @@ from __future__ import annotations
 import torch
 
 from config import TSConfig
+from control.dynamics.hooks import CommandHook
 from control.dynamics.backends import (
     DenseControlRolloutChannels,
     EndpointControlRollout,
@@ -48,10 +49,18 @@ def rollout_control_endpoints(
     segment_durations_s: torch.Tensor,
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
+    *,
+    command_hook: CommandHook | None = None,
 ) -> EndpointControlRollout:
-    """Roll a batch to every control boundary using the configured dynamics."""
+    """Roll a batch to every control boundary using the configured dynamics.
+
+    ``command_hook`` (``control.dynamics.hooks``) may rewrite each segment's command from
+    the state at its start; the result's ``controls`` is then the schedule flown.
+    """
     return control_dynamics_backend(config).endpoint_rollout(
-        rollout_inputs(controls, segment_durations_s, dynamics), config
+        rollout_inputs(controls, segment_durations_s, dynamics),
+        config,
+        command_hook=command_hook,
     )
 
 
@@ -64,6 +73,7 @@ def rollout_control_dense(
     config: TSConfig,
     *,
     segment_valid: torch.Tensor | None = None,
+    command_hook: CommandHook | None = None,
 ) -> DenseControlRolloutChannels:
     """Roll a batch once and return exact states at queries and control boundaries."""
     device = controls.device
@@ -77,4 +87,5 @@ def rollout_control_dense(
             if segment_valid is None
             else segment_valid.to(device=device, dtype=torch.bool)
         ),
+        command_hook=command_hook,
     )

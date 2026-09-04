@@ -41,6 +41,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from config import (
+    CONTROL_HOOK_FIELDS,
     PROCEDURE_LOSS_FIELDS,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
@@ -167,6 +168,7 @@ META_FIELDS = (
     "control_gradient_clip_norm",
     "control_gradient_clip_policy",
     "control_rollout_integrator_dt_s",
+    *CONTROL_HOOK_FIELDS,
 )
 
 _TAU_FIELDS = (
@@ -224,6 +226,16 @@ _ABBREV = {
     "control_gradient_clip_norm": "grad-clip",
     "control_gradient_clip_policy": "grad-clip-policy",
     "control_rollout_integrator_dt_s": "rollout-dt",
+    "control_command_hook": "hook",
+    "control_hook_gate": "hook-gate",
+    "control_hook_saturation": "hook-sat",
+    "control_barrier_alpha": "barrier-alpha",
+    "control_barrier_heading_gain": "barrier-gain",
+    "control_nominal_l1_distance_m": "l1",
+    "control_nominal_vertical_lookahead_m": "vert-look",
+    "control_nominal_vertical_gain": "vert-gain",
+    "control_nominal_residual_bank_max_rad": "res-bank",
+    "control_nominal_residual_load_max": "res-load",
 }
 
 #: Split prefixes shared by every category-label producer (publisher, pipeline,

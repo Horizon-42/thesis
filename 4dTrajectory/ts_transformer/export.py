@@ -149,6 +149,8 @@ def build_prediction_record(
         # The inference-time corridor projection (forecast.project_onto_final), by gate;
         # None means the states are the model's own output.
         "projectedOntoFinal": forecast.projected_onto_final,
+        # The rollout command hook the states were flown with (``hook/saturation``), or None.
+        "commandHook": forecast.command_hook,
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,
