@@ -4,6 +4,28 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-06 — Barrier filter v2: lag-aware, evaluated at the lead position, load-coordinated (after the first campaign's predict-only readout)
+
+The first campaign's predict-only arms (hard / soft barrier on the `simple-v3` baseline, KRDU)
+did on straight-ins what the penalty could not — lateral violation rows 35.5 → 1.6 %, endpoint
+|xt| p95 1821 → 56 m, FDE median 703 → 492 m, ADE unchanged — but 40–49 vectored flights lost
+more than 1 km of FDE (worst +14 km). Traced on the worst flight: the rate-only heading rule
+(`ψ̇ = β·excess`) on 7 s holds with a 2 s bank actuator commanded +28° for two holds, then −29°
+(a limit cycle), and because only the bank was changed the vertical lift component `n cos μ`
+the network had paired with its load factor was lost — path angle −1° → −10°, 93 → 200 m/s,
+16 km past the threshold. v2 (`control/constraints/barrier_filter.py`): the heading layer asks
+for a heading CHANGE over the hold and credits the bank the actuator is already in
+(`Δψ ≈ g/V_h·[tan μ_c (Δt − τ_eff) + tan μ_0 τ_eff]`, `τ_eff = τ(1 − e^{−Δt/τ})`, inverted for
+`μ_c`); the corridor margins are evaluated where the aircraft will be when the command bites
+(current velocity carried for `τ_eff`); the load factor is re-coordinated, `n' = n cos μ /
+cos μ'`; the heading-gain default drops 0.3 → 0.1 (with the lag credit, `βΔt = 1` meant "close
+the whole excess in one hold", 45° of bank for a 30° error). `RunwayAxesView` gains `hold_s`;
+diagnostics gain `hook_load_change`. Tests: the lag credit and the lift invariant, and the
+first campaign's worst entry replayed through the lagged rollout (capture in the first holds,
+≤ 15° after, corridor bounce ≤ 120 m, path angle within [−4.5°, −1°], speed within 5 % of
+the unfiltered rollout). The F arms rerun as `control_hooks_v2_20260906`
+(`docs/experiments/control_hooks_v2_arms.json`); the nominal-law hook is unchanged.
+
 ### 2026-09-06 — Command hooks on the control rollout: barrier filter and nominal law + bounded residual (implemented; campaign `control_hooks_20260906`)
 
 The control path's own constraint mechanism, per `docs/2026-09-05_control_constraint_design.zh.md`

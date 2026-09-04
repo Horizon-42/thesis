@@ -1,0 +1,42 @@
+{
+ "_comment": "Barrier v2 rerun of the F arms (lag-aware heading barrier crediting the bank actuator state, corridor margins at the lag-lead position, load factor re-coordinated to keep n*cos(mu), heading gain default 0.1; the baseline checkpoint predates the hook fields, so the predict-only arms run at today's defaults and the effective values are in each prediction directory's summary.json): the first campaign (control_hooks_20260906, commit cd981f4) showed the rate-only barrier limit-cycling on 7 s holds and stealing the vertical lift the network had paired with its bank. Same pairing as before (control_procedure_20260905/A_control_v3, same manifest, roster, split seed). R_nominal_residual is unchanged by v2: at KRDU its first-campaign arm directories are copied into this campaign (the runner skips completed steps; their experiment manifest names commit cd981f4), at KSJC it is trained here. P1 of docs/2026-09-05_control_constraint_design.zh.md: the two command hooks on the control rollout (simple-v3, openap-direct cohort, one seed, KRDU + KSJC), paired with the fresh simple-v3 baseline of control_procedure_20260905 (same manifest, roster, split seed). Pre-registered readings: corridor-violation rate on truth-established rows should fall on the F/R arms without the vectored-ADE cost the penalty paid (endpoint gain kept, path middle not pushed); the hook epoch record's gated / clamped (saturated) shares are the 'lazy network' diagnostic (clamped > 20 % with bank skill below baseline minus seed noise vetoes an arm; residual saturation > 30 % reads as the nominal law fighting the data); R vs F on flights whose first on-final row is outside the corridor = the design's 'recovery' question (compare_constraint_arms.py's outside@gate / recovered columns). Same claimed_* caveat as the penalty campaign; compare within control campaigns only.",
+ "base_recipe": "simple-v3",
+ "arms": [
+  {
+   "key": "F_barrier_infer",
+   "label": "baseline + hard barrier filter at prediction time",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/control_procedure_20260905/A_control_v3/checkpoint.pt",
+   "predict_args": [
+    "--command-hook",
+    "barrier",
+    "--hook-saturation",
+    "hard"
+   ]
+  },
+  {
+   "key": "F_barrier_infer_soft",
+   "label": "baseline + soft barrier filter at prediction time",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/control_procedure_20260905/A_control_v3/checkpoint.pt",
+   "predict_args": [
+    "--command-hook",
+    "barrier",
+    "--hook-saturation",
+    "soft"
+   ]
+  },
+  {
+   "key": "F_barrier_soft",
+   "label": "simple-v3 trained through the soft barrier filter",
+   "overrides": {
+    "control_command_hook": "barrier"
+   }
+  },
+  {
+   "key": "R_nominal_residual",
+   "label": "simple-v3 trained through the nominal law + bounded residual",
+   "overrides": {
+    "control_command_hook": "nominal-residual"
+   }
+  }
+ ]
+}

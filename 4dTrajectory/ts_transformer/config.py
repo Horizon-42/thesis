@@ -777,7 +777,7 @@ class TSConfig:
     # corridor edge is α × the remaining margin) and the heading gain that turns a heading
     # error outside the admissible interval into a turn-rate demand (1/s).
     control_barrier_alpha: float = 0.1
-    control_barrier_heading_gain: float = 0.3
+    control_barrier_heading_gain: float = 0.1
     # Nominal law + residual: L1 lateral lookahead, the vertical lookahead and gain of the
     # glidepath law, and the residual bounds around the nominal command.
     control_nominal_l1_distance_m: float = 3000.0

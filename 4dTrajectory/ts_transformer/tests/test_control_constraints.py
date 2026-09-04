@@ -47,7 +47,7 @@ HOLD_S = 5.0   # about the deployed hold: 64 segments over a p50 328 s arrival
 
 
 def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0, psi_rwy=0.0,
-          vertical_speed=None, hold_s=HOLD_S) -> RolloutStateView:
+          vertical_speed=None, hold_s=HOLD_S, bank_now_rad=0.0) -> RolloutStateView:
     """A chart state (runway course psi_rwy) at ``d`` back, ``xt`` right, on the final."""
     d, xt = torch.as_tensor(d_m, dtype=torch.float64), torch.as_tensor(xt_m, dtype=torch.float64)
     ue, un = math.cos(psi_rwy), math.sin(psi_rwy)
@@ -57,8 +57,10 @@ def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0
     vu = torch.full_like(d, -speed * TAN_GPA if vertical_speed is None else vertical_speed)
     chart = torch.stack([e, n, u, torch.full_like(d, speed * math.cos(heading)),
                          torch.full_like(d, speed * math.sin(heading)), vu, torch.full_like(d, 66000.0)], dim=-1)
-    return RolloutStateView(chart=chart, actuators=torch.zeros(len(d), 3, dtype=torch.float64),
-                            duration_s=torch.full_like(d, hold_s))
+    # Actuators being flown: trim thrust, the given bank, a level-flight load factor (the
+    # barrier reads the lift factor n·cos μ from here — zeros would halve every bound).
+    actuators = torch.tensor([[0.1, bank_now_rad, 1.0]], dtype=torch.float64).expand(len(d), -1).clone()
+    return RolloutStateView(chart=chart, actuators=actuators, duration_s=torch.full_like(d, hold_s))
 
 
 def _context(batch: int) -> dict[str, torch.Tensor]:
@@ -135,6 +137,62 @@ def test_barrier_filter_leaves_a_centred_aligned_command_alone_and_bounds_a_dive
     # Clamped: the two diverging rows lifted to the demand and the three outside rows; the
     # minute-long hold's demand (~0.5°) sits at the "active" threshold and may not count.
     assert diagnostics["hook_steps"] == 12.0 and diagnostics["hook_clamped_steps"] >= 5.0
+
+
+def test_barrier_filter_credits_the_bank_already_flown_and_keeps_the_vertical_lift():
+    """Same state, same command; the aircraft already banked 25° left toward the interval
+    needs less from the command than one flying wings level (the lag credit), and whatever
+    bank the filter sets, the load factor keeps n·cos μ the network asked for."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER)
+    hook = BarrierFilter(config, _context(1), hard=True)
+    d = torch.tensor([17_000.0], dtype=torch.float64)
+    edge = fag.K_MARGIN * fag.corridor_halfwidth(d) - 70.0
+    command = _command([math.radians(7.0)], load=1.06)
+    level = hook(_view(d.tolist(), edge.tolist(), heading_error_rad=-math.radians(30.0), speed=93.0, hold_s=7.0), command, 0)
+    banked = hook(_view(d.tolist(), edge.tolist(), heading_error_rad=-math.radians(30.0), speed=93.0, hold_s=7.0,
+                        bank_now_rad=math.radians(25.0)), command, 1)
+    assert float(level[0, 1]) > math.radians(7.0)                  # the network's 7° is not enough
+    assert float(banked[0, 1]) < float(level[0, 1])                 # the turn already under way counts
+    for out in (level, banked):
+        assert float(out[0, 2] * math.cos(float(out[0, 1]))) == pytest.approx(1.06 * math.cos(math.radians(7.0)), rel=1e-9)
+    assert hook.diagnostics()["hook_load_change"] > 0.0
+
+
+def test_barrier_filter_does_not_limit_cycle_through_the_lagged_rollout():
+    """The first campaign's worst flight: joining the final 70 m inside the right edge at
+    17 km, heading 25° right of the course, 7 s holds, τ_bank = 2 s, the network still
+    banking +7° for three holds then wings level. The rate-only rule flipped +28° → −29° and
+    steepened the path to 200 m/s; the lag-aware, load-coordinated rule must capture the
+    heading in the first holds and then be quiet: no bank beyond 15° after the capture, the
+    corridor kept, the glidepath kept, the speed kept."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER)
+    d0, speed = 17_000.0, 93.0
+    edge = fag.K_MARGIN * fag.corridor_halfwidth(torch.tensor([d0], dtype=torch.float64))[0].item() - 70.0
+    dynamics, controls, durations = _final_batch(config, xt_m=edge, d_m=d0, segments=26, speed=speed,
+                                                 heading_error_rad=-math.radians(25.0))
+    network = controls.detach().clone()
+    network[:, :3, 1] = math.radians(7.0)
+    hook = build_command_hook(config.__class__(**{**config.to_dict(), "control_hook_saturation": HOOK_SATURATION_HARD}), dynamics)
+    rollout = control_rollout.rollout_control_endpoints(network, durations, dynamics, config, command_hook=hook)
+    psi = dynamics["runway_heading_rad"].to(rollout.channels.dtype)
+    d_h, xt_h = fag.runway_axes(rollout.channels[..., 0], rollout.channels[..., 1], psi)
+    last = int(_last_approach_index(d_h)[0])
+    bank = rollout.controls[0, : last + 1, 1]
+    assert float(bank[0]) > math.radians(20.0)                          # the capture: a real turn
+    assert float(bank[2:].abs().max()) < math.radians(15.0), [round(math.degrees(b), 1) for b in bank.tolist()]
+    bound = fag.K_MARGIN * fag.corridor_halfwidth(d_h)
+    # Once captured the path may still bounce between the edges (a hold plus the lag makes
+    # each correction about one hold late), but never by more than a hold's drift.
+    assert torch.all((xt_h.abs() <= bound + 120.0)[0, 3 : last + 1]), (xt_h[0] - bound[0]).tolist()
+    # Vertical: the fixture flies open loop (a trim load, no glidepath law), so the check is
+    # that the coordinated load leaves the path angle and the speed alone — the rate-only
+    # rule steepened this entry from −3° to −10° and doubled the speed.
+    speeds = torch.hypot(rollout.channels[0, :, 3], rollout.channels[0, :, 4])
+    path_angle = torch.atan2(rollout.channels[0, :, 5], speeds)
+    assert torch.all(path_angle[: last + 1] > -math.radians(4.5)) and torch.all(path_angle[: last + 1] < 0.0)
+    plain = control_rollout.rollout_control_endpoints(network, durations, dynamics, config)
+    speeds_plain = torch.hypot(plain.channels[0, :, 3], plain.channels[0, :, 4])
+    assert torch.all((speeds / speeds_plain)[: last + 1] < 1.05)         # no energy stolen from the vertical
 
 
 def test_barrier_filter_soft_saturation_is_continuous_and_differentiable():
@@ -276,7 +334,8 @@ def _at(values: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
 _TRIM_THRUST = 0.1
 
 
-def _final_batch(config: TSConfig, *, xt_m: float, d_m: float, height_above_gp_m: float = 0.0, segments: int = 6):
+def _final_batch(config: TSConfig, *, xt_m: float, d_m: float, height_above_gp_m: float = 0.0, segments: int = 6,
+                 speed: float = 72.0, heading_error_rad: float = 0.0):
     """A synthetic batch whose initial state sits on the final at (d, xt, +height)."""
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9)
     series, _ = build_series(flights, config, airport=AIRPORT)
@@ -291,9 +350,8 @@ def _final_batch(config: TSConfig, *, xt_m: float, d_m: float, height_above_gp_m
     u = d_m * TAN_GPA + series[0].scenario.target.altitude - float(threshold["elevation_m"]) + height_above_gp_m
     lat, lon = frame.latlon_from_horizontal(e, n)
     alt = frame.alt0 + u
-    speed = 72.0
     for row in range(len(series)):
-        dynamics["initial_state"][row] = torch.tensor([lat, lon, alt, speed, psi, -math.radians(3.0), 66000.0], dtype=torch.float64)
+        dynamics["initial_state"][row] = torch.tensor([lat, lon, alt, speed, psi + heading_error_rad, -math.radians(3.0), 66000.0], dtype=torch.float64)
         dynamics["initial_controls"][row] = torch.tensor([_TRIM_THRUST, 0.0, math.cos(math.radians(3.0))], dtype=torch.float64)
     controls = torch.zeros((len(series), segments, 3), dtype=torch.float32)
     controls[:, :, 0], controls[:, :, 2] = _TRIM_THRUST, math.cos(math.radians(3.0))

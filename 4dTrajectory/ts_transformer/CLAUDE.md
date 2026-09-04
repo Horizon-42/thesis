@@ -108,9 +108,18 @@ Everything below is serialised into every checkpoint.
   pair — a version that acted only outside the interval clamped a centred command to zero
   bank; (4) diagnostics are per-step shares in `EpochResult.command_hook` (`gated`,
   `clamped` / `*_residual_saturated`, `bank_change_rad`), the "lazy network" reading is
-  clamped > 20 % with bank skill below baseline. Predict-time: `predict --command-hook
-  barrier --hook-saturation hard` on any lag checkpoint. Campaign
-  `docs/experiments/control_hooks_arms.json` → `control_hooks_20260906`.
+  clamped > 20 % with bank skill below baseline; (5) **a hook that changes the bank must
+  re-coordinate the load factor** (`n' = n cos μ / cos μ'`) or it steals the vertical lift the
+  network paired with its bank (v1 measured: −1° → −10° path angle, 93 → 200 m/s, 16 km past
+  the threshold on one flight), and **a rate rule on a held command with a lagged actuator
+  limit-cycles** — the barrier's heading layer therefore asks for a heading CHANGE over the
+  hold, credits the bank already flown (`state.actuators[:, 1]`) and evaluates the corridor
+  margins at the lag-lead position (v2, 2026-09-06; heading gain default 0.3 → 0.1).
+  Predict-time: `predict --command-hook barrier --hook-saturation hard` on any lag checkpoint.
+  Campaigns `docs/experiments/control_hooks_arms.json` → `control_hooks_20260906` (v1, commit
+  cd981f4; its trained `F_barrier_soft` checkpoint predates v2 and would run v2 at predict
+  time — quote its `_pred_val` records, do not re-predict it) and
+  `control_hooks_v2_arms.json` → `control_hooks_v2_20260906`.
 - **The procedure PENALTY is not the way on the state path (same campaign).** `procedure_loss_*` (runway-scale
   hinge² on truth-gated rows, `ProcedureMultipliers` fixed or dual-ascended on the violation
   rate) is kept as an option with the weights at 0. Dual ascent toward `epsilon=0.05` diverged
