@@ -4,6 +4,24 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-06 — Command-hook campaigns (KRDU v1 + v2, KSJC v2): the barrier is a predict-time safety layer, training through a hook is not
+
+Report `4dTrajectory/ts_transformer/docs/2026-09-06_control_hooks_results.zh.md`; campaigns
+`control_hooks_20260906` (v1, KRDU) and `control_hooks_v2_20260906` (KRDU + KSJC), simple-v3,
+one seed, paired against `control_procedure_20260905/A_control_v3`. The v2 soft barrier
+applied at prediction to the untouched baseline: KRDU pooled FDE 1650 → 1449 m, ADE
+1333 → 1278, FDE better on 84 % of flights, none worse by 1 km (v1: 54 such flights); KSJC
+996 → 930 m, 90 % better; straight-in endpoint |xt| p95 1821 / 407 → 70 / 46 m; vertical
+untouched. Hard saturation + hard gate is worse everywhere (the jump at the cone edge).
+Training through a hook: six trained arms (barrier v1/v2 + nominal v1/v2 at KRDU, barrier v2 +
+nominal v2 at KSJC), none beat its predict-time counterpart — pooled ADE +2…+21 %, bank skill
+below the baseline, vectored path middle worse; the pre-registered lazy veto (clamped ≥ 20 % and skill below
+baseline − seed noise) fires at KRDU. The nominal-law hook is the vertical complement (KRDU
+endpoint height above the threshold −164 → −7 m median, vertical violation rows 46.6 → 29.1 %) and revealed that
+the control baseline ends 157 / 162 m below the glidepath (median, KRDU / KSJC).
+Adopted: `predict --command-hook barrier --hook-saturation soft`. Next: the combined hook.
+Readouts (`readout.json/.txt`, `score.txt`) are in each campaign dir.
+
 ### 2026-09-06 — Nominal-law hook v2: thrust held to the unhooked rollout's speed (the third law)
 
 The first campaign's `R_nominal_residual` arm (KRDU) lost the endpoint: pooled FDE 1650 →

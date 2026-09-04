@@ -125,11 +125,24 @@ Everything below is serialised into every checkpoint.
   thrust to that rollout's speed (`control_nominal_speed_gain`, 0.1/s, capped at `1/Δt`
   like every other rate gain — uncapped it bangs between the envelope corners at 8
   segments).
-  Predict-time: `predict --command-hook barrier --hook-saturation hard` on any lag checkpoint.
-  Campaigns `docs/experiments/control_hooks_arms.json` → `control_hooks_20260906` (v1, commit
-  cd981f4; its trained `F_barrier_soft` checkpoint predates v2 and would run v2 at predict
-  time — quote its `_pred_val` records, do not re-predict it) and
-  `control_hooks_v2_arms.json` → `control_hooks_v2_20260906`.
+  Predict-time: `predict --command-hook barrier --hook-saturation soft` on any lag checkpoint
+  — **this is the adopted use (2026-09-06, `docs/2026-09-06_control_hooks_results.zh.md`)**:
+  the v2 soft barrier applied at prediction to the `simple-v3` baseline is a net gain at both
+  airports (KRDU pooled FDE 1650 → 1449 m, ADE 1333 → 1278, FDE better on 84 % of flights and
+  none worse by 1 km; KSJC 996 → 930 m, 90 % better; straight-in endpoint |xt| p95 1821/407 →
+  70/46 m), soft beats hard everywhere (the hard gate's jump at the cone edge: 10 KRDU
+  flights > 1 km worse), and **no arm trained THROUGH a hook beat its predict-time counterpart**
+  (six: barrier v1/v2 + nominal v1/v2 at KRDU, barrier v2 + nominal v2 at KSJC; pooled ADE
+  +2…+21 %, bank skill below the baseline, vectored path middle worse — the network leans on
+  the hook; the pre-registered lazy veto fires at KRDU). The nominal-law hook is the vertical
+  complement (KRDU endpoint height above the threshold −164 → −7 m median, vertical violation rows 46.6 → 29.1 %,
+  small lateral gain) and exposes a baseline fact: the control baseline ends 157 / 162 m BELOW
+  the glidepath (median, KRDU / KSJC). Next: a combined hook (barrier
+  lateral + nominal vertical) at predict time. Campaigns `docs/experiments/control_hooks_arms.json`
+  → `control_hooks_20260906` (v1, commit cd981f4; its trained `F_barrier_soft` checkpoint
+  predates v2 and would run v2 at predict time — quote its `_pred_val` records, do not
+  re-predict it) and `control_hooks_v2_arms.json` → `control_hooks_v2_20260906` (KRDU + KSJC);
+  `readout.json/.txt` + `score.txt` live in each campaign dir.
 - **The procedure PENALTY is not the way on the state path (same campaign).** `procedure_loss_*` (runway-scale
   hinge² on truth-gated rows, `ProcedureMultipliers` fixed or dual-ascended on the violation
   rate) is kept as an option with the weights at 0. Dual ascent toward `epsilon=0.05` diverged
@@ -448,6 +461,15 @@ namespace would restore the undifferentiated listing the package exists to remov
 
 ## Open items
 
+- **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
+  `control_hooks_v2_20260906` at KRDU + KSJC; report
+  `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a
+  predict-time safety layer; not adopted: any hook inside the training loop (six arms, none
+  beat its predict-time counterpart), the hard gate. Open: the combined lateral-barrier +
+  vertical-nominal hook at predict time; the baseline ending 157 / 162 m below the glidepath
+  (data or model?); a "committed to the final" gate for the vectored flights the v1 / hard
+  barrier hurt (gate opening at d < 8 km or ≥ 16 km; every bin is net positive under v2 soft); a second seed at KSJC (its −66 m FDE gain is the smaller
+  effect); PatchTST and the other three airports.
 - **Final-approach constraint campaign DONE 2026-09-04/05 (`final_constraint_20260904`, KRDU +
   KSJC, 3 predict-only + 5 trained arms per airport; report
   `docs/2026-09-05_final_constraint_results.zh.md`, readout `docs/compare_constraint_arms.py`).**
