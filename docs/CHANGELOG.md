@@ -26,8 +26,12 @@ timing): F0 1688 m → F1 1301 → F2 794 → **F3 chamfer 180 / Fréchet 1179 /
 gate passed**; F2 does not contain the trombone (its downwind runs along the anchor
 heading). On the truth path: naive 1308 (Phase 0 reproduced) → naive × truth duration
 622 → slowness knots K=2 166 / K=4 97 m; height knots K=4 30 m; combined K=4 110 m.
-P1.c's decision vector is therefore ≈14 numbers (d_join, via pose, K=4 slowness, K=4
-height). Design doc §〇 / §五 P1 updated with the plan, results and gates.
+P1.c's decision vector is therefore ≈14 numbers (d_join, the via in runway axes with
+its heading relative to the course, K=4 slowness with the duration as their integral,
+K=4 height with the terminal knot pinned to the threshold — a third review round found
+the unpinned fit landing up to 33 m below it on 28 % of flights, and the chart-frame via
+splitting one decision into four per-runway label distributions). Design doc §〇 / §五
+P1 updated with the plan, results and gates.
 
 ### 2026-09-05 — Geometric readout (P0 of the scene design): chamfer / Fréchet / arc-aligned ADE next to ADE/FDE
 
