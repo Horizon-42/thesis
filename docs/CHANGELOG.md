@@ -4,6 +4,31 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-05 — Closure decoder, P1.a / P1.b: the path family and the profile parametrisation, measured before any network
+
+Direction C of the scene design (fix the output side before the scene encoder) was
+chosen. `4dTrajectory/ts_transformer/closure_geometry.py` (new) holds the closed-form
+approach families the closure decoder will draw from — the Phase 0 rule template
+(moved out of `docs/phase0_intent_diagnostics.py`, which now imports it), a
+downwind-then-Dubins family and a via-pose Dubins family — with the vertical profile,
+the truth / naive timings and per-flight fits; `closure_profile.py` (new) parametrises
+speed as piecewise-linear SLOWNESS over progress (time is linear in the knots, the fit a
+bounded linear least squares) and height as knots; `docs/p1_closure_oracle.py
+geometry|speed` runs the two oracles on the reference arm's flights (post-anchor
+supervision truth). Two opus review rounds shaped the fits: the objective is the
+order-preserving arc-aligned horizontal error (chamfer let detours through), F3 is
+multi-start and seeded from F1/F2 (the fitted residuals nest), and the labels are
+canonicalised — the join at the localizer entry (a straight along the localizer made
+d_join unidentifiable), the via as the earliest pose along the fitted path that still
+reproduces it (identifiable: two best starts within 3 m median) — with `canonical:
+False` kept on the 4 % of looping fits. Results at KRDU (497 vectored flights, truth
+timing): F0 1688 m → F1 1301 → F2 794 → **F3 chamfer 180 / Fréchet 1179 / ADE 510 m,
+gate passed**; F2 does not contain the trombone (its downwind runs along the anchor
+heading). On the truth path: naive 1308 (Phase 0 reproduced) → naive × truth duration
+622 → slowness knots K=2 166 / K=4 97 m; height knots K=4 30 m; combined K=4 110 m.
+P1.c's decision vector is therefore ≈14 numbers (d_join, via pose, K=4 slowness, K=4
+height). Design doc §〇 / §五 P1 updated with the plan, results and gates.
+
 ### 2026-09-05 — Geometric readout (P0 of the scene design): chamfer / Fréchet / arc-aligned ADE next to ADE/FDE
 
 `4dTrajectory/ts_transformer/geometric_metrics.py` (new; `tests/test_geometric_metrics.py`,

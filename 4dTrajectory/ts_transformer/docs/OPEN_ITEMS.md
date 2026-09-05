@@ -23,8 +23,13 @@ Newest campaigns first, long-standing scope limits last.
   improves vectored geometry (KRDU chamfer 942 → 886 on 81 % of flights). The state output's
   saw-tooth polyline (heading reversals at ~50 % of nodes, length ratio ≈ 2) takes it out
   of the arc family (chamfer / Fréchet still read) — a finding about the state export, not
-  yet acted on. Not started: P1 (direction C), P2 data plane, any scene
-  encoder.
+  yet acted on. **Direction C chosen; P1.a / P1.b DONE 2026-09-05** (`closure_geometry.py`,
+  `closure_profile.py`, `docs/p1_closure_oracle.py`; artifacts `closure_p1_20260905/`):
+  the via-pose Dubins family (F3) fitted to the truth reaches vectored chamfer p50 180 m /
+  Fréchet 1179 / truth-timed ADE 510 m (gate passed), with identifiable canonical labels
+  on 96 % of fitted flights; on the truth path a K=4 slowness + K=4 height profile
+  reaches 110 m. Next: P1.c, the `closure` prediction output regressing ≈14 decision
+  numbers from those labels. Not started: P2 data plane, any scene encoder.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report
   `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a
