@@ -16,7 +16,8 @@ import numpy as np
 import torch
 
 from batch_contract import anchor_state
-from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, TSConfig, uses_control_dynamics
+from closure_output import probe_closure_context
+from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, TSConfig, uses_closure_labels, uses_control_dynamics
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from models import build_model
 from prediction_outputs import ControlPrediction
@@ -101,6 +102,8 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
         dense_supervision = None
         if config.uses_final_approach_context:
             dynamics = probe_final_approach(batch_size, device)
+        if uses_closure_labels(config.prediction_output):
+            dynamics = probe_closure_context(batch_size, device, config)
         if uses_control_dynamics(config.prediction_output):
             dynamics = probe_dynamics(batch_size, device)
             if config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:

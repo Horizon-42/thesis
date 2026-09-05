@@ -52,6 +52,7 @@ from evaluation_export import (  # noqa: E402
     summary_row,
 )
 
+from config import PREDICTION_CLOSURE
 from approach_difficulty import (  # noqa: E402
     approach_difficulty, difficulty_block,
 )
@@ -151,6 +152,11 @@ def build_prediction_record(
         "projectedOntoFinal": forecast.projected_onto_final,
         # The rollout command hook the states were flown with (``hook/saturation``), or None.
         "commandHook": forecast.command_hook,
+        # Closure output: the construction that drew the path (via-Dubins or a fallback)
+        # and whether it was drawn from the flight's label (the oracle arm).
+        **({"closureConstruction": forecast.closure_construction,
+            "closureFromLabels": forecast.closure_from_labels}
+           if forecast.prediction_output == PREDICTION_CLOSURE else {}),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,

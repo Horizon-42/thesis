@@ -4,6 +4,39 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-05 — Closure decoder, P1.c-1/2: the `closure` prediction output and its labels
+
+The third `prediction_output`. `closure_output.py` (new): `ClosurePrediction` (a 14-number
+decision vector — join distance, via pose in runway axes as (d, xt, cos Δψ, sin Δψ), K=4
+slowness knots whose integral is the duration, K=4 height knots with the threshold pinned
+to 0), `ClosureOutputModel` (the backbone's tokens → MLP → the bounded vector: sigmoid /
+tanh at the family's own reach, a softened unit vector for the heading), `fit_labels` (the
+per-flight label from the truth: the canonical F3 geometry, both profile widths with
+residuals, `valid` = canonical and within the 1 km cap, the difficulty covariates),
+`closure_loss_components` (L1 per group over the valid flights; state = geometry,
+final_time = slowness in seconds at a 60 s scale — measured at init the three groups then
+sit within a factor of two — kinematic = height, terminal = 0), `reconstruct` /
+`replay_batch` (the drawn trajectory: via-Dubins, else the plain CSC, else the straight
+line, each recorded as `source.closureConstruction`). Wired through `config.py`
+(`PREDICTION_CLOSURE`, the six `closure_*` fields, the locks: ENU chart, normalized horizon,
+objective checkpoint selection, no random anchors, knot widths ∈ (4, 8)), `train.py`
+(`closure-v1-slowness4-height4` target contract, loss registry, a replay branch that keeps
+the reconstruction's exact velocities; `LossComponents` moved to `batch_contract` so the
+loss side never imports the loop), `models.py`, `dataset.py` (the labels as the batch
+context — a file covering no flight is refused, the covered share is printed),
+`batching.py`, `forecast.py` (`closure_forecast`, `forecast_closure_from_labels` = the
+oracle arm, `source.closureFromLabels`), `run_naming.py` (`closed-form`, `closure-v1`, the
+labels file name in the run name), `anchor_eligibility.py`, `__main__.py`
+(`--closure-labels`, `predict --closure-from-labels`), `export.py`; scipy joins
+`requirements.txt`. `docs/p1_closure_oracle.py labels` writes a cohort's labels
+(`closure-labels-v2`; KRDU: 9720 flights, 96.8 % valid). `tests/test_closure_output.py`
+(6 tests) runs a whole train → checkpoint → forecast → export → evaluate chain. Review
+(opus): the wiring script had applied every hunk 2–3× (the labels file was parsed twice
+per dataset) — restored and re-applied once; the other findings (oracle provenance,
+zero-coverage training to a perfect loss, unbounded head, 20× loss-scale gap, schema
+bump, run-name identity) are the changes above. Arms for the campaign:
+`docs/experiments/closure_p1c_arms.json` (C_pred, C_truth_intent, C_oracle).
+
 ### 2026-09-05 — Closure decoder, P1.a / P1.b: the path family and the profile parametrisation, measured before any network
 
 Direction C of the scene design (fix the output side before the scene encoder) was

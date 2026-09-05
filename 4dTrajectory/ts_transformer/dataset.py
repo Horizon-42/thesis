@@ -75,6 +75,7 @@ from anchor_eligibility import (
 )
 from config import (
     AIRCRAFT_FILTER_OPENAP_DIRECT,
+    uses_closure_labels,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CORRIDOR_GATE_FAF,
     DEFAULT_AIRCRAFT_TYPE,
@@ -1360,6 +1361,23 @@ class TrajectoryWindows(Dataset, ABC):
             if config.uses_final_approach_context
             else None
         )
+        # The closure output's per-flight labels (never a model input): the decision
+        # vector, its validity, the label's path length and the runway course, from the
+        # config's labels file. Imported here because closure_output reaches this module
+        # through the arc-length geometry.
+        self.closure = None
+        if uses_closure_labels(config.prediction_output):
+            from closure_output import CONTEXT_VALID, label_context, load_labels
+            labels = load_labels(config.closure_labels_path)
+            self.closure = [label_context(s, labels, config) for s in self.series]
+            covered = sum(int(row[CONTEXT_VALID]) for row in self.closure)
+            if self.series and covered == 0:
+                raise ValueError(
+                    f"{config.closure_labels_path} carries a valid label for none of these "
+                    f"{len(self.series)} flights — another cohort's labels?"
+                )
+            print(f"  closure labels: {covered} of {len(self.series)} flights valid "
+                  f"({covered / max(len(self.series), 1):.1%}); the rest are in the batch, out of the loss")
         # Public diagnostic for normalized-time experiments. Actual query times come from
         # the shared clock below, which also defines fixed-time loss and inference timing.
         self.progress = (
@@ -1574,6 +1592,11 @@ class TrajectoryWindows(Dataset, ABC):
             torch.from_numpy(np.asarray(final_time_s)),
             torch.from_numpy(np.asarray(flight_weight)),
         )
+        if self.closure is not None:
+            return (*result, {
+                key: torch.from_numpy(np.asarray(value))
+                for key, value in self.closure[self.index[i][0]].items()
+            })
         if not uses_control_dynamics(self.config.prediction_output):
             return result
         dynamics = {
@@ -1620,6 +1643,8 @@ class TrajectoryWindows(Dataset, ABC):
         # keys), or the final-approach keys alone for a state recipe that needs them.
         if uses_control_dynamics(self.config.prediction_output):
             context_rows = [self._dynamics_arrays(int(index)) for index in indices]
+        elif self.closure is not None:
+            context_rows = [self.closure[self.index[int(index)][0]] for index in indices]
         elif self.final_approach is not None:
             context_rows = [self.final_approach[self.index[int(index)][0]] for index in indices]
         else:

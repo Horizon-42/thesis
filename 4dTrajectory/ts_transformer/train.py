@@ -47,6 +47,7 @@ from config import (
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
+    PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     PREDICTION_STATE,
     TSConfig,
@@ -100,9 +101,14 @@ from metrics import (
 )
 from final_approach_geometry import corridor_violations, runway_axes, truth_final_gate
 from models import build_model, parameter_count, resolve_device
-from batch_contract import anchor_state, model_forward, unpack_batch
+from batch_contract import LossComponents, anchor_state, model_forward, unpack_batch
 from control.envelope import CONTROL_HALF_WIDTH
 from prediction_outputs import ControlPrediction, StatePrediction
+from closure_output import (
+    ClosurePrediction,
+    closure_loss_components,
+    replay_batch as closure_replay_batch,
+)
 from time_grids import batch_time_grid, numpy_inference_time_grid
 from training_performance import EpochProfiler
 
@@ -121,6 +127,10 @@ STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal", "p
 CONTROL_LOSS_COMPONENT_NAMES = (
     "state", "final_time", "kinematic", "terminal", "control_effort", "control_smoothness"
 )
+# The closure output's regression groups wear the four fixed names (LossComponents
+# always emits them): state = geometry, final_time = slowness in seconds, kinematic =
+# height, terminal = 0.
+CLOSURE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
 CONTROL_TARGET_CONTRACTS = {
     (
         CONTROL_DURATION_FACTORIZED,
@@ -162,6 +172,13 @@ CONTROL_TARGET_CONTRACTS = {
 def target_contract(config: TSConfig) -> str:
     if config.prediction_output == PREDICTION_STATE:
         return STATE_TARGET_CONTRACTS[config.horizon_mode]
+    if config.prediction_output == PREDICTION_CLOSURE:
+        # The decision vector's shape IS the contract: a different knot count is a
+        # different head, and a checkpoint of one must not load into the other.
+        return (
+            f"closure-v1-slowness{config.closure_slowness_knots}"
+            f"-height{config.closure_height_knots}"
+        )
     base = CONTROL_TARGET_CONTRACTS[
         (
             config.control_duration_parameterization,
@@ -212,6 +229,8 @@ def target_contract(config: TSConfig) -> str:
 def loss_component_names(config: TSConfig) -> tuple[str, ...]:
     if config.prediction_output == PREDICTION_STATE:
         return STATE_LOSS_COMPONENT_NAMES
+    if config.prediction_output == PREDICTION_CLOSURE:
+        return CLOSURE_LOSS_COMPONENT_NAMES
     names = CONTROL_LOSS_COMPONENT_NAMES
     arc_velocity_extensions = {
         CONTROL_ARC_LOCAL_VELOCITY_VECTOR: (
@@ -365,36 +384,6 @@ def masked_mse(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
     error = (predicted - target) ** 2 * mask
     denominator = mask.sum()
     return error.sum() / denominator.clamp(min=1.0)
-
-
-@dataclass(frozen=True)
-class LossComponents:
-    """Weighted scalar contributions whose sum is the optimization objective."""
-
-    state: torch.Tensor
-    final_time: torch.Tensor
-    kinematic: torch.Tensor
-    terminal: torch.Tensor
-    extras: dict[str, torch.Tensor] = field(default_factory=dict)
-    # Batch-level COUNTS that are not part of the objective (the procedure penalty's gated
-    # rows and violations, which the dual update turns into a rate over the epoch).
-    diagnostics: dict[str, torch.Tensor] = field(default_factory=dict)
-
-    @property
-    def total(self) -> torch.Tensor:
-        return (
-            self.state + self.final_time + self.kinematic + self.terminal
-            + sum(self.extras.values(), self.state.new_zeros(()))
-        )
-
-    def tensors(self) -> dict[str, torch.Tensor]:
-        return {
-            "state": self.state,
-            "final_time": self.final_time,
-            "kinematic": self.kinematic,
-            "terminal": self.terminal,
-            **self.extras,
-        }
 
 
 @dataclass(frozen=True)
@@ -1095,6 +1084,7 @@ PredictionLossHandler = Callable[..., LossComponents]
 PREDICTION_LOSS_HANDLERS: dict[type, PredictionLossHandler] = {
     StatePrediction: state_prediction_loss_components,
     ControlPrediction: _control_loss_adapter,
+    ClosurePrediction: closure_loss_components,
 }
 
 
@@ -1286,6 +1276,18 @@ def _prediction_batch_replay(
             (len(x), points),
         ).copy()
         predicted_time_s = deployable.final_time_s.detach().cpu().numpy()
+    elif isinstance(output, ClosurePrediction):
+        # Drawn, not rolled out: every decision reconstructed in numpy and sampled on the
+        # target grid's fractions of its own duration (the context carries the course).
+        if dynamics is None:
+            raise ValueError("closure replay requires the per-flight label context")
+        anchors_physical = dataset.normalizer.decode(
+            anchor_state(x, len(dataset.config.channels))
+            .detach().cpu().numpy().astype(np.float64)
+        )
+        predicted_physical, segment_durations_s, predicted_time_s = closure_replay_batch(
+            output, anchors_physical, dynamics, dataset.config, dataset.config.pred_len
+        )
     else:
         if not isinstance(output, StatePrediction):
             raise TypeError("state replay requires StatePrediction")
@@ -1307,7 +1309,9 @@ def _prediction_batch_replay(
         anchor_state(x, len(dataset.config.channels))
         .detach().cpu().numpy().astype(np.float64)
     ).astype(np.float32)
-    if not uses_control_dynamics(dataset.config.prediction_output):
+    if dataset.config.prediction_output == PREDICTION_STATE:
+        # The state output predicts positions + duration only; the control rollout and
+        # the closure reconstruction both carry exact velocities.
         predicted_physical = states_with_derived_velocity(
             anchors,
             predicted_physical,

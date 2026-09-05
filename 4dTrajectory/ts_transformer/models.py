@@ -25,10 +25,12 @@ import torch.nn as nn
 from config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
+    PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     PREDICTION_STATE,
     TSConfig,
 )
+from closure_output import ClosureOutputModel
 from control.heads import ControlOutputModel
 from prediction_outputs import StateOutputLayer
 from control.duration import UniformDurationControlOutputModel
@@ -167,9 +169,15 @@ def _build_control_output(config: TSConfig, normalizer: Normalizer | None) -> nn
     )
 
 
+def _build_closure_output(config: TSConfig, normalizer: Normalizer | None) -> nn.Module:
+    del normalizer  # the decision vector is regressed in physical units
+    return ClosureOutputModel(config, build_state_forecaster(config))
+
+
 OUTPUT_MODEL_BUILDERS = {
     PREDICTION_STATE: _build_state_output,
     PREDICTION_CONTROL: _build_control_output,
+    PREDICTION_CLOSURE: _build_closure_output,
 }
 
 

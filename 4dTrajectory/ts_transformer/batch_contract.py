@@ -7,6 +7,8 @@ the package unusable anywhere else and put a cycle in the layering.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import torch
 from torch import nn
 
@@ -45,3 +47,33 @@ def model_forward(
     dynamics: dict[str, torch.Tensor] | None,
 ):
     return model(history) if dynamics is None else model(history, dynamics)
+
+
+@dataclass(frozen=True)
+class LossComponents:
+    """Weighted scalar contributions whose sum is the optimization objective."""
+
+    state: torch.Tensor
+    final_time: torch.Tensor
+    kinematic: torch.Tensor
+    terminal: torch.Tensor
+    extras: dict[str, torch.Tensor] = field(default_factory=dict)
+    # Batch-level COUNTS that are not part of the objective (the procedure penalty's gated
+    # rows and violations, which the dual update turns into a rate over the epoch).
+    diagnostics: dict[str, torch.Tensor] = field(default_factory=dict)
+
+    @property
+    def total(self) -> torch.Tensor:
+        return (
+            self.state + self.final_time + self.kinematic + self.terminal
+            + sum(self.extras.values(), self.state.new_zeros(()))
+        )
+
+    def tensors(self) -> dict[str, torch.Tensor]:
+        return {
+            "state": self.state,
+            "final_time": self.final_time,
+            "kinematic": self.kinematic,
+            "terminal": self.terminal,
+            **self.extras,
+        }

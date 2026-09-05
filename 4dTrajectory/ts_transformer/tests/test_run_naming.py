@@ -16,6 +16,7 @@ from config import (  # noqa: E402
     control_recipe_overrides,
 )
 from run_naming import (  # noqa: E402
+    CLOSURE_LOSS_FIELDS,
     CONTROL_LOSS_FIELDS,
     META_FIELDS,
     STATE_LOSS_FIELDS,
@@ -40,7 +41,7 @@ def _control_config(**overrides) -> dict:
 
 def test_every_named_field_exists_on_tsconfig():
     fields = set(TSConfig().to_dict())
-    for group in (CONTROL_LOSS_FIELDS, STATE_LOSS_FIELDS, META_FIELDS):
+    for group in (CONTROL_LOSS_FIELDS, STATE_LOSS_FIELDS, CLOSURE_LOSS_FIELDS, META_FIELDS):
         assert set(group) <= fields
 
 

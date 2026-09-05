@@ -34,6 +34,9 @@ torch>=2.6
 # built and verified against numpy 2.x only (2.5.1 on this machine); 1.x is
 # untested, not known-broken.
 numpy>=2.0
+# closure_geometry / closure_profile (the closure output's fits) use scipy.optimize;
+# the training path imports them through closure_output.
+scipy>=1.11
 
 # --- repo-local, installed editable (NOT on PyPI) -----------------------
 # Canonical geodesy/units. Verified present in `aeroviz`; if a fresh env is

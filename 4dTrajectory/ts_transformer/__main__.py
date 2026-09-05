@@ -85,6 +85,7 @@ from config import (  # noqa: E402
     CORRIDOR_GATES,
     HOOK_SATURATIONS,
     MODELS,
+    PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
     TSConfig,
@@ -130,7 +131,7 @@ from evaluation_protocol import (  # noqa: E402
 )
 from experiment_index import begin_run, finish_run  # noqa: E402
 from flyability import report_for_records  # noqa: E402
-from forecast import forecast_approaches  # noqa: E402
+from forecast import forecast_approaches, forecast_closure_from_labels  # noqa: E402
 from models import resolve_device  # noqa: E402
 from reference_velocity import REFERENCE_VELOCITY_SOURCES  # noqa: E402
 from train import (  # noqa: E402
@@ -234,7 +235,12 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         "--prediction-output",
         choices=PREDICTION_OUTPUTS,
         default=None,
-        help="predict state endpoints (default) or bounded controls with dynamics rollout",
+        help="predict state endpoints (default), bounded controls with dynamics rollout, "
+             "or the closure decision vector drawn in closed form",
+    )
+    parser.add_argument(
+        "--closure-labels", default=None, metavar="JSON",
+        help="closure output: the per-flight labels written by docs/p1_closure_oracle.py labels",
     )
     parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
     parser.add_argument("--n-segments", type=int, default=None,
@@ -567,6 +573,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
     batch_auto = args.batch_size == "auto"
     cli_values = (
         ("model", args.model), ("prediction_output", args.prediction_output),
+        ("closure_labels_path", args.closure_labels),
         ("seq_len", args.seq_len),
         ("n_segments", args.n_segments),
         ("horizon_mode", args.horizon_mode),
@@ -911,6 +918,12 @@ def main(argv: list[str] | None = None) -> int:
         help="with --command-hook: soft (tanh / softplus) or hard (clamp) saturation",
     )
     p_predict.add_argument(
+        "--closure-from-labels", default=None, metavar="JSON",
+        help="closure output: draw every flight from its LABEL in this file instead of the "
+             "model's decision (the family's own ceiling — the oracle arm); records carry "
+             "source.closureFromLabels",
+    )
+    p_predict.add_argument(
         "--project-final", choices=CORRIDOR_GATES, default=None, metavar="GATE",
         help="after truncation, clamp each state forecast's established tail (under this "
              "corridor gate) into the LPV corridor and glidepath window — the post-hoc "
@@ -1225,6 +1238,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  command hook at prediction time: {args.command_hook} ({args.hook_saturation})")
     elif args.hook_saturation is not None:
         parser.error("--hook-saturation needs --command-hook")
+    closure_labels = None
+    if args.closure_from_labels is not None:
+        if config.prediction_output != PREDICTION_CLOSURE:
+            parser.error("--closure-from-labels requires a closure checkpoint")
+        if args.project_final is not None or args.no_truncate:
+            parser.error("--closure-from-labels draws the label as it is; --project-final / --no-truncate do not apply")
+        from closure_output import load_labels
+        closure_labels = load_labels(args.closure_from_labels)
+        print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, flight_metrics = [], []
@@ -1232,15 +1254,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  dense rollout batch size: {rollout_batch_size}")
     for start in range(0, len(series), rollout_batch_size):
         batch_series = series[start : start + rollout_batch_size]
-        forecasts = forecast_approaches(
-            model,
-            batch_series,
-            config,
-            normalizer,
-            device=device,
-            truncate=not args.no_truncate,
-            project_final=args.project_final,
-        )
+        if closure_labels is not None:
+            forecasts = forecast_closure_from_labels(batch_series, config, closure_labels)
+        else:
+            forecasts = forecast_approaches(
+                model,
+                batch_series,
+                config,
+                normalizer,
+                device=device,
+                truncate=not args.no_truncate,
+                project_final=args.project_final,
+            )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)
         ):

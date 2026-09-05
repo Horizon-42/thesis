@@ -52,6 +52,7 @@ from config import (
     DEFAULT_N_SEGMENTS_BY_MODEL,
     HORIZON_FULL,
     HORIZON_WINDOW,
+    PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     TSConfig,
     control_recipe_overrides,
@@ -115,6 +116,17 @@ CONTROL_LOSS_FIELDS = (
     # rollout's segment endpoints too): a control run that carries it is a recipe edit.
     *PROCEDURE_LOSS_FIELDS,
 )
+#: The closure output's objective fields; its base name bumps when the regression
+#: itself is redesigned.
+CLOSURE_LOSS_BASE = "closure-v1"
+CLOSURE_LOSS_FIELDS = (
+    "closure_slowness_knots",
+    "closure_height_knots",
+    "closure_geometry_loss_weight",
+    "closure_timing_loss_weight",
+    "closure_height_loss_weight",
+    "final_time_scale_s",
+)
 STATE_LOSS_FIELDS = (
     "fitted_tail_position_weight",
     "fitted_terminal_position_weight",
@@ -133,6 +145,9 @@ META_FIELDS = (
     # and its name is what keeps it from being quoted as a predictor, so it never folds.
     "seed",
     "split_seed",
+    # The supervision target of a closure run: two runs on different label files are
+    # different runs, whatever else matches.
+    "closure_labels_path",
     *INTENT_FIELDS,
     "d_model",
     "n_heads",
@@ -212,6 +227,7 @@ _ABBREV = {
     "coordinate_frame": "frame",
     "target_conditioning": "target",
     "intent_conditioning": "intent",
+    "closure_labels_path": "labels",
     "state_position_reference": "pos-ref",
     "corridor_gate": "gate",
     "procedure_loss_lateral_weight": "proc-lat",
@@ -271,6 +287,8 @@ def _norm(value: Any) -> Any:
 def _fmt(value: Any) -> str:
     if isinstance(value, bool):
         return "on" if value else "off"
+    if isinstance(value, str) and "/" in value:
+        return value.rsplit("/", 1)[-1]        # a path: its file name identifies it
     if isinstance(value, float):
         return f"{value:g}"
     if isinstance(value, (list, tuple)):
@@ -345,6 +363,8 @@ def _loss_diffs_against(
 
 def loss_design_name(config: Mapping[str, Any]) -> str:
     """Field 4: the named recipe, or nearest-recipe + edits, or a hash version."""
+    if config.get("prediction_output") == PREDICTION_CLOSURE:
+        return _with_diffs(config, CLOSURE_LOSS_FIELDS, CLOSURE_LOSS_BASE)
     if config.get("prediction_output") != PREDICTION_CONTROL:
         return _with_state_diffs(config)
     recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
@@ -378,16 +398,23 @@ def loss_design_name(config: Mapping[str, Any]) -> str:
 
 
 def _with_state_diffs(config: Mapping[str, Any]) -> str:
-    diffs = _field_diffs(config, STATE_LOSS_FIELDS)
+    return _with_diffs(config, STATE_LOSS_FIELDS, STATE_LOSS_BASE)
+
+
+def _with_diffs(config: Mapping[str, Any], fields: tuple[str, ...], base: str) -> str:
+    diffs = _field_diffs(config, fields)
     if not diffs:
-        return STATE_LOSS_BASE
+        return base
     if len(diffs) <= _MAX_LISTED_DIFFS:
-        return f"{STATE_LOSS_BASE}({', '.join(_diff_items(diffs))})"
-    return f"{STATE_LOSS_BASE}-{_diff_hash(diffs)}"
+        return f"{base}({', '.join(_diff_items(diffs))})"
+    return f"{base}-{_diff_hash(diffs)}"
 
 
 def dynamics_name(config: Mapping[str, Any]) -> str:
-    """Field 3: ``kinematic`` for state output; flight model (+τ, +backend) for control."""
+    """Field 3: ``kinematic`` for state output, ``closed-form`` for closure; flight model
+    (+τ, +backend) for control."""
+    if config.get("prediction_output") == PREDICTION_CLOSURE:
+        return "closed-form"
     if config.get("prediction_output") != PREDICTION_CONTROL:
         return "kinematic"
     model = config.get("control_dynamics_model") or CONTROL_DYNAMICS_POINT_MASS

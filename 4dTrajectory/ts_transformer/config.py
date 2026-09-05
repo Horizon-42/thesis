@@ -109,7 +109,22 @@ AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
 AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
 PREDICTION_STATE = "state"
 PREDICTION_CONTROL = "control"
-PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL)
+PREDICTION_CLOSURE = "closure"
+PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_CLOSURE)
+# The closure output's own fields (scene design P1.c): a recipe leaves them open.
+CLOSURE_FIELDS = (
+    "closure_labels_path",
+    "closure_slowness_knots",
+    "closure_height_knots",
+    "closure_geometry_loss_weight",
+    "closure_timing_loss_weight",
+    "closure_height_loss_weight",
+)
+# There is no pre-closure behaviour to reproduce, so every closure field is required.
+REQUIRED_SERIALIZED_CLOSURE_FIELDS = CLOSURE_FIELDS
+# The profile knot widths a closure labels file carries (closure_output.fit_labels writes
+# both); a config may only ask for one of them.
+CLOSURE_LABEL_KNOTS = (4, 8)
 CONTROL_STATE_CLOCK_PREDICTED = "predicted"
 CONTROL_STATE_CLOCK_OBSERVED = "observed"
 CONTROL_STATE_CLOCKS = (
@@ -265,6 +280,11 @@ CHECKPOINT_SELECTION_METRICS = (
 def uses_control_dynamics(prediction_output: str) -> bool:
     """Whether an output strategy requires per-flight aircraft dynamics."""
     return prediction_output == PREDICTION_CONTROL
+
+
+def uses_closure_labels(prediction_output: str) -> bool:
+    """Whether an output strategy carries the per-flight closure labels as its context."""
+    return prediction_output == PREDICTION_CLOSURE
 
 
 HORIZON_NORMALIZED = "normalized"
@@ -596,6 +616,14 @@ class TSConfig:
     # reason; the lead channel is measured at the fixed anchor, so random train anchors
     # are refused with it.
     intent_conditioning: str = INTENT_CONDITIONING_NONE
+    # ── the closure output (scene design P1.c): the labels file and the decision vector's
+    # profile widths; the loss weights of its three regression groups ────────────────
+    closure_labels_path: str = ""
+    closure_slowness_knots: int = 4
+    closure_height_knots: int = 4
+    closure_geometry_loss_weight: float = 1.0
+    closure_timing_loss_weight: float = 1.0
+    closure_height_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
     # bounded to the final-approach corridor (see the constants).
@@ -939,6 +967,40 @@ class TSConfig:
                 "state_position_reference belongs to the state output; "
                 f"prediction_output={self.prediction_output!r} rolls its states out of "
                 "controls and has no position channels to reparametrize"
+            )
+        if self.prediction_output == PREDICTION_CLOSURE:
+            if not self.closure_labels_path:
+                raise ValueError(
+                    "the closure output regresses per-flight labels: set closure_labels_path "
+                    "to the JSON written by docs/p1_closure_oracle.py labels"
+                )
+            if self.coordinate_frame != COORDINATE_FRAME_ENU:
+                raise ValueError(
+                    "the closure geometry is written in the threshold-anchored ENU chart; "
+                    f"coordinate_frame={self.coordinate_frame!r} would draw it from the wrong origin"
+                )
+            if self.horizon_mode != HORIZON_NORMALIZED:
+                raise ValueError(
+                    "the closure output draws its own clock; only the normalized horizon "
+                    "contract (n_segments target nodes) fits it"
+                )
+            if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
+                raise ValueError(
+                    "the closure output selects its checkpoint on its regression objective; "
+                    f"checkpoint_selection_metric={self.checkpoint_selection_metric!r} replays "
+                    "a trajectory the training loop never draws"
+                )
+            if self.random_train_anchor:
+                raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
+            if (self.closure_slowness_knots not in CLOSURE_LABEL_KNOTS
+                    or self.closure_height_knots not in CLOSURE_LABEL_KNOTS):
+                raise ValueError(
+                    f"closure labels carry the knot widths {CLOSURE_LABEL_KNOTS}; got "
+                    f"slowness {self.closure_slowness_knots}, height {self.closure_height_knots}"
+                )
+        elif self.closure_labels_path:
+            raise ValueError(
+                f"closure_labels_path belongs to the closure output; prediction_output={self.prediction_output!r}"
             )
         if self.control_command_hook not in CONTROL_HOOKS:
             raise ValueError(
@@ -1617,6 +1679,10 @@ class TSConfig:
         if uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE)):
             missing += [
                 name for name in REQUIRED_SERIALIZED_CONTROL_FIELDS if name not in data
+            ]
+        if uses_closure_labels(data.get("prediction_output", PREDICTION_STATE)):
+            missing += [
+                name for name in REQUIRED_SERIALIZED_CLOSURE_FIELDS if name not in data
             ]
         if missing:
             raise ValueError(

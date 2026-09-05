@@ -71,7 +71,7 @@ import compare_frame_arms as cfa  # noqa: E402
 import geometric_metrics as gm  # noqa: E402
 import intent_conditioning as ic  # noqa: E402
 import phase0_intent_diagnostics as pid  # noqa: E402
-from approach_difficulty import approach_difficulty  # noqa: E402
+from closure_output import LABEL_KNOTS, LABEL_RESIDUAL_MAX_M, LABEL_SCHEMA, fit_labels  # noqa: E402
 from config import TSConfig  # noqa: E402
 from coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
 from dataset import build_series, load_flight_dicts  # noqa: E402
@@ -267,7 +267,6 @@ def cmd_geometry(args: argparse.Namespace) -> None:
 
 SLOWNESS_KNOTS = (2, 4, 8, 16)
 HEIGHT_KNOTS = (2, 4, 8)
-LABEL_KNOTS = (4, 8)
 
 
 def _timing_variants(f, length, truth_t, speed0):
@@ -373,42 +372,8 @@ def cmd_speed(args: argparse.Namespace) -> None:
 
 # ── P1.c-1: labels for every flight of the cohort ────────────────────────────
 
-LABEL_SCHEMA = "closure-labels-v1"
-LABEL_RESIDUAL_MAX_M = 1_000.0     # above this F3 residual the flight is a fallback, not a label
-
-
-def label_flight(item) -> dict:
-    """The closure decoder's label for one flight: the canonical F3 geometry (join at the
-    localizer entry, via in the chart and in runway axes), the K=4 / K=8 slowness and
-    height knots on the truth path, their residuals, and the difficulty covariates."""
-    series, anchor = item
-    psi = float(series.scenario.target.psi)
-    a, truth_xy, truth_t = _truth(series, anchor)
-    truth_u = np.concatenate([[a[2]], series.supervision_values[anchor + 1:, 2]])
-    anchor_pose = cg.AnchorPose.from_state(a, psi)
-    join = ic.truth_join_point(series)
-    d_join0 = float(cg.runway_axes_np(join[0], join[1], psi)[0])
-    f0 = cg.rule_template(anchor_pose, psi, d_join0)
-    f1 = cg.fit_rule_template(anchor_pose, psi, truth_xy, d_join0)
-    f2 = cg.fit_dubins_join(anchor_pose, psi, truth_xy, d_join0, seed=f1)
-    f3, spread = cg.fit_via_dubins(anchor_pose, psi, truth_xy, d_join0, seeds=(f1, f2))
-    f, length = cp.progress(truth_xy)
-    profile = {str(k): {"slowness_knots": cp.fit_slowness_knots(f, length, truth_t, k).tolist(),
-                        "height_knots": cp.fit_height_knots(f, truth_u, k).tolist()} for k in LABEL_KNOTS}
-    for k, block in profile.items():
-        times = cg.strictly_increasing(cp.times_from_slowness(f, length, np.array(block["slowness_knots"])))
-        values = np.zeros((len(truth_xy), 6))
-        values[:, :2], values[:, 2] = truth_xy, cp.height_from_knots(f, np.array(block["height_knots"]))
-        block["ade_m"] = _score(series, anchor, times[1:], values[1:], truth_t)["ade_m"]
-        block["duration_error_s"] = float(times[-1] - truth_t[-1])
-    geometry = {**_residuals(f3, truth_xy), "via_label_spread_m": spread, "rule_kind": f0.kind}
-    valid = bool(f3.params["canonical"] and geometry["error_m"] <= LABEL_RESIDUAL_MAX_M)
-    return {"flight_id": series.flight_id, "runway": series.scenario.source.get("runway"),
-            "anchor": {"d_m": anchor_pose.d, "xt_m": anchor_pose.xt, "heading_rad": anchor_pose.heading,
-                       "speed_mps": anchor_pose.speed_mps, "u_m": float(a[2])},
-            "d_join_truth_m": d_join0, "geometry": geometry, "profile": profile,
-            "duration_s": float(truth_t[-1]), "path_length_m": length, "valid": valid,
-            "difficulty": approach_difficulty(series, anchor).to_dict()}
+def _fit_labels(item) -> dict:
+    return fit_labels(*item)
 
 
 def cmd_labels(args: argparse.Namespace) -> None:
@@ -427,7 +392,7 @@ def cmd_labels(args: argparse.Namespace) -> None:
     print(f"{args.airport}: {len(flights)} rostered arrivals, {report.built} built "
           f"(skipped {dict(report.skipped)}); anchor index {anchor}; labelling with {args.workers} workers")
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        results = list(pool.map(label_flight, [(item, anchor) for item in series], chunksize=4))
+        results = list(pool.map(_fit_labels, [(item, anchor) for item in series], chunksize=4))
     by_id = {r["flight_id"]: r for r in results}
     out.write_text(json.dumps({
         "schema": LABEL_SCHEMA, "airport": args.airport, "manifest": str(manifest), "config_source": str(reference_dir),
@@ -444,9 +409,9 @@ def cmd_labels(args: argparse.Namespace) -> None:
           f"{np.median(error[vectored]) if vectored.any() else math.nan:.0f} m, straight-in "
           f"{np.median(error[~vectored]) if (~vectored).any() else math.nan:.0f} m")
     for k in LABEL_KNOTS:
-        ade = np.array([r["profile"][str(k)]["ade_m"] for r in results])
-        print(f"  profile K={k}: ADE on the truth path mean {ade.mean():.0f} / p50 {np.median(ade):.0f} m "
-              f"(vectored {ade[vectored].mean() if vectored.any() else math.nan:.0f} m)")
+        err = np.array([r["profile"][str(k)]["time_error_s"] for r in results])
+        print(f"  profile K={k}: mean |time error| on the truth path p50 {np.median(err):.1f} s "
+              f"(vectored {np.median(err[vectored]) if vectored.any() else math.nan:.1f} s)")
     print(f"wrote {out}")
 
 

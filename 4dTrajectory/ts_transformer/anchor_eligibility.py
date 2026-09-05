@@ -10,6 +10,7 @@ import numpy as np
 
 from channels import IDX
 from config import (
+    PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     PREDICTION_STATE,
     TSConfig,
@@ -63,6 +64,9 @@ def _airborne_control_candidates(
 AnchorEligibility = Callable[["FlightSeries", Sequence[int]], list[int]]
 _POLICIES: dict[str, tuple[str, AnchorEligibility]] = {
     PREDICTION_STATE: ("temporal-only-v1", _all_temporal_candidates),
+    # Labels are fitted at the fixed anchor; TSConfig refuses random anchors for closure,
+    # so this policy only ever names the fixed-anchor population.
+    PREDICTION_CLOSURE: ("temporal-only-v1", _all_temporal_candidates),
     PREDICTION_CONTROL: (
         "airborne-1.10-stall-margin-v1",
         _airborne_control_candidates,

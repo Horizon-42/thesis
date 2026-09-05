@@ -26,9 +26,9 @@ python -m pytest 4dTrajectory/ts_transformer/tests -q --import-mode=importlib
 python run_ts_pipeline.py --airport KRDU
 ```
 
-## The two prediction paths — this is the experiment
+## The three prediction paths — this is the experiment
 
-`prediction_output` decides whether dynamics is connected at all, and the two answers are the
+`prediction_output` decides whether dynamics is connected at all, and the answers are the
 point of the package, not a migration in progress.
 
 - **`state`** is the purely kinematic BASELINE: channels in, channels out, the only symbol it
@@ -39,8 +39,20 @@ point of the package, not a migration in progress.
 - **`control`** is the opposite: the model emits bounded controls and a differentiable RK4
   rollout of the shared point-mass equations turns them into the trajectory, so every prediction
   is dynamically admissible by construction.
+- **`closure`** (scene design P1.c, 2026-09-05) regresses 14 DECISION numbers — the join
+  distance, a via pose in runway axes, K=4 slowness knots (the duration is their integral),
+  K=4 height knots — and `closure_output.reconstruct` draws the trajectory in closed form
+  (`closure_geometry.via_dubins` + `closure_profile`; velocities = tangent × ground speed).
+  Training is L1 regression on per-flight LABELS fitted from the truth
+  (`docs/p1_closure_oracle.py labels` → `closure_labels_path`), carried as the batch context
+  and never an input; `predict --closure-from-labels` draws every flight from its label (the
+  family's ceiling, `source.closureFromLabels`). Locks: `enu` chart, `normalized` horizon,
+  `checkpoint_selection_metric=fixed-anchor-objective` (the loop never draws the path), no
+  random anchors; a labels file must be the airport's own and cover the cohort (a run refuses
+  one that covers no flight, prints the covered share otherwise). No dynamics, no
+  flyability guarantee beyond the family's 25° bank arcs.
 
-Single-aircraft-only and deterministic point-prediction are scope decisions for both (README).
+Single-aircraft-only and deterministic point-prediction are scope decisions for all three (README).
 
 Two orthogonal dynamics axes underneath the control path: `control_dynamics_model` ∈
 `point-mass` | `first-order-lag` is the physics; `control_dynamics_backend` ∈ `reanchored-rk4` |
