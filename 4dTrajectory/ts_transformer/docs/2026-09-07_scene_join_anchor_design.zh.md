@@ -171,24 +171,59 @@ loss/multimodal（CE + WTA·simple-v3）             forecast/export（top-1 记
 6. **评估契约。** 现有评估一条轨迹一个记录；多模态读数是新脚本，top-1 保持可比。要在报告里同时给 top-1 与 minADE_K，避免用 minADE_K 讲"更准了"。
 7. **意图之外的不确定性。** 即便汇入点对了，三边上的具体路径仍有个体差异；minADE_K 的剩余误差要分层看（汇入前 / 汇入后）。
 
-## 七、参考文献
+## 七、2024–2026 的进展与本方案的修订（文献核对，2026-09-07）
 
-轨迹预测的场景编码与多模态（自动驾驶，本方案的直接来源）：
+§三 的骨架来自 2019–2022 的驾驶预测文献。对照 2024–2026 的工作重新审视一遍，结论：**骨架不换（场景编码 + 汇入锚查询解码 + WTA + 物理 rollout），吸收五处新做法，把"生成式解码器"作为对照臂而不是主线。** 依据如下。
 
-- Gao, Sun, Zhao, Shen, Anguelov, Li, Schmid. *VectorNet: Encoding HD Maps and Agent Dynamics from Vectorized Representation.* CVPR 2020. — 实体/折线向量化 + 全局图注意力（§3.3 的实体编码器与场景注意力）。
-- Zhao et al. *TNT: Target-driveN Trajectory Prediction.* CoRL 2020；Gu, Sun, Zhao. *DenseTNT: End-to-end Trajectory Prediction from Dense Goal Sets.* ICCV 2021. — 先预测目标点再补轨迹（§3.4 的汇入锚 = 目标候选）。
-- Chai, Sapp, Bansal, Anguelov. *MultiPath: Multiple Probabilistic Anchor Trajectory Hypotheses for Behavior Prediction.* CoRL 2019；Varadarajan et al. *MultiPath++.* ICRA 2022. — 锚 + 分类 + 残差回归，winner-takes-all（§3.5）。
-- Shi, Jiang, Dai, Schiele. *Motion Transformer with Global Intention Localization and Local Movement Refinement (MTR).* NeurIPS 2022. — 意图查询做多模态解码（§3.4 的锚查询）。
-- Nayakanti et al. *Wayformer: Motion Forecasting via Simple & Efficient Attention Networks.* ICRA 2023. — 场景 token 的早期融合与以自车为中心的注意力（§3.3）。
-- Ngiam et al. *Scene Transformer: A Unified Architecture for Predicting Multiple Agents' Trajectories.* ICLR 2022；Zhou et al. *HiVT: Hierarchical Vector Transformer for Multi-Agent Motion Prediction.* CVPR 2022. — 多智能体的联合/层次编码（邻机数多时的替代）。
-- Rupprecht et al. *Learning in an Uncertain World: Representing Ambiguity Through Multiple Hypotheses.* ICCV 2017. — 多假设 + WTA 训练的理论依据。
-- Alahi et al. *Social LSTM.* CVPR 2016；Gupta et al. *Social GAN.* CVPR 2018. — "社会上下文"进入轨迹预测的起点。
+### 7.1 各类方法现在的位置
 
-航空侧（需要在写论文时逐一核对适用范围）：
+| 家族 | 代表（年） | 现状 |
+|---|---|---|
+| 查询式多模态解码器（锚/意图查询 + 分类 + WTA） | MTR（2022）→ MTR v3（2024 WOMD 运动预测第一）；IMPACT（RA-L 2026，WOMD 无激光雷达方法第一，交互预测 softmAP +10 %）；**ASCENT（2026-03，航空）** | 驾驶与航空基准上仍是第一梯队；ASCENT 用 2 层自注意力编码 + K 个可学习模式查询 + WTA + 参数化输出（航向、俯仰、速度 → 积分成位置），在 TrajAir 上 minADE₅ 0.35 km、40 s 历史 + K=20 时 0.19 km，**优于同基准的扩散模型 GooDFlight（0.29 km）**，V100 上 17 ms |
+| 扩散式轨迹生成 | MID（2022）、MotionDiffuser（2023）、**GooDFlight（2025，航空）**、TopoDiffuser（2025） | 多样性好、可控（分类器无关引导）；代价是多步去噪、需要更多数据；GooDFlight 把"目标估计"与"轨迹生成"两阶段分开——目标先用混合高斯 + 图注意力做联合分布，再用 10 步扩散生成动作序列并积分 |
+| 流匹配（单步/单次多模态） | MoFlow（CVPR 2025）、**TrajFlow（IROS 2025，WOMD SOTA 宣称）**、FlowS（2026-04，一步生成） | 把扩散的采样成本压到一次前向；TrajFlow 单次前向出 K 个模态 + Plackett–Luce 排序损失做概率校准——在"K 条一次出"这点上与查询式解码器殊途同归 |
+| 自回归 token 模型 | MotionLM（2023）、SMART（NeurIPS 2024）、AMP（2024）、TrajTok（2025 Sim Agents） | 强在多智能体联合仿真与长时程闭环（Sim Agents 赛道），不是单目标预测精度的第一 |
+| AR + 扩散混合（Diffusion Forcing 一系） | Diffusion Forcing（NeurIPS 2024）、MAGNet（2025-12，多人运动）、Epona（2025，驾驶世界模型：MST 编码 + TrajDiT 规划 + VisDiT 生成帧）、Causal/Rolling/Self Forcing（2025–2026，视频） | 强项是**流式/超长序列生成和世界模型**：逐 token 不同噪声水平，能无限外推、能做部分观测的补全。对我们的问题——一个离散决定（汇入点）+ 之后由物理决定的路径、总长 64 段——它的长处用不上，代价（训练数据量、采样成本、评估）用得上 |
+| 扩散/流策略（动作序列生成） | Diffusion Policy（2023）、Streaming Flow Policy（2025）、One-Step Flow Policy（2026）、A2A（2026） | 与我们的输出（控制序列）同形：以观测为条件生成动作块；它们说明"对控制序列做生成式建模"是成熟路线，可以作为解码器的替代实现 |
+| 航空侧 | MAIFormer（TITS 2026：多智能体倒置 transformer，仁川进场，2 min 视界，单输出）；Neurocomputing 2024（意图作为模型无关的附加条件，来自局部历史相似航班）；TartanAviation 概率学习（2024） | 航空侧刚开始做多智能体与多模态；视界都是 2 min（我们 5–10 min，更难）；没有人把到达序列/间隔当输入 |
 
-- Zeng, Chu, Xu, Liu, Quan. *Aircraft 4D Trajectory Prediction in Civil Aviation: A Review.* Aerospace 2022. — 综述，含 TMA 预测的误差量级与方法谱系。
-- Pang, Xu, Liu. *Data-driven trajectory prediction with weather uncertainties: A Bayesian deep learning approach.* Transportation Research Part C 2021. — 不确定性建模与外部条件（天气）输入。
-- Liu, Hansen. *Predicting Aircraft Trajectories: A Deep Generative Convolutional Recurrent Neural Networks Approach.* arXiv 2018. — 生成式（多峰）航迹预测的早期工作。
-- 与本项目已有文档的关系：`2026-09-04_constraint_methods_survey.zh.md`（约束方法）、`2026-09-03_runway_hypothesis_expansion.md`（K=2 的跑道模态实验）、`docs/literature/runway_assignment/README.md`（跑道分配的阅读清单，其中的到达序列/间隔文献与本文 §3.2 的上下文特征直接相关）。
+### 7.2 对"Multimodal Autoregressive Diffusion Transformer"这条路线的判断
 
-领域知识：管制员按尾流/雷达间隔与到达序列引导三边长度（ICAO Doc 4444 的间隔标准；AMAN/到达管理的文献，如 Eurocontrol 的 AMAN 报告）——这是"前机 ETA 与排队数解释 d_join"的依据，Phase 1 的测量会给出它在数据上的强度。
+它是 Diffusion Forcing 家族（每个 token 独立噪声水平的因果 transformer，AR 与全序列扩散的统一）在多模态条件下的形态（Epona、MAGNet 是最近的实例）。适合：视界不定长、要流式外推、要同时生成多种模态（图像 + 轨迹）、要在生成中途接受新观测。我们的任务：视界由到达时刻封闭、输出是一个决策 + 一段物理轨迹、训练集 1.4 万航班/机场。三个不匹配：（i）多模态的来源是一个离散决定，查询式解码器直接把它建成分类，扩散/AR 要靠采样去"发现"它，样本效率更低，且 ASCENT 已在航空基准上量到这一点；（ii）AR 逐段生成的优势是闭环——每段看到自己的状态——但我们的动力学 rollout 已经把"状态一致性"保证了，AR 再做一遍是重复；（iii）数据量：扩散模型在 TrajAir（1 万多条 GA 航迹）上被轻量 transformer 超过，我们的数据量同级。所以它不进主线；但它的一个子思想值得留：**逐段的噪声水平 = 逐段的不确定性**，在 Phase 4 可以作为"生成式解码器对照臂"实现（见 7.3 第 5 条）。
+
+### 7.3 修订：吸收进 §三 的五处
+
+1. **参数化输出 + 积分（ASCENT）**：它预测航向/俯仰/速度再积分成位置，消融证明优于直接回归 xyz。我们的控制序列 + 可微 rollout 就是这条路的更强形式（多了动力学、包线、执行器滞后）——保留，并在报告里引用它作为外部证据。
+2. **意图作为条件、意图标签可以自动生成（Neurocomputing 2024、IMPACT 2026）**：IMPACT 给 Waymo/Argoverse 自动标注行为意图并联合训练，交互预测第一。我们的 d_join 真值就是自动标注的意图——§3.1 的分类头不只是选锚，还是一个可解释的意图预测；训练时作为辅助任务同时回归 d_join 的连续值。
+3. **邻机的意图也预测，并让意图之间交互（GooDFlight 的"one-then-all"）**：先给每架飞机（本机 + 邻机）独立估计汇入/目标分布，再用图注意力按意图冲突裁剪成联合分布。这正对应到达序列：前机的汇入点约束本机的汇入点。§3.3 加一个"邻机意图头"（同一 d_join 锚集，只作辅助监督，真值来自邻机自己的航迹），§3.4 的锚查询对邻机意图 token 做交叉注意力。
+4. **概率校准用排序损失（TrajFlow 的 Plackett–Luce）**，替代/补充交叉熵；评估加 softmAP / brier-minFDE（驾驶基准的标准），与 minADE_K 一起报。
+5. **生成式解码器作为对照臂（Phase 4）**：同一场景编码 + 同一锚条件下，用流匹配（TrajFlow 式单次 K 模态，或 Diffusion Policy 式对控制序列的条件生成，一步蒸馏）替代确定性控制头，rollout 不变。这是"查询式 vs 生成式"在我们数据上的直接对照，也是把 AR-扩散思想收编的位置：若做逐段噪声（Diffusion Forcing），就是这一臂的变体。
+
+另加一条低风险的中间路线：**MAIFormer 式扩展现有主干**——把 N 架邻机的 3 通道当作 N·F 个变量 token、加一层 agent attention，保留 iTransformer。它是 Phase 2 的更自然实现（比"协变量 token"更贴合主干的归纳偏置），Phase 3 若时间不够可以停在这里加锚解码器。
+
+### 7.4 对成功标准的修订
+
+航空侧可比的外部数字：ASCENT/GooDFlight 在 TrajAir 上 120 s 视界 minADE₅ 0.19–0.35 km；MAIFormer 2 min 视界。我们的视界 5–10 min、场景是塔台管制下的商业进场，不可直接比，但给出了两个尺度：（i）短视界（2 min）上我们应当接近它们的量级——建议在报告里加一个 2 min 视界的分层读数作为外部锚点；（ii）minADE_K 与 top-1 的差就是"意图不确定性"的量，ASCENT 从 K=5 到 K=20 minADE 从 0.35 降到 0.19 km，说明这个差在航空数据上很大——与我们 §7.1 的误差预算一致。
+
+## 八、参考文献
+
+**2023–2026（现状，本方案的直接依据）**
+
+- Prutsch, Schinagl, Possegger. *ASCENT: Transformer-Based Aircraft Trajectory Prediction in Non-Towered Terminal Airspace.* arXiv 2603.16550, 2026-03. — 航空侧 SOTA：模式查询 + WTA + 参数化输出，优于扩散模型。
+- Yang, Liu, Chen, Cheng, Shi, Zou. *GooDFlight: Goal-oriented Diffusion Model for Flight Trajectory Prediction.* 2025（TrajAir）。— 目标估计（one-then-all）+ 目标条件扩散生成动作序列。
+- Yoon, Lee. *Multi-Agent Inverted Transformer for Flight Trajectory Prediction (MAIFormer).* arXiv 2509.21004，IEEE T-ITS 2026。— 多智能体倒置 transformer，仁川进场。
+- *Aircraft trajectory prediction in terminal airspace with intentions derived from local history.* Neurocomputing 615, 2024。— 意图作为模型无关条件。
+- Sun et al. *IMPACT: Behavioral Intention-aware Multimodal Trajectory Prediction with Adaptive Context Trimming.* RA-L 2026（arXiv 2504.09103）。— 自动标注意图 + 联合训练 + 上下文裁剪，WOMD 交互预测第一。
+- Shi, Jiang, Dai, Schiele. *MTR++* / MTR v3（2024 WOMD 运动预测第一）。— 查询式解码器的现役形态。
+- *TrajFlow: Multi-modal Motion Prediction via Flow Matching.* IROS 2025（arXiv 2506.08541）。— 单次前向 K 模态 + Plackett–Luce 排序损失。
+- Fu et al. *MoFlow: One-Step Flow Matching for Human Trajectory Forecasting.* CVPR 2025；*FlowS: One-Step Motion Prediction via Local Transport Conditioning.* 2026-04。— 一步生成。
+- Chen et al. *Diffusion Forcing: Next-token Prediction Meets Full-Sequence Diffusion.* NeurIPS 2024；Maluleke et al. *MAGNet: Multi-Agent Motion Generation via Diffusion Forcing.* 2025-12；*Epona: Autoregressive Diffusion World Model for Autonomous Driving.* 2025。— AR + 扩散混合（7.2 的判断对象）。
+- Wu et al. *SMART: Scalable Multi-agent Real-time Motion Generation via Next-token Prediction.* NeurIPS 2024；Seff et al. *MotionLM.* ICCV 2023。— 自回归 token 模型。
+- Chi et al. *Diffusion Policy.* RSS 2023；*Streaming Flow Policy* 2025；*One-Step Flow Policy* 2026。— 控制序列的生成式建模。
+- Abdel Madjid et al. *Trajectory Prediction for Autonomous Driving: Progress, Limitations, and Future Directions.* arXiv 2503.03262, 2025。— 综述。
+
+**2019–2022（起源，§三 的形状）**
+
+- VectorNet（CVPR 2020）；TNT（CoRL 2020）、DenseTNT（ICCV 2021）；MultiPath（CoRL 2019）、MultiPath++（ICRA 2022）；MTR（NeurIPS 2022）；Wayformer（ICRA 2023）；Scene Transformer（ICLR 2022）、HiVT（CVPR 2022）；Rupprecht et al. 多假设/WTA（ICCV 2017）；Social LSTM（2016）、Social GAN（2018）。
+
+**领域**：ICAO Doc 4444 间隔标准；AMAN/到达管理文献（前机 ETA 与排队解释 d_join 的依据）；`docs/literature/runway_assignment/README.md`。
