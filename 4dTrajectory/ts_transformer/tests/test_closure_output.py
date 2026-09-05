@@ -166,7 +166,7 @@ def test_reconstruction_is_a_valid_trajectory_that_ends_at_the_threshold(tmp_pat
     at_anchor[1], at_anchor[2] = a.d, a.xt
     at_anchor[3], at_anchor[4] = math.cos(cg.wrap_angle(a.heading - psi) + 0.3), math.sin(cg.wrap_angle(a.heading - psi) + 0.3)
     fallback = co.reconstruct(at_anchor, item.values[anchor], psi, config)
-    assert fallback.construction in (cg.KIND_VIA_DUBINS, cg.KIND_DOWNWIND_DUBINS) and np.allclose(fallback.values[-1, :2], 0.0, atol=1e-6)
+    assert fallback.construction == co.KIND_VIA_AT_ANCHOR and np.allclose(fallback.values[-1, :2], 0.0, atol=1e-6)
     # The head's outputs stay inside what the family draws, whatever the network emits.
     raw = torch.randn(64, co.decision_width(config)) * 50.0
     decoded = co.decode_raw(raw, config)
@@ -179,6 +179,18 @@ def test_reconstruction_is_a_valid_trajectory_that_ends_at_the_threshold(tmp_pat
     # The straight-line fallback: a decision whose via-Dubins and plain CSC both fail
     # cannot be produced by the bounded head, so it is exercised on the constructions.
     assert cg.straight_path(a).kind == cg.KIND_STRAIGHT
+    # A via inside one turn radius of the anchor is not a decision: a straight-in
+    # label puts it AT the anchor, and a predicted via 60 m off with 2° of heading error
+    # would otherwise be a full circle. The decoder draws the plain CSC instead.
+    near = vector.copy()
+    off = 60.0 * cg._unit(a.heading + math.pi / 2)
+    near[1], near[2] = cg.runway_axes_np(a.position[0] + off[0], a.position[1] + off[1], psi)
+    rel = cg.wrap_angle(a.heading - psi) + math.radians(2.0)
+    near[3], near[4] = math.cos(rel), math.sin(rel)
+    dropped = co.reconstruct(near, item.values[anchor], psi, config)
+    looped = cg.via_dubins(a, psi, near[0], *cg.chart_from_axes_np(near[1], near[2], psi), cg.wrap_angle(psi + rel))
+    assert dropped.construction == co.KIND_VIA_AT_ANCHOR
+    assert dropped.path.length < 0.6 * looped.length and dropped.path.length < 1.2 * drawn.path.length
 
 
 def test_drawing_from_the_labels_reproduces_the_truth(tmp_path):
@@ -190,7 +202,7 @@ def test_drawing_from_the_labels_reproduces_the_truth(tmp_path):
         assert forecast.prediction_output == PREDICTION_CLOSURE and forecast.controls is None
         metrics = observed_series_metrics(item, forecast)
         assert metrics["ade_m"] < 250.0 and abs(metrics["final_time_error_s"]) < 5.0
-    assert all(f.closure_from_labels and f.closure_construction == cg.KIND_VIA_DUBINS for f in forecasts)
+    assert all(f.closure_from_labels and f.closure_construction in (cg.KIND_VIA_DUBINS, co.KIND_VIA_AT_ANCHOR) for f in forecasts)
     with pytest.raises(KeyError, match="no closure label"):
         forecast_closure_from_labels(series, config, co.ClosureLabels(AIRPORT, {}))
     with pytest.raises(ValueError, match="fitted for 'KSJC'"):
@@ -248,7 +260,7 @@ def test_train_checkpoint_predict_export_and_evaluate_one_closure_run(tmp_path):
     assert states["control_segments"] == [] and states["source"]["predictionOutput"] == PREDICTION_CLOSURE
     assert np.allclose([states["predicted_states"][-1]["lat"], states["predicted_states"][-1]["lon"]],
                        [records[0].eval_record["target_state"]["lat"], records[0].eval_record["target_state"]["lon"]], atol=1e-5)
-    assert states["source"]["closureFromLabels"] is False and states["source"]["closureConstruction"] == cg.KIND_VIA_DUBINS
+    assert states["source"]["closureFromLabels"] is False and states["source"]["closureConstruction"] in (cg.KIND_VIA_DUBINS, co.KIND_VIA_AT_ANCHOR)
     loaded_records = load_records(out)
     report = evaluate_batch(loaded_records, contexts=_terminal_contexts())
     assert report["total"] == 4 and report["solved"] == 4

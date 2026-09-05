@@ -17,7 +17,12 @@ states or controls:
 ``reconstruct`` turns a decision vector and the anchor state into the dense trajectory
 (``closure_geometry.via_dubins`` for the path, ``closure_profile`` for the clock and the
 heights, velocities from the tangent and the ground speed), and the export writes it
-through the record contract's reference-shaped branch (no controls). Training is a
+through the record contract's reference-shaped branch (no controls). A via inside one
+turn radius of the anchor is not a decision — the label puts a straight-in flight's via
+AT the anchor, and a predicted via a few tens of metres off it with a degree of heading
+error makes ``via_dubins`` fly a full circle (measured on the first C_pred arm: 827 of
+the 837 straight-in paths longer than 1.3× the truth) — so ``reconstruct`` draws the
+plain CSC from the anchor to the join instead and records ``csc-via-at-anchor``. Training is a
 per-flight regression on the labels ``fit_labels`` produces from the truth
 (``docs/p1_closure_oracle.py labels`` writes them for a whole cohort); nothing
 differentiable goes through the geometry, and the model never sees a label as an input.
@@ -61,6 +66,8 @@ VIA_MAX_M = 40_000.0                # via_d, via_xt ∈ ±VIA_MAX_M
 HEIGHT_SCALE_M = 1_000.0
 SLOWNESS_MIN = 1.0 / cp.SPEED_MAX_MPS
 SLOWNESS_MAX = 1.0 / cp.SPEED_MIN_MPS
+
+KIND_VIA_AT_ANCHOR = "csc-via-at-anchor"     # the via was inside one turn radius: dropped
 
 CONTEXT_DECISION = "closure_decision"
 CONTEXT_VALID = "closure_valid"
@@ -352,16 +359,23 @@ class Reconstruction:
 
 def reconstruct(vector: np.ndarray, anchor_channels: np.ndarray, psi: float, config: TSConfig) -> Reconstruction:
     """Draw the trajectory a decision vector describes from the anchor state (physical
-    channel space). The via-Dubins path when it exists, else the plain CSC to the join,
-    else the straight line to the threshold — the construction used is reported."""
+    channel space). The via-Dubins path when the via lies at least one turn radius from
+    the anchor and the path exists; the plain CSC to the join when the via is inside
+    that radius (``KIND_VIA_AT_ANCHOR``: a straight-in flight's label puts it AT the
+    anchor, and a near miss there is a full circle) or the via path does not exist; else
+    the straight line to the threshold — the construction used is reported."""
     decision = split_decision(vector, config)
     anchor = cg.AnchorPose.from_state(anchor_channels, psi)
     via_e, via_n = cg.chart_from_axes_np(decision.via_d_m, decision.via_xt_m, psi)
     via_heading = cg.wrap_angle(psi + decision.via_heading_rel_rad)
-    path = cg.via_dubins(anchor, psi, decision.d_join_m, float(via_e), float(via_n), via_heading)
-    construction = cg.KIND_VIA_DUBINS
+    path, construction = None, cg.KIND_VIA_DUBINS
+    if np.hypot(via_e - anchor.position[0], via_n - anchor.position[1]) >= anchor.radius:
+        path = cg.via_dubins(anchor, psi, decision.d_join_m, float(via_e), float(via_n), via_heading)
+    else:
+        construction = KIND_VIA_AT_ANCHOR
     if path is None:
-        path, construction = cg.dubins_join(anchor, psi, decision.d_join_m, 0.0), cg.KIND_DOWNWIND_DUBINS
+        path = cg.dubins_join(anchor, psi, decision.d_join_m, 0.0)
+        construction = construction if construction == KIND_VIA_AT_ANCHOR else cg.KIND_DOWNWIND_DUBINS
     if path is None:
         path, construction = cg.straight_path(anchor), cg.KIND_STRAIGHT
     if path.length <= 0.0:
