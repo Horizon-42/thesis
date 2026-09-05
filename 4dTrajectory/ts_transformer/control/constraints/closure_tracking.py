@@ -53,6 +53,12 @@ ALONG_TRACK_GAIN_PER_S = 0.02
 ALONG_TRACK_SPEED_MAX_MPS = 10.0
 SPEED_PROPORTIONAL_GAIN = 0.3        # thrust (in weight units per m/s of speed error)·s
 ACCELERATION_FEEDFORWARD_MAX = 0.5   # m/s²
+SLOPE_MAX = 0.3                      # |du/ds| the vertical law is shown (≈ 17°): a reference
+                                     # node step steeper than an approach is a sampling artefact
+STALL_MARGIN = 1.15                  # the speed target never asks for less than this × V_stall
+_RHO0_KG_M3 = 1.225                  # ISA sea level (flyability.isa_density's constants)
+_ISA_LAPSE = 2.2558e-5
+_ISA_EXPONENT = 4.2559
 _DIAGNOSTIC_KEYS = (
     "hook_steps", "tracker_bank_saturated_steps", "tracker_load_saturated_steps",
     "tracker_thrust_saturated_steps", "tracker_cross_track_abs_m", "tracker_height_error_abs_m",
@@ -85,7 +91,7 @@ def reference_path(xy: np.ndarray, u: np.ndarray, speed: np.ndarray, times: np.n
     ds = np.maximum(np.hypot(step[:, 0], step[:, 1]), 1e-6)
     turn = np.concatenate([[0.0], (np.diff(course) + np.pi) % (2 * np.pi) - np.pi])
     curvature = np.gradient(np.cumsum(turn)) / ds
-    slope = np.gradient(u) / ds
+    slope = np.clip(np.gradient(u) / ds, -SLOPE_MAX, SLOPE_MAX)
     arc = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))])
     # The reference's own deceleration as a feed-forward, capped at what an approach
     # does (±ACCELERATION_FEEDFORWARD_MAX); the first node's one-sided gradient is not
@@ -132,6 +138,8 @@ class ClosureTracker:
         self.vertical_gain = config.control_nominal_vertical_gain
         self.speed_gain = config.control_nominal_speed_gain
         self.max_thrust_n = dynamics["max_thrust_n"].to(torch.float64)
+        aero = dynamics["aero_params"].to(torch.float64)           # [B, 6]: S, Cl_max, …
+        self.wing_area_m2, self.cl_max = aero[:, 0], aero[:, 1]
         self._thrust = dynamics["initial_controls"][:, 0].to(torch.float64).clone()
         self._counts: torch.Tensor | None = None
 
@@ -181,6 +189,10 @@ class ClosureTracker:
         # wind up beyond the envelope.
         speed_target = speed_ref + (ALONG_TRACK_GAIN_PER_S * along_track).clamp(
             min=-ALONG_TRACK_SPEED_MAX_MPS, max=ALONG_TRACK_SPEED_MAX_MPS)
+        # Never below the stall margin at this height (ISA density, the clean Cl_max).
+        rho = _RHO0_KG_M3 * (1.0 - _ISA_LAPSE * chart[:, 2].clamp(min=0.0)) ** _ISA_EXPONENT
+        stall_speed = torch.sqrt(2.0 * mass * GRAVITY_MPS2 / (rho * self.wing_area_m2 * self.cl_max))
+        speed_target = torch.maximum(speed_target, STALL_MARGIN * stall_speed)
         speed_error = speed_target - speed
         weight_per_newton = mass / self.max_thrust_n
         self._thrust = (self._thrust + hold_rate.clamp(max=self.speed_gain) * weight_per_newton * speed_error).clamp(

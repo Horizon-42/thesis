@@ -382,7 +382,13 @@ def reconstruct(vector: np.ndarray, anchor_channels: np.ndarray, psi: float, con
         raise ValueError("the anchor sits on the threshold: no path to draw")
     f = path.arc / path.length
     times = cg.strictly_increasing(cp.times_from_slowness(f, path.length, decision.slowness_knots))
+    # The height profile starts where the aircraft IS: the first knot is a least-squares
+    # value, and drawing from it put a step of tens of metres into the first 50 m (a
+    # 13 m/m slope on a synthetic flight; on real flights the tracker's vertical law read
+    # it as a −86° desired path angle). The offset fades linearly to the threshold, which
+    # stays at 0.
     heights = cp.height_from_knots(f, decision.height_knots)
+    heights = heights + (float(anchor_channels[2]) - heights[0]) * (1.0 - f)
     speed = cp.speed_from_slowness(f, decision.slowness_knots)
     step = np.gradient(path.horizontal, axis=0)
     tangent = step / np.maximum(np.hypot(*step.T), 1e-9)[:, None]
