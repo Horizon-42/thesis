@@ -4,6 +4,26 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — Control training design review: the below-glidepath endpoint is an objective-design fault
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_control_training_review.zh.md`. The control
+baseline's endpoint 157 / 162 m below the glidepath (KRDU / KSJC medians) is the last
+minute of the rollout: on the final (1–8 km) the prediction sits within ±13 m of the
+glidepath, at the truth's landing time it is 540–680 m short and 140 m low with a path
+angle of −4…−5° against the truth's −3°, and the rollout runs only 3–10 s past the truth
+(at inference; in training simple-v3 rescales the durations to the truth's final time).
+Ruled out: data and coordinates (truth endpoint +28 / +6 m), the fitted tail (median 6 / 2 s,
+379 / 11 m before the threshold, no flight over 60 s). The model's last-minute controls
+(load 1.014, thrust 0.069, speed 75 m/s) each sit near the inverted teacher's (0.999, ~0,
+71 m/s) yet fly a different path — the open-loop imitation teacher (47× the position
+term) says what the truth does at the truth's state, never what to do once drifted, and
+the isotropic 10 km metre-scale position loss (state path too) prices a 150 m height
+error at 2e-4 per endpoint averaged over 64 (terminal terms share the scale), with no
+threshold-crossing event, no ground in the rollout, and no path gradient to the time grid. Proposals ranked: per-channel position scale / vertical-only procedure term /
+threshold-plane crossing loss / ground hinge (P0), a closed-loop teacher built from the
+guidance laws on the rollout's own state (P1, the nominal law moved from filter to
+teacher), event-defined duration and closed-loop prediction (P2); first diagnostics named.
+
 ### 2026-09-06 — Command-hook campaigns (KRDU v1 + v2, KSJC v2): the barrier is a predict-time safety layer, training through a hook is not
 
 Report `4dTrajectory/ts_transformer/docs/2026-09-06_control_hooks_results.zh.md`; campaigns

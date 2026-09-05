@@ -467,7 +467,19 @@ namespace would restore the undifferentiated listing the package exists to remov
   predict-time safety layer; not adopted: any hook inside the training loop (six arms, none
   beat its predict-time counterpart), the hard gate. Open: the combined lateral-barrier +
   vertical-nominal hook at predict time; the baseline ending 157 / 162 m below the glidepath
-  (data or model?); a "committed to the final" gate for the vectored flights the v1 / hard
+  — traced 2026-09-07 to the last minute of the rollout (on the final it sits within ±13 m
+  of the glidepath; at the truth's landing time it is 540–680 m short and 140 m low, path
+  angle −4…−5° vs −3°), NOT to data, coordinates or the fitted tail (2–6 s), and read as
+  four objective-design faults — the isotropic 10 km metre-scale position loss (both
+  paths) prices a 150 m height error at 2e-4 per endpoint (a mean over 64), the 47×
+  open-loop imitation teacher never speaks to the rollout's own drift, the threshold
+  anchors present (the 1.25-weight fitted terminal row, `state_endpoint_loss_weight`)
+  share the 10 km scale and nothing stops at the ground, and the path loss carries no
+  gradient to the time grid (training rescales durations to the truth; the overrun is
+  inference-only):
+  `docs/2026-09-07_control_training_review.zh.md` (P0: per-channel position scale, the
+  vertical-only procedure term, a threshold-plane crossing loss; P1: a closed-loop
+  DAgger-style teacher from the guidance laws); a "committed to the final" gate for the vectored flights the v1 / hard
   barrier hurt (gate opening at d < 8 km or ≥ 16 km; every bin is net positive under v2 soft); a second seed at KSJC (its −66 m FDE gain is the smaller
   effect); PatchTST and the other three airports.
 - **Final-approach constraint campaign DONE 2026-09-04/05 (`final_constraint_20260904`, KRDU +
