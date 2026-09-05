@@ -4,7 +4,7 @@
 
 ## 〇、进度与状态（压缩 context 后从这里继续）
 
-**当前状态（2026-09-05）**：Phase 0 完成并提交；**P0（几何指标进标准读数）完成并提交**，Phase 0 四臂与 hook v2（KRDU + KSJC）已回填；**走向待用户决定**（§五 P1 之后的顺序：推荐 C 先修输出侧，再 B 改决策变量继续）。没有在跑的 campaign。磁盘只剩 4.0 GB——**下一个 campaign 前先清理**（`clean_pipeline_data.py --dry-run` 或删旧实验树）。
+**当前状态（2026-09-05）**：Phase 0、P0 完成并提交（P0 代码 `6867512`、文档 `b34c25a`）。**用户已决定走 C**（先修输出侧，再 B 改决策变量做场景）；**P1 进行中，当前在 P1.a（几何族 oracle）**——见 §五 P1 的分步与门。没有在跑的 campaign。磁盘只剩 4.0 GB——**下一个 campaign 前先清理**（`clean_pipeline_data.py --dry-run` 或删旧实验树）。
 
 | 阶段 | 状态 | 产物 / commit | 关键数字（KRDU val，雷达引导 497 架） |
 |---|---|---|---|
@@ -13,7 +13,7 @@
 | Phase 0 诊断 `docs/phase0_intent_diagnostics.py`（residual / sensitivity / template / context / timing；经 opus review） | 完成 | 同上 | 真值路径 + 朴素速度剖面 1308 m；真值汇入 + trombone + 真值时序 1688 m；真值路径 + 常速 2813 m；上下文对 d_join 的 R²（锚点后才汇入 6,557 架）：本机 0.34 → +因果计数 0.38 → +真值前机 ETA 0.47；知道 d_join 后剩余时长误差 35.8 → 22.8 s |
 | 门的判定 | 未达且门定错量级 | `2026-09-05_scene_phase0_results.zh.md` §四–§八 | 1.5 km 对"只知汇入点"的 oracle 在时间对齐指标下不可达；决策变量应含时间；输出侧（控制头 + rollout 按给定意图画几何）是先于场景编码的瓶颈 |
 | P0 几何指标读数：`geometric_metrics.py`（chamfer / 离散 Fréchet / 弧长对齐 ADE / 路径长度比 / 沿路径滞后 / 时长误差；真值 `closed` = 观测行闭合到阈值，`observed` 复现 Phase 0）进 `compare_constraint_arms.py` / `compare_frame_arms.py`（`--geometry-truth`） | 完成 | `6867512`；`tests/test_geometric_metrics.py`（23 项）；回填 `scene_phase0_20260905/readout_geometry.*`、`control_hooks_v2_20260906/readout_geometry.*`（KRDU + KSJC）；结果写进两份结果文档 | 雷达引导：chamfer 942 → 806 / 795 / 847，Fréchet 3100 → 2488 / 2468 / 2615，弧长 ADE 2175 → 1857 / 1775 / 1900——汇入点值 15–20 % 几何，**时长臂的几何不比 O_join 好**（其 ADE 增益全是时序）；`observed` 真值复现 Phase 0 chamfer 差 ≤ 2 m；**state 输出的锯齿折线使弧长参数化失效**（相邻节点航向反转 > 90° 的份额中位 0.50，control 臂与真值为 0；长度比 ≈ 2 对 1.01）——每航班按反转份额 ≤ 5 % 判"折线是航路"，arc-ADE / lag 只在这些航班上聚合并打印份额，块内合格 < 95 % 打印 n/a，不做平滑；state campaign 上弧长族因此基本全是 n/a，可读的几何是 chamfer + Fréchet |
-| P1 输出侧几何封闭（走向 C） | 待决定 | — | 见 §五 P1 |
+| P1 输出侧几何封闭（走向 C）：P1.a 几何族 oracle → P1.b 速度剖面 oracle → P1.c 解码器 `prediction_output="closure"` → P1.d 后备分支 | **进行中：P1.a** | `closure_geometry.py`（模板构造从诊断脚本搬入，单一来源）、`docs/p1_closure_oracle.py`、实验目录 `4dTrajectory/outputs/KRDU/experiments/closure_p1_20260905/` | 起点：模板 + 真值时序 1688 m、真值路径 + 朴素速度 1308 m、模板 + 朴素速度 2597 m（都高于 1.5 km 门）；P1.a 门 = 某族雷达引导 chamfer 中位 < 500 m 且真值时序 ADE < 1.0 km |
 | P2 数据平面（原 Phase 1）| 未开始 | — | 验收指标已改（§五 P2） |
 | P3 场景编码 + (d_join, T) 锚解码器（原 Phase 2/3） | 未开始 | — | top-1 目标已改（§一） |
 | P4 生成式对照等（原 Phase 4） | 未开始 | — | 不变 |
@@ -195,10 +195,12 @@ loss/multimodal（CE + WTA·simple-v3）             forecast/export（top-1 记
 > `2026-09-06_control_hooks_results.zh.md` "几何指标回填"——汇入点值 15–20 % 几何，时长臂零几何增益；
 > 软屏障是唯一雷达引导层几何也改善的 hook。P1 的验收（chamfer < 500 m）按 `closed` 真值读。
 
-**P1 — 输出侧：几何封闭的解码器（走向 C；≈1–2 周；待用户决定后开始）。** 设计 §3.4 的可选项升为主线：网络预测决策量 (d_join, T) 与一个速度剖面（例如沿路程的分段线性地速，或 64 段的速度目标），路径由几何闭式给出——锚点状态 → trombone / Dubins 到 (d_join, 0) → 航向道 + 下滑道（`phase0_intent_diagnostics.py::template_path` 是原型），再按速度剖面给时间；可选再经 rollout 做动力学一致化。
-- 先用**真值** (d_join, T) 验收输出侧（oracle 臂，KRDU）：目标雷达引导 ADE < 1.5 km（真值时序下模板已 1.7 km，学到速度剖面应更低）、chamfer < 500 m；若做不到，说明几何族本身不够（三边位置/下风延伸要作为第三个决策量），在这里加，不进场景。
-- 然后让网络自己预测 (d_join, T)（无真值），与 simple-v3 基线、O_join_duration 上界一起读四组数；直线进近分层用"straight"分支，必须不退。
-- 风险：几何族对非标准引导（转场、盘旋）不适用——统计份额（Phase 0 模板构造计数：雷达引导 497 架里 trombone 305、Dubins 181、直线 2、已飞过汇入点 9），给不适用的航班保留现有控制头作为后备分支。
+**P1 — 输出侧：几何封闭的解码器（走向 C；用户 2026-09-05 决定；≈1–2 周；进行中）。** 设计 §3.4 的可选项升为主线：网络预测决策量 (d_join, T) 与一个速度剖面，路径由几何闭式给出——锚点状态 → trombone / Dubins 到 (d_join, 0) → 航向道 + 下滑道（`phase0_intent_diagnostics.py::template_path` 是原型），再按速度剖面给时间。Phase 0 量到的起点：模板 + 真值时序 1688 m（几何本身的代价）、真值路径 + 朴素速度剖面 1308 m（速度剖面的代价）、模板 + 朴素 2597 m——两项都得改才能过 1.5 km，所以先分别做 oracle，再做解码器。每步：写代码 → opus review → 修 → 跑 → 记录。
+
+- **P1.a 几何族 oracle（numpy，无训练；≈1–2 天）。** 模板构造搬成包内单一来源 `closure_geometry.py`（诊断脚本改为导入）。在 KRDU 验证集（Phase 0 的 1404 架，同 config / anchor，`_series_for`）上按分层量每个几何族在**真值时序**（真值弧长分数处的时间，与 Phase 0 的"template + truth timing by arc length"同口径）下的 ADE，以及 chamfer / Fréchet（P0 的 `geometric_metrics`，真值 = supervision 行）：F0 = 现模板（真值 d_join，规则选 trombone / Dubins，半径按锚点速度 25° 坡度）= 1688 m；F1 = F0 但 d_join 按 chamfer 最优拟合（量 k=0.5 真值门的 d_join 对模板是否最优）；F2 = trombone 加第三个决策量（三边位置 d_base ≥ d_join + r，或下风延伸）；F3 = 经由点族（锚 → 1 个自由经由点 → Dubins 到 (d_join, 0) → 五边），经由点按 chamfer 拟合。每族逐航班记录拟合参数与残差（成为 P1.c 的标签与后备判据）。**门**：某族在雷达引导层 chamfer 中位 < 500 m 且真值时序 ADE < 1.0 km（给速度剖面留 0.5 km）；都不达 → 家族再加一个决策量，不进场景。
+- **P1.b 速度剖面 oracle（≈1 天）。** 在真值路径上（几何误差归零）量各参数化的 ADE：朴素剖面（锚点速度线性到 70 m/s）= 1308 m；朴素剖面按真值 T 缩放；沿路程分段线性地速 K 个节点（K = 4 / 8 / 16）按真值时间最小二乘拟合；垂直剖面：到汇入点线性下降 + 下滑道，对 K 节点高度剖面。**门**：某参数化 < 400 m，K 尽量小。
+- **P1.c 解码器 `prediction_output="closure"`（≈1 周）。** 网络回归低维决策向量（d_join、家族参数、T、K 个速度节点、可选高度节点）；标签 = P1.a / P1.b 的逐航班拟合，存实验目录的 `closure_labels.json`（按 flight_key，与名册对齐，不进 `tracks/`）；损失 = 各参数按尺度的 L1 + 现有时长项；推理时闭式重建路径 + 剖面 → 稠密状态（速度由路径切向与地速给出）→ 现有记录契约。**先不做可微几何**（先证明标签回归够用），**不做 rollout**（几何族按 25° 坡度弧线，动力学可行性作为读数报告，不作约束）。臂：C_oracle（真值标签直接重建 = 家族上界）、C_truth_intent（真值 (d_join, T) 经 intent 通道输入，网络出其余参数）、C_pred（全部自己出）；对照 simple-v3 与 O_join_duration；读数用 P0 的两族指标。**门**（雷达引导，KRDU）：C_truth_intent ADE < 1.5 km、chamfer < 500 m；C_pred 不差于 simple-v3 且直线进近不退；否则在 P1.a 的家族上加决策量，或回到控制头作后备。
+- **P1.d 后备分支。** 几何族不适用的航班（Phase 0 模板构造计数：雷达引导 497 架里 trombone 305、Dubins 181、直线 2、已过汇入点 9；盘旋、转场）保留现有控制头；判据 = P1.a 的拟合残差（chamfer）超阈值时标 `closure_fallback`，读数里单列。
 
 **P2 — 数据平面（原 Phase 1；≈2–3 天）。** 内容不变（`scene_index`、`scene_context`、`scene/features`、泄漏测试），**验收指标改**：邻机位置/ETA/离阈值距离等实体级特征对 (d_join, T) 的可解释性要明显高于 Phase 0 的粗特征基线（d_join R² 0.38 → 目标 ≥ 0.55；剩余时长中位误差 35.8 s → 目标 < 28 s；`phase0_intent_diagnostics.py context/timing` 是基线脚本）。达不到就说明上下文的价值在别处（跑道使用、离场），先量再建模。
 
