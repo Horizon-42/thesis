@@ -38,9 +38,10 @@
 - 输入 X = {本机历史 H_ego, 邻机历史 {H_j}, 静态几何 M, 标量上下文 c}，全部只用 t ≤ t₀ 的信息。
 - 决策变量 g = 汇入距离 d_join（本机建立五边航向道时离阈值的距离；真值由 `final_approach_geometry.truth_final_gate` 给出，即 readout 的 `gate_start_d_m`），可选地扩为 (d_join, 进入侧)。
 - K 个锚 {a_k}：d_join 的 K 个代表值，从训练集真值 d_join 的直方图聚类（k-means 或分位数），按机场分别做；直线进近集中在 FAF 内外一档，雷达引导分布在 10–25 km。
-- 输出：对每个锚 k，概率 p_k 和一条控制序列 u_k（64 段 + 时长）；u_k 经现有 rollout 得到轨迹 τ_k。
-- 训练：k* = argmin_k |d_join − a_k|；损失 = CE(p, k*) + λ·L_control(u_{k*})，其中 L_control 是 simple-v3 的现有项（位置、速度、模仿、时长）只算在被选中的模态上（winner-takes-all）。可选：对 |d_join − a_k| 在容差内的锚给软目标。
-- 推理：K 条轨迹 + p。
+- 输出：对每个锚 k，概率 p_k、连续的汇入距离修正 δ_k（d̂_join,k = a_k + δ_k，意图的连续值）和一条控制序列 u_k（64 段 + 时长）；u_k 经现有 rollout 得到轨迹 τ_k。
+- 训练：k* = argmin_k |d_join − a_k|；损失 = L_rank(p; k*) + λ_g·|δ_{k*} − (d_join − a_{k*})| + λ·L_control(u_{k*})。L_rank 用 Plackett–Luce 排序损失（TrajFlow）替代单纯交叉熵：按各锚与真值的距离排序，让概率的相对大小可校准；L_control 是 simple-v3 的现有项（位置、速度、模仿、时长）只算在被选中的模态上（winner-takes-all）。意图作为显式的辅助目标（IMPACT 的做法：意图标签自动生成、与轨迹联合训练），不只是选锚。
+- 邻机的意图也预测：对每架邻机 j，用它自己的历史给出 d_join 的分布 q_j（同一锚集），真值来自邻机自己的航迹（辅助监督，不影响推理契约）。这是到达序列进入模型的显式通道：本机的汇入点受前机汇入点约束（GooDFlight 的"one-then-all"：先独立估计每架的目标分布，再按交互裁剪）。
+- 推理：K 条轨迹 + p + d̂_join。
 
 ### 3.2 输入表示
 
@@ -67,19 +68,21 @@ VectorNet / Wayformer 的形状，以本机为中心：
 
 1. **实体编码器**（参数共享）：每个时序实体（本机、每架邻机）的 [60 × 6 + 静态属性] → 一个小 Transformer 或 GRU → 一个 token（d_model）；每条折线（航向道、程序航段、平行跑道）→ PointNet 式的逐点 MLP + max-pool → 一个 token；标量上下文 → MLP → 一个 token。
 2. **场景注意力**：所有 token 拼成集合（本机 1 + 邻机 ≤ 16 + 折线 ≤ 8 + 标量 1），做 2–4 层自注意力，或更省的形式：本机 token 作为 query 对其余做 cross-attention（Wayformer 的 early fusion / MTR 的局部注意力都可以，先用最简单的全自注意力）。位置编码用本机坐标系里的相对位置（对折线用其中点）。
-3. 输出：场景编码 Z（全部 token）与本机 token z_ego。
+3. **邻机意图 token**：每个邻机 token 经一个共享的意图头得到 q_j（K 维分布），把 q_j 的嵌入加回该邻机的 token（意图增强的实体表示）；同时把同跑道邻机按估算 ETA 排序的次序作为位置编码——到达序列的结构显式进入注意力。
+4. 输出：场景编码 Z（全部 token，含意图增强的邻机 token）与本机 token z_ego。
 
-这一层替代 iTransformer。本机历史本身用 iTransformer/PatchTST 编码仍可（当成实体编码器的一种），但 60 个点不需要它的重装备。
+这一层替代 iTransformer。本机历史本身用 iTransformer/PatchTST 编码仍可（当成实体编码器的一种），但 60 个点不需要它的重装备。若想保留现有主干走一条更低风险的路，MAIFormer（T-ITS 2026）的做法可以直接套：把 N 架邻机的通道当作 N·F 个变量 token 做掩码多变量注意力，再加一层 agent attention（每架邻机一个注意力分数，可解释）；它没有意图 token 和锚解码器，但作为 Phase 2 的编码器足够。
 
 ### 3.4 解码器：汇入锚查询
 
 MTR 的"意图查询"/DenseTNT 的目标候选：
 
 1. **锚查询**：K 个可学习 query，每个加上锚的嵌入（d_join 值的位置编码 + 所属侧）。
-2. **交叉注意力**：query 对场景编码 Z 做 2 层 cross-attention（也可以带一层 query 间的自注意力，让模态互相排斥）。
+2. **交叉注意力**：query 对场景编码 Z 做 2 层 cross-attention（其中邻机 token 已带意图，query 能直接"看到"前机大概在哪里汇入），再加一层 query 间的自注意力让模态互相排斥。
 3. **每个 query 的头**：
-   - 得分头 → logit_k；
-   - 控制头 → 64 段控制 + 时长（复用现有 `ControlOutputHead` / `UniformDurationControlHead` 的结构，输入换成 query 特征）；
+   - 得分头 → logit_k（排序损失训练）；
+   - 意图头 → δ_k（汇入距离的连续修正）；
+   - 控制头 → 64 段控制 + 时长（复用现有 `ControlOutputHead` / `UniformDurationControlHead` 的结构，输入换成 query 特征）；参数化输出再积分这一形式有外部证据（ASCENT 的消融：预测航向/俯仰/速度再积分优于直接回归位置），我们的控制序列 + 动力学 rollout 是它的更强形式；
    - → 现有 rollout（`rollout_control_endpoints` 训练、稠密 rollout 推理）。
 4. **可选的几何封闭**（`2026-09-04_procedure_constraints_design.zh.md` 的 P2）：汇入之后的路径不由网络出，按航向道 + 下滑道 + 减速剖面用逆动力学闭式给出（`control/dynamics/inverse.py`）；网络只出汇入前的控制。这把多模态严格限制在决策量上，代价是末段的个体差异（真实航班末段也有 ±60 m 的散布）被抹掉。建议 Phase 3 先不做封闭，把它作为一个对照臂。
 
@@ -87,8 +90,9 @@ MTR 的"意图查询"/DenseTNT 的目标候选：
 
 ### 3.5 损失与训练细节
 
-- 分类：交叉熵，目标 k*；若真值 d_join 与两个锚的距离都在容差（1 km）内，用软目标。
-- 回归：simple-v3 的全部项只在 k* 上算；其余模态不回传（WTA）。这是 MultiPath / MTR 的标准做法，避免模态坍缩。
+- 得分：Plackett–Luce 排序损失（按各锚到真值 d_join 的距离给出目标排序），必要时加交叉熵项；若真值与两个锚的距离都在容差（1 km）内，两者并列。
+- 意图辅助项：本机 δ_{k*} 的 L1；邻机意图头对每架邻机的 CE（真值 = 邻机自己的 d_join 所在锚；只对有真值的邻机算）。
+- 回归：simple-v3 的全部项只在 k* 上算；其余模态不回传（WTA）。这是 MultiPath / MTR / ASCENT 的标准做法，避免模态坍缩。
 - 训练成本：回归只需一条 rollout（k*），得分头不需要 rollout，所以训练时 rollout 次数不变；推理 K 次。
 - 类别不平衡：直线进近多（KRDU 64 %、KSJC 81 %），锚的先验分布倾斜；交叉熵可加类别权重，或按 d_join 分层采样。
 - 与复审文档 P0 的关系：垂直定价、阈值平面事件项可以同时开，但要作为独立臂，否则分不清收益来源。
@@ -96,7 +100,7 @@ MTR 的"意图查询"/DenseTNT 的目标候选：
 ### 3.6 推理、导出、评估
 
 - `forecast` 对每个模态生成一条预测；导出：top-1 走现有记录契约（`evaluation` 的一条轨迹一个记录，不改契约），其余模态作为同一航班的附加记录写在子目录 `modes/`，`source` 里记 `mode_index`、`mode_probability`、`join_anchor_m`。
-- 读数脚本 `docs/compare_multimodal_arms.py`：minADE_K / minFDE_K、miss rate（最好模态 FDE > 2 km 的份额）、锚分类准确率与校准曲线、top-1 的分层 ADE/FDE（与现有 `compare_frame_arms.py` 同口径）。
+- 读数脚本 `docs/compare_multimodal_arms.py`：minADE_K / minFDE_K、miss rate（最好模态 FDE > 2 km 的份额）、softmAP 与 brier-minFDE（驾驶基准的标准，概率参与评分）、锚分类准确率与校准曲线、d̂_join 的误差、top-1 的分层 ADE/FDE（与现有 `compare_frame_arms.py` 同口径），并加一个 2 min 视界的分层读数作为与 ASCENT/MAIFormer 等外部数字的量级锚点。
 - 对照：K 条随机锚 + 同一网络（排除"多试几次总有一条近"）；oracle 锚（给真值 k*）的上界。
 
 ## 四、架构（放在仓库的哪里）
@@ -149,7 +153,7 @@ loss/multimodal（CE + WTA·simple-v3）             forecast/export（top-1 记
 - 测试：泄漏（构造一架邻机只在 t > t₀ 有样本，必须不出现；ETA 不用落地时间）；确定性与缓存契约；名册一致性（邻机 flight_key 必须在 tracks manifest 里）；坐标系（邻机在本机图坐标里的位置与 `runway_axes` 一致）。
 - 测量：d_join 对上下文的可解释性——用简单模型（梯度提升或线性）从标量上下文预测 d_join，看 R²/分类准确率。这是不训神经网络就能看到"上下文值多少"的第二道门。
 
-**Phase 2 — 最小改动臂（2 天）。** 现有主干 + 上下文协变量 token + K 类汇入头（分类损失）+ 锚嵌入条件的控制头。目的：用最少的代码验证"上下文进得去、锚分得开"。门：锚准确率 > 先验；vectored top-1 ADE 有改善。若主干再次不用协变量 token（可用注意力权重或消融测），直接进 Phase 3。
+**Phase 2 — 最小改动臂（2–3 天）。** 保留 iTransformer，按 MAIFormer 的方式扩展：邻机通道作为额外变量 token（掩码多变量注意力）+ 一层 agent attention，加标量上下文 token，加 K 类汇入头（排序损失）+ 锚嵌入条件的控制头。目的：用最少的代码验证"上下文进得去、锚分得开"，并得到一个可解释的 agent attention 读数（哪架邻机在决定本机的汇入）。门：锚准确率 > 先验；vectored top-1 ADE 有改善。若主干不用邻机 token（注意力权重/消融），直接进 Phase 3。
 
 **Phase 3 — 场景编码器 + 汇入锚解码器（1–2 周）。**
 - 模型：`scene_encoder`、`join_anchor` 解码器、多模态预测输出、损失。
@@ -157,7 +161,7 @@ loss/multimodal（CE + WTA·simple-v3）             forecast/export（top-1 记
 - 实验（KRDU 后 KSJC，simple-v3 的损失剂量不变）：臂 = 基线、Phase 2 臂、Phase 3 臂（K = 4 / 6）、随机锚对照、oracle 锚上界；读数 minADE_K、top-1 分层、锚准确率与校准。
 - 预注册否决：直线进近 top-1 退；minADE_K 的改善不超过随机锚对照。
 
-**Phase 4 — 收尾。** 几何封闭对照臂（3.4 可选项）；每个模态套屏障过滤器；风（METAR）；合并机场训练；CZML 多模态渲染（可选）；报告。
+**Phase 4 — 收尾与生成式对照。** （i）生成式解码器对照臂：同一场景编码、同一锚条件，用流匹配（TrajFlow 式单次 K 模态，或 Diffusion Policy / Streaming Flow Policy 式对控制序列的条件生成，一步蒸馏）替代确定性控制头，rollout 不变；逐段噪声（Diffusion Forcing）作为它的变体。这是"查询式 vs 生成式"在我们数据上的直接对照——ASCENT 在 TrajAir 上量到查询式更好，我们的数据要自己量。（ii）几何封闭对照臂（3.4 可选项）；每个模态套屏障过滤器；风（METAR）；合并机场训练；CZML 多模态渲染（可选）；报告。
 
 **不做**：把多模态写成对 K 条都回归的损失（会坍缩成平均）；把邻机的落地时间当特征；把锚做成罚项；在训练回路里放 hook。
 
