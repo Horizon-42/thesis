@@ -150,7 +150,13 @@ def test_dubins_join_holds_the_heading_first_and_via_dubins_passes_the_via_pose(
     path = cg.via_dubins(anchor, PSI, 6_000.0, via[0], via[1], PSI + math.pi / 2)
     assert path.kind == cg.KIND_VIA_DUBINS and path.via == (via[0], via[1], PSI + math.pi / 2)
     assert np.min(np.hypot(*(path.horizontal - via).T)) < 1.0
-    assert path.params == {"d_join": 6_000.0, "via_e": via[0], "via_n": via[1], "via_heading": PSI + math.pi / 2}
+    # The label carries the via in runway axes with its heading relative to the course, wrapped.
+    assert path.params["d_join"] == 6_000.0 and (path.params["via_e"], path.params["via_n"]) == (via[0], via[1])
+    assert path.params["via_d"] == pytest.approx(14_000.0) and path.params["via_xt"] == pytest.approx(2_000.0)
+    assert path.params["via_heading_rel"] == pytest.approx(math.pi / 2)
+    wrapped = cg.via_dubins(anchor, PSI, 6_000.0, via[0], via[1], PSI + math.pi / 2 + 4 * math.pi)
+    assert wrapped.params["via_heading"] == pytest.approx(PSI + math.pi / 2) and -math.pi <= wrapped.params["via_heading"] < math.pi
+    assert cg.wrap_angle(3 * math.pi) == pytest.approx(-math.pi) and cg.wrap_angle(-math.pi - 0.1) == pytest.approx(math.pi - 0.1)
     d, xt, heading_error = _at_join(path)
     assert d == pytest.approx(6_000.0, abs=1.0) and xt == pytest.approx(0.0, abs=1.0) and heading_error < math.radians(1.5)
 

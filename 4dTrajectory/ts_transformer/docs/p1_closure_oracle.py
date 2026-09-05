@@ -259,7 +259,7 @@ def cmd_geometry(args: argparse.Namespace) -> None:
 
 SLOWNESS_KNOTS = (2, 4, 8, 16)
 HEIGHT_KNOTS = (2, 4, 8)
-LABEL_KNOTS = 8
+LABEL_KNOTS = (4, 8)
 
 
 def _timing_variants(f, length, truth_t, speed0):
@@ -319,9 +319,13 @@ def profile_flight(item) -> dict:
         if k in HEIGHT_KNOTS:
             out["combined"][f"slowness + height knots K={k}"] = score(
                 timings[f"slowness knots K={k} (LSQ)"], heights[f"height knots K={k} (LSQ)"])
+    # Labels at each K the design considers, with the residual the pair reaches on this
+    # flight (its own ADE, and the fitted duration's error) so a fallback rule can read it.
     out["labels"] = {
-        "slowness_knots": cp.fit_slowness_knots(f, length, truth_t, LABEL_KNOTS).tolist(),
-        "height_knots": cp.fit_height_knots(f, truth_u, LABEL_KNOTS).tolist(),
+        "slowness_knots": {str(k): cp.fit_slowness_knots(f, length, truth_t, k).tolist() for k in LABEL_KNOTS},
+        "height_knots": {str(k): cp.fit_height_knots(f, truth_u, k).tolist() for k in LABEL_KNOTS},
+        "combined_ade_m": {str(k): out["combined"][f"slowness + height knots K={k}"]["ade_m"] for k in LABEL_KNOTS},
+        "combined_duration_error_s": {str(k): out["combined"][f"slowness + height knots K={k}"]["duration_error_s"] for k in LABEL_KNOTS},
         "duration_s": float(truth_t[-1]), "naive_duration_s": float(timings["naive (anchor speed → 70 m/s)"][-1]),
         "path_length_m": length, "anchor_speed_mps": speed0,
     }
@@ -331,7 +335,7 @@ def profile_flight(item) -> dict:
 def cmd_speed(args: argparse.Namespace) -> None:
     reference_dir, config, anchor, keys, masks, by_compact, series, out = _flights(args)
     print(f"{args.airport}: {len(series)} flights, anchor index {anchor}; profiles on the TRUTH path "
-          f"(slowness knots {SLOWNESS_KNOTS}, height knots {HEIGHT_KNOTS}, labels at K={LABEL_KNOTS})")
+          f"(slowness knots {SLOWNESS_KNOTS}, height knots {HEIGHT_KNOTS}, labels at K in {LABEL_KNOTS})")
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         results = list(pool.map(profile_flight, [(item, anchor) for item in series], chunksize=8))
     by_key = {by_compact[r["flight_id"]]: r for r in results}

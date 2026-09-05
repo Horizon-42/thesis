@@ -333,18 +333,27 @@ def dubins_join(anchor: AnchorPose, psi: float, d_join: float, d_downwind: float
     return _close(horizontal, d_join, psi, KIND_DOWNWIND_DUBINS, {"d_join": d_join, "d_downwind": d_downwind}, via)
 
 
+def wrap_angle(a: float) -> float:
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+
 def via_dubins(anchor: AnchorPose, psi: float, d_join: float, via_e: float, via_n: float,
                via_heading: float) -> ClosurePath | None:
     """F3: Dubins CSC to a via pose, then Dubins CSC to the join pose (``None`` when
-    either CSC does not exist)."""
+    either CSC does not exist). The params carry the via both in the chart and in runway
+    axes with its heading relative to the course, wrapped to [−π, π) — the label a decoder
+    regresses (one distribution for every runway, no branch cut when stored as cos / sin)."""
     via = np.array([via_e, via_n])
     first = dubins_csc(anchor.position, anchor.heading, via, via_heading, anchor.radius)
     second = dubins_csc(via, via_heading, join_pose(d_join, psi), psi, anchor.radius)
     if first is None or second is None:
         return None
+    via_d, via_xt = runway_axes_np(via_e, via_n, psi)
+    heading = wrap_angle(float(via_heading))
     return _close(np.concatenate([first, second[1:]]), d_join, psi, KIND_VIA_DUBINS,
-                  {"d_join": d_join, "via_e": via_e, "via_n": via_n, "via_heading": via_heading},
-                  (float(via_e), float(via_n), float(via_heading)))
+                  {"d_join": d_join, "via_e": via_e, "via_n": via_n, "via_heading": heading,
+                   "via_d": float(via_d), "via_xt": float(via_xt), "via_heading_rel": wrap_angle(heading - psi)},
+                  (float(via_e), float(via_n), heading))
 
 
 # ── profiles ────────────────────────────────────────────────────────────────
@@ -460,6 +469,8 @@ def fit_rule_template(anchor: AnchorPose, psi: float, truth_xy: np.ndarray, d_jo
     costs = [_cost(build(d), truth_xy) for d in grid]
     x = _refine(lambda v: _cost(build(v[0]), truth_xy), np.array([grid[int(np.argmin(costs))]]), maxfev=60)
     fitted = build(x[0])
+    if fitted is None:
+        raise RuntimeError("no rule-template join exists for this anchor")
     return _relabelled_join(fitted, lambda d: build(d), psi, truth_xy)
 
 
@@ -565,8 +576,9 @@ def _canonical_label(fitted: ClosurePath, anchor: AnchorPose, psi: float, fit_er
     """``fitted`` re-expressed by its canonical labels (join at the localizer entry, the
     earliest reproducing via) when they exist — ``params["canonical"]``; otherwise the
     fitted labels themselves (they reproduce the fit by definition, but are not
-    identifiable). ``params`` also carry the via's arc fraction of the pre-final path and
-    the fit's own residual, so the labelled path's residual can be read against it."""
+    identifiable). ``params`` also carry the via's arc fraction of the path up to its
+    localizer entry (of the whole path when it has none) and the fit's own residual, so
+    the labelled path's residual can be read against it."""
     entry = localizer_entry(fitted, psi)
     d_entry = entry[1] if entry is not None else fitted.d_join
     pose, s_via, s_entry = canonical_via(fitted, anchor, psi, d_entry)

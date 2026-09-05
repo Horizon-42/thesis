@@ -63,10 +63,15 @@ def test_duration_scaling_keeps_the_shape_and_refuses_a_zero_duration():
         cp.progress(np.zeros((3, 2)))
 
 
-def test_height_fit_recovers_a_piecewise_linear_profile():
+def test_height_fit_recovers_a_piecewise_linear_profile_and_pins_the_threshold():
     f = np.linspace(0.0, 1.0, 301)
     truth_knots = np.array([900.0, 700.0, 450.0, 200.0, 0.0])
     u = cp.height_from_knots(f, truth_knots)
     fitted = cp.fit_height_knots(f, u, knots=4)
     assert np.allclose(fitted, truth_knots, atol=1e-6)
     assert np.allclose(cp.height_from_knots(f, fitted), u)
+    # A convex tail pulls an unpinned fit below the threshold; the pinned fit lands at 0.
+    convex = u + 40.0 * np.maximum(f - 0.8, 0.0) ** 2 / 0.04
+    fitted = cp.fit_height_knots(f, convex, knots=4)
+    assert fitted[-1] == 0.0
+    assert cp.fit_height_knots(f, convex, knots=4, terminal_m=17.0)[-1] == 17.0

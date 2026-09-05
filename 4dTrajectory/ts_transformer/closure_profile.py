@@ -14,8 +14,10 @@ oracle can measure what each parametrisation can reach on the truth path itself
   them; ``scale_to_duration`` rescales any time profile onto a given duration (the "naive
   shape + duration head" reading).
 * Height: piecewise-linear in ``f`` at ``K + 1`` knots, fitted by linear least squares
-  (``fit_height_knots``); the geometry's own profile (linear to the glidepath at the join,
-  then the glidepath) is the alternative the oracle compares it with.
+  with the LAST knot pinned to the threshold height (``fit_height_knots``: an unpinned fit
+  trades the landing for the interior and ends up to 33 m below the threshold on a
+  quarter of the flights); the geometry's own profile (linear to the glidepath at the
+  join, then the glidepath) is the alternative the oracle compares it with.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.optimize import lsq_linear
 
-from closure_geometry import cumulative_arc_m
+from geometric_metrics import cumulative_arc_m
 
 SPEED_MIN_MPS = 40.0
 SPEED_MAX_MPS = 160.0
@@ -87,9 +89,12 @@ def scale_to_duration(t: np.ndarray, duration_s: float) -> np.ndarray:
     return t * (duration_s / t[-1])
 
 
-def fit_height_knots(f: np.ndarray, u: np.ndarray, knots: int) -> np.ndarray:
-    """Height knots (m) whose piecewise-linear profile best matches ``u`` in least squares."""
-    return np.linalg.lstsq(hat_basis(f, knots), u, rcond=None)[0]
+def fit_height_knots(f: np.ndarray, u: np.ndarray, knots: int, *, terminal_m: float = 0.0) -> np.ndarray:
+    """Height knots (m) whose piecewise-linear profile best matches ``u`` in least squares,
+    the last knot pinned to ``terminal_m`` (the threshold: 0 in the threshold chart)."""
+    basis = hat_basis(f, knots)
+    free = np.linalg.lstsq(basis[:, :-1], u - basis[:, -1] * terminal_m, rcond=None)[0]
+    return np.append(free, terminal_m)
 
 
 def height_from_knots(f: np.ndarray, height_knots: np.ndarray) -> np.ndarray:
