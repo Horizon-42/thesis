@@ -1,6 +1,26 @@
 # 场景编码 + 汇入锚多模态的 control 预测（dev 文档，2026-09-07）
 
-承接 `2026-09-07_control_training_review.zh.md` §七：pooled ADE 的 60–76 % 来自雷达引导航班，它们的误差是"三边飞多远、何时汇入五边"这个管制决定，本机 120 s 历史里没有这个信息，单点回归只能输出各种决定的平均。本文给出把**交通上下文**放进输入、把**汇入决策**做成多模态输出的完整方案：意图、当前方案的缺陷、设计、架构、实现步骤、风险与参考文献。实现之前先按 §五 的 Phase 0 做上界实验，不通过就不动架构。
+承接 `2026-09-07_control_training_review.zh.md` §七：pooled ADE 的 60–76 % 来自雷达引导航班，它们的误差是"三边飞多远、何时汇入五边"这个管制决定，本机 120 s 历史里没有这个信息，单点回归只能输出各种决定的平均。本文给出把**交通上下文**放进输入、把**汇入决策**做成多模态输出的完整方案：意图、当前方案的缺陷、设计、架构、实现步骤、风险与参考文献。§五 的 Phase 0 上界实验已做完（2026-09-05），结果改写了优先级——见 §〇 与 §五。
+
+## 〇、进度与状态（压缩 context 后从这里继续）
+
+**当前状态（2026-09-05）**：Phase 0 完成并提交；**走向待用户决定**（§五 P1 之后的顺序：推荐 C 先修输出侧，再 B 改决策变量继续）。用户已同意 **P0（几何指标进标准读数）** 列入计划、按优先级排。没有在跑的 campaign。磁盘只剩 4.0 GB——**下一个 campaign 前先清理**（`clean_pipeline_data.py --dry-run` 或删旧实验树）。
+
+| 阶段 | 状态 | 产物 / commit | 关键数字（KRDU val，雷达引导 497 架） |
+|---|---|---|---|
+| Phase 0 机制：`intent_conditioning` ∈ none / truth-join / truth-join-lead / truth-join-duration（真值汇入点 + 可选真值前机 ETA / 真值剩余时长，作为只输入的常量协变量通道） | 完成 | `57d3e2b`, `def1cc5`；`intent_conditioning.py`、`config.py`（`INTENT_*`）、`FlightSeries.lead_landing`、`series_conditioning(..., anchor=)`、`--intent-conditioning`；测试 `tests/test_intent_conditioning.py` | 顺带修了两个既有阻塞 bug：控制训练回路/auto-batch 把 `x[:, -1]`（含协变量的整行）当锚点状态；配方覆盖检查拒绝新字段 |
+| Phase 0 campaign `4dTrajectory/outputs/KRDU/experiments/scene_phase0_20260905/`（臂 `docs/experiments/scene_phase0_arms.json`，与 `control_procedure_20260905/A_control_v3` 配对） | 完成 | `readout.txt/.json`（四臂）、`diagnostics_arms.txt`、`diagnostics_population.txt`；结果文档 `2026-09-05_scene_phase0_results.zh.md` | ADE：基线 2858 → 仅汇入点 2356 → +前机 ETA 2364（无增量）→ +剩余时长 **2011**；时长误差 39 → 22 → 20 → 5 s；时间无关几何误差 chamfer 942 → 791 → 801 → 850 m（**不改善**）；直线进近 469 → 458/442/434 |
+| Phase 0 诊断 `docs/phase0_intent_diagnostics.py`（residual / sensitivity / template / context / timing；经 opus review） | 完成 | 同上 | 真值路径 + 朴素速度剖面 1308 m；真值汇入 + trombone + 真值时序 1688 m；真值路径 + 常速 2813 m；上下文对 d_join 的 R²（锚点后才汇入 6,557 架）：本机 0.34 → +因果计数 0.38 → +真值前机 ETA 0.47；知道 d_join 后剩余时长误差 35.8 → 22.8 s |
+| 门的判定 | 未达且门定错量级 | `2026-09-05_scene_phase0_results.zh.md` §四–§八 | 1.5 km 对"只知汇入点"的 oracle 在时间对齐指标下不可达；决策变量应含时间；输出侧（控制头 + rollout 按给定意图画几何）是先于场景编码的瓶颈 |
+| P0 几何指标读数 | 计划中（下一步） | `compare_constraint_arms.py` / `compare_frame_arms.py` | 见 §五 P0 |
+| P1 输出侧几何封闭（走向 C） | 待决定 | — | 见 §五 P1 |
+| P2 数据平面（原 Phase 1）| 未开始 | — | 验收指标已改（§五 P2） |
+| P3 场景编码 + (d_join, T) 锚解码器（原 Phase 2/3） | 未开始 | — | top-1 目标已改（§一） |
+| P4 生成式对照等（原 Phase 4） | 未开始 | — | 不变 |
+
+**恢复工作时的约定**（来自 memory 与本轮经验）：正式 campaign（`run_ts_frame_ablation.py`，默认 formal）要求干净工作树——先 commit；代码在跑实验前用 opus subagent review，文档不送 review；`git add` 明确路径，不用 `-A`；看进程用 PID 不用 `pgrep -f`；子进程 stdout 到日志是块缓冲，`epoch` 行会滞后几分钟，不是卡死；引用数字只引当前产物；判"预测是否建立五边"用成员门（`hard_on_final` + `stays_mask`），k=0.5 真值门会被已知的 250–350 m 终点平移饱和成"从不"。
+
+**复现命令**：见 `2026-09-05_scene_phase0_results.zh.md` §九。
 
 ## 一、意图
 
@@ -8,12 +28,14 @@
 
 **要改的东西**：让模型知道决定汇入位置的外部信息（同跑道前机、排队、跑道使用），并把汇入位置这个离散的决定显式地建模成 K 个候选（多峰），而不是一个平均。
 
-**成功的定义（预注册）**：
-- 雷达引导分层：minADE_K（K ≤ 6）相对基线 ADE 下降 ≥ 40 %（KRDU 2858 m → < 1700 m）；top-1 ADE 不差于基线。
+**成功的定义（预注册；2026-09-05 按 Phase 0 修订，修订前的原文见 §7.4 之前的版本历史 `git log`）**：
+- 每个分层同时报**两组数**：时间对齐的 ADE/FDE/时长误差（4D，交付的量）与时间无关的几何误差（chamfer、Fréchet、弧长对齐 ADE；§五 P0）。只用其中一组下的结论不算数。
+- 雷达引导分层，top-1：Phase 0 量到"完美 (d_join, T) + 现解码器"= 2011 m、真值路径 + 朴素速度剖面 = 1308 m，所以 **top-1 ADE 的目标改为 < 2.0 km（从 2858），几何误差 chamfer < 600 m（从 942）**；minADE_K（K ≤ 6）< 1.7 km 保留。
+- 时长误差（雷达引导中位）：< 25 s（从 39；仅汇入点已到 22，是可实现的量级）。
 - 直线进近分层：top-1 ADE/FDE 不退（这一层现在已经不错，方案不能用它换雷达引导层）。
 - 汇入锚分类：top-1 准确率显著高于按先验的猜测；概率校准（预测概率 0.8 的锚命中率 ≈ 0.8）。
 - 动力学一致性、走廊约束、推理时屏障过滤器：每个模态都保留。
-- 否决：直线进近 top-1 FDE 退 > 种子噪声；或 minADE_K 的改善全部来自"K 条里总有一条碰巧近"（对照：K 条随机锚 + 同一网络）。
+- 否决：直线进近 top-1 FDE 退 > 种子噪声；或 minADE_K 的改善全部来自"K 条里总有一条碰巧近"（对照：K 条随机锚 + 同一网络）；或几何误差不动而只有时序改善（那是时长头的功劳，不是场景/多模态的）。
 
 **交付物形状**：K 条带概率的物理轨迹。现有评估（一条轨迹一个记录）用 top-1；新增一个多模态读数（minADE_K、miss rate、锚准确率、校准）。下游若要一条，取 top-1 或按概率加权；若要风险评估，用全部 K 条。
 
@@ -146,6 +168,32 @@ loss/multimodal（CE + WTA·simple-v3）             forecast/export（top-1 记
 不变量：邻机只按名册取（不 glob）；所有邻机样本 t ≤ t₀；坐标系仍是本机的阈值锚定 `enu`（跑道假设扩展的机制不变）；锚随 checkpoint 持久化（换机场重算）。
 
 ## 五、实现步骤（每步有测试与决策门）
+
+### 5.0 按 Phase 0 结果重排的优先级（2026-09-05）
+
+排序依据：Phase 0 量到（i）4D 误差的主项是沿路径的时序，其次是几何；（ii）现解码器拿到真值 (d_join, T) 仍只到 2.0 km、几何不动；（iii）粗特征上下文对 d_join 的可解释性弱（R² 0.38，真值前机 ETA 0.47）。所以先把"读数能分辨几何与时序"做好（P0），再修"给定意图 → 几何"的输出侧（P1），之后场景编码（P2/P3）的收益才有兑现空间。每步：写代码 → opus review → 修 → 实验 → 记录 → 下一步。
+
+**P0 — 几何指标进标准读数（≈1 天；下一步）。** 用户已同意。在 `docs/compare_constraint_arms.py`（及 `compare_frame_arms.py` 的表）里为每个分层、每臂加三列时间无关几何误差 + 一列时长误差，与现有 ADE/FDE 并列：
+- chamfer（对称最近点均值，100 m 重采样；`phase0_intent_diagnostics.py::chamfer_m` 已有，搬成单一来源）；
+- 离散 Fréchet 距离（顺序敏感，不被"铺满区域"的路径骗）；
+- 弧长对齐 ADE（在飞完路程的同一比例处比位置——保序、去速度）；
+- 时长误差中位与沿路径提前/滞后（真值弧长分数处的时间差）。
+真值用观测行（post-anchor `observed_states`）还是含拟合尾的 supervision 行要写明（两者差 6 s / ~400 m，Phase 0 的 chamfer 用了观测行）。回填 Phase 0 四臂与 hook v2 campaign 的表。门：无（读数工具）；验收 = 单元测试（合成路径的已知距离）+ Phase 0 数字复现。
+
+**P1 — 输出侧：几何封闭的解码器（走向 C；≈1–2 周；待用户决定后开始）。** 设计 §3.4 的可选项升为主线：网络预测决策量 (d_join, T) 与一个速度剖面（例如沿路程的分段线性地速，或 64 段的速度目标），路径由几何闭式给出——锚点状态 → trombone / Dubins 到 (d_join, 0) → 航向道 + 下滑道（`phase0_intent_diagnostics.py::template_path` 是原型），再按速度剖面给时间；可选再经 rollout 做动力学一致化。
+- 先用**真值** (d_join, T) 验收输出侧（oracle 臂，KRDU）：目标雷达引导 ADE < 1.5 km（真值时序下模板已 1.7 km，学到速度剖面应更低）、chamfer < 500 m；若做不到，说明几何族本身不够（三边位置/下风延伸要作为第三个决策量），在这里加，不进场景。
+- 然后让网络自己预测 (d_join, T)（无真值），与 simple-v3 基线、O_join_duration 上界一起读四组数；直线进近分层用"straight"分支，必须不退。
+- 风险：几何族对非标准引导（转场、盘旋）不适用——统计份额（Phase 0 模板构造计数：雷达引导 497 架里 trombone 305、Dubins 181、直线 2、已飞过汇入点 9），给不适用的航班保留现有控制头作为后备分支。
+
+**P2 — 数据平面（原 Phase 1；≈2–3 天）。** 内容不变（`scene_index`、`scene_context`、`scene/features`、泄漏测试），**验收指标改**：邻机位置/ETA/离阈值距离等实体级特征对 (d_join, T) 的可解释性要明显高于 Phase 0 的粗特征基线（d_join R² 0.38 → 目标 ≥ 0.55；剩余时长中位误差 35.8 s → 目标 < 28 s；`phase0_intent_diagnostics.py context/timing` 是基线脚本）。达不到就说明上下文的价值在别处（跑道使用、离场），先量再建模。
+
+**P3 — 场景编码 + 锚解码器（原 Phase 2/3；≈2 周）。** 内容不变，两处改：锚落在 **(d_join, T)** 的联合直方图上（或 T 为主、d_join 为辅），不再只 d_join；top-1 目标按 §一 修订（< 2.0 km），多模态的价值用 minADE_K 与校准报告，不承诺 top-1 低于 2 km。解码器输出接 P1 的几何封闭（每个模态一条闭式路径 + 速度剖面），控制头 + rollout 作为对照臂。
+
+**P4 — 生成式对照、风、合并机场、渲染、报告（原 Phase 4）。** 不变。
+
+**不再做**：只给汇入点的 oracle 臂（结论已清楚）；用 1.5 km 作为意图信息的门；把 top-1 < 2 km 当成场景编码的承诺；用 k=0.5 真值门判预测是否建立五边。
+
+### 5.1 原计划（Phase 0–4 原文；编号映射 Phase 1→P2，Phase 2/3→P3，Phase 4→P4）
 
 **Phase 0 — 上界实验（1 天，不改架构）。** 用现有的协变量 token 机制把真值 d_join 和真值前机 ETA 喂给 simple-v3，训一臂 KRDU。读 vectored ADE。门：若 < 1.5 km（从 2858），说明意图信息值这么多，继续；若几乎不动，问题在别处，停。
 
