@@ -25,7 +25,7 @@ options — the inference-time projection arm of the final-approach constraint c
 
     {"key": "A_project_on_final", "label": "arm A + corridor projection",
      "checkpoint": "4dTrajectory/outputs/{airport}/experiments/airport_frame_20260903/A_threshold_enu/checkpoint.pt",
-     "predict_args": ["--project-final", "on-final"]}
+     "predict_args": ["--project-final", "on-final"]}   (``{airport}`` is substituted in both)
 
 ``{airport}`` in the checkpoint path is substituted with the campaign's airport.
 
@@ -205,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  arm {key:<26s} predict-only from {checkpoint} "
                   f"{' '.join(arm.get('predict_args', []))}")
             steps += predict_only_steps(
-                key, checkpoint, list(arm.get("predict_args", [])), airport=airport,
+                key, checkpoint, [str(a).format(airport=airport) for a in arm.get("predict_args", [])], airport=airport,
                 campaign=campaign, split=args.split, device=args.device,
             )
             continue
