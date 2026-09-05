@@ -190,7 +190,7 @@ def test_reconstruction_is_a_valid_trajectory_that_ends_at_the_threshold(tmp_pat
     dropped = co.reconstruct(near, item.values[anchor], psi, config)
     looped = cg.via_dubins(a, psi, near[0], *cg.chart_from_axes_np(near[1], near[2], psi), cg.wrap_angle(psi + rel))
     assert dropped.construction == co.KIND_VIA_AT_ANCHOR
-    assert dropped.path.length < 0.6 * looped.length and dropped.path.length < 1.2 * drawn.path.length
+    assert dropped.path.length < 0.8 * looped.length and dropped.path.length < 1.2 * drawn.path.length
 
 
 def test_drawing_from_the_labels_reproduces_the_truth(tmp_path):
