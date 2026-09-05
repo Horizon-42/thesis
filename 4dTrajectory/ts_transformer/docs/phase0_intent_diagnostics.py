@@ -62,7 +62,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from scipy.spatial import cKDTree
 
 HERE = Path(__file__).resolve().parent
 TS_DIR = HERE.parent
@@ -74,11 +73,12 @@ for path in (HERE, TS_DIR, REPO_ROOT):
 import compare_frame_arms as cfa  # noqa: E402
 import final_approach_geometry as fag  # noqa: E402
 import intent_conditioning as ic  # noqa: E402
+import geometric_metrics as gm  # noqa: E402
 from config import DEFAULT_DT_S, DEFAULT_SEQ_LEN, TSConfig  # noqa: E402
 from coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
 from dataset import build_series, load_flight_dicts  # noqa: E402
 from flight_scenarios.identity import flight_key  # noqa: E402
-from geokit import METRES_PER_DEG_LAT, compass_bearing_to_math_enu_rad, metres_per_deg_lon  # noqa: E402
+from geokit import compass_bearing_to_math_enu_rad  # noqa: E402
 from metrics import common_physical_time_flight_metrics  # noqa: E402
 from trajectory_data_process.harvest.arrivals import load_arrival_flights  # noqa: E402
 
@@ -107,7 +107,9 @@ def _load_arms(specs: list[str]) -> dict[str, tuple[Path, dict[str, dict]]]:
         label, _, path = spec.partition("=")
         pred_dir = Path(path)
         pred_dir = pred_dir if pred_dir.is_absolute() else REPO_ROOT / pred_dir
-        arms[label] = (pred_dir, cfa.load_arm(pred_dir))
+        # The observed truth: this script's chamfer convention (the readouts default to
+        # the closed one; the two differ by the stop-short gap, see geometric_metrics).
+        arms[label] = (pred_dir, cfa.load_arm(pred_dir, geometry_truth=gm.GEOMETRY_TRUTH_OBSERVED))
     return arms
 
 
@@ -130,9 +132,7 @@ def _series_for(keys: list[str], airport: str, config: TSConfig):
 
 
 def _en(rows: list[dict], lat0: float, lon0: float) -> np.ndarray:
-    lat = np.array([r["lat"] for r in rows])
-    lon = np.array([r["lon"] for r in rows])
-    return np.stack([(lon - lon0) * metres_per_deg_lon(lat0), (lat - lat0) * METRES_PER_DEG_LAT], 1)
+    return np.stack(gm.chart_en([r["lat"] for r in rows], [r["lon"] for r in rows], lat0, lon0), 1)
 
 
 def _axes(xy: np.ndarray, psi: float) -> tuple[torch.Tensor, torch.Tensor]:
@@ -163,21 +163,6 @@ def _prediction_join_distance(xy: np.ndarray, psi: float) -> float:
     return float(d[0, opened[0]]) if len(opened) else math.nan
 
 
-def _resample(xy: np.ndarray, step: float = 100.0) -> np.ndarray:
-    seg = np.hypot(*np.diff(xy, axis=0).T)
-    s = np.concatenate([[0.0], np.cumsum(seg)])
-    if s[-1] < step:
-        return xy
-    grid = np.arange(0.0, s[-1], step)
-    return np.stack([np.interp(grid, s, xy[:, 0]), np.interp(grid, s, xy[:, 1])], 1)
-
-
-def chamfer_m(a: np.ndarray, b: np.ndarray) -> float:
-    """Symmetric mean nearest-point distance between two horizontal paths."""
-    a, b = _resample(a), _resample(b)
-    return 0.5 * (cKDTree(b).query(a)[0].mean() + cKDTree(a).query(b)[0].mean())
-
-
 def _p(values, q):
     return np.nanpercentile(np.asarray(values, dtype=float), q)
 
@@ -206,7 +191,7 @@ def cmd_residual(args: argparse.Namespace) -> None:
             if index == 0:
                 truth_join.append(_truth_join_distance(txy, psi))
             stats[label]["ade"].append(row["ade_m"])
-            stats[label]["chamfer"].append(chamfer_m(pxy, txy))
+            stats[label]["chamfer"].append(row["chamfer_m"])
             stats[label]["duration"].append(row["predicted_final_time_s"] - row["true_final_time_s"])
             stats[label]["pred_join"].append(_prediction_join_distance(pxy, psi))
     truth_join = np.array(truth_join)
@@ -279,7 +264,7 @@ def cmd_sensitivity(args: argparse.Namespace) -> None:
             ref_xy, ref_t, _ = forecasts[0.0]
             for shift, (xy, t, point) in forecasts.items():
                 nearest = float(np.min(np.hypot(xy[:, 0] - point[0], xy[:, 1] - point[1])))
-                results[shift].append((t - ref_t, chamfer_m(xy, ref_xy), chamfer_m(xy, truth_xy), nearest))
+                results[shift].append((t - ref_t, gm.chamfer_m(xy, ref_xy), gm.chamfer_m(xy, truth_xy), nearest))
     finally:
         ic.truth_join_point = original
     print(f"{len(series)} vectored flights, checkpoint {args.checkpoint}")
@@ -547,8 +532,7 @@ def _population(airport: str) -> list[dict]:
         target = targets[runway]
         psi = compass_bearing_to_math_enu_rad(math.radians(target["course_deg"]))
         wp = np.array(flight["waypoints"])
-        e = (wp[:, 1] - target["lon"]) * metres_per_deg_lon(target["lat"])
-        n = (wp[:, 2] - target["lat"]) * METRES_PER_DEG_LAT
+        e, n = gm.chart_en(wp[:, 2], wp[:, 1], target["lat"], target["lon"])
         d, xt = _axes(np.stack([e, n], 1), psi)
         gate = fag.truth_final_gate(d, xt, torch.ones_like(d, dtype=torch.bool))[0].numpy()
         opened = np.flatnonzero(gate)

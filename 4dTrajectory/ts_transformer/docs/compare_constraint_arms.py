@@ -23,7 +23,13 @@ Rows are matched by time: the truth row at ``t`` (post-anchor observed track) an
 predicted row at the same ``t``; truth rows beyond a truncated forecast's end are
 "uncovered" and counted, not scored.
 
-    python compare_constraint_arms.py A=<A_pred_val> proj=<A_project_on_final_pred_val> ... [--json out.json]
+Next to ADE/FDE every stratum table also prints the time-free geometry columns from
+``geometric_metrics`` (chamfer, discrete Fréchet, arc-aligned ADE, duration error,
+along-path lag); ``--geometry-truth`` picks their truth (default ``closed``; ``observed``
+reproduces the Phase 0 diagnostics' chamfer).
+
+    python compare_constraint_arms.py A=<A_pred_val> proj=<A_project_on_final_pred_val> ...
+        [--json out.json] [--geometry-truth closed|observed]
 """
 
 from __future__ import annotations
@@ -46,6 +52,7 @@ for path in (HERE, TS_DIR, REPO_ROOT):
 
 import compare_frame_arms as cfa  # noqa: E402
 import final_approach_geometry as fag  # noqa: E402
+import geometric_metrics as gm  # noqa: E402
 from config import TSConfig  # noqa: E402
 
 # The hinge scales the penalty arm trains with (one source: the config defaults).
@@ -53,12 +60,8 @@ LATERAL_SCALE_M = TSConfig().procedure_loss_lateral_scale_m
 VERTICAL_SCALE_M = TSConfig().procedure_loss_vertical_scale_m
 
 
-def _chart(rows: list[dict], lat0: float, lon0: float, alt0: float) -> np.ndarray:
-    lat = np.array([r["lat"] for r in rows]); lon = np.array([r["lon"] for r in rows])
-    e = (lon - lon0) * cfa.metres_per_deg_lon(lat0)
-    n = (lat - lat0) * cfa.METRES_PER_DEG_LAT
-    u = np.array([r["alt"] for r in rows]) - alt0
-    return np.stack([e, n, u], axis=1)
+def _chart(rows: list[dict], target: dict) -> np.ndarray:
+    return gm.chart_rows(rows, target)[:, :3]
 
 
 def _velocity(rows: list[dict]) -> np.ndarray:
@@ -71,12 +74,11 @@ def corridor_metrics(pred_dir: Path, row: dict) -> dict:
     eval_record = json.loads((pred_dir / row["eval_file"]).read_text())
     states = json.loads((pred_dir / row["states_file"]).read_text())
     target = eval_record["target_state"]
-    lat0, lon0, alt0 = float(target["lat"]), float(target["lon"]), float(target["alt"])
     psi = torch.tensor([float(target["psi"])], dtype=torch.float64)
     tan_gpa = torch.tensor([math.tan(-float(target["gamma"]))], dtype=torch.float64)
 
     truth_rows = [r for r in states["observed_states"] if r["t"] >= 0.0]
-    truth = _chart(truth_rows, lat0, lon0, alt0)
+    truth = _chart(truth_rows, target)
     d_t, xt_t = fag.runway_axes(
         torch.tensor(truth[:, 0])[None], torch.tensor(truth[:, 1])[None], psi
     )
@@ -86,7 +88,7 @@ def corridor_metrics(pred_dir: Path, row: dict) -> dict:
 
     pred_rows = states["predicted_states"]
     pred_by_time = {round(float(r["t"]), 3): i for i, r in enumerate(pred_rows)}
-    pred = _chart(pred_rows, lat0, lon0, alt0)
+    pred = _chart(pred_rows, target)
     d_p, xt_p = fag.runway_axes(
         torch.tensor(pred[:, 0])[None], torch.tensor(pred[:, 1])[None], psi
     )
@@ -139,8 +141,8 @@ def corridor_metrics(pred_dir: Path, row: dict) -> dict:
     }
 
 
-def load_arm(pred_dir: Path) -> dict[str, dict]:
-    rows = cfa.load_arm(pred_dir)
+def load_arm(pred_dir: Path, *, geometry_truth: str = gm.GEOMETRY_TRUTH_CLOSED) -> dict[str, dict]:
+    rows = cfa.load_arm(pred_dir, geometry_truth=geometry_truth)
     for row in rows.values():
         row.update(corridor_metrics(pred_dir, row))
     return rows
@@ -151,7 +153,7 @@ def _rate(numer: np.ndarray, denom: np.ndarray) -> float:
     return float(numer.sum()) / total if total else math.nan
 
 
-def _stratum_block(rows: list[dict]) -> dict[str, float]:
+def _stratum_block(rows: list[dict]) -> dict[str, float | bool]:
     gated = np.array([r["gated_rows"] for r in rows], dtype=float)
     covered = np.array([r["covered_rows"] for r in rows], dtype=float)
     lat_rows = np.array([r["lateral_violation_rows"] for r in rows], dtype=float)
@@ -196,6 +198,7 @@ def _stratum_block(rows: list[dict]) -> dict[str, float]:
         "endpoint_cross_track_abs_p95_m": float(np.percentile(np.abs([r["endpoint_cross_track_m"] for r in rows]), 95)),
         "first_step_offset_median_m": float(np.median([r["first_step_offset_m"] for r in rows])),
         "closer_to_sibling": float(np.mean([bool(r["closer_to_sibling"]) for r in rows if r["closer_to_sibling"] is not None])) if any(r["closer_to_sibling"] is not None for r in rows) else math.nan,
+        **gm.summarize(rows),
     }
 
 
@@ -203,6 +206,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("arms", nargs="+", help="label=prediction_dir; the first is the reference")
     parser.add_argument("--json", type=Path, default=None)
+    parser.add_argument("--geometry-truth", choices=gm.GEOMETRY_TRUTHS, default=gm.GEOMETRY_TRUTH_CLOSED,
+                        help="truth the time-free metrics are read against (see geometric_metrics)")
     args = parser.parse_args(argv)
 
     arms: dict[str, dict[str, dict]] = {}
@@ -213,14 +218,17 @@ def main(argv: list[str] | None = None) -> int:
         pred_dir = Path(path)
         if not pred_dir.is_absolute():
             pred_dir = REPO_ROOT / pred_dir
-        arms[label] = load_arm(pred_dir)
+        arms[label] = load_arm(pred_dir, geometry_truth=args.geometry_truth)
         print(f"loaded {label}: {len(arms[label])} flights from {pred_dir}")
     reference_label = next(iter(arms))
     keys = sorted(set.intersection(*(set(rows) for rows in arms.values())))
     print(f"paired flights: {len(keys)}")
+    print(gm.geometry_truth_notice(
+        args.geometry_truth, gm.summarize([arms[reference_label][k] for k in keys]), len(keys)))
     strata = cfa.strata_masks(arms[reference_label], keys)
 
-    output: dict = {"reference": reference_label, "paired_flights": len(keys), "strata": {}}
+    output: dict = {"reference": reference_label, "paired_flights": len(keys),
+                    "geometry_truth": args.geometry_truth, "strata": {}}
     for stratum, mask in strata.items():
         selected = [k for k, m in zip(keys, mask) if m]
         if not selected:
@@ -231,7 +239,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n== {stratum} (n={len(selected)}; {ref['flights_with_gated_rows']} with gated rows; "
               f"observed vertical-window violation on the covered rows "
               f"{ref['truth_vertical_violation_rate']:.1%}) ==")
-        header = ["arm", "ADE", "FDE mean", "FDE p50", "xt@thr p50", "|xt| p95", "1st-step",
+        header = ["arm", "ADE", "FDE mean", "FDE p50", *gm.GEOMETRY_TABLE_HEADER,
+                  "xt@thr p50", "abs xt p95", "1st-step",
                   "coverage", "lat viol rows", "flights any lat", "lat excess mean/p95",
                   "vert viol rows", "flights any vert", "hinge lat/vert", "claimed rows", "claimed lat viol",
                   "outside@gate", "recovered (n)"]
@@ -239,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         for label, b in blocks.items():
             table.append([
                 label, cfa._fmt(b["ade_mean_m"]), cfa._fmt(b["fde_mean_m"]), cfa._fmt(b["fde_median_m"]),
+                *gm.geometry_table_cells(b),
                 cfa._fmt(b["endpoint_cross_track_median_m"]), cfa._fmt(b["endpoint_cross_track_abs_p95_m"]),
                 cfa._fmt(b["first_step_offset_median_m"]),
                 f"{b['coverage']:.1%}", f"{b['lateral_violation_rate']:.1%}", f"{b['flights_any_lateral']:.1%}",
@@ -256,12 +266,16 @@ def main(argv: list[str] | None = None) -> int:
             ref_rows = arms[reference_label]
             fde = np.array([rows[k]["fde_m"] - ref_rows[k]["fde_m"] for k in selected])
             ade = np.array([rows[k]["ade_m"] - ref_rows[k]["ade_m"] for k in selected])
+            chamfer = np.array([rows[k]["chamfer_m"] - ref_rows[k]["chamfer_m"] for k in selected])
             print(f"   {label} vs {reference_label}: ADE better on {np.mean(ade < 0):.1%} "
                   f"(median Δ {np.median(ade):+.0f} m), FDE better on {np.mean(fde < 0):.1%} "
-                  f"(median Δ {np.median(fde):+.0f} m)")
+                  f"(median Δ {np.median(fde):+.0f} m), chamfer better on {np.mean(chamfer < 0):.1%} "
+                  f"(median Δ {np.median(chamfer):+.0f} m)")
             blocks[label]["paired"] = {
                 "ade_better_share": float(np.mean(ade < 0)), "ade_delta_median_m": float(np.median(ade)),
                 "fde_better_share": float(np.mean(fde < 0)), "fde_delta_median_m": float(np.median(fde)),
+                "chamfer_better_share": float(np.mean(chamfer < 0)),
+                "chamfer_delta_median_m": float(np.median(chamfer)),
             }
     if args.json is not None:
         args.json.write_text(json.dumps(output, indent=1))

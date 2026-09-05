@@ -19,8 +19,15 @@ difference on the shared flight set, never two independent means. Seed replicate
 (``*_s2024``) are read as a within-arm noise floor: a between-arm margin smaller than the
 seed-to-seed margin of the same arm is noise, whatever a p-value says.
 
+Every per-stratum table carries BOTH metric families (scene design doc §一): the
+time-aligned ADE/FDE/time MAE the package scores, and the time-free geometry from
+``geometric_metrics`` — chamfer, discrete Fréchet, arc-aligned ADE — with the along-path
+lag that carries the rest of the ADE. ``--geometry-truth`` picks the truth those are read
+against (default ``closed``: the observed rows closed to the threshold at
+``true_final_time_s``; ``observed`` reproduces the Phase 0 diagnostics' convention).
+
     python 4dTrajectory/ts_transformer/docs/compare_frame_arms.py <campaign-dir> [...]
-        [--json out.json]
+        [--json out.json] [--geometry-truth closed|observed]
 """
 from __future__ import annotations
 
@@ -33,10 +40,12 @@ import sys
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO))
-sys.path.insert(0, str(REPO / "geokit" / "src"))
-from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402
+TS_DIR = Path(__file__).resolve().parents[1]
+for path in (REPO, REPO / "geokit" / "src", TS_DIR):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 from flight_scenarios.runway_target import find_threshold  # noqa: E402
+import geometric_metrics as gm  # noqa: E402
 
 # approach_difficulty's own boundary for "the easy one".
 STRAIGHT_TORTUOSITY = 1.05
@@ -56,13 +65,12 @@ def _threshold_frame(target: dict) -> tuple[float, float, float, float]:
 
 
 def _world_en(lat: float, lon: float, lat0: float, lon0: float) -> tuple[float, float]:
-    return (lon - lon0) * metres_per_deg_lon(lat0), (lat - lat0) * METRES_PER_DEG_LAT
+    east, north = gm.chart_en(lat, lon, lat0, lon0)
+    return float(east), float(north)
 
 
-def endpoint_geometry(pred_dir: Path, row: dict) -> dict:
+def endpoint_geometry(eval_record: dict, states: dict, row: dict) -> dict:
     """The predicted endpoint against the ASSIGNED threshold and its parallel sibling."""
-    eval_record = json.loads((pred_dir / row["eval_file"]).read_text())
-    states = json.loads((pred_dir / row["states_file"]).read_text())
     target = eval_record["target_state"]
     last = states["predicted_states"][-1]
     lat0, lon0, psi = float(target["lat"]), float(target["lon"]), float(target["psi"])
@@ -106,14 +114,19 @@ def endpoint_geometry(pred_dir: Path, row: dict) -> dict:
     return result
 
 
-def load_arm(pred_dir: Path) -> dict[str, dict]:
+def load_arm(pred_dir: Path, *, geometry_truth: str = gm.GEOMETRY_TRUTH_CLOSED) -> dict[str, dict]:
+    """Every scored flight of one prediction directory, keyed by flight_key, with the
+    endpoint geometry and the time-free path metrics attached."""
     summary = json.loads((pred_dir / "summary.json").read_text())
     rows: dict[str, dict] = {}
     for row in summary.get("results", []):
         if row.get("ade_m") is None or row.get("route_tortuosity") is None:
             continue
         row = dict(row)
-        row.update(endpoint_geometry(pred_dir, row))
+        eval_record = json.loads((pred_dir / row["eval_file"]).read_text())
+        states = json.loads((pred_dir / row["states_file"]).read_text())
+        row.update(endpoint_geometry(eval_record, states, row))
+        row.update(gm.record_geometry(eval_record, states, row, geometry_truth=geometry_truth))
         rows[flight_key(row)] = row
     return rows
 
@@ -152,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="arm every paired difference is taken against (default: first A_*)")
     parser.add_argument("--only", default=None,
                         help="comma-separated arm names to read (their _s2024 replicates included)")
+    parser.add_argument("--geometry-truth", choices=gm.GEOMETRY_TRUTHS, default=gm.GEOMETRY_TRUTH_CLOSED,
+                        help="truth the time-free metrics are read against (see geometric_metrics)")
     args = parser.parse_args(argv)
 
     arms: dict[str, dict[str, dict]] = {}
@@ -161,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
             root = REPO / campaign
         for pred_dir in sorted(root.glob("*_pred_*")):
             if (pred_dir / "summary.json").is_file():
-                rows = load_arm(pred_dir)
+                rows = load_arm(pred_dir, geometry_truth=args.geometry_truth)
                 if rows:
                     arms[pred_dir.name.split("_pred_")[0]] = rows
     if args.only:
@@ -181,8 +196,10 @@ def main(argv: list[str] | None = None) -> int:
     airport = reference[shared[0]].get("arr_airport")
     print(f"# {airport}: {len(shared)} validation flights predicted by every arm; "
           f"paired differences against {reference_name}")
+    print(gm.geometry_truth_notice(
+        args.geometry_truth, gm.summarize([reference[k] for k in shared]), len(shared)))
     out: dict = {"airport": airport, "flights": len(shared), "reference": reference_name,
-                 "arms": {}, "strata": {}}
+                 "geometry_truth": args.geometry_truth, "arms": {}, "strata": {}}
 
     def metric(name: str, key: str, mask: np.ndarray) -> np.ndarray:
         return np.array([arms[name][k][key] for k in shared])[mask]
@@ -201,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
             time_err = np.abs(metric(name, "final_time_error_s", mask))
             d_ade = ade - metric(reference_name, "ade_m", mask)
             d_fde = fde - metric(reference_name, "fde_m", mask)
+            d_chamfer = metric(name, "chamfer_m", mask) - metric(reference_name, "chamfer_m", mask)
+            geometry = gm.summarize([arms[name][k] for k, m in zip(shared, mask) if m])
             block["arms"][name] = {
                 "ade_mean": float(ade.mean()), "ade_median": float(np.median(ade)),
                 "fde_mean": float(fde.mean()), "fde_median": float(np.median(fde)),
@@ -211,18 +230,24 @@ def main(argv: list[str] | None = None) -> int:
                 "paired_fde_median_delta": float(np.median(d_fde)),
                 "ade_better_share": float(np.mean(d_ade < 0)),
                 "fde_better_share": float(np.mean(d_fde < 0)),
+                "paired_chamfer_median_delta": float(np.median(d_chamfer)),
+                "chamfer_better_share": float(np.mean(d_chamfer < 0)),
+                **geometry,
             }
             a = block["arms"][name]
             rows.append([name, _fmt(a["ade_mean"]), _fmt(a["ade_median"]), _fmt(a["fde_mean"]),
                          _fmt(a["fde_median"]), _fmt(a["endpoint_median"]), _fmt(a["time_mae_s"], 1),
                          str(a["horizon_capped"]),
+                         *gm.geometry_table_cells(a),
                          f"{a['paired_ade_median_delta']:+.0f} ({a['ade_better_share'] * 100:.0f}%)",
-                         f"{a['paired_fde_median_delta']:+.0f} ({a['fde_better_share'] * 100:.0f}%)"])
+                         f"{a['paired_fde_median_delta']:+.0f} ({a['fde_better_share'] * 100:.0f}%)",
+                         f"{a['paired_chamfer_median_delta']:+.0f} ({a['chamfer_better_share'] * 100:.0f}%)"])
         out["strata"][stratum] = block
         print_table(
             f"{stratum} — n = {n}",
             ["arm", "ADE mean", "ADE med", "FDE mean", "FDE med", "endpoint med", "time MAE s",
-             "capped", "ΔADE med (better %)", "ΔFDE med (better %)"],
+             "capped", *gm.GEOMETRY_TABLE_HEADER,
+             "ΔADE med (better %)", "ΔFDE med (better %)", "Δchamfer med (better %)"],
             rows,
         )
 
