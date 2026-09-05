@@ -4,7 +4,7 @@
 
 ## 〇、进度与状态（压缩 context 后从这里继续）
 
-**当前状态（2026-09-05）**：Phase 0 完成并提交；**走向待用户决定**（§五 P1 之后的顺序：推荐 C 先修输出侧，再 B 改决策变量继续）。用户已同意 **P0（几何指标进标准读数）** 列入计划、按优先级排。没有在跑的 campaign。磁盘只剩 4.0 GB——**下一个 campaign 前先清理**（`clean_pipeline_data.py --dry-run` 或删旧实验树）。
+**当前状态（2026-09-05）**：Phase 0 完成并提交；**P0（几何指标进标准读数）完成并提交**，Phase 0 四臂与 hook v2（KRDU + KSJC）已回填；**走向待用户决定**（§五 P1 之后的顺序：推荐 C 先修输出侧，再 B 改决策变量继续）。没有在跑的 campaign。磁盘只剩 4.0 GB——**下一个 campaign 前先清理**（`clean_pipeline_data.py --dry-run` 或删旧实验树）。
 
 | 阶段 | 状态 | 产物 / commit | 关键数字（KRDU val，雷达引导 497 架） |
 |---|---|---|---|
@@ -12,7 +12,7 @@
 | Phase 0 campaign `4dTrajectory/outputs/KRDU/experiments/scene_phase0_20260905/`（臂 `docs/experiments/scene_phase0_arms.json`，与 `control_procedure_20260905/A_control_v3` 配对） | 完成 | `readout.txt/.json`（四臂）、`diagnostics_arms.txt`、`diagnostics_population.txt`；结果文档 `2026-09-05_scene_phase0_results.zh.md` | ADE：基线 2858 → 仅汇入点 2356 → +前机 ETA 2364（无增量）→ +剩余时长 **2011**；时长误差 39 → 22 → 20 → 5 s；时间无关几何误差 chamfer 942 → 791 → 801 → 850 m（**不改善**）；直线进近 469 → 458/442/434 |
 | Phase 0 诊断 `docs/phase0_intent_diagnostics.py`（residual / sensitivity / template / context / timing；经 opus review） | 完成 | 同上 | 真值路径 + 朴素速度剖面 1308 m；真值汇入 + trombone + 真值时序 1688 m；真值路径 + 常速 2813 m；上下文对 d_join 的 R²（锚点后才汇入 6,557 架）：本机 0.34 → +因果计数 0.38 → +真值前机 ETA 0.47；知道 d_join 后剩余时长误差 35.8 → 22.8 s |
 | 门的判定 | 未达且门定错量级 | `2026-09-05_scene_phase0_results.zh.md` §四–§八 | 1.5 km 对"只知汇入点"的 oracle 在时间对齐指标下不可达；决策变量应含时间；输出侧（控制头 + rollout 按给定意图画几何）是先于场景编码的瓶颈 |
-| P0 几何指标读数 | 计划中（下一步） | `compare_constraint_arms.py` / `compare_frame_arms.py` | 见 §五 P0 |
+| P0 几何指标读数：`geometric_metrics.py`（chamfer / 离散 Fréchet / 弧长对齐 ADE / 路径长度比 / 沿路径滞后 / 时长误差；真值 `closed` = 观测行闭合到阈值，`observed` 复现 Phase 0）进 `compare_constraint_arms.py` / `compare_frame_arms.py`（`--geometry-truth`） | 完成 | `6867512`；`tests/test_geometric_metrics.py`（23 项）；回填 `scene_phase0_20260905/readout_geometry.*`、`control_hooks_v2_20260906/readout_geometry.*`（KRDU + KSJC）；结果写进两份结果文档 | 雷达引导：chamfer 942 → 806 / 795 / 847，Fréchet 3100 → 2488 / 2468 / 2615，弧长 ADE 2175 → 1857 / 1775 / 1900——汇入点值 15–20 % 几何，**时长臂的几何不比 O_join 好**（其 ADE 增益全是时序）；`observed` 真值复现 Phase 0 chamfer 差 ≤ 2 m；**state 输出的锯齿折线使弧长参数化失效**（相邻节点航向反转 > 90° 的份额中位 0.50，control 臂与真值为 0；长度比 ≈ 2 对 1.01）——每航班按反转份额 ≤ 5 % 判"折线是航路"，arc-ADE / lag 只在这些航班上聚合并打印份额，块内合格 < 95 % 打印 n/a，不做平滑；state campaign 上弧长族因此基本全是 n/a，可读的几何是 chamfer + Fréchet |
 | P1 输出侧几何封闭（走向 C） | 待决定 | — | 见 §五 P1 |
 | P2 数据平面（原 Phase 1）| 未开始 | — | 验收指标已改（§五 P2） |
 | P3 场景编码 + (d_join, T) 锚解码器（原 Phase 2/3） | 未开始 | — | top-1 目标已改（§一） |
@@ -173,12 +173,27 @@ loss/multimodal（CE + WTA·simple-v3）             forecast/export（top-1 记
 
 排序依据：Phase 0 量到（i）4D 误差的主项是沿路径的时序，其次是几何；（ii）现解码器拿到真值 (d_join, T) 仍只到 2.0 km、几何不动；（iii）粗特征上下文对 d_join 的可解释性弱（R² 0.38，真值前机 ETA 0.47）。所以先把"读数能分辨几何与时序"做好（P0），再修"给定意图 → 几何"的输出侧（P1），之后场景编码（P2/P3）的收益才有兑现空间。每步：写代码 → opus review → 修 → 实验 → 记录 → 下一步。
 
-**P0 — 几何指标进标准读数（≈1 天；下一步）。** 用户已同意。在 `docs/compare_constraint_arms.py`（及 `compare_frame_arms.py` 的表）里为每个分层、每臂加三列时间无关几何误差 + 一列时长误差，与现有 ADE/FDE 并列：
+**P0 — 几何指标进标准读数（完成，2026-09-05，`6867512`）。** 在 `docs/compare_constraint_arms.py`（及 `compare_frame_arms.py` 的表）里为每个分层、每臂加三列时间无关几何误差 + 一列时长误差，与现有 ADE/FDE 并列：
 - chamfer（对称最近点均值，100 m 重采样；`phase0_intent_diagnostics.py::chamfer_m` 已有，搬成单一来源）；
 - 离散 Fréchet 距离（顺序敏感，不被"铺满区域"的路径骗）；
 - 弧长对齐 ADE（在飞完路程的同一比例处比位置——保序、去速度）；
 - 时长误差中位与沿路径提前/滞后（真值弧长分数处的时间差）。
 真值用观测行（post-anchor `observed_states`）还是含拟合尾的 supervision 行要写明（两者差 6 s / ~400 m，Phase 0 的 chamfer 用了观测行）。回填 Phase 0 四臂与 hook v2 campaign 的表。门：无（读数工具）；验收 = 单元测试（合成路径的已知距离）+ Phase 0 数字复现。
+
+> **做成了什么（2026-09-05）**：`geometric_metrics.py` 是单一来源（诊断脚本的 chamfer 也从这里取）。
+> 真值默认 **`closed`**：导出的状态文件只有观测行，没有 4D 指标所用的拟合尾，所以在 `true_final_time_s`
+> 处补阈值节点（直线闭合，KRDU 中位 379 m / 6 s、KSJC 82 m / 2 s，读数首行打印），两族指标在同一点、
+> 同一时刻结束；`--geometry-truth observed` 复现 Phase 0 的 chamfer（差 ≤ 2 m，重采样含终点）。
+> 表列：chamfer p50 / Fréchet p50 / arc-ADE / len ratio / abs Δdur p50 / lag p50（Δdur 按导出状态
+> 的时钟，horizon-capped 航班与 `final_time_error_s` 的时长头不同）。**review 发现 state 输出的锯齿折线
+> 让弧长参数化膨胀约 2 倍**（相邻节点航向反转 > 90° 的份额中位 0.50、每架都 > 0.05；control rollout
+> 与观测真值为 0、真值最大 0.008；长度比 ≈ 2 对 1.01），故每航班带 `reversal_share`，≤ 5 % 才进弧长族
+> （`arc_family_valid`），块内只在这些航班上聚合 arc-ADE / lag 并在 JSON 里写 `arc_family_share`，
+> 表里份额 < 100 % 时跟着打印、< 95 % 打印 n/a，不平滑（用长度比做门被 review 否决：带内中位仍会把带外
+> 航班平均进去，且 control 臂上长度比偏离是真实误差不是伪影）。state campaign 上弧长族因此基本全是
+> n/a——那里可读的几何是 chamfer + Fréchet。结果：`2026-09-05_scene_phase0_results.zh.md` §三b、
+> `2026-09-06_control_hooks_results.zh.md` "几何指标回填"——汇入点值 15–20 % 几何，时长臂零几何增益；
+> 软屏障是唯一雷达引导层几何也改善的 hook。P1 的验收（chamfer < 500 m）按 `closed` 真值读。
 
 **P1 — 输出侧：几何封闭的解码器（走向 C；≈1–2 周；待用户决定后开始）。** 设计 §3.4 的可选项升为主线：网络预测决策量 (d_join, T) 与一个速度剖面（例如沿路程的分段线性地速，或 64 段的速度目标），路径由几何闭式给出——锚点状态 → trombone / Dubins 到 (d_join, 0) → 航向道 + 下滑道（`phase0_intent_diagnostics.py::template_path` 是原型），再按速度剖面给时间；可选再经 rollout 做动力学一致化。
 - 先用**真值** (d_join, T) 验收输出侧（oracle 臂，KRDU）：目标雷达引导 ADE < 1.5 km（真值时序下模板已 1.7 km，学到速度剖面应更低）、chamfer < 500 m；若做不到，说明几何族本身不够（三边位置/下风延伸要作为第三个决策量），在这里加，不进场景。

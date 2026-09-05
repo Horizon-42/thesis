@@ -138,6 +138,18 @@ command is HELD.
   clean-configuration, real approaches are flown dirty, and on REAL tracks it first scored
   0/149. **Flyability alone is not a quality metric**: the WORSE predictor scores higher on it in
   3 of 4 cells by predicting blander paths. Always pair it with error metrics.
+- **Read both metric families, never one.** Every stratum table prints the time-aligned
+  ADE/FDE next to the time-free geometry from `geometric_metrics` (chamfer, discrete Fréchet,
+  arc-aligned ADE, length ratio, duration error, along-path lag). Phase 0 (2026-09-05): the
+  truth-duration arm cut vectored ADE 2356 → 2011 m with NO geometric gain — a timing-only
+  improvement reads as a model improvement on ADE alone. Truth = observed rows CLOSED to the
+  threshold at `true_final_time_s` (they stop a median 380 m / 6 s short at KRDU;
+  `--geometry-truth observed` reproduces the Phase 0 diagnostics within 2 m). arc-ADE / lag
+  are aggregated over the flights whose exported polyline is a route (heading reversals at
+  ≤ 5 % of nodes) and print `n/a` below a 95 % share: the STATE output's node-scale
+  saw-tooth reverses at ~50 % of its nodes and doubles its own arc length (control arms and
+  the truth: 0), nothing smooths it, so on state campaigns the readable geometry is chamfer
+  + Fréchet. The length ratio column is information, not a gate.
 - **A per-airport ADE without its ROUTE MIX is not a comparison.** Inside a matched stratum every
   airport scores the same; the whole spread is the share of flights in that stratum. Reweighted
   to the pooled mix KSJC goes 483 → 1526 m, best of five to worst. The signature to recognise:

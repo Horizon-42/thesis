@@ -49,6 +49,36 @@ k=0.5 走廊内的第一行的图坐标位置）和**真值**前机落地时刻�
   往哪汇入，却没有形成下风—三边—五边的几何。（用 k=0.5 的真值门判预测会被已知的 250–350 m
   终点平移饱和成"从不"，故这里用成员门。）
 
+### 三b、几何指标回填（P0，2026-09-05；`readout_geometry.txt/.json`）
+
+时间无关的几何误差与 ADE 并列读（`docs/compare_constraint_arms.py`；指标定义在
+`geometric_metrics.py`）。真值 = 阈值后观测行**闭合到阈值**（在 `true_final_time_s` 处补阈值节点，
+中位 379 m / 6 s）；§三的 chamfer 用的是不闭合的观测行，`--geometry-truth observed` 复现为
+943 / 802 / 793 / 849（原 942 / 801 / 791 / 850，差 ≤ 2 m，来自重采样现在含终点）。chamfer /
+Fréchet 水平、100 m 重采样；弧长对齐 ADE 三维、64 个弧长分数；Δdur 按导出状态的时钟。
+
+| 分层 | 指标 | A | O_join_lead | O_join | O_join_duration |
+|---|---|---:|---:|---:|---:|
+| 雷达引导 (497) | ADE（时间对齐，参照） | 2858 | 2364 | 2356 | 2011 |
+| 雷达引导 | chamfer 中位 (m) | 942 | 806 | 795 | 847 |
+| 雷达引导 | 离散 Fréchet 中位 (m) | 3100 | 2488 | 2468 | 2615 |
+| 雷达引导 | 弧长对齐 ADE 均值 (m) | 2175 | 1857 | 1775 | 1900 |
+| 雷达引导 | 预测 / 真值路径长度比中位 | 0.92 | 0.93 | 0.93 | 0.92 |
+| 雷达引导 | \|Δdur\| 中位 (s) / 沿路径滞后中位 (s) | 39.2 / +1.5 | 20.3 / +2.9 | 22.2 / +3.8 | 5.4 / +2.1 |
+| 雷达引导 | chamfer 优于 A 的份额 / 中位 Δ | — | 59 % / −68 m | 60 % / −85 m | 52 % / −36 m |
+| 直线进近 (904) | chamfer / Fréchet / 弧长 ADE | 134 / 890 / 592 | 77 / 857 / 600 | 86 / 781 / 577 | 68 / 761 / 556 |
+| 全部 (1404) | chamfer / Fréchet / 弧长 ADE | 256 / 1426 / 1173 | 181 / 1374 / 1066 | 183 / 1364 / 1021 | 163 / 1326 / 1045 |
+
+读法：
+- 三个几何指标一致：汇入点让雷达引导的几何误差降 15–20 %（chamfer 942 → 795、Fréchet
+  3100 → 2468、弧长 ADE 2175 → 1775），与 ADE 的 −17 % 同量级；**O_join_duration 的几何不比
+  O_join 好**（847 / 2615 / 1900 对 795 / 2468 / 1775），它多出的 ADE 增益（2356 → 2011）全部
+  来自时序（|Δdur| 22 → 5 s）——正是 §一修订后要单独看的"几何不动只有时序改善"。
+- Fréchet（保序）是 chamfer（不保序）的 3 倍：预测与真值不是平行偏移，而是**顺序不同**——
+  汇入位置不同，同一段航路落在不同的进度上。去掉速度的弧长对齐 ADE 仍有 1.8–2.2 km；路径
+  长度比 0.92 说明预测路径系统性偏短（提早汇入，与"预测自己的汇入距离 6–11 km 对真值 14 km"一致）。
+- 直线进近层几何误差本来就小（chamfer 134 m），汇入点再减半（68–86 m）；这一层已接近读数分辨率。
+
 ## 四、诊断：不足是信息还是解码器？
 
 **1. 灵敏度（24 架雷达引导航班，O_join_lead 检查点，CPU）。** 把输入的汇入点沿航向道移动
@@ -164,6 +194,9 @@ python run_ts_frame_ablation.py --arms 4dTrajectory/ts_transformer/docs/experime
 D=4dTrajectory/ts_transformer/docs; A=4dTrajectory/outputs/KRDU/experiments/control_procedure_20260905/A_control_v3_pred_val
 C=4dTrajectory/outputs/KRDU/experiments/scene_phase0_20260905
 python $D/compare_constraint_arms.py A=$A O_join_lead=$C/O_join_lead_pred_val O_join=$C/O_join_pred_val --json $C/readout.json
+# §三b 几何列（四臂；--geometry-truth observed 复现 §三 的 chamfer）
+python $D/compare_constraint_arms.py A=$A O_join_lead=$C/O_join_lead_pred_val O_join=$C/O_join_pred_val \
+    O_join_duration=$C/O_join_duration_pred_val --json $C/readout_geometry.json > $C/readout_geometry.txt
 python $D/phase0_intent_diagnostics.py residual A=$A O_join_lead=$C/O_join_lead_pred_val O_join=$C/O_join_pred_val
 python $D/phase0_intent_diagnostics.py sensitivity --checkpoint $C/O_join_lead/checkpoint.pt --summary $C/O_join_lead_pred_val/summary.json
 python $D/phase0_intent_diagnostics.py template A=$A O_join_lead=$C/O_join_lead_pred_val

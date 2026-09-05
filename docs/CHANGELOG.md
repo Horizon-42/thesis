@@ -4,6 +4,48 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-05 — Geometric readout (P0 of the scene design): chamfer / Fréchet / arc-aligned ADE next to ADE/FDE
+
+`4dTrajectory/ts_transformer/geometric_metrics.py` (new; `tests/test_geometric_metrics.py`,
+23 tests) is the single source for the time-free path metrics, and both standard readouts
+(`docs/compare_constraint_arms.py`, `docs/compare_frame_arms.py`) now print them in every
+stratum table next to ADE/FDE: chamfer p50 (symmetric nearest point, horizontal, 100 m
+resampling — moved out of `phase0_intent_diagnostics.py`, whose chamfer now comes from
+here), discrete Fréchet p50 (order-preserving, anti-diagonal DP on the same resampling,
+verified against the textbook recursion), arc-aligned ADE (3D at the same fraction of each
+path's own horizontal arc length, 64 fractions excluding the anchor), the predicted/true
+length ratio, |Δdur| p50 and the along-path lag p50 (predicted minus true time at the same
+arc fraction; Δdur on the exported states' clock, so a horizon-capped flight reads the cap
+here and the duration head in `final_time_error_s`). Truth (`--geometry-truth`): `closed`
+(default) = the post-anchor observed rows closed to the threshold at `true_final_time_s`
+— the exported states carry no fitted tail, and the observed track stops a median 379 m /
+6 s short at KRDU (82 m / 2 s at KSJC), so both metric families now end at the same point
+and time; `observed` = the rows as exported, which reproduces the Phase 0 diagnostics'
+chamfer within 2 m (the resampler now includes the endpoint: 942 / 801 / 791 / 850 →
+943 / 802 / 793 / 849). The readout's first line states the truth, the closure and every
+parameter. **Review finding (opus, 2026-09-05): the STATE output's exported polyline is a
+node-scale saw-tooth** (heading reversals > 90° at a median 50 % of its 2 s nodes, every
+flight above 5 %; control rollouts and the observed truth at 0, truth max 0.008; raw length
+ratio ≈ 2 against 1.01), which doubles anything parametrised by its own arc. Each flight
+therefore carries `reversal_share` and enters the arc family only at ≤ 5 %; a block
+aggregates arc-ADE / lag over those flights, writes `arc_family_share`, prints the share
+beside the value when it is below 100 % and `n/a` below 95 % (null in the JSON, so a two-flight mean is never quotable) — no smoothing (a silent
+approximation), and no length-ratio gate (the second review showed a block whose median
+ratio sits in a band still averages in its out-of-band flights, +398 % on one state
+stratum, and on control arms a ratio far from 1 is a real error, not an artifact). On
+state campaigns the arc family is therefore mostly `n/a`; chamfer / Fréchet / Δdur carry
+the geometry there. Also fixed while there: the constraint readout's `|xt| p95` header
+broke its markdown table since the campaign it was written for.
+Backfilled: `scene_phase0_20260905/readout_geometry.*` (four arms; results doc §三b) and
+`control_hooks_v2_20260906/readout_geometry.*` at KRDU + KSJC (hook results doc, new
+section). What the geometry says: the truth join point is worth 15–20 % of vectored geometry
+(chamfer 942 → 795, Fréchet 3100 → 2468, arc-ADE 2175 → 1775), the truth-duration arm adds
+none of it (its 2356 → 2011 ADE gain is timing alone — the case the revised success
+criteria veto), Fréchet ≈ 3× chamfer (the paths are sequenced differently, not offset), and
+the v2 soft barrier is the only hook that improves vectored geometry too (KRDU chamfer
+942 → 886 on 81 % of flights; both trained-through arms lose 13–16 % on Fréchet / arc-ADE).
+Design doc §〇 / §五 P0 updated; `CLAUDE.md` gained the "read both families" rule.
+
 ### 2026-09-05 — Phase 0 result (KRDU): the join point is worth −17 % vectored ADE, the gate was mis-sized
 
 `4dTrajectory/ts_transformer/docs/2026-09-05_scene_phase0_results.zh.md`; campaign

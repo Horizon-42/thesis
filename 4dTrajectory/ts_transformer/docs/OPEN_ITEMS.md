@@ -16,7 +16,15 @@ Newest campaigns first, long-standing scope limits last.
   and shown to be mis-sized (truth path + naive speed profile 1.3 km; trombone from the truth
   join + truth timing 1.7 km). Open — a decision for the user: (A) stop, (B) revise the design
   to (d_join, T) decisions, (C) fix the output side first (geometric closure); the results
-  doc recommends C then B. Not started: Phase 1 data plane, any scene encoder.
+  doc recommends C then B. **P0 geometric readout DONE 2026-09-05** (`geometric_metrics.py`
+  in both readouts; `readout_geometry.*` backfilled in `scene_phase0_20260905` and
+  `control_hooks_v2_20260906` KRDU + KSJC): the join arms gain 15–20 % on chamfer / Fréchet /
+  arc-ADE, the duration arm gains none of it; the v2 soft barrier is the only hook that also
+  improves vectored geometry (KRDU chamfer 942 → 886 on 81 % of flights). The state output's
+  saw-tooth polyline (heading reversals at ~50 % of nodes, length ratio ≈ 2) takes it out
+  of the arc family (chamfer / Fréchet still read) — a finding about the state export, not
+  yet acted on. Not started: P1 (direction C), P2 data plane, any scene
+  encoder.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report
   `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a

@@ -202,6 +202,34 @@ hook 诊断：门控步 77 → 82 %，坡度残差饱和 7.5 → 1.2 %，载荷�
 
 读法：与 KRDU 一致——垂直是所有臂里最好的（有垂直违反的航班 83 → 61 %，直线进近违反行 19 → 8 %），横向和路径中段退（雷达引导 ADE 均值 +294 m，全体 ADE 654 → 713）。直线参考坡度 RMS 0.24°（基线 0.17°，飞行航迹 0.53°）：KSJC 的基线本来就比数据平得多，名义律让直线段多了一点坡度，仍远低于数据。
 
+## 几何指标回填（P0，2026-09-05；每个实验目录下 `readout_geometry.txt/.json`）
+
+时间无关的几何误差（`geometric_metrics.py`：chamfer / 离散 Fréchet 水平、100 m 重采样，弧长对齐
+ADE 三维；真值 = 阈值后观测行闭合到阈值，KRDU 中位 379 m / 6 s、KSJC 82 m / 2 s）与 ADE/FDE
+并列读。列 = 基线、屏障 v2 硬 / 软（推理时套）、屏障训练臂、名义律训练臂。
+
+| 机场 · 分层 | 指标 | A | v2 硬（推理） | v2 软（推理） | 屏障训练 | 名义律训练 |
+|---|---|---:|---:|---:|---:|---:|
+| KRDU 全部 (1404) | chamfer / Fréchet / 弧长 ADE | 256 / 1426 / 1173 | 117 / 1244 / 1129 | 107 / 1241 / 1121 | 119 / 1341 / 1294 | 290 / 1584 / 1322 |
+| KRDU 全部 | chamfer 优于 A 的份额 / 中位 Δ | — | 81 % / −24 | 93 % / −33 | 63 % / −34 | 35 % / +50 |
+| KRDU 直线进近 (904) | chamfer / Fréchet / 弧长 ADE | 134 / 890 / 592 | 80 / 705 / 537 | 72 / 705 / 530 | 86 / 812 / 587 | 180 / 941 / 642 |
+| KRDU 雷达引导 (497) | chamfer / Fréchet / 弧长 ADE | 942 / 3100 / 2175 | 895 / 3057 / 2153 | 886 / 3055 / 2141 | 923 / 3521 / 2528 | 1062 / 3653 / 2507 |
+| KRDU 雷达引导 | chamfer 优于 A 的份额 / 中位 Δ | — | 59 % / −5 | 81 % / −13 | 56 % / −35 | 31 % / +91 |
+| KSJC 全部 (1083) | chamfer / Fréchet / 弧长 ADE | 65 / 514 / 607 | 53 / 489 / 594 | 46 / 488 / 590 | 52 / 449 / 656 | 90 / 567 / 688 |
+| KSJC 直线进近 (879) | chamfer / Fréchet / 弧长 ADE | 52 / 416 / 336 | 45 / 381 / 327 | 40 / 381 / 324 | 46 / 357 / 345 | 76 / 455 / 358 |
+| KSJC 雷达引导 (204) | chamfer / Fréchet / 弧长 ADE | 594 / 1528 / 1775 | 546 / 1522 / 1745 | 546 / 1514 / 1736 | 609 / 1730 / 1995 | 739 / 1889 / 2113 |
+| KSJC 雷达引导 | chamfer 优于 A 的份额 / 中位 Δ | — | 58 % / −7 | 76 % / −13 | 37 % / +79 | 24 % / +152 |
+
+读法：
+- 推理时的软屏障在几何上处处好于基线，且是唯一在雷达引导层几何也不退的 hook（KRDU chamfer
+  942 → 886、81 % 航班更好；KSJC 594 → 546、76 %）：它改的是五边段的横向位置（全部航班 chamfer
+  减半 256 → 107，Fréchet −13 %），不碰时序（|Δdur| 与沿路径滞后与 A 相同）。
+- 两个训练臂在雷达引导层的几何都退：屏障训练臂 KRDU Fréchet +14 % / 弧长 ADE +16 %、KSJC chamfer
+  +79 m / Fréchet +13 %（全部航班的 chamfer / Fréchet 略好于基线，是五边段的效应）；名义律训练臂
+  各层都最差（KRDU 雷达引导 chamfer +91 m、KSJC +152 m）。这与结论 4"训练回路里穿过 hook 不是净
+  收益"一致，且不再依赖时间对齐指标。名义律臂的垂直改善不进这些水平指标（弧长 ADE 是三维的，
+  但 KRDU 全部 1322 对 1173 仍差——横向的退大于垂直的进）。
+
 ## 结论与下一步
 
 **结论。**
@@ -236,6 +264,7 @@ python 4dTrajectory/ts_transformer/docs/compare_constraint_arms.py \
     F_barrier_infer_soft=…/F_barrier_infer_soft_pred_val F_barrier_soft=…/F_barrier_soft_pred_val \
     R_nominal_residual=…/R_nominal_residual_pred_val --json readout.json
 python 4dTrajectory/ts_transformer/docs/score_control_arms.py 4dTrajectory/outputs/<ICAO>/experiments/control_hooks_v2_20260906
+# 几何列（同一命令，--json readout_geometry.json > readout_geometry.txt；KSJC 的标签是 F2_infer_hard / F2_infer_soft / F2_trained / R2_trained）
 # 推理时套安全层（任何一阶滞后检查点）；名义律的两个仅推理臂（R v2 软/硬）就是这样跑的，
 # 它们不在实验目录里（本次的临时输出），用 --command-hook nominal-residual 复现
 python 4dTrajectory/ts_transformer/__main__.py predict --checkpoint <ckpt> --data <manifest> --airport <ICAO> \
