@@ -28,8 +28,16 @@ Newest campaigns first, long-standing scope limits last.
   the via-pose Dubins family (F3) fitted to the truth reaches vectored chamfer p50 180 m /
   Fréchet 1179 / truth-timed ADE 510 m (gate passed), with identifiable canonical labels
   on 96 % of fitted flights; on the truth path a K=4 slowness + K=4 height profile
-  reaches 110 m. Next: P1.c, the `closure` prediction output regressing ≈14 decision
-  numbers from those labels. Not started: P2 data plane, any scene encoder.
+  reaches 110 m. **P1.c DONE 2026-09-06 (`closure_p1c_20260905`, report
+  `docs/2026-09-06_closure_p1c_results.zh.md`): both gates pass.** The `closure` output
+  from the ego history alone beats simple-v3 on every stratum (pooled ADE 996 vs 1333,
+  vectored 2197 vs 2858, straight-in 310 vs 469); with the truth (d_join, T) as inputs it
+  reaches vectored ADE 1235 / chamfer 492 where the control head with the same inputs sat
+  at 2011 / 847 — the output side WAS the bottleneck; the family's own ceiling is 455 m.
+  Open: flyability — closure paths (the labels' too) are only 22 % fully flyable under
+  the clean polar (curvature jumps at the CSC junctions, acceleration jumps at the knots):
+  P1.d, a clothoid transition or a post-hoc rollout. Not started: P2 data plane (its
+  acceptance is now the 960 m between C_pred and C_truth_intent), any scene encoder.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report
   `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a

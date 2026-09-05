@@ -4,6 +4,27 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-06 — Closure decoder, P1.c-3: the campaign — both gates pass, the output side was the bottleneck
+
+`4dTrajectory/outputs/KRDU/experiments/closure_p1c_20260905/` (arms
+`docs/experiments/closure_p1c_arms.json` + `closure_p1c_oracle_arms.json`; report
+`4dTrajectory/ts_transformer/docs/2026-09-06_closure_p1c_results.zh.md`). KRDU val, 1404
+flights, closed truth, vectored stratum ADE / chamfer p50: simple-v3 2858 / 942; the Phase 0
+truth-intent control arm 2011 / 847; **C_pred (closure, ego history only) 2197 / 722;
+C_truth_intent (closure + truth (d_join, T) inputs) 1235 / 492; C_oracle (drawn from the
+labels) 455 / 180**. Pooled ADE 1333 → 996 (C_pred) → 595 (C_truth_intent); straight-in
+469 → 310. Gates (vectored ADE < 1.5 km and chamfer < 500 m with the truth intent; not
+worse than the baseline without it) both pass. Training is 2–2.5 s per epoch (a pure
+regression, no rollout). One decoder rule was added mid-campaign: a predicted via inside one
+turn radius of the anchor is dropped for the plain CSC (`csc-via-at-anchor`) — the first
+C_pred arm's straight-in stratum was 6260 m because a label via AT the anchor, predicted a
+few tens of metres off, made the Dubins path a full circle (827 of 837 over-long paths);
+the pre-rule readout is kept under `attempt1_readouts/`. The runner now substitutes
+`{airport}` in a predict-only arm's `predict_args`. Open (P1.d): closure paths are only
+22 % fully flyable under the clean polar (the labels' paths too — curvature jumps at CSC
+junctions, acceleration jumps at the knots). P2's acceptance becomes the 960 m of vectored
+ADE between C_pred and C_truth_intent.
+
 ### 2026-09-05 — Closure decoder, P1.c-1/2: the `closure` prediction output and its labels
 
 The third `prediction_output`. `closure_output.py` (new): `ClosurePrediction` (a 14-number
