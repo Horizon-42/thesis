@@ -1,0 +1,20 @@
+{
+ "_comment": "Phase 0 of docs/2026-09-07_scene_join_anchor_design.zh.md: the upper bound of intent information, measured before any scene encoder is built. simple-v3 (openap-direct cohort, one seed) with the TRUTH join point (chart position of the first observed row from which the track stays inside the final-approach cone, final_approach_geometry.truth_final_gate) and, in the first arm, the lead aircraft's TRUE landing time relative to the fixed anchor, appended to the history as input-only covariate channels (intent_conditioning.py, the target-conditioning token path). These arms read the FUTURE and are development measurements only; the run name carries 'intent=truth-...'. Paired flight-by-flight with the fresh simple-v3 baseline of control_procedure_20260905/A_control_v3 (same manifest, roster, split seed 1337, seed 1337). Pre-registered gate (design doc section 5): vectored-stratum ADE (compare_constraint_arms.py, tortuosity >= 1.05 and not established, n=497 at KRDU) below 1.5 km from the baseline's 2858 m means the intent is worth the scene work and Phase 1 starts; a vectored ADE that barely moves means the error is elsewhere and the design stops. Straight-in ADE must not degrade (the join point is redundant there). The second arm separates the two channels: join point without the lead.",
+ "base_recipe": "simple-v3",
+ "arms": [
+  {
+   "key": "O_join_lead",
+   "label": "simple-v3 + truth join point + truth lead ETA (input-only channels)",
+   "overrides": {
+    "intent_conditioning": "truth-join-lead"
+   }
+  },
+  {
+   "key": "O_join",
+   "label": "simple-v3 + truth join point only",
+   "overrides": {
+    "intent_conditioning": "truth-join"
+   }
+  }
+ ]
+}

@@ -97,7 +97,7 @@ def _history_at_anchor(
     encoded = normalizer.encode(series.values)
     return conditioned_history(
         encoded[anchor - config.seq_len + 1 : anchor + 1],
-        series_conditioning(series, config, normalizer),
+        series_conditioning(series, config, normalizer, anchor=anchor),
     )
 
 
@@ -390,7 +390,7 @@ def _forecast_window(
 ) -> Forecast:
     # The recursion feeds predicted STATE rows back as history; the conditioning row is
     # a per-flight constant, so it is re-appended to every pass rather than recursed.
-    conditioning = series_conditioning(series, config, normalizer)
+    conditioning = series_conditioning(series, config, normalizer, anchor=anchor)
     context = _final_approach_context(series, config, device)
     encoded = normalizer.encode(series.values)
     history = encoded[anchor - config.seq_len + 1 : anchor + 1]

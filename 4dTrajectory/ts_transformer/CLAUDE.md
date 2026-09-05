@@ -77,6 +77,17 @@ flight model.
   flagged `horizonCapped`; their gate verdicts are cap artifacts, not model error.
 - **A new loss term must be added to `loss_component_names`**, not only to the objective's
   `extras` — otherwise `KeyError` on the first batch, *after* the slow dataset build.
+- **The anchor state is `batch_contract.anchor_state(x, C)`, never `x[:, -1]`** — a history
+  is `[B, L, C + K]` with `K` input-only conditioning columns (`target_conditioning`,
+  `intent_conditioning`), and the control loss refuses a `[B, C + K]` anchor on the first
+  batch. Two call sites had the raw slice until 2026-09-05; any control run with conditioning
+  died there.
+- **`intent_conditioning=truth-…` checkpoints read the FUTURE** (the truth join point, the
+  lead's true landing time) — the Phase 0 upper-bound instrument of the scene design, never a
+  result to quote as a predictor; the run name carries `intent=truth-…` so it cannot pass as
+  one. Its lead channel is measured at the window's anchor, so it refuses random train
+  anchors; `FlightSeries.lead_landing is None` means "roster never consulted" and raises,
+  `LeadLanding(None)` means "no earlier landing" and reads as a clear runway.
 - **`overlap` is a REQUIRED arg to `write_batch`** — an optional metric is one that silently goes
   missing.
 - **τ shorter than the integrator step produces NaN, not a worse answer** (explicit RK4 on

@@ -15,6 +15,7 @@ import gc
 import numpy as np
 import torch
 
+from batch_contract import anchor_state
 from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, TSConfig, uses_control_dynamics
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from models import build_model
@@ -133,7 +134,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
                 control_diagnostics.record_prediction(prediction, dynamics)
         loss = prediction_loss(
             prediction,
-            x[:, -1],
+            anchor_state(x, len(config.channels)),
             target,
             state_weights,
             target_final_time_s,

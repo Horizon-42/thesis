@@ -808,14 +808,20 @@ def test_conditioned_windows_carry_the_target_and_the_model_still_predicts_six_c
 def test_conditioning_is_one_constant_row_under_a_threshold_frame():
     series, config = _series(n_flights=2, target_conditioning="channels")
     normalizer = Normalizer.fit(series)
-    rows = [dataset_module.series_conditioning(s, config, normalizer) for s in series]
+    anchor = config.seq_len - 1
+    rows = [
+        dataset_module.series_conditioning(s, config, normalizer, anchor=anchor)
+        for s in series
+    ]
     position = list(ch.POSITION_IDX)
     for row in rows:
         assert np.allclose(row[:3], -normalizer.mean[position] / normalizer.std[position])
     # Same runway, threshold at the origin: the rows are identical — the mechanism carries
     # no per-flight information here, which is what makes it a free control under arm A.
     assert np.allclose(rows[0], rows[1])
-    assert dataset_module.series_conditioning(series[0], TSConfig(), normalizer) is None
+    assert dataset_module.series_conditioning(
+        series[0], TSConfig(), normalizer, anchor=anchor
+    ) is None
 
 
 def test_conditioned_checkpoint_round_trips_and_refuses_a_different_input_contract(tmp_path):
@@ -1631,7 +1637,12 @@ def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU"
         relative = f"assigned/05L/{key}.json"
         source_text = json.dumps(flight)
         (tracks / relative).write_text(source_text, encoding="utf-8")
-        source_roster.append({"flight_key": key, "file": relative})
+        # The v2 tracks roster row (outcome, runway, landing time): what the lead lookup
+        # (intent_conditioning.lead_landings) reads.
+        source_roster.append({
+            "flight_key": key, "file": relative, "outcome": "assigned", "runway": "05L",
+            "landing_time_utc": flight["landing_time_utc"],
+        })
         roster.append({
             "flight_key": key,
             "source_file": relative,
@@ -1639,6 +1650,7 @@ def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU"
             "first_sample_index": 0,
             "last_sample_index": 0,
             "runway": "05L",
+            "landing_time_utc": flight["landing_time_utc"],
             "arrival_truncated": False,
             "cut_samples": 0,
             "arrival_duration_s": 0.0,
@@ -1675,7 +1687,16 @@ def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
         json.dumps({"id": "ORPHAN"}), encoding="utf-8"
     )
 
-    assert [f["id"] for f in load_flight_dicts(tmp_path, verbose=False)] == ["A", "B", "C"]
+    flights = load_flight_dicts(tmp_path, verbose=False)
+    assert [f["id"] for f in flights] == ["A", "B", "C"]
+    # Scene context rides along from the same roster: each flight's previous same-runway
+    # landing (the fixture lands one per second on 05L).
+    from intent_conditioning import LeadLanding
+
+    assert [f["lead_landing"] for f in flights] == [
+        LeadLanding(None), LeadLanding("2026-01-01T00:00:00Z"),
+        LeadLanding("2026-01-01T00:00:01Z"),
+    ]
 
 
 def test_ts_load_aggregates_multiple_airport_manifests(tmp_path):

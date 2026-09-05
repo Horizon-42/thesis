@@ -2602,7 +2602,7 @@ def fit_model(
                     control_diagnostics.record_prediction(prediction, dynamics)
                 components = prediction_loss_components(
                     prediction,
-                    x[:, -1],
+                    anchor_state(x, len(config.channels)),
                     y,
                     mask,
                     final_time_s,
@@ -3162,7 +3162,8 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
         raise ValueError(
             f"checkpoint input channel contract {list(stored_inputs)} != this build's "
             f"{list(config.input_channels)} for target_conditioning="
-            f"{config.target_conditioning!r} — the conditioning columns the model was "
+            f"{config.target_conditioning!r}, intent_conditioning="
+            f"{config.intent_conditioning!r} — the conditioning columns the model was "
             "trained on are not the ones this build would feed it. Re-train, or run the "
             "matching code version."
         )

@@ -80,6 +80,8 @@ from config import (  # noqa: E402
     CONTROL_HOOKS,
     CONTROL_HOOK_FIELDS,
     CONTROL_HOOK_OFF,
+    INTENT_CONDITIONINGS,
+    INTENT_FIELDS,
     CORRIDOR_GATES,
     HOOK_SATURATIONS,
     MODELS,
@@ -487,6 +489,17 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--intent-conditioning",
+        choices=INTENT_CONDITIONINGS,
+        default=None,
+        help=(
+            "Phase 0 intent upper bound: feed the TRUTH join point ('truth-join'), or that "
+            "plus the lead's TRUE landing time relative to the anchor ('truth-join-lead'), "
+            "as input-only constant channels (iTransformer only). Reads the future — a "
+            "development measurement, never a deployable model; default: none"
+        ),
+    )
+    parser.add_argument(
         "--random-train-anchor",
         action="store_true",
         default=None,
@@ -645,6 +658,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
         ("target_conditioning", args.target_conditioning),
+        ("intent_conditioning", args.intent_conditioning),
         ("state_position_reference", args.state_position_reference),
         ("aircraft_filter", args.aircraft_filter),
         ("random_train_anchor", args.random_train_anchor),
@@ -678,20 +692,23 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         # Run identity, plus the axes a named recipe deliberately leaves open. simple-v1-lag
         # exists to have its time constants swept, so pinning them would defeat it.
         runtime_fields = {"control_recipe_name", "seed", "split_seed", "device", "notes"}
-        # …and the final-approach penalty, which every recipe leaves open.
-        open_fields = set(PROCEDURE_LOSS_FIELDS) | set(CONTROL_HOOK_FIELDS) | (
-            set(TIME_CONSTANT_FIELDS)
-            if requested_recipe == CONTROL_RECIPE_SIMPLE_V1_LAG
-            else set()
+        # …and the final-approach penalty, the command hooks and the intent axis, which
+        # every recipe leaves open.
+        open_fields = (
+            set(PROCEDURE_LOSS_FIELDS) | set(CONTROL_HOOK_FIELDS) | set(INTENT_FIELDS) | (
+                set(TIME_CONSTANT_FIELDS)
+                if requested_recipe == CONTROL_RECIPE_SIMPLE_V1_LAG
+                else set()
+            )
         )
         unsupported = sorted(
             set(overrides) - set(frozen) - runtime_fields - open_fields
         )
         if unsupported:
             parser.error(
-                f"{requested_recipe} allows only seed, split_seed, device, run identity "
-                f"and the final-approach penalty fields outside its frozen fields; "
-                f"unsupported override {unsupported[0]!r}"
+                f"{requested_recipe} allows only seed, split_seed, device, run identity, "
+                f"the final-approach penalty, command-hook and intent fields outside its "
+                f"frozen fields; unsupported override {unsupported[0]!r}"
             )
         conflicts = {
             name: (overrides[name], expected)

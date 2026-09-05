@@ -4,6 +4,38 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-05 — Phase 0 of the scene design: truth-intent conditioning (upper-bound instrument)
+
+`4dTrajectory/ts_transformer/intent_conditioning.py` + `TSConfig.intent_conditioning` ∈
+`none | truth-join | truth-join-lead`. The TRUTH join point (chart position of the first
+observed row from which the track stays inside the k=0.5 cone, `truth_final_gate` on all
+observed rows incl. the lookback) and, with `-lead`, the previous same-runway landing's
+TRUE time relative to the window's anchor (`(t_lead − t_anchor)/600 s`, clipped ±1800 s;
+lead from the tracks roster's `assigned` landings, model-ready or not) are appended after the
+target conditioning as input-only constant channels through the covariate-token path. Reads
+the future by design — a development measurement of what inferring the intent is worth,
+never a deployable model; the run name carries `intent=truth-…`. Contracts: the row is built
+at the window's actual anchor (`series_conditioning(..., anchor=)`), random train anchors are
+refused with the lead channel, iTransformer only, `runway-aligned` refused (the gate reads
+chart e/n against the world course). `FlightSeries.lead_landing: LeadLanding | None` — `None`
+means the roster was never consulted (the channel raises), `LeadLanding(None)` means no
+earlier landing (reads as the negative clip); `load_flight_dicts` attaches it for every
+flight from the same manifest the flight came through. Data facts (KRDU/KSJC manifests):
+`entry_time_utc` is within 1 s of the first slice sample; median lead ETA at the anchor
+−27 s, 44 % of leads still airborne, 95 % within ±1800 s; a 150-flight KRDU sample shows
+d_join p5/p50/p95 = 10.6/18.7/23.7 km with no never-established fallback.
+
+Review found two pre-existing blockers on the way: the control training loop
+(`train.py`) and the auto-batch probe (`batching.py`) still passed `x[:, -1]` — the whole
+conditioned row — as the anchor state, so ANY control run with conditioning columns died on
+the first batch (`anchor_state(x, C)` everywhere now, with a control-path training-step
+test); and the named-recipe override check in `__main__.py` rejected fields outside
+`PROCEDURE_LOSS_FIELDS | CONTROL_HOOK_FIELDS` (now `| INTENT_FIELDS`, plus
+`--intent-conditioning`). Campaign declaration
+`docs/experiments/scene_phase0_arms.json` (O_join_lead, O_join; paired with
+`control_procedure_20260905/A_control_v3`; pre-registered gate: vectored ADE < 1.5 km from
+2858 m continues the design, no movement stops it).
+
 ### 2026-09-07 — Design: scene encoder + join-anchor multimodal control prediction
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_scene_join_anchor_design.zh.md`. Intent: give the

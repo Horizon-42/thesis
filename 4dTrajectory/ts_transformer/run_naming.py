@@ -42,6 +42,7 @@ from typing import Any
 
 from config import (
     CONTROL_HOOK_FIELDS,
+    INTENT_FIELDS,
     PROCEDURE_LOSS_FIELDS,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
@@ -128,8 +129,11 @@ STATE_LOSS_FIELDS = (
 META_FIELDS = (
     # Tuple order is display priority: the first _MAX_LISTED_META deviations are spelled
     # out, the rest fold into "+N more" — keep identity-bearing fields (seed) up front.
+    # The intent axis is identity-bearing too: a truth-conditioned run reads the future,
+    # and its name is what keeps it from being quoted as a predictor, so it never folds.
     "seed",
     "split_seed",
+    *INTENT_FIELDS,
     "d_model",
     "n_heads",
     "d_ff",
@@ -207,6 +211,7 @@ _ABBREV = {
     "aircraft_type": "type",
     "coordinate_frame": "frame",
     "target_conditioning": "target",
+    "intent_conditioning": "intent",
     "state_position_reference": "pos-ref",
     "corridor_gate": "gate",
     "procedure_loss_lateral_weight": "proc-lat",

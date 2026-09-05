@@ -21,7 +21,9 @@ from typing import Any
 # Channel order is a hard contract between the data build, the model, and the export.
 # It lives in channels.py; imported here so the default cannot drift from it.
 from channels import CHANNELS
-from coordinate_frames import COORDINATE_FRAME_ENU, COORDINATE_FRAMES
+from coordinate_frames import (
+    COORDINATE_FRAME_ENU, COORDINATE_FRAME_RUNWAY_ALIGNED, COORDINATE_FRAMES,
+)
 from target_conditioning import (
     TARGET_CONDITIONING_CHANNELS,
     TARGET_CONDITIONING_NONE,
@@ -57,6 +59,42 @@ STATE_POSITION_REFERENCES = (
 CORRIDOR_GATE_ON_FINAL = "on-final"
 CORRIDOR_GATE_FAF = "faf"
 CORRIDOR_GATES = (CORRIDOR_GATE_ON_FINAL, CORRIDOR_GATE_FAF)
+# The scene / join-anchor design's Phase 0 upper bound (intent_conditioning.py): the
+# TRUTH join point (``truth-join``) and, with it, the lead aircraft's TRUE landing time
+# (``truth-join-lead``) as input-only constant channels after the target conditioning.
+# Read from the future — a development measurement of what inferring the intent could
+# be worth, never a deployable predictor. The channel names live here beside
+# ``input_channels`` because the geometry module that computes them imports this one.
+INTENT_CONDITIONING_NONE = "none"
+INTENT_CONDITIONING_TRUTH_JOIN = "truth-join"
+INTENT_CONDITIONING_TRUTH_JOIN_LEAD = "truth-join-lead"
+INTENT_CONDITIONINGS = (
+    INTENT_CONDITIONING_NONE,
+    INTENT_CONDITIONING_TRUTH_JOIN,
+    INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
+)
+# The fields a named recipe leaves OPEN for the intent axis (the CLI's override check).
+INTENT_FIELDS = ("intent_conditioning",)
+# Order is load-bearing like channels.CHANNELS: serialised into every checkpoint
+# (``input_channels``) and ``train.load_checkpoint`` refuses a mismatch.
+INTENT_JOIN_CHANNELS: tuple[str, ...] = ("e_join", "n_join", "u_join")
+INTENT_LEAD_CHANNELS: tuple[str, ...] = ("lead_eta",)
+
+
+def intent_channel_names(intent_conditioning: str) -> tuple[str, ...]:
+    """The input-only channels an intent mode appends after the target conditioning."""
+    if intent_conditioning == INTENT_CONDITIONING_NONE:
+        return ()
+    if intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN:
+        return INTENT_JOIN_CHANNELS
+    if intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN_LEAD:
+        return INTENT_JOIN_CHANNELS + INTENT_LEAD_CHANNELS
+    raise ValueError(
+        f"unknown intent_conditioning {intent_conditioning!r}; expected one of "
+        f"{INTENT_CONDITIONINGS}"
+    )
+
+
 AIRCRAFT_FILTER_ALL = "all"
 AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
 AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
@@ -543,6 +581,12 @@ class TSConfig:
     # which runway it is flying to. The OUTPUT contract stays ``channels``. iTransformer
     # only: a channel-independent backbone cannot route a conditioning token anywhere.
     target_conditioning: str = TARGET_CONDITIONING_NONE
+    # The Phase 0 intent upper bound (INTENT_CONDITIONINGS above): the truth join point,
+    # optionally with the lead's true landing time, appended after the target
+    # conditioning as input-only constant channels. iTransformer only, for the same
+    # reason; the lead channel is measured at the fixed anchor, so random train anchors
+    # are refused with it.
+    intent_conditioning: str = INTENT_CONDITIONING_NONE
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
     # bounded to the final-approach corridor (see the constants).
@@ -945,6 +989,32 @@ class TSConfig:
                 f"itransformer backbone: {self.model!r} is channel-independent, so a "
                 "conditioning channel could never reach the state channels"
             )
+        if self.intent_conditioning not in INTENT_CONDITIONINGS:
+            raise ValueError(
+                f"unknown intent_conditioning {self.intent_conditioning!r}; "
+                f"expected one of {INTENT_CONDITIONINGS}"
+            )
+        if self.intent_conditioning != INTENT_CONDITIONING_NONE:
+            if self.model != "itransformer":
+                raise ValueError(
+                    f"intent_conditioning={self.intent_conditioning!r} requires the "
+                    f"itransformer backbone: {self.model!r} is channel-independent, so a "
+                    "conditioning channel could never reach the state channels"
+                )
+            if self.coordinate_frame == COORDINATE_FRAME_RUNWAY_ALIGNED:
+                raise ValueError(
+                    "the truth join point is gated on chart east/north against the world "
+                    f"runway course; the {COORDINATE_FRAME_RUNWAY_ALIGNED!r} chart is "
+                    "already rotated"
+                )
+            if (
+                self.intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN_LEAD
+                and self.random_train_anchor
+            ):
+                raise ValueError(
+                    "the lead ETA channel is measured at the flight's fixed anchor; "
+                    "random_train_anchor=True moves the anchor per sample"
+                )
         if self.reference_velocity_source not in REFERENCE_VELOCITY_SOURCES:
             raise ValueError(
                 f"unknown reference_velocity_source {self.reference_velocity_source!r}; "
@@ -1464,7 +1534,11 @@ class TSConfig:
         Serialised into every checkpoint beside ``channels``; ``load_checkpoint`` refuses
         a mismatch, the same lock that keeps a renamed state channel from loading.
         """
-        return self.channels + conditioning_channel_names(self.target_conditioning)
+        return (
+            self.channels
+            + conditioning_channel_names(self.target_conditioning)
+            + intent_channel_names(self.intent_conditioning)
+        )
 
     # The model INPUT width. PatchTST reads configs.enc_in; iTransformer infers the token
     # count from the tensor, but its duration head and the control feature head flatten

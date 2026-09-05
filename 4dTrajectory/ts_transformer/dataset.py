@@ -104,6 +104,7 @@ from fixed_dt_supervision import (
     cache_fixed_dt_supervision_rows,
     pack_fixed_dt_supervision_rows,
 )
+from intent_conditioning import LeadLanding, intent_vector, lead_landings
 from target_conditioning import (
     TARGET_CONDITIONING_NONE,
     conditioned_history,
@@ -375,6 +376,12 @@ class FlightSeries:
     supervision_times: np.ndarray | None = None    # [M], M >= N
     supervision_values: np.ndarray | None = None   # [M, C]
     supervision_weights: np.ndarray | None = None  # [M, C], fitted velocities are zero
+    # Scene context, from the tracks roster: the previous landing on the SAME runway.
+    # ``None`` = the roster was never consulted (a series built outside
+    # ``load_flight_dicts``); ``LeadLanding(None)`` = consulted, no earlier landing. Read
+    # only by the Phase 0 intent channels (intent_conditioning); Phase 1 replaces it
+    # with the neighbour set.
+    lead_landing: LeadLanding | None = None
 
     def __post_init__(self) -> None:
         supplied = (
@@ -786,6 +793,12 @@ def load_flight_dicts(
             manifest_path,
             include_flight_keys=local_keys,
         )
+        # Scene context from the same roster the flights came through: the previous
+        # same-runway landing, keyed by the manifest's own (airport-local) flight_key.
+        keys = [flight_key(flight, index) for index, flight in enumerate(manifest_flights)]
+        leads = lead_landings(manifest, manifest_path=manifest_path, flight_keys=keys)
+        for key, flight in zip(keys, manifest_flights):
+            flight["lead_landing"] = leads[key]
         flights.extend(manifest_flights)
         loaded_keys.update(
             dataset_flight_key(flight, index)
@@ -1049,6 +1062,7 @@ def build_series(
             supervision_times=supervision_times,
             supervision_values=supervision_values,
             supervision_weights=supervision_weights,
+            lead_landing=flight.get("lead_landing"),
         ))
         report.built += 1
 
@@ -1175,23 +1189,38 @@ def _build_supervision(
 # ── Windowing ────────────────────────────────────────────────────────────────
 
 def series_conditioning(
-    series: FlightSeries, config: TSConfig, normalizer: Normalizer
+    series: FlightSeries, config: TSConfig, normalizer: Normalizer, *, anchor: int
 ) -> np.ndarray | None:
-    """The flight's constant input-only conditioning row, or ``None`` when off.
+    """The flight's constant input-only conditioning row at ``anchor``, or ``None`` when
+    all off.
 
     Built here, beside the windows, because it is a per-flight INPUT value in the
     normalizer's space — the same row is appended to every history window of the flight
-    at training time (``TrajectoryWindows``) and at inference (``forecast``).
+    at training time (``TrajectoryWindows``) and at inference (``forecast``). Column
+    order is ``config.input_channels``: the target conditioning, then the intent. Only
+    the intent's lead channel depends on the anchor (an ETA is relative to a moment).
     """
-    if config.target_conditioning == TARGET_CONDITIONING_NONE:
-        return None
     position = list(POSITION_IDX)
-    return conditioning_vector(
-        series.target_chart,
-        float(series.scenario.target.psi),
+    parts: list[np.ndarray] = []
+    if config.target_conditioning != TARGET_CONDITIONING_NONE:
+        parts.append(conditioning_vector(
+            series.target_chart,
+            float(series.scenario.target.psi),
+            position_mean=normalizer.mean[position],
+            position_std=normalizer.std[position],
+        ))
+    intent = intent_vector(
+        series,
+        config.intent_conditioning,
+        anchor_time_s=float(series.times[anchor]),
         position_mean=normalizer.mean[position],
         position_std=normalizer.std[position],
     )
+    if intent is not None:
+        parts.append(intent)
+    if not parts:
+        return None
+    return np.concatenate(parts).astype(np.float32)
 
 
 def window_anchors(
@@ -1303,9 +1332,17 @@ class TrajectoryWindows(Dataset, ABC):
         self.encoded = [
             normalizer.encode(s.supervision_values).astype(np.float32) for s in self.series
         ]
-        # Input-only target conditioning, one constant row per flight (None when off).
+        # Input-only conditioning, one constant row per flight built at the flight's
+        # anchor (None when off, or when the flight has no window). A random-anchor
+        # population varies the anchor per sample; the only anchor-dependent column,
+        # the intent's lead ETA, refuses that policy at TSConfig.
         self.conditioning = [
-            series_conditioning(s, config, normalizer) for s in self.series
+            series_conditioning(
+                item, config, normalizer, anchor=self.index[self.range_starts[s_idx]][1]
+            )
+            if self.range_counts[s_idx]
+            else None
+            for s_idx, item in enumerate(self.series)
         ]
         # The per-flight final-approach context (never a model input), when the recipe
         # bounds or penalises the corridor. Resolved once: the FAF read is a document load.
