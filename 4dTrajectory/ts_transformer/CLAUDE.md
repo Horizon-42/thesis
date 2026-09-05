@@ -85,9 +85,11 @@ flight model.
 - **`intent_conditioning=truth-…` checkpoints read the FUTURE** (the truth join point, the
   lead's true landing time) — the Phase 0 upper-bound instrument of the scene design, never a
   result to quote as a predictor; the run name carries `intent=truth-…` so it cannot pass as
-  one. Its lead channel is measured at the window's anchor, so it refuses random train
-  anchors; `FlightSeries.lead_landing is None` means "roster never consulted" and raises,
-  `LeadLanding(None)` means "no earlier landing" and reads as a clear runway.
+  one. Its lead and remaining-time channels are measured at the window's anchor, so it
+  refuses random train anchors; `FlightSeries.lead_landing is None` means "roster never
+  consulted" and raises, `LeadLanding(None)` means "no earlier landing" and reads as a
+  clear runway. A `truth-join-duration` arm's `final_time_error_s` is an identity check
+  (its input IS the duration target), never a duration result.
 - **`overlap` is a REQUIRED arg to `write_batch`** — an optional metric is one that silently goes
   missing.
 - **τ shorter than the integrator step produces NaN, not a worse answer** (explicit RK4 on

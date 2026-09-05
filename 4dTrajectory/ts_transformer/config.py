@@ -68,10 +68,16 @@ CORRIDOR_GATES = (CORRIDOR_GATE_ON_FINAL, CORRIDOR_GATE_FAF)
 INTENT_CONDITIONING_NONE = "none"
 INTENT_CONDITIONING_TRUTH_JOIN = "truth-join"
 INTENT_CONDITIONING_TRUTH_JOIN_LEAD = "truth-join-lead"
+# ``truth-join-duration``: the join point plus the flight's TRUE remaining time from the
+# anchor — the duration head's own target handed to the input. The ceiling of a decision
+# made of (where to join, when to land) with this decoder; measured after the join-only
+# arms showed the residual is along-path timing.
+INTENT_CONDITIONING_TRUTH_JOIN_DURATION = "truth-join-duration"
 INTENT_CONDITIONINGS = (
     INTENT_CONDITIONING_NONE,
     INTENT_CONDITIONING_TRUTH_JOIN,
     INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
+    INTENT_CONDITIONING_TRUTH_JOIN_DURATION,
 )
 # The fields a named recipe leaves OPEN for the intent axis (the CLI's override check).
 INTENT_FIELDS = ("intent_conditioning",)
@@ -79,6 +85,7 @@ INTENT_FIELDS = ("intent_conditioning",)
 # (``input_channels``) and ``train.load_checkpoint`` refuses a mismatch.
 INTENT_JOIN_CHANNELS: tuple[str, ...] = ("e_join", "n_join", "u_join")
 INTENT_LEAD_CHANNELS: tuple[str, ...] = ("lead_eta",)
+INTENT_DURATION_CHANNELS: tuple[str, ...] = ("remaining_time",)
 
 
 def intent_channel_names(intent_conditioning: str) -> tuple[str, ...]:
@@ -89,6 +96,8 @@ def intent_channel_names(intent_conditioning: str) -> tuple[str, ...]:
         return INTENT_JOIN_CHANNELS
     if intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN_LEAD:
         return INTENT_JOIN_CHANNELS + INTENT_LEAD_CHANNELS
+    if intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN_DURATION:
+        return INTENT_JOIN_CHANNELS + INTENT_DURATION_CHANNELS
     raise ValueError(
         f"unknown intent_conditioning {intent_conditioning!r}; expected one of "
         f"{INTENT_CONDITIONINGS}"
@@ -1008,12 +1017,15 @@ class TSConfig:
                     "already rotated"
                 )
             if (
-                self.intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN_LEAD
+                self.intent_conditioning in (
+                    INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
+                    INTENT_CONDITIONING_TRUTH_JOIN_DURATION,
+                )
                 and self.random_train_anchor
             ):
                 raise ValueError(
-                    "the lead ETA channel is measured at the flight's fixed anchor; "
-                    "random_train_anchor=True moves the anchor per sample"
+                    "the lead ETA and remaining-time channels are measured at the flight's "
+                    "fixed anchor; random_train_anchor=True moves the anchor per sample"
                 )
         if self.reference_velocity_source not in REFERENCE_VELOCITY_SOURCES:
             raise ValueError(

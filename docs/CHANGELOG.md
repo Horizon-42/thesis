@@ -4,6 +4,29 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-05 — Phase 0 result (KRDU): the join point is worth −17 % vectored ADE, the gate was mis-sized
+
+`4dTrajectory/ts_transformer/docs/2026-09-05_scene_phase0_results.zh.md`; campaign
+`scene_phase0_20260905` (O_join_lead, O_join; simple-v3, paired with
+`control_procedure_20260905/A_control_v3`). Vectored ADE 2858 → 2364 / 2356 m, duration
+error 39 → 20 / 22 s, straight-in 469 → 442 / 458 m; the lead ETA adds nothing beyond the
+join point. The pre-registered gate (< 1.5 km) was unreachable for a join-only oracle under
+the time-aligned metric: on the same 497 flights the TRUTH path with a naive speed profile
+scores 1.3 km and a trombone from the truth join point with the truth's timing 1.7 km
+(`docs/phase0_intent_diagnostics.py`, five readings). The network reacts to the channel
+(±5 km join → ∓43/+53 s), mostly in timing; its predicted join distance moves 6 → 11 km
+toward the truth 14 km but the paths claim the final on fewer flights. Causal traffic counts
+from the manifests explain little of the join (R² 0.34 → 0.38 on flights joining after the
+anchor; the truth lead ETA 0.47); knowing the join halves the remaining-duration error
+(35.8 → 22.8 s). Conclusion: for vectored arrivals the 4D error is dominated by along-path
+timing and residual geometry, the join distance is one variable of ~three; the design's
+decision variable should include time. New mode `truth-join-duration` (join + the true
+remaining time, the duration head's own target) added to size the (where, when) ceiling
+with this decoder — its duration error is an identity check. Reviewer caveat folded in: a
+prediction's "establishes on the final" must be judged with the membership gate
+(`hard_on_final` + `stays_mask`), not the k=0.5 truth gate, which the documented 250–350 m
+endpoint translation saturates.
+
 ### 2026-09-05 — Phase 0 of the scene design: truth-intent conditioning (upper-bound instrument)
 
 `4dTrajectory/ts_transformer/intent_conditioning.py` + `TSConfig.intent_conditioning` ∈

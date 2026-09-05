@@ -15,6 +15,13 @@
    "overrides": {
     "intent_conditioning": "truth-join"
    }
+  },
+  {
+   "key": "O_join_duration",
+   "label": "simple-v3 + truth join point + truth remaining time (the (where, when) ceiling)",
+   "overrides": {
+    "intent_conditioning": "truth-join-duration"
+   }
   }
  ]
 }

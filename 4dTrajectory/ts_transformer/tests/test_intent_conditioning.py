@@ -269,6 +269,25 @@ def test_the_row_is_built_at_the_windows_actual_anchor():
     )
 
 
+def test_duration_mode_hands_the_duration_head_its_own_target():
+    from config import INTENT_DURATION_CHANNELS
+
+    series, config = _series(n_flights=2, seq_len=20, intent_conditioning="truth-join-duration")
+    assert config.input_channels == ch.CHANNELS + INTENT_JOIN_CHANNELS + INTENT_DURATION_CHANNELS
+    normalizer = Normalizer.fit(series)
+    windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    _x, _y, _w, final_time_s, _fw = windows[0]
+    s_idx, anchor = windows.index[0]
+    row = windows.conditioning[s_idx]
+    # The channel is the duration head's own target, on the loss's own time scale.
+    assert row[3] == pytest.approx(float(final_time_s) / config.final_time_scale_s)
+    assert ic.remaining_time_s(
+        series[s_idx], anchor_time_s=float(series[s_idx].times[anchor])
+    ) == pytest.approx(float(final_time_s))
+    with pytest.raises(ValueError, match="fixed anchor"):
+        TSConfig(random_train_anchor=True, intent_conditioning="truth-join-duration")
+
+
 def test_target_and_intent_rows_concatenate_in_input_channel_order():
     series, config = _series(
         n_flights=1, coordinate_frame="airport-enu", target_conditioning="channels",

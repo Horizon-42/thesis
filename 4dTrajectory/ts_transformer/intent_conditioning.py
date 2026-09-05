@@ -25,10 +25,15 @@ intent can reach.
                              ±``LEAD_ETA_CLIP_S`` (negative: the runway has been clear that
                              long; the negative clip when the roster has no earlier landing
                              on that runway)
+    remaining_time           (``truth-join-duration``) the flight's TRUE remaining time from
+                             the anchor to its last supervision row, over the config's
+                             ``final_time_scale_s`` — the duration head's own target as
+                             input, the ceiling of a decision made of (where to join, when
+                             to land); its duration error is an identity check, not a result
 
-These are TRUTH values — both lie in the future of the anchor on a vectored flight, and
-the lead's landing time is what the scene encoder would have to estimate from its current
-state. A checkpoint trained with them is a development measurement, never a deployable
+These are TRUTH values — every one of them lies in the future of the anchor on a vectored
+flight, the lead's landing time is what the scene encoder would have to estimate from its
+current state, and the remaining time is the duration head's own answer. A checkpoint trained with them is a development measurement, never a deployable
 predictor; the run name carries ``intent=truth-…`` so no table can quote it as one. The
 leak red line of the design (neighbour features only from ``t ≤ t₀``) is what Phase 1
 enforces; here it is deliberately crossed, once, to size the prize.
@@ -56,7 +61,11 @@ import torch
 from channels import POSITION_IDX
 # The mode and channel names live in config (beside ``input_channels``) because
 # final_approach_geometry imports config: defining them here would close a cycle.
-from config import INTENT_CONDITIONING_TRUTH_JOIN_LEAD, intent_channel_names
+from config import (
+    INTENT_CONDITIONING_TRUTH_JOIN_DURATION,
+    INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
+    intent_channel_names,
+)
 from final_approach_geometry import runway_axes, truth_final_gate
 
 if TYPE_CHECKING:  # a data-plane value type; avoids a dataset <-> intent import cycle
@@ -68,6 +77,8 @@ if TYPE_CHECKING:  # a data-plane value type; avoids a dataset <-> intent import
 # land within ±1800 s of the anchor, and a runway clear for half an hour is simply clear.
 LEAD_ETA_SCALE_S = 600.0
 LEAD_ETA_CLIP_S = 1800.0
+# The remaining-time channel is scaled by the config's ``final_time_scale_s`` — it IS the
+# quantity that scale was defined for (the duration head's target).
 
 # Mirror of the harvest's outcome literal (trajectory_data_process/harvest/arrivals.py
 # selects the roster with ``row["outcome"] != "assigned"``; it names no constant).
@@ -199,6 +210,12 @@ def lead_eta_s(series: "FlightSeries", *, anchor_time_s: float) -> float:
     return float(np.clip(eta, -LEAD_ETA_CLIP_S, LEAD_ETA_CLIP_S))
 
 
+def remaining_time_s(series: "FlightSeries", *, anchor_time_s: float) -> float:
+    """The TRUE time from the anchor to the flight's last supervision row — exactly the
+    duration head's training target for the window at that anchor."""
+    return float(series.supervision_times[-1] - anchor_time_s)
+
+
 # ── The conditioning row ─────────────────────────────────────────────────────
 
 def intent_vector(
@@ -208,9 +225,11 @@ def intent_vector(
     anchor_time_s: float,
     position_mean: np.ndarray,
     position_std: np.ndarray,
+    remaining_time_scale_s: float,
 ) -> np.ndarray | None:
     """One flight's constant intent row in the model's normalized input space, or
-    ``None`` when the mode is off. Column order is :func:`config.intent_channel_names`."""
+    ``None`` when the mode is off. Column order is :func:`config.intent_channel_names`;
+    ``remaining_time_scale_s`` is the config's ``final_time_scale_s``."""
     names = intent_channel_names(intent_conditioning)
     if not names:
         return None
@@ -218,6 +237,8 @@ def intent_vector(
     parts = [join]
     if intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN_LEAD:
         parts.append([lead_eta_s(series, anchor_time_s=anchor_time_s) / LEAD_ETA_SCALE_S])
+    if intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN_DURATION:
+        parts.append([remaining_time_s(series, anchor_time_s=anchor_time_s) / remaining_time_scale_s])
     row = np.concatenate(parts).astype(np.float32)
     if len(row) != len(names):
         raise RuntimeError(

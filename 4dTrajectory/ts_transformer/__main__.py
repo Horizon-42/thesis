@@ -495,8 +495,9 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         help=(
             "Phase 0 intent upper bound: feed the TRUTH join point ('truth-join'), or that "
             "plus the lead's TRUE landing time relative to the anchor ('truth-join-lead'), "
-            "as input-only constant channels (iTransformer only). Reads the future — a "
-            "development measurement, never a deployable model; default: none"
+            "or plus the flight's TRUE remaining time ('truth-join-duration'), as input-only "
+            "constant channels (iTransformer only). Reads the future — a development "
+            "measurement, never a deployable model; default: none"
         ),
     )
     parser.add_argument(

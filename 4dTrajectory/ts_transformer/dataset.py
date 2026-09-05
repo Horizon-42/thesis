@@ -1215,6 +1215,7 @@ def series_conditioning(
         anchor_time_s=float(series.times[anchor]),
         position_mean=normalizer.mean[position],
         position_std=normalizer.std[position],
+        remaining_time_scale_s=config.final_time_scale_s,
     )
     if intent is not None:
         parts.append(intent)
