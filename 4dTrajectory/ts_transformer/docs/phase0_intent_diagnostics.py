@@ -73,6 +73,7 @@ for path in (HERE, TS_DIR, REPO_ROOT):
 import compare_frame_arms as cfa  # noqa: E402
 import final_approach_geometry as fag  # noqa: E402
 import intent_conditioning as ic  # noqa: E402
+import closure_geometry as cg  # noqa: E402
 import geometric_metrics as gm  # noqa: E402
 from config import DEFAULT_DT_S, DEFAULT_SEQ_LEN, TSConfig  # noqa: E402
 from coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
@@ -83,10 +84,6 @@ from metrics import common_physical_time_flight_metrics  # noqa: E402
 from trajectory_data_process.harvest.arrivals import load_arrival_flights  # noqa: E402
 
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
-GRAVITY = 9.80665
-TEMPLATE_BANK_RAD = math.radians(25.0)
-TEMPLATE_TURN_SPEED_CAP_MPS = 100.0      # the turn radius is sized at approach speed
-TEMPLATE_THRESHOLD_SPEED_MPS = 70.0
 # The population readings anchor raw tracks where the package anchors its windows.
 ANCHOR_S = (DEFAULT_SEQ_LEN - 1) * DEFAULT_DT_S
 
@@ -277,156 +274,30 @@ def cmd_sensitivity(args: argparse.Namespace) -> None:
 
 # ── template ─────────────────────────────────────────────────────────────────
 
-def _arc(centre: np.ndarray, radius: float, start: float, sweep: float, step: float = 50.0) -> np.ndarray:
-    n = max(2, int(abs(radius * sweep) / step) + 1)
-    return np.array([
-        centre + radius * np.array([math.cos(start + k), math.sin(start + k)])
-        for k in np.linspace(0.0, sweep, n)
-    ])
-
-
-def _dubins(p0, h0, p1, h1, radius, step: float = 50.0) -> np.ndarray:
-    """Shortest turn-straight-turn path between two poses (LSL/RSR/LSR/RSL)."""
-    best = None
-    for s0, s1 in ((1, 1), (-1, -1), (1, -1), (-1, 1)):
-        c0 = p0 + radius * np.array([-s0 * math.sin(h0), s0 * math.cos(h0)])
-        c1 = p1 + radius * np.array([-s1 * math.sin(h1), s1 * math.cos(h1)])
-        dc = c1 - c0
-        distance = float(np.hypot(*dc))
-        theta = math.atan2(dc[1], dc[0])
-        if s0 == s1:
-            if distance < 1e-6:
-                continue
-            psi = theta
-        else:
-            if distance < 2 * radius:
-                continue
-            psi = theta + s0 * math.asin(2 * radius / distance)
-        a0, a1 = psi - s0 * math.pi / 2, psi - s1 * math.pi / 2
-        t0 = c0 + radius * np.array([math.cos(a0), math.sin(a0)])
-        t1 = c1 + radius * np.array([math.cos(a1), math.sin(a1)])
-        straight = t1 - t0
-        if straight @ np.array([math.cos(psi), math.sin(psi)]) < 0:
-            continue
-        f0, f1 = h0 - s0 * math.pi / 2, h1 - s1 * math.pi / 2
-        d0 = (s0 * (a0 - f0)) % (2 * math.pi)
-        d1 = (s1 * (f1 - a1)) % (2 * math.pi)
-        length = radius * (d0 + d1) + float(np.hypot(*straight))
-        if best is None or length < best[0]:
-            best = (length, s0, s1, c0, c1, f0, a0, a1, d0, d1, t0, t1)
-    if best is None:
-        raise RuntimeError("no Dubins CSC path")
-    _length, s0, s1, c0, c1, f0, a0, a1, d0, d1, t0, t1 = best
-    points = list(_arc(c0, radius, f0, s0 * d0, step))
-    n = max(2, int(np.hypot(*(t1 - t0)) / step) + 1)
-    points.extend(t0 + f * (t1 - t0) for f in np.linspace(0.0, 1.0, n)[1:])
-    points.extend(_arc(c1, radius, a1, s1 * d1, step)[1:])
-    return np.array(points)
-
-
-def _trombone(p0, psi, d0, xt0, d_join, radius, step: float = 50.0) -> tuple[np.ndarray, float]:
-    """Downwind → 90° base turn → base leg → 90° turn onto the final at ``d_join``.
-
-    Runway axes: ``d`` upstream (against the course), ``xt`` to the right of it. The
-    downwind continues to ``d = d_join``; the base leg lies at ``d_join + radius``; the
-    turn onto the final ends on the localizer at ``d_join`` heading for the threshold. An
-    anchor already past ``d_join`` turns at once and joins at its own distance (returned).
-    """
-    ud = -np.array([math.cos(psi), math.sin(psi)])
-    ux = np.array([math.sin(psi), -math.cos(psi)])
-    side = 1.0 if xt0 > 0 else -1.0
-    points = [p0.copy()]
-    if d0 < d_join:
-        n = max(2, int((d_join - d0) / step) + 1)
-        points.extend(p0 + f * (d_join - d0) * ud for f in np.linspace(0.0, 1.0, n)[1:])
-    d_turn = max(d0, d_join)
-    start = points[-1]
-    centre1 = start - side * radius * ux
-    heading_base = -side * ux
-    cross = ud[0] * heading_base[1] - ud[1] * heading_base[0]
-    sweep = (math.pi / 2) * (1.0 if cross > 0 else -1.0)
-    points.extend(_arc(centre1, radius, math.atan2(*(start - centre1)[::-1]), sweep, step)[1:])
-    base_start = points[-1]
-    base_end = (d_turn + radius) * ud + side * radius * ux
-    n = max(2, int(np.hypot(*(base_end - base_start)) / step) + 1)
-    points.extend(base_start + f * (base_end - base_start) for f in np.linspace(0.0, 1.0, n)[1:])
-    centre2 = d_turn * ud + side * radius * ux
-    heading_final = -ud
-    cross = heading_base[0] * heading_final[1] - heading_base[1] * heading_final[0]
-    sweep = (math.pi / 2) * (1.0 if cross > 0 else -1.0)
-    points.extend(_arc(centre2, radius, math.atan2(*(base_end - centre2)[::-1]), sweep, step)[1:])
-    return np.array(points), d_turn
-
-
-def template_path(series, anchor: int) -> tuple[np.ndarray, float, float, str]:
-    """Horizontal template ``[N, 2]`` from the anchor to the threshold, its along-path
-    distance at the join, the join distance it uses, and which construction it took
-    (``straight`` / ``trombone`` / ``trombone-past-join`` / ``dubins``)."""
+def template_path(series, anchor: int) -> cg.ClosurePath:
+    """The Phase 0 template (``closure_geometry.rule_template`` at the truth join):
+    ``straight`` / ``trombone`` / ``trombone-past-join`` / ``dubins``."""
     psi = float(series.scenario.target.psi)
-    a = series.values[anchor]
-    p0 = a[:2].copy()
-    v0 = float(np.hypot(a[3], a[4]))
-    h0 = math.atan2(a[4], a[3])
-    radius = min(v0, TEMPLATE_TURN_SPEED_CAP_MPS) ** 2 / (GRAVITY * math.tan(TEMPLATE_BANK_RAD))
     join = ic.truth_join_point(series)
-    d_join = float(fag.runway_axes(
-        torch.tensor([[join[0]]]), torch.tensor([[join[1]]]), torch.tensor([psi])
-    )[0])
-    d0, xt0 = (float(x) for x in fag.runway_axes(
-        torch.tensor([[p0[0]]]), torch.tensor([[p0[1]]]), torch.tensor([psi])
-    ))
-    cos_align = math.cos(h0 - psi)
-    if (abs(xt0) < 2.5 * radius and cos_align > 0.7) or (d_join >= d0 - 500.0 and abs(xt0) < 1000.0):
-        n = max(2, int(np.hypot(*p0) / 50.0) + 1)     # the origin IS the threshold (enu)
-        horiz = np.array([p0 * (1.0 - f) for f in np.linspace(0.0, 1.0, n)])
-        return horiz, 0.0, d0, "straight"
-    if cos_align < -0.3 and abs(xt0) >= 2.0 * radius:
-        horiz, d_used = _trombone(p0, psi, d0, xt0, d_join, radius)
-        kind = "trombone" if d_used == d_join else "trombone-past-join"
-        d_join = d_used
-    else:
-        e_j, n_j = fag.chart_from_axes(
-            torch.tensor([[d_join]]), torch.tensor([[0.0]]), torch.tensor([psi])
-        )
-        horiz = _dubins(p0, h0, np.array([float(e_j), float(n_j)]), psi, radius)
-        kind = "dubins"
-    d_final = np.arange(d_join - 50.0, 0.0, -50.0)
-    e_f, n_f = fag.chart_from_axes(
-        torch.tensor(d_final)[None], torch.zeros(1, len(d_final)), torch.tensor([psi])
-    )
-    horiz = np.concatenate([horiz, np.stack([e_f[0].numpy(), n_f[0].numpy()], 1), np.zeros((1, 2))])
-    s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(horiz, axis=0).T))])
-    return horiz, float(s[-1] - d_join), d_join, kind
+    d_join = float(cg.runway_axes_np(join[0], join[1], psi)[0])
+    return cg.rule_template(cg.AnchorPose.from_state(series.values[anchor], psi), psi, d_join)
 
 
 def _template_record(series, anchor: int, timing: str) -> tuple[np.ndarray, np.ndarray, str]:
-    """Template as ``(offsets_s, values[N, 6], kind)`` after the anchor, with a vertical
-    profile (linear to the glidepath at the join, then the glidepath — the chart origin is
-    the threshold-crossing aim point, so the glidepath height is ``d·tan(GPA)`` with no
-    TCH) and the chosen timing."""
+    """Template as ``(offsets_s, values[N, 6], kind)`` after the anchor — the closure
+    geometry's vertical profile and timing (``truth``: the truth's time at the same arc
+    fraction; ``naive``: linear deceleration from the anchor speed)."""
     a = series.values[anchor]
-    horiz, s_join, d_join, kind = template_path(series, anchor)
+    path = template_path(series, anchor)
     tan_gpa = math.tan(-float(series.scenario.target.gamma))
-    s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(horiz, axis=0).T))])
-    length = s[-1]
-    u = np.where(
-        s <= s_join,
-        a[2] + (s / max(s_join, 1.0)) * (d_join * tan_gpa - a[2]),
-        (length - s) * tan_gpa,
-    )
     if timing == "truth":
         truth_xy = np.concatenate([a[None, :2], series.supervision_values[anchor + 1:, :2]], 0)
-        s_truth = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(truth_xy, axis=0).T))])
         t_truth = np.concatenate([[0.0], series.supervision_times[anchor + 1:] - series.times[anchor]])
-        t = np.interp(s / length * s_truth[-1], s_truth, t_truth)
-        t = np.maximum.accumulate(t + np.arange(len(t)) * 1e-6)
+        t = cg.truth_timed(path, truth_xy, t_truth)
     else:
-        v0 = float(np.hypot(a[3], a[4]))
-        speed = v0 + (TEMPLATE_THRESHOLD_SPEED_MPS - v0) * s / length
-        t = np.concatenate([[0.0], np.cumsum(np.diff(s) / (0.5 * (speed[1:] + speed[:-1])))])
-    values = np.zeros((len(s), 6))
-    values[:, 0], values[:, 1], values[:, 2] = horiz[:, 0], horiz[:, 1], u
-    return t[1:], values[1:], kind
+        t = cg.naive_timed(path, float(np.hypot(a[3], a[4])))
+    offsets, values = cg.path_record(path, t, float(a[2]), tan_gpa)
+    return offsets, values, path.kind
 
 
 def _score(series, anchor: int, offsets: np.ndarray, values: np.ndarray) -> dict:
@@ -483,7 +354,7 @@ def cmd_template(args: argparse.Namespace) -> None:
                 s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(truth[:, :2], axis=0).T))])
                 truth_t = np.concatenate([[0.0], item.supervision_times[anchor + 1:] - item.times[anchor]])
                 v0 = float(np.hypot(a[3], a[4]))
-                speed = v0 + (TEMPLATE_THRESHOLD_SPEED_MPS - v0) * s / s[-1]
+                speed = v0 + (cg.THRESHOLD_SPEED_MPS - v0) * s / s[-1]
                 naive = np.concatenate([[0.0], np.cumsum(np.diff(s) / (0.5 * (speed[1:] + speed[:-1])))])
                 constant = s / s[-1] * truth_t[-1]
                 values = np.zeros((len(truth), 6))
