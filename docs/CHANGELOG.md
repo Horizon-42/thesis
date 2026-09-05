@@ -22,7 +22,15 @@ anchor; the truth lead ETA 0.47); knowing the join halves the remaining-duration
 timing and residual geometry, the join distance is one variable of ~three; the design's
 decision variable should include time. New mode `truth-join-duration` (join + the true
 remaining time, the duration head's own target) added to size the (where, when) ceiling
-with this decoder — its duration error is an identity check. Reviewer caveat folded in: a
+with this decoder — its duration error is an identity check. **Its arm: vectored ADE
+2011 m (−30 %), pooled 1005 m, duration error 5 s, but the time-free path error does NOT
+improve (chamfer 850 m vs 791 join-only, 942 baseline) and the claimed join distance falls
+back to 7.4 km — with both truth decision variables this decoder still hedges the geometry,
+while a crude trombone with the truth timing scores 1.7 km and the truth path with a naive
+speed profile 1.3 km.** Recommendation in the results doc: fix the output side first
+(geometric closure: predict (d_join, T) + a speed profile, construct the path), then the
+scene encoder; the deterministic top-1 of the scene design is capped near 2 km by this
+measurement. Reviewer caveat folded in: a
 prediction's "establishes on the final" must be judged with the membership gate
 (`hard_on_final` + `stays_mask`), not the k=0.5 truth gate, which the documented 250–350 m
 endpoint translation saturates.

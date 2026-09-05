@@ -7,6 +7,16 @@ Newest campaigns first, long-standing scope limits last.
 ---
 
 
+- **Scene design Phase 0 DONE 2026-09-05 (`scene_phase0_20260905`, KRDU; results
+  `docs/2026-09-05_scene_phase0_results.zh.md`, diagnostics
+  `docs/phase0_intent_diagnostics.py`).** The TRUTH join point as input: vectored ADE
+  2858 → 2356 m, duration error 39 → 22 s; + the truth lead ETA: no increment; + the truth
+  remaining time: 2011 m (−30 %), pooled 1005 m, duration error 5 s — but the time-free path
+  error never improves (chamfer 942 → 791 → 850 m). Pre-registered gate (< 1.5 km) not met
+  and shown to be mis-sized (truth path + naive speed profile 1.3 km; trombone from the truth
+  join + truth timing 1.7 km). Open — a decision for the user: (A) stop, (B) revise the design
+  to (d_join, T) decisions, (C) fix the output side first (geometric closure); the results
+  doc recommends C then B. Not started: Phase 1 data plane, any scene encoder.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report
   `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a
