@@ -1366,18 +1366,26 @@ class TrajectoryWindows(Dataset, ABC):
         # config's labels file. Imported here because closure_output reaches this module
         # through the arc-length geometry.
         self.closure = None
+        self.closure_coverage: tuple[int, int, int] | None = None
         if uses_closure_labels(config.prediction_output):
             from closure_output import CONTEXT_VALID, label_context, load_labels
             labels = load_labels(config.closure_labels_path)
             self.closure = [label_context(s, labels, config) for s in self.series]
-            covered = sum(int(row[CONTEXT_VALID]) for row in self.closure)
-            if self.series and covered == 0:
+            present = sum(s.flight_id in labels.flights for s in self.series)
+            valid = sum(int(row[CONTEXT_VALID]) for row in self.closure)
+            # Stated by the caller under its own verbosity; refused here when nothing
+            # could train (the two zeros mean different things).
+            self.closure_coverage = (present, valid, len(self.series))
+            if self.series and present == 0:
                 raise ValueError(
-                    f"{config.closure_labels_path} carries a valid label for none of these "
-                    f"{len(self.series)} flights — another cohort's labels?"
+                    f"{config.closure_labels_path} carries none of these {len(self.series)} "
+                    "flights — another cohort's labels?"
                 )
-            print(f"  closure labels: {covered} of {len(self.series)} flights valid "
-                  f"({covered / max(len(self.series), 1):.1%}); the rest are in the batch, out of the loss")
+            if self.series and valid == 0:
+                raise ValueError(
+                    f"{config.closure_labels_path} carries these {len(self.series)} flights but "
+                    "marks every label non-canonical or above the residual cap: nothing to regress"
+                )
         # Public diagnostic for normalized-time experiments. Actual query times come from
         # the shared clock below, which also defines fixed-time loss and inference timing.
         self.progress = (

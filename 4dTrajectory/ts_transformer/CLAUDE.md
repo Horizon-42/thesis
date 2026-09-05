@@ -194,7 +194,8 @@ them under `control` would claim an ownership that does not exist.
 `dataset` (`Normalizer` and the window types are data-plane values it genuinely consumes) but
 not `train`/`forecast`/`models`/`batching`. The oracle takes `train`'s objective dispatch as
 an injected `loss_components` argument for exactly this reason. `batch_contract.py` holds
-`unpack_batch`/`model_forward` so the train-only oracle can read a batch without importing
+`unpack_batch`/`model_forward`/`anchor_state` and the `LossComponents` contract so a loss
+module or the train-only oracle can read a batch and return an objective without importing
 the loop it runs inside. `tests/test_architecture.py` enforces all of it.
 
 `control/__init__.py` re-exports nothing on purpose — flattening forty names into one

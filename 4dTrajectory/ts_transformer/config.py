@@ -118,6 +118,7 @@ CLOSURE_FIELDS = (
     "closure_height_knots",
     "closure_geometry_loss_weight",
     "closure_timing_loss_weight",
+    "closure_timing_scale_s",
     "closure_height_loss_weight",
 )
 # There is no pre-closure behaviour to reproduce, so every closure field is required.
@@ -623,6 +624,11 @@ class TSConfig:
     closure_height_knots: int = 4
     closure_geometry_loss_weight: float = 1.0
     closure_timing_loss_weight: float = 1.0
+    # The timing group's seconds-to-loss scale. Measured at initialisation on synthetic
+    # arrivals with the three weights at 1.0: geometry ≈ 1.7, timing ≈ 1.5 at 60 s, height
+    # ≈ 0.9 — a minute puts the groups within a factor of two (at final_time_scale_s's
+    # 600 s the timing group was 20× under the geometry).
+    closure_timing_scale_s: float = 60.0
     closure_height_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
@@ -992,6 +998,8 @@ class TSConfig:
                 )
             if self.random_train_anchor:
                 raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
+            if self.closure_timing_scale_s <= 0.0:
+                raise ValueError("closure_timing_scale_s must be positive")
             if (self.closure_slowness_knots not in CLOSURE_LABEL_KNOTS
                     or self.closure_height_knots not in CLOSURE_LABEL_KNOTS):
                 raise ValueError(

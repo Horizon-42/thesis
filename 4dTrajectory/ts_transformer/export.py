@@ -52,7 +52,7 @@ from evaluation_export import (  # noqa: E402
     summary_row,
 )
 
-from config import PREDICTION_CLOSURE
+from config import PREDICTION_CLOSURE  # noqa: E402
 from approach_difficulty import (  # noqa: E402
     approach_difficulty, difficulty_block,
 )

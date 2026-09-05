@@ -124,9 +124,12 @@ CLOSURE_LOSS_FIELDS = (
     "closure_height_knots",
     "closure_geometry_loss_weight",
     "closure_timing_loss_weight",
+    "closure_timing_scale_s",
     "closure_height_loss_weight",
-    "final_time_scale_s",
 )
+# Fields whose value is a path: rendered as the file's parent/name (two label generations
+# in different directories must not read as one).
+_PATH_FIELDS = frozenset({"closure_labels_path"})
 STATE_LOSS_FIELDS = (
     "fitted_tail_position_weight",
     "fitted_terminal_position_weight",
@@ -287,8 +290,6 @@ def _norm(value: Any) -> Any:
 def _fmt(value: Any) -> str:
     if isinstance(value, bool):
         return "on" if value else "off"
-    if isinstance(value, str) and "/" in value:
-        return value.rsplit("/", 1)[-1]        # a path: its file name identifies it
     if isinstance(value, float):
         return f"{value:g}"
     if isinstance(value, (list, tuple)):
@@ -335,7 +336,13 @@ def _field_diffs(
 
 
 def _diff_items(diffs: list[tuple[str, Any]]) -> list[str]:
-    return [f"{_abbrev(field)}={_fmt(value)}" for field, value in diffs]
+    return [f"{_abbrev(field)}={_fmt_path(value) if field in _PATH_FIELDS else _fmt(value)}"
+            for field, value in diffs]
+
+
+def _fmt_path(value: Any) -> str:
+    parts = str(value).replace("\\", "/").rstrip("/").split("/")
+    return "/".join(parts[-2:])
 
 
 def _diff_hash(diffs: list[tuple[str, Any]]) -> str:

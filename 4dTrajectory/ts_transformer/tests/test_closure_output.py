@@ -78,6 +78,9 @@ def test_closure_config_contract(tmp_path):
     assert co.decision_width(config) == 14 and len(co.decision_names(config)) == 14
     name = run_display_name(config.to_dict())
     assert name.startswith("closure ·") and "closed-form" in name and "closure-v1" in name
+    assert f"labels={labels.parent.name}/labels.json" in name          # the file, with its directory
+    assert "timing-scale" in run_display_name(_closure_config(labels, closure_timing_scale_s=30.0).to_dict()) or \
+        "closure-timing-scale-s=30" in run_display_name(_closure_config(labels, closure_timing_scale_s=30.0).to_dict())
     assert "closure-v1(closure-slowness-knots=8" in run_display_name(_closure_config(labels, closure_slowness_knots=8).to_dict())
     with pytest.raises(ValueError, match="closure_labels_path"):
         TSConfig(prediction_output=PREDICTION_CLOSURE, **TINY)
@@ -122,8 +125,11 @@ def test_labels_round_trip_through_the_decision_vector(tmp_path):
     assert context[co.CONTEXT_COURSE] == pytest.approx(float(series[0].scenario.target.psi))
     absent = co.label_context(series[1], co.ClosureLabels(AIRPORT, {}), config)
     assert absent[co.CONTEXT_VALID] == 0.0 and not absent[co.CONTEXT_DECISION].any()
-    with pytest.raises(ValueError, match="fitted for KSJC"):
+    with pytest.raises(ValueError, match="fitted for 'KSJC'"):
         co.label_context(series[1], co.ClosureLabels("KSJC", labels.flights), config)
+    # The airport is compared the way FlightSeries.airport normalises it.
+    (tmp_path / "lower.json").write_text(json.dumps({"schema": co.LABEL_SCHEMA, "airport": " krdu ", "flights": labels.flights}))
+    assert co.load_labels(tmp_path / "lower.json").airport == AIRPORT
     with pytest.raises(ValueError, match="schema"):
         (tmp_path / "bad.json").write_text(json.dumps({"schema": "other", "airport": AIRPORT, "flights": {}}))
         co.load_labels(tmp_path / "bad.json")
@@ -167,6 +173,8 @@ def test_reconstruction_is_a_valid_trajectory_that_ends_at_the_threshold(tmp_pat
     assert decoded[:, 0].min() >= cg.D_JOIN_MIN_M and decoded[:, 0].max() <= cg.D_JOIN_MIN_M + co.D_JOIN_MAX_M
     assert decoded[:, 1:3].abs().max() <= co.VIA_MAX_M
     assert torch.allclose(decoded[:, 3:5].norm(dim=1), torch.ones(64), atol=1e-3)
+    small = co.decode_raw(torch.zeros(1, co.decision_width(config)), config)   # the origin: softened, finite
+    assert torch.isfinite(small).all() and small[0, 3:5].norm() < 1.0
     assert (1.0 / decoded[:, 5:5 + 5]).min() >= cp.SPEED_MIN_MPS - 1e-6 and (1.0 / decoded[:, 5:5 + 5]).max() <= cp.SPEED_MAX_MPS + 1e-6
     # The straight-line fallback: a decision whose via-Dubins and plain CSC both fail
     # cannot be produced by the bounded head, so it is exercised on the constructions.
@@ -185,6 +193,8 @@ def test_drawing_from_the_labels_reproduces_the_truth(tmp_path):
     assert all(f.closure_from_labels and f.closure_construction == cg.KIND_VIA_DUBINS for f in forecasts)
     with pytest.raises(KeyError, match="no closure label"):
         forecast_closure_from_labels(series, config, co.ClosureLabels(AIRPORT, {}))
+    with pytest.raises(ValueError, match="fitted for 'KSJC'"):
+        forecast_closure_from_labels(series, config, co.ClosureLabels("KSJC", labels.flights))
 
 
 def test_the_loss_regresses_the_labels_and_skips_invalid_flights(tmp_path):
@@ -245,6 +255,11 @@ def test_train_checkpoint_predict_export_and_evaluate_one_closure_run(tmp_path):
     assert (tmp_path / "run" / "history.json").is_file() and isinstance(result, dict)
     # A labels file for none of the flights is refused before a single batch is built.
     (tmp_path / "other.json").write_text(json.dumps({"schema": co.LABEL_SCHEMA, "airport": AIRPORT, "flights": {}}))
-    with pytest.raises(ValueError, match="valid label for none"):
+    with pytest.raises(ValueError, match="carries none of these"):
         train(series, _closure_config(tmp_path / "other.json"), output_dir=tmp_path / "run2",
+              data_provenance=_provenance(), verbose=False)
+    invalid = {k: {**v, "valid": False} for k, v in labels.flights.items()}
+    (tmp_path / "invalid.json").write_text(json.dumps({"schema": co.LABEL_SCHEMA, "airport": AIRPORT, "flights": invalid}))
+    with pytest.raises(ValueError, match="nothing to regress"):
+        train(series, _closure_config(tmp_path / "invalid.json"), output_dir=tmp_path / "run3",
               data_provenance=_provenance(), verbose=False)

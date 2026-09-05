@@ -7,7 +7,8 @@ states or controls:
 
     d_join (m)            the runway distance at which the path settles on the localizer
     via_d, via_xt (m)     the via pose in runway axes (a base-turn point, an intercept …)
-    via_cos, via_sin      the via heading RELATIVE to the inbound course, as a unit vector
+    via_cos, via_sin      the via heading RELATIVE to the inbound course, as a (near-)unit
+                          vector — exact away from the origin, softened at it
     slowness[K_s + 1]     ground slowness (s/m) at K_s + 1 knots over the path's progress —
                           the duration is their integral over the path, no separate head
     height[K_h]           height (m) at the first K_h of K_h + 1 knots; the last is the
@@ -60,10 +61,6 @@ VIA_MAX_M = 40_000.0                # via_d, via_xt ∈ ±VIA_MAX_M
 HEIGHT_SCALE_M = 1_000.0
 SLOWNESS_MIN = 1.0 / cp.SPEED_MAX_MPS
 SLOWNESS_MAX = 1.0 / cp.SPEED_MIN_MPS
-# The timing group in seconds at this scale (not final_time_scale_s): measured at
-# initialisation on synthetic arrivals with all weights 1.0, geometry ≈ 3.1, height ≈ 0.9
-# and timing at 600 s ≈ 0.15 — a minute puts the three groups within a factor of two.
-CLOSURE_TIMING_SCALE_S = 60.0
 
 CONTEXT_DECISION = "closure_decision"
 CONTEXT_VALID = "closure_valid"
@@ -174,22 +171,27 @@ class ClosureLabels:
 
 
 def load_labels(path: str | Path) -> ClosureLabels:
-    """Refuses another schema (the payload changed with the schema name)."""
+    """Refuses another schema (the payload changed with the schema name); the airport is
+    normalised the way ``FlightSeries.airport`` is."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if payload.get("schema") != LABEL_SCHEMA:
         raise ValueError(f"{path}: expected closure labels schema {LABEL_SCHEMA!r}, got {payload.get('schema')!r}")
-    return ClosureLabels(str(payload["airport"]), payload["flights"])
+    return ClosureLabels(str(payload["airport"] or "").strip().upper(), payload["flights"])
+
+
+def check_airport(series: "FlightSeries", labels: ClosureLabels) -> None:
+    """A labels file of another airport is refused: flight keys are unique within an
+    airport only, so a match across airports would be chance, never identity."""
+    if labels.airport != series.airport:
+        raise ValueError(f"closure labels were fitted for {labels.airport!r}, this flight is at {series.airport!r}")
 
 
 def label_context(series: "FlightSeries", labels: ClosureLabels, config: TSConfig) -> dict[str, np.ndarray]:
     """The per-flight context rows: the decision vector and its validity (0 for a flight
     the labels file does not carry or marks invalid — such a flight is in the batch but
     out of the loss), the label's path length (turns slowness error into seconds), and
-    the runway course the replay reconstructs with. A labels file of another airport is
-    refused: the flight keys would collide by chance, never by identity."""
-    airport = str(series.scenario.source["arr_airport"])
-    if labels.airport != airport:
-        raise ValueError(f"closure labels were fitted for {labels.airport}, this flight is at {airport}")
+    the runway course the replay reconstructs with."""
+    check_airport(series, labels)
     label = labels.flights.get(series.flight_id)
     width = decision_width(config)
     if label is None or not label["valid"]:
@@ -229,8 +231,9 @@ class ClosurePrediction:
 def decode_raw(raw: torch.Tensor, config: TSConfig) -> torch.Tensor:
     """Free network outputs → the physical decision vector, every group bounded to what
     the family can draw: d_join in ``[D_JOIN_MIN_M, D_JOIN_MIN_M + D_JOIN_MAX_M]``
-    (sigmoid), via distances in ``±VIA_MAX_M`` (tanh), the heading as a unit vector
-    (a softened normalisation: its gradient stays bounded at the origin), slowness inside
+    (sigmoid), via distances in ``±VIA_MAX_M`` (tanh), the heading as a near-unit vector
+    (``raw / sqrt(|raw|² + 1e-6)``: exact away from the origin, its gradient bounded at
+    it — ``split_decision`` reads it through ``atan2``, which needs no unit norm), slowness inside
     the profile's speed bounds (sigmoid), heights at the km scale (free)."""
     ks = config.closure_slowness_knots
     d_join = cg.D_JOIN_MIN_M + torch.sigmoid(raw[:, 0:1]) * D_JOIN_MAX_M
@@ -289,11 +292,11 @@ def closure_loss_components(prediction: ClosurePrediction, normalized_anchor_sta
     flights: ``state`` = the geometry (the join distance and the via's mean distance
     error at the 10 km scale, the heading as its unit vector), ``final_time`` = the
     slowness knots turned into seconds with the label's path length, at
-    ``CLOSURE_TIMING_SCALE_S``, ``kinematic`` = the height knots at the km scale,
+    ``closure_timing_scale_s``, ``kinematic`` = the height knots at the km scale,
     ``terminal`` = 0 (nothing to add: the path ends at the threshold by construction).
-    Weights are the flight weights times ``closure_valid``; a batch with no valid flight
-    is a data error (the dataset refuses a labels file that covers none), so its zero
-    objective never reaches a checkpoint."""
+    Weights are the flight weights times ``closure_valid``. A batch with no valid flight
+    contributes zero (the dataset refuses a labels file with no valid flight at all, and
+    reports the covered share, so a low share is visible, never silent)."""
     del normalized_anchor_state, target_states, state_weights, target_final_time_s, normalizer
     del dense_supervision, training_stage, multipliers
     if dynamics is None or CONTEXT_DECISION not in dynamics:
@@ -306,7 +309,7 @@ def closure_loss_components(prediction: ClosurePrediction, normalized_anchor_sta
     via_mean = 0.5 * (delta[:, 1] + delta[:, 2])
     geometry = delta[:, 0] / D_JOIN_SCALE_M + via_mean / VIA_SCALE_M + delta[:, 3] + delta[:, 4]
     seconds = delta[:, 5:5 + ks + 1].mean(dim=1) * dynamics[CONTEXT_PATH_LENGTH].to(pred.dtype)
-    timing = seconds / CLOSURE_TIMING_SCALE_S
+    timing = seconds / config.closure_timing_scale_s
     height = delta[:, 5 + ks + 1:].mean(dim=1) / HEIGHT_SCALE_M
 
     def weighted(term: torch.Tensor) -> torch.Tensor:
@@ -361,6 +364,8 @@ def reconstruct(vector: np.ndarray, anchor_channels: np.ndarray, psi: float, con
         path, construction = cg.dubins_join(anchor, psi, decision.d_join_m, 0.0), cg.KIND_DOWNWIND_DUBINS
     if path is None:
         path, construction = cg.straight_path(anchor), cg.KIND_STRAIGHT
+    if path.length <= 0.0:
+        raise ValueError("the anchor sits on the threshold: no path to draw")
     f = path.arc / path.length
     times = cg.strictly_increasing(cp.times_from_slowness(f, path.length, decision.slowness_knots))
     heights = cp.height_from_knots(f, decision.height_knots)

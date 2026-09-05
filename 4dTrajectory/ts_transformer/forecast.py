@@ -21,7 +21,7 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from closure_output import ClosureLabels, decision_from_label, reconstruct
+from closure_output import ClosureLabels, check_airport, decision_from_label, reconstruct
 from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from control.envelope import physical_controls
@@ -330,6 +330,8 @@ def forecast_closure_from_labels(
     the record's ``closureFromLabels`` marks the arm). A flight without a label has
     nothing to draw."""
     anchor = default_anchor(config) if anchor is None else anchor
+    for item in series:
+        check_airport(item, labels)
     missing = [item.flight_id for item in series if item.flight_id not in labels.flights]
     if missing:
         raise KeyError(f"{len(missing)} flight(s) have no closure label; first: {missing[0]!r}")

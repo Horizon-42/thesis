@@ -2408,6 +2408,10 @@ def fit_model(
         normalizer,
         minimum_anchor_index=minimum_anchor_index,
     )
+    if verbose and train_set.closure_coverage is not None:
+        present, valid, total = train_set.closure_coverage
+        print(f"  closure labels: {present} of {total} training flights in the file, {valid} valid "
+              f"({valid / max(total, 1):.1%} regress; the rest are in the batch, out of the loss)")
     val_sets = _validation_datasets(
         val_series,
         config,

@@ -395,7 +395,7 @@ def cmd_labels(args: argparse.Namespace) -> None:
         results = list(pool.map(_fit_labels, [(item, anchor) for item in series], chunksize=4))
     by_id = {r["flight_id"]: r for r in results}
     out.write_text(json.dumps({
-        "schema": LABEL_SCHEMA, "airport": args.airport, "manifest": str(manifest), "config_source": str(reference_dir),
+        "schema": LABEL_SCHEMA, "airport": args.airport.strip().upper(), "manifest": str(manifest), "config_source": str(reference_dir),
         "anchor_index": anchor, "truth": "post-anchor supervision rows", "objective": "closure_geometry.path_error_m",
         "label_knots": LABEL_KNOTS, "residual_max_m": LABEL_RESIDUAL_MAX_M, "flights": by_id}, indent=1))
     valid = np.array([r["valid"] for r in results])

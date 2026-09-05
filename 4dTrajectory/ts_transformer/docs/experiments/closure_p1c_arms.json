@@ -51,7 +51,7 @@
    "key": "C_oracle",
    "label": "every flight drawn from its own label (the closure family's ceiling)",
    "checkpoint": "4dTrajectory/outputs/{airport}/experiments/closure_p1c_20260905/C_pred/checkpoint.pt",
-   "predict_args": ["--closure-from-labels", "4dTrajectory/outputs/KRDU/closure_labels/closure_labels_20260905.json"]
+   "predict_args": ["--closure-from-labels", "4dTrajectory/outputs/{airport}/closure_labels/closure_labels_20260905.json"]
   }
  ]
 }
