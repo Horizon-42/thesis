@@ -4,6 +4,21 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — Design: scene encoder + join-anchor multimodal control prediction
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_scene_join_anchor_design.zh.md`. Intent: give the
+model the variables that decide the join (traffic context — the lead aircraft on the same
+runway, queue, time since last landing — plus the final approach course, FAF/IF and STAR
+legs as map tokens) and make the join distance an explicit K-way decision with a control
+schedule per anchor (VectorNet/Wayformer-style entity encoder + scene attention, MTR/TNT-style
+anchor queries, MultiPath winner-takes-all training; the differentiable rollout, envelope,
+teacher and predict-time barrier all kept per mode). Deficiencies of the current
+iTransformer-variate-token + flattened single head named with the measurements behind them.
+Phases: 0 oracle upper bound (truth d_join + lead ETA as covariates), 1 data-plane scene index
+/ context with leakage tests, 2 minimal-change context arm on the existing backbone, 3 the
+new encoder/decoder with pre-registered vetoes (random-anchor control, straight-in top-1 must
+not regress), 4 closure/wind/pooled airports. Reading list attached.
+
 ### 2026-09-07 — Control training design review: the below-glidepath endpoint is an objective-design fault
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_control_training_review.zh.md`. The control

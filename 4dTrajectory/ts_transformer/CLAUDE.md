@@ -479,7 +479,12 @@ namespace would restore the undifferentiated listing the package exists to remov
   inference-only):
   `docs/2026-09-07_control_training_review.zh.md` (P0: per-channel position scale, the
   vertical-only procedure term, a threshold-plane crossing loss; P1: a closed-loop
-  DAgger-style teacher from the guidance laws); a "committed to the final" gate for the vectored flights the v1 / hard
+  DAgger-style teacher from the guidance laws). **The km-level error is elsewhere**: vectored
+  flights carry 76 % / 60 % of pooled ADE and their error is the ATC join decision, which the
+  ego-only input cannot see and a single-output head can only average — design for traffic
+  context + join-anchor multimodal output (scene encoder, K join-distance anchors as decoder
+  queries, WTA training, top-1 stays on the existing record contract, Phase 0 = oracle
+  upper bound before any architecture work): `docs/2026-09-07_scene_join_anchor_design.zh.md`; a "committed to the final" gate for the vectored flights the v1 / hard
   barrier hurt (gate opening at d < 8 km or ≥ 16 km; every bin is net positive under v2 soft); a second seed at KSJC (its −66 m FDE gain is the smaller
   effect); PatchTST and the other three airports.
 - **Final-approach constraint campaign DONE 2026-09-04/05 (`final_constraint_20260904`, KRDU +
