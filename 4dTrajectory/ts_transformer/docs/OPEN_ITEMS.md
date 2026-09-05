@@ -34,9 +34,12 @@ Newest campaigns first, long-standing scope limits last.
   vectored 2197 vs 2858, straight-in 310 vs 469); with the truth (d_join, T) as inputs it
   reaches vectored ADE 1235 / chamfer 492 where the control head with the same inputs sat
   at 2011 / 847 — the output side WAS the bottleneck; the family's own ceiling is 455 m.
-  Open: flyability — closure paths (the labels' too) are only 22 % fully flyable under
-  the clean polar (curvature jumps at the CSC junctions, acceleration jumps at the knots):
-  P1.d, a clothoid transition or a post-hoc rollout. Not started: P2 data plane (its
+  Open: flyability, read as a delta — closure paths are 22 % fully flyable under the
+  clean polar against the control baseline's 0.1 % (its violations are 59k stall
+  samples) and the observed 98 %; per sample closure sits at 99.8 % = the observed, its
+  few violations per flight being bank jumps at the CSC junctions and thrust jumps at
+  the knots: P1.d, a clothoid / bank-rate transition plus profile smoothing, or a
+  post-hoc rollout. Not started: P2 data plane (its
   acceptance is now the 960 m between C_pred and C_truth_intent), any scene encoder.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report

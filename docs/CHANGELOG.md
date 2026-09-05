@@ -20,9 +20,11 @@ turn radius of the anchor is dropped for the plain CSC (`csc-via-at-anchor`) —
 C_pred arm's straight-in stratum was 6260 m because a label via AT the anchor, predicted a
 few tens of metres off, made the Dubins path a full circle (827 of 837 over-long paths);
 the pre-rule readout is kept under `attempt1_readouts/`. The runner now substitutes
-`{airport}` in a predict-only arm's `predict_args`. Open (P1.d): closure paths are only
-22 % fully flyable under the clean polar (the labels' paths too — curvature jumps at CSC
-junctions, acceleration jumps at the knots). P2's acceptance becomes the 960 m of vectored
+`{airport}` in a predict-only arm's `predict_args`. Flyability, read as a delta: closure
+paths are 22 % fully flyable under the clean polar against the control baseline's 0.1 %
+(59k stall samples) and the observed 98 %; per sample 99.8 % = the observed, the few
+violations per flight being bank jumps at the CSC junctions and thrust jumps at the knots
+(P1.d: a clothoid / bank-rate transition plus profile smoothing, or a post-hoc rollout). P2's acceptance becomes the 960 m of vectored
 ADE between C_pred and C_truth_intent.
 
 ### 2026-09-05 — Closure decoder, P1.c-1/2: the `closure` prediction output and its labels

@@ -33,12 +33,12 @@
 1. **输出侧确实是瓶颈。** 同样的真值 (d_join, T)，控制头 + rollout 给 2011 m（O_join_duration），闭式解码器给 1235 m，chamfer 847 → 492、Fréchet 2615 → 2033——意图变成几何了，而 Phase 0 的结论"几何不动只有时序改善"在这里反过来：C_truth_intent 的 |Δdur| 10.7 s 不如 O_join_duration 的 5.4 s，赢在几何。
 2. **只看本机的 closure 就已好于基线**（全体 996 vs 1333，雷达引导 2197 vs 2858），FDE 中位 11 m（路径按构造在阈值结束，时长也大致对）。剩下的雷达引导 ADE 2.2 km 是意图（经由点误差中位 1.8 km、汇入点 1.7 km、时长 34 s）——这是场景编码（P2/P3）要填的：C_pred → C_truth_intent 的 960 m。
 3. **家族上界 455 m** 说明 F3 + K=4 剖面对雷达引导航班够用；C_truth_intent → C_oracle 的 780 m 是给定意图后经由点 / 速度剖面的回归误差，可以在 P1 内继续压（更大的头、更多轮、意图输入的表示）。
-4. **可飞性：closure 预测 22 % 全可飞（观测航迹 98 %），C_oracle 也是 22 %**——不是模型，是家族：CSC 路径在弧–直交界处曲率跳变（瞬时坡度变化），慢度节点处加速度跳变，而 `flyability` 的干净极线按节点判。这与设计文档"动力学一致性作读数报告、不作约束"一致，但要进 P1.d：转弯过渡（回旋线）或事后 rollout。
+4. **可飞性要读差值**（`flyability_report.json`，干净极线）：逐样本可飞率 closure 99.8 %（C_oracle 99.3 %）= 观测 99.8 % > control 基线 93.3 %；整条全可飞率 closure 22 %、观测 98 %、**control 基线 0.1 %**（O_join_duration 3 %）。control 臂的违反几乎全是 stall（5.9 万样本——rollout 末段飞得太慢）；closure 的违反是每条几个样本：bank（C_pred 796 / C_oracle 2991：CSC 弧–直交界的曲率跳变）、thrust_over_max（约 1000：慢度节点处的加速度跳变）、load_factor_high（280–380）、stall（190–950）。所以 closure 不是可飞性的退步，而是家族有两处可修的跳变——P1.d：转弯过渡（回旋线 / 坡度率限制）与剖面平滑，或事后 rollout 一致化。
 5. 直线进近层的 csc-via-at-anchor 规则是解码器规则而非家族改动：标签在锚点上的经由点本来就不是决策；C_oracle 与 C_truth_intent 的构造计数一致（517 via-dubins / 887 csc）。
 
 ## 五、下一步（写回设计文档 §五）
 
-- P1 结束：closure 解码器成为输出侧的主线（control 头作对照）。P1.d：可飞性——量哪个判据失败（坡度跳变 / 加速度），做回旋线过渡或事后 rollout 一致化；后备分支的份额（标签无效 3.2 %）。
+- P1 结束：closure 解码器成为输出侧的主线（control 头作对照）。P1.d：可飞性——判据已量到（bank 与 thrust_over_max 的逐样本跳变），做回旋线过渡 / 坡度率限制与剖面平滑，或事后 rollout 一致化，目标整条全可飞率从 22 % 接近观测的 98 %；后备分支的份额（标签无效 3.2 %）。
 - P2 数据平面按计划；验收改用 closure 的口径：C_pred → C_truth_intent 的 960 m 雷达引导 ADE 是场景信息的价值上限。
 
 ## 六、复现
