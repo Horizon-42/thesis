@@ -1,5 +1,5 @@
 {
- "_comment": "P1.c of docs/2026-09-07_scene_join_anchor_design.zh.md: the closure decoder (prediction_output=closure) on the simple-v3 cohort (openap-direct, seed / split seed 1337 — paired flight-by-flight with control_procedure_20260905/A_control_v3 and scene_phase0_20260905/O_join_duration). The base copies simple-v3's backbone, optimiser and cohort settings; the closure output selects its checkpoint on its own regression objective and draws its trajectories in closed form from 14 regressed numbers (d_join, via pose in runway axes, K=4 slowness knots, K=4 height knots), labelled per flight by docs/p1_closure_oracle.py labels (closure_labels_20260905.json, 9720 flights). Arms: C_pred = ego history only; C_truth_intent = the TRUTH (d_join, remaining time) as input-only channels (the Phase 0 instrument — reads the future, development only); C_oracle = every validation flight drawn from its own label (no network: the family's ceiling, predicted from C_pred's checkpoint so the split is the same). Gate (design doc §五 P1.c, read with compare_constraint_arms.py on both metric families): C_truth_intent vectored ADE < 1.5 km and chamfer p50 < 500 m; C_pred not worse than A_control_v3 and straight-in not degraded.",
+ "_comment": "P1.c of docs/2026-09-07_scene_join_anchor_design.zh.md: the closure decoder (prediction_output=closure) on the simple-v3 cohort (openap-direct, seed / split seed 1337 — paired flight-by-flight with control_procedure_20260905/A_control_v3 and scene_phase0_20260905/O_join_duration). The base copies simple-v3's backbone, optimiser and cohort settings; the closure output selects its checkpoint on its own regression objective and draws its trajectories in closed form from 14 regressed numbers (d_join, via pose in runway axes, K=4 slowness knots, K=4 height knots), labelled per flight by docs/p1_closure_oracle.py labels (closure_labels_20260905.json, 9720 flights). Arms: C_pred = ego history only; C_truth_intent = the TRUTH (d_join, remaining time) as input-only channels (the Phase 0 instrument — reads the future, development only); C_oracle (closure_p1c_oracle_arms.json, run AFTER this file: the runner checks a predict-only arm's checkpoint at start) = every validation flight drawn from its own label (no network: the family's ceiling, predicted from C_pred's checkpoint so the split is the same). Gate (design doc §五 P1.c, read with compare_constraint_arms.py on both metric families): C_truth_intent vectored ADE < 1.5 km and chamfer p50 < 500 m; C_pred not worse than A_control_v3 and straight-in not degraded.",
  "base": {
   "model": "itransformer",
   "prediction_output": "closure",
@@ -46,12 +46,6 @@
    "overrides": {
     "intent_conditioning": "truth-join-duration"
    }
-  },
-  {
-   "key": "C_oracle",
-   "label": "every flight drawn from its own label (the closure family's ceiling)",
-   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/closure_p1c_20260905/C_pred/checkpoint.pt",
-   "predict_args": ["--closure-from-labels", "4dTrajectory/outputs/{airport}/closure_labels/closure_labels_20260905.json"]
   }
  ]
 }

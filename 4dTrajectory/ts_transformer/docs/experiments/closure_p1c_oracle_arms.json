@@ -1,0 +1,14 @@
+{
+ "_comment": "P1.c oracle arm (run after closure_p1c_arms.json has produced C_pred/checkpoint.pt): every validation flight drawn from its own closure label — the family's ceiling, no network; the checkpoint only fixes the split and the config.",
+ "arms": [
+  {
+   "key": "C_oracle",
+   "label": "every flight drawn from its own label (the closure family's ceiling)",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/closure_p1c_20260905/C_pred/checkpoint.pt",
+   "predict_args": [
+    "--closure-from-labels",
+    "4dTrajectory/outputs/{airport}/closure_labels/closure_labels_20260905.json"
+   ]
+  }
+ ]
+}
