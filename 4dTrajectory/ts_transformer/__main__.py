@@ -1250,13 +1250,13 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--closure-from-labels requires a closure checkpoint")
         if args.project_final is not None or args.no_truncate:
             parser.error("--closure-from-labels draws the label as it is; --project-final / --no-truncate do not apply")
+        from closure_output import load_labels
+        closure_labels = load_labels(args.closure_from_labels)
+        print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
     if args.closure_track:
         if config.prediction_output != PREDICTION_CLOSURE:
             parser.error("--closure-track requires a closure checkpoint")
         print("  flying every drawn reference with the point-mass rollout under the closure tracker")
-        from closure_output import load_labels
-        closure_labels = load_labels(args.closure_from_labels)
-        print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, flight_metrics = [], []
