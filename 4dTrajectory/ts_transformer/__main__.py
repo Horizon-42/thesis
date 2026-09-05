@@ -924,6 +924,12 @@ def main(argv: list[str] | None = None) -> int:
              "source.closureFromLabels",
     )
     p_predict.add_argument(
+        "--closure-track", action="store_true",
+        help="closure output: fly every drawn reference with the point-mass rollout under the "
+             "closure tracker (control.constraints.closure_tracking); records then carry the "
+             "controls flown and source.closureTracked",
+    )
+    p_predict.add_argument(
         "--project-final", choices=CORRIDOR_GATES, default=None, metavar="GATE",
         help="after truncation, clamp each state forecast's established tail (under this "
              "corridor gate) into the LPV corridor and glidepath window — the post-hoc "
@@ -1244,6 +1250,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--closure-from-labels requires a closure checkpoint")
         if args.project_final is not None or args.no_truncate:
             parser.error("--closure-from-labels draws the label as it is; --project-final / --no-truncate do not apply")
+    if args.closure_track:
+        if config.prediction_output != PREDICTION_CLOSURE:
+            parser.error("--closure-track requires a closure checkpoint")
+        print("  flying every drawn reference with the point-mass rollout under the closure tracker")
         from closure_output import load_labels
         closure_labels = load_labels(args.closure_from_labels)
         print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
@@ -1255,7 +1265,9 @@ def main(argv: list[str] | None = None) -> int:
     for start in range(0, len(series), rollout_batch_size):
         batch_series = series[start : start + rollout_batch_size]
         if closure_labels is not None:
-            forecasts = forecast_closure_from_labels(batch_series, config, closure_labels)
+            forecasts = forecast_closure_from_labels(
+                batch_series, config, closure_labels, track=args.closure_track, device=device,
+            )
         else:
             forecasts = forecast_approaches(
                 model,
@@ -1265,6 +1277,7 @@ def main(argv: list[str] | None = None) -> int:
                 device=device,
                 truncate=not args.no_truncate,
                 project_final=args.project_final,
+                closure_track=args.closure_track,
             )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)

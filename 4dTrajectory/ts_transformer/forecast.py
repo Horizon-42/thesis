@@ -12,6 +12,8 @@ import torch.nn as nn
 from batch_contract import model_forward
 from channels import IDX, horizontal_distance_m
 from config import (
+    CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CORRIDOR_GATES,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
@@ -22,6 +24,7 @@ from config import (
     TSConfig,
 )
 from closure_output import ClosureLabels, check_airport, decision_from_label, reconstruct
+from control.constraints.closure_tracking import HOOK_NAME as CLOSURE_TRACKER, ClosureTracker, reference_path
 from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from control.envelope import physical_controls
@@ -79,6 +82,10 @@ class Forecast:
     # and whether it was drawn from the flight's LABEL rather than a model output.
     closure_construction: str | None = None
     closure_from_labels: bool = False
+    # Closure output only: the drawn reference was flown by the point-mass rollout under
+    # the closure tracker (``control.constraints.closure_tracking``), so the record carries
+    # the dynamics' own states and the controls flown.
+    closure_tracked: bool = False
 
     @property
     def n_steps(self) -> int:
@@ -305,6 +312,87 @@ def closure_forecast(item: FlightSeries, vector: np.ndarray, config: TSConfig, a
     )
 
 
+def tracking_config(config: TSConfig) -> TSConfig:
+    """The rollout configuration the tracker flies under: the closure config re-read as a
+    control one on the first-order-lag dynamics (the only backends that run command
+    hooks — their state carries the actuators a hook reads; the point-mass model has
+    none), the closure fields cleared. Nothing else moves: segments, integrator step and
+    the nominal law's gains are the closure config's own."""
+    return replace(
+        config,
+        prediction_output=PREDICTION_CONTROL,
+        closure_labels_path="",
+        control_dynamics_model=CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+        control_dynamics_backend=CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    )
+
+
+def track_closure_forecasts(
+    series: Sequence[FlightSeries],
+    decisions: np.ndarray,
+    config: TSConfig,
+    anchor: int,
+    device: torch.device,
+    *,
+    from_labels: bool = False,
+) -> list[Forecast]:
+    """Every flight's decision vector drawn, then FLOWN: the point-mass rollout under the
+    closure tracker for the reference's own duration in ``config.n_segments`` held
+    segments. The record carries the rollout's states and the controls flown (newtons),
+    like a control forecast, plus the closure provenance."""
+    drawn = [reconstruct(vector, item.values[anchor], float(item.scenario.target.psi), config)
+             for item, vector in zip(series, decisions, strict=True)]
+    references = []
+    for item, rec in zip(series, drawn, strict=True):
+        a = item.values[anchor]
+        references.append(reference_path(
+            rec.path.horizontal,
+            np.concatenate([[a[2]], rec.values[:, 2]]),
+            np.concatenate([[np.hypot(a[3], a[4])], np.hypot(rec.values[:, 3], rec.values[:, 4])]),
+            np.concatenate([[0.0], rec.offsets_s]),
+        ))
+    dynamics = _dynamics_batch(series, anchor, device)
+    flight_config = tracking_config(config)
+    durations = np.array([[rec.final_time_s / config.n_segments] * config.n_segments for rec in drawn], dtype=np.float64)
+    offsets, padded_offsets, query_valid = _padded_dense_queries(durations, config.control_rollout_integrator_dt_s)
+    tracker = ClosureTracker(config, dynamics, references)
+    controls = torch.zeros((len(series), config.n_segments, 3), dtype=torch.float32, device=device)
+    with torch.no_grad():
+        rollout = control_rollout.rollout_control_dense(
+            controls, torch.from_numpy(durations).to(device), dynamics,
+            torch.from_numpy(padded_offsets), torch.from_numpy(query_valid), flight_config, command_hook=tracker,
+        )
+    query_channels = rollout.query_channels.detach().cpu().numpy().astype(np.float64)
+    query_geodetic = rollout.query_geodetic_states.detach().cpu().numpy().astype(np.float64)
+    flown = physical_controls(rollout.controls.to(controls.dtype), dynamics["max_thrust_n"]).detach().cpu().numpy()
+    forecasts = []
+    for row, (item, rec, row_offsets) in enumerate(zip(series, drawn, offsets, strict=True)):
+        count = len(row_offsets)
+        final_time_s = float(row_offsets[-1])
+        forecasts.append(Forecast(
+            times=float(item.times[anchor]) + row_offsets,
+            values=query_channels[row, :count],
+            normalized_progress=row_offsets / final_time_s,
+            anchor=anchor,
+            final_time_s=final_time_s,
+            predicted_final_time_s=rec.final_time_s,
+            horizon_mode=config.horizon_mode,
+            passes=1,
+            truncated_at_threshold=False,
+            horizon_capped=False,
+            controls=flown[row],
+            sample_durations_s=np.diff(np.concatenate(([0.0], row_offsets))),
+            segment_durations_s=durations[row],
+            geodetic_values=query_geodetic[row, :count],
+            prediction_output=config.prediction_output,
+            command_hook=CLOSURE_TRACKER,
+            closure_construction=rec.construction,
+            closure_from_labels=from_labels,
+            closure_tracked=True,
+        ))
+    return forecasts
+
+
 def _forecast_closure_batch(
     model: nn.Module,
     series: Sequence[FlightSeries],
@@ -312,17 +400,22 @@ def _forecast_closure_batch(
     normalizer: Normalizer,
     anchor: int,
     device: torch.device,
+    *,
+    track: bool = False,
 ) -> list[Forecast]:
     histories = _history_batch(series, config, normalizer, anchor)
     model.eval()
     with torch.no_grad():
         prediction = model(torch.from_numpy(histories).to(device))
     decisions = prediction.decision.detach().cpu().numpy().astype(np.float64)
+    if track:
+        return track_closure_forecasts(series, decisions, config, anchor, device)
     return [closure_forecast(item, vector, config, anchor) for item, vector in zip(series, decisions, strict=True)]
 
 
 def forecast_closure_from_labels(
-    series: Sequence[FlightSeries], config: TSConfig, labels: ClosureLabels, *, anchor: int | None = None
+    series: Sequence[FlightSeries], config: TSConfig, labels: ClosureLabels, *, anchor: int | None = None,
+    track: bool = False, device: torch.device | None = None,
 ) -> list[Forecast]:
     """The closure family's own ceiling: every flight drawn from its LABEL instead of a
     model output (the oracle arm) — every label, the non-canonical and above-cap ones
@@ -335,8 +428,10 @@ def forecast_closure_from_labels(
     missing = [item.flight_id for item in series if item.flight_id not in labels.flights]
     if missing:
         raise KeyError(f"{len(missing)} flight(s) have no closure label; first: {missing[0]!r}")
-    return [closure_forecast(item, decision_from_label(labels.flights[item.flight_id], config), config, anchor,
-                             from_labels=True) for item in series]
+    decisions = [decision_from_label(labels.flights[item.flight_id], config) for item in series]
+    if track:
+        return track_closure_forecasts(series, np.stack(decisions), config, anchor, device or torch.device("cpu"), from_labels=True)
+    return [closure_forecast(item, vector, config, anchor, from_labels=True) for item, vector in zip(series, decisions, strict=True)]
 
 
 def _dense_control_query_offsets(
@@ -598,6 +693,7 @@ def forecast_approaches(
     device: torch.device | None = None,
     truncate: bool = True,
     project_final: str | None = None,
+    closure_track: bool = False,
 ) -> list[Forecast]:
     """Predict one inference batch through the same dense path used by fit evaluation.
 
@@ -618,7 +714,9 @@ def forecast_approaches(
     if config.prediction_output == PREDICTION_CLOSURE:
         if project_final is not None:
             raise ValueError("the final-approach projection applies to state forecasts only")
-        return _forecast_closure_batch(model, series, config, normalizer, anchor, device)
+        return _forecast_closure_batch(model, series, config, normalizer, anchor, device, track=closure_track)
+    if closure_track:
+        raise ValueError("--closure-track applies to the closure output only")
     return [
         _forecast_state(
             model, item, config, normalizer, anchor, device, truncate, project_final

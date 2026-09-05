@@ -1,0 +1,23 @@
+{
+ "_comment": "P1.d (b) of docs/2026-09-07_scene_join_anchor_design.zh.md: the closure references of closure_p1c_20260905 FLOWN by the point-mass rollout under the closure tracker (control/constraints/closure_tracking.py; first-order-lag dynamics, the only backends that run command hooks), at predict time, no training. Predict-only arms from the P1.c checkpoints on the same val split; run AFTER closure_p1c_20260905 has C_pred and C_truth_intent. Two numbers to read (compare_constraint_arms.py against the untracked arms + flyability_report.json): the ADE the tracking costs (tracked minus untracked, per stratum) and the fully-flyable rate it recovers (untracked 22 %, control baseline 0.1 %, observed 98 %).",
+ "arms": [
+  {
+   "key": "C_pred_tracked",
+   "label": "C_pred's drawn references flown by the closure tracker",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/closure_p1c_20260905/C_pred/checkpoint.pt",
+   "predict_args": ["--closure-track"]
+  },
+  {
+   "key": "C_truth_intent_tracked",
+   "label": "C_truth_intent's drawn references flown by the closure tracker",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/closure_p1c_20260905/C_truth_intent/checkpoint.pt",
+   "predict_args": ["--closure-track"]
+  },
+  {
+   "key": "C_oracle_tracked",
+   "label": "the labels' references flown by the closure tracker (the tracked family ceiling)",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/closure_p1c_20260905/C_pred/checkpoint.pt",
+   "predict_args": ["--closure-from-labels", "4dTrajectory/outputs/{airport}/closure_labels/closure_labels_20260905.json", "--closure-track"]
+  }
+ ]
+}

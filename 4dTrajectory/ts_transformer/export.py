@@ -155,7 +155,8 @@ def build_prediction_record(
         # Closure output: the construction that drew the path (via-Dubins or a fallback)
         # and whether it was drawn from the flight's label (the oracle arm).
         **({"closureConstruction": forecast.closure_construction,
-            "closureFromLabels": forecast.closure_from_labels}
+            "closureFromLabels": forecast.closure_from_labels,
+            "closureTracked": forecast.closure_tracked}
            if forecast.prediction_output == PREDICTION_CLOSURE else {}),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
