@@ -12,15 +12,9 @@ from pathlib import Path
 from typing import Sequence
 
 from config import TSConfig
-from dataset import (
-    BuildReport,
-    FlightSeries,
-    arrival_data_provenance,
-    build_series,
-    flight_keys_by_split,
-    load_flight_dicts,
-    split_name_for_dataset_id,
-)
+from data_provenance import arrival_data_provenance
+from dataset import BuildReport, FlightSeries, build_series, load_flight_dicts
+from splits import flight_keys_by_split, split_name_for_dataset_id
 
 
 @dataclass(frozen=True)

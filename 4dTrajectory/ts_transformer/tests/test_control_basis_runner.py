@@ -120,8 +120,8 @@ from control.basis_fit import (                                    # noqa: E402
     BasisSchedule,
     load_fitted_teacher,
 )
-from dataset import (                                              # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA,
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,

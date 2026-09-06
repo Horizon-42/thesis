@@ -55,13 +55,11 @@ from approach_difficulty import STRAIGHT_TORTUOSITY, STRATUM_ALL, STRATUM_STRAIG
 from approach_difficulty import approach_difficulty  # noqa: E402
 from channels import IDX, channels_from_states, states_from_channels  # noqa: E402
 from coordinate_frames import COORDINATE_FRAME_AIRPORT_ENU  # noqa: E402
-from dataset import (  # noqa: E402
-    FlightSeries,
+from data_provenance import (  # noqa: E402
     arrival_data_provenance,
-    build_series,
-    load_flight_dicts,
     require_matching_data_provenance,
 )
+from dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
 from export import observed_series_metrics  # noqa: E402
 from forecast import Forecast, default_anchor, forecast_approaches  # noqa: E402
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402

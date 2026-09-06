@@ -103,15 +103,12 @@ from cross_validation import (  # noqa: E402
     cross_validate,
     validate_cv_parameters,
 )
-from dataset import (  # noqa: E402
+from data_provenance import (  # noqa: E402
     arrival_data_provenance,
-    build_series,
-    data_selection_audit,
-    dataset_flight_key,
-    flight_keys_by_split,
-    load_flight_dicts,
     require_matching_data_provenance,
 )
+from dataset import build_series, dataset_flight_key, load_flight_dicts  # noqa: E402
+from splits import data_selection_audit, flight_keys_by_split  # noqa: E402
 from development_cohorts import (  # noqa: E402
     development_cohort_audit,
     load_development_cohort,

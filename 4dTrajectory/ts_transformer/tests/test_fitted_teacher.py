@@ -36,13 +36,8 @@ from config import (
     control_recipe_overrides,
 )
 from control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM, load_fitted_teacher
-from dataset import (
-    ARRIVAL_DATA_PROVENANCE_SCHEMA,
-    FixedAnchorTrajectoryWindows,
-    Normalizer,
-    build_series,
-    truth_duration_s,
-)
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
 from forecast import forecast_approaches, posterior_latent_forecasts
 from models import build_model
 from run_naming import run_display_name

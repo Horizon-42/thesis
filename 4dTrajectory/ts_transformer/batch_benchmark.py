@@ -48,8 +48,8 @@ from dataset import (  # noqa: E402
     build_series,
     dataset_flight_key,
     iter_batches,
-    split_name_for_dataset_id,
 )
+from splits import split_name_for_dataset_id  # noqa: E402
 from batch_contract import anchor_state  # noqa: E402
 from models import build_model, parameter_count, resolve_device  # noqa: E402
 from objective import prediction_loss  # noqa: E402

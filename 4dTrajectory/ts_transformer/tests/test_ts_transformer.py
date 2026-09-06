@@ -49,6 +49,7 @@ import cross_validation as cv  # noqa: E402
 import control.dynamics.rollout as control_rollout_module  # noqa: E402
 import batch_contract  # noqa: E402
 import dataset as dataset_module  # noqa: E402
+import splits  # noqa: E402
 import batch_benchmark as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
 import experiment_index  # noqa: E402
@@ -104,11 +105,23 @@ from control.training.diagnostics import (  # noqa: E402
     clip_gradients_by_global_norm,
     gradient_norms,
 )
+from data_provenance import (  # noqa: E402
+    ARRIVAL_DATA_PROVENANCE_SCHEMA,
+    arrival_data_provenance,
+    require_matching_data_provenance,
+)
 from dataset import (  # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
-    Normalizer, RandomAnchorTrajectoryWindows, arrival_data_provenance, build_series,
-    cross_validation_folds, require_matching_data_provenance, split_by_flight,
-    split_name_for_dataset_id, window_anchors,
+    FixedAnchorTrajectoryWindows,
+    FlightEpochSampler,
+    Normalizer,
+    RandomAnchorTrajectoryWindows,
+    build_series,
+    window_anchors,
+)
+from splits import (  # noqa: E402
+    cross_validation_folds,
+    split_by_flight,
+    split_name_for_dataset_id,
 )
 from development_cohorts import DEVELOPMENT_COHORT_SCHEMA, DevelopmentCohort  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
@@ -1767,7 +1780,7 @@ def test_manifest_split_keys_are_resolved_without_loading_trajectory_values():
         }],
     }
 
-    resolved = dataset_module.flight_keys_by_split(provenance, config)
+    resolved = splits.flight_keys_by_split(provenance, config)
 
     assert set(resolved) == {"train", "val", "test"}
     assert sum(map(len, resolved.values())) == 20

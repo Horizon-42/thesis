@@ -23,7 +23,8 @@ import closure_geometry as cg  # noqa: E402
 import closure_output as co  # noqa: E402
 import closure_profile as cp  # noqa: E402
 from config import CHECKPOINT_SELECTION_OBJECTIVE, PREDICTION_CLOSURE, TSConfig  # noqa: E402
-from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, Normalizer, build_series  # noqa: E402
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from dataset import Normalizer, build_series  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records  # noqa: E402
 from evaluation.thresholds import AssessmentContext  # noqa: E402

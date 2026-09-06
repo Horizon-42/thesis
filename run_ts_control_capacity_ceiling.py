@@ -36,13 +36,15 @@ import run_ts_pipeline as pipeline  # noqa: E402
 import run_ts_predictability_report as common_report  # noqa: E402
 from config import PREDICTION_CONTROL  # noqa: E402
 from control.dynamics.rollout import rollout_control_endpoints  # noqa: E402
+from data_provenance import (  # noqa: E402
+    arrival_data_provenance,
+    require_matching_data_provenance,
+)
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightSeries,
-    arrival_data_provenance,
     build_series,
     load_flight_dicts,
-    require_matching_data_provenance,
 )
 from models import resolve_device  # noqa: E402
 from prediction_outputs import ControlPrediction  # noqa: E402

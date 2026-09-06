@@ -23,9 +23,14 @@ from batch_contract import unpack_batch  # noqa: E402
 from config import (  # noqa: E402
     CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
 from dataset import (  # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series,
-    final_approach_arrays, probe_dynamics, probe_final_approach,
+    FixedAnchorTrajectoryWindows,
+    Normalizer,
+    build_series,
+    final_approach_arrays,
+    probe_dynamics,
+    probe_final_approach,
 )
 from export import build_prediction_record  # noqa: E402
 from forecast import Forecast, forecast_approach, project_onto_final  # noqa: E402

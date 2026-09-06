@@ -97,14 +97,16 @@ from control.basis_fit import (  # noqa: E402
     inverse_dynamics_seed,
     width_scaled_learning_rate,
 )
+from data_provenance import (  # noqa: E402
+    arrival_data_provenance,
+    provenance_manifest_digests,
+    require_matching_data_provenance,
+)
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
-    arrival_data_provenance,
     load_flight_dicts,
-    provenance_manifest_digests,
-    require_matching_data_provenance,
     truth_duration_s,
 )
 from flight_scenarios.identity import flight_key, summary_row_key  # noqa: E402

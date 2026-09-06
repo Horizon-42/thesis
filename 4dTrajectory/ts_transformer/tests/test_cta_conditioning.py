@@ -28,7 +28,8 @@ from config import (
 )
 from control.conditioning import DYNAMICS_CONDITION_NAMES
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
 from export import build_prediction_record, observed_series_metrics, write_batch
 import batching
 from forecast import forecast_approaches, latent_mode_forecasts, shuffled_latent_forecasts

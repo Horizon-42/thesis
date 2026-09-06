@@ -48,8 +48,8 @@ from control.dynamics import rollout as control_rollout
 from control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
 from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
 from coordinate_frames import ENUFrame
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from dataset import (
-    ARRIVAL_DATA_PROVENANCE_SCHEMA,
     HEADING_RATE_SMOOTHING_WINDOW_S,
     Normalizer,
     build_series,

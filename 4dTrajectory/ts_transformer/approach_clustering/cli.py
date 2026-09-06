@@ -7,13 +7,9 @@ import json
 from pathlib import Path
 
 from config import TSConfig
-from dataset import (
-    arrival_data_provenance,
-    build_series,
-    flight_keys_by_split,
-    load_flight_dicts,
-    split_by_flight,
-)
+from data_provenance import arrival_data_provenance
+from dataset import build_series, load_flight_dicts
+from splits import flight_keys_by_split, split_by_flight
 
 from .artifacts import write_clustering_artifacts
 from .evaluation import compare_checkpoints

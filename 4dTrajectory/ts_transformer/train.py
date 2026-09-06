@@ -41,18 +41,20 @@ from config import (
 )
 from control.basis_fit import FittedTeacherTable, load_fitted_teacher
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
-from dataset import (
+from data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
+    provenance_eligibility_digests,
+    provenance_manifest_digests,
+)
+from dataset import (
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
     RandomAnchorTrajectoryWindows,
     iter_batches,
-    provenance_eligibility_digests,
-    provenance_manifest_digests,
-    split_by_flight,
     window_anchors,
 )
+from splits import split_by_flight
 from evaluation_protocol import (
     TEST_RELEASE_NAME,
     TEST_RELEASE_PROTOCOL_FIELD,

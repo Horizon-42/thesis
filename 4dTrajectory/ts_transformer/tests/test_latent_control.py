@@ -52,7 +52,8 @@ ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
 from config import CONTROL_DURATION_UNIFORM
-from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
 from export import build_prediction_record, observed_series_metrics, write_batch
 from forecast import (
     forecast_approach,
