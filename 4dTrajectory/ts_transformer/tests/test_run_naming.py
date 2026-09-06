@@ -192,12 +192,12 @@ def test_the_recipe_definitions_are_literals_and_match_the_defaults_today():
     literals equal the defaults — this pins that equality so a divergence is a
     deliberate, visible act."""
     import inspect
-    from config import TSConfig, control_recipe_overrides, CONTROL_RECIPE_SIMPLE_V1
-    source = inspect.getsource(__import__("config").control_simple_v1_overrides)
-    for name in ("DEFAULT_DT_S", "DEFAULT_SEQ_LEN", "DEFAULT_AIRCRAFT_TYPE",
-                 "DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S", "DEFAULT_VALIDATION_COMMON_GRID_POINTS",
-                 "DEFAULT_POSITION_LOSS_SCALE_M", "DEFAULT_FINAL_TIME_SCALE_S", "CHANNELS"):
-        assert name not in source, f"{name} is a mutable default inside a frozen recipe"
+    import re
+    from config import TSConfig, control_recipe_overrides, control_simple_v1_overrides, CONTROL_RECIPE_SIMPLE_V1
+    for function in (control_simple_v1_overrides, control_recipe_overrides):
+        source = inspect.getsource(function)
+        leaked = re.findall(r"\bDEFAULT_[A-Z0-9_]+\b", source) + re.findall(r"\bCHANNELS\b", source)
+        assert not leaked, f"{function.__name__} spells a mutable default: {leaked}"
     defaults = TSConfig()
     recipe = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
     for field in ("dt_s", "seq_len", "channels", "aircraft_type", "random_train_anchor_min_future_s",

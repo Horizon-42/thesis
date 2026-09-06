@@ -71,19 +71,15 @@ def main(argv: list[str]) -> int:
     print(f"{len(shared)} flights predicted by every arm\n")
 
     reference = arms[names[0]]
-    tort = np.array([reference[k]["route_tortuosity"] for k in sorted(shared)])
-    established = np.array(
-        [bool(reference[k].get("established_at_anchor")) for k in sorted(shared)]
-    )
+    keys = sorted(shared)
+    established = np.array([bool(reference[k].get("established_at_anchor")) for k in keys])
     # One strata definition (approach_difficulty): this file's own copy lacked the
     # `& ~established` on the vectored mask and restated the labels.
-    keys = sorted(shared)
     strata = {
         **{name: mask for name, mask in strata_masks(reference, keys).items()
            if name in (STRATUM_STRAIGHT_IN, STRATUM_VECTORED, STRATUM_ESTABLISHED)},
         "not established": ~established,
     }
-    keys = sorted(shared)
     width = max(len(n) for n in names) + 2
     for label, mask in strata.items():
         if mask.sum() < 20:

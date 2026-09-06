@@ -316,7 +316,7 @@ def cmd_template(args: argparse.Namespace) -> None:
     reference_dir, reference = next(iter(arms.values()))
     # The flights' own config (the arm's summary carries it whole), not a recipe re-derived
     # here: the population and the anchor must be the campaign's.
-    config = TSConfig(**json.loads((reference_dir / "summary.json").read_text())["config"])
+    config = TSConfig.from_dict(json.loads((reference_dir / "summary.json").read_text())["config"])
     if config.coordinate_frame != COORDINATE_FRAME_ENU:
         raise ValueError("the template assumes the threshold-anchored enu chart")
     keys = sorted(reference)

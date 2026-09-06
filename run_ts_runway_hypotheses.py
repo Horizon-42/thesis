@@ -69,7 +69,7 @@ from lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
 from models import resolve_device  # noqa: E402
 from train import load_checkpoint  # noqa: E402
 
-SCHEMA = "ts-runway-hypotheses-v2-mirror-control"
+SCHEMA = "ts-runway-hypotheses-v3-stratum-labels"   # v2 keyed the strata "straight-in"/"vectored"
 # A pseudo-candidate per flight: the assigned threshold mirrored to the far side of its
 # parallel sibling's offset (same separation, same course). An oracle that gains as much
 # from this fake alternative as from the real sibling is picking the luckiest of K noisy

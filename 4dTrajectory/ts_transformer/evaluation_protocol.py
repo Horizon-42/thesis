@@ -12,13 +12,11 @@ import fcntl
 import hashlib
 import json
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
-
-from io_utils import file_sha256, utc_now
 from typing import Any, Iterator, Sequence
 
 from dataset import require_matching_data_provenance
+from io_utils import file_sha256, utc_now
 
 TEST_RELEASE_NAME = "test_release.json"
 TEST_RELEASE_SCHEMA = "ts-test-release-v1-checkpoint-bound-one-shot"

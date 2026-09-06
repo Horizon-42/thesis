@@ -470,9 +470,9 @@ def control_recipe_overrides(name: str) -> dict[str, Any]:
 def control_simple_v1_overrides() -> dict[str, Any]:
     """Return the frozen scientific definition of the minimal control recipe.
 
-    Every value is a LITERAL, never a module default: a recipe is what a published paired
-    comparison ("same recipe, one axis") was run under, and a default that later moves
-    must not redefine it after the fact. A recipe that no longer matches the defaults is
+    Every value is a LITERAL or a recipe-named constant (``SIMPLE_V*``), never a module
+    ``DEFAULT_*``: a recipe is what a published paired comparison ("same recipe, one axis")
+    was run under, and a default that later moves must not redefine it after the fact. A recipe that no longer matches the defaults is
     the recipe telling the truth, not a bug.
     """
 

@@ -9,15 +9,13 @@ new experiments one searchable index while keeping every artifact in its origina
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Sequence
 
 from io_utils import sha256_bytes, utc_now, write_json_atomic
-from typing import Any, Sequence
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:  # run_naming -> config -> aerodynamic_model

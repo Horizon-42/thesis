@@ -23,6 +23,9 @@ def _write_arm(campaign: Path, name: str, straight_ade: float, vectored_ade: flo
     results = []
     for index in range(60):
         straight = index < 30
+        # Ten vectored flights are already established at the anchor: they are OUT of the
+        # vectored stratum (approach_difficulty), the one behavioural change of T0-5.
+        established = straight or index >= 50
         results.append({
             "id": f"FL{index:03d}",
             "runway": "30L",
@@ -31,7 +34,7 @@ def _write_arm(campaign: Path, name: str, straight_ade: float, vectored_ade: flo
             "ade_m": straight_ade if straight else vectored_ade,
             "fde_m": (straight_ade if straight else vectored_ade) * 2.0,
             "route_tortuosity": 1.01 if straight else 1.80,
-            "established_at_anchor": straight,
+            "established_at_anchor": established,
             "remaining_path_m": 9_000.0 if straight else 30_000.0,   # the covariates a real row carries
         })
     (pred / "summary.json").write_text(json.dumps({"results": results}))
@@ -55,6 +58,8 @@ def test_a_wash_in_aggregate_is_split_apart_by_stratum(tmp_path):
     out = result.stdout
 
     assert "60 flights predicted by every arm" in out
+    assert "n=30" in next(l for l in out.splitlines() if l.startswith("straight-in"))
+    assert "n=20" in next(l for l in out.splitlines() if l.startswith("vectored"))   # 30 minus the 10 established
     # Columns are ordered by dose, so `low` precedes `high`.
     assert out.strip().splitlines()[-1].index("low") < out.strip().splitlines()[-1].index("high")
 

@@ -46,10 +46,12 @@ MAX_THRUST_N = 240_000.0
 # Without it a common-profile share computed at N=16 would not be comparable with one at
 # N=64 — and the scorer would silently skip every arm whose N differed from the constant.
 COMMON_GRID_POINTS = 64
-# The bank floor is read on GENUINELY straight references — a stricter cut than the
-# readouts' straight-in stratum (approach_difficulty.STRAIGHT_TORTUOSITY = 1.05), on
-# purpose: a floor wants flights that really flew no turn at all. The two are different
-# populations and the printed labels say which; the assertion keeps them ordered.
+# The bank floor is read on GENUINELY straight references: a DIFFERENT estimator from the
+# readouts' straight-in stratum (`_tortuosity` below is the post-anchor arc over the chord
+# to the LAST OBSERVED row; approach_difficulty.route_tortuosity is remaining path over the
+# anchor's range to the THRESHOLD) at a stricter cut, on purpose — a floor wants flights
+# that really flew no turn at all. Neither population is a subset of the other; the printed
+# labels say which, and the assertion only keeps the two thresholds ordered.
 GENUINELY_STRAIGHT_TORTUOSITY = 1.02
 assert GENUINELY_STRAIGHT_TORTUOSITY < STRAIGHT_TORTUOSITY
 

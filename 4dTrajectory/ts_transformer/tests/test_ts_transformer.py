@@ -6495,3 +6495,20 @@ def test_a_stored_config_carrying_a_retired_field_still_loads_and_an_unknown_one
     assert TSConfig.from_dict(stored).prediction_output == PREDICTION_CONTROL
     with pytest.raises(TypeError):
         TSConfig.from_dict({**stored, "never_a_field": 1})
+
+
+L1_NATIVE32_CHECKPOINT = _REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32/checkpoint.pt"
+
+
+@pytest.mark.skipif(not L1_NATIVE32_CHECKPOINT.is_file(), reason="the L1 native32 checkpoint is not on this machine")
+def test_the_l1_native32_checkpoint_written_with_the_retired_fields_still_loads():
+    """The canary against the serialized contract: a REAL artifact from before a field was
+    retired (the synthetic test above pins the rule, not an artifact) — its class, its
+    strict state dict, and a config that round-trips without the retired keys."""
+    from config import RETIRED_SERIALIZED_FIELDS
+    from control.heads import ControlOutputModel
+    model, config, _normalizer, payload = load_checkpoint(L1_NATIVE32_CHECKPOINT)
+    assert isinstance(model, ControlOutputModel) and config.n_segments == 32
+    assert set(RETIRED_SERIALIZED_FIELDS) <= set(payload["config"]), "the canary lost its point: pick an older artifact"
+    assert not set(RETIRED_SERIALIZED_FIELDS) & set(config.to_dict())
+    assert TSConfig.from_dict(config.to_dict()) == config

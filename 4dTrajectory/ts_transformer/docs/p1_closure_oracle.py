@@ -162,7 +162,7 @@ def _flights(args: argparse.Namespace):
     """The reference arm's flights, config, anchor, strata, and the series to score."""
     reference_dir = args.reference if args.reference.is_absolute() else REPO_ROOT / args.reference
     reference, config_dict = _reference_rows(reference_dir)
-    config = TSConfig(**config_dict)
+    config = TSConfig.from_dict(config_dict)
     if config.coordinate_frame != COORDINATE_FRAME_ENU:
         raise ValueError("the closure geometry assumes the threshold-anchored enu chart")
     anchor = config.seq_len - 1
@@ -378,7 +378,7 @@ def _fit_labels(item) -> dict:
 
 def cmd_labels(args: argparse.Namespace) -> None:
     reference_dir = args.reference if args.reference.is_absolute() else REPO_ROOT / args.reference
-    config = TSConfig(**_reference_rows(reference_dir)[1])
+    config = TSConfig.from_dict(_reference_rows(reference_dir)[1])
     if config.coordinate_frame != COORDINATE_FRAME_ENU:
         raise ValueError("the closure geometry assumes the threshold-anchored enu chart")
     anchor = config.seq_len - 1

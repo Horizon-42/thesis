@@ -15,8 +15,6 @@ import math
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
-
-from io_utils import write_json_atomic
 from statistics import fmean, pstdev
 from typing import Any, Sequence
 
@@ -33,6 +31,7 @@ from config import (
     HORIZON_NORMALIZED,
     TSConfig,
 )
+from io_utils import write_json_atomic
 from dataset import (
     FlightSeries,
     cross_validation_folds,
@@ -258,7 +257,7 @@ def _candidate_run_contract(
     }
     # Keep the in-memory contract in the same JSON-native representation that is
     # restored on resume (notably, dataclass tuple fields become JSON arrays).
-    return json.loads(json.dumps(contract))
+    return json.loads(json.dumps(contract, allow_nan=False))
 
 
 def _require_finite_number(value: Any, label: str) -> None:
