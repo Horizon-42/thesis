@@ -16,6 +16,8 @@ from typing import Any, Literal, get_args
 
 from final_approach.crossing import FITTED_TAIL_KIND, validate_crossing_span
 
+from evaluation.speed_gate import LANDING_AERO_KEY, validate_landing_aero
+
 STATE_KEYS = ("lat", "lon", "alt", "V", "psi", "gamma", "m")
 
 # The subject vocabulary, defined once: the type annotation and the runtime check
@@ -57,19 +59,13 @@ class TrajectoryRecord:
 
     @property
     def airport(self) -> str:
-        """The arrival airport ICAO code, upper-cased.
+        """The arrival airport ICAO code, upper-cased (required at the boundary: it
+        selects the runway data a verdict is measured against)."""
+        return str(self.source["arr_airport"]).upper()
 
-        Required on every record: it selects the runway data a verdict is measured
-        against, and producers that cannot name it (``evaluation_export`` copies
-        whatever the scenario carried) would otherwise be graded against nothing.
-        """
-        code = self.source.get("arr_airport")
-        if not isinstance(code, str):
-            raise ValueError(
-                f"record {self.path or self.source.get('id')!r} requires "
-                "source.arr_airport"
-            )
-        return code.upper()
+    @property
+    def runway(self) -> str:
+        return str(self.source["runway"])
 
 
 def _number(value: Any, path: str) -> float:
@@ -103,6 +99,24 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
         raise ValueError(
             f"{where}: source.subject must be one of {SUBJECTS}, got {subject!r}"
         )
+    # Every source field the evaluator reads is checked HERE, once. The airport and
+    # runway select the assessment context a verdict is measured against; the datum
+    # offset is cross-checked against that context on observed records; the stall
+    # facts anchor the speed gate (absent or null = honestly indeterminate, present
+    # but malformed = a producer wrote something that cannot be trusted).
+    for key in ("arr_airport", "runway"):
+        if not isinstance(source.get(key), str) or not source[key].strip():
+            raise ValueError(f"{where}: source.{key} must be a non-empty string")
+    # The datum offset is read only when a threshold event is graded
+    # (``arrival._observed_arrival``); a reference track that carries no event (the
+    # optimizer's and ts_transformer's comparison references) never needs one.
+    if subject == "observed" and source.get("observed_threshold_event") is not None:
+        _number(source.get("hae_minus_msl_m"), f"{where}: source.hae_minus_msl_m")
+    if source.get(LANDING_AERO_KEY) is not None:
+        try:
+            validate_landing_aero(source[LANDING_AERO_KEY])
+        except ValueError as exc:
+            raise ValueError(f"{where}: {exc}") from exc
 
     try:
         initial = data["initial_state"]
@@ -120,6 +134,14 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
         raise ValueError(f"{where}: controls must be an array")
     for index, sample in enumerate(states):
         _state(sample, f"{where}: states[{index}]", timed=True)
+        # The clock is the one channel with an ordering contract (interpolated
+        # crossings and flight-time deltas both read it); the producers order it on
+        # the write side, and the boundary makes that structural on the read side.
+        if index and not sample["t"] > states[index - 1]["t"]:
+            raise ValueError(
+                f"{where}: states[{index}].t ({sample['t']}) must exceed "
+                f"states[{index - 1}].t ({states[index - 1]['t']})"
+            )
     for index, control in enumerate(controls):
         if not isinstance(control, dict):
             raise ValueError(f"{where}: controls[{index}] must be an object")
@@ -253,29 +275,45 @@ def record_files(path: str | Path) -> list[Path]:
     for index, row in enumerate(rows):
         if not isinstance(row, dict) or not isinstance(row.get("eval_file"), str):
             raise ValueError(f"{manifest}: results[{index}].eval_file must be a string")
-        files.append(p / row["eval_file"])
+        file = p / row["eval_file"]
+        if not file.is_file():
+            raise ValueError(f"{manifest}: results[{index}] lists a missing record {file}")
+        files.append(file)
     return sorted(files)
 
 
 def roster_context_keys(path: str | Path) -> list[tuple[str, str]] | None:
-    """``(airport, runway)`` pairs from a batch roster, or ``None`` for a loose record.
+    """``(airport, runway)`` pairs from a batch roster, or ``None`` when there is none.
 
-    ``summary_row`` carries both, so the assessment contexts a batch needs can be resolved
-    from the roster alone — which is what lets the records themselves be streamed instead
-    of materialized just to collect their airport codes.
+    The two batch writers name the airport differently -- the modeling batches per row
+    (``evaluation_export.summary_row``: ``arr_airport``), the harvest's observed batch
+    once at the top (``harvest.observed``: ``summary["airport"]``); both name the
+    runway per row. Either way the contexts a batch needs are resolved from the roster
+    alone, which is what lets the records themselves be streamed instead of
+    materialized just to collect their airport codes. ``None`` means the input is not
+    a rostered batch (a loose record file, or a directory without a manifest, which
+    :func:`record_files` then rejects with its own message). A row that cannot be
+    placed raises: falling back to loading the whole batch would silently switch to a
+    path that holds ~1 MB per flight.
     """
     p = Path(path)
-    if not p.is_dir():
+    manifest = p / "summary.json"
+    if not p.is_dir() or not manifest.exists():
         return None
-    rows = _load_json(p / "summary.json").get("results")
+    summary = _load_json(manifest)
+    rows = summary.get("results")
     if not isinstance(rows, list):
-        return None
+        raise ValueError(f"{manifest} has no results roster")
+    batch_airport = summary.get("airport")
     keys: list[tuple[str, str]] = []
-    for row in rows:
-        airport, runway = row.get("arr_airport"), row.get("runway")
+    for index, row in enumerate(rows):
+        airport = row.get("arr_airport") or batch_airport
+        runway = row.get("runway")
         if not isinstance(airport, str) or not isinstance(runway, str):
-            # A roster written before summary_row carried them: fall back to the records.
-            return None
+            raise ValueError(
+                f"{manifest}: results[{index}] names no runway, or no airport either "
+                "per row (arr_airport) or for the batch (airport)"
+            )
         keys.append((airport.upper(), runway))
     return keys
 
@@ -292,9 +330,9 @@ def iter_records(path: str | Path) -> Iterator[TrajectoryRecord]:
 
 
 def load_records(path: str | Path) -> list[TrajectoryRecord]:
-    """Load one record file or the records rostered by a batch summary.
+    """:func:`iter_records`, materialized -- for callers that need the list (tests).
 
-    Kept for callers that genuinely need random access (``evaluation.visualize`` samples
-    track overlays); the batch metrics path streams via :func:`iter_records`.
+    Nothing in the evaluation pipeline uses it: a batch is tens of thousands of
+    flights at ~1 MB of resolved state each.
     """
-    return [load_record(file) for file in record_files(path)]
+    return list(iter_records(path))

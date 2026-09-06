@@ -74,30 +74,36 @@ is a guidance-tracking scale, not a universal threshold-crossing or landing
 outcome standard, and is no longer computed or serialized. Trajectories and
 harvested threshold events do not carry evaluation policy.
 
-Speed, for optimized and predicted subjects (v6):
+Speed, for every subject (v7):
 
 ```text
 Vs1g  = sqrt(2 m g / (rho0 × S × Cl_max_landing))   # the project's own stall model
-speed window = [1.23 × Vs1g, 1.23 × Vs1g + 20 kt]   # inclusive, at the crossing
+Vs(n) = Vs1g × sqrt(max(n, 1))                       # at the crossing load factor
+speed window = [1.23 × Vs(n), 1.23 × Vs1g + 20 kt]  # inclusive, at the crossing
 ```
 
 The multiplier is the 14 CFR 25.125(b)(2)(i) landing reference-speed floor
-(V_REF ≥ 1.23 V_SR0); the window is the FSF ALAR Briefing Note 7.1 stabilized-approach
-speed element (not less than V_REF, not more than V_REF + 20 kt). `S` and `Cl_max`
-come from the record's producer-written `source.landing_aero` block; the mass is the
-crossing state's own. Observed records are never speed-graded — their V is ground
-speed and ADS-B coverage ends before the threshold — so the observed composite stays
-lateral + vertical. Full rationale, worked numbers, and trackable sources:
+(V_REF ≥ 1.23 V_SR0); the +20 kt is the FSF ALAR Briefing Note 7.1 stabilized-approach
+speed element, an energy criterion that stays at 1 g. `S` and `Cl_max` come from the
+record's producer-written `source.landing_aero` block; the mass is the crossing state's
+own; the load factor is the last control's (`controls[-1].load_factor`, the control
+active over the final rollout step) or a declared 1 g on records without controls.
+Computed subjects are judged on the crossing model airspeed; observed baselines on the
+event's fitted crossing GROUND speed as a stated proxy under its own criterion id
+(wind is unmodelled). Full rationale, worked numbers, the measured load-factor
+distribution and trackable sources:
 [THRESHOLD_SPEED_GATE.md](docs/THRESHOLD_SPEED_GATE.md).
 
-The explicit LNAV/VNAV Baro-VNAV fallback differs only in the vertical component;
-its lateral bound is the same runway half-width. The fallback is not selected
-silently. `baro_vnav_approved` must be true in the
-evaluation context. The ±22 m gate additionally requires an authoritative
-Baro-VNAV threshold-path altitude. The configured non-LPV runway fallback does
-not currently publish that reference, so evaluation still reports its lateral
+The LNAV/VNAV Baro-VNAV fallback differs only in the vertical component; its
+lateral bound is the same runway half-width. It is selected when the runway has
+no LPV Path Point, and its ±22 m gate applies when the runway's own RNAV (GPS)
+approach publishes an LNAV/VNAV line of minima together with a runway-leg
+vertical path (angle + crossing altitude, decoded from the same CIFP file —
+`baro_vnav_approved` in the context is derived from those facts, never from a
+caller flag). KRDU 32 (3.50°, 45 ft) and KSMF 35R (3.00°, 64 ft) resolve this way.
+A runway with no RNAV procedure at all (KRDU 14) still reports its lateral
 component but marks the vertical component and composite verdict
-`indeterminate`; it does not infer a target altitude from the trajectory.
+`indeterminate`; evaluation never infers a target altitude from the trajectory.
 
 All subjects use the same point-estimate rule:
 

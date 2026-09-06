@@ -7,16 +7,29 @@
  * the vitest fixtures (also pinned to v4) stayed green throughout. Test fixtures now
  * import this constant instead of repeating the string.
  */
-export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v6";
+export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v7";
 
 /**
- * Still-displayable older report versions. v5 predates the stall-anchored
- * crossing-speed gate: its verdicts compose lateral+vertical only and its rows
- * carry none of the speed fields. Published v5 artifacts remain on disk because
- * the record batches behind them were cleaned up, so they cannot be re-graded
- * until the optimizer batch is rerun — the report window labels them as
- * pre-speed-gate instead of refusing to open them (`isLegacyEvaluationReport`).
- * Versions before v5 changed shape, not just grading, and stay rejected.
+ * Still-displayable older report versions, in two classes.
+ *
+ * PRIOR speed-gate versions carry every speed field this file reads; they differ from
+ * the current schema only in how the gate's LOWER bound was anchored. v6 graded it at
+ * 1 g; v7 anchors it on the crossing load factor (`crossing_load_factor` on the row,
+ * evaluation/docs/THRESHOLD_SPEED_GATE.md §3.5). Batches on disk stay readable and
+ * the window notes the difference (`isPriorSpeedGateReport`).
+ */
+export const PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS = [
+  "terminal-approach-evaluation-v6",
+] as const;
+
+/**
+ * LEGACY versions predate the stall-anchored crossing-speed gate: v5 verdicts compose
+ * lateral+vertical only and its rows carry none of the speed fields. Published v5
+ * artifacts remain on disk because the record batches behind them were cleaned up,
+ * so they cannot be re-graded until the optimizer batch is rerun — the report window
+ * labels them as pre-speed-gate instead of refusing to open them
+ * (`isLegacyEvaluationReport`). Versions before v5 changed shape, not just grading,
+ * and stay rejected.
  */
 export const LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS = [
   "terminal-approach-evaluation-v5",
@@ -24,6 +37,7 @@ export const LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS = [
 
 export type EvaluationReportSchemaVersion =
   | typeof EVALUATION_REPORT_SCHEMA_VERSION
+  | (typeof PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS)[number]
   | (typeof LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS)[number];
 
 export interface MagnitudeSpread {
@@ -50,12 +64,15 @@ export interface EvaluationBounds {
   lateral_m: number;
   vertical_lower_m: number | null;
   vertical_upper_m: number | null;
-  /** v6: stall-anchored crossing-speed window (evaluation/speed_gate.py). The three
-   *  numbers are null when the record was not speed-gradable (observed subjects,
-   *  unsolved records, or a record without source.landing_aero). Absent entirely in
-   *  legacy v5 reports. */
+  /** v6+: stall-anchored crossing-speed window (evaluation/speed_gate.py). The
+   *  numbers are null when no window could be resolved (unsolved records, no
+   *  crossing, no source.landing_aero, or an observed event without a fitted ground
+   *  speed). Absent entirely in legacy v5 reports. `stall_speed_ms` is the 1-g stall
+   *  speed; v7 adds `stall_speed_at_n_ms`, the stall speed at the crossing load
+   *  factor the lower bound is anchored on. */
   speed_criterion?: string;
   stall_speed_ms?: number | null;
+  stall_speed_at_n_ms?: number | null;
   speed_lower_ms?: number | null;
   speed_upper_ms?: number | null;
 }
@@ -109,6 +126,12 @@ export interface EvaluationRow {
    *  stated proxy for airspeed (wind unmodelled). Null on rows whose event predates
    *  the field or could not fit a speed. */
   crossing_ground_speed_ms?: number | null;
+  /** v7: the load factor the crossing was flown at and where it came from —
+   *  "controls_last_step" (the control active over the final rollout step) or
+   *  "assumed_1g" (records without controls: observed baselines, state-output
+   *  predictions). Flat on the row like the two crossing speeds. */
+  crossing_load_factor?: number;
+  crossing_load_factor_source?: string;
   heading_rad?: number;
   final_time_s?: number;
   reason?: string;
@@ -135,7 +158,8 @@ export interface EvaluationReport {
   schema_version: EvaluationReportSchemaVersion;
   methodology: Record<string, unknown>;
   assessment_contexts: Record<string, unknown>[];
-  subject: EvaluationSubject | "mixed";
+  /** One subject names itself; several are "mixed"; a batch with no records is "empty". */
+  subject: EvaluationSubject | "mixed" | "empty";
   observed?: EvaluationObservedAggregate;
   total: number;
   measured: number;
@@ -152,9 +176,20 @@ export interface EvaluationReport {
    *  EvaluationRow.speed_result). Absent in legacy v5 reports. */
   speed_result_counts?: Record<EvaluationVerdict, number>;
   crossing_speed_ms?: MagnitudeSpread | null;
-  /** v6-additive: spread of the rows' audit-only crossing GROUND speeds
-   *  (`methodology.observed_crossing_ground_speed`). Null when no row carries one. */
+  /** v6-additive: spread of the observed rows' graded crossing GROUND speeds — the
+   *  proxy their speed gate judges (`methodology.observed_crossing_ground_speed`), kept
+   *  apart from `crossing_speed_ms`. Null when no row carries one. */
   crossing_ground_speed_ms?: MagnitudeSpread | null;
+  /** v7: the load factor the crossings were flown at — spread, how many sat below 1 g
+   *  (lower bound clamped to the 1-g floor) and how many were a declared 1 g. */
+  crossing_load_factor?: {
+    mean: number;
+    min: number;
+    p95: number;
+    max: number;
+    below_1g: number;
+    assumed_1g: number;
+  } | null;
   final_time_s: { mean: number; min: number; max: number } | null;
   reference: EvaluationReferenceAggregate | null;
   trajectories: EvaluationRow[];
@@ -234,8 +269,19 @@ function isObservedAggregate(value: unknown): value is EvaluationObservedAggrega
   );
 }
 
+/** Pre-speed-gate (v5): no speed fields, two-gate verdicts. */
 export function isLegacyEvaluationReport(report: EvaluationReport): boolean {
-  return report.schema_version !== EVALUATION_REPORT_SCHEMA_VERSION;
+  return (LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS as readonly string[]).includes(
+    String(report.schema_version),
+  );
+}
+
+/** Speed-gated at 1 g (v6): every speed field present, the lower bound not yet
+ *  anchored on the crossing load factor. */
+export function isPriorSpeedGateReport(report: EvaluationReport): boolean {
+  return (PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS as readonly string[]).includes(
+    String(report.schema_version),
+  );
 }
 
 export function isEvaluationReport(value: unknown): value is EvaluationReport {
@@ -244,6 +290,9 @@ export function isEvaluationReport(value: unknown): value is EvaluationReport {
   const counts = candidate.verdict_counts as Record<string, unknown> | undefined;
   const versionAccepted =
     candidate.schema_version === EVALUATION_REPORT_SCHEMA_VERSION ||
+    (PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS as readonly string[]).includes(
+      String(candidate.schema_version),
+    ) ||
     (LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS as readonly string[]).includes(
       String(candidate.schema_version),
     );

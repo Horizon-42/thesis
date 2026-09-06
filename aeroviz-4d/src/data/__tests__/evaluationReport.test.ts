@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   EVALUATION_REPORT_SCHEMA_VERSION,
   LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS,
+  PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS,
   composeVerdict,
   isEvaluationReport,
   isLegacyEvaluationReport,
+  isPriorSpeedGateReport,
   type EvaluationReport,
 } from "../evaluationReport";
 
@@ -72,6 +74,22 @@ describe("isEvaluationReport observed availability contract", () => {
     ).toBe(false);
     expect(LEGACY_EVALUATION_REPORT_SCHEMA_VERSIONS).toContain(
       "terminal-approach-evaluation-v5",
+    );
+  });
+
+  it("accepts 1-g speed-gated v6 reports as prior, not legacy", () => {
+    const v6 = {
+      ...reportWith(undefined),
+      schema_version: "terminal-approach-evaluation-v6",
+    };
+    expect(isEvaluationReport(v6)).toBe(true);
+    expect(isPriorSpeedGateReport(v6 as unknown as EvaluationReport)).toBe(true);
+    expect(isLegacyEvaluationReport(v6 as unknown as EvaluationReport)).toBe(false);
+    expect(
+      isPriorSpeedGateReport(reportWith(undefined) as unknown as EvaluationReport),
+    ).toBe(false);
+    expect(PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS).toContain(
+      "terminal-approach-evaluation-v6",
     );
   });
 

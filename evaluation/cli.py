@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from evaluation.context import ContextKey, contexts_for_airport
-from evaluation.records import TrajectoryRecord, roster_context_keys
+from evaluation.records import load_record, record_files, roster_context_keys
 from evaluation.thresholds import AssessmentContext
 from trajectory_data_process.harvest.airports import load_airport
 
@@ -38,22 +38,18 @@ def contexts_for_codes(
     return contexts
 
 
-def contexts_from_roster(
+def contexts_for_input(
     path: str | Path, args: argparse.Namespace
-) -> dict[ContextKey, AssessmentContext] | None:
-    """Contexts resolved from a batch ROSTER, or ``None`` when it cannot name them.
+) -> dict[ContextKey, AssessmentContext]:
+    """The assessment contexts an input needs, without holding the input.
 
-    ``summary.json`` already carries each row's ``arr_airport``, so a batch does not have
-    to be loaded into memory to discover which airports it spans — which is what lets
-    ``python -m evaluation`` stream its records.
+    A batch's ``summary.json`` carries each row's ``arr_airport``, so the airports it
+    spans are read off the roster and the records themselves are streamed. A loose
+    record file is read once for its airport; a directory without a manifest is
+    rejected by :func:`record_files` with its own message.
     """
     keys = roster_context_keys(path)
-    if keys is None:
-        return None
-    return contexts_for_codes((airport for airport, _runway in keys), args)
-
-
-def contexts_from_args(
-    records: list[TrajectoryRecord], args: argparse.Namespace
-) -> dict[ContextKey, AssessmentContext]:
-    return contexts_for_codes((record.airport for record in records), args)
+    if keys is not None:
+        return contexts_for_codes((airport for airport, _runway in keys), args)
+    [file] = record_files(path)
+    return contexts_for_codes([load_record(file).airport], args)

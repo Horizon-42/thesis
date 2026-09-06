@@ -13,7 +13,10 @@ from evaluation import (
     load_record,
     record_from_dict,
 )
+from evaluation.metrics import REPORT_SCHEMA_VERSION
+from evaluation.speed_gate import LOAD_FACTOR_ASSUMED_1G, OBSERVED_SPEED_CRITERION_ID
 from evaluation.tests.factories import (
+    CONTROL,
     assessment_context,
     observed_event,
     observed_payload,
@@ -42,7 +45,7 @@ def test_non_finite_values_are_rejected_at_the_record_boundary(location):
         value["states"].insert(
             1, dict(value["states"][0], alt=math.nan, t=50.0)
         )
-        value["controls"].insert(1, {"thrust": 1.0})
+        value["controls"].insert(1, dict(CONTROL))
     elif location == "last": value["states"][-1]["alt"] = math.nan
     elif location == "time": value["final_time_s"] = math.nan
     else: value["controls"][0]["thrust"] = math.inf
@@ -64,7 +67,7 @@ def test_batch_serializes_context_methodology_and_three_way_counts():
     report = evaluate_batch(
         [record_from_dict(trajectory_payload())], contexts=contexts()
     )
-    assert report["schema_version"] == "terminal-approach-evaluation-v6"
+    assert report["schema_version"] == REPORT_SCHEMA_VERSION
     assert report["verdict_counts"] == {"pass": 1, "fail": 0, "indeterminate": 0}
     assert report["assessment_contexts"][0]["runway_source_cycle"] == "2026-08-06"
     assert report["assessment_contexts"][0]["desired_threshold_altitude_msl_m"] == 130.0
@@ -160,9 +163,9 @@ def test_observed_crossing_ground_speed_is_reported_and_graded_as_a_proxy():
     # 71.5 m/s sits inside [66.3, 76.6] at the 60 t crossing mass.
     assert row["speed_result"] == "pass"
     assert row["verdict"] == "pass"
-    assert row["bounds"]["speed_criterion"] == (
-        "vref_1p23_vs1g_to_vref_plus_20kt_ground_speed_proxy"
-    )
+    assert row["bounds"]["speed_criterion"] == OBSERVED_SPEED_CRITERION_ID
+    assert row["crossing_load_factor"] == 1.0
+    assert row["crossing_load_factor_source"] == LOAD_FACTOR_ASSUMED_1G
     assert row["bounds"]["speed_lower_ms"] == pytest.approx(66.3, abs=0.1)
     # The airspeed slots stay empty: no crossing airspeed was ever measured.
     assert row["deviation"]["crossing_speed_ms"] is None

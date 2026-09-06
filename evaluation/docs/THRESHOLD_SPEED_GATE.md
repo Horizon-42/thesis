@@ -1,7 +1,10 @@
 # Threshold-crossing speed gate — design and sources
 
-**Status:** implemented (report schema `terminal-approach-evaluation-v6`).
+**Status:** implemented (report schema `terminal-approach-evaluation-v7`, 2026-09-07: the
+lower bound is anchored on the stall speed at the crossing LOAD FACTOR, §3.5; v6 anchored
+both bounds on the 1-g stall speed).
 **Code:** `evaluation/speed_gate.py` (policy), `evaluation/metrics.py` (composition),
+`evaluation/arrival.py` (the crossing state, mass and load factor),
 `aircraft/aero_params.stall_speed_ms` (the stall model, single source),
 `flight_scenarios/build.py` (the producer-written `source.landing_aero` block).
 **Measured results:** `BASELINE_SPEED_GATE_RESULTS.md` (2026-08-24 fleet baseline —
@@ -28,28 +31,27 @@ and **not** a certification statement about any real aircraft. The report says t
 
 ## 2. The rule
 
-For a record crossing the threshold at mass `m` (kg), with the aircraft's wing area `S`
-(m²) and landing-configuration maximum lift coefficient `Cl_max`:
-
-## Stall? lift coefficient is larger then the maximum lift coefficient, then the aircraft is in stall, and the speed gate will fail.
+For a record crossing the threshold at mass `m` (kg) and load factor `n`, with the
+aircraft's wing area `S` (m²) and landing-configuration maximum lift coefficient `Cl_max`:
 
 ```text
-V_s1g  = sqrt(2 m g / (rho0 · S · Cl_max))      # 1-g level stall speed, TAS (m/s)
-# Real stall speed; thrust, bank angle;
-
-# validate for 3 airplanes, look up stall speeds is match to the real aircraft; Cessna 53 flaps up, flaps down 48;
-# flight envolope; 
-
-V_ref  = 1.23 × V_s1g                            # reference landing speed
-gate   : V_ref ≤ V_crossing ≤ V_ref + 20 kt      # inclusive at both edges
+V_s1g   = sqrt(2 m g / (rho0 · S · Cl_max))      # 1-g level stall speed, TAS (m/s)
+V_s(n)  = V_s1g · sqrt(max(n, 1))                # stall speed under the lift n·m·g the
+                                                 # manoeuvre demands (Cl_required = Cl_max)
+lower   = 1.23 × V_s(n)                          # V_ref at the crossing load factor
+upper   = 1.23 × V_s1g + 20 kt                   # V_ref (1 g) + the ALAR additive
+gate    : lower ≤ V_crossing ≤ upper             # inclusive at both edges
 ```
 
 with `g = 9.81 m/s²`, `rho0 = 1.225 kg/m³` (ISA sea level), `20 kt = 10.289 m/s`.
 
 Every symbol is per-record: `m` and `V_crossing` come from the interpolated crossing
-state; `S` and `Cl_max` come from the record's `source.landing_aero` block, written by
-the same seam that gave the optimizer its aerodynamics — so the gate judges each record
-against the aircraft **the model actually flew**, not against a fleet-wide constant.
+state; `n` from the control active over the final rollout step (§3.5); `S` and `Cl_max`
+from the record's `source.landing_aero` block, written by the same seam that gave the
+optimizer its aerodynamics — so the gate judges each record against the aircraft **the
+model actually flew**, not against a fleet-wide constant. The aircraft is stalled when
+`Cl_required = n m g / (½ ρ V² S)` exceeds `Cl_max`; the lower bound is that condition
+with the 1.23 margin, which is why it must carry `n`.
 
 ## 3. Why each step, with sources
 
@@ -126,13 +128,68 @@ The gate compares them directly, and states the approximation:
   (at 5,000 ft the split is ~8 %). This is also why `rho0` is sea-level ISA: it keeps
   the gate bit-consistent with the optimizer's floor, which uses the same constant.
 
+### 3.5 The load factor: why the lower bound moves with `n` and the upper does not
+
+The model's own dynamics (`aerodynamic_model/casadi_simulator.py`) fly
+`γ̇ = g (n cos μ − cos γ) / V` and `ψ̇ = g n sin μ / (V cos γ)`, and its stall drag
+branch already computes `Cl_required` from `n·m·g`. Until v6 the gate anchored on the
+1-g stall speed regardless: a solve crossing in a 25° bank or a pull-up had its lower
+bound computed as if it were flying straight and level. Physically the lift the
+manoeuvre demands is `n·m·g`, so the speed at which the wing reaches `Cl_max` is
+`V_s1g·√n`; a crossing at `1.23·V_s1g` with `n = 2` is *below* its actual stall speed
+(`1.41·V_s1g`) and used to pass.
+
+**Measured on the optimizer batches on disk** (2026-09-07; `controls[-1].load_factor`,
+stall facts rebuilt from `dynamics_typecode` because those records predate
+`landing_aero`):
+
+| batch | graded | n median | n p95 | n max | flips, both bounds ×√n | flips, lower bound only, n ≥ 1 | passing yet V < V_s1g·√n |
+|---|---|---|---|---|---|---|---|
+| KMSY/runway | 3,439 | 1.010 | 1.015 | 1.231 | 227 | 1 | 0 |
+| KMSY/fitted_adsb | 3,308 | 1.010 | 1.015 | 1.128 | 158 | 20 | 0 |
+| KMSY/runway_cons | 2,853 | 0.997 | 1.005 | 1.160 | 4 | 0 | 0 |
+| KSJC/runway | 3,383 | 1.011 | 1.015 | 1.372 | 192 | 0 | 0 |
+| KSTL/runway_cons | 4,485 | 0.996 | 1.040 | 1.142 | 73 | 6 | 0 |
+
+The bulk crosses at `n ≈ 1`; the tail reaches 1.37, i.e. a 17 % higher stall speed —
+the whole 20 kt window. Two policy choices follow from the physics and the table:
+
+- **Only the lower bound scales.** `V_REF` is defined by 14 CFR 25.125 against the 1-g
+  reference stall speed, and the `+20 kt` upper edge is an energy / overrun criterion
+  (FSF ALAR, AC 91-79B), not a stall margin. Scaling both edges with `√n` moved the
+  upper edge by a fraction of a knot and flipped 4–227 verdicts per batch, all of them
+  records piled up against that edge (§7) — noise, not information.
+- **`n` is clamped at 1 for the bound.** A push-over (`n < 1`) at the threshold does not
+  make a slow crossing flyable: the flare that follows needs `n ≥ 1`, at which point the
+  1-g floor applies again. The row still reports the measured `n`.
+
+**Where `n` comes from** (`ArrivalDeviation.crossing_load_factor` +
+`crossing_load_factor_source`):
+
+- Records with `controls` (optimizer solves, control-output ts predictions):
+  `controls[-1].load_factor`, source `controls_last_step`. The rollout writes on every
+  sample the control that PRODUCED it (`aerodynamic_model/rollout.py`), so the last
+  control is the one active over the final step — the segment both the `terminal_state`
+  and the `interpolated_threshold` crossings lie on. A record whose controls lack the
+  column is malformed and raises.
+- Records without `controls` (observed baselines, state-output ts predictions): `n = 1`,
+  source `assumed_1g`, declared on every row. A censored observed crossing is a
+  straight-line fit (`γ̇ = ψ̇ = 0` by construction) and a measured ADS-B bracket's `γ̇`
+  is 25 ft-quantisation noise (`evaluation/CLAUDE.md`), so inverting the kinematics
+  would add noise, not a measurement.
+
+`aircraft.aero_params.stall_speed_ms` gained the `load_factor` keyword (default 1.0);
+the optimizer's velocity floor still calls it at 1 g, so the "one stall model" property
+of §3.1 is unchanged.
+
 ## 4. Data contract
 
 | Input | Source | Owner |
 |---|---|---|
 | `V_crossing`, `m` | the interpolated crossing state (`evaluation/arrival.py`, `ArrivalDeviation.crossing_speed_ms` / `crossing_mass_kg`) | evaluation |
+| `n` | `controls[-1].load_factor` when the record carries controls, else 1 g declared (`crossing_load_factor` / `crossing_load_factor_source`, §3.5) | evaluation reads, producer writes the controls |
 | `S`, `Cl_max` | `source.landing_aero = {wing_area_m2, cl_max_landing}` — written by `flight_scenarios.build_scenario` from the same `AeroParams` the optimizer/replay fly | producer |
-| 1.23, +20 kt, the formula | `evaluation/speed_gate.py` + `aircraft.aero_params.stall_speed_ms` | evaluation policy / shared model |
+| 1.23, +20 kt, the formula, the `n ≥ 1` clamp | `evaluation/speed_gate.py` + `aircraft.aero_params.stall_speed_ms` | evaluation policy / shared model |
 
 The producer-supplies-facts / evaluation-owns-policy split mirrors `hae_minus_msl_m`.
 Absent-vs-invalid follows the observed-event pattern:
@@ -150,11 +207,11 @@ Absent-vs-invalid follows the observed-event pattern:
 
 ## 5. Subjects and scope
 
-| Subject | Speed gate | Judged quantity |
-|---|---|---|
-| `optimized` | composed into the verdict | crossing model airspeed (state V at the event) |
-| `predicted` | composed into the verdict | same record contract, same crossing interpolation |
-| `observed` | **composed into the verdict (2026-08-24)** | fitted crossing **ground speed**, a stated proxy — see below |
+| Subject | Speed gate | Judged quantity | `n` for the lower bound (§3.5) |
+|---|---|---|---|
+| `optimized` | composed into the verdict | crossing model airspeed (state V at the event) | `controls[-1].load_factor` |
+| `predicted` | composed into the verdict | same record contract, same crossing interpolation | `controls[-1].load_factor` for control-output models; 1 g declared for state-output ones (`controls == []`) |
+| `observed` | **composed into the verdict (2026-08-24)** | fitted crossing **ground speed**, a stated proxy — see below | 1 g declared (`assumed_1g`) |
 
 **History.** The original v6 design excluded observed subjects entirely (no crossing
 speed existed, and ground speed is not airspeed). The owner overrode the exclusion on
@@ -187,16 +244,20 @@ event fitted no crossing speed; either composes the verdict to indeterminate.
 
 ## 6. Worked numbers (landing mass, the model's Cl_max classes)
 
-| Class example | m (kg) | S (m²) | Cl_max | V_s1g | V_ref = 1.23·V_s1g | window |
+| Class example | m (kg) | S (m²) | Cl_max | V_s1g | V_ref = 1.23·V_s1g | window at n = 1 |
 |---|---|---|---|---|---|---|
-| A320-class (MTOW 30–100 t) | 66,300 | 122.6 | 2.7 | 56.6 m/s | 69.7 m/s = 135.4 kt | 135.4 – 155.4 kt |
-| A320-class at 60 t | 60,000 | 122.6 | 2.7 | 53.9 m/s | 66.3 m/s = 128.8 kt | 128.8 – 148.8 kt |
+| A320 family (calibrated, `BASELINE_SPEED_GATE_RESULTS.md` §8) at MLW | 64,500 | 122.6 | 3.0 | 53.0 m/s | 65.2 m/s = 126.7 kt | 126.7 – 146.7 kt |
+| 737-class bucket (MTOW 30–100 t) at 60 t | 60,000 | 122.6 | 2.7 | 53.9 m/s | 66.3 m/s = 128.8 kt | 128.8 – 148.8 kt |
 | E75L-class at 34 t | 34,000 | 83.5 | 2.7 | 49.1 m/s | 60.5 m/s = 117.5 kt | 117.5 – 137.5 kt |
 | B77W-class (MTOW > 100 t) | 251,290 | 436.8 | 2.4 | 62.0 m/s | 76.2 m/s = 148.1 kt | 148.1 – 168.1 kt |
 
-Sanity anchors: real-world A320 V_REF (full flaps, typical landing weight) is
-~130–140 kt and B777-300ER V_REF ~140–150 kt — the model windows bracket the
-operational numbers, which is what a model-consistency gate needs.
+The load factor lifts the lower edge by `√n` (§3.5): +2.5 % at n = 1.05 (a 17° bank),
++4.9 % at 1.10 (25°), +10.9 % at 1.23 (the KMSY maximum), +17.1 % at 1.37 (the KSJC
+maximum) — for the A320 row that last case is a 148 kt lower edge, above the 1-g upper
+edge, i.e. no speed passes: an aircraft pulling 1.37 g across the threshold has no
+stabilized-approach window. Sanity anchors: real-world A320 V_REF (full flaps, typical
+landing weight) is ~130–140 kt and B777-300ER V_REF ~140–150 kt — the model windows
+bracket the operational numbers, which is what a model-consistency gate needs.
 
 ## 7. Known interactions (read before interpreting a batch)
 
@@ -221,6 +282,17 @@ operational numbers, which is what a model-consistency gate needs.
   the gate would hide exactly what the gate exists to show.
 - The gate judges the **rollout's** crossing state (same state the other gates use),
   so plan-vs-replay drift shows up here too.
+- **The upper edge is where `runway`-mode solves pile up.** With the A320 family's
+  calibrated `Cl_max` the 64.5 t window is 126.7–146.7 kt and the class-default target
+  of 145 kt sits 1.7 kt under the top, so the 15 % "fast" fails in KMSY/runway are
+  decided by sub-knot replay drift. Quote fast-fail rates with that margin, and read a
+  change in them after any constant tweak as edge sensitivity before reading it as
+  flight behaviour.
+- **The optimizer batches on disk (70,267 records, 15 batches) predate
+  `source.landing_aero` and grade speed-indeterminate to the last record** — their
+  three-gate pass count is 0 until the block is backfilled
+  (`4dTrajectory/optimization/backfill_landing_aero.py`, same typecode → `AeroParams`
+  chain the producer uses) and the reports regenerated.
 
 ## 8. Rejected alternatives
 
@@ -231,21 +303,35 @@ operational numbers, which is what a model-consistency gate needs.
 | Gate observed subjects with a widened window | still measures wind + a non-crossing sample; a wider bound that "usually passes" is an inert bound |
 | Density at threshold elevation instead of ρ₀ | breaks bit-consistency with the optimizer floor for < 1 % effect at this fleet's elevations; revisit only with a high-elevation airport |
 | Composite-only reporting (no per-component result) | consumers (ts lateral-eligibility precedent) need per-component access; `speed_result` is serialized like `lateral_result` |
+| Scale both bounds with `√n` | the upper edge is an energy criterion defined at 1 g; measured, it only flips records piled against that edge (§3.5) |
+| Relax the lower bound for `n < 1` | a push-over at the threshold precedes a flare that needs `n ≥ 1`; the 1-g floor is the binding one |
+| Invert ADS-B kinematics for the observed `n` | 25 ft altitude quantisation makes `γ̇` noise; a declared 1 g is honest, a fitted `n` would be fiction |
 
-## 9. Report surface (v6)
+## 9. Report surface (v7)
 
-- Per row: `speed_result`, `bounds.speed_criterion` (`vref_1p23_vs1g_to_vref_plus_20kt`),
-  `bounds.stall_speed_ms`, `bounds.speed_lower_ms`, `bounds.speed_upper_ms`,
-  `deviation.crossing_speed_ms`, `deviation.crossing_mass_kg`; `"speed"` joins
-  `violations` on a fail.
-- Per batch: `speed_result_counts`, `crossing_speed_ms` spread,
-  `methodology.terminal_speed` (criterion, formula, both sources, subject scope,
-  claim boundary — self-describing years later, like the vertical block).
-- Schema version bumped v5 → v6 in **all four homes** (producer, ts seam import,
-  frontend mirror `EVALUATION_REPORT_SCHEMA_VERSION`, fixtures via the constant).
-  Every existing on-disk v5 report is stale and must be regenerated before the ts
-  pipeline or the frontend will accept it — consistent with the standing "re-roster
-  everything" open item.
+- Per row: `speed_result`, `bounds.speed_criterion`
+  (`vref_1p23_vs_at_n_to_vref_1g_plus_20kt`; observed rows carry
+  `vref_1p23_vs1g_to_vref_1g_plus_20kt_ground_speed_proxy` — their window IS the 1-g one,
+  the id says so),
+  `bounds.stall_speed_ms` (1 g), `bounds.stall_speed_at_n_ms`, `bounds.speed_lower_ms`,
+  `bounds.speed_upper_ms`, `deviation.crossing_speed_ms`, `deviation.crossing_mass_kg`,
+  `deviation.crossing_load_factor`, `deviation.crossing_load_factor_source`; `"speed"`
+  joins `violations` on a fail.
+- Per batch: `speed_result_counts`, `crossing_speed_ms` / `crossing_ground_speed_ms`
+  spreads, `crossing_load_factor` (`mean/min/p95/max`, `below_1g` = rows whose lower
+  bound was clamped to the 1-g floor, `assumed_1g` = rows judged at a declared 1 g),
+  `methodology.terminal_speed` (criterion, formula, the load-factor rule and its sources,
+  subject scope, claim boundary — self-describing years later, like the vertical block).
+- An EMPTY window (`speed_lower_ms > speed_upper_ms`, n above ~1.25–1.40 on this fleet)
+  is a verdict, not an error: every speed fails and both bounds on the row show why
+  (`SpeedGateBounds.empty`). Measured n on the optimizer batches tops out at 1.37, so it
+  is reachable; it has not yet occurred.
+- Schema version v6 → v7 in **all four homes** (producer, ts seam, frontend mirror
+  `EVALUATION_REPORT_SCHEMA_VERSION`, fixtures via the constant). The ts seam
+  (`lateral_eligibility`) reads only `lateral_result`, which v6 and v7 share, so it
+  imports `READABLE_REPORT_SCHEMA_VERSIONS = (v6, v7)` and keeps accepting the v6
+  reports on disk; the frontend displays v6 with a "graded at 1 g" note and v5 as
+  pre-speed-gate. v5 → v6 (2026-08-24) had the same four-home discipline.
 
 ## 10. References
 

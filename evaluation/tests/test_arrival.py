@@ -69,40 +69,6 @@ def test_observed_record_consumes_serialized_event_and_converts_hae_to_msl():
     assert deviation.extrapolation_m == pytest.approx(325.0)
 
 
-def test_obsolete_hybrid_observed_method_is_rejected():
-    hybrid = observed_event()
-    hybrid["method"] = "direct_lateral_fitted_vertical"
-
-    with pytest.raises(ValueError, match="unsupported"):
-        arrival_deviation(
-            record_from_dict(trajectory_payload(subject="observed", event=hybrid)),
-            context=assessment_context(),
-        )
-
-
-@pytest.mark.parametrize(
-    "dropped",
-    [("method",), ("observability",), ("method", "observability")],
-    ids=["no-method", "no-observability", "neither"],
-)
-def test_estimated_event_missing_its_discriminators_is_rejected(dropped):
-    """Dropping BOTH is the case a bare ``.get(method) != observability`` misses.
-
-    ``None != None`` is False, so such an event validated clean and then fell through
-    to the censored branch -- graded as a real crossing on the strength of two absent
-    fields. Each single-field case already failed; only the pair did not.
-    """
-    event = observed_event()
-    for key in dropped:
-        del event[key]
-
-    with pytest.raises(ValueError, match="unsupported"):
-        arrival_deviation(
-            record_from_dict(trajectory_payload(subject="observed", event=event)),
-            context=assessment_context(),
-        )
-
-
 def test_observed_record_datum_offset_must_match_authoritative_context():
     value = trajectory_payload(subject="observed", event=observed_event())
     value["source"]["hae_minus_msl_m"] = 31.0
@@ -126,13 +92,12 @@ def test_unavailable_observed_event_is_indeterminate_input_not_a_refit_request()
     assert outcome.reason == "no assignment fit"
 
 
-@pytest.mark.parametrize("schema", ["observed-threshold-event-v7", None])
-def test_obsolete_or_missing_event_schema_requires_local_reclassification(schema):
+def test_the_event_contract_rejection_surfaces_through_arrival_unchanged():
+    """The payload schema is validated by the seam both packages share
+    (``final_approach.event_contract.validate_event``, tested there); evaluation only
+    has to let its verdict through. One case pins the seam."""
     legacy = observed_event()
-    if schema is None:
-        del legacy["schema_version"]
-    else:
-        legacy["schema_version"] = schema
+    legacy["schema_version"] = "observed-threshold-event-v7"
 
     with pytest.raises(ValueError, match="reclassify-existing"):
         arrival_deviation(

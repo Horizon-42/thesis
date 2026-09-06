@@ -9,10 +9,10 @@ from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, Sequence, TypeVar
 
-from evaluation.cli import add_context_args, contexts_from_args, contexts_from_roster
+from evaluation.cli import add_context_args, contexts_for_input
 from evaluation.context import ContextKey
 from evaluation.metrics import evaluate_batch
-from evaluation.records import TrajectoryRecord, iter_records, load_record, load_records
+from evaluation.records import TrajectoryRecord, iter_records, load_record
 from evaluation.reference import N_RESAMPLE, horizontal_arc_length_m, load_reference, resample_by_arc_length
 from evaluation.thresholds import AssessmentContext
 
@@ -28,48 +28,34 @@ def _positive_int(value: str) -> int:
 
 
 def build_payload(
-    records: Sequence[TrajectoryRecord],
-    *,
-    contexts: dict[ContextKey, AssessmentContext],
-    max_tracks: int = DEFAULT_MAX_TRACKS,
-) -> dict[str, Any]:
-    report = evaluate_batch(records, contexts=contexts)
-    drawable = [
-        record for record in records
-        if record.solved and horizontal_arc_length_m(record.states) > 0.0
-    ]
-    selected = _sample_evenly(drawable, max_tracks)
-    return {
-        "report": report,
-        "tracks": [_track_entry(record) for record in selected],
-        "tracksShown": len(selected),
-        "tracksTotal": len(drawable),
-    }
-
-
-def build_payload_streamed(
     input_path: str | Path,
     *,
     contexts: dict[ContextKey, AssessmentContext],
     max_tracks: int = DEFAULT_MAX_TRACKS,
 ) -> dict[str, Any]:
-    """:func:`build_payload` over a batch, in two passes and one record at a time.
+    """The report plus ``max_tracks`` overlays, in two passes and one record at a time.
 
     The report needs every record; the overlay needs only ``max_tracks`` of them. Holding
     the whole batch to draw 30 tracks costs ~1 MB per flight of resolved state, so pass one
     streams the metrics and remembers only which FILES were drawable, and pass two reloads
-    the sampled few.
+    the sampled few. There is no list-based variant: a second path that had to agree with
+    this one verdict for verdict was only ever exercised by tests.
     """
     report_records = _CountedStream(iter_records(input_path))
     report = evaluate_batch(report_records, contexts=contexts)
     drawable = report_records.drawable
-    selected = _sample_evenly(drawable, max_tracks) if drawable else []
+    selected = _sample_evenly(drawable, max_tracks)
     return {
         "report": report,
         "tracks": [_track_entry(load_record(file)) for file in selected],
         "tracksShown": len(selected),
         "tracksTotal": len(drawable),
     }
+
+
+def _drawable(record: TrajectoryRecord) -> bool:
+    """A solved record whose MEASURED path moved (an appended crossing row is not path)."""
+    return record.solved and horizontal_arc_length_m(record.measured_states) > 0.0
 
 
 class _CountedStream:
@@ -81,11 +67,7 @@ class _CountedStream:
 
     def __iter__(self) -> Iterator[TrajectoryRecord]:
         for record in self._records:
-            if (
-                record.path is not None
-                and record.solved
-                and horizontal_arc_length_m(record.states) > 0.0
-            ):
+            if record.path is not None and _drawable(record):
                 self.drawable.append(record.path)
             yield record
 
@@ -105,17 +87,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-tracks", type=_positive_int, default=DEFAULT_MAX_TRACKS)
     add_context_args(parser)
     args = parser.parse_args(argv)
-    contexts = contexts_from_roster(args.input, args)
-    if contexts is None:
-        records = load_records(args.input)
-        payload = build_payload(
-            records, contexts=contexts_from_args(records, args),
-            max_tracks=args.max_tracks,
-        )
-    else:
-        payload = build_payload_streamed(
-            args.input, contexts=contexts, max_tracks=args.max_tracks
-        )
+    payload = build_payload(
+        args.input, contexts=contexts_for_input(args.input, args), max_tracks=args.max_tracks
+    )
     out = Path(args.output)
     out.write_text(
         render_html(payload, title=args.title, source_label=str(args.input)),
@@ -131,7 +105,7 @@ def _sample_evenly(items: Sequence[T], count: int) -> list[T]:
     if count <= 0:
         raise ValueError("count must be greater than zero")
     if len(items) <= count:
-        return list(items)
+        return list(items)  # includes the empty batch
     step = (len(items) - 1) / (count - 1) if count > 1 else 0.0
     indices = sorted({round(index * step) for index in range(count)})
     return [items[index] for index in indices]
@@ -148,7 +122,9 @@ def _track_entry(record: TrajectoryRecord) -> dict[str, Any]:
         "flight_key": flight_key,
         "file": file_name,
         "label": label,
-        "trajectory": _polyline(resample_by_arc_length(record.states, N_RESAMPLE)),
+        # The MEASURED path: an observed record's appended fitted-crossing row is a
+        # modeling boundary, not flown trajectory (records.measured_states).
+        "trajectory": _polyline(resample_by_arc_length(record.measured_states, N_RESAMPLE)),
         "target": {
             "lat": record.target_state["lat"],
             "lon": record.target_state["lon"],
@@ -157,8 +133,10 @@ def _track_entry(record: TrajectoryRecord) -> dict[str, Any]:
     }
     if record.reference_file:
         reference = load_reference(record)
-        if horizontal_arc_length_m(reference.states) > 0.0:
-            entry["reference"] = _polyline(resample_by_arc_length(reference.states, N_RESAMPLE))
+        if _drawable(reference):
+            entry["reference"] = _polyline(
+                resample_by_arc_length(reference.measured_states, N_RESAMPLE)
+            )
     return entry
 
 
@@ -175,7 +153,7 @@ _TEMPLATE = """<!doctype html>
 <title>__TITLE__</title><script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 <style>body{font:14px system-ui;margin:0;background:#f5f7fa;color:#18212b}.wrap{max-width:1180px;margin:auto;padding:24px}h1{font-size:24px}.meta,.note{color:#667085}.cards{display:flex;gap:12px;flex-wrap:wrap}.card{background:white;padding:12px 18px;border-radius:9px;box-shadow:0 1px 3px #0001}.num{font-size:22px;font-weight:700}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.chart,table{background:white;border-radius:9px}table{width:100%;border-collapse:collapse}th,td{padding:7px;border-bottom:1px solid #eee;text-align:right}th:first-child,td:first-child{text-align:left}.scroll{overflow:auto;max-height:520px}@media(max-width:850px){.grid{grid-template-columns:1fr}}</style></head>
 <body><div class="wrap"><h1>__TITLE__</h1><div class="meta">input: __SOURCE__</div>
-<p class="note">Runway-threshold geometric verdict. Lateral is half the published runway width (did the crossing lie over the pavement) — not a navigation-containment bound. Vertical uses the published-TCH path and the 22 m RNAV/RNP terminal vertical bound. Speed (computed subjects only) uses the stall-anchored [1.23·Vs, 1.23·Vs + 20 kt] window at the record's crossing mass; observed records are never speed-graded. This is not touchdown or landing certification. Observed events reuse the producer-side threshold event, carry explicitly uncalibrated uncertainty, and are never refitted by evaluation.</p>
+<p class="note">Runway-threshold geometric verdict. Lateral is half the published runway width (did the crossing lie over the pavement) — not a navigation-containment bound. Vertical uses the published-TCH path and the 22 m RNAV/RNP terminal vertical bound. Speed uses the stall-anchored window [1.23·Vs(n), 1.23·Vs1g + 20 kt] at the record's crossing mass and load factor n: computed subjects are judged on the crossing model airspeed, observed baselines on the fitted crossing GROUND speed as a stated proxy (wind unmodelled; shown as GS) at a declared 1 g. This is not touchdown or landing certification. Observed events reuse the producer-side threshold event, carry explicitly uncalibrated uncertainty, and are never refitted by evaluation.</p>
 <div id="cards" class="cards"></div><h2>Terminal deviations</h2><div class="grid"><div id="lat" class="chart"></div><div id="vert" class="chart"></div></div>
 <h2>Track overlay</h2><div id="trackNote" class="note"></div><select id="selector"></select><div class="grid"><div id="plan" class="chart"></div><div id="profile" class="chart"></div></div>
 <h2>Per-trajectory verdicts</h2><div class="scroll"><table id="rows"></table></div></div>
@@ -186,7 +164,7 @@ Plotly.newPlot("lat",[{type:"bar",x:M.map(r=>r.file||r.id),y:M.map(r=>r.cross_tr
 Plotly.newPlot("vert",[{type:"bar",x:M.map(r=>r.file||r.id),y:M.map(r=>r.vertical_m),marker:{color:colors}}],{title:"Signed vertical deviation from published-TCH path (m)",margin:{b:90}},{displayModeBar:false});
 const sel=document.getElementById("selector");DATA.tracks.forEach((t,i)=>{const o=document.createElement("option");o.value=i;o.textContent=t.label;sel.appendChild(o)});document.getElementById("trackNote").textContent=`${DATA.tracksShown}/${DATA.tracksTotal} drawable tracks shown`;
 function draw(i){const t=DATA.tracks[i];if(!t)return;const plan=[],prof=[],f=t.trajectory.lat.map((_,k)=>k/(t.trajectory.lat.length-1));if(t.reference){plan.push({x:t.reference.lon,y:t.reference.lat,mode:"lines",name:"reference"});prof.push({x:f,y:t.reference.alt,mode:"lines",name:"reference"})}plan.push({x:t.trajectory.lon,y:t.trajectory.lat,mode:"lines",name:"trajectory"});prof.push({x:f,y:t.trajectory.alt,mode:"lines",name:"trajectory"});Plotly.react("plan",plan,{title:`Plan · ${t.label}`,xaxis:{title:"lon"},yaxis:{title:"lat",scaleanchor:"x"}},{displayModeBar:false});Plotly.react("profile",prof,{title:"Altitude by arc fraction",xaxis:{title:"arc fraction"},yaxis:{title:"m MSL"}},{displayModeBar:false})}sel.onchange=()=>draw(Number(sel.value));draw(0);
-document.getElementById("rows").innerHTML="<tr><th>flight identity</th><th>subject</th><th>benchmark</th><th>event</th><th>lateral</th><th>vertical</th><th>speed</th><th>overall</th><th>x (m)</th><th>z (m)</th><th>V (m/s)</th><th>reason</th></tr>"+ROWS.map(r=>`<tr><td>${esc(r.flight_key||r.file||r.id)}</td><td>${r.subject}</td><td>${r.benchmark}</td><td>${r.event_status}</td><td>${r.lateral_result}</td><td>${r.vertical_result}</td><td>${r.speed_result}</td><td>${r.verdict}</td><td>${r.cross_track_m==null?"—":r.cross_track_m.toFixed(2)}</td><td>${r.vertical_m==null?"—":r.vertical_m.toFixed(2)}</td><td>${r.deviation&&r.deviation.crossing_speed_ms!=null?r.deviation.crossing_speed_ms.toFixed(1):"—"}</td><td>${esc(r.reason)}</td></tr>`).join("");</script></body></html>"""
+document.getElementById("rows").innerHTML="<tr><th>flight identity</th><th>subject</th><th>benchmark</th><th>event</th><th>lateral</th><th>vertical</th><th>speed</th><th>overall</th><th>x (m)</th><th>z (m)</th><th>V (m/s)</th><th>n</th><th>reason</th></tr>"+ROWS.map(r=>`<tr><td>${esc(r.flight_key||r.file||r.id)}</td><td>${r.subject}</td><td>${r.benchmark}</td><td>${r.event_status}</td><td>${r.lateral_result}</td><td>${r.vertical_result}</td><td>${r.speed_result}</td><td>${r.verdict}</td><td>${r.cross_track_m==null?"—":r.cross_track_m.toFixed(2)}</td><td>${r.vertical_m==null?"—":r.vertical_m.toFixed(2)}</td><td>${r.deviation&&r.deviation.crossing_speed_ms!=null?r.deviation.crossing_speed_ms.toFixed(1):r.deviation&&r.deviation.crossing_ground_speed_ms!=null?r.deviation.crossing_ground_speed_ms.toFixed(1)+" GS":"—"}</td><td>${r.deviation?r.deviation.crossing_load_factor.toFixed(2)+(r.deviation.crossing_load_factor_source==="assumed_1g"?"*":""):"—"}</td><td>${esc(r.reason)}</td></tr>`).join("");</script></body></html>"""
 
 
 if __name__ == "__main__":

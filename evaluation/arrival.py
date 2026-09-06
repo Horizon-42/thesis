@@ -19,7 +19,7 @@ against the authoritative runway data.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from final_approach.crossing import (
@@ -30,14 +30,19 @@ from final_approach.crossing import (
 )
 from final_approach.event_contract import validate_event
 from final_approach.frame import RunwayFrame, TrackPoint
-
-# Every state channel a crossing interpolation blends; ψ is the one that wraps.
-_STATE_KEYS = ("t", "lat", "lon", "alt", "V", "psi", "gamma", "m")
-_ANGULAR_STATE_KEYS = ("psi",)
 from geokit import haversine_m
 
-from evaluation.records import TrajectoryRecord
+from evaluation.records import STATE_KEYS, TrajectoryRecord
+from evaluation.speed_gate import LOAD_FACTOR_ASSUMED_1G, LOAD_FACTOR_FROM_CONTROLS
 from evaluation.thresholds import AssessmentContext
+
+# Every state channel a crossing interpolation blends (the record contract's keys plus
+# the clock); ψ is the one that wraps.
+_TIMED_STATE_KEYS = ("t", *STATE_KEYS)
+_ANGULAR_STATE_KEYS = ("psi",)
+# The control column the speed gate reads (evaluation_export.CONTROL_DECIMALS names the
+# same three: thrust, bank_rad, load_factor).
+LOAD_FACTOR_KEY = "load_factor"
 
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
@@ -56,18 +61,25 @@ class ArrivalDeviation:
     speed_ms: float
     heading_rad: float
     flight_time_s: float
+    # Absolute state AT the graded event, for the speed gate. Mass is the crossing
+    # state's own on every subject (the observed record carries its resolved airframe's
+    # landing mass). The crossing AIRSPEED is the computed path's state V; it stays
+    # None on observed rows, whose V is ground-speed derived — the gate judges those on
+    # ``crossing_ground_speed_ms`` below as a stated proxy (speed_gate.OBSERVED_SPEED_POLICY).
+    crossing_mass_kg: float
+    # The load factor the crossing was flown at: the control active over the final
+    # rollout step when the record carries controls, else a declared 1 g — the
+    # ``source`` names which (speed_gate.LOAD_FACTOR_*). The gate's lower bound is the
+    # stall speed at this n (docs/THRESHOLD_SPEED_GATE.md section 3.5).
+    crossing_load_factor: float
+    crossing_load_factor_source: str
     extrapolation_m: float | None = None
-    # Absolute state AT the graded event, for the speed gate: the computed path fills
-    # both from the crossing state; observed leaves them None — the event estimators
-    # extrapolate POSITION only, so no observed crossing AIRSPEED or mass was measured
-    # (the ``speed_ms`` DEVIATION above already quotes the last sample for observed).
     crossing_speed_ms: float | None = None
-    crossing_mass_kg: float | None = None
     # The event's estimated GROUND speed at the crossing (ADS-B velocity source;
     # interpolated at a direct bracket, OLS-extrapolated for a censored fit). Observed
-    # subjects only; None on events serialized before 2026-08-24. AUDIT DATUM: wind is
-    # unmodelled, so it never feeds the stall-anchored airspeed gate and never
-    # composes into a verdict — it is reported, not judged.
+    # subjects only; None on events serialized before 2026-08-24, and the quantity the
+    # observed speed gate judges — under its own criterion id, because wind is
+    # unmodelled and it is not an airspeed.
     crossing_ground_speed_ms: float | None = None
 
     @property
@@ -142,6 +154,48 @@ def _require_target_agrees_with_runway_data(
         )
 
 
+def _authoritative_frame(
+    context: AssessmentContext, target: dict[str, float]
+) -> RunwayFrame:
+    """The runway frame every deviation is measured in: the CONTEXT's threshold.
+
+    Not one the artifact chose -- a record whose target is the fitted crossing of its
+    own flight would otherwise be graded against itself and score a near-zero deviation
+    by construction. The plane's elevation is the published LTP+TCH altitude, or the
+    target's when the context publishes none (vertical then grades indeterminate).
+    """
+    desired = context.desired_threshold_altitude_msl_m
+    return RunwayFrame(
+        ident=context.runway,
+        lat=context.threshold_lat,
+        lon=context.threshold_lon,
+        elevation_m=desired if desired is not None else float(target["alt"]),
+        course_deg=context.runway_course_deg,
+    )
+
+
+def _crossing_load_factor(record: TrajectoryRecord) -> tuple[float, str]:
+    """``(n, source)`` for the crossing: the control active over the final step.
+
+    The rollout writes on every sample the control that PRODUCED it
+    (``aerodynamic_model.rollout``), so ``controls[-1]`` is the one in force over the
+    last segment -- where both the terminal-state and the bracket-interpolated crossing
+    lie. A record with controls but no load-factor column is malformed (the control
+    contract is thrust / bank_rad / load_factor); a record with no controls at all
+    (observed baselines, state-output predictions) is judged at a declared 1 g.
+    """
+    if not record.controls:
+        return 1.0, LOAD_FACTOR_ASSUMED_1G
+    try:
+        return float(record.controls[-1][LOAD_FACTOR_KEY]), LOAD_FACTOR_FROM_CONTROLS
+    except KeyError:
+        raise ValueError(
+            f"record {record.path or record.source.get('id')!r} carries controls "
+            f"without a {LOAD_FACTOR_KEY!r} column; the speed gate cannot anchor on "
+            "the crossing load factor"
+        ) from None
+
+
 def _computed_arrival(
     record: TrajectoryRecord,
     context: AssessmentContext,
@@ -152,20 +206,7 @@ def _computed_arrival(
     target = record.target_state
     _require_target_agrees_with_runway_data(record, context)
     desired_altitude_msl_m = context.desired_threshold_altitude_msl_m
-    # Measured in the AUTHORITATIVE runway frame, not in one the artifact chose. A
-    # record whose target is the fitted crossing of its own flight would otherwise be
-    # graded against itself and score a near-zero deviation by construction.
-    frame = RunwayFrame(
-        ident=context.runway,
-        lat=context.threshold_lat,
-        lon=context.threshold_lon,
-        elevation_m=(
-            desired_altitude_msl_m
-            if desired_altitude_msl_m is not None
-            else float(target["alt"])
-        ),
-        course_deg=context.runway_course_deg,
-    )
+    frame = _authoritative_frame(context, target)
     final = record.states[-1]
     final_projected = frame.project(
         TrackPoint(final["lat"], final["lon"], final["alt"])
@@ -178,6 +219,7 @@ def _computed_arrival(
                 target,
                 frame,
                 desired_altitude_msl_m=desired_altitude_msl_m,
+                *_crossing_load_factor(record),
             ),
             "terminal_state",
         )
@@ -192,7 +234,7 @@ def _computed_arrival(
                 previous,
                 final,
                 bracket_fraction(previous_projected.along_m, final_projected.along_m),
-                keys=_STATE_KEYS,
+                keys=_TIMED_STATE_KEYS,
                 angular_keys=_ANGULAR_STATE_KEYS,
             )
             return ArrivalOutcome(
@@ -201,6 +243,7 @@ def _computed_arrival(
                     target,
                     frame,
                     desired_altitude_msl_m=desired_altitude_msl_m,
+                    *_crossing_load_factor(record),
                 ),
                 "interpolated_threshold",
             )
@@ -219,6 +262,8 @@ def _state_deviation(
     state: dict[str, float],
     target: dict[str, float],
     frame: RunwayFrame,
+    load_factor: float,
+    load_factor_source: str,
     *,
     desired_altitude_msl_m: float | None,
 ) -> ArrivalDeviation:
@@ -236,6 +281,8 @@ def _state_deviation(
         flight_time_s=state["t"],
         crossing_speed_ms=state["V"],
         crossing_mass_kg=state["m"],
+        crossing_load_factor=load_factor,
+        crossing_load_factor_source=load_factor_source,
     )
 
 
@@ -288,40 +335,29 @@ def _observed_arrival(
     target = record.target_state
     _require_target_agrees_with_runway_data(record, context)
     crossing = _marker_crossing(record.states, marker)
-    desired_altitude_msl_m = context.desired_threshold_altitude_msl_m
-    frame = RunwayFrame(
-        ident=context.runway,
-        lat=context.threshold_lat,
-        lon=context.threshold_lon,
-        elevation_m=(
-            desired_altitude_msl_m
-            if desired_altitude_msl_m is not None
-            else float(target["alt"])
-        ),
-        course_deg=context.runway_course_deg,
-    )
     deviation = _state_deviation(
         crossing,
         target,
-        frame,
-        desired_altitude_msl_m=desired_altitude_msl_m,
+        _authoritative_frame(context, target),
+        # An observed record carries no controls: the gate judges it at a declared 1 g
+        # (a censored crossing is a straight-line fit, and an ADS-B bracket's rates are
+        # quantisation noise -- docs/THRESHOLD_SPEED_GATE.md section 3.5).
+        1.0,
+        LOAD_FACTOR_ASSUMED_1G,
+        desired_altitude_msl_m=context.desired_threshold_altitude_msl_m,
     )
     return ArrivalOutcome(
-        ArrivalDeviation(
-            along_track_m=deviation.along_track_m,
-            cross_track_m=deviation.cross_track_m,
-            vertical_m=deviation.vertical_m,
-            speed_ms=deviation.speed_ms,
-            heading_rad=deviation.heading_rad,
+        replace(
+            deviation,
             # The flight time of the MEASURED trajectory (the record contract pins
             # final_time_s to the last measured row), not the estimated crossing
             # time an appended tail row carries.
             flight_time_s=float(record.final_time_s),
             extrapolation_m=event["extrapolation_distance_m"],
-            # No crossing AIRSPEED was measured (crossing_speed_ms stays None); the
-            # gate judges observed subjects on the GROUND speed below as a stated
+            # No crossing AIRSPEED was measured (the state's V is ground-speed derived);
+            # the gate judges observed subjects on the event's GROUND speed as a stated
             # proxy, anchored on the record's resolved-airframe crossing mass.
-            crossing_mass_kg=crossing["m"],
+            crossing_speed_ms=None,
             crossing_ground_speed_ms=event.get("crossing_ground_speed_m_s"),
         ),
         "estimated",
@@ -338,7 +374,7 @@ def _marker_crossing(
             left,
             states[marker["left_index"] + 1],
             float(marker["fraction"]),
-            keys=_STATE_KEYS,
+            keys=_TIMED_STATE_KEYS,
             angular_keys=_ANGULAR_STATE_KEYS,
         )
     return states[marker["start_index"]]

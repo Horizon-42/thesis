@@ -24,6 +24,9 @@ from evaluation.reference import (
 )
 from evaluation.speed_gate import (
     LANDING_AERO_KEY,
+    LOAD_FACTOR_ASSUMED_1G,
+    LOAD_FACTOR_FROM_CONTROLS,
+    MIN_BOUND_LOAD_FACTOR,
     MISSING_LANDING_AERO_REASON,
     OBSERVED_NO_CROSSING_SPEED_REASON,
     OBSERVED_SPEED_CRITERION_ID,
@@ -35,7 +38,7 @@ from evaluation.speed_gate import (
     SpeedGateBounds,
     speed_gate_bounds,
 )
-from evaluation.stats import magnitude_spread, signed_spread
+from evaluation.stats import magnitude_spread, percentile, signed_spread
 from evaluation.thresholds import (
     LATERAL_CRITERION_ID,
     RNAV_TERMINAL_VERTICAL_BOUND_M,
@@ -45,7 +48,12 @@ from evaluation.thresholds import (
     Verdict,
 )
 
-REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v6"
+REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v7"
+# Versions a consumer that reads only the fields v6 and v7 SHARE (the component
+# results, the geometry deviations) may accept. v7 changed the speed gate's lower bound
+# (anchored on the crossing load factor) and added the load-factor fields; lateral and
+# vertical verdicts are unchanged, which is all the ts lateral-eligibility seam reads.
+READABLE_REPORT_SCHEMA_VERSIONS = ("terminal-approach-evaluation-v6", REPORT_SCHEMA_VERSION)
 
 # The denominator every observed availability block is counted against. Evaluation
 # checks the LABEL, not the counts: the block is producer-owned audit output (the
@@ -131,7 +139,8 @@ METHODOLOGY: dict[str, Any] = {
     "terminal_speed": {
         "criterion": SPEED_CRITERION_ID,
         "bound_ms": (
-            "[1.23 x Vs1g(crossing mass), 1.23 x Vs1g + 20 kt] inclusive, per record"
+            "[1.23 x Vs(n), 1.23 x Vs1g + 20 kt] inclusive, per record; "
+            "Vs(n) = Vs1g x sqrt(max(n, 1)) at the crossing load factor n"
         ),
         "stall_model": (
             "Vs1g = sqrt(2 m g / (rho0 S Cl_max_landing)); ISA sea-level rho0, the "
@@ -140,6 +149,27 @@ METHODOLOGY: dict[str, Any] = {
         ),
         "vref_stall_multiplier": VREF_STALL_MULTIPLIER,
         "upper_additive_ms": SPEED_GATE_UPPER_ADDITIVE_MS,
+        "load_factor": {
+            "rule": (
+                "the LOWER bound is V_REF at the stall speed under the lift the crossing "
+                "manoeuvre demands (n m g), n clamped at "
+                f"{MIN_BOUND_LOAD_FACTOR:g}; the UPPER bound stays at 1 g because it is "
+                "an energy criterion, not a stall margin"
+            ),
+            "sources": {
+                LOAD_FACTOR_FROM_CONTROLS: (
+                    "controls[-1].load_factor -- the control active over the final "
+                    "rollout step, where the graded crossing lies (records with controls: "
+                    "optimizer solves, control-output predictions)"
+                ),
+                LOAD_FACTOR_ASSUMED_1G: (
+                    "declared 1 g for records without controls (observed baselines, "
+                    "state-output predictions); reported on the row, never inverted "
+                    "from ADS-B kinematics"
+                ),
+            },
+            "row_fields": ["crossing_load_factor", "crossing_load_factor_source"],
+        },
         "sources": [
             {
                 "document": "14 CFR 25.125(b)(2)(i)",
@@ -158,7 +188,7 @@ METHODOLOGY: dict[str, Any] = {
         ],
         "subjects": (
             "all subjects; optimized/predicted are judged on the crossing model "
-            "airspeed, and " + OBSERVED_SPEED_POLICY
+            "airspeed at the crossing load factor, and " + OBSERVED_SPEED_POLICY
         ),
         "observed_proxy_criterion": OBSERVED_SPEED_CRITERION_ID,
         "observed_proxy_caveat": (
@@ -172,8 +202,9 @@ METHODOLOGY: dict[str, Any] = {
             "200 m); not an operational or certification speed check"
         ),
     },
-    # Additive within v6 (2026-08-24). Descriptive only — the row/batch fields it
-    # describes carry a measured quantity, never a verdict component.
+    # Describes the observed rows' ``crossing_ground_speed_ms`` -- the quantity the
+    # observed speed gate judges (terminal_speed.subjects above), kept in its own field
+    # so it is never pooled with the computed subjects' airspeed.
     "observed_crossing_ground_speed": {
         "source": (
             "harvest threshold event `crossing_ground_speed_m_s`: ADS-B reported "
@@ -182,13 +213,15 @@ METHODOLOGY: dict[str, Any] = {
         ),
         "reference": "ground-referenced; wind is unmodelled",
         "use": (
-            "audit statistic on observed subjects only; never composed into any "
-            "verdict and never an input to the stall-anchored airspeed gate"
+            "observed subjects only: the quantity their speed gate judges, as a stated "
+            "proxy for airspeed under criterion " + OBSERVED_SPEED_CRITERION_ID + "; "
+            "the batch spread is reported separately from crossing_speed_ms and the "
+            "two are never compared as one quantity"
         ),
         "availability": (
             "rows whose serialized event carries the field; events written before "
             "2026-08-24, and censored fits without enough speed-bearing samples, "
-            "report null"
+            "report null and grade speed indeterminate"
         ),
     },
     "reference_comparison": {
@@ -220,8 +253,12 @@ class TrajectoryEvaluation:
     lateral_bound_m: float
     vertical_lower_bound_m: float | None
     vertical_upper_bound_m: float | None
-    # Per-record (mass-anchored), unlike the two context-owned bounds above; None when
-    # the record was not speed-gradable (unsolved, observed, or no landing_aero block).
+    # Which quantity the speed gate judged (the criterion id serialized with the
+    # bounds): the model airspeed, or the observed ground-speed proxy.
+    speed_criterion: str
+    # Per-record (mass- and load-factor-anchored), unlike the two context-owned bounds
+    # above; None when no window could be resolved (unsolved, no crossing, no
+    # landing_aero block, or an observed event without a fitted speed).
     speed_bounds: SpeedGateBounds | None = None
     flight_key: str | None = None
 
@@ -239,15 +276,10 @@ def _component(
 def _composite(
     lateral: ComponentResult,
     vertical: ComponentResult,
-    speed: ComponentResult | None,
+    speed: ComponentResult,
 ) -> Verdict:
-    """Compose the components that are IN SCOPE for this record.
-
-    ``speed`` is ``None`` for observed subjects — the gate is out of scope there (no
-    crossing airspeed was measured; see ``speed_gate.OBSERVED_SPEED_POLICY``), which is
-    different from an in-scope component that came back ``indeterminate``.
-    """
-    components = (lateral, vertical) if speed is None else (lateral, vertical, speed)
+    """Three components, every subject: one fail fails, all pass passes, else open."""
+    components = (lateral, vertical, speed)
     if "fail" in components:
         return "fail"
     if all(component == "pass" for component in components):
@@ -278,6 +310,9 @@ def evaluate_record(
         lateral_bound_m=limits.lateral_m,
         vertical_lower_bound_m=limits.vertical_lower_m,
         vertical_upper_bound_m=limits.vertical_upper_m,
+        speed_criterion=(
+            OBSERVED_SPEED_CRITERION_ID if subject == "observed" else SPEED_CRITERION_ID
+        ),
         flight_key=record.source.get("flight_key"),
     )
     if not record.solved:
@@ -317,56 +352,56 @@ def evaluate_record(
     # proxy criterion id and METHODOLOGY["terminal_speed"], never silently equated
     # with airspeed). Absent/null landing_aero reads "unspecified" and grades
     # indeterminate; a PRESENT malformed block raises in speed_gate_bounds.
-    speed_in_scope: ComponentResult | None = None
     speed_bounds: SpeedGateBounds | None = None
     speed_reason: str | None = None
     landing_aero = record.source.get(LANDING_AERO_KEY)
-    if subject != "observed":
-        if landing_aero is None:
-            speed_in_scope = "indeterminate"
-            speed_reason = MISSING_LANDING_AERO_REASON
-        else:
-            speed_bounds = speed_gate_bounds(deviation.crossing_mass_kg, landing_aero)
-            speed_in_scope = _component(
-                deviation.crossing_speed_ms, speed_bounds.lower_ms, speed_bounds.upper_ms
-            )
+    judged_speed = (
+        deviation.crossing_ground_speed_ms
+        if subject == "observed"
+        else deviation.crossing_speed_ms
+    )
+    if landing_aero is None:
+        speed_result: ComponentResult = "indeterminate"
+        speed_reason = (
+            OBSERVED_UNRESOLVED_AIRFRAME_REASON
+            if subject == "observed"
+            else MISSING_LANDING_AERO_REASON
+        )
+    elif judged_speed is None:
+        # Only an observed event can lack its speed: a computed crossing always has a
+        # state V (``arrival._state_deviation``).
+        speed_result = "indeterminate"
+        speed_reason = OBSERVED_NO_CROSSING_SPEED_REASON
     else:
-        if landing_aero is None:
-            speed_in_scope = "indeterminate"
-            speed_reason = OBSERVED_UNRESOLVED_AIRFRAME_REASON
-        elif deviation.crossing_ground_speed_ms is None:
-            speed_in_scope = "indeterminate"
-            speed_reason = OBSERVED_NO_CROSSING_SPEED_REASON
-        else:
-            speed_bounds = speed_gate_bounds(deviation.crossing_mass_kg, landing_aero)
-            speed_in_scope = _component(
-                deviation.crossing_ground_speed_ms,
-                speed_bounds.lower_ms,
-                speed_bounds.upper_ms,
-            )
-    verdict = _composite(lateral_result, vertical_result, speed_in_scope)
+        speed_bounds = speed_gate_bounds(
+            deviation.crossing_mass_kg,
+            landing_aero,
+            load_factor=deviation.crossing_load_factor,
+        )
+        speed_result = _component(judged_speed, speed_bounds.lower_ms, speed_bounds.upper_ms)
+    verdict = _composite(lateral_result, vertical_result, speed_result)
     violations: list[str] = []
     if lateral_result == "fail":
         violations.append("lateral")
     if vertical_result == "fail":
         violations.append("vertical")
-    if speed_in_scope == "fail":
+    if speed_result == "fail":
         violations.append("speed")
     # Lateral is always decidable once a crossing was measured -- a runway always has
     # a width -- so an indeterminate composite means a missing vertical reference, a
-    # missing landing_aero block, or both; name every one that applies.
+    # missing speed window, or both; name every one that applies.
     reason = None
     if verdict == "indeterminate":
         parts = []
         if vertical_result == "indeterminate":
             parts.append(limits.vertical_reason or "vertical bound or estimate unavailable")
-        if speed_in_scope == "indeterminate" and speed_reason is not None:
+        if speed_reason is not None:
             parts.append(speed_reason)
         reason = "; ".join(parts) or None
     return TrajectoryEvaluation(
         **common, solved=True, success=verdict == "pass", verdict=verdict,
         lateral_result=lateral_result, vertical_result=vertical_result,
-        speed_result=speed_in_scope if speed_in_scope is not None else "indeterminate",
+        speed_result=speed_result,
         speed_bounds=speed_bounds,
         deviation=deviation, event_status=outcome.event_status,
         violations=tuple(violations), reason=reason,
@@ -387,10 +422,23 @@ def evaluate_batch(
     rows: list[dict[str, Any]] = []
     comparisons: list[ReferenceComparison] = []
     used: dict[ContextKey, AssessmentContext] = {}
+    # The availability block belongs to an observed-only batch; its label is checked
+    # before the first record and its subject claim at the first record that breaks
+    # it -- not after a stream of tens of thousands has been consumed.
+    observed = (
+        _observed_availability(observed_availability)
+        if observed_availability is not None
+        else None
+    )
     for record in records:
         context = resolve_context(record, contexts)
         used[(context.airport, context.runway)] = context
         evaluation = evaluate_record(record, context=context)
+        if observed is not None and evaluation.subject != "observed":
+            raise ValueError(
+                "observed_availability can be attached only to an observed-only batch; "
+                f"record {evaluation.record_id!r} is {evaluation.subject!r}"
+            )
         evaluations.append(evaluation)
         row = _row(evaluation)
         if evaluation.subject == "observed":
@@ -412,15 +460,16 @@ def evaluate_batch(
                 "start_gap_m": span.start_gap_m,
                 "end_gap_m": span.end_gap_m,
             }
-            # ``comparable`` already implies both paths are non-empty; what it does
-            # not imply is that either MOVED, and an arc-length resample of a
-            # stationary path has nothing to parametrize by.
+            # ``comparable`` already implies both MEASURED paths are non-empty; what it
+            # does not imply is that either MOVED, and an arc-length resample of a
+            # stationary path has nothing to parametrize by. The guard walks the same
+            # measured lists the comparison resamples.
             if (
                 span.comparable
-                and horizontal_arc_length_m(record.states) > 0.0
-                and horizontal_arc_length_m(reference.states) > 0.0
+                and horizontal_arc_length_m(record.measured_states) > 0.0
+                and horizontal_arc_length_m(reference.measured_states) > 0.0
             ):
-                comparison = compare_to_reference(record, reference)
+                comparison = compare_to_reference(record, reference, span=span)
                 comparisons.append(comparison)
                 block.update(
                     reference_flight_time_s=comparison.reference_flight_time_s,
@@ -445,10 +494,6 @@ def evaluate_batch(
         for key in ("pass", "fail", "indeterminate")
     }
     subjects = {item.subject for item in evaluations}
-    if observed_availability is not None and subjects != {"observed"}:
-        raise ValueError(
-            "observed_availability can be attached only to an observed-only batch"
-        )
     total = len(evaluations)
     times = [item.deviation.flight_time_s for item in measured]
     return {
@@ -458,12 +503,13 @@ def evaluate_batch(
             {**context.to_dict(), "resolved_limits": context.limits().to_dict()}
             for _key, context in sorted(used.items())
         ],
-        "subject": sorted(subjects)[0] if len(subjects) == 1 else "mixed",
-        **(
-            {"observed": _observed_availability(observed_availability)}
-            if observed_availability is not None
-            else {}
+        # One subject names itself; several are "mixed"; none is "empty" -- a filtered
+        # stream that came up empty must not read as two subjects having been present.
+        "subject": (
+            sorted(subjects)[0] if len(subjects) == 1
+            else "mixed" if subjects else "empty"
         ),
+        **({"observed": observed} if observed is not None else {}),
         "total": total,
         "measured": len(measured),
         "solved": len(solved),
@@ -485,19 +531,42 @@ def evaluate_batch(
             for item in measured
             if item.deviation.crossing_speed_ms is not None
         ]),
-        # Additive within v6 (2026-08-24): spread of the events' audit-only ADS-B
-        # ground speeds (observed subjects; see METHODOLOGY
-        # ["observed_crossing_ground_speed"]). Null when no row carries one.
+        # The observed rows' graded ground-speed proxy (METHODOLOGY
+        # ["observed_crossing_ground_speed"]); null when no row carries one. Kept apart
+        # from crossing_speed_ms: two quantities, two spreads.
         "crossing_ground_speed_ms": magnitude_spread([
             item.deviation.crossing_ground_speed_ms
             for item in measured
             if item.deviation.crossing_ground_speed_ms is not None
         ]),
+        # The load factor the crossings were flown at: the spread, how many sat below
+        # 1 g (their lower bound was clamped to the 1-g floor), and how many were a
+        # declared 1 g rather than a measured one. Null for an empty batch.
+        "crossing_load_factor": _load_factor_aggregate(measured),
         "final_time_s": (
             {"mean": fmean(times), "min": min(times), "max": max(times)} if times else None
         ),
         "reference": _reference_aggregate(comparisons),
         "trajectories": rows,
+    }
+
+
+def _load_factor_aggregate(
+    measured: list[TrajectoryEvaluation],
+) -> dict[str, float | int] | None:
+    values = [item.deviation.crossing_load_factor for item in measured]
+    if not values:
+        return None
+    return {
+        "mean": fmean(values),
+        "min": min(values),
+        "p95": percentile(values, 0.95),
+        "max": max(values),
+        "below_1g": sum(value < MIN_BOUND_LOAD_FACTOR for value in values),
+        "assumed_1g": sum(
+            item.deviation.crossing_load_factor_source == LOAD_FACTOR_ASSUMED_1G
+            for item in measured
+        ),
     }
 
 
@@ -560,19 +629,12 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             "vertical_lower_m": item.vertical_lower_bound_m,
             "vertical_upper_m": item.vertical_upper_bound_m,
             **(
-                item.speed_bounds.to_dict(
-                    OBSERVED_SPEED_CRITERION_ID
-                    if item.subject == "observed"
-                    else SPEED_CRITERION_ID
-                )
+                item.speed_bounds.to_dict(item.speed_criterion)
                 if item.speed_bounds is not None
                 else {
-                    "speed_criterion": (
-                        OBSERVED_SPEED_CRITERION_ID
-                        if item.subject == "observed"
-                        else SPEED_CRITERION_ID
-                    ),
+                    "speed_criterion": item.speed_criterion,
                     "stall_speed_ms": None,
+                    "stall_speed_at_n_ms": None,
                     "speed_lower_ms": None,
                     "speed_upper_ms": None,
                 }
@@ -588,6 +650,8 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             "speed_ms": deviation.speed_ms,
             "crossing_speed_ms": deviation.crossing_speed_ms,
             "crossing_mass_kg": deviation.crossing_mass_kg,
+            "crossing_load_factor": deviation.crossing_load_factor,
+            "crossing_load_factor_source": deviation.crossing_load_factor_source,
             "crossing_ground_speed_ms": deviation.crossing_ground_speed_ms,
             "heading_rad": deviation.heading_rad,
             "final_time_s": deviation.flight_time_s,
@@ -600,8 +664,8 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
         # Keep common descriptive columns flat for simple report consumers. The two
         # crossing speeds are flat too (the frontend's verdict table reads them here):
         # ``crossing_speed_ms`` is the gate-graded model airspeed (computed subjects),
-        # ``crossing_ground_speed_ms`` the event's audit-only ADS-B ground speed
-        # (observed subjects) — different physical quantities, never merged.
+        # ``crossing_ground_speed_ms`` the gate-graded ground-speed proxy (observed
+        # subjects) — different physical quantities, never merged.
         row.update(
             lateral_m=deviation.lateral_m,
             cross_track_m=deviation.cross_track_m,
@@ -610,6 +674,8 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             speed_ms=deviation.speed_ms,
             crossing_speed_ms=deviation.crossing_speed_ms,
             crossing_ground_speed_ms=deviation.crossing_ground_speed_ms,
+            crossing_load_factor=deviation.crossing_load_factor,
+            crossing_load_factor_source=deviation.crossing_load_factor_source,
             heading_rad=deviation.heading_rad,
             final_time_s=deviation.flight_time_s,
         )

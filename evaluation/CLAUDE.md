@@ -2,7 +2,7 @@
 
 `geokit` + stdlib + the (stdlib-only) `aircraft` parameter package. Judges records against
 published approach geometry; the harvest (`final_approach`) decides *which* runway, this
-tree decides *how good*. Report schema: `terminal-approach-evaluation-v6`.
+tree decides *how good*. Report schema: `terminal-approach-evaluation-v7`.
 
 ## Gates & batch metrics (`evaluation/thresholds.py`, `evaluation/speed_gate.py`)
 
@@ -11,15 +11,26 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v6`.
   It is a LANDING-GEOMETRY claim — did the crossing lie over the pavement — NOT a
   navigation-containment one; `METHODOLOGY["terminal_lateral"]` states that inside every report.
 - **Vertical ∈ [−22, +22] m** from the published LTP+TCH path (ICAO Doc 9613 Vol II Pt C Ch5
-  §5.3.4.4.7, RNP APCH Baro-VNAV FAS), available for LPV always and for LNAV/VNAV only with
-  approved Baro-VNAV + a published reference. Gates judge the TRUE-dynamics rollout's final state.
-- **Speed ∈ [1.23·Vs1g, 1.23·Vs1g + 20 kt] at the crossing, per record** (v6;
-  `evaluation/speed_gate.py`, design + sources in `docs/THRESHOLD_SPEED_GATE.md`).
-  Vs1g = the project stall model at the record's crossing mass
-  (`aircraft.aero_params.stall_speed_ms` — the SAME function as the optimizer's velocity
-  floor); S/Cl_max from producer-written `source.landing_aero`
-  (`flight_scenarios.build_scenario`). 1.23 = 14 CFR 25.125(b)(2)(i); +20 kt = FSF ALAR
-  BN 7.1. **Composed into the verdict for ALL subjects (owner decision 2026-08-24,
+  §5.3.4.4.7, RNP APCH Baro-VNAV FAS), available for LPV always and for the LNAV/VNAV benchmark
+  when the runway's own RNAV (GPS) approach publishes LNAV/VNAV minima AND a runway-leg path
+  (`Runway.baro_vnav_minima`, `tch_source == "faa_cifp_approach_leg"` — KRDU 32 at 3.50°,
+  KSMF 35R; `assessment_for_runway` derives `baro_vnav_approved` from that, there is no
+  caller flag). A runway with no RNAV procedure at all (KRDU 14) keeps lateral and grades
+  vertical indeterminate with `procedure_source == "no_published_vertical_guidance"`. Gates
+  judge the TRUE-dynamics rollout's final state.
+- **Speed ∈ [1.23·Vs(n), 1.23·Vs1g + 20 kt] at the crossing, per record** (v7;
+  `evaluation/speed_gate.py`, design + sources + the measured load-factor distribution in
+  `docs/THRESHOLD_SPEED_GATE.md` §3.5). Vs1g = the project stall model at the record's
+  crossing mass (`aircraft.aero_params.stall_speed_ms` — the SAME function as the
+  optimizer's velocity floor); **Vs(n) = Vs1g·√max(n, 1) at the crossing LOAD FACTOR**,
+  read from `controls[-1].load_factor` (the control active over the final rollout step)
+  and declared 1 g (`crossing_load_factor_source == "assumed_1g"`) on records without
+  controls — observed baselines and state-output predictions. Only the lower edge moves
+  with n: the +20 kt edge is an energy criterion defined at 1 g, and scaling it too only
+  flipped records piled against it (measured, §3.5). S/Cl_max from producer-written
+  `source.landing_aero` (`flight_scenarios.build_scenario`). 1.23 = 14 CFR
+  25.125(b)(2)(i); +20 kt = FSF ALAR BN 7.1. **Composed into the verdict for ALL
+  subjects (owner decision 2026-08-24,
   superseding the original observed exclusion).** Computed subjects are judged on
   the crossing model airspeed (`crossing_speed_ms`); observed baselines on the
   fitted crossing GROUND speed (`crossing_ground_speed_ms`) as a STATED PROXY —
@@ -153,16 +164,19 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v6`.
 
 - **`load_records` resolves each `states_ref` into the full state list, and a batch is now
   tens of thousands of flights.** Measured 0.5 MB retained per record → ~7 GB on an uncapped
-  KRDU batch. `summary_row` already carries `arr_airport`, so `contexts_from_roster` resolves
-  the assessment contexts from `summary.json` alone and `iter_records` streams the records
-  past `evaluate_batch` one at a time; everything `evaluate_batch` retains
+  KRDU batch. The roster names the airport (`summary_row` per row as `arr_airport`; the
+  harvest's observed roster once, as `summary["airport"]`), so `cli.contexts_for_input`
+  resolves the assessment contexts from `summary.json` alone and `iter_records` streams the
+  records past `evaluate_batch` one at a time; everything `evaluate_batch` retains
   (`TrajectoryEvaluation`, rows, comparisons) is per-flight metadata, not trajectory arrays.
+  A roster row that cannot be placed RAISES — the old fallback silently materialized the
+  whole batch instead.
 - `evaluation.visualize` needs random access for its `--max-tracks` overlays, so it does the
   same in TWO passes: pass one streams the metrics and remembers only which FILES were
   drawable, pass two reloads the sampled few. Verdicts are identical either way (A/B pinned
   at 48/48, 44 pass) — if they ever differ, the streaming path is wrong, not the report.
-- `load_records` is kept for callers that genuinely need the list; prefer `record_files` +
-  `iter_records`.
+- `load_records` is `list(iter_records())`, kept for tests; nothing in the pipeline holds a
+  batch. `visualize.build_payload` is the streaming builder (there is no list variant).
 
 ## Records are written at a declared precision, and the boundary states are not
 

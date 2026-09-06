@@ -18,7 +18,10 @@ from typing import Any
 # in the producer alone and left this seam rejecting every report the pipeline produced.
 # This is the seam that is ALLOWED to know evaluation policy (see the docstring above);
 # the model, loss, and loader code still must not import it.
-from evaluation.metrics import REPORT_SCHEMA_VERSION as EVALUATION_REPORT_SCHEMA
+from evaluation.metrics import (
+    READABLE_REPORT_SCHEMA_VERSIONS,
+    REPORT_SCHEMA_VERSION as EVALUATION_REPORT_SCHEMA,
+)
 
 LATERAL_PASS_ROSTER_SCHEMA = "ts-lateral-pass-eligibility-v1"
 LATERAL_PASS_POLICY = "evaluation.lateral_result == pass"
@@ -69,7 +72,10 @@ def build_lateral_pass_roster(
     airport = str(manifest.get("airport") or "").strip().upper()
     if not airport:
         raise ValueError(f"{manifest_path} does not declare an airport")
-    if report.get("schema_version") != EVALUATION_REPORT_SCHEMA:
+    # This seam reads lateral_result only, which every readable version shares; the
+    # evaluator says which versions those are (v6 reports on disk stay usable after the
+    # v7 speed-gate change).
+    if report.get("schema_version") not in READABLE_REPORT_SCHEMA_VERSIONS:
         raise ValueError(f"{report_path} has the wrong evaluation schema")
     if report.get("subject") != "observed":
         raise ValueError(f"{report_path} is not an observed evaluation report")

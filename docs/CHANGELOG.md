@@ -4,6 +4,58 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — evaluation review: load-factor speed gate (v7), LNAV/VNAV runways wired, one read path
+
+Branch `dev-evaluation-review-fixes`; plan + status table
+`evaluation/docs/2026-09-07_review_fix_plan.zh.md`. Four milestones, each opus-reviewed.
+
+- **Speed gate anchors on the crossing load factor (report schema v6 → v7).** The gate
+  used the 1-g stall speed regardless of what the aircraft was doing; the model's own
+  dynamics fly `n` and its stall drag already uses `n·m·g`. Now `lower = 1.23·Vs1g·√max(n,1)`,
+  `upper = 1.23·Vs1g + 20 kt` (an energy criterion, stays at 1 g); `n` =
+  `controls[-1].load_factor` (the control active over the final rollout step) or a declared
+  1 g on records without controls (`crossing_load_factor_source`). Measured on the optimizer
+  batches: median n 1.01, tail to 1.37 (+17 % stall speed); scaling both edges would have
+  flipped 4–227 verdicts per batch, all records piled against the upper edge, the lower-only
+  rule 0–20 (`THRESHOLD_SPEED_GATE.md` §3.5). `aircraft.aero_params.stall_speed_ms` gained
+  `load_factor=1.0`; the optimizer floor is unchanged. Four version homes moved together; the
+  ts seam imports `READABLE_REPORT_SCHEMA_VERSIONS = (v6, v7)` since it reads only
+  `lateral_result`, and the frontend shows v6 as "graded at 1 g" (`isPriorSpeedGateReport`).
+- **Every v6 report contradicted itself**: `methodology.observed_crossing_ground_speed.use`
+  still said the ground speed was "never composed into any verdict" beside the
+  `terminal_speed` block that grades it (owner decision 2026-08-24); the HTML report note said
+  "observed records are never speed-graded" and its V column showed "—" for observed rows;
+  the frontend tooltips said "audit only, not graded". All say the same thing now, and a test
+  pins the two methodology blocks to each other.
+- **LNAV/VNAV runways are evaluated.** KRDU 32 (1,604 arrivals) and KSMF 35R (259) have no
+  LPV Path Point but publish LNAV/VNAV minima: `harvest/cifp.read_approach_verticals` decodes
+  the RNAV (GPS) procedure's runway leg (3.50°/470 ft − 425 ft = 45 ft; 3.00°/64 ft), pinned
+  per airport against the Path Points (all 23 LPV runways within 0.8 ft). `Runway` gained
+  `tch_source` / `baro_vnav_minima` (not in the frame fingerprint — all 26 frame fingerprints
+  and the 23 LPV context fingerprints are pinned unchanged by
+  `test_approach_verticals.py`); `assessment_for_runway` derives `baro_vnav_approved` from
+  the runway, no caller flag. KRDU 14 (13 arrivals, no procedure) stays excluded. The
+  previously inert `rnp_apch_lnav_vnav_baro` branch is now reachable. **Nothing on disk
+  changed**: re-running the harvest grows the arrivals rosters (KRDU +1,617, KSMF +259) and
+  every ts split — do it between campaigns.
+- **One read path.** `roster_context_keys` no longer falls back to materializing the whole
+  batch (~1 MB/flight on a 16 GB box) when a roster row lacks `arr_airport`; it raises.
+  `visualize.build_payload` is the streaming builder (the list variant and
+  `contexts_from_args` are gone); records validate `arr_airport`, `runway`,
+  `hae_minus_msl_m`, `landing_aero` shape and a strictly increasing `t` at the boundary
+  (followups #7–#10 closed); the reference guard walks `measured_states` like the comparison.
+- **Found, not fixed here**: all 70,267 optimizer records on disk predate `landing_aero`
+  and grade speed-indeterminate (three-gate pass = 0) — `4dTrajectory/optimization/
+  backfill_landing_aero.py` adds the block through the producer's own chain without
+  re-solving; run it and regenerate the reports when the GPU campaign is over. The root
+  `CLAUDE.md` open item claiming "no SOLVES on disk" was stale and is corrected.
+- Tests: fixtures import the constants they used to restate; negative pins on retired
+  wording replaced by positive pins on the current policy; `validate_event` cases moved to
+  `final_approach/tests/test_event_contract.py`; new coverage for the streaming payload,
+  roster errors, composite precedence, interpolated-crossing mass, the empty batch. Docs:
+  `BUG_FIX_GUIDE.md` and the v4 `FAILURE_REASON_ANALYSIS.html` archived under
+  `evaluation/docs/archive/`; `THRESHOLD_SPEED_GATE.md` §2 working notes replaced by §3.5.
+
 ### 2026-09-07 — Package audit T0: eight zero-risk cleanups, reviewed
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §二. One control

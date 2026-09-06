@@ -1,7 +1,9 @@
 # RNAV terminal-approach verdict standard
 
 Status: implemented by `evaluation`, report schema
-`terminal-approach-evaluation-v5`.
+`terminal-approach-evaluation-v7` (v6 added the stall-anchored crossing-speed gate,
+`THRESHOLD_SPEED_GATE.md`; v7 anchors its lower bound on the crossing load factor).
+This document is the lateral/vertical standard; the speed gate has its own.
 
 This document defines the small, project-wide terminal-geometry check used for
 observed, optimized, and predicted trajectories. It is deliberately not an
@@ -152,10 +154,16 @@ vertical pass iff -B_vertical <= z <= +B_vertical
 
 The boundary is inclusive. `22.0001 m` fails; exactly `22 m` passes.
 
-The LNAV/VNAV fallback is selected only when `baro_vnav_approved` is true and
-an authoritative threshold-path reference is available. Otherwise its lateral
-component may be evaluated, while vertical and composite results are
-`indeterminate`.
+The LNAV/VNAV benchmark is selected for a runway with no LPV Path Point. Its
+vertical rule applies when the runway's own RNAV (GPS) approach publishes an
+LNAV/VNAV (Baro-VNAV) line of minima together with a runway-leg vertical path:
+the final leg's coded vertical angle and runway-crossing altitude, decoded from
+the same CIFP file and pinned against the Path Points (`harvest/cifp.py`,
+`read_approach_verticals`). The context's `baro_vnav_approved` is derived from
+those published facts, never supplied by a caller. On this fleet: KRDU 32
+(3.50°, TCH 45 ft) and KSMF 35R (3.00°, TCH 64 ft). A runway with no RNAV
+procedure at all (KRDU 14) has its lateral component evaluated while vertical
+and composite results are `indeterminate`.
 
 ### 3.5 Composite verdict
 
@@ -251,7 +259,7 @@ the evaluator must not tune the bound airport by airport.
 
 ## 6. Report and reproducibility contract
 
-Schema `terminal-approach-evaluation-v5` serializes:
+Schema `terminal-approach-evaluation-v7` serializes (speed-gate fields: `THRESHOLD_SPEED_GATE.md` §9):
 
 - the threshold event method and provenance;
 - runway and procedure source cycles and fingerprints;
@@ -294,6 +302,6 @@ Implementation acceptance requires:
 4. observed evaluation consumes the serialized event and never refits;
 5. unavailable observed events remain `indeterminate`;
 6. non-finite values are rejected;
-7. reports use schema `terminal-approach-evaluation-v5` and contain the
+7. reports use schema `terminal-approach-evaluation-v7` and contain the
    source/claim-boundary metadata for both components; and
 8. the frontend preserves `pass`, `fail`, and `indeterminate` distinctly.
