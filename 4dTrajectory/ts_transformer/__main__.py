@@ -115,13 +115,18 @@ COMMANDS: dict[str, tuple[str, AddArguments, RunCommand]] = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    # allow_abbrev=False everywhere, top parser and every subparser: with it on, argparse
+    # accepts any unambiguous PREFIX, so the fifteen flags renamed in T3-19 kept working
+    # under their old spellings (`--dt` is a prefix of `--dt-s`) and a stale command line
+    # would have set the field it looks like it sets while reading as up to date.
     parser = argparse.ArgumentParser(
         prog="ts_transformer",
         description="Learned 4D trajectory prediction (iTransformer / PatchTST)",
+        allow_abbrev=False,
     )
     sub = parser.add_subparsers(dest="command", required=True)
     for name, (help_text, add_cli_arguments, _run) in COMMANDS.items():
-        add_cli_arguments(sub.add_parser(name, help=help_text))
+        add_cli_arguments(sub.add_parser(name, help=help_text, allow_abbrev=False))
 
     args = parser.parse_args(argv)
     return COMMANDS[args.command][2](args, parser, argv)

@@ -192,8 +192,10 @@ _TEACHER_OVERRIDES = {
 
 def basis_config(config_dict: dict, n_segments: int, device: str) -> TSConfig:
     """The reference arm's data contract at width ``n_segments``."""
-    known = {field.name for field in fields(TSConfig)}
-    payload = {name: value for name, value in config_dict.items() if name in known}
+    # `from_dict`, not a local field whitelist: the whitelist silently dropped whatever the
+    # contract had retired, so a stored value that WAS read (a measured-constant field)
+    # would have been swallowed here instead of refused.
+    payload = TSConfig.from_dict(config_dict).to_dict()
     payload.update(_RECIPE_OVERRIDES)
     payload["n_segments"] = int(n_segments)
     payload["device"] = device

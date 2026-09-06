@@ -33,6 +33,8 @@ from config import (
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_OBJECTIVES,
     COORDINATE_FRAMES,
+    RETIRED_CONSTANT_FIELDS,
+    RETIRED_SERIALIZED_FIELDS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     INTENT_CONDITIONINGS,
@@ -573,9 +575,22 @@ def config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser) 
             loaded = json.loads(Path(args.config_overrides).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             parser.error(f"cannot read --config-overrides: {exc}")
+        if not isinstance(loaded, dict):
+            parser.error("--config-overrides must be a JSON object of TSConfig fields")
         allowed = {field.name for field in fields(TSConfig)}
-        if not isinstance(loaded, dict) or any(key not in allowed for key in loaded):
-            parser.error("--config-overrides must be a JSON object containing TSConfig fields")
+        unknown = sorted(key for key in loaded if key not in allowed)
+        if unknown:
+            retired = [key for key in unknown
+                       if key in RETIRED_SERIALIZED_FIELDS or key in RETIRED_CONSTANT_FIELDS]
+            why = (
+                f" ({', '.join(retired)} was retired from the contract; a stored config may "
+                "still carry it, a new run may not set it)"
+                if retired else ""
+            )
+            parser.error(
+                f"--config-overrides names {len(unknown)} field(s) TSConfig does not have: "
+                f"{', '.join(unknown)}{why}"
+            )
         # Tuples came back as lists; the frozen-recipe comparison below is on raw values.
         overrides.update(coerce_sequence_fields(loaded))
 

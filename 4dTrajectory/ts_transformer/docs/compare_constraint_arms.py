@@ -53,11 +53,11 @@ for path in (HERE, TS_DIR, REPO_ROOT):
 import compare_frame_arms as cfa  # noqa: E402
 import final_approach_geometry as fag  # noqa: E402
 import geometric_metrics as gm  # noqa: E402
-import objective  # noqa: E402
+from config import PROCEDURE_LATERAL_SCALE_M, PROCEDURE_VERTICAL_SCALE_M  # noqa: E402
 
-# The hinge scales the penalty arm trains with (one source: the objective's constants).
-LATERAL_SCALE_M = objective.PROCEDURE_LATERAL_SCALE_M
-VERTICAL_SCALE_M = objective.PROCEDURE_VERTICAL_SCALE_M
+# The hinge scales the penalty arm trains with (one source: config's constants).
+LATERAL_SCALE_M = PROCEDURE_LATERAL_SCALE_M
+VERTICAL_SCALE_M = PROCEDURE_VERTICAL_SCALE_M
 
 
 def _chart(rows: list[dict], target: dict) -> np.ndarray:

@@ -11,10 +11,13 @@ Two independent choices meet here and are kept independent:
   2026-09-07; it was a measured regression and is retired — see ``config.py``.)
 
 A backend is a ROW, not a class: ``(endpoint_fn, dense_fn, post_fn)``. The first two roll
-the schedule and hand back whatever state their integrator carries; ``post_fn`` turns that
-state into the one public pair every consumer reads, ``(channels, geodetic)``. Two rows
-share `_chart_post` and two share their hook policy, which is the whole reason for the
-table: the three implementations differed in six lines each and agreed on the rest.
+the schedule and hand back whatever state their integrator carries, ALREADY converted to
+the representation ``post_fn`` reads — geodetic ``[B,N,7]`` for the re-anchored row, a
+PHYSICAL transport-chart state for the other two (the scaled row rescales, the lagged row
+drops its actuator block). ``post_fn`` turns that into the one public pair every consumer
+reads, ``(channels, geodetic)``. Two rows share `_chart_post` and two share their hook
+policy, which is the whole reason for the table: the three implementations differed in six
+lines each and agreed on the rest.
 
 Training, validation and forecasting consume one channel/geodetic result contract, so a
 representation change never reaches the model, the loss or the data pipeline. Controls
@@ -120,6 +123,18 @@ DenseFn = Callable[
 ]
 #: One backend state ``->`` the public ``(channels, geodetic)`` pair.
 PostFn = Callable[[torch.Tensor, RolloutInputs, TSConfig], tuple[torch.Tensor, torch.Tensor]]
+
+
+def _reads_command_hook(function):
+    """Mark a rollout function that actually looks at ``command_hook``.
+
+    ``runs_hooks=True`` on a row whose functions ``del command_hook`` would advertise a
+    hook and silently fly the unhooked schedule — a wrong trajectory with no error. The
+    assertion under ``_BACKENDS`` requires the flag and the mark to agree, in both
+    directions, so the claim cannot drift from the code.
+    """
+    function.reads_command_hook = True
+    return function
 
 
 def _runway_aligned(config: TSConfig) -> bool:
@@ -270,6 +285,7 @@ def _lag_hooked_schedule(
     )
 
 
+@_reads_command_hook
 def _lag_endpoint(
     inputs: RolloutInputs,
     config: TSConfig,
@@ -308,6 +324,7 @@ def _lag_endpoint(
     )
 
 
+@_reads_command_hook
 def _lag_dense(
     inputs: RolloutInputs,
     query_offsets_s: torch.Tensor,
@@ -349,7 +366,9 @@ def _lag_dense(
 class ControlDynamicsBackend:
     """One ``(control_dynamics_model, control_dynamics_backend)`` pair, as three functions."""
 
-    description: str
+    #: The ``(control_dynamics_model, control_dynamics_backend)`` pair this row is keyed
+    #: by, quoted verbatim in the refusal below so the message names what a config says.
+    key: tuple[str, str]
     endpoint_fn: EndpointFn
     dense_fn: DenseFn
     post_fn: PostFn
@@ -359,10 +378,11 @@ class ControlDynamicsBackend:
 
     def _admit(self, command_hook: CommandHook | None) -> None:
         if command_hook is not None and not self.runs_hooks:
+            model, backend = self.key
             raise NotImplementedError(
-                f"the {self.description} backend does not run command hooks; the "
-                "first-order-lag backends do (their state carries the chart and the "
-                "actuators a hook reads)"
+                f"control_dynamics_model={model!r} with control_dynamics_backend="
+                f"{backend!r} does not run command hooks; the first-order-lag backends do "
+                "(their state carries the chart and the actuators a hook reads)"
             )
 
     def endpoint_rollout(
@@ -402,7 +422,7 @@ class ControlDynamicsBackend:
 _BACKENDS: dict[tuple[str, str], ControlDynamicsBackend] = {
     (CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_REANCHORED_RK4): ControlDynamicsBackend(
         # Local ENU RK4 re-anchored into geodetic state every substep; casadi's twin.
-        description="re-anchored RK4",
+        key=(CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_REANCHORED_RK4),
         endpoint_fn=_reanchored_endpoint,
         dense_fn=_reanchored_dense,
         post_fn=_geodetic_post,
@@ -412,7 +432,7 @@ _BACKENDS: dict[tuple[str, str], ControlDynamicsBackend] = {
         CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     ): ControlDynamicsBackend(
         # Order-one internal state with the existing physical public contract.
-        description="scaled transport-chart",
+        key=(CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY),
         endpoint_fn=_scaled_chart_endpoint,
         dense_fn=_scaled_chart_dense,
         post_fn=_chart_post,
@@ -421,7 +441,10 @@ _BACKENDS: dict[tuple[str, str], ControlDynamicsBackend] = {
         CONTROL_DYNAMICS_FIRST_ORDER_LAG,
         CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     ): ControlDynamicsBackend(
-        description="first-order-lag scaled transport-chart",
+        key=(
+            CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+            CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+        ),
         endpoint_fn=partial(
             _lag_endpoint, chart_scale=SCALED_TRANSPORT_CHART_REFERENCE_UNITS
         ),
@@ -430,6 +453,20 @@ _BACKENDS: dict[tuple[str, str], ControlDynamicsBackend] = {
         runs_hooks=True,
     ),
 }
+
+
+def _unwrap(function):
+    return getattr(function, "func", function)
+
+
+for _key, _row in _BACKENDS.items():
+    assert _row.key == _key, f"{_row.key} is registered under {_key}"
+    for _fn in (_row.endpoint_fn, _row.dense_fn):
+        _reads = getattr(_unwrap(_fn), "reads_command_hook", False)
+        assert _reads == _row.runs_hooks, (
+            f"{_key} declares runs_hooks={_row.runs_hooks} but "
+            f"{_unwrap(_fn).__name__} {'reads' if _reads else 'ignores'} command_hook"
+        )
 
 
 def control_dynamics_backend(config: TSConfig) -> ControlDynamicsBackend:

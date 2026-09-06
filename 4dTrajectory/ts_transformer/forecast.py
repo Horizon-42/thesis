@@ -364,7 +364,20 @@ def _latent_batch(
     device: torch.device | None,
     cta_offset_s: float,
 ) -> tuple[int, torch.device, np.ndarray, dict[str, torch.Tensor]]:
-    """The anchor, device and batch inputs every latent decode below starts from."""
+    """The anchor, device and batch inputs every latent decode below starts from.
+
+    The ONE ``latent_dim`` refusal lives here, not in the fan-out: two of the four entries
+    read the prior (`_latent_prior_batch`) between this call and the fan-out, and on a
+    non-latent model that dies on an ``AttributeError`` naming ``prior_logits`` instead of
+    the contract. Every entry calls this first, so this is the earliest shared point.
+    ``__main__`` refuses the flags earlier still, at the CLI boundary; this is the library's
+    own contract, for the callers that are not the CLI.
+    """
+    if config.latent_dim < 1:
+        raise ValueError(
+            "latent forecasts need a latent control checkpoint (latent_dim > 0); this one "
+            f"has latent_dim={config.latent_dim}"
+        )
     device = device or next(model.parameters()).device
     anchor = default_anchor(config) if anchor is None else anchor
     return (
@@ -397,11 +410,13 @@ def _latent_forecasts(
     samples at all (the z-oracle, the shuffle), in which case the forecasts carry no mode
     index. That is the only difference between the four public entries below.
 
-    ``config.latent_dim > 0`` is deliberately NOT re-checked here. ``__main__`` refuses
-    every latent flag against a non-latent checkpoint — twice, once for
-    ``--z-from-posterior`` and once for the prior-sample options — and a second copy of
-    that rule is a second place to forget.
+    ``latent_dim`` is refused once, in `_latent_batch`, which every entry calls before it
+    reaches this point (see there for why it cannot be here).
     """
+    if probabilities is not None and len(probabilities) != len(latents):
+        raise ValueError(
+            f"{len(probabilities)} probability rows for {len(latents)} latent samples"
+        )
     return [
         _forecast_control_batch(
             model, series, config, normalizer, anchor, device,

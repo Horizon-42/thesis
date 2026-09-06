@@ -388,6 +388,33 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
     assert everything["mode_fde_spread_m"] is not None and everything["shuffled_delta_ade_m"] is not None
 
 
+def test_every_latent_forecast_entry_refuses_a_non_latent_checkpoint():
+    """One refusal, in the shared fan-out, for all four entries.
+
+    Each of the four used to carry its own copy; T3-22 dropped them because `__main__`
+    refuses the flags. That left the LIBRARY with none, and its callers are not all the
+    CLI — a non-latent model has no `sample_latents`, no `posterior`, and would have died
+    on an `AttributeError` naming a method instead of the contract.
+    """
+    torch.manual_seed(0)
+    config = _config(latent_dim=0)
+    model = build_model(config).eval()
+    series, _report = build_series(
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=3, seed=3), config, airport=AIRPORT
+    )
+    normalizer = Normalizer.fit(series)
+    device = torch.device("cpu")
+    calls = (
+        lambda: latent_mode_forecasts(model, series, config, normalizer, samples=2, seed=0, device=device),
+        lambda: random_latent_forecasts(model, series, config, normalizer, samples=2, seed=0, device=device),
+        lambda: posterior_latent_forecasts(model, series, config, normalizer, device=device),
+        lambda: shuffled_latent_forecasts(model, series, config, normalizer, seed=0, device=device),
+    )
+    for call in calls:
+        with pytest.raises(ValueError, match="latent_dim > 0"):
+            call()
+
+
 def test_shuffled_latents_never_hand_a_flight_its_own_and_need_two_flights():
     torch.manual_seed(0)
     config = _config()

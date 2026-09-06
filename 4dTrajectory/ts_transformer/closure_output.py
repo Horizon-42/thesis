@@ -46,7 +46,7 @@ import closure_geometry as cg
 import closure_profile as cp
 from approach_difficulty import approach_difficulty
 from batch_contract import LossComponents
-from config import CLOSURE_LABEL_KNOTS, TSConfig
+from config import CLOSURE_LABEL_KNOTS, CLOSURE_TIMING_SCALE_S, TSConfig
 from geometric_metrics import cumulative_arc_m
 from intent_conditioning import truth_join_point
 
@@ -64,12 +64,6 @@ D_JOIN_MAX_M = 40_000.0             # d_join ∈ [D_JOIN_MIN_M, D_JOIN_MIN_M + D
 VIA_SCALE_M = 10_000.0
 VIA_MAX_M = 40_000.0                # via_d, via_xt ∈ ±VIA_MAX_M
 HEIGHT_SCALE_M = 1_000.0
-#: The timing group's seconds-to-loss scale. Measured at initialisation on synthetic
-#: arrivals with the three weights at 1.0: geometry ≈ 1.7, timing ≈ 1.5 at 60 s, height
-#: ≈ 0.9 — a minute puts the groups within a factor of two (at `final_time_scale_s`'s
-#: 600 s the timing group was 20× under the geometry). It is a UNIT, never a swept knob:
-#: it was a `TSConfig` field until 2026-09-07 and no stored config ever moved it.
-CLOSURE_TIMING_SCALE_S = 60.0
 SLOWNESS_MIN = 1.0 / cp.SPEED_MAX_MPS
 SLOWNESS_MAX = 1.0 / cp.SPEED_MIN_MPS
 

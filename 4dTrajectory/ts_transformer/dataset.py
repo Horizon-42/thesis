@@ -82,7 +82,7 @@ from config import (
 )
 from data_provenance import manifest_paths
 from control.basis_fit import FittedTeacherTable
-from control.conditioning import DYNAMICS_CONDITION_NAMES, condition_vector
+from control.conditioning import condition_vector
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.dynamics.inverse import actual_controls, segment_controls
 from coordinate_frames import (

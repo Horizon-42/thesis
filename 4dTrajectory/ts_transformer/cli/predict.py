@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import replace
+from dataclasses import fields, replace
 
 from config import (
+    TSConfig,
     CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_OFF,
     CORRIDOR_GATES,
@@ -21,6 +22,7 @@ from config import (
     PREDICTION_CLOSURE,
 )
 from data_provenance import require_matching_data_provenance
+from closure_output import load_labels
 from dataset import dataset_flight_key, load_flight_dicts
 from evaluation_protocol import (
     TestReleaseError,
@@ -46,6 +48,24 @@ from .common import add_data_args, build_series_or_exit, provenance_from_args, s
 
 HELP = "forecast approaches with a checkpoint; write evaluation records"
 
+#: `TSConfig` field -> the predict flag that OVERRIDES the checkpoint's value for this run.
+#: Predict's config comes from the checkpoint, so these are overrides rather than settings
+#: of a new run — which is why they are not in `common.CLI_CONFIG_FIELDS`. They still obey
+#: the same rule, with two deliberate exceptions: `--command-hook` and `--hook-saturation`
+#: keep their shorter names because `CLAUDE.md` names
+#: `predict --command-hook barrier --hook-saturation soft` as THE adopted delivery form and
+#: two arm files (`control_hooks{,_v2}_arms.json`) spell them in still-re-runnable
+#: `predict_args`; renaming would rewrite a completed campaign's record for no measurement.
+PREDICT_CONFIG_FLAGS: dict[str, str] = {
+    "control_command_hook": "--command-hook",
+    "control_hook_saturation": "--hook-saturation",
+    "control_barrier_alpha": "--control-barrier-alpha",
+    "control_barrier_heading_gain": "--control-barrier-heading-gain",
+}
+_unknown = [name for name in PREDICT_CONFIG_FLAGS if name not in {f.name for f in fields(TSConfig)}]
+if _unknown:  # fail at import, like cli.common's list: a renamed field must rename here too
+    raise AssertionError(f"predict overrides unknown TSConfig fields: {_unknown}")
+
 #: The N(0, I) control draws from its own stream, never the treatment arm's.
 LATENT_RANDOM_SEED_OFFSET = 1_000_003
 
@@ -68,6 +88,16 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--hook-saturation", choices=HOOK_SATURATIONS, default=None,
         help="with --command-hook: soft (tanh / softplus) or hard (clamp) saturation",
+    )
+    parser.add_argument(
+        "--control-barrier-alpha", type=float, default=None,
+        help="with --command-hook barrier: override the checkpoint's class-K gain on the "
+             "corridor margins (default: the checkpoint's, normally 0.1)",
+    )
+    parser.add_argument(
+        "--control-barrier-heading-gain", type=float, default=None,
+        help="with --command-hook barrier: override the checkpoint's heading-alignment "
+             "barrier gain (default: the checkpoint's, normally 0.1)",
     )
     parser.add_argument(
         "--closure-from-labels", default=None, metavar="JSON",
@@ -185,6 +215,11 @@ def run_cli(
         )
     flights = [indexed[key] for key in split_keys]
     series, _build_report = build_series_or_exit(args, config, parser, flights)
+    gains = {
+        field: getattr(args, flag[2:].replace("-", "_"))
+        for field, flag in PREDICT_CONFIG_FLAGS.items()
+        if field.startswith("control_barrier_")
+    }
     if args.command_hook is not None:
         if args.hook_saturation is None:
             parser.error("--command-hook needs --hook-saturation")
@@ -192,17 +227,25 @@ def run_cli(
             config,
             control_command_hook=args.command_hook,
             control_hook_saturation=args.hook_saturation,
+            **{field: value for field, value in gains.items() if value is not None},
         )
-        print(f"  command hook at prediction time: {args.command_hook} ({args.hook_saturation})")
+        print(f"  command hook at prediction time: {args.command_hook} ({args.hook_saturation}); "
+              f"alpha {config.control_barrier_alpha:g}, heading gain "
+              f"{config.control_barrier_heading_gain:g}")
     elif args.hook_saturation is not None:
         parser.error("--hook-saturation needs --command-hook")
+    elif any(value is not None for value in gains.values()):
+        # A gain without a hook would be serialized into nothing and change no trajectory.
+        parser.error(
+            "--control-barrier-alpha / --control-barrier-heading-gain need --command-hook "
+            "barrier; without it the rollout runs the checkpoint's own hook setting"
+        )
     closure_labels = None
     if args.closure_from_labels is not None:
         if config.prediction_output != PREDICTION_CLOSURE:
             parser.error("--closure-from-labels requires a closure checkpoint")
         if args.project_final is not None or args.no_truncate:
             parser.error("--closure-from-labels draws the label as it is; --project-final / --no-truncate do not apply")
-        from closure_output import load_labels
         closure_labels = load_labels(args.closure_from_labels)
         print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
     if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:

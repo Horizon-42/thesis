@@ -404,13 +404,18 @@ HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
 
 # Fields removed from the contract after checkpoints that store them were written
-# (2026-09-07 package audit). `control_hook_gate` had a one-member vocabulary nothing
-# read and `control_dense_state_loss_weight` was a weight no loss read, so neither could
-# change an answer. `control_effort_loss_weight` / `control_smoothness_loss_weight` are
-# weaker: every named recipe pins them to 0.0 and no arm file since 2026-08 set them, but
-# the 2026-07-29 POOLED sweeps (`stage_c_effort`, `stage_c_smoothness`) DID — those ten
+# (2026-09-07 package audit). There are TWO kinds, and conflating them is how a stored
+# value that DID change a run gets dropped without a word.
+#
+# `RETIRED_SERIALIZED_FIELDS` is the unread kind: the code that read the field is gone or
+# never existed, so whatever a stored config says, it cannot have changed the run that
+# produced the artifact. `from_dict` drops these silently. `control_hook_gate` had a
+# one-member vocabulary nothing read and `control_dense_state_loss_weight` was a weight no
+# loss read. `control_effort_loss_weight` / `control_smoothness_loss_weight` are weaker:
+# every named recipe pins them to 0.0 and no arm file since 2026-08 set them, but the
+# 2026-07-29 POOLED sweeps (`stage_c_effort`, `stage_c_smoothness`) DID — those ten
 # first-generation runs lose the `custom(effort=…)` / `custom(smooth=…)` item from their
-# recomputed name. `from_dict` drops all four from a stored config.
+# recomputed name.
 RETIRED_SERIALIZED_FIELDS = (
     "control_hook_gate",
     "control_dense_state_loss_weight",
@@ -457,17 +462,32 @@ RETIRED_SERIALIZED_FIELDS = (
     "control_nominal_residual_bank_max_rad",
     "control_nominal_residual_load_max",
     "control_nominal_speed_gain",
-    # Three UNITS that were never a choice (T3-21, 2026-09-07): the hinge²'s metres and
-    # the closure timing group's seconds. Measured over every stored config under
-    # 4dTrajectory/outputs/*/experiments/** — 143, 143 and 81 carry them, NONE at anything
-    # but the default — and unlike the four scales that stay fields, no named recipe pins
-    # them, so a module constant cannot silently redefine a published comparison. They are
-    # now `objective.PROCEDURE_LATERAL_SCALE_M` / `PROCEDURE_VERTICAL_SCALE_M` and
-    # `closure_output.CLOSURE_TIMING_SCALE_S`.
-    "procedure_loss_lateral_scale_m",
-    "procedure_loss_vertical_scale_m",
-    "closure_timing_scale_s",
 )
+
+#: The metres the corridor and glidepath hinges are read in — the UNIT the squared
+#: violation is expressed in, never a dose (`procedure_loss_lateral_weight` /
+#: `procedure_loss_vertical_weight` and the dual step are the doses). Read by
+#: `objective.procedure_loss`.
+PROCEDURE_LATERAL_SCALE_M = 100.0
+PROCEDURE_VERTICAL_SCALE_M = 30.0
+#: The closure timing group's seconds-to-loss scale. Measured at initialisation on synthetic
+#: arrivals with the three weights at 1.0: geometry ~ 1.7, timing ~ 1.5 at 60 s, height
+#: ~ 0.9 — a minute puts the groups within a factor of two (at `final_time_scale_s`'s 600 s
+#: the timing group was 20x under the geometry). Read by `closure_output`.
+CLOSURE_TIMING_SCALE_S = 60.0
+
+# The MEASURED-CONSTANT kind of retirement (T3-21, 2026-09-07). These three were live loss
+# denominators: a stored value other than the constant WOULD have changed the run, so
+# dropping it silently would rewrite history. They were retired because nothing ever moved
+# them — measured over every stored config under 4dTrajectory/outputs/*/experiments/**:
+# 143, 143 and 81 artifacts carry them, none at anything but the constant above.
+# `from_dict` therefore drops each only when it EQUALS the constant, and refuses the config
+# otherwise, naming the key and the value.
+RETIRED_CONSTANT_FIELDS: dict[str, float] = {
+    "procedure_loss_lateral_scale_m": PROCEDURE_LATERAL_SCALE_M,
+    "procedure_loss_vertical_scale_m": PROCEDURE_VERTICAL_SCALE_M,
+    "closure_timing_scale_s": CLOSURE_TIMING_SCALE_S,
+}
 
 CONTROL_HOOK_FIELDS = (
     "control_command_hook",
@@ -1084,7 +1104,15 @@ class TSConfig:
                 )
 
     def _validate_ranges(self) -> None:
-        """Plain numeric bounds — no cross-field rule, no dependence on the output path."""
+        """Numeric bounds that do not depend on the output path.
+
+        Two of them do read a second field, and they are here rather than in a contract
+        pass because both are arithmetic on the numbers themselves: ``d_model`` must divide
+        by ``n_heads``, and ``val_fraction + test_fraction`` must leave a training split.
+        Runs third, after the vocabulary and the recipe freeze and before the two contract
+        passes — a bound is checked on a value that is already a legal member of its
+        vocabulary, and the contracts then read numbers already known to be in range.
+        """
         for name in ("procedure_loss_lateral_weight", "procedure_loss_vertical_weight",
                      "procedure_loss_dual_step"):
             if getattr(self, name) < 0.0:
@@ -1634,12 +1662,25 @@ class TSConfig:
                 f"serialized config is missing {', '.join(sorted(missing))}; "
                 "regenerate the derived checkpoint"
             )
-        # A field retired from the contract is dropped from a stored config, by name: the
-        # stored value could not have changed the run that produced the artifact (that is
-        # why it was retired), and refusing the artifact would be a contract change in the
-        # wrong direction. Anything else unknown still fails loudly below.
+        # An UNREAD retired field is dropped by name: nothing read it, so the stored value
+        # could not have changed the run, and refusing the artifact would be a contract
+        # change in the wrong direction.
         for name in RETIRED_SERIALIZED_FIELDS:
             data.pop(name, None)
+        # A MEASURED-CONSTANT retired field is dropped only when it agrees with the constant
+        # that replaced it. It was a live loss denominator, so a different stored value
+        # describes a run this build cannot reproduce — that is a loud failure, not a
+        # silent drop.
+        for name, constant in RETIRED_CONSTANT_FIELDS.items():
+            if name not in data:
+                continue
+            stored = data.pop(name)
+            if stored != constant:
+                raise ValueError(
+                    f"serialized config sets {name}={stored!r}, but the field was retired "
+                    f"to the constant {constant!r} because nothing on disk moved it; this "
+                    "artifact was produced under a value this build cannot reproduce"
+                )
         data["channels"] = tuple(data["channels"])
         return cls(**data)
 

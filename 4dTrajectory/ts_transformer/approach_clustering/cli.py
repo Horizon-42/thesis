@@ -26,7 +26,7 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     actions = parser.add_subparsers(dest="approach_action", required=True)
 
     build = actions.add_parser(
-        "build",
+        "build", allow_abbrev=False,
         help="build train-only approach clusters and development cohorts",
     )
     build.add_argument("--data", required=True)
@@ -39,7 +39,7 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     build.add_argument("--seed", type=int, default=1337)
 
     compare = actions.add_parser(
-        "compare",
+        "compare", allow_abbrev=False,
         help="compare checkpoints on one frozen validation approach cohort",
     )
     compare.add_argument("--data", required=True)
@@ -151,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="approach_clustering",
         description="Approach-path clustering and frozen-cohort comparison",
+        allow_abbrev=False,
     )
     add_cli_arguments(parser)
     return run_cli(parser.parse_args(argv), parser)

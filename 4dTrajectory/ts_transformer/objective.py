@@ -38,6 +38,8 @@ from config import (
     HORIZON_WINDOW,
     PREDICTION_CLOSURE,
     PREDICTION_STATE,
+    PROCEDURE_LATERAL_SCALE_M,
+    PROCEDURE_VERTICAL_SCALE_M,
     TSConfig,
 )
 from control.constraints import build_command_hook
@@ -46,6 +48,7 @@ from control.dynamics.backends import EndpointControlRollout
 from control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
 from control.latent import LATENT_KL_COMPONENT, LatentControlPrediction, with_latent_kl
 from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
+from control.loss.fixed_dt import fixed_dt_control_state_loss
 from dataset import Normalizer
 from final_approach_geometry import corridor_violations, runway_axes, truth_final_gate
 from fixed_dt_supervision import FixedDTControlSupervision
@@ -584,8 +587,6 @@ def _fixed_dt_control_state_loss(
     del normalized_anchor_state, target_states, state_weights, target_final_time_s
     if dense_supervision is None:
         raise ValueError("fixed-dt control state loss requires dense supervision targets")
-    from control.loss.fixed_dt import fixed_dt_control_state_loss
-
     result = fixed_dt_control_state_loss(
         prediction,
         dense_supervision,
@@ -776,12 +777,7 @@ class ProcedureMultipliers:
 PROCEDURE_DIAGNOSTICS = (
     "procedure_gated_rows", "procedure_lateral_violations", "procedure_vertical_violations",
 )
-#: The metres the corridor and glidepath hinges are read in — the UNIT the squared
-#: violation is expressed in, never a dose (`procedure_loss_lateral_weight` /
-#: `procedure_loss_vertical_weight` and the dual step are the doses). Both were `TSConfig`
-#: fields until 2026-09-07; no stored config ever moved either.
-PROCEDURE_LATERAL_SCALE_M = 100.0
-PROCEDURE_VERTICAL_SCALE_M = 30.0
+
 
 
 def procedure_loss(

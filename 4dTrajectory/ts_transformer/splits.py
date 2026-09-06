@@ -12,7 +12,7 @@ a flight that is in the test set stays there across harvests and across processe
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
 from aircraft.query_aircraft_parameters import (
     openap_direct_typecodes,
@@ -20,7 +20,9 @@ from aircraft.query_aircraft_parameters import (
 )
 from config import TSConfig
 from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import BuildReport, FlightSeries
+
+if TYPE_CHECKING:   # annotations only: importing `dataset` here would drag torch in
+    from dataset import BuildReport, FlightSeries
 
 
 DATA_SELECTION_SCHEMA = "ts-data-selection-v2-pre-split-eligibility"

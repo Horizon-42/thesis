@@ -42,6 +42,7 @@ _CLI_SPEC.loader.exec_module(ts_cli)
 
 import channels as ch  # noqa: E402
 import cli.common as cli_common  # noqa: E402
+from control.conditioning import DYNAMICS_CONDITION_NAMES  # noqa: E402
 import cli.evaluate_fit as cli_evaluate_fit  # noqa: E402
 import cli.train as cli_train  # noqa: E402
 from control import heads as control_models  # noqa: E402
@@ -51,6 +52,7 @@ import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
 import control.dynamics.rollout as control_rollout_module  # noqa: E402
 import batch_contract  # noqa: E402
+from batch_contract import anchor_state, model_forward, unpack_batch  # noqa: E402
 import dataset as dataset_module  # noqa: E402
 import splits  # noqa: E402
 import batch_benchmark as batch_probe  # noqa: E402
@@ -113,6 +115,7 @@ from data_provenance import (  # noqa: E402
     arrival_data_provenance,
     require_matching_data_provenance,
 )
+from dataset import iter_batches  # noqa: E402
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightEpochSampler,
@@ -165,8 +168,9 @@ from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     SCHEMA_VERSION as ARRIVAL_MANIFEST_SCHEMA,
 )
 from objective import (  # noqa: E402
-    STATE_LOSS_COMPONENT_NAMES, masked_mse, position_velocity_consistency_loss,
-    prediction_loss, state_prediction_loss_components,
+    STATE_LOSS_COMPONENT_NAMES, loss_component_names, masked_mse,
+    move_dynamics, move_fixed_dt_supervision, position_velocity_consistency_loss,
+    prediction_loss, prediction_loss_components, state_prediction_loss_components,
 )
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
@@ -2170,6 +2174,58 @@ def test_common_grid_checkpoint_selection_reuses_one_truth_cache(monkeypatch):
     assert len(set(cached_truth_ids)) == 1
 
 
+def _two_pass_loss_components(
+    model,
+    dataset,
+    device: torch.device,
+    batch_size: int,
+) -> dict[str, float]:
+    """The two-pass reference the shared validation forward is checked against.
+
+    It re-runs the objective on its own, so `evaluate_validation_airport`'s single forward
+    has something independent to be equal to. It lived in `validation.py` until the T3
+    review pointed out it has no production caller — a test oracle that ships inside the
+    module it is testing is one edit away from being the thing it checks.
+    """
+    names = loss_component_names(dataset.config)
+    component_totals = {name: 0.0 for name in names}
+    flight_weight_total = 0.0
+    with torch.no_grad():
+        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
+            (
+                x,
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                dynamics,
+                dense_supervision,
+            ) = unpack_batch(raw_batch)
+            x, y, mask = x.to(device), y.to(device), mask.to(device)
+            final_time_s = final_time_s.to(device)
+            flight_weights = flight_weights.to(device)
+            dynamics = move_dynamics(dynamics, device)
+            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
+            prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
+            components = prediction_loss_components(
+                prediction,
+                anchor_state(x, len(dataset.config.channels)),
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                dataset.config,
+                dataset.normalizer,
+                dynamics,
+                dense_supervision,
+            )
+            for name, value in components.tensors().items():
+                component_totals[name] += float(value) * len(flight_weights)
+            flight_weight_total += float(flight_weights.sum())
+    denominator = max(flight_weight_total, 1.0)
+    return {name: value / denominator for name, value in component_totals.items()}
+
+
 def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch):
     series, config = _series(
         n_flights=4,
@@ -2188,7 +2244,7 @@ def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch)
     normalizer = Normalizer.fit(series)
     dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
     model = build_model(config).eval()
-    legacy_components = validation._dataset_loss_components(
+    legacy_components = _two_pass_loss_components(
         model, dataset, torch.device("cpu"), config.batch_size
     )
     legacy_common = validation.evaluate_fixed_anchor_common_grid(
@@ -2899,7 +2955,7 @@ def test_control_models_use_per_sample_bounds_and_aircraft_condition(
     lower = torch.tensor([[0.0, -0.5, 0.5], [0.0, -0.7, 0.6]])
     upper = torch.tensor([[10_000.0, 0.5, 1.8], [250_000.0, 0.7, 2.0]])
     dynamics = {
-        "condition": torch.rand(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.rand(2, len(DYNAMICS_CONDITION_NAMES)),
         "control_lower": lower,
         "control_upper": upper,
     }
@@ -3080,7 +3136,7 @@ def test_control_model_starts_from_neutral_uniform_rollout():
     lower = torch.tensor([CONTROL_LOWER, CONTROL_LOWER], dtype=torch.float32)
     upper = torch.tensor([CONTROL_UPPER, CONTROL_UPPER], dtype=torch.float32)
     dynamics = {
-        "condition": torch.randn(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.randn(2, len(DYNAMICS_CONDITION_NAMES)),
         "control_lower": lower,
         "control_upper": upper,
     }
@@ -5021,7 +5077,7 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
     assert loaded_config == config
     assert loaded_config.prediction_output == PREDICTION_CONTROL
     assert isinstance(model(torch.zeros(1, config.seq_len, config.enc_in), {
-        "condition": torch.ones(1, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.ones(1, len(DYNAMICS_CONDITION_NAMES)),
         "control_lower": torch.tensor([CONTROL_LOWER], dtype=torch.float32),
         "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }), ControlPrediction)
@@ -5627,16 +5683,40 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
 def test_a_stored_config_carrying_a_retired_field_still_loads_and_an_unknown_one_does_not():
     """Checkpoints written before a field was retired keep loading; a genuinely unknown key
     is still refused, so the retired list stays honest."""
-    from config import RETIRED_SERIALIZED_FIELDS
+    from config import RETIRED_CONSTANT_FIELDS, RETIRED_SERIALIZED_FIELDS
     from dataclasses import fields as dataclass_fields
     live = {field.name for field in dataclass_fields(TSConfig)}
-    assert not (set(RETIRED_SERIALIZED_FIELDS) & live), "a retired field is still declared"
+    retired = set(RETIRED_SERIALIZED_FIELDS) | set(RETIRED_CONSTANT_FIELDS)
+    assert not (retired & live), "a retired field is still declared"
+    assert not (set(RETIRED_SERIALIZED_FIELDS) & set(RETIRED_CONSTANT_FIELDS)), (
+        "a field cannot be both unread and a measured constant"
+    )
     stored = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
     for name in RETIRED_SERIALIZED_FIELDS:
         stored[name] = 0.25
     assert TSConfig.from_dict(stored).prediction_output == PREDICTION_CONTROL
     with pytest.raises(TypeError):
         TSConfig.from_dict({**stored, "never_a_field": 1})
+
+
+def test_a_measured_constant_field_is_dropped_at_its_constant_and_refused_anywhere_else():
+    """The other retirement kind: these three WERE read, so a different value is history.
+
+    `procedure_loss_{lateral,vertical}_scale_m` and `closure_timing_scale_s` are loss
+    denominators. They were retired because nothing on disk ever moved them — not because
+    nothing read them — so dropping a non-default value by name would silently reinterpret
+    an artifact produced under a scale this build no longer has.
+    """
+    from config import RETIRED_CONSTANT_FIELDS
+
+    base = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
+    at_constant = {**base, **RETIRED_CONSTANT_FIELDS}
+    assert TSConfig.from_dict(at_constant).prediction_output == PREDICTION_CONTROL
+
+    for name, constant in RETIRED_CONSTANT_FIELDS.items():
+        with pytest.raises(ValueError, match=f"{name}=") as info:
+            TSConfig.from_dict({**at_constant, name: constant * 2})
+        assert repr(constant * 2) in str(info.value) and "retired" in str(info.value)
 
 
 L1_NATIVE32_CHECKPOINT = _REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32/checkpoint.pt"

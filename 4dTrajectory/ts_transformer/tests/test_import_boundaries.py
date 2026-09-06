@@ -12,6 +12,13 @@ TS_ROOT = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 
 
 def _import_without(banned: str, *modules: str) -> subprocess.CompletedProcess:
+    """Import `modules` in a fresh interpreter where importing `banned` raises.
+
+    The canary matters more than it looks: if the poison stopped working (a stale
+    `sys.modules` entry, an import hook installed too late) every test below would pass by
+    importing the banned module happily. So the child proves the ban is live on itself
+    first, and only then imports what is under test.
+    """
     code = f"""
 import builtins
 import sys
@@ -26,6 +33,12 @@ def without_it(name, globals=None, locals=None, fromlist=(), level=0):
     return real_import(name, globals, locals, fromlist, level)
 
 builtins.__import__ = without_it
+try:
+    __import__(banned)
+except ModuleNotFoundError:
+    pass
+else:
+    raise AssertionError("the " + banned + " ban is not in effect; this test proves nothing")
 """ + "".join(f"import {module}\n" for module in modules)
     return subprocess.run(
         [sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True
@@ -42,7 +55,11 @@ def test_the_provenance_and_protocol_modules_do_not_reach_the_data_plane() -> No
 
     `evaluation_protocol` compares two fingerprints for equality, and it used to pull
     `require_matching_data_provenance` through `dataset` — which meant the test-release
-    ledger could not be read without torch, numpy, openap and the whole harvest stack.
+    ledger could not be read without torch. `splits` is on the list for the same reason and
+    keeps its `dataset` import under `TYPE_CHECKING`: it hashes flight identities, and
+    `BuildReport` / `FlightSeries` appear in it only as annotations.
     """
-    completed = _import_without("torch", "data_provenance", "evaluation_protocol")
+    completed = _import_without(
+        "torch", "data_provenance", "evaluation_protocol", "splits"
+    )
     assert completed.returncode == 0, completed.stderr

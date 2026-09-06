@@ -630,54 +630,6 @@ def evaluate_validation_airport(
     )
 
 
-def _dataset_loss_components(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    device: torch.device,
-    batch_size: int,
-    *,
-    multipliers: ProcedureMultipliers | None = None,
-) -> dict[str, float]:
-    names = loss_component_names(dataset.config)
-    component_totals = {name: 0.0 for name in names}
-    flight_weight_total = 0.0
-    with torch.no_grad():
-        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
-            (
-                x,
-                y,
-                mask,
-                final_time_s,
-                flight_weights,
-                dynamics,
-                dense_supervision,
-            ) = unpack_batch(raw_batch)
-            x, y, mask = x.to(device), y.to(device), mask.to(device)
-            final_time_s = final_time_s.to(device)
-            flight_weights = flight_weights.to(device)
-            dynamics = move_dynamics(dynamics, device)
-            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
-            prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
-            components = prediction_loss_components(
-                prediction,
-                anchor_state(x, len(dataset.config.channels)),
-                y,
-                mask,
-                final_time_s,
-                flight_weights,
-                dataset.config,
-                dataset.normalizer,
-                dynamics,
-                dense_supervision,
-                multipliers=multipliers,
-            )
-            for name, value in components.tensors().items():
-                component_totals[name] += float(value) * len(flight_weights)
-            flight_weight_total += float(flight_weights.sum())
-    denominator = max(flight_weight_total, 1.0)
-    return {name: value / denominator for name, value in component_totals.items()}
-
-
 @dataclass(frozen=True)
 class ValidationSelection:
     """One deterministic checkpoint-selection result over fixed-anchor validation."""
