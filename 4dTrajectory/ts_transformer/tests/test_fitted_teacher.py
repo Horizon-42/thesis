@@ -47,9 +47,8 @@ from forecast import forecast_approaches, posterior_latent_forecasts
 from models import build_model
 from run_naming import run_display_name
 from synthetic import synthetic_arrivals
-from train import (
-    control_imitation_mse, evaluate_fixed_anchor_series, load_checkpoint, train,
-)
+from objective import control_imitation_mse
+from train import evaluate_fixed_anchor_series, load_checkpoint, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 N_SEGMENTS, SEQ_LEN = 4, 8

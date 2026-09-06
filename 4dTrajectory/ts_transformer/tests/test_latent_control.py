@@ -43,7 +43,8 @@ from batch_contract import LossComponents
 from models import build_model
 from prediction_outputs import ControlPrediction
 from run_naming import output_name, run_display_name
-from train import load_checkpoint, loss_component_names, train
+from objective import loss_component_names
+from train import load_checkpoint, train
 
 _CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_latent_test", Path(__file__).resolve().parents[1] / "__main__.py")
 assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None

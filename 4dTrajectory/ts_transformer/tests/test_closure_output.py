@@ -32,7 +32,8 @@ from forecast import forecast_approach, forecast_closure_from_labels  # noqa: E4
 from models import build_model  # noqa: E402
 from run_naming import run_display_name  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
-from train import load_checkpoint, loss_component_names, prediction_loss_components, target_contract, train  # noqa: E402
+from objective import loss_component_names, prediction_loss_components, target_contract  # noqa: E402
+from train import load_checkpoint, train  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 TINY = dict(seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1, final_time_scale_s=2.0,

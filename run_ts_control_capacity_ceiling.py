@@ -46,14 +46,13 @@ from dataset import (  # noqa: E402
 )
 from models import resolve_device  # noqa: E402
 from prediction_outputs import ControlPrediction  # noqa: E402
-from train import (  # noqa: E402
-    load_checkpoint,
+from batch_contract import unpack_batch  # noqa: E402
+from objective import (  # noqa: E402
     move_dynamics,
     move_fixed_dt_supervision,
     prediction_loss_components,
-    unpack_batch,
-    usable_series,
 )
+from train import load_checkpoint, usable_series  # noqa: E402
 
 
 SCHEMA_VERSION = "ts-control-capacity-ceiling-v1-development-only"

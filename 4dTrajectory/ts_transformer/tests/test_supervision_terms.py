@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 import torch
 
-import train as train_module
+import objective
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, heading_rate_rad_s
 from channels import CHANNELS, channels_from_states
 from config import (
@@ -439,7 +439,7 @@ def _endpoint_result(config: TSConfig, bank_schedule: list[float], target_dps: l
     }
     targets = torch.zeros(1, len(bank_schedule), channels, dtype=torch.float64)
     weights = torch.full_like(targets, 1.0 / channels)
-    result = train_module._native_endpoint_control_state_loss(
+    result = objective._native_endpoint_control_state_loss(
         prediction, torch.zeros(1, channels, dtype=torch.float64), targets, weights,
         durations.sum(dim=1), config,
         Normalizer(mean=np.zeros(channels), std=np.ones(channels)),
@@ -558,11 +558,11 @@ def test_the_components_are_registered_only_when_their_weight_is_non_zero():
     """A term missing from ``loss_component_names`` is a KeyError on the first batch,
     after the slow dataset build."""
     off = _config(4)
-    assert "heading_rate" not in train_module.loss_component_names(off)
-    assert "bank_tv" not in train_module.loss_component_names(off)
+    assert "heading_rate" not in objective.loss_component_names(off)
+    assert "bank_tv" not in objective.loss_component_names(off)
 
     on = _config(4, control_heading_rate_loss_weight=1.0, control_bank_tv_loss_weight=1.0)
-    names = train_module.loss_component_names(on)
+    names = objective.loss_component_names(on)
     assert "heading_rate" in names and "bank_tv" in names
     # Beside, not instead of: the four base components are untouched.
     assert names[:4] == ("state", "final_time", "kinematic", "terminal")

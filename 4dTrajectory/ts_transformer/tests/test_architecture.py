@@ -139,10 +139,12 @@ def test_the_control_package_does_not_import_the_training_loop():
     `dataset` is deliberately NOT on this list. `Normalizer` and the window types are
     data-plane value types the loss modules genuinely consume, and `Normalizer.fit`
     balances over `FlightSeries`, so it belongs with the data plane rather than under
-    `control`. The direction that matters is this one: a loss module that imported `train`
-    would make the package unusable outside the loop it was extracted from.
+    `control`. `objective` IS on it: it imports the control loss modules, so one importing
+    it back would be a cycle as well as a layering inversion. The direction that matters is
+    this one: a loss module that imported `train` or `objective` would make the package
+    unusable outside the loop it was extracted from.
     """
-    consumers = {"train", "forecast", "__main__", "models", "batching"}
+    consumers = {"train", "objective", "forecast", "__main__", "models", "batching"}
     for path in CONTROL.rglob("*.py"):
         if "__pycache__" in path.parts:
             continue

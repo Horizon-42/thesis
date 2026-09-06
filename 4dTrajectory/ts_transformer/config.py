@@ -685,7 +685,7 @@ class TSConfig:
     # VETOED for new arms — kept only so the 2026-09-03 artifact stored under it loads.
     state_position_reference: str = STATE_POSITION_ABSOLUTE
     corridor_gate: str = CORRIDOR_GATE_ON_FINAL
-    # State output only: the final-approach penalty (train.procedure_loss). Hinge² on the
+    # State output only: the final-approach penalty (objective.procedure_loss). Hinge² on the
     # metres outside the k-cone / glidepath window, on rows where the OBSERVED track is
     # established (final_approach_geometry.truth_final_gate), each family divided by its
     # runway-scale length. Weights are the multipliers λ: fixed when ``dual_step`` is 0,
@@ -1222,7 +1222,7 @@ class TSConfig:
                     "validated against the cohort, and never read"
                 )
             if self.control_state_objective != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
-                # `train.loss_component_names` registers `imitation` under the
+                # `objective.loss_component_names` registers `imitation` under the
                 # true-time-position objective ONLY, so under any other objective the term
                 # is not built at all — the same reason L1's dense arms have no teacher.
                 # That objective in turn requires the native grid and UNIFORM durations, so

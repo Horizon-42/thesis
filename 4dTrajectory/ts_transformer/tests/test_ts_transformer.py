@@ -47,11 +47,13 @@ import build_multiflight_capacity_report as capacity_report  # noqa: E402
 import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
 import control.dynamics.rollout as control_rollout_module  # noqa: E402
+import batch_contract  # noqa: E402
 import dataset as dataset_module  # noqa: E402
 import batch_benchmark as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
 import experiment_index  # noqa: E402
 import control.loss.fixed_dt as fixed_dt_loss_module  # noqa: E402
+import objective  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
@@ -145,12 +147,13 @@ from synthetic import synthetic_arrivals  # noqa: E402
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     SCHEMA_VERSION as ARRIVAL_MANIFEST_SCHEMA,
 )
+from objective import (  # noqa: E402
+    STATE_LOSS_COMPONENT_NAMES, masked_mse, position_velocity_consistency_loss,
+    prediction_loss, state_prediction_loss_components,
+)
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
-    STATE_LOSS_COMPONENT_NAMES,
-    evaluate_fit_splits,
-    load_checkpoint, masked_mse, position_velocity_consistency_loss,
-    prediction_loss, state_prediction_loss_components, train,
+    evaluate_fit_splits, load_checkpoint, train,
 )
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -2225,7 +2228,7 @@ def test_control_validation_replay_uses_dense_dynamics_queries():
     dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
     raw_batch = next(dataset_module.iter_batches(dataset, 1, shuffle=False, seed=0))
     x, y, mask, final_time_s, _weights, dynamics, _dense = (
-        train_module.unpack_batch(raw_batch)
+        batch_contract.unpack_batch(raw_batch)
     )
     assert dynamics is not None
     midpoint = 0.5 * (dynamics["control_lower"] + dynamics["control_upper"])
@@ -2475,7 +2478,7 @@ def test_control_simple_v1_is_a_frozen_serialized_recipe():
     assert config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE
     assert control_recipe(config)["name"] == CONTROL_RECIPE_SIMPLE_V1
     assert TSConfig.from_dict(config.to_dict()) == config
-    assert "bounded-control-uniform-duration" in train_module.target_contract(config)
+    assert "bounded-control-uniform-duration" in objective.target_contract(config)
     with pytest.raises(ValueError, match="simple-v1 recipe fields are frozen"):
         replace(config, n_segments=32)
 
@@ -2541,7 +2544,7 @@ def test_transport_chart_dynamics_is_an_explicit_control_only_contract():
     )
 
     assert control_recipe(config)["dynamics_backend"] == backend
-    assert f"+dynamics={backend}-v1" in train_module.target_contract(config)
+    assert f"+dynamics={backend}-v1" in objective.target_contract(config)
     with pytest.raises(ValueError, match="requires a control prediction output"):
         TSConfig(control_dynamics_backend=backend)
 
@@ -2825,7 +2828,7 @@ def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
     )
 
-    supervised = train_module.control_state_supervision_prediction(
+    supervised = objective.control_state_supervision_prediction(
         prediction, torch.tensor([8.0, 10.0]), config
     )
 
@@ -2836,7 +2839,7 @@ def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
     )
     torch.testing.assert_close(supervised.final_time_s, torch.tensor([8.0, 10.0]))
     torch.testing.assert_close(prediction.final_time_s, torch.tensor([4.0, 5.0]))
-    assert train_module.target_contract(config) == (
+    assert objective.target_contract(config) == (
         "bounded-control-nonuniform-duration-casadi-rollout-observed-clock-aligned-v3"
         "+duration-uniform-floor=0.8-v1"
     )
@@ -2850,7 +2853,7 @@ def test_predicted_control_state_clock_preserves_original_training_behavior():
     )
     config = TSConfig(prediction_output=PREDICTION_CONTROL)
 
-    assert train_module.control_state_supervision_prediction(
+    assert objective.control_state_supervision_prediction(
         prediction, torch.tensor([8.0]), config
     ) is prediction
 
@@ -2963,7 +2966,7 @@ def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
         "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }
 
-    components = train_module.prediction_loss_components(
+    components = objective.prediction_loss_components(
         prediction,
         torch.zeros(1, channel_count),
         target,
@@ -3022,7 +3025,7 @@ def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monk
         "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }
 
-    components = train_module.control_prediction_loss_components(
+    components = objective.control_prediction_loss_components(
         prediction,
         torch.zeros(1, config.enc_in),
         target,
@@ -4173,14 +4176,17 @@ def test_auto_batch_probe_executes_the_shared_physics_loss(monkeypatch):
         n_heads=2,
         e_layers=1,
     )
-    original_loss = train_module.prediction_loss
+    # "Shared" is the claim under test: the probe must run the package's ONE objective,
+    # not a copy of it that can drift.
+    assert batching.prediction_loss is objective.prediction_loss
+    original_loss = objective.prediction_loss
     calls: list[tuple[torch.Size, torch.Size]] = []
 
     def tracked_loss(prediction, anchor, target, *args):
         calls.append((anchor.shape, target.shape))
         return original_loss(prediction, anchor, target, *args)
 
-    monkeypatch.setattr(train_module, "prediction_loss", tracked_loss)
+    monkeypatch.setattr(batching, "prediction_loss", tracked_loss)
     monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
 
     batching._probe_training_step(config, 2, torch.device("cpu"))

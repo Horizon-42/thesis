@@ -52,7 +52,8 @@ from dataset import (  # noqa: E402
 )
 from batch_contract import anchor_state  # noqa: E402
 from models import build_model, parameter_count, resolve_device  # noqa: E402
-from train import prediction_loss, usable_series  # noqa: E402
+from objective import prediction_loss  # noqa: E402
+from train import usable_series  # noqa: E402
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     load_arrival_flights,
     resolve_arrival_manifest,
