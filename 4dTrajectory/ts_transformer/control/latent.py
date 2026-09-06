@@ -50,6 +50,9 @@ from control.heads import (
 from prediction_outputs import ControlPrediction, FinalTimeHead
 
 LATENT_KL_COMPONENT = "latent_kl"
+#: The auxiliary intent target's loss component (L2.f arm 2); registered only when
+#: ``latent_aux_duration_weight`` is non-zero.
+LATENT_AUX_COMPONENT = "latent_aux"
 # A latent dimension is ACTIVE when its KL exceeds what the free-bits budget gives away for
 # nothing; with no budget, above this floor (nats). Read with the budget in mind: the count
 # says "dimensions the objective is paying for", which is the collapse signal.
@@ -84,6 +87,10 @@ class LatentControlPrediction(ControlPrediction):
     prior_logvar: torch.Tensor                 # [B, K, Z]
     posterior_mean: torch.Tensor | None = None  # [B, Z]
     posterior_logvar: torch.Tensor | None = None
+    #: The auxiliary head's read-out of the posterior sample, in units of
+    #: ``final_time_scale_s``; ``None`` unless ``latent_aux_duration_weight`` is set AND
+    #: this decode came from a posterior (training). Never leaves the objective.
+    aux_normalized_duration: torch.Tensor | None = None   # [B]
 
 
 class PosteriorEncoder(nn.Module):
@@ -293,6 +300,15 @@ class LatentControlModel(ControlFeatureModel):
         self.control_head = control_head_for(config)
         _initialize_control_head(self.control_head)
         _initialize_final_time_head(self.final_time_head)
+        # The auxiliary intent target (L2.f): built only when it is weighted, so a
+        # checkpoint trained without it has no such parameters to load. It reads the
+        # POSTERIOR SAMPLE and nothing else, and `decode` never calls it — z's path to the
+        # prediction stays exactly the two the design names (the controls and the duration).
+        # Built LAST on purpose: every other module then draws the same initialization it
+        # would without the head, so an arm with the target and one without are paired.
+        self.aux_duration = (
+            nn.Linear(config.latent_dim, 1) if config.latent_aux_duration_weight else None
+        )
 
     def top1_latent(self, logits: torch.Tensor, mean: torch.Tensor) -> torch.Tensor:
         """The prior's most likely component mean — the deterministic top-1 intent."""
@@ -364,6 +380,11 @@ class LatentControlModel(ControlFeatureModel):
             prior_logvar=prior_logvar,
             posterior_mean=posterior_mean,
             posterior_logvar=posterior_logvar,
+            aux_normalized_duration=(
+                self.aux_duration(latent).squeeze(-1)
+                if self.aux_duration is not None and posterior_mean is not None
+                else None
+            ),
         )
 
 
@@ -436,6 +457,39 @@ def with_latent_kl(
         components,
         extras={**components.extras, LATENT_KL_COMPONENT: config.latent_beta * (charged * weights).mean()},
         diagnostics=diagnostics,
+    )
+
+
+def with_latent_aux_duration(
+    components: LossComponents,
+    prediction: LatentControlPrediction,
+    config: TSConfig,
+    target_final_time_s: torch.Tensor,
+    flight_weights: torch.Tensor,
+) -> LossComponents:
+    """Add the auxiliary duration target on z (L2.f arm 2).
+
+    The target is the batch's own truth duration in the units the posterior already reads
+    it in (``final_time_scale_s``), so the term says "z must carry the remaining duration"
+    and nothing else. Flight-weighted like every other control term. The head is applied to
+    the POSTERIOR SAMPLE, which is why a prediction without one is a contract error rather
+    than a skipped term: the component is registered in ``loss_component_names`` and a
+    missing value would be a KeyError one batch later.
+    """
+    if prediction.aux_normalized_duration is None:
+        raise ValueError(
+            "the auxiliary duration target needs a posterior sample; this prediction was "
+            "decoded from the prior"
+        )
+    target = target_final_time_s.to(prediction.aux_normalized_duration.dtype) / config.final_time_scale_s
+    squared_error = (prediction.aux_normalized_duration - target) ** 2
+    weights = flight_weights.to(dtype=squared_error.dtype, device=squared_error.device)
+    return replace(
+        components,
+        extras={
+            **components.extras,
+            LATENT_AUX_COMPONENT: config.latent_aux_duration_weight * (squared_error * weights).mean(),
+        },
     )
 
 

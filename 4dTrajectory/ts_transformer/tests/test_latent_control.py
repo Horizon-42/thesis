@@ -8,6 +8,7 @@ and a run with a latent must be named as a different model, not as a loss edit.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import importlib.util
 import json
 import math
@@ -30,6 +31,7 @@ from control.conditioning import DYNAMICS_CONDITION_NAMES
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.latent import (
     ACTIVE_UNIT_KL_NATS,
+    LATENT_AUX_COMPONENT,
     LATENT_KL_PER_DIM_PREFIX,
     PRIOR_MEAN_INIT_STD,
     PriorNetwork,
@@ -41,6 +43,7 @@ from control.latent import (
     latent_kl,
     per_dimension_kl,
     per_dimension_kl_mean_term,
+    with_latent_aux_duration,
     with_latent_kl,
 )
 from batch_contract import LossComponents
@@ -646,12 +649,85 @@ def test_the_warmup_names_the_run_only_when_it_is_set():
     )
 
 
-def test_the_named_recipes_pin_the_warmup_off():
+def test_the_named_recipes_pin_the_warmup_and_the_aux_target_off():
     from config import CONTROL_RECIPE_NAMES, CONTROL_RECIPE_CUSTOM, control_recipe_overrides
     for name in CONTROL_RECIPE_NAMES:
         if name == CONTROL_RECIPE_CUSTOM:
             continue
         assert control_recipe_overrides(name)["latent_beta_warmup_epochs"] == 0
+        assert control_recipe_overrides(name)["latent_aux_duration_weight"] == 0.0
+
+
+def test_config_refuses_the_aux_target_without_a_latent_and_under_a_given_cta():
+    with pytest.raises(ValueError, match="mean nothing without a latent"):
+        _config(latent_dim=0, latent_aux_duration_weight=1.0)
+    with pytest.raises(ValueError, match="must be finite and non-negative"):
+        _config(latent_aux_duration_weight=-1.0)
+    with pytest.raises(ValueError, match="already hands that duration to the decoder"):
+        _config(cta_conditioning="given", latent_aux_duration_weight=1.0)
+    # the CTA alone is fine, and so is the aux target alone
+    assert _config(cta_conditioning="given").latent_aux_duration_weight == 0.0
+    assert _config(latent_aux_duration_weight=1.0).cta_conditioning == "off"
+
+
+def test_the_aux_head_exists_only_when_weighted_and_reads_only_a_posterior_sample():
+    torch.manual_seed(0)
+    plain = build_model(_config())
+    assert plain.aux_duration is None
+    assert not any("aux_duration" in key for key in plain.state_dict())
+    config = _config(latent_aux_duration_weight=1.0)
+    model = build_model(config)
+    assert isinstance(model.aux_duration, torch.nn.Linear)
+    assert model.aux_duration.in_features == config.latent_dim
+    history, dynamics, future = _history(config, 3), _dynamics(3), _future(config, 3)
+    trained = model_forward(model, history, dynamics, future=future)
+    assert trained.aux_normalized_duration is not None
+    assert trained.aux_normalized_duration.shape == (3,)
+    assert torch.all(torch.isfinite(trained.aux_normalized_duration))
+    # inference: the prior's top-1, and an explicit latent (modes, shuffle, z-oracle)
+    assert model_forward(model, history, dynamics).aux_normalized_duration is None
+    assert model(history, dynamics, latent=torch.zeros(3, config.latent_dim)).aux_normalized_duration is None
+    # and the head is not in the decode path: the same latent decodes the same controls
+    # whether the head is there or not
+    rebuilt = build_model(_config())
+    rebuilt.load_state_dict(
+        {k: v for k, v in model.state_dict().items() if "aux_duration" not in k}
+    )
+    latent = torch.randn(3, config.latent_dim)
+    assert torch.allclose(
+        model.eval()(history, dynamics, latent=latent).controls,
+        rebuilt.eval()(history, dynamics, latent=latent).controls,
+    )
+
+
+def test_the_aux_component_is_registered_only_when_it_is_charged():
+    assert LATENT_AUX_COMPONENT not in loss_component_names(_config())
+    assert LATENT_AUX_COMPONENT in loss_component_names(_config(latent_aux_duration_weight=1.0))
+
+
+def test_the_aux_term_is_the_weighted_mse_against_the_normalized_duration():
+    config = _config(latent_dim=3, latent_aux_duration_weight=2.0, final_time_scale_s=100.0)
+    zero = torch.zeros(())
+    components = LossComponents(state=zero, final_time=zero, kinematic=zero, terminal=zero)
+    prediction = replace(
+        _prediction(components=1, latent_dim=3),
+        aux_normalized_duration=torch.tensor([1.0, 2.0]),
+    )
+    out = with_latent_aux_duration(
+        components, prediction, config, torch.tensor([300.0, 100.0]), torch.ones(2)
+    )
+    # targets 3.0 and 1.0 -> squared errors 4.0 and 1.0 -> weight 2 x mean 2.5
+    assert out.extras[LATENT_AUX_COMPONENT] == pytest.approx(5.0)
+    with pytest.raises(ValueError, match="decoded from the prior"):
+        with_latent_aux_duration(components, _prediction(components=1, latent_dim=3), config,
+                                 torch.tensor([300.0, 100.0]), torch.ones(2))
+
+
+def test_the_aux_target_names_the_run_only_when_it_is_set():
+    assert "aux-T" not in run_display_name(_config(latent_dim=8).to_dict())
+    assert "aux-T=1" in run_display_name(
+        _config(latent_dim=8, latent_aux_duration_weight=1.0).to_dict()
+    )
 
 
 @pytest.mark.parametrize("init_std", [1.0, 0.1])
@@ -745,6 +821,99 @@ def test_the_annealed_beta_is_what_the_epoch_charges_and_the_record_says_so(tmp_
     # the checkpoint keeps the run's own beta, not the epoch's
     _model, loaded, _normalizer, _payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert loaded.latent_beta == 0.5 and loaded.latent_beta_warmup_epochs == 4
+
+
+def _aux_arm(tmp_path: Path, weight: float, seed: int, *, epochs: int = 2, flights: int = 16):
+    """One tiny latent run at the given auxiliary weight; returns its epoch records.
+
+    The two weights are PAIRED: `aux_duration` is the last module built, so every other
+    module draws the same initialization, and the data, split and torch seed are identical.
+    The only difference between the arms is the auxiliary gradient.
+    """
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
+        control_rollout_integrator_dt_s=0.5,
+        seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1,
+        final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
+        epochs=epochs, patience=epochs, batch_size=8, dropout=0.0, seed=seed,
+        val_fraction=0.25, test_fraction=0.25,
+        latent_dim=3, latent_beta=0.5, latent_free_bits_nats=0.01,
+        latent_aux_duration_weight=weight,
+    )
+    series, _report = build_series(
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=flights, seed=3), config, airport=AIRPORT
+    )
+    provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                  "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
+    torch.manual_seed(0)
+    out = tmp_path / f"w{weight:g}_s{seed}"
+    train(series, config, output_dir=out, data_provenance=provenance, verbose=False)
+    return json.loads((out / "history.json").read_text())["history"]
+
+
+@pytest.mark.parametrize("seed", [7, 11, 13])
+def test_the_aux_target_keeps_information_in_the_posterior_mean(tmp_path: Path, seed: int):
+    """The designed effect, measured: the KL's MEAN term — the half that carries per-flight
+    information — is larger with the auxiliary target than without it, on the same seed.
+
+    Measured on synthetic arrivals (16 flights, 2 epochs, paired init), epoch 2, mean term
+    without -> with: seed 7 102.60 -> 108.06, seed 11 26.854 -> 26.917, seed 13 15.48 ->
+    15.69. Three of three, and at 3 and 6 epochs the gap widens (seed 7 at 6 epochs:
+    58.8 -> 94.0).
+
+    The `mean_displacement_sigma` MEDIAN is NOT monotone here and this test deliberately
+    does not assert it: 9.07 -> 9.31 (seed 7) and 1.96 -> 2.07 (seed 13) rise, 2.496 -> 2.481
+    (seed 11) falls. The explanation is the shape of the target — a scalar read-out needs
+    ONE latent direction, so it can raise the summed mean term while leaving a median over
+    three dimensions flat or lower. Read `kl_per_dim` beside the median on this arm.
+    """
+    without = _aux_arm(tmp_path, 0.0, seed)
+    with_target = _aux_arm(tmp_path, 1.0, seed)
+    assert all(row["train_components"].get(LATENT_AUX_COMPONENT) is None for row in without)
+    assert all(
+        row["train_components"][LATENT_AUX_COMPONENT] > 0.0 and
+        math.isfinite(row["train_components"][LATENT_AUX_COMPONENT])
+        for row in with_target
+    )
+    assert with_target[-1]["latent"]["kl_mean_term_nats"] > without[-1]["latent"]["kl_mean_term_nats"]
+
+
+def test_an_aux_trained_checkpoint_forecasts_and_writes_no_aux_output(tmp_path: Path):
+    """The head is training-only: the checkpoint rebuilds with it, the forecast never calls
+    it, and nothing about it (or about z) reaches a record."""
+    _aux_arm(tmp_path, 1.0, seed=7, epochs=1)
+    run = tmp_path / "w1_s7"
+    model, loaded, normalizer, _payload = load_checkpoint(run / "checkpoint.pt")
+    assert isinstance(model, LatentControlModel) and model.aux_duration is not None
+    assert loaded.latent_aux_duration_weight == 1.0
+    series, _report = build_series(
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=16, seed=3), loaded, airport=AIRPORT
+    )
+    forecast = forecast_approach(model, series[0], loaded, normalizer, device=torch.device("cpu"))
+    assert forecast.controls is not None
+    out = tmp_path / "pred"
+    write_batch(
+        [build_prediction_record(series[0], forecast, index=0, model_name=loaded.model,
+                                 horizon_mode=loaded.horizon_mode)],
+        output_dir=out, config_dict=loaded.to_dict(),
+        flight_metrics=[observed_series_metrics(series[0], forecast)],
+    )
+    summary = json.loads((out / "summary.json").read_text())
+    states = json.loads((out / summary["results"][0]["states_file"]).read_text())
+    assert "aux" not in json.dumps(states).lower()
+    assert "aux" not in json.dumps(summary["results"][0]).lower()
+    # state dict round trip into a fresh build of the same config
+    rebuilt = build_model(loaded)
+    rebuilt.load_state_dict(model.state_dict())
+    history, dynamics = _history(loaded, 2), _dynamics(2)
+    assert torch.allclose(
+        model.eval()(history, dynamics).controls, rebuilt.eval()(history, dynamics).controls
+    )
 
 
 def test_the_z_oracle_decodes_the_posterior_mean_of_each_flight_s_own_future(tmp_path: Path):
