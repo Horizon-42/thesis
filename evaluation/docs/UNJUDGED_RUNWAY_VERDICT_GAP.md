@@ -1,6 +1,13 @@
 # "Never judged" and "judged indeterminate" render identically
 
-Status: open finding, not yet fixed — needs a product decision, see "Directions" below.
+Status (2026-09-07): the evaluation half is fixed — KRDU 32 and KSMF 35R now carry
+their RNAV (GPS) approach's LNAV/VNAV vertical path (`Runway.tch_source ==
+"faa_cifp_approach_leg"`, see `trajectory_data_process/CLAUDE.md` "Runway thresholds
+& TCH"), so after the next harvest run they are evaluated like every other runway
+and the "never judged" bucket shrinks from 1,876 fleet flights to KRDU 14's 13. The
+frontend half below (a fourth UI state or a surfaced skip reason) is still open and
+still needs the product decision described under "Directions". The mechanism
+described in the rest of this document is unchanged for KRDU 14.
 
 ## Summary
 

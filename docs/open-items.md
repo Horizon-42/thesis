@@ -14,7 +14,9 @@ change you are making go in `docs/code-health-followups.md` instead.
   `outputs/harvest/<ICAO>/arrivals/manifest.json` are `harvest-arrivals-v5-takeoff-excluded`
   (KRDU 14,435 · KSJC 11,082 · KSTL 8,767 · KSMF 4,219 · KMSY 4,147) and every one has its
   `lateral_pass_eligibility.json`. Do NOT run `--evaluate-only` again without need — it
-  deletes that roster. **ts checkpoints trained before 2026-08-24 still predate the v5
+  deletes that roster, and since 2026-09-07 it rewrites it as
+  `harvest-arrivals-v6-published-vertical-path` with KRDU 32 + KSMF 35R included (+1,876
+  arrivals; readers accept both versions, the ts splits do not survive the change). **ts checkpoints trained before 2026-08-24 still predate the v5
   cohort**; the 2026-09-03 airport-frame arms are the first state checkpoints on it. →
   `trajectory_data_process/CLAUDE.md`, `docs/2026-08-21_ksjc_route_mix_and_ade.md`
 - **Per-airport ADE/FDE must be quoted with its route mix, never bare.** KSJC's apparent 1.7×
@@ -22,14 +24,17 @@ change you are making go in `docs/code-health-followups.md` instead.
   five to worst. `summary.json` now carries the covariates per row and an
   `accuracy.difficulty` block; published tables predate them and need re-deriving. →
   `4dTrajectory/ts_transformer/CLAUDE.md`
-- **The optimizer batch has NOT been run since the harvest grew; no SOLVES are on disk.**
-  `4dTrajectory/outputs/<ICAO>` holds only ts artifacts, so `--skip-optimize` has nothing to find
-  and the solve run is from scratch. **`flight_scenarios/outputs` is NOT empty** (this item said
-  it was until 2026-09-06): all ten `*_scenarios.json` + their `.selection.json` are there, 92 MB,
-  built 2026-08-23. Whether they can be reused as-is is UNVERIFIED — the arrival manifests were
-  rewritten 2026-08-24, one day later, though their per-airport `available` counts still match the
-  selections exactly. Let the runner's prepared-input signature check decide; do not assume either
-  way.
+- **The optimizer solves ARE on disk (2026-09-07 correction), all speed-indeterminate.**
+  `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}`: 15 batches, 70,267 v6-evaluated
+  records, solved from the 2026-08-23 scenarios — one day before `build_scenario` began writing
+  `source.landing_aero`, so every row reads "record carries no source.landing_aero block" and
+  the three-gate pass count is 0 (per batch: KRDU/runway 7,491, KSTL/runway 5,148, …). Backfill
+  without re-solving: `4dTrajectory/optimization/backfill_landing_aero.py --apply`, then
+  regenerate the reports (`run_all_evaluations.py`); the reports are v6 and the current schema
+  is v7 either way. **`flight_scenarios/outputs` is NOT empty**: all ten `*_scenarios.json` +
+  `.selection.json`, 92 MB, built 2026-08-23; the arrival manifests were rewritten 2026-08-24,
+  whether the scenarios can be reused as-is is UNVERIFIED — let the runner's prepared-input
+  signature check decide.
   The arrival manifests were re-harvested 2026-08-15…17 for all five airports (the old
   "KSJC and KSTL need a re-harvest" item is closed) but need the v5 re-roster above first; after it,
   `prepare_scenario_inputs.py --skip-observed` is safe and skips rebuilding the observed

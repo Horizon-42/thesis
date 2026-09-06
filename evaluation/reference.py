@@ -138,9 +138,16 @@ def compare_to_reference(
     reference: TrajectoryRecord,
     *,
     n: int = N_RESAMPLE,
+    span: ReferenceSpan | None = None,
 ) -> ReferenceComparison:
-    """Compare a SOLVED record's path + duration against its observed reference."""
-    span = reference_span(record, reference)
+    """Compare a SOLVED record's path + duration against its observed reference.
+
+    ``span`` lets a caller that already proved the endpoints match (``evaluate_batch``)
+    pass that proof in instead of walking both paths a second time; it is taken on the
+    caller's word and must be the span of THIS record and reference.
+    """
+    if span is None:
+        span = reference_span(record, reference)
     if not span.comparable:
         start = "unavailable" if span.start_gap_m is None else f"{span.start_gap_m:.1f} m"
         end = "unavailable" if span.end_gap_m is None else f"{span.end_gap_m:.1f} m"

@@ -4,17 +4,13 @@ from evaluation.arrival import ArrivalDeviation, ArrivalOutcome, arrival_deviati
 from evaluation.context import assessment_for_runway, contexts_for_airport, resolve_context
 from evaluation.metrics import TrajectoryEvaluation, evaluate_batch, evaluate_record
 from evaluation.records import (
-    STATE_KEYS,
-    Subject,
     TrajectoryRecord,
+    iter_records,
     load_record,
     load_records,
     record_from_dict,
 )
 from evaluation.reference import (
-    ENDPOINT_TOLERANCE_M,
-    ReferenceComparison,
-    ReferenceSpan,
     compare_to_reference,
     horizontal_arc_length_m,
     load_reference,
@@ -26,16 +22,11 @@ from evaluation.stats import percentile
 from evaluation.thresholds import AssessmentContext, ResolvedLimits
 
 __all__ = [
-    "STATE_KEYS",
     "AssessmentContext",
     "ArrivalDeviation",
     "ArrivalOutcome",
-    "ENDPOINT_TOLERANCE_M",
-    "ReferenceComparison",
-    "ReferenceSpan",
     "ResolvedLimits",
     "SpeedGateBounds",
-    "Subject",
     "TrajectoryEvaluation",
     "TrajectoryRecord",
     "arrival_deviation",
@@ -45,6 +36,7 @@ __all__ = [
     "evaluate_batch",
     "evaluate_record",
     "horizontal_arc_length_m",
+    "iter_records",
     "load_record",
     "load_records",
     "load_reference",

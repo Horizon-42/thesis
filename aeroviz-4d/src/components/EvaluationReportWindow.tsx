@@ -27,6 +27,7 @@ import { createPortal } from "react-dom";
 import {
   composeVerdict,
   isLegacyEvaluationReport,
+  isPriorSpeedGateReport,
   type EvaluationComponentResult,
   type EvaluationReport,
   type EvaluationRow,
@@ -854,6 +855,13 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
             the current schema.
           </p>
         ) : null}
+        {isPriorSpeedGateReport(report) ? (
+          <p className="eval-report-deviation-warning" role="status">
+            Speed graded at 1 g ({report.schema_version}): this batch&apos;s lower speed
+            bound ignored the crossing load factor; the current schema anchors it on the
+            load factor of the final rollout step. Re-evaluate the batch to regrade it.
+          </p>
+        ) : null}
 
         <p className="eval-report-gates">
           Terminal bounds are shown in each row. Lateral is half the published runway
@@ -862,11 +870,12 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           published-TCH path and the 22 m RNAV/RNP terminal bound. The result grades
           terminal final-approach geometry, not touchdown or landing certification.
           {hasSpeedGate
-            ? " Speed is the stall-anchored crossing window [1.23·Vs1g, 1.23·Vs1g + 20 kt]" +
-              " at the record's resolved-airframe crossing mass. Computed subjects are" +
-              " judged on the crossing model airspeed; observed baselines on the fitted" +
-              " crossing GROUND speed as a stated proxy (wind unmodelled — an ordinary" +
-              " 10 kt headwind is half the window), under its own criterion id."
+            ? " Speed is the stall-anchored crossing window [1.23·Vs(n), 1.23·Vs1g + 20 kt]" +
+              " at the record's resolved-airframe crossing mass and load factor n (the" +
+              " last control's; a declared 1 g on records without controls). Computed" +
+              " subjects are judged on the crossing model airspeed; observed baselines on" +
+              " the fitted crossing GROUND speed as a stated proxy (wind unmodelled — an" +
+              " ordinary 10 kt headwind is half the window), under its own criterion id."
             : ""}
         </p>
 
@@ -939,7 +948,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
               <tr>
                 <th
                   scope="row"
-                  title="ADS-B reported ground speed at the estimated crossing — audit statistic, never graded (wind unmodelled)"
+                  title="ADS-B reported ground speed at the estimated crossing — the quantity the observed speed gate judges, as a stated proxy for airspeed (wind unmodelled)"
                 >
                   crossing ground speed (m/s, ADS-B)
                 </th>
@@ -1062,7 +1071,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                         ? `window ${formatNum(row.bounds.speed_lower_ms)}–${formatNum(row.bounds.speed_upper_ms)} m/s` +
                           ` · Vs1g ${formatNum(row.bounds.stall_speed_ms)} m/s`
                         : row.crossing_speed_ms == null && row.crossing_ground_speed_ms != null
-                          ? "ADS-B ground speed — audit only, not graded"
+                          ? "ADS-B ground speed — graded as a stated proxy (wind unmodelled)"
                           : undefined}
                     >
                       {formatNum(row.crossing_speed_ms ?? row.crossing_ground_speed_ms)}

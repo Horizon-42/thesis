@@ -89,8 +89,23 @@ store, roster.
   which is the best end-to-end check that the datum, the fit and the TCH source all agree.
   The column decode is pinned by a coincidence-proof cross-check: **4795 of 4900 records decode a
   course width of exactly 106.75 m**, independently the LPV semiwidth in `evaluation/thresholds.py`.
-  A runway with no Path Point record has **no LPV procedure** (KRDU 14/32) — its TCH is `None`,
-  never defaulted, because it cannot be judged against LPV gates at all.
+  A runway with no Path Point record has **no LPV procedure** (KRDU 14/32, KSMF 35R), but that
+  is not the end of its vertical path: the RNAV (GPS) approach's **runway leg** (section P /
+  subsection F, the leg whose fix is `RWxx`) codes the vertical angle and the altitude at which
+  the path crosses the runway, and its approach-types continuation says whether LNAV/VNAV
+  (Baro-VNAV) minima are published. `read_approach_verticals` decodes that and `load_airport`
+  fills `Runway.threshold_crossing_height_m` / `published_glidepath_deg` from it when LNAV/VNAV
+  is published (`tch_source == "faa_cifp_approach_leg"`, `baro_vnav_minima`): **KRDU 32 =
+  3.50° / 470 ft − 425 ft = 45 ft (1,604 arrivals), KSMF 35R = 3.00° / 64 ft (259)**. The decode
+  is pinned per airport against the Path Points (the LPV-bearing procedure's leg must equal
+  LTP + TCH within 1 ft and match the glidepath — all 23 fleet LPV runways do, within 0.8 ft).
+  Only a runway with **no RNAV procedure at all** keeps `None` (KRDU 14, 13 arrivals). The
+  runway record (PG) publishes a TCH too, but it is the ILS/VGSI figure and differs from the RNAV
+  one by ~4 ft at KSTL 06/24 — a per-procedure quantity, so the procedure's own leg is what is
+  read. `tch_source` and `baro_vnav_minima` are NOT in `threshold_frame_snapshot`, so every
+  stored threshold event on those runways stays valid. **Re-running the harvest after this
+  change grows the arrivals rosters (KRDU +1,617, KSMF +259) and therefore every ts dataset
+  split** — do it between campaigns and rebuild `lateral_pass_eligibility.json` afterwards.
 
 ## Altitude outlier repair
 

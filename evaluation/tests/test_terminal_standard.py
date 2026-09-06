@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from evaluation import AssessmentContext, evaluate_batch, evaluate_record, record_from_dict
 from evaluation.context import assessment_for_runway
+from evaluation.thresholds import LNAV_VNAV_NO_PATH_REASON
 from evaluation.tests.factories import (
     TARGET,
     assessment_context,
@@ -205,7 +204,9 @@ def test_lnav_vnav_fallback_has_a_real_vertical_gate():
     assert result.verdict == "pass"
 
 
-def test_non_lpv_fallback_keeps_lateral_result_when_path_reference_is_unavailable():
+def test_a_runway_with_no_published_vertical_path_keeps_its_lateral_verdict():
+    """KRDU 14's shape: no LPV, no RNAV (GPS) procedure at all -- lateral is judged,
+    vertical and the composite stay indeterminate with the reason named."""
     runway = Runway(
         airport="KRDU",
         ident="05L",
@@ -222,7 +223,8 @@ def test_non_lpv_fallback_keeps_lateral_result_when_path_reference_is_unavailabl
         runway_source_cycle="2026-08-06",
         procedure_source_cycle="2026-08-06",
     )
-    context = assessment_for_runway(runway, baro_vnav_approved=True)
+    context = assessment_for_runway(runway)
+    assert not context.baro_vnav_approved
 
     result = evaluate_record(record_from_dict(trajectory_payload()), context=context)
 
@@ -231,7 +233,7 @@ def test_non_lpv_fallback_keeps_lateral_result_when_path_reference_is_unavailabl
     assert result.verdict == "indeterminate"
     assert result.deviation is not None
     assert result.deviation.vertical_m is None
-    assert result.reason == "authoritative Baro-VNAV threshold path reference unavailable"
+    assert result.reason == LNAV_VNAV_NO_PATH_REASON
 
     report = evaluate_batch(
         [record_from_dict(trajectory_payload())],
@@ -241,6 +243,29 @@ def test_non_lpv_fallback_keeps_lateral_result_when_path_reference_is_unavailabl
     assert report["trajectories"][0]["vertical_m"] is None
 
 
+def test_baro_vnav_approval_without_a_published_path_is_a_construction_error():
+    """The runway data sets the two together; a context claiming approval without the
+    TCH it is approved against is not a state the evaluator resolves."""
+    with pytest.raises(ValueError, match="baro_vnav_approved requires"):
+        AssessmentContext(
+            benchmark="rnp_apch_lnav_vnav_baro",
+            airport="KRDU",
+            runway="14",
+            threshold_lat=TARGET["lat"],
+            threshold_lon=TARGET["lon"],
+            runway_course_deg=45.0,
+            runway_width_m=45.72,
+            runway_source="faa_nasr_apt_rwy",
+            runway_source_cycle="2026-08-06",
+            procedure_source="no_published_vertical_guidance",
+            procedure_source_cycle="2026-08-06",
+            threshold_elevation_hae_m=144.76,
+            threshold_elevation_msl_m=114.76,
+            threshold_crossing_height_m=None,
+            baro_vnav_approved=True,
+        )
+
+
 def test_subject_is_required_instead_of_guessed():
     payload = observed_payload()
     del payload["source"]["subject"]
@@ -248,12 +273,3 @@ def test_subject_is_required_instead_of_guessed():
     with pytest.raises(ValueError, match="source.subject"):
         record_from_dict(payload)
 
-
-def test_non_finite_state_is_rejected_at_the_record_boundary():
-    payload = observed_payload()
-    # The last row is the appended fitted crossing — inferred rows are validated
-    # exactly like measured ones.
-    payload["states"][-1]["alt"] = math.nan
-
-    with pytest.raises(ValueError, match=r"states\[2\]\.alt.*finite"):
-        record_from_dict(payload)

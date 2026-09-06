@@ -51,7 +51,13 @@ MANIFEST_NAME = "manifest.json"
 # v5 excludes segments that begin on the ground (``takeoff_in_segment``). The bump is
 # what makes an existing v4 manifest fail loudly instead of quietly feeding a model
 # split that still contains 75 takeoffs -- the roster's MEANING changed, not its shape.
-SCHEMA_VERSION = "harvest-arrivals-v5-takeoff-excluded"
+# v6 (2026-09-07): the cohort admits runways whose vertical path comes from the RNAV
+# (GPS) approach leg (LNAV/VNAV minima, ``Runway.tch_source``), not only LPV Path
+# Points -- KRDU 32 and KSMF 35R join the roster on the next harvest. The roster SHAPE
+# is unchanged, so readers accept v5 too: the five rosters on disk are v5 and stay
+# valid until deliberately rebuilt (a re-harvest changes every ts dataset split).
+SCHEMA_VERSION = "harvest-arrivals-v6-published-vertical-path"
+READABLE_SCHEMA_VERSIONS = ("harvest-arrivals-v5-takeoff-excluded", SCHEMA_VERSION)
 
 
 def arrival_manifest_path(paths: HarvestPaths) -> Path:
@@ -102,23 +108,18 @@ def write_arrival_records(
         track = filtered_track(json.loads(source_bytes))
         runway = airport.runway(row["runway"])
 
+        # ``Runway`` publishes TCH and glidepath together or not at all (its
+        # __post_init__), so one check covers both halves of the vertical path.
         if runway.threshold_crossing_height_m is None:
             excluded.append(
                 {
                     "flight_key": row["flight_key"],
                     "outcome": "no_published_tch",
                     "runway": runway.ident,
-                    "reason": f"runway {runway.ident} publishes no LPV TCH",
-                }
-            )
-            continue
-        if runway.published_glidepath_deg is None:
-            excluded.append(
-                {
-                    "flight_key": row["flight_key"],
-                    "outcome": "no_published_glidepath",
-                    "runway": runway.ident,
-                    "reason": f"runway {runway.ident} publishes no LPV glidepath",
+                    "reason": (
+                        f"runway {runway.ident} publishes no vertically guided RNAV "
+                        "approach (no LPV Path Point, no LNAV/VNAV final leg)"
+                    ),
                 }
             )
             continue
@@ -257,10 +258,10 @@ def load_arrival_flights(
             f"{manifest_path} is not an arrival manifest object; legacy flight-array "
             "inputs are no longer supported"
         )
-    if manifest.get("schema_version") != SCHEMA_VERSION:
+    if manifest.get("schema_version") not in READABLE_SCHEMA_VERSIONS:
         raise ValueError(
             f"{manifest_path} has schema {manifest.get('schema_version')!r}; "
-            f"expected {SCHEMA_VERSION!r}"
+            f"expected one of {READABLE_SCHEMA_VERSIONS!r}"
         )
     if manifest.get("altitude_source") != "opensky_history_geoaltitude_m":
         raise ValueError(
@@ -420,6 +421,8 @@ def _runway_target(runway: Runway) -> dict[str, Any]:
         "published_glidepath_deg": runway.published_glidepath_deg,
         "position_source": runway.position_source,
         "vertical_source": runway.vertical_source,
+        "tch_source": runway.tch_source,
+        "baro_vnav_minima": runway.baro_vnav_minima,
     }
 
 

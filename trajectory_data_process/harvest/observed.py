@@ -86,7 +86,9 @@ def observed_record(
     An explicit ``mass_kg`` bypasses resolution (tests, synthetic tracks).
     """
     if runway.threshold_crossing_height_m is None:
-        raise ValueError(f"{runway.airport} {runway.ident} publishes no LPV TCH")
+        raise ValueError(
+            f"{runway.airport} {runway.ident} publishes no vertically guided RNAV approach"
+        )
     landing_aero: dict[str, float] | None = None
     aircraft_type: str | None = None
     if mass_kg is None:
@@ -160,6 +162,8 @@ def observed_record(
             "altitude_source": MSL_ALTITUDE_SOURCE,
             "hae_minus_msl_m": runway.hae_minus_msl_m,
             "vertical_source": runway.vertical_source,
+            "tch_source": runway.tch_source,
+            "baro_vnav_minima": runway.baro_vnav_minima,
             # The stall facts the speed gate anchors on — present only when the
             # airframe resolved (see NOMINAL_MASS_KG above).
             **({"landing_aero": landing_aero} if landing_aero is not None else {}),
@@ -206,7 +210,11 @@ def write_observed_records(
         runway = airport.runway(row["runway"])
         if runway.threshold_crossing_height_m is None:
             skipped.append(
-                SkippedTrack(row["flight_key"], f"runway {runway.ident} publishes no LPV TCH")
+                SkippedTrack(
+                    row["flight_key"],
+                    f"runway {runway.ident} publishes no vertically guided RNAV approach "
+                    "(no LPV Path Point, no LNAV/VNAV final leg)",
+                )
             )
             continue
         record = observed_record(track, runway, mass_kg=mass_kg)

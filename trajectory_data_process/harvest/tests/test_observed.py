@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 
 from trajectory_data_process.harvest.airports import (
+    PATH_POINT_TCH_SOURCE,
     Runway,
     threshold_frame_fingerprint,
     threshold_frame_snapshot,
@@ -23,6 +24,7 @@ def _runway() -> Runway:
         elevation_hae_m=130.0, elevation_msl_m=100.0,
         course_deg=180.0, hae_minus_msl_m=30.0,
         threshold_crossing_height_m=15.0, published_glidepath_deg=3.0,
+        tch_source=PATH_POINT_TCH_SOURCE,
         width_m=45.72, lpv_course_width_m=106.75,
         runway_source_cycle="2026-08-06",
         procedure_source_cycle="2026-08-06",

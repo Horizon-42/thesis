@@ -55,15 +55,22 @@ def aero_params_for_aircraft(aircraft: Aircraft) -> AeroParams:
     return AeroParams(S=aircraft.geometry.wing_area_m2, Cl_max=cl_max)
 
 
-def stall_speed_ms(mass_kg: float, *, wing_area_m2: float, cl_max: float) -> float:
-    """1-g level-flight stall speed of the project's stall model (TAS, m/s).
+def stall_speed_ms(
+    mass_kg: float, *, wing_area_m2: float, cl_max: float, load_factor: float = 1.0
+) -> float:
+    """Stall speed of the project's stall model at load factor ``n`` (TAS, m/s).
 
-    ``V_s = sqrt(2 m g / (rho0 S Cl_max))`` — the SINGLE definition. The optimizer's
-    velocity floor and evaluation's threshold speed gate both anchor on it, so a solve
-    admitted by the floor and the gate that judges it share one stall model by
+    ``V_s(n) = sqrt(2 n m g / (rho0 S Cl_max))`` — the SINGLE definition: the speed at
+    which the lift the manoeuvre demands, ``n m g``, needs the whole ``Cl_max``. The
+    default ``n = 1`` is the 1-g level-flight stall speed the optimizer's velocity floor
+    anchors on (and the analogue of the regulatory reference stall speed V_SR);
+    evaluation's threshold speed gate passes the crossing load factor
+    (``evaluation/docs/THRESHOLD_SPEED_GATE.md`` §3.5). Both call this one function, so
+    a solve admitted by the floor and the gate that judges it share one stall model by
     construction. ``cl_max`` is the LANDING-configuration value
     (:func:`aero_params_for_aircraft`).
     """
     return math.sqrt(
-        2.0 * mass_kg * GRAVITY_M_S2 / (RHO0_KG_M3 * wing_area_m2 * cl_max)
+        2.0 * load_factor * mass_kg * GRAVITY_M_S2
+        / (RHO0_KG_M3 * wing_area_m2 * cl_max)
     )

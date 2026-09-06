@@ -149,6 +149,10 @@ gate (schema v6).
 
 ## 7. `evaluation.records.roster_context_keys` leaks a raw FileNotFoundError
 
+**RESOLVED 2026-09-07** (`dev-evaluation-review-fixes`): a missing manifest returns `None` and
+`record_files` raises the crafted message; a roster ROW lacking `arr_airport`/`runway` now
+raises instead of silently falling back to materializing the batch.
+
 **Verified** (reproduced): `python -m evaluation --input <dir-without-summary.json>`
 raises `FileNotFoundError: .../summary.json` with a bare traceback. The crafted message
 for exactly this case lives in `record_files` ("has no summary.json manifest; pass a
@@ -163,6 +167,8 @@ can change.
 
 ## 8. `record_from_dict` does not enforce strictly-increasing `t`
 
+**RESOLVED 2026-09-07**: checked in the `_state` loop (`evaluation/tests/test_records.py`).
+
 **Verified**: a record whose `states` carry `t = [0, 10, 5]` and `final_time_s = 5.0`
 passes `record_from_dict`. The contract says `t` is "the one field with hard contracts —
 `final_time_s == states[-1]['t']` to 1e-6, and strictly increasing offsets"
@@ -176,6 +182,8 @@ side too.
 
 ## 9. `evaluation/arrival.py` restates `STATE_KEYS` as a literal tuple
 
+**RESOLVED 2026-09-07**: `_TIMED_STATE_KEYS = ("t", *STATE_KEYS)` imported from `records`.
+
 **Verified**: the crossing-interpolation dict comprehension iterates
 `("t", "lat", "lon", "alt", "V", "psi", "gamma", "m")` (`arrival.py`,
 `_computed_arrival`) — a mirror of `records.STATE_KEYS` restated without a mirror
@@ -185,6 +193,8 @@ comment. The project rule is "a schema literal in a consumer is a mirror — imp
 **Suggested:** `("t", *STATE_KEYS)` imported from `evaluation.records`.
 
 ## 10. `evaluate_batch` on an EMPTY iterable reports `subject: "mixed"`
+
+**RESOLVED 2026-09-07**: an empty batch reports `subject: "empty"`.
 
 **Verified**: with zero records, `sorted(subjects)[0] if len(subjects) == 1 else
 "mixed"` takes the else branch, so an empty batch serializes `subject: "mixed"`,
@@ -370,3 +380,44 @@ that change.
   teacher chain; T2 banners it rather than rewriting it, but `README.md` and `CLAUDE.md`
   still point at it as the authority for "which `control/` modules are live". T3/T4 should
   either re-derive that table or demote the pointer.
+---
+
+Opened 2026-09-07, during the `evaluation` review (`evaluation/docs/2026-09-07_review_fix_plan.zh.md`).
+
+## 15. KRDU 14's 13 arrivals still render as "indeterminate" in the Observe view
+
+**Judgement.** `evaluation/docs/UNJUDGED_RUNWAY_VERDICT_GAP.md`: the evaluation half is fixed
+(KRDU 32 / KSMF 35R now carry an LNAV/VNAV vertical path), so the "never judged" bucket is
+down to KRDU 14, which has no RNAV procedure at all. The frontend still paints those flights
+the same grey as a judged-indeterminate one; the fourth UI state / surfaced skip reason is a
+product decision the gap document lays out. 13 flights, so it is cosmetic until another
+procedure-less runway enters the fleet.
+
+## 16. An observed record without `landing_aero` cannot say WHY
+
+**Judgement.** `harvest/observed.py` omits the key when the icao24 does not resolve, and a
+record written before 2026-08-24 lacks it for every flight. Evaluation reports both as
+"airframe could not be resolved" — for a stale batch that reason is wrong, and unlike the
+`crossing_span` case there is no cure-naming raise. Fix on the producer side: write
+`landing_aero: null` plus an explicit `airframe_resolution` outcome, and let evaluation treat
+an ABSENT key as a stale artifact. Deferred because every current observed batch would need
+`--evaluate-only` (which the root `CLAUDE.md` warns rewrites the v5 arrivals roster).
+
+## 17. `harvest.airports.require_matching_runway_data` has no production caller
+
+**Verified** (2026-09-07, by the M1 review): `runway_data_fingerprint` is written into the
+reclassify / freshness-rebuild manifests as provenance and never checked; the checker
+`require_matching_runway_data` is dead code. Pre-existing. Either wire it (the reclassify
+reader is the natural place) or delete it; note the digest hashes every `Runway` field,
+so it moved for all 26 runways when `tch_source`/`baro_vnav_minima` were added
+(`test_approach_verticals.py` pins that as expected).
+
+## 18. `THRESHOLD_SPEED_GATE.md` §7: the upper edge is where `runway`-mode solves pile up
+
+**Verified** (2026-09-07 measurement). With the A320 family's calibrated `Cl_max` the 64.5 t
+window is 126.7–146.7 kt and the class-default target of 145 kt sits 1.7 kt under the top, so
+the ~15 % "fast" fails in `KMSY/runway` are decided by sub-knot replay drift. The real fix is
+per-type `reference_speed_kt` derived from `1.23·Vs1g(landing_mass)` instead of a class
+constant (already followup-listed under the E75L case); until then quote fast-fail rates with
+the margin.
+

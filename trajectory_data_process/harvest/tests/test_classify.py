@@ -8,7 +8,7 @@ import pytest
 
 from final_approach import Assignment, Projected, TrackPoint, fit_final_segment
 from geokit import METRES_PER_DEG_LAT
-from trajectory_data_process.harvest.airports import Airport, Runway
+from trajectory_data_process.harvest.airports import PATH_POINT_TCH_SOURCE, Airport, Runway
 from trajectory_data_process.harvest.classify import classify_track
 from trajectory_data_process.harvest.store import track_record
 from trajectory_data_process.harvest.threshold_event import (
@@ -35,6 +35,7 @@ def _airport() -> Airport:
         hae_minus_msl_m=0.0,
         threshold_crossing_height_m=15.0,
         published_glidepath_deg=3.0,
+        tch_source=PATH_POINT_TCH_SOURCE,
         width_m=45.72,
         lpv_course_width_m=106.75,
         runway_source_cycle="2026-08-06",

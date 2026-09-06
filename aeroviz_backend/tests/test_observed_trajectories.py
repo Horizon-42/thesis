@@ -6,6 +6,7 @@ import pytest
 from aeroviz_backend.observed_trajectories import ObservedTrajectoryBackend
 from flight_scenarios.identity import flight_key
 from trajectory_data_process.harvest.airports import (
+    PATH_POINT_TCH_SOURCE,
     Airport,
     Runway,
     threshold_frame_fingerprint,
@@ -120,6 +121,7 @@ def _arrival_runway(ident: str = "18") -> Runway:
         hae_minus_msl_m=0.0,
         threshold_crossing_height_m=15.0,
         published_glidepath_deg=3.0,
+        tch_source=PATH_POINT_TCH_SOURCE,
         width_m=45.72,
         lpv_course_width_m=106.75,
         runway_source_cycle="2026-08-06",

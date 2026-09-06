@@ -139,7 +139,7 @@ def evaluate_observed(batch: Batch, *, html: bool) -> None:
     )
     print(f"  published     -> {published}")
     if html:
-        payload = evaluation_visualize.build_payload_streamed(
+        payload = evaluation_visualize.build_payload(
             paths.approach, contexts=contexts
         )
         (paths.approach / HTML_NAME).write_text(

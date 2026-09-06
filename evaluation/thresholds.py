@@ -17,7 +17,8 @@ from typing import Any, Literal, get_args
 Benchmark = Literal["lpv", "rnp_apch_lnav_vnav_baro"]
 BENCHMARKS = get_args(Benchmark)
 ComponentResult = Literal["pass", "fail", "indeterminate"]
-Verdict = Literal["pass", "fail", "indeterminate"]
+# One vocabulary: a composite verdict takes the same three values as each component.
+Verdict = ComponentResult
 
 # THE LATERAL CRITERION IS HALF THE PUBLISHED RUNWAY WIDTH -- and that is the whole
 # rule, deliberately.
@@ -54,6 +55,13 @@ CONTEXT_SCHEMA_VERSION = "terminal-assessment-context-v2"
 # LPV display full-scale deflection as a landing-success threshold.
 RNAV_TERMINAL_VERTICAL_BOUND_M = 22.0
 RNAV_TERMINAL_VERTICAL_STANDARD_ID = "icao_doc_9613_rnp_apch_fas_22m"
+# Why a non-LPV runway's vertical component is indeterminate: its RNAV (GPS) approach
+# publishes no Baro-VNAV path (no LNAV/VNAV minima with a runway-leg vertical -- KRDU 14
+# has no RNAV procedure at all). The lateral component still resolves.
+LNAV_VNAV_NO_PATH_REASON = (
+    "LNAV/VNAV benchmark has no published Baro-VNAV path (LNAV/VNAV minima with a "
+    "runway-leg vertical)"
+)
 
 
 # Every numeric field that can silently decide a verdict. These come from parsed FAA
@@ -142,6 +150,14 @@ class AssessmentContext:
             ):
                 if getattr(self, name) is None:
                     raise ValueError(f"{name} is required for a vertically guided benchmark")
+        elif self.baro_vnav_approved and self.desired_threshold_altitude_msl_m is None:
+            # The runway data sets both together (``harvest.airports._build_runway``):
+            # LNAV/VNAV minima without the leg's path is rejected there, so a context
+            # claiming the one without the other is a construction error, not a state.
+            raise ValueError(
+                "baro_vnav_approved requires the published LTP elevation and TCH it is "
+                "approved against"
+            )
 
     @property
     def desired_threshold_altitude_msl_m(self) -> float | None:
@@ -188,43 +204,21 @@ class AssessmentContext:
         """The two component bounds this context resolves to.
 
         Lateral is benchmark-independent: it is the runway, and the runway does not
-        change width because the procedure did. Only the vertical bound depends on
-        which benchmark applies, and only because LNAV/VNAV needs approved Baro-VNAV
-        plus a published path reference before ±22 m means anything.
+        change width because the procedure did. The vertical bound applies to LPV
+        always and to LNAV/VNAV when the runway's approach publishes a Baro-VNAV path
+        (``baro_vnav_approved``, which the constructor ties to the published TCH).
         """
-        lateral_m = self.runway_width_m / 2.0
-        if self.benchmark == "lpv":
-            return ResolvedLimits(
-                benchmark=self.benchmark,
-                lateral_m=lateral_m,
-                vertical_lower_m=-RNAV_TERMINAL_VERTICAL_BOUND_M,
-                vertical_upper_m=RNAV_TERMINAL_VERTICAL_BOUND_M,
-            )
-
-        vertical_available = (
-            self.baro_vnav_approved
-            and self.desired_threshold_altitude_msl_m is not None
-        )
-        if not self.baro_vnav_approved:
-            vertical_reason = (
-                "LNAV/VNAV benchmark requires explicit approved Baro-VNAV context"
-            )
-        elif not vertical_available:
-            vertical_reason = (
-                "authoritative Baro-VNAV threshold path reference unavailable"
-            )
-        else:
-            vertical_reason = None
+        vertical_available = self.benchmark == "lpv" or self.baro_vnav_approved
         return ResolvedLimits(
             benchmark=self.benchmark,
-            lateral_m=lateral_m,
+            lateral_m=self.runway_width_m / 2.0,
             vertical_lower_m=(
                 -RNAV_TERMINAL_VERTICAL_BOUND_M if vertical_available else None
             ),
             vertical_upper_m=(
                 RNAV_TERMINAL_VERTICAL_BOUND_M if vertical_available else None
             ),
-            vertical_reason=vertical_reason,
+            vertical_reason=None if vertical_available else LNAV_VNAV_NO_PATH_REASON,
         )
 
 

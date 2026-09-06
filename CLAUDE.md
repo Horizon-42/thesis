@@ -132,6 +132,11 @@ Modeling pipeline: `arrivals/manifest.json` → `flight_scenarios` (`FlightScena
   failure returns.
 - Python env is conda **`aeroviz`**. This line used to say `aviation`, which is a DIFFERENT
   project's env on this machine, and that caused a near-miss deletion — hence the warning above.
+- **A nested git worktree under `.claude/worktrees/` shows up as untracked in the main tree**,
+  and a formal ts run (`--campaign-id`/`--experiment-id`) refuses to start on a dirty tree
+  (`experiment_index.begin_run`) — so creating one mid-campaign would abort the next arm. On this
+  machine `.git/info/exclude` carries `.claude/worktrees/` (local, not committed); re-add it
+  after a fresh clone before working in a worktree beside a running campaign.
 - Env spec backups (regenerate `aeroviz` if ever needed): `.env-backup/aeroviz-pip-freeze.txt`,
   `aeroviz-conda-explicit.txt`, `aeroviz-environment.yml`.
 - GPU: RTX 4060, 8 GB (compute capability 8.9), cu128 wheels.
@@ -225,8 +230,11 @@ Only the hazards that must fire unprompted are repeated here.
 - **`--evaluate-only` DELETES the v5 arrivals roster.** All five
   `outputs/harvest/<ICAO>/arrivals/manifest.json` are `harvest-arrivals-v5-takeoff-excluded`
   (re-measured on disk 2026-09-06, **42,650** arrivals — KRDU 14,435 / KSJC 11,082 / KSTL 8,767 /
-  KSMF 4,219 / KMSY 4,147) with their `lateral_pass_eligibility.json`.
-  Do not re-run it without need.
+  KSMF 4,219 / KMSY 4,147) with their `lateral_pass_eligibility.json`. Readers accept v5 and
+  the current writer version `harvest-arrivals-v6-published-vertical-path` (2026-09-07: the
+  cohort gains KRDU 32 + KSMF 35R via the RNAV approach-leg TCH, +1,876 arrivals on the next
+  harvest, which changes every ts dataset split). Do not re-run it without need, and never
+  under a running campaign.
 - **All control-output ts checkpoints are stale as of 2026-08-18** — the control contract
   changed units (newtons → fraction of installed thrust) and `TSConfig` gained required fields,
   so `load_checkpoint` refuses them. `state` checkpoints are unaffected, but any trained before
@@ -236,14 +244,13 @@ Only the hazards that must fire unprompted are repeated here.
   re-deriving. → `4dTrajectory/ts_transformer/CLAUDE.md`
 - **Quote only current-artifact numbers** — the KRDU ts run has three generations and the first
   is not reproducible; the gate-pass conclusion still needs re-deriving after the datum fix.
-- **The optimizer batch has no SOLVES on disk, but the prepared inputs DO exist** —
-  `flight_scenarios/outputs` is NOT empty (it holds all ten `*_scenarios.json` + their
-  `.selection.json`, 92 MB, built 2026-08-23); what is missing is `4dTrajectory/outputs/<ICAO>`
-  solve records, so `--skip-optimize` still has nothing to reuse. Whether the 08-23 scenarios can
-  be reused as-is is UNVERIFIED — the runner validates prepared-input signatures, so let it
-  decide rather than assuming. Scale, read off the selections on disk: **23,429 flights /
-  70,287 solves** (`runway`; `fitted_adsb` selects the same flights and then drops the 20
-  `UnusableFittedApproach` ones → 23,409 / 70,227), ~30 h at `--jobs 24`, 12.3 GiB
-  (`--rollout-dt 1.0` → 8.1 GiB). Free space is the binding constraint and moves with the ts
-  experiments, so check it right before launching; the runner refuses to start if its estimate
-  does not fit.
+- **The optimizer solves ARE on disk, and every one of them is speed-indeterminate.**
+  `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}` hold 15 v6-evaluated batches,
+  **70,267 records** (measured 2026-09-07), solved from the 2026-08-23 `flight_scenarios/outputs`
+  scenarios — one day BEFORE `build_scenario` started writing `source.landing_aero`, so their
+  three-gate pass count is 0 and no optimizer pass rate on disk is quotable.
+  `python 4dTrajectory/optimization/backfill_landing_aero.py --root 4dTrajectory/outputs --apply`
+  adds the block through the producer's own typecode chain without re-solving (~70 GB of
+  record reads to then regenerate the 15 reports — run it between GPU campaigns). A re-solve
+  is ~30 h at `--jobs 24`, 12.3 GiB (`--rollout-dt 1.0` → 8.1 GiB); free space is the binding
+  constraint and the runner refuses to start if its estimate does not fit.

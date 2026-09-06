@@ -11,6 +11,7 @@ from final_approach import Assignment, Projected, TrackPoint, fit_final_segment
 from final_approach.event_contract import validate_event
 from evaluation.context import assessment_for_runway
 from trajectory_data_process.harvest.airports import (
+    PATH_POINT_TCH_SOURCE,
     Airport,
     Runway,
     threshold_frame_fingerprint,
@@ -34,6 +35,7 @@ def _runway() -> Runway:
         hae_minus_msl_m=30.0,
         threshold_crossing_height_m=15.0,
         published_glidepath_deg=3.0,
+        tch_source=PATH_POINT_TCH_SOURCE,
         width_m=45.72,
         lpv_course_width_m=106.75,
         runway_source_cycle="2026-08-06",

@@ -40,26 +40,32 @@ def test_missing_path_point_continuation_raises(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("code", "non_lpv_idents", "runway_count"),
+    ("code", "non_lpv_idents", "no_vertical_idents", "runway_count"),
     [
-        ("KRDU", {"14", "32"}, 6),
-        ("KSMF", {"35R"}, 4),
+        ("KRDU", {"14", "32"}, {"14"}, 6),
+        ("KSMF", {"35R"}, set(), 4),
     ],
 )
 def test_airport_keeps_non_lpv_runways_for_assignment_only(
-    code, non_lpv_idents, runway_count
+    code, non_lpv_idents, no_vertical_idents, runway_count
 ):
+    """A non-LPV runway keeps the configured geometry frame; its vertical path comes
+    from the RNAV (GPS) approach leg when one publishes LNAV/VNAV minima (KRDU 32,
+    KSMF 35R) and stays None when no procedure exists at all (KRDU 14)."""
     airport = load_airport(code, config_file=CONFIG, cifp_file=CIFP)
 
     assert len(airport.runways) == runway_count
     assert {
+        runway.ident for runway in airport.runways if runway.lpv_course_width_m is None
+    } == non_lpv_idents
+    assert {
         runway.ident
         for runway in airport.runways
         if runway.threshold_crossing_height_m is None
-    } == non_lpv_idents
+    } == no_vertical_idents
     for ident in non_lpv_idents:
         runway = airport.runway(ident)
         assert runway.position_source == "runway_geometry"
         assert runway.vertical_source == "nearest_faa_cifp_path_point_offset"
-        assert runway.threshold_crossing_height_m is None
-        assert runway.published_glidepath_deg is None
+        assert (runway.threshold_crossing_height_m is None) == (ident in no_vertical_idents)
+        assert (runway.published_glidepath_deg is None) == (ident in no_vertical_idents)

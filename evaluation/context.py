@@ -14,20 +14,25 @@ from trajectory_data_process.harvest.airports import (
 
 ContextKey = tuple[str, str]
 
+# ``procedure_source`` for a non-LPV runway whose RNAV approach publishes no
+# vertical path at all (KRDU 14): there is no procedure to cite.
+NO_VERTICAL_GUIDANCE_SOURCE = "no_published_vertical_guidance"
+
 
 def assessment_for_runway(
     runway: Runway,
     *,
     benchmark: str | None = None,
-    baro_vnav_approved: bool = False,
 ) -> AssessmentContext:
     """Create policy context without adding it to a trajectory artifact.
 
-    LPV is selected only when the CIFP exposes an LPV course width.  The sole
-    fallback is RNP APCH LNAV/VNAV. Its ±22 m vertical limit is enabled only
-    when the caller confirms approved Baro-VNAV applicability and supplies an
-    authoritative threshold-path reference. A configured non-LPV runway has
-    no such reference, so its vertical and composite results stay indeterminate.
+    LPV is selected only when the CIFP exposes an LPV course width. The sole
+    fallback is RNP APCH LNAV/VNAV, and its ±22 m vertical limit applies only when
+    the runway's own RNAV (GPS) approach publishes an LNAV/VNAV (Baro-VNAV) line of
+    minima AND a threshold path -- TCH and glidepath decoded from that approach's
+    runway leg (``harvest.cifp.read_approach_verticals``; KRDU 32 and KSMF 35R).
+    Both facts come from the runway data, never from a caller's say-so. A runway
+    with neither keeps its lateral verdict and grades vertical indeterminate.
     """
     selected = benchmark or (
         "lpv" if runway.lpv_course_width_m is not None
@@ -46,7 +51,8 @@ def assessment_for_runway(
         runway_source=runway.width_source,
         runway_source_cycle=runway.runway_source_cycle,
         procedure_source=(
-            runway.position_source if selected == "lpv" else "faa_terminal_procedure"
+            runway.position_source if selected == "lpv"
+            else runway.tch_source or NO_VERTICAL_GUIDANCE_SOURCE
         ),
         procedure_source_cycle=runway.procedure_source_cycle,
         threshold_elevation_hae_m=runway.elevation_hae_m,
@@ -55,7 +61,7 @@ def assessment_for_runway(
         lpv_course_width_m=(
             runway.lpv_course_width_m if selected == "lpv" else None
         ),
-        baro_vnav_approved=(baro_vnav_approved if selected != "lpv" else False),
+        baro_vnav_approved=(runway.baro_vnav_minima if selected != "lpv" else False),
         threshold_frame_fingerprint=threshold_frame_fingerprint(runway),
     )
 
@@ -71,12 +77,7 @@ def resolve_context(
     record: TrajectoryRecord,
     contexts: Mapping[ContextKey, AssessmentContext],
 ) -> AssessmentContext:
-    runway = record.source.get("runway")
-    if not isinstance(runway, str):
-        raise ValueError(
-            f"record {record.path or record.source.get('id')!r} requires source.runway"
-        )
-    key = (record.airport, runway)
+    key = (record.airport, record.runway)
     try:
         return contexts[key]
     except KeyError as exc:
