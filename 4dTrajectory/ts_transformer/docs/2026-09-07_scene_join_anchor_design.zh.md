@@ -4,7 +4,7 @@
 
 ## 〇、进度与状态（压缩 context 后从这里继续）
 
-**当前状态（2026-09-06）**：Phase 0、P0、P1（a–d）完成并提交；交付形态 = closure 解码器 + rollout 跟踪（C_pred 全体 ADE 1005、雷达引导 2222，全可飞 92 %）。**P2 数据平面进行中**（用户 2026-09-06 决定继续 P2）：步骤与门见 §五 P2 的实施计划。没有在跑的 campaign。
+**当前状态（2026-09-06，第二次更新）**：**方案待重做**——用户看过 P1.d 跟踪器的 review 后决定重做方案（新方向待定）。这里是重做前的完整进度快照（§〇.1）；下面的状态表按阶段记录已提交的东西、数字与未解决的发现。没有在跑的 campaign；工作树干净。
 
 | 阶段 | 状态 | 产物 / commit | 关键数字（KRDU val，雷达引导 497 架） |
 |---|---|---|---|
@@ -19,8 +19,23 @@
 | P2 数据平面（原 Phase 1）| 未开始 | — | 验收指标已改（§五 P2） |
 | P3 场景编码 + (d_join, T) 锚解码器（原 Phase 2/3） | 未开始 | — | top-1 目标已改（§一） |
 | P1.d (b) 跟踪：`control/constraints/closure_tracking.py`（`ClosureTracker` hook：L1 + 曲率前馈、下滑道律跟参考高度、PI 速度保持 + 沿路径误差 + 失速裕度）、`forecast.track_closure_forecasts`、`predict --closure-track` | 完成（2026-09-06） | `6ee28fa`、`4ecfb69`；臂 `closure_p1d_arms.json`；读数 `closure_p1c_20260905/readout_p1d.*`；结果 `2026-09-06_closure_p1d_tracking_results.zh.md`；测试 `tests/test_closure_tracking.py` | 跟踪付出 ADE：C_pred +9（雷达引导 +25）、C_truth_intent +16、C_oracle +72 m；全可飞率 22 → 92 / 90 / 88 %；剩余违反 = 交界处 bank（L1 前视 3 km）与末段 stall；顺带修了高度剖面起点不在锚点的解码器缺陷 |
-| P2 数据平面：`trajectory_data_process/scene_index.py`（tracks 名册的时间索引，缓存带契约）→ `flight_scenarios/scene_context.py`（(机场, t₀, 本机) → 邻机 + 标量，只用 t ≤ t₀ 的样本，泄漏测试）→ `4dTrajectory/ts_transformer/scene/features.py`（实体级特征 → 数组，N_max 掩码）→ `docs/p2_scene_explainability.py`（与 Phase 0 同人群、同 CV 协议的可解释性测量） | **进行中** | — | 门：d_join R² 0.38 → ≥ 0.55；剩余时长中位误差 35.8 → < 28 s（Phase 0 `context` / `timing` 的口径） |
+| P2 数据平面：`trajectory_data_process/scene_index.py`（tracks 名册的时间索引，缓存带契约）→ `flight_scenarios/scene_context.py`（(机场, t₀, 本机) → 邻机 + 标量，只用 t ≤ t₀ 的样本，泄漏测试）→ `4dTrajectory/ts_transformer/scene/features.py`（实体级特征 → 数组，N_max 掩码）→ `docs/p2_scene_explainability.py`（与 Phase 0 同人群、同 CV 协议的可解释性测量） | **暂停：a/b/c WIP 已提交（`045c233`，13 项测试过，未 review），d 未写；方案待重做** | `045c233` | 门：d_join R² 0.38 → ≥ 0.55；剩余时长中位误差 35.8 → < 28 s（Phase 0 `context` / `timing` 的口径） |
 | P4 生成式对照等（原 Phase 4） | 未开始 | — | 不变；加：跟踪器增益进 config 与 run name、KSJC 复现、第二种子 |
+
+### 〇.1 重做前的进度快照（2026-09-06）
+
+**已交付并提交（可复用，不随方案重做而失效）**
+- Phase 0（真值意图上界，`scene_phase0_20260905`）、P0（几何指标读数 `geometric_metrics.py`，`6867512`）、P1.a/b（几何族与剖面 oracle，`closure_geometry.py` / `closure_profile.py` / `p1_closure_oracle.py`，`d3be105`…`7918d8f`）、P1.c（`closure` 输出：`closure_output.py` + 十处接缝，`8d03fe1`…`560d5b8`；campaign `closure_p1c_20260905`，两个门都过）、P1.d(b)（跟踪器 `control/constraints/closure_tracking.py`，`6ee28fa`、`4ecfb69`）。结果文档：`2026-09-05_scene_phase0_results.zh.md`、`2026-09-06_closure_p1c_results.zh.md`、`2026-09-06_closure_p1d_tracking_results.zh.md`。
+- 可部署的最好模型：closure C_pred（本机历史）全体 ADE 996 / 雷达引导 2197（基线 1333 / 2858）；+ 跟踪 1005 / 2222，整条全可飞 92 %。真值意图上界 C_truth_intent 595 / 1235，家族上界 C_oracle 183 / 458。
+
+**P1.d 跟踪器的 review 结论（opus，2026-09-06；代码未改）**
+- BLOCKER：最近节点搜索无单调约束——via-Dubins 参考会离自己只有几米，8 架（0.6 %，全是 via-dubins）跳到错误的一段，终点偏 6–19 km；P1.d 读数里"跟踪后 ADE 改善最大"的五架里四架就是它们，剔除后 pooled 代价 +9 → **+10.5 m**（结论不变、数字要修）。修法：按上一段索引做窗口搜索（`[prev, prev + ceil((V·Δt + margin)/50 m)]`），并定义飞过末节点后的行为。
+- SHOULD-FIX：垂直律符号无测试钉住（翻转后测试仍过）；失速裕度未算刚指令的载荷因子（45° 坡度 n = 1.41 → 剩余 stall 违反的来源）；ISA 密度用了相对阈值高度而非几何高度（高原机场偏乐观 8 %）且常数重述 `flyability`；高度剖面钉锚点（`4ecfb69`）没写进标签契约（`height_knots` 不再复现画出的剖面，`fit_labels` 报的残差描述的是没人画的剖面；此前训练的 closure 检查点是在不同重建下选的）；docstring 关于增益封顶的说法不实（沿路径 / 比例 / 前馈三个常数未封顶，积分项无 Δt 因子）。
+- 验证正确：全部符号约定、`due`/padding 簿记、单位、真实 campaign 配置校验、CUDA/CPU 一致、导出契约、导入方向。
+
+**P2 数据平面（WIP，`045c233`，未 review、未测量）**
+- 已建成并有测试（13 项过）：`trajectory_data_process/scene_index.py`（tracks 名册时间索引，缓存契约 = schema + manifest SHA + 记录数）、`flight_scenarios/scene_context.py`（(机场, t₀, 本机) → 邻机 + 标量；泄漏线比 §3.2 严：空中邻机的落地时间与最终跑道都不进特征，只进 `future_label`；已落地的只进标量）、`4dTrajectory/ts_transformer/scene/features.py`（[N_max, L, 6] 时序 + 静态 + 标量数组，成员门常数与包内 `final_approach_geometry` 互相钉住）。fixture `flight_scenarios/tests/scene_fixture.py`。
+- 未做：P2.d 测量脚本 `docs/p2_scene_explainability.py`（与 Phase 0 同人群、同 CV 协议），opus review，KRDU 全体索引的构建（66,942 个文件，未跑过）。
 
 **恢复工作时的约定**（来自 memory 与本轮经验）：正式 campaign（`run_ts_frame_ablation.py`，默认 formal）要求干净工作树——先 commit；代码在跑实验前用 opus subagent review，文档不送 review；`git add` 明确路径，不用 `-A`；看进程用 PID 不用 `pgrep -f`；子进程 stdout 到日志是块缓冲，`epoch` 行会滞后几分钟，不是卡死；引用数字只引当前产物；判"预测是否建立五边"用成员门（`hard_on_final` + `stays_mask`），k=0.5 真值门会被已知的 250–350 m 终点平移饱和成"从不"。
 

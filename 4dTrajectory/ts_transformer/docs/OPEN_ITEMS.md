@@ -42,10 +42,17 @@ Newest campaigns first, long-standing scope limits last.
   `docs/2026-09-06_closure_p1d_tracking_results.zh.md`)**: the drawn reference flown by
   the point-mass rollout under `control/constraints/closure_tracking.py` costs ≤ 100 m
   of ADE (C_pred +9 m pooled, +25 m vectored) and brings the fully-flyable rate from 22 %
-  to 92 % (observed 98 %) — the delivery form is closure + tracking. Open: the tracker's
-  gains are module constants (not in the checkpoint / run name); the remaining 8 % are
-  bank at the CSC junctions (the L1 look-ahead) and stall in the last leg. Not started: P2 data plane (its
-  acceptance is now the 960 m between C_pred and C_truth_intent), any scene encoder.
+  to 92 % (observed 98 %) — the delivery form is closure + tracking. **Review (opus, same
+  day) found the tracker's nearest-node search unguarded: 8 of 1404 via-Dubins flights
+  snap to the wrong leg (endpoints 6–19 km off) and four of the five largest "tracking
+  gains" are those; the pooled cost is +10.5 m without them. Five SHOULD-FIXes
+  (vertical-law sign untested, stall floor without the commanded load factor, ISA
+  density on chart height, the height pinning outside the label contract, the gain
+  docstring). Unfixed: the user decided to REDO the plan** — the design doc's §〇.1 is
+  the snapshot to resume from. The P2 data plane (`trajectory_data_process/scene_index`,
+  `flight_scenarios/scene_context`, `ts_transformer/scene/features`) is committed as WIP
+  (`045c233`): 13 tests, not reviewed, no explainability measurement, no KRDU index
+  built. Not started: any scene encoder.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report
   `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a

@@ -4,6 +4,23 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-06 — Snapshot before a redesign: the tracker review, the P2 data plane as WIP
+
+The opus review of the closure tracker (`control/constraints/closure_tracking.py`)
+found a BLOCKER — the nearest-node search over the whole reference lets a via-Dubins
+path that passes within metres of itself snap the tracker to the wrong leg (8 of 1404
+val flights, endpoints 6–19 km off; four of the five largest ADE "improvements" from
+tracking in `2026-09-06_closure_p1d_tracking_results.zh.md` are those flights, the
+honest pooled cost being +10.5 m) — and five SHOULD-FIXes (the vertical law's sign is
+untested; the stall floor ignores the commanded load factor; ISA density uses chart
+height; the height-profile anchor pinning of `4ecfb69` is outside the label contract;
+the gain docstring). Nothing was changed: the user decided to redo the plan. The P2 data
+plane built meanwhile is committed as WIP (`045c233`: `trajectory_data_process/scene_index.py`,
+`flight_scenarios/scene_context.py` with a stricter leakage line — an airborne
+neighbour's landing time AND eventual runway are future, kept in `future_label` only —
+and `4dTrajectory/ts_transformer/scene/features.py`; 13 tests, no review, no
+explainability measurement). The design doc's §〇.1 carries the full snapshot.
+
 ### 2026-09-06 — Closure decoder, P1.d: the drawn reference flown by the point-mass rollout — ≤ 100 m of ADE for 92 % flyability
 
 Option (b) of the design's P1.d. `control/constraints/closure_tracking.py` (new): a
