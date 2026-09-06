@@ -1,11 +1,14 @@
-"""Training loop: the epoch, the validation pass and the checkpoint it writes.
+"""The training loop: the epoch, the cohort it runs on, and the checkpoint it writes.
 
-What a prediction is scored against lives in ``objective.py`` — this module drives the
-optimizer over it. The checkpoint carries the config, the fitted normalizer and the flight
-ids of each split alongside the weights. That is what makes inference reproducible without
-re-deriving anything: ``forecast.py`` loads a checkpoint and knows the resample step,
-channel order, output length/time mode, and which flights the model must not be evaluated
-on.
+Two modules under it carry what used to be inline here. What a prediction is scored
+against is ``objective.py``; how a fitted model is replayed on a split and which epoch is
+kept is ``validation.py``. This module drives the optimizer over the first and calls the
+second once per epoch.
+
+The checkpoint carries the config, the fitted normalizer and the flight ids of each split
+alongside the weights. That is what makes inference reproducible without re-deriving
+anything: ``forecast.py`` loads a checkpoint and knows the resample step, channel order,
+output length/time mode, and which flights the model must not be evaluated on.
 """
 
 from __future__ import annotations
@@ -14,10 +17,9 @@ import hashlib
 import json
 import math
 import time
-from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 import numpy as np
 import torch
@@ -33,14 +35,11 @@ from config import (
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
-    PREDICTION_STATE,
     TSConfig,
     control_recipe,
     uses_control_dynamics,
 )
 from control.basis_fit import FittedTeacherTable, load_fitted_teacher
-from control.dynamics import rollout as control_rollout
-from control.constraints import build_command_hook
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -48,7 +47,6 @@ from dataset import (
     FlightSeries,
     Normalizer,
     RandomAnchorTrajectoryWindows,
-    TrajectoryWindows,
     iter_batches,
     provenance_eligibility_digests,
     provenance_manifest_digests,
@@ -60,37 +58,31 @@ from evaluation_protocol import (
     TEST_RELEASE_PROTOCOL_FIELD,
     TEST_RELEASE_SCHEMA,
 )
-from fixed_anchor_validation import (
-    CommonGridTruth,
-    fixed_anchor_common_truth,
-    fixed_anchor_common_grid_ade_metrics,
-    fixed_anchor_common_grid_metrics,
-    fixed_anchor_common_grid_report_metrics,
-)
-from metrics import (
-    raw_kinematic_metrics,
-    states_with_derived_velocity,
-)
+from fixed_anchor_validation import CommonGridTruth
 from models import build_model, parameter_count, resolve_device
 from batch_contract import anchor_state, model_forward, unpack_batch
 from io_utils import file_sha256
 from objective import (
     PROCEDURE_DIAGNOSTICS,
     ProcedureMultipliers,
-    align_control_targets_to_query_clock,
     loss_component_names,
     move_dynamics,
     move_fixed_dt_supervision,
     prediction_loss_components,
     target_contract,
 )
-from prediction_outputs import ControlPrediction, StatePrediction
-from closure_output import (
-    ClosurePrediction,
-    replay_batch as closure_replay_batch,
-)
-from time_grids import numpy_inference_time_grid
+from prediction_outputs import ControlPrediction
 from training_performance import EpochProfiler
+from validation import (
+    VALIDATION_SELECTIONS,
+    common_grid_validation_details,
+    evaluate_validation_airport,
+    predict_split,
+    validation_datasets,
+    build_validation_batch_plan,
+    evaluate_fixed_anchor_common_grid,
+    evaluate_split,
+)
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
@@ -159,329 +151,6 @@ class FitResult:
     # The teacher table this fit supervised its imitation term with, parsed ONCE by
     # ``fit_model`` and handed back so the caller can stamp its digest without reopening it.
     fitted_teacher: FittedTeacherTable | None = None
-
-
-@dataclass(frozen=True)
-class SplitPredictionReplay:
-    """One immutable deployable prediction pass reused by every metric view."""
-
-    predicted: np.ndarray
-    truth: np.ndarray
-    mask: np.ndarray
-    predicted_time_s: np.ndarray
-    truth_time_s: np.ndarray
-    anchors: np.ndarray
-    segment_durations_s: np.ndarray
-
-
-def _prediction_batch_replay(
-    output: StatePrediction | ControlPrediction,
-    x: torch.Tensor,
-    y: torch.Tensor,
-    mask: torch.Tensor,
-    final_time_s: torch.Tensor,
-    dynamics: dict[str, torch.Tensor] | None,
-    dataset: TrajectoryWindows,
-) -> SplitPredictionReplay:
-    """Materialize deployable physical arrays from an already-computed model output."""
-    metric_targets = y
-    metric_weights = mask
-    if uses_control_dynamics(dataset.config.prediction_output):
-        deployable = output
-        if dynamics is None:
-            raise ValueError("control replay requires per-flight dynamics")
-        points = dataset.config.validation_common_grid_points
-        progress = torch.arange(
-            1,
-            points + 1,
-            dtype=torch.float64,
-            device=deployable.segment_durations.device,
-        ) / points
-        predicted_total_s = deployable.segment_durations.to(torch.float64).sum(dim=1)
-        query_offsets_s = predicted_total_s.unsqueeze(1) * progress.unsqueeze(0)
-        query_valid = torch.ones_like(query_offsets_s, dtype=torch.bool)
-        rollout = control_rollout.rollout_control_dense(
-            deployable.controls,
-            deployable.segment_durations,
-            dynamics,
-            query_offsets_s,
-            query_valid,
-            dataset.config,
-            command_hook=build_command_hook(dataset.config, dynamics),
-        )
-        predicted_physical = (
-            rollout.query_channels.detach().cpu().numpy().astype(np.float32)
-        )
-        metric_targets, metric_weights = align_control_targets_to_query_clock(
-            anchor_state(x, len(dataset.config.channels)),
-            y,
-            mask,
-            query_offsets_s,
-            final_time_s,
-        )
-        segment_durations_s = np.broadcast_to(
-            (
-                predicted_total_s.detach().cpu().numpy().astype(np.float64)
-                / points
-            )[:, None],
-            (len(x), points),
-        ).copy()
-        predicted_time_s = deployable.final_time_s.detach().cpu().numpy()
-    elif isinstance(output, ClosurePrediction):
-        # Drawn, not rolled out: every decision reconstructed in numpy and sampled on the
-        # target grid's fractions of its own duration (the context carries the course).
-        if dynamics is None:
-            raise ValueError("closure replay requires the per-flight label context")
-        anchors_physical = dataset.normalizer.decode(
-            anchor_state(x, len(dataset.config.channels))
-            .detach().cpu().numpy().astype(np.float64)
-        )
-        predicted_physical, segment_durations_s, predicted_time_s = closure_replay_batch(
-            output, anchors_physical, dynamics, dataset.config, dataset.config.pred_len
-        )
-    else:
-        if not isinstance(output, StatePrediction):
-            raise TypeError("state replay requires StatePrediction")
-        out = output.states.detach().cpu().numpy()
-        predicted_physical = dataset.normalizer.decode(
-            out.astype(np.float64)
-        ).astype(np.float32)
-        segment_durations_s = numpy_inference_time_grid(
-            output.final_time_s.detach().cpu().numpy(), dataset.config
-        )[0]
-        predicted_time_s = output.final_time_s.detach().cpu().numpy()
-
-    # Decode in float64 (the normalizer stats' dtype), store float32: a pooled split is
-    # tens of thousands of [N,C] windows and metre-scale metrics do not need float64 storage.
-    truth = dataset.normalizer.decode(
-        metric_targets.detach().cpu().numpy().astype(np.float64)
-    ).astype(np.float32)
-    anchors = dataset.normalizer.decode(
-        anchor_state(x, len(dataset.config.channels))
-        .detach().cpu().numpy().astype(np.float64)
-    ).astype(np.float32)
-    if dataset.config.prediction_output == PREDICTION_STATE:
-        # The state output predicts positions + duration only; the control rollout and
-        # the closure reconstruction both carry exact velocities.
-        predicted_physical = states_with_derived_velocity(
-            anchors,
-            predicted_physical,
-            segment_durations_s,
-        ).astype(np.float32)
-    raw_mask = metric_weights.detach().cpu().numpy()
-    if raw_mask.ndim == 3:
-        raw_mask = np.all(raw_mask > 0.0, axis=-1).astype(np.float32)
-    return SplitPredictionReplay(
-        predicted=predicted_physical,
-        truth=truth,
-        mask=raw_mask,
-        predicted_time_s=predicted_time_s,
-        truth_time_s=final_time_s.detach().cpu().numpy(),
-        anchors=anchors,
-        segment_durations_s=segment_durations_s,
-    )
-
-
-def _merge_prediction_replays(
-    chunks: Sequence[tuple[np.ndarray, SplitPredictionReplay]],
-    *,
-    count: int,
-) -> SplitPredictionReplay:
-    """Restore dataset order after validation-only duration bucketing."""
-    if not chunks:
-        raise ValueError("prediction replay requires at least one batch")
-    indices = np.concatenate([item[0] for item in chunks])
-    order = np.argsort(indices, kind="stable")
-    if not np.array_equal(indices[order], np.arange(count, dtype=np.int64)):
-        raise ValueError("prediction replay indices must cover the dataset exactly once")
-
-    def merged(name: str) -> np.ndarray:
-        return np.concatenate(
-            [getattr(item[1], name) for item in chunks], axis=0
-        )[order]
-
-    return SplitPredictionReplay(
-        predicted=merged("predicted"),
-        truth=merged("truth"),
-        mask=merged("mask"),
-        predicted_time_s=merged("predicted_time_s"),
-        truth_time_s=merged("truth_time_s"),
-        anchors=merged("anchors"),
-        segment_durations_s=merged("segment_durations_s"),
-    )
-
-
-def _predict_split(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    normalizer: Normalizer,
-    device: torch.device,
-    batch_size: int,
-) -> SplitPredictionReplay:
-    """Return physical anchor/output arrays, masks, predicted time and true time."""
-    model.eval()
-    chunks: list[tuple[np.ndarray, SplitPredictionReplay]] = []
-    cursor = 0
-    with torch.no_grad():
-        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
-            (
-                x,
-                y,
-                mask,
-                final_time_s,
-                _flight_weights,
-                dynamics,
-                _dense_supervision,
-            ) = unpack_batch(raw_batch)
-            x_device = x.to(device)
-            y_device = y.to(device)
-            mask_device = mask.to(device)
-            final_time_device = final_time_s.to(device)
-            dynamics_device = move_dynamics(dynamics, device)
-            output = model_forward(model, x_device, dynamics_device)
-            batch_replay = _prediction_batch_replay(
-                output,
-                x_device,
-                y_device,
-                mask_device,
-                final_time_device,
-                dynamics_device,
-                dataset,
-            )
-            batch_count = len(x)
-            chunks.append(
-                (np.arange(cursor, cursor + batch_count, dtype=np.int64), batch_replay)
-            )
-            cursor += batch_count
-    return _merge_prediction_replays(
-        chunks,
-        count=len(dataset),
-    )
-
-
-def evaluate_split(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    *,
-    replay: SplitPredictionReplay | None = None,
-) -> dict[str, Any]:
-    """Formal fixed-anchor metrics on the common true-physical-time grid."""
-    replay = replay or _predict_split(
-        model, dataset, normalizer, device, config.batch_size
-    )
-    block = fixed_anchor_common_grid_report_metrics(
-        dataset.series,
-        config,
-        replay.anchors,
-        replay.predicted,
-        replay.predicted_time_s,
-        replay.segment_durations_s,
-        points=config.validation_common_grid_points,
-    )
-    indices_by_airport: dict[str, list[int]] = {}
-    for index, item in enumerate(dataset.series):
-        indices_by_airport.setdefault(item.airport or "<unknown>", []).append(index)
-    by_airport: dict[str, dict[str, Any]] = {}
-    for airport, indices in sorted(indices_by_airport.items()):
-        selected = np.asarray(indices, dtype=np.int64)
-        airport_block = fixed_anchor_common_grid_report_metrics(
-            [dataset.series[index] for index in indices],
-            config,
-            replay.anchors[selected],
-            replay.predicted[selected],
-            replay.predicted_time_s[selected],
-            replay.segment_durations_s[selected],
-            points=config.validation_common_grid_points,
-        )
-        by_airport[airport] = {
-            key: airport_block[key]
-            for key in (
-                "flights",
-                "ade_m",
-                "fde_m",
-                "arrival_endpoint_error_m",
-                "horizontal_m",
-                "along_track_m",
-                "cross_track_m",
-                "vertical_m",
-                "final_time_s",
-                "prediction_horizon_cap_rate",
-                "invalid_flights",
-            )
-        }
-    block["flight_micro_ade_m"] = block["ade_m"]
-    block["flight_micro_fde_m"] = block["fde_m"]
-    block["per_airport"] = by_airport
-    block["airport_macro"] = {
-        "ade_m": float(np.mean([item["ade_m"] for item in by_airport.values()])),
-        "fde_m": float(np.mean([item["fde_m"] for item in by_airport.values()])),
-        "arrival_endpoint_error_m": float(np.mean([
-            item["arrival_endpoint_error_m"]["mean"]
-            for item in by_airport.values()
-        ])),
-        "final_time_mae_s": float(np.mean([
-            item["final_time_s"]["mae"] for item in by_airport.values()
-        ])),
-    }
-    # Compatibility scalar names now point at the single formal airport-macro score.
-    block["ade_m"] = block["airport_macro"]["ade_m"]
-    block["fde_m"] = block["airport_macro"]["fde_m"]
-    # Raw model nodes on their own predicted clock: no measured-track interpolation,
-    # spline, filtering or CZML resampling. Durations are explicit [B,N] so this call site
-    # remains valid when the output layer moves from uniform to nonuniform segments.
-    active_segments = replay.segment_durations_s > 0.0
-    block["raw_kinematics"] = raw_kinematic_metrics(
-        replay.anchors,
-        replay.predicted,
-        replay.segment_durations_s,
-        valid_segments=active_segments,
-    )
-    observed_nodes, observed_duration_s, _ = fixed_anchor_common_truth(
-        dataset.series, config, replay.predicted.shape[1]
-    )
-    observed_segment_durations_s = np.broadcast_to(
-        (observed_duration_s / replay.predicted.shape[1])[:, None],
-        replay.segment_durations_s.shape,
-    ).copy()
-    block["raw_kinematics_observed_baseline"] = raw_kinematic_metrics(
-        replay.anchors,
-        observed_nodes,
-        observed_segment_durations_s,
-    )
-    return block
-
-
-def evaluate_fixed_anchor_common_grid(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    *,
-    replay: SplitPredictionReplay | None = None,
-) -> dict[str, Any]:
-    """Deployable fixed-anchor metrics on one shared physical-time grid."""
-    replay = replay or _predict_split(
-        model, dataset, normalizer, device, config.batch_size
-    )
-    block = fixed_anchor_common_grid_metrics(
-        dataset.series,
-        config,
-        replay.anchors,
-        replay.predicted,
-        replay.predicted_time_s,
-        replay.segment_durations_s,
-        points=config.validation_common_grid_points,
-        normalizer=normalizer,
-    )
-    return {
-        key: value
-        for key, value in block.items()
-        if not isinstance(value, np.ndarray)
-    }
 
 
 def _generalization_metric(train_value: float, val_value: float) -> dict[str, float | None]:
@@ -606,9 +275,9 @@ def evaluate_fit_splits(
             ),
         }
     }
-    objective = _training_objective_diagnostics(history, config)
-    if objective is not None:
-        diagnostics["training_objective"] = objective
+    training_objective = _training_objective_diagnostics(history, config)
+    if training_objective is not None:
+        diagnostics["training_objective"] = training_objective
 
     return {
         "schema_version": FIT_EVALUATION_SCHEMA,
@@ -644,7 +313,7 @@ def evaluate_fixed_anchor_series(
         raise ValueError(
             f"fixed-anchor {split_name} replay covers {len(dataset)}/{len(series)} flights"
         )
-    replay = _predict_split(model, dataset, normalizer, device, config.batch_size)
+    replay = predict_split(model, dataset, normalizer, device, config.batch_size)
     formal_metrics = evaluate_split(
         model, dataset, normalizer, config, device, replay=replay
     )
@@ -748,483 +417,6 @@ def filter_training_cohort(
     return retained, audit
 
 
-def _validation_datasets(
-    series: Sequence[FlightSeries],
-    config: TSConfig,
-    normalizer: Normalizer,
-    *,
-    minimum_anchor_index: int | None = None,
-    fitted_teacher: FittedTeacherTable | None = None,
-) -> dict[str, TrajectoryWindows]:
-    by_airport: dict[str, list[FlightSeries]] = {}
-    for item in series:
-        by_airport.setdefault(item.airport or "<unknown>", []).append(item)
-    return {
-        airport: FixedAnchorTrajectoryWindows(
-            group,
-            config,
-            normalizer,
-            minimum_anchor_index=minimum_anchor_index,
-            fitted_teacher=fitted_teacher,
-        )
-        for airport, group in sorted(by_airport.items())
-    }
-
-
-VALIDATION_DURATION_BUCKETS_S = (180.0, 360.0, 600.0)
-
-
-@dataclass(frozen=True)
-class ValidationBatch:
-    indices: np.ndarray
-    raw_batch: tuple
-    bucket: str
-    query_points: int
-
-
-@dataclass(frozen=True)
-class ValidationBatchPlan:
-    """Cached, validation-only batches grouped by fixed-anchor remaining duration."""
-
-    dataset: TrajectoryWindows
-    batches: tuple[ValidationBatch, ...]
-    bucket_flights: dict[str, int]
-    common_truth: CommonGridTruth | None
-
-    @property
-    def flights(self) -> int:
-        return len(self.dataset)
-
-    @property
-    def query_points(self) -> int:
-        return sum(batch.query_points for batch in self.batches)
-
-
-def _duration_bucket_label(bucket: int) -> str:
-    lower = 0.0 if bucket == 0 else VALIDATION_DURATION_BUCKETS_S[bucket - 1]
-    if bucket < len(VALIDATION_DURATION_BUCKETS_S):
-        upper = VALIDATION_DURATION_BUCKETS_S[bucket]
-        return f"({lower:g},{upper:g}]s"
-    return f"({lower:g},inf)s"
-
-
-def build_validation_batch_plan(
-    dataset: TrajectoryWindows,
-    batch_size: int,
-    *,
-    duration_bucketed: bool = False,
-) -> ValidationBatchPlan:
-    """Build each fixed validation tensor once; optionally group no-grad rows by duration."""
-    if not isinstance(dataset, FixedAnchorTrajectoryWindows):
-        raise TypeError("validation batching requires a fixed-anchor dataset")
-    durations = np.asarray([
-        dataset.series[series_index].supervision_times[-1]
-        - dataset.series[series_index].times[anchor]
-        for series_index, anchor in dataset.index
-    ], dtype=np.float64)
-    bucket_ids = (
-        np.searchsorted(
-            np.asarray(VALIDATION_DURATION_BUCKETS_S, dtype=np.float64),
-            durations,
-            side="left",
-        )
-        if duration_bucketed
-        else np.zeros(len(dataset), dtype=np.int64)
-    )
-    batches: list[ValidationBatch] = []
-    bucket_flights: dict[str, int] = {}
-    bucket_count = len(VALIDATION_DURATION_BUCKETS_S) + 1 if duration_bucketed else 1
-    for bucket in range(bucket_count):
-        indices = np.flatnonzero(bucket_ids == bucket).astype(np.int64, copy=False)
-        if not len(indices):
-            continue
-        label = _duration_bucket_label(bucket) if duration_bucketed else "unbucketed"
-        bucket_flights[label] = len(indices)
-        for start in range(0, len(indices), batch_size):
-            batch_indices = indices[start : start + batch_size]
-            raw_batch = dataset.batch(batch_indices)
-            dense = unpack_batch(raw_batch)[-1]
-            query_points = (
-                int(dense.valid.sum())
-                if dense is not None
-                else len(batch_indices) * dataset.config.pred_len
-            )
-            batches.append(
-                ValidationBatch(
-                    indices=batch_indices,
-                    raw_batch=raw_batch,
-                    bucket=label,
-                    query_points=query_points,
-                )
-            )
-    covered = (
-        np.concatenate([batch.indices for batch in batches])
-        if batches else np.array([], dtype=np.int64)
-    )
-    if not np.array_equal(np.sort(covered), np.arange(len(dataset), dtype=np.int64)):
-        raise ValueError("validation duration buckets must cover every row exactly once")
-    return ValidationBatchPlan(
-        dataset=dataset,
-        batches=tuple(batches),
-        bucket_flights=bucket_flights,
-        common_truth=(
-            fixed_anchor_common_truth(
-                dataset.series,
-                dataset.config,
-                dataset.config.validation_common_grid_points,
-            )
-            if dataset.config.checkpoint_selection_metric
-            == CHECKPOINT_SELECTION_COMMON_GRID_ADE
-            else None
-        ),
-    )
-
-
-@dataclass(frozen=True)
-class ValidationAirportEvaluation:
-    components: dict[str, float]
-    replay: SplitPredictionReplay
-    profile: dict[str, Any]
-
-
-def _evaluate_validation_airport(
-    model: nn.Module,
-    plan: ValidationBatchPlan,
-    device: torch.device,
-    *,
-    profiler: EpochProfiler | None = None,
-    multipliers: ProcedureMultipliers | None = None,
-) -> ValidationAirportEvaluation:
-    """Evaluate both validation clocks from one model forward per cached batch."""
-    dataset = plan.dataset
-    names = loss_component_names(dataset.config)
-    component_totals = {name: 0.0 for name in names}
-    flight_weight_total = 0.0
-    replay_chunks: list[tuple[np.ndarray, SplitPredictionReplay]] = []
-    started = time.perf_counter()
-    with torch.no_grad():
-        for batch in plan.batches:
-            section = profiler.section if profiler is not None else None
-            data_context = section("val_data_s") if section else nullcontext()
-            with data_context:
-                (
-                    x,
-                    y,
-                    mask,
-                    final_time_s,
-                    flight_weights,
-                    dynamics,
-                    dense_supervision,
-                ) = unpack_batch(batch.raw_batch)
-                x, y, mask = x.to(device), y.to(device), mask.to(device)
-                final_time_s = final_time_s.to(device)
-                flight_weights = flight_weights.to(device)
-                dynamics = move_dynamics(dynamics, device)
-                dense_supervision = move_fixed_dt_supervision(
-                    dense_supervision, device
-                )
-            objective_context = (
-                section("val_objective_s") if section else nullcontext()
-            )
-            with objective_context:
-                prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
-                components = prediction_loss_components(
-                    prediction,
-                    anchor_state(x, len(dataset.config.channels)),
-                    y,
-                    mask,
-                    final_time_s,
-                    flight_weights,
-                    dataset.config,
-                    dataset.normalizer,
-                    dynamics,
-                    dense_supervision,
-                    multipliers=multipliers,
-                )
-            for name, value in components.tensors().items():
-                component_totals[name] += float(value) * len(flight_weights)
-            flight_weight_total += float(flight_weights.sum())
-            selection_context = (
-                section("val_checkpoint_selection_s") if section else nullcontext()
-            )
-            with selection_context:
-                # The DEPLOYABLE replay: what the checkpoint predicts without the
-                # truth's future. A latent model's objective forward above decoded a
-                # posterior sample (it read the future); the replay the fixed-anchor
-                # selection metrics score must be the prior top-1 decode. (The
-                # objective-based selection metric would still read the posterior —
-                # config refuses it for a latent run.)
-                deployable = (
-                    model_forward(model, x, dynamics)
-                    if getattr(model, "consumes_future", False) else prediction
-                )
-                replay_chunks.append((
-                    batch.indices,
-                    _prediction_batch_replay(
-                        deployable,
-                        x,
-                        y,
-                        mask,
-                        final_time_s,
-                        dynamics,
-                        dataset,
-                    ),
-                ))
-    denominator = max(flight_weight_total, 1.0)
-    replay = _merge_prediction_replays(replay_chunks, count=len(dataset))
-    profile = {
-        "flights": plan.flights,
-        "batches": len(plan.batches),
-        "query_points": plan.query_points,
-        "wall_s": time.perf_counter() - started,
-        "duration_bucket_flights": dict(plan.bucket_flights),
-    }
-    return ValidationAirportEvaluation(
-        components={
-            name: value / denominator for name, value in component_totals.items()
-        },
-        replay=replay,
-        profile=profile,
-    )
-
-
-def _dataset_loss_components(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    device: torch.device,
-    batch_size: int,
-    *,
-    multipliers: ProcedureMultipliers | None = None,
-) -> dict[str, float]:
-    names = loss_component_names(dataset.config)
-    component_totals = {name: 0.0 for name in names}
-    flight_weight_total = 0.0
-    with torch.no_grad():
-        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
-            (
-                x,
-                y,
-                mask,
-                final_time_s,
-                flight_weights,
-                dynamics,
-                dense_supervision,
-            ) = unpack_batch(raw_batch)
-            x, y, mask = x.to(device), y.to(device), mask.to(device)
-            final_time_s = final_time_s.to(device)
-            flight_weights = flight_weights.to(device)
-            dynamics = move_dynamics(dynamics, device)
-            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
-            prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
-            components = prediction_loss_components(
-                prediction,
-                anchor_state(x, len(dataset.config.channels)),
-                y,
-                mask,
-                final_time_s,
-                flight_weights,
-                dataset.config,
-                dataset.normalizer,
-                dynamics,
-                dense_supervision,
-                multipliers=multipliers,
-            )
-            for name, value in components.tensors().items():
-                component_totals[name] += float(value) * len(flight_weights)
-            flight_weight_total += float(flight_weights.sum())
-    denominator = max(flight_weight_total, 1.0)
-    return {name: value / denominator for name, value in component_totals.items()}
-
-
-@dataclass(frozen=True)
-class ValidationSelection:
-    """One deterministic checkpoint-selection result over fixed-anchor validation."""
-
-    metric: str
-    value: float
-    by_airport: dict[str, float]
-    details_by_airport: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-def _objective_validation_selection(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-) -> ValidationSelection:
-    del model, val_sets, normalizer, config, device, precomputed_details_by_airport
-    return ValidationSelection(
-        metric=CHECKPOINT_SELECTION_OBJECTIVE,
-        value=float(np.mean(list(val_by_airport.values()))),
-        by_airport=dict(val_by_airport),
-    )
-
-
-def _common_grid_validation_details(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-    replays_by_airport: dict[str, SplitPredictionReplay] | None = None,
-    common_truth_by_airport: dict[str, CommonGridTruth] | None = None,
-) -> dict[str, dict[str, Any]]:
-    del val_by_airport
-    if precomputed_details_by_airport is not None:
-        if set(precomputed_details_by_airport) != set(val_sets):
-            raise ValueError("precomputed validation details do not match airport sets")
-        return precomputed_details_by_airport
-    if replays_by_airport is not None and set(replays_by_airport) != set(val_sets):
-        raise ValueError("validation replays do not match airport sets")
-    if (
-        common_truth_by_airport is not None
-        and set(common_truth_by_airport) != set(val_sets)
-    ):
-        raise ValueError("validation common-truth caches do not match airport sets")
-    details: dict[str, dict[str, Any]] = {}
-    for airport, dataset in val_sets.items():
-        replay = (
-            replays_by_airport[airport]
-            if replays_by_airport is not None
-            else _predict_split(
-                model, dataset, normalizer, device, config.batch_size
-            )
-        )
-        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE:
-            block = fixed_anchor_common_grid_ade_metrics(
-                dataset.series,
-                config,
-                replay.anchors,
-                replay.predicted,
-                replay.predicted_time_s,
-                replay.segment_durations_s,
-                points=config.validation_common_grid_points,
-                common_truth=(
-                    common_truth_by_airport[airport]
-                    if common_truth_by_airport is not None
-                    else None
-                ),
-            )
-            details[airport] = {
-                "ade_m": block["ade_m"],
-                "fde_m": block["fde_m"],
-                "final_time_mae_s": block["final_time_mae_s"],
-                "flights": block["flights"],
-            }
-            continue
-        block = evaluate_fixed_anchor_common_grid(
-            model,
-            dataset,
-            normalizer,
-            config,
-            device,
-            replay=replay,
-        )
-        details[airport] = {
-            "ade_m": block["ade_m"],
-            "fde_m": block["fde_m"],
-            "dense_state_loss": block["dense_state_loss"],
-            "terminal_velocity_error_mps": block[
-                "terminal_velocity_error_mps"
-            ],
-            "final_time_mae_s": block["final_time_mae_s"],
-            "flights": block["flights"],
-            "arc_length_geometry_loss": block["arc_length_geometry_loss"],
-            "arc_length_geometry_unweighted_loss": block[
-                "arc_length_geometry_unweighted_loss"
-            ],
-            "arc_length_distance_mean_m": block["arc_length_distance_mean_m"],
-            "arc_length_path_length_ratio": block[
-                "arc_length_path_length_ratio"
-            ],
-            "arc_length_path_length_log_error": block[
-                "arc_length_path_length_log_error"
-            ],
-            "arc_length_horizontal_velocity_mae_mps": block[
-                "arc_length_horizontal_velocity_mae_mps"
-            ],
-            "arc_length_horizontal_velocity_p95_mps": block[
-                "arc_length_horizontal_velocity_p95_mps"
-            ],
-            "arc_length_horizontal_tangent_mean": block[
-                "arc_length_horizontal_tangent_mean"
-            ],
-            "arc_length_horizontal_tangent_p95": block[
-                "arc_length_horizontal_tangent_p95"
-            ],
-            "arc_length_horizontal_speed_mae_mps": block[
-                "arc_length_horizontal_speed_mae_mps"
-            ],
-            "arc_length_horizontal_speed_p95_mps": block[
-                "arc_length_horizontal_speed_p95_mps"
-            ],
-            "arc_length_vertical_velocity_mae_mps": block[
-                "arc_length_vertical_velocity_mae_mps"
-            ],
-            "arc_length_vertical_velocity_p95_mps": block[
-                "arc_length_vertical_velocity_p95_mps"
-            ],
-            "arc_length_horizontal_mean_m": block[
-                "arc_length_horizontal_mean_m"
-            ],
-            "arc_length_horizontal_p95_m": block[
-                "arc_length_horizontal_p95_m"
-            ],
-            "arc_length_vertical_mae_m": block["arc_length_vertical_mae_m"],
-            "arc_length_vertical_p95_m": block["arc_length_vertical_p95_m"],
-            "arc_length_terminal_position_m": block[
-                "arc_length_terminal_position_m"
-            ],
-            "arc_length_terminal_velocity_error_mps": block[
-                "arc_length_terminal_velocity_error_mps"
-            ],
-            "arc_length_terminal_position_runway_components_m": block[
-                "arc_length_terminal_position_runway_components_m"
-            ],
-            "arc_length_terminal_velocity_runway_components_mps": block[
-                "arc_length_terminal_velocity_runway_components_mps"
-            ],
-        }
-    return details
-
-
-def _common_grid_validation_selection(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-) -> ValidationSelection:
-    details = _common_grid_validation_details(
-        model=model, val_sets=val_sets, normalizer=normalizer, config=config,
-        device=device, val_by_airport=val_by_airport,
-        precomputed_details_by_airport=precomputed_details_by_airport,
-    )
-    by_airport = {
-        airport: float(block["ade_m"]) for airport, block in details.items()
-    }
-    return ValidationSelection(
-        metric=CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-        value=float(np.mean(list(by_airport.values()))),
-        by_airport=by_airport,
-        details_by_airport=details,
-    )
-
-
-_VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
-    CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
-    CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
-}
 
 
 def fit_model(
@@ -1291,7 +483,7 @@ def fit_model(
         present, valid, total = train_set.closure_coverage
         print(f"  closure labels: {present} of {total} training flights in the file, {valid} valid "
               f"({valid / max(total, 1):.1%} regress; the rest are in the batch, out of the loss)")
-    val_sets = _validation_datasets(
+    val_sets = validation_datasets(
         val_series,
         config,
         normalizer,
@@ -1469,7 +661,7 @@ def fit_model(
 
         model.eval()
         val_evaluations = {
-            airport: _evaluate_validation_airport(
+            airport: evaluate_validation_airport(
                 model,
                 plan,
                 device,
@@ -1555,7 +747,7 @@ def fit_model(
             for airport, evaluation in val_evaluations.items()
         }
         selection_metrics_started = time.perf_counter()
-        common_grid_details = _common_grid_validation_details(
+        common_grid_details = common_grid_validation_details(
             model=model,
             val_sets=val_sets,
             normalizer=normalizer,
@@ -1569,7 +761,7 @@ def fit_model(
             "val_checkpoint_selection_s",
             time.perf_counter() - selection_metrics_started,
         )
-        validation_selection = _VALIDATION_SELECTIONS[
+        validation_selection = VALIDATION_SELECTIONS[
             config.checkpoint_selection_metric
         ](
             model=model,

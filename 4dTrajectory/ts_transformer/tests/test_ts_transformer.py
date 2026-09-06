@@ -58,6 +58,7 @@ import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
 import train as train_module  # noqa: E402
+import validation  # noqa: E402
 from arc_length_geometry import (  # noqa: E402
     arc_length_geometry_metrics,
     arc_length_velocity_metrics,
@@ -2133,7 +2134,7 @@ def test_common_grid_checkpoint_selection_reuses_one_truth_cache(monkeypatch):
     )
     train_series, val_series, _test_series = split_by_flight(series, config)
     cached_truth_ids: list[int] = []
-    original = train_module.fixed_anchor_common_grid_ade_metrics
+    original = validation.fixed_anchor_common_grid_ade_metrics
 
     def record_cache(*args, **kwargs):
         cached_truth = kwargs.get("common_truth")
@@ -2142,7 +2143,7 @@ def test_common_grid_checkpoint_selection_reuses_one_truth_cache(monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(
-        train_module,
+        validation,
         "fixed_anchor_common_grid_ade_metrics",
         record_cache,
     )
@@ -2170,29 +2171,29 @@ def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch)
     normalizer = Normalizer.fit(series)
     dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
     model = build_model(config).eval()
-    legacy_components = train_module._dataset_loss_components(
+    legacy_components = validation._dataset_loss_components(
         model, dataset, torch.device("cpu"), config.batch_size
     )
-    legacy_common = train_module.evaluate_fixed_anchor_common_grid(
+    legacy_common = validation.evaluate_fixed_anchor_common_grid(
         model, dataset, normalizer, config, torch.device("cpu")
     )
 
     calls = 0
-    original_forward = train_module.model_forward
+    original_forward = validation.model_forward
 
     def counted_forward(*args, **kwargs):
         nonlocal calls
         calls += 1
         return original_forward(*args, **kwargs)
 
-    monkeypatch.setattr(train_module, "model_forward", counted_forward)
-    plan = train_module.build_validation_batch_plan(dataset, config.batch_size)
-    shared = train_module._evaluate_validation_airport(
+    monkeypatch.setattr(validation, "model_forward", counted_forward)
+    plan = validation.build_validation_batch_plan(dataset, config.batch_size)
+    shared = validation.evaluate_validation_airport(
         model,
         plan,
         torch.device("cpu"),
     )
-    shared_common = train_module.evaluate_fixed_anchor_common_grid(
+    shared_common = validation.evaluate_fixed_anchor_common_grid(
         model,
         dataset,
         normalizer,
@@ -2238,7 +2239,7 @@ def test_control_validation_replay_uses_dense_dynamics_queries():
         final_time_s=torch.tensor([2.0], dtype=torch.float32),
     )
 
-    replay = train_module._prediction_batch_replay(
+    replay = validation._prediction_batch_replay(
         prediction, x, y, mask, final_time_s, dynamics, dataset
     )
 
@@ -2300,14 +2301,14 @@ def test_fit_evaluation_reuses_one_prediction_pass_per_split(monkeypatch):
     normalizer = Normalizer.fit(train_series)
     model = build_model(config)
     calls = 0
-    original_forward = train_module.model_forward
+    original_forward = validation.model_forward
 
     def counted_forward(*args, **kwargs):
         nonlocal calls
         calls += 1
         return original_forward(*args, **kwargs)
 
-    monkeypatch.setattr(train_module, "model_forward", counted_forward)
+    monkeypatch.setattr(validation, "model_forward", counted_forward)
     evaluate_fit_splits(
         model, train_series, val_series, normalizer, config, torch.device("cpu")
     )
@@ -3586,7 +3587,7 @@ def test_formal_common_grid_selector_reuses_identical_precomputed_truth():
     normalizer = Normalizer.fit(series)
     dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
     model = build_model(config).eval()
-    replay = train_module._predict_split(
+    replay = validation.predict_split(
         model,
         dataset,
         normalizer,

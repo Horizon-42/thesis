@@ -410,16 +410,16 @@ def test_the_deployable_replay_is_decoded_from_the_prior_not_the_posterior(tmp_p
     prior decode (no posterior) — counting forwards would pass even if the replay still
     reused the posterior object, because the end-of-training cohort evaluation also runs
     prior-only forwards."""
-    import train as train_module
+    import validation
 
     replayed: list[object] = []
-    original_replay = train_module._prediction_batch_replay
+    original_replay = validation._prediction_batch_replay
 
     def intercepting_replay(output, *args, **kwargs):
         replayed.append(output)
         return original_replay(output, *args, **kwargs)
 
-    monkeypatch.setattr(train_module, "_prediction_batch_replay", intercepting_replay)
+    monkeypatch.setattr(validation, "_prediction_batch_replay", intercepting_replay)
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
         control_duration_parameterization=CONTROL_DURATION_UNIFORM,
