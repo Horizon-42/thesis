@@ -4,6 +4,87 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — Package audit T2: the 2026-08 oracle teacher and the nominal-law hook archived, the scene features' sequence half deleted
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §四 (`ed7fccc`,
+`f701532`, `56643c4`). Three completed pieces of work leave the live package. Two are
+ARCHIVED — kept in the repository under `4dTrajectory/ts_transformer/archive/`, off the
+import path, each with a README naming the result documents that cite it and the commit it
+was taken from; `tests/test_architecture.py` now asserts that nothing live imports `archive`
+and that no `__init__.py` makes it importable. One is deleted outright.
+
+**Suite 558 → 516.** Stored-config load sweep (all `history.json` / `summary.json` under
+`4dTrajectory/outputs/*/experiments/**`), restricted to the 276 files present when T2 started:
+**181 loaded at base, 181 after** — nothing stopped loading. Run-name recount over the same
+276: **zero** names changed, raw or loaded. (The artifact tree grew by 15 files mid-audit —
+the main tree's GPU campaign writes into the same `outputs/` — which is why the raw totals
+move; the comparison is over the shared keys.)
+
+**The 2026-08 oracle teacher (`ed7fccc`) → `archive/oracle_teacher_2026_08/`.** The eight
+`control/oracle/*.py` modules, five runners (`run_ts_control_oracle.py`,
+`run_ts_oracle_teacher_{audit,optimize}.py`, `run_ts_simple_teacher_paired_cv.py`, and
+`plot_teacher_training.py` — the plan missed the last one; it plots the
+`model_pretraining.history` block only the archived pretrainer writes), and the two test
+files, renamed off pytest's `test_*.py` pattern so `run_all_tests.sh`'s whole-`4dTrajectory`
+collection skips them. Repo root: 20 → 15 `run_ts_*.py`. It was superseded by `simple-v3`'s
+in-training imitation term (`train.control_imitation_mse`); the archived
+`imitation.control_imitation_loss` is a different formula and only one of the two stays alive.
+`control/oracle/basis.py` → **`control/basis_fit.py`**: it is a fit, not a teacher, and the
+only member with a live consumer (`run_ts_control_basis_oracle.py`, the width study's live
+successor). Also deleted from the live package: `__main__ --control-teacher-schedules` with
+its three companion flags and the whole `model_pretrainer` / `model_pretraining` path through
+`train.py`; `dynamics/inverse.refine_piecewise_constant_schedule`; and
+`physical_criteria.{physical_criteria_loss,smooth_maximum}`, orphaned by the archive.
+
+**`transport-chart-velocity` retired.** The plan named only the `(first-order-lag, …)`
+registry entry, but deleting `TransportChartVelocityBackend` necessarily takes the
+`(point-mass, …)` one too, which would leave a vocabulary value with no backend at all — so
+the VALUE left `CONTROL_DYNAMICS_BACKENDS` (the CLI choices derive from it) and
+`run_ts_pipeline`'s filesystem-tag map. Evidence: 13 stored configs carry it, all from
+2026-07-31 / 08-01 / 08-02, and **none of them loads** at base (the arc family and the
+control-unit change had already refused them). `run_naming` keeps the `tcv` abbreviation on
+purpose — those runs' on-disk directories are historical record — and `test_run_naming` pins
+it. The lag model's remaining chart backend is the nondimensional one, which is what every
+published control run uses.
+
+**The nominal-law command hook (`f701532`) → `archive/nominal_law_hook_2026_09/`.**
+`control/constraints/nominal_residual.py` + `control/guidance_laws.py`. The 2026-09-06 hooks
+campaign ADOPTED the barrier as a predict-time safety layer and kept the nominal law "as an
+option"; T1-9 deleted the P1.d closure tracker, its only other consumer. `barrier_filter.py`
+and `gates.py` stay. **The `control_command_hook="nominal-residual"` VALUE is deliberately
+NOT retired** — six stored 2026-09-06 configs carry it, all six load, and `load_checkpoint`
+rebuilds a checkpoint through `TSConfig.from_dict`, so retiring it would make three
+current-cohort checkpoints unloadable rather than merely unnameable (same call as T1-14's
+`anchor-relative`). `CONTROL_HOOKS` is now "what a STORED config may say" and a new
+`CONTROL_HOOKS_AVAILABLE` is "what a NEW run may select": `--command-hook` rejects the
+archived value at the parser and `build_command_hook` refuses to construct it, pointing at
+the archive and the results document. The six `control_nominal_*` gain fields ARE retired
+(`RETIRED_SERIALIZED_FIELDS`) — measured first: not one stored config sets any of them away
+from its default, so no run name moved. Both hook arm files
+(`docs/experiments/control_hooks_{arms,v2_arms}.json`; the plan named only the first) lose
+their `R_nominal_residual` arm with a `_comment` clause saying where the code and the numbers
+went.
+
+**The scene features' sequence half (`56643c4`) — deleted, not archived.**
+`SceneArrays.neighbours` (`[N_MAX, L, 6]`), `neighbour_mask` and `_series_on_grid` were built
+for the L4 explainability gate; the gate did not pass and the one consumer
+(`run_ts_scene_explainability.py`) reads only the entity and scalar halves. `scene_arrays`
+loses its `seq_len` / `dt_s` parameters and the "lookback longer than the scene window"
+guard, which existed only to keep the resampling grid inside the window and can no longer
+fire. `scene/__init__.py` and the module docstring say so, so adding a sequence back is a
+deliberate re-derivation against a model that consumes one.
+
+**Documents.** One-line banners only, no rewrites: `2026-08-02_oracle_teacher_experiment`,
+`2026-08-16_control_simple_v1_development`, `2026-07-30_direct_control_oracle`,
+`2026-08-24_ksjc_result_labels_explained`, `control_parameter_prediction` (the whole call
+graph it draws is the archived chain), `2026-09-06_control_hooks_results`,
+`2026-09-05_control_constraint_design`, plus path notes on the two 2026-09-07 docs that cite
+`control/oracle/basis.py`. The live `CLAUDE.md`, `README.md`, `ENGINEERING_NOTES.md`,
+`OPEN_ITEMS.md` and `barrier_filter.py` lines that named archived modules, flags, runners or
+the retired backend are fixed; `CLAUDE.md`'s Layout section states the `archive/` convention,
+and both `ENGINEERING_NOTES` and `OPEN_ITEMS` now say that reviving the combined
+lateral-barrier + vertical-nominal hook is a deliberate un-archive, not an import.
+
 ### 2026-09-07 — Package audit T1-10 / T1-11 / T1-13 / T1-14: the horizon curriculum, the arc-length-geometry objective family and the dual terminal clock deleted
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §三, rows 10, 11, 13

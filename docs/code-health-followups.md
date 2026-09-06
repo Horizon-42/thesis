@@ -329,3 +329,36 @@ anchor) before any training uses them; (14) unused imports and two one-line dupl
 neighbour that landed just before t₀ with samples still in the window; an airborne
 neighbour on the parallel runway's final; an ego already established.
 
+
+---
+
+## ts_transformer: T2 leftovers (package audit, 2026-09-07)
+
+Noticed while archiving the oracle teacher and the nominal-law hook; none of them belongs to
+that change.
+
+- **No live `CommandHook` declares `needs_reference = True` any more (verified).** The
+  nominal law was the only one, and it is archived. The protocol field survives in
+  `control/dynamics/hooks.py`, and so does the machinery it drives — `track_reference` in
+  `aerodynamic_model/torch_piecewise_rollout.py` (an extra unhooked endpoint rollout per
+  segment) and its pass-through in `torch_lag_dynamics.py` and
+  `control/dynamics/backends.py:FirstOrderLagBackend._hooked_schedule`. It is not dead
+  (the barrier reads `state.actuators`, and the combined lateral/vertical hook that
+  `OPEN_ITEMS` still lists would need the reference back), but nothing exercises the
+  `True` branch outside `aerodynamic_model`'s own tests. Decide before T3-20 folds the
+  backend classes into a table.
+- **`aerodynamic_model`'s lag kernels still accept `chart_scale=None` (verified).** T2
+  deleted the only caller that passed it (the `(first-order-lag, transport-chart-velocity)`
+  registry entry); `FirstOrderLagBackend.chart_scale` is no longer optional on this side,
+  but `lag_state_scale` / `rollout_piecewise_constant*` in
+  `aerodynamic_model/torch_lag_dynamics.py` keep the branch. Cross-package, so left alone.
+- **`docs/open-items.md` line 79 and `README.md`'s "Known gaps" still narrate the
+  nominal-law hook as a live option (judgement).** Both sit under banners that mark their
+  section historical, and neither names a module path, so T2 did not touch them; a reader
+  skimming the root status file could still take "the vertical complement" as something
+  that can be run today.
+- **`docs/control_parameter_prediction.zh.md` is now mostly a map of archived code
+  (judgement).** Its §4/§5/§8 call graph, module-status table and script index describe the
+  teacher chain; T2 banners it rather than rewriting it, but `README.md` and `CLAUDE.md`
+  still point at it as the authority for "which `control/` modules are live". T3/T4 should
+  either re-derive that table or demote the pointer.
