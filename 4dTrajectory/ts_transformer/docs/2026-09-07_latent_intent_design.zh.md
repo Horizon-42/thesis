@@ -19,7 +19,7 @@ L2 的 base = native32 + 教师**。包审计 T0 完成待 review。下一步 = 
 |---|---|---|---|
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **完成（2026-09-07）**：native32 全体 ADE 1322 vs 基线 1333（配对胜率 52.6 %，bank skill 0.726 vs 0.728）——**N=32 免费**；dense/无教师 2515/2603，否决触发，wiggle 回归——**轨迹误差损失单独不够**。结果 `2026-09-07_l1_lowdim_results.zh.md` | `l1_lowdim_20260907/`（readout、readout_bank） | 不差于 simple-v3 ✓；参数 257 → 96 ✓；bank skill ✓（native32） |
-| L2 CVAE 骨架（隐意图 z） | **代码已合入（`b336b9f`）；campaign `l2_latent_20260907` 跑中，`L2_gauss`（β=1）坍缩（active_units 0，KL 0.0016 nat）→ 预注册 L2.c β 阶梯 {0.1, 0.01, 0.001}（见 §六 L2 末）** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
+| L2 CVAE 骨架（隐意图 z） | **`L2_gauss`（β=1）与 `L2b_beta0p1`（β=0.1）都坍缩，KL 轨迹相同且低于 free-bits 地板——β 不是约束，阶梯停在第一阶；β=0.1 的 top-1 与 native32 打平（雷达引导 FDE −235 m）。死路是后验初始化 → L2.d 热启动后验（`latent_posterior_init_std=0.1`）预注册，campaign `l2_warm_posterior_20260907`（见 §六 L2 末）** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | 未开始 | — | 见 §七 |
@@ -292,6 +292,29 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 > `--z-from-posterior`，从阶梯的 checkpoint 出发，门 (3) 在此测）。否决同前。**若没有任何 β 在不损失
 > top-1 的前提下过门 (1)**，说明解码器不靠 z 也能解释数据（模仿教师把控制钉在逆动力学目标上），下一个
 > 杠杆是后验的输入，不是 β。`L2_mix4`（β=1）按同一论证预计同样坍缩，其读数只作 K=4 的坍缩对照。
+
+> **L2.c 结果（2026-09-07）：β 不是约束——阶梯在第一阶后停止。** `L2b_beta0p1`（β=0.1）的 KL 轨迹与
+> `L2_gauss`（β=1）**逐轮相同**（峰值 0.046 vs 0.045 nat/航班，第 8 轮起 active_units 恒 0），且整段
+> **低于 free-bits 地板**（8 × 0.05 = 0.4 nat）——KL 惩罚从未生效，任何 β 都分辨不出阶梯。读数：shuffled
+> ΔADE +1 m（各分层 −0…+4），minADE_6 与同 K 的 N(0,I) 对照相差 < 2 m（1204.8 vs 1205.7）：门 (1)(2) 以
+> 满幅失败。唯一的真发现：**β=1 在拉低点估计，0.1 把它买回来**——top-1 与 native32 六个分层全部打平
+> （胜率 49.3–50.6 %，中位 Δ ±7 m；雷达引导 FDE p50 1747 vs 1982），直线进近 FDE p50 671 = 671，否决干净。
+> 后两阶（0.01 / 0.001）未跑：它们只会再测一次同一个零。z-oracle campaign 因此也未跑。
+>
+> **死路在后验本身，不在 β。** `PosteriorEncoder` 初始化时均值 ≈ 0.2、方差 1：z 对解码器是噪声，解码器的
+> z 权重在噪声梯度与 weight decay 下衰减到 0，后验随之得不到任何梯度——一个稳定的不动点，与 β 无关
+> （惩罚在地板之下本来就是零）。
+>
+> **L2.d 预注册（2026-09-07）：热启动后验。** 新 config 轴 `latent_posterior_init_std`（默认 1.0 = 坍缩运行
+> 的初始化，进 checkpoint、进 run name `q-std=…`）；臂文件 `docs/experiments/l2_warm_posterior_arms.json`
+> 钉 0.1：后验 log 方差半边初始化为常数 2·ln 0.1（权重置零），均值半边保持默认——z 从第 0 步起是未来
+> 的函数（初始 KL ≈ 1.8 nat/dim，高于地板，惩罚从第 0 步生效），KL 在配置的 β 下把它拉宽——这才是阶梯
+> 要测的权衡。同 base（K=1、N=32、simple-v3 监督 + 教师、free bits 0.05/dim），臂只差 β：0.1 与 0.01
+> （0.001 是自编码器一端，仅当 0.01 仍坍缩才有意义）。门与选法同 L2.c。**预注册的失败形态**：(a) z 成为
+> 未来的自编码器——z-oracle 极好、shuffled ΔADE 巨大、但 top-1 劣于 native32（先验预测不了 z）→ β 太
+> 低；(b) 热启动下仍坍缩 → 解码器不靠 z 就能解释数据，下一杠杆是 z 上的辅助意图目标（L2.e：z → 剩余
+> 时长 / d_join 的训练期辅助头，标签来自 `truth_duration_s` 与 closure labels），不是再换初始化。
+> campaign `l2_warm_posterior_20260907`。
 
 ### L3 — CTA 条件化（交付形态；≈2 天）
 

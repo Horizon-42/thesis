@@ -101,6 +101,7 @@ CONTROL_LOSS_FIELDS = (
     # the recipe fields off the front keep reading recipe fields.
     "latent_beta",
     "latent_free_bits_nats",
+    "latent_posterior_init_std",
 )
 #: The closure output's objective fields; its base name bumps when the regression
 #: itself is redesigned.
@@ -185,6 +186,7 @@ _TAU_FIELDS = (
 )
 
 _ABBREV = {
+    "latent_posterior_init_std": "q-std",
     "control_imitation_loss_weight": "imit",
     "control_velocity_loss_weight": "vel",
     "control_velocity_loss_scale_mps": "vel-scale",

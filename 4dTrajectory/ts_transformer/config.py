@@ -786,6 +786,13 @@ class TSConfig:
     latent_prior_components: int = 1          # K in the mixture prior; 1 = a single Gaussian
     latent_beta: float = 1.0                  # weight of KL(q ‖ p) in the objective
     latent_free_bits_nats: float = 0.0        # per-dim KL below this is not charged
+    # The posterior's standard deviation at initialization. 1.0 is the init the 2026-09-07
+    # L2 runs collapsed under: a mean of ≈0.2 inside a unit-variance sample is noise to the
+    # decoder, which learns to ignore z before the posterior can become informative — and
+    # the KL then sits under the free-bits floor, so beta never binds (L2_gauss and
+    # L2b_beta0p1 had identical KL trajectories). A narrow start hands the decoder an
+    # informative z from step 0 and lets the KL widen it at the configured beta.
+    latent_posterior_init_std: float = 1.0
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
@@ -1294,13 +1301,17 @@ class TSConfig:
             raise ValueError("latent_dim must be >= 0 and latent_prior_components >= 1")
         if self.latent_beta < 0.0 or self.latent_free_bits_nats < 0.0:
             raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
+        if self.latent_posterior_init_std <= 0.0:
+            raise ValueError("latent_posterior_init_std must be positive")
         if self.latent_dim == 0 and (
             self.latent_prior_components != 1
             or self.latent_beta != 1.0
             or self.latent_free_bits_nats != 0.0
+            or self.latent_posterior_init_std != 1.0
         ):
             raise ValueError(
-                "latent_prior_components / latent_beta / latent_free_bits_nats mean nothing "
+                "latent_prior_components / latent_beta / latent_free_bits_nats / "
+                "latent_posterior_init_std mean nothing "
                 "without a latent (latent_dim == 0) and would still rename the run"
             )
         if self.cta_conditioning not in CTA_CONDITIONINGS:
