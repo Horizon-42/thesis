@@ -22,7 +22,7 @@ L2 的 base = native32 + 教师**。包审计 T0 完成待 review。下一步 = 
 | L2 CVAE 骨架（隐意图 z） | **`L2_gauss`（β=1）与 `L2b_beta0p1`（β=0.1）都坍缩，KL 轨迹相同且低于 free-bits 地板——β 不是约束，阶梯停在第一阶；β=0.1 的 top-1 与 native32 打平（雷达引导 FDE −235 m）。死路是后验初始化 → L2.d 热启动后验（`latent_posterior_init_std=0.1`）预注册，campaign `l2_warm_posterior_20260907`（见 §六 L2 末）** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
-| L5 先验三臂 / 合并机场 / 多机 | 未开始 | — | 见 §七 |
+| L5 先验三臂 / 合并机场 / 多机 | **L5.a 拟合教师已预注册（2026-09-07，用户决定：400 步 + batch 1024 + 网络初值；契约见 §六 L5.a），待 T2 合入后实现**；其余未开始 | `run_ts_control_basis_oracle.py --checkpoint`、`control_imitation_target`、`l5_fitted_teacher_arms.json` | 见 §七 |
 
 **误差预算（KRDU val，雷达引导 497 架，未跟踪，`closure_p1c_20260905`）——本文所有目标都相对它**：
 
@@ -361,6 +361,39 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 要在结果文档里明说，避免被读成"多模态没用"。
 
 ### L5 — 先验三臂 / 合并机场 / 多机（之后）
+
+#### L5.a — 拟合教师（用户决定 2026-09-07：400 步 + batch 1024 + 网络初值，排进 L5）
+
+**动机。** L0 §三.5：现役模仿教师（真值航迹的逆动力学）开环飞出来离真值 2.5–7.8 km，而同宽度、穿过同一
+可微 rollout 拟合出的控制表只差 88–433 m——一个严格更好的教师；L1 证明教师不可缺。15 h 的估计来自 L0
+的设置（1200 步、batch 256、逆动力学初值，6851 架 → 27 个 batch × 1200 步 rollout 前后向）；L0 的收敛
+判据（最后 10 % 预算只买 0.4–1.2 %）说明 1200 步远超所需。**预注册设置：400 步、batch 1024、初值 =
+native32 checkpoint 自己的预测**（直线进近已在 445 m 内），预期一臂拟合 2–3 h；拟合覆盖 train + val 两个
+划分（val 也拟合，模仿分量在验证上才有定义；test 永不拟合）。
+
+**契约（实现前定）。**
+- 拟合器 `run_ts_control_basis_oracle.py` 增 `--checkpoint`：队列 = checkpoint 的划分（`--splits train,val`），
+  N / 动力学 / 锚点从 checkpoint 的 config 继承，`--init network|inverse-dynamics`（有 checkpoint 时默认
+  network：checkpoint 的确定性前向——隐变量模型取先验 top-1——给出 N×3 初值；总时长仍给定 = 真值时长，
+  与 L0 相同）。产物 `basis_fit.json` schema 升 v2：按 `flight_key` 键的控制表（N×3）、总时长、fitADE /
+  seedADE / best_step；戳 n_segments、uniform、锚点、checkpoint sha256、config sha256、步数 / lr / floor /
+  init。目录不可变，不入 git。
+- config 轴 `control_imitation_target ∈ {inverse-dynamics, fitted}`（默认与三个 recipe 字面量都是
+  inverse-dynamics）+ `control_fitted_teacher_path`（fitted 时必填，否则拒绝）；进 run name
+  （`imit-target=fitted`）；表文件的 sha256 进 checkpoint 的数据来源块，checkpoint 因此说得出它是哪张表
+  教出来的。
+- 数据集：fitted 下 `reference_control_supervision` 的逆动力学被表查找取代——`reference_controls` =
+  表里的控制，权重全 1（拟合覆盖整个视界）；表里没有的航班、N 不符、锚点不符、总时长与
+  `truth_duration_s` 不符（> 1e-6 s）→ 数据集构建时**拒绝**并报覆盖数（a of b），不静默回退。
+  损失 `control_imitation_mse` 不动。`random_train_anchor` 与 fitted 互斥（表只在固定锚点上有定义）。
+- 臂 `docs/experiments/l5_fitted_teacher_arms.json`：base = native32（custom、N=32、simple-v3 监督）+
+  fitted；`L5_fitted64`（剂量 64，与现役同）、`L5_fitted16`（16：新教师离真值近一个量级，剂量可能需要
+  重标）。对照 L1_native32，L2.d 若过门则加其胜者。
+- **门**：top-1 ADE / FDE p50 逐分层不劣于 native32，雷达引导层预期改善（教师从 2.5–7.8 km 变 88–433 m
+  是这一层的事）；**bank skill ≥ 0.70**（native32 0.726，地板 0.17 / 天花板 0.70）——拟合只最小化位置，
+  控制表可能带 bank wiggle，这是预注册的风险：若 bank skill 掉，修的是**拟合端**（拟合目标加平滑先验），
+  不是训练端；否决：直线进近 FDE p50 退化超过种子噪声。读数同 L1（`compare_constraint_arms.py` +
+  `score_control_arms.py`），拟合的 wall time 与 fitADE / seedADE 分布写进结果文档。
 
 - 先验三臂：单高斯 / K 混合 / **隐扩散**（两阶段，见 §2.3）。预注册读数：minADE_K、miss rate、
   校准曲线、验证 NLL、**逐层看**（直线进近层三臂应基本相同，差别必须全在雷达引导层）。
