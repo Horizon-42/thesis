@@ -44,6 +44,11 @@ MODELS = ("itransformer", "patchtst")
 # KRDU forecast ~250 m NW of the aircraft from its first step
 # (docs/2026-09-03_krdu_nw_endpoint_bias.md).
 STATE_POSITION_ABSOLUTE = "absolute"
+# VETOED (2026-09-03 state-v2 campaign, by that campaign's OWN pre-registered decision
+# rule): it did not clear the bar it was registered against, and `corridor-bounded` did.
+# The value STAYS only because a current-cohort artifact is stored under it
+# (`4dTrajectory/outputs/*/experiments/state_v2_20260903/A_anchor_relative`), whose config
+# must keep loading and naming. **Do not choose it for a new arm.**
 STATE_POSITION_ANCHOR_RELATIVE = "anchor-relative"
 # The absolute output, with the position channels bounded to the final-approach corridor
 # and glidepath window on the rows the output itself places on the final
@@ -626,7 +631,8 @@ class TSConfig:
     closure_height_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
-    # bounded to the final-approach corridor (see the constants).
+    # bounded to the final-approach corridor (see the constants). ``anchor-relative`` is
+    # VETOED for new arms — kept only so the 2026-09-03 artifact stored under it loads.
     state_position_reference: str = STATE_POSITION_ABSOLUTE
     corridor_gate: str = CORRIDOR_GATE_ON_FINAL
     # State output only: the final-approach penalty (train.procedure_loss). Hinge² on the

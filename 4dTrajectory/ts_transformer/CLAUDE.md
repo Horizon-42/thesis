@@ -143,7 +143,7 @@ flight model.
 | axis | default | status |
 |---|---|---|
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs |
-| `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); `anchor-relative` vetoed by its own pre-registered rule |
+| `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule — the value survives only so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads; never choose it for a new arm** |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport** |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option |
