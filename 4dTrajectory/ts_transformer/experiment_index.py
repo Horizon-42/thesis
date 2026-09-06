@@ -15,6 +15,8 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+from io_utils import sha256_bytes, utc_now, write_json_atomic
 from typing import Any, Sequence
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -53,21 +55,6 @@ _OCCUPIED_RUN_MARKERS = tuple(
 )
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temporary.replace(path)
-
-
-def _sha256_bytes(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
-
-
 def _git_identity(repo_root: Path) -> dict[str, Any]:
     def run(*args: str) -> str:
         return subprocess.run(
@@ -83,7 +70,7 @@ def _git_identity(repo_root: Path) -> dict[str, Any]:
     return {
         "commit": commit,
         "dirty": bool(status),
-        "status_sha256": _sha256_bytes(status.encode()),
+        "status_sha256": sha256_bytes(status.encode()),
     }
 
 
@@ -121,7 +108,7 @@ def begin_run(
         "campaign_id": campaign_id,
         "run_id": run_id,
         "status": "running",
-        "created_at_utc": _utc_now(),
+        "created_at_utc": utc_now(),
         "completed_at_utc": None,
         "output_dir": str(output),
         "source": source,
@@ -132,7 +119,7 @@ def begin_run(
         "failure": None,
     }
     path = output / RUN_MANIFEST_NAME
-    _write_json_atomic(path, manifest)
+    write_json_atomic(path, manifest)
     return path
 
 
@@ -147,15 +134,15 @@ def finish_run(manifest_path: str | Path, *, failure: str | None = None) -> dict
         if artifact.is_file():
             artifacts[name] = {
                 "bytes": artifact.stat().st_size,
-                "sha256": _sha256_bytes(artifact.read_bytes()),
+                "sha256": sha256_bytes(artifact.read_bytes()),
             }
     manifest.update({
         "status": "failed" if failure is not None else "completed",
-        "completed_at_utc": _utc_now(),
+        "completed_at_utc": utc_now(),
         "artifacts": artifacts,
         "failure": failure,
     })
-    _write_json_atomic(path, manifest)
+    write_json_atomic(path, manifest)
     return manifest
 
 
@@ -256,7 +243,7 @@ def rebuild_index(root: str | Path) -> dict[str, Any]:
             )
     document = {
         "schema_version": INDEX_SCHEMA,
-        "generated_at_utc": _utc_now(),
+        "generated_at_utc": utc_now(),
         "root": str(root_path),
         "entries": entries,
         "counts": {
@@ -264,7 +251,7 @@ def rebuild_index(root: str | Path) -> dict[str, Any]:
             for status in ("completed", "running", "failed", "incomplete", "unknown")
         },
     }
-    _write_json_atomic(root_path / INDEX_JSON_NAME, document)
+    write_json_atomic(root_path / INDEX_JSON_NAME, document)
 
     lines = [
         "# TS Transformer experiment index",

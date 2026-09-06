@@ -31,6 +31,9 @@ if str(TS_DIR) not in sys.path:
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
+from batching import is_cuda_oom  # noqa: E402
+from io_utils import sha256_bytes, write_json_atomic  # noqa: E402
+
 import run_ts_pipeline as pipeline  # noqa: E402
 from config import (  # noqa: E402
     COORDINATE_FRAMES,
@@ -60,19 +63,8 @@ from trajectory_data_process.harvest.arrivals import (  # noqa: E402
 RESULT_SCHEMA = "ts-batch-throughput-benchmark-v4-flight-epochs"
 
 
-def _sha256_bytes(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
-
-
 def _identity_digest(identities: Sequence[str]) -> str:
-    return _sha256_bytes("\n".join(sorted(identities)).encode())
-
-
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temporary.replace(path)
+    return sha256_bytes("\n".join(sorted(identities)).encode())
 
 
 def _parse_airports(raw: str) -> tuple[str, ...]:
@@ -143,7 +135,7 @@ def load_outer_train_flights(
             raise ValueError(f"{manifest_path} lacks airport or records roster")
         if airport in manifest_digests:
             raise ValueError(f"duplicate arrival manifest for airport {airport}")
-        manifest_digests[airport] = _sha256_bytes(manifest_bytes)
+        manifest_digests[airport] = sha256_bytes(manifest_bytes)
 
         selected_keys: set[str] = set()
         selected_dataset_ids: set[str] = set()
@@ -192,10 +184,6 @@ def load_outer_train_flights(
         "arrival_manifests": dict(sorted(manifest_digests.items())),
     }
     return flights, audit
-
-
-def _is_cuda_oom(exc: BaseException) -> bool:
-    return isinstance(exc, torch.cuda.OutOfMemoryError) or "out of memory" in str(exc).lower()
 
 
 def benchmark_candidate(
@@ -286,7 +274,7 @@ def benchmark_candidate(
             "wall_seconds": time.perf_counter() - started,
         }
     except RuntimeError as exc:
-        if not _is_cuda_oom(exc):
+        if not is_cuda_oom(exc):
             raise
         return {
             "batch_size": batch_size,
@@ -475,7 +463,7 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         },
         "data_leakage_guard": data_audit,
     }
-    _write_json_atomic(output_path, payload)
+    write_json_atomic(output_path, payload)
 
     print(f"\n✓ benchmark result: {output_path}", flush=True)
     if search_boundary_reached:

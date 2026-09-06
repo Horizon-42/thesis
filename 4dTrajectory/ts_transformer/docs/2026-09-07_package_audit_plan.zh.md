@@ -8,7 +8,7 @@
 
 | 工作包 | 状态 | 内容 | 工作量 |
 |---|---|---|---|
-| T0 零风险清理 | **1–6 完成（`55af0b7`、本提交）；7、8 待做** | 8 项（§二） | S×8 |
+| T0 零风险清理 | **完成**（`55af0b7`、`57e68fc`、本提交）；待 review 后合入 | 8 项（§二） | S×8 |
 | T1 删除已废除设计 | 未开始 | 跟踪器、horizon curriculum、arc-length 目标族、regularization | M×3 + S |
 | T2 归档 2026-08 教师机器 | 未开始 | `control/oracle/` 八模块 + 三个运行器 + nominal 律 hook | L |
 | T3 结构重排 | 未开始 | `objective.py` / `validation.py` 拆出 train、config 校验拆分、dataset 拆分、CLI 拆分、后端合并 | M×5 |

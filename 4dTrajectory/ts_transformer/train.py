@@ -103,6 +103,7 @@ from metrics import (
 from final_approach_geometry import corridor_violations, runway_axes, truth_final_gate
 from models import build_model, parameter_count, resolve_device
 from batch_contract import LossComponents, anchor_state, model_forward, unpack_batch
+from io_utils import file_sha256
 from control.envelope import CONTROL_HALF_WIDTH
 from prediction_outputs import ControlPrediction, StatePrediction
 from closure_output import (
@@ -358,13 +359,6 @@ def align_control_targets_to_query_clock(
 
     return interpolate(source_states), interpolate(source_weights)
 
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _split_sha256(series: Sequence[FlightSeries]) -> str:
@@ -1765,7 +1759,7 @@ def write_fit_evaluation(
     document = dict(evaluation)
     document["checkpoint"] = {
         "path": str(checkpoint),
-        "sha256": _file_sha256(checkpoint),
+        "sha256": file_sha256(checkpoint),
     }
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -3058,7 +3052,7 @@ def train(
         )
     torch.save(checkpoint_payload, checkpoint_tmp)
     checkpoint_tmp.replace(checkpoint_path)
-    checkpoint_sha256 = _file_sha256(checkpoint_path)
+    checkpoint_sha256 = file_sha256(checkpoint_path)
     # The model artifact is complete before any derived metric/report replay starts. A
     # reporting failure can therefore be resumed with ``evaluate-fit`` without retraining.
     fit_evaluation = evaluate_fit_splits(
@@ -3120,7 +3114,7 @@ def train(
         selection_tmp = out / "data_selection.json.tmp"
         selection_tmp.write_text(json.dumps(data_selection, indent=2), encoding="utf-8")
         selection_tmp.replace(selection_path)
-        checkpoint_metadata["data_selection_sha256"] = _file_sha256(selection_path)
+        checkpoint_metadata["data_selection_sha256"] = file_sha256(selection_path)
     if uses_control_dynamics(config.prediction_output):
         checkpoint_metadata["control_recipe"] = control_recipe(config)
     metadata_path = out / CHECKPOINT_METADATA_NAME

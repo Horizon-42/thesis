@@ -5378,15 +5378,15 @@ def test_fixed_horizon_cv_does_not_repeat_inert_n_segment_candidates(horizon_mod
 
 
 def test_spread_matches_the_gate_side_signed_spread():
-    # metrics._spread is the VECTORISED twin of evaluation/stats.signed_spread (that one
+    # metrics.signed_spread is the VECTORISED twin of evaluation/stats.signed_spread (that one
     # is stdlib-only by design and would sort millions of boxed floats here). This seam
     # test is what makes "same statistic" a checked property instead of a mirror comment:
     # if either side changes its percentile method or keys, this fails.
     from evaluation.stats import signed_spread
-    from metrics import _spread
+    from metrics import signed_spread as vectorised_spread
 
     values = np.array([3.0, -1.5, 0.25, -7.0, 4.0, 2.5, -0.75])
-    ours, theirs = _spread(values), signed_spread(values.tolist())
+    ours, theirs = vectorised_spread(values), signed_spread(values.tolist())
     assert set(ours) == set(theirs)
     for key in ours:
         assert ours[key] == pytest.approx(theirs[key])

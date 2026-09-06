@@ -31,7 +31,7 @@ from prediction_outputs import ControlPrediction
 _CANDIDATES = (8, 16, 32, 64, 128, 256, 512, 1024, 2048)
 
 
-def _is_cuda_oom(exc: BaseException) -> bool:
+def is_cuda_oom(exc: BaseException) -> bool:
     return isinstance(exc, torch.cuda.OutOfMemoryError) or "out of memory" in str(exc).lower()
 
 
@@ -201,7 +201,7 @@ def resolve_batch_size(
         try:
             _probe_training_step(config, candidate, device)
         except RuntimeError as exc:
-            if not _is_cuda_oom(exc):
+            if not is_cuda_oom(exc):
                 raise
             torch.cuda.empty_cache()
             break

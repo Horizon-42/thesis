@@ -15,6 +15,8 @@ import math
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
+
+from io_utils import write_json_atomic
 from statistics import fmean, pstdev
 from typing import Any, Sequence
 
@@ -171,14 +173,6 @@ def _airport_counts(series: Sequence[FlightSeries]) -> dict[str, int]:
     return dict(sorted(Counter(item.airport or "<unknown>" for item in series).items()))
 
 
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8"
-    )
-    temporary.replace(path)
-
-
 def _reject_nonfinite_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant {value!r}")
 
@@ -264,7 +258,7 @@ def _candidate_run_contract(
     }
     # Keep the in-memory contract in the same JSON-native representation that is
     # restored on resume (notably, dataclass tuple fields become JSON arrays).
-    return json.loads(json.dumps(contract, allow_nan=False))
+    return json.loads(json.dumps(contract))
 
 
 def _require_finite_number(value: Any, label: str) -> None:
@@ -350,14 +344,14 @@ def _write_candidate_progress(
     candidate_count: int,
     candidate_results: Sequence[dict[str, Any]],
 ) -> None:
-    _write_json_atomic(path, {
+    write_json_atomic(path, {
         "schema_version": PROGRESS_SCHEMA,
         "run_contract_sha256": run_contract_sha256,
         "run_contract": run_contract,
         "candidate_count": candidate_count,
         "completed_candidates": len(candidate_results),
         "candidates": list(candidate_results),
-    })
+    }, allow_nan=False)
 
 
 def cross_validate(
@@ -553,8 +547,8 @@ def cross_validate(
     }
     if eligibility_digests:
         results["eligibility_rosters"] = eligibility_digests
-    _write_json_atomic(out / RESULTS_NAME, results)
-    _write_json_atomic(out / BEST_CONFIG_NAME, best_overrides)
+    write_json_atomic(out / RESULTS_NAME, results, allow_nan=False)
+    write_json_atomic(out / BEST_CONFIG_NAME, best_overrides, allow_nan=False)
     if verbose:
         print(f"✓ cross validation selected candidate {best['candidate']}: {best_overrides}")
         print(f"  wrote {out / RESULTS_NAME} and {out / BEST_CONFIG_NAME}")

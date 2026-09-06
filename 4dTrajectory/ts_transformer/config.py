@@ -468,17 +468,23 @@ def control_recipe_overrides(name: str) -> dict[str, Any]:
 
 
 def control_simple_v1_overrides() -> dict[str, Any]:
-    """Return the frozen scientific definition of the minimal control recipe."""
+    """Return the frozen scientific definition of the minimal control recipe.
+
+    Every value is a LITERAL, never a module default: a recipe is what a published paired
+    comparison ("same recipe, one axis") was run under, and a default that later moves
+    must not redefine it after the fact. A recipe that no longer matches the defaults is
+    the recipe telling the truth, not a bug.
+    """
 
     return {
         "model": "itransformer",
         "prediction_output": PREDICTION_CONTROL,
         "horizon_mode": HORIZON_NORMALIZED,
-        "dt_s": DEFAULT_DT_S,
-        "seq_len": DEFAULT_SEQ_LEN,
+        "dt_s": 2.0,
+        "seq_len": 60,
         "n_segments": 64,
-        "channels": CHANNELS,
-        "aircraft_type": DEFAULT_AIRCRAFT_TYPE,
+        "channels": ("e", "n", "u", "edot", "ndot", "udot"),
+        "aircraft_type": "A320",
         "aircraft_filter": AIRCRAFT_FILTER_OPENAP_DIRECT,
         "coordinate_frame": "enu",
         "reference_velocity_source": REFERENCE_VELOCITY_TRACK_FIT,
@@ -500,13 +506,13 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "test_fraction": 0.15,
         "random_train_anchor": False,
         "training_cohort_min_future_s": 0.0,
-        "random_train_anchor_min_future_s": DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+        "random_train_anchor_min_future_s": 60.0,
         "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-        "validation_common_grid_points": DEFAULT_VALIDATION_COMMON_GRID_POINTS,
+        "validation_common_grid_points": 64,
         "fitted_tail_position_weight": 0.25,
         "fitted_terminal_position_weight": 1.0,
-        "position_loss_scale_m": DEFAULT_POSITION_LOSS_SCALE_M,
-        "final_time_scale_s": DEFAULT_FINAL_TIME_SCALE_S,
+        "position_loss_scale_m": 10_000.0,
+        "final_time_scale_s": 600.0,
         "final_time_loss_weight": 1.0,
         "state_endpoint_loss_weight": 0.25,
         "kinematic_consistency_loss_weight": 0.0,
