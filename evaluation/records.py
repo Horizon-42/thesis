@@ -16,7 +16,6 @@ from typing import Any, Literal, get_args
 
 from final_approach.crossing import FITTED_TAIL_KIND, validate_crossing_span
 
-from evaluation.speed_gate import LANDING_AERO_KEY, validate_landing_aero
 
 STATE_KEYS = ("lat", "lon", "alt", "V", "psi", "gamma", "m")
 
@@ -101,9 +100,9 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
         )
     # Every source field the evaluator reads is checked HERE, once. The airport and
     # runway select the assessment context a verdict is measured against; the datum
-    # offset is cross-checked against that context on observed records; the stall
-    # facts anchor the speed gate (absent or null = honestly indeterminate, present
-    # but malformed = a producer wrote something that cannot be trusted).
+    # offset is cross-checked against that context on observed records. The type
+    # designator the speed gate keys on (``speed_gate.TYPECODE_KEYS``) is optional by
+    # contract: absent reads honestly indeterminate.
     for key in ("arr_airport", "runway"):
         if not isinstance(source.get(key), str) or not source[key].strip():
             raise ValueError(f"{where}: source.{key} must be a non-empty string")
@@ -116,11 +115,6 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
         # observed record.
         if not isinstance(source.get("landing_time_utc"), str):
             raise ValueError(f"{where}: source.landing_time_utc must be an ISO 8601 string")
-    if source.get(LANDING_AERO_KEY) is not None:
-        try:
-            validate_landing_aero(source[LANDING_AERO_KEY])
-        except ValueError as exc:
-            raise ValueError(f"{where}: {exc}") from exc
 
     try:
         initial = data["initial_state"]

@@ -85,7 +85,8 @@ def test_observed_record_preserves_a_current_unavailable_event_for_indeterminate
     assert "crossing_span" not in record["source"]
 
 
-def test_estimated_censored_event_appends_the_crossing_row_behind_a_span():
+def _estimated_track_and_runway() -> tuple[dict, Runway]:
+    """A censored (right-truncated) track with the fitted-tail event the harvest writes."""
     runway = _runway()
     event = {
         "schema_version": "runway-threshold-event-v1",
@@ -115,6 +116,11 @@ def test_estimated_censored_event_appends_the_crossing_row_behind_a_span():
         "observed_threshold_event": event,
         "samples": [[0.0, -78.0, 35.05, 500.0], [60.0, -78.0, 35.04, 450.0]],
     }
+    return track, runway
+
+
+def test_estimated_censored_event_appends_the_crossing_row_behind_a_span():
+    track, runway = _estimated_track_and_runway()
 
     record = observed_record(track, runway)
 
@@ -190,3 +196,25 @@ def test_event_availability_counts_source_integrity_exclusions():
     assert availability["event_unavailable"] == 1
     assert availability["excluded_not_landing"] == 1
     assert availability["source_integrity_excluded_candidates"] == 1
+
+
+def test_observed_record_names_the_resolved_airframe_type_and_omits_it_when_unresolved(monkeypatch):
+    """The speed gate keys on ``source.aircraft_type`` (evaluation.speed_gate.TYPECODE_KEYS):
+    a resolvable icao24 writes the identity's ICAO type and the resolved landing mass into
+    the states; an unresolvable one writes no type and the nominal mass."""
+    from trajectory_data_process.harvest import observed as observed_module
+
+    track, runway = _estimated_track_and_runway()
+    monkeypatch.setattr(
+        observed_module, "resolve_airframe",
+        lambda icao24: (64_500.0, "A320") if icao24 == track["icao24"] else None,
+    )
+    record = observed_record(track, runway)
+    assert record["source"]["aircraft_type"] == "A320"
+    assert "landing_aero" not in record["source"]
+    assert all(state["m"] == 64_500.0 for state in record["states"])
+
+    monkeypatch.setattr(observed_module, "resolve_airframe", lambda icao24: None)
+    record = observed_record(track, runway)
+    assert "aircraft_type" not in record["source"]
+    assert all(state["m"] == observed_module.NOMINAL_MASS_KG for state in record["states"])

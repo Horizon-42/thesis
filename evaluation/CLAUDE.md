@@ -2,7 +2,7 @@
 
 `geokit` + stdlib + the (stdlib-only) `aircraft` parameter package. Judges records against
 published approach geometry; the harvest (`final_approach`) decides *which* runway, this
-tree decides *how good*. Report schema: `terminal-approach-evaluation-v7`.
+tree decides *how good*. Report schema: `terminal-approach-evaluation-v9`.
 
 ## Gates & batch metrics (`evaluation/thresholds.py`, `evaluation/speed_gate.py`)
 
@@ -18,49 +18,45 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v7`.
   caller flag). A runway with no RNAV procedure at all (KRDU 14) keeps lateral and grades
   vertical indeterminate with `procedure_source == "no_published_vertical_guidance"`. Gates
   judge the TRUE-dynamics rollout's final state.
-- **Speed ∈ [1.23·Vs(n), 1.23·Vs1g + 20 kt] at the crossing, per record** (v7;
-  `evaluation/speed_gate.py`, design + sources + the measured load-factor distribution in
-  `docs/THRESHOLD_SPEED_GATE.md` §3.5). Vs1g = the project stall model at the record's
-  crossing mass (`aircraft.aero_params.stall_speed_ms` — the SAME function as the
-  optimizer's velocity floor); **Vs(n) = Vs1g·√max(n, 1) at the crossing LOAD FACTOR**,
-  read from `controls[-1].load_factor` (the control active over the final rollout step)
-  on records with controls, MEASURED from the flight's own ADS-B kinematics on observed
-  baselines (`adsb_kinematics`: ψ̇/γ̇ fitted over the final 20 s of measured track,
-  `aircraft.kinematics.load_factor_from_rates`; the window facts are on the row), and
-  declared 1 g (`assumed_1g`) only on state-output predictions and observed tracks with
-  fewer than four samples in that window. Only the lower edge moves
-  with n: the +20 kt edge is an energy criterion defined at 1 g, and scaling it too only
-  flipped records piled against it (measured, §3.5). S/Cl_max from producer-written
-  `source.landing_aero` (`flight_scenarios.build_scenario`). 1.23 = 14 CFR
-  25.125(b)(2)(i); +20 kt = FSF ALAR BN 7.1. **Composed into the verdict for ALL
-  subjects (owner decision 2026-08-24,
-  superseding the original observed exclusion).** Computed subjects are judged on
-  the crossing model airspeed (`crossing_speed_ms`); observed baselines on the
-  fitted crossing GROUND speed (`crossing_ground_speed_ms`) **corrected by the
-  field's METAR headwind** (`evaluation/wind.py`, `data/metar/<ICAO>/` from
-  `trajectory_data_process/metar/fetch_iem_asos.py`, CLI `--metar-root`) into
-  `crossing_airspeed_estimate_ms` with a declared ±5 kt uncertainty (criterion id
-  `…_metar_airspeed_estimate`) — or, when no report within 30 min is usable, on the
-  raw ground speed as a STATED PROXY (`…_ground_speed_proxy`, `wind.status` on the
-  row says why, `wind_counts` on the batch). Every speed-graded row carries
-  `speed_margin_ms` (signed distance to the nearest bound) and `speed_uncertainty_ms`
-  (0 model / ±5 kt estimate / null proxy = unknown); the batch splits
-  `speed_result_counts_by_criterion`. Never compare observed and computed speed
-  rates as one quantity, and never quote an observed speed rate without the
-  marginal and unknown-uncertainty counts beside it — **the observed fleet all
-  landed; a 26 % speed-fail rate is the window's error, not the flights'**
-  (`BASELINE_SPEED_GATE_RESULTS.md` §9, follow-up O4). The observed window anchors on the
-  flight's RESOLVED airframe's landing mass + `landing_aero` (icao24 → OpenAP,
-  written by `harvest/observed.py` via `flight_scenarios.resolve_landing_aero` —
-  the same chain the scenarios use, so baseline and twins share one stall model).
-  Unresolvable airframe or speedless event ⇒ speed indeterminate, loudly,
-  composing the verdict to indeterminate. A computed record without
-  `landing_aero` grades indeterminate LOUDLY; a malformed block raises. The
-  optimizer floor (1.10·Vs) sits BELOW the gate on purpose — floor-riding and
-  observed-speed-target solves can legitimately fail speed; quote speed rates per
-  `target_source`. `crossing_speed_ms` (airspeed) stays null on observed rows —
-  the two speeds live in two fields and are never mixed; both are FLAT on the row
-  (the frontend verdict table reads them there, not only under `deviation`).
+- **Speed ∈ [V_ref,lo·√max(n,1), V_ref,hi + 20 kt] at the crossing, per record, anchored
+  on the type's PUBLISHED approach speed** (v9, 2026-09-07; `evaluation/speed_gate.py`;
+  design, sources and the measured results in `docs/THRESHOLD_SPEED_GATE.md`).
+  `V_ref` is the FAA Aircraft Characteristics Database (October 2024) approach speed at
+  MALW per ICAO type — lo/hi = the FSB's dual flap-configuration values where given —
+  scaled by `√(m/MALW)`: computed records at their crossing mass (`mass_basis =
+  crossing_mass`), observed records over the type's published mass range [minimum
+  operating mass, MALW] (`type_mass_range`; an ADS-B track carries no mass). The table
+  is `aircraft/reference_speeds.json` (`aircraft.reference_speeds`), every number with a
+  source id; the documents are downloaded under `data/reference_speeds/` and indexed in
+  `docs/reference_speeds/README.md` (URL, retrieval date, SHA-256, page). **Adding a
+  type is a cited JSON row, never a code change.** The record's type comes from
+  `source.dynamics_typecode` (computed: the type the model FLEW, which is the fallback
+  type when the identity's type has no dynamics — the row's `reference_typecode` says
+  which) or `source.aircraft_type` (observed: the resolved airframe). Only the lower
+  edge moves with n (`controls[-1].load_factor`; MEASURED from ADS-B kinematics on
+  observed baselines, `adsb_kinematics`; declared 1 g otherwise). +20 kt = FSF ALAR BN
+  7.1. **Composed into the verdict for ALL subjects (owner decision 2026-08-24).**
+  Computed subjects are judged on the crossing model airspeed (`crossing_speed_ms`);
+  observed baselines on the fitted crossing GROUND speed **corrected by the field's
+  METAR headwind** (`evaluation/wind.py`, `data/metar/<ICAO>/`, CLI `--metar-root`)
+  into `crossing_airspeed_estimate_ms` (criterion `…_metar_airspeed_estimate`) — or,
+  when no report within 30 min is usable, on the raw ground speed as a STATED PROXY
+  (`…_ground_speed_proxy`; `wind.status` on the row says why, `wind_counts` on the
+  batch). **The verdict is pass/fail against a determinate window** (owner decision
+  2026-09-07: no probabilistic or three-valued verdict; v8's `speed_uncertainty_ms` /
+  `speed_marginal` are gone); `speed_margin_ms` (signed distance to the nearest bound)
+  stays as a plain number; `bounds.reference_sources` carries the table's source ids so
+  each row traces to its documents. `indeterminate` only when nothing can be judged —
+  no crossing, no type on the record, a type without a published entry, an observed
+  row whose type publishes no minimum mass, no crossing speed — with the reason on the
+  row (`speed_reason`, written even when the composite is a lateral fail) and counted
+  in `speed_indeterminate_reasons` over the same rows as `speed_result_counts`. Never compare observed and computed speed rates as one
+  quantity. `source.landing_aero` (the v6–v8 stall inputs) is no longer read or
+  validated; the optimizer floor (1.10·Vs on the project stall model) sits BELOW the
+  gate on purpose — floor-riding and observed-speed-target solves can legitimately fail
+  speed; quote speed rates per `target_source`. `crossing_speed_ms` (airspeed) stays
+  null on observed rows — the two speeds live in two fields and are never mixed; both
+  are FLAT on the row (the frontend verdict table reads them there).
 - Batch metrics: solve/success rates, lateral mean/p95/max, vertical spreads, flight times;
   path-shape deviation vs reference = both paths resampled at 101 fractions of their own
   horizontal arc length.

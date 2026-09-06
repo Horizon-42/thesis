@@ -1,0 +1,24 @@
+FAA Aircraft Characteristics Database, edition 'Aircraft Characteristics (October 2024)'
+sheet 'Data_Dictionary' -- verbatim rows for the columns this pack consumes.
+
+[row 1] Characteristic | Full Elaboration | Unit | Note | Reference  | Link to Reference
+
+[row 2] ICAO_Code | International Civil Aviation Organization (ICAO) Aircraft Type Designator | Not Applicable | Standard abbreviations for aircraft assigned by ICAO that are most commonly used by air traffic services. | ICAO Website | https://www.icao.int/publications/doc8643/pages/search.aspx
+
+[row 9] AAC | Aircraft Approach Category | Not Applicable | AAC is determined based on the highest reported Approach Speed/Stall Speed in Flight Standardization Board (FSB) or aircraft manufacturer's documentation. For aircraft with a single reported AAC value, columns I and J are empty. | FAA AC/150-5300-13B, Aircraft Manufacturer Manual and FSB | https://www.faa.gov/airports/resources/advisory_circulars/index.cfm/go/document.current/documentnumber/150_5300-13
+
+[row 10] AAC_minimum | Minimum Aircraft Approach Category | Not Applicable | Minimum AAC is determined based on Approach Speed/Stall Speed in certain landing flap configurations and landing weights. It is applicable to aircraft with dual values of Approach Speed/Stall Speed in Flight Standardization Board (FSB) documentation. | FAA AC/150-5300-13B, Aircraft Manufacturer Manual and FSB | https://www.faa.gov/airports/resources/advisory_circulars/index.cfm/go/document.current/documentnumber/150_5300-13
+
+[row 11] AAC_maximum | Maximum Aircraft Approach Category | Not Applicable | Maximum AAC is determined based on Approach Speed/Stall Speed in certain landing flap configurations and maximum landing weights. It is applicable to aircraft with dual values of Approach Speed/Stall Speed in Flight Standardization Board (FSB) documentation. | FAA AC/150-5300-13B, Aircraft Manufacturer Manual and FSB | https://www.faa.gov/airports/resources/advisory_circulars/index.cfm/go/document.current/documentnumber/150_5300-13
+
+[row 14] Approach_Speed_knot | Approach Speed to the runway at Maximum Allowable Landing Weight (MALW) | Knots | Approach speed is the highest speed in the approach phase determined by considering landing flap configurations and MALW in Flight Standardization Board (FSB) or aircraft manufacturer's documentation. For aircraft with a single reported Approach Speed, columns N and O are empty. |  
+
+[row 15] Approach_Speed_minimum_knot | Minimum Approach Speed to the runway at a certain Allowable Landing Weight (ALW) | Knots | Minimum AAC is determined based on Approach Speed (or adjusted stalling speed when approach speed is not known) at the optimum landing flap configuration and at the Maximum Allowable Landing Weight (MALW) as reported in Flight Standardization Board (FSB) documentation. | Aircraft Manufacturer Manual
+
+[row 16] Approach_Speed_maximum_knot | Maximum Approach Speed to the runway at Maximum Allowable Landing Weight (MALW) | Knots | Maximum Approach speed is determined by considering certain landing flap configurations and MALW. It is applicable to aircraft with dual values of Approach Speed in Flight Standardization Board (FSB) documentation. | Aircraft Manufacturer Manual
+
+[row 24] MTOW_lb | Maximum Takeoff Gross Weight (MTOW) | lbs | Aircraft Manufacturer Manual
+
+[row 25] MALW_lb | Maximum Allowable Landing Weight (MALW) | lbs | Aircraft Manufacturer Manual
+
+[row 67, sheet note 2] 2- If there are dual values of AAC for a specific aircraft in the Flight Standardization Board (FSB), those values with their corresponding Approach Speed are reported in columns I, J, N, and O, respectively. There are airplanes in FSB for those there are dual values of AAC, while there is just one available Approach Speed corresponding to one of those two AACs. In these cases, the available Approach Speed is mentioned with its related AAC, then the missing Approach Speed is calculated based on its corresponding AAC such that the Approach Speed reflects its related AAC while it is the closest possible number to the available Approach Speed for the other AAC. In cases with dual AAC values, AAC in column H and its corresponding Approach Speed in column M depict the most critical (extreme) values of AAC and Approach Speed. For airplanes with a single value of AAC, AAC and its corresponding Approach Speed are reported in columns H and M, respectively.

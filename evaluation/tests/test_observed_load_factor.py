@@ -11,28 +11,28 @@ import math
 
 import pytest
 
-from aircraft.aero_params import GRAVITY_M_S2, stall_speed_ms
+from aircraft.aero_params import GRAVITY_M_S2
 from aircraft.kinematics import load_factor_from_rates
-from evaluation import evaluate_batch, evaluate_record, record_from_dict
+from aircraft.reference_speeds import reference_speed
+from evaluation import evaluate_batch, evaluate_record, record_from_dict, speed_gate_bounds
 from evaluation.arrival import LOAD_FACTOR_MIN_SAMPLES, LOAD_FACTOR_WINDOW_S
 from evaluation.speed_gate import (
     LOAD_FACTOR_ASSUMED_1G,
     LOAD_FACTOR_FROM_ADSB,
     OBSERVED_SPEED_CRITERION_ID,
-    SPEED_CRITERION_ID,
-    VREF_STALL_MULTIPLIER,
+    OBSERVED_SPEED_CRITERION_STEM,
 )
 from evaluation.tests.factories import (
-    LANDING_AERO,
-    TARGET,
+    AIRCRAFT_TYPE,
     assessment_context,
     observed_track_payload,
 )
 
-_VS = stall_speed_ms(
-    TARGET["m"], wing_area_m2=LANDING_AERO["wing_area_m2"], cl_max=LANDING_AERO["cl_max_landing"]
-)
-_LOWER_1G = VREF_STALL_MULTIPLIER * _VS
+# The observed window at 1 g, derived through the gate's own function from the
+# published table (the type's mass range, since an ADS-B track carries no mass).
+_LOWER_1G = speed_gate_bounds(
+    reference_speed(AIRCRAFT_TYPE), load_factor=1.0, crossing_mass_kg=None
+).lower_ms
 
 
 def _grade(payload):
@@ -62,7 +62,7 @@ def test_a_straight_stabilized_final_measures_one_g_and_keeps_the_1g_window():
     # Below 1 g clamps to the 1-g floor: the bound is the same as before, measured.
     assert result.speed_bounds.lower_ms == pytest.approx(_LOWER_1G)
     assert result.speed_criterion == OBSERVED_SPEED_CRITERION_ID
-    assert OBSERVED_SPEED_CRITERION_ID.startswith(SPEED_CRITERION_ID)
+    assert OBSERVED_SPEED_CRITERION_ID.startswith(OBSERVED_SPEED_CRITERION_STEM)
 
 
 def test_a_turning_final_lifts_the_lower_bound_by_the_square_root_of_n():

@@ -24,14 +24,12 @@ change you are making go in `docs/code-health-followups.md` instead.
   five to worst. `summary.json` now carries the covariates per row and an
   `accuracy.difficulty` block; published tables predate them and need re-deriving. →
   `4dTrajectory/ts_transformer/CLAUDE.md`
-- **TODO (owner-scheduled, independent of the ADS-B evaluation): backfill the optimizer records' `landing_aero` and regenerate their 15 reports.** The observed/ADS-B batches already carry the block and grade under the v7 gate as-is. **The optimizer solves ARE on disk (2026-09-07 correction), all speed-indeterminate.**
+- **TODO (owner-scheduled, between GPU campaigns): regenerate the 15 optimizer reports under the v9 published-V_ref gate.** **The optimizer solves ARE on disk (2026-09-07 correction).**
   `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}`: 15 batches, 70,267 v6-evaluated
-  records, solved from the 2026-08-23 scenarios — one day before `build_scenario` began writing
-  `source.landing_aero`, so every row reads "record carries no source.landing_aero block" and
-  the three-gate pass count is 0 (per batch: KRDU/runway 7,491, KSTL/runway 5,148, …). Backfill
-  without re-solving: `4dTrajectory/optimization/backfill_landing_aero.py --apply`, then
-  regenerate the reports (`run_all_evaluations.py`); the reports are v6 and the current schema
-  is v7 either way. **`flight_scenarios/outputs` is NOT empty**: all ten `*_scenarios.json` +
+  records, solved from the 2026-08-23 scenarios. Their v6 reports read speed-indeterminate on every
+  row (they predate `source.landing_aero`, which the v9 gate no longer reads anyway); every record
+  carries `source.dynamics_typecode`, so `run_all_evaluations.py` regrades them as-is (~70 GB of
+  record reads). The `backfill_landing_aero.py` tool was deleted with v9. **`flight_scenarios/outputs` is NOT empty**: all ten `*_scenarios.json` +
   `.selection.json`, 92 MB, built 2026-08-23; the arrival manifests were rewritten 2026-08-24,
   whether the scenarios can be reused as-is is UNVERIFIED — let the runner's prepared-input
   signature check decide.

@@ -1,0 +1,87 @@
+Boeing 737 Classic ACAP D6-58325-6 Rev E (November 2023) -- sections 2.1.7 (737-400) and 2.1.8 (737-500), verbatim
+------------------------------------------------------------------------------------------------------------------
+
+2.1.7 General Characteristics: Model 737-400
+
+                                                                              MODEL 737-400
+     CHARACTERISTICS          UNITS                CFM56-3B2 ENGINES                      CFM56-3C ENGINES
+                                                    (22,000 LB SLST)                       (23,500 LB SLST)
+MAX DESIGN               POUNDS              139,000     143,000       150,500       143,000      144,000      150,500
+    - TAXI WEIGHT        KILOGRAMS           63,049       64,864        68,266       64,864       65,317       68,266
+MAX DESIGN               POUNDS              138,500     142,500       150,000       142,500      143,500      150,000
+    - TAKEOFF WEIGHT     KILOGRAMS           62,823       64,637        68,039       64,637       65,091       68,039
+MAX DESIGN               POUNDS              121,000     121,000       124,000       124,000      124,000      124,000
+    - LANDING WEIGHT     KILOGRAMS           54,885       54,885        56,245       56,245       56,245       56,245
+MAX DESIGN               POUNDS              113,000     113,000       117,000       117,000      117,000      117,000
+    - ZERO FUEL WEIGHT   KILOGRAMS           51,256       51,256        53,070       53,070       53,070       53,070
+OPERATING                POUNDS              73,170       73,170        73,170       74,170       74,170       74,170
+    - EMPTY WEIGHT (1)   KILOGRAMS           33,189       33,189        33,189       33,643       33,643       33,643
+MAX STRUCTURAL           POUNDS              39,830       39,830        43,830       42,830       42,830       42,830
+    - PAYLOAD            KILOGRAMS           18,067       18,067        19,881       19,427       19,427       19,427
+SEATING CAPACITY         TWO-CLASS                          146: 8 FIRST CLASS AND 138 ECONOMY
+                         ALL-ECONOMY                       159 AT SIX ABREAST; FAA EXIT LIMIT: 189
+MAX CARGO VOLUME         CUBIC FEET           1,373      1,234 (2)     1,146 (3)    1,222 (4)    1,097 (5)    1,097 (5)
+    - LOWER DECK         CUBIC METERS          38.9       34.9 (2)     32.5 (3)      34.6 (4)     31.1 (5)     31.1 (5)
+USABLE FUEL              U.S. GALLONS         5,311      5,701 (2)     6,121 (3)    5,803 (4)    6,295 (5)    6,295 (5)
+                         LITERS              20,102     21,578 (2)    23,168 (3)    21,964 (4)   23,827 (5)   23,827 (5)
+                         POUNDS              35,584     38,197 (2)    41,011 (3)    38,880 (4)   42,177 (5)   42,177 (5)
+                         KILOGRAMS           16,141     17,326 (2)    18,602 (3)    17,636 (4)   19,131 (5)   19,131 (5)
+
+
+NOTES:
+1.       OPERATING EMPTY WEIGHT FOR BASELINE MIXED CLASS CONFIGURATION. CONSULT WITH
+         AIRLINE FOR SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.       AIRPLANE WITH 390 GAL (1,475 L) AUXILIARY FUEL TANK IN AFT CARGO COMPARTMENT
+3.       AIRPLANE WITH 810 GAL (3,065 L) AUXILIARY FUEL TANK IN AFT CARGO COMPARTMENT
+4.       AIRPLANE WITH 500 GAL (1,893 L) AUXILIARY FUEL TANK IN AFT CARGO COMPARTMENT
+5.       AIRPLANE WITH 1,000 GAL (3,785 L) AUXILIARY FUEL TANK IN AFT CARGO COMPARTMENT
+
+
+
+
+                                            D6-58325-6
+REV E                                    November 2023                                                          2-8
+                                      Not Subject to EAR or ITAR.
+                              Copyright © 2023 Boeing. All Rights Reserved.
+2.1.8 General Characteristics: Model 737-500
+
+     CHARACTERISTICS         UNITS                                      MODEL 737-500
+                                                    CFM56-3B1 ENGINES                   CFM56-3B1 ENGINES
+                                                      (18,500 LB SLST)                   (20,000 LB SLST)
+MAX DESIGN               POUNDS               116,000       125,000         134,000     125,000     136,500
+   - TAXI WEIGHT         KILOGRAMS             52,617        56,699          60,781      56,699      61,915
+MAX DESIGN               POUNDS               115,500       124,500         133,500     133,500     136,000
+   - TAKEOFF WEIGHT      KILOGRAMS             52,390        56,472          60,555      60,555      61,689
+MAX DESIGN               POUNDS               110,000       110,000         110,000     110,000     110,000
+   - LANDING WEIGHT      KILOGRAMS            49,8965        49,895          49,895      49,895      49,895
+MAX DESIGN               POUNDS               102,500       102,500         102,500     102,500     103,000
+   - ZERO FUEL WEIGHT    KILOGRAMS             46,493        46,493          46,493      46,493      46,720
+OPERATING                POUNDS                69,030        69,030          69,030      69,030      69,030
+   - EMPTY WEIGHT (1)    KILOGRAMS             31,311        31,311          31,311      31,311      31,311
+MAX STRUCTURAL           POUNDS                33,470        33,470          33,470      33,470      33,470
+   - PAYLOAD             KILOGRAMS             15,182        15,182          15,182      15,182      15,182
+SEATING CAPACITY         TWO-CLASS                      108: 8 FIRST CLASS AND 100 ECONOMY
+                         ALL-ECONOMY                   122 AT SIX ABREAST; FAA EXIT LIMIT: 149
+MAX CARGO VOLUME         CUBIC FEET              822         683 (2)        595 (3)      671 (4)    546 (5)
+   - LOWER DECK          CUBIC METERS            23.3        19.3 (2)       16.8 (3)     19.0 (4)   15.5 (5)
+USABLE FUEL              U.S. GALLONS           5,311       5,701 (2)       6,121 (3)   5,803 (4)   6,295 (5)
+                         LITERS                20,102      21,578 (2) 23,168 (3)        21,964 (4) 23,827 (5)
+                         POUNDS                35,584      38,197 (2) 41,011 (3)        38,880 (4) 42,177 (5)
+                         KILOGRAMS             16,141      17,326 (2) 18,602 (3)        17,636 (4) 19,131 (5)
+
+
+NOTES:
+1.       OPERATING EMPTY WEIGHT FOR BASELINE MIXED CLASS CONFIGURATION. CONSULT
+         WITH AIRLINE FOR SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.       AIRPLANE WITH 390 GAL (1,475 L) AUXILIARY FUEL TANK IN AFT CARGO COMPARTMENT
+3.       AIRPLANE WITH 810 GAL (3,065 L) AUXILIARY FUEL TANK IN AFT CARGO COMPARTMENT
+4.       AIRPLANE WITH 500 GAL (1,893 L) AUXILIARY FUEL TANK IN AFT CARGO COMPARTMENT
+5.       AIRPLANE WITH 1,000 GAL (3,785 L) AUXILIARY FUEL TANK IN AFT CARGO
+         COMPARTMENT
+
+
+
+
+                                          D6-58325-6
+REV E                                  November 2023                                                     2-9
+                                    Not Subject to EAR or ITAR.

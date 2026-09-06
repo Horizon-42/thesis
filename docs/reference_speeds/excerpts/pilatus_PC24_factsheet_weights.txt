@@ -1,0 +1,14 @@
+Pilatus PC-24 Factsheet, doc code PIL|0823A (Aug 2023) -- WEIGHTS block, verbatim (pdftotext -layout, columns trimmed to 110 characters; the DIMENSIONS column that shared these lines is cut away)
+----------------------------------------------------------------------------------------------------
+
+                       WEIGHTS                                                                                
+                       Maximum ramp weight                 18,840 lb   8,545 kg                               
+                       Maximum take-off weight             18,740 lb   8,500 kg
+                       Maximum landing weight              17,340 lb   7,865 kg                               
+                       Maximum zero fuel weight            14,660 lb   6,650 kg                               
+                       Usable fuel (888.5 U.S. gal/3363 l) 5,964 lb    2,705 kg
+                       Maximum payload                      3,100 lb   1,406 kg                               
+                       Full fuel payload                    1,314 lb     596 kg                               
+                       Basic operating weight              11,561 lb   5,244 kg
+                       (executive configuration 6 seat,
+                       incl. one pilot)

@@ -1,0 +1,93 @@
+Airbus A321 AC, Dec 01/23 -- subject 2-1-1 General Aircraft Characteristics Data (A321-100 and A321-200 weight variants), verbatim
+----------------------------------------------------------------------------------------------------
+
+2-1-1      General Aircraft Characteristics Data
+
+
+**ON A/C A321-100 A321-200 A321neo A321neo-ACF A321neo-XLR
+General Aircraft Characteristics Data
+
+**ON A/C A321-100
+1.   The following table gives characteristics of A321-100 models, these data are specific to each
+     weight variant:
+
+                                          Aircraft Characteristics
+                                          WV000             WV002         WV003          WV004
+Maximum Ramp Weight (MRW)                83 400 kg        83 400 kg      85 400 kg      78 400 kg
+Maximum Taxi Weight (MTW)               (183 865 lb)     (183 865 lb)   (188 275 lb)   (172 842 lb)
+Maximum Take-Off Weight                  83 000 kg        83 000 kg      85 000 kg      78 000 kg
+(MTOW)                                  (182 984 lb)     (182 984 lb)   (187 393 lb)   (171 961 lb)
+Maximum Landing Weight (MLW)             73 500 kg        74 500 kg      74 500 kg      73 500 kg
+                                        (162 040 lb)     (164 244 lb)   (164 244 lb)   (162 040 lb)
+Maximum Zero Fuel Weight                 69 500 kg        70 500 kg      70 500 kg      69 500 kg
+(MZFW)                                  (153 221 lb)     (155 426 lb)   (155 426 lb)   (153 221 lb)
+
+                                          Aircraft Characteristics
+                                           WV005            WV006         WV007          WV008
+Maximum Ramp Weight (MRW)                83 400 kg        78 400 kg      80 400 kg      89 400 kg
+Maximum Taxi Weight (MTW)               (183 865 lb)     (172 842 lb)   (177 252 lb)   (197 093 lb)
+Maximum Take-Off Weight                  83 000 kg        78 000 kg      80 000 kg      89 000 kg
+(MTOW)                                  (182 984 lb)     (171 961 lb)   (176 370 lb)   (196 211 lb)
+Maximum Landing Weight (MLW)             75 000 kg        74 500 kg      73 500 kg      75 500 kg
+                                        (165 347 lb)     (164 244 lb)   (162 040 lb)   (166 449 lb)
+Maximum Zero Fuel Weight                 71 000 kg        70 500 kg      69 500 kg      71 500 kg
+(MZFW)                                  (156 528 lb)     (155 426 lb)   (153 221 lb)   (157 630 lb)
+
+
+**ON A/C A321-200
+2.   The following table gives characteristics of A321-200 models, these data are specific to each
+     weight variant:
+
+
+
+                                                                                             Page 1
+                                                               2-1-1                       Dec 01/23
+                                           @A321
+                 AIRCRAFT CHARACTERISTICS - AIRPORT AND MAINTENANCE PLANNING
+
+
+
+                                       Aircraft Characteristics
+                                       WV000             WV001          WV002           WV003
+Maximum Ramp Weight (MRW)             89 400 kg        93 400 kg       89 400 kg       91 400 kg
+Maximum Taxi Weight (MTW)            (197 093 lb)     (205 912 lb)    (197 093 lb)    (201 502 lb)
+Maximum Take-Off Weight               89 000 kg        93 000 kg       89 000 kg       91 000 kg
+(MTOW)                               (196 211 lb)     (205 030 lb)    (196 211 lb)    (200 621 lb)
+Maximum Landing Weight (MLW)          75 500 kg        77 800 kg       77 800 kg       77 800 kg
+                                     (166 449 lb)     (171 520 lb)    (171 520 lb)    (171 520 lb)
+Maximum Zero Fuel Weight              71 500 kg        73 800 kg       73 800 kg       73 800 kg
+(MZFW)                               (157 630 lb)     (162 701 lb)    (162 701 lb)    (162 701 lb)
+
+                                       Aircraft Characteristics
+                                       WV004             WV005          WV006           WV007
+Maximum Ramp Weight (MRW)             87 400 kg         85 400 kg      83 400 kg       83 400 kg
+Maximum Taxi Weight (MTW)            (192 684 lb)     (188 275 lb)    (183 865 lb)    (183 865 lb)
+Maximum Take-Off Weight               87 000 kg         85 000 kg      83 000 kg       83 000 kg
+(MTOW)                               (191 802 lb)     (187 393 lb)    (182 984 lb)    (182 984 lb)
+Maximum Landing Weight (MLW)          75 500 kg         75 500 kg      75 500 kg       73 500 kg
+                                     (166 449 lb)     (166 449 lb)    (166 449 lb)    (162 040 lb)
+Maximum Zero Fuel Weight              71 500 kg         71 500 kg      71 500 kg       69 500 kg
+(MZFW)                               (157 630 lb)     (157 630 lb)    (157 630 lb)    (153 221 lb)
+
+                                       Aircraft Characteristics
+                                       WV008             WV009          WV010           WV011
+Maximum Ramp Weight (MRW)             80 400 kg        78 400 kg       85 400 kg       93 900 kg
+Maximum Taxi Weight (MTW)            (177 252 lb)     (172 842 lb)    (188 275 lb)    (207 014 lb)
+Maximum Take-Off Weight               80 000 kg        78 000 kg       85 000 kg       93 500 kg
+(MTOW)                               (176 370 lb)     (171 961 lb)    (187 393 lb)    (206 132 lb)
+Maximum Landing Weight (MLW)          73 500 kg        73 500 kg       77 800 kg       77 800 kg
+                                     (162 040 lb)     (162 040 lb)    (171 520 lb)    (171 520 lb)
+Maximum Zero Fuel Weight              69 500 kg        69 500 kg       73 800 kg       73 800 kg
+(MZFW)                               (153 221 lb)     (153 221 lb)    (162 701 lb)    (162 701 lb)
+
+
+**ON A/C A321neo
+3.   The following table gives characteristics of A321NEO models, these data are specific to each
+     weight variant:
+
+
+
+
+                                                                                            Page 2
+                                                            2-1-1                         Dec 01/23
+                                          @A321

@@ -6,6 +6,11 @@ from dataclasses import asdict, dataclass
 from statistics import fmean
 from typing import Any, Iterable, Mapping
 
+from aircraft.reference_speeds import (
+    REFERENCE_SPEEDS_PATH,
+    REFERENCE_SPEEDS_SCHEMA,
+    reference_speed,
+)
 from evaluation.arrival import (
     TARGET_CONTEXT_TOLERANCE_M,
     TERMINAL_PLANE_TOLERANCE_M,
@@ -23,12 +28,16 @@ from evaluation.reference import (
     reference_span,
 )
 from evaluation.speed_gate import (
-    LANDING_AERO_KEY,
     LOAD_FACTOR_ASSUMED_1G,
     LOAD_FACTOR_FROM_ADSB,
     LOAD_FACTOR_FROM_CONTROLS,
+    MASS_BASIS_CROSSING,
+    MASS_BASIS_TYPE_RANGE,
     MIN_BOUND_LOAD_FACTOR,
-    MISSING_LANDING_AERO_REASON,
+    NO_CROSSING_REASON,
+    NO_MIN_MASS_REASON,
+    NO_REFERENCE_SPEED_REASON,
+    NO_TYPECODE_REASON,
     OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID,
     OBSERVED_NO_CROSSING_SPEED_REASON,
     OBSERVED_SPEED_CRITERION_ID,
@@ -36,8 +45,9 @@ from evaluation.speed_gate import (
     OBSERVED_UNRESOLVED_AIRFRAME_REASON,
     SPEED_CRITERION_ID,
     SPEED_GATE_UPPER_ADDITIVE_MS,
-    VREF_STALL_MULTIPLIER,
+    TYPECODE_KEYS,
     SpeedGateBounds,
+    record_typecode,
     speed_gate_bounds,
 )
 from evaluation.stats import magnitude_spread, percentile, signed_spread
@@ -50,14 +60,13 @@ from evaluation.thresholds import (
     Verdict,
 )
 from evaluation.wind import (
-    AIRSPEED_ESTIMATE_UNCERTAINTY_MS,
     WIND_MAX_AGE_S,
     WIND_SOURCE,
     WindTable,
     wind_at_landing,
 )
 
-REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v8"
+REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v9"
 # Versions a consumer that reads only the fields these SHARE (the component results,
 # the geometry deviations) may accept. v7 anchored the speed gate's lower bound on the
 # crossing load factor; v8 measures that load factor on observed baselines from their
@@ -65,7 +74,8 @@ REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v8"
 # and vertical verdicts are unchanged throughout, which is all the ts
 # lateral-eligibility seam reads.
 READABLE_REPORT_SCHEMA_VERSIONS = (
-    "terminal-approach-evaluation-v6", "terminal-approach-evaluation-v7", REPORT_SCHEMA_VERSION,
+    "terminal-approach-evaluation-v6", "terminal-approach-evaluation-v7",
+    "terminal-approach-evaluation-v8", REPORT_SCHEMA_VERSION,
 )
 
 # The denominator every observed availability block is counted against. Evaluation
@@ -152,20 +162,46 @@ METHODOLOGY: dict[str, Any] = {
     "terminal_speed": {
         "criterion": SPEED_CRITERION_ID,
         "bound_ms": (
-            "[1.23 x Vs(n), 1.23 x Vs1g + 20 kt] inclusive, per record; "
-            "Vs(n) = Vs1g x sqrt(max(n, 1)) at the crossing load factor n"
+            "[V_ref,lo(m) x sqrt(max(n, 1)), V_ref,hi(m) + 20 kt] inclusive, per record; "
+            "V_ref,x(m) = V_published,x x sqrt(m / MALW) from the type's published "
+            "approach speed at its Maximum Allowable Landing Weight (lo = the lowest "
+            "landing flap-configuration value, hi = the highest); computed records at "
+            "their crossing mass, observed records over the type's published mass range"
         ),
-        "stall_model": (
-            "Vs1g = sqrt(2 m g / (rho0 S Cl_max_landing)); ISA sea-level rho0, the "
-            "model's landing Cl_max (aircraft.aero_params, shared with the optimizer's "
-            "velocity floor); S and Cl_max from the record's source.landing_aero"
-        ),
-        "vref_stall_multiplier": VREF_STALL_MULTIPLIER,
+        "reference_speeds": {
+            "table": str(REFERENCE_SPEEDS_PATH.relative_to(REFERENCE_SPEEDS_PATH.parents[1])),
+            "schema": REFERENCE_SPEEDS_SCHEMA,
+            "definition": (
+                "FAA Office of Airports, Aircraft Characteristics Database (October 2024): "
+                "Approach_Speed_knot = indicated airspeed at the Maximum Allowable Landing "
+                "Weight, the highest Flight Standardization Board / manufacturer value over "
+                "the landing flap configurations; Approach_Speed_minimum/maximum_knot where "
+                "the FSB gives dual flap-configuration values; MALW_lb the weight it is "
+                "quoted at. Minimum operating masses from the manufacturers' airport "
+                "planning documents (minimum flight weight, OEW or BOW), else OpenAP 2.4"
+            ),
+            "stated_approximation": (
+                "both flap-configuration values are scaled from the row's ONE MALW; where "
+                "the FSB quotes the lower value at a lower landing weight (A321: 140 kt at "
+                "75,500 kg, 142 kt at 77,800 kg) the lower edge is up to ~1.5 % low -- "
+                "permissive, noted in the row's approach_speed_note"
+            ),
+            "provenance": "docs/reference_speeds/README.md (URL, retrieval date, SHA-256, page per number)",
+            "mass_scaling": "V_ref(m) = V_ref(MALW) x sqrt(m / MALW) (constant lift coefficient)",
+            "record_type_keys": list(TYPECODE_KEYS),
+            "mass_bases": {
+                MASS_BASIS_CROSSING: "computed records: the crossing state's own mass",
+                MASS_BASIS_TYPE_RANGE: (
+                    "observed records: lower edge at the type's published minimum "
+                    "operating mass, upper edge at its MALW (the flight's mass is not measured)"
+                ),
+            },
+        },
         "upper_additive_ms": SPEED_GATE_UPPER_ADDITIVE_MS,
         "load_factor": {
             "rule": (
-                "the LOWER bound is V_REF at the stall speed under the lift the crossing "
-                "manoeuvre demands (n m g), n clamped at "
+                "the LOWER bound is V_ref under the lift the crossing manoeuvre demands "
+                "(n m g): V_ref,lo x sqrt(n), n clamped at "
                 f"{MIN_BOUND_LOAD_FACTOR:g}; the UPPER bound stays at 1 g because it is "
                 "an energy criterion, not a stall margin"
             ),
@@ -194,8 +230,21 @@ METHODOLOGY: dict[str, Any] = {
         },
         "sources": [
             {
-                "document": "14 CFR 25.125(b)(2)(i)",
-                "use": "V_REF may not be less than 1.23 V_SR0 (the lower bound anchor)",
+                "document": (
+                    "FAA Office of Airports, Aircraft Characteristics Database, "
+                    "'Aircraft Characteristics (October 2024)' (approach speed at MALW "
+                    "per ICAO type, FSB-validated; definitions per AC 150/5300-13B)"
+                ),
+                "use": "the published approach speed and MALW anchoring every window",
+            },
+            {
+                "document": (
+                    "manufacturer airport planning documents (Airbus AC 3-5-0 Final "
+                    "Approach Speed; Boeing ACAP 2.1 weights; Embraer APM Table 2.1; "
+                    "Bombardier CRJ900 APM 00-02-01 / 00-03-03) and the Eurocontrol "
+                    "Aircraft Performance Database (Vat)"
+                ),
+                "use": "corroboration of the FAA speeds; the published minimum operating masses",
             },
             {
                 "document": (
@@ -210,12 +259,12 @@ METHODOLOGY: dict[str, Any] = {
         ],
         "subjects": (
             "all subjects; optimized/predicted are judged on the crossing model "
-            "airspeed at the crossing load factor, and " + OBSERVED_SPEED_POLICY
+            "airspeed at their crossing mass and load factor, and " + OBSERVED_SPEED_POLICY
         ),
         "observed_proxy_criterion": OBSERVED_SPEED_CRITERION_ID,
         "observed_proxy_caveat": (
             "wind is unmodelled in the proxy: an ordinary 10 kt headwind is half the "
-            "20 kt window, so a proxy speed fail can reflect the day's wind rather "
+            "20 kt additive, so a proxy speed fail can reflect the day's wind rather "
             "than the flight; quote proxy-judged rates with this caveat"
         ),
         "observed_wind_correction": {
@@ -230,17 +279,21 @@ METHODOLOGY: dict[str, Any] = {
                 f"within {WIND_MAX_AGE_S:g} s and the direction is not variable; "
                 "otherwise the row is judged on the ground-speed proxy and says so"
             ),
-            "uncertainty_ms": AIRSPEED_ESTIMATE_UNCERTAINTY_MS,
-            "uncertainty_note": (
-                "declared, not fitted: the tower's 10 m wind is not the threshold wind, "
-                "reports are hourly with specials, gusts are not applied; speed_marginal "
-                "counts estimate-judged rows within this margin of a bound"
+            "limits": (
+                "stated, not modelled: the tower's 10 m wind is not the threshold wind, "
+                "reports are hourly with specials, gusts are not applied"
             ),
         },
+        "verdict": (
+            "pass/fail against the published window; indeterminate only when nothing "
+            "can be judged (no type on the record, no published entry for the type, no "
+            "published minimum mass for an observed row, no crossing speed) -- "
+            "speed_indeterminate_reasons counts each cause"
+        ),
         "claim_boundary": (
-            "model-consistent threshold-crossing energy, judged in TAS with TAS "
-            "treated as CAS (<1% at this fleet's threshold elevations, all below "
-            "200 m); not an operational or certification speed check"
+            "threshold-crossing speed against the type's published landing speed, judged "
+            "in TAS with TAS treated as CAS (<1% at this fleet's threshold elevations, "
+            "all below 200 m); not an operational or certification speed check"
         ),
     },
     # Describes the observed rows' ``crossing_ground_speed_ms`` -- the quantity the
@@ -301,20 +354,19 @@ class TrajectoryEvaluation:
     # bounds): the model airspeed, the observed METAR-corrected airspeed estimate, or
     # the observed ground-speed proxy.
     speed_criterion: str
-    # Per-record (mass- and load-factor-anchored), unlike the two context-owned bounds
-    # above; None when no window could be resolved (unsolved, no crossing, no
-    # landing_aero block, or an observed event without a fitted speed).
+    # Per-record (type-, mass- and load-factor-anchored), unlike the two context-owned
+    # bounds above; None when no window could be resolved (unsolved, no crossing, no
+    # type or no published entry, or an observed event without a fitted speed) --
+    # ``speed_reason`` then says why.
     speed_bounds: SpeedGateBounds | None = None
+    speed_reason: str | None = None
     # Observed subjects: ground speed + headwind when a usable METAR report exists
     # (``wind`` says which, or why not); the value judged under the estimate criterion.
     crossing_airspeed_estimate_ms: float | None = None
     wind: dict[str, Any] | None = None
-    # How much the speed verdict is worth: the judged value's signed distance to the
-    # nearest bound (positive inside the window, negative outside) and the declared
-    # uncertainty of that value -- 0 for a model airspeed, the METAR estimate's +/-5 kt,
-    # None for the ground-speed proxy (wind unmodelled: unknown, not zero).
+    # The judged value's signed distance to the nearest bound (positive inside the
+    # window, negative outside): one number, so a residual can be read off the row.
     speed_margin_ms: float | None = None
-    speed_uncertainty_ms: float | None = None
     flight_key: str | None = None
 
 
@@ -378,7 +430,7 @@ def evaluate_record(
     )
     if not record.solved:
         return TrajectoryEvaluation(
-            **common, speed_criterion=default_criterion,
+            **common, speed_criterion=default_criterion, speed_reason=NO_CROSSING_REASON,
             solved=False, success=False, verdict="fail",
             lateral_result="indeterminate", vertical_result="indeterminate",
             speed_result="indeterminate",
@@ -390,7 +442,8 @@ def evaluate_record(
     if outcome.deviation is None:
         computed_failure = subject != "observed"
         return TrajectoryEvaluation(
-            **common, speed_criterion=default_criterion, solved=True, success=False,
+            **common, speed_criterion=default_criterion, speed_reason=NO_CROSSING_REASON,
+            solved=True, success=False,
             verdict="fail" if computed_failure else "indeterminate",
             lateral_result="indeterminate", vertical_result="indeterminate",
             speed_result="indeterminate",
@@ -407,16 +460,16 @@ def evaluate_record(
         limits.vertical_lower_m,
         limits.vertical_upper_m,
     )
-    # Every subject is speed-graded against the stall-anchored window; the two
-    # branches differ only in WHICH measured quantity is judged. Computed subjects:
-    # the crossing state's model airspeed. Observed subjects: the event's fitted
-    # crossing GROUND speed as a STATED PROXY (wind unmodelled — declared in the
-    # proxy criterion id and METHODOLOGY["terminal_speed"], never silently equated
-    # with airspeed). Absent/null landing_aero reads "unspecified" and grades
-    # indeterminate; a PRESENT malformed block raises in speed_gate_bounds.
+    # Every subject is speed-graded against its type's published window; the two
+    # branches differ in WHICH measured quantity is judged and which mass frames the
+    # window. Computed subjects: the crossing state's model airspeed at the crossing
+    # mass. Observed subjects: the METAR-corrected airspeed estimate, or the event's
+    # fitted crossing GROUND speed as a STATED PROXY, over the type's published mass
+    # range (declared in the criterion id and METHODOLOGY["terminal_speed"]).
     speed_bounds: SpeedGateBounds | None = None
     speed_reason: str | None = None
-    landing_aero = record.source.get(LANDING_AERO_KEY)
+    typecode = record_typecode(record.source)
+    reference = reference_speed(typecode) if typecode is not None else None
     speed_criterion = default_criterion
     airspeed_estimate: float | None = None
     wind_block: dict[str, Any] | None = None
@@ -440,27 +493,30 @@ def evaluate_record(
                     speed_criterion = OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID
     else:
         judged_speed = deviation.crossing_speed_ms
-    if landing_aero is None:
+    if typecode is None:
         speed_result: ComponentResult = "indeterminate"
         speed_reason = (
-            OBSERVED_UNRESOLVED_AIRFRAME_REASON
-            if subject == "observed"
-            else MISSING_LANDING_AERO_REASON
+            OBSERVED_UNRESOLVED_AIRFRAME_REASON if subject == "observed" else NO_TYPECODE_REASON
         )
+    elif reference is None:
+        speed_result = "indeterminate"
+        speed_reason = NO_REFERENCE_SPEED_REASON.format(typecode=typecode)
     elif judged_speed is None:
         # Only an observed event can lack its speed: a computed crossing always has a
         # state V (``arrival._state_deviation``).
         speed_result = "indeterminate"
         speed_reason = OBSERVED_NO_CROSSING_SPEED_REASON
+    elif subject == "observed" and reference.min_mass_kg is None:
+        speed_result = "indeterminate"
+        speed_reason = NO_MIN_MASS_REASON.format(typecode=typecode)
     else:
         speed_bounds = speed_gate_bounds(
-            deviation.crossing_mass_kg,
-            landing_aero,
+            reference,
             load_factor=deviation.crossing_load_factor,
+            crossing_mass_kg=None if subject == "observed" else deviation.crossing_mass_kg,
         )
         speed_result = _component(judged_speed, speed_bounds.lower_ms, speed_bounds.upper_ms)
     speed_margin: float | None = None
-    speed_uncertainty: float | None = None
     if speed_bounds is not None and judged_speed is not None:
         inside = speed_bounds.lower_ms <= judged_speed <= speed_bounds.upper_ms
         distance = min(
@@ -468,10 +524,6 @@ def evaluate_record(
             abs(judged_speed - speed_bounds.upper_ms),
         )
         speed_margin = distance if inside else -distance
-        if subject != "observed":
-            speed_uncertainty = 0.0
-        elif airspeed_estimate is not None:
-            speed_uncertainty = AIRSPEED_ESTIMATE_UNCERTAINTY_MS
     verdict = _composite(lateral_result, vertical_result, speed_result)
     violations: list[str] = []
     if lateral_result == "fail":
@@ -497,10 +549,10 @@ def evaluate_record(
         speed_result=speed_result,
         speed_criterion=speed_criterion,
         speed_bounds=speed_bounds,
+        speed_reason=speed_reason,
         crossing_airspeed_estimate_ms=airspeed_estimate,
         wind=wind_block,
         speed_margin_ms=speed_margin,
-        speed_uncertainty_ms=speed_uncertainty,
         deviation=deviation, event_status=outcome.event_status,
         violations=tuple(violations), reason=reason,
     )
@@ -655,19 +707,10 @@ def evaluate_batch(
         "speed_result_counts": speed_result_counts,
         "speed_result_counts_by_criterion": speed_result_counts_by_criterion,
         "wind_counts": wind_counts,
-        # Speed verdicts whose judged value sits within its declared uncertainty of a
-        # bound, and speed verdicts whose uncertainty is unknown (proxy rows).
-        "speed_marginal": sum(
-            item.speed_margin_ms is not None
-            and item.speed_uncertainty_ms is not None
-            and item.speed_uncertainty_ms > 0.0
-            and abs(item.speed_margin_ms) <= item.speed_uncertainty_ms
-            for item in measured
-        ),
-        "speed_uncertainty_unknown": sum(
-            item.speed_margin_ms is not None and item.speed_uncertainty_ms is None
-            for item in measured
-        ),
+        # Why speed could not be judged, per cause, over the SAME rows as
+        # speed_result_counts (unmeasured crossings included): coverage of the
+        # published table is a fact the batch must state.
+        "speed_indeterminate_reasons": _speed_indeterminate_reasons(evaluations),
         # Observed rows' METAR-corrected crossing airspeed estimates (null when none).
         "crossing_airspeed_estimate_ms": magnitude_spread([
             item.crossing_airspeed_estimate_ms
@@ -697,6 +740,18 @@ def evaluate_batch(
         "reference": _reference_aggregate(comparisons),
         "trajectories": rows,
     }
+
+
+def _speed_indeterminate_reasons(evaluations: list[TrajectoryEvaluation]) -> dict[str, int]:
+    """Every speed-indeterminate row carries a reason; the counts sum to the
+    indeterminate tally in ``speed_result_counts``."""
+    counts: dict[str, int] = {}
+    for item in evaluations:
+        if item.speed_result == "indeterminate":
+            if item.speed_reason is None:
+                raise ValueError(f"{item.record_id}: speed indeterminate without a reason")
+            counts[item.speed_reason] = counts.get(item.speed_reason, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _load_factor_aggregate(
@@ -785,13 +840,20 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
                 if item.speed_bounds is not None
                 else {
                     "speed_criterion": item.speed_criterion,
-                    "stall_speed_ms": None,
-                    "stall_speed_at_n_ms": None,
+                    "reference_typecode": None,
+                    "reference_sources": None,
+                    "mass_basis": None,
+                    "vref_low_ms": None,
+                    "vref_high_ms": None,
                     "speed_lower_ms": None,
                     "speed_upper_ms": None,
                 }
             ),
         },
+        # Why the speed component is indeterminate (None when it was graded) -- on
+        # the row itself, so it is readable when the composite is a lateral/vertical
+        # fail and ``reason`` is not written.
+        "speed_reason": item.speed_reason,
     }
     if item.deviation is not None:
         deviation = item.deviation
@@ -829,7 +891,6 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             crossing_ground_speed_ms=deviation.crossing_ground_speed_ms,
             crossing_airspeed_estimate_ms=item.crossing_airspeed_estimate_ms,
             speed_margin_ms=item.speed_margin_ms,
-            speed_uncertainty_ms=item.speed_uncertainty_ms,
             crossing_load_factor=deviation.crossing_load_factor,
             crossing_load_factor_source=deviation.crossing_load_factor_source,
             heading_rad=deviation.heading_rad,

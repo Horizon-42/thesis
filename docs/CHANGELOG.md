@@ -4,6 +4,53 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — evaluation v9: the speed gate anchors on the type's PUBLISHED approach speed (O4)
+
+Branch `dev-observed-load-factor-metar`. Under the wind-corrected v8 gate 26 % of the
+observed fleet still failed speed, by airframe family — the 737 bucket's stall-model
+`1.23·Vs1g(MLW)` was 134 kt against a published 140–147 kt. All those flights landed, so the
+anchor was the error (`evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md` §9). Owner decision:
+plan A (published V_ref) with plan B (data calibration) only as a fallback, determinate
+bounds, no probabilistic or three-valued verdict, every source downloaded or cited in a
+dedicated folder.
+
+- **New `aircraft/reference_speeds.json` + `aircraft.reference_speeds`** (stdlib): per ICAO
+  type the FAA Aircraft Characteristics Database (October 2024) approach speed at MALW
+  (min/max over the FSB's flap configurations), the MALW, and the type's lowest published
+  operating mass (manufacturer MFW/OEW/BOW, else OpenAP 2.4) — one source id per number.
+  `docs/reference_speeds/README.md` indexes every document (URL, retrieval date, SHA-256,
+  page, excerpt); the files live under `data/reference_speeds/` (git-ignored,
+  `fetch_sources.sh` re-downloads). Sources: FAA ACD xlsx; Airbus A319/A320/A321 AC (3-5-0
+  Final Approach Speed); Boeing 737NG/737 MAX/757/767/777/787 ACAP (§2.1 weights); Embraer
+  175 APM; Bombardier CRJ900 APM; Eurocontrol Aircraft Performance Database (Vat).
+- **`evaluation/speed_gate.py` rewritten**: `V_ref,x(m) = V_x·√(m/MALW)`; computed records
+  `[V_ref,lo(m)·√max(n,1), V_ref,hi(m) + 20 kt]` at the crossing mass; observed records
+  `[V_ref,lo(m_min)·√max(n,1), V_ref,hi(MALW) + 20 kt]` over the type's published mass range
+  (an ADS-B track carries no mass). Criterion ids `published_vref_at_crossing_mass_and_n_…` /
+  `published_vref_over_type_mass_range_and_n_…` (+ `_metar_airspeed_estimate` /
+  `_ground_speed_proxy`). Bounds carry `reference_typecode`, `reference_sources` (the table's
+  source ids, so each row traces to its documents), `mass_basis`, `vref_low_ms`,
+  `vref_high_ms`; every row carries `speed_reason`. The record's type: `source.dynamics_typecode` (computed)
+  or `source.aircraft_type` (observed); `source.landing_aero` is no longer read or validated,
+  the harvest's observed writer no longer writes it, `backfill_landing_aero.py` deleted (the
+  70,267 on-disk optimizer records carry `dynamics_typecode` and regrade by report
+  regeneration).
+- **Verdict is pass/fail against the window**; `speed_uncertainty_ms`, `speed_marginal`,
+  `speed_uncertainty_unknown` and the ±5 kt declaration removed; `speed_margin_ms` kept;
+  new batch `speed_indeterminate_reasons` (count per cause over the same rows as
+  `speed_result_counts`: no crossing, no type, no published entry, no minimum mass, no
+  crossing speed). METAR correction unchanged. `flight_scenarios.resolve_landing_aero` →
+  `resolve_airframe` (mass + type; the stall block had no consumer left).
+- Observed re-evaluation (`observed_v9_2026-09-07/`): **96.9 % of graded rows pass** (v8:
+  73.8 %); 999 fails, 992 fast by a median 2.2 kt, 747 of them pushed over by the tower
+  headwind, the type clusters (E75L, B737) on single-flap-value FAA rows — followups #21–#23;
+  `BASELINE_SPEED_GATE_RESULTS.md` §10.
+- Schema v8 → v9 in all four homes; ts seam readable set (v6…v9); frontend shows the
+  published V_ref in the speed cell's tooltip and labels v6–v8 as stall-anchored.
+- Docs: `THRESHOLD_SPEED_GATE.md` §1/§2/§3.1/§3.2/§4/§5/§6/§7/§8/§9/§10 rewritten;
+  `evaluation/CLAUDE.md`, `README.md`, root open item, `open-items.md`, followups #16/#19
+  resolved, `trajectory_data_process/CLAUDE.md`, `flight_scenarios/CLAUDE.md`.
+
 ### 2026-09-07 — ts_transformer L1.b: two supervision terms that replace the imitation teacher's job of naming the bank
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md` §六 L1.b, branch

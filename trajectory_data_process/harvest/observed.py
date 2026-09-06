@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from flight_scenarios.build import resolve_landing_aero
+from flight_scenarios.build import resolve_airframe
 from flight_scenarios.crossing_span import CROSSING_SPAN_KEY, crossing_span_from_event
 from flight_scenarios.datum import MSL_ALTITUDE_SOURCE
 from flight_scenarios.start_state import state_samples_from_track
@@ -53,12 +53,12 @@ from trajectory_data_process.harvest.store import (
 from trajectory_data_process.harvest.threshold_event import require_current_threshold_event
 
 # Fallback mass for the state samples when the airframe cannot be resolved from its
-# icao24. A resolved record instead carries its type's landing mass and the
-# ``landing_aero`` stall facts — the SAME identity→OpenAP chain the scenarios use —
-# so the baseline's speed gate judges each flight against the assumptions its
-# optimized/predicted twins fly with. An UNRESOLVED record keeps this nominal mass,
-# gets no ``landing_aero``, and grades speed-indeterminate, loudly: judging an
-# unknown airframe against an invented window would be false precision.
+# icao24. A resolved record instead carries its type's landing mass and its ICAO
+# type (``aircraft_type``) — the SAME identity→OpenAP chain the scenarios use — and
+# the type is what the baseline's speed gate looks its PUBLISHED approach-speed
+# window up by. An UNRESOLVED record keeps this nominal mass, gets no
+# ``aircraft_type``, and grades speed-indeterminate, loudly: judging an unknown
+# airframe against an invented window would be false precision.
 NOMINAL_MASS_KG = 60_000.0
 
 RECORDS_DIR = "records"
@@ -78,23 +78,22 @@ def observed_record(
     """One stored track as an ``evaluation.records`` record, in MSL.
 
     Evaluation consumes the threshold event already produced by runway assignment;
-    it does not refit these state samples. Mass and the ``landing_aero`` stall
-    facts come from the flight's own resolved airframe (icao24 → OpenAP, the same
-    chain the scenarios use) so the speed gate grades the baseline against the
-    same assumptions as its modeled twins; an unresolvable airframe falls back to
-    ``NOMINAL_MASS_KG`` with no ``landing_aero`` and grades speed-indeterminate.
-    An explicit ``mass_kg`` bypasses resolution (tests, synthetic tracks).
+    it does not refit these state samples. The mass and the ICAO type come from the
+    flight's own resolved airframe (icao24 → identity → OpenAP, the same chain the
+    scenarios use); the type is the key the speed gate looks the published window up
+    by. An unresolvable airframe falls back to ``NOMINAL_MASS_KG`` with no
+    ``aircraft_type`` and grades speed-indeterminate. An explicit ``mass_kg``
+    bypasses resolution (tests, synthetic tracks) and writes no type.
     """
     if runway.threshold_crossing_height_m is None:
         raise ValueError(
             f"{runway.airport} {runway.ident} publishes no vertically guided RNAV approach"
         )
-    landing_aero: dict[str, float] | None = None
     aircraft_type: str | None = None
     if mass_kg is None:
-        resolved = resolve_landing_aero(track.get("icao24"))
+        resolved = resolve_airframe(track.get("icao24"))
         if resolved is not None:
-            mass_kg, aircraft_type, landing_aero = resolved
+            mass_kg, aircraft_type = resolved
         else:
             mass_kg = NOMINAL_MASS_KG
     event = track.get("observed_threshold_event")
@@ -164,9 +163,10 @@ def observed_record(
             "vertical_source": runway.vertical_source,
             "tch_source": runway.tch_source,
             "baro_vnav_minima": runway.baro_vnav_minima,
-            # The stall facts the speed gate anchors on — present only when the
-            # airframe resolved (see NOMINAL_MASS_KG above).
-            **({"landing_aero": landing_aero} if landing_aero is not None else {}),
+            # The resolved airframe's ICAO type designator: the key the speed gate
+            # looks its published approach speed up by (evaluation.speed_gate
+            # TYPECODE_KEYS) — present only when the airframe resolved (see
+            # NOMINAL_MASS_KG above).
             **({"aircraft_type": aircraft_type} if aircraft_type is not None else {}),
             "source_integrity": track.get("source_integrity"),
             # Copy policy-free producer output verbatim.  Benchmark selection and

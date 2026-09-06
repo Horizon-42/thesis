@@ -27,9 +27,11 @@ store, roster.
   appends the one inferred crossing row (built by `flight_scenarios.crossing_span`), so
   evaluation grades the STATES through one shared interpolation instead of re-reading
   the event; and it resolves each flight's airframe from its icao24
-  (`flight_scenarios.resolve_landing_aero`, the scenarios' own chain) to write
-  `source.landing_aero` + the landing mass the baseline speed gate anchors on
-  (unresolvable → `NOMINAL_MASS_KG`, no landing_aero, speed grades indeterminate).
+  (`flight_scenarios.resolve_airframe`, the scenarios' own chain) to write
+  `source.aircraft_type` — the ICAO type the baseline speed gate looks its PUBLISHED
+  approach-speed window up by (v9) — and the landing mass the states carry
+  (unresolvable → `NOMINAL_MASS_KG`, no aircraft_type, speed grades indeterminate).
+  `source.landing_aero` (v6–v8's stall inputs) is no longer written.
   Target kinematics and `final_time_s` stay anchored to the last MEASURED row. Records
   in `approach/records/` from before this date fail evaluation loudly ("no
   crossing_span") — rebuild with `--evaluate-only`.

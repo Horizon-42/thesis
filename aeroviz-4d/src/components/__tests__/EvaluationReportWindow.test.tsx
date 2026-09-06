@@ -36,7 +36,10 @@ const REPORT: EvaluationReport = {
       verdict: "pass", event_status: "terminal_state", lateral_result: "pass", vertical_result: "pass",
       speed_result: "pass",
       bounds: { lateral_criterion: "runway_half_width_at_threshold", lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22,
-        speed_criterion: "vref_1p23_vs1g_to_vref_plus_20kt", stall_speed_ms: 53.9, speed_lower_ms: 66.3, speed_upper_ms: 76.6 },
+        speed_criterion: "published_vref_at_crossing_mass_and_n_to_vref_plus_20kt", reference_typecode: "A320",
+        reference_sources: { approach_speed: "faa_acd_2024_10", malw: "faa_acd_2024_10", min_mass: "openap_2_4" },
+        mass_basis: "crossing_mass", vref_low_ms: 66.3, vref_high_ms: 66.3,
+        speed_lower_ms: 66.3, speed_upper_ms: 76.6 },
       lateral_m: 22.43, vertical_m: -1.68, crossing_speed_ms: 69.9, final_time_s: 329.1,
       reference: { file: "r.json", comparison_status: "compared", endpoint_tolerance_m: 1,
         start_gap_m: 0, end_gap_m: 0, reference_flight_time_s: 536.0,
@@ -48,7 +51,10 @@ const REPORT: EvaluationReport = {
       verdict: "fail", event_status: "terminal_state", lateral_result: "fail", vertical_result: "fail",
       speed_result: "pass",
       bounds: { lateral_criterion: "runway_half_width_at_threshold", lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22,
-        speed_criterion: "vref_1p23_vs1g_to_vref_plus_20kt", stall_speed_ms: 53.9, speed_lower_ms: 66.3, speed_upper_ms: 76.6 },
+        speed_criterion: "published_vref_at_crossing_mass_and_n_to_vref_plus_20kt", reference_typecode: "A320",
+        reference_sources: { approach_speed: "faa_acd_2024_10", malw: "faa_acd_2024_10", min_mass: "openap_2_4" },
+        mass_basis: "crossing_mass", vref_low_ms: 66.3, vref_high_ms: 66.3,
+        speed_lower_ms: 66.3, speed_upper_ms: 76.6 },
       violations: ["lateral", "vertical"],
       lateral_m: 179.53, vertical_m: -25.4, crossing_speed_ms: 71.2, final_time_s: 400.2,
       reference: { file: "r2.json", comparison_status: "compared", endpoint_tolerance_m: 1,
@@ -61,7 +67,10 @@ const REPORT: EvaluationReport = {
       verdict: "fail", event_status: "unsolved", lateral_result: "indeterminate", vertical_result: "indeterminate",
       speed_result: "indeterminate",
       bounds: { lateral_criterion: "runway_half_width_at_threshold", lateral_m: 22.86, vertical_lower_m: -22, vertical_upper_m: 22,
-        speed_criterion: "vref_1p23_vs1g_to_vref_plus_20kt", stall_speed_ms: null, speed_lower_ms: null, speed_upper_ms: null },
+        speed_criterion: "published_vref_at_crossing_mass_and_n_to_vref_plus_20kt", reference_typecode: null,
+        reference_sources: null, mass_basis: null, vref_low_ms: null, vref_high_ms: null,
+        speed_lower_ms: null, speed_upper_ms: null },
+      speed_reason: "no threshold crossing was measured (unsolved, not reached, or event unavailable); nothing to judge",
       violations: ["unsolved"], reason: "ValueError: Maximum_Iterations_Exceeded",
     },
   ],
@@ -190,8 +199,8 @@ describe("EvaluationReportWindow", () => {
     // card: 2 of 2 graded pass, 1 ungraded (unsolved row)
     expect(screen.getByText("speed gate pass 100.0% · 1 ungraded")).toBeTruthy();
     expect(screen.getByText("2/2")).toBeTruthy();
-    // gates paragraph names the stall-anchored window
-    expect(screen.getByText(/stall-anchored crossing window/)).toBeTruthy();
+    // gates paragraph names the published-V_ref window
+    expect(screen.getByText(/published-V_ref crossing window/)).toBeTruthy();
     // per-row: verdict column + graded crossing speed with its per-flight window
     const table = screen.getByRole("table", { name: "Per-trajectory verdicts" });
     const headers = Array.from(table.querySelectorAll("thead th")).map((h) => h.textContent);
@@ -203,7 +212,7 @@ describe("EvaluationReportWindow", () => {
     expect(passCells[headers.indexOf("V crossing (m/s)")]).toBe("69.9");
     expect(
       (passRow.children[headers.indexOf("V crossing (m/s)")] as HTMLElement).title,
-    ).toBe("window 66.3–76.6 m/s · Vs1g 53.9 m/s");
+    ).toBe("window 66.3–76.6 m/s · published V_ref 66.3–66.3 m/s (A320)");
     unmount();
 
     // A legacy v5 report (pre-speed-gate artifacts still published on disk) renders
@@ -236,7 +245,7 @@ describe("EvaluationReportWindow", () => {
     expect(screen.getByText(/Pre-speed-gate report/)).toBeTruthy();
     expect(screen.queryByText(/speed gate pass/)).toBeNull();
     expect(screen.queryByText("crossing speed (m/s)")).toBeNull();
-    expect(screen.queryByText(/stall-anchored crossing window/)).toBeNull();
+    expect(screen.queryByText(/published-V_ref crossing window/)).toBeNull();
     const legacyHeaders = Array.from(
       screen.getByRole("table", { name: "Per-trajectory verdicts" }).querySelectorAll("thead th"),
     ).map((h) => h.textContent);
@@ -257,6 +266,7 @@ describe("EvaluationReportWindow", () => {
         speed_result: (row.solved ? "pass" : "indeterminate") as "pass" | "indeterminate",
         crossing_speed_ms: null,
         crossing_ground_speed_ms: row.solved ? 70.2 : null,
+        bounds: { ...row.bounds, mass_basis: row.solved ? ("type_mass_range" as const) : null },
       })),
     };
     render(
@@ -286,11 +296,12 @@ describe("EvaluationReportWindow", () => {
     expect(solvedRow.children[headers.indexOf("speed")].textContent).toBe("pass");
     const cell = solvedRow.children[headers.indexOf("V crossing (m/s)")] as HTMLElement;
     // A proxy-judged row (no usable wind report): the ground speed, labelled GS, and a
-    // tooltip that says it was judged as the stated proxy against its window.
+    // tooltip that says it was judged as the stated proxy against its window — the
+    // observed producer frames it over the type's mass range, and the tooltip says so.
     expect(cell.textContent).toBe("70.2 GS");
     expect(cell.title).toBe(
       "ADS-B ground speed — judged as a stated proxy, no usable wind report (wind unmodelled)" +
-        " · window 66.3–76.6 m/s · Vs1g 53.9 m/s",
+        " · window 66.3–76.6 m/s · published V_ref 66.3–66.3 m/s (A320, type mass range)",
     );
   });
 
@@ -302,7 +313,11 @@ describe("EvaluationReportWindow", () => {
         crossing_speed_ms: null,
         crossing_ground_speed_ms: row.solved ? 70.2 : null,
         crossing_airspeed_estimate_ms: row.solved ? 74.9 : null,
-        bounds: { ...row.bounds, speed_criterion: "vref_1p23_vs_at_n_to_vref_1g_plus_20kt_metar_airspeed_estimate" },
+        bounds: {
+          ...row.bounds,
+          speed_criterion: "published_vref_over_type_mass_range_and_n_to_vref_plus_20kt_metar_airspeed_estimate",
+          mass_basis: row.solved ? ("type_mass_range" as const) : null,
+        },
       })),
     };
     render(
@@ -321,6 +336,42 @@ describe("EvaluationReportWindow", () => {
     expect(cell.title).toContain("METAR-corrected airspeed estimate");
     expect(cell.title).toContain("ground speed 70.2 m/s");
     expect(cell.title).toContain("window 66.3–76.6 m/s");
+    expect(cell.title).toContain("(A320, type mass range)");
+  });
+
+  it("names the stall anchor in the tooltip of a prior (v6–v8) report that still carries it", () => {
+    const prior: EvaluationReport = {
+      ...REPORT,
+      schema_version: "terminal-approach-evaluation-v8",
+      trajectories: REPORT.trajectories.map((row) => ({
+        ...row,
+        bounds: {
+          lateral_criterion: row.bounds.lateral_criterion,
+          lateral_m: row.bounds.lateral_m,
+          vertical_lower_m: row.bounds.vertical_lower_m,
+          vertical_upper_m: row.bounds.vertical_upper_m,
+          speed_criterion: "vref_1p23_vs_at_n_to_vref_1g_plus_20kt",
+          stall_speed_ms: row.solved ? 53.9 : null,
+          stall_speed_at_n_ms: row.solved ? 53.9 : null,
+          speed_lower_ms: row.bounds.speed_lower_ms,
+          speed_upper_ms: row.bounds.speed_upper_ms,
+        },
+      })),
+    };
+    render(
+      <EvaluationReportWindow
+        report={prior}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={() => undefined}
+      />,
+    );
+    expect(screen.getByText(/Earlier speed gate/)).toBeTruthy();
+    const table = screen.getByRole("table", { name: "Per-trajectory verdicts" });
+    const headers = Array.from(table.querySelectorAll("th")).map((th) => th.textContent);
+    const solvedRow = screen.getByText("FDX1738").closest("tr")!;
+    const cell = solvedRow.children[headers.indexOf("V crossing (m/s)")] as HTMLElement;
+    expect(cell.title).toBe("window 66.3–76.6 m/s · Vs1g 53.9 m/s");
   });
 
   it("toggling the speed gate off re-derives two-gate verdicts client-side", () => {

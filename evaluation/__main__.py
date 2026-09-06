@@ -52,8 +52,15 @@ def _print_summary(report: dict[str, Any], out: Path) -> None:
     if wind["estimated"] or wind["unavailable"]:
         print(
             f"  wind          METAR airspeed estimate {wind['estimated']}  "
-            f"ground-speed proxy {wind['unavailable']}  marginal {report['speed_marginal']}"
+            f"ground-speed proxy {wind['unavailable']}"
         )
+    speed = report["speed_result_counts"]
+    print(
+        f"  speed         pass {speed['pass']}  fail {speed['fail']}  "
+        f"indeterminate {speed['indeterminate']}"
+    )
+    for reason, count in report["speed_indeterminate_reasons"].items():
+        print(f"                {count} x {reason}")
     if report["lateral_m"]:
         print(f"  cross-track   {report['lateral_m']}")
     if report["vertical_m"]:

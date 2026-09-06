@@ -227,20 +227,20 @@ class _AircraftSelection:
         }
 
 
-def resolve_landing_aero(
+def resolve_airframe(
     icao24: str | None,
     *,
     declared_type: str | None = None,
     aircraft_provider: str = "auto",
-) -> tuple[float, str, dict[str, float]] | None:
-    """``(landing_mass_kg, typecode, landing_aero)`` for one airframe, or None.
+) -> tuple[float, str] | None:
+    """``(landing_mass_kg, typecode)`` for one airframe, or None.
 
-    The SAME identity→OpenAP chain ``build_scenario`` uses — so the observed
-    baseline's speed gate judges each flight against the stall-model facts its
-    optimized/predicted twins fly with, not a second set of assumptions. No
-    fallback type on purpose: an unresolvable airframe returns None and the
-    caller grades speed indeterminate, loudly, instead of judging a bizjet
-    against an A320 window.
+    The SAME identity→OpenAP chain ``build_scenario`` uses, for the harvest's
+    observed records: the landing mass their state samples carry, and the ICAO type
+    the evaluation speed gate looks its PUBLISHED approach-speed window up by
+    (``evaluation.speed_gate.TYPECODE_KEYS``). No fallback type on purpose: an
+    unresolvable airframe returns None and the caller grades speed indeterminate,
+    loudly, instead of judging a bizjet against an A320 window.
     """
     try:
         selection = _resolve_aircraft(
@@ -250,11 +250,9 @@ def resolve_landing_aero(
         )
     except KeyError:
         return None
-    aero = aero_params_for_aircraft(selection.aircraft)
     return (
         selection.aircraft.landing_mass,
         selection.identity.typecode or "UNKNOWN",
-        {"wing_area_m2": aero.S, "cl_max_landing": aero.Cl_max},
     )
 
 

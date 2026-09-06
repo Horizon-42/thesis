@@ -1,0 +1,1173 @@
+{
+ "schema": "aircraft-reference-speeds-v1",
+ "generated": "2026-09-07",
+ "speed_definition": "FAA Aircraft Characteristics Database Approach_Speed_knot: approach speed at Maximum Allowable Landing Weight, indicated airspeed; minimum/maximum where the FSB gives dual flap-configuration values",
+ "sources": {
+  "faa_acd_2024_10": {
+   "title": "Aircraft Characteristics Database",
+   "publisher": "FAA Office of Airports",
+   "document": "Aircraft Characteristics (October 2024); page last updated 2025-01-07",
+   "url": "https://www.faa.gov/airports/engineering/aircraft_char_database/aircraft_data",
+   "retrieved": "2026-09-07",
+   "sha256": "3e68848b6bb99f9700e25d33c080b993a80dc962d581a391f89aee94b6c8fcb3",
+   "local_path": "data/reference_speeds/faa/FAA-Aircraft-Characteristics-Database-2024-10.xlsx",
+   "readme": "docs/reference_speeds/README.md#faa_acd_2024_10"
+  },
+  "eurocontrol_apd": {
+   "title": "Aircraft Performance Database",
+   "publisher": "EUROCONTROL",
+   "document": "per-type web page, retrieved 2026-09-06",
+   "url": "https://contentzone.eurocontrol.int/aircraftperformance/details.aspx?ICAO=<TYPE>",
+   "retrieved": "2026-09-06",
+   "sha256": "per file, see docs/reference_speeds/excerpts/eurocontrol_apd_index.csv",
+   "local_path": "data/reference_speeds/eurocontrol/<TYPE>.html",
+   "readme": "docs/reference_speeds/README.md#eurocontrol_apd"
+  },
+  "boeing_737ng_acap_rev_c": {
+   "title": "737 Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-58325-7 Rev C, October 2025",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/737NG_REV_C.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "22b1746201262dc34bb3ea46ae710b8802aff5c7df45ee73106f6f5ce9eb65bf",
+   "local_path": "data/reference_speeds/boeing/737NG_REV_C.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_737ng_acap_rev_c"
+  },
+  "boeing_737cl_acap_rev_e": {
+   "title": "737 Classic Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-58325-6 Rev E, November 2023",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/737CL_REV_E.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "abe0baae09d582ecd63c5dd048117fd1ef3812b702c2e3096e0af10c4c8af360",
+   "local_path": "data/reference_speeds/boeing/737CL_REV_E.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_737cl_acap_rev_e"
+  },
+  "boeing_737max_acap_rev_k": {
+   "title": "737 MAX Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-38A004 Rev K, July 2025",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/737MAX_RevK.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "6ac41b3794c19e96ec7413fe45f2cc13f68d748561573a032d13ea2d6a9119ee",
+   "local_path": "data/reference_speeds/boeing/737MAX_RevK.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_737max_acap_rev_k"
+  },
+  "boeing_757_acap_rev_h": {
+   "title": "757 Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-58327 Rev H, December 2024",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/757_Rev_H.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "7f2dde89ecbdecbc8d3254cd4c028d8ece96aae4aa56f8a314406dd996dc4079",
+   "local_path": "data/reference_speeds/boeing/757_Rev_H.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_757_acap_rev_h"
+  },
+  "boeing_767_acap_rev_k": {
+   "title": "767 Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-58328 Rev K, December 2024",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/767_REV_K.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "af2a91f1cba372f09592aadf0b3f60fdc6cd8144034941292b45ddd695d3d3eb",
+   "local_path": "data/reference_speeds/boeing/767_REV_K.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_767_acap_rev_k"
+  },
+  "boeing_777_acap_rev_e": {
+   "title": "777-200/-200ER/-300 Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-58329 Rev E, December 2024",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/777-200-200ER-300_Rev_E.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "ef189aefb353fc15a33866453c51fe2e6251d54a8ca979ba639e9980e5cf19a5",
+   "local_path": "data/reference_speeds/boeing/777-200-200ER-300_Rev_E.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_777_acap_rev_e"
+  },
+  "boeing_777lr_300er_f_acap_rev_g": {
+   "title": "777-200LR/-300ER/777F Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-58329-2 Rev G, December 2024",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/777-200LR-300ER-F_Rev_G.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "9c98f2e9c013615c0eaa9dc87ccb82544b7a3333ed1b725d996e283d50da142a",
+   "local_path": "data/reference_speeds/boeing/777-200LR-300ER-F_Rev_G.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_777lr_300er_f_acap_rev_g"
+  },
+  "boeing_787_acap_rev_q": {
+   "title": "787 Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-58333 Rev Q, October 2025",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/787_ACAP_Rev_Q.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "b9f0398de13da78aa0391b9aefa32b1ecdecf5032d83413381018aeae81c57f6",
+   "local_path": "data/reference_speeds/boeing/787_ACAP_Rev_Q.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_787_acap_rev_q"
+  },
+  "airbus_ac_a319_0624": {
+   "title": "A319 Aircraft Characteristics - Airport and Maintenance Planning",
+   "publisher": "Airbus",
+   "document": "issue Jun 01/24 (file AC_A319_0624)",
+   "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2024-06/AC_A319_0624.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "c59ecba5b9449e35a0a68bd1ddafcaa69f24261ece7c807f38dcbd2e3b341e9c",
+   "local_path": "data/reference_speeds/airbus/AC_A319_0624.pdf",
+   "readme": "docs/reference_speeds/README.md#airbus_ac_a319_0624"
+  },
+  "airbus_ac_a320_0624": {
+   "title": "A320 Aircraft Characteristics - Airport and Maintenance Planning",
+   "publisher": "Airbus",
+   "document": "issue Jun 01/24 (file AC_A320_0624)",
+   "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-01/AC_A320_0624.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "f5cd06dfa3e6fe429301907e38e0470c37599f61bd808c8df47a37d5277836a2",
+   "local_path": "data/reference_speeds/airbus/AC_A320_0624.pdf",
+   "readme": "docs/reference_speeds/README.md#airbus_ac_a320_0624"
+  },
+  "airbus_ac_a321_1223": {
+   "title": "A321 Aircraft Characteristics - Airport and Maintenance Planning",
+   "publisher": "Airbus",
+   "document": "issue Dec 01/23 (file ac_a321_1223)",
+   "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2023-12/ac_a321_1223.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "932dad53c83190f506070bc5b4dbb3af33d24a7c3da858ce3083dc843d3b53f3",
+   "local_path": "data/reference_speeds/airbus/ac_a321_1223.pdf",
+   "readme": "docs/reference_speeds/README.md#airbus_ac_a321_1223"
+  },
+  "airbus_ac_a300_600_dec2009": {
+   "title": "A300-600 Airplane Characteristics for Airport Planning",
+   "publisher": "Airbus",
+   "document": "DEC 01/09",
+   "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2023-02/Airbus-Commercial-Aircraft-AC-A300-600-Dec-2009.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "f656ed63a07fbca17c3755dec452350be750bbab647b4c910f58e448ba88f516",
+   "local_path": "data/reference_speeds/airbus/Airbus-Commercial-Aircraft-AC-A300-600-Dec-2009.pdf",
+   "readme": "docs/reference_speeds/README.md#airbus_ac_a300_600_dec2009"
+  },
+  "embraer_e175_apm": {
+   "title": "Embraer 175 Airport Planning Manual",
+   "publisher": "Embraer",
+   "document": "APM-2259, May 25/18 pages (copy filed as NTSB docket DCA20IA014 Attachment 2)",
+   "url": "https://data.ntsb.gov/Docket/Document/docBLOB?ID=13691419&FileExtension=pdf&FileName=DCA20IA014+Attachment+2+-+Embraer+175+Airport+Planning+Manual-Rel.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "e1df5f7db5849b9f6e6e7800b3f8e61f2321692be25d0a676c09de966daf2c8c",
+   "local_path": "data/reference_speeds/embraer/E175_APM_NTSB_DCA20IA014_Att2.pdf",
+   "readme": "docs/reference_speeds/README.md#embraer_e175_apm"
+  },
+  "bombardier_crj900_apm_r11": {
+   "title": "CRJ900 Airport Planning Manual",
+   "publisher": "Bombardier",
+   "document": "CSP C-020 Rev 11",
+   "url": "https://customer.aero.bombardier.com/webd/BAG/CustSite/BRAD/RACSDocument.nsf/51aae8b2b3bfdf6685256c300045ff31/ec63f8639ff3ab9d85257c1500635bd8/$FILE/ATTQF1EY.pdf/CRJ900APMR11.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "987d2962bd5ac61714a631aef93dd09b582301c25821c65266b81701b9c23ef8",
+   "local_path": "data/reference_speeds/bombardier/CRJ900APMR11.pdf",
+   "readme": "docs/reference_speeds/README.md#bombardier_crj900_apm_r11"
+  },
+  "bombardier_crj200_apm_r8": {
+   "title": "CRJ100/200/440 Airport Planning Manual",
+   "publisher": "Bombardier",
+   "document": "CSP A-020 Rev 8, Jan 10/2016",
+   "url": "https://customer.aero.bombardier.com/webd/BAG/CustSite/BRAD/RACSDocument.nsf/51aae8b2b3bfdf6685256c300045ff31/ec63f8639ff3ab9d85257c1500635bd8/$FILE/ATT1ES4H.pdf/CRJ200APMR8.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "db533e0c559e50b2ff940df11421811e3523ced7b3060dcd80acd797348ccca5",
+   "local_path": "data/reference_speeds/bombardier/CRJ200APMR8.pdf",
+   "readme": "docs/reference_speeds/README.md#bombardier_crj200_apm_r8"
+  },
+  "bombardier_global5000_factsheet": {
+   "title": "Global 5000 Fact Sheet",
+   "publisher": "Bombardier",
+   "document": "served as 2018-10/Global_5000_Fact_Sheet_0.pdf",
+   "url": "https://bombardier.com/en/media/2531/download",
+   "retrieved": "2026-09-07",
+   "sha256": "ce6f73149633d4036398da600015f2c60df7ff992ea401d027208bfa9148da5d",
+   "local_path": "data/reference_speeds/bombardier/Global_5000_Fact_Sheet.pdf",
+   "readme": "docs/reference_speeds/README.md#bombardier_global5000_factsheet"
+  },
+  "pilatus_pc24_factsheet": {
+   "title": "PC-24 - The Super Versatile Jet, Factsheet",
+   "publisher": "Pilatus Aircraft Ltd",
+   "document": "doc code PIL|0823A (August 2023)",
+   "url": "https://www.pilatus-aircraft.com/assets/files/Brochures/PC-24/Pilatus-Aircraft-Ltd-PC-24-Factsheet.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "bd33088166a640dab3e4fe0df20ddfd06f952d8d5b5d57d0d6ad4f944a468280",
+   "local_path": "data/reference_speeds/pilatus/Pilatus-Aircraft-Ltd-PC-24-Factsheet.pdf",
+   "readme": "docs/reference_speeds/README.md#pilatus_pc24_factsheet"
+  },
+  "textron_citation_ascend_product_card": {
+   "title": "Cessna Citation Ascend product card (Model 560XL)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_ascend_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "e32eef00e038e6c38e7b66f1a9ffd45222ff0614edb22f03faf475f6ea4f8ec3",
+   "local_path": "data/reference_speeds/textron/citation_ascend_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_citation_ascend_product_card"
+  },
+  "textron_skyhawk_product_card": {
+   "title": "Cessna Skyhawk product card (Model 172S)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/piston/skyhawk_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "ff33311f8102476896ebeef76f402b19999ee736ea968e02b1d6f6e62b58fa50",
+   "local_path": "data/reference_speeds/textron/skyhawk_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_skyhawk_product_card"
+  },
+  "openap_2_4": {
+   "title": "OpenAP aircraft property database",
+   "publisher": "OpenAP (TU Delft)",
+   "document": "openap 2.4, package data files openap/data/aircraft/<type>.yml",
+   "url": "https://github.com/TUDelft-CNS-ATM/openap",
+   "retrieved": "2026-09-07",
+   "sha256": "per file, see docs/reference_speeds/excerpts/openap_2_4_oew.csv",
+   "local_path": "conda env aeroviz: site-packages/openap/data/aircraft/<type>.yml (not copied into data/)",
+   "readme": "docs/reference_speeds/README.md#openap_2_4"
+  }
+ },
+ "types": {
+  "B38M": {
+   "approach_speed_kt": 145,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 145,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Depending on flaps configuration and MALW, AAC could be C. AAC validated by Flight Standardization Board (FSB) report. Flap reading (FAA definitions sheet): the 140 kt minimum is the optimum (full) landing-flap value; the 145 kt maximum applies at a reduced landing flap setting.",
+   "malw_kg": 69309,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 152,800",
+   "min_mass_kg": 45000,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/b38m.yml; the Boeing 737 MAX ACAP D6-38A004 Rev K publishes no OPERATING EMPTY WEIGHT row",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 145
+    },
+    {
+     "source": "boeing_737max_acap_rev_k",
+     "mlw_kg": 69308,
+     "note": "2.1.2 Model 737-8 MAX DESIGN LANDING WEIGHT 152,800 lb (69,308 kg), highest weight variant; no approach speed is published"
+    }
+   ]
+  },
+  "B737": {
+   "approach_speed_kt": 130,
+   "approach_speed_min_kt": 130,
+   "approach_speed_max_kt": 130,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 66043,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 145,600",
+   "min_mass_kg": 37648,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_737ng_acap_rev_c",
+   "min_mass_note": "2.1.2 Model 737-700/-700W/-700C baseline mixed-class OEW 83,000 lb",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 137
+    },
+    {
+     "source": "boeing_737ng_acap_rev_c",
+     "mlw_kg": 58604,
+     "note": "2.1.2 Model 737-700 MAX DESIGN LANDING WEIGHT 129,200 lb (58,604 kg), highest weight variant - the FAA MALW of 145,600 lb matches no published 737-700 or BBJ landing weight; no approach speed is published"
+    }
+   ]
+  },
+  "B738": {
+   "approach_speed_kt": 144,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 144,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Depending on flaps configuration and MALW, AAC could be C. AAC validated by Flight Standardization Board (FSB) report. Flap reading (FAA definitions sheet): the 140 kt minimum is the optimum (full) landing-flap value; the 144 kt maximum applies at a reduced landing flap setting.",
+   "malw_kg": 66349,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 146,275",
+   "min_mass_kg": 41412,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_737ng_acap_rev_c",
+   "min_mass_note": "2.1.3 Model 737-800/-800W baseline mixed-class OEW 91,300 lb; the 737-800BCF freighter conversion in the same table is 85,500 lb (38,800 kg)",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 147
+    },
+    {
+     "source": "boeing_737ng_acap_rev_c",
+     "mlw_kg": 66360,
+     "note": "2.1.3 Model 737-800 MAX DESIGN LANDING WEIGHT 146,300 lb (66,360 kg), highest weight variant; no approach speed is published"
+    }
+   ]
+  },
+  "E75L": {
+   "approach_speed_kt": 126,
+   "approach_speed_min_kt": 126,
+   "approach_speed_max_kt": 126,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 34000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 74,957",
+   "min_mass_kg": 21500,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "embraer_e175_apm",
+   "min_mass_note": "Table 2.1 BOW, standard configuration: 21,500 kg (47,399 lb) for STD/LR/LL; the AR model is 22,500 kg",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": null,
+     "note": "the Eurocontrol Aircraft Performance Database has no entry for this designator (the page returns 'No ICAO')"
+    },
+    {
+     "source": "embraer_e175_apm",
+     "mlw_kg": 34000,
+     "note": "Table 2.1 MLW 34,000 kg (74,957 lb) STD/LR/LL, 34,100 kg AR; matches the FAA MALW exactly. No approach speed is published"
+    }
+   ]
+  },
+  "B739": {
+   "approach_speed_kt": 149,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 149,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Depending on flaps configuration and MALW, AAC could be C. AAC validated by Flight Standardization Board (FSB) report. Flap reading (FAA definitions sheet): the 140 kt minimum is the optimum (full) landing-flap value; the 149 kt maximum applies at a reduced landing flap setting.",
+   "malw_kg": 71350,
+   "malw_source": "boeing_737ng_acap_rev_c",
+   "malw_note": "ANOMALY: the FAA row's MALW_lb cell reads 71400, which is the kilogram figure, not pounds. Boeing D6-58325-7 Rev C section 2.1.5 gives the 737-900ER (with winglets) MAX DESIGN LANDING WEIGHT as 157,300 lb = 71,350 kg, and that value is used here instead of the FAA cell.",
+   "min_mass_kg": 42900,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_737ng_acap_rev_c",
+   "min_mass_note": "2.1.4 Model 737-900/-900W baseline mixed-class OEW 94,580 lb; the 737-900ER in 2.1.5 is 98,495 lb (44,676 kg)",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 150
+    },
+    {
+     "source": "boeing_737ng_acap_rev_c",
+     "mlw_kg": 71350,
+     "note": "2.1.5 Model 737-900ER with winglets MAX DESIGN LANDING WEIGHT 157,300 lb (71,350 kg); no approach speed is published"
+    }
+   ]
+  },
+  "A319": {
+   "approach_speed_kt": 126,
+   "approach_speed_min_kt": 126,
+   "approach_speed_max_kt": 126,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 61000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 134,482",
+   "min_mass_kg": 40800,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a319.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 130
+    },
+    {
+     "source": "airbus_ac_a319_0624",
+     "vat_kt": 126,
+     "mlw_kg": 62500,
+     "note": "subject 3-5-0: final approach speed 126 kt at MLW 62,500 kg (137,789 lb), AAC C. Subject 2-1-1 shows both 61,000 kg and 62,500 kg MLW weight variants; the FAA MALW 134,482 lb is the 61,000 kg variant"
+    }
+   ]
+  },
+  "CRJ9": {
+   "approach_speed_kt": 141,
+   "approach_speed_min_kt": 132,
+   "approach_speed_max_kt": 141,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Long Range version has an increased MALW, such that CRJ9 approach Category falls into D. AAC validated by Flight Standardization Board (FSB) report. Flap reading: 141 kt is the value at the Long Range MALW; 132 kt is the lower FSB value.",
+   "malw_kg": 33339,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 73,500",
+   "min_mass_kg": 20412,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "bombardier_crj900_apm_r11",
+   "min_mass_note": "00-02-01 Minimum Flight Weight 45,000 lb, both CL-600-2D24 and -2D15",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 135
+    },
+    {
+     "source": "bombardier_crj900_apm_r11",
+     "vat_kt": 139.5,
+     "mlw_kg": 33340,
+     "note": "VREF read off Figure 3 (00-03-03, PDF page 118), '5000 ft & below' line, flaps 45/slats extended, at MLW 33,340 kg: 139.5 +/- 1 kt. See excerpts/bombardier_CRJ900_fig3_reading.md"
+    }
+   ]
+  },
+  "A321": {
+   "approach_speed_kt": 142,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 142,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "The final approach speed is 140 knot at a MALW of 166,449 lb and classifies the aircraft into the AAC C while approach speed is 142 knot at a MALW of 171,520 lb and classifies into the AAC D. AAC validated by Flight Standardization Board (FSB) report. Flap reading: the dual value is by landing weight, not flap setting: 140 kt at MALW 166,449 lb (AAC C), 142 kt at MALW 171,520 lb (AAC D). Stated approximation: both values are scaled from the single malw_kg (77,800 kg); the 140 kt lower edge, quoted at 75,500 kg, is therefore ~1.5 % low at any mass (permissive).",
+   "malw_kg": 77800,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 171,520",
+   "min_mass_kg": 48500,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a321.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 141
+    },
+    {
+     "source": "airbus_ac_a321_1223",
+     "vat_kt": 142,
+     "mlw_kg": 77800,
+     "note": "subject 3-5-0: 140 kt at MLW 75,500 kg (AAC C) and 142 kt at MLW 77,800 kg (AAC D) for A321-100/-200; the FAA min/max pair 140/142 kt is exactly these two"
+    }
+   ]
+  },
+  "A320": {
+   "approach_speed_kt": 136,
+   "approach_speed_min_kt": 136,
+   "approach_speed_max_kt": 136,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 66000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 145,505",
+   "min_mass_kg": 42600,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a320.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 137
+    },
+    {
+     "source": "airbus_ac_a320_0624",
+     "vat_kt": 136,
+     "mlw_kg": 66000,
+     "note": "subject 3-5-0: final approach speed 136 kt at MLW 66,000 kg (145,505 lb), AAC C; matches the FAA speed and MALW exactly"
+    }
+   ]
+  },
+  "A21N": {
+   "approach_speed_kt": 136,
+   "approach_speed_min_kt": 136,
+   "approach_speed_max_kt": 136,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 79200,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 174,606",
+   "min_mass_kg": 50000,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a21n.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    },
+    {
+     "source": "airbus_ac_a321_1223",
+     "vat_kt": 136,
+     "mlw_kg": 79200,
+     "note": "subject 3-5-0: A321neo final approach speed 136 kt at MLW 79,200 kg (174,606 lb), AAC C; matches the FAA speed and MALW exactly"
+    }
+   ]
+  },
+  "B39M": {
+   "approach_speed_kt": 150,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 150,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Depending on flaps configuration and MALW, AAC could be C. AAC validated by Flight Standardization Board (FSB) report. Flap reading (FAA definitions sheet): the 140 kt minimum is the optimum (full) landing-flap value; the 150 kt maximum applies at a reduced landing flap setting.",
+   "malw_kg": 74344,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 163,900",
+   "min_mass_kg": 45000,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/b39m.yml; the Boeing 737 MAX ACAP D6-38A004 Rev K publishes no OPERATING EMPTY WEIGHT row",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 150
+    },
+    {
+     "source": "boeing_737max_acap_rev_k",
+     "mlw_kg": 74343,
+     "note": "2.1.5 Model 737-9 MAX DESIGN LANDING WEIGHT 163,900 lb (74,343 kg), highest weight variant; no approach speed is published"
+    }
+   ]
+  },
+  "A20N": {
+   "approach_speed_kt": 137,
+   "approach_speed_min_kt": 137,
+   "approach_speed_max_kt": 137,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 67400,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 148,591",
+   "min_mass_kg": 44300,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a20n.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 135
+    },
+    {
+     "source": "airbus_ac_a320_0624",
+     "vat_kt": 131.5,
+     "mlw_kg": 67400,
+     "note": "subject 3-5-0: A320neo final approach speed 131.5 kt at MLW 67,400 kg (148,592 lb), AAC C; the FAA MALW 148,591 lb is the same weight, but the FAA speed is 137 kt"
+    }
+   ]
+  },
+  "C56X": {
+   "approach_speed_kt": 116,
+   "approach_speed_min_kt": 116,
+   "approach_speed_max_kt": 116,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "According to FSB data, If flaps configuration is set for 15 or 20 degrees (not full flaps), AAC is C. Flap reading: 116 kt is the full-flap value; with flaps at 15 or 20 degrees the FSB puts the aircraft in AAC C (>= 121 kt).",
+   "malw_kg": 8482,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 18,700",
+   "min_mass_kg": 5924,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "textron_citation_ascend_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Operating Weight 13,060 lb. The card covers the current Model 560XL (Citation Ascend); Excel/XLS/XLS+ share the C56X designator",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 117
+    },
+    {
+     "source": "textron_citation_ascend_product_card",
+     "mlw_kg": 8482,
+     "note": "Citation Ascend page: Maximum Landing Weight 18,700 lb (8,482 kg), matches the FAA MALW exactly; no approach speed is published on the product card"
+    }
+   ]
+  },
+  "B763": {
+   "approach_speed_kt": 140,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 140,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 145150,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 320,000",
+   "min_mass_kg": 84540,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_767_acap_rev_k",
+   "min_mass_note": "2.1.3 Model 767-300 spec OEW 186,380 lb, the lowest column across the 767-300 / -300ER / -300 Freighter tables",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    },
+    {
+     "source": "boeing_767_acap_rev_k",
+     "mlw_kg": 145149,
+     "note": "2.1.4 Model 767-300ER MAX DESIGN LANDING WEIGHT 320,000 lb (145,149 kg), matches the FAA MALW; no approach speed is published"
+    }
+   ]
+  },
+  "B752": {
+   "approach_speed_kt": 137,
+   "approach_speed_min_kt": 137,
+   "approach_speed_max_kt": 137,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 89811,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 198,000",
+   "min_mass_kg": 56748,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_757_acap_rev_h",
+   "min_mass_note": "2.1.1 Model 757-200 (RB211) spec OEW 125,110 lb, the lowest passenger column; the 757-200PF freighter in 2.1.3 is 114,000 lb (51,709 kg)",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 130
+    },
+    {
+     "source": "boeing_757_acap_rev_h",
+     "mlw_kg": 89811,
+     "note": "2.1.1 Model 757-200 MAX DESIGN LANDING WEIGHT 198,000 lb (89,811 kg) baseline (matches the FAA MALW); the highest variant is 210,000 lb. No approach speed is published"
+    }
+   ]
+  },
+  "E170": {
+   "approach_speed_kt": 124,
+   "approach_speed_min_kt": 124,
+   "approach_speed_max_kt": 124,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 33300,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 73,413",
+   "min_mass_kg": 21140,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/e170.yml",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 130
+    }
+   ]
+  },
+  "E190": {
+   "approach_speed_kt": 124,
+   "approach_speed_min_kt": 124,
+   "approach_speed_max_kt": 124,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 43000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 94,799",
+   "min_mass_kg": 27753,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/e190.yml",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 131
+    }
+   ]
+  },
+  "GLF5": {
+   "approach_speed_kt": 136,
+   "approach_speed_min_kt": 136,
+   "approach_speed_max_kt": 136,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report. Corrected wheelbase using a Gulfstream GV Operating Manual.",
+   "malw_kg": 34156,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 75,300",
+   "min_mass_kg": null,
+   "min_mass_kind": null,
+   "min_mass_source": null,
+   "min_mass_note": "no published figure found. gulfstream.com no longer serves a Gulfstream V / G550 aircraft page (HTTP 403 AccessDenied, checked 2026-09-07), Gulfstream airport planning manuals sit behind the MyGulfstream login, and OpenAP 2.4 has no glf5.yml. Third-party compilations quote 48,300 lb but they are not manufacturer publications, so nothing is recorded here",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    }
+   ]
+  },
+  "GLF6": {
+   "approach_speed_kt": 137,
+   "approach_speed_min_kt": 137,
+   "approach_speed_max_kt": 137,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report. Registration count does not include G650ER (288 G650ERs in US registry).",
+   "malw_kg": 37875,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 83,500",
+   "min_mass_kg": 24000,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/glf6.yml; the gulfstream.com G650/G650ER page now redirects to the G800 and publishes no weights",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": null,
+     "note": "the Eurocontrol Aircraft Performance Database has no entry for this designator (the page returns 'No ICAO')"
+    }
+   ]
+  },
+  "A306": {
+   "approach_speed_kt": 137,
+   "approach_speed_min_kt": 137,
+   "approach_speed_max_kt": 137,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 137996,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 304,230",
+   "min_mass_kg": 86727,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "airbus_ac_a300_600_dec2009",
+   "min_mass_note": "chapter 2.1, A300B4-600 Estimated Operational Empty Weight with GE CF6-80 engines, 86,727 kg (191,198 lb) - the lowest passenger column; the A300C4-600 Freight version is 83,347 kg",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 139
+    },
+    {
+     "source": "airbus_ac_a300_600_dec2009",
+     "mlw_kg": 138000,
+     "note": "chapter 2.1 A300B4-600 MLW 138,000 kg (304,230 lb), matches the FAA MALW exactly; the A300B4-600R is 140,000 kg. Chapter 3.5.1 'Landing Approach Speed At 1.3 Vs' is a chart that was NOT read for this pack"
+    }
+   ]
+  },
+  "C25A": {
+   "approach_speed_kt": 114,
+   "approach_speed_min_kt": 114,
+   "approach_speed_max_kt": 114,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 5228,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 11,525",
+   "min_mass_kg": null,
+   "min_mass_kind": null,
+   "min_mass_source": null,
+   "min_mass_note": "no published figure found. Textron Aviation has retired the Citation CJ2 / Model 525A product page (cessna.txtav.com/en/citation/cj2 returns HTTP 404, checked 2026-09-07) and OpenAP 2.4 has no c25a.yml",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 110
+    }
+   ]
+  },
+  "LJ45": {
+   "approach_speed_kt": 123,
+   "approach_speed_min_kt": 123,
+   "approach_speed_max_kt": 123,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 8709,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 19,200",
+   "min_mass_kg": null,
+   "min_mass_kind": null,
+   "min_mass_source": null,
+   "min_mass_note": "no published figure found. Bombardier's public document index (RACSDocument.nsf) carries only CRJ and Dash 8 manuals, there is no Learjet 45 airport planning manual or spec sheet on a Bombardier domain, and OpenAP 2.4 has no lj45.yml",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    }
+   ]
+  },
+  "PC24": {
+   "approach_speed_kt": 107,
+   "approach_speed_min_kt": 107,
+   "approach_speed_max_kt": 107,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 7666,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 16,900",
+   "min_mass_kg": 5244,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "pilatus_pc24_factsheet",
+   "min_mass_note": "WEIGHTS block: Basic operating weight 11,561 lb, executive configuration 6 seat, incl. one pilot",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": null,
+     "note": "the Eurocontrol Aircraft Performance Database has no entry for this designator (the page returns 'No ICAO')"
+    },
+    {
+     "source": "pilatus_pc24_factsheet",
+     "mlw_kg": 7865,
+     "note": "factsheet Maximum landing weight 17,340 lb (7,865 kg) for the current PC-24; the FAA MALW 16,900 lb is the earlier certification. No approach speed is published (the factsheet gives landing-configuration stall speed 83 KIAS at MLW)"
+    }
+   ]
+  },
+  "A333": {
+   "approach_speed_kt": 137,
+   "approach_speed_min_kt": 137,
+   "approach_speed_max_kt": 137,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 187000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 412,264",
+   "min_mass_kg": 122780,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a333.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    }
+   ]
+  },
+  "C172": {
+   "approach_speed_kt": 62,
+   "approach_speed_min_kt": 62,
+   "approach_speed_max_kt": 62,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1111,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,450",
+   "min_mass_kg": 762,
+   "min_mass_kind": "BEW",
+   "min_mass_source": "textron_skyhawk_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Empty Weight 1,680 lb, current Model 172S Skyhawk",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 65
+    },
+    {
+     "source": "textron_skyhawk_product_card",
+     "mlw_kg": 1157,
+     "note": "product card Max Takeoff Weight 2,550 lb (1,157 kg); no separate landing weight is printed on the card, the model page gives Maximum Landing Weight 2,550 lb, against the FAA MALW of 2,450 lb. No approach speed is published"
+    }
+   ]
+  },
+  "B772": {
+   "approach_speed_kt": 140,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 140,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 213188,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 470,000",
+   "min_mass_kg": 133084,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_777_acap_rev_e",
+   "min_mass_note": "2.1.3 Model 777-200 (Rolls-Royce) baseline spec OEW 293,400 lb, the lowest column across the GE / PW / RR tables",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    },
+    {
+     "source": "boeing_777_acap_rev_e",
+     "mlw_kg": 208652,
+     "note": "2.1.1 Model 777-200 high-gross-weight option MAX DESIGN LANDING WEIGHT 460,000 lb (208,652 kg), the highest in the document - the FAA MALW of 470,000 lb matches no published column. No approach speed is published"
+    }
+   ]
+  },
+  "B788": {
+   "approach_speed_kt": 144,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 144,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Depending on configurations and performance packages, AAC could be C. AAC validated by Flight Standardization Board (FSB) report. Flap reading (FAA definitions sheet): the 140 kt minimum is the optimum landing-flap value; the 144 kt maximum applies to the other configurations / performance packages.",
+   "malw_kg": 172365,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 380,000",
+   "min_mass_kg": 119000,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/b788.yml; the Boeing 787 ACAP D6-58333 Rev Q publishes no OEW row",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    },
+    {
+     "source": "boeing_787_acap_rev_q",
+     "mlw_kg": 172365,
+     "note": "2.1.1 Model 787-8 MAX DESIGN LANDING WEIGHT 380,000 lb (172,365 kg), matches the FAA MALW; no approach speed is published"
+    }
+   ]
+  },
+  "CRJ2": {
+   "approach_speed_kt": 141,
+   "approach_speed_min_kt": 141,
+   "approach_speed_max_kt": 141,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 20276,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 44,700",
+   "min_mass_kg": 13835,
+   "min_mass_kind": "OWE",
+   "min_mass_source": "bombardier_crj200_apm_r8",
+   "min_mass_note": "00-02-01 Table 1 Operating Empty Weight 30,500 lb, identical for CRJ100/200 and all ER/LR variants",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    },
+    {
+     "source": "bombardier_crj200_apm_r8",
+     "mlw_kg": 21319,
+     "note": "00-02-01 Table 1 Maximum Design Landing Weight 47,000 lb (21,319 kg) for CRJ100/200 ER and LR; the base CRJ100/200 column is 44,700 lb (20,276 kg) and that is the FAA MALW. No approach speed is published"
+    }
+   ]
+  },
+  "C525": {
+   "approach_speed_kt": 108,
+   "approach_speed_min_kt": 108,
+   "approach_speed_max_kt": 108,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 4491,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 9,900",
+   "min_mass_kg": null,
+   "min_mass_kind": null,
+   "min_mass_source": null,
+   "min_mass_note": "no published figure found. Textron Aviation has retired the CitationJet / CJ1 (Model 525) product page (cessna.txtav.com/en/citation/cj1 returns HTTP 404, checked 2026-09-07) and OpenAP 2.4 has no c525.yml",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 110
+    }
+   ]
+  },
+  "GL5T": {
+   "approach_speed_kt": 128,
+   "approach_speed_min_kt": 128,
+   "approach_speed_max_kt": 128,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 35652,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 78,600",
+   "min_mass_kg": 23070,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "bombardier_global5000_factsheet",
+   "min_mass_note": "Weights block: Basic operating weight 50,861 lb",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 122
+    },
+    {
+     "source": "bombardier_global5000_factsheet",
+     "mlw_kg": 35652,
+     "note": "fact sheet Maximum landing weight 78,600 lb (35,652 kg), matches the FAA MALW exactly; no approach speed is published"
+    }
+   ]
+  },
+  "B789": {
+   "approach_speed_kt": 144,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 144,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Depending on configurations and performance packages, AAC could be C. AAC validated by Flight Standardization Board (FSB) report. Flap reading (FAA definitions sheet): the 140 kt minimum is the optimum landing-flap value; the 144 kt maximum applies to the other configurations / performance packages.",
+   "malw_kg": 192777,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 425,000",
+   "min_mass_kg": 128000,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/b789.yml; the Boeing 787 ACAP D6-58333 Rev Q publishes no OEW row",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 150
+    },
+    {
+     "source": "boeing_787_acap_rev_q",
+     "mlw_kg": 192776,
+     "note": "2.1.2 Model 787-9 MAX DESIGN LANDING WEIGHT 425,000 lb (192,776 kg), matches the FAA MALW; no approach speed is published"
+    }
+   ]
+  },
+  "C550": {
+   "approach_speed_kt": 105,
+   "approach_speed_min_kt": 105,
+   "approach_speed_max_kt": 105,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "According to FSB data, If flaps configuration is set for 15 or 20 degrees (not full flaps), AAC is C. Flap reading: 105 kt is the full-flap value; with flaps at 15 or 20 degrees the FSB puts the aircraft in AAC C (>= 121 kt).",
+   "malw_kg": 6123,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 13,500",
+   "min_mass_kg": 3655,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/c550.yml",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 110
+    }
+   ]
+  },
+  "A332": {
+   "approach_speed_kt": 136,
+   "approach_speed_min_kt": 136,
+   "approach_speed_max_kt": 136,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 182000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 401,241",
+   "min_mass_kg": 120200,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a332.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    }
+   ]
+  },
+  "A359": {
+   "approach_speed_kt": 140,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 140,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 207000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 456,357",
+   "min_mass_kg": 142400,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a359.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 140
+    }
+   ]
+  },
+  "B734": {
+   "approach_speed_kt": 139,
+   "approach_speed_min_kt": 139,
+   "approach_speed_max_kt": 139,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 56109,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 123,700",
+   "min_mass_kg": 33189,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_737cl_acap_rev_e",
+   "min_mass_note": "2.1.7 Model 737-400 (CFM56-3B2) baseline mixed-class OEW 73,170 lb, the lower of the two engine columns",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 139
+    },
+    {
+     "source": "boeing_737cl_acap_rev_e",
+     "mlw_kg": 56245,
+     "note": "2.1.7 Model 737-400 MAX DESIGN LANDING WEIGHT 124,000 lb (56,245 kg), highest variant; the FAA MALW is 123,700 lb. No approach speed is published"
+    }
+   ]
+  },
+  "B762": {
+   "approach_speed_kt": 135,
+   "approach_speed_min_kt": 135,
+   "approach_speed_max_kt": 135,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 117934,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 260,000",
+   "min_mass_kg": 78974,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_767_acap_rev_k",
+   "min_mass_note": "2.1.1 Model 767-200 spec OEW 174,110 lb, the lowest column; the 767-200ER in 2.1.2 starts at 181,130 lb",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 135
+    },
+    {
+     "source": "boeing_767_acap_rev_k",
+     "mlw_kg": 123377,
+     "note": "2.1.1 Model 767-200 MAX DESIGN LANDING WEIGHT 272,000 lb (123,377 kg) highest variant; the 767-200ER in 2.1.2 reaches 300,000 lb. The FAA MALW of 260,000 lb matches no published column. No approach speed is published"
+    }
+   ]
+  },
+  "E145": {
+   "approach_speed_kt": 124,
+   "approach_speed_min_kt": 124,
+   "approach_speed_max_kt": 124,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 18700,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 41,226",
+   "min_mass_kg": 12110,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/e145.yml",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 135
+    }
+   ]
+  },
+  "A343": {
+   "approach_speed_kt": 145,
+   "approach_speed_min_kt": 145,
+   "approach_speed_max_kt": 145,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 192000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 423,288",
+   "min_mass_kg": 130000,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/a343.yml; Airbus Aircraft Characteristics documents publish no OEW",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 150
+    }
+   ]
+  },
+  "B77W": {
+   "approach_speed_kt": 149,
+   "approach_speed_min_kt": 149,
+   "approach_speed_max_kt": 149,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 251290,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 554,000",
+   "min_mass_kg": 167800,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "openap_2_4",
+   "min_mass_note": "openap/data/aircraft/b77w.yml; the Boeing 777-200LR/-300ER/777F ACAP D6-58329-2 Rev G publishes no OEW row",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 149
+    },
+    {
+     "source": "boeing_777lr_300er_f_acap_rev_g",
+     "mlw_kg": 251290,
+     "note": "2.1.1 Model 777-300ER MAX DESIGN LANDING WEIGHT 554,000 lb (251,290 kg), matches the FAA MALW exactly; no approach speed is published"
+    }
+   ]
+  },
+  "B735": {
+   "approach_speed_kt": 128,
+   "approach_speed_min_kt": 128,
+   "approach_speed_max_kt": 128,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 49895,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 110,000",
+   "min_mass_kg": 31311,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_737cl_acap_rev_e",
+   "min_mass_note": "2.1.8 Model 737-500 baseline mixed-class OEW 69,030 lb, identical across all five weight/engine columns",
+   "corroboration": [
+    {
+     "source": "eurocontrol_apd",
+     "vat_kt": 128
+    },
+    {
+     "source": "boeing_737cl_acap_rev_e",
+     "mlw_kg": 49895,
+     "note": "2.1.8 Model 737-500 MAX DESIGN LANDING WEIGHT 110,000 lb (49,895 kg), matches the FAA MALW exactly; no approach speed is published"
+    }
+   ]
+  }
+ }
+}

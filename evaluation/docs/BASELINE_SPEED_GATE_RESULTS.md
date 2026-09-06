@@ -36,7 +36,7 @@ Fleet-wide: 10,555 ungraded = **10,306 unresolvable airframes + 0 speedless even
 (every graded-subject event carried a fitted crossing speed — the harvest's speed fit
 achieved full coverage) + the balance from rows with no estimable crossing at all.
 Unresolvable means the icao24 maps to no OpenAP-supported type
-(`flight_scenarios.resolve_landing_aero`, no fallback by design): overwhelmingly GA
+(`flight_scenarios.resolve_airframe`, then `resolve_landing_aero`; no fallback by design): overwhelmingly GA
 and unregistered traffic, which is why KRDU (29 %) and KSJC (33 %) are hit hardest
 while the airline-dominated KMSY/KSMF/KSTL barely are.
 
@@ -294,3 +294,104 @@ marginal count (estimate within its ±5 kt of a bound; `speed_margin_ms` /
   never pool the two, and quote the marginal count next to any observed speed rate.
 
 Reproduction: `python -m evaluation --input trajectory_data_process/outputs/harvest/<ICAO>/approach --output <scratch>` with and without `--metar-root /nonexistent`; the comparison scripts lived in the session scratchpad and are two dozen lines over the two reports' `trajectories` rows joined on `flight_key`.
+
+## 10. The published-V_ref window (v9, 2026-09-07): the observed fleet passes
+
+Re-evaluated on the same five observed batches, same METAR tables, same records —
+only the window changed (`THRESHOLD_SPEED_GATE.md` §3.1: the FAA Aircraft
+Characteristics Database approach speed per type, scaled by √(m/MALW), over the type's
+published mass range for observed rows). Reports:
+`trajectory_data_process/outputs/evaluation_reports/observed_v9_2026-09-07/<ICAO>_observed_report.json`
+(a separate folder; nothing an experiment reads was rewritten).
+
+### 10.1 Speed verdicts, v8 → v9
+
+| airport | graded | pass | fail | **v9 pass** | v8 pass (§9, stall anchor + wind) | estimate / proxy rows | indeterminate |
+|---|---|---|---|---|---|---|---|
+| KRDU | 10,030 | 9,567 | 463 | **95.4 %** | 71.1 % | 13,289 / 1,148 | 4,409 |
+| KSJC | 7,308 | 7,212 | 96 | **98.7 %** | 80.8 % | 10,341 / 810 | 3,849 |
+| KSTL | 7,151 | 6,946 | 205 | **97.1 %** | 71.1 % | 8,550 / 215 | 1,618 |
+| KSMF | 3,814 | 3,708 | 106 | **97.2 %** | 75.9 % | 3,922 / 307 | 417 |
+| KMSY | 3,484 | 3,355 | 129 | **96.3 %** | 70.3 % | 3,928 / 221 | 666 |
+| fleet | 31,787 | 30,788 | 999 | **96.9 %** | 73.8 % | 40,030 / 2,701 | 10,959 |
+
+The indeterminate rows are named, not hidden (`speed_indeterminate_reasons`): 10,541
+"airframe could not be resolved from icao24" (the same 24.7 % as before — no type, no
+window) and 404 whose type publishes no minimum operating mass (GLF5 147, C25A 119,
+LJ45 103, C525 35; `docs/reference_speeds/README.md` "Types with no published minimum
+mass"). Every graded row has a determinate pass/fail.
+
+### 10.2 By type (fleet, graded rows)
+
+| type | pass | fail | rate | margin to nearest edge, p50 / p05 (kt) | note |
+|---|---|---|---|---|---|
+| B38M | 5,733 | 131 | 97.8 % | 12.9 / 2.3 | FAA 140/145 (dual flap values) |
+| B737 | 5,316 | 221 | 96.0 % | 11.0 / 0.8 | FAA single value 130 kt; Eurocontrol Vat 137 |
+| B738 | 4,827 | 135 | 97.3 % | 11.7 / 1.9 | FAA 140/144 |
+| E75L | 3,099 | 302 | 91.1 % | 9.0 / −2.1 | FAA single value 126 kt (max flap); no published flaps-5 V_ref |
+| B739 | 2,213 | 36 | 98.4 % | 13.8 / 3.8 | FAA 140/149 |
+| A319 | 1,836 | 59 | 96.9 % | 11.6 / 1.4 | FAA single value 126 |
+| CRJ9 | 1,650 | 0 | 100 % | 18.8 / 10.2 | FAA 132/141; MFW published |
+| A321 | 1,189 | 13 | 98.9 % | 15.0 / 5.0 | |
+| A320 | 991 | 9 | 99.1 % | 14.7 / 6.2 | |
+| A21N | 873 | 8 | 99.1 % | 17.4 / 6.9 | the v8 "slow" residual is gone (§9) |
+| B39M | 703 | 10 | 98.6 % | 15.0 / 4.5 | |
+| A20N | 533 | 2 | 99.6 % | 19.0 / 9.9 | FAA 137 vs Airbus 131.5 at the same MLW: the higher value is the anchor |
+| C56X | 308 | 6 | 98.1 % | 14.8 / 3.0 | |
+| E170 / E190 | 156 / 134 | 19 / 20 | 89 % / 87 % | 7.4 / 6.2 | FAA single value 124 vs Eurocontrol 130/131 |
+| C172 | 47 | 16 | 74.6 % | 7.3 / −10.4 | GA training traffic; 62 kt anchor, a 10 kt wind is 16 % of it |
+
+The 737 family's v8 "fast" cluster (§9.2, 40 % of the 737NG/MAX rows) is gone: with the
+published 140–150 kt anchors the family sits 11–14 kt inside its window. The Airbus
+family, mid-window under v8, is now 15–19 kt inside. The A21N residual vanished with
+the mass assumption.
+
+### 10.3 Anatomy of the 999 residual fails
+
+- **992 fast, 7 slow.** The fast overshoot past the upper edge is small: p50 **2.2 kt**,
+  p90 7.2 kt; 773 of the 992 are within 5 kt of the edge, 947 within 10 kt. The seven
+  slow rows are four C172s (41–50 kt CAS against a 51 kt edge), two C56X (88–94 kt vs
+  97) and one GL5T (101 vs 103) — GA and bizjet rows 1–9 kt under the lower edge.
+- **747 of the 992 fast fails have their RAW ground speed inside the window**: the METAR
+  headwind correction pushed them over. Fast fails carry a median headwind of 7.7 kt
+  (p90 15.7) against 4.9 kt (p90 11.0) on passing rows; 313 of them had more than
+  10 kt on the nose, 355 a gust in the report. They cluster on windy days — KSMF
+  2026-05-18 (headwind p50 21.5 kt): 23 fails of 124 graded; KRDU 2026-07-21 (15.9 kt):
+  26 of 170; KSJC 2026-05-18 (12.1 kt): 29 of 152. This is the stated limit of the
+  correction (§3.6): the tower's 10 m sustained wind is not the wind at 50 ft, and on a
+  gusty day a crew flies V_ref + the wind additive, which the ALAR +20 kt already
+  admits — a 2 kt overshoot of that edge on a 20 kt headwind day is the report, not the
+  flight.
+- **The type clusters are single-valued FAA rows.** E75L (302 fails, 8.9 %), B737 (221,
+  4.0 %), A319 (59), E170/E190 (39): each has ONE FAA approach speed — the maximum-flap
+  value — where the dual-value rows (B738 140/144, B39M 140/150, CRJ9 132/141) carry the
+  reduced-flap speed on the upper edge. An E175 landed at flaps 5 or a 737-700 at flaps
+  30 has a higher V_ref than the row's 126 / 130 kt, and its legitimate V_ref + additive
+  crossing reads "fast" against an edge built from the other flap setting. Eurocontrol's
+  Vat for the same types (E170 130, E190 131, B737 137) is 6–7 kt higher, i.e. the
+  other configuration. Rule A keeps the FAA value (`docs/reference_speeds/README.md`
+  "Where the three sources disagree"); a PUBLISHED reduced-flap V_ref for these types
+  would move their upper edges and is the one open source item
+  (`docs/code-health-followups.md` #21).
+- **C172 (63 rows, 16 fast + 4 slow)** is GA training traffic on a 62 kt anchor: the
+  window is 51–82 kt CAS, so the ±5–10 kt the tower wind and the 25 ft altitude quantum
+  put on a 65 kt crossing is a quarter of the window. Quote it separately.
+
+### 10.4 Reading
+
+All these flights landed. Under v8 the window failed 26 % of them and the failures
+followed the airframe family, which was the anchor's signature; under v9 it fails
+3.1 %, the failures follow the day's wind and the single-flap-value rows, and the
+median overshoot is two knots. That is what a ground truth is supposed to show a
+correct window: residuals that are small, explainable row by row, and traceable to a
+stated limit of the method (the tower wind) or of a source (a one-flap FAA row) —
+not to the flights. Quote the observed speed rate as **96.9 % of graded rows (fleet),
+95.4–98.7 % by airport**, with the 24.7 % unresolved-airframe rows and the 404
+no-minimum-mass rows stated beside it, never pooled with computed subjects (whose
+window is framed at a known mass and is 20 kt plus the flap spread wide). Read the
+observed rate as a one-sided test in practice: the lower edge sits at the type's
+lightest published mass (A320: 109 kt against 136 kt at MALW), so it binds only on
+genuinely slow GA/bizjet rows (7 of 999 fails); the observed verdict is almost
+entirely a "not too fast" verdict.
+
+Reproduction: `python -m evaluation --input trajectory_data_process/outputs/harvest/<ICAO>/approach --output <folder>/<ICAO>_observed_report.json --metar-root data/metar` from the v9 tree; the per-type and fail-anatomy tallies are two short scripts over the reports' `trajectories` rows (`speed_result`, `speed_margin_ms`, `bounds`, `wind`, `crossing_ground_speed_ms`).

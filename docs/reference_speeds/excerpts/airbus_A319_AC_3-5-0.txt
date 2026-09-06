@@ -1,0 +1,35 @@
+Airbus A319 Aircraft Characteristics -- Airport and Maintenance Planning, Jun 01/24 -- subject 3-5-0 Final Approach Speed (PDF page 164), verbatim
+----------------------------------------------------------------------------------------------------
+
+3-5-0      Final Approach Speed
+
+
+**ON A/C A319-100
+Final Approach Speed
+
+1.   This section provides the final approach speed. It is defined as the indicated airspeed at
+     threshold in the landing configuration, at the certificated maximum flap setting and Maximum
+     Landing Weight (MLW), in standard atmospheric conditions. The approach speed is used to
+     classify the aircraft into an Aircraft Approach Category, a grouping of aircraft based on the
+     indicated airspeed at threshold.
+
+
+
+2.   The final approach speed is 126 kt at a MLW of 62 500 kg (137 789 lb) and classifies the aircraft
+     into the Aircraft Approach Category C.
+
+
+     NOTE : This value is given for information only.
+
+
+
+
+                                                                                              Page 1
+                                                             3-5-0                          Jun 01/24
+                                             @A319
+                  AIRCRAFT CHARACTERISTICS - AIRPORT AND MAINTENANCE PLANNING
+
+
+
+                                      GROUND MANEUVERING
+

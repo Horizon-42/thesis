@@ -1,0 +1,48 @@
+Airbus A321 Aircraft Characteristics -- Airport and Maintenance Planning, Dec 01/23 -- subject 3-5-0 Final Approach Speed (PDF page 191), verbatim
+----------------------------------------------------------------------------------------------------
+
+3-5-0      Final Approach Speed
+
+
+**ON A/C A321-100 A321-200 A321neo
+Final Approach Speed
+
+**ON A/C A321-100 A321-200
+1.   Final Approach Speed
+
+     A.   This section gives the final approach speed which is the indicated airspeed at threshold in
+          the landing configuration at the certificated maximum flap setting and Maximum Landing
+          Weight (MLW) at standard atmospheric conditions. The approach speed is used to classify
+          the aircraft into Aircraft Approach Category, a grouping of aircraft based on the indicated
+          airspeed at threshold.
+     B.   The final approach speed is 140 kt at a MLW of 75 500 kg (166 449 lb) and classifies the
+          aircraft into the Aircraft Approach Category C.
+
+          NOTE : This value is given for information only.
+     C.   The final approach speed is 142 kt at a MLW of 77 800 kg (171 520 lb) and classifies the
+          aircraft into the Aircraft Approach Category D.
+
+          NOTE : This value is given for information only.
+
+**ON A/C A321neo
+2.   Final Approach Speed
+
+     A.   This section gives the final approach speed which is the indicated airspeed at threshold
+          in the landing configuration at the certificated maximum flap setting and MLW at standard
+          atmospheric conditions. The approach speed is used to classify the aircraft into Aircraft
+          Approach Category, a grouping of aircraft based on the indicated airspeed at threshold.
+     B.   The final approach speed is 136 kt at a MLW of 79 200 kg (174 606 lb) and classifies the
+          aircraft into the Aircraft Approach Category C.
+
+          NOTE : This value is given for information only.
+
+
+
+
+                                                                                              Page 1
+                                                             3-5-0                          Dec 01/23
+                                             @A321
+                  AIRCRAFT CHARACTERISTICS - AIRPORT AND MAINTENANCE PLANNING
+
+
+

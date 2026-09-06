@@ -1,0 +1,49 @@
+Bombardier CRJ900 Airport Planning Manual CSP C-020 Rev 11 -- page 00-02-01 Aircraft Description (weights), verbatim (PDF page 22)
+----------------------------------------------------------------------------------------------------
+
+ CSP C−020 − MASTER
+ EFFECTIVITY: **ON A/C ALL
+                                                                                                         Page 1
+                                                                          00−02−01                  Oct 20/2010
+                                                F
+                                          AIRPORT PLANNING MANUAL
+
+                  Description                             Model CL−600−2D24        Model CL−600−2D15
+
+Maximum Ramp Weight (MRW)                                  85000 lb (38555 kg)      85000 lb (38555 kg)
+
+A/C 15036 − 15990
+
+Maximum Take−Off Weight (MTOW)                             82500 lb (37421 kg)              NA
+
+A/C 15001 − 15035
+
+Maximum Take−Off Weight (MTOW)                             84500 lb (38329 kg)      84500 lb (38329 kg)
+
+A/C 15036 − 15990
+
+Maximum Landing Weight (MTLW)                              73500 lb (33340 kg)      73500 lb (33340 kg)
+
+Minimum Flight Weight (MFW)                                45000 lb (20412 kg)      45000 lb (20412 kg)
+
+Maximum Zero Fuel Weight (MZFW)                            70000 lb (31751 kg)              NA
+
+A/C 15001 − 15035
+
+Maximum Zero Fuel Weight (MZFW)                            70750 lb (32092 kg)      70000 lb (31751 kg)
+
+A/C 15036 − 15990
+
+Maximum Fuel Tank Capacity                                2903 US gal (10989 L)    2903 US gal (10989 L)
+
+                                                            19595 lb (8888 kg)¹     19595 lb (8888 kg)¹
+
+Unusable Fuel                                             33.8 US gal (127.95 L)   33.8 US gal (127.95 L)
+
+                                                            228.2 lb (103.5 kg)¹    228.2 lb (103.5 kg)¹
+
+Maximum Cargo Volume − Aft Baggage                         437.5 pi³ (12.39 m³)²
+Compartment
+
+Maximum Cargo Volume − Forward Under Floor                  156.0 pi³ (4.41 m³)²
+Baggage

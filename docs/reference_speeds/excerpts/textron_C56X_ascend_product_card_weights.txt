@@ -1,0 +1,17 @@
+Textron Aviation / Cessna Citation Ascend product card (Model 560XL family, ICAO C56X) -- WEIGHTS block, verbatim (right-hand column of a 3-column layout)
+----------------------------------------------------------------------------------------------------
+
+
+                               WEIGHTS
+                             Max Takeoff Weight                              20,500 lb            9,299 kg
+
+                             Basic Operating Weight                           13,060 lb           5,924 kg
+
+                             Full Fuel Payload                                    900 lb             408 kg
+
+                             P OW E R P L A N T
+
+                               Manufacturer                                   Pratt & Whitney Canada
+
+                             Model                                                           (2) PW545D
+

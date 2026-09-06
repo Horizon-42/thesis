@@ -1,25 +1,29 @@
-"""Stall-anchored threshold-crossing speed gate (policy + per-record bounds).
+"""Published-V_ref threshold-crossing speed gate (policy + per-record bounds).
 
-The lateral and vertical gates ask WHERE the crossing was; this gate asks how much
-ENERGY the aircraft carried across the threshold, and whether the wing could carry the
-lift the crossing manoeuvre demanded. The window is anchored on the project's own
-stall model at the record's crossing mass AND crossing load factor:
+The lateral and vertical gates ask WHERE the crossing was; this gate asks whether the
+aircraft crossed the threshold at a speed its TYPE lands at. The window is anchored on
+the approach speed the type publishes (``aircraft/reference_speeds.json``: the FAA
+Aircraft Characteristics Database's FSB approach speed at the Maximum Allowable
+Landing Weight, with the dual flap-configuration values where the FAA gives them;
+provenance in ``docs/reference_speeds/README.md``), scaled to the mass in question by
+the square-root law and lifted on the lower edge by the crossing load factor:
 
-    V_s1g   = sqrt(2 m g / (rho0 S Cl_max_landing))    # aircraft.aero_params, ONE source
-    V_s(n)  = V_s1g * sqrt(max(n, 1))                   # the same model under n·m·g of lift
-    lower   = 1.23 x V_s(n)                             # 14 CFR 25.125(b)(2)(i) at the crossing n
-    upper   = 1.23 x V_s1g + 20 kt                      # FSF ALAR Briefing Note 7.1, at 1 g
-    window  = [lower, upper]  (inclusive)
+    V_ref,lo(m) = V_min · sqrt(m / MALW)      # lowest published flap-configuration value
+    V_ref,hi(m) = V_max · sqrt(m / MALW)      # highest
+    computed record (crossing mass m known):
+        [V_ref,lo(m)     · sqrt(max(n, 1)),   V_ref,hi(m)    + 20 kt]
+    observed record (mass unknown -- the type's published mass range):
+        [V_ref,lo(m_min) · sqrt(max(n, 1)),   V_ref,hi(MALW) + 20 kt]
 
-Design, sources, the measured load-factor distribution and the observed-subject proxy
-are documented in ``docs/THRESHOLD_SPEED_GATE.md`` (this package's docs directory).
+Every bound is a determinate number from a cited document plus one physical law; the
+verdict is pass/fail against it, and indeterminate only when there is nothing to judge
+with (no type on the record, no published entry for the type, no minimum mass for an
+observed row, no crossing speed). Design, sources and the measured results are in
+``docs/THRESHOLD_SPEED_GATE.md``.
 
-Policy lives HERE (the multiplier, the additive, the ``n >= 1`` clamp); the aircraft
-FACTS (wing area, landing Cl_max) come from the record's producer-written
-``source.landing_aero`` block -- the same supplied-then-checked pattern as
-``hae_minus_msl_m`` -- and the load factor from the record's own controls
-(``evaluation.arrival``). A computed record without the block is gradable on geometry
-but not on speed, and says so.
+Policy lives HERE (the additive, the ``n >= 1`` clamp, which record key names the
+type); the aircraft FACTS come from the published table, the mass and load factor from
+the record (``evaluation.arrival``).
 """
 
 from __future__ import annotations
@@ -28,19 +32,17 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from aircraft.aero_params import stall_speed_ms
+from aircraft.reference_speeds import ReferenceSpeed
 from geokit import kt_to_ms
 
 # The criterion id serialized next to every speed bound, mirroring how the lateral
-# criterion is named: the lower edge is V_ref at the crossing load factor ("vs_at_n"),
-# the upper edge V_ref at 1 g plus the ALAR additive.
-SPEED_CRITERION_ID = "vref_1p23_vs_at_n_to_vref_1g_plus_20kt"
-
-# V_REF may not be less than 1.23 V_SR0 (14 CFR 25.125(b)(2)(i); EASA CS-25.125 is
-# identical). The model's V_s is a 1-g stall speed, which is what V_SR references
-# (14 CFR 25.103), so the multiplier applies to it directly -- and to the accelerated
-# stall speed V_s1g * sqrt(n), which is the same wing at the lift the manoeuvre needs.
-VREF_STALL_MULTIPLIER = 1.23
+# criterion is named: what anchors the lower edge, what anchors the upper.
+SPEED_CRITERION_ID = "published_vref_at_crossing_mass_and_n_to_vref_plus_20kt"
+# Observed rows are judged over the type's published mass range (their mass is not
+# measured); the suffix says which measured quantity was judged.
+OBSERVED_SPEED_CRITERION_STEM = "published_vref_over_type_mass_range_and_n_to_vref_plus_20kt"
+OBSERVED_SPEED_CRITERION_ID = OBSERVED_SPEED_CRITERION_STEM + "_ground_speed_proxy"
+OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID = OBSERVED_SPEED_CRITERION_STEM + "_metar_airspeed_estimate"
 
 # Stabilized-approach speed element: "not more than V_REF + 20 knots indicated
 # airspeed and not less than V_REF" (FSF ALAR Briefing Note 7.1, Table 1, element 3).
@@ -52,8 +54,16 @@ SPEED_GATE_UPPER_ADDITIVE_MS = kt_to_ms(20.0)
 # (docs/THRESHOLD_SPEED_GATE.md section 3.5). The measured n is still reported.
 MIN_BOUND_LOAD_FACTOR = 1.0
 
-# Producer-written aircraft facts on the record (flight_scenarios.build_scenario).
-LANDING_AERO_KEY = "landing_aero"
+# Which mass framed the window (``SpeedGateBounds.mass_basis``).
+MASS_BASIS_CROSSING = "crossing_mass"
+MASS_BASIS_TYPE_RANGE = "type_mass_range"
+
+# The record's ICAO type designator, by producer: ``flight_scenarios.build`` writes the
+# type the model FLEW as ``dynamics_typecode`` (optimizer solves, ts predictions --
+# the aircraft whose mass the states carry); the harvest's observed writer
+# (``trajectory_data_process/harvest/observed.py``) writes the resolved airframe's
+# identity typecode as ``aircraft_type``. A record carries one or the other.
+TYPECODE_KEYS = ("dynamics_typecode", "aircraft_type")
 
 # ``ArrivalDeviation.crossing_load_factor_source`` values: the control active over the
 # final rollout step (records that carry controls); the inversion of the flight's own
@@ -64,138 +74,132 @@ LOAD_FACTOR_FROM_CONTROLS = "controls_last_step"
 LOAD_FACTOR_FROM_ADSB = "adsb_kinematics"
 LOAD_FACTOR_ASSUMED_1G = "assumed_1g"
 
-# Observed subjects are judged on their estimated crossing GROUND speed as a STATED
-# PROXY for airspeed (owner decision 2026-08-24, superseding the original exclusion):
-# wind is unmodelled, so an ordinary 10 kt headwind is half the 20 kt window and a
-# baseline speed fail can be the day's wind rather than the flight. The proxy is
-# declared everywhere it appears -- its own criterion id, the methodology block, and
-# this string -- never silently equated with the airspeed the computed subjects are
-# judged on. The mass anchoring the window is the flight's own resolved airframe's
-# landing mass (the same identity->OpenAP chain the scenarios use), so baseline and
-# modeled twins share one set of stall assumptions.
+# Observed subjects: the fitted crossing GROUND speed corrected by the field's METAR
+# headwind into an airspeed estimate when a usable report exists, else the raw ground
+# speed as a STATED proxy. The window spans the type's published mass range because
+# an ADS-B track carries no mass -- the honest window for a flight of unknown weight,
+# and one every correctly flown landing of the type sits inside.
 OBSERVED_SPEED_POLICY = (
     "observed records are speed-graded on the fitted crossing ground speed CORRECTED "
     "by the field's METAR headwind into an airspeed estimate (criterion "
-    "..._metar_airspeed_estimate, +/-5 kt declared) when a report within 30 min with "
-    "a non-variable direction exists, and otherwise on the raw ground speed as a "
-    "stated proxy (..._ground_speed_proxy, wind unmodelled) -- each row's "
-    "bounds.speed_criterion and wind block say which; the window is anchored on the "
-    "resolved airframe's landing mass -- the same stall assumptions the flight's "
-    "modeled twins fly with -- at the load factor inverted from the flight's own "
-    "ADS-B kinematics over the final 20 s before the crossing (a declared 1 g when "
-    "that window holds too few samples)"
+    "..._metar_airspeed_estimate) when a report within 30 min with a non-variable "
+    "direction exists, and otherwise on the raw ground speed as a stated proxy "
+    "(..._ground_speed_proxy, wind unmodelled) -- each row's bounds.speed_criterion "
+    "and wind block say which; the window is the type's PUBLISHED approach-speed "
+    "window over its published mass range [minimum operating mass, MALW] (the "
+    "flight's own mass is not measured), at the load factor inverted from the "
+    "flight's own ADS-B kinematics over the final 20 s before the crossing (a "
+    "declared 1 g when that window holds too few samples)"
 )
-# Distinct criterion id for the proxy, mirroring how the lateral criterion is named:
-# a reader of one row can tell WHAT was judged without consulting the subject. The
-# window is the same load-factor-anchored one the computed subjects get -- the
-# observed n is measured, not assumed -- so the id shares its stem.
-OBSERVED_SPEED_CRITERION_ID = SPEED_CRITERION_ID + "_ground_speed_proxy"
-# The proxy corrected by the field's METAR headwind component (``evaluation.wind``):
-# an airspeed ESTIMATE with a declared uncertainty, judged in the same window.
-OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID = SPEED_CRITERION_ID + "_metar_airspeed_estimate"
-MISSING_LANDING_AERO_REASON = (
-    "record carries no source.landing_aero block; crossing speed cannot be judged "
-    "against a stall-anchored window"
+NO_TYPECODE_REASON = (
+    "record names no aircraft type (source.dynamics_typecode / source.aircraft_type); "
+    "no published speed window exists"
 )
 OBSERVED_UNRESOLVED_AIRFRAME_REASON = (
-    "airframe could not be resolved from icao24, so no stall-anchored window exists; "
+    "airframe could not be resolved from icao24, so no published speed window exists; "
     "crossing ground speed is not judged"
+)
+NO_REFERENCE_SPEED_REASON = (
+    "no published approach speed for type {typecode} in aircraft/reference_speeds.json; "
+    "crossing speed is not judged"
+)
+NO_MIN_MASS_REASON = (
+    "type {typecode} publishes no minimum operating mass, so the observed window's "
+    "lower edge is undefined; crossing speed is not judged"
 )
 OBSERVED_NO_CROSSING_SPEED_REASON = (
     "the threshold event fitted no crossing ground speed; nothing to judge"
+)
+# Rows with no measured crossing at all (unsolved, ended short of the plane, event
+# unavailable): speed is indeterminate for the same reason lateral and vertical are.
+NO_CROSSING_REASON = (
+    "no threshold crossing was measured (unsolved, not reached, or event "
+    "unavailable); nothing to judge"
 )
 
 
 @dataclass(frozen=True)
 class SpeedGateBounds:
-    """The per-record window, plus the stall speeds that anchored it."""
+    """The per-record window, plus the published speeds that anchored it."""
 
-    stall_speed_ms: float          # 1 g -- what the upper edge and the optimizer floor use
-    stall_speed_at_n_ms: float     # at max(n, 1) -- what the lower edge uses
-    lower_ms: float
-    upper_ms: float
+    reference_typecode: str
+    # Source ids (keys of the table's ``sources`` block) of the three published facts
+    # the window came from -- each row traces to its documents without the table.
+    reference_sources: dict[str, str | None]
+    mass_basis: str            # MASS_BASIS_CROSSING or MASS_BASIS_TYPE_RANGE
+    vref_low_ms: float         # V_ref,lo at the basis's lower mass, 1 g
+    vref_high_ms: float        # V_ref,hi at the basis's upper mass
+    lower_ms: float            # vref_low at max(n, 1)
+    upper_ms: float            # vref_high + the additive
 
     @property
     def empty(self) -> bool:
         """No speed satisfies the window: the crossing load factor lifted V_ref past the
-        1-g energy limit (n above ~1.25-1.40 on this fleet). A verdict, not an error --
-        the manoeuvre itself has no stabilized-approach speed -- reported by both
-        bounds on the row and failed by ``metrics._component``."""
+        1-g energy limit. A verdict, not an error -- the manoeuvre itself has no
+        stabilized-approach speed -- reported by both bounds on the row and failed by
+        ``metrics._component``."""
         return self.lower_ms > self.upper_ms
 
-    def to_dict(self, criterion: str) -> dict[str, float | str]:
+    def to_dict(self, criterion: str) -> dict[str, Any]:
         return {
             "speed_criterion": criterion,
-            "stall_speed_ms": self.stall_speed_ms,
-            "stall_speed_at_n_ms": self.stall_speed_at_n_ms,
+            "reference_typecode": self.reference_typecode,
+            "reference_sources": dict(self.reference_sources),
+            "mass_basis": self.mass_basis,
+            "vref_low_ms": self.vref_low_ms,
+            "vref_high_ms": self.vref_high_ms,
             "speed_lower_ms": self.lower_ms,
             "speed_upper_ms": self.upper_ms,
         }
 
 
-def validate_landing_aero(landing_aero: Any) -> dict[str, float]:
-    """The stall facts as floats, or a ValueError naming the broken field.
-
-    Called ONCE, at the record boundary (``records.record_from_dict``). A PRESENT but
-    malformed block raises: unlike an absent block (a record predating the contract,
-    honestly indeterminate), a broken one means the producer wrote something and it
-    cannot be trusted -- same absent-vs-invalid split as the observed threshold event.
-    """
-    if not isinstance(landing_aero, Mapping):
-        raise ValueError(
-            f"source.{LANDING_AERO_KEY} must be an object, got {landing_aero!r}"
-        )
-    values: dict[str, float] = {}
-    for key in ("wing_area_m2", "cl_max_landing"):
-        value = landing_aero.get(key)
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(float(value))
-            or float(value) <= 0.0
-        ):
-            raise ValueError(
-                f"source.{LANDING_AERO_KEY}.{key} must be a positive finite number, "
-                f"got {value!r}"
-            )
-        values[key] = float(value)
-    return values
+def record_typecode(source: Mapping[str, Any]) -> str | None:
+    """The ICAO type designator the record names (``TYPECODE_KEYS``), or None."""
+    for key in TYPECODE_KEYS:
+        value = source.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return None
 
 
 def speed_gate_bounds(
-    crossing_mass_kg: float,
-    landing_aero: Mapping[str, Any],
+    reference: ReferenceSpeed,
     *,
     load_factor: float,
+    crossing_mass_kg: float | None,
 ) -> SpeedGateBounds:
-    """Resolve one record's speed window from its crossing mass, load factor and
-    aircraft facts (a block :func:`validate_landing_aero` accepted).
+    """Resolve one record's speed window from the type's published speeds.
 
-    A non-finite or non-positive load factor raises: the record's controls said
-    something impossible, which is a malformed record, not an open question.
+    ``crossing_mass_kg`` frames a computed record's window at its own crossing mass;
+    None frames an observed record's window over the type's published mass range,
+    which needs the type's minimum mass (a table without one is the caller's
+    indeterminate case, not this function's). A non-finite or non-positive load
+    factor raises: the record said something impossible.
     """
-    values = {
-        key: float(landing_aero[key]) for key in ("wing_area_m2", "cl_max_landing")
-    }
     if not math.isfinite(load_factor) or load_factor <= 0.0:
         raise ValueError(
             f"crossing load factor must be a positive finite number, got {load_factor!r}"
         )
-    bound_load_factor = max(load_factor, MIN_BOUND_LOAD_FACTOR)
-    stall_1g_ms = stall_speed_ms(
-        crossing_mass_kg,
-        wing_area_m2=values["wing_area_m2"],
-        cl_max=values["cl_max_landing"],
-    )
-    stall_at_n_ms = stall_speed_ms(
-        crossing_mass_kg,
-        wing_area_m2=values["wing_area_m2"],
-        cl_max=values["cl_max_landing"],
-        load_factor=bound_load_factor,
-    )
+    if crossing_mass_kg is None:
+        if reference.min_mass_kg is None:
+            raise ValueError(f"{reference.typecode}: no minimum mass for a type-range window")
+        basis = MASS_BASIS_TYPE_RANGE
+        low_mass, high_mass = reference.min_mass_kg, reference.malw_kg
+    else:
+        basis = MASS_BASIS_CROSSING
+        low_mass = high_mass = crossing_mass_kg
+    vref_low = kt_to_ms(reference.vref_kt(low_mass, edge="low"))
+    vref_high = kt_to_ms(reference.vref_kt(high_mass, edge="high"))
     return SpeedGateBounds(
-        stall_speed_ms=stall_1g_ms,
-        stall_speed_at_n_ms=stall_at_n_ms,
-        lower_ms=VREF_STALL_MULTIPLIER * stall_at_n_ms,
-        upper_ms=VREF_STALL_MULTIPLIER * stall_1g_ms + SPEED_GATE_UPPER_ADDITIVE_MS,
+        reference_typecode=reference.typecode,
+        reference_sources={
+            "approach_speed": reference.approach_speed_source,
+            "malw": reference.malw_source,
+            "min_mass": reference.min_mass_source,
+        },
+        mass_basis=basis,
+        vref_low_ms=vref_low,
+        vref_high_ms=vref_high,
+        lower_ms=vref_low * math.sqrt(max(load_factor, MIN_BOUND_LOAD_FACTOR)),
+        upper_ms=vref_high + SPEED_GATE_UPPER_ADDITIVE_MS,
     )

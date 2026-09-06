@@ -1,0 +1,38 @@
+Boeing 777-200LR/-300ER/777F ACAP D6-58329-2 Rev G (December 2024) -- section 2.1.1, verbatim. NOTE: no OPERATING EMPTY WEIGHT row is published in this document.
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2.1.1   General Characteristics: Model 777-200LR, -300ER, 777F
+
+ CHARACTERISTICS          UNITS                   777-200LR             777-300ER     777-F
+MAX DESIGN           POUNDS                         768,000              777,000     768,800
+  TAXI WEIGHT        KILOGRAMS                      348,358              352,441     348,721
+MAX DESIGN           POUNDS                         766,000              775,000     766,800
+  TAKEOFF WEIGHT     KILOGRAMS                      347,451              351,534     347,814
+MAX DESIGN           POUNDS                         492,000              554,000     575,000
+  LANDING WEIGHT     KILOGRAMS                      223,167              251,290     260,815
+MAX DESIGN ZERO      POUNDS                         461,000              524,000     547,000
+  FUEL WEIGHT        KILOGRAMS                      209,106              237,682     248,115
+TYPICAL SEATING      TWO CLASS                      279 (3)              339 (5)       N/A
+   CAPACITY          THREE CLASS                    301 (4)              370 (6)       N/A
+MAX CARGO            CUBIC FEET                    5,656 (1)            7,552 (1)   22,371 (2)
+  --LOWER DECK       CUBIC METERS                  160.1 (1)            213.8 (1)   633.4 (2)
+USABLE FUEL          U.S. GALLONS                    47,890              47,890      47,890
+                     LITERS                         181,283              181,283     181,283
+                     POUNDS                         320,863              320,863     320,863
+                     KILOGRAMS                      145,570              145,570     145,570
+
+NOTES:
+1. FWD CARGO = 18 LD3'S AT 158 CU FT EACH.
+   AFT CARGO = 14 LD3'S AT 158 CU FT EACH.
+   BULK CARGO = 600 CU FT
+2. INCLUDES MAIN DECK, FORWARD LOWER LOBE, AND AFT LOWER LOBE
+3. 42 FIRST CLASS AND 237 ECONOMY CLASS
+4. 16 FIRST CLASS, 58 BUSINESS CLASS AND 227 ECONOMY CLASS
+5. 56 FIRST CLASS AND 283 ECONOMY CLASS
+6. 12 FIRST CLASS, 42 BUSINESS CLASS AND 316 ECONOMY CLASS
+
+
+
+
+                                      D6-58329-2
+REV G                              December 2024                                             2-2

@@ -24,8 +24,11 @@ experiments/, comparison publications) are NOT swept — evaluate one of those
 directly with ``python -m evaluation --input <dir>``.
 
 Notes:
-  * Computed records written before 2026-08-23 carry no ``source.landing_aero``,
-    so the v6 speed gate grades them indeterminate until their batch is re-run.
+  * The speed gate keys on the record's aircraft type (``source.dynamics_typecode``
+    on computed records, ``source.aircraft_type`` on observed ones); a record that
+    names none, or a type without a published entry in
+    ``aircraft/reference_speeds.json``, grades speed indeterminate and the report's
+    ``speed_indeterminate_reasons`` says so.
   * ``--html`` renders the overlay report next to each JSON (one extra streamed
     pass per batch).
 

@@ -1,0 +1,18 @@
+Bombardier Global 5000 Fact Sheet (bombardier.com media 2531, file 2018-10/Global_5000_Fact_Sheet_0.pdf) -- Weights block, verbatim (right-hand column of a 3-column layout)
+----------------------------------------------------------------------------------------------------
+
+                    Weights
+                    Maximum ramp weight                92,750 lb   42,071 kg
+                    Maximum takeoff weight             92,500 lb   41,957 kg
+
+                    Maximum landing weight             78,600 lb   35,652 kg
+
+                    Maximum zero-fuel weight           58,000 lb   26,308 kg
+
+                    Basic operating weight             50,861 lb   23,070 kg
+
+                    Maximum fuel weight                39,250 lb   17,804 kg
+
+                    Maximum payload                     7,139 lb    3,238 kg
+
+ 2

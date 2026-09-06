@@ -1,0 +1,41 @@
+icao_type,fleet_rows_observed,landing_vat_ias_kt,mtow_kg,apc,page_title,local_file,sha256,bytes
+B38M,5864,145,82600,D,Aircraft Performance Database > B38M,data/reference_speeds/eurocontrol/B38M.html,24be7e4451392376e24d8a4c394b40c9cb5a8362d337723a1b7f2739309e4c5d,100326
+B737,5537,137,66320,C,Aircraft Performance Database > B737,data/reference_speeds/eurocontrol/B737.html,f2d23617a1392ea019bd7dd1cc3983f5ea28d6d49003929efd291d3e90e0fa51,104598
+B738,4963,147,70530,D,Aircraft Performance Database > B738,data/reference_speeds/eurocontrol/B738.html,6336af2ce02f5de7d2f2166500877b717b848b838f7e8cddb5ba9684811f4a40,104140
+E75L,3401,,,,Aircraft Performance Database > No ICAO,data/reference_speeds/eurocontrol/E75L.html,4f22e58e2d07fa8121e6c516ff0cff3fcc51ea66f570b8f77d94cbe7310fffb1,92503
+B739,2249,150,79015,D,Aircraft Performance Database > B739,data/reference_speeds/eurocontrol/B739.html,f8757f94723331e80685dc0e689b871d374be7c8ab3e43ad63e82d071115db03,101090
+A319,1895,130,64000,C,Aircraft Performance Database > A319,data/reference_speeds/eurocontrol/A319.html,6ced216adce614f7ca992f1a617628f7dbbc1f488a17ae0f94e81cb086594c80,111854
+CRJ9,1650,135,38330,C,Aircraft Performance Database > CRJ9,data/reference_speeds/eurocontrol/CRJ9.html,ba605cfee556874331ccbaa04b20d056d0681b148c0c9b09bebeb0acb8964356,101211
+A321,1202,141,83000,C,Aircraft Performance Database > A321,data/reference_speeds/eurocontrol/A321.html,8fe0e2e289eb9a548fa7d2d65e6c2a8fef30307f0ab648f253172cabda9e7f06,111460
+A320,1000,137,73900,C,Aircraft Performance Database > A320,data/reference_speeds/eurocontrol/A320.html,4b0781d6929454213acd9d5540f657fb5d339d8bd991e47e35548fc45b041a36,111799
+A21N,881,140,97000,C,Aircraft Performance Database > A21N,data/reference_speeds/eurocontrol/A21N.html,a5534ba15886b6b1adab81bf60f9af3479e53958aedf404181d1c8ff763490fe,99643
+B39M,713,150,88300,D,Aircraft Performance Database > B39M,data/reference_speeds/eurocontrol/B39M.html,22c0112d165a84b4fa37ba9de9d33aa3cc276b06f3d926b768edee70cb474cfa,97771
+A20N,535,135,79000,C,Aircraft Performance Database > A20N,data/reference_speeds/eurocontrol/A20N.html,b18834a956fe3018bbb5107da20af75e321eb8315bea92a8f7540eadff14fa51,100900
+C56X,314,117,8709,B,Aircraft Performance Database > C56X,data/reference_speeds/eurocontrol/C56X.html,e7847fdce6ca9eef2605e0968f99aaa7809d217a88eefa370f3a980c266aec4f,105541
+B763,239,140,186880,C,Aircraft Performance Database > B763,data/reference_speeds/eurocontrol/B763.html,7da4f1c53b77448f8adfa2e9cc3bd5008b608ed625dab78df3a4f797a7d3bbb4,102496
+B752,178,130,115680,C,Aircraft Performance Database > B752,data/reference_speeds/eurocontrol/B752.html,86955a163bd9180c66b2a86dfb7b3c269dd1b232da2128dd8fcd0fd64eaa18cc,101610
+E170,175,130,35995,C,Aircraft Performance Database > E170,data/reference_speeds/eurocontrol/E170.html,5b6262f1c7cd57a2d8ed504c79c7e75c93869b47a58640a7bd7c776a80b1cdf4,100316
+E190,154,131,45995,C,Aircraft Performance Database > E190,data/reference_speeds/eurocontrol/E190.html,65e3aaa56b50bd9fe3a3546396dc4459da62d5c67309d9b559698f12722edc0e,100497
+GLF5,147,140,41136,C,Aircraft Performance Database > GLF5,data/reference_speeds/eurocontrol/GLF5.html,7e92260e24177dacd4dbf5dab094ba9fd6869198006bef2bd089bba970947172,106328
+GLF6,141,,,,Aircraft Performance Database > No ICAO,data/reference_speeds/eurocontrol/GLF6.html,25f9fcd21a2e32207d3454018c002a5e3a51bd489ee54c2ae8246342bde8c0e2,92503
+A306,126,139,171700,C,Aircraft Performance Database > A306,data/reference_speeds/eurocontrol/A306.html,8ead1dc450edd4eeaa95d0d671823acf1acb5433cd775c8a6d6a8040551a2f37,105228
+C25A,119,110,5670,B,Aircraft Performance Database > C25A,data/reference_speeds/eurocontrol/C25A.html,25a5048f25bd9b0164d2ae5c3065195182cb55ae1e9226417cd654139297a68b,99119
+LJ45,103,140,9230,C,Aircraft Performance Database > LJ45,data/reference_speeds/eurocontrol/LJ45.html,9cf356c11d728dda9c640c37de93e6ae8e04b969e44bfc300006e3c5ca3af73e,102027
+PC24,75,,,,Aircraft Performance Database > No ICAO,data/reference_speeds/eurocontrol/PC24.html,b812d963e75a395423cb06e6647c9ae36e5ec4ee3df54f657b703dc0410c7282,92503
+A333,71,140,230000,C,Aircraft Performance Database > A333,data/reference_speeds/eurocontrol/A333.html,87c4e020bf7d9f6609537c6299db8b4c7461e8604a255876d95ddd63bae39669,101313
+C172,63,65,1050,A,Aircraft Performance Database > C172,data/reference_speeds/eurocontrol/C172.html,398ceab1ab7b5d621136f3511516ea55d213d7d8ed354f57ad135e2b83f08011,103786
+B772,62,140,247210,C,Aircraft Performance Database > B772,data/reference_speeds/eurocontrol/B772.html,80d5dbacc28fe2d06623c79c035cd2cc6e568249e71cc3e6f7ce77e3d59d2c06,106611
+B788,60,140,228000,C,Aircraft Performance Database > B788,data/reference_speeds/eurocontrol/B788.html,02a39e27aa68e624466a68f24211fc4e7d3aba201102a49191e3155c313a9dba,106549
+CRJ2,43,140,21523,C,Aircraft Performance Database > CRJ2,data/reference_speeds/eurocontrol/CRJ2.html,c9aeea999c73099bbb5ddc1941ab752b852aef22fbdb987cdc688b95b43ce5d6,98106
+C525,35,110,4717,B,Aircraft Performance Database > C525,data/reference_speeds/eurocontrol/C525.html,ddb960e571a512c3047ef1f1e67b679f2939e2fe996f6218a58ec8cf2aae409c,96361
+GL5T,35,122,41957,C,Aircraft Performance Database > GL5T,data/reference_speeds/eurocontrol/GL5T.html,298bed3cfb4c4134bf0a70801ab95f37d642c28496412b392f48345422cebed5,95770
+B789,33,150,254011,C,Aircraft Performance Database > B789,data/reference_speeds/eurocontrol/B789.html,e2cd002533b0d751fa890cc100281b6973759e1234fb9279da91e05b6635db19,100986
+C550,33,110,6850,B,Aircraft Performance Database > C550,data/reference_speeds/eurocontrol/C550.html,3ecbba8b0eb40d650f17c517b24b59aa91cabb9ae9a749de4d5c045bdcb7e163,105737
+A332,27,140,230000,C,Aircraft Performance Database > A332,data/reference_speeds/eurocontrol/A332.html,173535a4250779ae4ecfc7c1a39d7a9f9bede75b4ba546c17e47d520705a3228,103876
+A359,26,140,268000,C,Aircraft Performance Database > A359,data/reference_speeds/eurocontrol/A359.html,a93b54d1a8beacd7f49e270152804be39d223c58d20e877cb18711c705ee9941,107457
+B734,25,139,62820,C,Aircraft Performance Database > B734,data/reference_speeds/eurocontrol/B734.html,9ff32e9060d2795f0c04d663187d8fb5ddac5b8a432383a8d4e198c591efa24b,101323
+B762,10,135,179170,C,Aircraft Performance Database > B762,data/reference_speeds/eurocontrol/B762.html,60b1c29313bdc196fdee6ce5d315ca7ff76370213ae6d5bb4225781a9af58fe4,100861
+E145,5,135,21198,C,Aircraft Performance Database > E145,data/reference_speeds/eurocontrol/E145.html,1ccc95c7563b8b003919a9c73f950e41b454c7ecfb66a18717c97312f61e2be9,109152
+A343,1,150,275000,D,Aircraft Performance Database > A343,data/reference_speeds/eurocontrol/A343.html,67e52aa1318bbadd00fb63bdb5da8b83c888a8047da3fa9ef82bb0c532dd0042,105118
+B77W,1,149,351500,D,Aircraft Performance Database > B77W,data/reference_speeds/eurocontrol/B77W.html,b6f3e61976a5880406482502236464c84faab3f792ce23856a0b105c33469312,103870
+B735,1,128,52390,C,Aircraft Performance Database > B735,data/reference_speeds/eurocontrol/B735.html,a49b6af197efba87b1096a4f4faf850eabe7953eac7cc904d20f70f580367f54,105192

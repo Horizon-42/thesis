@@ -244,13 +244,13 @@ Only the hazards that must fire unprompted are repeated here.
   re-deriving. → `4dTrajectory/ts_transformer/CLAUDE.md`
 - **Quote only current-artifact numbers** — the KRDU ts run has three generations and the first
   is not reproducible; the gate-pass conclusion still needs re-deriving after the datum fix.
-- **The optimizer solves ARE on disk, and every one of them is speed-indeterminate.**
+- **The optimizer solves ARE on disk; their REPORTS are stale (v6, speed-indeterminate).**
   `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}` hold 15 v6-evaluated batches,
   **70,267 records** (measured 2026-09-07), solved from the 2026-08-23 `flight_scenarios/outputs`
-  scenarios — one day BEFORE `build_scenario` started writing `source.landing_aero`, so their
-  three-gate pass count is 0 and no optimizer pass rate on disk is quotable.
-  `python 4dTrajectory/optimization/backfill_landing_aero.py --root 4dTrajectory/outputs --apply`
-  adds the block through the producer's own typecode chain without re-solving (~70 GB of
-  record reads to then regenerate the 15 reports — run it between GPU campaigns). A re-solve
-  is ~30 h at `--jobs 24`, 12.3 GiB (`--rollout-dt 1.0` → 8.1 GiB); free space is the binding
-  constraint and the runner refuses to start if its estimate does not fit.
+  scenarios. Their v6 reports grade speed indeterminate on every row (they predate
+  `landing_aero`), so no optimizer pass rate on disk is quotable — but every record carries
+  `source.dynamics_typecode`, which is all the v9 published-V_ref gate keys on: regenerate the
+  15 reports (`run_all_evaluations.py`, ~70 GB of record reads, run it between GPU campaigns);
+  no backfill, no re-solve. A re-solve is ~30 h at `--jobs 24`, 12.3 GiB (`--rollout-dt 1.0`
+  → 8.1 GiB); free space is the binding constraint and the runner refuses to start if its
+  estimate does not fit.

@@ -1,0 +1,164 @@
+Boeing 767 ACAP D6-58328 Rev K (December 2024) -- sections 2.1.1 to 2.1.4, verbatim
+-----------------------------------------------------------------------------------
+
+2.1.1   General Characteristics: Model 767-200
+
+ CHARACTERISTICS         UNITS                                            767-200 (1)
+MAX DESIGN           POUNDS                  284,000          302,000          312,000      317,000
+  TAXI WEIGHT        KILOGRAMS               128,820          136,984          141,520      143,788
+MAX DESIGN           POUNDS                  282,000          300,000          310,000      315,000
+  TAKEOFF WEIGHT     KILOGRAMS               127,912          136,077          140,613      142,881
+MAX DESIGN           POUNDS                  257,000          270,000          270,000      272,000
+  LANDING WEIGHT     KILOGRAMS               116,573          122,469          122,469      123,377
+MAX DESIGN ZERO      POUNDS                  242,000          248,000          248,000      250,000
+  FUEL WEIGHT        KILOGRAMS               109,769          112,490          112,490      113,398
+SPEC OPERATING       POUNDS                  174,110          177,000          176,550      176,650
+  EMPTY WEIGHT (2)   KILOGRAMS                78,974           80,285           80,081      80,127
+MAX STRUCTURAL       POUNDS                   67,890           71,000           71,450      73,350
+  PAYLOAD            KILOGRAMS                30,794           32,205           32,409      33,271
+SEATING              ONE-CLASS                                   FAA EXIT LIMIT = 255 (3)
+  CAPACITY           MIXED CLASS                            216 - 18 FIRST + 198 ECONOMY
+MAX CARGO            CUBIC FEET               3,070             3,070            3,070       3,070
+  LOWER DECK         CUBIC METERS              86.9              86.9            86.9        86.9
+USABLE FUEL          U.S. GALLONS             12,140           16,700           16,700      16,700
+                     LITERS                   45,954           63,216           63,216      63,216
+                     POUNDS                   81,338          111,890          111,890      111,890
+                     KILOGRAMS                36,901           50,763           50,763      50,763
+
+
+NOTES:
+1.     SPEC WEIGHT FOR TYPICAL ENGINE/WEIGHT CONFIGURATION SHOWN
+       SEE TABLE 1.3.1 FOR COMBINATIONS AVAILABLE. CONSULT WITH AIRLINE FOR
+       SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.     TYPICAL OPERATING EMPTY WEIGHT SHOWN. ACTUAL WEIGHT WILL DEPEND
+       ON SPECIFIC AIRLINE CONFIGURATION.
+3.     290 WITH SECOND OVERWING EXIT DOOR.
+
+
+
+
+                                             D6-58328
+REV K                                    December 2024                                                2-2
+                                      Not Subject to EAR or ITAR.
+                              Copyright © 2024 Boeing. All Rights Reserved.
+2.1.2   General Characteristics: Model 767-200ER
+
+ CHARACTERISTICS       UNITS                                          767-200ER (1)
+MAX DESIGN         POUNDS               337,000      347,000      352,200    381,000   388,000    396000
+  TAXI WEIGHT      KILOGRAMS            152,860      157,396      159,755    172,818   175,993    179,622
+MAX DESIGN         POUNDS               335,000      345,000      351,000    380,000   387,000    395,000
+  TAKEOFF WEIGHT   KILOGRAMS            151,953      156,489      159,210    172,365   175,540    179,169
+MAX DESIGN         POUNDS               278,000      278,000      278,000    285,000   285,000    300,000
+  LANDING WEIGHT   KILOGRAMS            126,098      126,098      126,098    129,273   129,273    136,077
+MAX DESIGN ZERO    POUNDS               253,000      253,000      253,000    260,000   260,000    260000
+  FUEL WEIGHT      KILOGRAMS            114,758      114,758      114,758    117,934   117,934    117,934
+SPEC OPERATING     POUNDS               181,130      181,250      181,350    181,500   181,610    181,610
+  EMPTY WEIGHT (2) KILOGRAMS             82,159       82,213       82,258    82,327    82,376     82,376
+MAX STRUCTURAL     POUNDS                71,870       71,750       71,650    78,500    78,390     78,390
+  PAYLOAD          KILOGRAMS             32,599       32,545       32,499    35,607    35,557     35,557
+SEATING            ONE-CLASS                                   FAA EXIT LIMIT = 255 (3)
+  CAPACITY         MIXED CLASS                            216 - 18 FIRST + 198 ECONOMY
+MAX CARGO          CUBIC FEET            3,070        3,070         3,070     3,070       3,070    3,070
+  LOWER DECK       CUBIC METERS           86.9         86.9          86.9      86.9       86.9     86.9
+USABLE FUEL        U.S. GALLONS          16,700       20,540       20,540    24,140    24,140     24140
+                   LITERS                63,216       77,752       77,752    91,379    91,379     91,379
+                   POUNDS               111,890      137,618      137,618    161,738   161,738    161,738
+                   KILOGRAMS             50,763       62,434       62,434    73,378    73,378     73,378
+
+
+NOTES:
+1.     SPEC WEIGHT FOR TYPICAL ENGINE/WEIGHT CONFIGURATION SHOWN
+       SEE TABLE 1.3.1 FOR COMBINATIONS AVAILABLE. CONSULT WITH AIRLINE FOR
+       SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.     TYPICAL OPERATING EMPTY WEIGHT SHOWN. ACTUAL WEIGHT WILL DEPEND
+       ON SPECIFIC AIRLINE CONFIGURATION.
+3.     290 WITH SECOND OVERWING EXIT DOOR.
+
+
+
+
+                                           D6-58328
+REV K                                  December 2024                                                 2-3
+                                    Not Subject to EAR or ITAR.
+                            Copyright © 2024 Boeing. All Rights Reserved.
+2.1.3   General Characteristics: Model 767-300
+
+ CHARACTERISTICS         UNITS                                            767-300 (1)
+MAX DESIGN           POUNDS                             347,000                         352,000
+  TAXI WEIGHT        KILOGRAMS                          157,396                         159,664
+MAX DESIGN           POUNDS                             345,000                         350,000
+  TAKEOFF WEIGHT     KILOGRAMS                          156,489                         158,757
+MAX DESIGN           POUNDS                             300,000                         300,000
+  LANDING WEIGHT     KILOGRAMS                          136,077                         136,077
+MAX DESIGN ZERO      POUNDS                             278,000                         278,000
+  FUEL WEIGHT        KILOGRAMS                          126,098                         126,098
+SPEC OPERATING       POUNDS                             186,380                         189,750
+  EMPTY WEIGHT (2)   KILOGRAMS                          84,540                          86,069
+MAX STRUCTURAL       POUNDS                             91,620                          88,250
+  PAYLOAD            KILOGRAMS                          41,558                          40,029
+SEATING              ONE-CLASS                                    FAA EXIT LIMIT 290 (3)
+  CAPACITY           MIXED CLASS                            261 - 24 FIRST + 237 ECONOMY
+MAX CARGO            CUBIC FEET                          4,030                             4,030
+  LOWER DECK         CUBIC METERS                        114.1                             114.1
+USABLE FUEL          U.S. GALLONS                       16,700                          16,700
+                     LITERS                             63,216                          63,216
+                     POUNDS                             111,890                         111,890
+                     KILOGRAMS                          50,762                          50,762
+
+
+NOTES:
+1.     SPEC WEIGHT FOR TYPICAL ENGINE/WEIGHT CONFIGURATION SHOWN
+       SEE TABLE 1.3.1 FOR COMBINATIONS AVAILABLE. CONSULT WITH AIRLINE FOR
+       SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.     TYPICAL OPERATING EMPTY WEIGHT SHOWN. ACTUAL WEIGHT WILL DEPEND
+       ON SPECIFIC AIRLINE CONFIGURATION.
+3.     299 WITH MID-CABIN TYPE A DOOR.
+
+
+
+
+                                             D6-58328
+REV K                                    December 2024                                             2-4
+                                      Not Subject to EAR or ITAR.
+                              Copyright © 2024 Boeing. All Rights Reserved.
+2.1.4   General Characteristics: Model 767-300ER
+
+ CHARACTERISTICS        UNITS                                         767-300ER (1)
+MAX DESIGN           POUNDS                  381,000        388,000           401,000   409,000   413,000
+  TAXI WEIGHT        KILOGRAMS               172,818        175,993           181,890   185,519   187,333
+MAX DESIGN           POUNDS                  380,000        387,000           400,000   407,000   412,000
+  TAKEOFF WEIGHT     KILOGRAMS               172,365        175,540           181,436   184,612   186,880
+MAX DESIGN           POUNDS                  300,000        300,000           320,000   320,000   320,000
+  LANDING WEIGHT     KILOGRAMS               136,077        136,077           145,149   145,149   145,149
+MAX DESIGN ZERO      POUNDS                  278,000        278,000           288,000   295,000   295,000
+  FUEL WEIGHT        KILOGRAMS               126,098        126,098           130,634   133,809   133,809
+SPEC OPERATING       POUNDS                  193,840        193,940           195,040   198,440   198,440
+  EMPTY WEIGHT (2)   KILOGRAMS                87,924         87,969           88,468    90,010    90,010
+MAX STRUCTURAL       POUNDS                   84,160         84,060           92,960    96,560    96,560
+  PAYLOAD            KILOGRAMS                38,174         38,128           42,165    43,798    43,798
+SEATING              ONE-CLASS                                 FAA EXIT LIMIT = 290 (3)
+  CAPACITY           MIXED CLASS                          261 - 24 FIRST + 237 ECONOMY
+MAX CARGO            CUBIC FEET                4,030          4,030            4,030     4,030     4,030
+  LOWER DECK         CUBIC METERS             114.1           114.1            114.1     114.1     114.1
+USABLE FUEL          U.S. GALLONS             24,140         24,140           24,140    24,140    24,140
+                     LITERS                   91,379         91,379           91,379    91,379    91,379
+                     POUNDS                  161,738        161,738           161,738   161,738   161,738
+                     KILOGRAMS                73,377         73,377           73,377    73,377    73,377
+
+
+NOTES:
+1.     SPEC WEIGHT FOR TYPICAL ENGINE/WEIGHT CONFIGURATION SHOWN
+       SEE TABLE 1.3.1 FOR COMBINATIONS AVAILABLE. CONSULT WITH AIRLINE FOR
+       SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.     TYPICAL OPERATING EMPTY WEIGHT SHOWN. ACTUAL WEIGHT WILL DEPEND
+       ON SPECIFIC AIRLINE CONFIGURATION.
+3.     299 WITH SECOND OVERWING EXIT DOOR
+
+
+
+
+                                             D6-58328
+REV K                                    December 2024                                                     2-5
+                                      Not Subject to EAR or ITAR.
+                              Copyright © 2024 Boeing. All Rights Reserved.
+2.1.5   General Characteristics: Model 767-300 Freighter

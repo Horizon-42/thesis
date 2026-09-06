@@ -74,29 +74,35 @@ is a guidance-tracking scale, not a universal threshold-crossing or landing
 outcome standard, and is no longer computed or serialized. Trajectories and
 harvested threshold events do not carry evaluation policy.
 
-Speed, for every subject (v8):
+Speed, for every subject (v9):
 
 ```text
-Vs1g  = sqrt(2 m g / (rho0 × S × Cl_max_landing))   # the project's own stall model
-Vs(n) = Vs1g × sqrt(max(n, 1))                       # at the crossing load factor
-speed window = [1.23 × Vs(n), 1.23 × Vs1g + 20 kt]  # inclusive, at the crossing
+V_ref,lo(m) = V_min × sqrt(m / MALW)      # the type's PUBLISHED approach speed at MALW
+V_ref,hi(m) = V_max × sqrt(m / MALW)      #   (FAA Aircraft Characteristics Database, Oct 2024)
+computed : [V_ref,lo(m) × sqrt(max(n, 1)),     V_ref,hi(m) + 20 kt]     # at the crossing mass
+observed : [V_ref,lo(m_min) × sqrt(max(n, 1)), V_ref,hi(MALW) + 20 kt]  # over the type's mass range
 ```
 
-The multiplier is the 14 CFR 25.125(b)(2)(i) landing reference-speed floor
-(V_REF ≥ 1.23 V_SR0); the +20 kt is the FSF ALAR Briefing Note 7.1 stabilized-approach
-speed element, an energy criterion that stays at 1 g. `S` and `Cl_max` come from the
-record's producer-written `source.landing_aero` block; the mass is the crossing state's
-own; the load factor is the last control's (`controls[-1].load_factor`, the control
-active over the final rollout step) on records with controls, and a declared 1 g on
-state-output predictions. Computed subjects are judged on the crossing model airspeed. Observed baselines
-measure their load factor from their own ADS-B kinematics over the final 20 s, and
-are judged on the event's fitted crossing GROUND speed corrected by the field's METAR
-headwind component (`data/metar/<ICAO>/`, fetched by
-`trajectory_data_process/metar/fetch_iem_asos.py`; `--metar-root`) — an airspeed
-estimate with a declared ±5 kt uncertainty and its own criterion id — or, when no
-report within 30 min is usable, on the raw ground speed as a stated proxy, with the
-reason on the row. Full rationale, worked numbers, the measured load-factor
-distribution and trackable sources:
+`V_min`/`V_max` are the FSB approach speed at Maximum Allowable Landing Weight (the
+dual flap-configuration values where the FAA gives them), `MALW` the weight it is
+quoted at, `m_min` the type's lowest published operating mass — all from
+`aircraft/reference_speeds.json`, each number with a source id, the documents downloaded
+under `data/reference_speeds/` and indexed in `docs/reference_speeds/README.md`. The
++20 kt is the FSF ALAR Briefing Note 7.1 stabilized-approach speed element, an energy
+criterion that stays at 1 g. The record's type is `source.dynamics_typecode` (computed)
+or `source.aircraft_type` (observed); the mass is the crossing state's own on computed
+records (an observed flight's mass is not measured, hence the type-range window); the
+load factor is the last control's (`controls[-1].load_factor`) on records with
+controls, measured from the flight's own ADS-B kinematics over the final 20 s on
+observed baselines, and a declared 1 g on state-output predictions. Computed subjects
+are judged on the crossing model airspeed. Observed baselines are judged on the event's
+fitted crossing GROUND speed corrected by the field's METAR headwind component
+(`data/metar/<ICAO>/`, fetched by `trajectory_data_process/metar/fetch_iem_asos.py`;
+`--metar-root`) under its own criterion id — or, when no report within 30 min is
+usable, on the raw ground speed as a stated proxy, with the reason on the row. The
+verdict is pass/fail against that determinate window; `indeterminate` names its cause
+(`speed_indeterminate_reasons` on the batch). Full rationale, worked numbers, the
+measured load-factor distribution and trackable sources:
 [THRESHOLD_SPEED_GATE.md](docs/THRESHOLD_SPEED_GATE.md).
 
 The LNAV/VNAV Baro-VNAV fallback differs only in the vertical component; its
@@ -215,8 +221,9 @@ normalize two different physical spans and report the result as path error.
   criterion id `runway_half_width_at_threshold`;
 - the published-TCH vertical reference, common `±22 m` RNAV terminal bound,
   exact ICAO source location, and non-certification claim boundary;
-- the stall-anchored crossing-speed window per record (criterion id
-  `vref_1p23_vs1g_to_vref_plus_20kt`), its `speed_result`, and the
+- the crossing-speed window per record (v9: anchored on the type's published approach
+  speed, criterion id `published_vref_at_crossing_mass_and_n_to_vref_plus_20kt`; v6–v8
+  carried the stall-anchored `vref_1p23_vs…` ids), its `speed_result`, and the
   `methodology.terminal_speed` source audit;
 - event/point-verdict/uncalibrated-uncertainty/reference-comparison methodology;
 - three-way verdict counts;

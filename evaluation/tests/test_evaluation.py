@@ -144,8 +144,9 @@ def test_observed_report_copies_the_policy_free_event_for_audit():
 
 def test_observed_crossing_ground_speed_is_reported_and_graded_as_a_proxy():
     """The event's fitted ground speed reaches the row/batch AND the speed gate —
-    judged against the stall window as a stated proxy, under its own criterion id,
-    while the graded-AIRSPEED slots stay untouched (two quantities, two names)."""
+    judged against the type's published window as a stated proxy, under its own
+    criterion id, while the graded-AIRSPEED slots stay untouched (two quantities,
+    two names)."""
     payload = trajectory_payload(
         subject="observed", event=observed_event(ground_speed_m_s=71.5)
     )
@@ -160,13 +161,14 @@ def test_observed_crossing_ground_speed_is_reported_and_graded_as_a_proxy():
         "mean": pytest.approx(71.5), "p95": pytest.approx(71.5),
         "max": pytest.approx(71.5),
     }
-    # 71.5 m/s sits inside [66.3, 76.6] at the 60 t crossing mass.
+    # 71.5 m/s sits inside the A320's published type-mass-range window.
     assert row["speed_result"] == "pass"
     assert row["verdict"] == "pass"
     assert row["bounds"]["speed_criterion"] == OBSERVED_SPEED_CRITERION_ID
     assert row["crossing_load_factor"] == 1.0
     assert row["crossing_load_factor_source"] == LOAD_FACTOR_ASSUMED_1G
-    assert row["bounds"]["speed_lower_ms"] == pytest.approx(66.3, abs=0.1)
+    assert row["bounds"]["mass_basis"] == "type_mass_range"
+    assert row["bounds"]["speed_lower_ms"] < 71.5 < row["bounds"]["speed_upper_ms"]
     # The airspeed slots stay empty: no crossing airspeed was ever measured.
     assert row["deviation"]["crossing_speed_ms"] is None
     assert report["crossing_speed_ms"] is None

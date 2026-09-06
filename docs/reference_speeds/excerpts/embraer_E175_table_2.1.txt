@@ -1,0 +1,42 @@
+Embraer 175 Airport Planning Manual (APM-2259, May 25/18) -- Table 2.1 Aircraft General Characteristics, verbatim (PDF page 18)
+----------------------------------------------------------------------------------------------------
+
+                                      Table 2.1 - Aircraft General Characteristics
+      DESIGN                                                      AIRCRAFT MODELS
+     WEIGHTS[1]                      STD                         LR              LL                                AR
+                                   37660 kg                   38950 kg        38760 kg                           40530 kg
+          MRW
+                                  (83026 lb)                 (85870 lb)      (85450 lb)                         (89353 lb)
+                                   37500 kg                   38790 kg        38600 kg                           40370 kg
+         MTOW
+                                  (82673 lb)                 (85517 lb)      (85098 lb)                         (89000 lb)
+                                                                                                                 34100 kg
+          MLW                                          34000 kg (74957 lb)
+                                                                                                                (75177 lb)
+                                                                                                                 22500 kg
+        BOW [2]                                        21500 kg (47399 lb)
+                                                                                                                (49604 lb)
+                                                                                         31510 kg                32000 kg
+         MZFW                            31700 kg (69886 lb)
+                                                                                        (69467 lb)              (70548 lb)
+Maximum Payload
+            [2]                                                     10200 kg (22487 lb)
+Maximum Seating
+                                             84 passengers                           70 passengers            86 passengers
+    Capacity
+1. Applicable for standard models. For further information, refer to AFM and AOM.
+2. Standard configuration (weights may vary according to optional equipment installed or interior layouts).
+
+
+
+
+                                                                                                                     Section 2
+  EFFECTIVITY: ALL
+                                                                                                                      Page 2-2
+                                                                                                                                 w-apm2259
+
+
+
+
+                                                                                                                    May 25/18
+                                                                                AIRPORT

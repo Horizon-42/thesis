@@ -33,7 +33,8 @@ class A320FamilyLandingClMax(unittest.TestCase):
     def test_a320_floor_sits_at_or_just_below_published_vls(self):
         """The calibration claim itself: 1.23·Vs1g(64 t) must land at the published
         ≈128 kt CONF FULL VLS, or up to ~3 kt BELOW it — slightly conservative is
-        the right direction for a gate that judges wind-uncorrected ground speed.
+        the right direction for the optimizer's velocity floor, which is what still
+        reads this model (the evaluation gate anchors on published speeds since v9).
         If this drifts, the Cl_max above no longer means what its comment says."""
         aircraft = get_aircraft_parameters("A320")
         aero = aero_params_for_aircraft(aircraft)

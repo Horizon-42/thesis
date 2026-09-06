@@ -30,12 +30,13 @@ TARGET = {
     "m": 60_000.0,
 }
 
-# Narrow-body stall facts: an A320 wing (S = 122.6 m²) with the 30–100 t bucket's landing
-# Cl_max of 2.7 (aero_params_for_aircraft; the A320 family itself is calibrated to 3.0,
-# which the fixture deliberately does not track -- the block is producer-supplied and
-# the tests derive their window from it). At the TARGET mass of 60 t the 1-g window is
-# [66.3, 76.6] m/s, so the default crossing V of 70.0 m/s passes with margin on both sides.
-LANDING_AERO = {"wing_area_m2": 122.6, "cl_max_landing": 2.7}
+# The fixture airframe: an A320, whose published approach speed (FAA Aircraft
+# Characteristics Database: 136 kt at 66,000 kg) scaled to the TARGET mass of 60 t gives
+# a 1-g computed window of [66.7, 77.0] m/s, so the default crossing V of 70.0 m/s passes
+# with margin on both sides. Tests derive their windows through
+# ``evaluation.speed_gate.speed_gate_bounds`` on ``reference_speed(AIRCRAFT_TYPE)``,
+# never from restated numbers.
+AIRCRAFT_TYPE = "A320"
 
 # One row of a computed record's controls (the contract's three columns: thrust
 # fraction, bank, load factor). Straight and level: the speed gate reads load_factor.
@@ -75,9 +76,9 @@ def observed_event(
     *,
     cross_m: float = 0.0,
     vertical_m: float = 0.0,
-    # In the window at the default 60 t A320-class mass ([66.3, 76.6] m/s), so a
-    # default observed fixture passes all three gates; pass None to model an event
-    # that fitted no speed (pre-field or too few speed-bearing samples).
+    # Inside the A320's published type-mass-range window, so a default observed
+    # fixture passes all three gates; pass None to model an event that fitted no
+    # speed (pre-field or too few speed-bearing samples).
     ground_speed_m_s: float | None = 70.0,
 ) -> dict[str, Any]:
     event: dict[str, Any] = {
@@ -138,9 +139,9 @@ def trajectory_payload(
     states = [first, last]
     if subject == "observed":
         source["hae_minus_msl_m"] = 30.0
-        # The resolved-airframe stall facts the baseline speed gate anchors on —
-        # the same block the producer writes for a resolvable icao24.
-        source["landing_aero"] = dict(LANDING_AERO)
+        # The resolved airframe's type — the key the baseline speed gate looks its
+        # published window up by (the harvest writes it for a resolvable icao24).
+        source["aircraft_type"] = AIRCRAFT_TYPE
         if event is not None and event.get("status") == "estimated":
             # The span the real producer serializes: marker + (for censored
             # events) the appended inferred crossing row. final_time_s below
@@ -151,9 +152,9 @@ def trajectory_payload(
             source[CROSSING_SPAN_KEY] = span
             states = states + appended
     else:
-        # Computed records carry the producer-written stall facts the speed gate
-        # anchors on; without them the composite verdict is indeterminate by design.
-        source["landing_aero"] = dict(LANDING_AERO)
+        # Computed records name the type the model flew (flight_scenarios.build);
+        # without it the composite verdict is indeterminate by design.
+        source["dynamics_typecode"] = AIRCRAFT_TYPE
     if event is not None:
         source["observed_threshold_event"] = event
     return {
@@ -259,7 +260,7 @@ def observed_track_payload(
         "landing_time_utc": "2026-08-12T00:00:00Z",
         "flight_key": "TEST1_05L_abc123_20260812T000000Z",
         "hae_minus_msl_m": 30.0,
-        "landing_aero": dict(LANDING_AERO),
+        "aircraft_type": AIRCRAFT_TYPE,
         "observed_threshold_event": event,
         CROSSING_SPAN_KEY: span,
     }

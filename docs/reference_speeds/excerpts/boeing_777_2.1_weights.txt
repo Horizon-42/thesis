@@ -1,0 +1,121 @@
+Boeing 777-200/-200ER/-300 ACAP D6-58329 Rev E (December 2024) -- sections 2.1.1 to 2.1.3 (777-200, three engine makes), verbatim
+---------------------------------------------------------------------------------------------------------------------------------
+
+2.1.1       General Characteristics: Model 777-200 (General Electric Engines)
+
+     CHARACTERISTICS      UNITS                BASELINE AIRPLANE                 HIGH GROSS WEIGHT OPTION
+MAX DESIGN             POUNDS            508,000       517,000        537,000    582,000     592,000     634,500
+   TAXI WEIGHT         KILOGRAMS         230,424       234,507        243,579    263,990     268,526     287,804
+MAX DESIGN             POUNDS            506,000       515,000        535,000    580,000     590,000     632,500
+   TAKEOFF WEIGHT      KILOGRAMS         229,517       233,600        242,671    263,083     267,619     286,897
+MAX DESIGN             POUNDS            441,000       445,000        445,000    460,000     460,000     460,000
+   LANDING WEIGHT      KILOGRAMS         200,034       201,848        201,848    208,652     208,652     208,652
+MAX DESIGN             POUNDS            420,000       420,000        420,000    430,000     430,000     430,000
+   ZERO FUEL WEIGHT    KILOGRAMS         190,508       190,508        190,508    195,044     195,044     195,044
+SPEC OPERATING         POUNDS            298,900       298,900        299,550    304,500     304,500     304,500
+   EMPTY WEIGHT (1)    KILOGRAMS         135,578       135,578        135,873    138,118     138,118     138,118
+MAX STRUCTURAL         POUNDS            121,100       121,100        120,450    125,550     125,550     125,550
+   PAYLOAD (1)         KILOGRAMS          54,930        54,930         54,635    56,948       56,948      56,948
+SEATING                TWO-CLASS                              375 - 30 FIRST + 345 ECONOMY
+   CAPACITY (1)        THREE-CLASS                   305 - 24 FIRST + 54 BUSINESS + 227 ECONOMY
+MAX CARGO -            CUBIC FEET        5,656 (2)     5,656 (2)     5,656 (2)   5,656 (2)   5,656 (2)   5,656 (2)
+   LOWER DECK          CUBIC METERS      160.3 (2)     160.3 (2)     160.3 (2)   160.3 (2)   160.3 (2)   160.3 (2)
+USABLE FUEL            U.S. GALLONS       31,000        31,000         31,000     45,220      45,220      45,220
+                       LITERS            117,347       117,347        117,347    117,347     117,347     117,347
+                       POUNDS            207,700       207,700        207,700    207,700     207,700     207,700
+                       KILOGRAMS          94,230        94,230         94,230     94,230      94,230      94,230
+
+
+NOTES:
+1.         SPEC WEIGHT FOR BASELINE CONFIGURATION OF 375 PASSENGERS. CONSULT WITH
+           AIRLINE FOR SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.         FWD CARGO = 18 LD3'S AT 158 CU FT EACH.
+           AFT CARGO = 14 LD3'S AT 158 CU FT EACH.
+           BULK CARGO = 600 CU FT
+
+
+
+
+                                               D6-58329
+REV E                                      December 2024                                                     2-2
+                                        Not Subject to EAR or ITAR.
+                                Copyright © 2024 Boeing. All Rights Reserved.
+2.1.2       General Characteristics: Model 777-200 (Pratt & Whitney Engines)
+
+     CHARACTERISTICS       UNITS              BASELINE AIRPLANE                  HIGH GROSS WEIGHT OPTION
+MAX DESIGN             POUNDS             508,000      517,000      537,000     582,000     592,000     634,500
+   TAXI WEIGHT         KILOGRAMS          230,424      234,507      243,579     263,990     268,526     287,804
+MAX DESIGN             POUNDS             506,000      515,000      535,000     580,000     590,000     632,500
+   TAKEOFF WEIGHT      KILOGRAMS          229,517      233,600      242,671     263,083     267,619     286,897
+MAX DESIGN             POUNDS             441,000      445,000      445,000     450,000     455,000     455,000
+   LANDING WEIGHT      KILOGRAMS          200,034      201,848      201,848     204,116     206,384     206,384
+MAX DESIGN             POUNDS             420,000      420,000      420,000     430,000     430,000     430,000
+   ZERO FUEL WEIGHT    KILOGRAMS          190,508      190,508      190,508     195,044     195,044     195,044
+SPEC OPERATING         POUNDS             296,600      296,600      297,250     302,200     302,200     302,200
+   EMPTY WEIGHT (1)    KILOGRAMS          134,535      134,535      134,830     137,075     137,075     137,075
+MAX STRUCTURAL         POUNDS             123,400      123,400      122,750     127,800     127,800     127,800
+   PAYLOAD             KILOGRAMS          55,973        55,973       55,678      57,969      57,969      57,969
+SEATING                TWO-CLASS                              375 - 30 FIRST + 345 ECONOMY
+   CAPACITY (1)        THREE-CLASS                   305 - 24 FIRST + 54 BUSINESS + 227 ECONOMY
+MAX CARGO -            CUBIC FEET        5,656 (2)    5,656 (2)     5,656 (2)   5,656 (2)   5,656 (2)   5,656 (2)
+   LOWER DECK          CUBIC METERS      160.3 (2)    160.3 (2)     160.3 (2)   160.3 (2)   160.3 (2)   160.3 (2)
+USABLE FUEL            U.S. GALLONS       31,000        31,000       31,000      45,220      45,220      45,220
+                       LITERS             117,347      117,347      117,347     171,176     171,176     171,176
+                       POUNDS             207,700      207,700      207,700     302,974     302,974     302,974
+                       KILOGRAMS          94,230        94,230       94,230     137,454     137,454     137,454
+
+
+NOTES:
+1.         SPEC WEIGHT FOR BASELINE CONFIGURATION OF 375 PASSENGERS. CONSULT WITH
+           AIRLINE FOR SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.         FWD CARGO = 18 LD3'S AT 158 CU FT EACH.
+           AFT CARGO = 14 LD3'S AT 158 CU FT EACH.
+           BULK CARGO = 600 CU FT
+
+
+
+
+                                               D6-58329
+REV E                                      December 2024                                                     2-3
+                                        Not Subject to EAR or ITAR.
+                                Copyright © 2024 Boeing. All Rights Reserved.
+2.1.3      General Characteristics: Model 777-200 (Rolls-Royce Engines)
+
+     CHARACTERISTICS       UNITS                 BASELINE AIRPLANE                    HIGH GROSS WEIGHT
+MAX DESIGN             POUNDS               508,000       517,000       537,000    582,000     592,000     634,500
+   TAXI WEIGHT         KILOGRAMS            230,424       234,507       243,579    263,990     268,526     287,804
+MAX DESIGN             POUNDS               506,000       515,000       535,000    580,000     590,000     632,500
+   TAKEOFF WEIGHT      KILOGRAMS            229,517       233,600       242,671    263,083     267,619     286,897
+MAX DESIGN             POUNDS               441,000       445,000       445,000    450,000     455,000     455,000
+   LANDING WEIGHT      KILOGRAMS            200,034       201,848       201,848    204,116     206,384     206,384
+MAX DESIGN          POUNDS                  420,000       420,000       420,000    430,000     430,000     430,000
+   ZERO FUEL WEIGHT KILOGRAMS               190,508       190,508       190,508    195,044     195,044     195,044
+SPEC OPERATING         POUNDS               293,400       293,400       294,050    299,000     299,000     299,000
+   EMPTY WEIGHT (1)    KILOGRAMS            133,084       133,084       133,378    135,624     135,624     135,624
+MAX STRUCTURAL         POUNDS               126,600       126,600       125,950    131,000     131,000     131,000
+   PAYLOAD (1)         KILOGRAMS            57,424        57,424        57,129      59,420      59,420      59,420
+SEATING                TWO-CLASS                               375 - 30 FIRST + 345 ECONOMY
+   CAPACITY (1)        THREE-CLASS                     305 - 24 FIRST + 54 BUSINESS + 227 ECONOMY
+MAX CARGO -            CUBIC FEET          5,656 (2)     5,656 (2)     5,656 (2)   5,656 (2)   5,656 (2)   5,656 (2)
+   LOWER DECK          CUBIC METERS        160.3 (2)     160.3 (2)     160.3 (2)   160.3 (2)   160.3 (2)   160.3 (2)
+USABLE FUEL            U.S. GALLONS         31,000        31,000        31,000      45,220      45,220      45,220
+                       LITERS               117,347       117,347       117,347    117,347     117,347     117,347
+                       POUNDS               207,700       207,700       207,700    207,700     207,700     207,700
+                       KILOGRAMS            94,230        94,230        94,230      94,230      94,230      94,230
+
+
+NOTES:
+1.         SPEC WEIGHT FOR BASELINE CONFIGURATION OF 375 PASSENGERS. CONSULT WITH
+           AIRLINE FOR SPECIFIC WEIGHTS AND CONFIGURATIONS.
+2.         FWD CARGO = 18 LD3'S AT 158 CU FT EACH.
+           AFT CARGO = 14 LD3'S AT 158 CU FT EACH.
+           BULK CARGO = 600 CU FT
+
+
+
+
+                                               D6-58329
+REV E                                      December 2024                                                        2-4
+                                        Not Subject to EAR or ITAR.
+                                Copyright © 2024 Boeing. All Rights Reserved.
+2.1.4    General Characteristics: Model 777-300 (General Electric Engines)

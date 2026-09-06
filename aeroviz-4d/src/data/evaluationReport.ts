@@ -7,23 +7,25 @@
  * the vitest fixtures (also pinned to v4) stayed green throughout. Test fixtures now
  * import this constant instead of repeating the string.
  */
-export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v8";
+export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v9";
 
 /**
  * Still-displayable older report versions, in two classes.
  *
- * PRIOR speed-gate versions carry every speed field this file reads; they differ from
- * the current schema in how the gate's LOWER bound was anchored and in what the
- * observed baseline was judged on. v6 graded at 1 g; v7 anchored on the crossing load
- * factor (`crossing_load_factor`, evaluation/docs/THRESHOLD_SPEED_GATE.md §3.5) but
- * declared 1 g for observed rows; v8 measures the observed load factor from ADS-B
- * kinematics and corrects the observed ground speed by the METAR headwind
- * (`crossing_airspeed_estimate_ms`, `wind`). Batches on disk stay readable and the
- * window notes the difference (`isPriorSpeedGateReport`).
+ * PRIOR speed-gate versions carry the speed fields this file reads; they differ from
+ * the current schema in what anchored the window. v6–v8 anchored on the project's
+ * own stall model (`stall_speed_ms`, from a modelled Cl_max): v6 at 1 g, v7 at the
+ * crossing load factor, v8 measuring the observed load factor from ADS-B kinematics
+ * and correcting the observed ground speed by the METAR headwind
+ * (`crossing_airspeed_estimate_ms`, `wind`). v9 anchors on the type's PUBLISHED
+ * approach speed (`vref_low_ms`/`vref_high_ms`, evaluation/docs/THRESHOLD_SPEED_GATE.md
+ * §3.1). Batches on disk stay readable and the window notes the difference
+ * (`isPriorSpeedGateReport`).
  */
 export const PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS = [
   "terminal-approach-evaluation-v6",
   "terminal-approach-evaluation-v7",
+  "terminal-approach-evaluation-v8",
 ] as const;
 
 /**
@@ -68,13 +70,24 @@ export interface EvaluationBounds {
   lateral_m: number;
   vertical_lower_m: number | null;
   vertical_upper_m: number | null;
-  /** v6+: stall-anchored crossing-speed window (evaluation/speed_gate.py). The
-   *  numbers are null when no window could be resolved (unsolved records, no
-   *  crossing, no source.landing_aero, or an observed event without a fitted ground
-   *  speed). Absent entirely in legacy v5 reports. `stall_speed_ms` is the 1-g stall
-   *  speed; v7 adds `stall_speed_at_n_ms`, the stall speed at the crossing load
-   *  factor the lower bound is anchored on. */
+  /** v6+: the crossing-speed window (evaluation/speed_gate.py). The numbers are null
+   *  when no window could be resolved (unsolved records, no crossing, no aircraft
+   *  type or no published entry for it, or an observed event without a fitted ground
+   *  speed). Absent entirely in legacy v5 reports.
+   *  v9: the window is anchored on the type's PUBLISHED approach speed —
+   *  `reference_typecode` names the type, `mass_basis` says whether the window was
+   *  framed at the record's crossing mass ("crossing_mass", computed subjects) or
+   *  over the type's published mass range ("type_mass_range", observed subjects),
+   *  `vref_low_ms`/`vref_high_ms` are the published speed at the framing masses
+   *  (`speed_lower_ms` is the low one lifted by the crossing load factor) and
+   *  `reference_sources` the table's source ids for the speed, the MALW and the
+   *  minimum mass. v6–v8 (prior) carried `stall_speed_ms`/`stall_speed_at_n_ms`. */
   speed_criterion?: string;
+  reference_typecode?: string | null;
+  reference_sources?: { approach_speed: string; malw: string; min_mass: string | null } | null;
+  mass_basis?: "crossing_mass" | "type_mass_range" | null;
+  vref_low_ms?: number | null;
+  vref_high_ms?: number | null;
   stall_speed_ms?: number | null;
   stall_speed_at_n_ms?: number | null;
   speed_lower_ms?: number | null;
@@ -114,6 +127,9 @@ export interface EvaluationRow {
    *  Indeterminate when the airframe is unresolvable or no crossing speed exists.
    *  Absent in legacy v5 reports, whose verdicts never graded speed. */
   speed_result?: EvaluationComponentResult;
+  /** v9: why the speed component is indeterminate (null when it was graded) — on the
+   *  row itself, readable even when the composite is a lateral/vertical fail. */
+  speed_reason?: string | null;
   violations: string[];
   bounds: EvaluationBounds;
   lateral_m?: number | null;
@@ -144,12 +160,10 @@ export interface EvaluationRow {
   crossing_airspeed_estimate_ms?: number | null;
   /** v8 (observed rows): the wind report used, or why none was. */
   wind?: Record<string, number | string | null>;
-  /** v8: how much the speed verdict is worth — the judged value's signed distance to
-   *  the nearest bound (positive inside the window) and that value's declared
-   *  uncertainty: 0 for a model airspeed, the METAR estimate's ±5 kt, null for the
-   *  ground-speed proxy (unknown, not zero). */
+  /** v8+: the judged value's signed distance to the nearest bound (positive inside
+   *  the window, negative outside). v8 also carried `speed_uncertainty_ms`; v9 dropped
+   *  it — the verdict is pass/fail against a published window. */
   speed_margin_ms?: number | null;
-  speed_uncertainty_ms?: number | null;
   heading_rad?: number;
   final_time_s?: number;
   reason?: string;
@@ -199,15 +213,13 @@ export interface EvaluationReport {
    *  (`methodology.observed_crossing_ground_speed`), kept apart from
    *  `crossing_speed_ms`. Null when no row carries one. */
   crossing_ground_speed_ms?: MagnitudeSpread | null;
-  /** v8: spread of the observed rows' METAR-corrected airspeed estimates, how many
-   *  rows were judged on the estimate vs the proxy, and how many estimates sat within
-   *  the declared uncertainty of a bound. */
+  /** v8: spread of the observed rows' METAR-corrected airspeed estimates and how many
+   *  rows were judged on the estimate vs the proxy. */
   crossing_airspeed_estimate_ms?: MagnitudeSpread | null;
   wind_counts?: { estimated: number; unavailable: number };
-  /** v8: speed verdicts within their declared uncertainty of a bound, and speed
-   *  verdicts whose uncertainty is unknown (proxy-judged rows). */
-  speed_marginal?: number;
-  speed_uncertainty_unknown?: number;
+  /** v9: why speed could not be judged, per cause (no type on the record, no
+   *  published entry for the type, no published minimum mass, no crossing speed). */
+  speed_indeterminate_reasons?: Record<string, number>;
   /** v8: `speed_result_counts` split by the criterion each row was judged under, so
    *  an observed batch's estimate-judged and proxy-judged rows are never pooled. */
   speed_result_counts_by_criterion?: Record<string, Record<EvaluationVerdict, number>>;

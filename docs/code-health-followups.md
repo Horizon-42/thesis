@@ -393,9 +393,13 @@ the same grey as a judged-indeterminate one; the fourth UI state / surfaced skip
 product decision the gap document lays out. 13 flights, so it is cosmetic until another
 procedure-less runway enters the fleet.
 
-## 16. An observed record without `landing_aero` cannot say WHY
+## 16. An observed record without `landing_aero` cannot say WHY — RESOLVED BY REMOVAL (2026-09-07)
 
-**Judgement.** `harvest/observed.py` omits the key when the icao24 does not resolve, and a
+The v9 gate keys on `source.aircraft_type` and no longer reads `landing_aero`; an observed
+record without a type reads "airframe could not be resolved", which is now the only way the
+key goes missing (the harvest writes it whenever the icao24 resolves).
+
+**Judgement (original).** `harvest/observed.py` omits the key when the icao24 does not resolve, and a
 record written before 2026-08-24 lacks it for every flight. Evaluation reports both as
 "airframe could not be resolved" — for a stale batch that reason is wrong, and unlike the
 `crossing_span` case there is no cure-naming raise. Fix on the producer side: write
@@ -432,12 +436,46 @@ instead of raising on a degenerate abscissa. Both live on the ts dataset/eval pa
 formal campaign was running from, so they were left untouched; fold them onto the shared
 functions between campaigns (behaviour-identical for validated records).
 
-## 19. Per-type speed-window anchors were calibrated on wind-contaminated ground speeds
+## 19. Per-type speed-window anchors were calibrated on wind-contaminated ground speeds — RESOLVED (2026-09-07, v9)
 
-**Verified** (2026-09-07, `evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md` §9). The A320
+The anchors are no longer calibrated at all: the gate reads the type's PUBLISHED approach
+speed (`aircraft/reference_speeds.json`, provenance in `docs/reference_speeds/README.md`);
+`evaluation/docs/THRESHOLD_SPEED_GATE.md` §3.1 and `BASELINE_SPEED_GATE_RESULTS.md` §10.
+
+**Verified (original)** (2026-09-07, `evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md` §9). The A320
 family's landing Cl_max 3.0 (§8) was derived from proxy ground speeds that the METAR
 correction now shows were reading 5–8 kt slow; with the wind in, the Airbus family sits
 mid-window and the 737 bucket (Cl_max 2.7) crosses at a median 1.37–1.41 × Vs1g(MLW), on
 the +20 kt edge, 40 % "fast". Re-derive the per-type anchors on the corrected airspeed
 (and the A21N landing mass) before quoting any observed speed-fail rate; owner item O4.
 
+## 21. Single-valued FAA approach-speed rows for multi-flap types (E75L, B737, A319, E170, E190)
+
+**Verified** (2026-09-07, `evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md` §10.3). The FAA
+Aircraft Characteristics Database gives ONE approach speed (the maximum-flap value) for these
+types where the dual-value rows (B738 140/144, CRJ9 132/141) carry the reduced-flap speed too.
+Their observed rows produce the v9 gate's residual "fast" clusters (E75L 302 of 3,401, B737
+221 of 5,537), 2–7 kt over an upper edge built from the other flap setting; Eurocontrol's Vat
+for the same types is 6–7 kt higher. Rule A keeps the FAA value. The fix is a PUBLISHED
+reduced-flap V_ref at MALW for each (manufacturer FCOM/QRH excerpt or an FSB report) added as
+`approach_speed_max_kt` with its source in `aircraft/reference_speeds.json` +
+`docs/reference_speeds/README.md` — a data change, no code. Do not widen the window instead.
+
+## 22. Four types publish no minimum operating mass (GLF5, C25A, LJ45, C525)
+
+**Verified** (2026-09-07). 404 observed rows grade speed-indeterminate with the type named
+(`speed_indeterminate_reasons`). The manufacturers' public pages returned 403/404 at retrieval
+time (`docs/reference_speeds/README.md` "Types with no published minimum mass"); a TCDS does
+not state OEW. A published BOW/OEW (spec sheet, APM) for each closes it as a cited JSON row.
+
+## 23. The optimizer's velocity floor and V_ref target still come from the stall model
+
+**Verified** (opus review, 2026-09-07). Since v9 the evaluation gate anchors on the published
+approach speed while `4dTrajectory/optimization/scenario_optimization.py` floors velocity at
+`1.10 × stall_speed_ms` on `aircraft.aero_params` and targets the class-default 145 kt. Measured
+gap 1.23·Vs1g(MALW) − published, over the 39 OpenAP-resolvable types: LJ45 −73 kt, GLF5 −37,
+GLF6 −33, C525/C25A −31, GL5T −27, A306 −16, C550 −16, C56X −15, CRJ2 −13, B762 −9, A320 −8.5,
+B788 −8; +8 B735, +6 B734 — the bizjet rows fly fallback A320 dynamics, so a floor-riding
+solve of one fails v9 by 30–70 kt. Feed the floor's reference and the target V_ref from
+`aircraft.reference_speeds` (the same table the gate reads) when the optimizer is next
+re-solved; do not widen the gate (`THRESHOLD_SPEED_GATE.md` §7).

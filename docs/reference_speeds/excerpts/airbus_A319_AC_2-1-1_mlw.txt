@@ -1,0 +1,76 @@
+Airbus A319 AC, Jun 01/24 -- subject 2-1-1 General Aircraft Characteristics Data (weight variants, first page), verbatim
+----------------------------------------------------------------------------------------------------
+
+2-1-1      General Aircraft Characteristics Data
+
+
+**ON A/C A319-100 A319neo
+General Aircraft Characteristics Data
+
+**ON A/C A319-100
+1.   The following table gives characteristics of A319-100 models, these data are specific to each
+     weight variant:
+
+
+                                         Aircraft Characteristics
+                                                    WV000             WV001             WV002
+Maximum Ramp Weight (MRW)                          64 400 kg         70 400 kg         75 900 kg
+Maximum Taxi Weight (MTW)                         (141 978 lb)      (155 205 lb)      (167 331 lb)
+Maximum Take-Off Weight (MTOW)                     64 000 kg         70 000 kg         75 500 kg
+                                                  (141 096 lb)      (154 324 lb)      (166 449 lb)
+Maximum Landing Weight (MLW)                       61 000 kg         61 000 kg         62 500 kg
+                                                  (134 482 lb)      (134 482 lb)      (137 789 lb)
+Maximum Zero Fuel Weight (MZFW)                    57 000 kg         57 000 kg         58 500 kg
+                                                  (125 663 lb)      (125 663 lb)      (128 970 lb)
+
+                                         Aircraft Characteristics
+                                                   WV002
+                                                                      WV003             WV004
+                                                     ACJ
+Maximum Ramp Weight (MRW)                         75 900 kg          68 400 kg         68 400 kg
+Maximum Taxi Weight (MTW)                        (167 331 lb)       (150 796 lb)      (150 796 lb)
+Maximum Take-Off Weight (MTOW)                    75 500 kg          68 000 kg         68 000 kg
+                                                 (166 449 lb)       (149 914 lb)      (149 914 lb)
+Maximum Landing Weight (MLW)                      62 500 kg          61 000 kg         62 500 kg
+                                                 (137 789 lb)       (134 482 lb)      (137 789 lb)
+Maximum Zero Fuel Weight (MZFW)                   58 500 kg          57 000 kg         58 500 kg
+                                                 (128 970 lb)       (125 663 lb)      (128 970 lb)
+
+
+
+
+                                                                                              Page 1
+                                                               2-1-1                        Jun 01/24
+                                          @A319
+              AIRCRAFT CHARACTERISTICS - AIRPORT AND MAINTENANCE PLANNING
+
+
+
+                                   Aircraft Characteristics
+                                                                WV005
+                                          WV005                                        WV006
+                                                                  ACJ
+Maximum Ramp Weight (MRW)              70 400 kg               70 400 kg              73 900 kg
+Maximum Taxi Weight (MTW)             (155 205 lb)            (155 205 lb)           (162 922 lb)
+Maximum Take-Off Weight (MTOW)         70 000 kg               70 000 kg              73 500 kg
+                                      (154 324 lb)            (154 324 lb)           (162 040 lb)
+Maximum Landing Weight (MLW)           62 500 kg               62 500 kg              62 500 kg
+                                      (137 789 lb)            (137 789 lb)           (137 789 lb)
+Maximum Zero Fuel Weight (MZFW)        58 500 kg               58 500 kg              58 500 kg
+                                      (128 970 lb)            (128 970 lb)           (128 970 lb)
+
+                                   Aircraft Characteristics
+                                        WV007                 WV008                    WV009
+Maximum Ramp Weight (MRW)              75 900 kg             64 400 kg                66 400 kg
+Maximum Taxi Weight (MTW)             (167 331 lb)          (141 978 lb)             (146 387 lb)
+Maximum Take-Off Weight (MTOW)         75 500 kg             64 000 kg                66 000 kg
+                                      (166 449 lb)          (141 096 lb)             (145 505 lb)
+Maximum Landing Weight (MLW)           61 000 kg             62 500 kg                62 500 kg
+                                      (134 482 lb)          (137 789 lb)             (137 789 lb)
+Maximum Zero Fuel Weight (MZFW)        57 000 kg             58 500 kg                58 500 kg
+                                      (125 663 lb)          (128 970 lb)             (128 970 lb)
+
+                                  Aircraft Characteristics
+                             WV010                                           WV013        WV014
+                                           WV011          WV012
+                              ACJ                                             ACJ          ACJ

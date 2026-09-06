@@ -26,11 +26,12 @@ class AeroParams:
 # on final in CONF FULL the FBW lowest selectable speed IS VLS = 1.23·Vs1g, and
 # published VLS figures (≈128 kt CAS at 64 t for the A320) invert through this
 # module's stall formula to Cl_max ≈ 2.9–3.0 — the slats + fowler-flap high-lift
-# system genuinely outperforms the 737's. Measured consequence of the old shared
-# 2.7 (evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md §5): the family's
-# crossing-speed windows sat ~7 kt high and 45–92 % of its real crossings graded
-# "too slow", while the 737 family measured healthy at 2.7 — weather cannot tell
-# Airbus from Boeing, so the anchor was the error. 3.0 centres the measured fleet.
+# system genuinely outperforms the 737's. It was first measured through the
+# evaluation speed gate (evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md §5: at 2.7
+# the family's windows sat ~7 kt high). Since 2026-09-07 the gate anchors on the
+# type's PUBLISHED approach speed and no longer reads this model; the value stays
+# because the optimizer's velocity floor and the dynamics' stall branch still do,
+# and 3.0 is the value that puts 1.23·Vs1g at the published VLS.
 _A320_FAMILY = frozenset({"A318", "A319", "A320", "A321", "A19N", "A20N", "A21N"})
 _A320_FAMILY_LANDING_CL_MAX = 3.0
 

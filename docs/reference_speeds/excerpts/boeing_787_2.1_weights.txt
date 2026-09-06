@@ -1,0 +1,85 @@
+Boeing 787 ACAP D6-58333 Rev Q (October 2025) -- sections 2.1.1 (787-8) and 2.1.2 (787-9), verbatim. NOTE: no OPERATING EMPTY WEIGHT row is published in this document.
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2.1.1    General Characteristics: Model 787-8
+
+
+   CHARACTERISTICS           UNITS                              MODEL 787-8 *[1]
+
+
+ MAX DESIGN             POUNDS                                         503,500
+    TAXI WEIGHT         KILOGRAMS                                      228,383
+ MAX DESIGN             POUNDS                                         502,500
+    TAKEOFF WEIGHT      KILOGRAMS                                      227,930
+ MAX DESIGN             POUNDS                                         380,000
+    LANDING WEIGHT      KILOGRAMS                                      172,365
+ MAX DESIGN ZERO        POUNDS                                         355,000
+    FUEL WEIGHT         KILOGRAMS                                      161,025
+ SEATING                ONE CLASS                        359 ALL-ECONOMY SEATS;
+    CAPACITY                                             FAA EXIT LIMIT = 381 SEATS
+                        MIXED CLASS              242 DUAL-CLASS; 24 BUSINESS CLASS,
+                                                  218 ECONOMY CLASS (SEE SEC 2.4)
+ MAX CARGO -            CUBIC FEET                                         4,826
+    LOWER DECK *[2]     CUBIC METERS                                       136.7
+ USABLE FUEL *[3]       U.S. GALLONS                                   33,340
+                        LITERS                                         126,206
+                        POUNDS                                         223,378
+                        KILOGRAMS                                      101,343
+
+
+NOTES:
+*[1] GENERAL CHARACTERISTICS ARE THE SAME FOR BOTH GENERAL ELECTRIC AND ROLLS
+     ROYCE ENGINES.
+*[2] 16 LD-3 CONTAINERS IN FWD COMPARTMENT AT 158 CU FT (4.5 CU M) EACH; 12 LD-3
+     CONTAINERS IN AFT COMPARTMENT; 402 CU FT (11.4 CU M) IN BULK CARGO COMPARTMENT.
+     SEE SEC 2.6 FOR OTHER LOADING COMBINATIONS.
+*[3] FUEL DENSITY = 6.7 LBS/US GAL
+
+
+
+
+                                          D6-58333
+REV Q                                   October 2025                                  2-2
+                                   Not Subject to EAR or ITAR.
+                           Copyright © 2025 Boeing. All Rights Reserved.
+2.1.2    General Characteristics: Model 787-9
+
+
+   CHARACTERISTICS           UNITS                                   MODEL 787-9 *[1]
+
+
+ MAX DESIGN             POUNDS                            563,000                       573,000
+    TAXI WEIGHT         KILOGRAMS                         255,372                       259,908
+ MAX DESIGN             POUNDS                            561,500                       571,500
+    TAKEOFF WEIGHT      KILOGRAMS                         254,692                       259,228
+ MAX DESIGN             POUNDS                            425,000                       425,000
+    LANDING WEIGHT      KILOGRAMS                         192,776                       192,776
+ MAX DESIGN ZERO        POUNDS                            400,000                       400,000
+    FUEL WEIGHT         KILOGRAMS                         181,436                       181,436
+ SEATING                ONE CLASS                             406 ALL-ECONOMY SEATS;
+    CAPACITY                                                  FAA EXIT LIMIT = 420 SEATS
+                        MIXED CLASS                   290 DUAL-CLASS; 28 BUSINESS CLASS,
+                                                       262 ECONOMY CLASS (SEE SEC 2.4)
+ MAX CARGO -            CUBIC FEET                         6,090                         6,090
+    LOWER DECK *[2]     CUBIC METERS                       172.4                         172.4
+ USABLE FUEL *[3]       U.S. GALLONS                       33,399                       33,399
+                        LITERS                            126,429                       126,429
+                        POUNDS                            223,773                       223,773
+                        KILOGRAMS                         101,522                       101,522
+
+
+NOTES:
+*[1] GENERAL CHARACTERISTICS ARE THE SAME FOR BOTH GENERAL ELECTRIC AND ROLLS
+     ROYCE ENGINES.
+*[2] 20 LD-3 CONTAINERS IN FWD COMPARTMENT AT 158 CU FT (4.5 CU M) EACH; 16 LD-3
+     CONTAINERS IN AFT COMPARTMENT; 402 CU FT (11.4 CU M) IN BULK CARGO COMPARTMENT.
+     SEE SEC 2.6 FOR OTHER LOADING COMBINATIONS.
+*[3] FUEL DENSITY = 6.7 LBS/US GAL
+
+
+
+
+                                          D6-58333
+REV Q                                   October 2025                                              2-3
+                                   Not Subject to EAR or ITAR.
+                           Copyright © 2025 Boeing. All Rights Reserved.

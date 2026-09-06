@@ -1,0 +1,84 @@
+Bombardier CRJ100/200/440 Airport Planning Manual CSP A-020 Rev 8 (Jan 10/2016) -- page 00-02-01 Table 1 Aircraft Characteristics, verbatim
+----------------------------------------------------------------------------------------------------
+
+
+              Usable Fuel.                                 The usable fuel available for the aircraft
+                                                           engines.
+
+    C.      General Airplane Characteristics
+
+                                    Table 1 − Aircraft Characteristics
+
+
+    Model CL−600−2B19          CRJ100/200      CRJ100 ER      CRJ100 LR       CRJ200 ER        CRJ200 LR
+
+Engines                        2 GE CF34      2 GE CF34      2 GE CF34       2 GE CF34        2 GE CF34
+                               −3A1/−3B1      −3A1           −3A1            −3B1             −3B1
+
+Mode                           Passenger      Passenger      Passenger       Passenger        Passenger
+
+Maximum Seating Capacity       50             50             50              50               50
+
+Maximum           Pounds       47700          51250          53250           51250            53250
+Design Taxi
+                  Kilograms    21636          23247          24154           23247            24154
+Weight
+(MTW)
+
+Maximum           Pounds       44700          47000          47000           47000            47000
+Design
+                  Kilograms    20276          21319          21319           21319            21319
+Landing
+Weight
+(MLW)
+
+Maximum           Pounds       47450          51000          53000           51000            53000
+Design Take−
+                  Kilograms    21523          23133          24041           23133            24041
+Off Weight
+(MTOW)
+
+Operating         Pounds       30500          30500          30500           30500            30500
+Empty Weight
+                  Kilograms    13835          13835          13835           13835            13835
+(OWE)
+
+Maximum           Pounds       42200          44000          44000           44000            44000
+Design Zero
+                  Kilograms    19142          19958          19958           19958            19958
+Fuel Weight
+(MZFW)
+
+Usable Fuel       US Gallons   1400           2135           2135            2135             2135
+                  Liters
+                               5300           8081           8081            8081             8081
+
+Maximum           Pounds       11700          13500          13500           13500            13500
+Payload 1
+                  Kilograms    5307           6124           6124            6124             6124
+
+
+
+
+CSP A−020 − MASTER
+EFFECTIVITY: **ON A/C ALL
+
+                                                                  00−02−01
+                                                                                                     Page 2
+                                                                                                Jan 10/2016
+                                         C
+                                       AIRPORT PLANNING MANUAL
+
+    Model CL−600−2B19             CRJ100/200      CRJ100 ER      CRJ100 LR       CRJ200 ER        CRJ200 LR
+
+Maximum Cargo Volume 2
+
+1Please note that the maximum payload weight changes from flight to flight, as the OWE changes. (MZFW − OWE =
+
+Max. Payload)
+
+2Cargo volume varies according to cabin layout.
+
+
+
+

@@ -80,6 +80,7 @@ describe("isEvaluationReport observed availability contract", () => {
   it.each([
     "terminal-approach-evaluation-v6",
     "terminal-approach-evaluation-v7",
+    "terminal-approach-evaluation-v8",
   ])("accepts the earlier speed-gated report %s as prior, not legacy", (version) => {
     const prior = { ...reportWith(undefined), schema_version: version };
     expect(isEvaluationReport(prior)).toBe(true);

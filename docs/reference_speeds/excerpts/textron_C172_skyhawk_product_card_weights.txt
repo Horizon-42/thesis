@@ -1,0 +1,18 @@
+Textron Aviation / Cessna Skyhawk (172S) product card -- WEIGHTS block, verbatim (right-hand column of a 3-column layout)
+----------------------------------------------------------------------------------------------------
+
+
+          WEIGHTS
+
+          Max Takeoff Weight                          2,550 lb           1,157 kg
+
+          Basic Empty Weight                           1,680 lb           762 kg
+
+          Useful Load                                    878 lb           398 kg
+
+          P OW E R P L A N T
+
+          Manufacturer                                                Lycoming
+
+          Model                                                     IO-360-L2A
+

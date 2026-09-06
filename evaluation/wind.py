@@ -10,11 +10,11 @@ the archive CSV) and is joined to each flight by its landing time:
     headwind = W · cos(direction_from − runway course)      # both degrees TRUE
     airspeed estimate = crossing ground speed + headwind
 
-The estimate is declared with a fixed uncertainty (``AIRSPEED_ESTIMATE_UNCERTAINTY_MS``,
-5 kt: the tower's 10 m wind is not the wind at the threshold, reports are hourly and
-gusty). A report older than ``WIND_MAX_AGE_S`` or a variable-direction wind yields NO
-estimate, and the row says so and falls back to the ground-speed proxy — never
-silently.
+The correction is deterministic and its limits are stated, not modelled: the tower's
+10 m wind is not the wind at the threshold, reports are hourly with specials, gusts
+are not applied. A report older than ``WIND_MAX_AGE_S`` or a variable-direction wind
+yields NO estimate, and the row says so and falls back to the ground-speed proxy —
+never silently.
 """
 
 from __future__ import annotations
@@ -33,8 +33,6 @@ WIND_SOURCE = "iem_asos_metar"
 # The nearest report may be this far from the landing time (routine reports are hourly
 # at :51-:56; specials fill in when the weather moves).
 WIND_MAX_AGE_S = 1800.0
-# Declared, not fitted: the tower wind vs the threshold wind, hourly sampling, gusts.
-AIRSPEED_ESTIMATE_UNCERTAINTY_MS = kt_to_ms(5.0)
 _IEM_HEADER = ("station", "valid", "drct", "sknt", "gust")
 _IEM_MISSING = "M"
 

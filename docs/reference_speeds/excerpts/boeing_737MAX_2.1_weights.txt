@@ -1,0 +1,68 @@
+Boeing 737 MAX ACAP D6-38A004 Rev K (July 2025) -- sections 2.1.2 (737-8) and 2.1.5 (737-9), verbatim. NOTE: no OPERATING EMPTY WEIGHT row is published in this document.
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2.1.2 General Characteristics: Model 737-8
+
+   CHARACTERISTICS              UNITS                         MODEL 737-8
+ MAX DESIGN               POUNDS                    159,900        180,300   182,700
+   TAXI WEIGHT            KILOGRAMS                 72,529         81,782    82,871
+ MAX DESIGN               POUNDS                    159,400        179,800   182,200
+   TAKEOFF WEIGHT         KILOGRAMS                 72,302         81,555    82,644
+ MAX DESIGN               POUNDS                    150,300        150,300   152,800
+   LANDING WEIGHT         KILOGRAMS                 68,174         68,174    69,308
+ MAX DESIGN               POUNDS                    142,900        142,900   145,400
+   ZERO FUEL WEIGHT       KILOGRAMS                 64,818         64,818    65,952
+ SEATING CAPACITY         TWO-CLASS                   178            178      178
+                          SINGLE-CLASS                189            189      189
+ MAX CARGO VOLUME         CUBIC FEET                 1,515          1,515    1,515
+   LOWER DECK             CUBIC METERS                42.9           42.9     42.9
+ USABLE FUEL *[1]         US GALLONS                 6,820          6,820    6,820
+                          LITERS                     25,816         25,816   25,816
+                          POUNDS                     45,694         45,694   45,694
+                          KILOGRAMS                  20,730         20,730   20,730
+
+NOTES:
+*[1] FUEL DENSITY = 6.7 LBS/US GAL
+
+
+
+
+                                         D6-38A004
+REV K                                     July 2025                                    2-3
+                                   Not Subject to EAR or ITAR.
+                           Copyright © 2025 Boeing. All Rights Reserved.
+                    737-10 INFORMATION IS PRELIMINARY
+
+
+2.1.5 General Characteristics: Model 737-9
+
+  CHARACTERISTICS             UNITS                          MODEL 737-9
+ MAX DESIGN              POUNDS                    168,700       190,400   195,200
+   TAXI WEIGHT           KILOGRAMS                 76,521        86,363    88,541
+ MAX DESIGN              POUNDS                    168,200       189,900   194,700
+   TAKEOFF WEIGHT        KILOGRAMS                 76,294        86,137    88,314
+ MAX DESIGN              POUNDS                    155,700       155,700   163,900
+   LANDING WEIGHT        KILOGRAMS                 70,624        70,624    74,343
+ MAX DESIGN              POUNDS                    148,300       148,300   156,500
+   ZERO FUEL WEIGHT      KILOGRAMS                 67,267        67,267    70,987
+ SEATING CAPACITY        TWO-CLASS                   193           193      193
+                         SINGLE-CLASS                220           220      220
+ MAX CARGO VOLUME        CUBIC FEET                 1,786         1,786    1,786
+   LOWER DECK            CUBIC METERS                50.5          50.5     50.5
+ USABLE FUEL *[1]        US GALLONS                 6,820         6,820    6,820
+                         LITERS                     25,816        25,816   25,816
+                         POUNDS                     45,694        45,694   45,694
+                         KILOGRAMS                  20,730        20,730   20,730
+
+NOTES:
+*[1] FUEL DENSITY = 6.7 LBS/US GAL
+
+
+
+
+                                         D6-38A004
+REV K                                     July 2025                                  2-6
+                                   Not Subject to EAR or ITAR.
+                           Copyright © 2025 Boeing. All Rights Reserved.
+                                      737-10 INFORMATION IS PRELIMINARY
+

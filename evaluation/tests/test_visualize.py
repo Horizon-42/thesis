@@ -70,7 +70,7 @@ def test_rendered_payload_is_strict_json_and_escapes_script_close(tmp_path):
     # baseline on its ground-speed proxy. Positive pins: the old negative pins on
     # retired wording could never fail again, and the note they guarded was the one
     # that had actually gone stale.
-    assert "[1.23·Vs(n), 1.23·Vs1g + 20 kt]" in page
+    assert "[V_ref,lo·√n, V_ref,hi + 20 kt]" in page and "docs/reference_speeds" in page
     assert "corrected by the field's METAR headwind into an airspeed estimate" in page
     assert "V judged (m/s)" in page
     assert "</script><img" not in page

@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from evaluation import evaluate_batch, evaluate_record, record_from_dict
+from aircraft.reference_speeds import reference_speed
+from evaluation import evaluate_batch, evaluate_record, record_from_dict, speed_gate_bounds
 from evaluation.speed_gate import (
     OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID,
     OBSERVED_SPEED_CRITERION_ID,
 )
-from evaluation.tests.factories import assessment_context, observed_track_payload
+from evaluation.tests.factories import AIRCRAFT_TYPE, assessment_context, observed_track_payload
 from evaluation.wind import (
-    AIRSPEED_ESTIMATE_UNCERTAINTY_MS,
     WIND_MAX_AGE_S,
     WindObservation,
     WindTable,
@@ -36,6 +36,12 @@ RDU,2026-08-12 02:51,45.00,12.00,M
 # the fixture context): the nearest report, 00:10, is a 10 kt wind FROM 180 = a
 # tailwind; the calm 23:00 report is an hour away and not the nearest.
 LANDING = "2026-08-12T00:00:00Z"
+# The observed window (the type's published mass range at 1 g), through the gate's
+# own function: the tests place ground speeds relative to its lower edge.
+_LOWER = speed_gate_bounds(
+    reference_speed(AIRCRAFT_TYPE), load_factor=1.0, crossing_mass_kg=None
+).lower_ms
+_TAIL_MS = kt_to_ms(10.0)
 
 
 def _table(tmp_path: Path) -> WindTable:
@@ -100,50 +106,34 @@ def test_load_wind_tables_keys_by_airport_and_tolerates_an_absent_root(tmp_path)
 
 
 def test_a_tailwind_turns_a_passing_ground_speed_into_a_failing_airspeed_estimate(tmp_path):
-    """72 m/s over the ground with 10 kt (5.1 m/s) on the tail is 66.9 m/s of air: below
-    the 1-g floor of 66.3? No -- above it by 0.6 m/s, and marginal. Push the tailwind
-    case to a clear fail with 68 m/s."""
+    """A ground speed 2 m/s above the window's floor with 10 kt (5.1 m/s) on the tail is
+    3.1 m/s of air BELOW it: the proxy passes, the estimate fails, and the row's
+    margin is the signed distance to the floor."""
     table = _table(tmp_path)
     context = assessment_context()
+    ground = _LOWER + 2.0
     proxy = evaluate_record(
-        record_from_dict(observed_track_payload(ground_speed_m_s=68.0)), context=context
+        record_from_dict(observed_track_payload(ground_speed_m_s=ground)), context=context
     )
     assert proxy.speed_result == "pass"
     assert proxy.speed_criterion == OBSERVED_SPEED_CRITERION_ID
     assert proxy.wind["status"] == "unavailable" and proxy.crossing_airspeed_estimate_ms is None
+    assert proxy.speed_margin_ms == pytest.approx(2.0)
 
     corrected = evaluate_record(
-        record_from_dict(observed_track_payload(ground_speed_m_s=68.0)),
+        record_from_dict(observed_track_payload(ground_speed_m_s=ground)),
         context=context, wind=table,
     )
     assert corrected.speed_criterion == OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID
-    assert corrected.crossing_airspeed_estimate_ms == pytest.approx(68.0 - kt_to_ms(10.0))
+    assert corrected.crossing_airspeed_estimate_ms == pytest.approx(ground - _TAIL_MS)
     assert corrected.speed_result == "fail"
-    assert corrected.wind["headwind_ms"] == pytest.approx(-kt_to_ms(10.0))
-    # 3.5 m/s below the floor, uncertainty 2.6 m/s: outside its own error bar.
-    assert corrected.speed_margin_ms == pytest.approx(-(corrected.speed_bounds.lower_ms - corrected.crossing_airspeed_estimate_ms))
-    assert corrected.speed_uncertainty_ms == pytest.approx(AIRSPEED_ESTIMATE_UNCERTAINTY_MS)
-    assert abs(corrected.speed_margin_ms) > corrected.speed_uncertainty_ms
-    # The proxy row's uncertainty is unknown, not zero.
-    assert proxy.speed_uncertainty_ms is None and proxy.speed_margin_ms is not None
+    assert corrected.wind["headwind_ms"] == pytest.approx(-_TAIL_MS)
+    assert corrected.speed_margin_ms == pytest.approx(2.0 - _TAIL_MS)
+    # The same window frames both: the correction moves the judged value, not the bounds.
+    assert corrected.speed_bounds.lower_ms == pytest.approx(proxy.speed_bounds.lower_ms)
 
 
-def test_an_estimate_within_five_knots_of_a_bound_is_marginal(tmp_path):
-    table = _table(tmp_path)
-    context = assessment_context()
-    # 72.0 - 5.14 = 66.86 m/s: 0.6 m/s above the 66.3 m/s floor -- passes, marginally.
-    result = evaluate_record(
-        record_from_dict(observed_track_payload(ground_speed_m_s=72.0)),
-        context=context, wind=table,
-    )
-    assert result.speed_result == "pass"
-    assert 0.0 < result.speed_margin_ms <= AIRSPEED_ESTIMATE_UNCERTAINTY_MS
-    assert result.speed_margin_ms == pytest.approx(
-        result.crossing_airspeed_estimate_ms - result.speed_bounds.lower_ms
-    )
-
-
-def test_the_report_counts_estimated_and_proxy_rows_and_marginals(tmp_path):
+def test_the_report_counts_estimated_and_proxy_rows(tmp_path):
     table = _table(tmp_path)
     contexts = {("KRDU", "05L"): assessment_context()}
     stale = observed_track_payload(ground_speed_m_s=72.0)
@@ -157,15 +147,13 @@ def test_the_report_counts_estimated_and_proxy_rows_and_marginals(tmp_path):
         winds={"KRDU": table},
     )
     assert report["wind_counts"] == {"estimated": 1, "unavailable": 1}
-    assert report["speed_marginal"] == 1
-    assert report["speed_uncertainty_unknown"] == 1
+    assert report["speed_indeterminate_reasons"] == {}
     assert report["speed_result_counts_by_criterion"] == {
         OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID: {"pass": 1, "fail": 0, "indeterminate": 0},
         OBSERVED_SPEED_CRITERION_ID: {"pass": 1, "fail": 0, "indeterminate": 0},
     }
     rows = report["trajectories"]
-    assert rows[0]["speed_uncertainty_ms"] == pytest.approx(AIRSPEED_ESTIMATE_UNCERTAINTY_MS)
-    assert rows[1]["speed_uncertainty_ms"] is None and rows[1]["speed_margin_ms"] is not None
+    assert rows[0]["speed_margin_ms"] is not None and rows[1]["speed_margin_ms"] is not None
     assert rows[0]["bounds"]["speed_criterion"] == OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID
     assert rows[0]["crossing_airspeed_estimate_ms"] == pytest.approx(72.0 - kt_to_ms(10.0))
     assert rows[0]["wind"]["status"] == "estimated"
@@ -175,12 +163,12 @@ def test_the_report_counts_estimated_and_proxy_rows_and_marginals(tmp_path):
     assert report["crossing_airspeed_estimate_ms"]["max"] == pytest.approx(72.0 - kt_to_ms(10.0))
     methodology = report["methodology"]["terminal_speed"]["observed_wind_correction"]
     assert methodology["criterion"] == OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID
-    assert methodology["uncertainty_ms"] == pytest.approx(AIRSPEED_ESTIMATE_UNCERTAINTY_MS)
+    assert "limits" in methodology and "uncertainty_ms" not in methodology
 
 
 def test_a_calm_report_is_an_estimate_with_zero_correction(tmp_path):
-    """289 of KRDU's 2,256 reports are calm: the estimate criterion applies, the
-    correction is zero, and the row still carries the estimate's uncertainty."""
+    """289 of KRDU's 2,256 reports are calm: the estimate criterion applies and the
+    correction is zero."""
     table = _table(tmp_path)
     calm = observed_track_payload(ground_speed_m_s=70.0)
     calm["source"]["landing_time_utc"] = "2026-08-11T23:05:00Z"   # nearest: the calm 23:00
@@ -188,7 +176,6 @@ def test_a_calm_report_is_an_estimate_with_zero_correction(tmp_path):
     assert result.speed_criterion == OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID
     assert result.crossing_airspeed_estimate_ms == pytest.approx(70.0)
     assert result.wind["headwind_ms"] == 0.0 and result.wind["status"] == "estimated"
-    assert result.speed_uncertainty_ms == pytest.approx(AIRSPEED_ESTIMATE_UNCERTAINTY_MS)
 
 
 def test_several_csv_files_join_one_station_and_malformed_files_raise(tmp_path):
@@ -221,4 +208,4 @@ def test_without_any_wind_table_the_batch_is_judged_on_the_proxy_and_says_so():
     )
     assert report["wind_counts"] == {"estimated": 0, "unavailable": 1}
     assert report["trajectories"][0]["wind"]["status"] == "unavailable"
-    assert report["speed_marginal"] == 0 and report["speed_uncertainty_unknown"] == 1
+    assert report["trajectories"][0]["speed_result"] == "pass"

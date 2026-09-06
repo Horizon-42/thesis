@@ -79,10 +79,12 @@ class ArrivalDeviation:
     heading_rad: float
     flight_time_s: float
     # Absolute state AT the graded event, for the speed gate. Mass is the crossing
-    # state's own on every subject (the observed record carries its resolved airframe's
-    # landing mass). The crossing AIRSPEED is the computed path's state V; it stays
-    # None on observed rows, whose V is ground-speed derived — the gate judges those on
-    # ``crossing_ground_speed_ms`` below as a stated proxy (speed_gate.OBSERVED_SPEED_POLICY).
+    # state's own: the model's on computed subjects (it frames their window); on
+    # observed rows it is the harvest's assumed airframe mass, reported but NOT used
+    # to frame the window (the flight's mass is unmeasured, so the gate spans the
+    # type's published mass range -- speed_gate.OBSERVED_SPEED_POLICY). The crossing
+    # AIRSPEED is the computed path's state V; it stays None on observed rows, whose V
+    # is ground-speed derived — the gate judges those on ``crossing_ground_speed_ms``.
     crossing_mass_kg: float
     # The load factor the crossing was flown at: the control active over the final
     # rollout step when the record carries controls, else a declared 1 g — the
@@ -375,8 +377,8 @@ def _observed_arrival(
             flight_time_s=float(record.final_time_s),
             extrapolation_m=extrapolation_m,
             # No crossing AIRSPEED was measured (the state's V is ground-speed derived);
-            # the gate judges observed subjects on the event's GROUND speed as a stated
-            # proxy, anchored on the record's resolved-airframe crossing mass.
+            # the gate judges observed subjects on the event's GROUND speed (wind-
+            # corrected when a report exists) over the type's published mass range.
             crossing_speed_ms=None,
             crossing_ground_speed_ms=event.get("crossing_ground_speed_m_s"),
             crossing_load_factor_window=window,

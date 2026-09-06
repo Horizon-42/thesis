@@ -1,0 +1,84 @@
+Airbus A320 AC, Jun 01/24 -- subject 2-1-1 General Aircraft Characteristics Data (A320-200 weight variants), verbatim
+----------------------------------------------------------------------------------------------------
+
+2-1-1      General Aircraft Characteristics Data
+
+
+**ON A/C A320-200 A320neo
+General Aircraft Characteristics Data
+
+**ON A/C A320-200
+1.   The following table gives characteristics of A320-200 models, these data are specific to each
+     weight variant:
+
+
+                                          Aircraft Characteristics
+                                          WV000            WV001             WV002           WV003
+Maximum Ramp Weight (MRW)                73 900 kg        68 400 kg         70 400 kg       75 900 kg
+Maximum Taxi Weight (MTW)               (162 922 lb)     (150 796 lb)      (155 205 lb)    (167 331 lb)
+Maximum Take-Off Weight                  73 500 kg        68 000 kg         70 000 kg       75 500 kg
+(MTOW)                                  (162 040 lb)     (149 914 lb)      (154 324 lb)    (166 449 lb)
+Maximum Landing Weight (MLW)             64 500 kg        64 500 kg         64 500 kg       64 500 kg
+                                        (142 198 lb)     (142 198 lb)      (142 198 lb)    (142 198 lb)
+Maximum Zero Fuel Weight                 60 500 kg        60 500 kg         60 500 kg       60 500 kg
+(MZFW)                                  (133 380 lb)     (133 380 lb)      (133 380 lb)    (133 380 lb)
+
+                                          Aircraft Characteristics
+                                          WV004            WV005              WV006          WV007
+Maximum Ramp Weight (MRW)                71 900 kg        67 400 kg          66 400 kg      77 400 kg
+Maximum Taxi Weight (MTW)               (158 512 lb)     (148 592 lb)       (146 387 lb)   (170 638 lb)
+Maximum Take-Off Weight                  71 500 kg        67 000 kg          66 000 kg      77 000 kg
+(MTOW)                                  (157 630 lb)     (147 710 lb)       (145 505 lb)   (169 756 lb)
+Maximum Landing Weight (MLW)             64 500 kg        64 500 kg          64 500 kg      64 500 kg
+                                        (142 198 lb)     (142 198 lb)       (142 198 lb)   (142 198 lb)
+Maximum Zero Fuel Weight                 60 500 kg        60 500 kg          60 500 kg      60 500 kg
+(MZFW)                                  (133 380 lb)     (133 380 lb)       (133 380 lb)   (133 380 lb)
+
+                                          Aircraft Characteristics
+                                                   WV008                 WV009              WV010
+Maximum Ramp Weight (MRW)                         73 900 kg             75 900 kg          77 400 kg
+
+
+
+                                                                                                 Page 1
+                                                                2-1-1                          Jun 01/24
+                                      @A320
+              AIRCRAFT CHARACTERISTICS - AIRPORT AND MAINTENANCE PLANNING
+
+
+
+                                  Aircraft Characteristics
+                                           WV008               WV009               WV010
+Maximum Taxi Weight (MTW)               (162 922 lb)         (167 331 lb)        (170 638 lb)
+Maximum Take-Off Weight (MTOW)            73 500 kg           75 500 kg           77 000 kg
+                                        (162 040 lb)         (166 449 lb)        (169 756 lb)
+Maximum Landing Weight (MLW)              64 500 kg           64 500 kg           64 500 kg
+                                        (142 198 lb)         (142 198 lb)        (142 198 lb)
+Maximum Zero Fuel Weight (MZFW)           61 000 kg           61 000 kg           61 000 kg
+                                        (134 482 lb)         (134 482 lb)        (134 482 lb)
+
+                                  Aircraft Characteristics
+                                          WV011                WV012               WV013
+Maximum Ramp Weight (MRW)               75 900 kg             77 400 kg           71 900 kg
+Maximum Taxi Weight (MTW)              (167 331 lb)          (170 638 lb)        (158 512 lb)
+                                        75 500 kg             77 000 kg           71 500 kg
+Maximum Take-Off Weight (MTOW)
+                                       (166 449 lb)          (169 756 lb)        (157 630 lb)
+                                        66 000 kg             66 000 kg           71 500 kg
+Maximum Landing Weight (MLW)
+                                       (145 505 lb)          (145 505 lb)        (157 630 lb)
+                                        62 500 kg             62 500 kg           61 000 kg
+Maximum Zero Fuel Weight (MZFW)
+                                       (137 789 lb)          (137 789 lb)        (134 482 lb)
+
+                                  Aircraft Characteristics
+                                     WV014          WV015           WV016           WV017
+Maximum Ramp Weight (MRW)          73 900 kg       78 400 kg       73 900 kg       78 400 kg
+Maximum Taxi Weight (MTW)         (162 922 lb) (172 842 lb)       (162 922 lb)    (172 482 lb)
+                                   73 500 kg       78 000 kg       73 500 kg       78 000 kg
+Maximum Take-Off Weight (MTOW)
+                                  (162 040 lb) (171 961 lb)       (162 040 lb)    (171 961 lb)
+                                   64 500 kg       64 500 kg       66 000 kg       66 000 kg
+Maximum Landing Weight (MLW)
+                                  (142 198 lb) (142 198 lb)       (145 505 lb)    (145 505 lb)
+                                   61 500 kg       61 000 kg       62 500 kg       62 500 kg

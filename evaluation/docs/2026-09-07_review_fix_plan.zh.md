@@ -108,7 +108,7 @@ optimization `test_backfill_landing_aero`）；前端 vitest 524 passed，`tsc -
 - M3：`evaluation/records.py`、`cli.py`、`__main__.py`、`visualize.py`、`reference.py`、`metrics.py`、
   `arrival.py`、`thresholds.py`、`__init__.py` + 测试。
 - M4：`evaluation/tests/*`、`final_approach/tests/test_event_contract.py`（新）、
-  `4dTrajectory/optimization/backfill_landing_aero.py`（新）、`docs/CHANGELOG.md`、
+  `4dTrajectory/optimization/backfill_landing_aero.py`（新）、`docs/CHANGELOG.md`、（注：该工具已于同日 v9 删除——发布 V_ref 门只需记录里的 `dynamics_typecode`，见 `2026-09-07_observed_speed_gate_plan.zh.md` §6）
   `docs/code-health-followups.md`、根 `CLAUDE.md` Open Items、`evaluation/docs/archive/`。
 
 ## 5. 留给使用者的操作（本分支不执行）

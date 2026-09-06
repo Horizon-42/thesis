@@ -1,0 +1,205 @@
+Airbus A300-600 Airplane Characteristics for Airport Planning, DEC 01/09 -- chapter 2.1 General Airplane Characteristics Data (definitions + A300B4-600 / C4-600 / B4-600R tables), verbatim
+----------------------------------------------------------------------------------------------------
+
+2.1 General Airplane Characteristics
+    The weight terms used throughout this manual are given below together with
+    their respective definitions.
+
+    Maximum Taxi Weight (MTW) :
+    Maximum weight for ground maneuver as limited by aircraft strength and
+    airworthiness requirements. (It includes weight of run-up and taxi fuel).
+    It is also called Maximum Ramp Weight (MRW).
+
+    Maximum Landing Weight (MLW) :
+    Maximum weight for landing as limited by aircraft strength and
+    airworthiness requirements.
+
+    Maximum Takeoff Weight (MTOW) :
+    Maximum weight for takeoff as limited by aircraft strength and
+    airworthiness requirements. (This is the maximum weight at start of the
+    takeoff run).
+
+    Maximum Zero Fuel Weight (MZFW) :
+    Maximum operational weight of the aircraft without usable fuel.
+
+    Operational Empty Weight (OEW) :
+    Weight of structure, powerplant, furnishings, systems, and other items of
+    equipment that are an integral part of a particular aircraft configuration
+    plus the operator’s items.
+    The operator’s items are the flight and cabin crew and their baggage,
+    unusable fuel, engine oil, emergency equipment, toilet chemical and fluids,
+    galley structure, catering equipment, passenger seats and life vests,
+    documents, etc.
+
+    Maximum Payload :
+    Maximum Zero Fuel Weight (MZFW) minus Operational Empty Weight (OEW).
+
+    Maximum Seating Capacity :
+    Maximum number of passengers specifically certified or anticipated for
+    certification.
+
+    Maximum Cargo Volume :
+    Maximum usable volume available for cargo.
+
+    Usable Fuel :
+    Fuel available for aircraft propulsion.
+
+
+                                                                      Chapter 2.1
+                                                                           Page 1
+R                                                                       DEC 01/09
+                                  Printed in France
+                                         A300-600
+                  AIRPLANE CHARACTERISTICS FOR AIRPORT PLANNING
+
+
+                                                          AIRPLANE VERSION
+                                            A300B4—600               A300C4—600      A300C4—600
+                                                                         PAX           FREIGHT
+                                   WV000 (Basic)        WV008      WV000 (Basic)   WV000 (Basic)
+Maximum Taxi              kg          165 900         153 900        165 900         165 900
+Weight (MTW)              lb          365 740         339 291        365 740         365 740
+Maximum Takeoff           kg          165 000         153 000        165 000         165 000
+Weight (MTOW)             lb          363 760         337 304        363 760         363 760
+Maximum Landing           kg          138 000         138 000        138 000         138 000
+Weight (MLW)              lb          304 230         304 230        304 230         304 230
+Maximum Zero Fuel         kg          130 000         130 000        130 000         130 000
+Weight (MZFW)             lb          286 600         286 600        286 600         286 600
+                      GE CF6—80
+                                      86 727 kg (191 198 lb)
+                       Engines
+Estimated
+                        PW4000
+Operational Empty                     90 634 kg (199 814 lb)
+                       Engines
+Weight (OEW)
+                       PW JT9D                                      87 100 kg        83 347 kg
+                                      87 100 kg (192 019 lb)
+                       Engines                                    (192 019 lb)     (183 748 lb)
+Estimated                 kg                 43 273
+Maximum Payload
+          GE CF6—80       lb                 95 402
+Estimated                 kg                 39 366
+Maximum Payload
+             PW4000       lb                 86 787
+Estimated                 kg                 42 900                  42 900          46 653
+Maximum Payload
+            PW JT9D       lb                 94 578                  94 578         102 852
+Standard Seating       Single—
+                                                274                     262
+Capacity                class
+Usable                     l           62 000 – 76 400 (2)           62 000          62 000
+Fuel                  US Gallons       16 380 – 20 184 (2)           16 380          16 380
+                          kg
+Capacity                               48 670 – 59 974 (2)           48 670          48 670
+                      (d=0.785)
+                          lb          107 299 – 132 213 (2)         107 299         107 299
+Pressurized               m3                   860                      860             860
+Fuselage Volume
+(A/C non equipped)       ft3                 30 370                  30 370          30 370
+Passenger                 m3                    574                     574             540
+Compartment
+Volume                   ft3                 20 270                  20 270          19 069
+Cockpit                   m3                     12                      12              12
+Volume                   ft3                    424                     424             424
+Usuable Cargo            m3                     158.54                  158.54          158.54
+Compartment
+Volume (1)               ft3                  5 602                   5 602           5 602
+(1) Volume of Cargo Compartments : Fwd Cargo Compartment      : 76.51 m3 (2 702 ft3)
+                                   Aft Cargo Hold Compartment : 61.03 m3 (2 155 ft3)
+                                   Bulk Cargo Compartment     : 21 m3 (742 ft3)
+(2) ACT only for WV000 with PW JT9D engine
+
+                          General Airplane Characteristics Data
+                                                                                    Chapter 2.1
+                                                                                         Page 2
+R                                                                                     DEC 01/09
+                                        Printed in France
+                                          A300-600
+                  AIRPLANE CHARACTERISTICS FOR AIRPORT PLANNING
+
+
+
+                                                  AIRPLANE VERSION A300B4—600R
+                                  WV000 (Basic)       WV001           WV002           WV003
+Maximum Taxi             kg          171 400         172 600         172 600        168 700
+Weight (MTW)             lb         377 870          380 518            380 518     371 920
+Maximum Takeoff          kg         170 500          171 700            171 700     167 800
+Weight (MTOW)            lb         375 890          378 530            378 530     369 932
+Maximum Landing          kg         140 000          140 000            138 000     140 000
+Weight (MLW)             lb         308 650          308 650            304 230     308 650
+Maximum Zero Fuel        kg         130 000          130 000            130 000     130 000
+Weight (MZFW)            lb         286 600          286 600            286 600     286 600
+                     GE CF6—80
+Estimated                                             88 805 kg (195 779 lb)
+                      Engines
+Operational Empty
+                       PW4000
+Weight (OEW)                                          88 626 kg (195 384 lb)
+                      Engines
+Estimated                kg                                    41 195
+Maximum Payload
+         GE CF6—80       lb                                    90 818
+Estimated                kg          41 374
+Maximum Payload
+            PW4000       lb          91 213
+Standard Seating      single—
+                                                                  274
+Capacity               class
+Usable                   l                                     68 160
+Fuel                 US Gallons                                18 008
+                          kg
+Capacity                                                       53 505
+                      (d=0.785)
+                          lb                                117 958
+Pressurized              m3                                       860
+Fuselage Volume
+(A/C non equipped)      ft3                                    30 370
+Passenger                m3                                       574
+Compartment
+Volume                  ft3                                    20 270
+Cockpit                  m3                                        12
+Volume                  ft3                                       424
+Usuable Cargo            m3                                       158.54
+Compartment
+Volume (1)              ft3                                    5 602
+(1) Volume of Cargo Compartments : Fwd Cargo Compartment      : 76.51 m3 (2 702 ft3)
+                                   Aft Cargo Hold Compartment : 61.03 m3 (2 155 ft3)
+                                   Bulk Cargo Compartment     : 21 m3 (742 ft3)
+
+
+
+
+                          General Airplane Characteristics Data
+                                                                                  Chapter 2.1
+                                                                                      Page 2A
+R                                                                                   DEC 01/09
+                                        Printed in France
+                                              A300-600
+                  AIRPLANE CHARACTERISTICS FOR AIRPORT PLANNING
+
+
+
+                                                   AIRPLANE VERSION A300B4—600R
+                                     WV004        WV005       WV007        WV008             WV010
+Maximum Taxi             kg         172 600      144 900     153 900      150 900           140 900
+Weight (MTW)             lb         380 518      319 450         339 291        332 677     310 631
+Maximum Takeoff          kg         171 700      144 000         153 000        150 000     140 000
+Weight (MTOW)            lb         378 530      317 462         337 304        330 690     308 650
+Maximum Landing          kg         140 000      140 000         140 000        140 000     140 000
+Weight (MLW)             lb         308 650      308 650         308 650        308 650     308 650
+Maximum Zero Fuel        kg         130 000      130 000         130 000        130 000     130 000
+Weight (MZFW)            lb         286 600      286 600         286 600        286 600     286 600
+                     GE CF6—80
+Estimated                                             88 805 kg (195 779 lb)
+                      Engines
+Operational Empty
+                       PW4000
+Weight (OEW)                                          88 626 kg (195 384 lb)
+                      Engines
+Estimated                kg          41 195                                41 195
+Maximum Payload
+         GE CF6—80       lb          90 818                                90 818
+Estimated                kg                      41 374                                      41 374
+Maximum Payload
+            PW4000       lb                      91 213                                      91 213

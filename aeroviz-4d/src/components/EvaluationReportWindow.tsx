@@ -566,14 +566,21 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
 
 /** The judged speed cell's tooltip: which quantity was judged and against what. */
 function speedCellTitle(row: EvaluationRow): string | undefined {
+  const anchor =
+    row.bounds.vref_low_ms != null && row.bounds.vref_high_ms != null
+      ? ` · published V_ref ${formatNum(row.bounds.vref_low_ms)}–${formatNum(row.bounds.vref_high_ms)} m/s` +
+        (row.bounds.reference_typecode ? ` (${row.bounds.reference_typecode}` +
+          (row.bounds.mass_basis === "type_mass_range" ? ", type mass range)" : ")") : "")
+      : row.bounds.stall_speed_ms != null
+        ? ` · Vs1g ${formatNum(row.bounds.stall_speed_ms)} m/s`
+        : "";
   const window =
     row.bounds.speed_lower_ms != null && row.bounds.speed_upper_ms != null
-      ? `window ${formatNum(row.bounds.speed_lower_ms)}–${formatNum(row.bounds.speed_upper_ms)} m/s` +
-        ` · Vs1g ${formatNum(row.bounds.stall_speed_ms)} m/s`
+      ? `window ${formatNum(row.bounds.speed_lower_ms)}–${formatNum(row.bounds.speed_upper_ms)} m/s` + anchor
       : undefined;
   if (row.crossing_airspeed_estimate_ms != null) {
     return (
-      `METAR-corrected airspeed estimate (±5 kt declared; ground speed ${formatNum(row.crossing_ground_speed_ms)} m/s)` +
+      `METAR-corrected airspeed estimate (ground speed ${formatNum(row.crossing_ground_speed_ms)} m/s)` +
       (window ? ` · ${window}` : "")
     );
   }
@@ -799,11 +806,11 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
     { value: String(verdictCounts.indeterminate), label: "indeterminate" },
   ];
   if (hasSpeedGate && speedCounts) {
-    // Observed batches are graded too (2026-08-24): the fitted crossing GROUND
-    // speed judged against the stall window as a stated proxy — so the card is a
+    // Observed batches are graded too (2026-08-24): the wind-corrected crossing
+    // ground speed judged against the type's published window — so the card is a
     // real pass rate for every subject. The ungraded count stays informative:
-    // unresolvable airframes and speedless events for observed, records predating
-    // source.landing_aero for computed.
+    // unresolvable airframes and speedless events for observed, records naming no
+    // type (or a type without a published entry) for computed.
     cards.push({
       value: `${speedCounts.pass}/${speedGraded}`,
       label: `speed gate pass ${formatPct(speedGraded > 0 ? speedCounts.pass / speedGraded : null)} · ${speedCounts.indeterminate} ungraded`,
@@ -879,10 +886,10 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         ) : null}
         {isPriorSpeedGateReport(report) ? (
           <p className="eval-report-deviation-warning" role="status">
-            Earlier speed gate ({report.schema_version}): this batch&apos;s lower speed
-            bound was not anchored on a measured crossing load factor for every subject,
-            and its observed rows were judged on the raw ground speed without the
-            METAR headwind correction. Re-evaluate the batch to regrade it.
+            Earlier speed gate ({report.schema_version}): this batch&apos;s speed window
+            was anchored on the project&apos;s own stall model rather than on the type&apos;s
+            published approach speed (its observed 737-family rows read as fast by
+            construction). Re-evaluate the batch to regrade it.
           </p>
         ) : null}
 
@@ -893,14 +900,16 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           published-TCH path and the 22 m RNAV/RNP terminal bound. The result grades
           terminal final-approach geometry, not touchdown or landing certification.
           {hasSpeedGate
-            ? " Speed is the stall-anchored crossing window [1.23·Vs(n), 1.23·Vs1g + 20 kt]" +
-              " at the record's resolved-airframe crossing mass and load factor n (the" +
-              " last control's, or inverted from an observed flight's own kinematics)." +
+            ? " Speed is the published-V_ref crossing window [V_ref,lo·√n, V_ref,hi + 20 kt]:" +
+              " the type's FAA-published approach speed at its maximum landing weight," +
+              " scaled by √(m/MALW) — at the record's crossing mass for computed subjects," +
+              " over the type's published mass range for observed baselines (their mass" +
+              " is unmeasured) — and lifted on the lower edge by the crossing load factor n" +
+              " (the last control's, or inverted from an observed flight's own kinematics)." +
               " Computed subjects are judged on the crossing model airspeed; observed" +
               " baselines on the fitted crossing GROUND speed corrected by the field's" +
-              " METAR headwind (an airspeed estimate, ±5 kt declared) when a report is" +
-              " usable, else on the raw ground speed as a stated proxy — each under its" +
-              " own criterion id."
+              " METAR headwind when a report is usable, else on the raw ground speed as a" +
+              " stated proxy — each under its own criterion id."
             : ""}
         </p>
 
