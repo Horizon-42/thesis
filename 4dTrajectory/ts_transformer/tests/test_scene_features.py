@@ -78,3 +78,12 @@ def test_the_arrays_never_read_the_future(tmp_path):
     alone = replace(scene, neighbours=(), scalars=replace(scene.scalars, lead_eta_s=None, lead_gap_s=None, ahead_by_eta=0))
     s = scene_arrays(alone, seq_len=30, dt_s=2.0).scalars
     assert s[SCALAR_NAMES.index("lead_eta_s")] == NO_LEAD_SENTINEL_S and np.isfinite(s).all()
+
+
+def test_a_lookback_longer_than_the_scene_window_is_refused(tmp_path):
+    """The default 60 x 2 s lookback equals the 120 s window by coincidence; a longer one
+    would leave its earlier steps silently empty."""
+    scene, _keys = _scene(tmp_path)
+    with pytest.raises(ValueError, match="beyond the scene"):
+        scene_arrays(scene, seq_len=90, dt_s=2.0)
+    scene_arrays(scene, seq_len=61, dt_s=2.0)          # exactly the window: fine

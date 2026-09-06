@@ -158,6 +158,17 @@ def build_prediction_record(
             "closureFromLabels": forecast.closure_from_labels,
             "closureTracked": forecast.closure_tracked}
            if forecast.prediction_output == PREDICTION_CLOSURE else {}),
+        # Latent control output: which prior sample this is (None = the top-1 the contract
+        # carries) and its probability; whether it was decoded from another flight's
+        # latent (the collapse diagnostic). z itself is never written.
+        **({"modeIndex": forecast.mode_index, "modeProbability": forecast.mode_probability}
+           if forecast.mode_index is not None else {}),
+        **({"latentShuffled": True} if forecast.latent_shuffled else {}),
+        **({"zFromPosterior": True} if forecast.z_from_posterior else {}),
+        # CTA-conditioned control output: the arrival time the decoder was GIVEN (truth +
+        # offset) — a record that reads the future says so.
+        **({"ctaS": forecast.cta_s, "ctaOffsetS": forecast.cta_offset_s}
+           if forecast.cta_s is not None else {}),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,
@@ -457,6 +468,10 @@ def write_batch(
             "forecast_passes": source.get("forecastPasses"),
             "horizon_capped": source.get("horizonCapped"),
             "predicted_final_time_s": source.get("predictedFinalTimeS"),
+            # A CTA-conditioned run reads the future; the row it is compared on says so.
+            "cta_s": source.get("ctaS"),
+            "cta_offset_s": source.get("ctaOffsetS"),
+            "z_from_posterior": bool(source.get("zFromPosterior", False)),
             "true_final_time_s": metrics["true_final_time_s"],
             "final_time_error_s": metrics["final_time_error_s"],
             "split": split,
@@ -479,6 +494,9 @@ def write_batch(
             f"tsTransformer:{config_dict.get('model')}:"
             f"{config_dict.get('horizon_mode')}:"
             f"{config_dict.get('prediction_output', 'state')}:{split}"
+            + (f":cta{records[0].source.get('ctaOffsetS', 0.0):+g}s"
+               if records and records[0].source.get("ctaS") is not None else "")
+            + (":z-posterior" if records and records[0].source.get("zFromPosterior") else "")
         ),
         "split": split,
         "checkpoint": checkpoint,

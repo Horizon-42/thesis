@@ -44,6 +44,8 @@ acceptance rules, not landing certification.
 
 ## Status
 
+> **Historical (pre-v5, pre-2026-08-16).** The live status is `CLAUDE.md` ("Current defaults and their status") and `docs/2026-09-07_latent_intent_design.zh.md` §〇; this section is kept as the record of the first generation.
+
 The current code keeps three explicit prediction contracts: `normalized`, `full`, and
 `window`. They share channels, output heads, losses, split policy, and anchor policy, while
 their target clocks and inference strategies are dispatched independently. Checkpoints record
@@ -385,7 +387,7 @@ The four `run_ts_*.py` scripts above (repo root, alongside this package) are the
 ones. There are 13 more — kinematic-loss/overfit diagnostics for the state path, and a family
 of control/oracle-teacher production and diagnostic drivers
 (`run_ts_oracle_teacher_optimize.py`, `run_ts_control_capacity_ceiling.py`,
-`run_ts_control_mixture_report.py`, …) — indexed with dates and one-line purposes in
+…) — indexed with dates and one-line purposes in
 [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) (§7)
 rather than duplicated here.
 
@@ -720,6 +722,8 @@ The repository now contains routes 1 and 4; routes 2 and 3 remain distinct alter
    [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
 
 ## Historical results on real KRDU data (pre-normalized-time architecture)
+
+> **First-generation numbers (995 arrivals, not reproducible — see CLAUDE.md "Quote ONLY current-artifact numbers").** Current results: `docs/2026-09-07_l1_lowdim_results.zh.md`, `docs/2026-09-07_l0_control_basis_results.zh.md`, `docs/2026-09-06_closure_p1c_results.zh.md`.
 
 995 arrivals across 6 runways, split **by flight** (`flight_key`) into 702 train / 141 val /
 152 test. Both models, both horizon modes, 120-epoch cap with patience 15, `lr=5e-4`, on an
@@ -1097,6 +1101,8 @@ point that later work may choose to extend, but none is an accident:
   output — see [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
 
 ## Known gaps — actual unfinished work
+
+> **Historical.** The control path has six published result documents since 2026-09-04 and all five airports are harvested (v5, 42,650 arrivals); the live open items are `docs/OPEN_ITEMS.md`.
 
 - **Only KRDU so far.** 3747 arrivals are harvested across 5 airports (KMSY, KRDU, KSJC,
   KSMF, KSTL); only KRDU has been trained. Cross-airport generalisation is untested, and the

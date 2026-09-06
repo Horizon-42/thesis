@@ -87,6 +87,11 @@ def scalar_row(scene: SceneContext) -> np.ndarray:
 def scene_arrays(scene: SceneContext, *, seq_len: int, dt_s: float, n_max: int = N_MAX) -> SceneArrays:
     """The arrays for one scene on the ego's lookback grid (``seq_len`` steps of ``dt_s``
     ending at t₀, the ts window's own clock)."""
+    if (seq_len - 1) * dt_s > scene.window_s:
+        raise ValueError(
+            f"a {seq_len} x {dt_s:g} s lookback reaches {(seq_len - 1) * dt_s:g} s back, beyond the "
+            f"scene's {scene.window_s:g} s window — the earlier steps would be silently empty"
+        )
     grid = -dt_s * np.arange(seq_len - 1, -1, -1, dtype=np.float64)
     neighbours = np.zeros((n_max, seq_len, 6), dtype=np.float32)
     mask = np.zeros((n_max, seq_len), dtype=bool)

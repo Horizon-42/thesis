@@ -360,24 +360,6 @@ def test_checkpoints_written_before_the_offset_mask_buffer_still_load():
     assert {"channel_mean", "channel_std"} <= set(bounded.state_dict())
 
 
-ARM_A_CHECKPOINT = REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/airport_frame_20260903/A_threshold_enu/checkpoint.pt"
-STATE_V2_CHECKPOINT = REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/state_v2_20260903/A_anchor_relative/checkpoint.pt"
-
-
-@pytest.mark.skipif(not ARM_A_CHECKPOINT.is_file(), reason="the 2026-09-03 arm-A checkpoint is not on this machine")
-def test_the_2026_09_03_arm_a_checkpoint_loads():
-    model, config, _normalizer, _payload = load_checkpoint(ARM_A_CHECKPOINT)
-    assert config.state_position_reference == "absolute"
-    assert torch.equal(model.offset_mask[list(ch.POSITION_IDX)], torch.ones(3))
-
-
-@pytest.mark.skipif(not STATE_V2_CHECKPOINT.is_file(), reason="the 2026-09-03 state-v2 checkpoint is not on this machine")
-def test_the_2026_09_03_state_v2_checkpoint_that_stored_the_mask_loads_too():
-    model, config, _normalizer, _payload = load_checkpoint(STATE_V2_CHECKPOINT)
-    assert config.state_position_reference == "anchor-relative"
-    assert torch.equal(model.offset_mask[list(ch.POSITION_IDX)], torch.ones(3))
-
-
 def test_a_state_dict_that_stored_the_mask_loads_through_load_checkpoint(tmp_path):
     """Both generations pinned without the local artifacts: a checkpoint carrying the
     now-transient ``offset_mask`` key must load, and a stray other key must still fail."""

@@ -165,7 +165,7 @@ conda run -n aeroviz python run_ts_pipeline.py \
   --control-state-loss-grid fixed-dt \
   --control-state-objective terminal-state \
   --checkpoint-selection-metric fixed-anchor-terminal-state \
-  --control-dense-state-weight 0.25 \
+  --control-dense-state-weight 0.25 \   # 2026-09-07 起该参数已删除（T0-3：只在已废除的 terminal-state 目标下生效）
   --control-terminal-position-weight 1 \
   --control-terminal-velocity-weight 1 \
   --control-terminal-position-scale-m 100 \

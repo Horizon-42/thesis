@@ -81,6 +81,17 @@ INTENT_CONDITIONINGS = (
 )
 # The fields a named recipe leaves OPEN for the intent axis (the CLI's override check).
 INTENT_FIELDS = ("intent_conditioning",)
+
+# The latent-intent design's L3: the CONTROLLED time of arrival as a decoder input. Under
+# ``given`` the flight's duration IS the CTA (the duration head is bypassed) and the network
+# decides only the path that arrives then; training feeds the truth duration, prediction
+# feeds truth + ``--cta-offset-s`` (the counterfactual a scheduler asks for). A ``given`` run
+# READS THE FUTURE — the run name carries ``cta=given``, its ``final_time_error_s`` is an
+# identity check, and it is a delivery-form demonstration, never a prediction result.
+CTA_CONDITIONING_OFF = "off"
+CTA_CONDITIONING_GIVEN = "given"
+CTA_CONDITIONINGS = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
+CTA_FIELDS = ("cta_conditioning",)
 # Order is load-bearing like channels.CHANNELS: serialised into every checkpoint
 # (``input_channels``) and ``train.load_checkpoint`` refuses a mismatch.
 INTENT_JOIN_CHANNELS: tuple[str, ...] = ("e_join", "n_join", "u_join")
@@ -387,10 +398,14 @@ HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
 # The hook gates on the rollout state itself; the FAF gate is not carried by the control
 # dynamics, so ``on-final`` is the only gate a hook can use.
-HOOK_GATES = (CORRIDOR_GATE_ON_FINAL,)
+# Fields removed from the contract after checkpoints that store them were written. Each
+# could not change an answer (2026-09-07 package audit): `control_hook_gate` had a
+# one-member vocabulary nothing read; `control_dense_state_loss_weight` was a weight no
+# loss read. `from_dict` drops them from a stored config.
+RETIRED_SERIALIZED_FIELDS = ("control_hook_gate", "control_dense_state_loss_weight")
+
 CONTROL_HOOK_FIELDS = (
     "control_command_hook",
-    "control_hook_gate",
     "control_hook_saturation",
     "control_barrier_alpha",
     "control_barrier_heading_gain",
@@ -453,17 +468,23 @@ def control_recipe_overrides(name: str) -> dict[str, Any]:
 
 
 def control_simple_v1_overrides() -> dict[str, Any]:
-    """Return the frozen scientific definition of the minimal control recipe."""
+    """Return the frozen scientific definition of the minimal control recipe.
+
+    Every value is a LITERAL or a recipe-named constant (``SIMPLE_V*``), never a module
+    ``DEFAULT_*``: a recipe is what a published paired comparison ("same recipe, one axis")
+    was run under, and a default that later moves must not redefine it after the fact. A recipe that no longer matches the defaults is
+    the recipe telling the truth, not a bug.
+    """
 
     return {
         "model": "itransformer",
         "prediction_output": PREDICTION_CONTROL,
         "horizon_mode": HORIZON_NORMALIZED,
-        "dt_s": DEFAULT_DT_S,
-        "seq_len": DEFAULT_SEQ_LEN,
+        "dt_s": 2.0,
+        "seq_len": 60,
         "n_segments": 64,
-        "channels": CHANNELS,
-        "aircraft_type": DEFAULT_AIRCRAFT_TYPE,
+        "channels": ("e", "n", "u", "edot", "ndot", "udot"),
+        "aircraft_type": "A320",
         "aircraft_filter": AIRCRAFT_FILTER_OPENAP_DIRECT,
         "coordinate_frame": "enu",
         "reference_velocity_source": REFERENCE_VELOCITY_TRACK_FIT,
@@ -485,13 +506,13 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "test_fraction": 0.15,
         "random_train_anchor": False,
         "training_cohort_min_future_s": 0.0,
-        "random_train_anchor_min_future_s": DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+        "random_train_anchor_min_future_s": 60.0,
         "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-        "validation_common_grid_points": DEFAULT_VALIDATION_COMMON_GRID_POINTS,
+        "validation_common_grid_points": 64,
         "fitted_tail_position_weight": 0.25,
         "fitted_terminal_position_weight": 1.0,
-        "position_loss_scale_m": DEFAULT_POSITION_LOSS_SCALE_M,
-        "final_time_scale_s": DEFAULT_FINAL_TIME_SCALE_S,
+        "position_loss_scale_m": 10_000.0,
+        "final_time_scale_s": 600.0,
         "final_time_loss_weight": 1.0,
         "state_endpoint_loss_weight": 0.25,
         "kinematic_consistency_loss_weight": 0.0,
@@ -508,7 +529,6 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_velocity_loss_weight": 0.0,
         "control_velocity_loss_scale_mps": 10.0,
         "control_imitation_loss_weight": 0.0,
-        "control_dense_state_loss_weight": 0.0,
         "control_geometry_loss_weight": 0.0,
         "control_arc_horizontal_velocity_loss_weight": 0.0,
         "control_arc_vertical_velocity_loss_weight": 0.0,
@@ -547,7 +567,6 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     # deliberately NOT here: their defaults (0.0 / 10.0 / 0.0) reproduce the behaviour of
     # every checkpoint trained before those terms existed, which is exactly the "safe
     # stand-in" test this list applies.
-    "control_dense_state_loss_weight",
     "control_geometry_loss_weight",
     "control_arc_horizontal_velocity_loss_weight",
     "control_arc_vertical_velocity_loss_weight",
@@ -785,6 +804,16 @@ class TSConfig:
     # supervision weights are already zero on fitted-tail velocities, so the placeholder
     # rows cannot enter. Zero keeps the frozen simple-v1 behaviour.
     control_velocity_loss_weight: float = 0.0
+    # A latent intent on the control output (latent-intent design §六 L2; control/latent.py).
+    # latent_dim = 0 is the plain deterministic head. z is drawn from q(z | future) in
+    # training and from the prior's top-1 component at inference; it is never an output.
+    latent_dim: int = 0
+    latent_prior_components: int = 1          # K in the mixture prior; 1 = a single Gaussian
+    latent_beta: float = 1.0                  # weight of KL(q ‖ p) in the objective
+    latent_free_bits_nats: float = 0.0        # per-dim KL below this is not charged
+    # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
+    # duration head's output outright.
+    cta_conditioning: str = CTA_CONDITIONING_OFF
     control_velocity_loss_scale_mps: float = 10.0
     # Direct supervision of the control schedule against the one inverted from the flown
     # track by control_inverse_dynamics -- the same registry the forward model dispatches
@@ -795,7 +824,6 @@ class TSConfig:
     # (per-flight skill +0.197 against +0.312), while a same-runway twin reaches +0.598 --
     # so the signal is there and only supervision was missing. Zero keeps simple-v1/v2.
     control_imitation_loss_weight: float = 0.0
-    control_dense_state_loss_weight: float = 0.25
     control_geometry_loss_weight: float = 0.75
     control_arc_horizontal_velocity_loss_weight: float = 0.25
     control_arc_vertical_velocity_loss_weight: float = 0.25
@@ -859,7 +887,6 @@ class TSConfig:
     # recipe like the procedure penalty; first-order-lag dynamics and the native state-loss
     # grid only (the hook rides the segmented endpoint rollout).
     control_command_hook: str = CONTROL_HOOK_OFF
-    control_hook_gate: str = CORRIDOR_GATE_ON_FINAL
     control_hook_saturation: str = HOOK_SATURATION_SOFT
     # Barrier filter: the barrier's decay rate α (1/s; the allowed closing rate toward a
     # corridor edge is α × the remaining margin) and the heading gain that turns a heading
@@ -1019,11 +1046,6 @@ class TSConfig:
             raise ValueError(
                 f"unknown control_hook_saturation {self.control_hook_saturation!r}; "
                 f"expected one of {HOOK_SATURATIONS}"
-            )
-        if self.control_hook_gate not in HOOK_GATES:
-            raise ValueError(
-                f"unknown control_hook_gate {self.control_hook_gate!r}; a command hook gates "
-                f"on the rollout state itself, expected one of {HOOK_GATES}"
             )
         if self.control_command_hook != CONTROL_HOOK_OFF:
             if self.prediction_output != PREDICTION_CONTROL:
@@ -1508,8 +1530,40 @@ class TSConfig:
             raise ValueError("control_smoothness_loss_weight must be non-negative")
         if not 0.0 <= self.control_duration_uniform_floor < 1.0:
             raise ValueError("control_duration_uniform_floor must be in [0, 1)")
+        if self.latent_dim < 0 or self.latent_prior_components < 1:
+            raise ValueError("latent_dim must be >= 0 and latent_prior_components >= 1")
+        if self.latent_beta < 0.0 or self.latent_free_bits_nats < 0.0:
+            raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
+        if self.latent_dim == 0 and (
+            self.latent_prior_components != 1
+            or self.latent_beta != 1.0
+            or self.latent_free_bits_nats != 0.0
+        ):
+            raise ValueError(
+                "latent_prior_components / latent_beta / latent_free_bits_nats mean nothing "
+                "without a latent (latent_dim == 0) and would still rename the run"
+            )
+        if self.cta_conditioning not in CTA_CONDITIONINGS:
+            raise ValueError(
+                f"unknown cta_conditioning {self.cta_conditioning!r}; expected one of {CTA_CONDITIONINGS}"
+            )
+        if self.cta_conditioning != CTA_CONDITIONING_OFF and self.prediction_output != PREDICTION_CONTROL:
+            raise ValueError(
+                "cta_conditioning replaces the control path's duration head; "
+                f"prediction_output={self.prediction_output!r} has none"
+            )
+        if self.latent_dim > 0 and self.checkpoint_selection_metric == CHECKPOINT_SELECTION_OBJECTIVE:
+            raise ValueError(
+                "a latent control run cannot select its checkpoint on the validation objective: "
+                "that objective decodes a posterior sample (it reads the future, and is "
+                "stochastic); select on a fixed-anchor replay metric instead"
+            )
+        if self.latent_dim > 0 and self.prediction_output != PREDICTION_CONTROL:
+            raise ValueError(
+                "the latent intent lives on the control output; "
+                f"prediction_output={self.prediction_output!r} has no control head to decode it"
+            )
         for name, value in (
-            ("control_dense_state_loss_weight", self.control_dense_state_loss_weight),
             ("control_geometry_loss_weight", self.control_geometry_loss_weight),
             (
                 "control_arc_horizontal_velocity_loss_weight",
@@ -1697,6 +1751,12 @@ class TSConfig:
                 f"serialized config is missing {', '.join(sorted(missing))}; "
                 "regenerate the derived checkpoint"
             )
+        # A field retired from the contract is dropped from a stored config, by name: the
+        # stored value could not have changed the run that produced the artifact (that is
+        # why it was retired), and refusing the artifact would be a contract change in the
+        # wrong direction. Anything else unknown still fails loudly below.
+        for name in RETIRED_SERIALIZED_FIELDS:
+            data.pop(name, None)
         data["channels"] = tuple(data["channels"])
         data["control_horizon_curriculum_s"] = tuple(
             data["control_horizon_curriculum_s"]
@@ -1722,7 +1782,6 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "velocity_loss_weight": config.control_velocity_loss_weight,
         "velocity_loss_scale_mps": config.control_velocity_loss_scale_mps,
         "imitation_loss_weight": config.control_imitation_loss_weight,
-        "dense_state_loss_weight": config.control_dense_state_loss_weight,
         "geometry_loss_weight": config.control_geometry_loss_weight,
         "arc_horizontal_velocity_loss_weight": (
             config.control_arc_horizontal_velocity_loss_weight

@@ -10,17 +10,18 @@ Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；�
 
 ## 〇、状态表（压缩 context 后从这里继续）
 
-**当前状态（2026-09-07）**：L0 完成，**N\* = 32**（96 个操作参数，对照 control 头 257 = 2.7 倍缩减，
-不是设想的 10 倍）。**L1 campaign `l1_lowdim_20260907` 在跑**（三臂，约 6–8 h）。用户决定：先看轨迹误差损失
-够不够，拟合教师（`basis_fit.json`）留作对照臂。下一步 = L1 读数 → L2 CVAE 骨架的代码。
+**当前状态（2026-09-07）**：L0、L1 完成；L2（隐意图）、L3（CTA）代码完成并经 review，在 `dev-l2`；L4 前置测量
+门不过（场景编码器不建）。**L1 的答案：N=32 免费（1322 vs 1333），轨迹误差损失单独不够（dense 2515）——
+L2 的 base = native32 + 教师**。包审计 T0 完成待 review。下一步 = 合入 `dev-leg-ctrl` → L2 campaign 入队
+（`l2_latent_arms.json`：L2_gauss / L2_mix4，预测时 `--latent-samples 6 --latent-random 6 --latent-shuffle`）。
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
-| L1 低维控制头 + 稠密监督（确定性基线） | **campaign 在跑（2026-09-07 启动，`l1_lowdim_20260907`）**；无新代码 | 臂 `docs/experiments/l1_lowdim_arms.json`（L1_dense32 / L1_dense64 / L1_native32，对照 A_control_v3） | 不差于 simple-v3；参数 257 → 96；bank skill 必读 |
-| L2 CVAE 骨架（隐意图 z） | 未开始 | `latent_intent.py` + 十处接缝 | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
-| L3 CTA 条件化（交付形态） | 未开始 | `cta_conditioning` | 给真值 CTA 时时长误差 < 5 s ∧ 反事实 CTA 轨迹仍可飞 |
-| L4 场景条件（先验吃邻机） | 未开始（数据平面 WIP 已在 `045c233`） | `scene/` + 先验网络 | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
+| L1 低维控制头 + 稠密监督（确定性基线） | **完成（2026-09-07）**：native32 全体 ADE 1322 vs 基线 1333（配对胜率 52.6 %，bank skill 0.726 vs 0.728）——**N=32 免费**；dense/无教师 2515/2603，否决触发，wiggle 回归——**轨迹误差损失单独不够**。结果 `2026-09-07_l1_lowdim_results.zh.md` | `l1_lowdim_20260907/`（readout、readout_bank） | 不差于 simple-v3 ✓；参数 257 → 96 ✓；bank skill ✓（native32） |
+| L2 CVAE 骨架（隐意图 z） | **代码完成（2026-09-07，分支 `dev-l2`，待 review 后合入）**：L2.a 训练/top-1 + L2.b K 采样、shuffle 诊断、读数 | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
+| L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
+| L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | 未开始 | — | 见 §七 |
 
 **误差预算（KRDU val，雷达引导 497 架，未跟踪，`closure_p1c_20260905`）——本文所有目标都相对它**：
@@ -228,8 +229,14 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 
 ### L2 — CVAE 骨架（隐意图；≈1 周）
 
-新增 `prediction_output="latent-control"`（`PREDICTION_LATENT_CONTROL`）与顶层模块
-`latent_intent.py`：
+**实现决定（2026-09-07，与 §九 的命名草案不同）**：隐变量是 **control 输出上的一根轴**（`latent_dim > 0`），
+不是新的 `prediction_output`。理由：它就是 control 路径（出有界控制量、经 rollout 积分）加一个 z，
+和 `control_dynamics_model` 一样是 control 的轴；这样 config / dataset / forecast 里所有
+`== PREDICTION_CONTROL` 的判断按原样成立，零处需要改。run name 把它当作**不同的模型**报出：
+`control+z8`（K=4 混合先验时 `control+z8k4`），而不是一个损失编辑。模块在 `control/latent.py`
+（每个消费者都是 control 专用，符合 `control/` 的归属规则）。
+
+原草案（保留作对照）：新增 `prediction_output="latent-control"` 与顶层模块 `latent_intent.py`：
 
 - `PosteriorEncoder`：锚点之后的真值轨迹重采样到固定 32 点 `[32, 7]`（图坐标 e/n/u + 速度 3 通道 +
   归一化时间）→ 小 GRU/transformer → `(μ_q, logσ_q)`。**训练期唯一入口**。
@@ -242,6 +249,26 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 - 推理：`forecast` 从先验采样 `latent_samples` 个 z（默认 K=6），top-1 = 概率最高的模态走现有记录
   契约，其余写 `modes/` 子目录，`source` 带 `modeIndex` / `modeProbability`。
 - `predict --z-from-posterior`：z-oracle 上界臂。
+
+> **建成的形态（2026-09-07）**：
+> - `control/latent.py`：`PosteriorEncoder`（输入 = 归一化目标行 `y[B, pred_len, C]` + 真值时长，
+>   数据集本来就产出，**零数据管道改动**）、`PriorNetwork`（K 分量对角高斯混合，初始化为 N(0, I)）、
+>   `LatentControlModel`（z 拼进融合特征 → 现有控制头；**z 也进时长头**：`softplus(raw + W·z)·scale`，
+>   Phase 0 量到雷达引导的散布主要是时序，z 若到不了时长就把最大的变异留给了点估计）、`latent_kl`
+>   （K=1 逐维解析 + 逐维 free bits；K>1 单样本 MC + 总量 free bits，诊断用最负责分量的解析 KL）、
+>   `with_latent_kl`（`latent_kl` 分量 + 坍缩诊断）。
+> - 接缝：`batch_contract.model_forward(..., future=None)` 只把 `(y, final_time_s)` 交给声明
+>   `consumes_future` 的模型，且**只有训练步与验证目标步传它**——固定锚点回放（选 checkpoint 的
+>   top-1 ADE）和 `forecast` 从不传，后验按构造到不了预测。`train.py` 按 `LatentControlPrediction`
+>   类型派发损失；history 每轮多一条 `latent = {kl_nats_per_flight, active_units}`。
+> - 推理：`predict` 默认走先验 top-1（记录契约不变）；`--latent-samples K` 把 K 个先验采样各写成
+>   `modes/modeNN/` 完整预测目录（`source.modeIndex/modeProbability`）；`--latent-shuffle` 把"每架
+>   用别架的 top-1 z 解码"写成 `shuffled/`（`source.latentShuffled`）——坍缩判据。z 永不进记录。
+> - 读数 `run_ts_latent_readout.py`：top-1 / minADE_K / minFDE_K / miss rate / 模态 FDE 散布 /
+>   shuffled ΔADE，按分层；`--control` 接同 K 的随机隐变量对照臂。
+> - **未做**：β 退火（先只用 free bits，坍缩再加）、`--z-from-posterior`（z-oracle 臂）、z 探针
+>   R²（需要 `--latent-dump` 诊断文件，不进记录）。验证目标步是随机的（后验采样），所以 checkpoint
+>   选择用 `fixed-anchor-common-grid-ade`（先验 top-1 回放，确定性），不要用 `fixed-anchor-objective`。
 
 **臂**：`L2_gauss`（K=1）、`L2_mix4`、`L2_mix6`、`L2_zoracle`（predict-only）。
 **门（全部要过）**：
@@ -260,6 +287,14 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 到达时刻误差随 CTA 线性跟随（不是被时长头忽略）。
 **契约**：见 §三.3——这类臂永远不能作为预测精度结果引用。
 
+> **建成的形态（2026-09-07）**：`given` 下时长头被**旁路**——`final_time := dynamics["cta_s"]`（`ControlFeatureModel.final_time`
+> 是三个 control 模型共用的唯一规则），网络只决定"在那个时刻到达的路径"；CTA 同时作为一个融合 token 进解码器
+> （`cta_encoder`）。训练喂真值时长（`dataset.truth_duration_s`，`_dynamics_arrays` 写 `cta_s`）；预测喂真值 +
+> `--cta-offset-s`（`forecast._dynamics_batch`），记录带 `source.ctaS / ctaOffsetS`，run name 带 `cta=given`
+> （与 `intent=` 同一条"读了未来就必须穿在名字上"的纪律）。隐变量模型下 `latent_duration` 在 `given` 时失效
+> ——CTA 就是时长，这是有意的。门里的"时长误差 < 5 s"按构造为 0，所以 L3 真正要读的是**反事实**：
+> CTA ± 30/60/90 s 下逐样本可飞率相对 CTA=0 臂不退、且路径几何（chamfer）随 |偏移| 平滑变化而不是崩掉。
+
 ### L4 — 场景条件（先验吃邻机；≈2 周）
 
 先把 WIP 数据平面（`045c233`）过 opus review 并补上 P2.d 的可解释性测量，再接：
@@ -271,6 +306,20 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 - 泄漏红线：邻机特征只用 t ≤ t₀ 的样本；邻机落地时间与最终跑道只进 `future_label`，不进特征。
 
 **门**：KL(q‖p) 相对 L2 显著下降（先验变尖 = 场景信息进来了）；雷达引导 top-1 ADE 改善。
+
+> **前置测量结果（2026-09-07，`run_ts_scene_explainability.py`，KRDU 14,418 架，同 Phase 0 人群与 CV 协议）**：
+> 先复现了 Phase 0 到小数点（锚点后汇入 6,557 架：d_join R² 本机 0.34 → 粗上下文 0.38 → 真值前机 ETA
+> 0.47；剩余时长中位误差本机 35.8 s → 真值前机 26.4 s）。然后**场景数据平面的实体级特征零增量**：
+> 跑道使用标量 0.37 / 34.7 s，再加 4 架邻机的静态行 0.36 / 36.1 s。门（0.55 / 28 s）**不过**。
+> **诊断**（2,000 架抽样）：数据平面为 96 % 的雷达引导本机找到了"前机"，但它按当前地速估的前机 ETA
+> 与前机**真实**落地时刻的相关只有 **0.11**（中位晚 275 s，p10/p90 −90 / +1067 s）——雷达引导的前机
+> 自己的剩余时间和本机一样没定，它是同一个排序决定的另一个结果，不是本机能观测到的原因。真值前机 ETA
+> 能解释 d_join（0.47）正因为它是**结果**。有信号的只有 `lead_gap_s`（corr −0.44），而它已被本机自身
+> 状态覆盖。
+> **结论**：在锚点时刻，管制排序决定还没有写进邻机的可观测状态里；一个完美的邻机编码器也拿不回 962 m
+> 的大部分。**L4 场景编码器暂不建**；962 m 的交付形态是 L2 的分布（minADE_K + 校准），不是 top-1。
+> 若要继续追场景信息，方向是"前机的**预测**剩余时间"（把本机模型用在邻机上，GooDFlight 的 one-then-all）
+> 或更早的时间窗，且先在这个协议上量到增量再建模。待数据平面 review 确认特征无缺陷后此结论成为最终。
 **预期形状**：minADE_K 基本不变而 top-1 改善——那正是"场景信息在选模态"，是本设计预期的收益形态，
 要在结果文档里明说，避免被读成"多模态没用"。
 

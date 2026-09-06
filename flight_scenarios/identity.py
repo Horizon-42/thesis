@@ -24,6 +24,18 @@ import re
 from typing import Any
 
 
+def summary_row_key(row: dict[str, Any]) -> str:
+    """The readout JOIN key of one scored summary row: the raw ``id_runway_icao24_landing``.
+
+    Every readout that matches rows across arms keys on this — the compact
+    :func:`flight_key` is the filename-safe rendering of the same identity, not a second
+    identity. A present-but-null field reads as absent (``or ""``), never as ``"None"``.
+    """
+    return "_".join(
+        str(row.get(name) or "") for name in ("id", "runway", "icao24", "landing_time_utc")
+    )
+
+
 def flight_key(source: dict[str, Any], index: int) -> str:
     """Unique, filename-safe identity for one flight's source dict.
 

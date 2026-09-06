@@ -52,6 +52,7 @@ if str(_TS_DIR) not in sys.path:
     sys.path.insert(0, str(_TS_DIR))
 
 from config import (  # noqa: E402
+    CTA_CONDITIONING_GIVEN,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
@@ -131,7 +132,17 @@ from evaluation_protocol import (  # noqa: E402
 )
 from experiment_index import begin_run, finish_run  # noqa: E402
 from flyability import report_for_records  # noqa: E402
-from forecast import forecast_approaches, forecast_closure_from_labels  # noqa: E402
+# The N(0, I) control draws from its own stream, never the treatment arm's.
+LATENT_RANDOM_SEED_OFFSET = 1_000_003
+
+from forecast import (  # noqa: E402
+    forecast_approaches,
+    forecast_closure_from_labels,
+    latent_mode_forecasts,
+    posterior_latent_forecasts,
+    random_latent_forecasts,
+    shuffled_latent_forecasts,
+)
 from models import resolve_device  # noqa: E402
 from reference_velocity import REFERENCE_VELOCITY_SOURCES  # noqa: E402
 from train import (  # noqa: E402
@@ -295,7 +306,6 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="control/oracle compatibility weight; direct state ignores it")
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
-    parser.add_argument("--control-dense-state-weight", type=float, default=None)
     parser.add_argument("--control-geometry-weight", type=float, default=None)
     parser.add_argument(
         "--control-arc-horizontal-velocity-weight", type=float, default=None
@@ -593,7 +603,6 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("terminal_loss_weight", args.terminal_loss_weight),
         ("control_effort_loss_weight", args.control_effort_weight),
         ("control_smoothness_loss_weight", args.control_smoothness_weight),
-        ("control_dense_state_loss_weight", args.control_dense_state_weight),
         ("control_geometry_loss_weight", args.control_geometry_weight),
         (
             "control_arc_horizontal_velocity_loss_weight",
@@ -930,6 +939,38 @@ def main(argv: list[str] | None = None) -> int:
              "controls flown and source.closureTracked",
     )
     p_predict.add_argument(
+        "--latent-samples", type=int, default=0, metavar="K",
+        help="latent control output: besides the top-1 records, decode K prior samples per "
+             "flight and write each as a full prediction directory under modes/modeNN/ "
+             "(source.modeIndex / modeProbability) for the multimodal readout",
+    )
+    p_predict.add_argument("--latent-seed", type=int, default=0,
+                           help="seed for --latent-samples and --latent-shuffle")
+    p_predict.add_argument(
+        "--cta-offset-s", type=float, default=0.0, metavar="SECONDS",
+        help="CTA-conditioned control output: give every flight its truth arrival time plus "
+             "this offset (the counterfactual a scheduler asks for); records carry "
+             "source.ctaS / ctaOffsetS. 0 = the identity demonstration",
+    )
+    p_predict.add_argument(
+        "--z-from-posterior", action="store_true",
+        help="latent control output: decode every flight from the MEAN of q(z | its own "
+             "future) — the z-oracle upper bound (reads the future; records carry "
+             "source.zFromPosterior; never a prediction result). The whole output directory "
+             "is the oracle arm; cannot be combined with the prior-sample options",
+    )
+    p_predict.add_argument(
+        "--latent-random", type=int, default=0, metavar="K",
+        help="latent control output: decode K latents drawn from N(0, I) instead of the "
+             "prior per flight into random/modeNN/ — the same-K control arm minADE_K is "
+             "read against (a latent that only adds K chances would match it)",
+    )
+    p_predict.add_argument(
+        "--latent-shuffle", action="store_true",
+        help="latent control output: also decode every flight from ANOTHER flight's top-1 "
+             "latent into shuffled/ (source.latentShuffled) — the posterior-collapse reading",
+    )
+    p_predict.add_argument(
         "--project-final", choices=CORRIDOR_GATES, default=None, metavar="GATE",
         help="after truncation, clamp each state forecast's established tail (under this "
              "corridor gate) into the LPV corridor and glidepath window — the post-hoc "
@@ -1257,16 +1298,102 @@ def main(argv: list[str] | None = None) -> int:
         if config.prediction_output != PREDICTION_CLOSURE:
             parser.error("--closure-track requires a closure checkpoint")
         print("  flying every drawn reference with the point-mass rollout under the closure tracker")
+    if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
+        parser.error("--cta-offset-s needs a checkpoint trained with cta_conditioning=given")
+    if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
+        print(f"  CTA-conditioned: every flight is given its truth arrival time {args.cta_offset_s:+g} s "
+              "(reads the future — a delivery-form demonstration, not a prediction result)")
+    if args.z_from_posterior:
+        if config.latent_dim < 1:
+            parser.error("--z-from-posterior needs a latent control checkpoint")
+        if args.latent_samples or args.latent_random or args.latent_shuffle:
+            parser.error("--z-from-posterior is an oracle arm of its own; do not combine it with the prior-sample options")
+        print("  z-ORACLE: every flight decoded from the posterior mean of its OWN future "
+              "(reads the future — an upper bound, never a prediction result)")
+    if (args.latent_samples or args.latent_shuffle or args.latent_random) and config.latent_dim < 1:
+        parser.error("--latent-samples / --latent-random / --latent-shuffle need a latent control checkpoint")
+    if args.latent_samples < 0 or args.latent_random < 0:
+        parser.error("--latent-samples and --latent-random must be non-negative")
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, flight_metrics = [], []
+    # Extra decodes of the same flights: K prior samples (modes) and the shuffled-latent
+    # diagnostic, each collected as its own record set and written as a full prediction
+    # directory beside the top-1 one, so every readout reads them like any other arm.
+    mode_records: list[list] = [[] for _ in range(args.latent_samples)]
+    mode_metrics: list[list] = [[] for _ in range(args.latent_samples)]
+    random_records: list[list] = [[] for _ in range(args.latent_random)]
+    random_metrics: list[list] = [[] for _ in range(args.latent_random)]
+    shuffled_records: list = []
+    shuffled_metrics: list = []
     rollout_batch_size = max(1, min(config.batch_size, len(series)))
+    if args.latent_shuffle:
+        if len(series) < 2:
+            parser.error("--latent-shuffle needs at least two flights")
+        # Shuffling needs another flight in the batch: never a batch of one.
+        rollout_batch_size = max(2, rollout_batch_size)
     print(f"  dense rollout batch size: {rollout_batch_size}")
-    for start in range(0, len(series), rollout_batch_size):
-        batch_series = series[start : start + rollout_batch_size]
+    if args.latent_samples or args.latent_random or args.latent_shuffle:
+        # Latents are drawn per batch from seed + batch start, so a flight's latent is
+        # reproducible for a fixed (checkpoint, split, batch size) — say so.
+        print(f"  latent seed {args.latent_seed} (per batch: seed + batch start; the N(0, I) "
+              f"control adds {LATENT_RANDOM_SEED_OFFSET}); batch size {rollout_batch_size}")
+    # A trailing batch of ONE flight cannot be shuffled (no other latent to take), so it
+    # is folded into the batch before it rather than silently dropped from the diagnostic.
+    starts = list(range(0, len(series), rollout_batch_size))
+    if args.latent_shuffle and len(starts) > 1 and len(series) - starts[-1] == 1:
+        starts.pop()
+    for index_start, start in enumerate(starts):
+        stop = starts[index_start + 1] if index_start + 1 < len(starts) else len(series)
+        batch_series = series[start:stop]
+        if args.latent_samples:
+            for index, mode_forecasts in enumerate(latent_mode_forecasts(
+                model, batch_series, config, normalizer,
+                samples=args.latent_samples, seed=args.latent_seed + start, device=device,
+                cta_offset_s=args.cta_offset_s,
+            )):
+                for offset, (s, forecast) in enumerate(zip(batch_series, mode_forecasts, strict=True)):
+                    mode_records[index].append(build_prediction_record(
+                        s, forecast, index=start + offset, model_name=config.model,
+                        horizon_mode=config.horizon_mode, split=args.split,
+                    ))
+                    mode_metrics[index].append(observed_series_metrics(
+                        s, forecast, points=config.validation_common_grid_points,
+                    ))
+        if args.latent_random:
+            for index, random_forecasts in enumerate(random_latent_forecasts(
+                model, batch_series, config, normalizer,
+                samples=args.latent_random,
+                seed=args.latent_seed + LATENT_RANDOM_SEED_OFFSET + start, device=device,
+                cta_offset_s=args.cta_offset_s,
+            )):
+                for offset, (s, forecast) in enumerate(zip(batch_series, random_forecasts, strict=True)):
+                    random_records[index].append(build_prediction_record(
+                        s, forecast, index=start + offset, model_name=config.model,
+                        horizon_mode=config.horizon_mode, split=args.split,
+                    ))
+                    random_metrics[index].append(observed_series_metrics(
+                        s, forecast, points=config.validation_common_grid_points,
+                    ))
+        if args.latent_shuffle:
+            for offset, (s, forecast) in enumerate(zip(batch_series, shuffled_latent_forecasts(
+                model, batch_series, config, normalizer, seed=args.latent_seed + start, device=device,
+                cta_offset_s=args.cta_offset_s,
+            ), strict=True)):
+                shuffled_records.append(build_prediction_record(
+                    s, forecast, index=start + offset, model_name=config.model,
+                    horizon_mode=config.horizon_mode, split=args.split,
+                ))
+                shuffled_metrics.append(observed_series_metrics(
+                    s, forecast, points=config.validation_common_grid_points,
+                ))
         if closure_labels is not None:
             forecasts = forecast_closure_from_labels(
                 batch_series, config, closure_labels, track=args.closure_track, device=device,
+            )
+        elif args.z_from_posterior:
+            forecasts = posterior_latent_forecasts(
+                model, batch_series, config, normalizer, device=device, cta_offset_s=args.cta_offset_s,
             )
         else:
             forecasts = forecast_approaches(
@@ -1278,6 +1405,7 @@ def main(argv: list[str] | None = None) -> int:
                 truncate=not args.no_truncate,
                 project_final=args.project_final,
                 closure_track=args.closure_track,
+                cta_offset_s=args.cta_offset_s,
             )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)
@@ -1304,6 +1432,29 @@ def main(argv: list[str] | None = None) -> int:
         checkpoint=str(args.checkpoint),
         split=args.split,
     )
+    for index, (mode_rows, mode_flight_metrics) in enumerate(zip(mode_records, mode_metrics, strict=True)):
+        write_batch(
+            mode_rows, output_dir=args.output_dir / "modes" / f"mode{index:02d}",
+            config_dict=config.to_dict(), flight_metrics=mode_flight_metrics,
+            checkpoint=str(args.checkpoint), split=args.split,
+        )
+    if args.latent_samples:
+        print(f"  wrote {args.latent_samples} prior-sample mode(s) under {args.output_dir / 'modes'}")
+    for index, (random_rows, random_flight_metrics) in enumerate(zip(random_records, random_metrics, strict=True)):
+        write_batch(
+            random_rows, output_dir=args.output_dir / "random" / f"mode{index:02d}",
+            config_dict=config.to_dict(), flight_metrics=random_flight_metrics,
+            checkpoint=str(args.checkpoint), split=args.split,
+        )
+    if args.latent_random:
+        print(f"  wrote {args.latent_random} N(0, I) control mode(s) under {args.output_dir / 'random'}")
+    if shuffled_records:
+        write_batch(
+            shuffled_records, output_dir=args.output_dir / "shuffled",
+            config_dict=config.to_dict(), flight_metrics=shuffled_metrics,
+            checkpoint=str(args.checkpoint), split=args.split,
+        )
+        print(f"  wrote the shuffled-latent diagnostic under {args.output_dir / 'shuffled'}")
 
     if args.project_final is not None:
         print(f"  projected every state forecast onto the final ({args.project_final} gate)")

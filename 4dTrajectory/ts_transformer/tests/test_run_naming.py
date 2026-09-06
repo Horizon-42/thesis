@@ -184,3 +184,22 @@ def test_a_named_recipe_with_an_open_field_edit_is_named_recipe_plus_edits():
     assert run_slug(edited.to_dict()) != run_slug(plain.to_dict())
     # ``custom`` semantics for a runner that varies a frozen field are unchanged.
     assert recipe_settings("simple-v3", keep_name=False)["control_recipe_name"] == "custom"
+
+
+def test_the_recipe_definitions_are_literals_and_match_the_defaults_today():
+    """A recipe is a frozen definition: it must not be spelled with module defaults (a
+    default that moves would redefine every published paired comparison). Today the
+    literals equal the defaults — this pins that equality so a divergence is a
+    deliberate, visible act."""
+    import inspect
+    import re
+    from config import TSConfig, control_recipe_overrides, control_simple_v1_overrides, CONTROL_RECIPE_SIMPLE_V1
+    for function in (control_simple_v1_overrides, control_recipe_overrides):
+        source = inspect.getsource(function)
+        leaked = re.findall(r"\bDEFAULT_[A-Z0-9_]+\b", source) + re.findall(r"\bCHANNELS\b", source)
+        assert not leaked, f"{function.__name__} spells a mutable default: {leaked}"
+    defaults = TSConfig()
+    recipe = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
+    for field in ("dt_s", "seq_len", "channels", "aircraft_type", "random_train_anchor_min_future_s",
+                  "validation_common_grid_points", "position_loss_scale_m", "final_time_scale_s"):
+        assert recipe[field] == getattr(defaults, field), field

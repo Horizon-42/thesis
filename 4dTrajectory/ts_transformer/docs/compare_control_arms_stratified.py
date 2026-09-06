@@ -25,10 +25,9 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "4dTrajectory" / "ts_transformer"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from approach_difficulty import STRATUM_ESTABLISHED, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
 from score_control_arms import _imitation_dose  # noqa: E402
 
-# The stratum boundary approach_difficulty itself uses for "the easy one".
-STRAIGHT_TORTUOSITY = 1.05
 
 
 def arm_rows(pred_dir: Path) -> dict[str, dict]:
@@ -72,17 +71,15 @@ def main(argv: list[str]) -> int:
     print(f"{len(shared)} flights predicted by every arm\n")
 
     reference = arms[names[0]]
-    tort = np.array([reference[k]["route_tortuosity"] for k in sorted(shared)])
-    established = np.array(
-        [bool(reference[k].get("established_at_anchor")) for k in sorted(shared)]
-    )
+    keys = sorted(shared)
+    established = np.array([bool(reference[k].get("established_at_anchor")) for k in keys])
+    # One strata definition (approach_difficulty): this file's own copy lacked the
+    # `& ~established` on the vectored mask and restated the labels.
     strata = {
-        "straight-in (tortuosity < 1.05)": tort < STRAIGHT_TORTUOSITY,
-        "vectored (>= 1.05)": tort >= STRAIGHT_TORTUOSITY,
-        "established at anchor": established,
+        **{name: mask for name, mask in strata_masks(reference, keys).items()
+           if name in (STRATUM_STRAIGHT_IN, STRATUM_VECTORED, STRATUM_ESTABLISHED)},
         "not established": ~established,
     }
-    keys = sorted(shared)
     width = max(len(n) for n in names) + 2
     for label, mask in strata.items():
         if mask.sum() < 20:

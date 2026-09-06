@@ -1,7 +1,7 @@
 """Phase 0 of the scene / join-anchor design: the intent, read from the FUTURE, as input.
 
 The km-level error of the control model sits on vectored flights, and the design doc
-(``docs/2026-09-07_scene_join_anchor_design.zh.md``) argues it is the ATC join decision —
+(``docs/2026-09-07_scene_join_anchor_design.zh.discard.md``) argues it is the ATC join decision —
 how far down the downwind the aircraft is turned onto the final — that the model cannot
 see. Before building a scene encoder to infer that decision, this module measures what
 knowing it is WORTH: the truth join point and the lead aircraft's true landing time are

@@ -39,7 +39,9 @@ point of the package, not a migration in progress.
 - **`control`** is the opposite: the model emits bounded controls and a differentiable RK4
   rollout of the shared point-mass equations turns them into the trajectory, so every prediction
   is dynamically admissible by construction.
-- **`closure`** (scene design P1.c, 2026-09-05) regresses 14 DECISION numbers — the join
+- **`closure`** (scene design P1.c, 2026-09-05; **a COMPARISON ARM since 2026-09-07** — the
+  latent-intent design demoted it, and its tracker below is RETIRED with an unfixed BLOCKER:
+  a nearest-node search that jumps legs on 0.6 % of flights) regresses 14 DECISION numbers — the join
   distance, a via pose in runway axes, K=4 slowness knots (the duration is their integral),
   K=4 height knots — and `closure_output.reconstruct` draws the trajectory in closed form
   (`closure_geometry.via_dubins` + `closure_profile`; velocities = tangent × ground speed).
@@ -53,9 +55,19 @@ point of the package, not a migration in progress.
   dynamics of its own (22 % fully flyable); **`predict --closure-track` flies it with the
   point-mass rollout under `control/constraints/closure_tracking.py`** (a command hook:
   L1 + curvature feed-forward, the glidepath law on the reference height, a PI speed hold
-  with the along-track error) for ≤ 100 m of ADE and 92 % fully flyable — the delivery
-  form (P1.d, 2026-09-06). The tracker runs on the first-order-lag backend, the only one
-  that runs hooks (`forecast.tracking_config` derives that config).
+  with the along-track error) for ≤ 100 m of ADE (+10.5 m after the wrong-leg snaps are
+  excluded) and 92 % fully flyable — it WAS the delivery form (P1.d, 2026-09-06) and is
+  not any more; do not build on it.
+- **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
+  `latent_dim > 0` puts a latent intent z on the control output (`control/latent.py`:
+  q(z | future) in training only, a K-component mixture prior from the context, z reaches
+  the controls AND the duration; inference decodes the prior's top-1; `predict
+  --latent-samples K / --latent-random K / --latent-shuffle / --z-from-posterior` write
+  `modes/`, `random/`, `shuffled/` and the z-oracle; z never enters a record); and
+  `cta_conditioning=given` makes the given arrival time BE the duration (`predict
+  --cta-offset-s` is the scheduler's counterfactual). Both READ THE FUTURE in their oracle
+  forms and the run name says so (`control+z8`, `z=posterior`, `cta=given`) — never a
+  prediction result.
 
 Single-aircraft-only and deterministic point-prediction are scope decisions for all three (README).
 
@@ -140,6 +152,10 @@ flight model.
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried) |
 | `--project-final` | off | deployment fallback; FAF-gated wrecks vectored flights |
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
+| `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` mean nothing without it and are refused |
+| `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result |
+| `n_segments` (control) | 64 | **32 is free** (L1: 1322 vs 1333 m, bank skill 0.726 vs 0.728); the deployed head's 257 numbers become 96 |
+| `control_state_loss_grid` | native | `fixed-dt` without the imitation term (it is not registered there) trips the straight-in veto (FDE 703 → 2863) and brings the bank wiggle back — the trajectory-error loss alone is not enough |
 
 Command hooks are called once per control SEGMENT, at its start, with the rollout's own state,
 returning the command flown — and **the record carries the schedule FLOWN, not the network's**.

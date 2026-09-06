@@ -4,6 +4,31 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — Package audit T0: eight zero-risk cleanups, reviewed
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §二. One control
+model class (`UniformDurationControlOutputModel` + `control/duration.py` folded into
+`ControlOutputModel`; `UniformDurationControlHead` beside `ControlOutputHead`); two config
+axes that could never bind retired (`control_hook_gate`, `control_dense_state_loss_weight`
+— `RETIRED_SERIALIZED_FIELDS`, dropped by `from_dict` so stored configs keep loading);
+one strata definition (`approach_difficulty.STRATUM_*` + `strata_masks`; the stratified
+readout's own copy lacked `& ~established` on the vectored mask); six tests that could not
+fail removed; the recipes spelled as literals; one `io_utils`; one `metrics.signed_spread`.
+Run names recomputed over all 276 stored configs: 0 changed.
+
+Review findings fixed in the same commit series: three `docs/` scripts rebuilt a STORED
+config with `TSConfig(**summary["config"])`, bypassing `from_dict` — after the retirement
+0 of the 111 on-disk summaries loaded there (`p1_closure_oracle.py`, which the closure arm
+names as its label producer, included); `run_ts_runway_hypotheses.py` re-keyed its strata
+without a schema bump (now `v3-stratum-labels`); the stratified test's fixture could not
+exercise the mask fix (ten vectored rows are now established at the anchor and the
+stratum count asserts it); the L2 arms' gate named the arm the comment reports at 2515 m
+(now L1_native32, the base itself); a real-artifact checkpoint canary is back in skipif
+form (`L1_native32/checkpoint.pt`, which stores both retired fields); the recipe-literal
+guard is a `DEFAULT_*` regex over both recipe functions rather than an eight-name list.
+`score_control_arms._tortuosity` and `approach_difficulty.route_tortuosity` are two
+estimators (chord to the last observed row vs range to the threshold), not one statistic
+at two cuts — the comment says so now; unifying them would move the published bank floor.
 ### 2026-09-06 — Disk reclaim (29.7 GB) and three stale roster facts corrected
 
 The root filesystem hit 100 % (2.3 GB free). Reclaimed **29.7 GB** with no research
@@ -285,7 +310,7 @@ test); and the named-recipe override check in `__main__.py` rejected fields outs
 
 ### 2026-09-07 — Design: scene encoder + join-anchor multimodal control prediction
 
-`4dTrajectory/ts_transformer/docs/2026-09-07_scene_join_anchor_design.zh.md`. Intent: give the
+`4dTrajectory/ts_transformer/docs/2026-09-07_scene_join_anchor_design.zh.discard.md`. Intent: give the
 model the variables that decide the join (traffic context — the lead aircraft on the same
 runway, queue, time since last landing — plus the final approach course, FAF/IF and STAR
 legs as map tokens) and make the join distance an explicit K-way decision with a control

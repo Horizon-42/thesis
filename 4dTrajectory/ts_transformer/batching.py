@@ -17,7 +17,13 @@ import torch
 
 from batch_contract import anchor_state
 from closure_output import probe_closure_context
-from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, TSConfig, uses_closure_labels, uses_control_dynamics
+from config import (
+    CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CTA_CONDITIONING_GIVEN,
+    TSConfig,
+    uses_closure_labels,
+    uses_control_dynamics,
+)
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from models import build_model
 from prediction_outputs import ControlPrediction
@@ -25,7 +31,7 @@ from prediction_outputs import ControlPrediction
 _CANDIDATES = (8, 16, 32, 64, 128, 256, 512, 1024, 2048)
 
 
-def _is_cuda_oom(exc: BaseException) -> bool:
+def is_cuda_oom(exc: BaseException) -> bool:
     return isinstance(exc, torch.cuda.OutOfMemoryError) or "out of memory" in str(exc).lower()
 
 
@@ -106,6 +112,12 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             dynamics = probe_closure_context(batch_size, device, config)
         if uses_control_dynamics(config.prediction_output):
             dynamics = probe_dynamics(batch_size, device)
+            if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
+                # The probe's target duration is the scale, so the given CTA matches it and
+                # the probe's final_time term stays zero, as in a real given run.
+                dynamics["cta_s"] = torch.full(
+                    (batch_size,), config.final_time_scale_s, dtype=torch.float64, device=device
+                )
             if config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
                 points = int(config.final_time_scale_s // config.dt_s)
                 offsets = (
@@ -189,7 +201,7 @@ def resolve_batch_size(
         try:
             _probe_training_step(config, candidate, device)
         except RuntimeError as exc:
-            if not _is_cuda_oom(exc):
+            if not is_cuda_oom(exc):
                 raise
             torch.cuda.empty_cache()
             break

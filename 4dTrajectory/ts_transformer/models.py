@@ -32,8 +32,8 @@ from config import (
 )
 from closure_output import ClosureOutputModel
 from control.heads import ControlOutputModel
+from control.latent import LatentControlModel
 from prediction_outputs import StateOutputLayer
-from control.duration import UniformDurationControlOutputModel
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
 
@@ -156,14 +156,18 @@ def _build_state_output(config: TSConfig, normalizer: Normalizer | None) -> nn.M
     return StateOutputLayer(build_state_forecaster(config), config, normalizer)
 
 
+# One model class: the duration parameterization is decided inside the head
+# (`control.heads.control_head_for`), not by a second model type.
 CONTROL_OUTPUT_MODELS = {
     CONTROL_DURATION_FACTORIZED: ControlOutputModel,
-    CONTROL_DURATION_UNIFORM: UniformDurationControlOutputModel,
+    CONTROL_DURATION_UNIFORM: ControlOutputModel,
 }
 
 
 def _build_control_output(config: TSConfig, normalizer: Normalizer | None) -> nn.Module:
     del normalizer  # controls are rolled out in physical units already
+    if config.latent_dim > 0:
+        return LatentControlModel(config, build_state_forecaster(config))
     return CONTROL_OUTPUT_MODELS[config.control_duration_parameterization](
         config, build_state_forecaster(config)
     )

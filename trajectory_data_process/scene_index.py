@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -130,7 +131,12 @@ def build_scene_index(paths: HarvestPaths, *, verbose: bool = True) -> SceneInde
     if verbose:
         print(f"  scene index: reading {len(rows)} track files under {paths.tracks}")
     index = SceneIndex(str(manifest["airport"]).strip().upper(), _manifest_sha256(paths), tuple(_iter_track_times(paths, rows)))
-    (paths.tracks / INDEX_NAME).write_text(json.dumps(index.to_payload(len(rows))), encoding="utf-8")
+    # Written to a sibling and renamed: a reader never sees a half-written cache (a truncated
+    # file would otherwise fail to parse instead of being rebuilt).
+    target = paths.tracks / INDEX_NAME
+    staging = target.with_suffix(".json.tmp")
+    staging.write_text(json.dumps(index.to_payload(len(rows))), encoding="utf-8")
+    os.replace(staging, target)
     return index
 
 
@@ -139,8 +145,17 @@ def load_scene_index(paths: HarvestPaths, *, verbose: bool = True) -> SceneIndex
     cache = paths.tracks / INDEX_NAME
     manifest_sha = _manifest_sha256(paths)
     if cache.is_file():
-        payload = json.loads(cache.read_text(encoding="utf-8"))
-        record_count = len(read_manifest(paths)["records"])
+        # A cache that does not parse has failed its contract exactly like a stale one:
+        # rebuilt, never trusted (the write is atomic, so this is external damage).
+        try:
+            payload = json.loads(cache.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+        manifest = read_manifest(paths)
+        # The cache hit must hold the manifest to the same standard the build does: the
+        # index encodes source timing, and a pre-v2 harvest has none to encode.
+        require_source_timed_manifest(manifest, path=paths.manifest)
+        record_count = len(manifest["records"])
         if (payload.get("schema") == SCENE_INDEX_SCHEMA and payload.get("manifest_sha256") == manifest_sha
                 and payload.get("record_count") == record_count == len(payload.get("entries", []))):
             return SceneIndex(str(payload["airport"]), manifest_sha, tuple(IndexEntry(**e) for e in payload["entries"]))

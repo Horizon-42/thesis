@@ -287,15 +287,45 @@ numpy-2.x optimizer failure, so a green run needs them addressed or quarantined.
 
 `docs/` holds ~12 runnable `.py` files, several of them libraries other scripts import
 (`compare_frame_arms`, `phase0_intent_diagnostics`, `p1_closure_oracle`, `closure_*` helpers
-are already in the package but the readouts are not). Consequences seen: no tests, no
-`conftest.py` (every test file carries its own `sys.path` preamble), and top-level runners
-that have to put `ts_transformer/docs` on `sys.path` to reuse a twelve-line helper.
+are already in the package but the readouts are not). Consequences seen: no tests, no `conftest.py` at the time (25 of 32 test files still
+carry their own `sys.path` preamble; the seven newest do not), and package modules that
+cite a `docs/` script as their data producer (`closure_output.py`, `config.py`,
+`__main__.py` all name `docs/p1_closure_oracle.py labels`).
 
 Done so far: `strata_masks` + `STRAIGHT_TORTUOSITY` moved into `approach_difficulty.py`
 (one source, `compare_frame_arms` imports them); `tests/conftest.py` added; the L0 basis
 fit went in as `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` with tests.
 
-Remaining: move the readout scripts (`compare_*_arms.py`, `score_control_arms.py`,
-`phase0_intent_diagnostics.py`, `p1_closure_oracle.py`) into the package as modules with
-`run_ts_*` fronts, and drop the per-file `sys.path` preambles in `tests/`. Mechanical but
-touches every results doc's reproduce command, so it wants its own commit.
+Remaining: the migration table in `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md`
+§七 (hubs first: `p1_closure_oracle`, `compare_frame_arms`, `score_control_arms`), and the
+25 per-file `sys.path` preambles in `tests/`.
+
+## ts_transformer: the auto-batch probe measures a smaller graph than a latent run trains (review finding, 2026-09-07)
+
+`batching._heterogeneous_control_probe_prediction` downcasts to a plain `ControlPrediction`, so
+with `latent_dim > 0` the batch-size probe never builds the posterior encoder or the KL graph;
+the resolved batch size is measured against less memory than training uses. Judgement: small
+(the latent adds two linear layers), but a probe that lies is a probe; fix = let the probe run
+the model's real forward with a synthetic future when `consumes_future`.
+
+## scene data plane: review leftovers (opus, 2026-09-07; the HIGH/MEDIUM items are fixed)
+
+Verified by the review, deferred here because the scene encoder is not being built (L4 gate
+failed on the measurement the plane was built for): (7) `scene_context` mirrors the on-final
+membership constants instead of importing them upward from `final_approach_geometry`
+(pinned by a test today); (8) `ego_alt_hae_m` is a required argument nothing consumes — a
+datum trap; (9) the ego's ETA uses the caller's ground speed while each neighbour's uses a
+two-sample finite difference, and straight-line `distance/|v|` gives an outbound aircraft
+a finite ETA — the observable-lead-ETA proxy the L4 diagnostic found uninformative (corr
+0.11 with the true landing) would need an along-path estimator anyway; (10) the
+`since_last_landing` / `lead` sentinels collide with real values (3.0 % of KRDU anchors clip
+at 3600 s, 8 of them mean "no landing yet") — a validity bit per column; (11) `hour_utc` /
+`weekday` are UTC, which conflates time zones under merged-airport training; (12)
+`max(dt, 1e-3)` turns a duplicate timestamp into a 1000× speed; (13) no per-window scene
+cache — 15.7 ms per scene, ~9 track reads each, would be rebuilt every epoch and every
+DataLoader worker holds its own reader cache; precompute `SceneArrays` per (flight_key,
+anchor) before any training uses them; (14) unused imports and two one-line duplicates
+(`parse_utc_s` ≡ `intent_conditioning.parse_utc`, `OUTCOME_ASSIGNED`). Test gaps: a
+neighbour that landed just before t₀ with samples still in the window; an airborne
+neighbour on the parallel runway's final; an ego already established.
+

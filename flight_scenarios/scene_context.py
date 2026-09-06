@@ -195,7 +195,22 @@ def scene_context(
     n_max: int = N_MAX,
     reader: "_Reader | None" = None,
 ) -> SceneContext:
-    """The scene at t₀: see the module docstring for what enters and what does not."""
+    """The scene at t₀: see the module docstring for what enters and what does not.
+
+    ``t0_utc_s`` is on the TRACK clock: ``parse_utc_s(arrival["entry_time_utc"]) +
+    series.times[anchor]`` (the arrival slice's entry, plus the ts window's anchor offset).
+    A track's ``start_time_utc`` is a median 45 s (p90 76 s, max 577 s) EARLIER than the
+    arrival's entry at KRDU — the repo's two-window trap — and a t₀ 45 s early is a
+    different 120 s scene that reads as model noise, never as a bug. The ego must be a
+    rostered track (a wrong key would make the ego its own neighbour) and t₀ must lie
+    inside its own sampled span; both are checked here.
+    """
+    ego_entry = index.entry(ego_flight_key)          # KeyError: not a rostered track
+    if not ego_entry.start_utc_s <= t0_utc_s <= ego_entry.end_utc_s:
+        raise ValueError(
+            f"t0 {t0_utc_s:.0f} lies outside the ego's own sampled span "
+            f"[{ego_entry.start_utc_s:.0f}, {ego_entry.end_utc_s:.0f}] — the wrong clock?"
+        )
     reader = reader or _Reader(paths)
     frame = ego_frame(ego_runway, ego_target)
     course_rad = math.radians(90.0 - float(ego_target["course_deg"]))      # compass → math-ENU
@@ -218,11 +233,15 @@ def scene_context(
         ))
     in_radius = len(neighbours)
     neighbours.sort(key=lambda nb: nb.distance_to_ego_m)
+    # The scalars describe everyone in the radius; the N_MAX cut (by distance to the ego)
+    # applies to the entity tensors only — "how many are ahead of me by ETA" must not be
+    # truncated by distance (the bound binds on 1.5 % of KRDU anchors).
+    everyone = neighbours
     neighbours = neighbours[:n_max]
 
     recent = index.landings_before(t0_utc_s, since_s=RECENT_LANDINGS_S)
     same = [t for t, runway, _ in index.landings_before(t0_utc_s) if runway == ego_runway]
-    ahead = [nb.observed.eta_s for nb in neighbours if nb.observed.eta_s < ego_eta]
+    ahead = [nb.observed.eta_s for nb in everyone if nb.observed.eta_s < ego_eta]
     when = datetime.fromtimestamp(t0_utc_s, tz=timezone.utc)
     recent_same = sum(runway == ego_runway for _, runway, _ in recent)
     scalars = Scalars(
@@ -230,7 +249,7 @@ def scene_context(
         landings_recent=len(recent), landings_recent_same_runway=recent_same,
         same_runway_share_recent=(recent_same / len(recent)) if recent else None,
         airborne_in_radius=in_radius,
-        established_on_ego_final=sum(nb.observed.established for nb in neighbours),
+        established_on_ego_final=sum(nb.observed.established for nb in everyone),
         ahead_by_eta=len(ahead),
         lead_eta_s=max(ahead) if ahead else None,
         lead_gap_s=(ego_eta - max(ahead)) if ahead else None,

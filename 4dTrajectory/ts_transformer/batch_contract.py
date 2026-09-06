@@ -47,8 +47,20 @@ def model_forward(
     model: nn.Module,
     history: torch.Tensor,
     dynamics: dict[str, torch.Tensor] | None,
+    future: tuple[torch.Tensor, torch.Tensor] | None = None,
 ):
-    return model(history) if dynamics is None else model(history, dynamics)
+    """One forward pass under the output contract.
+
+    ``future`` = ``(target_rows, true_final_time_s)`` is the TRUTH's future, and only the
+    training loop passes it; a model that declares ``consumes_future`` (the latent control
+    model) encodes its posterior from it, every other model never sees it. Forecasting
+    never passes it, so the posterior cannot reach a prediction by construction.
+    """
+    if dynamics is None:
+        return model(history)
+    if future is not None and getattr(model, "consumes_future", False):
+        return model(history, dynamics, future=future)
+    return model(history, dynamics)
 
 
 @dataclass(frozen=True)

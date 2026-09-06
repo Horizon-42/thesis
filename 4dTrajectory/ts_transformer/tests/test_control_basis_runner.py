@@ -17,7 +17,8 @@ import torch
 
 from approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks
 from control.oracle.basis import inverse_dynamics_seed
-from run_ts_control_basis_oracle import summarise, summary_row_key
+from flight_scenarios.identity import summary_row_key
+from run_ts_control_basis_oracle import summarise
 
 
 def _reference() -> dict[str, dict]:

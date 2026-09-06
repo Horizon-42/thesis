@@ -407,8 +407,6 @@ def test_hook_config_is_guarded_and_named():
         TSConfig(prediction_output=PREDICTION_CONTROL, control_command_hook=CONTROL_HOOK_BARRIER)
     with pytest.raises(ValueError, match="control output"):
         TSConfig(control_command_hook=CONTROL_HOOK_BARRIER)
-    with pytest.raises(ValueError, match="on-final"):
-        _hook_config(control_command_hook=CONTROL_HOOK_BARRIER, control_hook_gate="faf")
     with pytest.raises(ValueError, match="unknown control_hook_saturation"):
         _hook_config(control_command_hook=CONTROL_HOOK_BARRIER, control_hook_saturation="never")
     named = TSConfig(**recipe_settings("simple-v3", keep_name=True), control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL)

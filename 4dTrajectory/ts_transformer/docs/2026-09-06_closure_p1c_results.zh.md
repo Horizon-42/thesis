@@ -1,6 +1,6 @@
 # 闭式解码器 P1.c 结果（KRDU，2026-09-06）
 
-承接 `2026-09-07_scene_join_anchor_design.zh.md` §五 P1（走向 C：先修输出侧）。P1.a/b 定了家族（F3 经由点 Dubins）与剖面（K=4 慢度 / 高度节点）；P1.c 把它做成第三种 `prediction_output="closure"`，在 KRDU 上与 simple-v3 基线、Phase 0 的真值意图臂配对比较。campaign：`4dTrajectory/outputs/KRDU/experiments/closure_p1c_20260905/`（读数 `readout_geometry.txt/.json`，`compare_constraint_arms.py`，闭合真值，两族指标）。
+承接 `2026-09-07_scene_join_anchor_design.zh.discard.md` §五 P1（走向 C：先修输出侧）。P1.a/b 定了家族（F3 经由点 Dubins）与剖面（K=4 慢度 / 高度节点）；P1.c 把它做成第三种 `prediction_output="closure"`，在 KRDU 上与 simple-v3 基线、Phase 0 的真值意图臂配对比较。campaign：`4dTrajectory/outputs/KRDU/experiments/closure_p1c_20260905/`（读数 `readout_geometry.txt/.json`，`compare_constraint_arms.py`，闭合真值，两族指标）。
 
 ## 一、门（预注册，设计文档 §五 P1.c）
 

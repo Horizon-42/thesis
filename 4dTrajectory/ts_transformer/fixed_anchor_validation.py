@@ -17,10 +17,10 @@ import torch
 from arc_length_geometry import arc_length_geometry_metrics, arc_length_velocity_metrics
 from channels import POSITION_IDX, VELOCITY_IDX
 from config import HORIZON_NORMALIZED, TSConfig
-from control.loss.components import last_reliable_terminal_velocity_target
 from dataset import FlightSeries, Normalizer
+from metrics import signed_spread
 from fixed_dt_supervision import build_fixed_dt_supervision
-from terminal_state_loss import terminal_state_metrics_numpy
+from terminal_state_loss import last_reliable_terminal_velocity_target, terminal_state_metrics_numpy
 from time_grids import output_time_grid
 
 
@@ -496,18 +496,9 @@ def _common_grid_ade_result(
     }
 
 
-def _signed_spread(values: np.ndarray) -> dict[str, float]:
-    values = np.asarray(values, dtype=np.float64)
-    magnitude = np.abs(values)
-    return {
-        "mean_signed": float(values.mean()),
-        "mean_abs": float(magnitude.mean()),
-        "p95_abs": float(np.percentile(magnitude, 95)),
-        "max_abs": float(magnitude.max()),
-    }
-
-
-def _magnitude_spread(values: np.ndarray) -> dict[str, float]:
+def _magnitude_spread_with_median(values: np.ndarray) -> dict[str, float]:
+    """{mean, median, p95, max} — one key MORE than ``evaluation/stats.magnitude_spread``,
+    hence the name: the two are not interchangeable."""
     values = np.asarray(values, dtype=np.float64)
     return {
         "mean": float(values.mean()),
@@ -583,13 +574,13 @@ def fixed_anchor_common_grid_report_metrics(
         "flights": len(series),
         "ade_m": float(per_flight_ade.mean()),
         "fde_m": float(per_flight_fde.mean()),
-        "ade_distribution_m": _magnitude_spread(per_flight_ade),
-        "fde_distribution_m": _magnitude_spread(per_flight_fde),
-        "arrival_endpoint_error_m": _magnitude_spread(endpoint_error),
-        "horizontal_m": _magnitude_spread(horizontal.mean(axis=1)),
-        "along_track_m": _signed_spread(along),
-        "cross_track_m": _signed_spread(cross),
-        "vertical_m": _signed_spread(vertical),
+        "ade_distribution_m": _magnitude_spread_with_median(per_flight_ade),
+        "fde_distribution_m": _magnitude_spread_with_median(per_flight_fde),
+        "arrival_endpoint_error_m": _magnitude_spread_with_median(endpoint_error),
+        "horizontal_m": _magnitude_spread_with_median(horizontal.mean(axis=1)),
+        "along_track_m": signed_spread(np.asarray(along, dtype=np.float64)),
+        "cross_track_m": signed_spread(np.asarray(cross, dtype=np.float64)),
+        "vertical_m": signed_spread(np.asarray(vertical, dtype=np.float64)),
         "final_time_s": {
             "mae": float(np.abs(time_error).mean()),
             "rmse": float(np.sqrt(np.mean(time_error**2))),

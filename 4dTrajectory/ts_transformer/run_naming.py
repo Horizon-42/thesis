@@ -42,6 +42,7 @@ from typing import Any
 
 from config import (
     CONTROL_HOOK_FIELDS,
+    CTA_FIELDS,
     INTENT_FIELDS,
     PROCEDURE_LOSS_FIELDS,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
@@ -91,7 +92,6 @@ CONTROL_LOSS_FIELDS = (
     "control_velocity_loss_weight",
     "control_velocity_loss_scale_mps",
     "control_imitation_loss_weight",
-    "control_dense_state_loss_weight",
     "control_geometry_loss_weight",
     "control_arc_horizontal_velocity_loss_weight",
     "control_arc_vertical_velocity_loss_weight",
@@ -115,6 +115,10 @@ CONTROL_LOSS_FIELDS = (
     # The final-approach penalty is an objective on BOTH paths (it acts on the control
     # rollout's segment endpoints too): a control run that carries it is a recipe edit.
     *PROCEDURE_LOSS_FIELDS,
+    # The latent intent's objective knobs (control/latent.py); last, so tests that slice
+    # the recipe fields off the front keep reading recipe fields.
+    "latent_beta",
+    "latent_free_bits_nats",
 )
 #: The closure output's objective fields; its base name bumps when the regression
 #: itself is redesigned.
@@ -152,6 +156,8 @@ META_FIELDS = (
     # different runs, whatever else matches.
     "closure_labels_path",
     *INTENT_FIELDS,
+    # The CTA axis reads the future the same way: a given-CTA run must wear it.
+    *CTA_FIELDS,
     "d_model",
     "n_heads",
     "d_ff",
@@ -203,7 +209,6 @@ _ABBREV = {
     "control_imitation_loss_weight": "imit",
     "control_velocity_loss_weight": "vel",
     "control_velocity_loss_scale_mps": "vel-scale",
-    "control_dense_state_loss_weight": "dense",
     "control_geometry_loss_weight": "geom",
     "control_effort_loss_weight": "effort",
     "control_smoothness_loss_weight": "smooth",
@@ -230,6 +235,7 @@ _ABBREV = {
     "coordinate_frame": "frame",
     "target_conditioning": "target",
     "intent_conditioning": "intent",
+    "cta_conditioning": "cta",
     "closure_labels_path": "labels",
     "state_position_reference": "pos-ref",
     "corridor_gate": "gate",
@@ -251,7 +257,6 @@ _ABBREV = {
     "control_gradient_clip_policy": "grad-clip-policy",
     "control_rollout_integrator_dt_s": "rollout-dt",
     "control_command_hook": "hook",
-    "control_hook_gate": "hook-gate",
     "control_hook_saturation": "hook-sat",
     "control_barrier_alpha": "barrier-alpha",
     "control_barrier_heading_gain": "barrier-gain",
@@ -273,10 +278,13 @@ SPLIT_DISPLAY = {
 
 _DEFAULTS: dict[str, Any] = TSConfig().to_dict()
 
+#: The fields the output word reads for a latent run; guarded like every other field.
+LATENT_OUTPUT_FIELDS = ("latent_dim", "latent_prior_components")
+
 _unknown = [
     name
     for name in (*CONTROL_LOSS_FIELDS, *STATE_LOSS_FIELDS, *META_FIELDS,
-                 *(field for field, _ in _TAU_FIELDS))
+                 *(field for field, _ in _TAU_FIELDS), *LATENT_OUTPUT_FIELDS)
     if name not in _DEFAULTS
 ]
 if _unknown:  # fail at import: a renamed TSConfig field must rename here too
@@ -469,11 +477,23 @@ def meta_items(config: Mapping[str, Any]) -> list[str]:
     return items
 
 
+def output_name(config: Mapping[str, Any]) -> str:
+    """Field 1: the output contract; a control output with a latent intent says so
+    (``control+z8``, ``control+z8k4`` for a K=4 mixture prior) — a latent run is a
+    different model from the deterministic head, not a loss edit on it."""
+    output = str(config.get("prediction_output") or "state")
+    latent_dim = int(config.get("latent_dim") or 0)
+    if output != PREDICTION_CONTROL or latent_dim <= 0:
+        return output
+    components = int(config.get("latent_prior_components") or 1)
+    return f"{output}+z{latent_dim}" + (f"k{components}" if components > 1 else "")
+
+
 def run_display_name(config: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
     """The canonical human name: output · backbone · dynamics · loss · meta."""
     backbone = str(config.get("model") or "?")
     parts = [
-        str(config.get("prediction_output") or "state"),
+        output_name(config),
         _BACKBONE_DISPLAY.get(backbone, backbone),
         dynamics_name(config),
         loss_design_name(config),
@@ -514,7 +534,7 @@ def run_slug(config: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
     ):
         dyn += f"-{_BACKEND_SLUG.get(backend, _slugify(str(backend)))}"
     tokens = [
-        str(config.get("prediction_output") or "state"),
+        _slugify(output_name(config)),
         _BACKBONE_SLUG.get(backbone, _slugify(backbone)),
         dyn,
         _slugify(loss_design_name(config)),

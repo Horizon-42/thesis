@@ -193,9 +193,9 @@ def common_physical_time_flight_metrics(
         "fde_m": float(displacement[-1]),
         "arrival_endpoint_error_m": arrival_endpoint_error,
         "horizontal_ade_m": float(horizontal.mean()),
-        "along_track_m": _spread(along),
-        "cross_track_m": _spread(cross),
-        "vertical_m": _spread(vertical),
+        "along_track_m": signed_spread(along),
+        "cross_track_m": signed_spread(cross),
+        "vertical_m": signed_spread(vertical),
         "final_time_error_s": time_error,
         "true_final_time_s": float(true_final_time_s),
         "predicted_final_time_s": float(predicted_final_time_s),
@@ -324,7 +324,7 @@ def raw_kinematic_metrics(
     }
 
 
-def _spread(values: np.ndarray) -> dict[str, float]:
+def signed_spread(values: np.ndarray) -> dict[str, float]:
     """Magnitude summary of a signed error array.
 
     The vectorised twin of ``evaluation/stats.signed_spread`` (same keys, same

@@ -123,7 +123,7 @@ from dataset import (  # noqa: E402
     cross_validation_folds, require_matching_data_provenance, split_by_flight,
     split_name_for_dataset_id, window_anchors,
 )
-from development_cohorts import DevelopmentCohort  # noqa: E402
+from development_cohorts import DEVELOPMENT_COHORT_SCHEMA, DevelopmentCohort  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
 from evaluation.thresholds import AssessmentContext  # noqa: E402
@@ -152,7 +152,7 @@ from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
 from terminal_state_loss import terminal_state_errors  # noqa: E402
-from control.duration import UniformDurationControlHead  # noqa: E402
+from prediction_outputs import UniformDurationControlHead  # noqa: E402
 from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
@@ -302,7 +302,7 @@ def test_development_cohort_checkpoint_cannot_be_frozen_for_test(tmp_path):
         "data_provenance": provenance,
         "data_selection": {
             "development_cohort": {
-                "schema_version": "ts-development-cohort-v1",
+                "schema_version": DEVELOPMENT_COHORT_SCHEMA,
                 "name": "KRDU-05L-cluster-0",
             },
         },
@@ -436,8 +436,8 @@ def test_invalid_teacher_arguments_do_not_begin_a_formal_run(monkeypatch, tmp_pa
     assert not began_run
 
 
-def test_predict_cli_refuses_test_without_explicit_release(tmp_path):
-    with pytest.raises(SystemExit):
+def test_predict_cli_refuses_test_without_explicit_release(tmp_path, capsys):
+    with pytest.raises(SystemExit) as info:
         ts_cli.main([
             "predict",
             "--checkpoint", str(tmp_path / "checkpoint.pt"),
@@ -445,6 +445,7 @@ def test_predict_cli_refuses_test_without_explicit_release(tmp_path):
             "--output-dir", str(tmp_path / "prediction"),
             "--split", "test",
         ])
+    assert info.value.code == 2 and "--split test is sealed" in capsys.readouterr().err
 
 
 def _frame() -> frames.ENUFrame:
@@ -2462,7 +2463,7 @@ def test_control_simple_v1_is_a_frozen_serialized_recipe():
         replace(config, n_segments=32)
 
 
-def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts():
+def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts(capsys):
     parser = argparse.ArgumentParser()
     ts_cli._add_data_args(parser)
     ts_cli._add_training_args(parser)
@@ -2492,8 +2493,9 @@ def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts():
             "--n-segments", "32",
         ]
     )
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as info:
         ts_cli._config_from_args(conflicting, parser)
+    assert info.value.code == 2 and "recipe fields are frozen: n_segments=32" in capsys.readouterr().err
 
 
 def test_cached_teacher_pretrainer_accepts_native_control_batch(tmp_path):
@@ -2721,7 +2723,6 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_gradient_clip_norm",
         "control_gradient_clip_policy",
         "control_dynamics_backend",
-        "control_dense_state_loss_weight",
         "control_geometry_loss_weight",
         "control_arc_horizontal_velocity_loss_weight",
         "control_arc_vertical_velocity_loss_weight",
@@ -3250,7 +3251,7 @@ def test_capacity_report_recipe_detects_every_config_difference(
 
 def test_capacity_report_masks_unsupervised_reference_velocity_placeholders():
     diagnostics = {
-        "channel_names": ["e", "n", "u", "edot", "ndot", "udot"],
+        "channel_names": list(ch.CHANNELS),
         "anchor_state": [0.0, 0.0, 0.0, 10.0, 0.0, -1.0],
         "fixed_dt": {
             "offset_s": [2.0, 4.0, 6.0],
@@ -5377,15 +5378,15 @@ def test_fixed_horizon_cv_does_not_repeat_inert_n_segment_candidates(horizon_mod
 
 
 def test_spread_matches_the_gate_side_signed_spread():
-    # metrics._spread is the VECTORISED twin of evaluation/stats.signed_spread (that one
+    # metrics.signed_spread is the VECTORISED twin of evaluation/stats.signed_spread (that one
     # is stdlib-only by design and would sort millions of boxed floats here). This seam
     # test is what makes "same statistic" a checked property instead of a mirror comment:
     # if either side changes its percentile method or keys, this fails.
     from evaluation.stats import signed_spread
-    from metrics import _spread
+    from metrics import signed_spread as vectorised_spread
 
     values = np.array([3.0, -1.5, 0.25, -7.0, 4.0, 2.5, -0.75])
-    ours, theirs = _spread(values), signed_spread(values.tolist())
+    ours, theirs = vectorised_spread(values), signed_spread(values.tolist())
     assert set(ours) == set(theirs)
     for key in ours:
         assert ours[key] == pytest.approx(theirs[key])
@@ -6479,3 +6480,35 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
     assert history["config"]["model"] == model_name
     assert len(history["history"]) == 2
     assert history["data_provenance"]["source_record_count"] == len(series)
+
+
+def test_a_stored_config_carrying_a_retired_field_still_loads_and_an_unknown_one_does_not():
+    """Checkpoints written before a field was retired keep loading; a genuinely unknown key
+    is still refused, so the retired list stays honest."""
+    from config import RETIRED_SERIALIZED_FIELDS
+    from dataclasses import fields as dataclass_fields
+    live = {field.name for field in dataclass_fields(TSConfig)}
+    assert not (set(RETIRED_SERIALIZED_FIELDS) & live), "a retired field is still declared"
+    stored = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
+    for name in RETIRED_SERIALIZED_FIELDS:
+        stored[name] = 0.25
+    assert TSConfig.from_dict(stored).prediction_output == PREDICTION_CONTROL
+    with pytest.raises(TypeError):
+        TSConfig.from_dict({**stored, "never_a_field": 1})
+
+
+L1_NATIVE32_CHECKPOINT = _REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32/checkpoint.pt"
+
+
+@pytest.mark.skipif(not L1_NATIVE32_CHECKPOINT.is_file(), reason="the L1 native32 checkpoint is not on this machine")
+def test_the_l1_native32_checkpoint_written_with_the_retired_fields_still_loads():
+    """The canary against the serialized contract: a REAL artifact from before a field was
+    retired (the synthetic test above pins the rule, not an artifact) — its class, its
+    strict state dict, and a config that round-trips without the retired keys."""
+    from config import RETIRED_SERIALIZED_FIELDS
+    from control.heads import ControlOutputModel
+    model, config, _normalizer, payload = load_checkpoint(L1_NATIVE32_CHECKPOINT)
+    assert isinstance(model, ControlOutputModel) and config.n_segments == 32
+    assert set(RETIRED_SERIALIZED_FIELDS) <= set(payload["config"]), "the canary lost its point: pick an older artifact"
+    assert not set(RETIRED_SERIALIZED_FIELDS) & set(config.to_dict())
+    assert TSConfig.from_dict(config.to_dict()) == config

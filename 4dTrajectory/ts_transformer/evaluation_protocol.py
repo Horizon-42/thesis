@@ -12,11 +12,11 @@ import fcntl
 import hashlib
 import json
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 from dataset import require_matching_data_provenance
+from io_utils import file_sha256, utc_now
 
 TEST_RELEASE_NAME = "test_release.json"
 TEST_RELEASE_SCHEMA = "ts-test-release-v1-checkpoint-bound-one-shot"
@@ -32,16 +32,6 @@ def test_release_path(checkpoint: str | Path) -> Path:
     return Path(checkpoint).resolve().with_name(TEST_RELEASE_NAME)
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _json_sha256(value: Any) -> str:
@@ -114,7 +104,7 @@ def _read_bound_release(
     stored_provenance = checkpoint_payload.get("data_provenance")
     if not isinstance(release, dict) or release.get("schema_version") != TEST_RELEASE_SCHEMA:
         raise TestReleaseError("test release has an unsupported schema")
-    if release.get("checkpoint_sha256") != _file_sha256(checkpoint):
+    if release.get("checkpoint_sha256") != file_sha256(checkpoint):
         raise TestReleaseError("test release is bound to a different checkpoint")
     if release.get("test_split_sha256") != _json_sha256(sorted(test_keys)):
         raise TestReleaseError("test release is bound to a different outer-test split")
@@ -157,9 +147,9 @@ def create_test_release(
         _write_atomic(release_path, {
             "schema_version": TEST_RELEASE_SCHEMA,
             "status": "frozen",
-            "created_at": _utc_now(),
+            "created_at": utc_now(),
             "checkpoint": str(checkpoint_path),
-            "checkpoint_sha256": _file_sha256(checkpoint_path),
+            "checkpoint_sha256": file_sha256(checkpoint_path),
             "data_provenance_sha256": _json_sha256(
                 checkpoint_payload.get("data_provenance")
             ),
@@ -213,7 +203,7 @@ def begin_test_evaluation(
         release["claims"].append({
             "claim_id": claim_id,
             "status": "started",
-            "started_at": _utc_now(),
+            "started_at": utc_now(),
             "output_dir": str(Path(output_dir).resolve()),
             "flight_count": len(selected),
             "flight_keys_sha256": _json_sha256(sorted(selected)),
@@ -245,7 +235,7 @@ def complete_test_evaluation(checkpoint: str | Path, claim_id: str) -> None:
         if claim is None or claim.get("status") != "started":
             raise TestReleaseError(f"test claim {claim_id!r} is absent or not active")
         claim["status"] = "complete"
-        claim["completed_at"] = _utc_now()
+        claim["completed_at"] = utc_now()
         completed = {
             key
             for item in claims
@@ -254,7 +244,7 @@ def complete_test_evaluation(checkpoint: str | Path, claim_id: str) -> None:
         }
         if len(completed) == release.get("test_flights"):
             release["status"] = "complete"
-            release["completed_at"] = _utc_now()
+            release["completed_at"] = utc_now()
         elif any(item.get("status") == "started" for item in claims):
             release["status"] = "evaluating"
         else:
