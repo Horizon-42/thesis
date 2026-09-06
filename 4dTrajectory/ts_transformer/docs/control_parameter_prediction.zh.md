@@ -186,16 +186,16 @@ train→predict→evaluate 全流程之后的机场级结果表。这是目前"�
 
 ### 2.3 loss grid — `control_state_loss_grid`
 
-分派在 `train.py:650-653`（`_CONTROL_STATE_LOSS_HANDLERS`）：
+分派在 `objective.py` 的 `_CONTROL_STATE_LOSS_HANDLERS`：
 
 - `native-segment-endpoints` → `_native_endpoint_control_state_loss`
-  （`train.py:561`）：只在模型自己学出的、非均匀的 segment 端点上算 loss，用
+  （`objective._native_endpoint_control_state_loss`）：只在模型自己学出的、非均匀的 segment 端点上算 loss，用
   `align_control_targets_to_prediction_clock` 把真值插值到预测的累积时钟上。
   **simple-v1 用这一档**，且此时 `dense_supervision` 恒为 `None`——因此
   `fixed_dt_control_loss.py`、horizon curriculum（2.6）、
   `terminal-state`/`physical-criteria`/`arc-length-geometry` 三个目标在
   simple-v1 下**永远不会被调用**（不是关闭，是这条分支物理上不会走到）。
-- `fixed-dt` → `_fixed_dt_control_state_loss`（`train.py:617`），委托给
+- `fixed-dt` → `objective._fixed_dt_control_state_loss`，委托给
   `fixed_dt_control_loss.fixed_dt_control_state_loss`：在规则的 `dt_s` 网格上
   评估密集监督（`fixed_dt_supervision.FixedDTControlSupervision`），是
   `physical-criteria`/`terminal-state`/`arc-length-geometry` 三个目标以及
@@ -286,7 +286,7 @@ training_optimizations.zh.md`（"Clip-only 因果对照"一节）记录过课程
 **不是** `control` 的一个子选项，而是 `PREDICTION_CONTROL_MIXTURE`
 （`prediction_output=control-mixture`）独立枚举值，走独立的模型类
 （`ControlMixtureOutputModel`，`control_models.py:106`）和独立的 loss 适配器
-（`train.py:962` `_mixture_loss_adapter` → `control_mixture_loss.py`）。
+（`_mixture_loss_adapter` → `control_mixture_loss.py`；两者都已随 control-mixture 输出退役）。
 
 结构（`control_mixture.py`）：`K`（默认 3，`control_expert_count`）个独立的
 `ControlOutputHead` "专家" 各自输出完整的 controls/durations/final_time，外加
@@ -331,7 +331,7 @@ model_forward(model, history, dynamics)
      -> ControlFeatureModel.fused_features        (backbone 特征 + 8 维气动条件编码融合)
      -> UniformDurationControlHead.forward        (bounded controls + final_time/N 等分)
 
-prediction_loss_components()                      [train.py:1004, PREDICTION_LOSS_HANDLERS 按类型分派]
+prediction_loss_components()                      [objective.py, PREDICTION_LOSS_HANDLERS 按类型分派]
   -> _control_loss_adapter -> control_prediction_loss_components -> control_prediction_loss_terms
        state_prediction = control_state_supervision_prediction(...)   [控制训练时钟, 2.5 之外的 clock 轴]
        (dense_supervision is None under native grid -> 跳过 horizon curriculum 分支)

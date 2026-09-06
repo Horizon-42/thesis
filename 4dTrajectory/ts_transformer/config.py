@@ -50,7 +50,7 @@ STATE_POSITION_ABSOLUTE = "absolute"
 # (`4dTrajectory/outputs/*/experiments/state_v2_20260903/A_anchor_relative`), whose config
 # must keep loading and naming. It cannot be SELECTED: it is absent from
 # `STATE_POSITION_REFERENCES_AVAILABLE`, which is the CLI's choices and the boundary check
-# `__main__._refuse_unavailable_selection` applies to `--config-overrides` as well — the
+# `cli.common._refuse_unavailable_selection` applies to `--config-overrides` as well — the
 # same mechanism `control_command_hook="nominal-residual"` uses.
 STATE_POSITION_ANCHOR_RELATIVE = "anchor-relative"
 # The absolute output, with the position channels bounded to the final-approach corridor
@@ -397,7 +397,7 @@ CONTROL_HOOK_NOMINAL_RESIDUAL = "nominal-residual"
 CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL)
 #: What a NEW run may select. ``off`` is in it — the flag's own choices drop that one,
 #: because `--command-hook` exists to turn a hook ON, but a config saying ``off`` is the
-#: default and must pass the boundary check in `__main__`.
+#: default and must pass the boundary check in `cli.common`.
 CONTROL_HOOKS_AVAILABLE = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER)
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"

@@ -3,7 +3,7 @@
 This module contains no training loop and no optimizer policy.  It turns one completed
 dynamics rollout into named per-flight loss terms, then composes those terms through an
 explicit objective registry.  Adding a new tracking recipe therefore does not add another
-branch to ``train.py``.
+branch to ``objective.py``.
 """
 
 from __future__ import annotations

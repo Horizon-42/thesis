@@ -30,7 +30,13 @@ changed at inference without retraining.
 
 **Every flag that sets a ``TSConfig`` field is named after that field** (``--dt-s`` for
 ``dt_s``, ``--control-rollout-integrator-dt-s`` for
-``control_rollout_integrator_dt_s``, …). ``cli/common.py`` asserts it at import.
+``control_rollout_integrator_dt_s``, …). ``cli/common.py`` asserts it at import, and every
+parser here passes ``allow_abbrev=False`` so an old spelling is refused rather than
+prefix-matched. The exceptions are declared where they occur: ``--batch-size`` (also takes
+``"auto"``), ``--instance-norm`` (one flag, two backbone fields), ``--control-recipe-name``
+(resolved first), and on ``predict`` — whose config comes from the checkpoint, so its flags
+are OVERRIDES — ``--command-hook`` / ``--hook-saturation``, kept short because they are the
+adopted delivery form and two arm files spell them.
 
 One module per subcommand under ``cli/``; this file is the parser table and the bootstrap.
 

@@ -239,7 +239,8 @@ command is HELD.
 | `dataset.py` | observed arrivals → model windows | 1,742 |
 | `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 258 |
 | `splits.py` | which split a flight belongs to | 192 |
-| `cli/` + `__main__.py` | one module per subcommand + the parser table | 131 + 6 |
+| `cli/` | one module per subcommand (`common` 817, `predict` 422, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze_test` 42, `__init__` 15) | 1,542 |
+| `__main__.py` | the bootstrap and the `COMMANDS` table it dispatches from | 131 |
 
 Two edges that a change must not reverse: `evaluation_protocol` reaches
 `data_provenance`, never `dataset` (a boundary test bans torch from that path), and
@@ -288,7 +289,11 @@ them under `control` would claim an ownership that does not exist.
 
 **Direction**: the objective and the training loop import `control/`, never the reverse.
 `control/` may import `dataset` (`Normalizer` and the window types are data-plane values it
-genuinely consumes) but not `train`/`objective`/`forecast`/`models`/`batching`.
+genuinely consumes) but not `train`/`objective`/`validation`/`forecast`/`models`/`batching`.
+**That `dataset` edge runs BOTH ways and only one direction is safe**: `dataset` imports
+`control.{basis_fit, conditioning, dynamics.inverse, envelope}` to build a batch at all, so
+those four must stay `dataset`-free or the cycle closes and fails at import in whichever
+order a caller hits first. `tests/test_architecture.py` names the four and pins it.
 `batch_contract.py` holds `unpack_batch`/`model_forward`/`anchor_state` and the
 `LossComponents` contract so a loss module can read a batch and return an objective without
 importing `objective`, which imports it. `tests/test_architecture.py` enforces all of it.
@@ -299,10 +304,18 @@ namespace would restore the undifferentiated listing the package exists to remov
 **Every CLI flag is named after the `TSConfig` field it sets** (`--dt-s`,
 `--control-rollout-integrator-dt-s`, `--control-state-supervision-clock`, …; fifteen were
 renamed on 2026-09-07). `cli/common.CLI_CONFIG_FIELDS` is therefore a list of field names,
-asserted against `fields(TSConfig)` at import, and `tests/test_architecture.py` checks that
-each listed field has a flag. Three fields are exceptions and say so where they occur:
-`batch_size` (its flag also takes `"auto"`), `use_norm`/`revin` (one `--instance-norm`), and
-`control_recipe_name` (resolved against `--config-overrides` first).
+asserted against `fields(TSConfig)` at import; `tests/test_architecture.py` checks both
+remaining directions — each listed field has a flag spelled as itself, and every parser dest
+is either a listed field or one of the frozen `NON_CONFIG_DESTS` (so DELETING a name from
+the list fails instead of leaving its flag silently ignored). **Every parser passes
+`allow_abbrev=False`**: without it argparse accepts any unambiguous prefix and four of the
+renamed flags kept working under their old spellings. Exceptions, all recorded where they
+occur — on train: `batch_size` (its flag also takes `"auto"`), `use_norm`/`revin` (one
+`--instance-norm`), `control_recipe_name` (resolved against `--config-overrides` first); on
+predict, whose config comes from the CHECKPOINT so its four flags are overrides rather than
+settings (`cli/predict.PREDICT_CONFIG_FLAGS`, asserted the same way):
+`--command-hook` / `--hook-saturation` keep their short names because `CLAUDE.md` names them
+as the adopted delivery form and two arm files spell them in re-runnable `predict_args`.
 
 **Run and category naming**: `run_naming.py` is the single source for one grammar —
 `output · backbone · dynamics · loss · meta` — rendered from the run's serialized config by

@@ -6,21 +6,35 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
-## ts_transformer: three dead bindings noticed during the T3 audit (2026-09-07)
+## ts_transformer: two dead loss helpers (2026-09-07)
 
-**Verified** by AST walk over the module, on `dev-t3` at `4148a53`:
+**Verified** by AST walk over the module, on `dev-t3`: `objective.masked_mse` and
+`objective.position_velocity_consistency_loss` have no live caller — only
+`tests/test_ts_transformer.py`. They moved with the rest of the objective in T3-15 rather
+than being deleted there, because T3 is a structural pass and a deletion is a T1-shaped
+change with its own evidence to state (the `kinematic` component is weighted zero on every
+path today, which is why they went quiet). Deleting both would also remove four tests that
+currently test nothing else.
 
-- `objective.masked_mse` and `objective.position_velocity_consistency_loss` have no live
-  caller — only `tests/test_ts_transformer.py`. They moved with the rest of the objective in
-  T3-15 rather than being deleted there, because T3 is a structural pass and a deletion is a
-  T1-shaped change with its own evidence to state (the `kinematic` component is weighted zero
-  on every path today, which is why they went quiet). Deleting both would also remove four
-  tests that currently test nothing else.
-- `dataset` imports `DYNAMICS_CONDITION_NAMES` from `control.conditioning` and never uses
-  it. This was already true at `4e00c59`; the T3-18 carve did not create it.
+**Judgement**: safe to delete, and it should be decided together with whether the
+kinematic-consistency term is ever coming back.
 
-**Judgement**: all three are safe to delete, and the first two should be decided together
-with whether the kinematic-consistency term is ever coming back.
+**Corrected 2026-09-07 (T3 review)**: this entry also listed `dataset`'s unused
+`DYNAMICS_CONDITION_NAMES` import as safe to delete. It was NOT — three tests read the name
+through `dataset`, so removing the import alone cost seven failures. That is now fixed
+properly (the tests import from `control.conditioning`, `dataset` no longer re-exports it),
+and it is the reason this file states verified-vs-judgement: "unused inside this module" is
+not "unreferenced", and only the second one licenses a deletion.
+
+## ts_transformer: train_only_diagnostics is one unreferenced helper (2026-09-07)
+
+**Verified**: `select_outer_train_series` was deleted in the T3 review — its only caller went
+to `archive/oracle_teacher_2026_08/` in T2. What is left in the module is
+`rank_outer_train_candidates`, which has no caller either, live or archived.
+
+**Judgement**: the module should go with the runner cleanup (T4-27), not before — deleting a
+file is cheap, but the split-discipline it documents ("open exactly one outer-train flight,
+never val/test") is worth keeping in view while the capacity diagnostics are being reworked.
 
 ## ts_transformer: run_ts_pipeline's flags no longer match the ones it emits (2026-09-07)
 

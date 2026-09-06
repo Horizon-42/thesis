@@ -15,8 +15,8 @@ is the LTP + TCH aim point (``flight_scenarios.runway_target``):
     hw(d)      =   cw · (d + d_GARP) / d_GARP   flight_scenarios.fas_geometry, one source with the optimizer
 
 Everything here is torch so one implementation serves the bounded output layer
-(``prediction_outputs.StateOutputLayer``), the training-time penalty (``train``) and the
-inference-time projection (``forecast``); NumPy callers wrap their arrays.
+(``prediction_outputs.StateOutputLayer``), the training-time penalty
+(``objective.procedure_loss``) and the inference-time projection (``forecast``); NumPy callers wrap their arrays.
 
 **Which rows are "on the final".**  The measured data (docs/2026-09-04_procedure_constraints_design.zh.md)
 say 15–62 % of flights join the final INSIDE the FAF, so the FAF distance is not the

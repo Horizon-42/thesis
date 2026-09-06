@@ -102,10 +102,14 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 |---|---|
 | `config.py` | `TSConfig` — the one namespace both vendored models read, serialised into every checkpoint |
 | `channels.py` | the feature contract: geodetic states ⇄ threshold-anchored ENU channels |
-| `dataset.py` | track loading, input resampling, mode-dispatched targets, by-flight split, normalisation |
+| `dataset.py` | track loading, input resampling, mode-dispatched targets, normalisation |
+| `data_provenance.py` | which arrival rosters produced a run: manifest + eligibility digests, and the staleness refusal. Pure hashing — no torch, so `evaluation_protocol` can compare two fingerprints without the data plane |
+| `splits.py` | the by-flight train/val/test split (hashed identities) and the data-selection audit |
 | `models.py` | model construction over the two vendored encoders and selected state/control/control-mixture head |
 | `prediction_outputs.py` | typed state/control outputs, final-time head, bounded controls and duration partition |
-| `train.py` | state loss or differentiable control-rollout loss, early stopping, checkpoints |
+| `objective.py` | what a prediction is scored against: the target contracts, `loss_component_names`, every loss construction and the `PREDICTION_LOSS_HANDLERS` dispatch |
+| `validation.py` | how a fitted model is replayed on a split and which epoch is kept: one forward pass per split, the per-airport validation, `VALIDATION_SELECTIONS` |
+| `train.py` | the epoch, the training cohort, early stopping, the checkpoint it writes |
 | `forecast.py` | independent normalized, one-pass full, and recursive-window inference strategies |
 | `metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
 | `export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
@@ -119,6 +123,7 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | `fixed_anchor_validation.py` / `evaluation_protocol.py` | deterministic fixed-anchor metrics and the one-way outer-test release gate |
 | `approach_clustering/` | train-only approach geometry clustering and shared-cohort comparison CLI |
 | `batch_benchmark.py` | outer-train-only CUDA throughput benchmark used by `benchmark-batch` |
+| `__main__.py` / `cli/` | the subcommand table, and one module per subcommand (`train`, `cross_validate`, `evaluate_fit`, `freeze_test`, `predict`, plus `common`) — each exposes `HELP` / `add_cli_arguments()` / `run_cli()` |
 | `synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
 | `control/` (package: envelope, heads, conditioning, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |
