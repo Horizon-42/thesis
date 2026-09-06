@@ -30,6 +30,7 @@ from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from control.envelope import physical_controls
 from dataset import (
+    FixedAnchorTrajectoryWindows,
     truth_duration_s,
     FlightSeries,
     Normalizer,
@@ -100,6 +101,9 @@ class Forecast:
     # the counterfactual offset) — the record says what it was asked for.
     cta_s: float | None = None
     cta_offset_s: float | None = None
+    # Latent control output only: decoded from the POSTERIOR mean q(z | this flight's own
+    # future) — the z-oracle upper bound. Reads the future; never a prediction result.
+    z_from_posterior: bool = False
 
     @property
     def n_steps(self) -> int:
@@ -249,6 +253,7 @@ def _forecast_control_batch(
     latent: torch.Tensor | None = None,
     mode: tuple[int, np.ndarray] | None = None,
     latent_shuffled: bool = False,
+    z_from_posterior: bool = False,
     histories: np.ndarray | None = None,
     dynamics: dict[str, torch.Tensor] | None = None,
     cta_offset_s: float = 0.0,
@@ -330,6 +335,7 @@ def _forecast_control_batch(
             mode_index=None if mode is None else mode[0],
             mode_probability=None if mode is None else float(mode[1][row]),
             latent_shuffled=latent_shuffled,
+            z_from_posterior=z_from_posterior,
             cta_s=None if cta is None else float(cta[row]),
             cta_offset_s=None if cta is None else float(cta_offset_s),
         ))
@@ -441,6 +447,42 @@ def random_latent_forecasts(
         )
         for index in range(samples)
     ]
+
+
+def posterior_latent_forecasts(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    *,
+    anchor: int | None = None,
+    device: torch.device | None = None,
+    cta_offset_s: float = 0.0,
+) -> list[Forecast]:
+    """Every flight decoded from the MEAN of q(z | its own future): the z-oracle.
+
+    The upper bound the latent can reach when the intent is known — L2's gate 3 reads it
+    against the truth-intent arm. The future is the same target rows and true duration
+    the training loop hands the posterior, built by the dataset itself (no restated
+    target logic). It READS THE FUTURE: the records say ``zFromPosterior`` and this is
+    never a prediction result.
+    """
+    if config.latent_dim < 1:
+        raise ValueError("the posterior decode needs a latent control checkpoint (latent_dim > 0)")
+    device = device or next(model.parameters()).device
+    anchor = default_anchor(config) if anchor is None else anchor
+    windows = FixedAnchorTrajectoryWindows(list(series), config, normalizer)
+    if len(windows) != len(series) or any(windows.index[i][1] != anchor for i in range(len(series))):
+        raise RuntimeError("the fixed-anchor windows do not sit at the forecast anchor")
+    batch = windows.batch(np.arange(len(series)))
+    y, final_time_s = batch[1].to(device), batch[3].to(device)
+    model.eval()
+    with torch.no_grad():
+        posterior_mean, _logvar = model.posterior(y, final_time_s)
+    return _forecast_control_batch(
+        model, series, config, normalizer, anchor, device,
+        latent=posterior_mean, z_from_posterior=True, cta_offset_s=cta_offset_s,
+    )
 
 
 def shuffled_latent_forecasts(

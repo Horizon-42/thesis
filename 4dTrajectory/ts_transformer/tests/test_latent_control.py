@@ -45,12 +45,13 @@ from run_naming import output_name, run_display_name
 from train import load_checkpoint, loss_component_names, train
 
 from config import CONTROL_DURATION_UNIFORM
-from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, build_series
+from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series
 from export import build_prediction_record, observed_series_metrics, write_batch
 from forecast import (
     forecast_approach,
     latent_derangement,
     latent_mode_forecasts,
+    posterior_latent_forecasts,
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
@@ -533,3 +534,47 @@ def test_the_latent_model_trains_under_simple_v3_s_own_supervision(tmp_path: Pat
     assert isinstance(model, LatentControlModel)
     forecast = forecast_approach(model, series[0], loaded, normalizer, device=torch.device("cpu"))
     assert forecast.controls is not None and forecast.controls.shape[0] == config.n_segments
+
+
+def test_the_z_oracle_decodes_the_posterior_mean_of_each_flight_s_own_future(tmp_path: Path):
+    """Gate 3's instrument: the decode must equal a forward from the training-side posterior
+    mean (the dataset's own target rows and duration), and the record must say it read
+    the future."""
+    torch.manual_seed(0)
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
+        control_rollout_integrator_dt_s=0.5,
+        seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1,
+        final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
+        epochs=1, patience=1, batch_size=8, dropout=0.0, latent_dim=3,
+    )
+    series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=4, seed=3), config, airport=AIRPORT)
+    normalizer = Normalizer.fit(series)
+    model = build_model(config).eval()
+    with torch.no_grad():
+        model.control_head.control_projection.weight.normal_(std=0.1)
+    oracle = posterior_latent_forecasts(model, series, config, normalizer, device=torch.device("cpu"))
+    top1 = forecast_approach(model, series[0], config, normalizer, device=torch.device("cpu"))
+    assert all(f.z_from_posterior for f in oracle) and not top1.z_from_posterior
+    assert not np.allclose(oracle[0].controls, top1.controls)     # a different latent decoded
+    # the same decode as the training-side posterior mean
+    windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    x, y, _w, final_time, _fw, dynamics, _s = windows.batch(np.arange(4))
+    with torch.no_grad():
+        mean, _ = model.posterior(y, final_time)
+        direct = model(x, dynamics, latent=mean)
+    assert np.allclose(oracle[1].segment_durations_s.sum(), float(direct.final_time_s[1]), atol=1e-4)
+    out = tmp_path / "oracle"
+    write_batch([build_prediction_record(item, f, index=i, model_name=config.model, horizon_mode=config.horizon_mode)
+                 for i, (item, f) in enumerate(zip(series, oracle))],
+                output_dir=out, config_dict=config.to_dict(),
+                flight_metrics=[observed_series_metrics(item, f) for item, f in zip(series, oracle)])
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["mode"].endswith(":z-posterior") and summary["results"][0]["z_from_posterior"] is True
+    states = json.loads((out / summary["results"][0]["states_file"]).read_text())
+    assert states["source"]["zFromPosterior"] is True

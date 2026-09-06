@@ -164,6 +164,7 @@ def build_prediction_record(
         **({"modeIndex": forecast.mode_index, "modeProbability": forecast.mode_probability}
            if forecast.mode_index is not None else {}),
         **({"latentShuffled": True} if forecast.latent_shuffled else {}),
+        **({"zFromPosterior": True} if forecast.z_from_posterior else {}),
         # CTA-conditioned control output: the arrival time the decoder was GIVEN (truth +
         # offset) — a record that reads the future says so.
         **({"ctaS": forecast.cta_s, "ctaOffsetS": forecast.cta_offset_s}
@@ -470,6 +471,7 @@ def write_batch(
             # A CTA-conditioned run reads the future; the row it is compared on says so.
             "cta_s": source.get("ctaS"),
             "cta_offset_s": source.get("ctaOffsetS"),
+            "z_from_posterior": bool(source.get("zFromPosterior", False)),
             "true_final_time_s": metrics["true_final_time_s"],
             "final_time_error_s": metrics["final_time_error_s"],
             "split": split,
@@ -494,6 +496,7 @@ def write_batch(
             f"{config_dict.get('prediction_output', 'state')}:{split}"
             + (f":cta{records[0].source.get('ctaOffsetS', 0.0):+g}s"
                if records and records[0].source.get("ctaS") is not None else "")
+            + (":z-posterior" if records and records[0].source.get("zFromPosterior") else "")
         ),
         "split": split,
         "checkpoint": checkpoint,

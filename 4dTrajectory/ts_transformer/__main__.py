@@ -139,6 +139,7 @@ from forecast import (  # noqa: E402
     forecast_approaches,
     forecast_closure_from_labels,
     latent_mode_forecasts,
+    posterior_latent_forecasts,
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
@@ -954,6 +955,13 @@ def main(argv: list[str] | None = None) -> int:
              "source.ctaS / ctaOffsetS. 0 = the identity demonstration",
     )
     p_predict.add_argument(
+        "--z-from-posterior", action="store_true",
+        help="latent control output: decode every flight from the MEAN of q(z | its own "
+             "future) — the z-oracle upper bound (reads the future; records carry "
+             "source.zFromPosterior; never a prediction result). The whole output directory "
+             "is the oracle arm; cannot be combined with the prior-sample options",
+    )
+    p_predict.add_argument(
         "--latent-random", type=int, default=0, metavar="K",
         help="latent control output: decode K latents drawn from N(0, I) instead of the "
              "prior per flight into random/modeNN/ — the same-K control arm minADE_K is "
@@ -1297,6 +1305,13 @@ def main(argv: list[str] | None = None) -> int:
     if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
         print(f"  CTA-conditioned: every flight is given its truth arrival time {args.cta_offset_s:+g} s "
               "(reads the future — a delivery-form demonstration, not a prediction result)")
+    if args.z_from_posterior:
+        if config.latent_dim < 1:
+            parser.error("--z-from-posterior needs a latent control checkpoint")
+        if args.latent_samples or args.latent_random or args.latent_shuffle:
+            parser.error("--z-from-posterior is an oracle arm of its own; do not combine it with the prior-sample options")
+        print("  z-ORACLE: every flight decoded from the posterior mean of its OWN future "
+              "(reads the future — an upper bound, never a prediction result)")
     if (args.latent_samples or args.latent_shuffle or args.latent_random) and config.latent_dim < 1:
         parser.error("--latent-samples / --latent-random / --latent-shuffle need a latent control checkpoint")
     if args.latent_samples < 0 or args.latent_random < 0:
@@ -1377,6 +1392,10 @@ def main(argv: list[str] | None = None) -> int:
         if closure_labels is not None:
             forecasts = forecast_closure_from_labels(
                 batch_series, config, closure_labels, track=args.closure_track, device=device,
+            )
+        elif args.z_from_posterior:
+            forecasts = posterior_latent_forecasts(
+                model, batch_series, config, normalizer, device=device, cta_offset_s=args.cta_offset_s,
             )
         else:
             forecasts = forecast_approaches(
