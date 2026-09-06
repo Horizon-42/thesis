@@ -47,3 +47,14 @@ def test_airborne_and_landing_queries_read_the_past_only(tmp_path):
     assert [(runway, e.flight_key) for _, runway, e in recent] == [(RUNWAY, keys["LANDED"])]
     # A landing at or after T0 is never "before" it.
     assert all(t <= T0 for t, _, _ in landings)
+
+
+def test_a_truncated_cache_is_rebuilt_and_the_write_is_atomic(tmp_path):
+    paths, _keys = standard_scene(tmp_path)
+    built = build_scene_index(paths, verbose=False)
+    cache = paths.tracks / INDEX_NAME
+    assert cache.is_file() and not cache.with_suffix(".json.tmp").exists()
+    cache.write_text(cache.read_text()[: len(cache.read_text()) // 2])       # a half-written file
+    reloaded = load_scene_index(paths, verbose=False)
+    assert len(reloaded.entries) == len(built.entries)
+    assert json.loads(cache.read_text())["schema"] == SCENE_INDEX_SCHEMA

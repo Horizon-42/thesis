@@ -308,3 +308,24 @@ the resolved batch size is measured against less memory than training uses. Judg
 (the latent adds two linear layers), but a probe that lies is a probe; fix = let the probe run
 the model's real forward with a synthetic future when `consumes_future`.
 
+## scene data plane: review leftovers (opus, 2026-09-07; the HIGH/MEDIUM items are fixed)
+
+Verified by the review, deferred here because the scene encoder is not being built (L4 gate
+failed on the measurement the plane was built for): (7) `scene_context` mirrors the on-final
+membership constants instead of importing them upward from `final_approach_geometry`
+(pinned by a test today); (8) `ego_alt_hae_m` is a required argument nothing consumes — a
+datum trap; (9) the ego's ETA uses the caller's ground speed while each neighbour's uses a
+two-sample finite difference, and straight-line `distance/|v|` gives an outbound aircraft
+a finite ETA — the observable-lead-ETA proxy the L4 diagnostic found uninformative (corr
+0.11 with the true landing) would need an along-path estimator anyway; (10) the
+`since_last_landing` / `lead` sentinels collide with real values (3.0 % of KRDU anchors clip
+at 3600 s, 8 of them mean "no landing yet") — a validity bit per column; (11) `hour_utc` /
+`weekday` are UTC, which conflates time zones under merged-airport training; (12)
+`max(dt, 1e-3)` turns a duplicate timestamp into a 1000× speed; (13) no per-window scene
+cache — 15.7 ms per scene, ~9 track reads each, would be rebuilt every epoch and every
+DataLoader worker holds its own reader cache; precompute `SceneArrays` per (flight_key,
+anchor) before any training uses them; (14) unused imports and two one-line duplicates
+(`parse_utc_s` ≡ `intent_conditioning.parse_utc`, `OUTCOME_ASSIGNED`). Test gaps: a
+neighbour that landed just before t₀ with samples still in the window; an airborne
+neighbour on the parallel runway's final; an ego already established.
+

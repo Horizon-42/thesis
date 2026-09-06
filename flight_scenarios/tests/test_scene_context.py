@@ -100,3 +100,28 @@ def test_the_scene_is_deterministic_and_the_reader_cache_changes_nothing(tmp_pat
 
 def sc_wrap(a: float) -> float:
     return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def test_an_unknown_ego_key_is_refused_not_made_its_own_neighbour(tmp_path):
+    paths, keys = standard_scene(tmp_path)
+    index = build_scene_index(paths, verbose=False)
+    with pytest.raises(KeyError):
+        sc.scene_context(paths, index, **{**_ego_kwargs(keys), "ego_flight_key": "NOT_A_KEY"})
+
+
+def test_a_t0_outside_the_ego_s_own_span_is_refused(tmp_path):
+    """The two-window trap: a t₀ on the wrong clock lands outside the ego's samples."""
+    paths, keys = standard_scene(tmp_path)
+    index = build_scene_index(paths, verbose=False)
+    with pytest.raises(ValueError, match="wrong clock"):
+        sc.scene_context(paths, index, **{**_ego_kwargs(keys), "t0_utc_s": T0 - 1_000.0})
+
+
+def test_the_scalars_count_everyone_in_the_radius_not_only_the_kept_entities(tmp_path):
+    paths, keys = standard_scene(tmp_path)
+    index = build_scene_index(paths, verbose=False)
+    full = sc.scene_context(paths, index, **_ego_kwargs(keys))
+    cut = sc.scene_context(paths, index, **_ego_kwargs(keys), n_max=1)
+    assert len(cut.neighbours) == 1 and len(full.neighbours) == 2
+    assert cut.scalars == full.scalars                  # the N_MAX cut is for the tensors only
+    assert cut.in_radius == full.in_radius == 2
