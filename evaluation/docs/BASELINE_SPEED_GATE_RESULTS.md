@@ -323,6 +323,10 @@ mass"). Every graded row has a determinate pass/fail.
 
 ### 10.2 By type (fleet, graded rows)
 
+Every type's published speeds, its observed and MALW windows, and its per-airport pass
+rates are tabulated in `2026-09-07_reference_speed_windows_by_type.zh.md`; the rows below
+are the fleet's main types.
+
 | type | pass | fail | rate | margin to nearest edge, p50 / p05 (kt) | note |
 |---|---|---|---|---|---|
 | B38M | 5,733 | 131 | 97.8 % | 12.9 / 2.3 | FAA 140/145 (dual flap values) |

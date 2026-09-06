@@ -150,4 +150,5 @@ O1 实测（v8 代码，风修正关闭）：见 `THRESHOLD_SPEED_GATE.md` §3.5
 修正把它推出去的，集中在大风日（KSMF 05-18 顶风 21.5 kt：124 条中 23 条失败）；机型簇 E75L（302）、
 B737（221）、A319、E170/E190 都是 FAA 表只给单一（最大襟翼）速度的机型，减小襟翼构型的 V_ref 更高——
 Eurocontrol Vat 高 6–7 kt——按 A 方案规则保留 FAA 值，列为唯一待补来源项（followups #21）。737 家族
-的"过快"簇与 A21N 的"过慢"残差都消失。详见 `BASELINE_SPEED_GATE_RESULTS.md` §10。
+的"过快"簇与 A21N 的"过慢"残差都消失。详见 `BASELINE_SPEED_GATE_RESULTS.md` §10；逐机型的发布速度、
+速度窗（观测窗与 MALW 处计算窗）和五机场通过率：`2026-09-07_reference_speed_windows_by_type.zh.md`。
