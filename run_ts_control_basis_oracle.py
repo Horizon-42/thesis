@@ -102,6 +102,7 @@ from dataset import (  # noqa: E402
     Normalizer,
     build_series,
     arrival_data_provenance,
+    checkpoint_data_provenance,
     load_flight_dicts,
     provenance_manifest_digests,
     require_matching_data_provenance,
@@ -740,7 +741,8 @@ def run_teacher_fit(
             "the teacher cohort is the checkpoint's splits, not a chosen airport"
         )
     manifests = [pipeline.arrival_manifest_path(item) for item in airports]
-    require_matching_data_provenance(payload, arrival_data_provenance(manifests))
+    provenance = checkpoint_data_provenance(payload, manifests)
+    require_matching_data_provenance(payload, provenance)
 
     device = resolve_device(args.device)
     # The RESOLVED device, so the stored config says where the fit ran rather than "auto"
@@ -797,7 +799,7 @@ def run_teacher_fit(
         # written out beside its digest so a reader never has to guess which fields it covers.
         "config": config.to_dict(),
         "config_sha256": config_sha256(config),
-        "manifests": provenance_manifest_digests(arrival_data_provenance(manifests)),
+        "manifests": provenance_manifest_digests(provenance),
         "init": args.init,
         "splits": splits,
         "optimizer": {

@@ -325,6 +325,28 @@ def provenance_eligibility_digests(
     return result
 
 
+def checkpoint_data_provenance(
+    payload: dict[str, Any], manifests: Sequence[str | Path]
+) -> dict[str, Any]:
+    """Today's fingerprint of a checkpoint's own data, built the way it was trained.
+
+    The pre-split lateral-pass roster is PART of the data identity — the whole v5 cohort
+    is eligibility-bound — and a fingerprint taken without it lists 14 435 KRDU arrivals
+    where the checkpoint carries 14 378, which reads as "the manifest changed". Whether to
+    read the roster is the checkpoint's own answer, not a caller's flag: a checkpoint
+    trained before the sidecar existed must not be handed one either. Every runner that
+    replays a checkpoint fingerprints through here; the L5.a fitter did not, and died at
+    startup on every v5 checkpoint (2026-09-07).
+    """
+    from lateral_eligibility import default_lateral_pass_roster_path  # local import keeps the loader policy-agnostic
+
+    rosters = (
+        [default_lateral_pass_roster_path(path) for path in manifests]
+        if provenance_eligibility_digests(payload["data_provenance"]) else None
+    )
+    return arrival_data_provenance(manifests, eligibility_rosters=rosters)
+
+
 def require_matching_data_provenance(
     checkpoint_payload: dict[str, Any],
     current: dict[str, Any],
