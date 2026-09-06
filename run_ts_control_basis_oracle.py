@@ -203,10 +203,19 @@ def teacher_config(config: TSConfig, device: str) -> TSConfig:
     return replace(config, **_TEACHER_OVERRIDES, device=device)
 
 
+#: Excluded from :func:`config_sha256`: ``device`` is WHERE the fit ran, not what it fitted,
+#: and the same table produced on CPU and on CUDA must carry the same contract digest.
+_CONFIG_DIGEST_EXCLUDES = ("device",)
+
+
 def config_sha256(config: TSConfig) -> str:
     """Digest of the contract a table was fitted under — width, anchor, dynamics, frame."""
+    payload = {
+        name: value for name, value in config.to_dict().items()
+        if name not in _CONFIG_DIGEST_EXCLUDES
+    }
     return hashlib.sha256(
-        json.dumps(config.to_dict(), sort_keys=True, default=str).encode()
+        json.dumps(payload, sort_keys=True, default=str).encode()
     ).hexdigest()
 
 
@@ -527,20 +536,18 @@ def render(payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run_width_study(args: argparse.Namespace, parser: argparse.ArgumentParser, out: Path) -> int:
+def run_width_study(
+    args: argparse.Namespace, parser: argparse.ArgumentParser, out: Path,
+    segment_counts: list[int], duration_modes: list[str],
+) -> int:
     """`--reference`: the ADE(N) curve over one scored arm's cohort (design §六 L0)."""
-    segment_counts = [int(token) for token in args.segments.split(",") if token]
-    duration_modes = [token.strip() for token in args.duration_modes.split(",") if token.strip()]
-    if not segment_counts or any(count < 1 for count in segment_counts):
-        parser.error("--segments must be positive integers")
-    for mode in duration_modes:
-        if mode not in DURATION_MODES:
-            parser.error(f"unknown duration mode {mode!r}; expected one of {DURATION_MODES}")
-
     airport = args.airport
     reference_dir, summary, cohort_keys, compact_of, masks, coverage = cohort(args, out)
     device = resolve_device(args.device)
     base_config = basis_config(summary["config"], max(segment_counts), args.device)
+    # Every refusal this mode can make has been made; claim the immutable directory before
+    # the expensive work rather than at the top, so a rejected invocation leaves nothing.
+    out.mkdir(parents=True, exist_ok=False)
     series, series_keys, manifest = build_cohort_series(
         cohort_keys, compact_of, airport, base_config
     )
@@ -634,7 +641,16 @@ def fit_teacher_table(
     *, model, series, split_of: dict[str, str], config: TSConfig, normalizer: Normalizer,
     anchor: int, init: str, args: argparse.Namespace, device,
 ) -> list[dict]:
-    """Fit one schedule per flight over the checkpoint's cohort; one row each."""
+    """Fit one schedule per flight over the checkpoint's cohort; one row each.
+
+    The cohort is sorted by its truth duration before batching, because the dense
+    supervision of a batch is padded to its LONGEST flight: at KRDU the train split runs
+    from a p50 of 183 s to 1454 s, so a batch of 1024 drawn in split order integrates about
+    2.5x the flight-seconds it needs. The table is keyed by flight, so the order it was
+    fitted in is not observable in the result — and sorting makes it deterministic rather
+    than dependent on the order the splits happened to arrive in.
+    """
+    series = sorted(series, key=lambda item: (truth_duration_s(item, anchor), item.flight_id))
     windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
     if len(windows) != len(series):
         raise RuntimeError(
@@ -705,20 +721,11 @@ def teacher_quantiles(rows: list[dict]) -> dict:
     return out
 
 
-def run_teacher_fit(args: argparse.Namespace, parser: argparse.ArgumentParser, out: Path) -> int:
+def run_teacher_fit(
+    args: argparse.Namespace, parser: argparse.ArgumentParser, out: Path, splits: list[str],
+) -> int:
     """`--checkpoint`: the per-flight teacher table over the checkpoint's own splits (§六 L5.a)."""
     started = time.time()
-    splits = [token.strip() for token in args.splits.split(",") if token.strip()]
-    if not splits or len(set(splits)) != len(splits):
-        parser.error("--splits must be a non-repeating list of split names")
-    for split in splits:
-        if split == FORBIDDEN_SPLIT:
-            parser.error(
-                f"the {FORBIDDEN_SPLIT} split is sealed: a teacher fitted on it would train on it"
-            )
-        if split not in TEACHER_SPLITS:
-            parser.error(f"unknown split {split!r}; expected one of {TEACHER_SPLITS}")
-
     checkpoint = args.checkpoint if args.checkpoint.is_absolute() else REPO_ROOT / args.checkpoint
     model, checkpoint_config, normalizer, payload = load_checkpoint(checkpoint)
     if checkpoint_config.prediction_output != PREDICTION_CONTROL:
@@ -735,9 +742,11 @@ def run_teacher_fit(args: argparse.Namespace, parser: argparse.ArgumentParser, o
     manifests = [pipeline.arrival_manifest_path(item) for item in airports]
     require_matching_data_provenance(payload, arrival_data_provenance(manifests))
 
-    config = teacher_config(checkpoint_config, args.device)
-    anchor = config.seq_len - 1
     device = resolve_device(args.device)
+    # The RESOLVED device, so the stored config says where the fit ran rather than "auto"
+    # (`config_sha256` excludes it either way — see _CONFIG_DIGEST_EXCLUDES).
+    config = teacher_config(checkpoint_config, str(device))
+    anchor = config.seq_len - 1
     model = model.to(device)
     split_of = {
         key: split for split in splits for key in payload["split"][split]
@@ -747,6 +756,9 @@ def run_teacher_fit(args: argparse.Namespace, parser: argparse.ArgumentParser, o
         raise RuntimeError("the checkpoint's splits overlap: one flight cannot be in two")
     print(f"{'/'.join(airports)}: {len(wanted)} flights over splits {splits}, N={config.n_segments}, "
           f"anchor {anchor}, init {args.init}, device {device}", flush=True)
+    # As in the width study: the immutable directory is claimed only once every refusal
+    # this mode can make has been made.
+    out.mkdir(parents=True, exist_ok=False)
 
     built, report = build_series(
         load_flight_dicts(manifests, include_flight_keys=set(wanted), verbose=False),
@@ -770,7 +782,8 @@ def run_teacher_fit(args: argparse.Namespace, parser: argparse.ArgumentParser, o
     quantiles = teacher_quantiles(rows)
     table = {
         "schema": FITTED_TEACHER_SCHEMA,
-        "airport": airports[0] if len(airports) == 1 else "",
+        # The cohort's airports: flight keys are unique WITHIN an airport only, so the
+        # dataset checks its own airports against these before anything else.
         "airports": list(airports),
         # The three stamps a consumer is checked against (control.basis_fit.require_cover):
         # a schedule reproduces its truth only at the width, anchor and uniform partition it
@@ -798,7 +811,9 @@ def run_teacher_fit(args: argparse.Namespace, parser: argparse.ArgumentParser, o
             "device": str(device),
         },
         "wall_time_s": time.time() - started,
-        "coverage": {split: quantiles[split]["flights"] for split in splits},
+        "coverage": {
+            split: sum(1 for row in rows if row["split"] == split) for split in splits
+        },
         "quantiles": quantiles,
         "flights": {
             row["flight_key"]: {
@@ -894,14 +909,16 @@ def main(argv: list[str] | None = None) -> int:
                 f"--{name.replace('_', '-')} belongs to "
                 f"{'--reference' if teacher_mode else '--checkpoint'} mode"
             )
-    args.segments = args.segments or "4,8,16,32,64"
-    args.duration_modes = args.duration_modes or ",".join(DURATION_MODES)
+    # ``or`` would turn an explicit 0 into the default and hide it from the guards below.
     args.limit = 0 if args.limit is None else args.limit
-    args.splits = args.splits or ",".join(TEACHER_SPLITS)
-    args.init = args.init or INIT_NETWORK
-    args.steps = args.steps or (DEFAULT_TEACHER_STEPS if teacher_mode else DEFAULT_WIDTH_STEPS)
-    args.batch_size = args.batch_size or (
-        DEFAULT_TEACHER_BATCH_SIZE if teacher_mode else DEFAULT_WIDTH_BATCH_SIZE
+    args.init = INIT_NETWORK if args.init is None else args.init
+    args.steps = (
+        (DEFAULT_TEACHER_STEPS if teacher_mode else DEFAULT_WIDTH_STEPS)
+        if args.steps is None else args.steps
+    )
+    args.batch_size = (
+        (DEFAULT_TEACHER_BATCH_SIZE if teacher_mode else DEFAULT_WIDTH_BATCH_SIZE)
+        if args.batch_size is None else args.batch_size
     )
     args.airport = None if args.airport is None else args.airport.upper()
 
@@ -914,13 +931,38 @@ def main(argv: list[str] | None = None) -> int:
     if not 0.0 < args.learning_rate_floor <= 1.0:
         parser.error("--learning-rate-floor must be in (0, 1]")
 
+    # Each mode's list arguments are parsed HERE, beside the numeric guards, so that every
+    # refusal that needs nothing but the command line happens before the immutable output
+    # directory is claimed (each mode creates it once its own refusals are also past).
+    splits = [token.strip() for token in (args.splits or ",".join(TEACHER_SPLITS)).split(",")
+              if token.strip()]
+    segment_counts = [int(token) for token in (args.segments or "4,8,16,32,64").split(",") if token]
+    duration_modes = [token.strip() for token in
+                      (args.duration_modes or ",".join(DURATION_MODES)).split(",") if token.strip()]
+    if teacher_mode:
+        if not splits or len(set(splits)) != len(splits):
+            parser.error("--splits must be a non-repeating list of split names")
+        for split in splits:
+            if split == FORBIDDEN_SPLIT:
+                parser.error(
+                    f"the {FORBIDDEN_SPLIT} split is sealed: a teacher fitted on it would "
+                    "train on it"
+                )
+            if split not in TEACHER_SPLITS:
+                parser.error(f"unknown split {split!r}; expected one of {TEACHER_SPLITS}")
+    else:
+        if not segment_counts or any(count < 1 for count in segment_counts):
+            parser.error("--segments must be positive integers")
+        for mode in duration_modes:
+            if mode not in DURATION_MODES:
+                parser.error(f"unknown duration mode {mode!r}; expected one of {DURATION_MODES}")
+
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
-    out.mkdir(parents=True, exist_ok=False)   # experiment artifacts are immutable
     torch.manual_seed(args.seed)
     if teacher_mode:
-        return run_teacher_fit(args, parser, out)
+        return run_teacher_fit(args, parser, out, splits)
     args.airport = args.airport or "KRDU"
-    return run_width_study(args, parser, out)
+    return run_width_study(args, parser, out, segment_counts, duration_modes)
 
 
 if __name__ == "__main__":

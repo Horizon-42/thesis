@@ -404,16 +404,17 @@ class FittedTeacherTable:
 
     Width-, anchor- and duration-specific by construction: the schedule reproduces the
     truth only at the N it was fitted at, from the anchor it was fitted from, spread
-    uniformly over the total duration it was given. :meth:`require_cover` is where all
-    three are checked — the dataset calls it once at build time so a stale table refuses
-    the run instead of silently teaching the wrong schedule.
+    uniformly over the total duration it was given, for the flights of the airports it was
+    fitted over. :meth:`require_cover` is where all five are checked (the schema and the
+    uniform partition are checked at load) — the training dataset calls it once at build
+    time so a stale table refuses the run instead of silently teaching the wrong schedule.
     """
 
     path: Path
     sha256: str
     n_segments: int
     anchor_index: int
-    airport: str
+    airports: frozenset[str]               # the cohort the table was fitted over
     controls: dict[str, np.ndarray]        # flight_key -> [N, 3], dimensionless
     total_duration_s: dict[str, float]     # flight_key -> the duration it was fitted over
 
@@ -425,6 +426,7 @@ class FittedTeacherTable:
             "sha256": self.sha256,
             "n_segments": self.n_segments,
             "anchor_index": self.anchor_index,
+            "airports": sorted(self.airports),
             "flights": len(self.controls),
         }
 
@@ -444,24 +446,38 @@ class FittedTeacherTable:
         self,
         flights: Sequence[tuple[str, float]],
         *,
+        airports: set[str],
+        anchor_indices: set[int],
         n_segments: int,
-        anchor_index: int,
     ) -> None:
         """Refuse unless this table covers every flight at this width, anchor and duration.
 
-        ``flights`` is ``(flight_key, truth duration from the anchor)`` per flight. There
-        is no partial mode: a teacher that covers most of a cohort would train the rest on
+        ``flights`` is ``(flight_key, truth duration from the anchor)`` per flight, and
+        ``anchor_indices`` the anchors the dataset actually samples them at. There is no
+        partial mode: a teacher that covers most of a cohort would train the rest on
         nothing while the loss still reported an imitation number.
+
+        The airport check comes first because a table from another airport fails EVERY
+        other check as well, and "covers 0 of 11082 flights" does not name the cause. Flight
+        keys are unique within an airport only, which is why the cohort's airports have to
+        be inside the table's rather than merely overlap them.
         """
+        foreign = sorted(airports - self.airports)
+        if foreign:
+            raise ValueError(
+                f"{self.path}: the fitted teacher was fitted over "
+                f"{sorted(self.airports)}, this run covers {sorted(airports)} — "
+                f"{foreign} is outside it"
+            )
         if self.n_segments != n_segments:
             raise ValueError(
                 f"{self.path}: the fitted teacher was fitted at N={self.n_segments}, this run "
                 f"has n_segments={n_segments} — a schedule only reproduces its own width"
             )
-        if self.anchor_index != anchor_index:
+        if anchor_indices != {self.anchor_index}:
             raise ValueError(
                 f"{self.path}: the fitted teacher was fitted at anchor {self.anchor_index}, "
-                f"this run anchors at {anchor_index}"
+                f"this run anchors at {sorted(anchor_indices)}"
             )
         missing = [key for key, _duration in flights if key not in self.controls]
         if missing:
@@ -515,16 +531,7 @@ def load_fitted_teacher(path: str | Path) -> FittedTeacherTable:
         sha256=hashlib.sha256(raw).hexdigest(),
         n_segments=n_segments,
         anchor_index=int(payload["anchor_index"]),
-        airport=str(payload.get("airport") or "").strip().upper(),
+        airports=frozenset(str(name).strip().upper() for name in payload["airports"]),
         controls=controls,
         total_duration_s=durations,
     )
-
-
-def fitted_teacher_provenance(path: str | Path) -> dict[str, object]:
-    """The table's identity for a checkpoint's provenance block, without keeping the table.
-
-    Reads the file a second time (the dataset holds the schedules; the training run only
-    needs the digest), which is minutes of nothing against the hours of training it stamps.
-    """
-    return load_fitted_teacher(path).provenance

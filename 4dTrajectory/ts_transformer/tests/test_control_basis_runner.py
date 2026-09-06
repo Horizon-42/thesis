@@ -104,7 +104,7 @@ def test_the_seed_refuses_a_batch_that_does_not_cover_the_same_flights():
 import json                                                        # noqa: E402
 
 import run_ts_control_basis_oracle as runner                       # noqa: E402
-from batch_contract import model_forward                           # noqa: E402
+from forecast import _control_prediction_batch                     # noqa: E402
 from config import (                                               # noqa: E402
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -210,6 +210,7 @@ def test_the_teacher_table_carries_its_stamps_and_the_whole_cohort(
 
     table = json.loads((out / "basis_fit.json").read_text())
     assert table["schema"] == FITTED_TEACHER_SCHEMA
+    assert table["airports"] == [AIRPORT]
     assert table["n_segments"] == 4 and table["duration_mode"] == DURATION_UNIFORM
     assert table["anchor_index"] == 7                      # seq_len - 1
     assert table["checkpoint_sha256"] == file_sha256(checkpoint)
@@ -260,7 +261,9 @@ def test_the_written_table_is_the_one_the_dataset_loader_accepts(
         (item.flight_id, truth_duration_s(item, anchor))
         for item in series if item.dataset_id in wanted
     ]
-    table.require_cover(covered, n_segments=config.n_segments, anchor_index=anchor)
+    table.require_cover(
+        covered, airports={AIRPORT}, anchor_indices={anchor}, n_segments=config.n_segments
+    )
     assert table.provenance["flights"] == len(covered)
     assert table.provenance["sha256"] == file_sha256(out / "basis_fit.json")
 
@@ -280,10 +283,14 @@ def test_the_network_seed_is_the_checkpoints_own_forward(tmp_path):
         windows, np.arange(len(series)), device
     )
 
+    # The independent reference is the pass `predict` itself makes (per flight, through
+    # `forecast`), not the batched call `network_seed` uses: the two must agree exactly, or
+    # the teacher is not seeded from the schedule this checkpoint would fly.
     seed = runner.network_seed(model, history, dynamics, device)
-    with torch.no_grad():
-        expected = model_forward(model, history, dynamics).controls
-    assert np.allclose(seed, expected.numpy().astype(np.float64), atol=0.0, rtol=0.0)
+    expected = _control_prediction_batch(
+        model, history.numpy(), dynamics, device
+    ).controls
+    assert np.array_equal(seed, expected.numpy().astype(np.float64))
 
     anchor = config.seq_len - 1
     durations = np.array([truth_duration_s(item, anchor) for item in series])
@@ -330,6 +337,7 @@ def test_the_teacher_refuses_the_sealed_test_split(monkeypatch, tmp_path, traine
     with pytest.raises(SystemExit):
         runner.main(["--checkpoint", str(checkpoint), "--out", str(tmp_path / "sealed"),
                      "--device", "cpu", "--splits", "train,test"])
+    assert not (tmp_path / "sealed").exists()   # the immutable dir is claimed after the refusals
 
 
 def test_the_teacher_output_directory_is_immutable(monkeypatch, tmp_path, trained_checkpoint):
@@ -357,6 +365,7 @@ def test_a_state_checkpoint_has_no_control_schedule_to_fit(monkeypatch, tmp_path
     with pytest.raises(SystemExit):
         runner.main(["--checkpoint", str(out / "checkpoint.pt"), "--out", str(tmp_path / "no"),
                      "--device", "cpu"])
+    assert not (tmp_path / "no").exists()
 
 
 @pytest.mark.parametrize("argv, message", [
@@ -372,3 +381,68 @@ def test_each_mode_refuses_the_other_mode_s_options(tmp_path, capsys, argv, mess
         runner.main([*argv, "--out", str(tmp_path / "never")])
     assert message in capsys.readouterr().err
     assert not (tmp_path / "never").exists()      # nothing is created before the refusal
+
+
+def test_the_table_does_not_depend_on_the_order_the_cohort_arrived_in(
+    monkeypatch, tmp_path, trained_checkpoint
+):
+    """The fit batches by DURATION, not by split order, so the input order is not observable.
+
+    The padding of a batch's dense supervision is set by its longest flight, so a batch
+    drawn in split order integrates far more flight-seconds than it needs. Sorting also
+    makes the result independent of the order the checkpoint's splits happened to list.
+    """
+    flights, checkpoint, payload = trained_checkpoint
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    forward, reversed_out = tmp_path / "forward", tmp_path / "reversed"
+    runner.main(["--checkpoint", str(checkpoint), "--out", str(forward), "--steps", "2",
+                 "--batch-size", "4", "--device", "cpu"])
+
+    reversed_payload = dict(payload)
+    reversed_payload["split"] = {
+        name: list(reversed(keys)) for name, keys in payload["split"].items()
+    }
+    monkeypatch.setattr(
+        runner, "load_checkpoint",
+        lambda path: (*load_checkpoint(path)[:3], reversed_payload),
+    )
+    runner.main(["--checkpoint", str(checkpoint), "--out", str(reversed_out), "--steps", "2",
+                 "--batch-size", "4", "--device", "cpu"])
+
+    first = json.loads((forward / "basis_fit.json").read_text())["flights"]
+    second = json.loads((reversed_out / "basis_fit.json").read_text())["flights"]
+    assert first == second
+
+
+def test_the_width_study_still_runs_end_to_end(monkeypatch, tmp_path, trained_checkpoint):
+    """The ADE(N) mode shares the batch mechanics with the teacher and must keep working."""
+    flights, _checkpoint, payload = trained_checkpoint
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    reference = tmp_path / "reference"
+    reference.mkdir()
+    rows = [{
+        "id": flight["id"], "runway": flight["runway"], "icao24": flight["icao24"],
+        "landing_time_utc": flight["landing_time_utc"],
+        "ade_m": 100.0 + index, "route_tortuosity": 1.05 + 0.5 * (index % 2),
+        "established_at_anchor": bool(index % 2), "remaining_path_m": 20_000.0,
+    } for index, flight in enumerate(flights[:4])]
+    (reference / "summary.json").write_text(json.dumps(
+        {"config": payload["config"], "split": "val", "results": rows}
+    ))
+
+    out = tmp_path / "l0"
+    assert runner.main([
+        "--reference", str(reference), "--out", str(out), "--airport", AIRPORT,
+        "--segments", "4", "--duration-modes", "uniform,free",
+        "--steps", "2", "--batch-size", "4", "--device", "cpu",
+    ]) == 0
+    result = json.loads((out / "oracle_basis.json").read_text())
+    assert result["schema"] == runner.RESULT_SCHEMA
+    assert set(result["arms"]) == {"N=4 uniform", "N=4 free"}
+    assert result["verdict"]["status"] in {"pass", "fail"}
+    assert result["coverage"]["measured_flights"] == 4
+    schedules = json.loads((out / "basis_fit.json").read_text())
+    assert schedules["schema"] == runner.RESULT_SCHEMA        # NOT the teacher schema
+    assert len(schedules["arms"]["N=4 uniform"]) == 4
+    text = (out / "oracle_basis.txt").read_text()
+    assert "gate:" in text and "N=4 uniform" in text

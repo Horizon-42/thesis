@@ -46,7 +46,7 @@ from config import (
     control_recipe,
     uses_control_dynamics,
 )
-from control.basis_fit import fitted_teacher_provenance
+from control.basis_fit import FittedTeacherTable, load_fitted_teacher
 from control.dynamics import rollout as control_rollout
 from control.constraints import build_command_hook
 from control.loss.components import (
@@ -454,8 +454,11 @@ def control_imitation_mse(
 
     Both sides live in the dimensionless control box, and each channel is divided by half
     its box width so a full-scale error costs the same in thrust, bank and load factor.
-    Segments past the last measured velocity carry zero weight (see
-    :func:`dataset.reference_control_supervision`).
+    Under ``control_imitation_target="inverse-dynamics"`` the segments past the last
+    measured velocity carry zero weight (see :func:`dataset.reference_control_supervision`);
+    under ``"fitted"`` every segment carries weight one, because that schedule was fitted
+    over the whole supervised horizon. This function reads whichever pair the dataset put
+    in the batch and cannot tell them apart — which is the point of the axis.
     """
     if not config.control_imitation_loss_weight:
         return None
@@ -1092,6 +1095,9 @@ class FitResult:
     train_windows: int
     val_windows: int
     procedure_multipliers: dict[str, float] | None = None
+    # The teacher table this fit supervised its imitation term with, parsed ONCE by
+    # ``fit_model`` and handed back so the caller can stamp its digest without reopening it.
+    fitted_teacher: FittedTeacherTable | None = None
 
 
 @dataclass(frozen=True)
@@ -1687,6 +1693,7 @@ def _validation_datasets(
     normalizer: Normalizer,
     *,
     minimum_anchor_index: int | None = None,
+    fitted_teacher: FittedTeacherTable | None = None,
 ) -> dict[str, TrajectoryWindows]:
     by_airport: dict[str, list[FlightSeries]] = {}
     for item in series:
@@ -1697,6 +1704,7 @@ def _validation_datasets(
             config,
             normalizer,
             minimum_anchor_index=minimum_anchor_index,
+            fitted_teacher=fitted_teacher,
         )
         for airport, group in sorted(by_airport.items())
     }
@@ -2198,6 +2206,15 @@ def fit_model(
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
     normalizer = Normalizer.fit(train_series, balance_airports_and_flights=True)
+    # The imitation term's teacher table is a TRAINING input and is opened exactly here —
+    # the one place that builds supervised window sets. Every replay path (evaluate-fit,
+    # the z-oracle forecast, the approach-cohort comparison) builds its own window set
+    # without one and must keep working when the table is gone.
+    fitted_teacher = (
+        load_fitted_teacher(config.control_fitted_teacher_path)
+        if config.uses_fitted_teacher
+        else None
+    )
     training_dataset_class = {
         False: FixedAnchorTrajectoryWindows,
         True: RandomAnchorTrajectoryWindows,
@@ -2207,6 +2224,7 @@ def fit_model(
         config,
         normalizer,
         minimum_anchor_index=minimum_anchor_index,
+        fitted_teacher=fitted_teacher,
     )
     if verbose and train_set.closure_coverage is not None:
         present, valid, total = train_set.closure_coverage
@@ -2217,6 +2235,7 @@ def fit_model(
         config,
         normalizer,
         minimum_anchor_index=minimum_anchor_index,
+        fitted_teacher=fitted_teacher,
     )
     val_batch_plans = {
         airport: build_validation_batch_plan(dataset, config.batch_size)
@@ -2605,6 +2624,7 @@ def fit_model(
         # The λ the SELECTED epoch trained with, i.e. the one belonging to the restored
         # weights (the history carries the whole trajectory).
         procedure_multipliers=best_multipliers,
+        fitted_teacher=fitted_teacher,
     )
 
 
@@ -2635,18 +2655,6 @@ def train(
         raise ValueError("data_provenance is not a TS arrival-data fingerprint")
     manifest_digests = provenance_manifest_digests(data_provenance)
     eligibility_digests = provenance_eligibility_digests(data_provenance)
-    # The imitation term's teacher table, when the recipe reads one: which file, its
-    # digest, its width and how many flights it carries — so a checkpoint says which table
-    # taught it. Recorded BESIDE `data_provenance` rather than inside it on purpose: that
-    # object is compared for EQUALITY by `evaluate-fit` and `freeze-test` against a
-    # provenance rebuilt from the arrival manifests alone, and the teacher is
-    # training-only. Prediction never needs the table, so a missing one at predict time
-    # must not (and does not) refuse the checkpoint.
-    fitted_teacher = (
-        fitted_teacher_provenance(config.control_fitted_teacher_path)
-        if config.uses_fitted_teacher
-        else None
-    )
 
     series = usable_series(series, config, verbose=verbose)
     train_series, val_series, test_series = split_by_flight(series, config)
@@ -2673,6 +2681,15 @@ def train(
     model, config, normalizer, device = (
         fit.model, fit.config, fit.normalizer, fit.device
     )
+    # Which teacher table supervised the imitation term: the file, its digest, its width,
+    # its anchor, its airports and how many flights it carries — read off the table
+    # ``fit_model`` already parsed, so the file is opened exactly once per run. Recorded
+    # BESIDE `data_provenance`, never inside it: that object is compared for EQUALITY by
+    # `evaluate-fit` and `freeze-test` against a provenance rebuilt from the arrival
+    # manifests alone, and the teacher is a TRAINING input — no replay or prediction path
+    # builds a window set that reads it, so a checkpoint must stay usable with the table
+    # gone.
+    fitted_teacher = None if fit.fitted_teacher is None else fit.fitted_teacher.provenance
     test_window_count = (
         None
         if reserved_test_keys is not None
@@ -2717,9 +2734,10 @@ def train(
         "training_anchor_contract": training_anchor_contract,
         "training_cohort": training_cohort,
         "data_provenance": data_provenance,
-        "fitted_teacher": fitted_teacher,
         "data_selection": data_selection,
     }
+    if fitted_teacher is not None:
+        checkpoint_payload["fitted_teacher"] = fitted_teacher
     if fit.procedure_multipliers is not None:
         # The λ the selected epoch trained with: what a reader of the history needs to
         # weigh the logged ``procedure`` component, and where the dual run stood.

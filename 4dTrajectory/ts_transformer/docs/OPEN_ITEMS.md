@@ -18,6 +18,7 @@ its §〇 status table is the live one). What that design settled and what is ru
 | L2 latent intent | code done + reviewed (`dev-l2`) | campaign next; arms `docs/experiments/l2_latent_arms.json` |
 | L3 CTA conditioning | code done + reviewed (`dev-l2`) | `cta_conditioning=given`, `predict --cta-offset-s` |
 | L4 scene encoder | **NOT built — gate failed** | scene entity features add nothing (d_join R² 0.37 vs 0.38); the observable lead ETA correlates 0.11 with the lead's true landing |
+| L5.a fitted teacher | code done + reviewed (`dev-l5`) | the fit itself is a GPU job and **has not run**: `docs/experiments/l5_fitted_teacher_arms.json` points at `4dTrajectory/outputs/KRDU/experiments/l5_fitted_teacher_20260907/basis_fit.json`, which **does not exist until** `run_ts_control_basis_oracle.py --checkpoint .../l1_lowdim_20260907/L1_native32/checkpoint.pt --out <that directory> --splits train,val` has been run (8255 flights, ~2–3 h). Until then both arms die at the dataset build, by design — the config carries the path, the dataset opens it |
 
 **Abolished by that design** (entries below are history): the P1.d closure tracker (its BLOCKER
 is not being fixed; the code was DELETED 2026-09-07 by audit T1-9), the K join-anchor decoder,

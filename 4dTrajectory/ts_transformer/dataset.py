@@ -87,7 +87,7 @@ from config import (
     TSConfig,
     uses_control_dynamics,
 )
-from control.basis_fit import load_fitted_teacher
+from control.basis_fit import FittedTeacherTable
 from control.conditioning import DYNAMICS_CONDITION_NAMES, condition_vector
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.dynamics.inverse import actual_controls, segment_controls
@@ -1303,6 +1303,7 @@ class TrajectoryWindows(Dataset, ABC):
         *,
         minimum_anchor_index: int | None = None,
         minimum_future_s: float = 0.0,
+        fitted_teacher: FittedTeacherTable | None = None,
     ):
         self.series = list(series)
         self.config = config
@@ -1393,26 +1394,34 @@ class TrajectoryWindows(Dataset, ABC):
                     f"{config.closure_labels_path} carries these {len(self.series)} flights but "
                     "marks every label non-canonical or above the residual cap: nothing to regress"
                 )
-        # The imitation term's per-flight teacher table, when the recipe reads one
-        # (control_imitation_target="fitted"). Read once, and CHECKED once, here: a fitted
-        # schedule reproduces its truth track only at the width, the anchor and the total
+        # The imitation term's per-flight teacher table (control_imitation_target=
+        # "fitted"). It is a TRAINING-TIME INPUT, handed in by `train.fit_model` for the
+        # train and validation window sets it supervises — never opened here. Every other
+        # consumer of this class replays a checkpoint (evaluate-fit, the z-oracle forecast,
+        # the approach-cohort comparison) and needs no teacher at all; loading it here
+        # would make those paths depend on a training artifact that may be gone, and on it
+        # covering a cohort it was never fitted for.
+        #
+        # What IS checked here is coverage, because this is where the flights are known: a
+        # fitted schedule reproduces its truth only at the width, the anchor and the total
         # duration it was fitted under, and a flight the table does not carry has no
-        # teacher at all. So a table that does not cover this cohort refuses the build —
-        # there is no partial mode, which would train part of every batch on nothing while
-        # the loss still reported an imitation number.
-        self.fitted_teacher = None
-        if config.uses_fitted_teacher:
-            self.fitted_teacher = load_fitted_teacher(config.control_fitted_teacher_path)
-            self.fitted_teacher.require_cover(
+        # teacher at all. A table that does not cover this cohort refuses the build — there
+        # is no partial mode, which would train part of every batch on nothing while the
+        # loss still reported an imitation number.
+        self.fitted_teacher = fitted_teacher
+        if fitted_teacher is not None:
+            covered = [
+                (self.series[int(index)], self.index[int(self.range_starts[int(index)])][1])
+                for index in self.eligible_series
+            ]
+            fitted_teacher.require_cover(
                 [
-                    (item.flight_id, truth_duration_s(item, self.index[start][1]))
-                    for item, start, count in zip(
-                        self.series, self.range_starts, self.range_counts
-                    )
-                    if count
+                    (item.flight_id, truth_duration_s(item, anchor))
+                    for item, anchor in covered
                 ],
+                airports={item.airport for item, _anchor in covered},
+                anchor_indices={int(anchor) for _item, anchor in covered},
                 n_segments=int(config.n_segments),
-                anchor_index=config.seq_len - 1,
             )
         # Public diagnostic for normalized-time experiments. Actual query times come from
         # the shared clock below, which also defines fixed-time loss and inference timing.

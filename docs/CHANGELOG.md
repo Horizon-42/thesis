@@ -33,10 +33,14 @@ the total duration fitted over, fitADE / seedADE / best step / split, and the st
 consumer is checked by. The `--reference` width study is unchanged (defaults still
 600 / 256); the two modes share only the batch mechanics.
 
-**One trap worth recording:** the table's stamped duration is compared against the
+**Two traps worth recording.** The table's stamped duration is compared against the
 dataset's `truth_duration_s` to 1e-6 s, and the batch's own `final_time` is float32, whose
-resolution at 300 s is ~3e-5 s. The teacher path therefore takes the float64 duration
-directly and gives the fit the same value it stamps.
+resolution at 300 s is ~3e-5 s — so the teacher path takes the float64 duration directly
+and gives the fit the same value it stamps. And the dense supervision of a batch is padded
+to its LONGEST flight: at KRDU the train split runs from a p50 of 183 s to 1454 s, so a
+batch of 1024 drawn in split order integrates ~2.5x the flight-seconds it needs. The
+cohort is therefore sorted by truth duration before batching, which also makes the table
+independent of the order the splits happened to list (tested).
 
 **The axis (`8b79623`).** `control_imitation_target ∈ {inverse-dynamics, fitted}` plus
 `control_fitted_teacher_path`. The default and all four named recipes' literals stay
@@ -45,20 +49,34 @@ directly and gives the fit the same value it stamps.
 `reference_controls` with the row and `reference_control_weight` with **ones** (the
 schedule was fitted over the whole supervised horizon, so there is no fitted tail to mask);
 `train.control_imitation_mse` is untouched. The build REFUSES a table that is not this
-cohort's — a missing flight (with `covers a of b flights`), a duration off by more than
-1e-6 s, another width, another anchor, another schema, a free-duration partition — with no
-partial mode, which would train part of every batch on nothing while the loss still
-reported an imitation number. `imit-target` joins `run_naming.CONTROL_LOSS_FIELDS`, so only
-the non-default value names a run: recount over the 291 stored configs on disk, **0 names
-changed**.
+cohort's — another schema, a free-duration partition, another airport, another width,
+another anchor, a missing flight (with `covers a of b flights`), a duration off by more
+than 1e-6 s — with no partial mode, which would train part of every batch on nothing while
+the loss still reported an imitation number. The airport check comes first because a
+foreign table fails every other check too and "covers 0 of 11082" does not name the cause.
+Config refuses the incoherent combinations before any of that: fitted without a path, a
+path without fitted, off the control path, with `random_train_anchor`, with
+`control_imitation_loss_weight=0`, and off `control_state_objective=true-time-position` —
+the only objective `loss_component_names` registers `imitation` under, which (because it
+also requires the native grid and uniform durations) is what keeps a uniformly partitioned
+table from claiming to supervise a learned partition. `imit-target` joins `run_naming.CONTROL_LOSS_FIELDS` and the table's path
+joins `META_FIELDS` beside `closure_labels_path` (two generations of a table are two
+different runs), so only the non-default values name a run: recount over every
+config-bearing artifact under `4dTrajectory/outputs/*/experiments/**` — 728 files
+(`history.json`, `summary.json`, `fit_evaluation.json`, `checkpoint_metadata.json`,
+`config.json`, `best_config.json`) — **0 names changed**.
 
-**Where the digest lives, and why not in `data_provenance`.** The table's path, sha256,
-width, anchor and flight count go into `checkpoint_metadata.json` and the checkpoint
-payload under `fitted_teacher`. They are deliberately NOT inside `data_provenance`: that
-object is compared for EQUALITY by `evaluate-fit` and `freeze-test` against a provenance
-rebuilt from the arrival manifests alone, so putting the teacher in it would make every
-fitted checkpoint fail those two paths. The teacher is training-only — predicting from a
-fitted checkpoint with the table deleted works, and is tested.
+**The teacher is a training-time INPUT, and that is a contract, not a wording.**
+`train.fit_model` opens the file once and hands the table to the two window sets it
+supervises; the dataset never opens it. Every other consumer of `TrajectoryWindows`
+replays a checkpoint — `evaluate-fit`, `predict --z-from-posterior`,
+`approach_clustering` — and builds its window set without a teacher, so a fitted
+checkpoint stays usable when the table is gone or covers a different cohort (both tested).
+The table's path, sha256, width, anchor, airports and flight count go into
+`checkpoint_metadata.json` and the checkpoint payload under `fitted_teacher`, deliberately
+NOT inside `data_provenance`: that object is compared for EQUALITY by `evaluate-fit` and
+`freeze-test` against a provenance rebuilt from the arrival manifests alone, so putting
+the teacher in it would make every fitted checkpoint fail those two paths.
 
 **The arms (`7c097cc`).** `docs/experiments/l5_fitted_teacher_arms.json`: L1_native32's
 exact base plus the fitted teacher, `L5_fitted64` (the deployed dose) and `L5_fitted16` (a

@@ -26,14 +26,16 @@ from config import (
     CONTROL_RECIPE_NAMES,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_STATE_CLOCK_OBSERVED,
+    CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_LOSS_GRID_NATIVE,
+    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     PREDICTION_CONTROL,
     PREDICTION_STATE,
     TSConfig,
     control_recipe_overrides,
 )
-from control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM
+from control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM, load_fitted_teacher
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -41,10 +43,13 @@ from dataset import (
     build_series,
     truth_duration_s,
 )
-from forecast import forecast_approaches
+from forecast import forecast_approaches, posterior_latent_forecasts
+from models import build_model
 from run_naming import run_display_name
 from synthetic import synthetic_arrivals
-from train import control_imitation_mse, load_checkpoint, train
+from train import (
+    control_imitation_mse, evaluate_fixed_anchor_series, load_checkpoint, train,
+)
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 N_SEGMENTS, SEQ_LEN = 4, 8
@@ -89,7 +94,7 @@ def _series(config: TSConfig, n_flights: int = 12):
 
 
 def _table(path: Path, series, *, n_segments: int = N_SEGMENTS, anchor_index: int = SEQ_LEN - 1,
-           duration_delta_s: float = 0.0, drop: int = 0, **stamps) -> Path:
+           duration_delta_s: float = 0.0, drop: int = 0, airports=(AIRPORT,), **stamps) -> Path:
     """A teacher table in the fitter's own schema, one distinctive schedule per flight."""
     anchor = SEQ_LEN - 1
     flights = {}
@@ -104,7 +109,7 @@ def _table(path: Path, series, *, n_segments: int = N_SEGMENTS, anchor_index: in
         }
     payload = {
         "schema": FITTED_TEACHER_SCHEMA,
-        "airport": AIRPORT,
+        "airports": list(airports),
         "n_segments": n_segments,
         "duration_mode": DURATION_UNIFORM,
         "anchor_index": anchor_index,
@@ -138,6 +143,18 @@ def test_the_default_and_every_named_recipe_imitate_the_inverse_dynamics():
     ({"control_imitation_target": CONTROL_IMITATION_TARGET_FITTED,
       "control_fitted_teacher_path": "teacher.json",
       "random_train_anchor": True}, "fitted AT the fixed anchor"),
+    # A teacher for a term this run does not build: the table would be loaded, validated
+    # against the cohort, and never read — and the run name would still claim it.
+    ({"control_imitation_target": CONTROL_IMITATION_TARGET_FITTED,
+      "control_fitted_teacher_path": "teacher.json",
+      "control_imitation_loss_weight": 0.0}, "switches off"),
+    # `imitation` is registered under true-time-position only; that objective in turn
+    # requires the native grid and uniform durations, so this closes those holes too.
+    ({"control_imitation_target": CONTROL_IMITATION_TARGET_FITTED,
+      "control_fitted_teacher_path": "teacher.json",
+      "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_FIXED_DT,
+      "control_state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE},
+     "registered under"),
 ])
 def test_the_config_refuses_an_incoherent_teacher(overrides, message):
     with pytest.raises(ValueError, match=message):
@@ -156,9 +173,18 @@ def test_a_state_run_has_no_control_schedule_to_imitate():
 def test_only_the_non_default_teacher_names_the_run():
     default = _config()
     assert "imit-target" not in run_display_name(default.to_dict())
-    fitted = _config(control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
-                     control_fitted_teacher_path="basis_fit.json")
-    assert "imit-target=fitted" in run_display_name(fitted.to_dict())
+    assert "teacher=" not in run_display_name(default.to_dict())
+    fitted = _config(
+        control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
+        control_fitted_teacher_path=(
+            "4dTrajectory/outputs/KRDU/experiments/l5_fitted_teacher_20260907/basis_fit.json"
+        ),
+    )
+    name = run_display_name(fitted.to_dict())
+    assert "imit-target=fitted" in name
+    # Two generations of a table are two different runs, exactly as for closure labels:
+    # rendered as parent/name so tables in different campaign directories cannot read alike.
+    assert "teacher=l5_fitted_teacher_20260907/basis_fit.json" in name
     # A stored config from before the axis existed reads as the default, i.e. unchanged.
     stored = default.to_dict()
     del stored["control_imitation_target"], stored["control_fitted_teacher_path"]
@@ -173,7 +199,9 @@ def test_the_dataset_serves_the_table_with_unit_weights_and_the_loss_consumes_th
     table = _table(tmp_path / "teacher.json", series)
     config = _config(control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
                      control_fitted_teacher_path=str(table))
-    windows = FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+    windows = FixedAnchorTrajectoryWindows(
+        series, config, Normalizer.fit(series), fitted_teacher=load_fitted_teacher(table)
+    )
     indices = np.arange(len(series))
     _x, _y, _w, _final_time, _fw, dynamics = windows.batch(indices)
 
@@ -216,7 +244,9 @@ def test_the_dataset_build_refuses_a_table_that_is_not_this_cohorts(tmp_path, kw
     config = _config(control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
                      control_fitted_teacher_path=str(table))
     with pytest.raises(ValueError, match=message):
-        FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+        FixedAnchorTrajectoryWindows(
+            series, config, Normalizer.fit(series), fitted_teacher=load_fitted_teacher(table)
+        )
 
 
 @pytest.mark.parametrize("field, value, message", [
@@ -229,16 +259,20 @@ def test_the_loader_refuses_another_files_schema(tmp_path, field, value, message
     payload = json.loads(table.read_text())
     payload[field] = value
     table.write_text(json.dumps(payload))
-    config = _config(control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
-                     control_fitted_teacher_path=str(table))
     with pytest.raises(ValueError, match=message):
-        FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+        load_fitted_teacher(table)
 
 
 # ── training end to end ─────────────────────────────────────────────────────
 
-def test_training_from_the_table_stamps_it_and_predicts_without_it(tmp_path):
-    """The checkpoint says which table taught it; prediction never needs the table back."""
+def test_training_from_the_table_stamps_it_and_replays_without_it(tmp_path):
+    """The checkpoint says which table taught it; every replay path works without it.
+
+    The teacher is a TRAINING input. `evaluate-fit`, the z-oracle forecast and the
+    approach-cohort comparison all build their own fixed-anchor window sets from the same
+    config, and none of them may depend on a training artifact that can be gone (or on it
+    covering a cohort it was never fitted for).
+    """
     torch.manual_seed(0)
     series = _series(_config())
     table = _table(tmp_path / "teacher.json", series)
@@ -254,6 +288,7 @@ def test_training_from_the_table_stamps_it_and_predicts_without_it(tmp_path):
         "sha256": hashlib.sha256(table.read_bytes()).hexdigest(),
         "n_segments": N_SEGMENTS,
         "anchor_index": SEQ_LEN - 1,
+        "airports": [AIRPORT],
         "flights": len(series),
     }
     history = json.loads((out / "history.json").read_text())["history"]
@@ -268,6 +303,30 @@ def test_training_from_the_table_stamps_it_and_predicts_without_it(tmp_path):
     forecasts = forecast_approaches(model, series[:2], loaded, normalizer,
                                     device=torch.device("cpu"))
     assert len(forecasts) == 2 and all(f.n_steps > 1 for f in forecasts)
+    # evaluate-fit replays a cohort of its own choosing — here one the table does not even
+    # cover in full, which under a loading dataset would have refused on coverage.
+    replay = evaluate_fixed_anchor_series(
+        model, series[:3], normalizer, loaded, torch.device("cpu"), split_name="train"
+    )
+    assert replay["flights"] == 3 and replay["windows"] == 3
+
+
+def test_the_z_oracle_forecast_needs_no_teacher(tmp_path):
+    """`predict --z-from-posterior` builds a window set to read the truth future out of;
+    under a fitted config that build must not want the teacher table."""
+    torch.manual_seed(0)
+    series = _series(_config())
+    table = _table(tmp_path / "teacher.json", series)
+    config = _config(latent_dim=3, latent_free_bits_nats=0.05,
+                     control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
+                     control_fitted_teacher_path=str(table))
+    model = build_model(config).eval()
+    normalizer = Normalizer.fit(series)
+    table.unlink()
+    forecasts = posterior_latent_forecasts(
+        model, series[:3], config, normalizer, device=torch.device("cpu")
+    )
+    assert len(forecasts) == 3 and all(f.z_from_posterior for f in forecasts)
 
 
 def test_the_two_teachers_train_to_different_imitation_numbers(tmp_path):

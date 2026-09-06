@@ -1169,6 +1169,26 @@ class TSConfig:
                     "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
                     "random_train_anchor would supervise other anchors with it"
                 )
+            if not self.control_imitation_loss_weight:
+                raise ValueError(
+                    "control_imitation_target names a teacher for a term this run switches "
+                    "off (control_imitation_loss_weight=0): the table would be loaded and "
+                    "validated against the cohort, and never read"
+                )
+            if self.control_state_objective != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
+                # `train.loss_component_names` registers `imitation` under the
+                # true-time-position objective ONLY, so under any other objective the term
+                # is not built at all — the same reason L1's dense arms have no teacher.
+                # That objective in turn requires the native grid and UNIFORM durations, so
+                # this one check also closes the factorized-duration hole: a table of
+                # schedules spread uniformly over the total duration cannot supervise a
+                # learned partition.
+                raise ValueError(
+                    "the imitation term is registered under control_state_objective="
+                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION!r} only; this run scores "
+                    f"{self.control_state_objective!r} and would load the fitted teacher "
+                    "and never read it"
+                )
         elif self.control_fitted_teacher_path:
             raise ValueError(
                 "control_fitted_teacher_path belongs to "

@@ -141,12 +141,18 @@ flight model.
   inverse under the SAME config key as its forward model; a model added without one fails at
   registry lookup. The transport term (ω×v) is UNCONDITIONAL and there is no correct "off".
 - **A fitted teacher table belongs to ONE width, anchor and cohort** — `control_imitation_target=
-  "fitted"` reads per-flight schedules that reproduce the truth only at the N, the anchor and the
-  total duration they were fitted under. The DATASET build checks all four (schema, N, anchor,
-  each flight's `truth_duration_s` to 1e-6 s) and refuses a table that does not cover the cohort,
-  with the count — there is no partial mode. The teacher is **training-only**: its digest rides in
-  `checkpoint_metadata.json` / the payload's `fitted_teacher`, never in `data_provenance` (which
-  `evaluate-fit` and `freeze-test` compare for equality), and predict never needs the file.
+  "fitted"` reads per-flight schedules that reproduce the truth only at the N, the anchor, the
+  uniform partition and the total duration they were fitted under. Six things are checked, and
+  the run is refused on any of them: the SCHEMA and the `uniform` duration mode at load, then the
+  cohort's AIRPORTS (flight keys are unique within an airport only, so a foreign table would
+  otherwise read as "covers 0 of N"), N, the anchors the dataset actually samples, coverage (with
+  the count — there is no partial mode) and each flight's `truth_duration_s` to 1e-6 s.
+- **The fitted teacher is a TRAINING-TIME INPUT, not something a dataset loads.** `train.fit_model`
+  opens the file once and hands the table to the train and validation window sets; every replay
+  path (`evaluate-fit`, `predict --z-from-posterior`, the approach-cohort comparison, any
+  `forecast`) builds its own window set WITHOUT it and must keep working when the file is gone.
+  Its digest rides in `checkpoint_metadata.json` / the payload's `fitted_teacher`, never in
+  `data_provenance` — that object is compared for equality by `evaluate-fit` and `freeze-test`.
 
 ## Current defaults and their status
 
@@ -164,7 +170,7 @@ flight model.
 | `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result |
 | `n_segments` (control) | 64 | **32 is free** (L1: 1322 vs 1333 m, bank skill 0.726 vs 0.728); the deployed head's 257 numbers become 96 |
 | `control_state_loss_grid` | native | `fixed-dt` without the imitation term (it is not registered there) trips the straight-in veto (FDE 703 → 2863) and brings the bank wiggle back — the trajectory-error loss alone is not enough |
-| `control_imitation_target` | `inverse-dynamics` | WHAT the imitation term imitates. The default's schedule, flown open-loop, lands **2.5–7.8 km** from the truth it was read off (L0), so "imitating it perfectly" is not "flying the truth". `fitted` reads the per-flight table `run_ts_control_basis_oracle.py --checkpoint` fits through the same rollout (88–433 m) and needs `control_fitted_teacher_path`; refused with `random_train_anchor`. L5.a, **not yet measured** — the arms are `docs/experiments/l5_fitted_teacher_arms.json` |
+| `control_imitation_target` | `inverse-dynamics` | WHAT the imitation term imitates. The default's schedule, flown open-loop, lands **2.5–7.8 km** from the truth it was read off (L0), so "imitating it perfectly" is not "flying the truth". `fitted` reads the per-flight table `run_ts_control_basis_oracle.py --checkpoint` fits through the same rollout (88–433 m) and needs `control_fitted_teacher_path` (which names the run: `teacher=<dir>/<file>`); refused with `random_train_anchor`, with `control_imitation_loss_weight=0`, and off `control_state_objective=true-time-position` (the only objective the term is registered under). L5.a, **not yet measured** — the arms are `docs/experiments/l5_fitted_teacher_arms.json` |
 
 Command hooks are called once per control SEGMENT, at its start, with the rollout's own state,
 returning the command flown — and **the record carries the schedule FLOWN, not the network's**.

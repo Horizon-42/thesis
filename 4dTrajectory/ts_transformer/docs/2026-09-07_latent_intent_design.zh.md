@@ -409,14 +409,24 @@ native32 checkpoint 自己的预测**（直线进近已在 445 m 内），预期
 > 逐划分覆盖数，末尾打印逐划分 fitADE / seedADE 分位数。`--init network` 的初值是 checkpoint 自己的确定性
 > 前向（`batch_contract.model_forward`，隐变量模型取先验 top-1），只取控制量，总时长仍是真值（float64——
 > 数据集按 1e-6 s 比对，batch 的 float32 `final_time` 到不了这个精度）。
+> 拟合前按真值时长排序再分批：稠密监督按批内最长航班补齐，训练集 p50 183 s / 最长 1454 s，
+> 按划分顺序取 batch 1024 会多积分约 2.5 倍飞行秒；排序同时让产物与划分列出的顺序无关（有测试）。
 > 训练侧 config 轴 `control_imitation_target ∈ {inverse-dynamics, fitted}` + `control_fitted_teacher_path`
 > （CLI `--control-imitation-target` / `--control-fitted-teacher`；默认与四个 named recipe 的字面量都是
-> inverse-dynamics；进 run name 的 `imit-target`，291 份存量 config 重算 0 处改名）。表在**数据集构建时**
-> 读一次并校验（schema、N、锚点、每架总时长 1e-6 s、覆盖率），不覆盖即拒绝并报 a of b，无回退；
-> `reference_control_supervision` 的逆动力学被表查找取代，权重全 1；`control_imitation_mse` 不动。
-> 表的 path/sha256/N/锚点/航班数进 `checkpoint_metadata.json` 与 checkpoint payload 的 `fitted_teacher`
-> ——**不进 `data_provenance`**：那个对象被 `evaluate-fit` / `freeze-test` 按相等比对，而教师只在训练期
-> 存在，predict 不需要表（已测：删表后仍能预测）。臂文件 `docs/experiments/l5_fitted_teacher_arms.json`。
+> inverse-dynamics；两者都进 run name：`imit-target` 与 `teacher=<目录>/<文件>`——两代表是两个运行，
+> 与 `closure_labels_path` 同一条规则；728 份含 config 的存量产物重算 0 处改名）。config 先拒绝不自洽的
+> 组合：fitted 无路径、有路径非 fitted、非 control 路径、`random_train_anchor`、模仿权重为 0、
+> `control_state_objective` 非 true-time-position（`loss_component_names` 只在该目标下注册 `imitation`；
+> 该目标又要求 native 网格与均匀时长，所以这一条同时堵住了"均匀表监督可学时长分配"的洞）。
+> **表是训练期输入，不是数据集自己加载的东西**：`train.fit_model` 打开一次，交给它监督的 train / val
+> 两个窗口集；`evaluate-fit`、`predict --z-from-posterior`、approach-cohort 比较等回放路径各自建窗口集
+> 且**不带教师**，删表后照样跑（有测试）。校验共六项，任一不过即拒绝：加载时的 schema 与 `uniform`，
+> 构建时的机场（flight key 只在机场内唯一，否则会报成"covers 0 of N"）、N、数据集实际锚点、覆盖率
+> （报 a of b，无回退）、每架总时长 1e-6 s。`reference_control_supervision` 的逆动力学被表查找取代，
+> 权重全 1；`control_imitation_mse` 不动。表的 path/sha256/N/锚点/机场/航班数进
+> `checkpoint_metadata.json` 与 checkpoint payload 的 `fitted_teacher`——**不进 `data_provenance`**：
+> 那个对象被 `evaluate-fit` / `freeze-test` 按相等比对。臂文件
+> `docs/experiments/l5_fitted_teacher_arms.json`（表跑出来之前两臂会在数据集构建处失败，这是设计）。
 
 - 先验三臂：单高斯 / K 混合 / **隐扩散**（两阶段，见 §2.3）。预注册读数：minADE_K、miss rate、
   校准曲线、验证 NLL、**逐层看**（直线进近层三臂应基本相同，差别必须全在雷达引导层）。
