@@ -1,0 +1,16 @@
+{
+ "_comment": "L1.b of docs/2026-09-07_latent_intent_design.zh.md: supervision instead of a teacher. The imitation teacher's one job is to name the bank (position is order 0, bank order 2; L1's teacherless dense arms put 6x the observed bank energy into a common profile). But L1 never measured whether the FIRST-order velocity term alone holds the wiggle: its dense arms had neither velocity nor imitation registered (both exist only under true-time-position). Arm 1 answers that with zero code: the L1_native32 base (custom, N=32, native segment endpoints, true-time-position, velocity 0.003 @ 10 m/s) with the imitation weight at 0. Arms 2 (heading-rate loss through the rollout, model-consistent, no inverse dynamics) and 3 (+ bank total-variation) join this file after implementation and review. Second motive: the imitation term is 0.556 of the loss and its inverse-dynamics target is inconsistent with the rollout (flown open-loop it drifts 2.5-7.8 km) — the decoder is pinned to controls that do not reproduce the track, a candidate reason z has nothing to earn in L2; L2.e waits for this campaign's winner. PRE-REGISTERED GATES: bank skill >= 0.70 (score_control_arms.py; native32 0.726, floor 0.17, ceiling 0.70), ADE / FDE p50 per stratum not worse than L1_native32 (compare_constraint_arms.py, L1_native32 first). VETO: straight-in FDE p50 degraded beyond seed noise (671 m). DECISION RULE: if arm 1 or 2 passes, the teacher line becomes a comparison arm and L5.a's fitted teacher stays only as the upper bound; if none passes, the fitted teacher is the main-line teacher.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_imitation_loss_weight": 0.0
+ },
+ "arms": [
+  {
+   "key": "L1b_noteacher",
+   "label": "N=32, native endpoints + velocity term, NO teacher (imitation 0)",
+   "overrides": {}
+  }
+ ]
+}
