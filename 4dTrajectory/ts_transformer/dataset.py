@@ -74,6 +74,7 @@ from anchor_eligibility import (
     random_train_anchor_eligibility_policy,
 )
 from config import (
+    CTA_CONDITIONING_GIVEN,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     uses_closure_labels,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -600,6 +601,11 @@ def probe_final_approach(batch_size: int, device: torch.device) -> dict[str, tor
         name: torch.full((batch_size,), value, dtype=torch.float32, device=device)
         for name, value in rows.items()
     }
+
+
+def truth_duration_s(series: FlightSeries, anchor: int) -> float:
+    """Seconds from the anchor to the truth's end — the value the CTA is given as."""
+    return float(series.supervision_times[-1] - series.times[anchor])
 
 
 def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
@@ -1559,6 +1565,9 @@ class TrajectoryWindows(Dataset, ABC):
         s_idx, anchor = self.index[i]
         series = self.series[s_idx]
         arrays = dynamics_arrays(series, anchor)
+        if self.config.cta_conditioning == CTA_CONDITIONING_GIVEN:
+            # Training feeds the truth as the controlled time of arrival.
+            arrays["cta_s"] = np.array(truth_duration_s(series, anchor), dtype=np.float64)
         if self.config.control_imitation_loss_weight:
             anchor_time = float(series.times[anchor])
             arrays.update(

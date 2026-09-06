@@ -12,6 +12,7 @@ import torch.nn as nn
 from batch_contract import model_forward
 from channels import IDX, horizontal_distance_m
 from config import (
+    CTA_CONDITIONING_GIVEN,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CORRIDOR_GATES,
@@ -29,6 +30,7 @@ from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from control.envelope import physical_controls
 from dataset import (
+    truth_duration_s,
     FlightSeries,
     Normalizer,
     bounded_output_gate,
@@ -94,6 +96,10 @@ class Forecast:
     # Latent control output only: decoded from ANOTHER flight's top-1 latent (the
     # posterior-collapse diagnostic — a decoder that ignores z barely moves).
     latent_shuffled: bool = False
+    # CTA-conditioned control output only: the arrival time the decoder was given (truth +
+    # the counterfactual offset) — the record says what it was asked for.
+    cta_s: float | None = None
+    cta_offset_s: float | None = None
 
     @property
     def n_steps(self) -> int:
@@ -167,9 +173,15 @@ def _forward(
 
 
 def _dynamics_batch(
-    series: Sequence[FlightSeries], anchor: int, device: torch.device
+    series: Sequence[FlightSeries], anchor: int, device: torch.device,
+    config: TSConfig | None = None, cta_offset_s: float = 0.0,
 ) -> dict[str, torch.Tensor]:
+    """The per-flight context; under ``cta_conditioning=given`` it carries the CTA =
+    the truth duration + ``cta_offset_s`` (the counterfactual a scheduler asks for)."""
     rows = [dynamics_arrays(item, anchor) for item in series]
+    if config is not None and config.cta_conditioning == CTA_CONDITIONING_GIVEN:
+        for item, row in zip(series, rows, strict=True):
+            row["cta_s"] = np.array(truth_duration_s(item, anchor) + cta_offset_s, dtype=np.float64)
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
@@ -239,6 +251,7 @@ def _forecast_control_batch(
     latent_shuffled: bool = False,
     histories: np.ndarray | None = None,
     dynamics: dict[str, torch.Tensor] | None = None,
+    cta_offset_s: float = 0.0,
 ) -> list[Forecast]:
     """Predict and densely roll a heterogeneous batch of bounded control schedules.
 
@@ -250,8 +263,12 @@ def _forecast_control_batch(
     if histories is None:
         histories = _history_batch(series, config, normalizer, anchor)
     if dynamics is None:
-        dynamics = _dynamics_batch(series, anchor, device)
+        dynamics = _dynamics_batch(series, anchor, device, config, cta_offset_s)
     prediction = _control_prediction_batch(model, histories, dynamics, device, latent=latent)
+    cta = (
+        dynamics["cta_s"].detach().cpu().numpy().astype(np.float64)
+        if config.cta_conditioning == CTA_CONDITIONING_GIVEN else None
+    )
     durations = prediction.segment_durations.detach().cpu().numpy().astype(np.float64)
     offsets, padded_offsets, query_valid = _padded_dense_queries(
         durations, config.control_rollout_integrator_dt_s
@@ -313,6 +330,8 @@ def _forecast_control_batch(
             mode_index=None if mode is None else mode[0],
             mode_probability=None if mode is None else float(mode[1][row]),
             latent_shuffled=latent_shuffled,
+            cta_s=None if cta is None else float(cta[row]),
+            cta_offset_s=None if cta is None else float(cta_offset_s),
         ))
     return forecasts
 
@@ -363,7 +382,7 @@ def latent_mode_forecasts(
     device = device or next(model.parameters()).device
     anchor = default_anchor(config) if anchor is None else anchor
     histories = _history_batch(series, config, normalizer, anchor)
-    dynamics = _dynamics_batch(series, anchor, device)
+    dynamics = _dynamics_batch(series, anchor, device, config)
     logits, mean, logvar, _top1 = _latent_prior_batch(model, histories, dynamics, device)
     generator = torch.Generator(device=device).manual_seed(seed)
     latents, components = model.sample_latents(logits, mean, logvar, samples, generator=generator)
@@ -411,7 +430,7 @@ def random_latent_forecasts(
     )
     probabilities = np.full((samples, len(series)), 1.0 / samples)
     histories = _history_batch(series, config, normalizer, anchor)
-    dynamics = _dynamics_batch(series, anchor, device)
+    dynamics = _dynamics_batch(series, anchor, device, config)
     return [
         _forecast_control_batch(
             model, series, config, normalizer, anchor, device,
@@ -445,7 +464,7 @@ def shuffled_latent_forecasts(
     device = device or next(model.parameters()).device
     anchor = default_anchor(config) if anchor is None else anchor
     histories = _history_batch(series, config, normalizer, anchor)
-    dynamics = _dynamics_batch(series, anchor, device)
+    dynamics = _dynamics_batch(series, anchor, device, config)
     _logits, _mean, _logvar, top1 = _latent_prior_batch(model, histories, dynamics, device)
     source = torch.from_numpy(latent_derangement(len(series), seed)).to(device)
     return _forecast_control_batch(
@@ -878,6 +897,7 @@ def forecast_approaches(
     truncate: bool = True,
     project_final: str | None = None,
     closure_track: bool = False,
+    cta_offset_s: float = 0.0,
 ) -> list[Forecast]:
     """Predict one inference batch through the same dense path used by fit evaluation.
 
@@ -893,8 +913,10 @@ def forecast_approaches(
         if project_final is not None:
             raise ValueError("the final-approach projection applies to state forecasts only")
         return _forecast_control_batch(
-            model, series, config, normalizer, anchor, device
+            model, series, config, normalizer, anchor, device, cta_offset_s=cta_offset_s
         )
+    if cta_offset_s:
+        raise ValueError("--cta-offset-s applies to a CTA-conditioned control checkpoint only")
     if config.prediction_output == PREDICTION_CLOSURE:
         if project_final is not None:
             raise ValueError("the final-approach projection applies to state forecasts only")

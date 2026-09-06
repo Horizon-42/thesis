@@ -164,6 +164,10 @@ def build_prediction_record(
         **({"modeIndex": forecast.mode_index, "modeProbability": forecast.mode_probability}
            if forecast.mode_index is not None else {}),
         **({"latentShuffled": True} if forecast.latent_shuffled else {}),
+        # CTA-conditioned control output: the arrival time the decoder was GIVEN (truth +
+        # offset) — a record that reads the future says so.
+        **({"ctaS": forecast.cta_s, "ctaOffsetS": forecast.cta_offset_s}
+           if forecast.cta_s is not None else {}),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,

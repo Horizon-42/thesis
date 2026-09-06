@@ -19,7 +19,7 @@ Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；�
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **campaign 在跑（2026-09-07 启动，`l1_lowdim_20260907`）**；无新代码 | 臂 `docs/experiments/l1_lowdim_arms.json`（L1_dense32 / L1_dense64 / L1_native32，对照 A_control_v3） | 不差于 simple-v3；参数 257 → 96；bank skill 必读 |
 | L2 CVAE 骨架（隐意图 z） | **代码完成（2026-09-07，分支 `dev-l2`，待 review 后合入）**：L2.a 训练/top-1 + L2.b K 采样、shuffle 诊断、读数 | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
-| L3 CTA 条件化（交付形态） | 未开始 | `cta_conditioning` | 给真值 CTA 时时长误差 < 5 s ∧ 反事实 CTA 轨迹仍可飞 |
+| L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | 未开始（数据平面 WIP 已在 `045c233`） | `scene/` + 先验网络 | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | 未开始 | — | 见 §七 |
 
@@ -285,6 +285,14 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 **门**：给真值 CTA 时时长误差中位 < 5 s；反事实 CTA 的轨迹逐样本可飞率不低于 `L2` 臂，且
 到达时刻误差随 CTA 线性跟随（不是被时长头忽略）。
 **契约**：见 §三.3——这类臂永远不能作为预测精度结果引用。
+
+> **建成的形态（2026-09-07）**：`given` 下时长头被**旁路**——`final_time := dynamics["cta_s"]`（`ControlFeatureModel.final_time`
+> 是三个 control 模型共用的唯一规则），网络只决定"在那个时刻到达的路径"；CTA 同时作为一个融合 token 进解码器
+> （`cta_encoder`）。训练喂真值时长（`dataset.truth_duration_s`，`_dynamics_arrays` 写 `cta_s`）；预测喂真值 +
+> `--cta-offset-s`（`forecast._dynamics_batch`），记录带 `source.ctaS / ctaOffsetS`，run name 带 `cta=given`
+> （与 `intent=` 同一条"读了未来就必须穿在名字上"的纪律）。隐变量模型下 `latent_duration` 在 `given` 时失效
+> ——CTA 就是时长，这是有意的。门里的"时长误差 < 5 s"按构造为 0，所以 L3 真正要读的是**反事实**：
+> CTA ± 30/60/90 s 下逐样本可飞率相对 CTA=0 臂不退、且路径几何（chamfer）随 |偏移| 平滑变化而不是崩掉。
 
 ### L4 — 场景条件（先验吃邻机；≈2 周）
 

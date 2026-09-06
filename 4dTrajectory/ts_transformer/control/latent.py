@@ -259,7 +259,9 @@ class LatentControlModel(ControlFeatureModel):
     ) -> ControlPrediction:
         decoder_features = self.latent_fusion(torch.cat([features, latent], dim=-1))
         raw_duration = self.final_time_head.raw(history) + self.latent_duration(latent).squeeze(-1)
-        final_time_s = F.softplus(raw_duration) * self.final_time_head.scale_s
+        final_time_s = self.final_time(
+            F.softplus(raw_duration) * self.final_time_head.scale_s, dynamics
+        )
         return self.control_head(
             decoder_features, final_time_s,
             lower=dynamics["control_lower"], upper=dynamics["control_upper"],

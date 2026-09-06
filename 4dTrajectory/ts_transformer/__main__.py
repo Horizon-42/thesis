@@ -51,7 +51,8 @@ _TS_DIR = Path(__file__).resolve().parent
 if str(_TS_DIR) not in sys.path:
     sys.path.insert(0, str(_TS_DIR))
 
-from config import (  # noqa: E402
+from config import (
+    CTA_CONDITIONING_GIVEN,  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
@@ -947,6 +948,12 @@ def main(argv: list[str] | None = None) -> int:
     p_predict.add_argument("--latent-seed", type=int, default=0,
                            help="seed for --latent-samples and --latent-shuffle")
     p_predict.add_argument(
+        "--cta-offset-s", type=float, default=0.0, metavar="SECONDS",
+        help="CTA-conditioned control output: give every flight its truth arrival time plus "
+             "this offset (the counterfactual a scheduler asks for); records carry "
+             "source.ctaS / ctaOffsetS. 0 = the identity demonstration",
+    )
+    p_predict.add_argument(
         "--latent-random", type=int, default=0, metavar="K",
         help="latent control output: decode K latents drawn from N(0, I) instead of the "
              "prior per flight into random/modeNN/ — the same-K control arm minADE_K is "
@@ -1285,6 +1292,11 @@ def main(argv: list[str] | None = None) -> int:
         if config.prediction_output != PREDICTION_CLOSURE:
             parser.error("--closure-track requires a closure checkpoint")
         print("  flying every drawn reference with the point-mass rollout under the closure tracker")
+    if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
+        parser.error("--cta-offset-s needs a checkpoint trained with cta_conditioning=given")
+    if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
+        print(f"  CTA-conditioned: every flight is given its truth arrival time {args.cta_offset_s:+g} s "
+              "(reads the future — a delivery-form demonstration, not a prediction result)")
     if (args.latent_samples or args.latent_shuffle or args.latent_random) and config.latent_dim < 1:
         parser.error("--latent-samples / --latent-random / --latent-shuffle need a latent control checkpoint")
     if args.latent_samples < 0 or args.latent_random < 0:
@@ -1373,6 +1385,7 @@ def main(argv: list[str] | None = None) -> int:
                 truncate=not args.no_truncate,
                 project_final=args.project_final,
                 closure_track=args.closure_track,
+                cta_offset_s=args.cta_offset_s,
             )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)

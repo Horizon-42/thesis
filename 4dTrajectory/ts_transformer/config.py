@@ -81,6 +81,17 @@ INTENT_CONDITIONINGS = (
 )
 # The fields a named recipe leaves OPEN for the intent axis (the CLI's override check).
 INTENT_FIELDS = ("intent_conditioning",)
+
+# The latent-intent design's L3: the CONTROLLED time of arrival as a decoder input. Under
+# ``given`` the flight's duration IS the CTA (the duration head is bypassed) and the network
+# decides only the path that arrives then; training feeds the truth duration, prediction
+# feeds truth + ``--cta-offset-s`` (the counterfactual a scheduler asks for). A ``given`` run
+# READS THE FUTURE — the run name carries ``cta=given``, its ``final_time_error_s`` is an
+# identity check, and it is a delivery-form demonstration, never a prediction result.
+CTA_CONDITIONING_OFF = "off"
+CTA_CONDITIONING_GIVEN = "given"
+CTA_CONDITIONINGS = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
+CTA_FIELDS = ("cta_conditioning",)
 # Order is load-bearing like channels.CHANNELS: serialised into every checkpoint
 # (``input_channels``) and ``train.load_checkpoint`` refuses a mismatch.
 INTENT_JOIN_CHANNELS: tuple[str, ...] = ("e_join", "n_join", "u_join")
@@ -792,6 +803,9 @@ class TSConfig:
     latent_prior_components: int = 1          # K in the mixture prior; 1 = a single Gaussian
     latent_beta: float = 1.0                  # weight of KL(q ‖ p) in the objective
     latent_free_bits_nats: float = 0.0        # per-dim KL below this is not charged
+    # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
+    # duration head's output outright.
+    cta_conditioning: str = CTA_CONDITIONING_OFF
     control_velocity_loss_scale_mps: float = 10.0
     # Direct supervision of the control schedule against the one inverted from the flown
     # track by control_inverse_dynamics -- the same registry the forward model dispatches
@@ -1527,6 +1541,15 @@ class TSConfig:
             raise ValueError(
                 "latent_prior_components / latent_beta / latent_free_bits_nats mean nothing "
                 "without a latent (latent_dim == 0) and would still rename the run"
+            )
+        if self.cta_conditioning not in CTA_CONDITIONINGS:
+            raise ValueError(
+                f"unknown cta_conditioning {self.cta_conditioning!r}; expected one of {CTA_CONDITIONINGS}"
+            )
+        if self.cta_conditioning != CTA_CONDITIONING_OFF and self.prediction_output != PREDICTION_CONTROL:
+            raise ValueError(
+                "cta_conditioning replaces the control path's duration head; "
+                f"prediction_output={self.prediction_output!r} has none"
             )
         if self.latent_dim > 0 and self.checkpoint_selection_metric == CHECKPOINT_SELECTION_OBJECTIVE:
             raise ValueError(

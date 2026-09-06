@@ -42,6 +42,7 @@ from typing import Any
 
 from config import (
     CONTROL_HOOK_FIELDS,
+    CTA_FIELDS,
     INTENT_FIELDS,
     PROCEDURE_LOSS_FIELDS,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
@@ -156,6 +157,8 @@ META_FIELDS = (
     # different runs, whatever else matches.
     "closure_labels_path",
     *INTENT_FIELDS,
+    # The CTA axis reads the future the same way: a given-CTA run must wear it.
+    *CTA_FIELDS,
     "d_model",
     "n_heads",
     "d_ff",
@@ -234,6 +237,7 @@ _ABBREV = {
     "coordinate_frame": "frame",
     "target_conditioning": "target",
     "intent_conditioning": "intent",
+    "cta_conditioning": "cta",
     "closure_labels_path": "labels",
     "state_position_reference": "pos-ref",
     "corridor_gate": "gate",

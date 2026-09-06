@@ -9,7 +9,7 @@ import torch.nn as nn
 from config import TSConfig
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.conditioning import DYNAMICS_CONDITION_NAMES
-from config import CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM
+from config import CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM, CTA_CONDITIONING_GIVEN
 from prediction_outputs import ControlOutputHead, FinalTimeHead, UniformDurationControlHead
 
 
@@ -25,8 +25,15 @@ class ControlFeatureModel(nn.Module):
             nn.GELU(),
             nn.Dropout(config.dropout),
         )
+        # The controlled time of arrival as one more fused token (L3): the decoder must
+        # know when it has to arrive to decide the path that does.
+        self.cta_given = config.cta_conditioning == CTA_CONDITIONING_GIVEN
+        self.cta_scale_s = config.final_time_scale_s
+        self.cta_encoder = (
+            nn.Sequential(nn.Linear(1, config.d_model), nn.GELU()) if self.cta_given else None
+        )
         self.feature_fusion = nn.Sequential(
-            nn.Linear((config.enc_in + 1) * config.d_model, config.d_model),
+            nn.Linear((config.enc_in + 1 + int(self.cta_given)) * config.d_model, config.d_model),
             nn.GELU(),
             nn.LayerNorm(config.d_model),
         )
@@ -36,7 +43,17 @@ class ControlFeatureModel(nn.Module):
     ) -> torch.Tensor:
         encoded = self.feature_encoder.encode_features(history)
         condition = self.condition_encoder(dynamics["condition"])
-        return self.feature_fusion(torch.cat((encoded, condition), dim=-1))
+        parts = [encoded, condition]
+        if self.cta_given:
+            cta = (dynamics["cta_s"] / self.cta_scale_s).to(encoded.dtype).unsqueeze(-1)
+            parts.append(self.cta_encoder(cta))
+        return self.feature_fusion(torch.cat(parts, dim=-1))
+
+    def final_time(self, head_value: torch.Tensor, dynamics: dict[str, torch.Tensor]) -> torch.Tensor:
+        """The duration the schedule is rolled over: the given CTA, or the head's prediction."""
+        if self.cta_given:
+            return dynamics["cta_s"].to(head_value.dtype)
+        return head_value
 
 
 # What "doing nothing" means before any gradient arrives: 20% of installed thrust, wings
@@ -114,7 +131,7 @@ class ControlOutputModel(ControlFeatureModel):
         features = self.fused_features(history, dynamics)
         return self.control_head(
             features,
-            self.final_time_head(history),
+            self.final_time(self.final_time_head(history), dynamics),
             lower=dynamics["control_lower"],
             upper=dynamics["control_upper"],
         )
