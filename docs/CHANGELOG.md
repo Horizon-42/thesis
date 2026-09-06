@@ -56,6 +56,160 @@ Branch `dev-evaluation-review-fixes`; plan + status table
   `BUG_FIX_GUIDE.md` and the v4 `FAILURE_REASON_ANALYSIS.html` archived under
   `evaluation/docs/archive/`; `THRESHOLD_SPEED_GATE.md` §2 working notes replaced by §3.5.
 
+### 2026-09-07 — Package audit T1-10 / T1-11 / T1-13 / T1-14: the horizon curriculum, the arc-length-geometry objective family and the dual terminal clock deleted
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §三, rows 10, 11, 13
+and 14 (`c5c3a32`, `09e4420`, `2692e61`). T1 is complete: the whole 2026-07/08 generation of
+abolished control design is out of live code.
+
+**T1-10 — the horizon curriculum (`c5c3a32`).** `control_horizon_curriculum_s` defaulted to
+`()`, every named recipe pinned it to `()`, and no arm file ever set it. Its own validation
+made it unreachable in practice besides: it required `control_state_objective=arc-length-geometry`,
+the family retired the same day. Deleted: `control/training/curriculum.py`, the `training_stage`
+parameter of eight loss functions and of `_evaluate_validation_airport`, the stage-view crop,
+`EpochResult.training_stage`, and the whole staged branch of `fit_model` (scheduler reset,
+`curriculum-prefix-objective` selection, stage prints). `close_duration_prefix` is KEPT and moved
+to its only consumer, `control/loss/fixed_dt.py`; with the prefix mask gone it takes
+`(durations, total_duration)` and its four unreachable opening guards go — the `allclose` on the
+reconstructed total is the check that ever mattered. Two knock-ons: `include_deployable_replay`
+could no longer be False (flag and both branches deleted), and `segment_valid` had no non-None
+source, so the pass-through in `control/dynamics/{rollout,backends}.py` went too (the
+`aerodynamic_model` kernels below keep the capability, with their own defaults and tests).
+The oracle teacher's short-to-long refinement existed only to drive the crop, so
+`teacher_optimization_stages` is gone and `optimize_teacher_controls` takes a flat `steps`;
+`run_ts_oracle_teacher_optimize.py` and `run_ts_simple_teacher_paired_cv.py` swap
+`--prefix-steps 30` / `--full-steps 150` for one `--steps 240`, the same budget.
+
+**T1-11 + T1-13 — the arc-length-geometry objective family and the dual terminal clock
+(`09e4420`).** No arm file has used `arc-length-geometry` since 2026-08-02; README /
+OPEN_ITEMS / ENGINEERING_NOTES never mention it; its only setters were three 2026-08 teacher
+runners whose checkpoints `load_checkpoint` already refuses (the 2026-08-18 control-unit
+change). The dual terminal clock rode with it — its `state-supervision` strategy was literally
+`return result`, and its two other values were reachable only under the arc objective. Deleted:
+`components._arc_length_geometry_objective` with its four helper tables and the
+`runway_heading_rad` argument, `control/loss/terminal_clock.py` (its deletion was already
+staged when a concurrent docs commit swept it in, so it landed under `1c83d7c`, not
+`09e4420`), the torch halves of `arc_length_geometry.py` and `terminal_state_loss.py`,
+`train._arc_length_geometry_validation_selection`, and seventeen config fields — sixteen
+`control_geometry_*` / `control_arc_*` / `control_terminal_*` plus the whole
+`control_gradient_clip_policy` AXIS (a one-member vocabulary is the behaviour, not a choice;
+`control_gradient_clip_norm` stays, and `clip_gradients_by_global_norm` now caps once and
+returns the applied coefficient).
+
+**What the arc deletion did NOT touch, deliberately.** The plan's row 11 asked for
+`fixed_anchor_validation.py:110-315` AND for keeping the three `*_metrics_numpy` "the
+validation uses every epoch"; those cannot both hold. `fixed_anchor_arc_length_geometry_metrics`
+is a DIAGNOSTIC that `fixed_anchor_common_grid_metrics` computes for every control run
+whatever its objective, and `train._common_grid_validation_details` plus
+`build_multiflight_capacity_report.py` read ~30 of its `arc_length_*` keys today — so the
+block stays, and its three shape parameters (position-end weight 4.0, terminal emphases
+3.0 / 5.0) are frozen as module constants, which is what keeps those keys comparable across
+the whole artifact history.
+
+**A naming tie-break the deletion widened.** With the sixteen arc/terminal fields out of
+`run_naming.CONTROL_LOSS_FIELDS`, a custom config can now tie a named recipe at ZERO
+loss-field diffs (the v1 / v1-lag tie itself pre-existed: `control_dynamics_model` was never a
+loss field; the deletion made it reach every point-mass run) — and the documented "a later
+recipe wins ties" then named every point-mass `simple-v1` run `simple-v1-lag`, because those
+two recipes are the same loss design and
+differ only in the flight model. The nearest-recipe rank gained a second key: fewest edits
+among the NON-loss fields the recipe also freezes.
+
+**T1-14 — `state_position_reference="anchor-relative"` KEPT and marked vetoed (`2692e61`).**
+It was vetoed by the 2026-09-03 state-v2 campaign's own pre-registered rule, but a
+current-cohort artifact is stored under it (`state_v2_20260903/A_anchor_relative`), so
+deleting the value would stop that run's config loading. The warning now lives at the
+constant in `config.py` and in the package `CLAUDE.md` defaults table.
+
+**Contract.** All nineteen removed fields go into `RETIRED_SERIALIZED_FIELDS` and out of
+`REQUIRED_SERIALIZED_CONTROL_FIELDS`, so every stored config still loads through
+`TSConfig.from_dict` — the lenient direction. 2026-08 teacher checkpoints stop loading; they
+were already refused by the 2026-08-18 control-unit change.
+
+**Stored-run-name recount** (`history.json` + `summary.json` under
+`4dTrajectory/outputs/*/experiments/**`, read-only, `run_display_name` + `run_slug` before and
+after each commit; the config count rises across the three commits — 261 → 263 → 276 — because
+the L2 campaign kept writing in the main tree while this worktree was edited, and one
+pre-existing `summary.json` carries no config dict throughout):
+ - **T1-10: 20 names moved**, all the 2026-07-31/08-01/08-02 POOLED and KSJC control
+   generation, which genuinely ran `60,120,240 s × 10 epochs`. Their `curriculum=60/120/240`
+   meta item drops out, so a name ends one item earlier or shows one fewer `+N more`.
+ - **T1-11 + T1-13: 24 names moved**, the same generation and one mechanism: without the
+   arc/terminal loss fields those runs are within two edits of simple-v1, so
+   `custom(obj=…, grid=…, clock=…, duration-grad=off)` (and one `custom-56aee7f8` content
+   hash) becomes the spelled-out `simple-v1+(obj=…, grid=…)`, with `grad-clip=20` taking the
+   meta slot the curriculum vacated. One further name was already wrong and is now right: a
+   point-mass run that read `simple-v1-lag` now reads `simple-v1`.
+ - **T1-14: 0 names moved** (comment-only).
+Both families are the documented behaviour of the grammar ("names describe a config relative
+to TODAY'S defaults"). No on-disk run directory is renamed, the cached `display_name` in
+`outputs/*/INDEX.md` and `index.json` is a historical snapshot and was not touched, and no
+moved name is quoted in any doc, arm file or source.
+
+**Docs that quote the retired code got a one-line banner, never a rewrite**:
+`2026-08-02_dual_clock_terminal_ablation.zh.md`, `2026-08-01_arc_length_geometry_loss_experiments.zh.md`,
+`2026-07-31_deployable_control_training_optimizations.zh.md`, `2026-09-07_control_training_review.zh.md`
+and `control_parameter_prediction.zh.md`.
+
+Suite after each commit: 586 / 556 / 556 passed. `train --help`, `predict --help`,
+`run_ts_pipeline.py --help` and the three teacher runners' `--help` all work.
+
+### 2026-09-07 — Package audit T1-9 / T1-12: the closure tracker and the regularization axis deleted
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §三, rows 9 and 12
+(`0702669`, `0898291`). Two generations of abolished design removed from live code.
+
+**T1-9 — the closure tracker (`0702669`).** The P1.d delivery form — a drawn closure
+reference flown by the point-mass rollout under a command hook — was abolished by the
+latent-intent design (§四) with its review BLOCKER unfixed: the tracker's nearest-node
+search snaps onto a self-approaching reference and jumps legs on 8 of 1404 via-Dubins
+flights (endpoints 6–19 km off), which are four of the five largest "tracking gains", so
+the honest tracking cost is **+10.5 m of ADE, not +9**. Deleted:
+`control/constraints/closure_tracking.py`, `tests/test_closure_tracking.py`,
+`docs/experiments/closure_p1d_arms.json`, `forecast.tracking_config` /
+`track_closure_forecasts` / `Forecast.closure_tracked` and the `track`/`device` parameters
+that fed them, `predict --closure-track`, and `source.closureTracked` in the record. The
+closure OUTPUT is untouched and stays as a comparison arm (`closure_output.py`,
+`prediction_output=closure`, `--closure-from-labels`, the labels/template chain). No
+TSConfig field moved, so no serialization or run-name change. Suite 598 → 596 (the two
+tracker tests).
+
+**T1-12 — effort / smoothness regularization (`0898291`).** Every named recipe pinned both
+weights to 0.0, no arm file had set them since 2026-08, and the term was computed on every
+control batch and then multiplied by zero. Deleted `control/loss/regularization.py`, the
+`control_effort_loss_weight` / `control_smoothness_loss_weight` fields with their raises,
+recipe pins and `control_recipe()` entries, the whole block in
+`train.control_prediction_loss_terms`, the two `ControlLossTerms` fields and their share of
+`.total`, the two `CONTROL_LOSS_COMPONENT_NAMES` entries and extras, both CLI flags, and
+the `run_ts_pipeline` / `run_ts_control_oracle` / `run_ts_control_capacity_ceiling`
+plumbing. Both fields joined `RETIRED_SERIALIZED_FIELDS` so older checkpoints still load
+through `from_dict`; neither was in `REQUIRED_SERIALIZED_CONTROL_FIELDS`.
+
+**Run-name recount, 261 stored configs (`history.json` + `summary.json` under
+`4dTrajectory/outputs/*/experiments/**`, read only): 23 names moved** — and unlike T0's
+zero, these are the real thing, in two families. Ten are the 2026-07-29 / 08-01 POOLED
+effort–smoothness SWEEPS (`stage_c_effort`, `stage_c_smoothness`,
+`control_output/{effort,smoothness}_weight`), which genuinely set the weights:
+`custom(effort=0.0001)` → `custom`. So these two fields retire on **weaker grounds than
+`control_hook_gate` / `control_dense_state_loss_weight`** — the stored value could change
+THOSE runs — and the `RETIRED_SERIALIZED_FIELDS` comment now says so instead of claiming a
+blanket "could not change an answer". The other thirteen are 2026-08-01/02
+arc-length-geometry runs carrying the old module defaults (1e-3 / 1e-2): losing two
+residual diffs drops them under `_MAX_LISTED_DIFFS`, so the loss design UN-collapses from
+the content hash `custom-1c5a2429` / `custom-3788b8a3` into the spelled-out
+`custom(obj=arc-length-geometry, grid=fixed-dt, clock=observed, …)`. Both families are the
+grammar's documented behaviour (names describe a config against TODAY'S defaults). No
+on-disk run directory was renamed; the cached `display_name` in `outputs/*/INDEX.md` and
+`index.json` is a historical snapshot and was left alone; neither moved name is quoted in
+any doc, arm file or source.
+
+Docs, one line each and no dated doc rewritten: the package `CLAUDE.md` closure paragraph
+and Layout line, `docs/OPEN_ITEMS.md` (both tracker mentions),
+`docs/2026-09-06_closure_p1d_tracking_results.zh.md` (its supersession banner now names
+the deleted symbols and says its §一/§五 no longer execute) and
+`docs/control_parameter_prediction.zh.md` (a second 2026-09-07 note in its existing
+staleness banner).
+
 ### 2026-09-07 — Package audit T0: eight zero-risk cleanups, reviewed
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §二. One control

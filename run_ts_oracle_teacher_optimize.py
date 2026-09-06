@@ -3,6 +3,10 @@
 
 With no ``--airport`` argument the cohort is balanced across every discovered K-airport.
 Repeating ``--airport`` restricts the same pooled workflow to an explicit airport set.
+
+The 2026-08 published numbers ran the arc-length-geometry objective with the 60/120/240 s
+prefix schedule; both were retired 2026-09-07 (package audit T1-10/11). This runner now
+trains the package's current objective at the full horizon and cannot reproduce them.
 """
 
 from __future__ import annotations
@@ -24,11 +28,9 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
-    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     PREDICTION_CONTROL,
     TSConfig,
 )
@@ -40,7 +42,6 @@ from train import prediction_loss_components  # noqa: E402
 from control.oracle.optimization import (  # noqa: E402
     BatchedOracleTeacher,
     optimize_teacher_controls,
-    teacher_optimization_stages,
 )
 from control.oracle.targets import build_inverse_dynamics_target  # noqa: E402
 
@@ -96,8 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--cohort-size", type=int, default=32)
-    parser.add_argument("--prefix-steps", type=int, default=30)
-    parser.add_argument("--full-steps", type=int, default=150)
+    parser.add_argument("--steps", type=int, default=240)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--gradient-clip-norm", type=float, default=20.0)
     parser.add_argument("--log-every", type=int, default=10)
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--split-seed", type=int, default=1337)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args(argv)
-    for name in ("cohort_size", "prefix_steps", "full_steps", "log_every"):
+    for name in ("cohort_size", "steps", "log_every"):
         if getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if args.learning_rate <= 0.0 or args.gradient_clip_norm <= 0.0:
@@ -134,8 +134,9 @@ def main(argv: list[str] | None = None) -> int:
         control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+        # The arc-length-geometry objective and its paired checkpoint-selection metric
+        # were RETIRED 2026-09-07 (package audit T1-11); this finished 2026-08 campaign's
+        # config now falls back to the package defaults.
         control_state_duration_gradient=False,
         random_train_anchor=False,
         n_segments=64,
@@ -182,7 +183,6 @@ def main(argv: list[str] | None = None) -> int:
         dynamics["control_upper"],
         final_time,
     ).to(device)
-    stages = teacher_optimization_stages(args.prefix_steps, args.full_steps)
     history = optimize_teacher_controls(
         teacher,
         x=x,
@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         supervision=supervision,
         config=config,
         normalizer=normalizer,
-        stages=stages,
+        steps=args.steps,
         learning_rate=args.learning_rate,
         gradient_clip_norm=args.gradient_clip_norm,
         log_every=args.log_every,
@@ -242,11 +242,9 @@ def main(argv: list[str] | None = None) -> int:
         "recipe": {
             "initialization": "inverse-dynamics",
             "duration": "uniform true outer-train final time / N; frozen",
-            "objective": "production arc-length-geometry 2+4",
-            "stages": [
-                {"label": stage.label, "horizon_s": stage.horizon_s, "steps": steps}
-                for stage, steps in stages
-            ],
+            "objective": config.control_state_objective,
+            "checkpoint_selection_metric": config.checkpoint_selection_metric,
+            "steps": args.steps,
             "learning_rate": args.learning_rate,
             "gradient_clip_norm": args.gradient_clip_norm,
         },

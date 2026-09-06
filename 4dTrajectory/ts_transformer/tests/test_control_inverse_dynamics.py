@@ -116,7 +116,6 @@ def _dense_reference(config: TSConfig, controls: np.ndarray, initial_controls):
         torch.tensor(offsets, dtype=torch.float64).unsqueeze(0),
         torch.ones((1, len(offsets)), dtype=torch.bool),
         config,
-        segment_valid=None,
     )
     states = rollout.query_geodetic_states[0].numpy()
     times = np.concatenate(([0.0], offsets))
@@ -435,17 +434,16 @@ def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
     )
     terminal = torch.zeros(2, 6, dtype=torch.float64)
     anchor = torch.zeros(2, 6, dtype=torch.float64)
-    heading = torch.zeros(2, dtype=torch.float64)
 
     off = control_tracking_loss_terms(
-        result, anchor, terminal, _velocity_term_config(0.0), normalizer, None, heading
+        result, anchor, terminal, _velocity_term_config(0.0), normalizer, None
     )
     assert "velocity" not in off.extras
     assert "velocity" not in train_module.loss_component_names(_velocity_term_config(0.0))
 
     on_config = _velocity_term_config(0.25)
     on = control_tracking_loss_terms(
-        result, anchor, terminal, on_config, normalizer, None, heading
+        result, anchor, terminal, on_config, normalizer, None
     )
     torch.testing.assert_close(
         on.extras["velocity"], torch.tensor([1.0, 2.25], dtype=torch.float64)
@@ -480,7 +478,7 @@ def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
     result = prediction_zero_weights(
         prediction, torch.zeros(1, channels, dtype=torch.float64), targets, weights,
         durations.sum(dim=1), config, Normalizer(mean=np.zeros(channels), std=np.ones(channels)),
-        probe_dynamics(1, torch.device("cpu")), None, None,
+        probe_dynamics(1, torch.device("cpu")), None,
     )
     # With every velocity weight zero the term is exactly zero, not a division blow-up.
     assert float(result.physical_velocity_mse[0]) == 0.0

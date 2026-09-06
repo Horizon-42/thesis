@@ -8,7 +8,6 @@ import torch
 
 from config import TSConfig
 from control.dynamics import rollout as control_rollout
-from control.training.curriculum import close_duration_prefix
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
 from prediction_outputs import ControlPrediction
@@ -22,25 +21,37 @@ class FixedDTStateLossResult:
     physical_segment_durations_s: torch.Tensor
 
 
+def close_duration_prefix(
+    durations: torch.Tensor,
+    total_duration: torch.Tensor,
+) -> torch.Tensor:
+    """Close the final segment on the caller's exact physical-time clock.
+
+    The learned durations are a normalized partition scaled by a learned total, so
+    accumulating them in the model's float32 leaves the reconstructed total a few
+    microseconds off the float64 reference clock the fixed-dt queries live on — enough to
+    push a query that lands exactly on the horizon past the end of the rollout. Recomputing
+    the last duration from the preceding float64 boundary makes the sum exact instead.
+    """
+    corrected_last = total_duration - durations[:, :-1].sum(dim=1)
+    closed = torch.cat((durations[:, :-1], corrected_last.unsqueeze(1)), dim=1)
+    if not torch.allclose(closed.sum(dim=1), total_duration, rtol=1e-6, atol=1e-6):
+        raise RuntimeError("control durations do not sum to the physical-time horizon")
+    return closed
+
+
 def fixed_dt_rollout_channels(
     prediction: ControlPrediction,
     supervision: FixedDTControlSupervision,
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
-    segment_valid: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Return query/end states and their exact event-aligned segment clock."""
-    durations = prediction.segment_durations.to(control_rollout.ROLLOUT_DTYPE)
-    active_segments = (
-        torch.ones_like(durations, dtype=torch.bool)
-        if segment_valid is None
-        else segment_valid.to(device=durations.device)
-    )
     durations = close_duration_prefix(
-        durations,
-        active_segments,
+        prediction.segment_durations.to(control_rollout.ROLLOUT_DTYPE),
         prediction.final_time_s.to(
-            dtype=control_rollout.ROLLOUT_DTYPE, device=durations.device
+            dtype=control_rollout.ROLLOUT_DTYPE,
+            device=prediction.segment_durations.device,
         ),
     )
     rollout = control_rollout.rollout_control_dense(
@@ -50,7 +61,6 @@ def fixed_dt_rollout_channels(
         supervision.query_offsets_s,
         supervision.valid,
         config,
-        segment_valid=segment_valid,
     )
     return rollout.query_channels, rollout.segment_end_channels, durations
 
@@ -61,11 +71,10 @@ def fixed_dt_control_state_loss(
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
-    segment_valid: torch.Tensor | None = None,
 ) -> FixedDTStateLossResult:
     """Average each flight over its complete regular-dt reference prefix."""
     query_channels, endpoint_channels, segment_durations = fixed_dt_rollout_channels(
-        prediction, supervision, dynamics, config, segment_valid
+        prediction, supervision, dynamics, config
     )
     dtype, device = query_channels.dtype, query_channels.device
     mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)

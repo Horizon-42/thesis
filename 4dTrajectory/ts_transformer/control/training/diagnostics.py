@@ -1,7 +1,7 @@
 """Gradient clipping and audit metrics for deterministic control training.
 
-This module is deliberately independent of the training loop. A positive clip norm enables
-an explicit clipping policy and records the pre-clip scale by model subsystem plus bounded-
+This module is deliberately independent of the training loop. A positive clip norm applies
+one exact global L2 cap and records the pre-clip scale by model subsystem plus bounded-
 control saturation. The model, objective, and optimizer remain owned by their existing
 modules.
 """
@@ -14,39 +14,11 @@ import math
 import torch
 import torch.nn as nn
 
-from config import (
-    CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
-    CONTROL_GRADIENT_CLIP_GLOBAL,
-    CONTROL_GRADIENT_CLIP_POLICIES,
-)
 from prediction_outputs import CONTROL_NAMES, ControlPrediction
 
 
 GRADIENT_GROUPS = ("backbone", "control_head", "final_time_head")
 SATURATION_THRESHOLD_FRACTION = 0.01
-
-
-@dataclass(frozen=True)
-class GradientClipScope:
-    """One independently scaled gradient vector in a clipping policy."""
-
-    groups: tuple[str, ...]
-    capped: bool
-
-
-_CLIP_SCOPES = {
-    CONTROL_GRADIENT_CLIP_GLOBAL: {
-        "global": GradientClipScope(groups=GRADIENT_GROUPS, capped=True),
-    },
-    CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED: {
-        "control_backbone": GradientClipScope(
-            groups=("backbone", "control_head"), capped=True
-        ),
-        "final_time_head": GradientClipScope(
-            groups=("final_time_head",), capped=False
-        ),
-    },
-}
 
 
 def _gradient_group(parameter_name: str) -> str:
@@ -82,54 +54,24 @@ def gradient_norms(model: nn.Module) -> dict[str, float]:
 
 def clip_gradients_by_global_norm(
     model: nn.Module, max_norm: float
-) -> tuple[dict[str, float], bool]:
-    """Apply one exact global L2 cap and return the pre-clip audit snapshot."""
-    norms, scopes = clip_gradients_by_policy(
-        model, max_norm=max_norm, policy=CONTROL_GRADIENT_CLIP_GLOBAL
-    )
-    return norms, bool(scopes["global"]["triggered"])
+) -> tuple[dict[str, float], float]:
+    """Apply one exact global L2 cap and return the pre-clip audit snapshot.
 
-
-def clip_gradients_by_policy(
-    model: nn.Module,
-    *,
-    max_norm: float,
-    policy: str,
-) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
-    """Apply a named group policy and return the pre-clip audit snapshot."""
+    The second return value is the scaling coefficient actually applied — 1.0 when the
+    pre-clip norm was already under the cap, so ``coefficient < 1.0`` IS "this batch was
+    clipped".
+    """
     if not math.isfinite(max_norm) or max_norm <= 0.0:
         raise ValueError("gradient clip max_norm must be positive and finite")
-    if policy not in CONTROL_GRADIENT_CLIP_POLICIES:
-        raise ValueError(
-            f"unknown gradient clip policy {policy!r}; expected one of "
-            f"{CONTROL_GRADIENT_CLIP_POLICIES}"
-        )
     norms = gradient_norms(model)
-    scope_results: dict[str, dict[str, object]] = {}
-    with torch.no_grad():
-        for scope_name, scope in _CLIP_SCOPES[policy].items():
-            pre_clip_norm = math.sqrt(
-                sum(norms[group] * norms[group] for group in scope.groups)
-            )
-            triggered = scope.capped and pre_clip_norm > max_norm
-            coefficient = (
-                max_norm / (pre_clip_norm + 1e-12) if triggered else 1.0
-            )
-            if triggered:
-                for parameter_name, parameter in model.named_parameters():
-                    if (
-                        parameter.grad is not None
-                        and _gradient_group(parameter_name) in scope.groups
-                    ):
-                        parameter.grad.mul_(coefficient)
-            scope_results[scope_name] = {
-                "groups": list(scope.groups),
-                "capped": scope.capped,
-                "pre_clip_norm": pre_clip_norm,
-                "triggered": triggered,
-                "coefficient": coefficient,
-            }
-    return norms, scope_results
+    triggered = norms["total"] > max_norm
+    coefficient = max_norm / (norms["total"] + 1e-12) if triggered else 1.0
+    if triggered:
+        with torch.no_grad():
+            for parameter in model.parameters():
+                if parameter.grad is not None:
+                    parameter.grad.mul_(coefficient)
+    return norms, coefficient
 
 
 @dataclass
@@ -137,7 +79,6 @@ class ControlTrainingDiagnosticsAccumulator:
     """Aggregate batch diagnostics into one JSON-serializable epoch record."""
 
     max_norm: float
-    policy: str = CONTROL_GRADIENT_CLIP_GLOBAL
     batch_count: int = 0
     clipped_batches: int = 0
     gradient_sum: dict[str, float] = field(
@@ -146,11 +87,8 @@ class ControlTrainingDiagnosticsAccumulator:
     gradient_max: dict[str, float] = field(
         default_factory=lambda: {name: 0.0 for name in (*GRADIENT_GROUPS, "total")}
     )
-    clip_scope_sum: dict[str, float] = field(default_factory=dict)
-    clip_scope_max: dict[str, float] = field(default_factory=dict)
-    clip_scope_coefficient_sum: dict[str, float] = field(default_factory=dict)
-    clip_scope_coefficient_min: dict[str, float] = field(default_factory=dict)
-    clip_scope_triggered: dict[str, int] = field(default_factory=dict)
+    coefficient_sum: float = 0.0
+    coefficient_min: float = 1.0
     saturated_by_control: list[int] = field(
         default_factory=lambda: [0 for _name in CONTROL_NAMES]
     )
@@ -175,32 +113,14 @@ class ControlTrainingDiagnosticsAccumulator:
         self.controls_by_control += prediction.controls.shape[0] * prediction.controls.shape[1]
 
     def record_gradients_and_clip(self, model: nn.Module) -> None:
-        norms, scopes = clip_gradients_by_policy(
-            model, max_norm=self.max_norm, policy=self.policy
-        )
+        norms, coefficient = clip_gradients_by_global_norm(model, self.max_norm)
         self.batch_count += 1
-        self.clipped_batches += int(
-            any(bool(scope["triggered"]) for scope in scopes.values())
-        )
+        self.clipped_batches += int(coefficient < 1.0)
         for name, value in norms.items():
             self.gradient_sum[name] += value
             self.gradient_max[name] = max(self.gradient_max[name], value)
-        for name, scope in scopes.items():
-            pre_clip_norm = float(scope["pre_clip_norm"])
-            coefficient = float(scope["coefficient"])
-            self.clip_scope_sum[name] = self.clip_scope_sum.get(name, 0.0) + pre_clip_norm
-            self.clip_scope_max[name] = max(
-                self.clip_scope_max.get(name, 0.0), pre_clip_norm
-            )
-            self.clip_scope_coefficient_sum[name] = (
-                self.clip_scope_coefficient_sum.get(name, 0.0) + coefficient
-            )
-            self.clip_scope_coefficient_min[name] = min(
-                self.clip_scope_coefficient_min.get(name, 1.0), coefficient
-            )
-            self.clip_scope_triggered[name] = (
-                self.clip_scope_triggered.get(name, 0) + int(bool(scope["triggered"]))
-            )
+        self.coefficient_sum += coefficient
+        self.coefficient_min = min(self.coefficient_min, coefficient)
 
     def summary(self) -> dict[str, object]:
         if self.batch_count <= 0 or self.controls_by_control <= 0:
@@ -215,30 +135,12 @@ class ControlTrainingDiagnosticsAccumulator:
                 "max": dict(self.gradient_max),
             },
             "clip": {
-                "policy": self.policy,
                 "max_norm": self.max_norm,
                 "batches": self.batch_count,
                 "triggered_batches": self.clipped_batches,
                 "trigger_rate": self.clipped_batches / self.batch_count,
-                "scopes": {
-                    name: {
-                        "groups": list(scope.groups),
-                        "capped": scope.capped,
-                        "pre_clip_norm_mean": (
-                            self.clip_scope_sum[name] / self.batch_count
-                        ),
-                        "pre_clip_norm_max": self.clip_scope_max[name],
-                        "triggered_batches": self.clip_scope_triggered[name],
-                        "trigger_rate": (
-                            self.clip_scope_triggered[name] / self.batch_count
-                        ),
-                        "coefficient_mean": (
-                            self.clip_scope_coefficient_sum[name] / self.batch_count
-                        ),
-                        "coefficient_min": self.clip_scope_coefficient_min[name],
-                    }
-                    for name, scope in _CLIP_SCOPES[self.policy].items()
-                },
+                "coefficient_mean": self.coefficient_sum / self.batch_count,
+                "coefficient_min": self.coefficient_min,
             },
             "control_saturation": {
                 "threshold_fraction": SATURATION_THRESHOLD_FRACTION,

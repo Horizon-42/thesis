@@ -105,6 +105,7 @@ def main() -> int:
         icao = manifest_path.parents[1].name
         document = json.loads(manifest_path.read_text(encoding="utf-8"))
         touched = False
+        labels: dict[str, list[str]] = {}
         for category in document["categories"]:
             key = category.get("key", "")
             if not key.startswith("ts_"):
@@ -113,11 +114,18 @@ def main() -> int:
             if label is None:
                 unmatched.append(f"{icao}/{key}")
                 continue
+            labels.setdefault(label, []).append(key)
             if category.get("label") != label:
                 print(f"{icao}/{key}\n  - {category.get('label')}\n  + {label}")
                 category["label"] = label
                 touched = True
                 changed += 1
+        # The grammar names a config; two categories with one name means the configs differed
+        # only in an axis the grammar no longer spells (a retired field — the 2026-07/08
+        # effort/smoothness sweeps are the known case). Refuse rather than publish twins.
+        collisions = {label: keys for label, keys in labels.items() if len(keys) > 1}
+        if collisions:
+            raise SystemExit(f"{icao}: one label for several categories — refusing to publish twins: {collisions}")
         if touched and not args.dry_run:
             temporary = manifest_path.with_suffix(".json.tmp")
             temporary.write_text(json.dumps(document, indent=2), encoding="utf-8")

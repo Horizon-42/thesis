@@ -72,7 +72,6 @@ def rollout_control_dense(
     query_valid: torch.Tensor,
     config: TSConfig,
     *,
-    segment_valid: torch.Tensor | None = None,
     command_hook: CommandHook | None = None,
 ) -> DenseControlRolloutChannels:
     """Roll a batch once and return exact states at queries and control boundaries."""
@@ -82,10 +81,5 @@ def rollout_control_dense(
         query_offsets_s.to(dtype=ROLLOUT_DTYPE, device=device),
         query_valid.to(device=device, dtype=torch.bool),
         config,
-        segment_valid=(
-            None
-            if segment_valid is None
-            else segment_valid.to(device=device, dtype=torch.bool)
-        ),
         command_hook=command_hook,
     )

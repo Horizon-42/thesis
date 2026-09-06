@@ -501,6 +501,28 @@ def test_a_mixture_prior_starts_with_distinguishable_components():
 def test_config_refuses_latent_knobs_without_a_latent():
     with pytest.raises(ValueError, match="mean nothing without a latent"):
         _config(latent_dim=0, latent_beta=0.5)
+    with pytest.raises(ValueError, match="mean nothing without a latent"):
+        _config(latent_dim=0, latent_posterior_init_std=0.1)
+    with pytest.raises(ValueError, match="latent_posterior_init_std must be positive"):
+        _config(latent_posterior_init_std=0.0)
+
+
+@pytest.mark.parametrize("init_std", [1.0, 0.1])
+def test_the_posterior_opens_at_the_configured_std_and_its_mean_reads_the_future(init_std):
+    """The 2026-09-07 collapse mechanism: a posterior that opens at unit variance around a
+    mean of ~0.2 hands the decoder noise. The log-variance half starts as the configured
+    constant for EVERY flight; the mean half is a function of the future from step 0."""
+    torch.manual_seed(0)
+    config = _config(latent_posterior_init_std=init_std)
+    model = build_model(config)
+    future = torch.randn(4, config.pred_len, len(config.channels))
+    mean, logvar = model.posterior(future, torch.tensor([200.0, 250.0, 300.0, 350.0]))
+    assert torch.allclose(logvar, torch.full_like(logvar, 2.0 * math.log(init_std)))
+    assert not torch.allclose(mean[0], mean[1])           # not a constant: it reads the future
+    assert mean.abs().mean() > 0.01
+    # the axis names the run only when it leaves the default
+    name = run_display_name(config.to_dict())
+    assert ("q-std=0.1" in name) == (init_std != 1.0)
 
 
 def test_the_latent_model_trains_under_simple_v3_s_own_supervision(tmp_path: Path):

@@ -1,5 +1,10 @@
 #!/usr/bin/env python
-"""Audit inverse-dynamics teacher quality on a deterministic outer-train cohort."""
+"""Audit inverse-dynamics teacher quality on a deterministic outer-train cohort.
+
+The 2026-08 published numbers ran the arc-length-geometry objective with the 60/120/240 s
+prefix schedule; both were retired 2026-09-07 (package audit T1-10/11). This runner now
+trains the package's current objective at the full horizon and cannot reproduce them.
+"""
 
 from __future__ import annotations
 
@@ -15,16 +20,13 @@ TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
-import torch  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
-    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     PREDICTION_CONTROL,
     TSConfig,
 )
@@ -73,8 +75,9 @@ def main(argv: list[str] | None = None) -> int:
         control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+        # The arc-length-geometry objective and its paired checkpoint-selection metric
+        # were RETIRED 2026-09-07 (package audit T1-11); this finished 2026-08 campaign's
+        # config now falls back to the package defaults.
         control_state_duration_gradient=False,
         random_train_anchor=False,
         n_segments=64,

@@ -59,12 +59,9 @@ from config import (  # noqa: E402
     STATE_POSITION_REFERENCES,
     TARGET_CONDITIONINGS,
     CHECKPOINT_SELECTION_METRICS,
-    CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
-    CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DYNAMICS_MODELS,
     CONTROL_DURATION_PARAMETERIZATIONS,
-    CONTROL_GRADIENT_CLIP_POLICIES,
     CONTROL_RECIPE_NAMES,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_SIMPLE_V1,
@@ -75,7 +72,6 @@ from config import (  # noqa: E402
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_OBJECTIVES,
-    CONTROL_TERMINAL_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     CONTROL_HOOKS,
@@ -215,20 +211,6 @@ def _cv_parameters(value: str) -> tuple[str, ...]:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def _positive_float_csv(value: str) -> tuple[float, ...]:
-    try:
-        parsed = tuple(float(token.strip()) for token in value.split(",") if token.strip())
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "horizon curriculum must be a comma-separated list of seconds"
-        ) from exc
-    if not parsed or any(item <= 0.0 for item in parsed):
-        raise argparse.ArgumentTypeError(
-            "horizon curriculum must contain positive seconds"
-        )
-    return parsed
-
-
 def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--control-recipe",
@@ -304,52 +286,6 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="control/oracle compatibility weight; direct state ignores it")
     parser.add_argument("--terminal-loss-weight", type=float, default=None,
                         help="control/oracle compatibility weight; direct state ignores it")
-    parser.add_argument("--control-effort-weight", type=float, default=None)
-    parser.add_argument("--control-smoothness-weight", type=float, default=None)
-    parser.add_argument("--control-geometry-weight", type=float, default=None)
-    parser.add_argument(
-        "--control-arc-horizontal-velocity-weight", type=float, default=None
-    )
-    parser.add_argument(
-        "--control-arc-vertical-velocity-weight", type=float, default=None
-    )
-    parser.add_argument(
-        "--control-arc-horizontal-velocity-scale-mps", type=float, default=None
-    )
-    parser.add_argument(
-        "--control-arc-vertical-velocity-scale-mps", type=float, default=None
-    )
-    parser.add_argument(
-        "--control-arc-local-velocity",
-        choices=CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
-        default=None,
-    )
-    parser.add_argument("--control-arc-tangent-weight", type=float, default=None)
-    parser.add_argument("--control-arc-position-end-weight", type=float, default=None)
-    parser.add_argument(
-        "--control-arc-terminal",
-        choices=CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
-        default=None,
-    )
-    parser.add_argument(
-        "--control-arc-terminal-cross-track-emphasis", type=float, default=None
-    )
-    parser.add_argument(
-        "--control-arc-terminal-vertical-emphasis", type=float, default=None
-    )
-    parser.add_argument("--control-terminal-position-weight", type=float, default=None)
-    parser.add_argument("--control-terminal-velocity-weight", type=float, default=None)
-    parser.add_argument("--control-terminal-position-scale-m", type=float, default=None)
-    parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=None)
-    parser.add_argument(
-        "--control-terminal-clock",
-        choices=CONTROL_TERMINAL_CLOCKS,
-        default=None,
-        help=(
-            "terminal-state rollout clock: share dense supervision or use the deployable "
-            "predicted clock"
-        ),
-    )
     parser.add_argument(
         "--control-duration-parameterization",
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
@@ -434,37 +370,12 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--control-horizon-curriculum",
-        type=_positive_float_csv,
-        default=None,
-        metavar="SECONDS,...",
-        help=(
-            "physical-time control prefixes trained before the full horizon, e.g. "
-            "60,120,240; train/validation only"
-        ),
-    )
-    parser.add_argument(
-        "--control-horizon-stage-epochs",
-        type=int,
-        default=None,
-        help="epochs per numeric control-horizon curriculum stage (default: 10)",
-    )
-    parser.add_argument(
         "--control-gradient-clip-norm",
         type=float,
         default=None,
         help=(
             "global L2 gradient cap for deterministic control training; positive values "
             "also record gradient and control-saturation diagnostics"
-        ),
-    )
-    parser.add_argument(
-        "--control-gradient-clip-policy",
-        choices=CONTROL_GRADIENT_CLIP_POLICIES,
-        default=None,
-        help=(
-            "gradient clipping scope: one global cap (default) or leave only the "
-            "final-time head outside the combined backbone/control cap"
         ),
     )
     parser.add_argument(
@@ -601,57 +512,6 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("state_endpoint_loss_weight", args.state_endpoint_loss_weight),
         ("kinematic_consistency_loss_weight", args.kinematic_consistency_weight),
         ("terminal_loss_weight", args.terminal_loss_weight),
-        ("control_effort_loss_weight", args.control_effort_weight),
-        ("control_smoothness_loss_weight", args.control_smoothness_weight),
-        ("control_geometry_loss_weight", args.control_geometry_weight),
-        (
-            "control_arc_horizontal_velocity_loss_weight",
-            args.control_arc_horizontal_velocity_weight,
-        ),
-        (
-            "control_arc_vertical_velocity_loss_weight",
-            args.control_arc_vertical_velocity_weight,
-        ),
-        (
-            "control_arc_horizontal_velocity_scale_mps",
-            args.control_arc_horizontal_velocity_scale_mps,
-        ),
-        (
-            "control_arc_vertical_velocity_scale_mps",
-            args.control_arc_vertical_velocity_scale_mps,
-        ),
-        (
-            "control_arc_local_velocity_parameterization",
-            args.control_arc_local_velocity,
-        ),
-        ("control_arc_tangent_loss_weight", args.control_arc_tangent_weight),
-        ("control_arc_position_end_weight", args.control_arc_position_end_weight),
-        ("control_arc_terminal_parameterization", args.control_arc_terminal),
-        (
-            "control_arc_terminal_cross_track_emphasis",
-            args.control_arc_terminal_cross_track_emphasis,
-        ),
-        (
-            "control_arc_terminal_vertical_emphasis",
-            args.control_arc_terminal_vertical_emphasis,
-        ),
-        (
-            "control_terminal_position_loss_weight",
-            args.control_terminal_position_weight,
-        ),
-        (
-            "control_terminal_velocity_loss_weight",
-            args.control_terminal_velocity_weight,
-        ),
-        (
-            "control_terminal_position_scale_m",
-            args.control_terminal_position_scale_m,
-        ),
-        (
-            "control_terminal_velocity_scale_mps",
-            args.control_terminal_velocity_scale_mps,
-        ),
-        ("control_terminal_supervision_clock", args.control_terminal_clock),
         ("control_duration_parameterization", args.control_duration_parameterization),
         ("control_duration_uniform_floor", args.control_duration_uniform_floor),
         ("control_dynamics_backend", args.control_dynamics_backend),
@@ -663,13 +523,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_state_loss_grid", args.control_state_loss_grid),
         ("control_state_objective", args.control_state_objective),
         ("control_state_duration_gradient", args.control_state_duration_gradient),
-        ("control_horizon_curriculum_s", args.control_horizon_curriculum),
-        (
-            "control_horizon_curriculum_stage_epochs",
-            args.control_horizon_stage_epochs,
-        ),
         ("control_gradient_clip_norm", args.control_gradient_clip_norm),
-        ("control_gradient_clip_policy", args.control_gradient_clip_policy),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),
@@ -889,6 +743,7 @@ def main(argv: list[str] | None = None) -> int:
     p_fit.add_argument("--checkpoint", required=True)
     p_fit.add_argument(
         "--output-dir",
+        type=Path,
         default=None,
         help="destination for fit_evaluation.json (default: checkpoint directory)",
     )
@@ -931,12 +786,6 @@ def main(argv: list[str] | None = None) -> int:
         help="closure output: draw every flight from its LABEL in this file instead of the "
              "model's decision (the family's own ceiling — the oracle arm); records carry "
              "source.closureFromLabels",
-    )
-    p_predict.add_argument(
-        "--closure-track", action="store_true",
-        help="closure output: fly every drawn reference with the point-mass rollout under the "
-             "closure tracker (control.constraints.closure_tracking); records then carry the "
-             "controls flown and source.closureTracked",
     )
     p_predict.add_argument(
         "--latent-samples", type=int, default=0, metavar="K",
@@ -1061,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
             resolve_device(args.device),
             history=history,
         )
-        output_dir = Path(args.output_dir) if args.output_dir else checkpoint_path.parent
+        output_dir = args.output_dir or checkpoint_path.parent
         document = write_fit_evaluation(
             evaluation,
             checkpoint_path=checkpoint_path,
@@ -1293,10 +1142,6 @@ def main(argv: list[str] | None = None) -> int:
         from closure_output import load_labels
         closure_labels = load_labels(args.closure_from_labels)
         print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
-    if args.closure_track:
-        if config.prediction_output != PREDICTION_CLOSURE:
-            parser.error("--closure-track requires a closure checkpoint")
-        print("  flying every drawn reference with the point-mass rollout under the closure tracker")
     if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
         parser.error("--cta-offset-s needs a checkpoint trained with cta_conditioning=given")
     if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
@@ -1387,9 +1232,7 @@ def main(argv: list[str] | None = None) -> int:
                     s, forecast, points=config.validation_common_grid_points,
                 ))
         if closure_labels is not None:
-            forecasts = forecast_closure_from_labels(
-                batch_series, config, closure_labels, track=args.closure_track, device=device,
-            )
+            forecasts = forecast_closure_from_labels(batch_series, config, closure_labels)
         elif args.z_from_posterior:
             forecasts = posterior_latent_forecasts(
                 model, batch_series, config, normalizer, device=device, cta_offset_s=args.cta_offset_s,
@@ -1403,7 +1246,6 @@ def main(argv: list[str] | None = None) -> int:
                 device=device,
                 truncate=not args.no_truncate,
                 project_final=args.project_final,
-                closure_track=args.closure_track,
                 cta_offset_s=args.cta_offset_s,
             )
         for offset, (s, forecast) in enumerate(
