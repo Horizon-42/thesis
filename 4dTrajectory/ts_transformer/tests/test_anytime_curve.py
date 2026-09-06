@@ -41,8 +41,11 @@ from config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from dataset import (
+from data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
+    provenance_manifest_digests,
+)
+from dataset import (
     FlightSeries,
     build_series,
     dataset_flight_key,
@@ -107,14 +110,18 @@ def built_series(trained_checkpoint):
 
 
 def _patch_data_plane(monkeypatch, flights, tmp_path):
-    """The runner's three data-plane seams, pointed at the synthetic flights."""
+    """The runner's three data-plane seams, pointed at the synthetic flights.
+
+    The fingerprint seam is `checkpoint_data_provenance` — the package helper that owns the
+    roster rule — so a runner that went back to the plain manifest hash would not be patched
+    here and would fail against the real rosters, which is the bug this seam once hid.
+    """
     manifest = tmp_path / "manifest.json"
     indexed = {dataset_flight_key(flight, index): flight
                for index, flight in enumerate(flights)}
     monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
     monkeypatch.setattr(
-        runner, "arrival_data_provenance",
-        lambda _paths, eligibility_rosters=None: _provenance(),
+        runner, "checkpoint_data_provenance", lambda _payload, _manifests: _provenance()
     )
     monkeypatch.setattr(
         runner, "load_flight_dicts",
@@ -122,7 +129,6 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
             flight for key, flight in indexed.items() if key in include_flight_keys
         ],
     )
-    monkeypatch.setattr(runner, "provenance_manifest_digests", lambda _p: {AIRPORT: "a" * 64})
 
 
 # ── the bin coordinate is the covariate's own arithmetic ────────────────────
@@ -190,37 +196,33 @@ def test_a_bin_with_too_little_truth_after_it_is_empty() -> None:
 
 # ── the data identity the split is rebuilt under ────────────────────────────
 
-def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoint_did(
-    monkeypatch, tmp_path
-) -> None:
-    """The pre-split lateral-pass roster is part of the data identity.
+def test_the_fingerprint_goes_through_the_package_helper(monkeypatch, tmp_path,
+                                                         trained_checkpoint) -> None:
+    """The roster rule has ONE owner: `data_provenance.checkpoint_data_provenance`.
 
-    Fingerprinting the v5 cohort without it lists every arrival candidate where the
-    checkpoint carries only the eligible ones (14 435 vs 14 378 at KRDU), and the run dies
-    claiming the manifest changed. Whether to read it is the CHECKPOINT's answer: one
-    trained before the sidecar existed must not be handed one.
+    The pre-split lateral-pass roster is part of the data identity — fingerprinting the v5
+    cohort without it lists every arrival candidate where the checkpoint carries only the
+    eligible ones (14 435 vs 14 378 at KRDU) and the run dies claiming the manifest changed.
+    That rule belongs to the helper, not to this runner: what is asserted here is that
+    `load_arm` asks it, with the checkpoint's own payload and its own manifests.
     """
+    _flights, checkpoint = trained_checkpoint
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
     seen: dict = {}
 
-    def spy(paths, *, eligibility_rosters=None):
-        seen["paths"], seen["rosters"] = list(paths), eligibility_rosters
-        return {}
+    def spy(payload, manifests):
+        seen["payload"], seen["manifests"] = payload, list(manifests)
+        return _provenance()
 
-    monkeypatch.setattr(runner, "arrival_data_provenance", spy)
-    manifests = [tmp_path / AIRPORT / "arrivals" / "manifest.json"]
+    monkeypatch.setattr(runner, "checkpoint_data_provenance", spy)
+    arm = runner.load_arm("tiny", checkpoint, "val", torch.device("cpu"))
 
-    def payload(eligibility):
-        return {"data_provenance": {
-            "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-            "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64,
-                           "eligibility": eligibility}],
-        }}
-
-    runner.current_provenance(payload({"roster_sha256": "b" * 64}), manifests)
-    assert seen["rosters"] == [manifests[0].parent / "lateral_pass_eligibility.json"]
-
-    runner.current_provenance(payload(None), manifests)
-    assert seen["rosters"] is None
+    assert seen["manifests"] == [manifest]
+    assert seen["payload"]["data_provenance"] == _provenance()
+    # ...and the digests published are the checkpoint's own, never a fresh hash that would
+    # have to repeat the roster rule to stay comparable.
+    assert provenance_manifest_digests(arm.payload["data_provenance"]) == {AIRPORT: "a" * 64}
 
 
 # ── the re-anchored forecast ────────────────────────────────────────────────
@@ -321,7 +323,7 @@ def test_the_metrics_are_scored_after_the_anchor_at_every_bin(built_series) -> N
 # ── the invariant: the stratum label is taken once, at L−1 ──────────────────
 
 def test_the_strata_are_fixed_at_the_l_minus_one_anchor(
-    monkeypatch, trained_checkpoint, built_series
+    trained_checkpoint, built_series
 ) -> None:
     """A flight vectored at L−1 and established at 4 km stays in the vectored stratum.
 
@@ -331,11 +333,6 @@ def test_the_strata_are_fixed_at_the_l_minus_one_anchor(
     which is exactly how a survivor curve looks like an improving one.
     """
     _flights, checkpoint = trained_checkpoint
-    monkeypatch.setattr(
-        runner, "arrival_data_provenance",
-        lambda _paths, eligibility_rosters=None: _provenance(),
-    )
-    monkeypatch.setattr(runner, "provenance_manifest_digests", lambda _p: {AIRPORT: "a" * 64})
     by_id = {item.flight_id.split("_")[0]: item for item in built_series}
     vectored, straight = by_id["SYN05L000"], by_id["SYN05L002"]
     arm = _arm(checkpoint)

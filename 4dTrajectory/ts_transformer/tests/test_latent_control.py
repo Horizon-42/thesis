@@ -43,15 +43,18 @@ from batch_contract import LossComponents
 from models import build_model
 from prediction_outputs import ControlPrediction
 from run_naming import output_name, run_display_name
-from train import load_checkpoint, loss_component_names, train
+from objective import loss_component_names
+from train import load_checkpoint, train
 
 _CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_latent_test", Path(__file__).resolve().parents[1] / "__main__.py")
 assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
 ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
+import cli.predict as cli_predict
 from config import CONTROL_DURATION_UNIFORM
-from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
 from export import build_prediction_record, observed_series_metrics, write_batch
 from forecast import (
     forecast_approach,
@@ -385,6 +388,33 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
     assert everything["mode_fde_spread_m"] is not None and everything["shuffled_delta_ade_m"] is not None
 
 
+def test_every_latent_forecast_entry_refuses_a_non_latent_checkpoint():
+    """One refusal, in the shared fan-out, for all four entries.
+
+    Each of the four used to carry its own copy; T3-22 dropped them because `__main__`
+    refuses the flags. That left the LIBRARY with none, and its callers are not all the
+    CLI — a non-latent model has no `sample_latents`, no `posterior`, and would have died
+    on an `AttributeError` naming a method instead of the contract.
+    """
+    torch.manual_seed(0)
+    config = _config(latent_dim=0)
+    model = build_model(config).eval()
+    series, _report = build_series(
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=3, seed=3), config, airport=AIRPORT
+    )
+    normalizer = Normalizer.fit(series)
+    device = torch.device("cpu")
+    calls = (
+        lambda: latent_mode_forecasts(model, series, config, normalizer, samples=2, seed=0, device=device),
+        lambda: random_latent_forecasts(model, series, config, normalizer, samples=2, seed=0, device=device),
+        lambda: posterior_latent_forecasts(model, series, config, normalizer, device=device),
+        lambda: shuffled_latent_forecasts(model, series, config, normalizer, seed=0, device=device),
+    )
+    for call in calls:
+        with pytest.raises(ValueError, match="latent_dim > 0"):
+            call()
+
+
 def test_shuffled_latents_never_hand_a_flight_its_own_and_need_two_flights():
     torch.manual_seed(0)
     config = _config()
@@ -409,16 +439,16 @@ def test_the_deployable_replay_is_decoded_from_the_prior_not_the_posterior(tmp_p
     prior decode (no posterior) — counting forwards would pass even if the replay still
     reused the posterior object, because the end-of-training cohort evaluation also runs
     prior-only forwards."""
-    import train as train_module
+    import validation
 
     replayed: list[object] = []
-    original_replay = train_module._prediction_batch_replay
+    original_replay = validation._prediction_batch_replay
 
     def intercepting_replay(output, *args, **kwargs):
         replayed.append(output)
         return original_replay(output, *args, **kwargs)
 
-    monkeypatch.setattr(train_module, "_prediction_batch_replay", intercepting_replay)
+    monkeypatch.setattr(validation, "_prediction_batch_replay", intercepting_replay)
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
         control_duration_parameterization=CONTROL_DURATION_UNIFORM,
@@ -627,8 +657,8 @@ def test_the_predict_cli_writes_the_latent_decodes_beside_the_top1(tmp_path: Pat
     train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
     _model, _loaded, _normalizer, payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert len(payload["split"]["val"]) >= 2   # the shuffle needs another flight in the batch
-    monkeypatch.setattr(ts_cli, "_provenance_from_args", lambda _args: provenance)
-    monkeypatch.setattr(ts_cli, "load_flight_dicts", lambda _path, include_flight_keys=None: flights)
+    monkeypatch.setattr(cli_predict, "provenance_from_args", lambda _args: provenance)
+    monkeypatch.setattr(cli_predict, "load_flight_dicts", lambda _path, include_flight_keys=None: flights)
 
     out = tmp_path / "pred"
     assert ts_cli.main([

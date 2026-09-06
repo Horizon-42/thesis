@@ -14,7 +14,7 @@ N=64）。KRDU 验证集 1404 架，同队列、同种子、同划分，逐航�
 | L1_dense64 | 64 | 同上 | **无** | 85/180 轮早停，30 min |
 | L1_native32 | 32 | 同 A | 同 A | **180/180 轮未早停**，63 min |
 
-设计上 fixed-dt 网格下 `velocity` / `imitation` 两个分量根本不注册（`train.loss_component_names` 只在
+设计上 fixed-dt 网格下 `velocity` / `imitation` 两个分量根本不注册（`objective.loss_component_names` 只在
 `true-time-position` 目标下注册它们），所以 dense 臂天然没有教师——这正是"轨迹误差损失够不够"的干净实验。
 
 ## 二、结果（ADE 均值 / FDE p50 / chamfer p50 / Fréchet p50，m）

@@ -7,12 +7,8 @@ import json
 from pathlib import Path
 from typing import Sequence
 
-from dataset import (
-    arrival_data_provenance,
-    build_series,
-    load_flight_dicts,
-    require_matching_data_provenance,
-)
+from data_provenance import arrival_data_provenance, require_matching_data_provenance
+from dataset import build_series, load_flight_dicts
 from development_cohorts import load_development_cohort
 from models import resolve_device
 from train import evaluate_fixed_anchor_series, load_checkpoint

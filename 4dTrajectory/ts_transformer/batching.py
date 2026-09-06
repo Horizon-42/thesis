@@ -15,7 +15,7 @@ import gc
 import numpy as np
 import torch
 
-from batch_contract import anchor_state
+from batch_contract import anchor_state, model_forward
 from closure_output import probe_closure_context
 from config import (
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -25,7 +25,10 @@ from config import (
     uses_control_dynamics,
 )
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
+from dataset import Normalizer, probe_dynamics, probe_final_approach
+from fixed_dt_supervision import FixedDTControlSupervision
 from models import build_model
+from objective import prediction_loss
 from prediction_outputs import ControlPrediction
 
 _CANDIDATES = (8, 16, 32, 64, 128, 256, 512, 1024, 2048)
@@ -67,13 +70,13 @@ def _heterogeneous_control_probe_prediction(
 
 
 def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device) -> None:
-    """Run the real state/time/physics loss once or raise CUDA OOM."""
-    # Local imports avoid a module cycle: train imports resolve_batch_size, while the probe
-    # must share train's loss implementation so its retained CUDA graph cannot drift.
-    from dataset import Normalizer, probe_dynamics, probe_final_approach
-    from fixed_dt_supervision import FixedDTControlSupervision
-    from train import model_forward, prediction_loss
+    """Run the real state/time/physics loss once or raise CUDA OOM.
 
+    The probe runs the SHARED objective, not a copy of it, so the CUDA graph it retains is
+    the one the epoch will build. That import used to be deferred into this function to
+    break a cycle through ``train`` (which imports ``resolve_batch_size``); the objective
+    lives in its own module now, so the cycle — and the deferral — are gone.
+    """
     model = optimizer = x = target = state_weights = control_diagnostics = None
     target_final_time_s = flight_weights = prediction = loss = normalizer = None
     try:

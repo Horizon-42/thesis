@@ -46,7 +46,7 @@ import closure_geometry as cg
 import closure_profile as cp
 from approach_difficulty import approach_difficulty
 from batch_contract import LossComponents
-from config import CLOSURE_LABEL_KNOTS, TSConfig
+from config import CLOSURE_LABEL_KNOTS, CLOSURE_TIMING_SCALE_S, TSConfig
 from geometric_metrics import cumulative_arc_m
 from intent_conditioning import truth_join_point
 
@@ -299,7 +299,7 @@ def closure_loss_components(prediction: ClosurePrediction, normalized_anchor_sta
     flights: ``state`` = the geometry (the join distance and the via's mean distance
     error at the 10 km scale, the heading as its unit vector), ``final_time`` = the
     slowness knots turned into seconds with the label's path length, at
-    ``closure_timing_scale_s``, ``kinematic`` = the height knots at the km scale,
+    ``CLOSURE_TIMING_SCALE_S``, ``kinematic`` = the height knots at the km scale,
     ``terminal`` = 0 (nothing to add: the path ends at the threshold by construction).
     Weights are the flight weights times ``closure_valid``. A batch with no valid flight
     contributes zero (the dataset refuses a labels file with no valid flight at all, and
@@ -316,7 +316,7 @@ def closure_loss_components(prediction: ClosurePrediction, normalized_anchor_sta
     via_mean = 0.5 * (delta[:, 1] + delta[:, 2])
     geometry = delta[:, 0] / D_JOIN_SCALE_M + via_mean / VIA_SCALE_M + delta[:, 3] + delta[:, 4]
     seconds = delta[:, 5:5 + ks + 1].mean(dim=1) * dynamics[CONTEXT_PATH_LENGTH].to(pred.dtype)
-    timing = seconds / config.closure_timing_scale_s
+    timing = seconds / CLOSURE_TIMING_SCALE_S
     height = delta[:, 5 + ks + 1:].mean(dim=1) / HEIGHT_SCALE_M
 
     def weighted(term: torch.Tensor) -> torch.Tensor:

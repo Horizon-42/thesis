@@ -120,8 +120,8 @@ from control.basis_fit import (                                    # noqa: E402
     BasisSchedule,
     load_fitted_teacher,
 )
-from dataset import (                                              # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA,
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
@@ -187,7 +187,10 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
     indexed = {dataset_flight_key(flight, index): flight
                for index, flight in enumerate(flights)}
     monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
-    monkeypatch.setattr(runner, "arrival_data_provenance", lambda _paths: _provenance())
+    # the width study fingerprints the manifest alone; the teacher fit fingerprints the
+    # checkpoint's own data (roster included) — both seams point at the synthetic plane
+    monkeypatch.setattr(runner, "arrival_data_provenance", lambda _paths, eligibility_rosters=None: _provenance())
+    monkeypatch.setattr(runner, "checkpoint_data_provenance", lambda _payload, _manifests: _provenance())
     monkeypatch.setattr(
         runner, "load_flight_dicts",
         lambda _paths, include_flight_keys, verbose=True: [
@@ -446,3 +449,28 @@ def test_the_width_study_still_runs_end_to_end(monkeypatch, tmp_path, trained_ch
     assert len(schedules["arms"]["N=4 uniform"]) == 4
     text = (out / "oracle_basis.txt").read_text()
     assert "gate:" in text and "N=4 uniform" in text
+
+
+def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoint_did(monkeypatch, tmp_path):
+    """The blocker of 2026-09-07: every v5 checkpoint's provenance is eligibility-bound, and
+    a fingerprint taken without the roster reads as "the manifest changed" — the fitter died
+    at startup on every real checkpoint. The roster is read iff the checkpoint recorded one."""
+    import data_provenance as provenance_module
+    seen = {}
+
+    def spy(paths, *, eligibility_rosters=None):
+        seen["paths"], seen["rosters"] = list(paths), eligibility_rosters
+        return _provenance()
+
+    monkeypatch.setattr(provenance_module, "arrival_data_provenance", spy)
+    manifests = [tmp_path / "KRDU" / "arrivals" / "manifest.json"]
+
+    def payload(eligibility):
+        return {"data_provenance": {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                                    "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64,
+                                                   "source_records": [], "eligibility": eligibility}]}}
+
+    provenance_module.checkpoint_data_provenance(payload({"roster_sha256": "b" * 64}), manifests)
+    assert seen["rosters"] == [manifests[0].resolve().parent / "lateral_pass_eligibility.json"]
+    provenance_module.checkpoint_data_provenance(payload(None), manifests)
+    assert seen["rosters"] is None

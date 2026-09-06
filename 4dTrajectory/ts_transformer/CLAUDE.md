@@ -105,8 +105,9 @@ flight model.
   **97.8 %** of flights — the "an arrival is ~3.5–5 min" straight-line estimate was WRONG (real
   arrivals are vectored), **do not resize from it**. The ~2 % over the horizon are cut at H and
   flagged `horizonCapped`; their gate verdicts are cap artifacts, not model error.
-- **A new loss term must be added to `loss_component_names`**, not only to the objective's
-  `extras` — otherwise `KeyError` on the first batch, *after* the slow dataset build.
+- **A new loss term must be added to `objective.loss_component_names`**, not only to the
+  objective's `extras` — otherwise `KeyError` on the first batch, *after* the slow dataset
+  build.
 - **A supervision term on the turn rate reads the RHS, never a restated identity.** The
   shared point-mass RHS integrates `ψ̇ = g·n_realized·sin φ / (V·cos γ)` with the
   STALL-LIMITED load factor; the textbook `g·tan φ / V` equals it only on a coordinated
@@ -170,10 +171,10 @@ flight model.
 | axis | default | status |
 |---|---|---|
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs |
-| `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `__main__._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
+| `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `cli.common._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport** |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
-| procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option |
+| procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `closure_output.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried) |
 | `--project-final` | off | deployment fallback; FAF-gated wrecks vectored flights |
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
@@ -227,10 +228,35 @@ command is HELD.
 
 ## Layout
 
+**Five modules carry the training plane, and each answers one question** (T3, 2026-09-07 —
+`train.py` was 3,027 lines and `__main__.main` 714):
+
+| module | the question | lines |
+|---|---|---|
+| `objective.py` | what is a prediction scored against | 1,079 |
+| `validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 869 |
+| `train.py` | the epoch, the cohort, the checkpoint | 1,194 |
+| `dataset.py` | observed arrivals → model windows | 1,742 |
+| `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 258 |
+| `splits.py` | which split a flight belongs to | 192 |
+| `cli/` | one module per subcommand (`common` 817, `predict` 422, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze_test` 42, `__init__` 15) | 1,542 |
+| `__main__.py` | the bootstrap and the `COMMANDS` table it dispatches from | 131 |
+
+Two edges that a change must not reverse: `evaluation_protocol` reaches
+`data_provenance`, never `dataset` (a boundary test bans torch from that path), and
+`batch_contract` sits BELOW `objective` — `closure_output` and `control/latent` return
+`LossComponents`, so it cannot move up.
+
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
 prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
 `dynamics/{backends,rollout,inverse,hooks}`, `loss/{components,fixed_dt}`,
 `training/diagnostics`, `constraints/{barrier_filter,gates}`.
+
+**A dynamics backend is a ROW, not a class**: `control/dynamics/backends.py` maps the
+`(control_dynamics_model, control_dynamics_backend)` PAIR to
+`(endpoint_fn, dense_fn, post_fn, runs_hooks)`. `post_fn` turns whatever state the
+integrator carries into the one public `(channels, geodetic)` pair; `runs_hooks` is why the
+point-mass rows refuse a command hook. A new pair supplies three functions and a flag.
 
 **`archive/` is not the package.** Completed campaigns are kept there (README each, naming
 the result documents that cite them, the commit they were taken from, and anything vendored
@@ -267,12 +293,13 @@ importable. A finished one-off driver belongs there, not beside the live runners
   Measured 2026-09-07 on KRDU val: vectored |Δt| p80 **65.8–72.5 s** against straight-in
   **12.0–20.3 s**, so one pooled ETA interval cannot serve both strata.
 
-**A replay runner must fingerprint the data the way the checkpoint was trained** — with the
-pre-split lateral-pass roster (`lateral_eligibility.default_lateral_pass_roster_path`) when the
-checkpoint's provenance carries an `eligibility` block. Without it the v5 cohort fingerprints as
-14 435 KRDU arrivals against the checkpoint's 14 378 and `require_matching_data_provenance`
-reports "the manifest changed". `run_ts_control_basis_oracle.py --checkpoint` still has the
-plain call and will hit this on every v5 checkpoint (`docs/code-health-followups.md`).
+**A replay runner fingerprints through `data_provenance.checkpoint_data_provenance(payload,
+manifests)`, never `arrival_data_provenance(manifests)`** — the helper reads the pre-split
+lateral-pass roster iff the checkpoint recorded one. Without the roster the v5 cohort
+fingerprints as 14 435 KRDU arrivals against the checkpoint's 14 378 and
+`require_matching_data_provenance` reports "the manifest changed" on a correct pair. The A0
+runner hit it first; the L5.a fitter had the same plain call and died at startup on every v5
+checkpoint until `e8df12f` (`docs/code-health-followups.md` §19).
 
 **Measurement code is CODE.** Reusable logic goes in the package with tests
 (`control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
@@ -288,16 +315,35 @@ control-specific. `prediction_outputs` (holds `StatePrediction`), `terminal_stat
 level — `fixed_anchor_validation` and `dataset` share them with the state path, and filing
 them under `control` would claim an ownership that does not exist.
 
-**Direction**: the training loop imports `control/`, never the reverse. `control/` may import
-`dataset` (`Normalizer` and the window types are data-plane values it genuinely consumes) but
-not `train`/`forecast`/`models`/`batching`. The oracle takes `train`'s objective dispatch as
-an injected `loss_components` argument for exactly this reason. `batch_contract.py` holds
-`unpack_batch`/`model_forward`/`anchor_state` and the `LossComponents` contract so a loss
-module or the train-only oracle can read a batch and return an objective without importing
-the loop it runs inside. `tests/test_architecture.py` enforces all of it.
+**Direction**: the objective and the training loop import `control/`, never the reverse.
+`control/` may import `dataset` (`Normalizer` and the window types are data-plane values it
+genuinely consumes) but not `train`/`objective`/`validation`/`forecast`/`models`/`batching`.
+**That `dataset` edge runs BOTH ways and only one direction is safe**: `dataset` imports
+`control.{basis_fit, conditioning, dynamics.inverse, envelope}` to build a batch at all, so
+those four must stay `dataset`-free or the cycle closes and fails at import in whichever
+order a caller hits first. `tests/test_architecture.py` names the four and pins it.
+`batch_contract.py` holds `unpack_batch`/`model_forward`/`anchor_state` and the
+`LossComponents` contract so a loss module can read a batch and return an objective without
+importing `objective`, which imports it. `tests/test_architecture.py` enforces all of it.
 
 `control/__init__.py` re-exports nothing on purpose — flattening forty names into one
 namespace would restore the undifferentiated listing the package exists to remove.
+
+**Every CLI flag is named after the `TSConfig` field it sets** (`--dt-s`,
+`--control-rollout-integrator-dt-s`, `--control-state-supervision-clock`, …; fifteen were
+renamed on 2026-09-07). `cli/common.CLI_CONFIG_FIELDS` is therefore a list of field names,
+asserted against `fields(TSConfig)` at import; `tests/test_architecture.py` checks both
+remaining directions — each listed field has a flag spelled as itself, and every parser dest
+is either a listed field or one of the frozen `NON_CONFIG_DESTS` (so DELETING a name from
+the list fails instead of leaving its flag silently ignored). **Every parser passes
+`allow_abbrev=False`**: without it argparse accepts any unambiguous prefix and four of the
+renamed flags kept working under their old spellings. Exceptions, all recorded where they
+occur — on train: `batch_size` (its flag also takes `"auto"`), `use_norm`/`revin` (one
+`--instance-norm`), `control_recipe_name` (resolved against `--config-overrides` first); on
+predict, whose config comes from the CHECKPOINT so its four flags are overrides rather than
+settings (`cli/predict.PREDICT_CONFIG_FLAGS`, asserted the same way):
+`--command-hook` / `--hook-saturation` keep their short names because `CLAUDE.md` names them
+as the adopted delivery form and two arm files spell them in re-runnable `predict_args`.
 
 **Run and category naming**: `run_naming.py` is the single source for one grammar —
 `output · backbone · dynamics · loss · meta` — rendered from the run's serialized config by

@@ -6,6 +6,49 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## ts_transformer: two dead loss helpers (2026-09-07)
+
+**Verified** by AST walk over the module, on `dev-t3`: `objective.masked_mse` and
+`objective.position_velocity_consistency_loss` have no live caller — only
+`tests/test_ts_transformer.py`. They moved with the rest of the objective in T3-15 rather
+than being deleted there, because T3 is a structural pass and a deletion is a T1-shaped
+change with its own evidence to state (the `kinematic` component is weighted zero on every
+path today, which is why they went quiet). Deleting both would also remove four tests that
+currently test nothing else.
+
+**Judgement**: safe to delete, and it should be decided together with whether the
+kinematic-consistency term is ever coming back.
+
+**Corrected 2026-09-07 (T3 review)**: this entry also listed `dataset`'s unused
+`DYNAMICS_CONDITION_NAMES` import as safe to delete. It was NOT — three tests read the name
+through `dataset`, so removing the import alone cost seven failures. That is now fixed
+properly (the tests import from `control.conditioning`, `dataset` no longer re-exports it),
+and it is the reason this file states verified-vs-judgement: "unused inside this module" is
+not "unreferenced", and only the second one licenses a deletion.
+
+## ts_transformer: train_only_diagnostics is one unreferenced helper (2026-09-07)
+
+**Verified**: `select_outer_train_series` was deleted in the T3 review — its only caller went
+to `archive/oracle_teacher_2026_08/` in T2. What is left in the module is
+`rank_outer_train_candidates`, which has no caller either, live or archived.
+
+**Judgement**: the module should go with the runner cleanup (T4-27), not before — deleting a
+file is cheap, but the split-discipline it documents ("open exactly one outer-train flight,
+never val/test") is worth keeping in view while the capacity diagnostics are being reworked.
+
+## ts_transformer: run_ts_pipeline's flags no longer match the ones it emits (2026-09-07)
+
+**Verified**: T3-19 renamed fifteen `ts_transformer` flags to the `TSConfig` field each sets.
+`run_ts_pipeline.py` emits two of them (`--control-state-supervision-clock`,
+`--control-rollout-integrator-dt-s`) but keeps its own older names
+(`--control-state-clock`, `--control-rollout-dt`) on its own CLI, with a comment at the
+emission site saying so.
+
+**Judgement**: renaming the pipeline's surface too would make one setting have one name
+everywhere, at the cost of breaking a habit and a running campaign's command lines. Out of
+T3's scope ("update every runner that SPELLS one of the renamed flags"); worth doing when no
+campaign is in flight.
+
 Opened 2026-08-17, during the `final_approach` / `evaluation` design pass.
 
 ---
@@ -422,24 +465,23 @@ constant (already followup-listed under the E75L case); until then quote fast-fa
 the margin.
 
 
-## 19. `run_ts_control_basis_oracle.py --checkpoint` fingerprints the data without the eligibility roster
+## 19. ~~`run_ts_control_basis_oracle.py --checkpoint` fingerprints the data without the eligibility roster~~ FIXED (`e8df12f`)
 
 **Verified** (2026-09-07, hit while building `run_ts_anytime_curve.py`): the teacher-table mode
-calls `require_matching_data_provenance(payload, arrival_data_provenance(manifests))` with no
+called `require_matching_data_provenance(payload, arrival_data_provenance(manifests))` with no
 `eligibility_rosters`, while every current checkpoint's `data_provenance` is
 `ts-arrival-data-v3-eligibility-bound` and carries the pre-split lateral-pass roster. The
 fingerprint taken without the roster lists all 14 435 KRDU arrival candidates where the
-checkpoint carries the 14 378 eligible ones, so the strict comparison fails with "checkpoint
+checkpoint carries the 14 378 eligible ones, so the strict comparison failed with "checkpoint
 training data does not match the current arrival manifests" — on a checkpoint and a manifest
 that are both correct. Reproduced against `l1_lowdim_20260907/L1_native32`,
-`l2_warm_posterior_20260907/L2d_warm_beta0p01` and `closure_p1c_20260905/C_pred`.
+`l2_warm_posterior_20260907/L2d_warm_beta0p01` and `closure_p1c_20260905/C_pred`; it was a live
+blocker for **L5.a**, whose documented fit died at the check before fitting anything.
 
-This is a live blocker for **L5.a**, whose fit "has not run" (`docs/OPEN_ITEMS.md`): the
-documented command dies at the provenance check before it fits anything.
-
-**Fix** (the shape `run_ts_anytime_curve.current_provenance` uses): read the roster exactly when
-the checkpoint's own provenance has an `eligibility` block —
-`[default_lateral_pass_roster_path(path) for path in manifests] if
-provenance_eligibility_digests(payload["data_provenance"]) else None`. Not a flag: a checkpoint
-trained before the sidecar existed must not be handed one. Deferred here because the L0/L5
-runner belongs to another branch's change.
+**Fixed 2026-09-07 by `e8df12f`**: the rule has one owner,
+`data_provenance.checkpoint_data_provenance(payload, manifests)` — the roster is read iff the
+checkpoint recorded one, so a checkpoint trained before the sidecar existed is not handed one.
+The fitter uses it for both the check and the table's stamp; `run_ts_anytime_curve.py` calls the
+same helper (its own copy of the rule was deleted when `dev-l2` merged). Kept here as the record
+of why the helper exists: **a new replaying runner that calls `arrival_data_provenance` directly
+reintroduces this**, and a test that patches that function is what hid it the first time.

@@ -65,20 +65,20 @@ from approach_difficulty import (  # noqa: E402
     strata_masks,
 )
 from config import CTA_CONDITIONING_GIVEN, TSConfig  # noqa: E402
-from dataset import (  # noqa: E402
-    Normalizer,
-    arrival_data_provenance,
-    build_series,
-    load_flight_dicts,
-    provenance_eligibility_digests,
+from data_provenance import (  # noqa: E402
+    checkpoint_data_provenance,
     provenance_manifest_digests,
     require_matching_data_provenance,
+)
+from dataset import (  # noqa: E402
+    Normalizer,
+    build_series,
+    load_flight_dicts,
     truth_duration_s,
 )
 from export import observed_series_metrics  # noqa: E402
 from forecast import forecast_approaches  # noqa: E402
 from io_utils import file_sha256  # noqa: E402
-from lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
 from models import resolve_device  # noqa: E402
 from train import load_checkpoint, usable_series  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
@@ -146,24 +146,11 @@ def load_arm(label: str, path: Path, split: str, device: torch.device) -> Arm:
         raise SystemExit(f"{label} ({path}): the checkpoint has no {split!r} split")
     airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
     manifests = [pipeline.arrival_manifest_path(item) for item in airports]
-    require_matching_data_provenance(payload, current_provenance(payload, manifests))
+    # The package helper owns the roster rule (the fingerprint reads the pre-split
+    # lateral-pass roster iff the checkpoint recorded one); every replaying runner goes
+    # through it, which is what the L5.a fitter was missing when it died at startup.
+    require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
     return Arm(label, path, model.to(device), config, normalizer, payload, airports, manifests)
-
-
-def current_provenance(payload: dict, manifests: list[Path]) -> dict:
-    """Today's fingerprint of the checkpoint's own data, built the way it was trained.
-
-    The pre-split lateral-pass roster is PART of the data identity — the whole v5 cohort
-    is eligibility-bound — and a fingerprint taken without it lists 14 435 KRDU arrivals
-    where the checkpoint carries 14 378, which reads as "the manifest changed". Whether to
-    read the roster is therefore the checkpoint's own answer, not a flag: a checkpoint
-    trained before the sidecar existed must not be handed one either.
-    """
-    rosters = (
-        [default_lateral_pass_roster_path(path) for path in manifests]
-        if provenance_eligibility_digests(payload["data_provenance"]) else None
-    )
-    return arrival_data_provenance(manifests, eligibility_rosters=rosters)
 
 
 def cohort_series(arm: Arm, split: str) -> list:
@@ -464,7 +451,10 @@ def measure_checkpoint(arm: Arm, series: list, args: argparse.Namespace,
         "anchor_l1": anchor_l1,
         "flights": len(series),
         "stratum_n_at_l1": stratum_size,
-        "manifests": provenance_manifest_digests(arrival_data_provenance(arm.manifests)),
+        # The digests the CHECKPOINT carries, not a fresh hash of today's files: the
+        # provenance check above has already established they agree, and re-hashing here
+        # would have to repeat the roster rule to stay comparable.
+        "manifests": provenance_manifest_digests(arm.payload["data_provenance"]),
         "seconds": time.time() - started,
         # Keyed by the bin's metres as a string: JSON object keys are strings, and a float
         # key silently becomes one anyway.

@@ -1,11 +1,11 @@
 """The shape of a training batch, and how a model is called with one.
 
-`dataset` produces these tuples and `train` consumes them. Keeping the helpers here rather
-than in `train` is what lets a module under `control/` read a batch without importing the
-training loop it runs inside — an import that would make the package unusable anywhere else
-and put a cycle in the layering. `LossComponents`, the
+`dataset` produces these tuples and `objective` consumes them. Keeping the helpers here
+rather than beside the objective is what lets a module under `control/` read a batch
+without importing the objective it is called from — an import that would put a cycle in
+the layering, since `objective` imports those loss modules. `LossComponents`, the
 objective's return contract, lives here for the same reason: a loss module (the closure
-output's) returns it without importing the loop.
+output's, the latent's) returns it without importing `objective`.
 """
 from __future__ import annotations
 

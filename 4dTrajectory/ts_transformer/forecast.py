@@ -355,6 +355,81 @@ def _latent_prior_batch(
     return (torch.cat(logits), torch.cat(means), torch.cat(logvars), torch.cat(top1))
 
 
+def _latent_batch(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    anchor: int | None,
+    device: torch.device | None,
+    cta_offset_s: float,
+) -> tuple[int, torch.device, np.ndarray, dict[str, torch.Tensor]]:
+    """The anchor, device and batch inputs every latent decode below starts from.
+
+    The ONE ``latent_dim`` refusal lives here, not in the fan-out: two of the four entries
+    read the prior (`_latent_prior_batch`) between this call and the fan-out, and on a
+    non-latent model that dies on an ``AttributeError`` naming ``prior_logits`` instead of
+    the contract. Every entry calls this first, so this is the earliest shared point.
+    ``__main__`` refuses the flags earlier still, at the CLI boundary; this is the library's
+    own contract, for the callers that are not the CLI.
+    """
+    if config.latent_dim < 1:
+        raise ValueError(
+            "latent forecasts need a latent control checkpoint (latent_dim > 0); this one "
+            f"has latent_dim={config.latent_dim}"
+        )
+    device = device or next(model.parameters()).device
+    anchor = default_anchor(config) if anchor is None else anchor
+    return (
+        anchor,
+        device,
+        _history_batch(series, config, normalizer, anchor),
+        _dynamics_batch(series, anchor, device, config, cta_offset_s),
+    )
+
+
+def _latent_forecasts(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    anchor: int,
+    device: torch.device,
+    *,
+    latents: torch.Tensor,
+    probabilities: np.ndarray | None,
+    histories: np.ndarray,
+    dynamics: dict[str, torch.Tensor],
+    latent_shuffled: bool = False,
+    z_from_posterior: bool = False,
+    cta_offset_s: float = 0.0,
+) -> list[list[Forecast]]:
+    """Decode and roll the batch once per latent: ``latents`` is ``[S, B, Z]``.
+
+    ``probabilities`` is ``[S, B]`` for prior samples and ``None`` when the latents are not
+    samples at all (the z-oracle, the shuffle), in which case the forecasts carry no mode
+    index. That is the only difference between the four public entries below.
+
+    ``latent_dim`` is refused once, in `_latent_batch`, which every entry calls before it
+    reaches this point (see there for why it cannot be here).
+    """
+    if probabilities is not None and len(probabilities) != len(latents):
+        raise ValueError(
+            f"{len(probabilities)} probability rows for {len(latents)} latent samples"
+        )
+    return [
+        _forecast_control_batch(
+            model, series, config, normalizer, anchor, device,
+            latent=latents[index],
+            mode=None if probabilities is None else (index, probabilities[index]),
+            latent_shuffled=latent_shuffled,
+            z_from_posterior=z_from_posterior,
+            histories=histories, dynamics=dynamics, cta_offset_s=cta_offset_s,
+        )
+        for index in range(len(latents))
+    ]
+
+
 def latent_mode_forecasts(
     model: nn.Module,
     series: Sequence[FlightSeries],
@@ -375,14 +450,11 @@ def latent_mode_forecasts(
     index and probability: the mixture weight of the component it was drawn from, or
     ``1/samples`` under a single Gaussian prior (which has no discrete weight to report).
     """
-    if config.latent_dim < 1:
-        raise ValueError("mode forecasts need a latent control checkpoint (latent_dim > 0)")
     if samples < 1:
         raise ValueError("samples must be positive")
-    device = device or next(model.parameters()).device
-    anchor = default_anchor(config) if anchor is None else anchor
-    histories = _history_batch(series, config, normalizer, anchor)
-    dynamics = _dynamics_batch(series, anchor, device, config, cta_offset_s)
+    anchor, device, histories, dynamics = _latent_batch(
+        model, series, config, normalizer, anchor, device, cta_offset_s
+    )
     logits, mean, logvar, _top1 = _latent_prior_batch(model, histories, dynamics, device)
     generator = torch.Generator(device=device).manual_seed(seed)
     latents, components = model.sample_latents(logits, mean, logvar, samples, generator=generator)
@@ -391,14 +463,11 @@ def latent_mode_forecasts(
         probabilities = np.full((samples, len(series)), 1.0 / samples)
     else:
         probabilities = weights.gather(1, components.transpose(0, 1)).transpose(0, 1).cpu().numpy()
-    return [
-        _forecast_control_batch(
-            model, series, config, normalizer, anchor, device,
-            latent=latents[index], mode=(index, probabilities[index]),
-            histories=histories, dynamics=dynamics, cta_offset_s=cta_offset_s,
-        )
-        for index in range(samples)
-    ]
+    return _latent_forecasts(
+        model, series, config, normalizer, anchor, device,
+        latents=latents, probabilities=probabilities,
+        histories=histories, dynamics=dynamics, cta_offset_s=cta_offset_s,
+    )
 
 
 def random_latent_forecasts(
@@ -419,27 +488,21 @@ def random_latent_forecasts(
     prior whose modes only beat the top-1 because there are K of them will not beat this.
     Every forecast is stamped with its sample index and a probability of ``1/samples``.
     """
-    if config.latent_dim < 1:
-        raise ValueError("random-latent forecasts need a latent control checkpoint (latent_dim > 0)")
     if samples < 1:
         raise ValueError("samples must be positive")
-    device = device or next(model.parameters()).device
-    anchor = default_anchor(config) if anchor is None else anchor
+    anchor, device, histories, dynamics = _latent_batch(
+        model, series, config, normalizer, anchor, device, cta_offset_s
+    )
     generator = torch.Generator(device=device).manual_seed(seed)
     latents = torch.randn(
         (samples, len(series), config.latent_dim), generator=generator, device=device
     )
-    probabilities = np.full((samples, len(series)), 1.0 / samples)
-    histories = _history_batch(series, config, normalizer, anchor)
-    dynamics = _dynamics_batch(series, anchor, device, config, cta_offset_s)
-    return [
-        _forecast_control_batch(
-            model, series, config, normalizer, anchor, device,
-            latent=latents[index], mode=(index, probabilities[index]),
-            histories=histories, dynamics=dynamics, cta_offset_s=cta_offset_s,
-        )
-        for index in range(samples)
-    ]
+    return _latent_forecasts(
+        model, series, config, normalizer, anchor, device,
+        latents=latents,
+        probabilities=np.full((samples, len(series)), 1.0 / samples),
+        histories=histories, dynamics=dynamics, cta_offset_s=cta_offset_s,
+    )
 
 
 def posterior_latent_forecasts(
@@ -460,10 +523,9 @@ def posterior_latent_forecasts(
     target logic). It READS THE FUTURE: the records say ``zFromPosterior`` and this is
     never a prediction result.
     """
-    if config.latent_dim < 1:
-        raise ValueError("the posterior decode needs a latent control checkpoint (latent_dim > 0)")
-    device = device or next(model.parameters()).device
-    anchor = default_anchor(config) if anchor is None else anchor
+    anchor, device, histories, dynamics = _latent_batch(
+        model, series, config, normalizer, anchor, device, cta_offset_s
+    )
     windows = FixedAnchorTrajectoryWindows(list(series), config, normalizer)
     if len(windows) != len(series) or any(windows.index[i][1] != anchor for i in range(len(series))):
         raise RuntimeError("the fixed-anchor windows do not sit at the forecast anchor")
@@ -472,10 +534,11 @@ def posterior_latent_forecasts(
     model.eval()
     with torch.no_grad():
         posterior_mean, _logvar = model.posterior(y, final_time_s)
-    return _forecast_control_batch(
+    return _latent_forecasts(
         model, series, config, normalizer, anchor, device,
-        latent=posterior_mean, z_from_posterior=True, cta_offset_s=cta_offset_s,
-    )
+        latents=posterior_mean[None], probabilities=None, z_from_posterior=True,
+        histories=histories, dynamics=dynamics, cta_offset_s=cta_offset_s,
+    )[0]
 
 
 def shuffled_latent_forecasts(
@@ -495,21 +558,18 @@ def shuffled_latent_forecasts(
     is handed someone else's intent, the decoder is not reading z, and every other number
     would still say "converged". A batch of one cannot be shuffled and raises.
     """
-    if config.latent_dim < 1:
-        raise ValueError("the shuffled-latent forecast needs a latent control checkpoint")
     if len(series) < 2:
         raise ValueError("shuffling latents needs at least two flights in the batch")
-    device = device or next(model.parameters()).device
-    anchor = default_anchor(config) if anchor is None else anchor
-    histories = _history_batch(series, config, normalizer, anchor)
-    dynamics = _dynamics_batch(series, anchor, device, config, cta_offset_s)
+    anchor, device, histories, dynamics = _latent_batch(
+        model, series, config, normalizer, anchor, device, cta_offset_s
+    )
     _logits, _mean, _logvar, top1 = _latent_prior_batch(model, histories, dynamics, device)
     source = torch.from_numpy(latent_derangement(len(series), seed)).to(device)
-    return _forecast_control_batch(
+    return _latent_forecasts(
         model, series, config, normalizer, anchor, device,
-        latent=top1[source], latent_shuffled=True, histories=histories, dynamics=dynamics,
-        cta_offset_s=cta_offset_s,
-    )
+        latents=top1[source][None], probabilities=None, latent_shuffled=True,
+        histories=histories, dynamics=dynamics, cta_offset_s=cta_offset_s,
+    )[0]
 
 
 def latent_derangement(count: int, seed: int) -> np.ndarray:

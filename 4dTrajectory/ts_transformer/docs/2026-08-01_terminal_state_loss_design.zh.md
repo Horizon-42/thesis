@@ -166,7 +166,7 @@ conda run -n aeroviz python run_ts_pipeline.py \
   --models itransformer \
   --prediction-output control \
   --control-dynamics-backend transport-chart-velocity \
-  --control-state-clock observed \
+  --control-state-supervision-clock observed \
   --control-state-loss-grid fixed-dt \
   --control-state-objective terminal-state \
   --checkpoint-selection-metric fixed-anchor-terminal-state \

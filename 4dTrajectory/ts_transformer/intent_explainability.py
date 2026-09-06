@@ -38,7 +38,6 @@ from trajectory_data_process.harvest.arrivals import load_arrival_flights
 
 #: The model's anchor: the end of the lookback window, seconds after the arrival slice's entry.
 ANCHOR_S = (DEFAULT_SEQ_LEN - 1) * DEFAULT_DT_S
-EGO_NAMES = ("d_m", "xt_m", "cos_heading_rel", "sin_heading_rel", "ground_speed_mps", "height_m")
 CONTEXT_NAMES = ("since_last_landing_s", "airborne_same_runway", "airborne_other_runway",
                  "landings_last_30min", "hour_utc", "weekday", "runway")
 
