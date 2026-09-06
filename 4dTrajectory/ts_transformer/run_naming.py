@@ -95,6 +95,9 @@ CONTROL_LOSS_FIELDS = (
     "control_velocity_loss_weight",
     "control_velocity_loss_scale_mps",
     "control_imitation_loss_weight",
+    # WHICH teacher that weight imitates: only the non-default `fitted` names a run, and it
+    # has to, because two runs on the same weight and different teachers are different runs.
+    "control_imitation_target",
     "final_time_loss_weight",
     "final_time_scale_s",
     "position_loss_scale_m",
@@ -192,6 +195,7 @@ _TAU_FIELDS = (
 _ABBREV = {
     "latent_posterior_init_std": "q-std",
     "control_imitation_loss_weight": "imit",
+    "control_imitation_target": "imit-target",
     "control_velocity_loss_weight": "vel",
     "control_velocity_loss_scale_mps": "vel-scale",
     "control_state_objective": "obj",

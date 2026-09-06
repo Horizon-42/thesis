@@ -87,6 +87,7 @@ from config import (
     TSConfig,
     uses_control_dynamics,
 )
+from control.basis_fit import load_fitted_teacher
 from control.conditioning import DYNAMICS_CONDITION_NAMES, condition_vector
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.dynamics.inverse import actual_controls, segment_controls
@@ -1392,6 +1393,27 @@ class TrajectoryWindows(Dataset, ABC):
                     f"{config.closure_labels_path} carries these {len(self.series)} flights but "
                     "marks every label non-canonical or above the residual cap: nothing to regress"
                 )
+        # The imitation term's per-flight teacher table, when the recipe reads one
+        # (control_imitation_target="fitted"). Read once, and CHECKED once, here: a fitted
+        # schedule reproduces its truth track only at the width, the anchor and the total
+        # duration it was fitted under, and a flight the table does not carry has no
+        # teacher at all. So a table that does not cover this cohort refuses the build —
+        # there is no partial mode, which would train part of every batch on nothing while
+        # the loss still reported an imitation number.
+        self.fitted_teacher = None
+        if config.uses_fitted_teacher:
+            self.fitted_teacher = load_fitted_teacher(config.control_fitted_teacher_path)
+            self.fitted_teacher.require_cover(
+                [
+                    (item.flight_id, truth_duration_s(item, self.index[start][1]))
+                    for item, start, count in zip(
+                        self.series, self.range_starts, self.range_counts
+                    )
+                    if count
+                ],
+                n_segments=int(config.n_segments),
+                anchor_index=config.seq_len - 1,
+            )
         # Public diagnostic for normalized-time experiments. Actual query times come from
         # the shared clock below, which also defines fixed-time loss and inference timing.
         self.progress = (
@@ -1570,8 +1592,14 @@ class TrajectoryWindows(Dataset, ABC):
             arrays["cta_s"] = np.array(truth_duration_s(series, anchor), dtype=np.float64)
         if self.config.control_imitation_loss_weight:
             anchor_time = float(series.times[anchor])
+            # The fitted teacher replaces the inversion outright — its schedule was fitted
+            # over the WHOLE supervised horizon through the rollout, so every segment
+            # carries weight one, where the inversion has to mask the fitted tail it has no
+            # measured velocity to differentiate.
             arrays.update(
-                reference_control_supervision(
+                self.fitted_teacher.supervision(series.flight_id)
+                if self.fitted_teacher is not None
+                else reference_control_supervision(
                     series,
                     anchor,
                     self.config,

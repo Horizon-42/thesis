@@ -62,6 +62,7 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DYNAMICS_MODELS,
     CONTROL_DURATION_PARAMETERIZATIONS,
+    CONTROL_IMITATION_TARGETS,
     CONTROL_RECIPE_NAMES,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_SIMPLE_V1_LAG,
@@ -359,6 +360,25 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--control-imitation-target",
+        choices=CONTROL_IMITATION_TARGETS,
+        default=None,
+        help=(
+            "what the imitation term imitates: the schedule inverted out of the flown "
+            "track (default), or a per-flight table fitted through the rollout "
+            "(--control-fitted-teacher). The inverted schedule flown open-loop lands "
+            "2.5-7.8 km from the truth it was read off; the fitted one lands 88-433 m"
+        ),
+    )
+    parser.add_argument(
+        "--control-fitted-teacher", default=None, metavar="JSON",
+        help=(
+            "--control-imitation-target fitted: the basis_fit.json written by "
+            "run_ts_control_basis_oracle.py --checkpoint. The dataset build refuses a "
+            "table whose width, anchor or per-flight duration is not this run's"
+        ),
+    )
+    parser.add_argument(
         "--control-state-duration-gradient",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -552,6 +572,8 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_state_supervision_clock", args.control_state_clock),
         ("control_state_loss_grid", args.control_state_loss_grid),
         ("control_state_objective", args.control_state_objective),
+        ("control_imitation_target", args.control_imitation_target),
+        ("control_fitted_teacher_path", args.control_fitted_teacher),
         ("control_state_duration_gradient", args.control_state_duration_gradient),
         ("control_gradient_clip_norm", args.control_gradient_clip_norm),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),

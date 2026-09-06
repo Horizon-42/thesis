@@ -76,6 +76,7 @@ from batch_contract import model_forward  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
     CONTROL_HOOK_OFF,
+    CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -155,6 +156,8 @@ _RECIPE_OVERRIDES = {
     # No loss runs here, and a non-zero imitation weight would make the dataset solve the
     # per-flight inverse for a teacher target nothing reads, on every one of the arms.
     "control_imitation_loss_weight": 0.0,
+    "control_imitation_target": CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
+    "control_fitted_teacher_path": "",
     "procedure_loss_lateral_weight": 0.0,
     "procedure_loss_vertical_weight": 0.0,
     "intent_conditioning": INTENT_CONDITIONING_NONE,
@@ -167,8 +170,9 @@ _RECIPE_OVERRIDES = {
 # itself needs. In particular the model INPUT contract (`intent_conditioning`,
 # `target_conditioning`) is deliberately untouched: the seed is the checkpoint's own
 # forward, and a history built under different conditioning is not the history it was
-# trained on. The imitation weight is zeroed so the dataset never solves the per-flight
-# inverse for a teacher target this fit does not read.
+# trained on. The imitation fields are reset so the dataset never solves the per-flight
+# inverse for a target this fit does not read — and so a checkpoint that was itself
+# trained from a fitted table does not need that table on disk to seed the next one.
 _TEACHER_OVERRIDES = {
     "control_recipe_name": CONTROL_RECIPE_CUSTOM,
     "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -176,6 +180,8 @@ _TEACHER_OVERRIDES = {
     "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
     "control_command_hook": CONTROL_HOOK_OFF,
     "control_imitation_loss_weight": 0.0,
+    "control_imitation_target": CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
+    "control_fitted_teacher_path": "",
     "procedure_loss_lateral_weight": 0.0,
     "procedure_loss_vertical_weight": 0.0,
     "random_train_anchor": False,

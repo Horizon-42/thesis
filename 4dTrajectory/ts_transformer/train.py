@@ -46,6 +46,7 @@ from config import (
     control_recipe,
     uses_control_dynamics,
 )
+from control.basis_fit import fitted_teacher_provenance
 from control.dynamics import rollout as control_rollout
 from control.constraints import build_command_hook
 from control.loss.components import (
@@ -2634,6 +2635,18 @@ def train(
         raise ValueError("data_provenance is not a TS arrival-data fingerprint")
     manifest_digests = provenance_manifest_digests(data_provenance)
     eligibility_digests = provenance_eligibility_digests(data_provenance)
+    # The imitation term's teacher table, when the recipe reads one: which file, its
+    # digest, its width and how many flights it carries — so a checkpoint says which table
+    # taught it. Recorded BESIDE `data_provenance` rather than inside it on purpose: that
+    # object is compared for EQUALITY by `evaluate-fit` and `freeze-test` against a
+    # provenance rebuilt from the arrival manifests alone, and the teacher is
+    # training-only. Prediction never needs the table, so a missing one at predict time
+    # must not (and does not) refuse the checkpoint.
+    fitted_teacher = (
+        fitted_teacher_provenance(config.control_fitted_teacher_path)
+        if config.uses_fitted_teacher
+        else None
+    )
 
     series = usable_series(series, config, verbose=verbose)
     train_series, val_series, test_series = split_by_flight(series, config)
@@ -2704,6 +2717,7 @@ def train(
         "training_anchor_contract": training_anchor_contract,
         "training_cohort": training_cohort,
         "data_provenance": data_provenance,
+        "fitted_teacher": fitted_teacher,
         "data_selection": data_selection,
     }
     if fit.procedure_multipliers is not None:
@@ -2776,6 +2790,8 @@ def train(
     }
     if eligibility_digests:
         checkpoint_metadata["eligibility_rosters"] = eligibility_digests
+    if fitted_teacher is not None:
+        checkpoint_metadata["fitted_teacher"] = fitted_teacher
     if data_selection is not None:
         selection_path = out / "data_selection.json"
         selection_tmp = out / "data_selection.json.tmp"
