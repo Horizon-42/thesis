@@ -20,6 +20,8 @@ Arms are declared in a JSON file::
 A control campaign names ``"base_recipe": "simple-v3"`` instead of (or under) ``base``:
 the recipe's content becomes the base and the arms override only fields it leaves open.
 
+Any arm may carry ``predict_args`` (extra flags for its predict step — a latent arm's
+``--latent-samples 6 --latent-random 6 --latent-shuffle``, a projection's ``--project-final``).
 A PREDICT-ONLY arm reuses an existing checkpoint (no training) and may add predict
 options — the inference-time projection arm of the final-approach constraint campaign::
 
@@ -119,7 +121,7 @@ def predict_only_steps(
 def arm_steps(
     key: str, label: str, config_path: Path, config: TSConfig, *, airport: str,
     campaign: Path, split: str, device: str, seed: int | None, split_seed: int | None,
-    formal: bool = True,
+    formal: bool = True, predict_args: list[str] = (),
 ) -> list[tuple[str, list[str], Path]]:
     """(step label, command, artifact whose existence means the step is done)."""
     manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
@@ -150,6 +152,7 @@ def arm_steps(
             "--data", str(manifest), "--eligibility-roster", str(roster),
             "--airport", airport,
             "--output-dir", str(pred_dir), "--split", split, "--device", device,
+            *predict_args,
         ], pred_dir / "summary.json"),
         *_evaluation_steps(key, pred_dir),
     ]
@@ -213,12 +216,14 @@ def main(argv: list[str] | None = None) -> int:
         config_path, config = arm_config(
             base, arm.get("overrides", {}), campaign / key / "config.json"
         )
-        print(f"  arm {key:<26s} {run_display_name(config.to_dict(), extra=(key,))}")
+        predict_args = [str(a).format(airport=airport) for a in arm.get("predict_args", [])]
+        print(f"  arm {key:<26s} {run_display_name(config.to_dict(), extra=(key,))} {' '.join(predict_args)}")
         print(f"      slug {run_slug(config.to_dict())}")
         steps += arm_steps(
             key, arm.get("label", key), config_path, config, airport=airport,
             campaign=campaign, split=args.split, device=args.device,
             seed=args.seed, split_seed=args.split_seed, formal=not args.informal,
+            predict_args=predict_args,
         )
 
     pending = [step for step in steps if not step[2].exists()]
