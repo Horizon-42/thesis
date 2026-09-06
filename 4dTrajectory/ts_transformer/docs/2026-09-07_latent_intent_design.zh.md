@@ -19,7 +19,7 @@ L2 的 base = native32 + 教师**。包审计 T0 完成待 review。下一步 = 
 |---|---|---|---|
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **完成（2026-09-07）**：native32 全体 ADE 1322 vs 基线 1333（配对胜率 52.6 %，bank skill 0.726 vs 0.728）——**N=32 免费**；dense/无教师 2515/2603，否决触发，wiggle 回归——**轨迹误差损失单独不够**。结果 `2026-09-07_l1_lowdim_results.zh.md` | `l1_lowdim_20260907/`（readout、readout_bank） | 不差于 simple-v3 ✓；参数 257 → 96 ✓；bank skill ✓（native32） |
-| L2 CVAE 骨架（隐意图 z） | **代码完成（2026-09-07，分支 `dev-l2`，待 review 后合入）**：L2.a 训练/top-1 + L2.b K 采样、shuffle 诊断、读数 | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
+| L2 CVAE 骨架（隐意图 z） | **代码已合入（`b336b9f`）；campaign `l2_latent_20260907` 跑中，`L2_gauss`（β=1）坍缩（active_units 0，KL 0.0016 nat）→ 预注册 L2.c β 阶梯 {0.1, 0.01, 0.001}（见 §六 L2 末）** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | 未开始 | — | 见 §七 |
@@ -278,6 +278,20 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 **诊断（必须进读数脚本，否则坍缩会被读成收敛）**：per-dim KL、shuffle-z ΔADE、K 条散布 vs 真值散布、
 **z 对真值 d_join / 时长 / via 位姿的线性可解码性 R²**（用 `closure_labels.json` 当探针，不当目标）。
 若 z 解码不出 d_join 但重建很好 → z 吸收的是风与执行噪声，是坏消息，先压 `latent_dim` 再查。
+
+> **L2.c β 标定（2026-09-07 预注册，campaign `l2_latent_20260907` 第一臂出结果后）。** `L2_gauss`（β=1.0）
+> **坍缩**：best epoch 136 的 `active_units` 0.0（第 8 轮起恒 0，峰值 0.30 在第 1 轮），KL 0.0016 nat/航班，
+> 选择指标 1398 m（native32 1322）。这不是病态而是最优解，**量纲**决定的：重建项是缩放 MSE——位置按
+> `(m / position_loss_scale_m = 10 km)²`——962 m 的全部隐藏意图只值 (0.096)² ≈ 0.009 个损失单位，而一个
+> 4 路决策要 log 4 = 1.4 nat；β=1 下 KL 是 z 能买到的全部收益的约 150 倍。β 必须是"每 nat 的损失单位"量级。
+> 预注册：**十进制阶梯 β ∈ {0.1, 0.01, 0.001}**，同 base（K=1 解析 KL，free bits 0.05/dim 不动，以保持可比；
+> 不加退火——终值 β 过高时退火只推迟坍缩），臂文件 `docs/experiments/l2_beta_ladder_arms.json`，
+> campaign `l2_beta_ladder_20260907`。读法：每臂 best epoch 的 active_units / KL、shuffled ΔADE、
+> minADE_6 vs top-1 vs 同 K 随机对照、top-1 vs native32 逐分层；**选过门 (1) 且 top-1 不劣于 native32
+> （种子噪声内）的最大 β**，然后把它带到 K=4 与 z-oracle 臂（`l2_zoracle_arms.json`，predict-only
+> `--z-from-posterior`，从阶梯的 checkpoint 出发，门 (3) 在此测）。否决同前。**若没有任何 β 在不损失
+> top-1 的前提下过门 (1)**，说明解码器不靠 z 也能解释数据（模仿教师把控制钉在逆动力学目标上），下一个
+> 杠杆是后验的输入，不是 β。`L2_mix4`（β=1）按同一论证预计同样坍缩，其读数只作 K=4 的坍缩对照。
 
 ### L3 — CTA 条件化（交付形态；≈2 天）
 

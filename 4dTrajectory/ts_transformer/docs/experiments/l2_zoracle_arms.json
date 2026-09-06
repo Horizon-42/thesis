@@ -1,0 +1,29 @@
+{
+ "_comment": "L2 gate (3) of docs/2026-09-07_latent_intent_design.zh.md — the z-ORACLE: decode each validation flight from its POSTERIOR z (q(z | its own future), --z-from-posterior) instead of the prior top-1. Predict-only from the beta ladder's checkpoints (run AFTER l2_beta_ladder_20260907 has trained; the runner refuses a missing checkpoint). This is the upper bound of what the latent can carry: with the true intent handed to the decoder, vectored ADE must reach <= 1235 m (C_truth_intent, the truth (d_join, T) conditioning) — if the posterior z does not buy that, z is not encoding the intent whatever the KL says. Reading: per arm, vectored / straight-in / all ADE and FDE p50 vs the same arm's prior top-1 (compare_constraint_arms.py, first arm = the prior top-1 of the chosen beta). No modes/ here: --z-from-posterior is an oracle arm of its own and refuses the prior-sample options.",
+ "arms": [
+  {
+   "key": "L2z_beta0p1",
+   "label": "z-oracle (posterior z), beta 0.1",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l2_beta_ladder_20260907/L2b_beta0p1/checkpoint.pt",
+   "predict_args": [
+    "--z-from-posterior"
+   ]
+  },
+  {
+   "key": "L2z_beta0p01",
+   "label": "z-oracle (posterior z), beta 0.01",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l2_beta_ladder_20260907/L2b_beta0p01/checkpoint.pt",
+   "predict_args": [
+    "--z-from-posterior"
+   ]
+  },
+  {
+   "key": "L2z_beta0p001",
+   "label": "z-oracle (posterior z), beta 0.001",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l2_beta_ladder_20260907/L2b_beta0p001/checkpoint.pt",
+   "predict_args": [
+    "--z-from-posterior"
+   ]
+  }
+ ]
+}
