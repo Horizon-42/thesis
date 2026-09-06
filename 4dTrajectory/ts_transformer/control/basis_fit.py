@@ -27,9 +27,12 @@ reads as "N segments are not enough", which is the one wrong answer this study c
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+import hashlib
+import json
 import math
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -376,3 +379,152 @@ def fit_basis_schedules(
         clipped_share=clipped / float(batch * steps),
         steps=steps,
     )
+
+
+# ── the fitted teacher table ────────────────────────────────────────────────
+#
+# The width study above answers "how wide"; the SAME fit, run at one width over a
+# checkpoint's own training cohort, answers "what should the imitation term imitate".
+# ``run_ts_control_basis_oracle.py --checkpoint`` writes the table, `dataset` reads it
+# (latent-intent design §六 L5.a).
+
+#: The teacher table's schema. The one source: the runner stamps it, the dataset loader
+#: checks it. v1 (``l0-control-basis-oracle-v1``) is the width study's per-arm dump, keyed
+#: by the reference summary's readout key and carrying several widths — a different file.
+FITTED_TEACHER_SCHEMA = "ts-basis-fit-v2-teacher"
+#: A flight's fitted duration must be the duration the dataset supervises it over. The fit
+#: is GIVEN that duration, so any difference is a different cohort or a different anchor,
+#: not numerical drift — the tolerance only absorbs the JSON round trip.
+FITTED_TEACHER_DURATION_TOLERANCE_S = 1e-6
+
+
+@dataclass(frozen=True)
+class FittedTeacherTable:
+    """One control schedule per flight, fitted through the rollout to its own truth track.
+
+    Width-, anchor- and duration-specific by construction: the schedule reproduces the
+    truth only at the N it was fitted at, from the anchor it was fitted from, spread
+    uniformly over the total duration it was given. :meth:`require_cover` is where all
+    three are checked — the dataset calls it once at build time so a stale table refuses
+    the run instead of silently teaching the wrong schedule.
+    """
+
+    path: Path
+    sha256: str
+    n_segments: int
+    anchor_index: int
+    airport: str
+    controls: dict[str, np.ndarray]        # flight_key -> [N, 3], dimensionless
+    total_duration_s: dict[str, float]     # flight_key -> the duration it was fitted over
+
+    @property
+    def provenance(self) -> dict[str, object]:
+        """What a checkpoint records so it can say which table taught it."""
+        return {
+            "path": str(self.path),
+            "sha256": self.sha256,
+            "n_segments": self.n_segments,
+            "anchor_index": self.anchor_index,
+            "flights": len(self.controls),
+        }
+
+    def supervision(self, flight_key: str) -> dict[str, np.ndarray]:
+        """The imitation term's target rows for one flight, in `dataset`'s contract.
+
+        Every segment carries weight one: unlike the inverse-dynamics teacher, whose
+        fitted-tail segments have no measured velocity to differentiate, this schedule was
+        fitted over the WHOLE supervised horizon.
+        """
+        return {
+            "reference_controls": self.controls[flight_key],
+            "reference_control_weight": np.ones(self.n_segments, dtype=np.float64),
+        }
+
+    def require_cover(
+        self,
+        flights: Sequence[tuple[str, float]],
+        *,
+        n_segments: int,
+        anchor_index: int,
+    ) -> None:
+        """Refuse unless this table covers every flight at this width, anchor and duration.
+
+        ``flights`` is ``(flight_key, truth duration from the anchor)`` per flight. There
+        is no partial mode: a teacher that covers most of a cohort would train the rest on
+        nothing while the loss still reported an imitation number.
+        """
+        if self.n_segments != n_segments:
+            raise ValueError(
+                f"{self.path}: the fitted teacher was fitted at N={self.n_segments}, this run "
+                f"has n_segments={n_segments} — a schedule only reproduces its own width"
+            )
+        if self.anchor_index != anchor_index:
+            raise ValueError(
+                f"{self.path}: the fitted teacher was fitted at anchor {self.anchor_index}, "
+                f"this run anchors at {anchor_index}"
+            )
+        missing = [key for key, _duration in flights if key not in self.controls]
+        if missing:
+            raise ValueError(
+                f"{self.path}: the fitted teacher covers {len(flights) - len(missing)} of "
+                f"{len(flights)} flights; first missing: {missing[0]!r}"
+            )
+        drift = [
+            (key, duration, self.total_duration_s[key])
+            for key, duration in flights
+            if abs(self.total_duration_s[key] - duration) > FITTED_TEACHER_DURATION_TOLERANCE_S
+        ]
+        if drift:
+            key, wanted, stored = drift[0]
+            raise ValueError(
+                f"{self.path}: the fitted teacher was fitted over a different horizon for "
+                f"{len(drift)} of {len(flights)} flights; first {key!r}: fitted over "
+                f"{stored!r} s, this run supervises {wanted!r} s"
+            )
+
+
+def load_fitted_teacher(path: str | Path) -> FittedTeacherTable:
+    """Read and validate a teacher table; the per-flight contract is checked here, once."""
+    table_path = Path(path)
+    raw = table_path.read_bytes()
+    payload = json.loads(raw)
+    if payload.get("schema") != FITTED_TEACHER_SCHEMA:
+        raise ValueError(
+            f"{table_path}: expected fitted-teacher schema {FITTED_TEACHER_SCHEMA!r}, got "
+            f"{payload.get('schema')!r}"
+        )
+    if payload.get("duration_mode") != DURATION_UNIFORM:
+        raise ValueError(
+            f"{table_path}: the imitation target is compared against a uniformly partitioned "
+            f"schedule; this table's duration_mode is {payload.get('duration_mode')!r}"
+        )
+    n_segments = int(payload["n_segments"])
+    controls: dict[str, np.ndarray] = {}
+    durations: dict[str, float] = {}
+    for key, entry in payload["flights"].items():
+        row = np.asarray(entry["controls"], dtype=np.float64)
+        if row.shape != (n_segments, 3):
+            raise ValueError(
+                f"{table_path}: flight {key!r} carries a {row.shape} schedule, not "
+                f"{(n_segments, 3)}"
+            )
+        controls[key] = row
+        durations[key] = float(entry["total_duration_s"])
+    return FittedTeacherTable(
+        path=table_path,
+        sha256=hashlib.sha256(raw).hexdigest(),
+        n_segments=n_segments,
+        anchor_index=int(payload["anchor_index"]),
+        airport=str(payload.get("airport") or "").strip().upper(),
+        controls=controls,
+        total_duration_s=durations,
+    )
+
+
+def fitted_teacher_provenance(path: str | Path) -> dict[str, object]:
+    """The table's identity for a checkpoint's provenance block, without keeping the table.
+
+    Reads the file a second time (the dataset holds the schedules; the training run only
+    needs the digest), which is minutes of nothing against the hours of training it stamps.
+    """
+    return load_fitted_teacher(path).provenance
