@@ -198,18 +198,32 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 
 ### L1 — 低维控制头 + 稠密监督（确定性基线；≈2 天）
 
-两个改动，一起做一臂：
+**勘察结论（2026-09-07）：不需要新代码，L1 是一个 campaign 不是一次实现。** 稠密监督已经存在——
+`control_state_loss_grid ∈ native-segment-endpoints | fixed-dt`，`fixed-dt` 就是"在 2 s 真值网格上
+打分"，`train._CONTROL_STATE_LOSS_HANDLERS` 已经派发它，L0 的拟合用的就是这条路径。所以两个改动
+都是 config：
 
-1. `n_segments = N*`（config 字段已有）；
-2. **训练打分从"N 个段端点按真值时钟对齐"改成"`rollout_control_dense` 在真值采样时刻查询"**。
-   现在 64 既是控制网格又是打分网格；N\*=8 时端点监督太粗，必须先拆开。新增
-   `control_supervision_grid ∈ endpoints | dense`（默认 `dense`，`endpoints` 保留复现旧臂）。
+1. `n_segments = N*`；
+2. `control_state_loss_grid = fixed-dt`（其约束：`prediction_output=control`、
+   `control_state_supervision_clock=observed`，且 `control_state_objective` 不能是
+   `true-time-position`——它要求 native 网格；用 `normalized-mse`，`arc-length-geometry` 另作一臂）。
+   simple-v3 冻结了这几个字段，所以 L1 的臂是 `custom` 且逐字段写明。
 
 **臂**（KRDU）：`L1_lowdim`（N\*，dense）、`L1_lowdim_endpoints`（N\*，端点，隔离两个改动）、
 对照 `control_procedure_20260905/A_control_v3`（64，端点）。
 **门**：`L1_lowdim` 的 pooled 与雷达引导 ADE 不差于 simple-v3（1333 / 2858），直线进近不退；
 参数量 257 → ≈4N\*。
 **注意**：模仿项权重 64.0 是按 64 段标定的，**换段数必须重标剂量**（1/4/16/64 阶梯，读幅度不读 p）。
+
+> **模仿项的教师（用户 2026-09-07 决定：先跑 L1 主线，看轨迹误差损失够不够）**。L0 顺带量到
+> 现在这个教师有多差：它就是 L0 的 `seed`（真值航迹的逆动力学），**照单飞出来离真值 2.5–7.8 km**
+> （N=4 7850、N=8 6381、N=16 4095、N=32 2537 m），而同宽度拟合后的控制表飞出来只差 88–433 m。
+> 也就是说"完美模仿现在的教师"并不等价于"飞出真值航迹"——这就是复审文档 §三 缺陷 B 的数字形式。
+> `basis_fit.json` 是一个严格更好的教师（它按构造复现真值航迹）。**但不进 L1 主线**：主线只用轨迹
+> 误差损失，先证明它够不够；若不够，再补跑训练集的拟合（KRDU 训练集约 1 万架，N=32 单臂 ≈15 h，
+> 一次性可复用）并作为 `imitation-target=fitted` 对照臂。教师是**宽度专属**的，N\* 一变即作废，
+> 所以那份文件必须带 schema 与拟合配置戳（陈旧标签静默训错东西，仓库已踩过一次）。
+> 三臂对照届时是：模仿项关掉 / 逆动力学教师（现状） / 拟合教师。
 
 ### L2 — CVAE 骨架（隐意图；≈1 周）
 

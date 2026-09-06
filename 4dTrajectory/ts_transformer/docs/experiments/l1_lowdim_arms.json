@@ -1,0 +1,36 @@
+{
+ "_comment": "L1 of docs/2026-09-07_latent_intent_design.zh.md: the low-dimensional control head with dense supervision, the deterministic baseline the latent decoder (L2) is built on. L0 measured the width (l0_control_basis_20260907): fitted to the truth, a 32-segment schedule reproduces a vectored track to ~200 m and a 64-segment one to ~91 m, against the 962 m of intent the ego history cannot see — so 32 segments (96 numbers) is enough representation, against the deployed head's 257. Two axes, one arm each, with control_procedure_20260905/A_control_v3 (N=64, native endpoints, true-time-position, imitation 64) filling the fourth cell: WIDTH (32 vs 64) and SUPERVISION (native segment endpoints aligned to the truth clock + a separate velocity and imitation term, vs the dense fixed-dt grid whose normalized MSE scores every channel at every 2 s truth sample). NOTE the loss composition is not free to mix: train.loss_component_names registers `velocity` and `imitation` ONLY under control_state_objective=true-time-position, so a fixed-dt arm has no imitation term at all — which is exactly the question this campaign answers (user decision, 2026-09-07): is the trajectory-error loss enough on its own, or does the schedule still need a teacher? The imitation weight and the separate velocity weight are therefore set to 0 explicitly on the dense arms rather than left at simple-v3's values, so the recorded config does not claim a term that is never built. PRE-REGISTERED READING: (1) L1_dense32 vs A_control_v3 on both metric families per stratum — the deliverable comparison; (2) L1_dense32 vs L1_dense64 isolates the width, L1_native32 vs A_control_v3 isolates it under the OLD supervision, so the two together say whether the width and the grid interact; (3) bank skill (docs/score_control_arms.py, read against the random-flight floor and the same-runway twin ceiling, never 1.0) is a REQUIRED reading on the dense arms: position is derivative order 0 and velocity order 1, so with the imitation term gone nothing names the bank, and the 2026-08-19 wiggle is the predicted failure — if it returns, the answer to 'is trajectory error enough' is no and the fitted teacher (basis_fit.json, L0's per-flight schedules) becomes the next arm rather than the inverse-dynamics one; (4) flyability as a DELTA against observed tracks, paired with the error metrics, never alone. VETO: straight-in top-1 FDE degraded beyond seed noise on every dense arm.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_state_loss_grid": "fixed-dt",
+  "control_state_objective": "normalized-mse",
+  "control_imitation_loss_weight": 0.0,
+  "control_velocity_loss_weight": 0.0
+ },
+ "arms": [
+  {
+   "key": "L1_dense32",
+   "label": "N=32, dense fixed-dt supervision, no teacher (the deliverable candidate)",
+   "overrides": {}
+  },
+  {
+   "key": "L1_dense64",
+   "label": "N=64, dense fixed-dt supervision, no teacher (isolates the width)",
+   "overrides": {
+    "n_segments": 64
+   }
+  },
+  {
+   "key": "L1_native32",
+   "label": "N=32 under simple-v3's own supervision (isolates the width against A_control_v3)",
+   "overrides": {
+    "control_state_loss_grid": "native-segment-endpoints",
+    "control_state_objective": "true-time-position",
+    "control_imitation_loss_weight": 64.0,
+    "control_velocity_loss_weight": 0.003
+   }
+  }
+ ]
+}
