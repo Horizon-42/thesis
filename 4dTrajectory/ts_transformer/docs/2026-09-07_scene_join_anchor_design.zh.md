@@ -4,7 +4,7 @@
 
 ## 〇、进度与状态（压缩 context 后从这里继续）
 
-**当前状态（2026-09-06）**：Phase 0、P0、P1.a/b/c/d 完成并提交。**P1 结束，交付形态 = closure 解码器 + 点质量 rollout 跟踪**（`2026-09-06_closure_p1d_tracking_results.zh.md`）：可部署的 C_pred 全体 ADE 1005（基线 1333）、雷达引导 2222（2858），整条全可飞率 22 % → 92 %（control 基线 0.1 %，观测 98 %），跟踪付出 ≤ 100 m ADE。下一步：**P2 数据平面**（验收口径 = C_pred → C_truth_intent 的 960 m 雷达引导 ADE）；跟踪器增益进 config、KSJC / 第二种子归入 P4。没有在跑的 campaign。
+**当前状态（2026-09-06）**：Phase 0、P0、P1（a–d）完成并提交；交付形态 = closure 解码器 + rollout 跟踪（C_pred 全体 ADE 1005、雷达引导 2222，全可飞 92 %）。**P2 数据平面进行中**（用户 2026-09-06 决定继续 P2）：步骤与门见 §五 P2 的实施计划。没有在跑的 campaign。
 
 | 阶段 | 状态 | 产物 / commit | 关键数字（KRDU val，雷达引导 497 架） |
 |---|---|---|---|
@@ -19,6 +19,7 @@
 | P2 数据平面（原 Phase 1）| 未开始 | — | 验收指标已改（§五 P2） |
 | P3 场景编码 + (d_join, T) 锚解码器（原 Phase 2/3） | 未开始 | — | top-1 目标已改（§一） |
 | P1.d (b) 跟踪：`control/constraints/closure_tracking.py`（`ClosureTracker` hook：L1 + 曲率前馈、下滑道律跟参考高度、PI 速度保持 + 沿路径误差 + 失速裕度）、`forecast.track_closure_forecasts`、`predict --closure-track` | 完成（2026-09-06） | `6ee28fa`、`4ecfb69`；臂 `closure_p1d_arms.json`；读数 `closure_p1c_20260905/readout_p1d.*`；结果 `2026-09-06_closure_p1d_tracking_results.zh.md`；测试 `tests/test_closure_tracking.py` | 跟踪付出 ADE：C_pred +9（雷达引导 +25）、C_truth_intent +16、C_oracle +72 m；全可飞率 22 → 92 / 90 / 88 %；剩余违反 = 交界处 bank（L1 前视 3 km）与末段 stall；顺带修了高度剖面起点不在锚点的解码器缺陷 |
+| P2 数据平面：`trajectory_data_process/scene_index.py`（tracks 名册的时间索引，缓存带契约）→ `flight_scenarios/scene_context.py`（(机场, t₀, 本机) → 邻机 + 标量，只用 t ≤ t₀ 的样本，泄漏测试）→ `4dTrajectory/ts_transformer/scene/features.py`（实体级特征 → 数组，N_max 掩码）→ `docs/p2_scene_explainability.py`（与 Phase 0 同人群、同 CV 协议的可解释性测量） | **进行中** | — | 门：d_join R² 0.38 → ≥ 0.55；剩余时长中位误差 35.8 → < 28 s（Phase 0 `context` / `timing` 的口径） |
 | P4 生成式对照等（原 Phase 4） | 未开始 | — | 不变；加：跟踪器增益进 config 与 run name、KSJC 复现、第二种子 |
 
 **恢复工作时的约定**（来自 memory 与本轮经验）：正式 campaign（`run_ts_frame_ablation.py`，默认 formal）要求干净工作树——先 commit；代码在跑实验前用 opus subagent review，文档不送 review；`git add` 明确路径，不用 `-A`；看进程用 PID 不用 `pgrep -f`；子进程 stdout 到日志是块缓冲，`epoch` 行会滞后几分钟，不是卡死；引用数字只引当前产物；判"预测是否建立五边"用成员门（`hard_on_final` + `stays_mask`），k=0.5 真值门会被已知的 250–350 m 终点平移饱和成"从不"。
@@ -213,6 +214,13 @@ loss/multimodal（CE + WTA·simple-v3）             forecast/export（top-1 记
 - **P1.d 后备分支 + 可飞性。** 已量到（`flyability_report.json`）：closure 逐样本可飞 99.8 %（观测 99.8 %，control 基线 93.3 %），整条全可飞 22 %（观测 98 %，control 基线 0.1 %——它的违反是 5.9 万个 stall 样本）；closure 每条只有几个违反样本：bank（CSC 弧–直交界的曲率跳变）、thrust_over_max（慢度节点的加速度跳变）、少量 load factor / stall。**用户 2026-09-06 决定走 (b)：closure 轨迹作参考，点质量 rollout 用制导律跟踪它（网络出"要做什么"，动力学负责"怎么飞"）。结果（同日，`2026-09-06_closure_p1d_tracking_results.zh.md`）：跟踪付出的 ADE ≤ 100 m（C_pred +9，雷达引导 +25），整条全可飞率 22 → 92 %（C_pred）；P1 结束，交付形态 = closure + 跟踪。** 先在预测时做（不训练），量两个数：跟踪付出多少 ADE（tracked − untracked，按臂、按分层）、整条全可飞率从 22 % 回到多少。实现：`control/constraints/closure_tracking.py` 的 `ClosureTracker`（command hook，`needs_reference=False`）：每段开始取 rollout 自身状态，在参考路径上找最近节点；横向 = L1 律（相对参考切向的横偏与航向差）+ 参考曲率前馈 atan(V²κ/g)，垂直 = 下滑道律跟踪参考高度剖面（`glidepath_tan` 换成参考的局部坡度），推力 = 带积分作用的速度保持（上一段推力 + k·m·(V_ref − V)/T_max，起点为锚点隐含推力）跟踪参考地速；增益复用 `control_nominal_*`，按段长封顶 1/Δt。rollout 时长 = closure 的时长，64 段。`predict --closure-track`（可与 `--closure-from-labels` 同用）；记录带控制量（走导出的控制分支）与 `source.closureTracked`。臂：C_pred_tracked、C_oracle_tracked（predict-only）；读数 `compare_constraint_arms.py` + `flyability_report.json`。门：无（量数）；若跟踪付出的 ADE 小于场景信息的 960 m 而全可飞率接近观测，closure + 跟踪成为交付形态。后备分支：标签无效的 3.2 % 航班与重建退化（`closureConstruction`）在读数里单列。几何族不适用的航班（Phase 0 模板构造计数：雷达引导 497 架里 trombone 305、Dubins 181、直线 2、已过汇入点 9；盘旋、转场）保留现有控制头；判据 = P1.a 的拟合残差（chamfer）超阈值时标 `closure_fallback`，读数里单列。
 
 **P2 — 数据平面（原 Phase 1；≈2–3 天）。** 内容不变（`scene_index`、`scene_context`、`scene/features`、泄漏测试），**验收指标改**：邻机位置/ETA/离阈值距离等实体级特征对 (d_join, T) 的可解释性要明显高于 Phase 0 的粗特征基线（d_join R² 0.38 → 目标 ≥ 0.55；剩余时长中位误差 35.8 s → 目标 < 28 s；`phase0_intent_diagnostics.py context/timing` 是基线脚本）。达不到就说明上下文的价值在别处（跑道使用、离场），先量再建模。
+
+  > **实施计划（2026-09-06）**，每步：代码 → opus review → 修 → 跑 → 记录：
+  > - **P2.a `trajectory_data_process/scene_index.py`**：读一遍 `tracks/manifest.json` 名册的每个航迹文件（KRDU 66,942 个、1.2 GB），建按机场的时间索引：flight_key、outcome、runway、icao24、`start_utc_s`（航迹 `start_time_utc`，毫秒）、`end_utc_s`、样本数、`landing_utc_s`（仅 assigned）、file。缓存 `tracks/scene_index.json`，契约 = schema 串 + tracks manifest 的 SHA-256 + 记录数；不匹配即重建，永不 glob。查询：`airborne_at(t0, window_s)` = 在 [t₀ − window, t₀] 有样本的航迹（bisect）。
+  > - **P2.b `flight_scenarios/scene_context.py`**：`scene_context(paths, index, ego_key, t0_utc_s, ego_target, ...)` → 邻机列表 + 标量。**泄漏红线（比 §3.2 更严）**：邻机只用 t ≤ t₀ 的样本；仍在空中的邻机的落地时间**和最终跑道**都是未来，不进特征——观测到的只有它的位置 / 速度 / 高度、离本机跑道阈值的距离、按当前地速的 ETA 估计、是否已建立在某条五边（成员门，任一跑道）、按 ETA 在本机前面的次序；已落地（landing ≤ t₀）的航班才带跑道，只进"上次落地距今 / 30 min 落地数 / 跑道使用份额"这些标量。邻机的最终 d_join / 跑道作为**辅助监督标签**单独返回（`future_label`，永不进特征）。高度用 HAE 减阈值 HAE 高程（相对高度不需要基准转换）。半径 40 km、N_max 16（按离本机距离排序截断，掩码），窗口 120 s。
+  > - **P2.c `4dTrajectory/ts_transformer/scene/features.py`**：邻机时序 [N_max, L, 6]（本机图坐标的相对位置 / 速度，缺失掩码）+ 静态特征 + 标量 → numpy；P3 直接消费。
+  > - **P2.d 测量 `docs/p2_scene_explainability.py`**：与 Phase 0 `_population` 同一人群（门打开且锚窗完整的进场；锚点后才汇入的子集单独报）、同一 5 折梯度提升；特征组递进：本机锚点态 → + Phase 0 粗上下文 → + 实体级场景特征（前机的离阈值距离 / ETA / 与本机 ETA 差、同五边已建立架数、40 km 内空中架数、最近邻机的相对位置、跑道使用份额）→ + 真值前机 ETA（对照上界）。目标 d_join（R²、中位误差）与剩余时长（原始航迹时长）。**门**：d_join R² ≥ 0.55、剩余时长中位误差 < 28 s；达不到就量到底是哪类信息缺（跑道使用、离场、风），先量再建模。
+  > - 测试：泄漏（构造一架只在 t > t₀ 有样本的邻机，不得出现；仍在空中的邻机的 landing / runway 不得出现在特征里）、索引缓存契约（manifest 改变即重建）、名册一致性（邻机 key 必在 tracks manifest）、坐标（邻机在本机图坐标里的 (d, xt) 与 `runway_axes` 一致）、确定性。
 
 **P3 — 场景编码 + 锚解码器（原 Phase 2/3；≈2 周）。** 内容不变，两处改：锚落在 **(d_join, T)** 的联合直方图上（或 T 为主、d_join 为辅），不再只 d_join；top-1 目标按 §一 修订（< 2.0 km），多模态的价值用 minADE_K 与校准报告，不承诺 top-1 低于 2 km。解码器输出接 P1 的几何封闭（每个模态一条闭式路径 + 速度剖面），控制头 + rollout 作为对照臂。
 
