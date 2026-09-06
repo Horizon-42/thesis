@@ -1,0 +1,32 @@
+{
+ "_comment": "L2 of docs/2026-09-07_latent_intent_design.zh.md: the latent intent on the control output. BASE = L1's winning supervision (DRAFT: dense32, i.e. N=32 fixed-dt normalized-mse, no teacher; finalise from l1_lowdim_20260907/readout.txt before launching — if L1_native32 won, switch the three supervision fields). Arms differ only in the prior: L2_gauss (K=1, analytic KL), L2_mix4 (K=4 mixture, MC KL). Checkpoint selection stays fixed-anchor-common-grid-ade (the prior top-1 replay, deterministic) because the validation OBJECTIVE is stochastic under a posterior sample. Free bits 0.05 nats/dim, beta 1.0 (no annealing in v1). READOUT: predict every arm with `--latent-samples 6 --latent-random 6 --latent-shuffle` (modes/, random/, shuffled/ beside the top-1 records), then run_ts_latent_readout.py per arm (it reads random/ as the same-K control) and compare_constraint_arms.py for top-1 vs L1_dense32 on both metric families. PRE-REGISTERED GATES (design doc §六 L2): (1) not collapsed — history.json latent.active_units >= 3 at the best epoch AND shuffled ΔADE > 200 m pooled; (2) minADE_6 clearly below top-1 AND below the same-K N(0, I) control the readout prints (`ctrl minADE`, from --latent-random 6: K chances at a latent the prior did not choose); (3) top-1 not worse than L1_dense32 on every stratum (the latent must not cost the point estimate). VETO: straight-in top-1 FDE degraded beyond seed noise.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_state_loss_grid": "fixed-dt",
+  "control_state_objective": "normalized-mse",
+  "control_imitation_loss_weight": 0.0,
+  "control_velocity_loss_weight": 0.0,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "latent_dim": 8,
+  "latent_beta": 1.0,
+  "latent_free_bits_nats": 0.05
+ },
+ "arms": [
+  {
+   "key": "L2_gauss",
+   "label": "latent z8, single-Gaussian prior (analytic KL)",
+   "overrides": {
+    "latent_prior_components": 1
+   }
+  },
+  {
+   "key": "L2_mix4",
+   "label": "latent z8, K=4 mixture prior (MC KL)",
+   "overrides": {
+    "latent_prior_components": 4
+   }
+  }
+ ]
+}

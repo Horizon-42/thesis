@@ -299,3 +299,12 @@ Remaining: move the readout scripts (`compare_*_arms.py`, `score_control_arms.py
 `phase0_intent_diagnostics.py`, `p1_closure_oracle.py`) into the package as modules with
 `run_ts_*` fronts, and drop the per-file `sys.path` preambles in `tests/`. Mechanical but
 touches every results doc's reproduce command, so it wants its own commit.
+
+## ts_transformer: the auto-batch probe measures a smaller graph than a latent run trains (review finding, 2026-09-07)
+
+`batching._heterogeneous_control_probe_prediction` downcasts to a plain `ControlPrediction`, so
+with `latent_dim > 0` the batch-size probe never builds the posterior encoder or the KL graph;
+the resolved batch size is measured against less memory than training uses. Judgement: small
+(the latent adds two linear layers), but a probe that lies is a probe; fix = let the probe run
+the model's real forward with a synthetic future when `consumes_future`.
+

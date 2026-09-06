@@ -115,6 +115,10 @@ CONTROL_LOSS_FIELDS = (
     # The final-approach penalty is an objective on BOTH paths (it acts on the control
     # rollout's segment endpoints too): a control run that carries it is a recipe edit.
     *PROCEDURE_LOSS_FIELDS,
+    # The latent intent's objective knobs (control/latent.py); last, so tests that slice
+    # the recipe fields off the front keep reading recipe fields.
+    "latent_beta",
+    "latent_free_bits_nats",
 )
 #: The closure output's objective fields; its base name bumps when the regression
 #: itself is redesigned.
@@ -469,11 +473,23 @@ def meta_items(config: Mapping[str, Any]) -> list[str]:
     return items
 
 
+def output_name(config: Mapping[str, Any]) -> str:
+    """Field 1: the output contract; a control output with a latent intent says so
+    (``control+z8``, ``control+z8k4`` for a K=4 mixture prior) — a latent run is a
+    different model from the deterministic head, not a loss edit on it."""
+    output = str(config.get("prediction_output") or "state")
+    latent_dim = int(config.get("latent_dim") or 0)
+    if output != PREDICTION_CONTROL or latent_dim <= 0:
+        return output
+    components = int(config.get("latent_prior_components") or 1)
+    return f"{output}+z{latent_dim}" + (f"k{components}" if components > 1 else "")
+
+
 def run_display_name(config: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
     """The canonical human name: output · backbone · dynamics · loss · meta."""
     backbone = str(config.get("model") or "?")
     parts = [
-        str(config.get("prediction_output") or "state"),
+        output_name(config),
         _BACKBONE_DISPLAY.get(backbone, backbone),
         dynamics_name(config),
         loss_design_name(config),
@@ -514,7 +530,7 @@ def run_slug(config: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
     ):
         dyn += f"-{_BACKEND_SLUG.get(backend, _slugify(str(backend)))}"
     tokens = [
-        str(config.get("prediction_output") or "state"),
+        _slugify(output_name(config)),
         _BACKBONE_SLUG.get(backbone, _slugify(backbone)),
         dyn,
         _slugify(loss_design_name(config)),

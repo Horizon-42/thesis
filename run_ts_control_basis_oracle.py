@@ -91,7 +91,7 @@ from dataset import (  # noqa: E402
     load_flight_dicts,
     provenance_manifest_digests,
 )
-from flight_scenarios.identity import flight_key  # noqa: E402
+from flight_scenarios.identity import flight_key, summary_row_key  # noqa: E402
 from metrics import common_physical_time_flight_metrics  # noqa: E402
 from models import resolve_device  # noqa: E402
 from physical_criteria import fixed_dt_position_ade_m  # noqa: E402
@@ -139,13 +139,6 @@ def basis_config(config_dict: dict, n_segments: int, device: str) -> TSConfig:
     payload["n_segments"] = int(n_segments)
     payload["device"] = device
     return TSConfig(**payload)
-
-
-def summary_row_key(row: dict) -> str:
-    """The readout join key for one scored row (`flight_key` = id_runway_icao24_landing)."""
-    return "_".join(
-        str(row.get(name) or "") for name in ("id", "runway", "icao24", "landing_time_utc")
-    )
 
 
 def cohort(args: argparse.Namespace, out: Path):

@@ -44,6 +44,7 @@ TS_DIR = Path(__file__).resolve().parents[1]
 for path in (REPO, REPO / "geokit" / "src", TS_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
+from flight_scenarios.identity import summary_row_key  # noqa: E402
 from flight_scenarios.runway_target import find_threshold  # noqa: E402
 import geometric_metrics as gm  # noqa: E402
 from approach_difficulty import STRAIGHT_TORTUOSITY, strata_masks  # noqa: E402
@@ -57,7 +58,7 @@ SIBLINGS = {
 
 
 def flight_key(row: dict) -> str:
-    return "_".join(str(row.get(f, "")) for f in ("id", "runway", "icao24", "landing_time_utc"))
+    return summary_row_key(row)
 
 
 def _threshold_frame(target: dict) -> tuple[float, float, float, float]:

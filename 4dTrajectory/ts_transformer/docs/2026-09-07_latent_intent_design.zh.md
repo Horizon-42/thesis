@@ -18,7 +18,7 @@ Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；�
 |---|---|---|---|
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **campaign 在跑（2026-09-07 启动，`l1_lowdim_20260907`）**；无新代码 | 臂 `docs/experiments/l1_lowdim_arms.json`（L1_dense32 / L1_dense64 / L1_native32，对照 A_control_v3） | 不差于 simple-v3；参数 257 → 96；bank skill 必读 |
-| L2 CVAE 骨架（隐意图 z） | 未开始 | `latent_intent.py` + 十处接缝 | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
+| L2 CVAE 骨架（隐意图 z） | **代码完成（2026-09-07，分支 `dev-l2`，待 review 后合入）**：L2.a 训练/top-1 + L2.b K 采样、shuffle 诊断、读数 | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | 未开始 | `cta_conditioning` | 给真值 CTA 时时长误差 < 5 s ∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | 未开始（数据平面 WIP 已在 `045c233`） | `scene/` + 先验网络 | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | 未开始 | — | 见 §七 |
@@ -228,8 +228,14 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 
 ### L2 — CVAE 骨架（隐意图；≈1 周）
 
-新增 `prediction_output="latent-control"`（`PREDICTION_LATENT_CONTROL`）与顶层模块
-`latent_intent.py`：
+**实现决定（2026-09-07，与 §九 的命名草案不同）**：隐变量是 **control 输出上的一根轴**（`latent_dim > 0`），
+不是新的 `prediction_output`。理由：它就是 control 路径（出有界控制量、经 rollout 积分）加一个 z，
+和 `control_dynamics_model` 一样是 control 的轴；这样 config / dataset / forecast 里所有
+`== PREDICTION_CONTROL` 的判断按原样成立，零处需要改。run name 把它当作**不同的模型**报出：
+`control+z8`（K=4 混合先验时 `control+z8k4`），而不是一个损失编辑。模块在 `control/latent.py`
+（每个消费者都是 control 专用，符合 `control/` 的归属规则）。
+
+原草案（保留作对照）：新增 `prediction_output="latent-control"` 与顶层模块 `latent_intent.py`：
 
 - `PosteriorEncoder`：锚点之后的真值轨迹重采样到固定 32 点 `[32, 7]`（图坐标 e/n/u + 速度 3 通道 +
   归一化时间）→ 小 GRU/transformer → `(μ_q, logσ_q)`。**训练期唯一入口**。
@@ -242,6 +248,26 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 - 推理：`forecast` 从先验采样 `latent_samples` 个 z（默认 K=6），top-1 = 概率最高的模态走现有记录
   契约，其余写 `modes/` 子目录，`source` 带 `modeIndex` / `modeProbability`。
 - `predict --z-from-posterior`：z-oracle 上界臂。
+
+> **建成的形态（2026-09-07）**：
+> - `control/latent.py`：`PosteriorEncoder`（输入 = 归一化目标行 `y[B, pred_len, C]` + 真值时长，
+>   数据集本来就产出，**零数据管道改动**）、`PriorNetwork`（K 分量对角高斯混合，初始化为 N(0, I)）、
+>   `LatentControlModel`（z 拼进融合特征 → 现有控制头；**z 也进时长头**：`softplus(raw + W·z)·scale`，
+>   Phase 0 量到雷达引导的散布主要是时序，z 若到不了时长就把最大的变异留给了点估计）、`latent_kl`
+>   （K=1 逐维解析 + 逐维 free bits；K>1 单样本 MC + 总量 free bits，诊断用最负责分量的解析 KL）、
+>   `with_latent_kl`（`latent_kl` 分量 + 坍缩诊断）。
+> - 接缝：`batch_contract.model_forward(..., future=None)` 只把 `(y, final_time_s)` 交给声明
+>   `consumes_future` 的模型，且**只有训练步与验证目标步传它**——固定锚点回放（选 checkpoint 的
+>   top-1 ADE）和 `forecast` 从不传，后验按构造到不了预测。`train.py` 按 `LatentControlPrediction`
+>   类型派发损失；history 每轮多一条 `latent = {kl_nats_per_flight, active_units}`。
+> - 推理：`predict` 默认走先验 top-1（记录契约不变）；`--latent-samples K` 把 K 个先验采样各写成
+>   `modes/modeNN/` 完整预测目录（`source.modeIndex/modeProbability`）；`--latent-shuffle` 把"每架
+>   用别架的 top-1 z 解码"写成 `shuffled/`（`source.latentShuffled`）——坍缩判据。z 永不进记录。
+> - 读数 `run_ts_latent_readout.py`：top-1 / minADE_K / minFDE_K / miss rate / 模态 FDE 散布 /
+>   shuffled ΔADE，按分层；`--control` 接同 K 的随机隐变量对照臂。
+> - **未做**：β 退火（先只用 free bits，坍缩再加）、`--z-from-posterior`（z-oracle 臂）、z 探针
+>   R²（需要 `--latent-dump` 诊断文件，不进记录）。验证目标步是随机的（后验采样），所以 checkpoint
+>   选择用 `fixed-anchor-common-grid-ade`（先验 top-1 回放，确定性），不要用 `fixed-anchor-objective`。
 
 **臂**：`L2_gauss`（K=1）、`L2_mix4`、`L2_mix6`、`L2_zoracle`（predict-only）。
 **门（全部要过）**：

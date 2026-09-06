@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from config import TSConfig
+from config import CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM, TSConfig
 from control.heads import (
     ControlFeatureModel,
     _initialize_control_head,
@@ -40,6 +40,22 @@ class UniformDurationControlHead(ControlOutputHead):
             segment_durations=segment_durations,
             final_time_s=final_time_s,
         )
+
+
+# The control head per duration parameterization — ONE registry, so a model that
+# composes a head (the latent control model) and the per-parameterization models cannot
+# disagree, and an unknown parameterization fails loudly in both.
+def control_head_for(config: TSConfig) -> ControlOutputHead:
+    builders = {
+        CONTROL_DURATION_FACTORIZED: lambda: ControlOutputHead(
+            config.d_model, int(config.n_segments),
+            duration_uniform_floor=config.control_duration_uniform_floor,
+        ),
+        CONTROL_DURATION_UNIFORM: lambda: UniformDurationControlHead(
+            config.d_model, int(config.n_segments)
+        ),
+    }
+    return builders[config.control_duration_parameterization]()
 
 
 class UniformDurationControlOutputModel(ControlFeatureModel):

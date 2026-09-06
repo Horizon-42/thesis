@@ -785,6 +785,13 @@ class TSConfig:
     # supervision weights are already zero on fitted-tail velocities, so the placeholder
     # rows cannot enter. Zero keeps the frozen simple-v1 behaviour.
     control_velocity_loss_weight: float = 0.0
+    # A latent intent on the control output (latent-intent design §六 L2; control/latent.py).
+    # latent_dim = 0 is the plain deterministic head. z is drawn from q(z | future) in
+    # training and from the prior's top-1 component at inference; it is never an output.
+    latent_dim: int = 0
+    latent_prior_components: int = 1          # K in the mixture prior; 1 = a single Gaussian
+    latent_beta: float = 1.0                  # weight of KL(q ‖ p) in the objective
+    latent_free_bits_nats: float = 0.0        # per-dim KL below this is not charged
     control_velocity_loss_scale_mps: float = 10.0
     # Direct supervision of the control schedule against the one inverted from the flown
     # track by control_inverse_dynamics -- the same registry the forward model dispatches
@@ -1508,6 +1515,24 @@ class TSConfig:
             raise ValueError("control_smoothness_loss_weight must be non-negative")
         if not 0.0 <= self.control_duration_uniform_floor < 1.0:
             raise ValueError("control_duration_uniform_floor must be in [0, 1)")
+        if self.latent_dim < 0 or self.latent_prior_components < 1:
+            raise ValueError("latent_dim must be >= 0 and latent_prior_components >= 1")
+        if self.latent_beta < 0.0 or self.latent_free_bits_nats < 0.0:
+            raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
+        if self.latent_dim == 0 and (
+            self.latent_prior_components != 1
+            or self.latent_beta != 1.0
+            or self.latent_free_bits_nats != 0.0
+        ):
+            raise ValueError(
+                "latent_prior_components / latent_beta / latent_free_bits_nats mean nothing "
+                "without a latent (latent_dim == 0) and would still rename the run"
+            )
+        if self.latent_dim > 0 and self.prediction_output != PREDICTION_CONTROL:
+            raise ValueError(
+                "the latent intent lives on the control output; "
+                f"prediction_output={self.prediction_output!r} has no control head to decode it"
+            )
         for name, value in (
             ("control_dense_state_loss_weight", self.control_dense_state_loss_weight),
             ("control_geometry_loss_weight", self.control_geometry_loss_weight),

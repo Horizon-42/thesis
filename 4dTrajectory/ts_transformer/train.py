@@ -69,6 +69,7 @@ from control.training.curriculum import (
 )
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from control.loss.terminal_clock import apply_control_terminal_clock
+from control.latent import LATENT_KL_COMPONENT, LatentControlPrediction, with_latent_kl
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -259,6 +260,7 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
         *names,
         *extensions.get(config.control_state_objective, ()),
         *(("procedure",) if config.procedure_loss_active else ()),
+        *((LATENT_KL_COMPONENT,) if config.latent_dim > 0 else ()),
     )
 
 
@@ -1080,10 +1082,35 @@ def _control_loss_adapter(
     )
 
 
+def _latent_control_loss_adapter(
+    prediction: LatentControlPrediction,
+    normalized_anchor_state,
+    target_states,
+    state_weights,
+    target_final_time_s,
+    flight_weights,
+    config,
+    normalizer,
+    dynamics,
+    dense_supervision,
+    training_stage,
+    *,
+    multipliers: ProcedureMultipliers | None = None,
+) -> LossComponents:
+    """The control objective on the decoded schedule, plus the latent's KL term."""
+    components = _control_loss_adapter(
+        prediction, normalized_anchor_state, target_states, state_weights,
+        target_final_time_s, flight_weights, config, normalizer, dynamics,
+        dense_supervision, training_stage, multipliers=multipliers,
+    )
+    return with_latent_kl(components, prediction, config, flight_weights)
+
+
 PredictionLossHandler = Callable[..., LossComponents]
 PREDICTION_LOSS_HANDLERS: dict[type, PredictionLossHandler] = {
     StatePrediction: state_prediction_loss_components,
     ControlPrediction: _control_loss_adapter,
+    LatentControlPrediction: _latent_control_loss_adapter,
     ClosurePrediction: closure_loss_components,
 }
 
@@ -1185,6 +1212,10 @@ class EpochResult:
     # the step count (per-step shares and per-step means, whatever the hook counts), plus
     # ``steps`` itself.
     command_hook: dict[str, float] = field(default_factory=dict)
+    # The latent intent's epoch record (control/latent.py): KL nats per flight and the number
+    # of latent dimensions carrying more than ACTIVE_UNIT_KL_NATS — the posterior-collapse
+    # reading, which looks exactly like "converged" on every other number.
+    latent: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -1984,7 +2015,7 @@ def _evaluate_validation_airport(
                 section("val_objective_s") if section else nullcontext()
             )
             with objective_context:
-                prediction = model_forward(model, x, dynamics)
+                prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
                 components = prediction_loss_components(
                     prediction,
                     anchor_state(x, len(dataset.config.channels)),
@@ -2008,10 +2039,19 @@ def _evaluate_validation_airport(
                     if section else nullcontext()
                 )
                 with selection_context:
+                    # The DEPLOYABLE replay: what the checkpoint predicts without the
+                    # truth's future. A latent model's objective forward above decoded a
+                    # posterior sample (it read the future); the replay that selects the
+                    # checkpoint must be the prior top-1 decode, or every selection metric
+                    # is oracle-informed.
+                    deployable = (
+                        model_forward(model, x, dynamics)
+                        if getattr(model, "consumes_future", False) else prediction
+                    )
                     replay_chunks.append((
                         batch.indices,
                         _prediction_batch_replay(
-                            prediction,
+                            deployable,
                             x,
                             y,
                             mask,
@@ -2069,7 +2109,7 @@ def _dataset_loss_components(
             flight_weights = flight_weights.to(device)
             dynamics = move_dynamics(dynamics, device)
             dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
-            prediction = model_forward(model, x, dynamics)
+            prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
             components = prediction_loss_components(
                 prediction,
                 anchor_state(x, len(dataset.config.channels)),
@@ -2600,7 +2640,7 @@ def fit_model(
             )
             optimizer.zero_grad()
             with profiler.section("train_forward_s"):
-                prediction = model_forward(model, x, dynamics)
+                prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
             with profiler.section("train_rollout_loss_s"):
                 if control_diagnostics is not None:
                     if not isinstance(prediction, ControlPrediction) or dynamics is None:
@@ -2685,6 +2725,16 @@ def fit_model(
                 if name.startswith("hook_") and name != "hook_steps"
             }
             hook_epoch["steps"] = hook_steps
+        latent_epoch: dict[str, float] = {}
+        if config.latent_dim > 0:
+            # Both totals are UNWEIGHTED sums over flights (control/latent.py), so they are
+            # divided by the unweighted flight count they were summed over, never by the
+            # airport-weighted total the objective components use.
+            flights = max(train_diagnostic_totals.get("latent_flights", 0.0), 1.0)
+            latent_epoch = {
+                "kl_nats_per_flight": train_diagnostic_totals.get("latent_kl_nats", 0.0) / flights,
+                "active_units": train_diagnostic_totals.get("latent_active_units", 0.0) / flights,
+            }
         train_components = {
             name: value / max(train_weight_total, 1.0)
             for name, value in train_component_totals.items()
@@ -2790,6 +2840,7 @@ def fit_model(
             },
             procedure=procedure_epoch,
             command_hook=hook_epoch,
+            latent=latent_epoch,
         ))
 
         if (

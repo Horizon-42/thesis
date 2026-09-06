@@ -86,6 +86,14 @@ class Forecast:
     # the closure tracker (``control.constraints.closure_tracking``), so the record carries
     # the dynamics' own states and the controls flown.
     closure_tracked: bool = False
+    # Latent control output only: which prior SAMPLE this forecast decodes (None = the
+    # deterministic top-1 the record contract carries) and its probability — the mixture
+    # weight of the component it was drawn from, or 1/samples under a single Gaussian.
+    mode_index: int | None = None
+    mode_probability: float | None = None
+    # Latent control output only: decoded from ANOTHER flight's top-1 latent (the
+    # posterior-collapse diagnostic — a decoder that ignores z barely moves).
+    latent_shuffled: bool = False
 
     @property
     def n_steps(self) -> int:
@@ -190,8 +198,13 @@ def _control_prediction_batch(
     histories: np.ndarray,
     dynamics: dict[str, torch.Tensor],
     device: torch.device,
+    latent: torch.Tensor | None = None,
 ) -> ControlPrediction:
-    """Preserve the original per-flight network arithmetic, then stack its schedules."""
+    """Preserve the original per-flight network arithmetic, then stack its schedules.
+
+    ``latent`` (``[B, Z]``) decodes a latent control model from these latents instead of
+    its prior's top-1 — the K-sample and shuffled-z forecasts.
+    """
     predictions: list[ControlPrediction] = []
     model.eval()
     with torch.no_grad():
@@ -199,8 +212,10 @@ def _control_prediction_batch(
             row_dynamics = {
                 name: value[row : row + 1] for name, value in dynamics.items()
             }
+            history_row = torch.from_numpy(history[None]).to(device)
             predictions.append(
-                model(torch.from_numpy(history[None]).to(device), row_dynamics)
+                model(history_row, row_dynamics) if latent is None
+                else model(history_row, row_dynamics, latent=latent[row : row + 1])
             )
     return ControlPrediction(
         controls=torch.cat([item.controls for item in predictions], dim=0),
@@ -218,11 +233,20 @@ def _forecast_control_batch(
     normalizer: Normalizer,
     anchor: int,
     device: torch.device,
+    *,
+    latent: torch.Tensor | None = None,
+    mode: tuple[int, np.ndarray] | None = None,
+    latent_shuffled: bool = False,
 ) -> list[Forecast]:
-    """Predict and densely roll a heterogeneous batch of bounded control schedules."""
+    """Predict and densely roll a heterogeneous batch of bounded control schedules.
+
+    ``latent`` decodes from given latents (``[B, Z]``); ``mode`` = (sample index, per-flight
+    probability) stamps the forecasts as that prior sample; ``latent_shuffled`` stamps them
+    as the collapse diagnostic.
+    """
     histories = _history_batch(series, config, normalizer, anchor)
     dynamics = _dynamics_batch(series, anchor, device)
-    prediction = _control_prediction_batch(model, histories, dynamics, device)
+    prediction = _control_prediction_batch(model, histories, dynamics, device, latent=latent)
     durations = prediction.segment_durations.detach().cpu().numpy().astype(np.float64)
     offsets, padded_offsets, query_valid = _padded_dense_queries(
         durations, config.control_rollout_integrator_dt_s
@@ -281,8 +305,159 @@ def _forecast_control_batch(
                 None if command_hook is None
                 else f"{config.control_command_hook}/{config.control_hook_saturation}"
             ),
+            mode_index=None if mode is None else mode[0],
+            mode_probability=None if mode is None else float(mode[1][row]),
+            latent_shuffled=latent_shuffled,
         ))
     return forecasts
+
+
+def _latent_prior_batch(
+    model: nn.Module,
+    histories: np.ndarray,
+    dynamics: dict[str, torch.Tensor],
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """The prior's (logits, mean, logvar) and its top-1 latent for a batch, per flight."""
+    logits, means, logvars, top1 = [], [], [], []
+    model.eval()
+    with torch.no_grad():
+        for row, history in enumerate(histories):
+            row_dynamics = {name: value[row : row + 1] for name, value in dynamics.items()}
+            prediction = model(torch.from_numpy(history[None]).to(device), row_dynamics)
+            logits.append(prediction.prior_logits)
+            means.append(prediction.prior_mean)
+            logvars.append(prediction.prior_logvar)
+            top1.append(prediction.latent)
+    return (torch.cat(logits), torch.cat(means), torch.cat(logvars), torch.cat(top1))
+
+
+def latent_mode_forecasts(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    *,
+    samples: int,
+    seed: int,
+    anchor: int | None = None,
+    device: torch.device | None = None,
+) -> list[list[Forecast]]:
+    """K prior samples per flight, decoded and rolled out: ``[sample][flight]``.
+
+    The record contract stays single-trajectory — the top-1 goes through
+    ``forecast_approaches`` as always; these are the additional modes a multimodal
+    readout scores (minADE_K, miss rate, calibration). Each forecast carries its sample
+    index and probability: the mixture weight of the component it was drawn from, or
+    ``1/samples`` under a single Gaussian prior (which has no discrete weight to report).
+    """
+    if config.latent_dim < 1:
+        raise ValueError("mode forecasts need a latent control checkpoint (latent_dim > 0)")
+    if samples < 1:
+        raise ValueError("samples must be positive")
+    device = device or next(model.parameters()).device
+    anchor = default_anchor(config) if anchor is None else anchor
+    histories = _history_batch(series, config, normalizer, anchor)
+    dynamics = _dynamics_batch(series, anchor, device)
+    logits, mean, logvar, _top1 = _latent_prior_batch(model, histories, dynamics, device)
+    generator = torch.Generator(device=device).manual_seed(seed)
+    latents, components = model.sample_latents(logits, mean, logvar, samples, generator=generator)
+    weights = torch.softmax(logits, dim=-1)                       # [B, K]
+    if weights.shape[-1] == 1:
+        probabilities = np.full((samples, len(series)), 1.0 / samples)
+    else:
+        probabilities = weights.gather(1, components.transpose(0, 1)).transpose(0, 1).cpu().numpy()
+    return [
+        _forecast_control_batch(
+            model, series, config, normalizer, anchor, device,
+            latent=latents[index], mode=(index, probabilities[index]),
+        )
+        for index in range(samples)
+    ]
+
+
+def random_latent_forecasts(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    *,
+    samples: int,
+    seed: int,
+    anchor: int | None = None,
+    device: torch.device | None = None,
+) -> list[list[Forecast]]:
+    """K latents drawn from N(0, I) — not the prior — decoded and rolled out: ``[sample][flight]``.
+
+    The same-K CONTROL for minADE_K: K chances at a latent the prior did not choose. A
+    prior whose modes only beat the top-1 because there are K of them will not beat this.
+    Every forecast is stamped with its sample index and a probability of ``1/samples``.
+    """
+    if config.latent_dim < 1:
+        raise ValueError("random-latent forecasts need a latent control checkpoint (latent_dim > 0)")
+    if samples < 1:
+        raise ValueError("samples must be positive")
+    device = device or next(model.parameters()).device
+    anchor = default_anchor(config) if anchor is None else anchor
+    generator = torch.Generator(device=device).manual_seed(seed)
+    latents = torch.randn(
+        (samples, len(series), config.latent_dim), generator=generator, device=device
+    )
+    probabilities = np.full((samples, len(series)), 1.0 / samples)
+    return [
+        _forecast_control_batch(
+            model, series, config, normalizer, anchor, device,
+            latent=latents[index], mode=(index, probabilities[index]),
+        )
+        for index in range(samples)
+    ]
+
+
+def shuffled_latent_forecasts(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    *,
+    seed: int,
+    anchor: int | None = None,
+    device: torch.device | None = None,
+) -> list[Forecast]:
+    """Every flight decoded from ANOTHER flight's top-1 latent (a seeded permutation).
+
+    The posterior-collapse reading: if the trajectory error barely moves when each flight
+    is handed someone else's intent, the decoder is not reading z, and every other number
+    would still say "converged". A batch of one cannot be shuffled and raises.
+    """
+    if config.latent_dim < 1:
+        raise ValueError("the shuffled-latent forecast needs a latent control checkpoint")
+    if len(series) < 2:
+        raise ValueError("shuffling latents needs at least two flights in the batch")
+    device = device or next(model.parameters()).device
+    anchor = default_anchor(config) if anchor is None else anchor
+    histories = _history_batch(series, config, normalizer, anchor)
+    dynamics = _dynamics_batch(series, anchor, device)
+    _logits, _mean, _logvar, top1 = _latent_prior_batch(model, histories, dynamics, device)
+    source = torch.from_numpy(latent_derangement(len(series), seed)).to(device)
+    return _forecast_control_batch(
+        model, series, config, normalizer, anchor, device,
+        latent=top1[source], latent_shuffled=True,
+    )
+
+
+def latent_derangement(count: int, seed: int) -> np.ndarray:
+    """``source[i]`` = the flight whose latent flight ``i`` decodes from; never ``i`` itself.
+
+    A seeded random cycle over the flights: each takes the next one's latent, so there is
+    no fixed point by construction (a random permutation with fixed points rolled away is
+    not one — the roll can create new ones).
+    """
+    if count < 2:
+        raise ValueError("a derangement needs at least two flights")
+    order = np.random.default_rng(seed).permutation(count)
+    source = np.empty(count, dtype=np.int64)
+    source[order] = np.roll(order, -1)
+    return source
 
 
 def closure_forecast(item: FlightSeries, vector: np.ndarray, config: TSConfig, anchor: int,

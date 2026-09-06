@@ -158,6 +158,12 @@ def build_prediction_record(
             "closureFromLabels": forecast.closure_from_labels,
             "closureTracked": forecast.closure_tracked}
            if forecast.prediction_output == PREDICTION_CLOSURE else {}),
+        # Latent control output: which prior sample this is (None = the top-1 the contract
+        # carries) and its probability; whether it was decoded from another flight's
+        # latent (the collapse diagnostic). z itself is never written.
+        **({"modeIndex": forecast.mode_index, "modeProbability": forecast.mode_probability}
+           if forecast.mode_index is not None else {}),
+        **({"latentShuffled": True} if forecast.latent_shuffled else {}),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,
