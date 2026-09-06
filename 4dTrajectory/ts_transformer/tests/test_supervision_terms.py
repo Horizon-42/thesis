@@ -716,3 +716,18 @@ def test_a_screening_run_records_both_terms_and_they_change_the_schedule(tmp_pat
         )
         schedules.append(forecast.controls)
     assert not np.allclose(schedules[0], schedules[1])
+
+
+def test_the_teacherless_supervision_trains_under_random_anchors(tmp_path: Path):
+    """The A0-random arm of the anytime design: L1.b's supervision is the only screened
+    recipe compatible with random_train_anchor (the imitation teachers are anchor-bound).
+    A window-class constructor that did not accept train()'s fitted_teacher keyword made
+    every random-anchor run die before epoch 1 (2026-09-07)."""
+    _series, run_dir = _train_screening(
+        tmp_path, "random_anchor",
+        random_train_anchor=True, random_train_anchor_min_future_s=4.0,
+        control_heading_rate_loss_weight=8.0, control_bank_tv_loss_weight=1.0,
+    )
+    history = json.loads((run_dir / "history.json").read_text())
+    assert history["config"]["random_train_anchor"] is True
+    assert all(math.isfinite(epoch["train_components"]["heading_rate"]) for epoch in history["history"])

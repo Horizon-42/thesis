@@ -1671,14 +1671,19 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
         normalizer: Normalizer,
         *,
         minimum_anchor_index: int | None = None,
+        fitted_teacher: FittedTeacherTable | None = None,
     ):
         self.anchor_eligibility_policy = random_train_anchor_eligibility_policy(config)
+        # The config refuses a fitted teacher with random anchors (the table is fitted AT the
+        # fixed anchor), so this is always None here; it is forwarded, not special-cased, so
+        # the two window classes keep one constructor contract — train() passes it to both.
         super().__init__(
             series,
             config,
             normalizer,
             minimum_anchor_index=minimum_anchor_index,
             minimum_future_s=config.random_train_anchor_min_future_s,
+            fitted_teacher=fitted_teacher,
         )
 
     def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
