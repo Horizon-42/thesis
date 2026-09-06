@@ -287,18 +287,18 @@ numpy-2.x optimizer failure, so a green run needs them addressed or quarantined.
 
 `docs/` holds ~12 runnable `.py` files, several of them libraries other scripts import
 (`compare_frame_arms`, `phase0_intent_diagnostics`, `p1_closure_oracle`, `closure_*` helpers
-are already in the package but the readouts are not). Consequences seen: no tests, no
-`conftest.py` (every test file carries its own `sys.path` preamble), and top-level runners
-that have to put `ts_transformer/docs` on `sys.path` to reuse a twelve-line helper.
+are already in the package but the readouts are not). Consequences seen: no tests, no `conftest.py` at the time (25 of 32 test files still
+carry their own `sys.path` preamble; the seven newest do not), and package modules that
+cite a `docs/` script as their data producer (`closure_output.py`, `config.py`,
+`__main__.py` all name `docs/p1_closure_oracle.py labels`).
 
 Done so far: `strata_masks` + `STRAIGHT_TORTUOSITY` moved into `approach_difficulty.py`
 (one source, `compare_frame_arms` imports them); `tests/conftest.py` added; the L0 basis
 fit went in as `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` with tests.
 
-Remaining: move the readout scripts (`compare_*_arms.py`, `score_control_arms.py`,
-`phase0_intent_diagnostics.py`, `p1_closure_oracle.py`) into the package as modules with
-`run_ts_*` fronts, and drop the per-file `sys.path` preambles in `tests/`. Mechanical but
-touches every results doc's reproduce command, so it wants its own commit.
+Remaining: the migration table in `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md`
+§七 (hubs first: `p1_closure_oracle`, `compare_frame_arms`, `score_control_arms`), and the
+25 per-file `sys.path` preambles in `tests/`.
 
 ## ts_transformer: the auto-batch probe measures a smaller graph than a latent run trains (review finding, 2026-09-07)
 

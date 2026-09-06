@@ -14,7 +14,7 @@
 | T3 结构重排 | 未开始 | `objective.py` / `validation.py` 拆出 train、config 校验拆分、dataset 拆分、CLI 拆分、后端合并 | M×5 |
 | T4 测试与运行器 | 未开始 | 13 条红测试搬家修复、`tests/support.py`、`runner_support.py`、拆 6.5k 行测试文件、20→14 运行器 | M×4 |
 | T5 `docs/*.py` 迁移 | 未开始 | 13 个脚本的迁移表（枢纽三个先） | M |
-| T6 文档卫生 | 未开始 | OPEN_ITEMS 重写头部、CLAUDE.md 降级 closure、README 加 banner、7 处死链 | S |
+| T6 文档卫生 | **完成**（本提交） | OPEN_ITEMS 重写头部、CLAUDE.md 降级 closure + 两根新轴、README 加 banner、7 处死链、`30d`、两份取代 banner、`notes_7_20` 并入 | S |
 
 **时序约束**：所有改动在 `dev-l2`（worktree）上做；**只在 campaign 之间合入 `dev-leg-ctrl`**——正式
 campaign 的 predict/eval 步会 import 主树的当前代码，中途合入会污染它的来源。T0 在 L2 campaign

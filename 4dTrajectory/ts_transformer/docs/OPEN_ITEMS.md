@@ -6,6 +6,25 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
+## Current state (2026-09-07) — the latent-intent design supersedes everything below it
+
+The control path was redesigned on 2026-09-07 (`docs/2026-09-07_latent_intent_design.zh.md`,
+its §〇 status table is the live one). What that design settled and what is running:
+
+| step | state | number |
+|---|---|---|
+| L0 width oracle | done | N\* = 32: 96 operating numbers replace 257 (vectored fit 203 m against 962 m of intent) |
+| L1 low-dim head | done (`l1_lowdim_20260907`, `docs/2026-09-07_l1_lowdim_results.zh.md`) | native32 1322 m ≈ N=64 baseline 1333; dense / no-teacher 2515 — the trajectory-error loss alone is NOT enough, the imitation teacher stays |
+| L2 latent intent | code done + reviewed (`dev-l2`) | campaign next; arms `docs/experiments/l2_latent_arms.json` |
+| L3 CTA conditioning | code done + reviewed (`dev-l2`) | `cta_conditioning=given`, `predict --cta-offset-s` |
+| L4 scene encoder | **NOT built — gate failed** | scene entity features add nothing (d_join R² 0.37 vs 0.38); the observable lead ETA correlates 0.11 with the lead's true landing |
+
+**Abolished by that design** (entries below are history): the P1.d closure tracker (its BLOCKER
+is not being fixed), the K join-anchor decoder, the `2026-09-07_control_training_review`
+P0/P1 objective fixes. The closure output stays as a comparison arm only.
+
+---
+
 
 - **Scene design Phase 0 DONE 2026-09-05 (`scene_phase0_20260905`, KRDU; results
   `docs/2026-09-05_scene_phase0_results.zh.md`, diagnostics
@@ -76,7 +95,7 @@ Newest campaigns first, long-standing scope limits last.
   ego-only input cannot see and a single-output head can only average — design for traffic
   context + join-anchor multimodal output (scene encoder, K join-distance anchors as decoder
   queries, WTA training, top-1 stays on the existing record contract, Phase 0 = oracle
-  upper bound before any architecture work): `docs/2026-09-07_scene_join_anchor_design.zh.md`; a "committed to the final" gate for the vectored flights the v1 / hard
+  upper bound before any architecture work): `docs/2026-09-07_scene_join_anchor_design.zh.discard.md`; a "committed to the final" gate for the vectored flights the v1 / hard
   barrier hurt (gate opening at d < 8 km or ≥ 16 km; every bin is net positive under v2 soft); a second seed at KSJC (its −66 m FDE gain is the smaller
   effect); PatchTST and the other three airports.
 - **Final-approach constraint campaign DONE 2026-09-04/05 (`final_constraint_20260904`, KRDU +
@@ -166,3 +185,24 @@ Newest campaigns first, long-standing scope limits last.
   multimodality) — both are the survey's named open problems. Flyability is MEASURED but not
   FIXED (nothing projects a prediction back inside the envelope — README routes 2–4), and its
   polar is clean-configuration only, which is why it is read as a delta.
+
+- Open questions carried over from `docs/notes_7_20.md` (2026-07-20, deleted 2026-09-07):
+  why 300 steps?
+  figure to show fail of patchtst
+  
+  cross valition 
+  accuracy ???
+  hard constraints
+  which baseline? with or without dynamic model
+  multiple different 
+  evaluation them with hard constraints and dynamic
+  obliation study
+  
+  3 weeks for baselines 
+  
+  Diffusion Model??? guide diffusion; classifier free guidence; tricky to optimize.
+  Temp output; video generation; low dimension;
+  
+  moudlize repo; interfeces
+  
+  improve;

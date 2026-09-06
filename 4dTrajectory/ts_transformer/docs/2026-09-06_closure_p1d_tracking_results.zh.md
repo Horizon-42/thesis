@@ -1,5 +1,7 @@
 # P1.d (b)：closure 参考 + 点质量 rollout 跟踪（KRDU，2026-09-06）
 
+> **已取代（2026-09-07）**：跟踪器代码退役、BLOCKER 不修（`2026-09-07_latent_intent_design.zh.md` §四）。本文的"跟踪付出 +9 m"含 8 架跳段航班，剔除后为 **+10.5 m**；数字保留作历史。
+
 承接 `2026-09-06_closure_p1c_results.zh.md`：closure 解码器画出的轨迹是几何族成员，不满足飞行方程，干净极线下只有 22 % 整条全可飞。用户决定走 (b)：网络出"要做什么"（closure 参考），动力学负责"怎么飞"（点质量 rollout 在制导律下跟踪参考）。本文只量两个数：**跟踪付出多少 ADE**，**整条全可飞率回到多少**。产物：`closure_p1c_20260905/*_tracked_pred_val/`，读数 `readout_p1d.txt/.json`（`compare_constraint_arms.py`，闭合真值），`flyability_report.json`。
 
 ## 一、做了什么

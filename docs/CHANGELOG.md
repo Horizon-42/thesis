@@ -235,7 +235,7 @@ test); and the named-recipe override check in `__main__.py` rejected fields outs
 
 ### 2026-09-07 — Design: scene encoder + join-anchor multimodal control prediction
 
-`4dTrajectory/ts_transformer/docs/2026-09-07_scene_join_anchor_design.zh.md`. Intent: give the
+`4dTrajectory/ts_transformer/docs/2026-09-07_scene_join_anchor_design.zh.discard.md`. Intent: give the
 model the variables that decide the join (traffic context — the lead aircraft on the same
 runway, queue, time since last landing — plus the final approach course, FAF/IF and STAR
 legs as map tokens) and make the join distance an explicit K-way decision with a control

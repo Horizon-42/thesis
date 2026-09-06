@@ -1,6 +1,6 @@
 # 场景设计 Phase 0：真值意图上界实验（KRDU，2026-09-05）
 
-设计文档：`2026-09-07_scene_join_anchor_design.zh.md` §五 Phase 0。臂声明：
+设计文档：`2026-09-07_scene_join_anchor_design.zh.discard.md` §五 Phase 0。臂声明：
 `docs/experiments/scene_phase0_arms.json`；产物：`4dTrajectory/outputs/KRDU/experiments/scene_phase0_20260905/`
 （`readout.txt/.json` 为三臂配对读数）。代码：`intent_conditioning.py`（commit 57d3e2b）。
 诊断脚本：`docs/phase0_intent_diagnostics.py`（本文所有非读数表的数字都出自它）。
