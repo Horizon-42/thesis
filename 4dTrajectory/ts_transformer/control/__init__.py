@@ -7,7 +7,6 @@ the role is the submodule:
 
     control.envelope           the dimensionless box the head predicts in
     control.heads              the output heads that emit a schedule
-    control.duration           the uniform segment-duration parameterization
     control.dynamics.backends  the flight models a schedule can be rolled through
     control.dynamics.rollout   the one rollout API training/forecast/evaluation share
     control.dynamics.inverse   the same models solved backwards, for teachers and targets

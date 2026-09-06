@@ -2721,7 +2721,6 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_gradient_clip_norm",
         "control_gradient_clip_policy",
         "control_dynamics_backend",
-        "control_dense_state_loss_weight",
         "control_geometry_loss_weight",
         "control_arc_horizontal_velocity_loss_weight",
         "control_arc_vertical_velocity_loss_weight",
@@ -6479,3 +6478,18 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
     assert history["config"]["model"] == model_name
     assert len(history["history"]) == 2
     assert history["data_provenance"]["source_record_count"] == len(series)
+
+
+def test_a_stored_config_carrying_a_retired_field_still_loads_and_an_unknown_one_does_not():
+    """Checkpoints written before a field was retired keep loading; a genuinely unknown key
+    is still refused, so the retired list stays honest."""
+    from config import RETIRED_SERIALIZED_FIELDS
+    from dataclasses import fields as dataclass_fields
+    live = {field.name for field in dataclass_fields(TSConfig)}
+    assert not (set(RETIRED_SERIALIZED_FIELDS) & live), "a retired field is still declared"
+    stored = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
+    for name in RETIRED_SERIALIZED_FIELDS:
+        stored[name] = 0.25
+    assert TSConfig.from_dict(stored).prediction_output == PREDICTION_CONTROL
+    with pytest.raises(TypeError):
+        TSConfig.from_dict({**stored, "never_a_field": 1})

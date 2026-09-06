@@ -398,10 +398,14 @@ HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
 # The hook gates on the rollout state itself; the FAF gate is not carried by the control
 # dynamics, so ``on-final`` is the only gate a hook can use.
-HOOK_GATES = (CORRIDOR_GATE_ON_FINAL,)
+# Fields removed from the contract after checkpoints that store them were written. Each
+# could not change an answer (2026-09-07 package audit): `control_hook_gate` had a
+# one-member vocabulary nothing read; `control_dense_state_loss_weight` was a weight no
+# loss read. `from_dict` drops them from a stored config.
+RETIRED_SERIALIZED_FIELDS = ("control_hook_gate", "control_dense_state_loss_weight")
+
 CONTROL_HOOK_FIELDS = (
     "control_command_hook",
-    "control_hook_gate",
     "control_hook_saturation",
     "control_barrier_alpha",
     "control_barrier_heading_gain",
@@ -519,7 +523,6 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_velocity_loss_weight": 0.0,
         "control_velocity_loss_scale_mps": 10.0,
         "control_imitation_loss_weight": 0.0,
-        "control_dense_state_loss_weight": 0.0,
         "control_geometry_loss_weight": 0.0,
         "control_arc_horizontal_velocity_loss_weight": 0.0,
         "control_arc_vertical_velocity_loss_weight": 0.0,
@@ -558,7 +561,6 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     # deliberately NOT here: their defaults (0.0 / 10.0 / 0.0) reproduce the behaviour of
     # every checkpoint trained before those terms existed, which is exactly the "safe
     # stand-in" test this list applies.
-    "control_dense_state_loss_weight",
     "control_geometry_loss_weight",
     "control_arc_horizontal_velocity_loss_weight",
     "control_arc_vertical_velocity_loss_weight",
@@ -816,7 +818,6 @@ class TSConfig:
     # (per-flight skill +0.197 against +0.312), while a same-runway twin reaches +0.598 --
     # so the signal is there and only supervision was missing. Zero keeps simple-v1/v2.
     control_imitation_loss_weight: float = 0.0
-    control_dense_state_loss_weight: float = 0.25
     control_geometry_loss_weight: float = 0.75
     control_arc_horizontal_velocity_loss_weight: float = 0.25
     control_arc_vertical_velocity_loss_weight: float = 0.25
@@ -880,7 +881,6 @@ class TSConfig:
     # recipe like the procedure penalty; first-order-lag dynamics and the native state-loss
     # grid only (the hook rides the segmented endpoint rollout).
     control_command_hook: str = CONTROL_HOOK_OFF
-    control_hook_gate: str = CORRIDOR_GATE_ON_FINAL
     control_hook_saturation: str = HOOK_SATURATION_SOFT
     # Barrier filter: the barrier's decay rate α (1/s; the allowed closing rate toward a
     # corridor edge is α × the remaining margin) and the heading gain that turns a heading
@@ -1040,11 +1040,6 @@ class TSConfig:
             raise ValueError(
                 f"unknown control_hook_saturation {self.control_hook_saturation!r}; "
                 f"expected one of {HOOK_SATURATIONS}"
-            )
-        if self.control_hook_gate not in HOOK_GATES:
-            raise ValueError(
-                f"unknown control_hook_gate {self.control_hook_gate!r}; a command hook gates "
-                f"on the rollout state itself, expected one of {HOOK_GATES}"
             )
         if self.control_command_hook != CONTROL_HOOK_OFF:
             if self.prediction_output != PREDICTION_CONTROL:
@@ -1563,7 +1558,6 @@ class TSConfig:
                 f"prediction_output={self.prediction_output!r} has no control head to decode it"
             )
         for name, value in (
-            ("control_dense_state_loss_weight", self.control_dense_state_loss_weight),
             ("control_geometry_loss_weight", self.control_geometry_loss_weight),
             (
                 "control_arc_horizontal_velocity_loss_weight",
@@ -1751,6 +1745,12 @@ class TSConfig:
                 f"serialized config is missing {', '.join(sorted(missing))}; "
                 "regenerate the derived checkpoint"
             )
+        # A field retired from the contract is dropped from a stored config, by name: the
+        # stored value could not have changed the run that produced the artifact (that is
+        # why it was retired), and refusing the artifact would be a contract change in the
+        # wrong direction. Anything else unknown still fails loudly below.
+        for name in RETIRED_SERIALIZED_FIELDS:
+            data.pop(name, None)
         data["channels"] = tuple(data["channels"])
         data["control_horizon_curriculum_s"] = tuple(
             data["control_horizon_curriculum_s"]
@@ -1776,7 +1776,6 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "velocity_loss_weight": config.control_velocity_loss_weight,
         "velocity_loss_scale_mps": config.control_velocity_loss_scale_mps,
         "imitation_loss_weight": config.control_imitation_loss_weight,
-        "dense_state_loss_weight": config.control_dense_state_loss_weight,
         "geometry_loss_weight": config.control_geometry_loss_weight,
         "arc_horizontal_velocity_loss_weight": (
             config.control_arc_horizontal_velocity_loss_weight
