@@ -43,8 +43,8 @@ from control.heads import (
     ControlFeatureModel,
     _initialize_control_head,
     _initialize_final_time_head,
+    control_head_for,
 )
-from control.duration import control_head_for
 from prediction_outputs import ControlPrediction, FinalTimeHead
 
 LATENT_KL_COMPONENT = "latent_kl"
@@ -320,7 +320,11 @@ def with_latent_kl(
     weights = flight_weights.to(dtype=kl.dtype, device=kl.device)
     diagnostics = dict(components.diagnostics)
     diagnostics["latent_flights"] = kl_dim.new_tensor(float(len(kl_dim)))
-    diagnostics["latent_kl_nats"] = kl_dim.detach().sum()
+    # Two KLs: the one the objective CHARGES (free bits applied; the MC estimate for a
+    # mixture) and the per-dimension analytic KL against the most responsible component,
+    # which active_units is read from. For K = 1 without free bits they coincide.
+    diagnostics["latent_kl_nats"] = kl.detach().sum()
+    diagnostics["latent_component_kl_nats"] = kl_dim.detach().sum()
     diagnostics["latent_active_units"] = (
         kl_dim.detach().mean(dim=0) > active_unit_threshold_nats(config)
     ).sum().to(kl_dim.dtype) * len(kl_dim)

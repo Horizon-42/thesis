@@ -97,6 +97,16 @@ def readout(arm: Path, control: Path | None) -> dict:
         control_min_ade = np.nanmin(_stack(control_rows, keys, "ade_m"), axis=0)
         control_min_fde = np.nanmin(_stack(control_rows, keys, "fde_m"), axis=0)
 
+    # Coverage is stated, never silent: a mode directory that scored fewer flights than
+    # the top-1 would otherwise shrink every nan-reduction's denominator unannounced.
+    coverage = {
+        "top1": int(np.isfinite(ade[0]).sum()),
+        "modes": [int(np.isfinite(ade[1 + k]).sum()) for k in range(len(modes))],
+        "shuffled": None if shuffled_ade is None else int(np.isfinite(shuffled_ade).sum()),
+        "control": None if not control_rows else int(
+            np.isfinite(_stack(control_rows, keys, "ade_m")).all(axis=0).sum()
+        ),
+    }
     per_stratum = {}
     for stratum, mask in masks.items():
         idx = np.flatnonzero(mask)
@@ -105,6 +115,8 @@ def readout(arm: Path, control: Path | None) -> dict:
         block = {
             "n": int(len(idx)),
             "modes": len(modes),
+            "min_ade_full_coverage_n": int(np.isfinite(ade[:, idx]).all(axis=0).sum()),
+            "shuffled_n": None if shuffled_ade is None else int(np.isfinite(shuffled_ade[idx]).sum()),
             "top1_ade_mean_m": float(np.nanmean(ade[0, idx])),
             "top1_fde_p50_m": float(np.nanmedian(fde[0, idx])),
             "min_ade_mean_m": float(np.nanmean(np.nanmin(ade[:, idx], axis=0))),
@@ -124,15 +136,32 @@ def readout(arm: Path, control: Path | None) -> dict:
         per_stratum[stratum] = block
     return {"arm": str(arm),
             "control": str(control) if control is not None else (f"{arm}/random" if random_modes else None),
+            # What the control decodes: N(0, I) latents under the arm's own checkpoint (its
+            # prior may be far from N(0, I) once trained, especially a mixture) or an
+            # external arm's own prior samples — say which, so gate 2 is read correctly.
+            "control_kind": (
+                "external arm (its prior)" if control is not None
+                else ("N(0, I) latents, same checkpoint" if random_modes else None)
+            ),
+            "control_modes": (len(control_rows) - 1) if control_rows else 0,
             "flights": len(keys), "modes": len(modes), "random_modes": len(random_modes),
-            "shuffled": shuffled is not None, "miss_fde_m": MISS_FDE_M, "strata": per_stratum}
+            "shuffled": shuffled is not None, "coverage": coverage,
+            "miss_fde_m": MISS_FDE_M, "strata": per_stratum}
 
 
 def render(result: dict) -> str:
+    coverage = result["coverage"]
     lines = [
         f"latent readout — {result['arm']} ({result['flights']} flights, {result['modes']} modes"
         f"{', shuffled' if result['shuffled'] else ''})"
-        + (f" vs control {result['control']}" if result["control"] else ""),
+        + (f" vs control {result['control']} [{result['control_kind']}, {result['control_modes']} modes]"
+           if result["control"] else ""),
+        f"coverage: top-1 {coverage['top1']}, modes {coverage['modes']}, "
+        f"shuffled {coverage['shuffled']}, control {coverage['control']} of {result['flights']} flights"
+        + (" — INCOMPLETE" if any(
+            c is not None and c < result["flights"]
+            for c in (coverage["top1"], coverage["shuffled"], coverage["control"], *coverage["modes"])
+        ) else ""),
         "",
         f"{'stratum':>46s} {'n':>5s} {'top1 ADE':>9s} {'minADE_K':>9s} {'top1 FDE':>9s} "
         f"{'minFDE_K':>9s} {'miss':>6s} {'spread':>7s} {'shufΔADE':>9s} {'ctrl minADE':>11s}",

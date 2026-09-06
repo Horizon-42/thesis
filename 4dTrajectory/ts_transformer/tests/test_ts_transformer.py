@@ -152,7 +152,7 @@ from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
 from terminal_state_loss import terminal_state_errors  # noqa: E402
-from control.duration import UniformDurationControlHead  # noqa: E402
+from prediction_outputs import UniformDurationControlHead  # noqa: E402
 from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
 # Imported, never restated: a schema version pinned by hand in a fixture is a version

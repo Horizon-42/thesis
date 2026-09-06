@@ -131,6 +131,9 @@ from evaluation_protocol import (  # noqa: E402
 )
 from experiment_index import begin_run, finish_run  # noqa: E402
 from flyability import report_for_records  # noqa: E402
+# The N(0, I) control draws from its own stream, never the treatment arm's.
+LATENT_RANDOM_SEED_OFFSET = 1_000_003
+
 from forecast import (  # noqa: E402
     forecast_approaches,
     forecast_closure_from_labels,
@@ -1299,14 +1302,22 @@ def main(argv: list[str] | None = None) -> int:
     shuffled_records: list = []
     shuffled_metrics: list = []
     rollout_batch_size = max(1, min(config.batch_size, len(series)))
+    if args.latent_shuffle:
+        if len(series) < 2:
+            parser.error("--latent-shuffle needs at least two flights")
+        # Shuffling needs another flight in the batch: never a batch of one.
+        rollout_batch_size = max(2, rollout_batch_size)
     print(f"  dense rollout batch size: {rollout_batch_size}")
+    if args.latent_samples or args.latent_random or args.latent_shuffle:
+        # Latents are drawn per batch from seed + batch start, so a flight's latent is
+        # reproducible for a fixed (checkpoint, split, batch size) — say so.
+        print(f"  latent seed {args.latent_seed} (per batch: seed + batch start; the N(0, I) "
+              f"control adds {LATENT_RANDOM_SEED_OFFSET}); batch size {rollout_batch_size}")
     # A trailing batch of ONE flight cannot be shuffled (no other latent to take), so it
     # is folded into the batch before it rather than silently dropped from the diagnostic.
     starts = list(range(0, len(series), rollout_batch_size))
     if args.latent_shuffle and len(starts) > 1 and len(series) - starts[-1] == 1:
         starts.pop()
-    if args.latent_shuffle and len(series) < 2:
-        parser.error("--latent-shuffle needs at least two flights")
     for index_start, start in enumerate(starts):
         stop = starts[index_start + 1] if index_start + 1 < len(starts) else len(series)
         batch_series = series[start:stop]
@@ -1326,7 +1337,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.latent_random:
             for index, random_forecasts in enumerate(random_latent_forecasts(
                 model, batch_series, config, normalizer,
-                samples=args.latent_random, seed=args.latent_seed + start, device=device,
+                samples=args.latent_random,
+                seed=args.latent_seed + LATENT_RANDOM_SEED_OFFSET + start, device=device,
             )):
                 for offset, (s, forecast) in enumerate(zip(batch_series, random_forecasts, strict=True)):
                     random_records[index].append(build_prediction_record(

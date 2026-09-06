@@ -44,7 +44,7 @@ from prediction_outputs import ControlPrediction
 from run_naming import output_name, run_display_name
 from train import load_checkpoint, loss_component_names, train
 
-from config import CHECKPOINT_SELECTION_OBJECTIVE, CONTROL_DURATION_UNIFORM
+from config import CONTROL_DURATION_UNIFORM
 from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, build_series
 from export import build_prediction_record, observed_series_metrics, write_batch
 from forecast import (
@@ -286,7 +286,8 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
         control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_OBJECTIVE,
+        # the objective metric is refused for a latent run (it reads the posterior)
+        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
         control_rollout_integrator_dt_s=0.5,
         seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1,
         final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
@@ -303,7 +304,7 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
 
     first = json.loads((tmp_path / "run" / "history.json").read_text())["history"][0]
     assert LATENT_KL_COMPONENT in first["train_components"]
-    assert set(first["latent"]) == {"kl_nats_per_flight", "active_units"}
+    assert set(first["latent"]) == {"kl_nats_per_flight", "component_kl_nats_per_flight", "active_units"}
     assert 0.0 <= first["latent"]["active_units"] <= 3.0
 
     model, loaded, normalizer, _payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
@@ -397,15 +398,20 @@ def test_the_latent_derangement_has_no_fixed_point_and_is_a_permutation(count):
 
 def test_the_deployable_replay_is_decoded_from_the_prior_not_the_posterior(tmp_path: Path, monkeypatch):
     """The objective forward reads the future; the replay that selects the checkpoint must
-    not. Count both kinds of forward during one training epoch."""
-    calls = {"posterior": 0, "prior": 0}
-    original = LatentControlModel.forward
+    not. Intercept every prediction the replay is built from and require it to be a
+    prior decode (no posterior) — counting forwards would pass even if the replay still
+    reused the posterior object, because the end-of-training cohort evaluation also runs
+    prior-only forwards."""
+    import train as train_module
 
-    def counting_forward(self, history, dynamics, future=None, latent=None):
-        calls["posterior" if future is not None else "prior"] += 1
-        return original(self, history, dynamics, future=future, latent=latent)
+    replayed: list[object] = []
+    original_replay = train_module._prediction_batch_replay
 
-    monkeypatch.setattr(LatentControlModel, "forward", counting_forward)
+    def intercepting_replay(output, *args, **kwargs):
+        replayed.append(output)
+        return original_replay(output, *args, **kwargs)
+
+    monkeypatch.setattr(train_module, "_prediction_batch_replay", intercepting_replay)
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
         control_duration_parameterization=CONTROL_DURATION_UNIFORM,
@@ -422,9 +428,36 @@ def test_the_deployable_replay_is_decoded_from_the_prior_not_the_posterior(tmp_p
     provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
                   "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
     train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
-    # Training + validation objective decode the posterior; the deployable replay decodes
-    # the prior. Both must have happened.
-    assert calls["posterior"] > 0 and calls["prior"] > 0
+    assert replayed, "the validation replay never ran"
+    assert all(isinstance(output, LatentControlPrediction) for output in replayed)
+    assert all(output.posterior_mean is None for output in replayed)
+
+
+def test_config_refuses_objective_checkpoint_selection_with_a_latent():
+    from config import CHECKPOINT_SELECTION_OBJECTIVE
+    with pytest.raises(ValueError, match="cannot select its checkpoint on the validation objective"):
+        _config(checkpoint_selection_metric=CHECKPOINT_SELECTION_OBJECTIVE)
+
+
+def test_mode_probability_is_the_sampled_component_s_mixture_weight():
+    """K=3 with asymmetric logits: every mode's probability must be softmax(logits) at the
+    component it was drawn from (the gather/transpose in latent_mode_forecasts)."""
+    torch.manual_seed(0)
+    config = _config(latent_prior_components=3)
+    model = build_model(config).eval()
+    with torch.no_grad():
+        model.prior.network.bias[:3] = torch.tensor([2.0, 0.0, -2.0])
+        logits, mean, logvar = model.prior(torch.zeros(2, config.d_model))
+        weights = torch.softmax(logits, dim=-1)
+        latents, components = model.sample_latents(logits, mean, logvar, samples=6,
+                                                   generator=torch.Generator().manual_seed(1))
+    assert latents.shape == (6, 2, 4) and components.shape == (6, 2)
+    gathered = weights.gather(1, components.transpose(0, 1)).transpose(0, 1)
+    for s in range(6):
+        for b in range(2):
+            assert gathered[s, b] == pytest.approx(float(weights[b, components[s, b]]))
+    # and the component that dominates the logits is drawn most often
+    assert (components == 0).float().mean() > 0.6
 
 
 def test_the_mixture_kl_estimator_is_unbiased_without_a_budget():

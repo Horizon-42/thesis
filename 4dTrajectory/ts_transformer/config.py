@@ -1528,6 +1528,12 @@ class TSConfig:
                 "latent_prior_components / latent_beta / latent_free_bits_nats mean nothing "
                 "without a latent (latent_dim == 0) and would still rename the run"
             )
+        if self.latent_dim > 0 and self.checkpoint_selection_metric == CHECKPOINT_SELECTION_OBJECTIVE:
+            raise ValueError(
+                "a latent control run cannot select its checkpoint on the validation objective: "
+                "that objective decodes a posterior sample (it reads the future, and is "
+                "stochastic); select on a fixed-anchor replay metric instead"
+            )
         if self.latent_dim > 0 and self.prediction_output != PREDICTION_CONTROL:
             raise ValueError(
                 "the latent intent lives on the control output; "

@@ -237,15 +237,20 @@ def _forecast_control_batch(
     latent: torch.Tensor | None = None,
     mode: tuple[int, np.ndarray] | None = None,
     latent_shuffled: bool = False,
+    histories: np.ndarray | None = None,
+    dynamics: dict[str, torch.Tensor] | None = None,
 ) -> list[Forecast]:
     """Predict and densely roll a heterogeneous batch of bounded control schedules.
 
     ``latent`` decodes from given latents (``[B, Z]``); ``mode`` = (sample index, per-flight
     probability) stamps the forecasts as that prior sample; ``latent_shuffled`` stamps them
-    as the collapse diagnostic.
+    as the collapse diagnostic. ``histories`` / ``dynamics`` accept the batch's inputs when
+    the caller decodes the same flights several times.
     """
-    histories = _history_batch(series, config, normalizer, anchor)
-    dynamics = _dynamics_batch(series, anchor, device)
+    if histories is None:
+        histories = _history_batch(series, config, normalizer, anchor)
+    if dynamics is None:
+        dynamics = _dynamics_batch(series, anchor, device)
     prediction = _control_prediction_batch(model, histories, dynamics, device, latent=latent)
     durations = prediction.segment_durations.detach().cpu().numpy().astype(np.float64)
     offsets, padded_offsets, query_valid = _padded_dense_queries(
@@ -371,6 +376,7 @@ def latent_mode_forecasts(
         _forecast_control_batch(
             model, series, config, normalizer, anchor, device,
             latent=latents[index], mode=(index, probabilities[index]),
+            histories=histories, dynamics=dynamics,
         )
         for index in range(samples)
     ]
@@ -404,10 +410,13 @@ def random_latent_forecasts(
         (samples, len(series), config.latent_dim), generator=generator, device=device
     )
     probabilities = np.full((samples, len(series)), 1.0 / samples)
+    histories = _history_batch(series, config, normalizer, anchor)
+    dynamics = _dynamics_batch(series, anchor, device)
     return [
         _forecast_control_batch(
             model, series, config, normalizer, anchor, device,
             latent=latents[index], mode=(index, probabilities[index]),
+            histories=histories, dynamics=dynamics,
         )
         for index in range(samples)
     ]
@@ -441,7 +450,7 @@ def shuffled_latent_forecasts(
     source = torch.from_numpy(latent_derangement(len(series), seed)).to(device)
     return _forecast_control_batch(
         model, series, config, normalizer, anchor, device,
-        latent=top1[source], latent_shuffled=True,
+        latent=top1[source], latent_shuffled=True, histories=histories, dynamics=dynamics,
     )
 
 

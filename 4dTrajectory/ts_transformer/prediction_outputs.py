@@ -275,6 +275,36 @@ class ControlOutputHead(nn.Module):
         ).unsqueeze(1)
 
 
+
+class UniformDurationControlHead(ControlOutputHead):
+    """Decode controls while fixing every segment duration to ``final_time / N``."""
+
+    def __init__(self, input_dim: int, n_segments: int):
+        super().__init__(input_dim, n_segments)
+        # The base class owns the established bounded-control projection. Removing this
+        # module makes the simplified contract structural: no unused duration logits are
+        # serialized, optimized, or accidentally revived by another loss.
+        self.duration_projection = None
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        final_time_s: torch.Tensor,
+        *,
+        lower: torch.Tensor,
+        upper: torch.Tensor,
+    ) -> ControlPrediction:
+        controls = self.bounded_controls(features, lower=lower, upper=upper)
+        segment_durations = final_time_s.unsqueeze(-1).expand(
+            -1, self.n_segments
+        ) / self.n_segments
+        return ControlPrediction(
+            controls=controls,
+            segment_durations=segment_durations,
+            final_time_s=final_time_s,
+        )
+
+
 def stabilized_duration_fractions(
     logits: torch.Tensor, uniform_floor: float
 ) -> torch.Tensor:

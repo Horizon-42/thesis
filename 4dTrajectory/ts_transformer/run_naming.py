@@ -277,10 +277,13 @@ SPLIT_DISPLAY = {
 
 _DEFAULTS: dict[str, Any] = TSConfig().to_dict()
 
+#: The fields the output word reads for a latent run; guarded like every other field.
+LATENT_OUTPUT_FIELDS = ("latent_dim", "latent_prior_components")
+
 _unknown = [
     name
     for name in (*CONTROL_LOSS_FIELDS, *STATE_LOSS_FIELDS, *META_FIELDS,
-                 *(field for field, _ in _TAU_FIELDS))
+                 *(field for field, _ in _TAU_FIELDS), *LATENT_OUTPUT_FIELDS)
     if name not in _DEFAULTS
 ]
 if _unknown:  # fail at import: a renamed TSConfig field must rename here too

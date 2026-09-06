@@ -9,7 +9,8 @@ import torch.nn as nn
 from config import TSConfig
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.conditioning import DYNAMICS_CONDITION_NAMES
-from prediction_outputs import ControlOutputHead, FinalTimeHead
+from config import CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM
+from prediction_outputs import ControlOutputHead, FinalTimeHead, UniformDurationControlHead
 
 
 class ControlFeatureModel(nn.Module):
@@ -83,17 +84,29 @@ def _initialize_final_time_head(head: FinalTimeHead, raw_bias: float = 0.0) -> N
         final_layer.bias.fill_(raw_bias)
 
 
+# The control head per duration parameterization — the ONE construction site, so the
+# deterministic models and the latent model that composes a head cannot build different
+# heads for the same config, and an unknown parameterization fails loudly everywhere.
+def control_head_for(config: TSConfig) -> ControlOutputHead:
+    builders = {
+        CONTROL_DURATION_FACTORIZED: lambda: ControlOutputHead(
+            config.d_model, int(config.n_segments),
+            duration_uniform_floor=config.control_duration_uniform_floor,
+        ),
+        CONTROL_DURATION_UNIFORM: lambda: UniformDurationControlHead(
+            config.d_model, int(config.n_segments)
+        ),
+    }
+    return builders[config.control_duration_parameterization]()
+
+
 class ControlOutputModel(ControlFeatureModel):
     """Original single deterministic control strategy, state-dict compatible."""
 
     def __init__(self, config: TSConfig, feature_encoder: nn.Module):
         super().__init__(config, feature_encoder)
         self.final_time_head = FinalTimeHead(config)
-        self.control_head = ControlOutputHead(
-            config.d_model,
-            int(config.n_segments),
-            duration_uniform_floor=config.control_duration_uniform_floor,
-        )
+        self.control_head = control_head_for(config)
         _initialize_control_head(self.control_head)
         _initialize_final_time_head(self.final_time_head)
 

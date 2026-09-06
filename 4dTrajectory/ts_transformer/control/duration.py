@@ -4,58 +4,14 @@ from __future__ import annotations
 
 import torch
 
-from config import CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM, TSConfig
+from config import TSConfig
 from control.heads import (
+    control_head_for,
     ControlFeatureModel,
     _initialize_control_head,
     _initialize_final_time_head,
 )
-from prediction_outputs import ControlOutputHead, ControlPrediction, FinalTimeHead
-
-
-class UniformDurationControlHead(ControlOutputHead):
-    """Decode controls while fixing every segment duration to ``final_time / N``."""
-
-    def __init__(self, input_dim: int, n_segments: int):
-        super().__init__(input_dim, n_segments)
-        # The base class owns the established bounded-control projection. Removing this
-        # module makes the simplified contract structural: no unused duration logits are
-        # serialized, optimized, or accidentally revived by another loss.
-        self.duration_projection = None
-
-    def forward(
-        self,
-        features: torch.Tensor,
-        final_time_s: torch.Tensor,
-        *,
-        lower: torch.Tensor,
-        upper: torch.Tensor,
-    ) -> ControlPrediction:
-        controls = self.bounded_controls(features, lower=lower, upper=upper)
-        segment_durations = final_time_s.unsqueeze(-1).expand(
-            -1, self.n_segments
-        ) / self.n_segments
-        return ControlPrediction(
-            controls=controls,
-            segment_durations=segment_durations,
-            final_time_s=final_time_s,
-        )
-
-
-# The control head per duration parameterization — ONE registry, so a model that
-# composes a head (the latent control model) and the per-parameterization models cannot
-# disagree, and an unknown parameterization fails loudly in both.
-def control_head_for(config: TSConfig) -> ControlOutputHead:
-    builders = {
-        CONTROL_DURATION_FACTORIZED: lambda: ControlOutputHead(
-            config.d_model, int(config.n_segments),
-            duration_uniform_floor=config.control_duration_uniform_floor,
-        ),
-        CONTROL_DURATION_UNIFORM: lambda: UniformDurationControlHead(
-            config.d_model, int(config.n_segments)
-        ),
-    }
-    return builders[config.control_duration_parameterization]()
+from prediction_outputs import ControlPrediction, FinalTimeHead, UniformDurationControlHead
 
 
 class UniformDurationControlOutputModel(ControlFeatureModel):
@@ -64,9 +20,7 @@ class UniformDurationControlOutputModel(ControlFeatureModel):
     def __init__(self, config: TSConfig, feature_encoder):
         super().__init__(config, feature_encoder)
         self.final_time_head = FinalTimeHead(config)
-        self.control_head = UniformDurationControlHead(
-            config.d_model, int(config.n_segments)
-        )
+        self.control_head = control_head_for(config)
         _initialize_control_head(self.control_head)
         _initialize_final_time_head(self.final_time_head)
 

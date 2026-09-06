@@ -2041,9 +2041,10 @@ def _evaluate_validation_airport(
                 with selection_context:
                     # The DEPLOYABLE replay: what the checkpoint predicts without the
                     # truth's future. A latent model's objective forward above decoded a
-                    # posterior sample (it read the future); the replay that selects the
-                    # checkpoint must be the prior top-1 decode, or every selection metric
-                    # is oracle-informed.
+                    # posterior sample (it read the future); the replay the fixed-anchor
+                    # selection metrics score must be the prior top-1 decode. (The
+                    # objective-based selection metric would still read the posterior —
+                    # config refuses it for a latent run.)
                     deployable = (
                         model_forward(model, x, dynamics)
                         if getattr(model, "consumes_future", False) else prediction
@@ -2732,7 +2733,13 @@ def fit_model(
             # airport-weighted total the objective components use.
             flights = max(train_diagnostic_totals.get("latent_flights", 0.0), 1.0)
             latent_epoch = {
+                # what the objective charged (free bits applied; MC for a mixture)
                 "kl_nats_per_flight": train_diagnostic_totals.get("latent_kl_nats", 0.0) / flights,
+                # analytic KL per flight against the most responsible component — the
+                # quantity active_units is read from
+                "component_kl_nats_per_flight": (
+                    train_diagnostic_totals.get("latent_component_kl_nats", 0.0) / flights
+                ),
                 "active_units": train_diagnostic_totals.get("latent_active_units", 0.0) / flights,
             }
         train_components = {
