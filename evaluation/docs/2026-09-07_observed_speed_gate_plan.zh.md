@@ -14,8 +14,8 @@
 | O2 | METAR 顶风：IEM ASOS 归档抓取脚本 + 评估读时按落地时间就近关联，空速估计 = 地速 + 顶风分量，±5 kt 声明不确定度，`speed_marginal` 计数 | 已评审、提交 `8bf9f5c`；v9 去掉了 ±5 kt/`speed_marginal` 层（§6） | `8bf9f5c` | 五机场 2026-04-30 至 07-23 的观测已抓取到 `data/metar/` |
 | O3 | 五机场重评估的 n 分布与风修正前后的速度判定对比，写进 `BASELINE_SPEED_GATE_RESULTS.md` | 完成 | | 只写 scratchpad，不覆盖盘上报告 |
 | O3 结果 | 风修正让"过慢"簇缩小 3 到 5 倍，剩下 737 家族的"过快"簇（中位 V_est/Vs1g(MLW) 1.37–1.41），A320 家族居中，A21N 仍慢 | 已写入 `BASELINE_SPEED_GATE_RESULTS.md` §9 | | 91–97 % 行有 30 min 内的 METAR |
-| O4 | 用公开发布的机型 V_ref 取代失速模型锚（A 方案）：FAA Aircraft Characteristics Database（2024-10 版）每个 ICAO 机型在 MALW 处的 FSB 进近速度（含襟翼构型上下值），按 √(m/MALW) 缩放；计算记录用穿越质量，观测记录（质量未知）用机型公布质量区间 [最小质量, MALW]；来源文件存 `data/reference_speeds/`，出处索引 `docs/reference_speeds/README.md`，机器表 `aircraft/reference_speeds.json` | 代码+测试+文档+五机场重评估完成，待评审提交（§6.5） | | 判定保持二值；删除 ±5 kt 不确定度层；B 方案（观测空速标定）只在 FAA 表无该机型时启用，目前机队 40 型全部在表内，未触发 |
-| — | schema v7 → v8 → v9（四处镜像），合并到 `dev-leg-ctrl` | v9 随 O4 一起 bump，合并待做 | | 观测与计算判定都会变，按项目规则 bump |
+| O4 | 用公开发布的机型 V_ref 取代失速模型锚（A 方案）：FAA Aircraft Characteristics Database（2024-10 版）每个 ICAO 机型在 MALW 处的 FSB 进近速度（含襟翼构型上下值），按 √(m/MALW) 缩放；计算记录用穿越质量，观测记录（质量未知）用机型公布质量区间 [最小质量, MALW]；来源文件存 `data/reference_speeds/`，出处索引 `docs/reference_speeds/README.md`，机器表 `aircraft/reference_speeds.json` | 已评审（opus）、提交 `53ae8e8`；结果见 §6.5 | `53ae8e8` | 判定保持二值；删除 ±5 kt 不确定度层；B 方案（观测空速标定）只在 FAA 表无该机型时启用，目前机队 40 型全部在表内，未触发 |
+| — | schema v7 → v8 → v9（四处镜像），合并到 `dev-leg-ctrl` | v9 已 bump（`53ae8e8`）；分支已吸收 `dev-leg-ctrl`（`ebda491`），合入主树等 campaign 结束 | | 观测与计算判定都会变，按项目规则 bump |
 
 ## 2. 依据
 
