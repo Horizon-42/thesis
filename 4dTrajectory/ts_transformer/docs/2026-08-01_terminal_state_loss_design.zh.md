@@ -1,5 +1,10 @@
 # Terminal-state control loss 设计（2026-08-01）
 
+> **代码已退役（2026-09-07，包审计 T1-11）**：`terminal-state` 目标此前已删除，本次连同
+> `arc-length-geometry` 目标族一起删掉了它遗留的 `control_terminal_position/velocity_loss_weight`
+> 与 `control_terminal_*_scale` 字段和第 5 节列出的那组 CLI 标志。
+> **本文的数字与设计论证保留为历史结论，不重写。**
+
 ## 目标
 
 新 loss 面向“以正确状态到达跑道入口”，替代原先近似只优化较差一项的
