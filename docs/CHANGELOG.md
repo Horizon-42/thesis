@@ -113,6 +113,88 @@ Reviewed 2026-09-07: behaviour clean (bit-exact at weight 0 over 22,428 leaves, 
 hand-checked on 185 real endpoints, lag indexing exact including the hooked path, 0 run names
 moved); the findings above are the documentation and reading-rule fixes that followed, plus
 the coarse-`dt_s` refusal and two new tests (the TV subgradient behaviour, the refusal).
+### 2026-09-07 — L5.a: the FITTED imitation teacher — the fitter's checkpoint mode, `control_imitation_target`, the pre-registered arms
+
+Latent-intent design §六 L5.a (`4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md`),
+branch `dev-l5`, commits `ca9b939`, `8b79623`, `7c097cc`. Code only — the fit itself is a
+GPU job scheduled separately, so **no L5 number exists yet**. Suite 522 → 551.
+
+**Why.** L1 settled that the imitation term cannot be dropped (the teacher-free dense arms
+scored 2515/2603 m against native32's 1322 and brought the 2026-08 bank wiggle back), and
+L0 measured that the teacher in service is bad in a quantified way: its target is the
+inverse dynamics of the truth track, and flown open-loop that schedule lands **2.5–7.8 km**
+from the truth it was read off (N=4 7850 m, N=8 6381, N=16 4095, N=32 2537). "Imitating the
+teacher perfectly" is therefore not "flying the truth track" — the numeric form of the
+control-training review's defect B. Fitted through the same differentiable rollout at the
+same width, the schedule reproduces the truth to **88–433 m**.
+
+**The fitter (`ca9b939`).** `run_ts_control_basis_oracle.py` gains a `--checkpoint` mode:
+the cohort is the checkpoint's own `train,val` splits (`test` refused — a teacher fitted on
+it trains on it), the width, anchor, dynamics and frame are inherited from its config, and
+`--init network` (the default) seeds each flight from the checkpoint's own deterministic
+forward through `batch_contract.model_forward` — a latent model decodes its prior's top-1
+there, i.e. the schedule it would actually fly. `--init inverse-dynamics` keeps the width
+study's seed. Pre-registered budget `--steps 400 --batch-size 1024` (L0's own convergence
+evidence — the last 10 % of a 1200-step budget bought 0.4–1.2 % — puts 400 past the knee,
+and the network seed starts far closer). The output is `basis_fit.json` under the schema
+`ts-basis-fit-v2-teacher`, keyed by `flight_key`, carrying the N×3 dimensionless controls,
+the total duration fitted over, fitADE / seedADE / best step / split, and the stamps a
+consumer is checked by. The `--reference` width study is unchanged (defaults still
+600 / 256); the two modes share only the batch mechanics.
+
+**Two traps worth recording.** The table's stamped duration is compared against the
+dataset's `truth_duration_s` to 1e-6 s, and the batch's own `final_time` is float32, whose
+resolution at 300 s is ~3e-5 s — so the teacher path takes the float64 duration directly
+and gives the fit the same value it stamps. And the dense supervision of a batch is padded
+to its LONGEST flight: at KRDU the train split runs from a p50 of 183 s to 1454 s, so a
+batch of 1024 drawn in split order integrates ~2.5x the flight-seconds it needs. The
+cohort is therefore sorted by truth duration before batching, which also makes the table
+independent of the order the splits happened to list (tested).
+
+**The axis (`8b79623`).** `control_imitation_target ∈ {inverse-dynamics, fitted}` plus
+`control_fitted_teacher_path`. The default and all four named recipes' literals stay
+`inverse-dynamics` — every published simple-v* comparison was run against it. Under
+`fitted` the dataset loads the table once at build time and substitutes
+`reference_controls` with the row and `reference_control_weight` with **ones** (the
+schedule was fitted over the whole supervised horizon, so there is no fitted tail to mask);
+`train.control_imitation_mse` is untouched. The build REFUSES a table that is not this
+cohort's — another schema, a free-duration partition, another airport, another width,
+another anchor, a missing flight (with `covers a of b flights`), a duration off by more
+than 1e-6 s — with no partial mode, which would train part of every batch on nothing while
+the loss still reported an imitation number. The airport check comes first because a
+foreign table fails every other check too and "covers 0 of 11082" does not name the cause.
+Config refuses the incoherent combinations before any of that: fitted without a path, a
+path without fitted, off the control path, with `random_train_anchor`, with
+`control_imitation_loss_weight=0`, and off `control_state_objective=true-time-position` —
+the only objective `loss_component_names` registers `imitation` under, which (because it
+also requires the native grid and uniform durations) is what keeps a uniformly partitioned
+table from claiming to supervise a learned partition. `imit-target` joins `run_naming.CONTROL_LOSS_FIELDS` and the table's path
+joins `META_FIELDS` beside `closure_labels_path` (two generations of a table are two
+different runs), so only the non-default values name a run: recount over every
+config-bearing artifact under `4dTrajectory/outputs/*/experiments/**` — 728 files
+(`history.json`, `summary.json`, `fit_evaluation.json`, `checkpoint_metadata.json`,
+`config.json`, `best_config.json`) — **0 names changed**.
+
+**The teacher is a training-time INPUT, and that is a contract, not a wording.**
+`train.fit_model` opens the file once and hands the table to the two window sets it
+supervises; the dataset never opens it. Every other consumer of `TrajectoryWindows`
+replays a checkpoint — `evaluate-fit`, `predict --z-from-posterior`,
+`approach_clustering` — and builds its window set without a teacher, so a fitted
+checkpoint stays usable when the table is gone or covers a different cohort (both tested).
+The table's path, sha256, width, anchor, airports and flight count go into
+`checkpoint_metadata.json` and the checkpoint payload under `fitted_teacher`, deliberately
+NOT inside `data_provenance`: that object is compared for EQUALITY by `evaluate-fit` and
+`freeze-test` against a provenance rebuilt from the arrival manifests alone, so putting
+the teacher in it would make every fitted checkpoint fail those two paths.
+
+**The arms (`7c097cc`).** `docs/experiments/l5_fitted_teacher_arms.json`: L1_native32's
+exact base plus the fitted teacher, `L5_fitted64` (the deployed dose) and `L5_fitted16` (a
+better teacher may want less pull). Gates: per-stratum top-1 ADE/FDE p50 not worse than
+native32, **bank skill ≥ 0.70** against the 0.17 random-flight floor and the 0.70
+same-runway twin ceiling; veto on straight-in FDE p50 beyond seed noise. Pre-registered
+risk: the fit minimises POSITION only, so the table may carry bank wiggle of its own — if
+bank skill drops, the fix is at the FITTING end (a smoothness prior in the fit objective),
+never at the training end, which would hide which of the two produced it.
 
 ### 2026-09-07 — Package audit T2: the 2026-08 oracle teacher and the nominal-law hook archived, the scene features' sequence half deleted
 

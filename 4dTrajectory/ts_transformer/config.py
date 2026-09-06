@@ -168,6 +168,21 @@ CONTROL_STATE_OBJECTIVES = (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
 )
+# What the imitation term imitates (latent-intent design §六 L5.a). ``inverse-dynamics`` is
+# the schedule `dataset.reference_control_supervision` inverts out of the flown track, and
+# L0 measured what it is worth: flown open-loop it lands 2.5-7.8 km from the truth it was
+# read off (N=4 7850 m, N=8 6381, N=16 4095, N=32 2537), so "imitating the teacher
+# perfectly" is NOT "flying the truth track". ``fitted`` reads a per-flight control table
+# fitted THROUGH the same differentiable rollout (`run_ts_control_basis_oracle.py
+# --checkpoint`), which reproduces the truth to 88-433 m at the same width — a strictly
+# better teacher. The table is width-, anchor- and duration-specific, and it is the DATASET
+# that checks all three: this config only carries the path.
+CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS = "inverse-dynamics"
+CONTROL_IMITATION_TARGET_FITTED = "fitted"
+CONTROL_IMITATION_TARGETS = (
+    CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
+    CONTROL_IMITATION_TARGET_FITTED,
+)
 CONTROL_DURATION_FACTORIZED = "factorized"
 CONTROL_DURATION_UNIFORM = "uniform"
 CONTROL_DURATION_PARAMETERIZATIONS = (
@@ -569,6 +584,9 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_heading_rate_loss_weight": 0.0,
         "control_heading_rate_loss_scale_dps": 1.5,
         "control_bank_tv_loss_weight": 0.0,
+        # Every published simple-v* comparison was run against the inverse-dynamics
+        # teacher; a recipe names one configuration, so the target is frozen here too.
+        "control_imitation_target": CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
         "control_state_duration_gradient": False,
         "control_gradient_clip_norm": 20.0,
         "control_rollout_integrator_dt_s": 0.5,
@@ -856,6 +874,12 @@ class TSConfig:
     control_heading_rate_loss_weight: float = 0.0
     control_heading_rate_loss_scale_dps: float = 1.5
     control_bank_tv_loss_weight: float = 0.0
+    # WHICH schedule that term imitates (CONTROL_IMITATION_TARGETS above), and, under
+    # ``fitted``, the table it reads. The path is carried, never opened, here: the width,
+    # the anchor and the per-flight duration are checked where the flights are known, at
+    # the dataset build, which refuses a table that does not cover the cohort.
+    control_imitation_target: str = CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS
+    control_fitted_teacher_path: str = ""
     # Whether state-rollout gradients may update the learned duration partition. Turning
     # this off leaves the final-time loss trainable while controls own geometry fitting.
     control_state_duration_gradient: bool = True
@@ -1169,6 +1193,54 @@ class TSConfig:
             raise ValueError(
                 "control_heading_rate_loss_scale_dps must be finite and positive"
             )
+        if self.control_imitation_target not in CONTROL_IMITATION_TARGETS:
+            raise ValueError(
+                f"unknown control_imitation_target {self.control_imitation_target!r}; "
+                f"expected one of {CONTROL_IMITATION_TARGETS}"
+            )
+        if self.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
+            if not self.control_fitted_teacher_path:
+                raise ValueError(
+                    "the fitted teacher imitates a per-flight table: set "
+                    "control_fitted_teacher_path to the basis_fit.json written by "
+                    "run_ts_control_basis_oracle.py --checkpoint"
+                )
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "the imitation term supervises a control schedule; "
+                    f"prediction_output={self.prediction_output!r} emits none"
+                )
+            if self.random_train_anchor:
+                raise ValueError(
+                    "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
+                    "random_train_anchor would supervise other anchors with it"
+                )
+            if not self.control_imitation_loss_weight:
+                raise ValueError(
+                    "control_imitation_target names a teacher for a term this run switches "
+                    "off (control_imitation_loss_weight=0): the table would be loaded and "
+                    "validated against the cohort, and never read"
+                )
+            if self.control_state_objective != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
+                # `train.loss_component_names` registers `imitation` under the
+                # true-time-position objective ONLY, so under any other objective the term
+                # is not built at all — the same reason L1's dense arms have no teacher.
+                # That objective in turn requires the native grid and UNIFORM durations, so
+                # this one check also closes the factorized-duration hole: a table of
+                # schedules spread uniformly over the total duration cannot supervise a
+                # learned partition.
+                raise ValueError(
+                    "the imitation term is registered under control_state_objective="
+                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION!r} only; this run scores "
+                    f"{self.control_state_objective!r} and would load the fitted teacher "
+                    "and never read it"
+                )
+        elif self.control_fitted_teacher_path:
+            raise ValueError(
+                "control_fitted_teacher_path belongs to "
+                f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r}; this run "
+                f"imitates {self.control_imitation_target!r}"
+            )
         for name in (
             "control_thrust_time_constant_s",
             "control_bank_time_constant_s",
@@ -1403,6 +1475,11 @@ class TSConfig:
             or self.procedure_loss_vertical_weight > 0.0
             or self.procedure_loss_dual_step > 0.0
         )
+
+    @property
+    def uses_fitted_teacher(self) -> bool:
+        """Whether the dataset must load the per-flight teacher table and supervise from it."""
+        return self.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED
 
     @property
     def uses_final_approach_context(self) -> bool:

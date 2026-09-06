@@ -101,6 +101,9 @@ CONTROL_LOSS_FIELDS = (
     "control_heading_rate_loss_weight",
     "control_heading_rate_loss_scale_dps",
     "control_bank_tv_loss_weight",
+    # WHICH teacher that weight imitates: only the non-default `fitted` names a run, and it
+    # has to, because two runs on the same weight and different teachers are different runs.
+    "control_imitation_target",
     "final_time_loss_weight",
     "final_time_scale_s",
     "position_loss_scale_m",
@@ -126,7 +129,7 @@ CLOSURE_LOSS_FIELDS = (
 )
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
 # in different directories must not read as one).
-_PATH_FIELDS = frozenset({"closure_labels_path"})
+_PATH_FIELDS = frozenset({"closure_labels_path", "control_fitted_teacher_path"})
 STATE_LOSS_FIELDS = (
     "fitted_tail_position_weight",
     "fitted_terminal_position_weight",
@@ -148,6 +151,10 @@ META_FIELDS = (
     # The supervision target of a closure run: two runs on different label files are
     # different runs, whatever else matches.
     "closure_labels_path",
+    # ...and the same for the imitation term's fitted teacher: `imit-target=fitted` says
+    # WHICH KIND of teacher, this says which one. A table is width-, anchor- and
+    # cohort-specific, so two generations of it are two different runs.
+    "control_fitted_teacher_path",
     *INTENT_FIELDS,
     # The CTA axis reads the future the same way: a given-CTA run must wear it.
     *CTA_FIELDS,
@@ -198,6 +205,7 @@ _TAU_FIELDS = (
 _ABBREV = {
     "latent_posterior_init_std": "q-std",
     "control_imitation_loss_weight": "imit",
+    "control_imitation_target": "imit-target",
     "control_velocity_loss_weight": "vel",
     "control_velocity_loss_scale_mps": "vel-scale",
     "control_heading_rate_loss_weight": "hr",
@@ -227,6 +235,7 @@ _ABBREV = {
     "intent_conditioning": "intent",
     "cta_conditioning": "cta",
     "closure_labels_path": "labels",
+    "control_fitted_teacher_path": "teacher",
     "state_position_reference": "pos-ref",
     "corridor_gate": "gate",
     "procedure_loss_lateral_weight": "proc-lat",
