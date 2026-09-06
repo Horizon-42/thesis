@@ -38,8 +38,13 @@ Newest campaigns first, long-standing scope limits last.
   clean polar against the control baseline's 0.1 % (its violations are 59k stall
   samples) and the observed 98 %; per sample closure sits at 99.8 % = the observed, its
   few violations per flight being bank jumps at the CSC junctions and thrust jumps at
-  the knots: P1.d, a clothoid / bank-rate transition plus profile smoothing, or a
-  post-hoc rollout. Not started: P2 data plane (its
+  the knots. **P1.d DONE 2026-09-06 (option b, report
+  `docs/2026-09-06_closure_p1d_tracking_results.zh.md`)**: the drawn reference flown by
+  the point-mass rollout under `control/constraints/closure_tracking.py` costs ≤ 100 m
+  of ADE (C_pred +9 m pooled, +25 m vectored) and brings the fully-flyable rate from 22 %
+  to 92 % (observed 98 %) — the delivery form is closure + tracking. Open: the tracker's
+  gains are module constants (not in the checkpoint / run name); the remaining 8 % are
+  bank at the CSC junctions (the L1 look-ahead) and stall in the last leg. Not started: P2 data plane (its
   acceptance is now the 960 m between C_pred and C_truth_intent), any scene encoder.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report

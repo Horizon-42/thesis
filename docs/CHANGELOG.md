@@ -4,6 +4,28 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-06 — Closure decoder, P1.d: the drawn reference flown by the point-mass rollout — ≤ 100 m of ADE for 92 % flyability
+
+Option (b) of the design's P1.d. `control/constraints/closure_tracking.py` (new): a
+command hook that steers the rollout's own state toward the closure reference at every
+segment start — L1 lateral guidance on the cross-track / heading error to the reference's
+local course plus its curvature as a feed-forward bank, the glidepath law on the height
+error with the reference's local slope (capped 0.3), and a PI speed hold toward the
+reference speed (integrator from the anchor's implied thrust, proportional 0.3, the
+reference acceleration ±0.5 m/s² as feed-forward) with the along-track error folded into
+the target and a 1.15 × stall floor. `forecast.track_closure_forecasts` flies every
+decision vector under it on the first-order-lag dynamics (`tracking_config` derives that
+control config; the only backends that run hooks) for the reference's own duration in
+64 held segments; `predict --closure-track`; records carry the controls flown and
+`source.closureTracked`. Also fixed: the drawn height profile now starts at the anchor's
+height (the first knot is a least-squares value, and the step it drew made the vertical
+law ask for a −86° path angle). KRDU val, 1404 flights, pooled / vectored ADE:
+C_pred 996 → 1005 / 2197 → 2222, C_truth_intent 595 → 611 / 1235 → 1244, C_oracle 183 →
+256 / 458 → 554 m; fully flyable (clean polar) 22 → 92 / 90 / 88 % (observed 98 %, the
+control baseline 0.1 %), per sample 99.9 %. The delivery form is closure + tracking
+(`docs/2026-09-06_closure_p1d_tracking_results.zh.md`); the tracker's gains stay module
+constants for now (a P1.d measurement setting, not yet a config field).
+
 ### 2026-09-06 — Closure decoder, P1.c-3: the campaign — both gates pass, the output side was the bottleneck
 
 `4dTrajectory/outputs/KRDU/experiments/closure_p1c_20260905/` (arms

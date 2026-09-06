@@ -49,8 +49,13 @@ point of the package, not a migration in progress.
   family's ceiling, `source.closureFromLabels`). Locks: `enu` chart, `normalized` horizon,
   `checkpoint_selection_metric=fixed-anchor-objective` (the loop never draws the path), no
   random anchors; a labels file must be the airport's own and cover the cohort (a run refuses
-  one that covers no flight, prints the covered share otherwise). No dynamics, no
-  flyability guarantee beyond the family's 25° bank arcs.
+  one that covers no flight, prints the covered share otherwise). The drawn path has no
+  dynamics of its own (22 % fully flyable); **`predict --closure-track` flies it with the
+  point-mass rollout under `control/constraints/closure_tracking.py`** (a command hook:
+  L1 + curvature feed-forward, the glidepath law on the reference height, a PI speed hold
+  with the along-track error) for ≤ 100 m of ADE and 92 % fully flyable — the delivery
+  form (P1.d, 2026-09-06). The tracker runs on the first-order-lag backend, the only one
+  that runs hooks (`forecast.tracking_config` derives that config).
 
 Single-aircraft-only and deterministic point-prediction are scope decisions for all three (README).
 
