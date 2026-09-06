@@ -3,6 +3,10 @@
 
 With no ``--airport`` argument the cohort is balanced across every discovered K-airport.
 Repeating ``--airport`` restricts the same pooled workflow to an explicit airport set.
+
+The 2026-08 published numbers ran the arc-length-geometry objective with the 60/120/240 s
+prefix schedule; both were retired 2026-09-07 (package audit T1-10/11). This runner now
+trains the package's current objective at the full horizon and cannot reproduce them.
 """
 
 from __future__ import annotations
@@ -238,7 +242,8 @@ def main(argv: list[str] | None = None) -> int:
         "recipe": {
             "initialization": "inverse-dynamics",
             "duration": "uniform true outer-train final time / N; frozen",
-            "objective": "the package's configured control objective",
+            "objective": config.control_state_objective,
+            "checkpoint_selection_metric": config.checkpoint_selection_metric,
             "steps": args.steps,
             "learning_rate": args.learning_rate,
             "gradient_clip_norm": args.gradient_clip_norm,

@@ -13,7 +13,7 @@ from typing import Callable
 
 import torch
 
-from channels import POSITION_IDX, VELOCITY_IDX
+from channels import POSITION_IDX
 from config import (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -22,7 +22,6 @@ from config import (
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
 from physical_criteria import terminal_position_error_m
-from terminal_state_loss import last_reliable_terminal_velocity_target
 
 
 @dataclass(frozen=True)
@@ -50,26 +49,6 @@ class ControlTrackingLossTerms:
     state: torch.Tensor
     terminal_position: torch.Tensor
     extras: dict[str, torch.Tensor] = field(default_factory=dict)
-
-
-def terminal_velocity_error_mps(
-    normalized_segment_end_states: torch.Tensor,
-    normalized_anchor_state: torch.Tensor,
-    supervision: FixedDTControlSupervision,
-    normalizer: Normalizer,
-) -> torch.Tensor:
-    """3-D terminal chart-velocity error against the last reliable observation."""
-
-    indices = list(VELOCITY_IDX)
-    endpoint = normalized_segment_end_states[:, -1, indices]
-    target = last_reliable_terminal_velocity_target(
-        normalized_anchor_state.to(dtype=endpoint.dtype, device=endpoint.device),
-        supervision,
-    ).to(dtype=endpoint.dtype, device=endpoint.device)
-    scale = torch.as_tensor(
-        normalizer.std[indices], dtype=endpoint.dtype, device=endpoint.device
-    )
-    return torch.linalg.vector_norm((endpoint - target) * scale, dim=-1)
 
 
 def normalized_terminal_position_mse(

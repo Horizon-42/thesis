@@ -92,7 +92,10 @@ from control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
 from control.loss.components import (  # noqa: E402
     ControlStateLossResult,
     control_tracking_loss_terms,
+)
+from terminal_state_loss import (  # noqa: E402
     last_reliable_terminal_velocity_target,
+    terminal_state_metrics_numpy,
 )
 from control.training.diagnostics import (  # noqa: E402
     ControlTrainingDiagnosticsAccumulator,
@@ -117,6 +120,9 @@ from fixed_dt_supervision import (  # noqa: E402
     build_fixed_dt_supervision,
 )
 from fixed_anchor_validation import (  # noqa: E402
+    ARC_LENGTH_POSITION_END_WEIGHT,
+    TERMINAL_CROSS_TRACK_EMPHASIS,
+    TERMINAL_VERTICAL_EMPHASIS,
     fixed_anchor_arc_length_geometry_metrics,
     fixed_anchor_common_grid_ade_metrics,
     fixed_anchor_common_grid_metrics,
@@ -3496,18 +3502,37 @@ def test_arc_position_progress_weight_emphasizes_late_geometry_error():
         reference,
         _identity_normalizer(),
         points=3,
-        position_end_weight=4.0,
+        position_end_weight=ARC_LENGTH_POSITION_END_WEIGHT,
     )
     late = arc_length_geometry_metrics(
         late_error,
         reference,
         _identity_normalizer(),
         points=3,
-        position_end_weight=4.0,
+        position_end_weight=ARC_LENGTH_POSITION_END_WEIGHT,
     )
 
     assert early["unweighted_loss"] == pytest.approx(late["unweighted_loss"])
     assert late["loss"] > early["loss"]
+
+
+def test_terminal_state_metrics_numpy_applies_the_frozen_emphasis():
+    """The shape constants used to be config fields (retired with the arc-length objective,
+    T1-11); they are frozen so the ``arc_length_*`` diagnostic keys stay comparable across
+    the artifact history. A non-zero error pins the arithmetic — and the numbers."""
+    from config import COORDINATE_FRAME_RUNWAY_ALIGNED
+    predicted = np.zeros(len(ch.CHANNELS))
+    predicted[list(ch.POSITION_IDX)] = 1.0          # 1 m along, 1 m cross, 1 m vertical
+    reference = np.zeros(len(ch.CHANNELS))
+    metrics = terminal_state_metrics_numpy(
+        predicted, reference, np.zeros(len(ch.VELOCITY_IDX)), 0.0,
+        coordinate_frame=COORDINATE_FRAME_RUNWAY_ALIGNED,
+        cross_track_emphasis=TERMINAL_CROSS_TRACK_EMPHASIS,
+        vertical_emphasis=TERMINAL_VERTICAL_EMPHASIS,
+    )
+    assert (ARC_LENGTH_POSITION_END_WEIGHT, TERMINAL_CROSS_TRACK_EMPHASIS, TERMINAL_VERTICAL_EMPHASIS) == (4.0, 3.0, 5.0)
+    assert metrics["position_runway_components_m"] == pytest.approx(1.0 + 3.0 * 1.0 + 5.0 * 1.0)
+    assert metrics["position_vector_m"] == pytest.approx(np.sqrt(3.0))
 
 
 def test_fixed_anchor_arc_geometry_filters_the_same_sparse_reference_rows():

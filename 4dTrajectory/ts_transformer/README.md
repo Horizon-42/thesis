@@ -656,8 +656,9 @@ entirely (`final_time_s / N`, no learned partition) — it is what
 
 **`control_recipe_name`** (`custom` default / `simple-v1`) is the top-level switch over this
 whole design space. `custom` preserves every axis above plus several more not summarised in
-this README (tracking objective, loss grid, dynamics-rollout backend — three registries,
-each a `config.<field> → implementation` dict, not scattered branching). `simple-v1` freezes one
+this README (tracking objective, loss grid, dynamics-rollout backend, duration
+parameterization, validation selection, command hook — registries, each a
+`config.<field> → implementation` dict, not scattered branching). `simple-v1` freezes one
 concrete point in that space (uniform duration, absolute controls, the
 `scaled-transport-chart-velocity` dynamics backend, a minimal "true-time-position" tracking
 objective, every auxiliary loss weight zeroed); `TSConfig.__post_init__` raises if any of its

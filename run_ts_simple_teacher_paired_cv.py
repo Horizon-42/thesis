@@ -6,6 +6,10 @@ recipe unchanged, partitions only the usable outer-train population, regenerates
 fold's teacher schedules from that fold's training rows, and evaluates both arms on the
 same fold validation rows.  Outer-validation and outer-test trajectory values are never
 opened.
+
+The 2026-08 published numbers ran the arc-length-geometry objective with the 60/120/240 s
+prefix schedule; both were retired 2026-09-07 (package audit T1-10/11). This runner now
+trains the package's current objective at the full horizon and cannot reproduce them.
 """
 
 from __future__ import annotations
@@ -419,7 +423,8 @@ def optimize_fold_teacher(
         "recipe": {
             "initialization": "inverse-dynamics",
             "duration": "uniform true fold-train final time / N; frozen",
-            "objective": "the package's configured control objective",
+            "objective": config.control_state_objective,
+            "checkpoint_selection_metric": config.checkpoint_selection_metric,
             "steps": steps,
             "learning_rate": learning_rate,
             "gradient_clip_norm": gradient_clip_norm,

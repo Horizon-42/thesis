@@ -54,10 +54,12 @@ block stays, and its three shape parameters (position-end weight 4.0, terminal e
 3.0 / 5.0) are frozen as module constants, which is what keeps those keys comparable across
 the whole artifact history.
 
-**A naming tie-break the deletion forced.** With the sixteen arc/terminal fields out of
+**A naming tie-break the deletion widened.** With the sixteen arc/terminal fields out of
 `run_naming.CONTROL_LOSS_FIELDS`, a custom config can now tie a named recipe at ZERO
-loss-field diffs — and the documented "a later recipe wins ties" then named every point-mass
-`simple-v1` run `simple-v1-lag`, because those two recipes are the same loss design and
+loss-field diffs (the v1 / v1-lag tie itself pre-existed: `control_dynamics_model` was never a
+loss field; the deletion made it reach every point-mass run) — and the documented "a later
+recipe wins ties" then named every point-mass `simple-v1` run `simple-v1-lag`, because those
+two recipes are the same loss design and
 differ only in the flight model. The nearest-recipe rank gained a second key: fewest edits
 among the NON-loss fields the recipe also freezes.
 

@@ -743,6 +743,7 @@ def main(argv: list[str] | None = None) -> int:
     p_fit.add_argument("--checkpoint", required=True)
     p_fit.add_argument(
         "--output-dir",
+        type=Path,
         default=None,
         help="destination for fit_evaluation.json (default: checkpoint directory)",
     )
@@ -909,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
             resolve_device(args.device),
             history=history,
         )
-        output_dir = Path(args.output_dir) if args.output_dir else checkpoint_path.parent
+        output_dir = args.output_dir or checkpoint_path.parent
         document = write_fit_evaluation(
             evaluation,
             checkpoint_path=checkpoint_path,

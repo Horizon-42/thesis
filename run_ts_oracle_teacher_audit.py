@@ -1,5 +1,10 @@
 #!/usr/bin/env python
-"""Audit inverse-dynamics teacher quality on a deterministic outer-train cohort."""
+"""Audit inverse-dynamics teacher quality on a deterministic outer-train cohort.
+
+The 2026-08 published numbers ran the arc-length-geometry objective with the 60/120/240 s
+prefix schedule; both were retired 2026-09-07 (package audit T1-10/11). This runner now
+trains the package's current objective at the full horizon and cannot reproduce them.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +20,6 @@ TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
-import torch  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
 from config import (  # noqa: E402

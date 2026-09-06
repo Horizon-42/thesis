@@ -5,14 +5,12 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import torch
-from torch import nn
 
 from batch_contract import anchor_state
 from config import TSConfig
 from control.oracle.basis import DURATION_UNIFORM, BasisSchedule
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
-from prediction_outputs import ControlPrediction
 
 
 # train.prediction_loss_components, injected. Typed loosely on purpose: spelling out the
