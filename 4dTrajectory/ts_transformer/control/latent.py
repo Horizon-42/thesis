@@ -30,8 +30,10 @@ without one raises.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 import math
+from typing import Any
 
 import torch
 from torch import nn
@@ -52,6 +54,10 @@ LATENT_KL_COMPONENT = "latent_kl"
 # nothing; with no budget, above this floor (nats). Read with the budget in mind: the count
 # says "dimensions the objective is paying for", which is the collapse signal.
 ACTIVE_UNIT_KL_NATS = 0.05
+#: The per-dimension KL reaches the epoch record as one summed diagnostic per dimension
+#: (a batch diagnostic is a scalar the loop adds up); ``latent_epoch_record`` reassembles
+#: the vector, so the index format lives here and nowhere else.
+LATENT_KL_PER_DIM_PREFIX = "latent_kl_dim"
 # Both log-variances are bare linear outputs; a transient excursion turns exp() into inf and
 # the KL into NaN grads that the loop's divergence guard misdiagnoses as a learning-rate
 # problem. Bounded here, and stated: σ² ∈ [e⁻⁸, e⁸].
@@ -155,6 +161,46 @@ def per_dimension_kl(
     )
 
 
+def per_dimension_kl_mean_term(
+    q_mean: torch.Tensor, p_mean: torch.Tensor, p_logvar: torch.Tensor
+) -> torch.Tensor:
+    """The MEAN half of :func:`per_dimension_kl`: ``0.5 (μ_q − μ_p)² / σ_p²``, ``[B, Z]``.
+
+    The half a flight pays for saying something the prior does not already say — the half
+    that carries the information. The VARIANCE half is the remainder
+    (``per_dimension_kl − this``, :attr:`LatentKL.variance_term_per_dimension`) rather than
+    a second closed form: the sum is the number the objective charges and must stay
+    bit-identical to what it was before the split existed.
+    """
+    return 0.5 * (q_mean - p_mean) ** 2 / p_logvar.exp()
+
+
+@dataclass(frozen=True)
+class LatentKL:
+    """What the objective charges, and the analytic decomposition the diagnostics read.
+
+    ``charged`` is the per-flight term ``latent_beta`` multiplies (free bits applied; the
+    one-sample estimate under a mixture). Everything else is analytic and per dimension,
+    taken against ONE prior component — the only one for K = 1, the most responsible for
+    the sampled z otherwise (``prior_mean`` / ``prior_logvar`` are that component's, so a
+    reader never has to restate the choice).
+    """
+
+    charged: torch.Tensor                   # [B]
+    per_dimension: torch.Tensor             # [B, Z]
+    mean_term_per_dimension: torch.Tensor   # [B, Z]
+    #: ``|μ_q − μ_p| / σ_p``: how far this flight's posterior mean sits from the prior's,
+    #: in prior sigmas. The L2.e' probe's number — under 0.2 in every collapsed arm.
+    displacement_sigma: torch.Tensor        # [B, Z]
+    prior_mean: torch.Tensor                # [B, Z]
+    prior_logvar: torch.Tensor              # [B, Z]
+
+    @property
+    def variance_term_per_dimension(self) -> torch.Tensor:
+        """The WIDTH half of the per-dimension KL, as the remainder of the total."""
+        return self.per_dimension - self.mean_term_per_dimension
+
+
 def most_responsible_component(
     z: torch.Tensor, logits: torch.Tensor, mean: torch.Tensor, logvar: torch.Tensor
 ) -> torch.Tensor:
@@ -165,14 +211,27 @@ def most_responsible_component(
     return log_joint.argmax(dim=-1)
 
 
-def latent_kl(
-    prediction: LatentControlPrediction, *, free_bits_nats: float
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """The per-flight KL term ``[B]`` (free bits applied) and the per-dim diagnostic ``[B, Z]``.
+def _latent_kl(
+    charged: torch.Tensor, q_mean: torch.Tensor, q_logvar: torch.Tensor,
+    p_mean: torch.Tensor, p_logvar: torch.Tensor,
+) -> LatentKL:
+    """The charged term plus the analytic diagnostics against one prior component."""
+    return LatentKL(
+        charged=charged,
+        per_dimension=per_dimension_kl(q_mean, q_logvar, p_mean, p_logvar),
+        mean_term_per_dimension=per_dimension_kl_mean_term(q_mean, p_mean, p_logvar),
+        displacement_sigma=(q_mean - p_mean).abs() / (0.5 * p_logvar).exp(),
+        prior_mean=p_mean,
+        prior_logvar=p_logvar,
+    )
+
+
+def latent_kl(prediction: LatentControlPrediction, *, free_bits_nats: float) -> LatentKL:
+    """The per-flight KL term (free bits applied) and the per-dimension diagnostics.
 
     Single Gaussian prior: exact per-dimension KL, free bits per dimension. Mixture prior:
     one-sample Monte-Carlo ``log q(z) − log p(z)`` with free bits on the total (a mixture
-    has no per-dimension decomposition), and the diagnostic is the analytic KL against
+    has no per-dimension decomposition), and the diagnostics are the analytic KL against
     the component most responsible for the sampled z.
     """
     if prediction.posterior_mean is None or prediction.posterior_logvar is None:
@@ -180,10 +239,10 @@ def latent_kl(
     q_mean, q_logvar = prediction.posterior_mean, prediction.posterior_logvar
     z = prediction.latent
     if prediction.prior_logits.shape[-1] == 1:
-        kl_dim = per_dimension_kl(
-            q_mean, q_logvar, prediction.prior_mean[:, 0], prediction.prior_logvar[:, 0]
-        )
-        return (kl_dim - free_bits_nats).clamp(min=0.0).sum(dim=-1), kl_dim
+        p_mean, p_logvar = prediction.prior_mean[:, 0], prediction.prior_logvar[:, 0]
+        kl_dim = per_dimension_kl(q_mean, q_logvar, p_mean, p_logvar)
+        charged = (kl_dim - free_bits_nats).clamp(min=0.0).sum(dim=-1)
+        return _latent_kl(charged, q_mean, q_logvar, p_mean, p_logvar)
     log_q = _gaussian_log_density(z, q_mean, q_logvar)
     log_p = torch.logsumexp(
         F.log_softmax(prediction.prior_logits, dim=-1)
@@ -200,12 +259,11 @@ def latent_kl(
         total = total.clamp(min=budget) - budget
     k = most_responsible_component(z, prediction.prior_logits, prediction.prior_mean, prediction.prior_logvar)
     index = k.view(-1, 1, 1).expand(-1, 1, z.shape[-1])
-    kl_dim = per_dimension_kl(
-        q_mean, q_logvar,
+    return _latent_kl(
+        total, q_mean, q_logvar,
         prediction.prior_mean.gather(1, index).squeeze(1),
         prediction.prior_logvar.gather(1, index).squeeze(1),
     )
-    return total, kl_dim
 
 
 class LatentControlModel(ControlFeatureModel):
@@ -325,22 +383,80 @@ def with_latent_kl(
     The KL term is flight-weighted like every other control term (``flight_weights`` are
     the airport-macro weights), so β means the same thing in a multi-airport run. The
     diagnostics are UNWEIGHTED sums plus the flight count they were summed over, so the
-    epoch record divides like by like.
+    epoch record divides like by like — except the displacement MEDIAN, which is not
+    summable and is carried as this batch's median times the batch's flight count, i.e.
+    the epoch reports the flight-weighted mean of the per-batch medians (batches are
+    hundreds of flights; the same shape as ``latent_active_units``, which is likewise a
+    per-batch count).
     """
-    kl, kl_dim = latent_kl(prediction, free_bits_nats=config.latent_free_bits_nats)
-    weights = flight_weights.to(dtype=kl.dtype, device=kl.device)
+    kl = latent_kl(prediction, free_bits_nats=config.latent_free_bits_nats)
+    charged = kl.charged
+    weights = flight_weights.to(dtype=charged.dtype, device=charged.device)
+    kl_dim = kl.per_dimension.detach()
+    flights = float(len(kl_dim))
     diagnostics = dict(components.diagnostics)
-    diagnostics["latent_flights"] = kl_dim.new_tensor(float(len(kl_dim)))
+    diagnostics["latent_flights"] = kl_dim.new_tensor(flights)
     # Two KLs: the one the objective CHARGES (free bits applied; the MC estimate for a
     # mixture) and the per-dimension analytic KL against the most responsible component,
     # which active_units is read from. For K = 1 without free bits they coincide.
-    diagnostics["latent_kl_nats"] = kl.detach().sum()
-    diagnostics["latent_component_kl_nats"] = kl_dim.detach().sum()
+    diagnostics["latent_kl_nats"] = charged.detach().sum()
+    diagnostics["latent_component_kl_nats"] = kl_dim.sum()
+    # The split of that analytic KL: what the posterior MEAN's displacement costs, and what
+    # its WIDTH costs. L2.e' measured a budget spent entirely on the second — the mean term
+    # dies in the first ten epochs and nothing brings it back — so the two are recorded
+    # from epoch 1 rather than reconstructed from a probe afterwards.
+    diagnostics["latent_kl_mean_term_nats"] = kl.mean_term_per_dimension.detach().sum()
+    diagnostics["latent_kl_variance_term_nats"] = kl.variance_term_per_dimension.detach().sum()
+    diagnostics["latent_mean_displacement_sigma"] = kl.displacement_sigma.detach().median() * flights
+    mean_kl_per_dim = kl_dim.mean(dim=0)
     diagnostics["latent_active_units"] = (
-        kl_dim.detach().mean(dim=0) > active_unit_threshold_nats(config)
-    ).sum().to(kl_dim.dtype) * len(kl_dim)
+        mean_kl_per_dim > active_unit_threshold_nats(config)
+    ).sum().to(kl_dim.dtype) * flights
+    # The same count on a FIXED ruler: `active_unit_threshold_nats` moves with the free-bits
+    # budget, which made gate (1) unreadable across the L2.e' arms (each arm counted against
+    # its own threshold). This one is comparable between any two runs.
+    diagnostics["latent_active_units_0p05"] = (
+        mean_kl_per_dim > ACTIVE_UNIT_KL_NATS
+    ).sum().to(kl_dim.dtype) * flights
+    for index, value in enumerate(kl_dim.sum(dim=0)):
+        diagnostics[f"{LATENT_KL_PER_DIM_PREFIX}{index:02d}"] = value
     return replace(
         components,
-        extras={**components.extras, LATENT_KL_COMPONENT: config.latent_beta * (kl * weights).mean()},
+        extras={**components.extras, LATENT_KL_COMPONENT: config.latent_beta * (charged * weights).mean()},
         diagnostics=diagnostics,
     )
+
+
+def latent_epoch_record(
+    diagnostic_totals: Mapping[str, float], config: TSConfig
+) -> dict[str, Any]:
+    """The epoch's ``latent`` block from the epoch's summed diagnostics.
+
+    Both totals are UNWEIGHTED sums over flights (``with_latent_kl``), so they are divided
+    by the unweighted flight count they were summed over, never by the airport-weighted
+    total the objective components use. Assembled here, beside the names, so the training
+    loop restates none of them.
+    """
+    flights = max(diagnostic_totals.get("latent_flights", 0.0), 1.0)
+
+    def per_flight(name: str) -> float:
+        return diagnostic_totals.get(name, 0.0) / flights
+
+    return {
+        # what the objective charged (free bits applied; MC for a mixture)
+        "kl_nats_per_flight": per_flight("latent_kl_nats"),
+        # analytic KL per flight against the most responsible component — the quantity
+        # active_units is read from — and its two halves
+        "component_kl_nats_per_flight": per_flight("latent_component_kl_nats"),
+        "kl_mean_term_nats": per_flight("latent_kl_mean_term_nats"),
+        "kl_variance_term_nats": per_flight("latent_kl_variance_term_nats"),
+        "kl_per_dim": [
+            per_flight(f"{LATENT_KL_PER_DIM_PREFIX}{index:02d}")
+            for index in range(config.latent_dim)
+        ],
+        # |μ_q − μ_p| / σ_p, median over flights and dimensions (flight-weighted mean of
+        # the per-batch medians): under ~0.2 means z is the prior's mean wearing noise.
+        "mean_displacement_sigma": per_flight("latent_mean_displacement_sigma"),
+        "active_units": per_flight("latent_active_units"),
+        "active_units_0p05": per_flight("latent_active_units_0p05"),
+    }

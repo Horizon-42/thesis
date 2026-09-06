@@ -20,7 +20,15 @@ Pre-registered (design doc §六 L2 gates 1–2): shuffled ΔADE > 200 m pooled,
 clearly below top-1 AND below a same-K random-latent control (a separate arm; this runner
 reads whatever directories it is given, so pass that arm as `--control`).
 
-    python run_ts_latent_readout.py --arm <pred_dir> [--control <pred_dir>] [--json out.json]
+`--history <run>/history.json` adds the KEPT epoch's own latent block (L2.f): per-dimension
+KL, the KL's mean/variance split, the posterior mean's displacement from the prior mean in
+prior sigmas, and both active-unit counts. That displacement is what the L2.e' arms died on
+(0.05–0.2 σ — z is the prior's mean wearing noise), and it is readable at epoch 1, so it
+belongs beside the prediction-side gates. A run trained before those diagnostics existed
+prints the keys it does have.
+
+    python run_ts_latent_readout.py --arm <pred_dir> [--control <pred_dir>]
+                                    [--history <run>/history.json] [--json out.json]
 """
 
 from __future__ import annotations
@@ -69,6 +77,54 @@ def _stack(rows_by_arm: list[dict[str, dict]], keys: list[str], field: str) -> n
             if row is not None:
                 out[a, f] = float(row[field])
     return out
+
+
+def kept_epoch_latent(history_path: Path) -> dict:
+    """The `latent` block of the epoch the checkpoint was taken from.
+
+    The artifact says which epoch that was (`fit_diagnostics.training_objective`), so the
+    selection rule is read, never restated here.
+    """
+    payload = json.loads(history_path.read_text())
+    objective = payload["fit_diagnostics"]["training_objective"]
+    epoch = int(objective["best_epoch"])
+    row = next(item for item in payload["history"] if item["epoch"] == epoch)
+    if not row.get("latent"):
+        raise SystemExit(f"{history_path} epoch {epoch} has no latent block — not a latent run")
+    return {"history": str(history_path), "epoch": epoch,
+            "selection_metric": objective["checkpoint_selection_metric"],
+            "selection_value": objective["checkpoint_selection_value"],
+            **row["latent"]}
+
+
+def render_latent(block: dict) -> str:
+    """One line per diagnostic, in the order a collapse is diagnosed in."""
+    order = (
+        ("mean_displacement_sigma", "|q mean − p mean| / p sigma (median)", "{:.3f}"),
+        ("kl_mean_term_nats", "KL mean term (nats/flight)", "{:.4f}"),
+        ("kl_variance_term_nats", "KL variance term (nats/flight)", "{:.4f}"),
+        ("component_kl_nats_per_flight", "analytic KL (nats/flight)", "{:.4f}"),
+        ("kl_nats_per_flight", "charged KL (nats/flight)", "{:.4f}"),
+        ("beta_effective", "beta effective this epoch", "{:g}"),
+        ("active_units", "active units (budget ruler)", "{:.2f}"),
+        ("active_units_0p05", "active units (> 0.05 nats)", "{:.2f}"),
+    )
+    lines = [
+        "",
+        f"kept epoch {block['epoch']} ({block['selection_metric']}="
+        f"{block['selection_value']:.1f}) — {block['history']}",
+    ]
+    lines += [
+        f"  {label:<38s} {form.format(block[key])}"
+        for key, label, form in order if key in block
+    ]
+    if "kl_per_dim" in block:
+        lines.append("  per-dimension KL (nats/flight)         "
+                     + " ".join(f"{value:.3f}" for value in block["kl_per_dim"]))
+    lines.append("  a median displacement under ~0.2 sigma means the posterior mean sits ON the "
+                 "prior mean:")
+    lines.append("  z carries no per-flight information however large the KL is.")
+    return "\n".join(lines)
 
 
 def readout(arm: Path, control: Path | None) -> dict:
@@ -181,6 +237,8 @@ def render(result: dict) -> str:
     lines.append("minADE_K = best of {top-1, modes} per flight; miss = share whose best mode's FDE > "
                  f"{MISS_FDE_M:g} m; spread = per-flight std of the modes' FDE; shufΔADE = ADE decoded "
                  "from another flight's latent minus top-1 (≈0 means the decoder ignores z).")
+    if "latent_diagnostics" in result:
+        lines.append(render_latent(result["latent_diagnostics"]))
     return "\n".join(lines) + "\n"
 
 
@@ -190,6 +248,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control", type=Path, default=None,
                         help="an external control arm (top-1 + modes/); default = the arm's own "
                              "random/ modes from `predict --latent-random K`")
+    parser.add_argument("--history", type=Path, default=None,
+                        help="the arm's training history.json; prints the kept epoch's "
+                             "latent diagnostics (per-dim KL, mean/variance split, "
+                             "posterior-mean displacement, active units)")
     parser.add_argument("--json", type=Path, default=None)
     args = parser.parse_args(argv)
     arm = args.arm if args.arm.is_absolute() else REPO_ROOT / args.arm
@@ -197,6 +259,9 @@ def main(argv: list[str] | None = None) -> int:
         args.control if args.control.is_absolute() else REPO_ROOT / args.control
     )
     result = readout(arm, control)
+    if args.history is not None:
+        history = args.history if args.history.is_absolute() else REPO_ROOT / args.history
+        result["latent_diagnostics"] = kept_epoch_latent(history)
     text = render(result)
     print(text, end="")
     if args.json is not None:

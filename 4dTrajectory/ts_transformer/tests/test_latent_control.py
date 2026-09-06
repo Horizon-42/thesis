@@ -30,13 +30,16 @@ from control.conditioning import DYNAMICS_CONDITION_NAMES
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.latent import (
     ACTIVE_UNIT_KL_NATS,
+    LATENT_KL_PER_DIM_PREFIX,
     PRIOR_MEAN_INIT_STD,
     PriorNetwork,
     LATENT_KL_COMPONENT,
     LatentControlModel,
     LatentControlPrediction,
+    latent_epoch_record,
     latent_kl,
     per_dimension_kl,
+    per_dimension_kl_mean_term,
     with_latent_kl,
 )
 from batch_contract import LossComponents
@@ -64,7 +67,7 @@ from forecast import (
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
-from run_ts_latent_readout import readout
+from run_ts_latent_readout import kept_epoch_latent, readout, render_latent
 from synthetic import synthetic_arrivals
 
 
@@ -198,20 +201,43 @@ def _prediction(*, components: int, latent_dim: int = 3, batch: int = 2) -> Late
 
 
 def test_single_gaussian_kl_is_analytic_and_free_bits_are_per_dimension():
-    kl, kl_dim = latent_kl(_prediction(components=1), free_bits_nats=0.0)
-    assert torch.allclose(kl, torch.full((2,), 1.5))
-    assert torch.allclose(kl_dim, torch.full((2, 3), 0.5))
-    charged, _ = latent_kl(_prediction(components=1), free_bits_nats=0.4)
+    kl = latent_kl(_prediction(components=1), free_bits_nats=0.0)
+    assert torch.allclose(kl.charged, torch.full((2,), 1.5))
+    assert torch.allclose(kl.per_dimension, torch.full((2, 3), 0.5))
+    charged = latent_kl(_prediction(components=1), free_bits_nats=0.4).charged
     assert torch.allclose(charged, torch.full((2,), 0.3))         # (0.5 − 0.4) × 3
-    uncharged, _ = latent_kl(_prediction(components=1), free_bits_nats=0.5)
+    uncharged = latent_kl(_prediction(components=1), free_bits_nats=0.5).charged
     assert torch.allclose(uncharged, torch.zeros(2))
+
+
+def test_the_kl_splits_into_a_mean_term_and_a_variance_term_that_sum_back():
+    """q = N(1, 1) against p = N(0, 1): all 0.5 nats/dim are the MEAN term. The variance
+    term is the remainder of the same expression, never a second closed form."""
+    kl = latent_kl(_prediction(components=1), free_bits_nats=0.0)
+    assert torch.allclose(kl.mean_term_per_dimension, torch.full((2, 3), 0.5))
+    assert torch.allclose(kl.variance_term_per_dimension, torch.zeros(2, 3), atol=1e-7)
+    assert torch.allclose(kl.displacement_sigma, torch.ones(2, 3))   # |1 − 0| / 1
+    # a wider posterior on the prior's mean: nothing in the mean term, all in the width
+    q_mean, p = torch.zeros(2, 3), torch.zeros(2, 3)
+    wide = per_dimension_kl(q_mean, torch.ones(2, 3), p, p)
+    assert torch.allclose(
+        per_dimension_kl_mean_term(q_mean, p, p), torch.zeros(2, 3)
+    ) and torch.all(wide > 0.0)
+    # and the two halves add back up to the number the objective charges
+    mixed = latent_kl(_prediction(components=1, latent_dim=3), free_bits_nats=0.0)
+    assert torch.allclose(
+        mixed.mean_term_per_dimension + mixed.variance_term_per_dimension, mixed.per_dimension
+    )
 
 
 def test_mixture_kl_is_finite_and_keeps_a_per_dimension_diagnostic():
     torch.manual_seed(0)
-    kl, kl_dim = latent_kl(_prediction(components=4), free_bits_nats=0.0)
-    assert kl.shape == (2,) and torch.all(torch.isfinite(kl)) and torch.all(kl >= 0.0)
-    assert kl_dim.shape == (2, 3)
+    kl = latent_kl(_prediction(components=4), free_bits_nats=0.0)
+    assert kl.charged.shape == (2,) and torch.all(torch.isfinite(kl.charged))
+    assert torch.all(kl.charged >= 0.0)
+    assert kl.per_dimension.shape == (2, 3)
+    # the diagnostics are taken against ONE component, and the record says which one's
+    assert kl.prior_mean.shape == (2, 3) and kl.prior_logvar.shape == (2, 3)
 
 
 def test_a_prediction_from_the_prior_has_no_kl():
@@ -240,6 +266,42 @@ def test_with_latent_kl_adds_the_weighted_term_and_the_collapse_diagnostics():
     # every dimension carries 0.5 nats > ACTIVE_UNIT_KL_NATS -> 3 active units, batch-summed
     assert ACTIVE_UNIT_KL_NATS < 0.5
     assert out.diagnostics["latent_active_units"] == pytest.approx(3 * 2)
+    assert out.diagnostics["latent_active_units_0p05"] == pytest.approx(3 * 2)
+    # the split, the displacement and the per-dimension vector, all batch-summed alike
+    assert out.diagnostics["latent_kl_mean_term_nats"] == pytest.approx(0.5 * 3 * 2)
+    assert out.diagnostics["latent_kl_variance_term_nats"] == pytest.approx(0.0, abs=1e-6)
+    assert out.diagnostics["latent_mean_displacement_sigma"] == pytest.approx(1.0 * 2)
+    for index in range(3):
+        key = f"{LATENT_KL_PER_DIM_PREFIX}{index:02d}"
+        assert out.diagnostics[key] == pytest.approx(0.5 * 2)
+
+
+def test_the_active_unit_count_on_the_fixed_ruler_ignores_the_free_bits_budget():
+    """`active_units` moves with the budget (that is its definition); the 0.05 count is the
+    ruler that stays comparable between two runs on different budgets."""
+    zero = torch.zeros(())
+    components = LossComponents(state=zero, final_time=zero, kinematic=zero, terminal=zero)
+    prediction = _prediction(components=1, latent_dim=3)     # 0.5 nats in every dimension
+    budgeted = with_latent_kl(components, prediction, _config(latent_dim=3, latent_free_bits_nats=1.0),
+                              torch.ones(2))
+    assert budgeted.diagnostics["latent_active_units"] == pytest.approx(0.0)
+    assert budgeted.diagnostics["latent_active_units_0p05"] == pytest.approx(3 * 2)
+
+
+def test_the_epoch_record_divides_the_summed_diagnostics_by_the_flight_count():
+    zero = torch.zeros(())
+    components = LossComponents(state=zero, final_time=zero, kinematic=zero, terminal=zero)
+    config = _config(latent_dim=3)
+    out = with_latent_kl(components, _prediction(components=1, latent_dim=3), config, torch.ones(2))
+    totals = {name: float(value) for name, value in out.diagnostics.items()}
+    record = latent_epoch_record(totals, config)
+    assert record["component_kl_nats_per_flight"] == pytest.approx(1.5)
+    assert record["kl_mean_term_nats"] == pytest.approx(1.5)
+    assert record["kl_variance_term_nats"] == pytest.approx(0.0, abs=1e-6)
+    assert record["kl_per_dim"] == pytest.approx([0.5, 0.5, 0.5])
+    assert record["mean_displacement_sigma"] == pytest.approx(1.0)
+    assert record["active_units"] == pytest.approx(3.0)
+    assert record["active_units_0p05"] == pytest.approx(3.0)
 
 
 def test_the_kl_component_is_registered_only_with_a_latent():
@@ -314,8 +376,22 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
 
     first = json.loads((tmp_path / "run" / "history.json").read_text())["history"][0]
     assert LATENT_KL_COMPONENT in first["train_components"]
-    assert set(first["latent"]) == {"kl_nats_per_flight", "component_kl_nats_per_flight", "active_units"}
+    assert set(first["latent"]) == {
+        "kl_nats_per_flight", "component_kl_nats_per_flight", "kl_mean_term_nats",
+        "kl_variance_term_nats", "kl_per_dim", "mean_displacement_sigma",
+        "active_units", "active_units_0p05",
+    }
     assert 0.0 <= first["latent"]["active_units"] <= 3.0
+    assert 0.0 <= first["latent"]["active_units_0p05"] <= 3.0
+    # the vector is one entry per latent dimension and adds up to the analytic total
+    assert len(first["latent"]["kl_per_dim"]) == 3
+    assert sum(first["latent"]["kl_per_dim"]) == pytest.approx(
+        first["latent"]["component_kl_nats_per_flight"], rel=1e-6
+    )
+    assert first["latent"]["kl_mean_term_nats"] + first["latent"]["kl_variance_term_nats"] == (
+        pytest.approx(first["latent"]["component_kl_nats_per_flight"], rel=1e-6)
+    )
+    assert first["latent"]["mean_displacement_sigma"] > 0.0
 
     model, loaded, normalizer, _payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert isinstance(model, LatentControlModel) and loaded.latent_dim == 3
@@ -386,6 +462,14 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
     assert everything["min_ade_mean_m"] <= everything["top1_ade_mean_m"] + 1e-9
     assert everything["control_min_ade_mean_m"] <= everything["top1_ade_mean_m"] + 1e-9
     assert everything["mode_fde_spread_m"] is not None and everything["shuffled_delta_ade_m"] is not None
+
+    # ...and the kept epoch's own latent diagnostics, read off the artifact's best_epoch.
+    diagnostics = kept_epoch_latent(tmp_path / "run" / "history.json")
+    history = json.loads((tmp_path / "run" / "history.json").read_text())
+    assert diagnostics["epoch"] == history["fit_diagnostics"]["training_objective"]["best_epoch"]
+    assert len(diagnostics["kl_per_dim"]) == 3
+    text = render_latent(diagnostics)
+    assert "per-dimension KL" in text and "p sigma" in text
 
 
 def test_every_latent_forecast_entry_refuses_a_non_latent_checkpoint():
@@ -512,7 +596,7 @@ def test_the_mixture_kl_estimator_is_unbiased_without_a_budget():
         prior_logvar=torch.zeros(draws, 2, 4),
         posterior_mean=q_mean.expand(draws, -1), posterior_logvar=q_logvar.expand(draws, -1),
     )
-    total, _ = latent_kl(prediction, free_bits_nats=0.0)
+    total = latent_kl(prediction, free_bits_nats=0.0).charged
     assert (total < 0).float().mean() > 0.2            # a signed estimator, as it must be
     assert total.mean() == pytest.approx(float(analytic), abs=0.02)
 
