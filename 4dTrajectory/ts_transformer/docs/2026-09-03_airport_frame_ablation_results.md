@@ -1,4 +1,4 @@
-# Airport-center frame ablation — results (2026-09-03)
+30d# Airport-center frame ablation — results (2026-09-03)
 
 Plan: `2026-09-03_airport_frame_ablation_plan.md`. Readout script (the pre-registered
 tables, regenerable from the artifacts): `docs/compare_frame_arms.py`, whose JSON output
