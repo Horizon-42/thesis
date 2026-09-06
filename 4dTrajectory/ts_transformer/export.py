@@ -394,8 +394,13 @@ def write_batch(
     flight_metrics: Sequence[dict[str, float]],
     checkpoint: str | None = None,
     split: str = "test",
+    skipped: dict[str, int] | None = None,
 ) -> list[Path]:
     """Write every record plus the ``summary.json`` manifest. Returns the eval-file paths.
+
+    ``skipped`` states any bounded coverage the caller applied before predicting (today: the
+    flights a counterfactual CTA offset could not be asked of); it is written as
+    ``summary["skipped"]`` so a readout never mistakes a subset for the split.
 
     ``flight_metrics`` is ``observed_series_metrics`` per record, positionally aligned. It is
     required, not optional: a prediction batch's error against the observed track is its
@@ -498,6 +503,7 @@ def write_batch(
             + (":z-posterior" if records and records[0].source.get("zFromPosterior") else "")
         ),
         "split": split,
+        "skipped": dict(skipped or {}),
         "checkpoint": checkpoint,
         "config": config_dict,
         "total": len(rows),

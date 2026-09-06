@@ -13,6 +13,7 @@ import json
 from dataclasses import fields, replace
 
 from config import (
+    DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     TSConfig,
     CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_OFF,
@@ -23,7 +24,7 @@ from config import (
 )
 from data_provenance import require_matching_data_provenance
 from closure_output import load_labels
-from dataset import dataset_flight_key, load_flight_dicts
+from dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
 from evaluation_protocol import (
     TestReleaseError,
     begin_test_evaluation,
@@ -264,6 +265,23 @@ def run_cli(
         parser.error("--latent-samples / --latent-random / --latent-shuffle need a latent control checkpoint")
     if args.latent_samples < 0 or args.latent_random < 0:
         parser.error("--latent-samples and --latent-random must be non-negative")
+    skipped: dict[str, int] = {}
+    if args.cta_offset_s:
+        # A counterfactual CTA that leaves less than the package's minimum remaining future
+        # is not a plausible arrival time (truth durations start at ~21 s, so −90 s would ask
+        # for a landing in the past): those flights are SKIPPED and counted, never clamped —
+        # a clamp would silently change the offset the scan is read against.
+        anchor = config.seq_len - 1
+        kept = [item for item in series
+                if truth_duration_s(item, anchor) + args.cta_offset_s >= DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S]
+        skipped["cta_below_min_future"] = len(series) - len(kept)
+        if not kept:
+            parser.error(f"--cta-offset-s {args.cta_offset_s:+g} leaves no flight with at least "
+                         f"{DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S:g} s to fly")
+        print(f"  CTA offset {args.cta_offset_s:+g} s: {len(kept)} of {len(series)} flights keep >= "
+              f"{DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S:g} s of remaining future; "
+              f"{skipped['cta_below_min_future']} skipped (stated in summary.json)")
+        series = kept
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, flight_metrics = [], []
@@ -378,6 +396,7 @@ def run_cli(
         flight_metrics=flight_metrics,
         checkpoint=str(args.checkpoint),
         split=args.split,
+        skipped=skipped,
     )
     for index, (mode_rows, mode_flight_metrics) in enumerate(zip(mode_records, mode_metrics, strict=True)):
         write_batch(
