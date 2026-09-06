@@ -128,8 +128,9 @@ def heading_rate_rad_s(
     The first two state entries (horizontal position) do not enter ``dpsi/dt``, so a
     geodetic ``(lat, lon, alt, V, psi, gamma, m)`` row may be passed unchanged. The
     transport-chart backends add the moving-frame term ``omega x v`` on top of this force
-    part; at TMA speeds that contributes under 1e-3 deg/s, against a standard-rate turn's
-    3 deg/s.
+    part, and this expression omits it: measured over TMA arrivals it contributes a mean
+    3.5e-4 to 9.0e-4 deg/s and a worst ~3e-3 deg/s (bank 0.3 rad at 60 m/s) — at most
+    0.2 % of the 1.5 deg/s scale the heading-rate residual is read in.
     """
     return enu_rhs(states, controls, aero_params)[..., HEADING_RATE_ROW]
 

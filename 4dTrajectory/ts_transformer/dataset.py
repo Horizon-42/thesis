@@ -494,8 +494,15 @@ def reference_control_supervision(
 
     ``total_duration_s`` is the full supervised horizon (fitted tail included) because the
     model's segments span it, but the fitted tail has no measured velocity to differentiate.
-    Segments whose midpoint falls past ``last_measured_time_s`` therefore get weight zero,
-    the same masking the velocity term already relies on.
+    Segments whose midpoint falls past ``last_measured_time_s`` therefore get weight zero —
+    the same cut the velocity term already makes, not the same numbers (this is a hard 0/1
+    step, that one an interpolated per-channel weight).
+
+    Those midpoints sit at the UNIFORM ``(k+0.5)·T/N``, which pairs index-for-index with the
+    predicted schedule only through one chain: this target is built for the
+    ``true-time-position`` objective, which ``TSConfig`` admits only with
+    ``control_duration_parameterization="uniform"``. Under a non-uniform partition segment k
+    of the two sides would cover different physical times.
     """
     mass_kg = float(series.scenario.initial.m)
     anchor_time = float(series.times[anchor])
@@ -539,18 +546,41 @@ def reference_control_supervision(
 # samples: ADS-B reports a quantised track angle, this package's psi comes from a
 # least-squares velocity fit of it, and a single dt_s step of heading difference is
 # therefore dominated by that quantisation rather than by the turn. A central difference
-# spanning 10 s IS the boxcar average of the one-step slopes inside it — long enough to
+# over this window IS the boxcar average of the one-step slopes inside it — long enough to
 # bury the quantisation, short enough that a roll-in (~5 s) is not smeared across the
 # straight legs either side. Stated as a constant because it is a smoothing choice the
 # target depends on, not a free parameter.
+#
+# The constant is NOMINAL: the difference is taken between samples, so the half-width is
+# `int(round(W / 2 / dt_s))` samples and the REALIZED span is `2 * half * dt_s`. At the
+# package default dt_s = 2 s that is half = round(2.5) = 2 (Python rounds a .5 tie to even)
+# and a span of 8 s, not 10. Quote the realized span, never the constant, when reading how
+# much a target was smoothed. Rounding goes both ways: at a coarse dt_s the realized span
+# can also EXCEED the constant (dt_s = 3 s -> half 2 -> 12 s; dt_s = 5.05 s -> half 1 ->
+# 10.1 s). That widening is stated rather than guarded — only a dt_s too coarse for even
+# one sample of half-width is refused below.
 HEADING_RATE_SMOOTHING_WINDOW_S = 10.0
 
 
 def _smoothed_heading_rate_dps(
     times_s: np.ndarray, heading_rad: np.ndarray, dt_s: float
 ) -> np.ndarray:
-    """Central difference of an UNWRAPPED heading over the smoothing window, deg/s."""
-    half = max(1, int(round(HEADING_RATE_SMOOTHING_WINDOW_S / (2.0 * dt_s))))
+    """Central difference of an UNWRAPPED heading over the smoothing window, deg/s.
+
+    A sample step too coarse for even one sample of half-width is REFUSED with its numbers
+    rather than silently floored to one: a ``max(1, ...)`` would keep running with a window
+    of ``2 * dt_s``, arbitrarily wider than the constant that names it, and nothing
+    downstream would say so. The narrower rounding wobble either side of the nominal width
+    is stated at the constant.
+    """
+    half = int(round(HEADING_RATE_SMOOTHING_WINDOW_S / (2.0 * dt_s)))
+    if half < 1:
+        raise ValueError(
+            f"dt_s={dt_s:g}s cannot realize the {HEADING_RATE_SMOOTHING_WINDOW_S:g}s "
+            f"heading-rate smoothing window: its half-width rounds to {half} samples "
+            f"({HEADING_RATE_SMOOTHING_WINDOW_S / (2.0 * dt_s):.3g} before rounding), so "
+            f"the term needs dt_s < {HEADING_RATE_SMOOTHING_WINDOW_S:g}s"
+        )
     rows = np.arange(len(heading_rad))
     right = np.minimum(rows + half, len(heading_rad) - 1)
     left = np.maximum(rows - half, 0)
@@ -575,9 +605,15 @@ def reference_heading_rate_supervision(
     heading IS the target, and the rollout supplies the model side, so the two can never
     be solutions of different equations), and the mask is read at segment ENDPOINTS rather
     than midpoints, because a turn rate is a quantity at an instant while a
-    piecewise-constant control is a quantity over a segment. Those endpoints are exactly
-    where the velocity term's supervision weights are already zeroed past the last
-    measured velocity, so the two terms mask identically.
+    piecewise-constant control is a quantity over a segment. That is the same cut the
+    velocity term makes past the last measured velocity — not the same numbers: this is a
+    hard 0/1 step, the velocity term's is an interpolated per-channel weight.
+
+    The endpoints are placed at the UNIFORM ``(k+1)·T/N``, which is the rollout's own
+    ``cumsum(segment_durations)`` only through one chain: this target is built for the
+    ``true-time-position`` objective, which ``TSConfig`` admits only with
+    ``control_duration_parameterization="uniform"``. Under a non-uniform partition row k of
+    the two sides would be different physical instants.
 
     ``psi`` comes from :func:`channels.states_from_channels`, i.e. the modeling layer's
     math-ENU heading, unwrapped before differencing so the +/-pi branch cut cannot read as

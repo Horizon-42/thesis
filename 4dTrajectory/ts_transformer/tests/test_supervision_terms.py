@@ -116,27 +116,40 @@ def _config(n_segments: int = 8, **overrides) -> TSConfig:
 
 
 def test_a_constant_rate_turn_reads_its_own_rate_at_every_endpoint():
-    """The target is a rate, so a 3 deg/s turn must read 3 deg/s at all N endpoints."""
+    """A 3 deg/s turn reads 3 deg/s at all N endpoints, and a -3 deg/s turn reads -3.
+
+    What this pins is the UNIT and the SIGN — rad/s off the velocity channels out as signed
+    deg/s — and that the chain is rate-preserving end to end. It deliberately CANNOT catch a
+    wrong smoothing width or a wrong endpoint index: on a constant-rate turn every window
+    and every sample time gives the same answer. Those live in
+    ``test_the_smoothing_window_is_a_stated_constant_and_survives_a_jittered_heading`` (a
+    rate that is not constant under noise) and in
+    ``test_endpoints_past_the_last_measured_velocity_carry_zero_weight`` /
+    ``test_the_anchor_slice_is_the_only_past_the_target_reads``.
+    """
     duration_s = 120.0
-    series = _series_from_states(
-        _constant_turn(3.0, psi0_rad=0.4, duration_s=duration_s)
-    )
     config = _config(n_segments=8)
 
-    target = reference_heading_rate_supervision(
-        series, 0, config,
-        total_duration_s=duration_s, last_measured_time_s=duration_s,
-    )
-
-    np.testing.assert_allclose(
-        target["reference_heading_rate_dps"], 3.0, rtol=1e-6
-    )
-    assert target["reference_heading_rate_weight"].tolist() == [1.0] * 8
+    for rate_dps in (3.0, -3.0):
+        series = _series_from_states(
+            _constant_turn(rate_dps, psi0_rad=0.4, duration_s=duration_s)
+        )
+        target = reference_heading_rate_supervision(
+            series, 0, config,
+            total_duration_s=duration_s, last_measured_time_s=duration_s,
+        )
+        np.testing.assert_allclose(
+            target["reference_heading_rate_dps"], rate_dps, rtol=1e-6
+        )
+        assert target["reference_heading_rate_weight"].tolist() == [1.0] * 8
 
 
 def test_the_heading_is_unwrapped_before_it_is_differentiated():
     """psi wraps at +/-pi; differencing the wrapped angle would put a 180 deg/s spike
-    exactly where the turn crosses the branch cut, and nowhere else."""
+    exactly where the turn crosses the branch cut, and nowhere else.
+
+    Like the test above this is a constant-rate fixture, so it pins the branch cut ONLY —
+    not the window width and not the endpoint placement."""
     duration_s = 120.0
     # Start 30 degrees short of +pi at 3 deg/s: the cut is crossed 10 s in.
     series = _series_from_states(
@@ -189,6 +202,22 @@ def test_the_smoothing_window_is_a_stated_constant_and_survives_a_jittered_headi
     # of steps it spans; the single difference is not usable as a target at all.
     assert one_step_rms > 3.0 * smoothed_rms
     np.testing.assert_allclose(smoothed, 1.0, atol=0.35)
+
+
+def test_a_sample_step_too_coarse_for_the_window_is_refused_with_its_numbers():
+    """The window is a stated constant, so a dt_s that cannot realize even one sample of
+    half-width fails loudly instead of being floored to one and silently widened."""
+    duration_s = 600.0
+    dt_s = 12.0
+    series = _series_from_states(
+        _constant_turn(1.0, psi0_rad=0.0, duration_s=duration_s, dt_s=dt_s)
+    )
+
+    with pytest.raises(ValueError, match="heading-rate smoothing window"):
+        reference_heading_rate_supervision(
+            series, 0, _config(n_segments=8, dt_s=dt_s),
+            total_duration_s=duration_s, last_measured_time_s=duration_s,
+        )
 
 
 def test_endpoints_past_the_last_measured_velocity_carry_zero_weight():
@@ -466,6 +495,36 @@ def test_bank_total_variation_is_the_mean_absolute_step_in_half_box_units():
     assert float(flat.control_bank_tv[0]) == 0.0
     result.control_bank_tv.sum().backward()
     assert torch.any(controls.grad[0, :, BANK_INDEX].abs() > 0.0)
+
+
+def test_bank_total_variation_prices_reversals_and_is_stationary_when_flat():
+    """What the term can and cannot do, as gradients — the reading rule for arm ③.
+
+    ``|x|`` has subgradient ``sign(x)``, so on a monotone run the interior segments' two
+    contributions cancel and only the ends are charged: a smooth roll-in costs exactly what
+    a single step of the same total size costs. At EXACT flatness the value AND the gradient
+    are both zero — a stationary point, and the one every run starts at, because
+    ``control.heads._initialize_control_head`` zeroes the projection so all N commands are
+    identical. Only the other terms leave it. "The TV term changed nothing" is this first,
+    a too-small dose second.
+    """
+    config = _config(n_segments=4, control_bank_tv_loss_weight=1.0)
+
+    def bank_grad(schedule):
+        result, controls = _endpoint_result(config, schedule, [0.0] * 4, [0.0] * 4)
+        result.control_bank_tv.sum().backward()
+        return float(result.control_bank_tv[0]), controls.grad[0, :, BANK_INDEX]
+
+    flat_value, flat_grad = bank_grad([0.15] * 4)
+    assert flat_value == 0.0
+    torch.testing.assert_close(flat_grad, torch.zeros_like(flat_grad))
+
+    _monotone_value, monotone_grad = bank_grad([0.0, 0.1, 0.2, 0.3])
+    assert torch.all(monotone_grad[1:3] == 0.0)          # the interior cancels
+    assert float(monotone_grad[0]) < 0.0 < float(monotone_grad[3])
+
+    _reversal_value, reversal_grad = bank_grad([0.0, 0.1, 0.0, 0.1])
+    assert torch.all(reversal_grad.abs() > 0.0)          # every segment is charged
 
 
 def test_both_terms_are_weighted_into_the_objective_and_are_additive():
