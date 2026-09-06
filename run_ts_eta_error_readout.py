@@ -23,8 +23,10 @@ its signed and absolute quantiles are the same numbers by construction — it is
 the arrival-TIME error and the arrival-PLACE error are the two halves of one 4D miss and
 reading one without the other has already produced a wrong conclusion in this package.
 
-Coverage is stated per arm: rows whose metrics are null (an unscored flight) are counted
-and dropped, never silently averaged over.
+Coverage is stated per arm: a row is used only if it carries every metric AND every
+covariate the strata are cut on, and what that drops is counted, never silently averaged
+over. `established_at_anchor` is on that list for a Python reason — a present-but-null flag
+reads as False and would move the flight into the vectored stratum unnoticed.
 """
 
 from __future__ import annotations
@@ -42,26 +44,30 @@ for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from approach_difficulty import strata_masks  # noqa: E402
+from approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
 from flight_scenarios.identity import summary_row_key  # noqa: E402
 
-RESULT_SCHEMA = "ts-eta-error-readout-b0-v1"
+RESULT_SCHEMA = "ts-eta-error-readout-b0-v2"
 
 # The width an interval would need (absolute) and the shape it would need (signed).
 ABSOLUTE_QUANTILES = (50, 80, 90)
 SIGNED_QUANTILES = (10, 50, 90)
-# The metrics read out of the summary rows, and what each is called in the result.
-METRICS = {"final_time_error_s": "abs_final_time_error_s", "fde_m": "fde_m"}
+# The metrics read out of the summary rows. The published block keeps the row's own name:
+# it carries the signed quantiles as well, so calling it "abs_..." would misname half of it.
+METRICS = ("final_time_error_s", "fde_m")
+# A row is usable only if it carries every metric AND every covariate the strata are cut
+# on — `established_at_anchor` included, because a present-but-null flag reads as False and
+# would move that flight into the vectored stratum unnoticed.
+REQUIRED_FIELDS = METRICS + STRATA_COVARIATES
 
 
 def scored_rows(summary: dict) -> tuple[dict[str, dict], dict[str, int]]:
-    """The arm's rows keyed by flight, plus what was dropped for want of a metric."""
+    """The arm's rows keyed by flight, plus what was dropped for want of a field."""
     results = summary["results"]
     rows = {
         summary_row_key(row): row
         for row in results
-        if all(row.get(name) is not None for name in METRICS)
-        and row.get("route_tortuosity") is not None
+        if all(row.get(name) is not None for name in REQUIRED_FIELDS)
     }
     coverage = {
         "summary_rows": len(results),
@@ -86,7 +92,7 @@ def readout(label: str, pred_dir: Path) -> dict:
     rows, coverage = scored_rows(summary)
     keys = sorted(rows)
     if not keys:
-        raise SystemExit(f"{pred_dir} has no scored rows carrying {tuple(METRICS)}")
+        raise SystemExit(f"{pred_dir} has no rows carrying all of {REQUIRED_FIELDS}")
     masks = strata_masks(rows, keys)
     values = {
         name: np.array([float(rows[key][name]) for key in keys], dtype=np.float64)
@@ -99,10 +105,7 @@ def readout(label: str, pred_dir: Path) -> dict:
             continue
         strata[stratum] = {
             "n": int(len(selected)),
-            **{
-                published: quantile_block(values[name][selected])
-                for name, published in METRICS.items()
-            },
+            **{name: quantile_block(values[name][selected]) for name in METRICS},
         }
     return {
         "label": label,
@@ -133,7 +136,7 @@ def render(payload: dict) -> str:
             f"{'FDE p90':>9s}",
         ]
         for stratum, block in arm["strata"].items():
-            time_block, fde = block["abs_final_time_error_s"], block["fde_m"]
+            time_block, fde = block["final_time_error_s"], block["fde_m"]
             lines.append(
                 f"   {stratum:>46s} {block['n']:>5d} "
                 f"{time_block['abs_p50']:>8.1f} {time_block['abs_p80']:>8.1f} "
@@ -150,8 +153,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("arms", nargs="+", metavar="LABEL=PRED_DIR",
                         help="a scored prediction directory and the name it is reported "
-                             "under; repeatable")
-    parser.add_argument("--json", type=Path, default=None)
+                             "under; repeatable. A relative PRED_DIR resolves against the "
+                             "repository root")
+    parser.add_argument("--json", type=Path, default=None,
+                        help="write the block here as well; must not exist (an immutable "
+                             "artifact). A relative path resolves against the repository root")
     args = parser.parse_args(argv)
 
     arms: dict[str, Path] = {}
@@ -174,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     print(text, end="")
     if args.json is not None:
         out = args.json if args.json.is_absolute() else REPO_ROOT / args.json
+        if out.exists():
+            raise FileExistsError(f"{out} exists; a readout is an immutable artifact")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, indent=2))
         print(f"wrote {out}")

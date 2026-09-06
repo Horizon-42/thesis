@@ -276,20 +276,29 @@ importable. A finished one-off driver belongs there, not beside the live runners
 **Runners for the anytime / calibrated-ETA line** (2026-09-07,
 `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`):
 
-- `run_ts_anytime_curve.py` — **A0-fixed**: replays `--checkpoint LABEL=PATH` (repeatable) from
-  a grid of REMAINING-PATH anchors and reports ADE / FDE / |Δt| per bin per stratum. Three
-  things it exists to keep right: the strata are computed once at **L−1 and fixed for every
-  bin** (relabel per bin and a flight leaves the vectored stratum exactly when it rolls out on
-  final — a survivor curve reads as an improving one); the bin coordinate is
+- `run_ts_anytime_curve.py` — **A0**: replays `--checkpoint LABEL=PATH` (repeatable) from a
+  grid of REMAINING-PATH anchors and reports, per bin per stratum, ADE (mean / p50 / p95) and
+  FDE beside the time-free chamfer and Fréchet, |Δt| p50/p80 and the predicted duration p50.
+  Five things it exists to keep right: the strata are computed once at **L−1 and fixed for
+  every bin** (relabel per bin and a flight leaves the vectored stratum exactly when it rolls
+  out on final — a survivor curve reads as an improving one); the bin coordinate is
   `approach_difficulty.remaining_path_profile_m`, which the covariate itself reads, so a
-  consumer binning on distance-to-go never restates the arc length; and the reading carries the
-  out-of-distribution cost of an L−1-trained checkpoint, so it is **never quoted without an
-  A0-random arm**. `cta_conditioning=given` is refused (its duration IS the truth's).
-  **`--min-future-s 60` empties the 2 km bin and most of the 4 km one** (≈27 s / 53 s of truth
-  left at approach speed) — stated as `n=0 / partial`, but s_freeze can then only be read at
-  ≥ 6 km.
+  consumer binning on distance-to-go never restates the arc length; **bins hold different
+  flights**, so the monotonicity verdict is PAIRED over the flights present in both adjacent
+  bins and prints that n (and reads the ADE **median**, the package's convention, not the
+  mean); each checkpoint's arm is named from its OWN `random_train_anchor` (`A0-fixed` /
+  `A0-random`) because one run may hold both and their difference IS the out-of-distribution
+  cost; and every per-flight row stays in the artifact so another paired reading needs no
+  re-run. Refused: `cta_conditioning=given` and `intent_conditioning=truth-…` (both read the
+  future, the latter afresh at every anchor). `--command-hook` / `--hook-saturation` mean what
+  they mean in `predict`. **`--min-future-s 60` empties the 2 km bin and most of the 4 km one**
+  (≈27 s / 53 s of truth left at approach speed) — stated as `n=0 / partial`, but s_freeze can
+  then only be read at ≥ 6 km, and the **~125 s duration-head floor** makes |Δt| p80 RISE
+  toward the runway anyway (L1_native32 vectored: 64 s at 12 km, 141 s at 4 km).
 - `run_ts_eta_error_readout.py` — **B0**: |`final_time_error_s`| p50/p80/p90 and the SIGNED
   p10/p50/p90 (same for `fde_m`) per stratum, straight out of existing `summary.json` files.
+  A row is used only if it carries every metric AND every `STRATA_COVARIATES` field — a
+  present-but-null `established_at_anchor` would otherwise read as False and change stratum.
   Measured 2026-09-07 on KRDU val: vectored |Δt| p80 **65.8–72.5 s** against straight-in
   **12.0–20.3 s**, so one pooled ETA interval cannot serve both strata.
 

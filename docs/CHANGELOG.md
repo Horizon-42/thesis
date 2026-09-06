@@ -7,8 +7,9 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 ### 2026-09-07 — ts_transformer A0 / B0: the re-anchoring curve and the arrival-time error distribution
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
-§二 2.1–2.4 and §三 3.1, branch `dev-a0`. Both are MEASUREMENTS on existing checkpoints and
-existing prediction directories — no training, no new model axis.
+§二 2.1–2.4 and §三 3.1, branch `dev-a0` (`3f7a849` A0, `fe84e76` B0, `5f408df` tests, then
+the merge of `dev-l2` and this branch's review-fix commit). Both are MEASUREMENTS on existing
+checkpoints and existing prediction directories — no training, no new model axis.
 
 **Why.** Every evaluation in this package anchors at L−1 (`seq_len − 1`, 120 s after the 25 km
 slice starts), which is the moment the ego history knows least about where the controller is
@@ -19,13 +20,12 @@ how the error falls as the remaining path shrinks; B0 asks how wide an arrival-t
 would have to be, which is the number B1 (quantile head) and B2 (conformal) would be built
 against.
 
-**`run_ts_anytime_curve.py` (A0-fixed).** `--checkpoint LABEL=PATH`, repeatable; the cohort is
-each checkpoint's own `val` split, rebuilt the way `predict` rebuilds it; bins are REMAINING
-PATH (`--bins-km 20,16,12,8,6,4,2`), and a flight's anchor in a bin is the observed sample
-whose remaining path is closest to the bin value, empty when it has no full lookback or under
+**`run_ts_anytime_curve.py` (A0).** `--checkpoint LABEL=PATH`, repeatable; the cohort is each
+checkpoint's own `val` split, rebuilt the way `predict` rebuilds it; bins are REMAINING PATH
+(`--bins-km 20,16,12,8,6,4,2`), and a flight's anchor in a bin is the observed sample whose
+remaining path is closest to the bin value, empty when it has no full lookback or under
 `--min-future-s` of truth after it. Scored with the package's own `observed_series_metrics`.
-Writes `anytime_curve.json` + `.txt` with the §2.4 readings (vectored ADE monotone within
-±22 m; the largest s > 4 km under 1500 m; s_freeze, reported not gated). Three design points:
+Writes `anytime_curve.json` + `.txt` with the §2.4 readings. Six design points:
 
 - **The strata are computed once at L−1 and fixed for every bin.** This is the whole
   difference between a curve and a survivor curve: relabel per bin and a flight leaves the
@@ -37,18 +37,45 @@ Writes `anytime_curve.json` + `.txt` with the §2.4 readings (vectored ADE monot
   `remaining_path_profile_m` (the per-sample form, one suffix sum) and
   `approach_difficulty()` now reads its own `remaining_path_m` out of it. The anchor grid and
   the NEAR / FAR strata therefore cannot become two definitions of one name.
+- **Bins hold different flights, so the curve is read PAIRED.** A bin's population is the
+  flights whose geometry put a sample there; an unpaired difference of two medians mixes "the
+  model got better" with "this bin got easier flights". The monotonicity verdict compares
+  adjacent bins over the flights present in BOTH and prints that n, and every per-flight row
+  stays in the artifact so another paired reading needs no re-run. It reads the ADE
+  **median** (the package's convention for a heavy-tailed error); mean and p95 are published
+  beside it.
+- **Both metric families, per cell.** Time-free chamfer and Fréchet
+  (`geometric_metrics.path_metrics`, truth = the post-anchor supervision rows ADE is scored
+  against) sit next to ADE / FDE / |Δt|. The closure arm is why: at 12 km it scores ADE 6.7–8.1
+  km with a 172–176 s duration error against native32's 1128 m / 63 s — off its training
+  anchor it is an out-of-distribution CONTROL, not a competitor, and reading one family alone
+  says the opposite.
+- **The arm is a per-checkpoint fact**, named from its own `random_train_anchor`
+  (`A0-fixed` / `A0-random`): one run may hold both, their difference IS the
+  out-of-distribution cost §六 3 asks for, and the out-of-distribution warning is printed only
+  for the arms that need it.
 - **`observed_series_metrics` was already anchor-aware** (`series.times[forecast.anchor]`,
   truth = supervision rows after it, difficulty at that anchor), so nothing at the export
   boundary had to change — asserted, not assumed: a forecast that copies the truth from a
-  late anchor scores ADE 0 there.
+  late anchor scores ADE, chamfer and Fréchet 0 there.
 
-Refusals: `cta_conditioning=given` (its duration IS the truth's, so its curve improves for
-free), the sealed `test` split, and a malformed `LABEL=PATH` — all before the immutable output
-directory is created, which is why the checkpoints are loaded first and the tracks second.
+Refusals, all before the immutable output directory exists: `cta_conditioning=given` (its
+duration IS the truth's) and `intent_conditioning=truth-…` (its oracle channels are re-read
+at EVERY anchor, so the curve would measure how fast the oracle converges — three such
+checkpoints exist under `scene_phase0_20260905`), the sealed `test` split, a malformed
+`LABEL=PATH`, and a `--command-hook` without its saturation or on a non-control checkpoint.
+The artifact is staged in a `.partial-*` directory and renamed, so a crash mid-measurement
+never leaves a half-written curve under the name a reader will cite. `--limit N` is the smoke
+test on a real checkpoint (the artifact says so, and the coverage denominators are the
+flights actually built).
 
 **`run_ts_eta_error_readout.py` (B0).** A pure readout of `summary.json`: per stratum the
 |`final_time_error_s`| p50/p80/p90 and the SIGNED p10/p50/p90, and the same quantiles of
-`fde_m`. Measured on the three KRDU val arms (1404 flights each, full coverage):
+`fde_m`. A row is used only if it carries every metric AND every `STRATA_COVARIATES` field —
+the tuple `strata_masks` reads, now exported, because a present-but-null
+`established_at_anchor` would pass a numeric-only filter and then read as False, moving that
+flight into the vectored stratum unnoticed. Measured on the three KRDU val arms (1404 flights
+each, full coverage):
 
 | arm | vectored \|Δt\| p80 | straight-in \|Δt\| p80 | signed p50 (all) |
 |---|---:|---:|---:|
@@ -69,25 +96,37 @@ with a fresh example.
 cohort is eligibility-bound: `arrival_data_provenance(manifests)` without
 `eligibility_rosters` lists 14 435 KRDU arrival candidates where the checkpoint carries the
 14 378 eligible ones, and `require_matching_data_provenance` then reports "the manifest
-changed" on a checkpoint and a manifest that are both correct. The new runner reads the roster
-exactly when the checkpoint's provenance carries an `eligibility` block (not a flag — a
-checkpoint trained before the sidecar existed must not be handed one). The same plain call is
-still in `run_ts_control_basis_oracle.py --checkpoint`, where it is a live blocker for L5.a's
-unrun fit: `docs/code-health-followups.md` §19.
+changed" on a checkpoint and a manifest that are both correct. Found here, fixed for the
+package in `e8df12f` as `data_provenance.checkpoint_data_provenance(payload, manifests)` (the
+roster is read iff the checkpoint recorded one), which this runner calls — its own copy was
+deleted when `dev-l2` merged. It had been a live startup blocker for L5.a's unrun fit.
 
-**Measured while verifying, not results** (2 flights, CPU): all three §2.2 arms replay at
-anchors 87–241 against L−1 = 59, closure included — `closure_output.reconstruct` draws from
-the ANCHOR STATE and its labels only ever enter training and `--closure-from-labels`, so the
-closure arm stays in A0-fixed rather than being dropped from it.
+**Two things measured while verifying, which are not results**: all three §2.2 arms replay at
+anchors 87–260 against L−1 = 59 (closure included — `closure_output.reconstruct` draws from
+the ANCHOR STATE and its labels only ever enter training and `--closure-from-labels`); and
+the whole A0-fixed run costs ≈76 min per control arm on CPU at 1404 flights × 7 bins, with
+the closure arm roughly two orders of magnitude cheaper. Batching is by ANCHOR, and real
+anchors are nearly all distinct, so the effective batch is ≈2.7 and `--batch-size` barely
+matters.
 
-**Known gap in the design's own grid**: `--min-future-s 60` empties the 2 km bin and most of
-the 4 km one (≈27 s and ≈53 s of truth left at approach speed). The readout states it
-(`n=0 / cov 0.00 / partial`) and gate 2 only asks about s > 4 km, but **s_freeze can then only
-be read at ≥ 6 km**; reading it closer in needs a lower floor, which changes the bins'
-population and must be quoted with the result.
+**Two gaps this work found in the design's own plan**, both now written into it:
 
-Tests: `4dTrajectory/ts_transformer/tests/test_anytime_curve.py` (17) and
-`test_eta_error_readout.py` (7); package suite 580 → 604.
+- `--min-future-s 60` empties the 2 km bin and most of the 4 km one (≈27 s and ≈53 s of truth
+  left at approach speed). The readout states it (`n=0 / cov 0.00 / partial`) and gate 2 only
+  asks about s > 4 km, but **s_freeze can then only be read at ≥ 6 km**. Reading it closer in
+  needs a lower floor, which changes the bins' population and must be quoted with the result —
+  and the **~125 s duration-head floor** makes |Δt| p80 RISE toward the runway anyway
+  (L1_native32 vectored: 64 s at 12 km, 141 s at 4 km), so every cell now prints its predicted
+  duration p50 and the freeze block names the floor.
+- **The A0-random arm cannot be trained yet**: `random_train_anchor=True` raises
+  `TypeError: RandomAnchorTrajectoryWindows.__init__() got an unexpected keyword argument
+  'fitted_teacher'` before the first epoch (introduced by `e9e3639`, no current recipe uses
+  random anchors, so the suite is green). Since §六 3 forbids publishing the fixed arm's
+  curve alone, that one-line fix gates the whole A0 reading —
+  `docs/code-health-followups.md` §20.
+
+Tests: `4dTrajectory/ts_transformer/tests/test_anytime_curve.py` (24) and
+`test_eta_error_readout.py` (10); package suite 616 → 626.
 
 ### 2026-09-07 — ts_transformer T3 review: the guards that did not grow with the module map
 

@@ -59,7 +59,7 @@ def test_the_strata_carry_their_own_absolute_and_signed_quantiles(tmp_path) -> N
     }
     assert result["split"] == "val"
 
-    straight = result["strata"][STRATUM_STRAIGHT_IN]["abs_final_time_error_s"]
+    straight = result["strata"][STRATUM_STRAIGHT_IN]["final_time_error_s"]
     assert straight["abs_p50"] == pytest.approx(20.0)     # |10|, |-20|, |60|
     assert straight["abs_p80"] == pytest.approx(44.0)
     assert straight["abs_p90"] == pytest.approx(52.0)
@@ -69,7 +69,7 @@ def test_the_strata_carry_their_own_absolute_and_signed_quantiles(tmp_path) -> N
     assert straight["signed_p90"] == pytest.approx(50.0)
     assert straight["mean_signed"] == pytest.approx(50.0 / 3.0)
 
-    vectored = result["strata"][STRATUM_VECTORED]["abs_final_time_error_s"]
+    vectored = result["strata"][STRATUM_VECTORED]["final_time_error_s"]
     assert result["strata"][STRATUM_VECTORED]["n"] == 2
     assert vectored["abs_p50"] == pytest.approx(60.0)     # |-30|, |-90|
     assert vectored["abs_p80"] == pytest.approx(78.0)
@@ -98,11 +98,29 @@ def test_an_unscored_row_is_dropped_and_counted(tmp_path) -> None:
     assert result["strata"][STRATUM_ALL]["n"] == 5
 
 
-def test_a_row_without_the_covariates_cannot_be_stratified(tmp_path) -> None:
+@pytest.mark.parametrize("covariate", runner.STRATA_COVARIATES)
+def test_a_row_missing_any_stratum_covariate_cannot_be_stratified(tmp_path, covariate) -> None:
+    """Every covariate the strata are cut on, not just the numeric ones.
+
+    A present-but-NULL `established_at_anchor` would pass a "tortuosity is not None" filter
+    and then read as False — quietly moving that flight into the vectored stratum, where it
+    would widen exactly the interval B is trying to size.
+    """
     rows = [_row(flight) for flight in _FLIGHTS]
-    rows.append(_row(("NOMIX", 1.0, True, 5_000.0, 5.0, 50.0), route_tortuosity=None))
+    rows.append(_row(("NOMIX", 1.6, False, 5_000.0, 5.0, 50.0), **{covariate: None}))
     result = runner.readout("A", _write(tmp_path, rows))
-    assert result["coverage"]["dropped_unscored_rows"] == 1
+    assert result["coverage"] == {
+        "summary_rows": 6, "scored_rows": 5, "dropped_unscored_rows": 1
+    }
+    assert result["strata"][STRATUM_VECTORED]["n"] == 2       # NOT 3
+
+
+def test_the_json_is_immutable(tmp_path) -> None:
+    arm = _write(tmp_path, [_row(flight) for flight in _FLIGHTS])
+    out = tmp_path / "block" / "b0.json"
+    assert runner.main([f"one={arm}", "--json", str(out)]) == 0
+    with pytest.raises(FileExistsError):
+        runner.main([f"one={arm}", "--json", str(out)])
 
 
 def test_every_arm_is_reported_and_the_json_carries_the_schema(tmp_path) -> None:

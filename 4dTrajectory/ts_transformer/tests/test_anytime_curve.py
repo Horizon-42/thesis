@@ -14,8 +14,9 @@ Four things are silently wrong if they drift, and each is measured here rather t
 
 from __future__ import annotations
 
-import argparse
+from dataclasses import replace
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -216,7 +217,9 @@ def test_the_fingerprint_goes_through_the_package_helper(monkeypatch, tmp_path,
         return _provenance()
 
     monkeypatch.setattr(runner, "checkpoint_data_provenance", spy)
-    arm = runner.load_arm("tiny", checkpoint, "val", torch.device("cpu"))
+    grid = runner.Grid(split="val", bins_m=(10_000.0,), min_future_s=10.0,
+                       batch_size=None, limit=0)
+    arm = runner.load_arm("tiny", checkpoint, grid, torch.device("cpu"))
 
     assert seen["manifests"] == [manifest]
     assert seen["payload"]["data_provenance"] == _provenance()
@@ -270,12 +273,14 @@ def test_the_forecast_at_a_late_anchor_reads_the_history_ending_there(
         assert rows[key]["anchor_index"] == anchor
         assert rows[key]["remaining_path_m"] == pytest.approx(profile[anchor])
         history = next(row for row in seen if row[0] == anchor)[1]
+        # Independently: this recipe carries no conditioning column, so the history the
+        # model is shown IS the encoded lookback ENDING at the anchor. (Comparing against
+        # `_history_at_anchor` again would only prove the spy delegates.)
+        expected = arm.normalizer.encode(item.values)[anchor - arm.config.seq_len + 1 : anchor + 1]
+        assert history.shape == expected.shape
+        assert history == pytest.approx(expected)
         assert history == pytest.approx(
             _history_at_anchor(item, arm.config, arm.normalizer, anchor)
-        )
-        # ...and that history ends AT the anchor, in the model's own encoding.
-        assert history[-1][: len(arm.config.channels)] == pytest.approx(
-            arm.normalizer.encode(item.values[anchor : anchor + 1])[0]
         )
         forecast = forecast_approaches(
             arm.model, [item], arm.config, arm.normalizer, anchor=anchor,
@@ -353,16 +358,15 @@ def test_the_strata_are_fixed_at_the_l_minus_one_anchor(
     for item in (vectored, straight):                                 # both established there
         assert approach_difficulty(item, late[item.flight_id]).established_at_anchor
 
-    args = argparse.Namespace(
-        bins_m=[4_000.0], min_future_s=10.0, batch_size=8, split="val",
-    )
-    result = runner.measure_checkpoint(arm, [vectored, straight], args, torch.device("cpu"))
+    grid = runner.Grid(split="val", bins_m=(4_000.0,), min_future_s=10.0,
+                       batch_size=8, limit=0)
+    result = runner.measure_checkpoint(arm, [vectored, straight], grid, torch.device("cpu"))
 
     assert result["stratum_n_at_l1"] == {
         STRATUM_ALL: 2, STRATUM_STRAIGHT_IN: 1, STRATUM_VECTORED: 1,
         STRATUM_ESTABLISHED: 0, "remaining path < 13 km": 0, "remaining path >= 13 km": 2,
     }
-    cells = result["bins"]["4000.0"]
+    cells = result["bins"]["4000.0"]["strata"]
     assert cells[STRATUM_ALL]["n"] == 2
     assert cells[STRATUM_VECTORED]["n"] == 1        # NOT 0: the label did not follow the anchor
     assert cells[STRATUM_STRAIGHT_IN]["n"] == 1
@@ -399,6 +403,30 @@ def test_a_cta_conditioned_checkpoint_is_refused(monkeypatch, tmp_path) -> None:
     assert not out.exists()        # the immutable dir is claimed after every refusal
 
 
+def test_an_intent_conditioned_checkpoint_is_refused(monkeypatch, tmp_path,
+                                                     trained_checkpoint) -> None:
+    """`intent_conditioning=truth-…` reads the future, and reads it AGAIN at every anchor.
+
+    Its lead and remaining-time channels are measured at the window's anchor, so a
+    re-anchored replay hands the model a fresh oracle answer at every bin: the curve would
+    measure how quickly the oracle converges, not how quickly intent is exposed. Three such
+    checkpoints exist under `scene_phase0_20260905`, which is why this is a refusal and not
+    a note.
+    """
+    _flights, checkpoint = trained_checkpoint
+    model, config, normalizer, payload = load_checkpoint(checkpoint)
+    monkeypatch.setattr(
+        runner, "load_checkpoint",
+        lambda _path: (model, replace(config, intent_conditioning="truth-join"),
+                       normalizer, payload),
+    )
+    out = tmp_path / "never"
+    with pytest.raises(SystemExit, match="reads the FUTURE"):
+        runner.main(["--checkpoint", f"intent={checkpoint}", "--out", str(out),
+                     "--device", "cpu"])
+    assert not out.exists()
+
+
 @pytest.mark.parametrize("argv, message", [
     (["--checkpoint", "nolabel"], "LABEL=PATH"),
     (["--checkpoint", "a=x", "--checkpoint", "a=y"], "used twice"),
@@ -427,48 +455,219 @@ def test_the_curve_runs_end_to_end_and_states_its_coverage(
 
     payload = json.loads((out / "anytime_curve.json").read_text())
     assert payload["schema"] == runner.RESULT_SCHEMA
-    assert payload["arm"] == "A0-fixed" and payload["split"] == "val"
-    assert payload["bins_m"] == [20_000.0, 10_000.0, 4_000.0]
-    assert payload["min_future_s"] == 10.0
+    assert payload["grid"] == {
+        "split": "val", "bins_m": [20_000.0, 10_000.0, 4_000.0],
+        "min_future_s": 10.0, "limit": 0,
+    }
     assert "closest" in payload["anchor_definition"]
     assert payload["strata_anchor"].startswith("L-1")
+    assert "supervision rows" in payload["geometry_truth"]
 
     arm = payload["checkpoints"]["tiny"]
+    assert arm["arm"] == runner.ARM_FIXED and arm["random_train_anchor"] is False
+    assert arm["command_hook"] is None
     assert arm["checkpoint"] == str(checkpoint) and len(arm["checkpoint_sha256"]) == 64
     assert arm["airports"] == [AIRPORT] and arm["prediction_output"] == "control"
     assert arm["anchor_l1"] == 7 and arm["flights"] > 0
+    assert arm["flights"] == arm["split_flights"]          # no --limit here
     assert arm["stratum_n_at_l1"][STRATUM_ALL] == arm["flights"]
     assert set(arm["bins"]) == {"20000.0", "10000.0", "4000.0"}
-    for cells in arm["bins"].values():
-        assert set(cells) == set(arm["stratum_n_at_l1"])
-        for stratum, cell in cells.items():
-            assert set(cell) == {
-                "n", "stratum_n_at_l1", "coverage", "partial", "ade_mean_m", "fde_p50_m",
-                "abs_final_time_error_p50_s", "abs_final_time_error_p80_s",
-                "remaining_path_p50_m",
-            }
+    cell_keys = {"n", "stratum_n_at_l1", "coverage", "partial"} | {
+        metric.key for metric in runner.CELL_METRICS
+    }
+    for value, block in arm["bins"].items():
+        assert set(block) == {"strata", "flights"}
+        assert set(block["strata"]) == set(arm["stratum_n_at_l1"])
+        for stratum, cell in block["strata"].items():
+            assert set(cell) == cell_keys
             assert cell["stratum_n_at_l1"] == arm["stratum_n_at_l1"][stratum]
             assert cell["partial"] == (cell["coverage"] < runner.PARTIAL_COVERAGE)
             assert (cell["ade_mean_m"] is None) == (cell["n"] == 0)
-        # Every flight of the split reaches the 4 km bin, and none of them is counted twice.
-        assert cells[STRATUM_ALL]["n"] <= arm["flights"]
-    assert arm["bins"]["4000.0"][STRATUM_ALL]["n"] == arm["flights"]
+        # The per-flight rows ARE the `all` stratum's population at that bin, which is what
+        # makes a paired reading across bins possible at all.
+        assert len(block["flights"]) == block["strata"][STRATUM_ALL]["n"]
+        for row in block["flights"].values():
+            assert set(row) == {
+                "anchor_index", "remaining_path_m", "ade_m", "fde_m", "final_time_error_s",
+                "predicted_final_time_s", "chamfer_m", "frechet_m",
+            }
+            assert row["anchor_index"] >= arm["anchor_l1"]
+    # Every flight of this synthetic split reaches every bin (they all fly 25 km in).
+    for value in arm["bins"]:
+        assert arm["bins"][value]["strata"][STRATUM_ALL]["n"] == arm["flights"]
 
     verdicts = arm["verdicts"]
-    assert verdicts["stratum"] == STRATUM_VECTORED
-    assert verdicts["monotone"]["status"] in {"pass", "fail"}
+    assert verdicts["stratum"] == STRATUM_VECTORED and verdicts["statistic"] == "ade_p50_m"
     assert set(verdicts) == {
-        "stratum", "bins_read_m", "bins_skipped_partial_m", "monotone", "reachable", "freeze",
+        "stratum", "statistic", "bins_read_m", "bins_skipped_partial_m", "monotone",
+        "reachable", "freeze",
     }
+    # This cohort has vectored flights in every bin, so the verdict is READ (never "unread")
+    # and every adjacent pair is paired over flights that reached both.
+    assert verdicts["monotone"]["status"] in {"pass", "fail"}
+    assert len(verdicts["monotone"]["steps"]) == len(verdicts["bins_read_m"]) - 1
+    for step in verdicts["monotone"]["steps"]:
+        assert step["paired_n"] > 0
+        assert step["delta_p50_m"] == pytest.approx(
+            step["ade_p50_to_m"] - step["ade_p50_from_m"]
+        )
+    assert verdicts["freeze"]["duration_head_floor_s"] == runner.DURATION_HEAD_FLOOR_S
 
     text = (out / "anytime_curve.txt").read_text()
-    assert "A0-fixed anytime curve" in text and "FIXED arm" in text
-    assert "s med km" in text and "cov" in text
+    assert "A0 anytime curve" in text
+    assert f"{runner.ARM_FIXED}: the checkpoint was trained at L-1" in text
+    assert f"[{runner.ARM_RANDOM}]" not in text            # one arm, and it is the fixed one
+    assert "This run holds BOTH arms" not in text
+    for metric in runner.CELL_METRICS:                     # every published column prints
+        assert metric.header in text
     for stratum in arm["stratum_n_at_l1"]:
         assert stratum in text
-    assert "1." in text and "s_freeze" in text
+    assert "1. paired vectored ADE p50" in text
+    assert verdicts["monotone"]["status"].upper() in text
+    assert "3. s_freeze" in text and "duration head cannot predict below ~125 s" in text
     # The bin's flight count reaches the terminal too, not only the artifact.
     assert "4.0 km:" in capsys.readouterr().out
+
+
+def test_the_geometry_is_reported_beside_the_time_aligned_error(built_series) -> None:
+    """MEDIUM 3 / the package rule: a cell carries chamfer and Fréchet as well as ADE.
+
+    The zero-error control pins the seam — a forecast that IS the truth after the anchor has
+    zero chamfer and zero Fréchet, so the two paths handed to `geometric_metrics` are the
+    same pair `observed_series_metrics` scores.
+    """
+    config = _config()
+    for series in built_series[:2]:
+        profile = remaining_path_profile_m(series)
+        anchor = runner.bin_anchor(
+            series, profile, 8_000.0, seq_len=config.seq_len, min_future_s=10.0
+        )
+        geometry = runner._geometry(series, _truth_forecast(series, anchor, config))
+        assert geometry["chamfer_m"] == pytest.approx(0.0, abs=1e-6)
+        assert geometry["frechet_m"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_an_arm_is_named_from_its_own_training_anchor_policy(
+    monkeypatch, tmp_path, trained_checkpoint
+) -> None:
+    """HIGH 2: `A0-fixed` / `A0-random` is a per-CHECKPOINT fact, and a mixed run says so.
+
+    The two arms are not comparable as runs — their difference IS the out-of-distribution
+    cost §六 3 asks for — so the label rides in each checkpoint's own block and the banner
+    covers the arms actually present. The random arm here is the fixed checkpoint re-read
+    with `random_train_anchor=True`: this test is about the LABEL, and training a random-
+    anchor model is currently broken upstream anyway (`RandomAnchorTrajectoryWindows`
+    takes no `fitted_teacher`).
+    """
+    flights, checkpoint = trained_checkpoint
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    twin = tmp_path / "twin.pt"
+    twin.write_bytes(checkpoint.read_bytes())
+    plain = load_checkpoint(checkpoint)
+
+    def load(path):
+        model, config, normalizer, payload = plain
+        if Path(path) == twin:
+            config = replace(config, random_train_anchor=True,
+                             random_train_anchor_min_future_s=20.0)
+        return model, config, normalizer, payload
+
+    monkeypatch.setattr(runner, "load_checkpoint", load)
+
+    out = tmp_path / "mixed"
+    assert runner.main([
+        "--checkpoint", f"fixed={checkpoint}", "--checkpoint", f"random={twin}",
+        "--out", str(out), "--device", "cpu", "--bins-km", "10", "--min-future-s", "10",
+    ]) == 0
+
+    payload = json.loads((out / "anytime_curve.json").read_text())
+    assert payload["checkpoints"]["fixed"]["arm"] == runner.ARM_FIXED
+    assert payload["checkpoints"]["fixed"]["random_train_anchor"] is False
+    assert payload["checkpoints"]["random"]["arm"] == runner.ARM_RANDOM
+    assert payload["checkpoints"]["random"]["random_train_anchor"] is True
+    assert "arm" not in payload                       # never a run-level claim
+
+    text = (out / "anytime_curve.txt").read_text()
+    assert f"fixed [{runner.ARM_FIXED}]" in text and f"random [{runner.ARM_RANDOM}]" in text
+    assert f"{runner.ARM_FIXED}: the checkpoint was trained at L-1" in text
+    assert f"{runner.ARM_RANDOM}: the checkpoint was trained with random anchors" in text
+    assert "This run holds BOTH arms" in text
+
+
+def test_a_limited_run_says_so_and_counts_its_own_denominators(
+    monkeypatch, tmp_path, trained_checkpoint
+) -> None:
+    """MEDIUM 7: `--limit` is a smoke test, and the coverage is of what was BUILT."""
+    flights, checkpoint = trained_checkpoint
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    out = tmp_path / "smoke"
+    assert runner.main([
+        "--checkpoint", f"tiny={checkpoint}", "--out", str(out), "--device", "cpu",
+        "--bins-km", "10", "--min-future-s", "10", "--limit", "2",
+    ]) == 0
+
+    payload = json.loads((out / "anytime_curve.json").read_text())
+    arm = payload["checkpoints"]["tiny"]
+    assert payload["grid"]["limit"] == 2
+    assert arm["flights"] == 2 and arm["split_flights"] >= 2
+    assert arm["stratum_n_at_l1"][STRATUM_ALL] == 2
+    assert arm["bins"]["10000.0"]["strata"][STRATUM_ALL]["coverage"] == pytest.approx(1.0)
+    assert "SMOKE TEST" in (out / "anytime_curve.txt").read_text()
+
+
+def test_the_command_hook_is_passed_through_like_predict(
+    monkeypatch, tmp_path, trained_checkpoint
+) -> None:
+    """LOW 21: the adopted deployment form is `predict --command-hook barrier`, and a curve
+    of the deployed predictor has to be able to fly the same way."""
+    _flights, checkpoint = trained_checkpoint
+    grid = runner.Grid(split="val", bins_m=(10_000.0,), min_future_s=10.0,
+                       batch_size=None, limit=0)
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
+    monkeypatch.setattr(
+        runner, "checkpoint_data_provenance", lambda _payload, _manifests: _provenance()
+    )
+
+    plain = runner.load_arm("plain", checkpoint, grid, torch.device("cpu"))
+    assert plain.config.control_command_hook == "off"
+
+    # This tiny recipe is point-mass, and the hook lives on the lag dynamics: TSConfig
+    # refuses it with the reason rather than flying a hook that reads no actuator state.
+    with pytest.raises(ValueError, match="first-order-lag"):
+        runner.load_arm("hooked", checkpoint, grid, torch.device("cpu"),
+                        command_hook="barrier", hook_saturation="soft")
+
+
+def test_the_hook_flags_come_as_a_pair_and_only_on_a_control_checkpoint(
+    tmp_path, capsys, trained_checkpoint
+) -> None:
+    _flights, checkpoint = trained_checkpoint
+    with pytest.raises(SystemExit):
+        runner.main(["--checkpoint", f"a={checkpoint}", "--out", str(tmp_path / "never"),
+                     "--device", "cpu", "--command-hook", "barrier"])
+    assert "given together" in capsys.readouterr().err
+    assert not (tmp_path / "never").exists()
+
+
+def test_a_failed_measurement_leaves_no_artifact_under_the_name_a_reader_cites(
+    monkeypatch, tmp_path, trained_checkpoint
+) -> None:
+    """LOW 15: the directory appears whole. A crash mid-measurement leaves a `.partial-*`
+    directory beside it, never a half-written curve under `--out`."""
+    flights, checkpoint = trained_checkpoint
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("the rollout died")
+
+    monkeypatch.setattr(runner, "measure_bin", explode)
+    out = tmp_path / "never"
+    with pytest.raises(RuntimeError, match="the rollout died"):
+        runner.main(["--checkpoint", f"tiny={checkpoint}", "--out", str(out),
+                     "--device", "cpu", "--bins-km", "10", "--min-future-s", "10"])
+    assert not out.exists()
+    assert not list(tmp_path.glob("never.partial-*"))     # nothing was staged either
 
 
 def test_the_output_directory_is_immutable(monkeypatch, tmp_path, trained_checkpoint) -> None:
@@ -480,3 +679,4 @@ def test_the_output_directory_is_immutable(monkeypatch, tmp_path, trained_checkp
     assert runner.main(argv) == 0
     with pytest.raises(FileExistsError):
         runner.main(argv)
+    assert not list(tmp_path.glob("once.partial-*"))      # and the refusal staged nothing

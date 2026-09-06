@@ -485,3 +485,27 @@ The fitter uses it for both the check and the table's stamp; `run_ts_anytime_cur
 same helper (its own copy of the rule was deleted when `dev-l2` merged). Kept here as the record
 of why the helper exists: **a new replaying runner that calls `arrival_data_provenance` directly
 reintroduces this**, and a test that patches that function is what hid it the first time.
+
+## 20. `random_train_anchor=True` training raises before the first epoch
+
+**Verified** (2026-09-07, hit while building the A0 arm-label test): `train.fit_model` builds
+its training window set as
+
+```python
+training_dataset_class = {False: FixedAnchorTrajectoryWindows,
+                          True: RandomAnchorTrajectoryWindows}[config.random_train_anchor]
+train_set = training_dataset_class(..., fitted_teacher=fitted_teacher)
+```
+
+but `RandomAnchorTrajectoryWindows.__init__` takes no `fitted_teacher`, so any
+`random_train_anchor=True` run dies with `TypeError:
+RandomAnchorTrajectoryWindows.__init__() got an unexpected keyword argument 'fitted_teacher'`
+before a single epoch. Introduced by `e9e3639` (L5.a: the fitted teacher became a
+training-time input); no current recipe uses random anchors, which is why the suite is green.
+
+It is a **prerequisite for the A0-random arm** (anytime design §2.2): that arm is exactly
+`random_train_anchor=True` + the L1.b teacherless supervision, and §六 3 says the fixed arm's
+curve must not be published alone. The fitted teacher is refused with random anchors anyway
+(`TSConfig`), so the fix is to pass it only to the fixed-anchor class, or to accept and
+refuse it in the random one — one line either way, plus a test that constructs the random
+window set through `fit_model`.

@@ -62,6 +62,12 @@ STRATUM_FAR = "remaining path >= 13 km"
 # so every arc length here is read off these two and never off the height channel.
 _HORIZONTAL_IDX = list(POSITION_IDX[:2])
 
+# The covariates :func:`strata_masks` reads, in one tuple because every readout has to
+# filter its rows for them. Guard on ALL of them: `established_at_anchor` present but NULL
+# would pass a `route_tortuosity is not None` test and then read as False, quietly moving
+# that flight into the vectored stratum.
+STRATA_COVARIATES = ("route_tortuosity", "established_at_anchor", "remaining_path_m")
+
 
 def strata_masks(rows: dict[str, dict[str, Any]], keys: list[str]) -> dict[str, np.ndarray]:
     """The standard readout strata over rows carrying the difficulty covariates.
@@ -69,11 +75,12 @@ def strata_masks(rows: dict[str, dict[str, Any]], keys: list[str]) -> dict[str, 
     One source for every readout and measurement that reports "straight-in" against
     "vectored": a stratum defined twice is a comparison between two different populations.
     ``rows`` maps a key to a scored row (a ``summary.json`` result, say); ``keys`` fixes
-    the order the masks are aligned to.
+    the order the masks are aligned to. Every row must carry ``STRATA_COVARIATES``.
     """
-    tortuosity = np.array([rows[key]["route_tortuosity"] for key in keys])
-    established = np.array([bool(rows[key]["established_at_anchor"]) for key in keys])
-    remaining = np.array([rows[key]["remaining_path_m"] for key in keys])
+    tortuosity, established, remaining = (
+        np.array([rows[key][name] for key in keys]) for name in STRATA_COVARIATES
+    )
+    established = established.astype(bool)
     return {
         STRATUM_ALL: np.ones(len(keys), dtype=bool),
         STRATUM_STRAIGHT_IN: tortuosity < STRAIGHT_TORTUOSITY,

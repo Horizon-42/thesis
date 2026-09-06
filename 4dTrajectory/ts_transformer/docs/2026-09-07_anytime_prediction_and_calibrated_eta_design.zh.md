@@ -50,10 +50,8 @@ Phase 0 的另外三条测量决定了本文的方向：雷达引导层 4D 误�
 
 ### 〇.1 A0 / B0 的运行命令（2026-09-07 建成）
 
-A0-fixed，§2.2 的三个臂一次跑完。三个 checkpoint 都已实测能在**非默认锚点**回放（KRDU val 的 2 架
-飞机、CPU、锚点 87 / 147 / 172 / 241 对 L−1 = 59）：closure 的 `closure_output.reconstruct` 从**锚点
-状态**画路径，标签只出现在训练目标与 `--closure-from-labels` 里，不绑定读数锚点，所以 closure 留在
-A0-fixed 里，不必降为对照。
+A0-fixed，§2.2 的三个臂一次跑完。三个 checkpoint 都已实测能在**非默认锚点**回放（KRDU val，CPU，
+锚点 87–260 对 L−1 = 59）。
 
 ```bash
 conda activate aeroviz
@@ -65,14 +63,30 @@ python run_ts_anytime_curve.py \
     --out $E/anytime_a0_20260907 --split val --bins-km 20,16,12,8,6,4,2 --min-future-s 60
 ```
 
-规模：3 臂 × 7 bin × 1404 架 ≈ 2.9 万次「前向 + dense rollout」，锚点相同的航班合批。产物
-`anytime_curve.json` / `.txt`（目录不可覆盖）。
+**规模与代价**：3 臂 × 7 bin × 1404 架 ≈ 2.9 万次「前向 + dense rollout」。合批是**按锚点**做的
+（同一次 `forecast_approaches` 只吃一个锚点），而真实数据上锚点几乎两两不同，**有效批量 ≈ 2.7**，
+`--batch-size` 基本不起作用。实测 control 臂在 CPU 上约 **76 min / 臂**（1404 架 × 7 bin），
+closure 臂便宜约两个数量级（它的前向没有 rollout）。先用 `--limit N` 冒烟（产物会标 SMOKE TEST，
+覆盖率分母取实际建成的航班数），确认无误再跑全量。
+
+`--command-hook barrier --hook-saturation soft` 与 `predict` 同义，用于给「已采用的交付形态」画曲线；
+`cta_conditioning=given` 与 `intent_conditioning=truth-…` 的 checkpoint 一律拒绝（前者时长即真值，
+后者的真值汇入点/前机落地时间在**每个锚点都重新读一次未来**，曲线会变成「oracle 收敛得多快」）。
+
+**closure 在 A0-fixed 里是对照，不是竞争者**：它离开 L−1 后分布外代价最大。同一批 KRDU val 航班上，
+12 km 处 closure 的雷达引导 ADE ≈ 6.7–8.1 km、时长误差 ≈ 172–176 s，而 native32 是 1128 m / 63 s——
+closure 在 L−1 处的 996 m 是它的强项，重锚后不是。读它是为了量分布外代价，不是为了比谁准。
 
 **§2.3 的网格与 `--min-future-s 60` 在近端互相矛盾**：2 km 处真值只剩约 27 s（75 m/s），4 km 处约
 53 s，都在 60 s 地板之下，所以按字面这两个 bin 对绝大多数航班是空的。读数会把它们打成
 `n=0 / cov 0.00 / partial`（不会静默），且 §2.4 的门 2 只问 s > 4 km，不依赖它们——但 **s_freeze
 就只能在 ≥ 6 km 的 bin 上定**；若曲线到 6 km 仍 > 30 s，要定出 s_freeze 必须以更低的地板重跑
 （例如 `--min-future-s 20`），并把地板写在结果里，因为它改变的是 bin 的人口而不只是范围。
+
+**时长头有 ~125 s 地板**（包级已知陷阱），所以剩余路程小到一定程度后 **\|Δt\| 反而随着接近跑道上升**：
+L1_native32 的雷达引导 \|Δt\| p80 从 12 km 的 64 s 涨到 4 km 的 141 s。读数因此每格都打印
+`pred T p50`，freeze 段也把这个地板写出来；s_freeze 不存在时打印「not reached in the bins read」，
+不打印裸的 never。
 
 B0，同三个臂的 `_pred_val` 目录，纯读数（秒级，CPU）：
 
@@ -83,6 +97,10 @@ python run_ts_eta_error_readout.py \
     C_pred=$E/closure_p1c_20260905/C_pred_pred_val \
     --json $E/b0_eta_error_20260907/eta_error.json
 ```
+
+> §〇.2 的数字是用上面这条命令去掉 `--json` 读出来的（写产物的那一步要在主工作树跑，
+> `4dTrajectory/outputs` 在 dev 工作树里是只读软链）。**引用这些数字之前，产物
+> `b0_eta_error_20260907/eta_error.json` 必须先由上面的完整命令写出来**——本仓的规矩是只引当前产物。
 
 ### 〇.2 B0 的读数（KRDU val，1404 架，2026-09-07 当前产物，覆盖 1404/1404）
 
@@ -162,8 +180,9 @@ CTA 条件放进同一个采样器的方式，只在 L2 的 CVAE 承载不了意
 输入分布（离入口更近、更低、更慢、常已建立）与训练分布不同。A0 因此必须是**两臂**：
 
 - **A0-fixed**：现有 checkpoint（native32、L2.d warm β=0.01、closure）在锚点网格上回放。读数含分布外效应。
-  三者都已实测能在非默认锚点回放（§〇.1）；`cta_conditioning=given` 的 checkpoint 被 runner 拒绝，
-  它的时长就是真值，曲线会白白变好。
+  三者都已实测能在非默认锚点回放（§〇.1），其中 **closure 是分布外代价的对照臂**，不是精度竞争者。
+  `cta_conditioning=given` 与 `intent_conditioning=truth-…` 的 checkpoint 被 runner 拒绝：
+  两者都读未来，且后者在每个锚点都重读一次。
 - **A0-random**：`random_train_anchor=True` 训练的臂。`CLAUDE.md` 记录了随机锚点 + 模仿教师是性能悬崖
   （逐样本逐轮重算逆动力学），且拟合教师表按锚点绑定、closure 标签拒绝随机锚点。**唯一与随机锚点相容
   且已通过筛选的监督是 L1.b 的无教师组合**（hr=8 + TV=1，bank skill 0.711 vs 教师对照 0.709，ADE 不劣）。
@@ -171,6 +190,11 @@ CTA 条件放进同一个采样器的方式，只在 L2 的 CVAE 承载不了意
   保持 60 s）。这也是 L1.b 的一个独立用途。
 
 两臂的差 = 分布外代价；曲线的形状从 A0-random 读，与当前 base 的可比性从 A0-fixed 读。
+臂名由每个 checkpoint 自己的 `random_train_anchor` 决定并写进它自己的块（`A0-fixed` / `A0-random`），
+一次运行可以同时含两臂，读数会说明；分布外的告诫只对 fixed 臂打印。
+**注意（2026-09-07 实测）**：`random_train_anchor=True` 的训练当前**跑不起来**——
+`RandomAnchorTrajectoryWindows.__init__()` 不接受 `train.fit_model` 传入的 `fitted_teacher`
+（`TypeError`，先于任何 epoch）。A0-random 臂开工前必须先修这个。
 
 ### 2.3 锚点网格
 
@@ -183,7 +207,10 @@ bin 取剩余路程最接近 bin 值的样本为锚点；锚点前不足 120 s �
 
 ### 2.4 A0 的门（预注册）
 
-1. 雷达引导层 ADE(s) 随 s 减小单调下降（允许种子噪声 ±22 m 的逆序）。
+1. 雷达引导层 ADE(s) 随 s 减小单调下降（允许种子噪声 ±22 m 的逆序）。**读的是 ADE 中位数**
+   （`ade_p50_m`，本包读重尾误差的惯例；均值与 p95 同时报出但不进门），而且是**配对**读：
+   相邻两个 bin 只在两边都出现的航班上比较，读数打印配对航班数 n。bin 的人口不同，
+   不配对的两个中位数之差混了「模型变准」与「这个 bin 的航班更容易」。
 2. 存在 s\* > 4 km 使雷达引导 ADE(s\*) < 1.5 km（Phase 0 的门，在 L−1 处不可达；这里问它在哪里变得可达）。
 3. 时长误差 p80(s) 首次 < 30 s 的 s 记为 s_freeze；报告它，不设门。
 
