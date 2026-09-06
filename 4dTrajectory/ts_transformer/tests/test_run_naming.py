@@ -113,15 +113,16 @@ def test_exact_v2_content_reads_as_v2():
     assert loss_design_name(config) == "simple-v2"
 
 
-def test_the_l1b_heading_rate_term_is_a_loss_field_with_a_short_name():
-    """A run trained THROUGH the heading-rate term is a different objective and must not
-    share a name with one that was not. Every stored config predates it and carries its
-    defaults, so adding it renames nothing that exists."""
+def test_the_l1b_supervision_terms_are_loss_fields_with_short_names():
+    """A run trained THROUGH the heading-rate or bank-TV term is a different objective and
+    must not share a name with one that was not. Every stored config predates both and
+    carries their defaults, so adding them renames nothing that exists."""
     from run_naming import _ABBREV
 
     for field, abbreviation in (
         ("control_heading_rate_loss_weight", "hr"),
         ("control_heading_rate_loss_scale_dps", "hr-scale"),
+        ("control_bank_tv_loss_weight", "bank-tv"),
     ):
         assert field in CONTROL_LOSS_FIELDS
         assert _ABBREV[field] == abbreviation
@@ -132,6 +133,9 @@ def test_the_l1b_heading_rate_term_is_a_loss_field_with_a_short_name():
     assert loss_design_name(config) == "simple-v3"
     config["control_heading_rate_loss_weight"] = 8.0
     assert loss_design_name(config) == "simple-v3+(hr=8)"
+    config["control_bank_tv_loss_weight"] = 1.0
+    # Diffs are listed in CONTROL_LOSS_FIELDS order, so the heading rate leads.
+    assert loss_design_name(config) == "simple-v3+(hr=8, bank-tv=1)"
 
 
 def test_deeply_custom_loss_collapses_to_a_stable_hash():

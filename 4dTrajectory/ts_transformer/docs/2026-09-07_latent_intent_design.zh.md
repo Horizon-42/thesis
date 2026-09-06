@@ -22,7 +22,7 @@ L2 的 base = native32 + 教师**。包审计 T0 完成待 review。下一步 = 
 |---|---|---|---|
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **完成（2026-09-07）**：native32 全体 ADE 1322 vs 基线 1333（配对胜率 52.6 %，bank skill 0.726 vs 0.728）——**N=32 免费**；dense/无教师 2515/2603，否决触发，wiggle 回归——**轨迹误差损失单独不够**。结果 `2026-09-07_l1_lowdim_results.zh.md` | `l1_lowdim_20260907/`（readout、readout_bank） | 不差于 simple-v3 ✓；参数 257 → 96 ✓；bank skill ✓（native32） |
-| L1.b 监督替代教师 | **预注册（2026-09-07）**：② 航向率损失；③ ② + bank TV（① 模仿 0 撤销：simple-v2 的 bank skill 0.124 已回答）——教师只给坡度命名；模仿目标与 rollout 不一致也是 z 无利可图的候选原因 | `l1b_supervision_arms.json`、`control_heading_rate_loss_weight`、`control_bank_tv_loss_weight` | 见 §六 L1.b |
+| L1.b 监督替代教师 | **代码完成（2026-09-07，`dev-l1b`）**：② 航向率损失（模型侧读 `enu_rhs` 本身 + rollout 的实际 bank）；③ ② + bank TV（① 模仿 0 撤销：simple-v2 的 bank skill 0.124 已回答）。臂文件已填：`L1b_hr1` / `L1b_hr8` / `L1b_hr8_tv1`，筛选档 60 轮，**待入队** | `l1b_supervision_arms.json`、`control_heading_rate_loss_weight`（+ `_scale_dps`）、`control_bank_tv_loss_weight`、`tests/test_supervision_terms.py` | 见 §六 L1.b |
 | L2 CVAE 骨架（隐意图 z） | **`L2_gauss`（β=1）与 `L2b_beta0p1`（β=0.1）都坍缩，KL 轨迹相同且低于 free-bits 地板——β 不是约束，阶梯停在第一阶；β=0.1 的 top-1 与 native32 打平（雷达引导 FDE −235 m）。死路是后验初始化 → L2.d 热启动后验（`latent_posterior_init_std=0.1`）预注册，campaign `l2_warm_posterior_20260907`（见 §六 L2 末）** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
@@ -257,6 +257,30 @@ wiggle"是未测的。还有一层：模仿项占损失 0.556，而逆动力学�
 拟合已降到 2–3 h，贪心是它的近视近似且把纠错瞬变写进目标；双层优化与分布匹配（GAN/MMD）——超出
 路线与规模。"少数几次有滚转率限制的机动"作为另一种基，先用 L0 的宽度 oracle 量表示误差再决定。
 臂文件 `docs/experiments/l1b_supervision_arms.json`，②③ 实现 + review 后填入。**筛选档**：坍缩 / wiggle 这类定性问题用 60 轮（约 20 min/臂）先筛，过筛的臂再跑满 180 轮出门数（`epochs` 是 config 字段，臂文件直接设；不减航班——减航班改变总体，数字不再可比，而且加速比更小）。
+
+**实现（2026-09-07，`dev-l1b`）**：分量名 `heading_rate` / `bank_tv`，与 `velocity` / `imitation` 同在
+`true-time-position` 目标下注册；在别的目标下给非 0 权重会被 config **直接拒绝**（不会静默失效）。
+CLI `--control-heading-rate-weight` / `--control-heading-rate-scale-dps` / `--control-bank-tv-weight`；
+run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命名，0 处变化）。三个臂
+`L1b_hr1` / `L1b_hr8` / `L1b_hr8_tv1`。
+
+- **目标**（`dataset.reference_heading_rate_supervision`，只在训练期、读未来）：观测 ψ 取自速度通道
+  （`states_from_channels`，即建模层的 math-ENU 航向，符号约定与 rollout 同源），`np.unwrap` 后做
+  **中心差分**，窗宽是模块常数 `HEADING_RATE_SMOOTHING_WINDOW_S = 10 s`（半宽 `floor(W/2/dt_s)` 个
+  样本，dt_s = 2 s 时为 2，即跨度 8 s——ADS-B 航迹角是量化值，单步 2 s 差分是噪声而不是转弯率），
+  再采样到 N 个段端点。权重 = 端点时刻 ≤ 最后一个实测速度时刻（与速度项同一处掩码；模仿项用段中点，
+  因为控制量是段上的量、转弯率是瞬时量）。
+- **模型侧**（`train.control_heading_rate_mse`）：`aerodynamic_model.torch_dynamics.heading_rate_rad_s`
+  直接从 `enu_rhs` 里读 ψ 行，输入是 rollout 的段端点状态和该处的**实际**控制
+  （`EndpointControlRollout.actual_controls`：point-mass 下就是指令，一阶滞后下是作动器状态）。
+  **更正预注册的一处写法**：RHS 积分的是 `g·n_realized·sin φ /(V·cos γ)`（载荷因子含失速限幅），
+  教科书的 `g·tan φ / V` 只在协调平飞（`n = cos γ / cos φ`）下与之相等；代码调用 RHS 本身，
+  "按构造模型一致"才是真成立而不是近似成立。尺度 `control_heading_rate_loss_scale_dps = 1.5`
+  是读数单位（半个标准转弯率），不是剂量。
+- **`bank_tv`**：相邻**指令** bank 的平均 |步长| ÷ 半个 bank 盒宽（`CONTROL_HALF_WIDTH[BANK_INDEX]`）。
+  罚指令而不是滞后后的实际 bank——罚后者等于为作动器执行它收到的指令而罚它。
+- **剂量是标定不是结论**：模仿项的剂量曲线在 ~11.8×–~47× 位置项之间是噪声平台，所以航向率的剂量未知，
+  1.0 / 8.0 是**把它夹在中间**，TV 的 1.0 是毫无先验的第一次探针。
 
 ### L2 — CVAE 骨架（隐意图；≈1 周）
 

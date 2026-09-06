@@ -89,7 +89,7 @@ from models import build_model, parameter_count, resolve_device
 from batch_contract import LossComponents, anchor_state, model_forward, unpack_batch
 from io_utils import file_sha256
 from control.envelope import CONTROL_HALF_WIDTH
-from control.envelope import physical_controls
+from control.envelope import BANK_INDEX, physical_controls
 from control.dynamics.backends import EndpointControlRollout
 from aerodynamic_model.torch_dynamics import heading_rate_rad_s
 from prediction_outputs import ControlPrediction, StatePrediction
@@ -211,6 +211,7 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
             *(("velocity",) if config.control_velocity_loss_weight else ()),
             *(("imitation",) if config.control_imitation_loss_weight else ()),
             *(("heading_rate",) if config.control_heading_rate_loss_weight else ()),
+            *(("bank_tv",) if config.control_bank_tv_loss_weight else ()),
         ),
     }
     return (
@@ -517,6 +518,24 @@ def control_heading_rate_mse(
     return (delta.square() * weight).sum(dim=1) / weight.sum(dim=1).clamp(min=1.0)
 
 
+def control_bank_total_variation(
+    controls: torch.Tensor, config: TSConfig
+) -> torch.Tensor | None:
+    """Per-flight mean |bank step| between adjacent COMMANDED segments, in half-box units.
+
+    A structural constraint rather than a target: it prices the schedule's roughness
+    without naming a value, so it can only remove the wiggle the teacherless arms grew, not
+    put a shape in. The commanded schedule is the one the head owns — penalising the lagged
+    actual bank would charge the actuator for the command it was given.
+    """
+    if not config.control_bank_tv_loss_weight:
+        return None
+    bank = controls[..., BANK_INDEX]
+    return (bank[:, 1:] - bank[:, :-1]).abs().mean(dim=1) / float(
+        CONTROL_HALF_WIDTH[BANK_INDEX]
+    )
+
+
 def _native_endpoint_control_state_loss(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
@@ -584,6 +603,7 @@ def _native_endpoint_control_state_loss(
         physical_velocity_mse=physical_velocity_mse,
         control_imitation_mse=control_imitation_mse(prediction, config, dynamics),
         control_heading_rate_mse=control_heading_rate_mse(rollout, config, dynamics),
+        control_bank_tv=control_bank_total_variation(prediction.controls, config),
         aligned_targets=aligned_targets,
         aligned_weights=aligned_weights,
         hook_diagnostics=command_hook.diagnostics() if command_hook is not None else {},

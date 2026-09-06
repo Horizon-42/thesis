@@ -387,6 +387,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--control-bank-tv-weight",
+        type=float,
+        default=None,
+        help=(
+            "weight of the COMMANDED bank's total variation: mean |step| between adjacent "
+            "segments, in half-box units (default: 0, off)"
+        ),
+    )
+    parser.add_argument(
         "--control-gradient-clip-norm",
         type=float,
         default=None,
@@ -574,6 +583,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_state_duration_gradient", args.control_state_duration_gradient),
         ("control_heading_rate_loss_weight", args.control_heading_rate_weight),
         ("control_heading_rate_loss_scale_dps", args.control_heading_rate_scale_dps),
+        ("control_bank_tv_loss_weight", args.control_bank_tv_weight),
         ("control_gradient_clip_norm", args.control_gradient_clip_norm),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),

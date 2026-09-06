@@ -1,11 +1,13 @@
-"""L1.b: the heading-rate supervision that replaces the imitation teacher's job.
+"""L1.b: the two supervision terms that replace the imitation teacher's job.
 
 The teacher's one real job is to NAME THE BANK (position is derivative order 0, velocity
 order 1, bank order 2), and its inverse-dynamics target is not consistent with the rollout.
-This term prices the same information through the rollout instead:
+These two terms price the same information through the rollout instead:
 
 * ``heading_rate`` — the rollout's own turn rate at each segment endpoint against the flown
-  track's, read out of the RHS the rollout integrates.
+  track's, read out of the RHS the rollout integrates;
+* ``bank_tv`` — the commanded bank's total variation, a structural penalty that names no
+  value at all.
 
 The heading-rate half is tested as TWO HALVES AGAINST EACH OTHER: a rollout at a constant
 positive bank, the target rebuilt from the track that rollout flew, and the two required to
@@ -43,7 +45,7 @@ from config import (
     recipe_settings,
 )
 from control.dynamics import rollout as control_rollout
-from control.envelope import BANK_INDEX, physical_controls
+from control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
 from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
 from coordinate_frames import ENUFrame
 from dataset import (
@@ -452,42 +454,63 @@ def test_the_heading_rate_term_ignores_masked_endpoints():
     assert float(all_zero.control_heading_rate_mse[0]) == 0.0
 
 
-def test_the_term_is_weighted_into_the_objective_and_is_additive():
+def test_bank_total_variation_is_the_mean_absolute_step_in_half_box_units():
+    config = _config(n_segments=4, control_bank_tv_loss_weight=1.0)
+    schedule = [0.0, 0.2, 0.2, -0.1]
+    result, controls = _endpoint_result(config, schedule, [0.0] * 4, [0.0] * 4)
+
+    expected = (0.2 + 0.0 + 0.3) / 3.0 / float(CONTROL_HALF_WIDTH[BANK_INDEX])
+    assert float(result.control_bank_tv[0]) == pytest.approx(expected)
+    # A constant schedule has none of it, and the term reaches the commanded bank.
+    flat, _ = _endpoint_result(config, [0.15] * 4, [0.0] * 4, [0.0] * 4)
+    assert float(flat.control_bank_tv[0]) == 0.0
+    result.control_bank_tv.sum().backward()
+    assert torch.any(controls.grad[0, :, BANK_INDEX].abs() > 0.0)
+
+
+def test_both_terms_are_weighted_into_the_objective_and_are_additive():
     result = ControlStateLossResult(
         normalized_mse=torch.zeros(2, dtype=torch.float64),
         normalized_segment_end_states=torch.zeros(2, 4, 6, dtype=torch.float64),
         physical_position_mse=torch.tensor([0.25, 0.5], dtype=torch.float64),
         physical_velocity_mse=torch.tensor([4.0, 9.0], dtype=torch.float64),
         control_heading_rate_mse=torch.tensor([2.0, 3.0], dtype=torch.float64),
+        control_bank_tv=torch.tensor([0.1, 0.2], dtype=torch.float64),
     )
     normalizer = Normalizer(mean=np.zeros(6), std=np.ones(6))
     terminal = torch.zeros(2, 6, dtype=torch.float64)
     off = control_tracking_loss_terms(result, terminal, terminal, _config(4), normalizer, None)
-    on_config = _config(4, control_heading_rate_loss_weight=8.0)
+    on_config = _config(
+        4, control_heading_rate_loss_weight=8.0, control_bank_tv_loss_weight=1.0
+    )
     on = control_tracking_loss_terms(result, terminal, terminal, on_config, normalizer, None)
 
-    assert "heading_rate" not in off.extras
+    assert "heading_rate" not in off.extras and "bank_tv" not in off.extras
     torch.testing.assert_close(
         on.extras["heading_rate"], torch.tensor([16.0, 24.0], dtype=torch.float64)
+    )
+    torch.testing.assert_close(
+        on.extras["bank_tv"], torch.tensor([0.1, 0.2], dtype=torch.float64)
     )
     torch.testing.assert_close(on.state, off.state)
 
 
-def test_the_component_is_registered_only_when_its_weight_is_non_zero():
+def test_the_components_are_registered_only_when_their_weight_is_non_zero():
     """A term missing from ``loss_component_names`` is a KeyError on the first batch,
     after the slow dataset build."""
     off = _config(4)
     assert "heading_rate" not in train_module.loss_component_names(off)
+    assert "bank_tv" not in train_module.loss_component_names(off)
 
-    on = _config(4, control_heading_rate_loss_weight=1.0)
+    on = _config(4, control_heading_rate_loss_weight=1.0, control_bank_tv_loss_weight=1.0)
     names = train_module.loss_component_names(on)
-    assert "heading_rate" in names
+    assert "heading_rate" in names and "bank_tv" in names
     # Beside, not instead of: the four base components are untouched.
     assert names[:4] == ("state", "final_time", "kinematic", "terminal")
 
 
 def test_a_weight_that_no_objective_would_build_is_refused():
-    """The term is built by the true-time-position objective only. Under any other the
+    """Both terms are built by the true-time-position objective only. Under any other the
     weight could not change an answer, so the config refuses it rather than ignoring it."""
     with pytest.raises(ValueError, match="control_heading_rate_loss_weight"):
         _config(
@@ -496,11 +519,20 @@ def test_a_weight_that_no_objective_would_build_is_refused():
             control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
             control_heading_rate_loss_weight=1.0,
         )
+    with pytest.raises(ValueError, match="control_bank_tv_loss_weight"):
+        _config(
+            4,
+            control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+            control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+            control_bank_tv_loss_weight=1.0,
+        )
 
 
 def test_negative_weights_and_a_non_positive_scale_are_refused():
     with pytest.raises(ValueError, match="control_heading_rate_loss_weight"):
         _config(4, control_heading_rate_loss_weight=-1.0)
+    with pytest.raises(ValueError, match="control_bank_tv_loss_weight"):
+        _config(4, control_bank_tv_loss_weight=-0.5)
     for scale in (0.0, -1.5, math.inf, math.nan):
         with pytest.raises(ValueError, match="control_heading_rate_loss_scale_dps"):
             _config(4, control_heading_rate_loss_scale_dps=scale)
@@ -524,24 +556,29 @@ def test_the_scale_is_the_unit_the_residual_is_read_in():
 # ── recipes, naming and the whole loop ───────────────────────────────────────
 
 def test_the_recipe_definitions_pin_the_terms_off():
-    """Every named recipe is simple-v3 or older, i.e. the TEACHER line. L1.b's term is
-    what the teacher is measured against, so a recipe must spell it off as a literal."""
+    """Every named recipe is simple-v3 or older, i.e. the TEACHER line. L1.b's terms are
+    what the teacher is measured against, so a recipe must spell them off as literals."""
     literals = control_simple_v1_overrides()
     assert literals["control_heading_rate_loss_weight"] == 0.0
     assert literals["control_heading_rate_loss_scale_dps"] == 1.5
+    assert literals["control_bank_tv_loss_weight"] == 0.0
     for recipe in ("simple-v1", "simple-v1-lag", "simple-v2", CONTROL_RECIPE_SIMPLE_V3):
-        assert control_recipe_overrides(recipe)["control_heading_rate_loss_weight"] == 0.0
+        overrides = control_recipe_overrides(recipe)
+        assert overrides["control_heading_rate_loss_weight"] == 0.0
+        assert overrides["control_bank_tv_loss_weight"] == 0.0
 
 
-def test_the_term_names_the_run_only_when_it_leaves_the_default():
+def test_the_terms_name_the_run_only_when_they_leave_the_default():
     plain = TSConfig(**recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=True))
     assert run_display_name(plain.to_dict()).split(" · ")[3] == "simple-v3"
 
     settings = dict(recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=False))
-    settings.update(control_heading_rate_loss_weight=8.0)
+    settings.update(
+        control_heading_rate_loss_weight=8.0, control_bank_tv_loss_weight=1.0
+    )
     armed = TSConfig(**settings)
     loss = run_display_name(armed.to_dict()).split(" · ")[3]
-    assert "hr=8" in loss
+    assert "hr=8" in loss and "bank-tv=1" in loss
     # The scale rides along only when it too is moved off the recipe's literal.
     assert "hr-scale" not in loss
     rescaled = replace(armed, control_heading_rate_loss_scale_dps=3.0)
@@ -587,20 +624,30 @@ def _train_screening(tmp_path: Path, name: str, **overrides):
     return series, tmp_path / name
 
 
-def test_a_screening_run_records_the_term_and_it_changes_the_schedule(tmp_path: Path):
-    """The end-to-end contract: the component reaches history.json with finite values, and
-    training THROUGH it lands on a different schedule than the same seed without it."""
+def test_a_screening_run_records_both_terms_and_they_change_the_schedule(tmp_path: Path):
+    """The end-to-end contract: both components reach history.json with finite values, and
+    training THROUGH them lands on a different schedule than the same seed without them."""
     _series, plain_dir = _train_screening(tmp_path, "plain")
     series, armed_dir = _train_screening(
-        tmp_path, "armed", control_heading_rate_loss_weight=8.0,
+        tmp_path, "armed",
+        control_heading_rate_loss_weight=8.0,
+        control_bank_tv_loss_weight=1.0,
     )
 
     armed = json.loads((armed_dir / "history.json").read_text())["history"]
     for epoch in armed:
-        assert math.isfinite(epoch["train_components"]["heading_rate"])
+        for name in ("heading_rate", "bank_tv"):
+            assert name in epoch["train_components"], name
+            assert math.isfinite(epoch["train_components"][name])
         assert epoch["train_components"]["heading_rate"] > 0.0
+    # The control head starts with a zeroed projection, so every segment carries the same
+    # neutral command and the FIRST epoch's total variation is exactly zero. It becomes
+    # positive as soon as the schedule stops being flat — which is what the term prices.
+    assert armed[0]["train_components"]["bank_tv"] == 0.0
+    assert armed[-1]["train_components"]["bank_tv"] > 0.0
     plain = json.loads((plain_dir / "history.json").read_text())["history"]
     assert "heading_rate" not in plain[0]["train_components"]
+    assert "bank_tv" not in plain[0]["train_components"]
 
     schedules = []
     for run in (plain_dir, armed_dir):
