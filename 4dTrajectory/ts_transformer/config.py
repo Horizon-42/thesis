@@ -361,15 +361,22 @@ PROCEDURE_LOSS_FIELDS = (
 # The rollout command hook: a constraint module that rewrites each control segment's
 # command from the state at the segment's start (control/dynamics/hooks.py). ``barrier``
 # is the per-step safety layer (a barrier on the corridor gives a bank interval the command
-# is saturated into); ``nominal-residual`` is a fixed tracking law toward the centreline
-# and glidepath with the command as a bounded residual around it
-# (docs/2026-09-05_control_constraint_design.zh.md). Both act only where the corridor gate
-# says the aircraft is on the final; ``soft`` saturation keeps gradients in the training
-# loop, ``hard`` is for inference-only arms.
+# is saturated into). It acts only where the corridor gate says the aircraft is on the
+# final; ``soft`` saturation keeps gradients in the training loop, ``hard`` is for
+# inference-only arms.
 CONTROL_HOOK_OFF = "off"
 CONTROL_HOOK_BARRIER = "barrier"
+# ``nominal-residual`` — a fixed tracking law toward the centreline and glidepath with the
+# command as a bounded residual — was NEVER ADOPTED
+# (docs/2026-09-06_control_hooks_results.zh.md) and its code is archived
+# (archive/nominal_law_hook_2026_09/). The VALUE stays because six 2026-09-06 configs, and
+# the checkpoints `load_checkpoint` rebuilds from them, carry it; `build_command_hook`
+# refuses to construct it, so it cannot be chosen for new work.
 CONTROL_HOOK_NOMINAL_RESIDUAL = "nominal-residual"
+#: What a STORED config may say.
 CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL)
+#: What a NEW run may select (the CLI's choices).
+CONTROL_HOOKS_AVAILABLE = (CONTROL_HOOK_BARRIER,)
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
@@ -416,6 +423,18 @@ RETIRED_SERIALIZED_FIELDS = (
     # The gradient-clip POLICY axis went with `final-time-decoupled`: one remaining member
     # is not a choice, it is the behaviour. `control_gradient_clip_norm` stays.
     "control_gradient_clip_policy",
+    # The nominal-law hook's six gains (T2, 2026-09-07). Its code is archived
+    # (archive/nominal_law_hook_2026_09/) and nothing else reads them — the P1.d closure
+    # tracker that also used them went in T1-9. Measured on disk: not one stored config
+    # sets any of the six away from its default, so no recomputed run name moves. The
+    # `control_command_hook="nominal-residual"` VALUE is deliberately NOT retired; six
+    # 2026-09-06 configs and their checkpoints would stop loading.
+    "control_nominal_l1_distance_m",
+    "control_nominal_vertical_lookahead_m",
+    "control_nominal_vertical_gain",
+    "control_nominal_residual_bank_max_rad",
+    "control_nominal_residual_load_max",
+    "control_nominal_speed_gain",
 )
 
 CONTROL_HOOK_FIELDS = (
@@ -423,12 +442,6 @@ CONTROL_HOOK_FIELDS = (
     "control_hook_saturation",
     "control_barrier_alpha",
     "control_barrier_heading_gain",
-    "control_nominal_l1_distance_m",
-    "control_nominal_vertical_lookahead_m",
-    "control_nominal_vertical_gain",
-    "control_nominal_residual_bank_max_rad",
-    "control_nominal_residual_load_max",
-    "control_nominal_speed_gain",
 )
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
@@ -838,16 +851,6 @@ class TSConfig:
     # error outside the admissible interval into a turn-rate demand (1/s).
     control_barrier_alpha: float = 0.1
     control_barrier_heading_gain: float = 0.1
-    # Nominal law + residual: L1 lateral lookahead, the vertical lookahead and gain of the
-    # glidepath law, and the residual bounds around the nominal command.
-    control_nominal_l1_distance_m: float = 3000.0
-    control_nominal_vertical_lookahead_m: float = 2000.0
-    control_nominal_vertical_gain: float = 0.2
-    control_nominal_residual_bank_max_rad: float = math.radians(5.0)
-    control_nominal_residual_load_max: float = 0.1
-    # Thrust coordination of the nominal-law hook: T' = T + k·m·(V_reference − V), the
-    # reference being the network's own unhooked rollout (1/k = 10 s).
-    control_nominal_speed_gain: float = 0.1
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -1005,10 +1008,7 @@ class TSConfig:
                 raise ValueError("the command hook rides the native segment-endpoint rollout")
             if self.coordinate_frame != COORDINATE_FRAME_ENU:
                 raise ValueError("the command hook reads the threshold-anchored ENU chart")
-            for name in ("control_barrier_alpha", "control_barrier_heading_gain",
-                         "control_nominal_l1_distance_m", "control_nominal_vertical_lookahead_m",
-                         "control_nominal_vertical_gain", "control_nominal_residual_bank_max_rad",
-                         "control_nominal_residual_load_max", "control_nominal_speed_gain"):
+            for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
                 if getattr(self, name) <= 0.0:
                     raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
         if (

@@ -1,5 +1,7 @@
 # control 输出上的命令 hook：屏障过滤器与名义律 + 有界残差（实验报告，2026-09-06）
 
+> **代码已归档（2026-09-07，包审计 T2）。** 本文引用的名义律 hook（`control/constraints/nominal_residual.py` + `control/guidance_laws.py`）从未被采用（采用的是预测期软屏障），随 P1.d 跟踪器在 T1-9 被删后失去唯一消费者，已移入 `archive/nominal_law_hook_2026_09/`：不在 import 路径上、不再可训练。`control_command_hook="nominal-residual"` 取值保留（六个 2026-09-06 配置与检查点要靠它加载），但 `build_command_hook` 拒绝构造它。数字保留为历史，不重写。
+
 承接 `2026-09-05_control_constraint_design.zh.md`（方案，第六版）和 `2026-09-05_control_penalty_results.zh.md`（罚项）。两轮实验：`control_hooks_20260906`（v1 代码 cd981f4，KRDU）和 `control_hooks_v2_20260906`（屏障 v2 dff1cf0 + 名义律 v2 bc2a4f2，KRDU + KSJC），都是 simple-v3、openap-direct 队列、一个种子（1337），基线是 `control_procedure_20260905/A_control_v3`（同一清单、名册、划分种子，不重跑）。读数：`docs/compare_constraint_arms.py`（走廊、终点、分层配对、回收率；各实验目录下 `readout.json/.txt`）、`docs/score_control_arms.py`（坡度统计；`score.txt`），hook 诊断读 `history.json` 的 `command_hook`；终点能量、门开距离分箱和配对差分布用本次的临时脚本（数字见文中）。
 
 ## 一句话结论

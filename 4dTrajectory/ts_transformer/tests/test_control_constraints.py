@@ -1,4 +1,9 @@
-"""The two command-hook constraint modules: barrier filter and nominal law + residual."""
+"""The command-hook constraint module that stayed: the barrier filter and its gate.
+
+The nominal tracking law that shared this file was never adopted and is archived
+(`archive/nominal_law_hook_2026_09/`); what remains of it here is the contract that its
+retired vocabulary value still NAMES a stored run and no longer BUILDS one.
+"""
 
 from __future__ import annotations
 
@@ -21,13 +26,11 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL,
     HOOK_SATURATION_HARD, PREDICTION_CONTROL, TSConfig, recipe_settings,
 )
-from control.constraints import BarrierFilter, NominalResidual, build_command_hook  # noqa: E402
-import control.constraints.nominal_residual as nominal_residual_module  # noqa: E402
+from control.constraints import BarrierFilter, build_command_hook  # noqa: E402
 from control.constraints.gates import on_final_weight, runway_axes_view  # noqa: E402
 from control.dynamics import rollout as control_rollout  # noqa: E402
 from control.dynamics.hooks import RolloutStateView  # noqa: E402
 from control.envelope import MAX_BANK_RAD  # noqa: E402
-from control.guidance_laws import glidepath_load_factor, l1_bank, speed_hold_thrust  # noqa: E402
 from coordinate_frames import ENUFrame  # noqa: E402
 from dataset import Normalizer, build_series, dynamics_arrays  # noqa: E402
 from evaluation.records import record_from_dict  # noqa: E402
@@ -244,115 +247,6 @@ def test_barrier_filter_keeps_an_adversarial_rollout_inside_the_corridor():
     assert torch.all(_at(xt_h.abs(), last) < _at(xt_p.abs(), last))
 
 
-# ── nominal law + residual ───────────────────────────────────────────────────
-
-def test_guidance_laws_point_back_to_the_centreline_and_glidepath():
-    speed = torch.tensor([70.0], dtype=torch.float64)
-    right = l1_bank(torch.tensor([300.0], dtype=torch.float64), torch.zeros(1, dtype=torch.float64), speed,
-                    l1_distance_m=3000.0, bank_limit_rad=MAX_BANK_RAD)
-    left = l1_bank(torch.tensor([-300.0], dtype=torch.float64), torch.zeros(1, dtype=torch.float64), speed,
-                   l1_distance_m=3000.0, bank_limit_rad=MAX_BANK_RAD)
-    assert float(right) > 0.0 and float(left) < 0.0 and float(right) == pytest.approx(-float(left))
-    on_line = l1_bank(torch.zeros(1, dtype=torch.float64), torch.zeros(1, dtype=torch.float64), speed,
-                      l1_distance_m=3000.0, bank_limit_rad=MAX_BANK_RAD)
-    assert float(on_line) == 0.0
-    gp = torch.tensor([TAN_GPA], dtype=torch.float64)
-    gamma = torch.tensor([-math.radians(3.0)], dtype=torch.float64)
-    high = glidepath_load_factor(torch.tensor([100.0], dtype=torch.float64), gamma, speed, torch.zeros(1, dtype=torch.float64),
-                                 glidepath_tan=gp, lookahead_m=2000.0, gain_per_s=0.2, load_limits=(0.2, 2.0))
-    low = glidepath_load_factor(torch.tensor([-100.0], dtype=torch.float64), gamma, speed, torch.zeros(1, dtype=torch.float64),
-                                glidepath_tan=gp, lookahead_m=2000.0, gain_per_s=0.2, load_limits=(0.2, 2.0))
-    on_path = glidepath_load_factor(torch.zeros(1, dtype=torch.float64), gamma, speed, torch.zeros(1, dtype=torch.float64),
-                                    glidepath_tan=gp, lookahead_m=2000.0, gain_per_s=0.2, load_limits=(0.2, 2.0))
-    assert float(high) < float(on_path) < float(low)                  # high → push over, low → pull up
-    assert float(on_path) == pytest.approx(math.cos(float(gamma)))
-    # Energy: slower than the unhooked schedule would be → more thrust, faster → less, the
-    # same → the command's own; k·m·ΔV over the installed thrust, saturated at the box.
-    mass, t_max = torch.tensor([66_000.0], dtype=torch.float64), torch.tensor([2.0e5], dtype=torch.float64)
-    thrust = torch.tensor([0.1], dtype=torch.float64)
-    def held(reference_speed):
-        return speed_hold_thrust(thrust, speed, torch.tensor([reference_speed], dtype=torch.float64), gain_per_s=0.1,
-                                 mass_kg=mass, max_thrust_n=t_max, thrust_limits=(-0.2, 1.0))
-    assert float(held(70.0)) == pytest.approx(0.1)
-    assert float(held(80.0)) == pytest.approx(0.1 + 0.1 * 66_000.0 * 10.0 / 2.0e5)
-    assert float(held(60.0)) < 0.1
-    assert float(held(200.0)) == 1.0 and float(held(0.0)) == -0.2
-
-
-def test_nominal_residual_is_identity_off_the_final_and_a_bounded_band_on_it():
-    config = _hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL)
-    hook = NominalResidual(config, _context(2), hard=True)
-    command = _command([0.4, -0.4], load=1.3)
-    # Downwind (reversed heading): the gate is off, the command passes untouched.
-    downwind = hook(_view([5_000.0, 5_000.0], [3_000.0, 3_000.0], heading_error_rad=math.pi), command, 0)
-    assert torch.allclose(downwind, command)
-    # On the final, 300 m right, aligned: the nominal bank is positive; the command is
-    # held within ±5° of it, the load within ±0.1 of the glidepath law's.
-    view = _view([8_000.0, 8_000.0], [300.0, 300.0])
-    bank_nom, load_nom = hook.nominal(view)
-    out = hook(view, command, 1)
-    assert torch.all(bank_nom > 0.0)
-    assert torch.allclose(out[:, 1], bank_nom + torch.tensor([1.0, -1.0], dtype=torch.float64) * config.control_nominal_residual_bank_max_rad)
-    assert torch.allclose(out[:, 2], load_nom + config.control_nominal_residual_load_max)
-    assert torch.allclose(out[:, 0], command[:, 0])                   # at the unhooked schedule's speed: thrust untouched
-    # 10 m/s slower than the unhooked schedule would be: the thrust comes up by k·m·ΔV.
-    slow = hook(_view([8_000.0, 8_000.0], [0.0, 0.0], reference_speed=80.0), command, 2)
-    assert torch.allclose(slow[:, 0], command[:, 0] + config.control_nominal_speed_gain * 66_000.0 * 10.0 / 2.0e5, atol=2e-3)
-    assert hook.diagnostics()["hook_thrust_change"] > 0.0
-    diagnostics = hook.diagnostics()
-    assert diagnostics["hook_gated_steps"] == 4.0 and diagnostics["hook_bank_residual_saturated_steps"] == 4.0
-
-
-def test_nominal_residual_gradients_flow_through_the_residual_and_the_state():
-    config = _hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL)
-    hook = NominalResidual(config, _context(1), hard=False)
-    bank = torch.tensor([0.02], dtype=torch.float64, requires_grad=True)
-    command = torch.stack([torch.full_like(bank, 0.3), bank, torch.ones_like(bank)], dim=-1)
-    view = _view([8_000.0], [300.0])
-    chart = view.chart.clone().requires_grad_(True)
-    out = hook(RolloutStateView(chart=chart, actuators=view.actuators, duration_s=view.duration_s, reference=view.reference), command, 0)
-    out[:, 1].sum().backward()
-    assert bank.grad is not None and float(bank.grad) > 0.0
-    assert chart.grad is not None and torch.count_nonzero(chart.grad) > 0
-
-
-@pytest.mark.parametrize("height_above_gp_m", [80.0, -120.0])
-def test_nominal_law_converges_to_the_centreline_and_glidepath_through_the_rollout(monkeypatch, height_above_gp_m):
-    """Residuals pinned near zero: from 300 m right and 80 m high (or 120 m low — the
-    direction the first campaign's arm failed in), the tracked rollout ends much closer to
-    both than the untracked one, at the untracked one's speed."""
-    config = _hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL,
-                          control_nominal_residual_bank_max_rad=1e-4, control_nominal_residual_load_max=1e-4)
-    dynamics, controls, durations = _final_batch(config, xt_m=300.0, d_m=12_000.0, height_above_gp_m=height_above_gp_m, segments=32)
-    hook = build_command_hook(config, dynamics)
-    tracked = control_rollout.rollout_control_endpoints(controls, durations, dynamics, config, command_hook=hook)
-    plain = control_rollout.rollout_control_endpoints(controls, durations, dynamics, config)
-    psi = dynamics["runway_heading_rad"].to(tracked.channels.dtype)
-    d_t, xt_t = fag.runway_axes(tracked.channels[..., 0], tracked.channels[..., 1], psi)
-    d_p, xt_p = fag.runway_axes(plain.channels[..., 0], plain.channels[..., 1], psi)
-    last = _last_approach_index(d_t)
-    assert torch.all(_at(xt_t.abs(), last) < 60.0)
-    assert torch.all(_at(xt_t.abs(), last) < _at(xt_p.abs(), last))
-    height_error = tracked.channels[..., 2] - fag.glidepath_height(d_t, dynamics["glidepath_tan"].to(d_t.dtype))
-    assert torch.all(_at(height_error.abs(), last) < 40.0)
-    assert torch.all(_at(height_error.abs(), last) < height_error[:, 0].abs())
-    # Energy: the plain rollout flies parallel to the glidepath at its offset; the law's
-    # descent onto it (from above) releases height the schedule did not mean to release
-    # and the climb onto it (from below) spends speed the schedule did not mean to spend —
-    # with the thrust passed through the tracked rollout ends more than 10 m/s off the
-    # plain one's speed, in opposite directions for the two starts (the first campaign's
-    # arm, pulled up, arrived 30 m/s slow). The speed hold on the unhooked rollout keeps
-    # it within 3 m/s.
-    monkeypatch.setattr(nominal_residual_module, "speed_hold_thrust", lambda thrust, *args, **kwargs: thrust)
-    passthrough = control_rollout.rollout_control_endpoints(
-        controls, durations, dynamics, config, command_hook=build_command_hook(config, dynamics))
-    speed_t = _at(torch.hypot(tracked.channels[..., 3], tracked.channels[..., 4]), last)
-    speed_p = _at(torch.hypot(plain.channels[..., 3], plain.channels[..., 4]), last)
-    speed_x = _at(torch.hypot(passthrough.channels[..., 3], passthrough.channels[..., 4]), last)
-    assert torch.all((speed_x - speed_p).abs() > 10.0)
-    assert torch.all((speed_t - speed_p).abs() < 3.0)
-
-
 # ── batch fixture on the final ───────────────────────────────────────────────
 
 def _last_approach_index(d: torch.Tensor) -> torch.Tensor:
@@ -409,9 +303,14 @@ def test_hook_config_is_guarded_and_named():
         TSConfig(control_command_hook=CONTROL_HOOK_BARRIER)
     with pytest.raises(ValueError, match="unknown control_hook_saturation"):
         _hook_config(control_command_hook=CONTROL_HOOK_BARRIER, control_hook_saturation="never")
+    # The archived nominal law's value still LOADS and still NAMES its six stored
+    # 2026-09-06 runs (their checkpoints go through TSConfig.from_dict), and no longer
+    # builds a hook — the whole of what T2 left of it.
     named = TSConfig(**recipe_settings("simple-v3", keep_name=True), control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL)
     assert "hook=nominal-residual" in run_display_name(named.to_dict())
     assert "hook=" not in run_display_name(TSConfig(**recipe_settings("simple-v3", keep_name=True)).to_dict())
+    with pytest.raises(ValueError, match="archived"):
+        build_command_hook(_hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL), _context(1))
 
 
 def test_training_refuses_hard_saturation_and_logs_the_hook(tmp_path):
@@ -421,7 +320,7 @@ def test_training_refuses_hard_saturation_and_logs_the_hook(tmp_path):
     series, _ = build_series(flights, hard, airport=AIRPORT)
     with pytest.raises(ValueError, match="hard hook saturation"):
         fit_model(series[:8], series[8:], hard, verbose=False)
-    soft = _hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL, n_segments=4,
+    soft = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER, n_segments=4,
                         epochs=1, patience=1, batch_size=32, d_model=16, n_heads=4, d_ff=32, e_layers=1, device="cpu")
     series, _ = build_series(flights, soft, airport=AIRPORT)
     fit = fit_model(series[:8], series[8:], soft, verbose=False)

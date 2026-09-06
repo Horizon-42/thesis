@@ -203,7 +203,7 @@ command is HELD.
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
 prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
 `dynamics/{backends,rollout,inverse,hooks}`, `loss/{components,fixed_dt}`,
-`training/diagnostics`, `constraints/{barrier_filter,nominal_residual,gates}`.
+`training/diagnostics`, `constraints/{barrier_filter,gates}`.
 
 **`archive/` is not the package.** Completed campaigns are kept there (README each, naming
 the result documents that cite them) and are OFF the import path: the 2026-08 oracle teacher

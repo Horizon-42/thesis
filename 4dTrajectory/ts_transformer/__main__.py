@@ -74,7 +74,7 @@ from config import (  # noqa: E402
     CONTROL_STATE_OBJECTIVES,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
-    CONTROL_HOOKS,
+    CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_FIELDS,
     CONTROL_HOOK_OFF,
     INTENT_CONDITIONINGS,
@@ -732,7 +732,7 @@ def main(argv: list[str] | None = None) -> int:
         help="keep full/window forecasts past closest threshold approach",
     )
     p_predict.add_argument(
-        "--command-hook", choices=[hook for hook in CONTROL_HOOKS if hook != CONTROL_HOOK_OFF],
+        "--command-hook", choices=list(CONTROL_HOOKS_AVAILABLE),
         default=None, metavar="HOOK",
         help="run the control rollout through this command hook at prediction time "
              "(the inference-only arms); the checkpoint's own hook applies otherwise",
