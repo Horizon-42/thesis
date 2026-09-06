@@ -20,8 +20,8 @@ its §〇 status table is the live one). What that design settled and what is ru
 | L4 scene encoder | **NOT built — gate failed** | scene entity features add nothing (d_join R² 0.37 vs 0.38); the observable lead ETA correlates 0.11 with the lead's true landing |
 
 **Abolished by that design** (entries below are history): the P1.d closure tracker (its BLOCKER
-is not being fixed), the K join-anchor decoder, the `2026-09-07_control_training_review`
-P0/P1 objective fixes. The closure output stays as a comparison arm only.
+is not being fixed; the code was DELETED 2026-09-07 by audit T1-9), the K join-anchor decoder,
+the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure output stays as a comparison arm only.
 
 ---
 
@@ -59,7 +59,8 @@ P0/P1 objective fixes. The closure output stays as a comparison arm only.
   few violations per flight being bank jumps at the CSC junctions and thrust jumps at
   the knots. **P1.d DONE 2026-09-06 (option b, report
   `docs/2026-09-06_closure_p1d_tracking_results.zh.md`)**: the drawn reference flown by
-  the point-mass rollout under `control/constraints/closure_tracking.py` costs ≤ 100 m
+  the point-mass rollout under `control/constraints/closure_tracking.py` (RETIRED — code
+  DELETED 2026-09-07) costs ≤ 100 m
   of ADE (C_pred +9 m pooled, +25 m vectored) and brings the fully-flyable rate from 22 %
   to 92 % (observed 98 %) — the delivery form is closure + tracking. **Review (opus, same
   day) found the tracker's nearest-node search unguarded: 8 of 1404 via-Dubins flights

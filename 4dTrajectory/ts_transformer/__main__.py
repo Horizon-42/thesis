@@ -933,12 +933,6 @@ def main(argv: list[str] | None = None) -> int:
              "source.closureFromLabels",
     )
     p_predict.add_argument(
-        "--closure-track", action="store_true",
-        help="closure output: fly every drawn reference with the point-mass rollout under the "
-             "closure tracker (control.constraints.closure_tracking); records then carry the "
-             "controls flown and source.closureTracked",
-    )
-    p_predict.add_argument(
         "--latent-samples", type=int, default=0, metavar="K",
         help="latent control output: besides the top-1 records, decode K prior samples per "
              "flight and write each as a full prediction directory under modes/modeNN/ "
@@ -1294,10 +1288,6 @@ def main(argv: list[str] | None = None) -> int:
         from closure_output import load_labels
         closure_labels = load_labels(args.closure_from_labels)
         print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
-    if args.closure_track:
-        if config.prediction_output != PREDICTION_CLOSURE:
-            parser.error("--closure-track requires a closure checkpoint")
-        print("  flying every drawn reference with the point-mass rollout under the closure tracker")
     if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
         parser.error("--cta-offset-s needs a checkpoint trained with cta_conditioning=given")
     if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
@@ -1388,9 +1378,7 @@ def main(argv: list[str] | None = None) -> int:
                     s, forecast, points=config.validation_common_grid_points,
                 ))
         if closure_labels is not None:
-            forecasts = forecast_closure_from_labels(
-                batch_series, config, closure_labels, track=args.closure_track, device=device,
-            )
+            forecasts = forecast_closure_from_labels(batch_series, config, closure_labels)
         elif args.z_from_posterior:
             forecasts = posterior_latent_forecasts(
                 model, batch_series, config, normalizer, device=device, cta_offset_s=args.cta_offset_s,
@@ -1404,7 +1392,6 @@ def main(argv: list[str] | None = None) -> int:
                 device=device,
                 truncate=not args.no_truncate,
                 project_final=args.project_final,
-                closure_track=args.closure_track,
                 cta_offset_s=args.cta_offset_s,
             )
         for offset, (s, forecast) in enumerate(
