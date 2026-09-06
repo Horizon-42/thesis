@@ -11,7 +11,7 @@ import pytest
 from trajectory_data_process.harvest import freshness_rebuild as rebuild_module
 from trajectory_data_process.harvest.__main__ import build_parser
 from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
-from trajectory_data_process.harvest.airports import Airport, Runway
+from trajectory_data_process.harvest.airports import PATH_POINT_TCH_SOURCE, Airport, Runway
 from trajectory_data_process.harvest.freshness_rebuild import rebuild_fresh_tracks
 from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
@@ -38,6 +38,7 @@ def _airport() -> Airport:
                 hae_minus_msl_m=30.0,
                 threshold_crossing_height_m=15.0,
                 published_glidepath_deg=3.0,
+                tch_source=PATH_POINT_TCH_SOURCE,
                 width_m=45.72,
                 lpv_course_width_m=106.75,
                 runway_source_cycle="2026-08-06",

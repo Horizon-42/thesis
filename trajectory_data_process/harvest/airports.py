@@ -36,11 +36,26 @@ from typing import Literal, Sequence
 
 from final_approach import RunwayFrame
 
-from trajectory_data_process.harvest.cifp import PathPoint, read_path_points
+from trajectory_data_process.harvest.cifp import (
+    ApproachVertical,
+    PathPoint,
+    read_approach_verticals,
+    read_path_points,
+)
 
 Datum = Literal["msl", "hae"]
 RUNWAY_DATA_FINGERPRINT_SCHEMA = "harvest-runway-data-v1"
 THRESHOLD_FRAME_FINGERPRINT_SCHEMA = "threshold-physical-frame-v1"
+# ``Runway.tch_source`` values: the LPV Path Point, or the RNAV (GPS) approach's runway
+# leg (``cifp.ApproachVertical``) on a runway that publishes LNAV/VNAV minima only.
+PATH_POINT_TCH_SOURCE = "faa_cifp_path_point"
+APPROACH_LEG_TCH_SOURCE = "faa_cifp_approach_leg"
+# A decoded approach-leg TCH above this means the configured threshold elevation and
+# the CIFP runway altitude disagree, not a real crossing height (the fleet publishes
+# 13.7-19.5 m; PANS-OPS design TCH tops out near 25 m). It guards the REPORTED TCH
+# only: the judged crossing altitude is elevation + (leg - elevation) = the leg's own
+# figure, so a wrong configured elevation moves this number and never the gate.
+_MAX_PLAUSIBLE_TCH_M = 30.0
 
 
 @dataclass(frozen=True)
@@ -51,8 +66,12 @@ class Runway:
     the pavement end -- see ``acquisition/runways.py``. Six thresholds in this fleet are
     displaced, KSJC 30L/30R by 775 m, which on a 3 deg path is a 40.6 m altitude error.
 
-    ``threshold_crossing_height_m`` is the PUBLISHED TCH, or None for a non-LPV runway.
-    Such a runway remains available for assignment but is excluded from model arrivals.
+    ``threshold_crossing_height_m`` / ``published_glidepath_deg`` are the PUBLISHED
+    vertical path: the LPV Path Point's, or -- on a runway without LPV -- the RNAV (GPS)
+    approach's runway-leg values when that approach publishes LNAV/VNAV (Baro-VNAV)
+    minima (``tch_source`` says which). Both are None only when no vertically guided
+    RNAV approach exists at all (KRDU 14); such a runway remains available for
+    assignment but is excluded from model arrivals.
     """
 
     airport: str
@@ -74,10 +93,28 @@ class Runway:
     position_source: str = "faa_cifp_path_point"
     vertical_source: str = "faa_cifp_path_point"
     width_source: str = "faa_nasr_apt_rwy"
+    # Where the TCH and glidepath come from -- named by whoever sets a TCH, never
+    # assumed. NOT part of the physical-frame fingerprint (``threshold_frame_snapshot``):
+    # it decides how a crossing is judged, not where the plane it was measured against
+    # lies (it IS in ``runway_data_snapshot``, the provenance digest).
+    tch_source: str | None = None
+    # The runway's RNAV (GPS) approach publishes an LNAV/VNAV line of minima -- the
+    # Baro-VNAV context the RNP APCH vertical bound (evaluation) is conditioned on.
+    baro_vnav_minima: bool = False
 
     def __post_init__(self) -> None:
         if abs(self.elevation_hae_m - self.elevation_msl_m - self.hae_minus_msl_m) > 1e-6:
             raise ValueError(f"{self.airport} {self.ident}: inconsistent vertical datum fields")
+        if (self.threshold_crossing_height_m is None) != (self.published_glidepath_deg is None):
+            raise ValueError(
+                f"{self.airport} {self.ident}: TCH and glidepath are published together or "
+                "not at all"
+            )
+        if (self.threshold_crossing_height_m is None) != (self.tch_source is None):
+            raise ValueError(
+                f"{self.airport} {self.ident}: tch_source must name where the TCH came "
+                "from, and be None without one"
+            )
         if not math.isfinite(self.width_m) or self.width_m <= 0.0:
             raise ValueError(f"{self.airport} {self.ident}: invalid runway width {self.width_m!r}")
         if self.lpv_course_width_m is not None and (
@@ -235,6 +272,11 @@ def load_airport(
     if cifp_file is None:
         raise ValueError(f"{code}: CIFP file is required for runway vertical datum facts")
     published: dict[tuple[str, str], PathPoint] = read_path_points(cifp_file, airport=code)
+    # The RNAV (GPS) approaches' runway legs, decode-pinned against the Path Points: a
+    # runway with no LPV can still publish an LNAV/VNAV path (KRDU 32, KSMF 35R).
+    verticals: dict[tuple[str, str], ApproachVertical] = read_approach_verticals(
+        cifp_file, airport=code, path_points=published
+    )
 
     runway_rows = [
         (threshold, runway)
@@ -260,6 +302,7 @@ def load_airport(
             threshold,
             runway_row,
             published.get((code, threshold["ident"])),
+            verticals.get((code, threshold["ident"])),
             airport_path_points,
             runway_source_cycle=width_cycle,
             procedure_source_cycle=procedure_cycle,
@@ -281,6 +324,7 @@ def _build_runway(
     threshold: dict,
     runway_row: dict,
     point: PathPoint | None,
+    vertical: ApproachVertical | None,
     airport_path_points: Sequence[PathPoint],
     *,
     runway_source_cycle: str,
@@ -290,6 +334,7 @@ def _build_runway(
     if width_ft is None:
         raise ValueError(f"{code} {runway_row.get('name')}: FAA NASR runway width is required")
     width_m = float(width_ft) * 0.3048
+    baro_vnav_minima = vertical is not None and vertical.baro_vnav_minima
     if point is not None:
         hae = point.ltp_ellipsoidal_height_m
         msl = point.ltp_orthometric_height_m
@@ -305,6 +350,8 @@ def _build_runway(
             procedure_source_cycle=procedure_source_cycle,
             position_source="faa_cifp_path_point",
             vertical_source="faa_cifp_path_point",
+            tch_source=PATH_POINT_TCH_SOURCE,
+            baro_vnav_minima=baro_vnav_minima,
         )
 
     if threshold.get("elevation_m") is None:
@@ -333,20 +380,45 @@ def _build_runway(
         reference.ltp_ellipsoidal_height_m
         - reference.ltp_orthometric_height_m
     )
+    # No LPV, but an RNAV (GPS) approach with LNAV/VNAV minima still publishes where the
+    # path crosses the runway: its runway-leg altitude above the configured threshold
+    # elevation is that approach's TCH. An LNAV-only approach (or none at all) leaves
+    # the vertical path None -- never defaulted. A Baro-VNAV approach whose leg codes no
+    # path, or two that disagree, is a data error and says so.
+    tch = glidepath = tch_source = None
+    if baro_vnav_minima:
+        if vertical.conflict:
+            raise ValueError(f"{code} {threshold['ident']}: {vertical.conflict}")
+        if vertical.glidepath_deg is None or vertical.crossing_altitude_msl_m is None:
+            raise ValueError(
+                f"{code} {threshold['ident']}: approach {vertical.procedure} publishes "
+                "LNAV/VNAV minima but its runway leg codes no vertical path"
+            )
+        tch = vertical.crossing_altitude_msl_m - msl
+        if not 0.0 < tch < _MAX_PLAUSIBLE_TCH_M:
+            raise ValueError(
+                f"{code} {threshold['ident']}: approach {vertical.procedure} crosses the "
+                f"runway at {vertical.crossing_altitude_msl_m:.1f} m MSL but the "
+                f"configured threshold elevation is {msl:.1f} m; the two sources disagree"
+            )
+        glidepath = vertical.glidepath_deg
+        tch_source = APPROACH_LEG_TCH_SOURCE
     return Runway(
         airport=code, ident=threshold["ident"], lat=lat, lon=lon,
         elevation_hae_m=msl + hae_minus_msl,
         elevation_msl_m=msl,
         hae_minus_msl_m=hae_minus_msl,
         course_deg=float(threshold["heading_deg"]),
-        threshold_crossing_height_m=None,
-        published_glidepath_deg=None,
+        threshold_crossing_height_m=tch,
+        published_glidepath_deg=glidepath,
         width_m=width_m,
         lpv_course_width_m=None,
         runway_source_cycle=runway_source_cycle,
         procedure_source_cycle=procedure_source_cycle,
         position_source="runway_geometry",
         vertical_source="nearest_faa_cifp_path_point_offset",
+        tch_source=tch_source,
+        baro_vnav_minima=baro_vnav_minima,
     )
 
 

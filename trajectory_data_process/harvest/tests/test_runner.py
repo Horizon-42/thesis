@@ -37,6 +37,7 @@ def _airport() -> Airport:
         procedure_source_cycle="2026-08-06",
         position_source="faa_cifp_path_point",
         vertical_source="faa_cifp_path_point",
+        tch_source=None,
     )
     return Airport(
         code="KAAA",

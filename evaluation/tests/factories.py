@@ -7,6 +7,8 @@ makes datum and threshold-height failures intentional rather than fixture drift.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from evaluation import AssessmentContext
@@ -14,6 +16,7 @@ from evaluation.thresholds import Benchmark
 from final_approach.event_contract import CENSORED_EVENT_METHOD, EVENT_SCHEMA_VERSION
 from flight_scenarios.crossing_span import CROSSING_SPAN_KEY, crossing_span_from_event
 from geokit import metres_per_deg_lon
+from trajectory_data_process.harvest.airports import APPROACH_LEG_TCH_SOURCE
 
 
 TARGET = {
@@ -26,10 +29,16 @@ TARGET = {
     "m": 60_000.0,
 }
 
-# A320-class stall facts (aero_params_for_aircraft: S = 122.6 m², landing Cl_max = 2.7).
-# At the TARGET mass of 60 t the speed window is [66.3, 76.6] m/s, so the default
-# crossing V of 70.0 m/s passes with margin on both sides.
+# Narrow-body stall facts: an A320 wing (S = 122.6 m²) with the 30–100 t bucket's landing
+# Cl_max of 2.7 (aero_params_for_aircraft; the A320 family itself is calibrated to 3.0,
+# which the fixture deliberately does not track -- the block is producer-supplied and
+# the tests derive their window from it). At the TARGET mass of 60 t the 1-g window is
+# [66.3, 76.6] m/s, so the default crossing V of 70.0 m/s passes with margin on both sides.
 LANDING_AERO = {"wing_area_m2": 122.6, "cl_max_landing": 2.7}
+
+# One row of a computed record's controls (the contract's three columns: thrust
+# fraction, bank, load factor). Straight and level: the speed gate reads load_factor.
+CONTROL = {"thrust": 1.0, "bank_rad": 0.0, "load_factor": 1.0}
 
 
 def assessment_context(
@@ -46,8 +55,9 @@ def assessment_context(
         runway_width_m=45.72,
         runway_source="faa_nasr_apt_rwy",
         runway_source_cycle="2026-08-06",
+        # The non-LPV context has a TCH and approved Baro-VNAV: the runway-leg source.
         procedure_source=(
-            "faa_cifp_path_point" if is_lpv else "faa_terminal_procedure"
+            "faa_cifp_path_point" if is_lpv else APPROACH_LEG_TCH_SOURCE
         ),
         procedure_source_cycle="2026-08-06",
         threshold_elevation_hae_m=130.0,
@@ -152,7 +162,7 @@ def trajectory_payload(
         "final_time_s": final_t,
         "states": states,
         "controls": (
-            [] if subject == "observed" else [{"thrust": 1.0}, {"thrust": 1.0}]
+            [] if subject == "observed" else [dict(CONTROL), dict(CONTROL)]
         ),
     }
 
@@ -164,3 +174,19 @@ def observed_payload(
         subject="observed",
         event=observed_event(cross_m=cross_m, vertical_m=vertical_m),
     )
+
+
+def write_batch(root: Path, payloads: list[dict[str, Any]]) -> Path:
+    """A batch directory the way the modeling producers write one: records plus a
+    ``summary.json`` roster naming each row's airport and runway."""
+    rows = []
+    for index, payload in enumerate(payloads):
+        name = f"record_{index}_eval.json"
+        (root / name).write_text(json.dumps(payload), encoding="utf-8")
+        rows.append({
+            "eval_file": name,
+            "arr_airport": payload["source"]["arr_airport"],
+            "runway": payload["source"]["runway"],
+        })
+    (root / "summary.json").write_text(json.dumps({"results": rows}), encoding="utf-8")
+    return root

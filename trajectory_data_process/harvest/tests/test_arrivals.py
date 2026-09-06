@@ -8,6 +8,7 @@ import pytest
 
 from flight_scenarios.identity import flight_key
 from trajectory_data_process.harvest.airports import (
+    PATH_POINT_TCH_SOURCE,
     Airport,
     Runway,
     threshold_frame_fingerprint,
@@ -50,6 +51,7 @@ def _runway(
         procedure_source_cycle="2026-08-06",
         position_source="faa_cifp_path_point",
         vertical_source="faa_cifp_path_point",
+        tch_source=None if tch_m is None else PATH_POINT_TCH_SOURCE,
     )
 
 
@@ -61,8 +63,7 @@ def _airport() -> Airport:
         elevation_msl_m=10.0,
         runways=(
             _runway("18"),
-            _runway("19", tch_m=None),
-            _runway("20", glidepath_deg=None),
+            _runway("19", tch_m=None, glidepath_deg=None),
         ),
     )
 
@@ -286,9 +287,9 @@ def test_arrival_manifest_crops_final_entry_to_landing_anchor_and_excludes_non_m
         ),
         _source_track(
             paths,
-            callsign="NOGLIDE",
+            callsign="NOTCH2",
             icao24="aaa004",
-            runway="20",
+            runway="19",
             samples=_approach_samples(),
             landing_sample_index=6,
         ),
@@ -303,8 +304,7 @@ def test_arrival_manifest_crops_final_entry_to_landing_anchor_and_excludes_non_m
         "assigned": 4,
         "included": 1,
         "local_circuit": 1,
-        "no_published_tch": 1,
-        "no_published_glidepath": 1,
+        "no_published_tch": 2,
     }
     [flight] = load_arrival_flights(paths.airport)
     assert flight["id"] == "ARR1"
