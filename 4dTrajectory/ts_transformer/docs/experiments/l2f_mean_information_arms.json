@@ -1,0 +1,44 @@
+{
+ "_comment": "L2.f pre-registration (2026-09-07) of docs/2026-09-07_latent_intent_design.zh.md §六: put the information back in the POSTERIOR MEAN. EVIDENCE that retires the free-bits line: a direct probe of three trained checkpoints (200 val flights; run_ts_latent_probe.py is that measurement as code) found the posterior mean sitting ON the prior mean in every arm — |q mean - p mean| / p sigma is 0.05-0.11 (warm beta 0.01, fb 0.05), 0.10-0.20 (fb 0.5), 0.11-0.19 (fb 1.0) — while the budget bought only a narrower posterior (q sigma 0.40 / 0.23 / 0.15 against p sigma 0.44 / 0.49 / 0.58). z is a denoised CONSTANT: that is why shuffled dADE was +47/+16 m, why the z-oracle bought only 227 m, why the N(0, I) control beat the trained prior's best-of-6, and why top-1 got WORSE as the budget grew (1214 / 1260 / 1387 m). MECHANISM: above the free-bits floor the penalty's gradient on the KL's mean term is proportional to the displacement, so it flattens each flight's q mean onto p within the first ten epochs — before the decoder has learned to read z — and after that no gradient brings the information back; free bits then make an uninformative narrow posterior free. TWO ARMS, one per restoring force, same base as L2.d (warm posterior q-std 0.1, K=1, fb 0.05/dim, beta 0.01, N=32, simple-v3 supervision + teacher, 180 epochs): (1) L2f_anneal ramps beta 0 -> 0.01 linearly over 40 epochs, so the decoder's z-weights grow before the mean term is charged — the L2.c reading that annealing only postpones collapse was about the VARIANCE term and does not carry over; (2) L2f_aux_T adds a TRAINING-ONLY linear head on the posterior sample predicting the normalized remaining duration (MSE, weight 1.0), which says outright what z must carry and does not depend on the decoder at all; the prior cannot predict T from the context, so it must widen, which is what makes K samples spread over arrival times. GATES (all four, per the design doc): posterior mean displacement median > 1 sigma; shuffled dADE > 200 m pooled; minADE_6 below the same-K N(0, I) control; top-1 not worse than native32 (1322 m pooled) per stratum. VETO: straight-in FDE p50 degraded beyond seed noise (native32 671 m). FALLBACK if both fail: L2.d's warm beta=0.01 at 1214 m stands as the delivery form. READOUT: run_ts_latent_readout.py --arm <pred> --history <run>/history.json (the kept epoch's per-dim KL, the KL's mean/variance split, the displacement median, both active-unit counts) plus run_ts_latent_probe.py on the two checkpoints; then the usual stratified top-1 table. ONE READING CAVEAT, measured on synthetic data while building the aux head (three seeds, paired init): the aux target raises the KL's MEAN TERM in 3 of 3 seeds but the displacement MEDIAN in only 2 of 3, because a scalar read-out needs ONE latent direction and a median over eight dimensions can miss it. On L2f_aux_T read kl_per_dim and kl_mean_term_nats beside gate (1)'s median, and say which one the verdict rests on.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "latent_dim": 8,
+  "latent_prior_components": 1,
+  "latent_posterior_init_std": 0.1,
+  "latent_beta": 0.01,
+  "latent_free_bits_nats": 0.05
+ },
+ "arms": [
+  {
+   "key": "L2f_anneal",
+   "label": "warm posterior, beta 0.01 annealed linearly over 40 epochs, free bits 0.05/dim",
+   "overrides": {
+    "latent_beta_warmup_epochs": 40
+   },
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  },
+  {
+   "key": "L2f_aux_T",
+   "label": "warm posterior, beta 0.01, free bits 0.05/dim, auxiliary duration target on z (weight 1.0)",
+   "overrides": {
+    "latent_aux_duration_weight": 1.0
+   },
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  }
+ ]
+}
