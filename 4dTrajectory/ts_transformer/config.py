@@ -48,14 +48,22 @@ STATE_POSITION_ABSOLUTE = "absolute"
 # rule): it did not clear the bar it was registered against, and `corridor-bounded` did.
 # The value STAYS only because a current-cohort artifact is stored under it
 # (`4dTrajectory/outputs/*/experiments/state_v2_20260903/A_anchor_relative`), whose config
-# must keep loading and naming. **Do not choose it for a new arm.**
+# must keep loading and naming. It cannot be SELECTED: it is absent from
+# `STATE_POSITION_REFERENCES_AVAILABLE`, which is the CLI's choices and the boundary check
+# `__main__._refuse_unavailable_selection` applies to `--config-overrides` as well — the
+# same mechanism `control_command_hook="nominal-residual"` uses.
 STATE_POSITION_ANCHOR_RELATIVE = "anchor-relative"
 # The absolute output, with the position channels bounded to the final-approach corridor
 # and glidepath window on the rows the output itself places on the final
 # (final_approach_geometry): a hard constraint by construction, no weight to calibrate.
 STATE_POSITION_CORRIDOR_BOUNDED = "corridor-bounded"
+#: What a STORED config may say.
 STATE_POSITION_REFERENCES = (
     STATE_POSITION_ABSOLUTE, STATE_POSITION_ANCHOR_RELATIVE, STATE_POSITION_CORRIDOR_BOUNDED,
+)
+#: What a NEW run may select (the CLI's choices): the vetoed value is not one of them.
+STATE_POSITION_REFERENCES_AVAILABLE = (
+    STATE_POSITION_ABSOLUTE, STATE_POSITION_CORRIDOR_BOUNDED,
 )
 # Which rows the corridor binds. ``on-final``: rows inside the full-scale cone and aligned
 # with the course, read from the prediction itself (deployable). ``faf``: every row inside
@@ -375,8 +383,10 @@ CONTROL_HOOK_BARRIER = "barrier"
 CONTROL_HOOK_NOMINAL_RESIDUAL = "nominal-residual"
 #: What a STORED config may say.
 CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL)
-#: What a NEW run may select (the CLI's choices).
-CONTROL_HOOKS_AVAILABLE = (CONTROL_HOOK_BARRIER,)
+#: What a NEW run may select. ``off`` is in it — the flag's own choices drop that one,
+#: because `--command-hook` exists to turn a hook ON, but a config saying ``off`` is the
+#: default and must pass the boundary check in `__main__`.
+CONTROL_HOOKS_AVAILABLE = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER)
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
@@ -753,7 +763,7 @@ class TSConfig:
     # diluted to 1/N of the whole-path objective. It uses the same physical position scale
     # as the path loss; the 0.25 coefficient is frozen by the development Pareto audit.
     state_endpoint_loss_weight: float = 0.25
-    # Control/oracle experiment compatibility knobs. The formal direct-state objective
+    # Cross-output compatibility knobs the control path reads. The formal direct-state objective
     # ignores both: it predicts position+duration and derives future velocity from position.
     kinematic_consistency_loss_weight: float = 3.0
     terminal_loss_weight: float = 0.02

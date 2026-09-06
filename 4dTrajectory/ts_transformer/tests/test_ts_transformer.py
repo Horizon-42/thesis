@@ -81,6 +81,7 @@ from config import (  # noqa: E402
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+    CONTROL_RECIPE_SIMPLE_V3,
     CONTROL_RECIPE_SIMPLE_V1,
     PREDICTION_CONTROL,
     PREDICTION_STATE,
@@ -369,6 +370,91 @@ def test_development_cohort_rejects_incomplete_rebuild(monkeypatch, tmp_path):
             tmp_path,
             built_ids=("KRDU:train",),
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "extra_argv"),
+    [
+        # The hook needs a control run to be a legal config at all, so the override is
+        # applied to one: the refusal under test is "not available", not "not applicable".
+        ("control_command_hook", "nominal-residual",
+         ["--prediction-output", PREDICTION_CONTROL, "--control-recipe", CONTROL_RECIPE_SIMPLE_V3]),
+        ("state_position_reference", "anchor-relative", []),
+    ],
+)
+def test_a_value_a_new_run_may_not_select_does_not_begin_a_formal_run(
+    monkeypatch, tmp_path, capsys, field, value, extra_argv
+):
+    """`--config-overrides` is the second door into a field whose flag already refuses it.
+
+    Both values are legal in a STORED config (their artifacts and checkpoints must keep
+    loading) and neither may be selected for a new run — one is archived code, one was
+    vetoed by its own campaign. Without the check at the config boundary the run gets a
+    dataset build and a formal experiment manifest before dying deep in the training loop,
+    which leaves a half-open run in the experiment index.
+    """
+    began_run = False
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text(json.dumps({field: value}), encoding="utf-8")
+    monkeypatch.setattr(
+        ts_cli, "arrival_data_provenance", lambda _data: _fake_data_provenance()
+    )
+    monkeypatch.setattr(
+        ts_cli,
+        "flight_keys_by_split",
+        lambda _provenance, _config: {
+            "train": ["KRDU:train"], "val": ["KRDU:val"], "test": ["KRDU:test"]
+        },
+    )
+    monkeypatch.setattr(ts_cli, "load_flight_dicts", lambda *_args, **_kwargs: [{}])
+    monkeypatch.setattr(
+        ts_cli,
+        "_build_series_or_exit",
+        lambda *_args: (
+            [SimpleNamespace(dataset_id="KRDU:train")],
+            SimpleNamespace(to_dict=lambda: {}),
+        ),
+    )
+    monkeypatch.setattr(ts_cli, "data_selection_audit", lambda *_args: {})
+
+    def record_begin(*_args, **_kwargs):
+        nonlocal began_run
+        began_run = True
+        return tmp_path / "run" / experiment_index.RUN_MANIFEST_NAME
+
+    monkeypatch.setattr(ts_cli, "begin_run", record_begin)
+    monkeypatch.setattr(
+        ts_cli, "train", lambda *_args, **_kwargs: pytest.fail("train must not start")
+    )
+
+    with pytest.raises(SystemExit):
+        ts_cli.main([
+            "train",
+            "--data", str(tmp_path / "manifest.json"),
+            "--output-dir", str(tmp_path / "run"),
+            "--config-overrides", str(overrides),
+            "--campaign-id", "retired-vocabulary",
+            "--experiment-id", field,
+            *extra_argv,
+        ])
+
+    assert f"{field}={value!r} cannot be selected" in capsys.readouterr().err
+    assert not began_run
+
+
+def test_predict_refuses_the_archived_hook_at_the_parser(tmp_path, capsys):
+    """The predict flag's own choices: `--command-hook` names what can still be flown."""
+    with pytest.raises(SystemExit) as info:
+        ts_cli.main([
+            "predict",
+            "--checkpoint", str(tmp_path / "checkpoint.pt"),
+            "--data", str(tmp_path / "manifest.json"),
+            "--output-dir", str(tmp_path / "prediction"),
+            "--command-hook", "nominal-residual",
+            "--hook-saturation", "soft",
+        ])
+    assert info.value.code == 2
+    assert "invalid choice: 'nominal-residual'" in capsys.readouterr().err
 
 
 def test_predict_cli_refuses_test_without_explicit_release(tmp_path, capsys):

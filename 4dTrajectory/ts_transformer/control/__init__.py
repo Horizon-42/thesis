@@ -1,8 +1,8 @@
 """Everything specific to predicting a CONTROL SCHEDULE rather than a state sequence.
 
 These modules used to sit at the top level behind a ``control_`` prefix, which named the
-subject but not the role, so the loss, the flight models, the head and the teacher were
-interleaved with the shared modules in one flat listing. The prefix is now the package and
+subject but not the role, so the loss, the flight models and the head were interleaved with
+the shared modules in one flat listing. The prefix is now the package and
 the role is the submodule:
 
     control.envelope           the dimensionless box the head predicts in

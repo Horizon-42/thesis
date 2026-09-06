@@ -46,5 +46,14 @@ Commit `882d048` (`dev-t2`), package audit T2, 2026-09-07.
 - `control_oracle/optimization.py` still imports `control.oracle.basis`; that module is the
   one member with a live consumer and moved OUT to `control/basis_fit.py` (it is a fit, not a
   teacher — `run_ts_control_basis_oracle.py` is the live successor of the width study).
+- Five names this campaign was the sole consumer of were deleted from the live package by the
+  same commit and are VENDORED into `control_oracle/shooting.py` under an "vendored 2026-09-07"
+  banner, so the unit is self-contained: `PHYSICAL_CRITERIA_DISTANCE_SCALE_M`,
+  `PHYSICAL_CRITERIA_SMOOTH_MAX_TEMPERATURE`, `smooth_maximum` and `physical_criteria_loss`
+  (originals: `git show 882d048:4dTrajectory/ts_transformer/physical_criteria.py`) and
+  `refine_piecewise_constant_schedule` (original: `git show
+  882d048:4dTrajectory/ts_transformer/control/dynamics/inverse.py`). Everything else it
+  imports — `config`, `dataset`, `channels`, `control.envelope`, `control.loss.fixed_dt`,
+  `physical_criteria.fixed_dt_position_ade_m` — is still live, and drifts without notice.
 - `tests/` here are the campaign's own tests, renamed off pytest's `test_*.py` pattern so the
   suite does not collect them.

@@ -56,7 +56,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
-    STATE_POSITION_REFERENCES,
+    STATE_POSITION_REFERENCES_AVAILABLE,
     TARGET_CONDITIONINGS,
     CHECKPOINT_SELECTION_METRICS,
     CONTROL_DYNAMICS_BACKENDS,
@@ -64,7 +64,6 @@ from config import (  # noqa: E402
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_RECIPE_NAMES,
     CONTROL_RECIPE_CUSTOM,
-    CONTROL_RECIPE_SIMPLE_V1,
     CONTROL_RECIPE_SIMPLE_V1_LAG,
     PROCEDURE_LOSS_FIELDS,
     TIME_CONSTANT_FIELDS,
@@ -83,7 +82,6 @@ from config import (  # noqa: E402
     HOOK_SATURATIONS,
     MODELS,
     PREDICTION_CLOSURE,
-    PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
     TSConfig,
     control_recipe_overrides,
@@ -399,11 +397,13 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default=None)
     parser.add_argument(
         "--state-position-reference",
-        choices=STATE_POSITION_REFERENCES,
+        choices=STATE_POSITION_REFERENCES_AVAILABLE,
         default=None,
         help=(
-            "state output only: 'anchor-relative' reads the position channels as "
-            "displacements from the anchor; default: absolute chart coordinates"
+            "state output only: 'corridor-bounded' binds the position channels to the "
+            "final-approach corridor on the rows the output places on the final; default: "
+            "absolute chart coordinates. ('anchor-relative' is vetoed — a stored config may "
+            "carry it, a new run may not select it.)"
         ),
     )
     parser.add_argument(
@@ -476,6 +476,36 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="immutable formal run identity; refuses an occupied output directory",
     )
+
+
+#: (field, what a NEW run may select, why the rest are there). A stored config may carry any
+#: value the vocabulary allows — `TSConfig.from_dict` and `load_checkpoint` must keep working
+#: on artifacts trained under a value that has since been archived or vetoed. Selecting one
+#: for a NEW run is a different act, and this is where it is refused.
+_NEW_RUN_VOCABULARIES = (
+    ("control_command_hook", CONTROL_HOOKS_AVAILABLE,
+     "the nominal-law hook is archived (archive/nominal_law_hook_2026_09/); its numbers are "
+     "in docs/2026-09-06_control_hooks_results.zh.md"),
+    ("state_position_reference", STATE_POSITION_REFERENCES_AVAILABLE,
+     "anchor-relative was VETOED by the 2026-09-03 state-v2 campaign's own pre-registered "
+     "rule; the value exists so that campaign's artifact still loads"),
+)
+
+
+def _refuse_unavailable_selection(config: TSConfig, parser: argparse.ArgumentParser) -> None:
+    """Refuse a value a stored config may carry but a new run may not select.
+
+    The flags' own ``choices`` already refuse these; ``--config-overrides`` is the second
+    door into the same fields, and without this the run gets a dataset build and a formal
+    experiment manifest (``begin_run``) before the training loop dies on it.
+    """
+    for field, available, why in _NEW_RUN_VOCABULARIES:
+        value = getattr(config, field)
+        if value not in available:
+            parser.error(
+                f"{field}={value!r} cannot be selected for a new run: {why}. "
+                f"Available: {', '.join(available)}"
+            )
 
 
 def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[TSConfig, bool]:
@@ -594,7 +624,9 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
             parser.error(f"{requested_recipe} recipe fields are frozen: {details}")
         overrides.update(frozen)
     overrides["control_recipe_name"] = requested_recipe
-    return TSConfig(**overrides), batch_auto
+    config = TSConfig(**overrides)
+    _refuse_unavailable_selection(config, parser)
+    return config, batch_auto
 
 
 def _build_series_or_exit(args: argparse.Namespace, config: TSConfig,
@@ -732,7 +764,8 @@ def main(argv: list[str] | None = None) -> int:
         help="keep full/window forecasts past closest threshold approach",
     )
     p_predict.add_argument(
-        "--command-hook", choices=list(CONTROL_HOOKS_AVAILABLE),
+        "--command-hook",
+        choices=[hook for hook in CONTROL_HOOKS_AVAILABLE if hook != CONTROL_HOOK_OFF],
         default=None, metavar="HOOK",
         help="run the control rollout through this command hook at prediction time "
              "(the inference-only arms); the checkpoint's own hook applies otherwise",

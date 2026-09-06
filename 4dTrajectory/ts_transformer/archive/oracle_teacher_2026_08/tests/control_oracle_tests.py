@@ -29,10 +29,8 @@ from control.oracle.shooting import (  # noqa: E402
     OracleObjective,
     fit_control_oracle,
     oracle_state_loss,
-    smooth_maximum,
-)
-from control.dynamics.inverse import (  # noqa: E402
     refine_piecewise_constant_schedule,
+    smooth_maximum,
 )
 from control.oracle.curriculum import (  # noqa: E402
     build_horizon_curriculum,

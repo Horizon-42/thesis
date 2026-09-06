@@ -26,7 +26,9 @@ move; the comparison is over the shared keys.)
 `plot_teacher_training.py` — the plan missed the last one; it plots the
 `model_pretraining.history` block only the archived pretrainer writes), and the two test
 files, renamed off pytest's `test_*.py` pattern so `run_all_tests.sh`'s whole-`4dTrajectory`
-collection skips them. Repo root: 20 → 15 `run_ts_*.py`. It was superseded by `simple-v3`'s
+collection skips them. Five runners, FOUR of them `run_ts_*` — `plot_teacher_training.py`
+never carried the prefix — so the glob T4-27's "20 → 14" target is measured on reads **20 →
+16** at the repo root. It was superseded by `simple-v3`'s
 in-training imitation term (`train.control_imitation_mse`); the archived
 `imitation.control_imitation_loss` is a different formula and only one of the two stays alive.
 `control/oracle/basis.py` → **`control/basis_fit.py`**: it is a fit, not a teacher, and the

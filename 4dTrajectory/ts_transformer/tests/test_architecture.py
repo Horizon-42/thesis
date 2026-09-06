@@ -19,6 +19,7 @@ from pathlib import Path
 import sys
 
 TS_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = TS_DIR.parents[1]
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
@@ -46,6 +47,22 @@ def _module_files() -> list[Path]:
         and "tests" not in path.parts
         and "docs" not in path.parts
         and "archive" not in path.parts
+    ]
+
+
+def _archive_import_candidates() -> list[Path]:
+    """Everything that could import the archive and be RUN — wider than `_module_files`.
+
+    The layering checks below deliberately skip `tests/` and the root runners (a test may
+    import anything; a runner is not part of the package). The archive rule is not about
+    layering: `CLAUDE.md` says the archive is off the import path, and a test file or a
+    root `run_ts_*.py` importing it would break that claim just as loudly as a package
+    module would.
+    """
+    return [
+        *_module_files(),
+        *sorted(p for p in (TS_DIR / "tests").glob("*.py")),
+        *sorted(REPO_ROOT.glob("run_ts_*.py")),
     ]
 
 
@@ -78,12 +95,15 @@ def test_nothing_live_imports_the_archive():
     checkpoints are already refused, its objective and dynamics backend are retired). A
     live import would quietly make it load-bearing again.
     """
-    assert ARCHIVE.is_dir() and (ARCHIVE / "oracle_teacher_2026_08" / "README.md").is_file()
-    for path in _module_files():
+    campaigns = sorted(p.name for p in ARCHIVE.iterdir() if p.is_dir())
+    assert campaigns and all((ARCHIVE / name / "README.md").is_file() for name in campaigns), (
+        f"every archived campaign needs a README saying what it is: {campaigns}"
+    )
+    for path in _archive_import_candidates():
         offending = {name for name in _imported_names(path) if name.split(".")[0] == "archive"}
         assert not offending, (
-            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; archive/ is a record "
-            f"of completed campaigns, never a dependency"
+            f"{path} imports {sorted(offending)}; archive/ is a record of completed "
+            f"campaigns, never a dependency"
         )
     # And nothing in the archive is reachable as a package: no __init__.py on the way in.
     assert not (ARCHIVE / "__init__.py").exists()
@@ -117,7 +137,7 @@ def test_the_control_package_does_not_import_the_training_loop():
     """control/ is imported BY the training loop; it must never reach back up into it.
 
     `dataset` is deliberately NOT on this list. `Normalizer` and the window types are
-    data-plane value types the loss and the oracle genuinely consume, and `Normalizer.fit`
+    data-plane value types the loss modules genuinely consume, and `Normalizer.fit`
     balances over `FlightSeries`, so it belongs with the data plane rather than under
     `control`. The direction that matters is this one: a loss module that imported `train`
     would make the package unusable outside the loop it was extracted from.

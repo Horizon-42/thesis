@@ -352,6 +352,14 @@ that change.
   registry entry); `FirstOrderLagBackend.chart_scale` is no longer optional on this side,
   but `lag_state_scale` / `rollout_piecewise_constant*` in
   `aerodynamic_model/torch_lag_dynamics.py` keep the branch. Cross-package, so left alone.
+- **`aerodynamic_model/torch_transport_chart_dynamics.py`'s two rollout entry points have no
+  non-test caller repo-wide (verified in the T2 review).** `rollout_piecewise_constant` and
+  `rollout_piecewise_constant_at_times` were reached only through the deleted
+  `TransportChartVelocityBackend`; the chart's other exports
+  (`transport_chart_state_to_channels` / `_to_geodetic`) are still read by
+  `control/dynamics/backends.py`, and the lag and scaled kernels have their own rollouts. The
+  module's own tests still exercise both, so the suite does not notice. Same cross-package
+  call as the `chart_scale=None` entry above.
 - **`docs/open-items.md` line 79 and `README.md`'s "Known gaps" still narrate the
   nominal-law hook as a live option (judgement).** Both sit under banners that mark their
   section historical, and neither names a module path, so T2 did not touch them; a reader

@@ -11,24 +11,89 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import math
 
+import numpy as np
 import torch
 from torch import nn
 
 from channels import POSITION_IDX
 from config import TSConfig
 from dataset import Normalizer
+from control.envelope import CONTROL_NAMES
 from control.loss.fixed_dt import (
     FixedDTStateLossResult,
     fixed_dt_control_state_loss,
 )
 from fixed_dt_supervision import FixedDTControlSupervision
-from physical_criteria import (
-    PHYSICAL_CRITERIA_DISTANCE_SCALE_M,
-    fixed_dt_position_ade_m,
-    physical_criteria_loss,
-    smooth_maximum,
-)
+from physical_criteria import fixed_dt_position_ade_m
 from prediction_outputs import ControlPrediction
+
+
+# ── vendored 2026-09-07 (package audit T2) ───────────────────────────────────
+# These five names were deleted from the live package by the same commit that archived this
+# campaign, because this campaign was their only consumer. Copied here verbatim so the unit
+# reads as one thing; the originals are
+#   git show 882d048:4dTrajectory/ts_transformer/physical_criteria.py
+#   git show 882d048:4dTrajectory/ts_transformer/control/dynamics/inverse.py
+# (`fixed_dt_position_ade_m` is NOT vendored — it is still live, read by
+# `run_ts_control_basis_oracle.py`.)
+
+PHYSICAL_CRITERIA_DISTANCE_SCALE_M = 100.0
+PHYSICAL_CRITERIA_SMOOTH_MAX_TEMPERATURE = 0.1
+
+
+def smooth_maximum(
+    first: torch.Tensor,
+    second: torch.Tensor,
+    *,
+    temperature: float = PHYSICAL_CRITERIA_SMOOTH_MAX_TEMPERATURE,
+) -> torch.Tensor:
+    """Differentiable maximum with the same units and shape as its inputs."""
+    if temperature <= 0.0:
+        raise ValueError("smooth-maximum temperature must be positive")
+    return temperature * torch.logsumexp(
+        torch.stack((first, second), dim=0) / temperature,
+        dim=0,
+    )
+
+
+def physical_criteria_loss(
+    ade_m: torch.Tensor,
+    terminal_error_m: torch.Tensor,
+) -> torch.Tensor:
+    """Smooth worst of ADE/100 m and terminal-error/100 m, per flight."""
+    scale = PHYSICAL_CRITERIA_DISTANCE_SCALE_M
+    return smooth_maximum(ade_m / scale, terminal_error_m / scale)
+
+
+def refine_piecewise_constant_schedule(
+    controls: np.ndarray,
+    segment_durations_s: np.ndarray,
+    *,
+    target_segments: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split every source segment equally while preserving its exact trajectory."""
+    source_controls = np.asarray(controls, dtype=np.float64)
+    source_durations = np.asarray(segment_durations_s, dtype=np.float64)
+    if source_controls.ndim != 2 or source_controls.shape[1] != len(CONTROL_NAMES):
+        raise ValueError("controls must be [N,3]")
+    if source_durations.shape != (len(source_controls),):
+        raise ValueError("segment durations must align with controls")
+    if not np.all(np.isfinite(source_controls)):
+        raise ValueError("controls must be finite")
+    if not np.all(np.isfinite(source_durations)) or not np.all(source_durations > 0.0):
+        raise ValueError("segment durations must be positive and finite")
+    if target_segments <= len(source_controls):
+        raise ValueError("target segment count must exceed the source count")
+    factor, remainder = divmod(target_segments, len(source_controls))
+    if remainder:
+        raise ValueError("target segment count must be an integer source multiple")
+    return (
+        np.repeat(source_controls, factor, axis=0),
+        np.repeat(source_durations / factor, factor),
+    )
+
+
+# ── end vendored ─────────────────────────────────────────────────────────────
 
 
 ORACLE_DURATION_UNIFORM = "uniform"

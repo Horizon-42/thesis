@@ -368,3 +368,25 @@ def test_prediction_exports_the_effective_schedule_and_names_the_hook(monkeypatc
     max_thrust_n = series[0].scenario.aircraft.engine.max_thrust_total_n
     assert parsed.controls[0]["thrust"] == pytest.approx(0.20 * max_thrust_n)     # untouched channels pass
     assert parsed.controls[-1]["thrust"] == pytest.approx(0.16 * max_thrust_n)
+
+
+def test_predicting_a_stored_nominal_law_checkpoint_refuses_instead_of_substituting():
+    """The archived hook's checkpoints load; flying them does NOT quietly become a barrier.
+
+    The value survives so `load_checkpoint` can rebuild the six 2026-09-06 configs, which
+    means the whole predict path can reach a config asking for a hook that no longer exists.
+    It must say so, not fall back to the hook that does.
+    """
+    config = _hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL, n_segments=2)
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=1, seed=9)
+    series, _ = build_series(flights, config, airport=AIRPORT)
+    normalizer = Normalizer.fit(series)
+
+    class AnyControlModel(torch.nn.Module):
+        def forward(self, history, dynamics):
+            controls = torch.tensor([[[0.20, 0.04, 1.01], [0.16, -0.02, 0.99]]], dtype=history.dtype).expand(len(history), -1, -1)
+            durations = torch.tensor([[6.0, 6.0]], dtype=history.dtype).expand(len(history), -1)
+            return ControlPrediction(controls=controls, segment_durations=durations, final_time_s=durations.sum(dim=-1))
+
+    with pytest.raises(ValueError, match="archived"):
+        forecast_approach(AnyControlModel(), series[0], config, normalizer, device=torch.device("cpu"))
