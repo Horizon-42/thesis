@@ -398,11 +398,20 @@ HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
 # The hook gates on the rollout state itself; the FAF gate is not carried by the control
 # dynamics, so ``on-final`` is the only gate a hook can use.
-# Fields removed from the contract after checkpoints that store them were written. Each
-# could not change an answer (2026-09-07 package audit): `control_hook_gate` had a
-# one-member vocabulary nothing read; `control_dense_state_loss_weight` was a weight no
-# loss read. `from_dict` drops them from a stored config.
-RETIRED_SERIALIZED_FIELDS = ("control_hook_gate", "control_dense_state_loss_weight")
+# Fields removed from the contract after checkpoints that store them were written
+# (2026-09-07 package audit). `control_hook_gate` had a one-member vocabulary nothing
+# read and `control_dense_state_loss_weight` was a weight no loss read, so neither could
+# change an answer. `control_effort_loss_weight` / `control_smoothness_loss_weight` are
+# weaker: every named recipe pins them to 0.0 and no arm file since 2026-08 set them, but
+# the 2026-07-29 POOLED sweeps (`stage_c_effort`, `stage_c_smoothness`) DID — those ten
+# first-generation runs lose the `custom(effort=…)` / `custom(smooth=…)` item from their
+# recomputed name. `from_dict` drops all four from a stored config.
+RETIRED_SERIALIZED_FIELDS = (
+    "control_hook_gate",
+    "control_dense_state_loss_weight",
+    "control_effort_loss_weight",
+    "control_smoothness_loss_weight",
+)
 
 CONTROL_HOOK_FIELDS = (
     "control_command_hook",
@@ -517,8 +526,6 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "state_endpoint_loss_weight": 0.25,
         "kinematic_consistency_loss_weight": 0.0,
         "terminal_loss_weight": 0.0,
-        "control_effort_loss_weight": 0.0,
-        "control_smoothness_loss_weight": 0.0,
         "control_duration_parameterization": CONTROL_DURATION_UNIFORM,
         "control_duration_uniform_floor": 0.0,
         "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
@@ -763,10 +770,6 @@ class TSConfig:
     # scale, not an aviation acceptance threshold; the checkpoint records it explicitly.
     position_loss_scale_m: float = DEFAULT_POSITION_LOSS_SCALE_M
     final_time_scale_s: float = DEFAULT_FINAL_TIME_SCALE_S
-    # Control-output-only regularizers. Controls are scaled by each flight's own envelope
-    # before these are evaluated, so mixed-aircraft batches share one dimensionless loss.
-    control_effort_loss_weight: float = 1e-3
-    control_smoothness_loss_weight: float = 1e-2
     # Duration-head ablation for the deterministic single-control strategy. ``factorized``
     # predicts one positive total time plus a softmax partition; ``direct`` predicts each
     # positive segment duration and derives total time by summation. Both emit the same
@@ -1524,10 +1527,6 @@ class TSConfig:
             raise ValueError("kinematic_consistency_loss_weight must be non-negative")
         if self.terminal_loss_weight < 0.0:
             raise ValueError("terminal_loss_weight must be non-negative")
-        if self.control_effort_loss_weight < 0.0:
-            raise ValueError("control_effort_loss_weight must be non-negative")
-        if self.control_smoothness_loss_weight < 0.0:
-            raise ValueError("control_smoothness_loss_weight must be non-negative")
         if not 0.0 <= self.control_duration_uniform_floor < 1.0:
             raise ValueError("control_duration_uniform_floor must be in [0, 1)")
         if self.latent_dim < 0 or self.latent_prior_components < 1:
@@ -1768,8 +1767,6 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
     """Serialize the complete recipe for a control-output strategy."""
     base: dict[str, Any] = {
         "reference_velocity_source": config.reference_velocity_source,
-        "effort_loss_weight": config.control_effort_loss_weight,
-        "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": config.control_duration_parameterization,
         "duration_uniform_floor": config.control_duration_uniform_floor,
         "dynamics_backend": config.control_dynamics_backend,

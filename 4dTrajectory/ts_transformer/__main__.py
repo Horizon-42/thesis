@@ -304,8 +304,6 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="control/oracle compatibility weight; direct state ignores it")
     parser.add_argument("--terminal-loss-weight", type=float, default=None,
                         help="control/oracle compatibility weight; direct state ignores it")
-    parser.add_argument("--control-effort-weight", type=float, default=None)
-    parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument("--control-geometry-weight", type=float, default=None)
     parser.add_argument(
         "--control-arc-horizontal-velocity-weight", type=float, default=None
@@ -601,8 +599,6 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("state_endpoint_loss_weight", args.state_endpoint_loss_weight),
         ("kinematic_consistency_loss_weight", args.kinematic_consistency_weight),
         ("terminal_loss_weight", args.terminal_loss_weight),
-        ("control_effort_loss_weight", args.control_effort_weight),
-        ("control_smoothness_loss_weight", args.control_smoothness_weight),
         ("control_geometry_loss_weight", args.control_geometry_weight),
         (
             "control_arc_horizontal_velocity_loss_weight",

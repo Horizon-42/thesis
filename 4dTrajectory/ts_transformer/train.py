@@ -60,7 +60,6 @@ from control.loss.components import (
     ControlStateLossResult,
     control_tracking_loss_terms,
 )
-from control.loss.regularization import control_regularization_signals
 from control.training.curriculum import (
     ControlTrainingStage,
     build_control_training_stage_view,
@@ -126,9 +125,7 @@ HISTORY_NAME = "history.json"
 FIT_EVALUATION_NAME = "fit_evaluation.json"
 FIT_EVALUATION_SCHEMA = "ts-fit-evaluation-v3-common-true-time-endpoint"
 STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal", "procedure")
-CONTROL_LOSS_COMPONENT_NAMES = (
-    "state", "final_time", "kinematic", "terminal", "control_effort", "control_smoothness"
-)
+CONTROL_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
 # The closure output's regression groups wear the four fixed names (LossComponents
 # always emits them): state = geometry, final_time = slowness in seconds, kinematic =
 # height, terminal = 0.
@@ -389,8 +386,6 @@ class ControlLossTerms:
     state: torch.Tensor
     final_time: torch.Tensor
     terminal: torch.Tensor
-    effort: torch.Tensor
-    smoothness: torch.Tensor
     extras: dict[str, torch.Tensor] = field(default_factory=dict)
     # Batch-level counts that are not objectives (see LossComponents.diagnostics).
     diagnostics: dict[str, torch.Tensor] = field(default_factory=dict)
@@ -401,8 +396,6 @@ class ControlLossTerms:
             self.state
             + self.final_time
             + self.terminal
-            + self.effort
-            + self.smoothness
             + sum(self.extras.values(), self.state.new_zeros(()))
         )
 
@@ -729,38 +722,10 @@ def control_prediction_loss_terms(
         runway_heading_rad,
     )
 
-    effort_signal, smoothness_signal = control_regularization_signals(
-        prediction, dynamics
-    )
-    active_segments = (
-        torch.ones_like(prediction.segment_durations, dtype=torch.bool)
-        if segment_valid is None
-        else segment_valid
-    )
-    active_float = active_segments.to(dtype=effort_signal.dtype)
-    effort = (
-        effort_signal.square() * active_float.unsqueeze(-1)
-    ).sum(dim=(1, 2)) / (
-        active_float.sum(dim=1) * effort_signal.shape[-1]
-    ).clamp(min=1.0)
-    if prediction.controls.shape[1] > 1:
-        changes = torch.diff(smoothness_signal, dim=1)
-        active_pairs = active_segments[:, 1:] & active_segments[:, :-1]
-        pair_float = active_pairs.to(dtype=changes.dtype)
-        smoothness = (
-            changes.square() * pair_float.unsqueeze(-1)
-        ).sum(dim=(1, 2)) / (
-            pair_float.sum(dim=1) * changes.shape[-1]
-        ).clamp(min=1.0)
-    else:
-        smoothness = effort.new_zeros(effort.shape)
-
     return ControlLossTerms(
         state=tracking.state,
         final_time=config.final_time_loss_weight * time_loss,
         terminal=tracking.terminal_position,
-        effort=config.control_effort_loss_weight * effort,
-        smoothness=config.control_smoothness_loss_weight * smoothness,
         extras={**tracking.extras, **procedure_extra},
         diagnostics={**rollout_loss.hook_diagnostics, **procedure_diagnostics},
     )
@@ -806,12 +771,8 @@ def control_prediction_loss_components(
         kinematic=zero,
         terminal=weighted_mean(terms.terminal),
         extras={
-            "control_effort": weighted_mean(terms.effort),
-            "control_smoothness": weighted_mean(terms.smoothness),
-            **{
-                name: weighted_mean(value)
-                for name, value in terms.extras.items()
-            },
+            name: weighted_mean(value)
+            for name, value in terms.extras.items()
         },
         diagnostics=terms.diagnostics,
     )

@@ -407,8 +407,6 @@ class TrainingPlan:
         random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
         checkpoint_selection_metric: str = CHECKPOINT_SELECTION_COMMON_GRID_ADE,
         validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS,
-        control_effort_weight: float | None = None,
-        control_smoothness_weight: float | None = None,
         control_geometry_weight: float = 0.75,
         control_arc_horizontal_velocity_weight: float = 0.25,
         control_arc_vertical_velocity_weight: float = 0.25,
@@ -471,8 +469,6 @@ class TrainingPlan:
         self.random_train_anchor_min_future_s = random_train_anchor_min_future_s
         self.checkpoint_selection_metric = checkpoint_selection_metric
         self.validation_common_grid_points = validation_common_grid_points
-        self.control_effort_weight = control_effort_weight
-        self.control_smoothness_weight = control_smoothness_weight
         self.control_geometry_weight = control_geometry_weight
         self.control_arc_horizontal_velocity_weight = (
             control_arc_horizontal_velocity_weight
@@ -645,10 +641,6 @@ class TrainingPlan:
         if self.aircraft_type is not None:
             args += ["--aircraft-type", self.aircraft_type]
         args += ["--aircraft-filter", self.aircraft_filter]
-        if self.control_effort_weight is not None:
-            args += ["--control-effort-weight", str(self.control_effort_weight)]
-        if self.control_smoothness_weight is not None:
-            args += ["--control-smoothness-weight", str(self.control_smoothness_weight)]
         args += [
             "--control-geometry-weight",
             str(self.control_geometry_weight),
@@ -916,10 +908,6 @@ class TrainingPlan:
             overrides["device"] = self.device
         if self.aircraft_type is not None:
             overrides["aircraft_type"] = self.aircraft_type
-        if self.control_effort_weight is not None:
-            overrides["control_effort_loss_weight"] = self.control_effort_weight
-        if self.control_smoothness_weight is not None:
-            overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
         if self.control_rollout_dt is not None:
             overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
@@ -1047,10 +1035,6 @@ class TrainingPlan:
             overrides["device"] = self.device
         if self.aircraft_type is not None:
             overrides["aircraft_type"] = self.aircraft_type
-        if self.control_effort_weight is not None:
-            overrides["control_effort_loss_weight"] = self.control_effort_weight
-        if self.control_smoothness_weight is not None:
-            overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
         if self.control_rollout_dt is not None:
             overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
@@ -1306,9 +1290,7 @@ def run_training(
             )
         if uses_control_dynamics(config.prediction_output):
             print(
-                f"   control   : effort={config.control_effort_loss_weight:g}, "
-                f"smoothness={config.control_smoothness_loss_weight:g}, "
-                f"duration={config.control_duration_parameterization}, "
+                f"   control   : duration={config.control_duration_parameterization}, "
                 f"dynamics={config.control_dynamics_backend}, "
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
@@ -1476,8 +1458,6 @@ def main() -> None:
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--batch-size", default="2048",
                         help="positive integer or auto (default: 2048)")
-    parser.add_argument("--control-effort-weight", type=float, default=None)
-    parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument("--control-geometry-weight", type=float, default=0.75)
     parser.add_argument(
         "--control-arc-horizontal-velocity-weight", type=float, default=0.25
@@ -1690,8 +1670,6 @@ def main() -> None:
             random_train_anchor_min_future_s=args.random_train_anchor_min_future_s,
             checkpoint_selection_metric=args.checkpoint_selection_metric,
             validation_common_grid_points=args.validation_common_grid_points,
-            control_effort_weight=args.control_effort_weight,
-            control_smoothness_weight=args.control_smoothness_weight,
             control_geometry_weight=args.control_geometry_weight,
             control_arc_horizontal_velocity_weight=(
                 args.control_arc_horizontal_velocity_weight

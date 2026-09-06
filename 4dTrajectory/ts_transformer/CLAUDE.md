@@ -199,7 +199,7 @@ command is HELD.
 
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
 prefix: `envelope`, `heads`, `duration`, `conditioning`, `dynamics/{backends,rollout,inverse}`,
-`loss/{components,terminal_clock,fixed_dt,regularization}`, `training/{curriculum,diagnostics}`,
+`loss/{components,terminal_clock,fixed_dt}`, `training/{curriculum,diagnostics}`,
 `constraints/{barrier_filter,nominal_residual,gates}`, `oracle/*` (which absorbed the old
 `oracle_teacher/` package — two halves of one idea).
 

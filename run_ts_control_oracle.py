@@ -92,8 +92,6 @@ def build_oracle_config(
         n_segments=n_segments,
         batch_size=1,
         dropout=0.0,
-        control_effort_loss_weight=0.0,
-        control_smoothness_loss_weight=0.0,
         random_train_anchor=False,
         seed=optimizer_seed,
         split_seed=split_seed,

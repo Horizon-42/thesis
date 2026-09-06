@@ -319,8 +319,6 @@ def optimize_oracle(
     ceiling_config = replace(
         config,
         final_time_loss_weight=0.0,
-        control_effort_loss_weight=0.0,
-        control_smoothness_loss_weight=0.0,
     )
     optimizer = torch.optim.Adam(parameters, lr=learning_rate)
     best_loss = math.inf
@@ -654,11 +652,7 @@ def main() -> None:
         "objective": {
             "total_time": "fixed to observed truth",
             "optimized": "per-flight bounded controls and, where named, duration partition",
-            "disabled_weights": [
-                "final_time_loss_weight",
-                "control_effort_loss_weight",
-                "control_smoothness_loss_weight",
-            ],
+            "disabled_weights": ["final_time_loss_weight"],
             "terminal_loss_weight": config.terminal_loss_weight,
             "warning": "oracle reconstruction ceiling; not a deployable prediction result",
         },

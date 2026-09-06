@@ -116,7 +116,6 @@ from control.training.diagnostics import (  # noqa: E402
     clip_gradients_by_global_norm,
     gradient_norms,
 )
-from control.loss.regularization import control_regularization_signals  # noqa: E402
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
     Normalizer, RandomAnchorTrajectoryWindows, arrival_data_provenance, build_series,
@@ -3457,8 +3456,6 @@ def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
         d_ff=16,
         e_layers=1,
         terminal_loss_weight=0.0,
-        control_effort_loss_weight=0.0,
-        control_smoothness_loss_weight=0.0,
     )
     channel_count = config.enc_in
     # Truth is linear in physical time and was sampled on the uniform true clock [5, 10].
@@ -3519,8 +3516,6 @@ def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monk
         position_loss_scale_m=10_000.0,
         final_time_scale_s=600.0,
         state_endpoint_loss_weight=0.25,
-        control_effort_loss_weight=0.0,
-        control_smoothness_loss_weight=0.0,
     )
     normalizer = Normalizer(
         mean=np.zeros(config.enc_in),
@@ -3573,8 +3568,6 @@ def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monk
     )
     assert float(components.final_time) == pytest.approx((2.0 / 600.0) ** 2)
     assert float(components.kinematic) == pytest.approx(0.0)
-    assert float(components.extras["control_effort"]) == pytest.approx(0.0)
-    assert float(components.extras["control_smoothness"]) == pytest.approx(0.0)
 
 
 def test_control_model_starts_from_neutral_uniform_rollout():
@@ -3733,8 +3726,6 @@ def test_control_simple_loss_forms_one_real_dynamics_training_step():
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
         control_state_duration_gradient=False,
-        control_effort_loss_weight=0.0,
-        control_smoothness_loss_weight=0.0,
         seq_len=8,
         n_segments=2,
         d_model=16,
@@ -4759,8 +4750,6 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         aircraft_type="A320",
         aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT,
         batch_size="16",
-        control_effort_weight=1e-4,
-        control_smoothness_weight=1e-2,
         control_duration_parameterization=CONTROL_DURATION_UNIFORM,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_NATIVE,
@@ -4775,8 +4764,6 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
 
     assert recipe[recipe.index("--prediction-output") + 1] == PREDICTION_CONTROL
     assert recipe[recipe.index("--split-seed") + 1] == "1337"
-    assert recipe[recipe.index("--control-effort-weight") + 1] == "0.0001"
-    assert recipe[recipe.index("--control-smoothness-weight") + 1] == "0.01"
     assert recipe[recipe.index("--control-duration-parameterization") + 1] == "uniform"
     assert recipe[recipe.index("--control-state-clock") + 1] == "observed"
     assert (
@@ -4791,7 +4778,6 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
     assert config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
-    assert config.control_effort_loss_weight == pytest.approx(1e-4)
     assert config.control_duration_parameterization == CONTROL_DURATION_UNIFORM
     assert config.control_state_supervision_clock == CONTROL_STATE_CLOCK_OBSERVED
     assert config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_NATIVE

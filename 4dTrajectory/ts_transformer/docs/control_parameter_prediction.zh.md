@@ -13,6 +13,8 @@
 > `benchmark_validation_execution.py`、`control_oracle_curriculum` 的重复实现。
 > 第 8 节 a/b/c/d/e 五条建议均已落实。
 >
+> **2026-09-07 补充（二）**：effort / smoothness 正则轴已删除——`control/loss/regularization.py`（本文的 `control_regularization.py`）、`control_effort_loss_weight` / `control_smoothness_loss_weight` 与两个 CLI 标志都不存在了（包审计 T1-12：所有配方钉 0.0，每批算一次乘零）。本文 2.4、3、6 节提到它的地方按此读。
+>
 > **2026-09-07 补充**：`uniform` 已是唯一的 duration 参数化——`UniformDurationControlOutputModel` /
 > `uniform_duration_control.py`（后为 `control/duration.py`）并入 `ControlOutputModel`，
 > `UniformDurationControlHead` 移到 `prediction_outputs.py`；本文第 2、3、6 节里的这些名字按此读。
