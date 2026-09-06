@@ -113,6 +113,27 @@ def test_exact_v2_content_reads_as_v2():
     assert loss_design_name(config) == "simple-v2"
 
 
+def test_the_l1b_heading_rate_term_is_a_loss_field_with_a_short_name():
+    """A run trained THROUGH the heading-rate term is a different objective and must not
+    share a name with one that was not. Every stored config predates it and carries its
+    defaults, so adding it renames nothing that exists."""
+    from run_naming import _ABBREV
+
+    for field, abbreviation in (
+        ("control_heading_rate_loss_weight", "hr"),
+        ("control_heading_rate_loss_scale_dps", "hr-scale"),
+    ):
+        assert field in CONTROL_LOSS_FIELDS
+        assert _ABBREV[field] == abbreviation
+
+    config = _control_config(control_recipe_name="custom")
+    config.update(control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V3))
+    config["control_recipe_name"] = "custom"
+    assert loss_design_name(config) == "simple-v3"
+    config["control_heading_rate_loss_weight"] = 8.0
+    assert loss_design_name(config) == "simple-v3+(hr=8)"
+
+
 def test_deeply_custom_loss_collapses_to_a_stable_hash():
     config = _control_config(control_recipe_name="custom")
     for field in CONTROL_LOSS_FIELDS[:8]:

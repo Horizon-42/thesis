@@ -34,6 +34,9 @@ class ControlStateLossResult:
     physical_position_mse: torch.Tensor | None = None
     physical_velocity_mse: torch.Tensor | None = None
     control_imitation_mse: torch.Tensor | None = None
+    # L1.b's teacherless bank term: the rollout's own turn rate against the flown track's
+    # at the same endpoints.
+    control_heading_rate_mse: torch.Tensor | None = None
     # The normalized targets and weights aligned to ``normalized_segment_end_states`` rows
     # (the native grid fills them); the procedure penalty gates on these truth rows.
     aligned_targets: torch.Tensor | None = None
@@ -133,6 +136,14 @@ def _true_time_position_objective(
             )
         extras["imitation"] = (
             config.control_imitation_loss_weight * result.control_imitation_mse
+        )
+    if config.control_heading_rate_loss_weight:
+        if result.control_heading_rate_mse is None:
+            raise ValueError(
+                "the heading-rate term needs the native uniform-clock rollout turn rate"
+            )
+        extras["heading_rate"] = (
+            config.control_heading_rate_loss_weight * result.control_heading_rate_mse
         )
     return ControlTrackingLossTerms(
         state=result.physical_position_mse,

@@ -535,6 +535,80 @@ def reference_control_supervision(
     }
 
 
+# The observed heading is differentiated over a WINDOW, never between neighbouring
+# samples: ADS-B reports a quantised track angle, this package's psi comes from a
+# least-squares velocity fit of it, and a single dt_s step of heading difference is
+# therefore dominated by that quantisation rather than by the turn. A central difference
+# spanning 10 s IS the boxcar average of the one-step slopes inside it — long enough to
+# bury the quantisation, short enough that a roll-in (~5 s) is not smeared across the
+# straight legs either side. Stated as a constant because it is a smoothing choice the
+# target depends on, not a free parameter.
+HEADING_RATE_SMOOTHING_WINDOW_S = 10.0
+
+
+def _smoothed_heading_rate_dps(
+    times_s: np.ndarray, heading_rad: np.ndarray, dt_s: float
+) -> np.ndarray:
+    """Central difference of an UNWRAPPED heading over the smoothing window, deg/s."""
+    half = max(1, int(round(HEADING_RATE_SMOOTHING_WINDOW_S / (2.0 * dt_s))))
+    rows = np.arange(len(heading_rad))
+    right = np.minimum(rows + half, len(heading_rad) - 1)
+    left = np.maximum(rows - half, 0)
+    return np.degrees(
+        (heading_rad[right] - heading_rad[left]) / (times_s[right] - times_s[left])
+    )
+
+
+def reference_heading_rate_supervision(
+    series: FlightSeries,
+    anchor: int,
+    config: TSConfig,
+    total_duration_s: float,
+    last_measured_time_s: float,
+) -> dict[str, np.ndarray]:
+    """The flown track's turn rate at the N segment ENDPOINTS, as a TRAINING TARGET.
+
+    Supervision, not dynamics: it reads the future, so it is built here rather than in
+    :func:`dynamics_arrays`, which predict also calls and which must stay deployable from
+    the lookback alone. The same shape as :func:`reference_control_supervision`, with two
+    deliberate differences — no inverse dynamics is solved (the observed track's own
+    heading IS the target, and the rollout supplies the model side, so the two can never
+    be solutions of different equations), and the mask is read at segment ENDPOINTS rather
+    than midpoints, because a turn rate is a quantity at an instant while a
+    piecewise-constant control is a quantity over a segment. Those endpoints are exactly
+    where the velocity term's supervision weights are already zeroed past the last
+    measured velocity, so the two terms mask identically.
+
+    ``psi`` comes from :func:`channels.states_from_channels`, i.e. the modeling layer's
+    math-ENU heading, unwrapped before differencing so the +/-pi branch cut cannot read as
+    a turn. The sign convention is therefore the rollout's own: counter-clockwise is
+    positive, which is what a positive bank produces under the shared RHS.
+    """
+    anchor_time = float(series.times[anchor])
+    times = series.times[anchor:] - anchor_time
+    samples = states_from_channels(
+        times,
+        series.values[anchor:],
+        series.frame,
+        mass_kg=float(series.scenario.initial.m),
+    )
+    heading_rad = np.unwrap(np.asarray([s.psi for _t, s in samples], dtype=np.float64))
+    n_segments = int(config.n_segments)
+    endpoints = (np.arange(n_segments, dtype=np.float64) + 1.0) * (
+        total_duration_s / n_segments
+    )
+    return {
+        "reference_heading_rate_dps": np.interp(
+            endpoints,
+            times,
+            _smoothed_heading_rate_dps(times, heading_rad, config.dt_s),
+        ),
+        "reference_heading_rate_weight": (
+            endpoints <= last_measured_time_s
+        ).astype(np.float64),
+    }
+
+
 # The per-flight final-approach context (final_approach_geometry.FINAL_APPROACH_KEYS):
 # what the corridor-bounded state output and the procedure penalty need to place a chart
 # row on the runway's final. One row per flight, NEVER a model input (it rides in the
@@ -1572,6 +1646,27 @@ class TrajectoryWindows(Dataset, ABC):
             anchor_time = float(series.times[anchor])
             arrays.update(
                 reference_control_supervision(
+                    series,
+                    anchor,
+                    self.config,
+                    total_duration_s=float(
+                        series.supervision_times[-1] - anchor_time
+                    ),
+                    last_measured_time_s=float(
+                        self.last_supervised_times[s_idx][
+                            self.kinematic_channels
+                        ].min()
+                        - anchor_time
+                    ),
+                )
+            )
+        if self.config.control_heading_rate_loss_weight:
+            # Same supervised horizon and same last-measured instant as the imitation
+            # target above; the heading-rate target only masks at the endpoints instead of
+            # the midpoints, and costs no inverse-dynamics solve.
+            anchor_time = float(series.times[anchor])
+            arrays.update(
+                reference_heading_rate_supervision(
                     series,
                     anchor,
                     self.config,

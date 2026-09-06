@@ -368,6 +368,25 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--control-heading-rate-weight",
+        type=float,
+        default=None,
+        help=(
+            "weight of the heading-rate term: the rollout's own turn rate at the segment "
+            "endpoints against the flown track's (default: 0, off). Built by the "
+            "true-time-position objective only"
+        ),
+    )
+    parser.add_argument(
+        "--control-heading-rate-scale-dps",
+        type=float,
+        default=None,
+        help=(
+            "deg/s the heading-rate residual is read in — the unit, not the dose "
+            "(default: 1.5, half a standard-rate turn)"
+        ),
+    )
+    parser.add_argument(
         "--control-gradient-clip-norm",
         type=float,
         default=None,
@@ -553,6 +572,8 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_state_loss_grid", args.control_state_loss_grid),
         ("control_state_objective", args.control_state_objective),
         ("control_state_duration_gradient", args.control_state_duration_gradient),
+        ("control_heading_rate_loss_weight", args.control_heading_rate_weight),
+        ("control_heading_rate_loss_scale_dps", args.control_heading_rate_scale_dps),
         ("control_gradient_clip_norm", args.control_gradient_clip_norm),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),

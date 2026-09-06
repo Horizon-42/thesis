@@ -89,6 +89,9 @@ from models import build_model, parameter_count, resolve_device
 from batch_contract import LossComponents, anchor_state, model_forward, unpack_batch
 from io_utils import file_sha256
 from control.envelope import CONTROL_HALF_WIDTH
+from control.envelope import physical_controls
+from control.dynamics.backends import EndpointControlRollout
+from aerodynamic_model.torch_dynamics import heading_rate_rad_s
 from prediction_outputs import ControlPrediction, StatePrediction
 from closure_output import (
     ClosurePrediction,
@@ -207,6 +210,7 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
         CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: (
             *(("velocity",) if config.control_velocity_loss_weight else ()),
             *(("imitation",) if config.control_imitation_loss_weight else ()),
+            *(("heading_rate",) if config.control_heading_rate_loss_weight else ()),
         ),
     }
     return (
@@ -469,6 +473,50 @@ def control_imitation_mse(
     )
 
 
+def control_heading_rate_mse(
+    rollout: EndpointControlRollout,
+    config: TSConfig,
+    dynamics: dict[str, torch.Tensor],
+) -> torch.Tensor | None:
+    """Per-flight MSE between the ROLLOUT's own turn rate and the flown track's, deg/s.
+
+    The predicted side is read out of the RHS the rollout integrates
+    (:func:`aerodynamic_model.torch_dynamics.heading_rate_rad_s`) at each segment END,
+    evaluated on the state the rollout reached there and on the controls the aircraft had
+    ACTUALLY reached (the commands under the point-mass model, the actuator states after
+    the lag). Nothing about the coordinated-turn identity is restated, so this term cannot
+    ask for a turn the model would not fly — which is exactly what the imitation teacher's
+    inverse-dynamics target does not guarantee.
+
+    Both sides are divided by ``control_heading_rate_loss_scale_dps``, and endpoints past
+    the last measured velocity carry zero weight (see
+    :func:`dataset.reference_heading_rate_supervision`) — the same masking the velocity
+    term relies on.
+    """
+    if not config.control_heading_rate_loss_weight:
+        return None
+    states = rollout.geodetic_states
+    dtype, device = states.dtype, states.device
+
+    def cast(value: torch.Tensor) -> torch.Tensor:
+        return value.to(dtype=dtype, device=device)
+
+    predicted_dps = torch.rad2deg(
+        heading_rate_rad_s(
+            states,
+            physical_controls(
+                cast(rollout.actual_controls), cast(dynamics["max_thrust_n"])
+            ),
+            # Per-flight ``[B,6]`` against per-endpoint ``[B,N,7]`` states.
+            cast(dynamics["aero_params"]).unsqueeze(-2),
+        )
+    )
+    target = cast(dynamics["reference_heading_rate_dps"])
+    weight = cast(dynamics["reference_heading_rate_weight"])
+    delta = (predicted_dps - target) / config.control_heading_rate_loss_scale_dps
+    return (delta.square() * weight).sum(dim=1) / weight.sum(dim=1).clamp(min=1.0)
+
+
 def _native_endpoint_control_state_loss(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
@@ -535,6 +583,7 @@ def _native_endpoint_control_state_loss(
         physical_position_mse=physical_position_mse,
         physical_velocity_mse=physical_velocity_mse,
         control_imitation_mse=control_imitation_mse(prediction, config, dynamics),
+        control_heading_rate_mse=control_heading_rate_mse(rollout, config, dynamics),
         aligned_targets=aligned_targets,
         aligned_weights=aligned_weights,
         hook_diagnostics=command_hook.diagnostics() if command_hook is not None else {},

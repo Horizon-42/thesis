@@ -109,6 +109,31 @@ def enu_rhs(
     )
 
 
+HEADING_RATE_ROW = STATE_NAMES.index("psi")
+
+
+def heading_rate_rad_s(
+    states: torch.Tensor,
+    controls: torch.Tensor,
+    aero_params: torch.Tensor,
+) -> torch.Tensor:
+    """``dpsi/dt`` at ``states``, read out of :func:`enu_rhs` itself.
+
+    A supervision term on the turn rate must use the model's OWN relation, not a restated
+    coordinated-turn identity: this RHS turns at ``g·n_realized·sin(mu)/(V·cos gamma)``
+    with the STALL-LIMITED load factor, which equals the textbook ``g·tan(mu)/V`` only
+    where the schedule happens to be coordinated and level (``n = cos gamma / cos mu``).
+    Calling the RHS is what keeps the two from drifting apart.
+
+    The first two state entries (horizontal position) do not enter ``dpsi/dt``, so a
+    geodetic ``(lat, lon, alt, V, psi, gamma, m)`` row may be passed unchanged. The
+    transport-chart backends add the moving-frame term ``omega x v`` on top of this force
+    part; at TMA speeds that contributes under 1e-3 deg/s, against a standard-rate turn's
+    3 deg/s.
+    """
+    return enu_rhs(states, controls, aero_params)[..., HEADING_RATE_ROW]
+
+
 def rk4_enu_step(
     state_enu: torch.Tensor,
     controls: torch.Tensor,

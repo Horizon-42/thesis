@@ -85,6 +85,12 @@ class EndpointControlRollout:
     # The schedule actually flown, envelope units: the network's commands, or what a
     # command hook made of them. Records and downstream losses read THIS.
     controls: torch.Tensor
+    # ``[B,N,3]``: what the aircraft was actually doing AT each segment end, envelope
+    # units. Under the point-mass model a piecewise-constant command is in effect
+    # instantly, so this IS ``controls``; under the first-order lag the three controls are
+    # states chasing their command and this is where they got to. A term that prices what
+    # the rollout flew (the heading-rate loss) must read this, never the command.
+    actual_controls: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -154,6 +160,7 @@ class ReanchoredRK4Backend(ControlDynamicsBackend):
             ),
             geodetic,
             inputs.controls,
+            inputs.controls,
         )
 
     def dense_rollout(
@@ -200,6 +207,7 @@ class _TransportChartResults:
         inputs: RolloutInputs,
         config: TSConfig,
         controls: torch.Tensor,
+        actual_controls: torch.Tensor,
     ) -> EndpointControlRollout:
         return EndpointControlRollout(
             transport_chart_state_to_channels(
@@ -209,6 +217,7 @@ class _TransportChartResults:
             ),
             transport_chart_state_to_geodetic(chart_states, inputs.frame_params),
             controls,
+            actual_controls,
         )
 
     @staticmethod
@@ -253,7 +262,11 @@ class ScaledTransportChartVelocityBackend(ControlDynamicsBackend):
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
         return _TransportChartResults.endpoint(
-            scaled_to_physical_transport_chart_state(scaled), inputs, config, inputs.controls
+            scaled_to_physical_transport_chart_state(scaled),
+            inputs,
+            config,
+            inputs.controls,
+            inputs.controls,
         )
 
     def dense_rollout(
@@ -303,6 +316,12 @@ class FirstOrderLagBackend(ControlDynamicsBackend):
             states, lag_state_scale(self.chart_scale, reference)
         )
 
+    def _actuators(self, states: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
+        """The three controls the actuators had REACHED at each segment end."""
+        return lag_actuator_states(
+            states, lag_state_scale(self.chart_scale, reference)
+        )
+
     def _hooked_schedule(
         self, inputs: RolloutInputs, config: TSConfig, command_hook: CommandHook
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -349,7 +368,11 @@ class FirstOrderLagBackend(ControlDynamicsBackend):
         if command_hook is not None:
             states, effective = self._hooked_schedule(inputs, config, command_hook)
             return _TransportChartResults.endpoint(
-                self._to_chart(states, inputs.frame_params), inputs, config, effective
+                self._to_chart(states, inputs.frame_params),
+                inputs,
+                config,
+                effective,
+                self._actuators(states, inputs.frame_params),
             )
         states = lag_endpoint_rollout(
             inputs.initial_state,
@@ -364,7 +387,11 @@ class FirstOrderLagBackend(ControlDynamicsBackend):
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
         return _TransportChartResults.endpoint(
-            self._to_chart(states, inputs.frame_params), inputs, config, inputs.controls
+            self._to_chart(states, inputs.frame_params),
+            inputs,
+            config,
+            inputs.controls,
+            self._actuators(states, inputs.frame_params),
         )
 
     def dense_rollout(
