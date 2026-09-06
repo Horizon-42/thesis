@@ -123,7 +123,7 @@ from dataset import (  # noqa: E402
     cross_validation_folds, require_matching_data_provenance, split_by_flight,
     split_name_for_dataset_id, window_anchors,
 )
-from development_cohorts import DevelopmentCohort  # noqa: E402
+from development_cohorts import DEVELOPMENT_COHORT_SCHEMA, DevelopmentCohort  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
 from evaluation.thresholds import AssessmentContext  # noqa: E402
@@ -302,7 +302,7 @@ def test_development_cohort_checkpoint_cannot_be_frozen_for_test(tmp_path):
         "data_provenance": provenance,
         "data_selection": {
             "development_cohort": {
-                "schema_version": "ts-development-cohort-v1",
+                "schema_version": DEVELOPMENT_COHORT_SCHEMA,
                 "name": "KRDU-05L-cluster-0",
             },
         },
@@ -436,8 +436,8 @@ def test_invalid_teacher_arguments_do_not_begin_a_formal_run(monkeypatch, tmp_pa
     assert not began_run
 
 
-def test_predict_cli_refuses_test_without_explicit_release(tmp_path):
-    with pytest.raises(SystemExit):
+def test_predict_cli_refuses_test_without_explicit_release(tmp_path, capsys):
+    with pytest.raises(SystemExit) as info:
         ts_cli.main([
             "predict",
             "--checkpoint", str(tmp_path / "checkpoint.pt"),
@@ -445,6 +445,7 @@ def test_predict_cli_refuses_test_without_explicit_release(tmp_path):
             "--output-dir", str(tmp_path / "prediction"),
             "--split", "test",
         ])
+    assert info.value.code == 2 and "--split test is sealed" in capsys.readouterr().err
 
 
 def _frame() -> frames.ENUFrame:
@@ -2462,7 +2463,7 @@ def test_control_simple_v1_is_a_frozen_serialized_recipe():
         replace(config, n_segments=32)
 
 
-def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts():
+def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts(capsys):
     parser = argparse.ArgumentParser()
     ts_cli._add_data_args(parser)
     ts_cli._add_training_args(parser)
@@ -2492,8 +2493,9 @@ def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts():
             "--n-segments", "32",
         ]
     )
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as info:
         ts_cli._config_from_args(conflicting, parser)
+    assert info.value.code == 2 and "recipe fields are frozen: n_segments=32" in capsys.readouterr().err
 
 
 def test_cached_teacher_pretrainer_accepts_native_control_batch(tmp_path):
@@ -3249,7 +3251,7 @@ def test_capacity_report_recipe_detects_every_config_difference(
 
 def test_capacity_report_masks_unsupervised_reference_velocity_placeholders():
     diagnostics = {
-        "channel_names": ["e", "n", "u", "edot", "ndot", "udot"],
+        "channel_names": list(ch.CHANNELS),
         "anchor_state": [0.0, 0.0, 0.0, 10.0, 0.0, -1.0],
         "fixed_dt": {
             "offset_s": [2.0, 4.0, 6.0],

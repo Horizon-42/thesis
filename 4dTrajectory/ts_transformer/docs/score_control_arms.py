@@ -36,6 +36,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "4dTrajectory" / "ts_transformer"))
+from approach_difficulty import STRAIGHT_TORTUOSITY  # noqa: E402
 from control.dynamics.inverse import actual_controls  # noqa: E402
 
 AERO = np.array([122.6, 2.7, 0.023, 0.0334, 0.8, 0.2])
@@ -45,7 +46,12 @@ MAX_THRUST_N = 240_000.0
 # Without it a common-profile share computed at N=16 would not be comparable with one at
 # N=64 — and the scorer would silently skip every arm whose N differed from the constant.
 COMMON_GRID_POINTS = 64
-STRAIGHT_TORTUOSITY = 1.02
+# The bank floor is read on GENUINELY straight references — a stricter cut than the
+# readouts' straight-in stratum (approach_difficulty.STRAIGHT_TORTUOSITY = 1.05), on
+# purpose: a floor wants flights that really flew no turn at all. The two are different
+# populations and the printed labels say which; the assertion keeps them ordered.
+GENUINELY_STRAIGHT_TORTUOSITY = 1.02
+assert GENUINELY_STRAIGHT_TORTUOSITY < STRAIGHT_TORTUOSITY
 
 
 def _tortuosity(rows) -> float:
@@ -159,7 +165,7 @@ def score(pred_dir: Path) -> dict | None:
 
     model_bank = np.array(model)
     observed_bank = np.array(observed)
-    straight = np.array(tortuosity) < STRAIGHT_TORTUOSITY
+    straight = np.array(tortuosity) < GENUINELY_STRAIGHT_TORTUOSITY
     common = model_bank.mean(axis=0)
     residual_model = model_bank - common
     residual_observed = observed_bank - observed_bank.mean(axis=0)

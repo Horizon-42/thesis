@@ -8,7 +8,7 @@
 
 | 工作包 | 状态 | 内容 | 工作量 |
 |---|---|---|---|
-| T0 零风险清理 | 未开始 | 8 项（§二） | S×8 |
+| T0 零风险清理 | **1–6 完成（`55af0b7`、本提交）；7、8 待做** | 8 项（§二） | S×8 |
 | T1 删除已废除设计 | 未开始 | 跟踪器、horizon curriculum、arc-length 目标族、regularization | M×3 + S |
 | T2 归档 2026-08 教师机器 | 未开始 | `control/oracle/` 八模块 + 三个运行器 + nominal 律 hook | L |
 | T3 结构重排 | 未开始 | `objective.py` / `validation.py` 拆出 train、config 校验拆分、dataset 拆分、CLI 拆分、后端合并 | M×5 |
@@ -47,7 +47,7 @@ campaign 的 predict/eval 步会 import 主树的当前代码，中途合入会�
 | 2 | **删 `config.control_hook_gate` + `HOOK_GATES`** + 校验 + naming 条目 + 一行测试 | 词汇表只有一个成员，没有任何代码读它；序列化进每个检查点 | B |
 | 3 | **删 `control_dense_state_loss_weight`** + CLI 标志 + `run_ts_pipeline` 7 处 + 必需序列化字段条目 | 全仓库无任何损失读它；只有一个"是否被序列化"的测试；验证指标 `fixed_anchor_validation:675` 保留 | A |
 | 4 | `fixed_anchor_validation.py:20` 改从 `terminal_state_loss` import `last_reliable_terminal_velocity_target`，删 `components` 的再导出 | 唯一活的归属规则违反：state 路径共享模块伸进 `control/` 拿一个顶层符号 | B |
-| 5 | **`STRAIGHT_TORTUOSITY` 与分层标签统一到 `approach_difficulty`**：`docs/score_control_arms.py:48`（1.02）、`docs/compare_control_arms_stratified.py:31,81`（缺 `& ~established`）、`run_ts_runway_hypotheses.py:77,230`（重述标签） | 四处定义、一处不同值、一处掩码错；**发表过的分层表会移动——这正是目的** | C |
+| 5 | **`STRAIGHT_TORTUOSITY` 与分层标签统一到 `approach_difficulty`**：`compare_control_arms_stratified.py` 改用 `strata_masks`（其掩码原缺 `& ~established`）、`run_ts_runway_hypotheses.py` 改用 `STRATUM_*`；`score_control_arms.py` 的 1.02 **是有意的更严的地板阈值**（"genuinely straight" 参考），改名 `GENUINELY_STRAIGHT_TORTUOSITY` 并与 1.05 显式关联（断言 <），不改数字 | 四处定义、一处掩码错；stratified 读数的 vectored 层会移动——这正是目的 | C |
 | 6 | 修错测试：`test_ts_transformer.py:305` 重述 schema（import `DEVELOPMENT_COHORT_SCHEMA`）；`:3253` 重述通道元组；`:382,424,440,2495` `SystemExit` 无 `match`；`test_cta_conditioning.py:182` **无断言**（断言探针批带有限的 `cta_s`）；`test_final_constraint.py:363-378` 绑定本机日期产物、与 5 行后的封闭测试重复（删） | 逐条引用了断言 | C |
 | 7 | **recipe 冻结改为字面量**：`control_simple_v1_overrides` 里 `dt_s / seq_len / channels / aircraft_type / random_train_anchor_min_future_s / validation_common_grid_points / position_loss_scale_m / final_time_scale_s` 八个字段钉在模块默认值上 | 改默认值静默重定义 v1/v2/v3，追溯改写"同 recipe 一轴"的配对比较 | A |
 | 8 | 五个字节相同的私有助手合并到 `io_utils.py`（`_write_json_atomic`×2、`_file_sha256`×2、`_utc_now`×2、`_sha256_bytes`×2、`_is_cuda_oom`×2）；`fixed_anchor_validation._signed_spread` 改 import `metrics._spread`，`_magnitude_spread` 改名（与 `evaluation/stats.magnitude_spread` 同名不同 schema） | `cross_validation.py` 的 `allow_nan=False` 变体是有意义的差异，做成参数 | A |

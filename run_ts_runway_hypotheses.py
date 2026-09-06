@@ -51,6 +51,7 @@ for path in (TS_DIR, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from approach_difficulty import STRAIGHT_TORTUOSITY, STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED  # noqa: E402
 from approach_difficulty import approach_difficulty  # noqa: E402
 from channels import IDX, channels_from_states, states_from_channels  # noqa: E402
 from coordinate_frames import COORDINATE_FRAME_AIRPORT_ENU  # noqa: E402
@@ -74,7 +75,6 @@ SCHEMA = "ts-runway-hypotheses-v2-mirror-control"
 # from this fake alternative as from the real sibling is picking the luckiest of K noisy
 # forecasts, not using runway knowledge.
 MIRROR = "MIRROR"
-STRAIGHT_TORTUOSITY = 1.05
 # A candidate whose inbound course is more than this far from the aircraft's track at the
 # anchor is not being flown to; the parallel sibling stays inside the gate by construction.
 COURSE_GATE_DEG = 90.0
@@ -226,9 +226,9 @@ def summarise(flights: list[dict[str, Any]], selectors: list[str]) -> dict[str, 
     tort = np.array([f["difficulty"]["route_tortuosity"] for f in flights])
     established = np.array([bool(f["difficulty"]["established_at_anchor"]) for f in flights])
     strata = {
-        "all": np.ones(len(flights), dtype=bool),
-        "straight-in": tort < STRAIGHT_TORTUOSITY,
-        "vectored": (tort >= STRAIGHT_TORTUOSITY) & ~established,
+        STRATUM_ALL: np.ones(len(flights), dtype=bool),
+        STRATUM_STRAIGHT_IN: tort < STRAIGHT_TORTUOSITY,
+        STRATUM_VECTORED: (tort >= STRAIGHT_TORTUOSITY) & ~established,
     }
     out: dict[str, Any] = {}
     for stratum, mask in strata.items():

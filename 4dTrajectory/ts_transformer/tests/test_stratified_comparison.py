@@ -32,6 +32,7 @@ def _write_arm(campaign: Path, name: str, straight_ade: float, vectored_ade: flo
             "fde_m": (straight_ade if straight else vectored_ade) * 2.0,
             "route_tortuosity": 1.01 if straight else 1.80,
             "established_at_anchor": straight,
+            "remaining_path_m": 9_000.0 if straight else 30_000.0,   # the covariates a real row carries
         })
     (pred / "summary.json").write_text(json.dumps({"results": results}))
     if weight is not None:
