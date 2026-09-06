@@ -20,7 +20,7 @@ Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；�
 | L1 低维控制头 + 稠密监督（确定性基线） | **campaign 在跑（2026-09-07 启动，`l1_lowdim_20260907`）**；无新代码 | 臂 `docs/experiments/l1_lowdim_arms.json`（L1_dense32 / L1_dense64 / L1_native32，对照 A_control_v3） | 不差于 simple-v3；参数 257 → 96；bank skill 必读 |
 | L2 CVAE 骨架（隐意图 z） | **代码完成（2026-09-07，分支 `dev-l2`，待 review 后合入）**：L2.a 训练/top-1 + L2.b K 采样、shuffle 诊断、读数 | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
-| L4 场景条件（先验吃邻机） | 未开始（数据平面 WIP 已在 `045c233`） | `scene/` + 先验网络 | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
+| L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**暂不建**（数据平面 WIP review 在跑，若发现特征缺陷则重测） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | 未开始 | — | 见 §七 |
 
 **误差预算（KRDU val，雷达引导 497 架，未跟踪，`closure_p1c_20260905`）——本文所有目标都相对它**：
@@ -305,6 +305,20 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 - 泄漏红线：邻机特征只用 t ≤ t₀ 的样本；邻机落地时间与最终跑道只进 `future_label`，不进特征。
 
 **门**：KL(q‖p) 相对 L2 显著下降（先验变尖 = 场景信息进来了）；雷达引导 top-1 ADE 改善。
+
+> **前置测量结果（2026-09-07，`run_ts_scene_explainability.py`，KRDU 14,418 架，同 Phase 0 人群与 CV 协议）**：
+> 先复现了 Phase 0 到小数点（锚点后汇入 6,557 架：d_join R² 本机 0.34 → 粗上下文 0.38 → 真值前机 ETA
+> 0.47；剩余时长中位误差本机 35.8 s → 真值前机 26.4 s）。然后**场景数据平面的实体级特征零增量**：
+> 跑道使用标量 0.37 / 34.7 s，再加 4 架邻机的静态行 0.36 / 36.1 s。门（0.55 / 28 s）**不过**。
+> **诊断**（2,000 架抽样）：数据平面为 96 % 的雷达引导本机找到了"前机"，但它按当前地速估的前机 ETA
+> 与前机**真实**落地时刻的相关只有 **0.11**（中位晚 275 s，p10/p90 −90 / +1067 s）——雷达引导的前机
+> 自己的剩余时间和本机一样没定，它是同一个排序决定的另一个结果，不是本机能观测到的原因。真值前机 ETA
+> 能解释 d_join（0.47）正因为它是**结果**。有信号的只有 `lead_gap_s`（corr −0.44），而它已被本机自身
+> 状态覆盖。
+> **结论**：在锚点时刻，管制排序决定还没有写进邻机的可观测状态里；一个完美的邻机编码器也拿不回 962 m
+> 的大部分。**L4 场景编码器暂不建**；962 m 的交付形态是 L2 的分布（minADE_K + 校准），不是 top-1。
+> 若要继续追场景信息，方向是"前机的**预测**剩余时间"（把本机模型用在邻机上，GooDFlight 的 one-then-all）
+> 或更早的时间窗，且先在这个协议上量到增量再建模。待数据平面 review 确认特征无缺陷后此结论成为最终。
 **预期形状**：minADE_K 基本不变而 top-1 改善——那正是"场景信息在选模态"，是本设计预期的收益形态，
 要在结果文档里明说，避免被读成"多模态没用"。
 
