@@ -22,7 +22,7 @@ L2 的 base = native32 + 教师**。包审计 T0 完成待 review。下一步 = 
 |---|---|---|---|
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **完成（2026-09-07）**：native32 全体 ADE 1322 vs 基线 1333（配对胜率 52.6 %，bank skill 0.726 vs 0.728）——**N=32 免费**；dense/无教师 2515/2603，否决触发，wiggle 回归——**轨迹误差损失单独不够**。结果 `2026-09-07_l1_lowdim_results.zh.md` | `l1_lowdim_20260907/`（readout、readout_bank） | 不差于 simple-v3 ✓；参数 257 → 96 ✓；bank skill ✓（native32） |
-| L1.b 监督替代教师 | **代码完成（2026-09-07，`dev-l1b`）**：② 航向率损失（模型侧读 `enu_rhs` 本身 + rollout 的实际 bank）；③ ② + bank TV（① 模仿 0 撤销：simple-v2 的 bank skill 0.124 已回答）。臂文件已填：`L1b_native32_e60`（同预算对照）/ `L1b_hr1` / `L1b_hr8` / `L1b_hr8_tv1`，筛选档 60 轮，**待入队** | `l1b_supervision_arms.json`、`control_heading_rate_loss_weight`（+ `_scale_dps`）、`control_bank_tv_loss_weight`、`tests/test_supervision_terms.py` | 见 §六 L1.b |
+| L1.b 监督替代教师 | **筛选通过（2026-09-07）**：hr=8 + TV=1 bank skill 0.711 vs 教师对照 0.709，bank RMS 0.17°（观测 0.41°），ADE 不劣；hr=8 单独 0.665 败（轨迹最好）；hr=1 坍进共同剖面 → 教师线降为对照，`l1b_full_arms.json` 180 轮确认（hr8+tv1 / hr16+tv1 / hr16）排今晚 | `l1b_supervision_arms.json`、`l1b_full_arms.json` | 见 §六 L1.b |
 | L2 CVAE 骨架（隐意图 z） | **L2.d 热启动后验 β=0.01：z 活到最后（2.8 维、0.17 nat），top-1 全分层优于 native32（1214 vs 1322，胜率 65 %，雷达引导 −227 m），bank skill 0.729 最好；门 (3)+否决过，(1)(2) 败——信息量太小、先验比 N(0,I) 窄；z-oracle 雷达引导 2416 m（门 1235）：z 只带约五分之一的意图。KL 一直在 free-bits 地板之下，β 在那里不起作用 → L2.e' 第二版：free bits 当信息预算 ∈ {0.5, 1.0} nat/dim（见 §六 L2 末）；冷启动与 β ≥ 0.1 全部坍缩** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
@@ -256,7 +256,22 @@ wiggle"是未测的。还有一层：模仿项占损失 0.556，而逆动力学�
 臂，回答"教师质量还能买多少"）；若都不过，L5.a 拟合教师成为主线教师。不做的：闭环（贪心）教师——
 拟合已降到 2–3 h，贪心是它的近视近似且把纠错瞬变写进目标；双层优化与分布匹配（GAN/MMD）——超出
 路线与规模。"少数几次有滚转率限制的机动"作为另一种基，先用 L0 的宽度 oracle 量表示误差再决定。
-臂文件 `docs/experiments/l1b_supervision_arms.json`，②③ 实现 + review 后填入。**筛选档**：坍缩 / wiggle 这类定性问题用 60 轮（约 20 min/臂）先筛，过筛的臂再跑满 180 轮出门数（`epochs` 是 config 字段，臂文件直接设；不减航班——减航班改变总体，数字不再可比，而且加速比更小）。
+**筛选结果（2026-09-07，campaign `l1b_supervision_20260907`，60 轮，匹配对照 = 同预算的教师臂）**：
+
+| 臂 | bank skill | 直线参考 bank RMS | 共同剖面份额 | ADE 全体 / 直线 / 雷达引导 | 直线 FDE p50 |
+|---|---:|---:|---:|---|---:|
+| 对照（教师 64） | 0.709 | 0.39° | 3.1 % | 1459 / 540 / 3083 | 776 |
+| hr=1 | 0.516 | 0.47° | **22.3 %** | 1597 / 566 / 3430 | 926 |
+| hr=8 | 0.665 | 0.20° | 2.3 % | **1396 / 497 / 2987** | **734** |
+| **hr=8 + TV=1** | **0.711** | **0.17°** | 2.5 % | 1404 / 508 / 2991 | 846 |
+
+（地板 0.170、孪生天花板 0.699、观测 bank RMS 0.41°、观测共同剖面 1.8 %。）**hr=8 + TV 过门**，教师线按决定规则
+降为对照臂，L5.a 只作上界。剂量是杠杆（1 → 8：0.516 → 0.665），8 是括号上沿不是最优；TV 在损失里只占 2 %、
+四臂符号反转皆为 0，"给反转定价"的机制不成立，但它确实把 skill 抬了 0.046、RMS 压到 0.17°——记为"有效、机制未明"。
+hr=1 不是"效果弱"而是把模型推进共同坡度剖面（22 %），比无教师的 dense 臂还差。保留意见：过门只赢 0.002、单种子；
+直线 FDE 846 是弱点而 hr=8 单独最好（734）。**确认臂**（`l1b_full_arms.json`，180 轮，对照 L1_native32 的 1322 /
+0.726 / 671）：hr8+tv1、hr16+tv1、hr16；过门者成为主线底座的监督（隐变量臂在多机场前换底座），都不过则筛选结论翻转、
+拟合教师回到主线。**筛选档**：坍缩 / wiggle 这类定性问题用 60 轮（约 20 min/臂）先筛，过筛的臂再跑满 180 轮出门数（`epochs` 是 config 字段，臂文件直接设；不减航班——减航班改变总体，数字不再可比，而且加速比更小）。
 
 **实现（2026-09-07，`dev-l1b`）**：分量名 `heading_rate` / `bank_tv`，与 `velocity` / `imitation` 同在
 `true-time-position` 目标下注册；在别的目标下给非 0 权重会被 config **直接拒绝**（不会静默失效）。
