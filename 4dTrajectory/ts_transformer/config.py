@@ -50,7 +50,7 @@ STATE_POSITION_ABSOLUTE = "absolute"
 # (`4dTrajectory/outputs/*/experiments/state_v2_20260903/A_anchor_relative`), whose config
 # must keep loading and naming. It cannot be SELECTED: it is absent from
 # `STATE_POSITION_REFERENCES_AVAILABLE`, which is the CLI's choices and the boundary check
-# `__main__._refuse_unavailable_selection` applies to `--config-overrides` as well — the
+# `cli.common._refuse_unavailable_selection` applies to `--config-overrides` as well — the
 # same mechanism `control_command_hook="nominal-residual"` uses.
 STATE_POSITION_ANCHOR_RELATIVE = "anchor-relative"
 # The absolute output, with the position channels bounded to the final-approach corridor
@@ -142,7 +142,6 @@ CLOSURE_FIELDS = (
     "closure_height_knots",
     "closure_geometry_loss_weight",
     "closure_timing_loss_weight",
-    "closure_timing_scale_s",
     "closure_height_loss_weight",
 )
 # There is no pre-closure behaviour to reproduce, so every closure field is required.
@@ -378,8 +377,6 @@ PROCEDURE_LOSS_FIELDS = (
     "procedure_loss_vertical_weight",
     "procedure_loss_dual_step",
     "procedure_loss_epsilon",
-    "procedure_loss_lateral_scale_m",
-    "procedure_loss_vertical_scale_m",
 )
 # The rollout command hook: a constraint module that rewrites each control segment's
 # command from the state at the segment's start (control/dynamics/hooks.py). ``barrier``
@@ -400,20 +397,25 @@ CONTROL_HOOK_NOMINAL_RESIDUAL = "nominal-residual"
 CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL)
 #: What a NEW run may select. ``off`` is in it — the flag's own choices drop that one,
 #: because `--command-hook` exists to turn a hook ON, but a config saying ``off`` is the
-#: default and must pass the boundary check in `__main__`.
+#: default and must pass the boundary check in `cli.common`.
 CONTROL_HOOKS_AVAILABLE = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER)
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
 
 # Fields removed from the contract after checkpoints that store them were written
-# (2026-09-07 package audit). `control_hook_gate` had a one-member vocabulary nothing
-# read and `control_dense_state_loss_weight` was a weight no loss read, so neither could
-# change an answer. `control_effort_loss_weight` / `control_smoothness_loss_weight` are
-# weaker: every named recipe pins them to 0.0 and no arm file since 2026-08 set them, but
-# the 2026-07-29 POOLED sweeps (`stage_c_effort`, `stage_c_smoothness`) DID — those ten
+# (2026-09-07 package audit). There are TWO kinds, and conflating them is how a stored
+# value that DID change a run gets dropped without a word.
+#
+# `RETIRED_SERIALIZED_FIELDS` is the unread kind: the code that read the field is gone or
+# never existed, so whatever a stored config says, it cannot have changed the run that
+# produced the artifact. `from_dict` drops these silently. `control_hook_gate` had a
+# one-member vocabulary nothing read and `control_dense_state_loss_weight` was a weight no
+# loss read. `control_effort_loss_weight` / `control_smoothness_loss_weight` are weaker:
+# every named recipe pins them to 0.0 and no arm file since 2026-08 set them, but the
+# 2026-07-29 POOLED sweeps (`stage_c_effort`, `stage_c_smoothness`) DID — those ten
 # first-generation runs lose the `custom(effort=…)` / `custom(smooth=…)` item from their
-# recomputed name. `from_dict` drops all four from a stored config.
+# recomputed name.
 RETIRED_SERIALIZED_FIELDS = (
     "control_hook_gate",
     "control_dense_state_loss_weight",
@@ -461,6 +463,31 @@ RETIRED_SERIALIZED_FIELDS = (
     "control_nominal_residual_load_max",
     "control_nominal_speed_gain",
 )
+
+#: The metres the corridor and glidepath hinges are read in — the UNIT the squared
+#: violation is expressed in, never a dose (`procedure_loss_lateral_weight` /
+#: `procedure_loss_vertical_weight` and the dual step are the doses). Read by
+#: `objective.procedure_loss`.
+PROCEDURE_LATERAL_SCALE_M = 100.0
+PROCEDURE_VERTICAL_SCALE_M = 30.0
+#: The closure timing group's seconds-to-loss scale. Measured at initialisation on synthetic
+#: arrivals with the three weights at 1.0: geometry ~ 1.7, timing ~ 1.5 at 60 s, height
+#: ~ 0.9 — a minute puts the groups within a factor of two (at `final_time_scale_s`'s 600 s
+#: the timing group was 20x under the geometry). Read by `closure_output`.
+CLOSURE_TIMING_SCALE_S = 60.0
+
+# The MEASURED-CONSTANT kind of retirement (T3-21, 2026-09-07). These three were live loss
+# denominators: a stored value other than the constant WOULD have changed the run, so
+# dropping it silently would rewrite history. They were retired because nothing ever moved
+# them — measured over every stored config under 4dTrajectory/outputs/*/experiments/**:
+# 143, 143 and 81 artifacts carry them, none at anything but the constant above.
+# `from_dict` therefore drops each only when it EQUALS the constant, and refuses the config
+# otherwise, naming the key and the value.
+RETIRED_CONSTANT_FIELDS: dict[str, float] = {
+    "procedure_loss_lateral_scale_m": PROCEDURE_LATERAL_SCALE_M,
+    "procedure_loss_vertical_scale_m": PROCEDURE_VERTICAL_SCALE_M,
+    "closure_timing_scale_s": CLOSURE_TIMING_SCALE_S,
+}
 
 CONTROL_HOOK_FIELDS = (
     "control_command_hook",
@@ -673,11 +700,6 @@ class TSConfig:
     closure_height_knots: int = 4
     closure_geometry_loss_weight: float = 1.0
     closure_timing_loss_weight: float = 1.0
-    # The timing group's seconds-to-loss scale. Measured at initialisation on synthetic
-    # arrivals with the three weights at 1.0: geometry ≈ 1.7, timing ≈ 1.5 at 60 s, height
-    # ≈ 0.9 — a minute puts the groups within a factor of two (at final_time_scale_s's
-    # 600 s the timing group was 20× under the geometry).
-    closure_timing_scale_s: float = 60.0
     closure_height_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
@@ -685,7 +707,7 @@ class TSConfig:
     # VETOED for new arms — kept only so the 2026-09-03 artifact stored under it loads.
     state_position_reference: str = STATE_POSITION_ABSOLUTE
     corridor_gate: str = CORRIDOR_GATE_ON_FINAL
-    # State output only: the final-approach penalty (train.procedure_loss). Hinge² on the
+    # State output only: the final-approach penalty (objective.procedure_loss). Hinge² on the
     # metres outside the k-cone / glidepath window, on rows where the OBSERVED track is
     # established (final_approach_geometry.truth_final_gate), each family divided by its
     # runway-scale length. Weights are the multipliers λ: fixed when ``dual_step`` is 0,
@@ -696,8 +718,6 @@ class TSConfig:
     procedure_loss_vertical_weight: float = 0.0
     procedure_loss_dual_step: float = 0.0
     procedure_loss_epsilon: float = 0.02
-    procedure_loss_lateral_scale_m: float = 100.0
-    procedure_loss_vertical_scale_m: float = 30.0
     # Velocity-state supervision may retain the upstream centred track fit or be rebuilt
     # causally from the uniform chart positions.  This changes both model inputs and
     # measured velocity targets, so it is an explicit checkpoint recipe field.
@@ -924,10 +944,33 @@ class TSConfig:
     notes: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Normalize the two under-specified fields, then validate in five passes.
+
+        The order is the only one that works: a value must be a member of its
+        vocabulary, then inside its numeric bounds, before any cross-field rule can
+        read it and mean anything.
+        """
         # Sequence fields arrive as lists from JSON; the contract is tuples (see
         # SEQUENCE_FIELDS / coerce_sequence_fields — the CLI's recipe check uses the same).
         for name in SEQUENCE_FIELDS:
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        self._validate_vocabulary()
+        # After the vocabulary, not before: the table is keyed by the model name.
+        if self.n_segments is None:
+            object.__setattr__(
+                self, "n_segments", DEFAULT_N_SEGMENTS_BY_MODEL[self.model]
+            )
+        self._validate_recipe()
+        self._validate_ranges()
+        self._validate_output_contract()
+        self._validate_control_contract()
+
+    def _validate_vocabulary(self) -> None:
+        """Every field whose value must be a member of a named tuple.
+
+        Runs first: the checks below all read these values, and
+        ``control_recipe_overrides`` indexes a recipe table with one of them.
+        """
         if self.control_recipe_name not in CONTROL_RECIPE_NAMES:
             raise ValueError(
                 f"unknown control_recipe_name {self.control_recipe_name!r}; expected one "
@@ -940,36 +983,9 @@ class TSConfig:
                 f"unknown prediction_output {self.prediction_output!r}; "
                 f"expected one of {PREDICTION_OUTPUTS}"
             )
-        if self.n_segments is None:
-            object.__setattr__(
-                self, "n_segments", DEFAULT_N_SEGMENTS_BY_MODEL[self.model]
-            )
-        expected = control_recipe_overrides(self.control_recipe_name)
-        if expected:
-            mismatches = {
-                name: (getattr(self, name), value)
-                for name, value in expected.items()
-                if getattr(self, name) != value
-            }
-            if mismatches:
-                details = ", ".join(
-                    f"{name}={actual!r} (expected {wanted!r})"
-                    for name, (actual, wanted) in sorted(mismatches.items())
-                )
-                raise ValueError(
-                    f"{self.control_recipe_name} recipe fields are frozen: {details}"
-                )
         if self.horizon_mode not in HORIZON_MODES:
             raise ValueError(
                 f"unknown horizon_mode {self.horizon_mode!r}; expected one of {HORIZON_MODES}"
-            )
-        if (
-            uses_control_dynamics(self.prediction_output)
-            and self.horizon_mode != HORIZON_NORMALIZED
-        ):
-            raise ValueError(
-                "control output uses learned non-uniform segments and currently requires "
-                "horizon_mode='normalized'; state output retains normalized/full/window"
             )
         if self.coordinate_frame not in COORDINATE_FRAMES:
             raise ValueError(
@@ -985,70 +1001,6 @@ class TSConfig:
             raise ValueError(
                 f"unknown corridor_gate {self.corridor_gate!r}; expected one of {CORRIDOR_GATES}"
             )
-        for name in ("procedure_loss_lateral_weight", "procedure_loss_vertical_weight",
-                     "procedure_loss_dual_step"):
-            if getattr(self, name) < 0.0:
-                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
-        if not 0.0 <= self.procedure_loss_epsilon < 1.0:
-            raise ValueError(
-                f"procedure_loss_epsilon is a violation RATE in [0, 1), got "
-                f"{self.procedure_loss_epsilon!r}"
-            )
-        for name in ("procedure_loss_lateral_scale_m", "procedure_loss_vertical_scale_m"):
-            if getattr(self, name) <= 0.0:
-                raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
-        if self.uses_final_approach_context and self.coordinate_frame != COORDINATE_FRAME_ENU:
-            raise ValueError(
-                "the final-approach corridor (corridor-bounded output / procedure loss) is "
-                "written in the threshold-anchored ENU chart — the target at the origin, "
-                f"east/north axes; coordinate_frame={self.coordinate_frame!r} would measure "
-                "it from the wrong point or rotate it twice"
-            )
-        if (
-            self.prediction_output != PREDICTION_STATE
-            and self.state_position_reference != STATE_POSITION_ABSOLUTE
-        ):
-            raise ValueError(
-                "state_position_reference belongs to the state output; "
-                f"prediction_output={self.prediction_output!r} rolls its states out of "
-                "controls and has no position channels to reparametrize"
-            )
-        if self.prediction_output == PREDICTION_CLOSURE:
-            if not self.closure_labels_path:
-                raise ValueError(
-                    "the closure output regresses per-flight labels: set closure_labels_path "
-                    "to the JSON written by docs/p1_closure_oracle.py labels"
-                )
-            if self.coordinate_frame != COORDINATE_FRAME_ENU:
-                raise ValueError(
-                    "the closure geometry is written in the threshold-anchored ENU chart; "
-                    f"coordinate_frame={self.coordinate_frame!r} would draw it from the wrong origin"
-                )
-            if self.horizon_mode != HORIZON_NORMALIZED:
-                raise ValueError(
-                    "the closure output draws its own clock; only the normalized horizon "
-                    "contract (n_segments target nodes) fits it"
-                )
-            if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
-                raise ValueError(
-                    "the closure output selects its checkpoint on its regression objective; "
-                    f"checkpoint_selection_metric={self.checkpoint_selection_metric!r} replays "
-                    "a trajectory the training loop never draws"
-                )
-            if self.random_train_anchor:
-                raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
-            if self.closure_timing_scale_s <= 0.0:
-                raise ValueError("closure_timing_scale_s must be positive")
-            if (self.closure_slowness_knots not in CLOSURE_LABEL_KNOTS
-                    or self.closure_height_knots not in CLOSURE_LABEL_KNOTS):
-                raise ValueError(
-                    f"closure labels carry the knot widths {CLOSURE_LABEL_KNOTS}; got "
-                    f"slowness {self.closure_slowness_knots}, height {self.closure_height_knots}"
-                )
-        elif self.closure_labels_path:
-            raise ValueError(
-                f"closure_labels_path belongs to the closure output; prediction_output={self.prediction_output!r}"
-            )
         if self.control_command_hook not in CONTROL_HOOKS:
             raise ValueError(
                 f"unknown control_command_hook {self.control_command_hook!r}; expected one "
@@ -1059,75 +1011,16 @@ class TSConfig:
                 f"unknown control_hook_saturation {self.control_hook_saturation!r}; "
                 f"expected one of {HOOK_SATURATIONS}"
             )
-        if self.control_command_hook != CONTROL_HOOK_OFF:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError("a control command hook needs the control output")
-            if self.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
-                raise ValueError(
-                    "the command hook is implemented on the first-order-lag dynamics (its "
-                    f"state carries the actuators a hook reads); "
-                    f"control_dynamics_model={self.control_dynamics_model!r}"
-                )
-            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
-                raise ValueError("the command hook rides the native segment-endpoint rollout")
-            if self.coordinate_frame != COORDINATE_FRAME_ENU:
-                raise ValueError("the command hook reads the threshold-anchored ENU chart")
-            for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
-                if getattr(self, name) <= 0.0:
-                    raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
-        if (
-            self.prediction_output == PREDICTION_CONTROL
-            and self.procedure_loss_active
-            and self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
-        ):
-            raise ValueError(
-                "the procedure penalty on the control path is implemented on the native "
-                "segment-endpoint rollout (its aligned targets carry the truth gate); "
-                f"control_state_loss_grid={self.control_state_loss_grid!r} is not supported"
-            )
         if self.target_conditioning not in TARGET_CONDITIONINGS:
             raise ValueError(
                 f"unknown target_conditioning {self.target_conditioning!r}; "
                 f"expected one of {TARGET_CONDITIONINGS}"
-            )
-        if (
-            self.target_conditioning == TARGET_CONDITIONING_CHANNELS
-            and self.model != "itransformer"
-        ):
-            raise ValueError(
-                f"target_conditioning={TARGET_CONDITIONING_CHANNELS!r} requires the "
-                f"itransformer backbone: {self.model!r} is channel-independent, so a "
-                "conditioning channel could never reach the state channels"
             )
         if self.intent_conditioning not in INTENT_CONDITIONINGS:
             raise ValueError(
                 f"unknown intent_conditioning {self.intent_conditioning!r}; "
                 f"expected one of {INTENT_CONDITIONINGS}"
             )
-        if self.intent_conditioning != INTENT_CONDITIONING_NONE:
-            if self.model != "itransformer":
-                raise ValueError(
-                    f"intent_conditioning={self.intent_conditioning!r} requires the "
-                    f"itransformer backbone: {self.model!r} is channel-independent, so a "
-                    "conditioning channel could never reach the state channels"
-                )
-            if self.coordinate_frame == COORDINATE_FRAME_RUNWAY_ALIGNED:
-                raise ValueError(
-                    "the truth join point is gated on chart east/north against the world "
-                    f"runway course; the {COORDINATE_FRAME_RUNWAY_ALIGNED!r} chart is "
-                    "already rotated"
-                )
-            if (
-                self.intent_conditioning in (
-                    INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
-                    INTENT_CONDITIONING_TRUTH_JOIN_DURATION,
-                )
-                and self.random_train_anchor
-            ):
-                raise ValueError(
-                    "the lead ETA and remaining-time channels are measured at the flight's "
-                    "fixed anchor; random_train_anchor=True moves the anchor per sample"
-                )
         if self.reference_velocity_source not in REFERENCE_VELOCITY_SOURCES:
             raise ValueError(
                 f"unknown reference_velocity_source {self.reference_velocity_source!r}; "
@@ -1143,17 +1036,91 @@ class TSConfig:
                 f"unknown control_dynamics_backend {self.control_dynamics_backend!r}; "
                 f"expected one of {CONTROL_DYNAMICS_BACKENDS}"
             )
-        if (
-            not uses_control_dynamics(self.prediction_output)
-            and self.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4
-        ):
-            raise ValueError(
-                "non-default control dynamics backend requires a control prediction output"
-            )
         if self.control_dynamics_model not in CONTROL_DYNAMICS_MODELS:
             raise ValueError(
                 f"unknown control_dynamics_model {self.control_dynamics_model!r}; "
                 f"expected one of {CONTROL_DYNAMICS_MODELS}"
+            )
+        if self.control_imitation_target not in CONTROL_IMITATION_TARGETS:
+            raise ValueError(
+                f"unknown control_imitation_target {self.control_imitation_target!r}; "
+                f"expected one of {CONTROL_IMITATION_TARGETS}"
+            )
+        if self.control_state_supervision_clock not in CONTROL_STATE_CLOCKS:
+            raise ValueError(
+                "unknown control_state_supervision_clock "
+                f"{self.control_state_supervision_clock!r}; expected one of "
+                f"{CONTROL_STATE_CLOCKS}"
+            )
+        if self.control_state_loss_grid not in CONTROL_STATE_LOSS_GRIDS:
+            raise ValueError(
+                "unknown control_state_loss_grid "
+                f"{self.control_state_loss_grid!r}; expected one of "
+                f"{CONTROL_STATE_LOSS_GRIDS}"
+            )
+        if self.control_state_objective not in CONTROL_STATE_OBJECTIVES:
+            raise ValueError(
+                "unknown control_state_objective "
+                f"{self.control_state_objective!r}; expected one of "
+                f"{CONTROL_STATE_OBJECTIVES}"
+            )
+        if self.control_duration_parameterization not in CONTROL_DURATION_PARAMETERIZATIONS:
+            raise ValueError(
+                "unknown control_duration_parameterization "
+                f"{self.control_duration_parameterization!r}; expected one of "
+                f"{CONTROL_DURATION_PARAMETERIZATIONS}"
+            )
+        if self.checkpoint_selection_metric not in CHECKPOINT_SELECTION_METRICS:
+            raise ValueError(
+                f"unknown checkpoint_selection_metric "
+                f"{self.checkpoint_selection_metric!r}; expected one of "
+                f"{CHECKPOINT_SELECTION_METRICS}"
+            )
+        if self.cta_conditioning not in CTA_CONDITIONINGS:
+            raise ValueError(
+                f"unknown cta_conditioning {self.cta_conditioning!r}; expected one of {CTA_CONDITIONINGS}"
+            )
+
+    def _validate_recipe(self) -> None:
+        """A named recipe's fields are frozen at the values that define it.
+
+        `simple-v1/v2/v3` are published comparison arms, so a run that says it is one and
+        differs anywhere is a different experiment wearing the same name.
+        """
+        expected = control_recipe_overrides(self.control_recipe_name)
+        if expected:
+            mismatches = {
+                name: (getattr(self, name), value)
+                for name, value in expected.items()
+                if getattr(self, name) != value
+            }
+            if mismatches:
+                details = ", ".join(
+                    f"{name}={actual!r} (expected {wanted!r})"
+                    for name, (actual, wanted) in sorted(mismatches.items())
+                )
+                raise ValueError(
+                    f"{self.control_recipe_name} recipe fields are frozen: {details}"
+                )
+
+    def _validate_ranges(self) -> None:
+        """Numeric bounds that do not depend on the output path.
+
+        Two of them do read a second field, and they are here rather than in a contract
+        pass because both are arithmetic on the numbers themselves: ``d_model`` must divide
+        by ``n_heads``, and ``val_fraction + test_fraction`` must leave a training split.
+        Runs third, after the vocabulary and the recipe freeze and before the two contract
+        passes — a bound is checked on a value that is already a legal member of its
+        vocabulary, and the contracts then read numbers already known to be in range.
+        """
+        for name in ("procedure_loss_lateral_weight", "procedure_loss_vertical_weight",
+                     "procedure_loss_dual_step"):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
+        if not 0.0 <= self.procedure_loss_epsilon < 1.0:
+            raise ValueError(
+                f"procedure_loss_epsilon is a violation RATE in [0, 1), got "
+                f"{self.procedure_loss_epsilon!r}"
             )
         if (
             not math.isfinite(self.control_velocity_loss_weight)
@@ -1174,72 +1141,12 @@ class TSConfig:
             value = getattr(self, name)
             if not math.isfinite(value) or value < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative")
-            # Both terms are built by the true-time-position objective only. Elsewhere the
-            # weight would be a number that cannot change an answer.
-            if (
-                value
-                and self.control_state_objective
-                != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION
-            ):
-                raise ValueError(
-                    f"{name} is only built by the "
-                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION} objective, not "
-                    f"{self.control_state_objective!r}"
-                )
         if (
             not math.isfinite(self.control_heading_rate_loss_scale_dps)
             or self.control_heading_rate_loss_scale_dps <= 0.0
         ):
             raise ValueError(
                 "control_heading_rate_loss_scale_dps must be finite and positive"
-            )
-        if self.control_imitation_target not in CONTROL_IMITATION_TARGETS:
-            raise ValueError(
-                f"unknown control_imitation_target {self.control_imitation_target!r}; "
-                f"expected one of {CONTROL_IMITATION_TARGETS}"
-            )
-        if self.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
-            if not self.control_fitted_teacher_path:
-                raise ValueError(
-                    "the fitted teacher imitates a per-flight table: set "
-                    "control_fitted_teacher_path to the basis_fit.json written by "
-                    "run_ts_control_basis_oracle.py --checkpoint"
-                )
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "the imitation term supervises a control schedule; "
-                    f"prediction_output={self.prediction_output!r} emits none"
-                )
-            if self.random_train_anchor:
-                raise ValueError(
-                    "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
-                    "random_train_anchor would supervise other anchors with it"
-                )
-            if not self.control_imitation_loss_weight:
-                raise ValueError(
-                    "control_imitation_target names a teacher for a term this run switches "
-                    "off (control_imitation_loss_weight=0): the table would be loaded and "
-                    "validated against the cohort, and never read"
-                )
-            if self.control_state_objective != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
-                # `train.loss_component_names` registers `imitation` under the
-                # true-time-position objective ONLY, so under any other objective the term
-                # is not built at all — the same reason L1's dense arms have no teacher.
-                # That objective in turn requires the native grid and UNIFORM durations, so
-                # this one check also closes the factorized-duration hole: a table of
-                # schedules spread uniformly over the total duration cannot supervise a
-                # learned partition.
-                raise ValueError(
-                    "the imitation term is registered under control_state_objective="
-                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION!r} only; this run scores "
-                    f"{self.control_state_objective!r} and would load the fitted teacher "
-                    "and never read it"
-                )
-        elif self.control_fitted_teacher_path:
-            raise ValueError(
-                "control_fitted_teacher_path belongs to "
-                f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r}; this run "
-                f"imitates {self.control_imitation_target!r}"
             )
         for name in (
             "control_thrust_time_constant_s",
@@ -1249,124 +1156,11 @@ class TSConfig:
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
-            # The actuator ODE is integrated by the same explicit RK4 as the rest of the
-            # state, and explicit RK4 on y' = -y/tau is only stable for h/tau < 2.785.
-            # Below that the rollout does not degrade, it produces NaN, so a swept time
-            # constant shorter than the integrator step is refused at construction
-            # rather than discovered as a dead training run.
-            if (
-                self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG
-                and value < self.control_rollout_integrator_dt_s
-            ):
-                raise ValueError(
-                    f"{name}={value:g}s is shorter than the "
-                    f"{self.control_rollout_integrator_dt_s:g}s integrator step; explicit "
-                    "RK4 is unstable there"
-                )
-        if self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG:
-            if not uses_control_dynamics(self.prediction_output):
-                raise ValueError(
-                    "the lagged flight model requires prediction_output='control'"
-                )
-            # The lag is one RK4 over the coupled point-mass/actuator ODE, so it needs a
-            # backend that exposes a continuous chart RHS. The re-anchored baseline is a
-            # discrete map (it rebuilds a local ENU frame every substep) and has no such
-            # RHS to augment.
-            if self.control_dynamics_backend == CONTROL_DYNAMICS_REANCHORED_RK4:
-                raise ValueError(
-                    "the lagged flight model requires a transport-chart dynamics backend"
-                )
-        if self.control_state_supervision_clock not in CONTROL_STATE_CLOCKS:
-            raise ValueError(
-                "unknown control_state_supervision_clock "
-                f"{self.control_state_supervision_clock!r}; expected one of "
-                f"{CONTROL_STATE_CLOCKS}"
-            )
-        if self.control_state_loss_grid not in CONTROL_STATE_LOSS_GRIDS:
-            raise ValueError(
-                "unknown control_state_loss_grid "
-                f"{self.control_state_loss_grid!r}; expected one of "
-                f"{CONTROL_STATE_LOSS_GRIDS}"
-            )
-        if self.control_state_objective not in CONTROL_STATE_OBJECTIVES:
-            raise ValueError(
-                "unknown control_state_objective "
-                f"{self.control_state_objective!r}; expected one of "
-                f"{CONTROL_STATE_OBJECTIVES}"
-            )
-        if self.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "fixed-dt control state loss is supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-                raise ValueError(
-                    "fixed-dt control state loss requires "
-                    "control_state_supervision_clock='observed'"
-                )
-        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "true-time-position control objective is supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
-                raise ValueError(
-                    "true-time-position control objective requires "
-                    "control_state_loss_grid='native-segment-endpoints'"
-                )
-            if self.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
-                raise ValueError(
-                    "true-time-position control objective requires uniform control durations"
-                )
-            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-                raise ValueError(
-                    "true-time-position control objective requires observed state supervision"
-                )
-        if not self.control_state_duration_gradient:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "detached control-state duration gradients are supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-                raise ValueError(
-                    "detached control-state duration gradients require "
-                    "control_state_supervision_clock='observed'"
-                )
         if (
             not math.isfinite(self.control_gradient_clip_norm)
             or self.control_gradient_clip_norm < 0.0
         ):
             raise ValueError("control_gradient_clip_norm must be finite and non-negative")
-        if (
-            self.control_gradient_clip_norm > 0.0
-            and self.prediction_output != PREDICTION_CONTROL
-        ):
-            raise ValueError(
-                "control gradient clipping is supported only by "
-                "prediction_output='control'"
-            )
-        if self.control_duration_parameterization not in CONTROL_DURATION_PARAMETERIZATIONS:
-            raise ValueError(
-                "unknown control_duration_parameterization "
-                f"{self.control_duration_parameterization!r}; expected one of "
-                f"{CONTROL_DURATION_PARAMETERIZATIONS}"
-            )
-        if (
-            self.control_duration_parameterization == CONTROL_DURATION_UNIFORM
-            and self.prediction_output != PREDICTION_CONTROL
-        ):
-            raise ValueError(
-                "uniform control durations are supported only by prediction_output='control'"
-            )
-        if self.checkpoint_selection_metric not in CHECKPOINT_SELECTION_METRICS:
-            raise ValueError(
-                f"unknown checkpoint_selection_metric "
-                f"{self.checkpoint_selection_metric!r}; expected one of "
-                f"{CHECKPOINT_SELECTION_METRICS}"
-            )
         for name in (
             "seq_len",
             "n_segments",
@@ -1436,6 +1230,105 @@ class TSConfig:
             raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
         if self.latent_posterior_init_std <= 0.0:
             raise ValueError("latent_posterior_init_std must be positive")
+
+    def _validate_output_contract(self) -> None:
+        """Which fields belong to which ``prediction_output``, and the chart each needs.
+
+        A field that means nothing under the configured output is refused rather than
+        ignored, because it would still be serialized into the checkpoint and still rename
+        the run.
+        """
+        if (
+            uses_control_dynamics(self.prediction_output)
+            and self.horizon_mode != HORIZON_NORMALIZED
+        ):
+            raise ValueError(
+                "control output uses learned non-uniform segments and currently requires "
+                "horizon_mode='normalized'; state output retains normalized/full/window"
+            )
+        if self.uses_final_approach_context and self.coordinate_frame != COORDINATE_FRAME_ENU:
+            raise ValueError(
+                "the final-approach corridor (corridor-bounded output / procedure loss) is "
+                "written in the threshold-anchored ENU chart — the target at the origin, "
+                f"east/north axes; coordinate_frame={self.coordinate_frame!r} would measure "
+                "it from the wrong point or rotate it twice"
+            )
+        if (
+            self.prediction_output != PREDICTION_STATE
+            and self.state_position_reference != STATE_POSITION_ABSOLUTE
+        ):
+            raise ValueError(
+                "state_position_reference belongs to the state output; "
+                f"prediction_output={self.prediction_output!r} rolls its states out of "
+                "controls and has no position channels to reparametrize"
+            )
+        if self.prediction_output == PREDICTION_CLOSURE:
+            if not self.closure_labels_path:
+                raise ValueError(
+                    "the closure output regresses per-flight labels: set closure_labels_path "
+                    "to the JSON written by docs/p1_closure_oracle.py labels"
+                )
+            if self.coordinate_frame != COORDINATE_FRAME_ENU:
+                raise ValueError(
+                    "the closure geometry is written in the threshold-anchored ENU chart; "
+                    f"coordinate_frame={self.coordinate_frame!r} would draw it from the wrong origin"
+                )
+            if self.horizon_mode != HORIZON_NORMALIZED:
+                raise ValueError(
+                    "the closure output draws its own clock; only the normalized horizon "
+                    "contract (n_segments target nodes) fits it"
+                )
+            if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
+                raise ValueError(
+                    "the closure output selects its checkpoint on its regression objective; "
+                    f"checkpoint_selection_metric={self.checkpoint_selection_metric!r} replays "
+                    "a trajectory the training loop never draws"
+                )
+            if self.random_train_anchor:
+                raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
+            if (self.closure_slowness_knots not in CLOSURE_LABEL_KNOTS
+                    or self.closure_height_knots not in CLOSURE_LABEL_KNOTS):
+                raise ValueError(
+                    f"closure labels carry the knot widths {CLOSURE_LABEL_KNOTS}; got "
+                    f"slowness {self.closure_slowness_knots}, height {self.closure_height_knots}"
+                )
+        elif self.closure_labels_path:
+            raise ValueError(
+                f"closure_labels_path belongs to the closure output; prediction_output={self.prediction_output!r}"
+            )
+        if (
+            self.target_conditioning == TARGET_CONDITIONING_CHANNELS
+            and self.model != "itransformer"
+        ):
+            raise ValueError(
+                f"target_conditioning={TARGET_CONDITIONING_CHANNELS!r} requires the "
+                f"itransformer backbone: {self.model!r} is channel-independent, so a "
+                "conditioning channel could never reach the state channels"
+            )
+        if self.intent_conditioning != INTENT_CONDITIONING_NONE:
+            if self.model != "itransformer":
+                raise ValueError(
+                    f"intent_conditioning={self.intent_conditioning!r} requires the "
+                    f"itransformer backbone: {self.model!r} is channel-independent, so a "
+                    "conditioning channel could never reach the state channels"
+                )
+            if self.coordinate_frame == COORDINATE_FRAME_RUNWAY_ALIGNED:
+                raise ValueError(
+                    "the truth join point is gated on chart east/north against the world "
+                    f"runway course; the {COORDINATE_FRAME_RUNWAY_ALIGNED!r} chart is "
+                    "already rotated"
+                )
+            if (
+                self.intent_conditioning in (
+                    INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
+                    INTENT_CONDITIONING_TRUTH_JOIN_DURATION,
+                )
+                and self.random_train_anchor
+            ):
+                raise ValueError(
+                    "the lead ETA and remaining-time channels are measured at the flight's "
+                    "fixed anchor; random_train_anchor=True moves the anchor per sample"
+                )
         if self.latent_dim == 0 and (
             self.latent_prior_components != 1
             or self.latent_beta != 1.0
@@ -1446,10 +1339,6 @@ class TSConfig:
                 "latent_prior_components / latent_beta / latent_free_bits_nats / "
                 "latent_posterior_init_std mean nothing "
                 "without a latent (latent_dim == 0) and would still rename the run"
-            )
-        if self.cta_conditioning not in CTA_CONDITIONINGS:
-            raise ValueError(
-                f"unknown cta_conditioning {self.cta_conditioning!r}; expected one of {CTA_CONDITIONINGS}"
             )
         if self.cta_conditioning != CTA_CONDITIONING_OFF and self.prediction_output != PREDICTION_CONTROL:
             raise ValueError(
@@ -1466,6 +1355,202 @@ class TSConfig:
             raise ValueError(
                 "the latent intent lives on the control output; "
                 f"prediction_output={self.prediction_output!r} has no control head to decode it"
+            )
+
+    def _validate_control_contract(self) -> None:
+        """The control path's internal consistency.
+
+        Its axes are not independent: the objective constrains the grid, the clock and the
+        duration parameterization; the command hook constrains the flight model, the grid
+        and the chart; the fitted teacher constrains the objective and the anchor policy.
+        Every rule here names the pair it binds.
+
+        **`control_state_loss_grid` cannot be derived from `control_state_objective`** —
+        measured on disk 2026-09-07, not assumed. `true-time-position` does pin the native
+        grid, but `normalized-mse` runs on BOTH: of the 233 stored configs that load,
+        159 are (`true-time-position`, native), 62 + 8 are (`normalized-mse`, native) on
+        the state and closure outputs, and 4 are (`normalized-mse`, `fixed-dt`) on the
+        control output — the arms `CLAUDE.md`'s defaults table describes as tripping the
+        straight-in veto. Two live values under one objective is not a function, so the
+        grid stays a field and these rules stay checks.
+        """
+        if self.control_command_hook != CONTROL_HOOK_OFF:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError("a control command hook needs the control output")
+            if self.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
+                raise ValueError(
+                    "the command hook is implemented on the first-order-lag dynamics (its "
+                    f"state carries the actuators a hook reads); "
+                    f"control_dynamics_model={self.control_dynamics_model!r}"
+                )
+            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
+                raise ValueError("the command hook rides the native segment-endpoint rollout")
+            if self.coordinate_frame != COORDINATE_FRAME_ENU:
+                raise ValueError("the command hook reads the threshold-anchored ENU chart")
+            for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
+                if getattr(self, name) <= 0.0:
+                    raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
+        if (
+            self.prediction_output == PREDICTION_CONTROL
+            and self.procedure_loss_active
+            and self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
+        ):
+            raise ValueError(
+                "the procedure penalty on the control path is implemented on the native "
+                "segment-endpoint rollout (its aligned targets carry the truth gate); "
+                f"control_state_loss_grid={self.control_state_loss_grid!r} is not supported"
+            )
+        if (
+            not uses_control_dynamics(self.prediction_output)
+            and self.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4
+        ):
+            raise ValueError(
+                "non-default control dynamics backend requires a control prediction output"
+            )
+        for name in ("control_heading_rate_loss_weight", "control_bank_tv_loss_weight"):
+            # Both terms are built by the true-time-position objective only. Elsewhere the
+            # weight would be a number that cannot change an answer.
+            if (
+                getattr(self, name)
+                and self.control_state_objective
+                != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION
+            ):
+                raise ValueError(
+                    f"{name} is only built by the "
+                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION} objective, not "
+                    f"{self.control_state_objective!r}"
+                )
+        if self.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
+            if not self.control_fitted_teacher_path:
+                raise ValueError(
+                    "the fitted teacher imitates a per-flight table: set "
+                    "control_fitted_teacher_path to the basis_fit.json written by "
+                    "run_ts_control_basis_oracle.py --checkpoint"
+                )
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "the imitation term supervises a control schedule; "
+                    f"prediction_output={self.prediction_output!r} emits none"
+                )
+            if self.random_train_anchor:
+                raise ValueError(
+                    "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
+                    "random_train_anchor would supervise other anchors with it"
+                )
+            if not self.control_imitation_loss_weight:
+                raise ValueError(
+                    "control_imitation_target names a teacher for a term this run switches "
+                    "off (control_imitation_loss_weight=0): the table would be loaded and "
+                    "validated against the cohort, and never read"
+                )
+            if self.control_state_objective != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
+                # `objective.loss_component_names` registers `imitation` under the
+                # true-time-position objective ONLY, so under any other objective the term
+                # is not built at all — the same reason L1's dense arms have no teacher.
+                # That objective in turn requires the native grid and UNIFORM durations, so
+                # this one check also closes the factorized-duration hole: a table of
+                # schedules spread uniformly over the total duration cannot supervise a
+                # learned partition.
+                raise ValueError(
+                    "the imitation term is registered under control_state_objective="
+                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION!r} only; this run scores "
+                    f"{self.control_state_objective!r} and would load the fitted teacher "
+                    "and never read it"
+                )
+        elif self.control_fitted_teacher_path:
+            raise ValueError(
+                "control_fitted_teacher_path belongs to "
+                f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r}; this run "
+                f"imitates {self.control_imitation_target!r}"
+            )
+        for name in (
+            "control_thrust_time_constant_s",
+            "control_bank_time_constant_s",
+            "control_load_time_constant_s",
+        ):
+            # The actuator ODE is integrated by the same explicit RK4 as the rest of the
+            # state, and explicit RK4 on y' = -y/tau is only stable for h/tau < 2.785.
+            # Below that the rollout does not degrade, it produces NaN, so a swept time
+            # constant shorter than the integrator step is refused at construction
+            # rather than discovered as a dead training run.
+            value = getattr(self, name)
+            if (
+                self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG
+                and value < self.control_rollout_integrator_dt_s
+            ):
+                raise ValueError(
+                    f"{name}={value:g}s is shorter than the "
+                    f"{self.control_rollout_integrator_dt_s:g}s integrator step; explicit "
+                    "RK4 is unstable there"
+                )
+        if self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG:
+            if not uses_control_dynamics(self.prediction_output):
+                raise ValueError(
+                    "the lagged flight model requires prediction_output='control'"
+                )
+            # The lag is one RK4 over the coupled point-mass/actuator ODE, so it needs a
+            # backend that exposes a continuous chart RHS. The re-anchored baseline is a
+            # discrete map (it rebuilds a local ENU frame every substep) and has no such
+            # RHS to augment.
+            if self.control_dynamics_backend == CONTROL_DYNAMICS_REANCHORED_RK4:
+                raise ValueError(
+                    "the lagged flight model requires a transport-chart dynamics backend"
+                )
+        if self.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "fixed-dt control state loss is supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "fixed-dt control state loss requires "
+                    "control_state_supervision_clock='observed'"
+                )
+        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "true-time-position control objective is supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
+                raise ValueError(
+                    "true-time-position control objective requires "
+                    "control_state_loss_grid='native-segment-endpoints'"
+                )
+            if self.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
+                raise ValueError(
+                    "true-time-position control objective requires uniform control durations"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "true-time-position control objective requires observed state supervision"
+                )
+        if not self.control_state_duration_gradient:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "detached control-state duration gradients are supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "detached control-state duration gradients require "
+                    "control_state_supervision_clock='observed'"
+                )
+        if (
+            self.control_gradient_clip_norm > 0.0
+            and self.prediction_output != PREDICTION_CONTROL
+        ):
+            raise ValueError(
+                "control gradient clipping is supported only by "
+                "prediction_output='control'"
+            )
+        if (
+            self.control_duration_parameterization == CONTROL_DURATION_UNIFORM
+            and self.prediction_output != PREDICTION_CONTROL
+        ):
+            raise ValueError(
+                "uniform control durations are supported only by prediction_output='control'"
             )
 
     @property
@@ -1577,12 +1662,25 @@ class TSConfig:
                 f"serialized config is missing {', '.join(sorted(missing))}; "
                 "regenerate the derived checkpoint"
             )
-        # A field retired from the contract is dropped from a stored config, by name: the
-        # stored value could not have changed the run that produced the artifact (that is
-        # why it was retired), and refusing the artifact would be a contract change in the
-        # wrong direction. Anything else unknown still fails loudly below.
+        # An UNREAD retired field is dropped by name: nothing read it, so the stored value
+        # could not have changed the run, and refusing the artifact would be a contract
+        # change in the wrong direction.
         for name in RETIRED_SERIALIZED_FIELDS:
             data.pop(name, None)
+        # A MEASURED-CONSTANT retired field is dropped only when it agrees with the constant
+        # that replaced it. It was a live loss denominator, so a different stored value
+        # describes a run this build cannot reproduce — that is a loud failure, not a
+        # silent drop.
+        for name, constant in RETIRED_CONSTANT_FIELDS.items():
+            if name not in data:
+                continue
+            stored = data.pop(name)
+            if stored != constant:
+                raise ValueError(
+                    f"serialized config sets {name}={stored!r}, but the field was retired "
+                    f"to the constant {constant!r} because nothing on disk moved it; this "
+                    "artifact was produced under a value this build cannot reproduce"
+                )
         data["channels"] = tuple(data["channels"])
         return cls(**data)
 

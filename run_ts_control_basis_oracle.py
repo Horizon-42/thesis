@@ -97,15 +97,17 @@ from control.basis_fit import (  # noqa: E402
     inverse_dynamics_seed,
     width_scaled_learning_rate,
 )
+from data_provenance import (  # noqa: E402
+    arrival_data_provenance,
+    checkpoint_data_provenance,
+    provenance_manifest_digests,
+    require_matching_data_provenance,
+)
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
-    arrival_data_provenance,
-    checkpoint_data_provenance,
     load_flight_dicts,
-    provenance_manifest_digests,
-    require_matching_data_provenance,
     truth_duration_s,
 )
 from flight_scenarios.identity import flight_key, summary_row_key  # noqa: E402
@@ -191,8 +193,10 @@ _TEACHER_OVERRIDES = {
 
 def basis_config(config_dict: dict, n_segments: int, device: str) -> TSConfig:
     """The reference arm's data contract at width ``n_segments``."""
-    known = {field.name for field in fields(TSConfig)}
-    payload = {name: value for name, value in config_dict.items() if name in known}
+    # `from_dict`, not a local field whitelist: the whitelist silently dropped whatever the
+    # contract had retired, so a stored value that WAS read (a measured-constant field)
+    # would have been swallowed here instead of refused.
+    payload = TSConfig.from_dict(config_dict).to_dict()
     payload.update(_RECIPE_OVERRIDES)
     payload["n_segments"] = int(n_segments)
     payload["device"] = device

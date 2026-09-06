@@ -4,6 +4,202 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — ts_transformer T3 review: the guards that did not grow with the module map
+
+`e1fe10f` (code + tests) and this entry, branch `dev-t3`. The independent review passed on
+behaviour — 15,241 in-process leaves and 316,993 CLI-path leaves identical, 0 import cycles,
+every moved function body AST-identical, 0 stored names or load verdicts moved — and found
+what a structural pass systematically misses: a guard that stayed where it was.
+
+- **`dataset` was accidentally re-exporting `DYNAMICS_CONDITION_NAMES`.** The import had no
+  use in `dataset`, but three tests read it THROUGH `dataset`, so the follow-up entry saying
+  it was "safe to delete" would have cost seven failures. They import it from
+  `control.conditioning` now.
+- **Four renamed flags still worked.** argparse accepts any unambiguous PREFIX by default,
+  so `--dt`, `--control-recipe`, `--closure-labels` and `--control-fitted-teacher` kept
+  parsing after the T3-19 rename — a stale command line setting the field it looks like it
+  sets while reading as up to date. `allow_abbrev=False` on every parser, and a test that
+  runs all fifteen old spellings through `main()` and requires "unrecognized arguments".
+- **`RETIRED_SERIALIZED_FIELDS` dropped non-default values silently**, and its header
+  ("could not have changed the run") was false for the three fields T3-21 put in it — they
+  are live loss denominators. Split into the unread kind (dropped by name) and
+  `RETIRED_CONSTANT_FIELDS`, a `{field: constant}` map that drops a stored value only when
+  it EQUALS the constant and otherwise refuses, naming the key and the value. Exposure is
+  zero — 0 non-default across the artifacts on disk — so no stored config changes verdict.
+  The three constants are single-sourced in `config.py` rather than mirrored.
+- **The barrier gains could not reach the delivery form.** T3-21 put them on `train`, where
+  the hook cannot be enabled without training through it, while the ADOPTED use is
+  `predict --command-hook barrier`. Both are on `predict` now, folded into the existing
+  `replace(...)` and refused without the hook, behind `cli.predict.PREDICT_CONFIG_FLAGS` —
+  the same import-time assertion `CLI_CONFIG_FIELDS` carries. `--command-hook` /
+  `--hook-saturation` keep their short names on purpose: two arm files spell them in
+  still-re-runnable `predict_args`, and renaming rewrites a finished campaign's record.
+- **One `latent_dim` refusal came back**, in `_latent_batch` — T3-22 removed four copies on
+  the grounds that `__main__` checks, which is true of the CLI and not of the library's other
+  callers. It is in `_latent_batch` rather than the fan-out because two of the four entries
+  read the prior in between and would die on `AttributeError: prior_logits` first.
+- **`CLI_CONFIG_FIELDS` was guarded in two directions of three**: deleting a name left its
+  flag parsed and ignored. `NON_CONFIG_DESTS` freezes the infrastructure dests and the
+  documented exceptions, and the test now asserts set equality.
+- Also: `validation` added to the control-layering ban; the two-way `dataset` ↔ `control/`
+  edge stated and pinned (the four modules `dataset` imports must stay `dataset`-free);
+  `splits` guards its annotation-only `dataset` import and joins the torch ban;
+  `validation._dataset_loss_components` moved into the test module that was its only caller;
+  the import-boundary helper proves its poison is live before importing anything;
+  `test_architecture` resolves relative imports; all four point-mass hook refusals covered.
+- **`run_slug` now hashes the diffs `_MAX_LISTED_META` folds into `+N more`.** The barrier
+  gains are LAST in `META_FIELDS`, so two runs differing only in them were the first pair to
+  fold — and a slug names a FUTURE directory, so they would have shared one. 131 stored
+  configs' slugs gain a 6-hex suffix; nothing on disk is renamed (existing directories are
+  historical record), display names are untouched, and there are 0 actual collisions before
+  or after, so the fix is prophylactic.
+
+Numbers this entry and the one below it got wrong, re-counted: `__main__.main` was 679 lines
+not 714; `__post_init__` had 97 `raise` statements not 123; `cli_values` was 58 pairs and
+`CLI_CONFIG_FIELDS` 55 (57 after T3-21), not 60 and 54; `_refuse_hook` had 4 call sites not
+six. The equivalence itemization is restated so it no longer reads as a partition of 9,197,
+and two claims are softened: `evaluation_protocol` shed torch and openap but still loads
+numpy and the harvest package, and the `cta_offset` guard is kept for its test as well as
+for its non-CLI caller. Stale module references fixed in `config.py`, `forecast.py`,
+`final_approach_geometry.py`, `control/loss/components.py`, `docs/ENGINEERING_NOTES.md` and
+four `docs/*.md`; `README.md`'s Layout table gains `objective`, `validation`,
+`data_provenance`, `splits` and `cli/`.
+
+Suite 583 → **591 passed**.
+
+
+### 2026-09-07 — ts_transformer package audit T3: the structural rearrangement (eight commits)
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §五, branch `dev-t3`,
+base `4e00c59`. Nothing here changes a number: every item is a move, and the series is
+closed by an equivalence proof rather than by an assertion. Suite 580 → 583 (three new
+architecture / boundary tests); stored-config sweep at base and at HEAD over every
+`history.json` / `summary.json` / `checkpoint_metadata.json` under
+`4dTrajectory/outputs/*/experiments/**`: 306 shared configs, 233 load at both, **0 load
+verdicts changed, 0 run names changed**.
+
+**The training plane is five modules now, one question each** (`3d3dba0` T3-15,
+`7a27791` T3-16, `ae9d83f` T3-18). `train.py` was 3,027 lines holding three of them.
+
+| module | question | lines |
+|---|---|---|
+| `objective.py` | what a prediction is scored against | 1,079 (new) |
+| `validation.py` | how a fitted model is replayed on a split, which epoch is kept | 869 (new) |
+| `train.py` | the epoch, the cohort, the checkpoint | 1,194 |
+| `data_provenance.py` | which arrival rosters produced this run | 258 (new) |
+| `splits.py` | which split a flight belongs to | 192 (new) |
+| `dataset.py` | observed arrivals → model windows | 1,742 |
+
+Each carve was verified line-for-line against `4e00c59`: 924, 754, 221 and 147 non-blank
+lines moved unchanged. Two consequences worth keeping:
+
+- `batching._probe_training_step`'s three in-function imports are gone. The deferred
+  `from train import prediction_loss` existed only to break a cycle (`train` imports
+  `resolve_batch_size`); with the objective in its own module there is none, and `dataset` /
+  `fixed_dt_supervision` had been deferred alongside it for no reason of their own.
+- `evaluation_protocol` took `require_matching_data_provenance` from `dataset`, so reading
+  the test-release ledger imported torch and openap to compare two dicts. It reaches
+  `data_provenance` now, and
+  `test_the_provenance_and_protocol_modules_do_not_reach_the_data_plane` imports it with
+  `torch` banned. It is not import-free: `data_provenance` still pulls numpy and the harvest
+  package through `trajectory_data_process.harvest.arrivals`. Torch and openap are what
+  went.
+
+**`TSConfig.__post_init__` is five named validators** (`24aee2d` T3-17): 544 lines and 97
+raises, in an order nobody could hold, become `_validate_vocabulary` → `_validate_recipe` →
+`_validate_ranges` → `_validate_output_contract` → `_validate_control_contract`, and the
+order is the argument for it (a value must be in its vocabulary, then in its bounds, before
+a cross-field rule can read it). The `n_segments` default sits BETWEEN the vocabulary pass
+and the rest, because `DEFAULT_N_SEGMENTS_BY_MODEL[self.model]` would raise `KeyError`
+instead of the vocabulary's `ValueError` if it ran first.
+
+**The plan was wrong twice, and both are now measured facts in the code.**
+
+1. `control_state_loss_grid` is NOT derivable from `control_state_objective` after T1-11.
+   Census over the 306 stored configs: 159 `(control, true-time-position, native)`, 62 + 8
+   `(state|closure, normalized-mse, native)`, **4 `(control, normalized-mse, fixed-dt)`** —
+   the arms `CLAUDE.md`'s defaults table describes. `true-time-position` does pin the native
+   grid; `normalized-mse` runs on both. Two values under one objective is not a function, so
+   the six mutual raises stay, with the census in `_validate_control_contract`'s docstring.
+2. Of the seven `*_scale` fields "never non-default on disk", only three may become module
+   constants. `control_simple_v1_overrides` pins `position_loss_scale_m`,
+   `final_time_scale_s`, `control_velocity_loss_scale_mps` and
+   `control_heading_rate_loss_scale_dps` as LITERALS — that is what T0-7 did, so that a
+   module default cannot silently redefine a published simple-v* comparison. Retiring them
+   would reinstall exactly that hazard.
+
+**Three units retired, two hook gains gained flags** (`4148a53` T3-21).
+`objective.PROCEDURE_LATERAL_SCALE_M` (100 m), `objective.PROCEDURE_VERTICAL_SCALE_M` (30 m)
+and `closure_output.CLOSURE_TIMING_SCALE_S` (60 s) leave `TSConfig` into
+`RETIRED_SERIALIZED_FIELDS` (143 / 143 / 81 stored configs carry them, none at anything but
+the default), out of both `run_naming` tuples. `--control-barrier-alpha` and
+`--control-barrier-heading-gain` exist at last: `--config-overrides` JSON was the only way to
+set either, which is how six 2026-09-06 configs carry the first campaign's heading gain 0.3
+rather than a chosen value.
+
+**A dynamics backend is a row, not a class** (`2fc5560` T3-20). Three near-identical classes
+behind an ABC become `ControlDynamicsBackend(description, endpoint_fn, dense_fn, post_fn,
+runs_hooks)`; `_TransportChartResults` was `post_fn` written twice, and `_refuse_hook`'s four
+call sites become one `_admit` driven by `runs_hooks`. Bit-exactness was measured, not
+asserted: all three registered pairs (and the lagged one again under a barrier hook), endpoint
+and dense, 13 tensor digests plus the control gradient each — byte-identical.
+
+**The four latent forecast entries share one fan-out** (`c48adf8` T3-22): `_latent_batch` +
+`_latent_forecasts(latents, probabilities, …)`, where `probabilities is None` states once
+what four call sites used to imply — latents that are not prior samples carry no mode index.
+The four `latent_dim < 1` re-checks are gone (`__main__` refuses every latent flag against a
+non-latent checkpoint, twice) — the T3 review put ONE back, in `_latent_batch`, for the
+library's own callers. The `cta_offset` guard in `forecast_approaches` is NOT gone, against
+the plan: `test_the_offset_is_refused_off_the_cta_path` pins it, and the entry has a caller
+outside the CLI (`run_ts_runway_hypotheses.py`), so deleting it would have removed the only
+check on that path and a green test with it.
+
+**BREAKING (CLI): one module per subcommand, and fifteen flags renamed** (`dba2450` T3-19).
+`__main__.main` 679 → `__main__.py` 131 lines (and `cli/` 1,542): a bootstrap plus a `COMMANDS` table of
+`(help, add_cli_arguments, run_cli)`, the pattern `approach_clustering/cli.py` already used.
+`cli/{train,cross_validate,evaluate_fit,freeze_test,predict}.py` + `cli/common.py`. Every
+flag that sets a `TSConfig` field is now named after that field, so the 58-pair hand-written
+`cli_values` mapping is a list of 55 field names with an import-time assertion (57 after
+T3-21 adds the two barrier gains). Old spellings
+are not accepted:
+
+    --closure-labels                 -> --closure-labels-path
+    --dt                             -> --dt-s
+    --fitted-tail-weight             -> --fitted-tail-position-weight
+    --fitted-terminal-weight         -> --fitted-terminal-position-weight
+    --kinematic-consistency-weight   -> --kinematic-consistency-loss-weight
+    --control-thrust-tau-s           -> --control-thrust-time-constant-s
+    --control-bank-tau-s             -> --control-bank-time-constant-s
+    --control-load-tau-s             -> --control-load-time-constant-s
+    --control-state-clock            -> --control-state-supervision-clock
+    --control-fitted-teacher         -> --control-fitted-teacher-path
+    --control-heading-rate-weight    -> --control-heading-rate-loss-weight
+    --control-heading-rate-scale-dps -> --control-heading-rate-loss-scale-dps
+    --control-bank-tv-weight         -> --control-bank-tv-loss-weight
+    --control-rollout-dt             -> --control-rollout-integrator-dt-s
+    --control-recipe                 -> --control-recipe-name
+
+Updated wherever spelled: `run_ts_flight_model_paired.py`, the two flags `run_ts_pipeline.py`
+EMITS (its own same-named flags are a separate CLI surface and keep their names, with a
+comment at the emission site), `tests/test_ts_transformer.py`, the package `README.md` and
+eight `docs/*.md`. Older entries BELOW in this file (newest first) keep the spelling they
+were written with.
+
+**The equivalence proof that closes the series.** Six tiny CPU runs on synthetic KRDU
+arrivals, fixed seeds, two epochs, trained once at `4e00c59` and once at `4148a53`: simple-v3
+supervision content at N=32, the latent config (`latent_dim=8`, posterior init 0.1, β=0.01,
+free bits 0.5), the L1.b terms armed (heading-rate 8, bank-TV 1), `state`, `closure`, and the
+lagged model under `control_command_hook=barrier`. **9,197 leaf values compared, 8,951
+identical.** The categories that carry the claim, each counted separately (they do not
+partition the 9,197 — the rest are the strings and identities around them): 6,752
+`history.json` floats, 6 state-dict SHA-256s, 6 target contracts, 6 checkpoint metadata
+schemas, 750 forecast field digests (top-1 everywhere, plus 2 prior modes, the z-oracle and
+the shuffle on the latent run), 6 run display names, 6 slugs, 72 normalizer statistics, 34
+split rosters — 0 differences in any of them. The 246 that differ: 240 wall-clock timings,
+and the 6 `.pt` file digests, which move because the serialized config lost the three fields
+T3-21 retired (111 → 108 fields, every shared value equal).
+
+
 ### 2026-09-07 — ts_transformer L1.b: two supervision terms that replace the imitation teacher's job of naming the bank
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md` §六 L1.b, branch

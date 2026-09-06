@@ -120,8 +120,8 @@ from control.basis_fit import (                                    # noqa: E402
     BasisSchedule,
     load_fitted_teacher,
 )
-from dataset import (                                              # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA,
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
@@ -455,14 +455,14 @@ def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoin
     """The blocker of 2026-09-07: every v5 checkpoint's provenance is eligibility-bound, and
     a fingerprint taken without the roster reads as "the manifest changed" — the fitter died
     at startup on every real checkpoint. The roster is read iff the checkpoint recorded one."""
-    import dataset as dataset_module
+    import data_provenance as provenance_module
     seen = {}
 
     def spy(paths, *, eligibility_rosters=None):
         seen["paths"], seen["rosters"] = list(paths), eligibility_rosters
         return _provenance()
 
-    monkeypatch.setattr(dataset_module, "arrival_data_provenance", spy)
+    monkeypatch.setattr(provenance_module, "arrival_data_provenance", spy)
     manifests = [tmp_path / "KRDU" / "arrivals" / "manifest.json"]
 
     def payload(eligibility):
@@ -470,7 +470,7 @@ def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoin
                                     "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64,
                                                    "source_records": [], "eligibility": eligibility}]}}
 
-    dataset_module.checkpoint_data_provenance(payload({"roster_sha256": "b" * 64}), manifests)
+    provenance_module.checkpoint_data_provenance(payload({"roster_sha256": "b" * 64}), manifests)
     assert seen["rosters"] == [manifests[0].resolve().parent / "lateral_pass_eligibility.json"]
-    dataset_module.checkpoint_data_provenance(payload(None), manifests)
+    provenance_module.checkpoint_data_provenance(payload(None), manifests)
     assert seen["rosters"] is None

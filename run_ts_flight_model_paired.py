@@ -51,7 +51,7 @@ ARMS = (
         "first_order_lag",
         "simple-v1-lag",
         "first-order-lag controls (tau_bank=2s)",
-        ("--control-bank-tau-s", "2.0"),
+        ("--control-bank-time-constant-s", "2.0"),
     ),
 )
 
@@ -75,7 +75,7 @@ def arm_commands(
                 "--data", str(manifest),
                 "--eligibility-roster", str(roster),
                 "--airport", airport,
-                "--control-recipe", arm.recipe,
+                "--control-recipe-name", arm.recipe,
                 "--seed", str(seed),
                 "--split-seed", str(split_seed),
                 "--device", device,

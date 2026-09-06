@@ -333,7 +333,7 @@ conda run -n aeroviz python \
   --epochs 180 \
   --patience 20 \
   --learning-rate 0.0005 \
-  --kinematic-consistency-weight 3 \
+  --kinematic-consistency-loss-weight 3 \
   --terminal-loss-weight 0.02 \
   --seed 1337
 ```

@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
-from dataset import require_matching_data_provenance
+from data_provenance import require_matching_data_provenance
 from io_utils import file_sha256, utc_now
 
 TEST_RELEASE_NAME = "test_release.json"

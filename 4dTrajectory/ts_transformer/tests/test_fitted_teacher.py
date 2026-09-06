@@ -36,20 +36,14 @@ from config import (
     control_recipe_overrides,
 )
 from control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM, load_fitted_teacher
-from dataset import (
-    ARRIVAL_DATA_PROVENANCE_SCHEMA,
-    FixedAnchorTrajectoryWindows,
-    Normalizer,
-    build_series,
-    truth_duration_s,
-)
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
 from forecast import forecast_approaches, posterior_latent_forecasts
 from models import build_model
 from run_naming import run_display_name
 from synthetic import synthetic_arrivals
-from train import (
-    control_imitation_mse, evaluate_fixed_anchor_series, load_checkpoint, train,
-)
+from objective import control_imitation_mse
+from train import evaluate_fixed_anchor_series, load_checkpoint, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 N_SEGMENTS, SEQ_LEN = 4, 8

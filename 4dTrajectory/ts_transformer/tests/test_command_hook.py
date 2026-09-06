@@ -17,7 +17,8 @@ for path in (TS_DIR, REPO_ROOT):
         sys.path.insert(0, str(path))
 
 from config import (  # noqa: E402
-    CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_DYNAMICS_POINT_MASS, PREDICTION_CONTROL, TSConfig,
+    CONTROL_DYNAMICS_BACKENDS, CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+    CONTROL_DYNAMICS_POINT_MASS, PREDICTION_CONTROL, TSConfig,
 )
 from control.dynamics import rollout as control_rollout  # noqa: E402
 from control.dynamics.hooks import RolloutStateView  # noqa: E402
@@ -118,11 +119,29 @@ def test_a_state_reading_hook_changes_the_path_and_stays_differentiable():
     assert torch.allclose(dense.segment_end_channels[..., :3], hooked2.channels[..., :3], atol=1.0)
 
 
-def test_point_mass_backends_refuse_a_hook():
-    config = TSConfig(prediction_output=PREDICTION_CONTROL, control_dynamics_model=CONTROL_DYNAMICS_POINT_MASS,
-                      seq_len=8, n_segments=6)
+@pytest.mark.parametrize("backend", CONTROL_DYNAMICS_BACKENDS)
+@pytest.mark.parametrize("roll", ("endpoints", "dense"))
+def test_point_mass_backends_refuse_a_hook(backend, roll):
+    """All FOUR point-mass entry points, not just the default backend's endpoint roll.
+
+    A hook a backend cannot run must raise, never be dropped: a silently unhooked rollout
+    is a different trajectory reported as the hooked one. The message quotes the config
+    pair, so the refusal names what the run actually asked for.
+    """
+    config = TSConfig(prediction_output=PREDICTION_CONTROL,
+                      control_dynamics_model=CONTROL_DYNAMICS_POINT_MASS,
+                      control_dynamics_backend=backend, seq_len=8, n_segments=6)
     dynamics, controls, durations = _batch(config)
-    with pytest.raises(NotImplementedError, match="first-order-lag"):
-        control_rollout.rollout_control_endpoints(controls, durations, dynamics, config, command_hook=_Identity())
+    offsets = torch.cumsum(durations, dim=1).to(torch.float64)
+    valid = torch.ones_like(offsets, dtype=torch.bool)
+    with pytest.raises(NotImplementedError, match="first-order-lag") as info:
+        if roll == "endpoints":
+            control_rollout.rollout_control_endpoints(
+                controls, durations, dynamics, config, command_hook=_Identity())
+        else:
+            control_rollout.rollout_control_dense(
+                controls, durations, dynamics, offsets, valid, config,
+                command_hook=_Identity())
+    assert repr(backend) in str(info.value) and repr(CONTROL_DYNAMICS_POINT_MASS) in str(info.value)
     plain = control_rollout.rollout_control_endpoints(controls, durations, dynamics, config)
     assert torch.equal(plain.controls, controls.to(plain.controls.dtype))

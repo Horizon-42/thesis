@@ -32,17 +32,15 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import DEFAULT_AIRCRAFT_TYPE, TSConfig  # noqa: E402
+from data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightSeries,
-    arrival_data_provenance,
     build_series,
-    flight_keys_by_split,
     iter_batches,
     load_flight_dicts,
-    provenance_manifest_digests,
-    split_name_for_dataset_id,
 )
+from splits import flight_keys_by_split, split_name_for_dataset_id  # noqa: E402
 from models import parameter_count  # noqa: E402
 from train import evaluate_split, fit_model, usable_series  # noqa: E402
 

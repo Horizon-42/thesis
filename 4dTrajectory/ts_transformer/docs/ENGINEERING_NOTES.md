@@ -88,7 +88,8 @@ Everything below is serialised into every checkpoint.
   Per segment, never per substep — the hand-written adjoints cover whole schedules, so the
   hooked engine integrates one segment at a time and the hook's state dependence is plain
   autograd (`aerodynamic_model.torch_piecewise_rollout.rollout_piecewise_constant_hooked_with_step`).
-  Only the first-order-lag backends support it (`_refuse_hook` on the point-mass ones); the
+  Only the first-order-lag backends support it (the point-mass rows carry `runs_hooks=False`
+  and their `_admit` refuses, quoting the config pair); the
   dense rollout settles the effective schedule first and re-integrates it; **the record
   carries the schedule FLOWN**, not the network's (`forecast` exports
   `rollout.controls`, `source.commandHook` = `hook/saturation`). Two modules in

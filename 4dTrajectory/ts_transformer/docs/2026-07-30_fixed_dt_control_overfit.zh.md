@@ -18,10 +18,10 @@
 
 ```text
 --prediction-output control
---control-state-clock observed
+--control-state-supervision-clock observed
 --control-state-loss-grid fixed-dt
---dt 2
---control-rollout-dt 0.5
+--dt-s 2
+--control-rollout-integrator-dt-s 0.5
 ```
 
 旧 control checkpoint 若缺少 `control_state_loss_grid` 会要求重新生成，不添加兼容 fallback。

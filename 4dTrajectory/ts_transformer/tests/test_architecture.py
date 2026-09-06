@@ -67,11 +67,28 @@ def _archive_import_candidates() -> list[Path]:
 
 
 def _imported_names(path: Path) -> set[str]:
+    """Every module name a file imports, with relative imports resolved.
+
+    `from .common import x` inside `cli/` reads as `node.module == "common"` and
+    `node.level == 1`; without the resolution below the layering checks would see a
+    top-level `common` that does not exist and miss a real edge.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    # Root `run_ts_*.py` runners live outside the package and have no relative imports.
+    package = (
+        path.parent.relative_to(TS_DIR).parts
+        if path.is_relative_to(TS_DIR) else ()
+    )
     names: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            names.add(node.module)
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                prefix = package[: len(package) - node.level + 1]
+                base = ".".join((*prefix, node.module)) if node.module else ".".join(prefix)
+                names.add(base)
+                names.update(f"{base}.{alias.name}" for alias in node.names)
+            elif node.module:
+                names.add(node.module)
         elif isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
     return names
@@ -139,10 +156,14 @@ def test_the_control_package_does_not_import_the_training_loop():
     `dataset` is deliberately NOT on this list. `Normalizer` and the window types are
     data-plane value types the loss modules genuinely consume, and `Normalizer.fit`
     balances over `FlightSeries`, so it belongs with the data plane rather than under
-    `control`. The direction that matters is this one: a loss module that imported `train`
-    would make the package unusable outside the loop it was extracted from.
+    `control`. `objective` and `validation` ARE on it: both import `control/`, so one
+    importing either back would be a cycle as well as a layering inversion. The direction
+    that matters is this one: a loss module that imported `train`, `objective` or
+    `validation` would make the package unusable outside the loop it was extracted from.
     """
-    consumers = {"train", "forecast", "__main__", "models", "batching"}
+    consumers = {
+        "train", "objective", "validation", "forecast", "__main__", "models", "batching",
+    }
     for path in CONTROL.rglob("*.py"):
         if "__pycache__" in path.parts:
             continue
@@ -151,6 +172,171 @@ def test_the_control_package_does_not_import_the_training_loop():
             f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; control/ is imported "
             f"BY the training loop, never the other way round"
         )
+
+
+#: `dataset` imports these four `control/` modules — the data plane genuinely needs the
+#: control envelope, the conditioning names, the inverse dynamics and the teacher table to
+#: BUILD a batch. That is the one edge that runs downward into `control/`, and it only
+#: stays acyclic while these four stay `dataset`-free.
+CONTROL_MODULES_DATASET_IMPORTS = (
+    "control/basis_fit.py",
+    "control/conditioning.py",
+    "control/dynamics/inverse.py",
+    "control/envelope.py",
+)
+
+
+def test_the_dataset_control_edge_runs_one_way_only():
+    """`dataset` imports four `control/` modules; none of them may import `dataset` back.
+
+    The general rule is the other way round — `control/` MAY import `dataset` (`Normalizer`
+    and the window types are data-plane values a loss genuinely consumes), which is why the
+    layering test above does not ban it. These four are the exception inside the exception:
+    `dataset` needs them to build a batch at all, so a `dataset` import in any of them
+    closes a cycle that only fails at import time, in whichever order a caller happens to
+    hit first.
+    """
+    dataset_imports = _imported_names(TS_DIR / "dataset.py")
+    for name in CONTROL_MODULES_DATASET_IMPORTS:
+        module = name[: -len(".py")].replace("/", ".")
+        assert module in dataset_imports, (
+            f"{module} is no longer imported by dataset — drop it from "
+            f"CONTROL_MODULES_DATASET_IMPORTS rather than leaving a rule about nothing"
+        )
+        assert "dataset" not in _imported_names(TS_DIR / name), (
+            f"{name} imports dataset, which imports it: the one downward edge into "
+            f"control/ has become a cycle"
+        )
+
+
+def test_every_subcommand_module_exposes_the_same_triple():
+    """`__main__` is a table, not a 700-line `if` chain, and this is what makes that safe.
+
+    A command is `(help, add_cli_arguments, run_cli)`. `approach-cohorts` and
+    `benchmark-batch` supply their two callables from their own modules and carry their
+    help text in the table, which is why they have no module under `cli/`.
+    """
+    import argparse
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ts_cli_main", TS_DIR / "__main__.py")
+    main_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(main_module)
+
+    assert set(main_module.COMMANDS) == {
+        "train", "cross-validate", "approach-cohorts", "benchmark-batch",
+        "evaluate-fit", "freeze-test", "predict",
+    }
+    for name, (help_text, add_cli_arguments, run_cli) in main_module.COMMANDS.items():
+        assert help_text and callable(add_cli_arguments) and callable(run_cli), name
+        # It has to actually build: a subparser that raises is a --help that never prints.
+        add_cli_arguments(argparse.ArgumentParser(prog=name))
+
+
+#: Every training-parser dest that is NOT a `TSConfig` field the CLI sets. Two kinds:
+#: infrastructure (where the data is, where the output goes, the experiment identity), and
+#: the three documented exceptions where the flag deliberately is not the field's name.
+#: Frozen here so that DELETING a name from `CLI_CONFIG_FIELDS` fails loudly instead of
+#: leaving its flag parsed, accepted and silently ignored.
+NON_CONFIG_DESTS = {
+    "help",
+    # infrastructure
+    "data", "eligibility_roster", "airport", "output_dir",
+    "config_overrides", "campaign_id", "experiment_id",
+    # the documented exceptions (see CLI_CONFIG_FIELDS' comment)
+    "batch_size",          # the flag also accepts "auto", which is not a config value
+    "instance_norm",       # one flag, two backbone-specific fields (use_norm / revin)
+    "control_recipe_name",  # its flag IS its name, but it resolves before the rest
+}
+
+
+def _training_parser():
+    import argparse
+
+    from cli.common import add_data_args, add_training_args
+
+    parser = argparse.ArgumentParser()
+    add_data_args(parser)          # --aircraft-type / --aircraft-filter live here
+    add_training_args(parser)
+    return parser
+
+
+def test_every_training_flag_is_named_after_the_field_it_sets():
+    """The rename that turned a hand-written flag→field table into a list of field names.
+
+    `cli.common` asserts at import that every name in `CLI_CONFIG_FIELDS` is a `TSConfig`
+    field. The two other directions are checked here: that each listed field has a flag
+    spelled exactly as the field, and — the one that catches a DELETION — that every dest
+    the parser defines is either a listed field or a frozen non-config dest. Without the
+    second, dropping `"patience"` from the list leaves `--patience 99` parsed and ignored.
+    """
+    from cli.common import CLI_CONFIG_FIELDS
+
+    parser = _training_parser()
+    flags = {option for action in parser._actions for option in action.option_strings}
+    missing = [
+        name for name in CLI_CONFIG_FIELDS
+        if f"--{name.replace('_', '-')}" not in flags
+    ]
+    assert not missing, f"{missing} are config fields the CLI claims to set with no flag"
+
+    dests = {action.dest for action in parser._actions}
+    assert dests - set(CLI_CONFIG_FIELDS) == NON_CONFIG_DESTS, (
+        "a training flag exists whose dest is neither in CLI_CONFIG_FIELDS nor a declared "
+        f"non-config dest: {sorted(dests - set(CLI_CONFIG_FIELDS) - NON_CONFIG_DESTS)}; "
+        f"or one was removed: {sorted(NON_CONFIG_DESTS - dests)}"
+    )
+
+
+#: The 2026-09-07 (T3-19) renames, old spelling -> new. Every old one must be REFUSED:
+#: argparse's default prefix matching accepted four of them silently.
+RENAMED_FLAGS_2026_09_07 = {
+    "--closure-labels": "--closure-labels-path",
+    "--dt": "--dt-s",
+    "--fitted-tail-weight": "--fitted-tail-position-weight",
+    "--fitted-terminal-weight": "--fitted-terminal-position-weight",
+    "--kinematic-consistency-weight": "--kinematic-consistency-loss-weight",
+    "--control-thrust-tau-s": "--control-thrust-time-constant-s",
+    "--control-bank-tau-s": "--control-bank-time-constant-s",
+    "--control-load-tau-s": "--control-load-time-constant-s",
+    "--control-state-clock": "--control-state-supervision-clock",
+    "--control-fitted-teacher": "--control-fitted-teacher-path",
+    "--control-heading-rate-weight": "--control-heading-rate-loss-weight",
+    "--control-heading-rate-scale-dps": "--control-heading-rate-loss-scale-dps",
+    "--control-bank-tv-weight": "--control-bank-tv-loss-weight",
+    "--control-rollout-dt": "--control-rollout-integrator-dt-s",
+    "--control-recipe": "--control-recipe-name",
+}
+
+
+def test_a_renamed_flag_is_refused_not_prefix_matched(capsys):
+    """`--dt 2` must not keep working as `--dt-s 2`.
+
+    argparse accepts any unambiguous PREFIX by default, so four of the fifteen renamed
+    flags (`--dt`, `--control-recipe`, `--closure-labels`, `--control-fitted-teacher`)
+    still parsed after T3-19 — a stale command line would have set the field it looks like
+    it sets while reading as up to date. Every subparser passes `allow_abbrev=False`.
+    """
+    import importlib.util
+
+    import pytest
+
+    spec = importlib.util.spec_from_file_location("ts_cli_abbrev", TS_DIR / "__main__.py")
+    main_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(main_module)
+
+    prefixes = {old for old, new in RENAMED_FLAGS_2026_09_07.items() if new.startswith(old)}
+    assert prefixes == {
+        "--dt", "--control-recipe", "--closure-labels", "--control-fitted-teacher",
+    }, f"the set of old spellings argparse could prefix-match has changed: {sorted(prefixes)}"
+
+    for old in RENAMED_FLAGS_2026_09_07:
+        with pytest.raises(SystemExit) as info:
+            main_module.main([
+                "train", "--data", "x.json", "--output-dir", "out", old, "1",
+            ])
+        assert info.value.code == 2, old
+        assert "unrecognized arguments" in capsys.readouterr().err, old
 
 
 def test_the_conditioning_names_and_their_scalings_are_one_source():
