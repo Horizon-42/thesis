@@ -142,7 +142,6 @@ CLOSURE_FIELDS = (
     "closure_height_knots",
     "closure_geometry_loss_weight",
     "closure_timing_loss_weight",
-    "closure_timing_scale_s",
     "closure_height_loss_weight",
 )
 # There is no pre-closure behaviour to reproduce, so every closure field is required.
@@ -378,8 +377,6 @@ PROCEDURE_LOSS_FIELDS = (
     "procedure_loss_vertical_weight",
     "procedure_loss_dual_step",
     "procedure_loss_epsilon",
-    "procedure_loss_lateral_scale_m",
-    "procedure_loss_vertical_scale_m",
 )
 # The rollout command hook: a constraint module that rewrites each control segment's
 # command from the state at the segment's start (control/dynamics/hooks.py). ``barrier``
@@ -460,6 +457,16 @@ RETIRED_SERIALIZED_FIELDS = (
     "control_nominal_residual_bank_max_rad",
     "control_nominal_residual_load_max",
     "control_nominal_speed_gain",
+    # Three UNITS that were never a choice (T3-21, 2026-09-07): the hinge²'s metres and
+    # the closure timing group's seconds. Measured over every stored config under
+    # 4dTrajectory/outputs/*/experiments/** — 143, 143 and 81 carry them, NONE at anything
+    # but the default — and unlike the four scales that stay fields, no named recipe pins
+    # them, so a module constant cannot silently redefine a published comparison. They are
+    # now `objective.PROCEDURE_LATERAL_SCALE_M` / `PROCEDURE_VERTICAL_SCALE_M` and
+    # `closure_output.CLOSURE_TIMING_SCALE_S`.
+    "procedure_loss_lateral_scale_m",
+    "procedure_loss_vertical_scale_m",
+    "closure_timing_scale_s",
 )
 
 CONTROL_HOOK_FIELDS = (
@@ -673,11 +680,6 @@ class TSConfig:
     closure_height_knots: int = 4
     closure_geometry_loss_weight: float = 1.0
     closure_timing_loss_weight: float = 1.0
-    # The timing group's seconds-to-loss scale. Measured at initialisation on synthetic
-    # arrivals with the three weights at 1.0: geometry ≈ 1.7, timing ≈ 1.5 at 60 s, height
-    # ≈ 0.9 — a minute puts the groups within a factor of two (at final_time_scale_s's
-    # 600 s the timing group was 20× under the geometry).
-    closure_timing_scale_s: float = 60.0
     closure_height_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
@@ -696,8 +698,6 @@ class TSConfig:
     procedure_loss_vertical_weight: float = 0.0
     procedure_loss_dual_step: float = 0.0
     procedure_loss_epsilon: float = 0.02
-    procedure_loss_lateral_scale_m: float = 100.0
-    procedure_loss_vertical_scale_m: float = 30.0
     # Velocity-state supervision may retain the upstream centred track fit or be rebuilt
     # causally from the uniform chart positions.  This changes both model inputs and
     # measured velocity targets, so it is an explicit checkpoint recipe field.
@@ -1094,9 +1094,6 @@ class TSConfig:
                 f"procedure_loss_epsilon is a violation RATE in [0, 1), got "
                 f"{self.procedure_loss_epsilon!r}"
             )
-        for name in ("procedure_loss_lateral_scale_m", "procedure_loss_vertical_scale_m"):
-            if getattr(self, name) <= 0.0:
-                raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
         if (
             not math.isfinite(self.control_velocity_loss_weight)
             or self.control_velocity_loss_weight < 0.0
@@ -1261,8 +1258,6 @@ class TSConfig:
                 )
             if self.random_train_anchor:
                 raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
-            if self.closure_timing_scale_s <= 0.0:
-                raise ValueError("closure_timing_scale_s must be positive")
             if (self.closure_slowness_knots not in CLOSURE_LABEL_KNOTS
                     or self.closure_height_knots not in CLOSURE_LABEL_KNOTS):
                 raise ValueError(

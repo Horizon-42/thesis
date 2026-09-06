@@ -776,6 +776,12 @@ class ProcedureMultipliers:
 PROCEDURE_DIAGNOSTICS = (
     "procedure_gated_rows", "procedure_lateral_violations", "procedure_vertical_violations",
 )
+#: The metres the corridor and glidepath hinges are read in — the UNIT the squared
+#: violation is expressed in, never a dose (`procedure_loss_lateral_weight` /
+#: `procedure_loss_vertical_weight` and the dual step are the doses). Both were `TSConfig`
+#: fields until 2026-09-07; no stored config ever moved either.
+PROCEDURE_LATERAL_SCALE_M = 100.0
+PROCEDURE_VERTICAL_SCALE_M = 30.0
 
 
 def procedure_loss(
@@ -819,8 +825,8 @@ def procedure_loss(
     lateral_m, vertical_m = corridor_violations(d_pred, xt_pred, predicted[..., IDX["u"]], tan_gpa)
     gate_weight = gate.to(dtype)
     gated_rows = gate_weight.sum(dim=1)
-    lateral_sq = ((lateral_m / config.procedure_loss_lateral_scale_m) ** 2 * gate_weight).sum(dim=1)
-    vertical_sq = ((vertical_m / config.procedure_loss_vertical_scale_m) ** 2 * gate_weight).sum(dim=1)
+    lateral_sq = ((lateral_m / PROCEDURE_LATERAL_SCALE_M) ** 2 * gate_weight).sum(dim=1)
+    vertical_sq = ((vertical_m / PROCEDURE_VERTICAL_SCALE_M) ** 2 * gate_weight).sum(dim=1)
     per_flight_lateral = lateral_sq / gated_rows.clamp(min=1.0)
     per_flight_vertical = vertical_sq / gated_rows.clamp(min=1.0)
     weights = multipliers or ProcedureMultipliers.from_config(config)

@@ -124,7 +124,6 @@ CLOSURE_LOSS_FIELDS = (
     "closure_height_knots",
     "closure_geometry_loss_weight",
     "closure_timing_loss_weight",
-    "closure_timing_scale_s",
     "closure_height_loss_weight",
 )
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
@@ -242,8 +241,6 @@ _ABBREV = {
     "procedure_loss_vertical_weight": "proc-vert",
     "procedure_loss_dual_step": "proc-dual",
     "procedure_loss_epsilon": "proc-eps",
-    "procedure_loss_lateral_scale_m": "proc-lat-scale",
-    "procedure_loss_vertical_scale_m": "proc-vert-scale",
     "reference_velocity_source": "ref-vel",
     "checkpoint_selection_metric": "select",
     "training_cohort_min_future_s": "min-future",

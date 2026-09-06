@@ -64,6 +64,12 @@ D_JOIN_MAX_M = 40_000.0             # d_join ∈ [D_JOIN_MIN_M, D_JOIN_MIN_M + D
 VIA_SCALE_M = 10_000.0
 VIA_MAX_M = 40_000.0                # via_d, via_xt ∈ ±VIA_MAX_M
 HEIGHT_SCALE_M = 1_000.0
+#: The timing group's seconds-to-loss scale. Measured at initialisation on synthetic
+#: arrivals with the three weights at 1.0: geometry ≈ 1.7, timing ≈ 1.5 at 60 s, height
+#: ≈ 0.9 — a minute puts the groups within a factor of two (at `final_time_scale_s`'s
+#: 600 s the timing group was 20× under the geometry). It is a UNIT, never a swept knob:
+#: it was a `TSConfig` field until 2026-09-07 and no stored config ever moved it.
+CLOSURE_TIMING_SCALE_S = 60.0
 SLOWNESS_MIN = 1.0 / cp.SPEED_MAX_MPS
 SLOWNESS_MAX = 1.0 / cp.SPEED_MIN_MPS
 
@@ -299,7 +305,7 @@ def closure_loss_components(prediction: ClosurePrediction, normalized_anchor_sta
     flights: ``state`` = the geometry (the join distance and the via's mean distance
     error at the 10 km scale, the heading as its unit vector), ``final_time`` = the
     slowness knots turned into seconds with the label's path length, at
-    ``closure_timing_scale_s``, ``kinematic`` = the height knots at the km scale,
+    ``CLOSURE_TIMING_SCALE_S``, ``kinematic`` = the height knots at the km scale,
     ``terminal`` = 0 (nothing to add: the path ends at the threshold by construction).
     Weights are the flight weights times ``closure_valid``. A batch with no valid flight
     contributes zero (the dataset refuses a labels file with no valid flight at all, and
@@ -316,7 +322,7 @@ def closure_loss_components(prediction: ClosurePrediction, normalized_anchor_sta
     via_mean = 0.5 * (delta[:, 1] + delta[:, 2])
     geometry = delta[:, 0] / D_JOIN_SCALE_M + via_mean / VIA_SCALE_M + delta[:, 3] + delta[:, 4]
     seconds = delta[:, 5:5 + ks + 1].mean(dim=1) * dynamics[CONTEXT_PATH_LENGTH].to(pred.dtype)
-    timing = seconds / config.closure_timing_scale_s
+    timing = seconds / CLOSURE_TIMING_SCALE_S
     height = delta[:, 5 + ks + 1:].mean(dim=1) / HEIGHT_SCALE_M
 
     def weighted(term: torch.Tensor) -> torch.Tensor:

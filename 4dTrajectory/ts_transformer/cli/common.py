@@ -329,6 +329,29 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
             "segments, in half-box units (default: 0, off)"
         ),
     )
+    # The adopted command hook's two gains. Design doc §三.8 asks for them in the
+    # checkpoint; until 2026-09-07 the only way to set either was a hand-written
+    # --config-overrides JSON, which is how six 2026-09-06 configs ended up carrying the
+    # first campaign's heading gain.
+    parser.add_argument(
+        "--control-barrier-alpha",
+        type=float,
+        default=None,
+        help=(
+            "barrier command hook: the class-K gain on the corridor margins, capped by the "
+            "segment's own 1/hold rate (default: 0.1). A held command cannot close more "
+            "than the whole margin in one hold, so the cap is not a taste knob"
+        ),
+    )
+    parser.add_argument(
+        "--control-barrier-heading-gain",
+        type=float,
+        default=None,
+        help=(
+            "barrier command hook: the gain on the heading-alignment barrier (default: "
+            "0.1; the first 2026-09-06 campaign ran at 0.3 and limit-cycled on 7 s holds)"
+        ),
+    )
     parser.add_argument(
         "--control-gradient-clip-norm",
         type=float,
@@ -485,6 +508,8 @@ CLI_CONFIG_FIELDS = (
     "control_heading_rate_loss_scale_dps",
     "control_bank_tv_loss_weight",
     "control_gradient_clip_norm",
+    "control_barrier_alpha",
+    "control_barrier_heading_gain",
     "control_rollout_integrator_dt_s",
     "d_model",
     "e_layers",

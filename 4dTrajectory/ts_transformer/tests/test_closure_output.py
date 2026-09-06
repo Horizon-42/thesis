@@ -81,8 +81,9 @@ def test_closure_config_contract(tmp_path):
     name = run_display_name(config.to_dict())
     assert name.startswith("closure ·") and "closed-form" in name and "closure-v1" in name
     assert f"labels={labels.parent.name}/labels.json" in name          # the file, with its directory
-    assert "timing-scale" in run_display_name(_closure_config(labels, closure_timing_scale_s=30.0).to_dict()) or \
-        "closure-timing-scale-s=30" in run_display_name(_closure_config(labels, closure_timing_scale_s=30.0).to_dict())
+    # `closure_timing_scale_s` was retired to `closure_output.CLOSURE_TIMING_SCALE_S`
+    # (T3-21, 2026-09-07): a unit, not a swept knob, so there is no longer a value for the
+    # name to carry. The knot widths below are the closure axis the name still reports.
     assert "closure-v1(closure-slowness-knots=8" in run_display_name(_closure_config(labels, closure_slowness_knots=8).to_dict())
     with pytest.raises(ValueError, match="closure_labels_path"):
         TSConfig(prediction_output=PREDICTION_CLOSURE, **TINY)
