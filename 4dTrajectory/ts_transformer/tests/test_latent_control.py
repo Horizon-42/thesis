@@ -8,6 +8,7 @@ and a run with a latent must be named as a different model, not as a loss edit.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 from pathlib import Path
@@ -43,6 +44,11 @@ from models import build_model
 from prediction_outputs import ControlPrediction
 from run_naming import output_name, run_display_name
 from train import load_checkpoint, loss_component_names, train
+
+_CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_latent_test", Path(__file__).resolve().parents[1] / "__main__.py")
+assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
+ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
+_CLI_SPEC.loader.exec_module(ts_cli)
 
 from config import CONTROL_DURATION_UNIFORM
 from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series
@@ -578,3 +584,41 @@ def test_the_z_oracle_decodes_the_posterior_mean_of_each_flight_s_own_future(tmp
     assert summary["mode"].endswith(":z-posterior") and summary["results"][0]["z_from_posterior"] is True
     states = json.loads((out / summary["results"][0]["states_file"]).read_text())
     assert states["source"]["zFromPosterior"] is True
+
+
+def test_the_predict_cli_writes_the_latent_decodes_beside_the_top1(tmp_path: Path, monkeypatch):
+    """Through the real predict command, the way the campaign runner calls it (--output-dir
+    as a string): the modes/, random/ and shuffled/ record sets must cross the same path
+    boundary as the top-1 records. The L2 campaign died on `str / "modes"` after a full
+    54-minute train because the chain test above mirrored the CLI instead of walking it."""
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)
+    config = _config(
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
+        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
+        control_rollout_integrator_dt_s=0.5, seq_len=8, n_segments=4, n_heads=4,
+        final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
+        epochs=1, patience=1, batch_size=8, latent_dim=3,
+    )
+    series, _report = build_series(flights, config, airport=AIRPORT)
+    provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                  "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
+    train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
+    _model, _loaded, _normalizer, payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
+    assert len(payload["split"]["val"]) >= 2   # the shuffle needs another flight in the batch
+    monkeypatch.setattr(ts_cli, "_provenance_from_args", lambda _args: provenance)
+    monkeypatch.setattr(ts_cli, "load_flight_dicts", lambda _path, include_flight_keys=None: flights)
+
+    out = tmp_path / "pred"
+    assert ts_cli.main([
+        "predict", "--checkpoint", str(tmp_path / "run" / "checkpoint.pt"),
+        "--data", str(tmp_path / "manifest.json"), "--airport", AIRPORT,
+        "--output-dir", str(out), "--split", "val", "--device", "cpu",
+        "--latent-samples", "2", "--latent-random", "2", "--latent-shuffle",
+    ]) == 0
+    top1 = json.loads((out / "summary.json").read_text())["results"]
+    assert len(top1) == len(payload["split"]["val"])
+    for sub in ("modes/mode00", "modes/mode01", "random/mode00", "random/mode01", "shuffled"):
+        rows = json.loads((out / sub / "summary.json").read_text())["results"]
+        assert len(rows) == len(top1), sub
+    shuffled = json.loads((out / "shuffled" / top1[0]["states_file"]).read_text())
+    assert shuffled["source"]["latentShuffled"] is True

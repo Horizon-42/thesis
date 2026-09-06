@@ -184,7 +184,7 @@ def _add_data_args(parser: argparse.ArgumentParser) -> None:
             "Doc 8643 types with a native same-type OpenAP model (no synonym or fallback)"
         ),
     )
-    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--output-dir", required=True, type=Path)
 
 
 def _provenance_from_args(args: argparse.Namespace) -> dict[str, object]:
@@ -1167,10 +1167,9 @@ def main(argv: list[str] | None = None) -> int:
                 command=sys.argv if argv is None else ["ts_transformer", *argv],
             )
         if args.command == "cross-validate":
-            output_dir = Path(args.output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            selection_path = output_dir / "data_selection.json"
-            selection_tmp = output_dir / "data_selection.json.tmp"
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            selection_path = args.output_dir / "data_selection.json"
+            selection_tmp = args.output_dir / "data_selection.json.tmp"
             selection_tmp.write_text(json.dumps(data_selection, indent=2), encoding="utf-8")
             selection_tmp.replace(selection_path)
             try:
@@ -1503,7 +1502,7 @@ def main(argv: list[str] | None = None) -> int:
         [record.reference_record["states"] for record in records],
         [s.scenario.aircraft for s in series],
     )
-    (Path(args.output_dir) / "flyability_report.json").write_text(
+    (args.output_dir / "flyability_report.json").write_text(
         json.dumps(flyability, indent=2), encoding="utf-8")
     predicted, observed = flyability["predicted"], flyability["observed_baseline"]
     print(f"  flyability: {predicted['fully_flyable_rate'] * 100:.1f}% of predictions fully "
