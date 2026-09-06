@@ -24,7 +24,7 @@ change you are making go in `docs/code-health-followups.md` instead.
   five to worst. `summary.json` now carries the covariates per row and an
   `accuracy.difficulty` block; published tables predate them and need re-deriving. →
   `4dTrajectory/ts_transformer/CLAUDE.md`
-- **The optimizer solves ARE on disk (2026-09-07 correction), all speed-indeterminate.**
+- **TODO (owner-scheduled, independent of the ADS-B evaluation): backfill the optimizer records' `landing_aero` and regenerate their 15 reports.** The observed/ADS-B batches already carry the block and grade under the v7 gate as-is. **The optimizer solves ARE on disk (2026-09-07 correction), all speed-indeterminate.**
   `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}`: 15 batches, 70,267 v6-evaluated
   records, solved from the 2026-08-23 scenarios — one day before `build_scenario` began writing
   `source.landing_aero`, so every row reads "record carries no source.landing_aero block" and
