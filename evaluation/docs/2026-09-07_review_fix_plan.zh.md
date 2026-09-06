@@ -8,12 +8,12 @@
 
 | # | 里程碑 | 状态 | 提交 | 备注 |
 |---|---|---|---|---|
-| M1 | LNAV/VNAV 分支接通：进近航段竖直角 + TCH 进 `Runway`，生产端不再拒绝 KRDU 32 / KSMF 35R，`baro_vnav_approved` 由程序事实推出 | 代码+测试+文档完成，opus 评审中 | | KRDU 14 无程序，仍排除（13 条）；26 条跑道 frame fingerprint 与 23 条 LPV context fingerprint 钉死不变 |
-| M2 | 速度门：真实载荷因子 n、报告自相矛盾、HTML 说明、过时注释与死路径、schema v7（四处镜像） | 代码+测试+文档完成，opus 评审中 | | 政策 B，见 §3.1；前端 v6 归为 prior（"graded at 1 g"），v5 仍 legacy |
-| M3 | 结构：roster 缺字段抛错、visualize 单路径、边界校验集中、followups #7/#8/#10、守卫列表不一致、`arrival` 收拾、`__init__` 清理 | 代码+测试完成，opus 评审中 | | `contexts_for_input` 取代两条路径；`load_records` 仅为 ts 测试保留 |
-| M4 | 测试与文档：常量 import、正向断言、重复/错位测试、覆盖缺口；文档归档与版本头；`landing_aero` 回填脚本；根 CLAUDE.md Open Items 更新 | 完成，opus 评审中 | | 回填脚本只写不跑，见 §5；`validate_event` 测试移至 `final_approach/tests/test_event_contract.py` |
+| M1 | LNAV/VNAV 分支接通：进近航段竖直角 + TCH 进 `Runway`，生产端不再拒绝 KRDU 32 / KSMF 35R，`baro_vnav_approved` 由程序事实推出 | 完成，已评审 | `92c74ed` | KRDU 14 无程序，仍排除（13 条）；26 条跑道 frame fingerprint 与 23 条 LPV context fingerprint 钉死不变 |
+| M2 | 速度门：真实载荷因子 n、报告自相矛盾、HTML 说明、过时注释与死路径、schema v7（四处镜像） | 完成，已评审 | `bb643d5` | 政策 B，见 §3.1；前端 v6 归为 prior（"graded at 1 g"），v5 仍 legacy |
+| M3 | 结构：roster 缺字段抛错、visualize 单路径、边界校验集中、followups #7/#8/#10、守卫列表不一致、`arrival` 收拾、`__init__` 清理 | 完成，已评审 | `bb643d5` | `contexts_for_input` 取代两条路径；`load_records` 仅为 ts 测试保留 |
+| M4 | 测试与文档：常量 import、正向断言、重复/错位测试、覆盖缺口；文档归档与版本头；`landing_aero` 回填脚本；根 CLAUDE.md Open Items 更新 | 完成，已评审 | `bb643d5` | 回填脚本只写不跑，见 §5；`validate_event` 测试移至 `final_approach/tests/test_event_contract.py` |
 | — | 两轮 opus 评审（M1；M2–M4）的发现已全部处理 | 完成 | | 阻塞项：RNAV 前缀误匹配环形程序、arrivals schema 未 bump、观测记录 `hae_minus_msl_m` 硬要求打断 ts 参考记录、观测 roster 无 `arr_airport`；其余见 §7 |
-| — | 合并到 `dev-leg-ctrl` | 待做 | | 须先确认 §6 的实验隔离条件 |
+| — | 合并到 `dev-leg-ctrl` | 分支已吸收 `dev-leg-ctrl`（`1fa4875`，仅 CHANGELOG 冲突，两侧条目都保留），合并树上全部套件复跑通过后 fast-forward | | campaign 在合并前已自行结束（见 §6.6） |
 
 测试状态（2026-09-07，worktree）：Python 定向套件 619 passed（evaluation、harvest、final_approach、
 flight_scenarios、aircraft、aeroviz_backend、aeroviz-4d/python、ts `test_lateral_eligibility`、
@@ -149,3 +149,7 @@ manifest 逐 arm 记录 commit）。合并进 `dev-leg-ctrl` 会改变后续 arm
    而 formal run 的 `experiment_index.begin_run` 遇到脏树会拒绝启动，下一个 arm 会因此中止。
    已在主树 `.git/info/exclude` 加入 `.claude/worktrees/`（本机本地设置），主树 `git status` 恢复干净。
    正在跑的 arm 1 的 manifest 记录 `commit 3029b09, dirty False`，未受影响。
+6. 观察到但非本分支所为：arm 2（`L2b_beta0p01`）的 train 于 17:43:49 正常写出 manifest
+   （`status: running`，脏树检查已通过），随后 17:44–17:45 之间整个 wrapper 与 train 进程消失，
+   日志无 traceback，内存充裕（31 GB 总量、14 GB 空闲），同一时刻另一个交互会话在主树上活动。
+   最可能是该会话主动停止了 campaign；本分支没有触碰主树。合并时主树无实验在跑。
