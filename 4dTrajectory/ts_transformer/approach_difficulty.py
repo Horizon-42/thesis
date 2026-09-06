@@ -46,6 +46,38 @@ DIFFICULTY_SCHEMA = "ts-approach-difficulty-v1"
 ESTABLISHED_CROSS_TRACK_M = 500.0
 # ...and tracking inbound, not outbound on a teardrop over the same ground.
 ESTABLISHED_TRACK_TOLERANCE_DEG = 30.0
+# The tortuosity above which a route is no longer a straight-in. 1.05 is what the fleet's
+# own bimodal distribution separates at; every readout that reports a stratum uses it.
+STRAIGHT_TORTUOSITY = 1.05
+# The stratum labels ARE the schema every readout keys on: a consumer that restates one
+# and drifts gets a silently empty stratum, not an error.
+STRATUM_ALL = "all"
+STRATUM_STRAIGHT_IN = f"straight-in (tortuosity < {STRAIGHT_TORTUOSITY})"
+STRATUM_VECTORED = f"vectored (tortuosity >= {STRAIGHT_TORTUOSITY}, not established)"
+STRATUM_ESTABLISHED = "established at anchor"
+STRATUM_NEAR = "remaining path < 13 km"
+STRATUM_FAR = "remaining path >= 13 km"
+
+
+def strata_masks(rows: dict[str, dict[str, Any]], keys: list[str]) -> dict[str, np.ndarray]:
+    """The standard readout strata over rows carrying the difficulty covariates.
+
+    One source for every readout and measurement that reports "straight-in" against
+    "vectored": a stratum defined twice is a comparison between two different populations.
+    ``rows`` maps a key to a scored row (a ``summary.json`` result, say); ``keys`` fixes
+    the order the masks are aligned to.
+    """
+    tortuosity = np.array([rows[key]["route_tortuosity"] for key in keys])
+    established = np.array([bool(rows[key]["established_at_anchor"]) for key in keys])
+    remaining = np.array([rows[key]["remaining_path_m"] for key in keys])
+    return {
+        STRATUM_ALL: np.ones(len(keys), dtype=bool),
+        STRATUM_STRAIGHT_IN: tortuosity < STRAIGHT_TORTUOSITY,
+        STRATUM_VECTORED: (tortuosity >= STRAIGHT_TORTUOSITY) & ~established,
+        STRATUM_ESTABLISHED: established,
+        STRATUM_NEAR: remaining < 13_000.0,
+        STRATUM_FAR: remaining >= 13_000.0,
+    }
 
 
 @dataclass(frozen=True)

@@ -189,6 +189,14 @@ prefix: `envelope`, `heads`, `duration`, `conditioning`, `dynamics/{backends,rol
 `constraints/{barrier_filter,nominal_residual,gates}`, `oracle/*` (which absorbed the old
 `oracle_teacher/` package — two halves of one idea).
 
+**Measurement code is CODE.** Reusable logic goes in the package with tests
+(`control/oracle/basis.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
+a runnable experiment goes in a top-level `run_ts_*.py` runner beside the others;
+**`docs/` holds documents**. The `docs/*.py` scripts predate this rule and are a layout
+defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add to them, and
+move what you touch. `tests/conftest.py` already puts the package on `sys.path`, so a new
+test file needs no path preamble.
+
 **Membership rule**: a module belongs in `control/` only if EVERY consumer of it is
 control-specific. `prediction_outputs` (holds `StatePrediction`), `terminal_state_loss`,
 `arc_length_geometry`, `fixed_dt_supervision` and `flyability` therefore stay at the top

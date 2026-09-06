@@ -46,9 +46,9 @@ for path in (REPO, REPO / "geokit" / "src", TS_DIR):
         sys.path.insert(0, str(path))
 from flight_scenarios.runway_target import find_threshold  # noqa: E402
 import geometric_metrics as gm  # noqa: E402
+from approach_difficulty import STRAIGHT_TORTUOSITY, strata_masks  # noqa: E402
 
 # approach_difficulty's own boundary for "the easy one".
-STRAIGHT_TORTUOSITY = 1.05
 # Parallel siblings whose separation a runway-blind frame would average across.
 SIBLINGS = {
     "KSJC": {"12L": "12R", "12R": "12L", "30L": "30R", "30R": "30L"},
@@ -129,20 +129,6 @@ def load_arm(pred_dir: Path, *, geometry_truth: str = gm.GEOMETRY_TRUTH_CLOSED) 
         row.update(gm.record_geometry(eval_record, states, row, geometry_truth=geometry_truth))
         rows[flight_key(row)] = row
     return rows
-
-
-def strata_masks(reference: dict[str, dict], keys: list[str]) -> dict[str, np.ndarray]:
-    tort = np.array([reference[k]["route_tortuosity"] for k in keys])
-    established = np.array([bool(reference[k]["established_at_anchor"]) for k in keys])
-    remaining = np.array([reference[k]["remaining_path_m"] for k in keys])
-    return {
-        "all": np.ones(len(keys), dtype=bool),
-        f"straight-in (tortuosity < {STRAIGHT_TORTUOSITY})": tort < STRAIGHT_TORTUOSITY,
-        "vectored (tortuosity >= 1.05, not established)": (tort >= STRAIGHT_TORTUOSITY) & ~established,
-        "established at anchor": established,
-        "remaining path < 13 km": remaining < 13_000.0,
-        "remaining path >= 13 km": remaining >= 13_000.0,
-    }
 
 
 def _fmt(value: float, digits: int = 0) -> str:

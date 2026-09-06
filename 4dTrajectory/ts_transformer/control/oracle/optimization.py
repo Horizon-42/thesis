@@ -9,6 +9,7 @@ from torch import nn
 
 from batch_contract import anchor_state
 from config import TSConfig
+from control.oracle.basis import DURATION_UNIFORM, BasisSchedule
 from control.training.curriculum import ControlTrainingStage
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
@@ -41,8 +42,13 @@ def teacher_optimization_stages(
     return (*prefix, (ControlTrainingStage("full", None, 1, None), full_steps))
 
 
-class BatchedOracleTeacher(nn.Module):
-    """One independent bounded control schedule per train flight."""
+class BatchedOracleTeacher(BasisSchedule):
+    """One independent bounded control schedule per train flight.
+
+    The teacher's schedule IS a uniform-duration :class:`BasisSchedule`; this name and its
+    positional signature stay because the teacher generator and the paired-CV ablation both
+    construct it, and a schedule defined twice is two subtly different search spaces.
+    """
 
     def __init__(
         self,
@@ -51,27 +57,8 @@ class BatchedOracleTeacher(nn.Module):
         control_upper: torch.Tensor,
         final_time_s: torch.Tensor,
     ) -> None:
-        super().__init__()
-        unit = (initial_controls - control_lower.unsqueeze(1)) / (
-            control_upper - control_lower
-        ).unsqueeze(1)
-        unit = unit.clamp(min=1e-6, max=1.0 - 1e-6)
-        self.control_logits = nn.Parameter(torch.log(unit) - torch.log1p(-unit))
-        self.register_buffer("control_lower", control_lower)
-        self.register_buffer("control_upper", control_upper)
-        self.register_buffer("final_time_s", final_time_s)
-
-    def forward(self) -> ControlPrediction:
-        unit = torch.sigmoid(self.control_logits)
-        controls = self.control_lower.unsqueeze(1) + unit * (
-            self.control_upper - self.control_lower
-        ).unsqueeze(1)
-        segments = controls.shape[1]
-        durations = self.final_time_s.unsqueeze(1).expand(-1, segments) / segments
-        return ControlPrediction(
-            controls=controls,
-            segment_durations=durations,
-            final_time_s=self.final_time_s,
+        super().__init__(
+            initial_controls, control_lower, control_upper, final_time_s, DURATION_UNIFORM
         )
 
 

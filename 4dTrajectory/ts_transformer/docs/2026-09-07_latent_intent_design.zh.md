@@ -15,7 +15,7 @@ Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；�
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
-| L0 操作参数维度 oracle | **未开始（下一步）** | `docs/l0_control_basis_oracle.py` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
+| L0 操作参数维度 oracle | **代码完成，待 review** | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + `tests/test_control_basis_oracle.py` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | 未开始 | `config`/`heads`/`train` 改动 + 臂 `l1_lowdim_arms.json` | 不差于 simple-v3；参数 257 → ≈4N\* |
 | L2 CVAE 骨架（隐意图 z） | 未开始 | `latent_intent.py` + 十处接缝 | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | 未开始 | `cta_conditioning` | 给真值 CTA 时时长误差 < 5 s ∧ 反事实 CTA 轨迹仍可飞 |
@@ -163,7 +163,8 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 （约束）就能把整条飞到终端硬钉；closure 用 14 个数。三者夹出的答案在 8–16，但那是"找一条轨迹"的
 证据，不是"拟合观测轨迹"的证据——必须量。
 
-**做法**：`docs/l0_control_basis_oracle.py`，对 KRDU 验证集（Phase 0 的同一批 1404 架，同 config /
+**做法**：库 `control/oracle/basis.py`（`BasisSchedule` / `fit_basis_schedules` /
+`inverse_dynamics_seed`，带 11 项测试）+ 运行器 `run_ts_control_basis_oracle.py`。对 KRDU 验证集（Phase 0 的同一批 1404 架，同 config /
 同锚点，`_series_for`）：
 
 1. 初值 = `control/dynamics/inverse.py::segment_controls(..., n_segments=N)`（逆动力学采样 + 裁剪）；
