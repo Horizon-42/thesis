@@ -112,6 +112,10 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
     # optimizer's and ts_transformer's comparison references) never needs one.
     if subject == "observed" and source.get("observed_threshold_event") is not None:
         _number(source.get("hae_minus_msl_m"), f"{where}: source.hae_minus_msl_m")
+        # The wind join keys on it (evaluation.wind); the harvest writes it on every
+        # observed record.
+        if not isinstance(source.get("landing_time_utc"), str):
+            raise ValueError(f"{where}: source.landing_time_utc must be an ISO 8601 string")
     if source.get(LANDING_AERO_KEY) is not None:
         try:
             validate_landing_aero(source[LANDING_AERO_KEY])

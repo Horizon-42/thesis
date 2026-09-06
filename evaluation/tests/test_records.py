@@ -44,6 +44,13 @@ def test_an_observed_record_with_an_event_requires_its_datum_offset():
         record_from_dict(value)
 
 
+def test_an_observed_record_with_an_event_requires_its_landing_time():
+    value = observed_payload()
+    del value["source"]["landing_time_utc"]
+    with pytest.raises(ValueError, match="landing_time_utc"):
+        record_from_dict(value)
+
+
 def test_a_reference_track_without_an_event_needs_no_datum_offset():
     """The optimizer's and ts_transformer's comparison references are observed records
     that never pass through runway assignment: no event, nothing to cross-check."""

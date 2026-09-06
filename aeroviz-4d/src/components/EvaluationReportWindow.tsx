@@ -564,6 +564,28 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
   );
 });
 
+/** The judged speed cell's tooltip: which quantity was judged and against what. */
+function speedCellTitle(row: EvaluationRow): string | undefined {
+  const window =
+    row.bounds.speed_lower_ms != null && row.bounds.speed_upper_ms != null
+      ? `window ${formatNum(row.bounds.speed_lower_ms)}–${formatNum(row.bounds.speed_upper_ms)} m/s` +
+        ` · Vs1g ${formatNum(row.bounds.stall_speed_ms)} m/s`
+      : undefined;
+  if (row.crossing_airspeed_estimate_ms != null) {
+    return (
+      `METAR-corrected airspeed estimate (±5 kt declared; ground speed ${formatNum(row.crossing_ground_speed_ms)} m/s)` +
+      (window ? ` · ${window}` : "")
+    );
+  }
+  if (row.crossing_speed_ms == null && row.crossing_ground_speed_ms != null) {
+    return (
+      "ADS-B ground speed — judged as a stated proxy, no usable wind report (wind unmodelled)" +
+      (window ? ` · ${window}` : "")
+    );
+  }
+  return window;
+}
+
 function rowWhy(row: EvaluationRow): string {
   return row.reason ?? row.violations.join("; ");
 }
@@ -857,9 +879,10 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
         ) : null}
         {isPriorSpeedGateReport(report) ? (
           <p className="eval-report-deviation-warning" role="status">
-            Speed graded at 1 g ({report.schema_version}): this batch&apos;s lower speed
-            bound ignored the crossing load factor; the current schema anchors it on the
-            load factor of the final rollout step. Re-evaluate the batch to regrade it.
+            Earlier speed gate ({report.schema_version}): this batch&apos;s lower speed
+            bound was not anchored on a measured crossing load factor for every subject,
+            and its observed rows were judged on the raw ground speed without the
+            METAR headwind correction. Re-evaluate the batch to regrade it.
           </p>
         ) : null}
 
@@ -872,10 +895,12 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           {hasSpeedGate
             ? " Speed is the stall-anchored crossing window [1.23·Vs(n), 1.23·Vs1g + 20 kt]" +
               " at the record's resolved-airframe crossing mass and load factor n (the" +
-              " last control's; a declared 1 g on records without controls). Computed" +
-              " subjects are judged on the crossing model airspeed; observed baselines on" +
-              " the fitted crossing GROUND speed as a stated proxy (wind unmodelled — an" +
-              " ordinary 10 kt headwind is half the window), under its own criterion id."
+              " last control's, or inverted from an observed flight's own kinematics)." +
+              " Computed subjects are judged on the crossing model airspeed; observed" +
+              " baselines on the fitted crossing GROUND speed corrected by the field's" +
+              " METAR headwind (an airspeed estimate, ±5 kt declared) when a report is" +
+              " usable, else on the raw ground speed as a stated proxy — each under its" +
+              " own criterion id."
             : ""}
         </p>
 
@@ -948,7 +973,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
               <tr>
                 <th
                   scope="row"
-                  title="ADS-B reported ground speed at the estimated crossing — the quantity the observed speed gate judges, as a stated proxy for airspeed (wind unmodelled)"
+                  title="ADS-B reported ground speed at the estimated crossing — the observed speed gate's input: corrected by the METAR headwind into the airspeed estimate it judges when a report is usable, judged as-is (a stated proxy, wind unmodelled) otherwise"
                 >
                   crossing ground speed (m/s, ADS-B)
                 </th>
@@ -1067,14 +1092,18 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                   <td>{formatNum(row.vertical_m, 2)}</td>
                   {hasSpeedGate ? (
                     <td
-                      title={row.bounds.speed_lower_ms != null && row.bounds.speed_upper_ms != null
-                        ? `window ${formatNum(row.bounds.speed_lower_ms)}–${formatNum(row.bounds.speed_upper_ms)} m/s` +
-                          ` · Vs1g ${formatNum(row.bounds.stall_speed_ms)} m/s`
-                        : row.crossing_speed_ms == null && row.crossing_ground_speed_ms != null
-                          ? "ADS-B ground speed — graded as a stated proxy (wind unmodelled)"
-                          : undefined}
+                      title={speedCellTitle(row)}
                     >
-                      {formatNum(row.crossing_speed_ms ?? row.crossing_ground_speed_ms)}
+                      {formatNum(
+                        row.crossing_airspeed_estimate_ms ??
+                          row.crossing_speed_ms ??
+                          row.crossing_ground_speed_ms,
+                      )}
+                      {row.crossing_airspeed_estimate_ms != null
+                        ? " est"
+                        : row.crossing_speed_ms == null && row.crossing_ground_speed_ms != null
+                          ? " GS"
+                          : ""}
                     </td>
                   ) : null}
                   <td>{formatNum(row.final_time_s)}</td>

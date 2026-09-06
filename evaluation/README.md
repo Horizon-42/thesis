@@ -74,7 +74,7 @@ is a guidance-tracking scale, not a universal threshold-crossing or landing
 outcome standard, and is no longer computed or serialized. Trajectories and
 harvested threshold events do not carry evaluation policy.
 
-Speed, for every subject (v7):
+Speed, for every subject (v8):
 
 ```text
 Vs1g  = sqrt(2 m g / (rho0 × S × Cl_max_landing))   # the project's own stall model
@@ -87,10 +87,15 @@ The multiplier is the 14 CFR 25.125(b)(2)(i) landing reference-speed floor
 speed element, an energy criterion that stays at 1 g. `S` and `Cl_max` come from the
 record's producer-written `source.landing_aero` block; the mass is the crossing state's
 own; the load factor is the last control's (`controls[-1].load_factor`, the control
-active over the final rollout step) or a declared 1 g on records without controls.
-Computed subjects are judged on the crossing model airspeed; observed baselines on the
-event's fitted crossing GROUND speed as a stated proxy under its own criterion id
-(wind is unmodelled). Full rationale, worked numbers, the measured load-factor
+active over the final rollout step) on records with controls, and a declared 1 g on
+state-output predictions. Computed subjects are judged on the crossing model airspeed. Observed baselines
+measure their load factor from their own ADS-B kinematics over the final 20 s, and
+are judged on the event's fitted crossing GROUND speed corrected by the field's METAR
+headwind component (`data/metar/<ICAO>/`, fetched by
+`trajectory_data_process/metar/fetch_iem_asos.py`; `--metar-root`) — an airspeed
+estimate with a declared ±5 kt uncertainty and its own criterion id — or, when no
+report within 30 min is usable, on the raw ground speed as a stated proxy, with the
+reason on the row. Full rationale, worked numbers, the measured load-factor
 distribution and trackable sources:
 [THRESHOLD_SPEED_GATE.md](docs/THRESHOLD_SPEED_GATE.md).
 

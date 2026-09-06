@@ -215,3 +215,82 @@ Reading:
   model, not another Cl tweak), A20N (27 % slow, same direction, milder), B763
   (33.9 % slow, n=239, heavy-bucket Cl 2.4 uncertain), E75L (22 % slow). These stay
   documented rather than patched — each needs its own evidence.
+
+## 9. Measured load factor and the METAR headwind (2026-09-07, report v8)
+
+Measured on the same five observed batches, evaluated to a scratch directory with the
+v8 code (`--metar-root` = the five airports' IEM ASOS archives, 2026-04-30 … 07-23; the
+reports on disk were not overwritten). Two things changed for observed rows: the
+crossing load factor is inverted from the flight's own final 20 s of kinematics
+(`THRESHOLD_SPEED_GATE.md` §3.5), and the ground speed is corrected by the field's
+headwind component into an airspeed estimate (§3.6). The load factor alone moved
+211 verdicts fleet-wide (all within a knot of the floor); the wind is what matters.
+
+### 9.1 Coverage and the wind itself
+
+| airport | speed-graded rows | METAR estimate / proxy | headwind kt p5 / p50 / p95 |
+|---|---|---|---|
+| KRDU | 10,194 | 13,289 / 1,148 | −2.3 / +4.9 / +12.0 |
+| KSJC | 7,481 | 10,341 / 810 | −1.5 / +8.0 / +14.0 |
+| KSTL | 7,190 | 8,550 / 215 | −2.9 / +3.7 / +9.9 |
+| KSMF | 3,825 | 3,922 / 307 | −1.6 / +6.1 / +14.2 |
+| KMSY | 3,501 | 3,928 / 221 | −2.6 / +2.8 / +10.0 |
+
+A report within 30 min exists for 91–97 % of the rows; the rest (stale or variable
+wind) stay on the proxy and say so. The median headwind is 3–8 kt — a quarter to a
+third of the 20 kt window, on every airport, in the direction that makes a
+ground-speed proxy read SLOW.
+
+### 9.2 What the correction did to the verdicts
+
+| airport | speed pass / fail, proxy → estimate | fails slow / fast, proxy → estimate | rows that moved (fail→pass, pass→fail) | marginal (±5 kt) |
+|---|---|---|---|---|
+| KRDU | 7,741 / 2,453 → 7,253 / 2,941 | 1,383 / 1,070 → 585 / 2,356 | 2,318 (915, 1,403) | 4,777 |
+| KSJC | 5,272 / 2,209 → 6,041 / 1,440 | 1,922 / 287 → 357 / 1,083 | 2,525 (1,647, 878) | 3,403 |
+| KSTL | 5,614 / 1,576 → 5,113 / 2,077 | 531 / 1,045 → 192 / 1,885 | 1,497 (498, 999) | 3,665 |
+| KSMF | 2,831 / 994 → 2,904 / 921 | 731 / 263 → 154 / 767 | 1,107 (590, 517) | 1,794 |
+| KMSY | 2,704 / 797 → 2,460 / 1,041 | 209 / 588 → 89 / 952 | 626 (191, 435) | 1,724 |
+
+The "slow" cluster §2 and §5 discussed was mostly wind: it shrinks 3–5× at every
+airport (KSJC 1,922 → 357). What is left is a "fast" cluster, and it is NOT weather
+either — it sits on one manufacturer, again:
+
+| KSJC type | graded | proxy slow / fast | estimate slow / fast / pass | median V_est / Vs1g(MLW) |
+|---|---|---|---|---|
+| B737 | 1,765 | 566 / 24 | 70 / 106 / 1,589 | 1.332 |
+| B38M | 1,619 | 207 / 96 | 19 / 435 / 1,165 | 1.375 |
+| B738 | 839 | 118 / 56 | 24 / 212 / 603 | 1.375 |
+| E75L | 1,063 | 479 / 0 | 55 / 33 / 975 | 1.310 |
+| A319 | 280 | 128 / 2 | 13 / 6 / 261 | 1.305 |
+| A21N | 153 | 138 / 0 | 61 / 0 / 92 | 1.236 |
+
+KSTL and KRDU repeat it: B38M / B738 / B739 cross at a median 1.37–1.41 × the model's
+1-g stall speed at MLW (KSTL B38M 748 of 1,783 fast; KRDU B738 515 of 1,114), the
+Airbus family (Cl_max 3.0 after §8) at 1.31–1.35, mid-window, and A21N at 1.24, still
+slow (the landing-mass residual of §8). The 737 family's upper edge is 1.23 + 20 kt ≈
+1.42 × Vs1g at these masses, so its crossings sit ON that edge — which is why the
+marginal count (estimate within its ±5 kt of a bound; `speed_margin_ms` /
+`speed_uncertainty_ms` on every row) is 35–50 % of the estimate-judged rows — a
+20 kt window with ±5 kt on both edges leaves only half of it unambiguous.
+
+### 9.3 Reading, and what it opens
+
+- §8 calibrated the A320 family's Cl_max from 2.7 to 3.0 on the PROXY, i.e. on
+  ground speeds that were reading 5–8 kt slow because of the wind. With the wind
+  corrected the family sits mid-window, so the calibration landed at roughly the right
+  place for the wrong reason, and the 737 bucket (kept at 2.7) is now the outlier in
+  the other direction. **The per-type anchors must be re-derived on the corrected
+  airspeed**, with the wind in the model, before any speed-fail rate is quoted as
+  flight behaviour (follow-up O4 in `2026-09-07_observed_speed_gate_plan.zh.md`).
+- Three candidate explanations for the 737 "fast" cluster, none decidable from the
+  gate alone: the bucket's landing Cl_max 2.7 is low for the 737NG/MAX (the same
+  correction §8 made for Airbus), 737 crews fly V_ref + 15–20 kt to the threshold
+  (the +5/−0 kt threshold margin AC 91-79B expects would then be routinely exceeded),
+  or the tower's 10 m wind understates the headwind at 50 ft (a log-profile factor of
+  ~1.1–1.2 pushes the same way). Type-specific published V_ref tables at typical
+  landing mass would separate the first from the other two.
+- The A21N residual is unchanged by the wind: a mass problem, as §8 said.
+- The proxy-vs-estimate split is on every row (`bounds.speed_criterion`, `wind`);
+  never pool the two, and quote the marginal count next to any observed speed rate.
+
+Reproduction: `python -m evaluation --input trajectory_data_process/outputs/harvest/<ICAO>/approach --output <scratch>` with and without `--metar-root /nonexistent`; the comparison scripts lived in the session scratchpad and are two dozen lines over the two reports' `trajectories` rows joined on `flight_key`.

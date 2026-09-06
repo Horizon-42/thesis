@@ -56,9 +56,12 @@ MIN_BOUND_LOAD_FACTOR = 1.0
 LANDING_AERO_KEY = "landing_aero"
 
 # ``ArrivalDeviation.crossing_load_factor_source`` values: the control active over the
-# final rollout step (records that carry controls), or the declared 1-g assumption
-# (observed baselines and state-output predictions, whose records carry none).
+# final rollout step (records that carry controls); the inversion of the flight's own
+# ADS-B kinematics over the final window before the crossing (observed baselines,
+# ``evaluation.arrival._observed_load_factor``); or the declared 1-g assumption
+# (state-output predictions, and observed tracks whose window is too short).
 LOAD_FACTOR_FROM_CONTROLS = "controls_last_step"
+LOAD_FACTOR_FROM_ADSB = "adsb_kinematics"
 LOAD_FACTOR_ASSUMED_1G = "assumed_1g"
 
 # Observed subjects are judged on their estimated crossing GROUND speed as a STATED
@@ -71,16 +74,25 @@ LOAD_FACTOR_ASSUMED_1G = "assumed_1g"
 # landing mass (the same identity->OpenAP chain the scenarios use), so baseline and
 # modeled twins share one set of stall assumptions.
 OBSERVED_SPEED_POLICY = (
-    "observed records are speed-graded on the fitted crossing GROUND speed as a "
-    "stated proxy for airspeed (wind unmodelled); the window is anchored on the "
-    "resolved airframe's landing mass at a declared 1 g -- the same stall "
-    "assumptions the flight's modeled twins fly with"
+    "observed records are speed-graded on the fitted crossing ground speed CORRECTED "
+    "by the field's METAR headwind into an airspeed estimate (criterion "
+    "..._metar_airspeed_estimate, +/-5 kt declared) when a report within 30 min with "
+    "a non-variable direction exists, and otherwise on the raw ground speed as a "
+    "stated proxy (..._ground_speed_proxy, wind unmodelled) -- each row's "
+    "bounds.speed_criterion and wind block say which; the window is anchored on the "
+    "resolved airframe's landing mass -- the same stall assumptions the flight's "
+    "modeled twins fly with -- at the load factor inverted from the flight's own "
+    "ADS-B kinematics over the final 20 s before the crossing (a declared 1 g when "
+    "that window holds too few samples)"
 )
 # Distinct criterion id for the proxy, mirroring how the lateral criterion is named:
-# a reader of one row can tell WHAT was judged without consulting the subject. An
-# observed record carries no controls, so its window is the 1-g one ("vs1g"), not
-# the load-factor-anchored one the computed subjects get.
-OBSERVED_SPEED_CRITERION_ID = "vref_1p23_vs1g_to_vref_1g_plus_20kt_ground_speed_proxy"
+# a reader of one row can tell WHAT was judged without consulting the subject. The
+# window is the same load-factor-anchored one the computed subjects get -- the
+# observed n is measured, not assumed -- so the id shares its stem.
+OBSERVED_SPEED_CRITERION_ID = SPEED_CRITERION_ID + "_ground_speed_proxy"
+# The proxy corrected by the field's METAR headwind component (``evaluation.wind``):
+# an airspeed ESTIMATE with a declared uncertainty, judged in the same window.
+OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID = SPEED_CRITERION_ID + "_metar_airspeed_estimate"
 MISSING_LANDING_AERO_REASON = (
     "record carries no source.landing_aero block; crossing speed cannot be judged "
     "against a stall-anchored window"

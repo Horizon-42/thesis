@@ -24,8 +24,11 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v7`.
   crossing mass (`aircraft.aero_params.stall_speed_ms` — the SAME function as the
   optimizer's velocity floor); **Vs(n) = Vs1g·√max(n, 1) at the crossing LOAD FACTOR**,
   read from `controls[-1].load_factor` (the control active over the final rollout step)
-  and declared 1 g (`crossing_load_factor_source == "assumed_1g"`) on records without
-  controls — observed baselines and state-output predictions. Only the lower edge moves
+  on records with controls, MEASURED from the flight's own ADS-B kinematics on observed
+  baselines (`adsb_kinematics`: ψ̇/γ̇ fitted over the final 20 s of measured track,
+  `aircraft.kinematics.load_factor_from_rates`; the window facts are on the row), and
+  declared 1 g (`assumed_1g`) only on state-output predictions and observed tracks with
+  fewer than four samples in that window. Only the lower edge moves
   with n: the +20 kt edge is an energy criterion defined at 1 g, and scaling it too only
   flipped records piled against it (measured, §3.5). S/Cl_max from producer-written
   `source.landing_aero` (`flight_scenarios.build_scenario`). 1.23 = 14 CFR
@@ -33,11 +36,20 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v7`.
   subjects (owner decision 2026-08-24,
   superseding the original observed exclusion).** Computed subjects are judged on
   the crossing model airspeed (`crossing_speed_ms`); observed baselines on the
-  fitted crossing GROUND speed (`crossing_ground_speed_ms`) as a STATED PROXY —
-  wind is unmodelled (10 kt headwind = half the window), declared by its own
-  criterion id (`…_ground_speed_proxy` on every row's bounds) and
-  `methodology.terminal_speed.observed_proxy_caveat`; never compare observed and
-  computed speed rates as one quantity. The observed window anchors on the
+  fitted crossing GROUND speed (`crossing_ground_speed_ms`) **corrected by the
+  field's METAR headwind** (`evaluation/wind.py`, `data/metar/<ICAO>/` from
+  `trajectory_data_process/metar/fetch_iem_asos.py`, CLI `--metar-root`) into
+  `crossing_airspeed_estimate_ms` with a declared ±5 kt uncertainty (criterion id
+  `…_metar_airspeed_estimate`) — or, when no report within 30 min is usable, on the
+  raw ground speed as a STATED PROXY (`…_ground_speed_proxy`, `wind.status` on the
+  row says why, `wind_counts` on the batch). Every speed-graded row carries
+  `speed_margin_ms` (signed distance to the nearest bound) and `speed_uncertainty_ms`
+  (0 model / ±5 kt estimate / null proxy = unknown); the batch splits
+  `speed_result_counts_by_criterion`. Never compare observed and computed speed
+  rates as one quantity, and never quote an observed speed rate without the
+  marginal and unknown-uncertainty counts beside it — **the observed fleet all
+  landed; a 26 % speed-fail rate is the window's error, not the flights'**
+  (`BASELINE_SPEED_GATE_RESULTS.md` §9, follow-up O4). The observed window anchors on the
   flight's RESOLVED airframe's landing mass + `landing_aero` (icao24 → OpenAP,
   written by `harvest/observed.py` via `flight_scenarios.resolve_landing_aero` —
   the same chain the scenarios use, so baseline and twins share one stall model).

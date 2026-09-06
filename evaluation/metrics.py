@@ -25,9 +25,11 @@ from evaluation.reference import (
 from evaluation.speed_gate import (
     LANDING_AERO_KEY,
     LOAD_FACTOR_ASSUMED_1G,
+    LOAD_FACTOR_FROM_ADSB,
     LOAD_FACTOR_FROM_CONTROLS,
     MIN_BOUND_LOAD_FACTOR,
     MISSING_LANDING_AERO_REASON,
+    OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID,
     OBSERVED_NO_CROSSING_SPEED_REASON,
     OBSERVED_SPEED_CRITERION_ID,
     OBSERVED_SPEED_POLICY,
@@ -47,13 +49,24 @@ from evaluation.thresholds import (
     ComponentResult,
     Verdict,
 )
+from evaluation.wind import (
+    AIRSPEED_ESTIMATE_UNCERTAINTY_MS,
+    WIND_MAX_AGE_S,
+    WIND_SOURCE,
+    WindTable,
+    wind_at_landing,
+)
 
-REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v7"
-# Versions a consumer that reads only the fields v6 and v7 SHARE (the component
-# results, the geometry deviations) may accept. v7 changed the speed gate's lower bound
-# (anchored on the crossing load factor) and added the load-factor fields; lateral and
-# vertical verdicts are unchanged, which is all the ts lateral-eligibility seam reads.
-READABLE_REPORT_SCHEMA_VERSIONS = ("terminal-approach-evaluation-v6", REPORT_SCHEMA_VERSION)
+REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v8"
+# Versions a consumer that reads only the fields these SHARE (the component results,
+# the geometry deviations) may accept. v7 anchored the speed gate's lower bound on the
+# crossing load factor; v8 measures that load factor on observed baselines from their
+# own ADS-B kinematics and corrects their ground speed by the METAR headwind. Lateral
+# and vertical verdicts are unchanged throughout, which is all the ts
+# lateral-eligibility seam reads.
+READABLE_REPORT_SCHEMA_VERSIONS = (
+    "terminal-approach-evaluation-v6", "terminal-approach-evaluation-v7", REPORT_SCHEMA_VERSION,
+)
 
 # The denominator every observed availability block is counted against. Evaluation
 # checks the LABEL, not the counts: the block is producer-owned audit output (the
@@ -162,13 +175,22 @@ METHODOLOGY: dict[str, Any] = {
                     "rollout step, where the graded crossing lies (records with controls: "
                     "optimizer solves, control-output predictions)"
                 ),
+                LOAD_FACTOR_FROM_ADSB: (
+                    "observed baselines: n inverted from the flight's own kinematics "
+                    "(psi and gamma rates fitted over the final 20 s of measured track "
+                    "before the crossing, the point-mass rotational equations); the "
+                    "window facts are on the row"
+                ),
                 LOAD_FACTOR_ASSUMED_1G: (
-                    "declared 1 g for records without controls (observed baselines, "
-                    "state-output predictions); reported on the row, never inverted "
-                    "from ADS-B kinematics"
+                    "declared 1 g for records without controls or a usable window "
+                    "(state-output predictions; observed tracks with fewer than four "
+                    "samples in the final 20 s); reported on the row"
                 ),
             },
-            "row_fields": ["crossing_load_factor", "crossing_load_factor_source"],
+            "row_fields": [
+                "crossing_load_factor", "crossing_load_factor_source",
+                "crossing_load_factor_window",
+            ],
         },
         "sources": [
             {
@@ -192,10 +214,29 @@ METHODOLOGY: dict[str, Any] = {
         ),
         "observed_proxy_criterion": OBSERVED_SPEED_CRITERION_ID,
         "observed_proxy_caveat": (
-            "wind is unmodelled: an ordinary 10 kt headwind is half the 20 kt "
-            "window, so an observed speed fail can reflect the day's wind rather "
-            "than the flight; quote observed speed rates with this caveat"
+            "wind is unmodelled in the proxy: an ordinary 10 kt headwind is half the "
+            "20 kt window, so a proxy speed fail can reflect the day's wind rather "
+            "than the flight; quote proxy-judged rates with this caveat"
         ),
+        "observed_wind_correction": {
+            "criterion": OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID,
+            "source": (
+                WIND_SOURCE + ": the field's ASOS/METAR reports (IEM archive; direction "
+                "degrees true, speed knots), joined to each flight by landing time"
+            ),
+            "rule": (
+                "airspeed estimate = crossing ground speed + W cos(direction_from - "
+                "runway course), using the report nearest the landing time when it is "
+                f"within {WIND_MAX_AGE_S:g} s and the direction is not variable; "
+                "otherwise the row is judged on the ground-speed proxy and says so"
+            ),
+            "uncertainty_ms": AIRSPEED_ESTIMATE_UNCERTAINTY_MS,
+            "uncertainty_note": (
+                "declared, not fitted: the tower's 10 m wind is not the threshold wind, "
+                "reports are hourly with specials, gusts are not applied; speed_marginal "
+                "counts estimate-judged rows within this margin of a bound"
+            ),
+        },
         "claim_boundary": (
             "model-consistent threshold-crossing energy, judged in TAS with TAS "
             "treated as CAS (<1% at this fleet's threshold elevations, all below "
@@ -213,10 +254,13 @@ METHODOLOGY: dict[str, Any] = {
         ),
         "reference": "ground-referenced; wind is unmodelled",
         "use": (
-            "observed subjects only: the quantity their speed gate judges, as a stated "
-            "proxy for airspeed under criterion " + OBSERVED_SPEED_CRITERION_ID + "; "
-            "the batch spread is reported separately from crossing_speed_ms and the "
-            "two are never compared as one quantity"
+            "observed subjects only: the input to their speed gate. With a usable METAR "
+            "report it is corrected by the headwind into crossing_airspeed_estimate_ms "
+            "and THAT is judged (criterion " + OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID
+            + "); without one the raw ground speed is judged as a stated proxy "
+            "(criterion " + OBSERVED_SPEED_CRITERION_ID + "). The batch spread is "
+            "reported separately from crossing_speed_ms and the two are never "
+            "compared as one quantity"
         ),
         "availability": (
             "rows whose serialized event carries the field; events written before "
@@ -254,12 +298,23 @@ class TrajectoryEvaluation:
     vertical_lower_bound_m: float | None
     vertical_upper_bound_m: float | None
     # Which quantity the speed gate judged (the criterion id serialized with the
-    # bounds): the model airspeed, or the observed ground-speed proxy.
+    # bounds): the model airspeed, the observed METAR-corrected airspeed estimate, or
+    # the observed ground-speed proxy.
     speed_criterion: str
     # Per-record (mass- and load-factor-anchored), unlike the two context-owned bounds
     # above; None when no window could be resolved (unsolved, no crossing, no
     # landing_aero block, or an observed event without a fitted speed).
     speed_bounds: SpeedGateBounds | None = None
+    # Observed subjects: ground speed + headwind when a usable METAR report exists
+    # (``wind`` says which, or why not); the value judged under the estimate criterion.
+    crossing_airspeed_estimate_ms: float | None = None
+    wind: dict[str, Any] | None = None
+    # How much the speed verdict is worth: the judged value's signed distance to the
+    # nearest bound (positive inside the window, negative outside) and the declared
+    # uncertainty of that value -- 0 for a model airspeed, the METAR estimate's +/-5 kt,
+    # None for the ground-speed proxy (wind unmodelled: unknown, not zero).
+    speed_margin_ms: float | None = None
+    speed_uncertainty_ms: float | None = None
     flight_key: str | None = None
 
 
@@ -291,8 +346,14 @@ def evaluate_record(
     record: TrajectoryRecord,
     *,
     context: AssessmentContext,
+    wind: WindTable | None = None,
 ) -> TrajectoryEvaluation:
-    """Evaluate one trajectory at its runway-threshold event."""
+    """Evaluate one trajectory at its runway-threshold event.
+
+    ``wind`` is the airport's METAR table (``evaluation.wind``); it corrects an OBSERVED
+    record's crossing ground speed to an airspeed estimate before the speed gate. Absent
+    (no table for the airport), the ground-speed proxy applies and the row says so.
+    """
     record_id = str(
         record.source.get("id")
         or (record.path.stem if record.path is not None else "trajectory")
@@ -310,14 +371,15 @@ def evaluate_record(
         lateral_bound_m=limits.lateral_m,
         vertical_lower_bound_m=limits.vertical_lower_m,
         vertical_upper_bound_m=limits.vertical_upper_m,
-        speed_criterion=(
-            OBSERVED_SPEED_CRITERION_ID if subject == "observed" else SPEED_CRITERION_ID
-        ),
         flight_key=record.source.get("flight_key"),
+    )
+    default_criterion = (
+        OBSERVED_SPEED_CRITERION_ID if subject == "observed" else SPEED_CRITERION_ID
     )
     if not record.solved:
         return TrajectoryEvaluation(
-            **common, solved=False, success=False, verdict="fail",
+            **common, speed_criterion=default_criterion,
+            solved=False, success=False, verdict="fail",
             lateral_result="indeterminate", vertical_result="indeterminate",
             speed_result="indeterminate",
             deviation=None, event_status="unsolved", violations=("unsolved",),
@@ -328,7 +390,7 @@ def evaluate_record(
     if outcome.deviation is None:
         computed_failure = subject != "observed"
         return TrajectoryEvaluation(
-            **common, solved=True, success=False,
+            **common, speed_criterion=default_criterion, solved=True, success=False,
             verdict="fail" if computed_failure else "indeterminate",
             lateral_result="indeterminate", vertical_result="indeterminate",
             speed_result="indeterminate",
@@ -355,11 +417,29 @@ def evaluate_record(
     speed_bounds: SpeedGateBounds | None = None
     speed_reason: str | None = None
     landing_aero = record.source.get(LANDING_AERO_KEY)
-    judged_speed = (
-        deviation.crossing_ground_speed_ms
-        if subject == "observed"
-        else deviation.crossing_speed_ms
-    )
+    speed_criterion = default_criterion
+    airspeed_estimate: float | None = None
+    wind_block: dict[str, Any] | None = None
+    if subject == "observed":
+        judged_speed = deviation.crossing_ground_speed_ms
+        if judged_speed is not None:
+            # The proxy corrected by the field's wind, when a usable report exists; the
+            # block says which report or why none -- a fallback that is stated per row.
+            if wind is None:
+                wind_block = {
+                    "source": WIND_SOURCE, "status": "unavailable",
+                    "reason": "no METAR table for this airport (evaluation --metar-root)",
+                }
+            else:
+                headwind, wind_block = wind_at_landing(
+                    wind, record.source["landing_time_utc"], context.runway_course_deg
+                )
+                if headwind is not None:
+                    airspeed_estimate = judged_speed + headwind
+                    judged_speed = airspeed_estimate
+                    speed_criterion = OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID
+    else:
+        judged_speed = deviation.crossing_speed_ms
     if landing_aero is None:
         speed_result: ComponentResult = "indeterminate"
         speed_reason = (
@@ -379,6 +459,19 @@ def evaluate_record(
             load_factor=deviation.crossing_load_factor,
         )
         speed_result = _component(judged_speed, speed_bounds.lower_ms, speed_bounds.upper_ms)
+    speed_margin: float | None = None
+    speed_uncertainty: float | None = None
+    if speed_bounds is not None and judged_speed is not None:
+        inside = speed_bounds.lower_ms <= judged_speed <= speed_bounds.upper_ms
+        distance = min(
+            abs(judged_speed - speed_bounds.lower_ms),
+            abs(judged_speed - speed_bounds.upper_ms),
+        )
+        speed_margin = distance if inside else -distance
+        if subject != "observed":
+            speed_uncertainty = 0.0
+        elif airspeed_estimate is not None:
+            speed_uncertainty = AIRSPEED_ESTIMATE_UNCERTAINTY_MS
     verdict = _composite(lateral_result, vertical_result, speed_result)
     violations: list[str] = []
     if lateral_result == "fail":
@@ -402,7 +495,12 @@ def evaluate_record(
         **common, solved=True, success=verdict == "pass", verdict=verdict,
         lateral_result=lateral_result, vertical_result=vertical_result,
         speed_result=speed_result,
+        speed_criterion=speed_criterion,
         speed_bounds=speed_bounds,
+        crossing_airspeed_estimate_ms=airspeed_estimate,
+        wind=wind_block,
+        speed_margin_ms=speed_margin,
+        speed_uncertainty_ms=speed_uncertainty,
         deviation=deviation, event_status=outcome.event_status,
         violations=tuple(violations), reason=reason,
     )
@@ -413,8 +511,13 @@ def evaluate_batch(
     *,
     contexts: Mapping[ContextKey, AssessmentContext],
     observed_availability: Mapping[str, Any] | None = None,
+    winds: Mapping[str, WindTable] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate a batch and serialize every verdict-changing parameter."""
+    """Evaluate a batch and serialize every verdict-changing parameter.
+
+    ``winds`` maps airport code to its METAR table; observed records at an airport
+    without one are judged on the ground-speed proxy, and the report counts both.
+    """
     # Iterated, never materialized: `records` may be a generator over a batch whose
     # resolved states are ~1 MB per flight. Everything retained below (evaluations, rows,
     # comparisons) is per-flight metadata, not trajectory arrays.
@@ -433,7 +536,10 @@ def evaluate_batch(
     for record in records:
         context = resolve_context(record, contexts)
         used[(context.airport, context.runway)] = context
-        evaluation = evaluate_record(record, context=context)
+        evaluation = evaluate_record(
+            record, context=context,
+            wind=winds.get(context.airport) if winds is not None else None,
+        )
         if observed is not None and evaluation.subject != "observed":
             raise ValueError(
                 "observed_availability can be attached only to an observed-only batch; "
@@ -493,6 +599,27 @@ def evaluate_batch(
         key: sum(item.speed_result == key for item in evaluations)
         for key in ("pass", "fail", "indeterminate")
     }
+    # The same tallies per criterion: an observed batch mixes estimate-judged and
+    # proxy-judged rows, and a pooled rate cannot be decomposed after the fact.
+    speed_result_counts_by_criterion = {
+        criterion: {
+            key: sum(
+                item.speed_result == key and item.speed_criterion == criterion
+                for item in evaluations
+            )
+            for key in ("pass", "fail", "indeterminate")
+        }
+        for criterion in sorted({item.speed_criterion for item in evaluations})
+    }
+    # How the observed rows' speed was judged: the METAR-corrected estimate, or the
+    # proxy because no usable report existed (a per-row fact, summed here).
+    wind_counts = {
+        "estimated": sum(item.crossing_airspeed_estimate_ms is not None for item in measured),
+        "unavailable": sum(
+            item.wind is not None and item.crossing_airspeed_estimate_ms is None
+            for item in measured
+        ),
+    }
     subjects = {item.subject for item in evaluations}
     total = len(evaluations)
     times = [item.deviation.flight_time_s for item in measured]
@@ -526,6 +653,27 @@ def evaluate_batch(
             if item.deviation.vertical_m is not None
         ]),
         "speed_result_counts": speed_result_counts,
+        "speed_result_counts_by_criterion": speed_result_counts_by_criterion,
+        "wind_counts": wind_counts,
+        # Speed verdicts whose judged value sits within its declared uncertainty of a
+        # bound, and speed verdicts whose uncertainty is unknown (proxy rows).
+        "speed_marginal": sum(
+            item.speed_margin_ms is not None
+            and item.speed_uncertainty_ms is not None
+            and item.speed_uncertainty_ms > 0.0
+            and abs(item.speed_margin_ms) <= item.speed_uncertainty_ms
+            for item in measured
+        ),
+        "speed_uncertainty_unknown": sum(
+            item.speed_margin_ms is not None and item.speed_uncertainty_ms is None
+            for item in measured
+        ),
+        # Observed rows' METAR-corrected crossing airspeed estimates (null when none).
+        "crossing_airspeed_estimate_ms": magnitude_spread([
+            item.crossing_airspeed_estimate_ms
+            for item in measured
+            if item.crossing_airspeed_estimate_ms is not None
+        ]),
         "crossing_speed_ms": magnitude_spread([
             item.deviation.crossing_speed_ms
             for item in measured
@@ -563,6 +711,10 @@ def _load_factor_aggregate(
         "p95": percentile(values, 0.95),
         "max": max(values),
         "below_1g": sum(value < MIN_BOUND_LOAD_FACTOR for value in values),
+        "adsb_kinematics": sum(
+            item.deviation.crossing_load_factor_source == LOAD_FACTOR_FROM_ADSB
+            for item in measured
+        ),
         "assumed_1g": sum(
             item.deviation.crossing_load_factor_source == LOAD_FACTOR_ASSUMED_1G
             for item in measured
@@ -652,6 +804,7 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             "crossing_mass_kg": deviation.crossing_mass_kg,
             "crossing_load_factor": deviation.crossing_load_factor,
             "crossing_load_factor_source": deviation.crossing_load_factor_source,
+            "crossing_load_factor_window": deviation.crossing_load_factor_window,
             "crossing_ground_speed_ms": deviation.crossing_ground_speed_ms,
             "heading_rad": deviation.heading_rad,
             "final_time_s": deviation.flight_time_s,
@@ -674,11 +827,16 @@ def _row(item: TrajectoryEvaluation) -> dict[str, Any]:
             speed_ms=deviation.speed_ms,
             crossing_speed_ms=deviation.crossing_speed_ms,
             crossing_ground_speed_ms=deviation.crossing_ground_speed_ms,
+            crossing_airspeed_estimate_ms=item.crossing_airspeed_estimate_ms,
+            speed_margin_ms=item.speed_margin_ms,
+            speed_uncertainty_ms=item.speed_uncertainty_ms,
             crossing_load_factor=deviation.crossing_load_factor,
             crossing_load_factor_source=deviation.crossing_load_factor_source,
             heading_rad=deviation.heading_rad,
             final_time_s=deviation.flight_time_s,
         )
+    if item.wind is not None:
+        row["wind"] = item.wind
     if item.reason is not None:
         row["reason"] = item.reason
     return row

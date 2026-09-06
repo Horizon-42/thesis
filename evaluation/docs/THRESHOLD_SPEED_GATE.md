@@ -172,22 +172,82 @@ the whole 20 kt window. Two policy choices follow from the physics and the table
   control is the one active over the final step — the segment both the `terminal_state`
   and the `interpolated_threshold` crossings lie on. A record whose controls lack the
   column is malformed and raises.
-- Records without `controls` (observed baselines, state-output ts predictions): `n = 1`,
-  source `assumed_1g`, declared on every row. A censored observed crossing is a
-  straight-line fit (`γ̇ = ψ̇ = 0` by construction) and a measured ADS-B bracket's `γ̇`
-  is 25 ft-quantisation noise (`evaluation/CLAUDE.md`), so inverting the kinematics
-  would add noise, not a measurement.
+- Observed baselines: `n` is MEASURED from the flight's own kinematics
+  (`arrival._observed_load_factor`, source `adsb_kinematics`): ψ and γ are fitted
+  linearly over the final 20 s of measured track before the crossing (the samples' own
+  V/ψ/γ are already windowed least-squares velocities), and
+  `aircraft.kinematics.load_factor_from_rates` applies the point-mass inversion. On a
+  3° final at 70 m/s the 25 ft altitude quantum costs ~0.002 in `n` over such a window
+  and the heading fit ~0.005 — a measurement, where a per-sample rate would be noise.
+  The window's length, sample count, fitted rates and how far before the threshold the
+  measured track ended (`0` for a measured bracket, the fit's extrapolation for a
+  censored track, whose appended crossing row is a straight line with zero rates by
+  construction) are on the row (`crossing_load_factor_window`). Fewer than four samples
+  in the window ⇒ `assumed_1g` with the reason on the row. The rotating-frame transport
+  terms (~1e-5 rad/s, 7e-5 in `n`) are not applied.
+- State-output ts predictions carry no controls: `n = 1`, source `assumed_1g`, declared
+  on every row.
 
 `aircraft.aero_params.stall_speed_ms` gained the `load_factor` keyword (default 1.0);
 the optimizer's velocity floor still calls it at 1 g, so the "one stall model" property
 of §3.1 is unchanged.
+
+**Measured on the observed fleet (v8, 2026-09-07; `crossing_load_factor_window` on
+every row):**
+
+| airport | measured rows | n measured / declared | n p50 | p95 | p99 | max | n > 1.01 | n > 1.05 | window p50 | ends before threshold p50 | verdicts moved vs 1 g |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| KRDU | 14,438 | 14,423 / 15 | 1.0022 | 1.0158 | 1.0219 | 1.122 | 2,382 | 11 | 18 samples | 298 m | 84 |
+| KSJC | 11,151 | 11,150 / 1 | 1.0035 | 1.0116 | 1.0172 | 1.084 | 963 | 3 | 20 | 0 m | 59 |
+| KSTL | 8,765 | 8,762 / 3 | 1.0048 | 1.0189 | 1.0241 | 1.067 | 2,098 | 1 | 17 | 0 m | 37 |
+| KSMF | 4,229 | 4,229 / 0 | 1.0025 | 1.0095 | 1.0133 | 1.049 | 168 | 0 | 20 | 0 m | 17 |
+| KMSY | 4,149 | 4,146 / 3 | 1.0037 | 1.0156 | 1.0217 | 1.041 | 698 | 0 | 17 | 0 m | 14 |
+
+Real approaches cross at 1 g to within a percent — the assumption v7 made is now a
+measurement, and it holds. The 211 verdicts that moved are all pass → fail with `n`
+between 1.003 and 1.017 lifting the floor by 0.15–0.85 %, on flights whose ground speed
+sat within about a knot of it: exactly the rows the wind uncertainty (§3.6) owns, which
+is why the estimate-judged rows carry `speed_marginal`.
+
+### 3.6 Wind: the METAR headwind correction for observed baselines
+
+The observed crossing speed is a GROUND speed and the window is an airspeed window;
+an ordinary 10 kt headwind is half the window, so a proxy-judged fail can be the
+day's weather. OpenSky state vectors carry neither airspeed nor true heading (no wind
+triangle), so the wind comes from the field itself: the ASOS/METAR reports the IEM
+archive republishes (routine hourly plus specials, direction degrees TRUE, speed and
+gust in knots, UTC — `trajectory_data_process/metar/fetch_iem_asos.py` fetches them
+into `data/metar/<ICAO>/`, with provenance beside each file). `evaluation.wind` joins
+each flight to the report nearest its landing time:
+
+```text
+headwind          = W · cos(direction_from − runway course)     # both degrees true
+airspeed estimate = crossing ground speed + headwind
+```
+
+judged in the same window under `…_metar_airspeed_estimate`, with a DECLARED ±5 kt
+uncertainty (the tower's 10 m wind is not the threshold wind; hourly sampling; gusts
+not applied). Every speed-graded row carries `speed_margin_ms` — the judged value's
+signed distance to the nearest bound, positive inside the window — and
+`speed_uncertainty_ms`: 0 for a model airspeed, the estimate's ±5 kt, and **null for
+the proxy** (the wind error is unknown, not zero). The batch counts `speed_marginal`
+(rows within their own uncertainty of a bound) and `speed_uncertainty_unknown`
+(proxy-judged rows), and splits `speed_result_counts` by criterion so estimate-judged
+and proxy-judged rows are never pooled. A report older than 30 min or a
+variable-direction wind yields no estimate: the row is judged on the ground-speed
+proxy under its own id and `wind.status` says why (on this fleet the dominant cause is
+a variable wind, not report age); the batch reports `wind_counts`. Nothing on disk is
+rewritten — the join is at read time, like the altitude repair and the arrival-window
+slice. The harvest's own `--evaluate-only` evaluation and every evaluation CLI take
+`--metar-root` (default `data/metar`).
 
 ## 4. Data contract
 
 | Input | Source | Owner |
 |---|---|---|
 | `V_crossing`, `m` | the interpolated crossing state (`evaluation/arrival.py`, `ArrivalDeviation.crossing_speed_ms` / `crossing_mass_kg`) | evaluation |
-| `n` | `controls[-1].load_factor` when the record carries controls, else 1 g declared (`crossing_load_factor` / `crossing_load_factor_source`, §3.5) | evaluation reads, producer writes the controls |
+| `n` | `controls[-1].load_factor` when the record carries controls; the ADS-B kinematic inversion over the final 20 s on observed baselines; else 1 g declared (`crossing_load_factor` / `_source` / `_window`, §3.5) | evaluation reads, producer writes the controls / the track |
+| wind | `data/metar/<ICAO>/*.csv` (IEM ASOS archive, `fetch_iem_asos`), joined by `source.landing_time_utc` and the context's runway course (§3.6) | evaluation reads at evaluation time |
 | `S`, `Cl_max` | `source.landing_aero = {wing_area_m2, cl_max_landing}` — written by `flight_scenarios.build_scenario` from the same `AeroParams` the optimizer/replay fly | producer |
 | 1.23, +20 kt, the formula, the `n ≥ 1` clamp | `evaluation/speed_gate.py` + `aircraft.aero_params.stall_speed_ms` | evaluation policy / shared model |
 
@@ -211,7 +271,7 @@ Absent-vs-invalid follows the observed-event pattern:
 |---|---|---|---|
 | `optimized` | composed into the verdict | crossing model airspeed (state V at the event) | `controls[-1].load_factor` |
 | `predicted` | composed into the verdict | same record contract, same crossing interpolation | `controls[-1].load_factor` for control-output models; 1 g declared for state-output ones (`controls == []`) |
-| `observed` | **composed into the verdict (2026-08-24)** | fitted crossing **ground speed**, a stated proxy — see below | 1 g declared (`assumed_1g`) |
+| `observed` | **composed into the verdict (2026-08-24)** | fitted crossing ground speed **+ METAR headwind** = airspeed estimate (±5 kt declared) when a report is usable, else the raw **ground speed** as a stated proxy — see below and §3.6 | measured from the final 20 s of ADS-B kinematics (`adsb_kinematics`); `assumed_1g` only when the window is too short |
 
 **History.** The original v6 design excluded observed subjects entirely (no crossing
 speed existed, and ground speed is not airspeed). The owner overrode the exclusion on
@@ -310,16 +370,16 @@ bracket the operational numbers, which is what a model-consistency gate needs.
 ## 9. Report surface (v7)
 
 - Per row: `speed_result`, `bounds.speed_criterion`
-  (`vref_1p23_vs_at_n_to_vref_1g_plus_20kt`; observed rows carry
-  `vref_1p23_vs1g_to_vref_1g_plus_20kt_ground_speed_proxy` — their window IS the 1-g one,
-  the id says so),
+  (`vref_1p23_vs_at_n_to_vref_1g_plus_20kt`; observed rows carry the same stem plus
+  `_ground_speed_proxy` — their `n` is measured too, from ADS-B kinematics),
   `bounds.stall_speed_ms` (1 g), `bounds.stall_speed_at_n_ms`, `bounds.speed_lower_ms`,
   `bounds.speed_upper_ms`, `deviation.crossing_speed_ms`, `deviation.crossing_mass_kg`,
   `deviation.crossing_load_factor`, `deviation.crossing_load_factor_source`; `"speed"`
   joins `violations` on a fail.
 - Per batch: `speed_result_counts`, `crossing_speed_ms` / `crossing_ground_speed_ms`
   spreads, `crossing_load_factor` (`mean/min/p95/max`, `below_1g` = rows whose lower
-  bound was clamped to the 1-g floor, `assumed_1g` = rows judged at a declared 1 g),
+  bound was clamped to the 1-g floor, `adsb_kinematics` = observed rows with a measured
+  `n`, `assumed_1g` = rows judged at a declared 1 g),
   `methodology.terminal_speed` (criterion, formula, the load-factor rule and its sources,
   subject scope, claim boundary — self-describing years later, like the vertical block).
 - An EMPTY window (`speed_lower_ms > speed_upper_ms`, n above ~1.25–1.40 on this fleet)

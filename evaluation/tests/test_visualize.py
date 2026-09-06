@@ -71,6 +71,7 @@ def test_rendered_payload_is_strict_json_and_escapes_script_close(tmp_path):
     # retired wording could never fail again, and the note they guarded was the one
     # that had actually gone stale.
     assert "[1.23·Vs(n), 1.23·Vs1g + 20 kt]" in page
-    assert "observed baselines on the fitted crossing GROUND speed as a stated proxy" in page
+    assert "corrected by the field's METAR headwind into an airspeed estimate" in page
+    assert "V judged (m/s)" in page
     assert "</script><img" not in page
     assert "<\\/script><img" in page

@@ -32,8 +32,14 @@ from final_approach.event_contract import validate_event
 from final_approach.frame import RunwayFrame, TrackPoint
 from geokit import haversine_m
 
+from aircraft.kinematics import linear_slope, load_factor_from_rates
+
 from evaluation.records import STATE_KEYS, TrajectoryRecord
-from evaluation.speed_gate import LOAD_FACTOR_ASSUMED_1G, LOAD_FACTOR_FROM_CONTROLS
+from evaluation.speed_gate import (
+    LOAD_FACTOR_ASSUMED_1G,
+    LOAD_FACTOR_FROM_ADSB,
+    LOAD_FACTOR_FROM_CONTROLS,
+)
 from evaluation.thresholds import AssessmentContext
 
 # Every state channel a crossing interpolation blends (the record contract's keys plus
@@ -43,6 +49,17 @@ _ANGULAR_STATE_KEYS = ("psi",)
 # The control column the speed gate reads (evaluation_export.CONTROL_DECIMALS names the
 # same three: thrust, bank_rad, load_factor).
 LOAD_FACTOR_KEY = "load_factor"
+# The observed baseline's load factor is inverted from its own ADS-B kinematics over
+# this much MEASURED track before the crossing: ψ̇ and γ̇ by a linear fit over the
+# window (the samples' V/ψ/γ are themselves windowed least-squares velocities), n from
+# the point-mass rotational equations. Measured on 1,000 KRDU rows: the γ-fit's own
+# standard error is 0.001 in n (p95 0.004; the 25 ft altitude quantum over ~70 m of
+# descent), and the heading term V cos γ ψ̇ / g -- p95 0.006 -- enters n through the
+# hypot at 1.6e-5, so on an established final n is cos γ + V γ̇ / g and a turn never
+# moves it. A measurement, where a per-sample rate would be noise; fewer samples than
+# the minimum is declared, not guessed.
+LOAD_FACTOR_WINDOW_S = 20.0
+LOAD_FACTOR_MIN_SAMPLES = 4
 
 TERMINAL_PLANE_TOLERANCE_M = 1.0
 TARGET_CONTEXT_TOLERANCE_M = 0.01
@@ -81,6 +98,10 @@ class ArrivalDeviation:
     # observed speed gate judges — under its own criterion id, because wind is
     # unmodelled and it is not an airspeed.
     crossing_ground_speed_ms: float | None = None
+    # Observed subjects: the facts behind ``crossing_load_factor`` (window length,
+    # samples, fitted rates, how far before the threshold the measured track ended), or
+    # why 1 g was declared instead. None on computed subjects.
+    crossing_load_factor_window: dict[str, Any] | None = None
 
     @property
     def lateral_m(self) -> float:
@@ -335,15 +356,14 @@ def _observed_arrival(
     target = record.target_state
     _require_target_agrees_with_runway_data(record, context)
     crossing = _marker_crossing(record.states, marker)
+    extrapolation_m = float(event["extrapolation_distance_m"])
+    load_factor, source, window = _observed_load_factor(record, marker, extrapolation_m)
     deviation = _state_deviation(
         crossing,
         target,
         _authoritative_frame(context, target),
-        # An observed record carries no controls: the gate judges it at a declared 1 g
-        # (a censored crossing is a straight-line fit, and an ADS-B bracket's rates are
-        # quantisation noise -- docs/THRESHOLD_SPEED_GATE.md section 3.5).
-        1.0,
-        LOAD_FACTOR_ASSUMED_1G,
+        load_factor,
+        source,
         desired_altitude_msl_m=context.desired_threshold_altitude_msl_m,
     )
     return ArrivalOutcome(
@@ -353,14 +373,64 @@ def _observed_arrival(
             # final_time_s to the last measured row), not the estimated crossing
             # time an appended tail row carries.
             flight_time_s=float(record.final_time_s),
-            extrapolation_m=event["extrapolation_distance_m"],
+            extrapolation_m=extrapolation_m,
             # No crossing AIRSPEED was measured (the state's V is ground-speed derived);
             # the gate judges observed subjects on the event's GROUND speed as a stated
             # proxy, anchored on the record's resolved-airframe crossing mass.
             crossing_speed_ms=None,
             crossing_ground_speed_ms=event.get("crossing_ground_speed_m_s"),
+            crossing_load_factor_window=window,
         ),
         "estimated",
+    )
+
+
+def _observed_load_factor(
+    record: TrajectoryRecord, marker: dict[str, Any], extrapolation_m: float
+) -> tuple[float, str, dict[str, Any]]:
+    """``(n, source, facts)`` from the flight's own kinematics before the crossing.
+
+    The window is the last ``LOAD_FACTOR_WINDOW_S`` of MEASURED samples ending at the
+    crossing bracket's right sample (a measured bracket) or at the last measured
+    sample (a fitted tail -- the appended crossing row is a straight-line inference
+    whose own rates are zero by construction, so the measured window ``extrapolation_m``
+    before the threshold is the honest figure). ψ is unwrapped sample to sample before
+    the fit; a track turning through ±π reads as one turn, not a 2π swing.
+    """
+    states = record.measured_states
+    end = (
+        marker["left_index"] + 1
+        if marker["kind"] == MEASURED_BRACKET_KIND
+        else len(states) - 1
+    )
+    ends_m_before_threshold = 0.0 if marker["kind"] == MEASURED_BRACKET_KIND else extrapolation_m
+    latest_t = states[end]["t"]
+    window = [s for s in states[: end + 1] if s["t"] >= latest_t - LOAD_FACTOR_WINDOW_S]
+    if len(window) < LOAD_FACTOR_MIN_SAMPLES:
+        return 1.0, LOAD_FACTOR_ASSUMED_1G, {
+            "samples": len(window),
+            "reason": (
+                f"fewer than {LOAD_FACTOR_MIN_SAMPLES} measured samples in the final "
+                f"{LOAD_FACTOR_WINDOW_S:g} s; load factor declared, not measured"
+            ),
+        }
+    times = [s["t"] for s in window]
+    headings = [window[0]["psi"]]
+    for sample in window[1:]:
+        headings.append(headings[-1] + math.remainder(sample["psi"] - headings[-1], math.tau))
+    psi_rate = linear_slope(times, headings)
+    gamma_rate = linear_slope(times, [s["gamma"] for s in window])
+    last = window[-1]
+    return (
+        load_factor_from_rates(last["V"], last["gamma"], gamma_rate, psi_rate),
+        LOAD_FACTOR_FROM_ADSB,
+        {
+            "duration_s": times[-1] - times[0],
+            "samples": len(window),
+            "psi_rate_rad_s": psi_rate,
+            "gamma_rate_rad_s": gamma_rate,
+            "ends_m_before_threshold": ends_m_before_threshold,
+        },
     )
 
 

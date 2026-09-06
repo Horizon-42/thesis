@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from evaluation.cli import add_context_args, contexts_for_input
+from evaluation.cli import add_context_args, contexts_for_input, winds_for_input
 from evaluation.metrics import evaluate_batch
 from evaluation.records import iter_records
 
@@ -25,7 +25,9 @@ def main(argv: list[str] | None = None) -> None:
     # The roster names the airports, so the records are streamed one at a time and
     # never held as a list (a batch is ~1 MB of resolved state per flight).
     contexts = contexts_for_input(args.input, args)
-    report = evaluate_batch(iter_records(args.input), contexts=contexts)
+    report = evaluate_batch(
+        iter_records(args.input), contexts=contexts, winds=winds_for_input(contexts, args)
+    )
     report["input"] = str(args.input)
     out = Path(args.output)
     out.write_text(json.dumps(report, indent=2, allow_nan=False), encoding="utf-8")
@@ -45,6 +47,12 @@ def _print_summary(report: dict[str, Any], out: Path) -> None:
             f"  events        estimated {observed['event_estimated']}/"
             f"{observed['event_estimated'] + observed['event_unavailable']} = "
             f"{observed['event_estimated_rate']:.1%}"
+        )
+    wind = report["wind_counts"]
+    if wind["estimated"] or wind["unavailable"]:
+        print(
+            f"  wind          METAR airspeed estimate {wind['estimated']}  "
+            f"ground-speed proxy {wind['unavailable']}  marginal {report['speed_marginal']}"
         )
     if report["lateral_m"]:
         print(f"  cross-track   {report['lateral_m']}")

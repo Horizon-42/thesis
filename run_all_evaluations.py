@@ -50,9 +50,10 @@ if str(REPO_ROOT) not in sys.path:
 
 import evaluation.__main__ as evaluation_cli  # noqa: E402
 import evaluation.visualize as evaluation_visualize  # noqa: E402
-from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG  # noqa: E402
+from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG, DEFAULT_METAR_ROOT  # noqa: E402
 from evaluation.context import contexts_for_airport  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
+from evaluation.wind import load_wind_tables  # noqa: E402
 from trajectory_data_process.harvest.airports import load_airport  # noqa: E402
 from trajectory_data_process.harvest.__main__ import DEFAULT_FRONTEND_DATA  # noqa: E402
 from trajectory_data_process.harvest.observed import (  # noqa: E402
@@ -118,11 +119,13 @@ def evaluate_observed(batch: Batch, *, html: bool) -> None:
         batch.airport, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP
     )
     contexts = contexts_for_airport(airport)
+    winds = load_wind_tables(DEFAULT_METAR_ROOT)
     summary = json.loads((paths.approach / SUMMARY_NAME).read_text(encoding="utf-8"))
     report = evaluate_batch(
         iter_observed_records(paths),
         contexts=contexts,
         observed_availability=summary["event_availability"],
+        winds=winds,
     )
     report["input"] = str(paths.approach)
     out = paths.approach / REPORT_NAME
@@ -140,7 +143,7 @@ def evaluate_observed(batch: Batch, *, html: bool) -> None:
     print(f"  published     -> {published}")
     if html:
         payload = evaluation_visualize.build_payload(
-            paths.approach, contexts=contexts
+            paths.approach, contexts=contexts, winds=winds
         )
         (paths.approach / HTML_NAME).write_text(
             evaluation_visualize.render_html(

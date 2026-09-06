@@ -7,19 +7,23 @@
  * the vitest fixtures (also pinned to v4) stayed green throughout. Test fixtures now
  * import this constant instead of repeating the string.
  */
-export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v7";
+export const EVALUATION_REPORT_SCHEMA_VERSION = "terminal-approach-evaluation-v8";
 
 /**
  * Still-displayable older report versions, in two classes.
  *
  * PRIOR speed-gate versions carry every speed field this file reads; they differ from
- * the current schema only in how the gate's LOWER bound was anchored. v6 graded it at
- * 1 g; v7 anchors it on the crossing load factor (`crossing_load_factor` on the row,
- * evaluation/docs/THRESHOLD_SPEED_GATE.md §3.5). Batches on disk stay readable and
- * the window notes the difference (`isPriorSpeedGateReport`).
+ * the current schema in how the gate's LOWER bound was anchored and in what the
+ * observed baseline was judged on. v6 graded at 1 g; v7 anchored on the crossing load
+ * factor (`crossing_load_factor`, evaluation/docs/THRESHOLD_SPEED_GATE.md §3.5) but
+ * declared 1 g for observed rows; v8 measures the observed load factor from ADS-B
+ * kinematics and corrects the observed ground speed by the METAR headwind
+ * (`crossing_airspeed_estimate_ms`, `wind`). Batches on disk stay readable and the
+ * window notes the difference (`isPriorSpeedGateReport`).
  */
 export const PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS = [
   "terminal-approach-evaluation-v6",
+  "terminal-approach-evaluation-v7",
 ] as const;
 
 /**
@@ -127,11 +131,25 @@ export interface EvaluationRow {
    *  the field or could not fit a speed. */
   crossing_ground_speed_ms?: number | null;
   /** v7: the load factor the crossing was flown at and where it came from —
-   *  "controls_last_step" (the control active over the final rollout step) or
-   *  "assumed_1g" (records without controls: observed baselines, state-output
-   *  predictions). Flat on the row like the two crossing speeds. */
+   *  "controls_last_step" (the control active over the final rollout step),
+   *  "adsb_kinematics" (v8, observed rows: inverted from the flight's own kinematics)
+   *  or "assumed_1g" (state-output predictions; observed tracks too short to fit).
+   *  Flat on the row like the two crossing speeds. */
   crossing_load_factor?: number;
   crossing_load_factor_source?: string;
+  /** v8 (observed rows): ground speed + METAR headwind component — the value the speed
+   *  gate judges when a usable report exists (`bounds.speed_criterion` ends in
+   *  `_metar_airspeed_estimate`); null when the row fell back to the ground-speed
+   *  proxy, and `wind.status`/`wind.reason` say why. */
+  crossing_airspeed_estimate_ms?: number | null;
+  /** v8 (observed rows): the wind report used, or why none was. */
+  wind?: Record<string, number | string | null>;
+  /** v8: how much the speed verdict is worth — the judged value's signed distance to
+   *  the nearest bound (positive inside the window) and that value's declared
+   *  uncertainty: 0 for a model airspeed, the METAR estimate's ±5 kt, null for the
+   *  ground-speed proxy (unknown, not zero). */
+  speed_margin_ms?: number | null;
+  speed_uncertainty_ms?: number | null;
   heading_rad?: number;
   final_time_s?: number;
   reason?: string;
@@ -176,10 +194,23 @@ export interface EvaluationReport {
    *  EvaluationRow.speed_result). Absent in legacy v5 reports. */
   speed_result_counts?: Record<EvaluationVerdict, number>;
   crossing_speed_ms?: MagnitudeSpread | null;
-  /** v6-additive: spread of the observed rows' graded crossing GROUND speeds — the
-   *  proxy their speed gate judges (`methodology.observed_crossing_ground_speed`), kept
-   *  apart from `crossing_speed_ms`. Null when no row carries one. */
+  /** v6-additive: spread of the observed rows' crossing GROUND speeds — the proxy
+   *  their speed gate judges when no wind report is usable
+   *  (`methodology.observed_crossing_ground_speed`), kept apart from
+   *  `crossing_speed_ms`. Null when no row carries one. */
   crossing_ground_speed_ms?: MagnitudeSpread | null;
+  /** v8: spread of the observed rows' METAR-corrected airspeed estimates, how many
+   *  rows were judged on the estimate vs the proxy, and how many estimates sat within
+   *  the declared uncertainty of a bound. */
+  crossing_airspeed_estimate_ms?: MagnitudeSpread | null;
+  wind_counts?: { estimated: number; unavailable: number };
+  /** v8: speed verdicts within their declared uncertainty of a bound, and speed
+   *  verdicts whose uncertainty is unknown (proxy-judged rows). */
+  speed_marginal?: number;
+  speed_uncertainty_unknown?: number;
+  /** v8: `speed_result_counts` split by the criterion each row was judged under, so
+   *  an observed batch's estimate-judged and proxy-judged rows are never pooled. */
+  speed_result_counts_by_criterion?: Record<string, Record<EvaluationVerdict, number>>;
   /** v7: the load factor the crossings were flown at — spread, how many sat below 1 g
    *  (lower bound clamped to the 1-g floor) and how many were a declared 1 g. */
   crossing_load_factor?: {
@@ -188,6 +219,7 @@ export interface EvaluationReport {
     p95: number;
     max: number;
     below_1g: number;
+    adsb_kinematics: number;
     assumed_1g: number;
   } | null;
   final_time_s: { mean: number; min: number; max: number } | null;

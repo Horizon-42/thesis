@@ -23,7 +23,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from evaluation.cli import DEFAULT_METAR_ROOT
 from evaluation.metrics import evaluate_batch
+from evaluation.wind import load_wind_tables
 from evaluation.context import contexts_for_airport
 
 from trajectory_data_process.acquisition.opensky_history import install_query_cancel_on_interrupt
@@ -76,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--entry-radius-km", type=float, default=ENTRY_RADIUS_KM,
                         help="terminal-entry radius for the model-ready arrival dataset")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--metar-root", type=Path, default=DEFAULT_METAR_ROOT,
+                        help="<ICAO>/*.csv ASOS wind archives (metar.fetch_iem_asos); the "
+                             "observed speed gate corrects the crossing ground speed by "
+                             "the headwind when present, else judges the proxy and says so")
     parser.add_argument("--cifp", type=Path, default=DEFAULT_CIFP,
                         help="ARINC 424 CIFP file supplying per-runway published TCH")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -262,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         iter_observed_records(paths),
         contexts=contexts_for_airport(airport),
         observed_availability=summary["event_availability"],
+        winds=load_wind_tables(args.metar_root),
     )
     (paths.approach / REPORT_NAME).write_text(
         json.dumps(report, indent=1, allow_nan=False), encoding="utf-8"

@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import math
 from typing import Any
 
 from evaluation import AssessmentContext
 from evaluation.thresholds import Benchmark
 from final_approach.event_contract import CENSORED_EVENT_METHOD, EVENT_SCHEMA_VERSION
 from flight_scenarios.crossing_span import CROSSING_SPAN_KEY, crossing_span_from_event
-from geokit import metres_per_deg_lon
+from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 from trajectory_data_process.harvest.airports import APPROACH_LEG_TCH_SOURCE
 
 
@@ -190,3 +191,83 @@ def write_batch(root: Path, payloads: list[dict[str, Any]]) -> Path:
         })
     (root / "summary.json").write_text(json.dumps({"results": rows}), encoding="utf-8")
     return root
+
+
+def observed_track_payload(
+    *,
+    samples: int = 25,
+    psi_rate_rad_s: float = 0.0,
+    gamma_rate_rad_s: float = 0.0,
+    psi0_rad: float = math.pi / 2.0,
+    censored: bool = False,
+    trailing_samples: int = 0,
+    speed_ms: float = 70.0,
+    ground_speed_m_s: float | None = 70.0,
+) -> dict[str, Any]:
+    """An observed record with a 1 Hz MEASURED track on the runway-0° (north) final.
+
+    ψ and γ follow the requested rates along the track (the kinematics the speed gate
+    inverts for the load factor); positions descend the 3° path to the threshold at
+    ``speed_ms``. ``censored=False`` ends with a pair straddling the plane at fraction
+    0.5 (a ``measured_bracket`` crossing); ``censored=True`` stops 325 m short and
+    carries the fitted-tail event the harvest writes, so the crossing row is inferred.
+    ``trailing_samples`` continues the measured track past the bracket (the real
+    harvest keeps a few rollout samples after the crossing pair on some tracks).
+    """
+    dt = 1.0
+    step_m = speed_ms * dt
+    lat_step = step_m / METRES_PER_DEG_LAT
+    slope = math.tan(math.radians(3.0))
+    # Distance (m, positive = before the plane) of sample k: the last sample sits half a
+    # step past the plane for a bracket, 325 m before it for a censored track.
+    def before_m(k: int) -> float:
+        end_before = 325.0 if censored else -0.5 * step_m
+        return end_before + (samples - 1 - k) * step_m
+
+    states = []
+    for k in range(samples + (0 if censored else trailing_samples)):
+        t = k * dt
+        states.append({
+            "t": t,
+            "lat": TARGET["lat"] - before_m(k) / METRES_PER_DEG_LAT,
+            "lon": TARGET["lon"],
+            "alt": TARGET["alt"] + before_m(k) * slope,
+            "V": speed_ms,
+            "psi": psi0_rad + psi_rate_rad_s * t,
+            "gamma": -0.05 + gamma_rate_rad_s * t,
+            "m": TARGET["m"],
+        })
+    if censored:
+        event = observed_event(ground_speed_m_s=ground_speed_m_s)
+    else:
+        event = {
+            **observed_event(ground_speed_m_s=ground_speed_m_s),
+            "method": "direct_linear_bracket",
+            "observability": "within_observed_support",
+            "event_time_s": states[-2]["t"] + 0.5 * dt,
+            "interpolation_fraction": 0.5,
+            "extrapolation_distance_m": 0.0,
+            "source_sample_range": [samples - 2, samples - 1],
+        }
+    span, appended = crossing_span_from_event(event, states, hae_minus_msl_m=30.0)
+    source: dict[str, Any] = {
+        "id": "TEST1",
+        "subject": "observed",
+        "arr_airport": "KRDU",
+        "runway": "05L",
+        "icao24": "abc123",
+        "landing_time_utc": "2026-08-12T00:00:00Z",
+        "flight_key": "TEST1_05L_abc123_20260812T000000Z",
+        "hae_minus_msl_m": 30.0,
+        "landing_aero": dict(LANDING_AERO),
+        "observed_threshold_event": event,
+        CROSSING_SPAN_KEY: span,
+    }
+    return {
+        "source": source,
+        "initial_state": {key: value for key, value in states[0].items() if key != "t"},
+        "target_state": dict(TARGET),
+        "final_time_s": states[-1]["t"],
+        "states": states + appended,
+        "controls": [],
+    }

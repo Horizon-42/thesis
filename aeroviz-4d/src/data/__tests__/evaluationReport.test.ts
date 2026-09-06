@@ -77,20 +77,18 @@ describe("isEvaluationReport observed availability contract", () => {
     );
   });
 
-  it("accepts 1-g speed-gated v6 reports as prior, not legacy", () => {
-    const v6 = {
-      ...reportWith(undefined),
-      schema_version: "terminal-approach-evaluation-v6",
-    };
-    expect(isEvaluationReport(v6)).toBe(true);
-    expect(isPriorSpeedGateReport(v6 as unknown as EvaluationReport)).toBe(true);
-    expect(isLegacyEvaluationReport(v6 as unknown as EvaluationReport)).toBe(false);
+  it.each([
+    "terminal-approach-evaluation-v6",
+    "terminal-approach-evaluation-v7",
+  ])("accepts the earlier speed-gated report %s as prior, not legacy", (version) => {
+    const prior = { ...reportWith(undefined), schema_version: version };
+    expect(isEvaluationReport(prior)).toBe(true);
+    expect(isPriorSpeedGateReport(prior as unknown as EvaluationReport)).toBe(true);
+    expect(isLegacyEvaluationReport(prior as unknown as EvaluationReport)).toBe(false);
     expect(
       isPriorSpeedGateReport(reportWith(undefined) as unknown as EvaluationReport),
     ).toBe(false);
-    expect(PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS).toContain(
-      "terminal-approach-evaluation-v6",
-    );
+    expect(PRIOR_SPEED_GATE_REPORT_SCHEMA_VERSIONS).toContain(version);
   });
 
   it("rejects the current schema without the auditable common RNAV vertical methodology", () => {

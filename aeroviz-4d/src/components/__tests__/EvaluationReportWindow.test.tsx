@@ -285,8 +285,42 @@ describe("EvaluationReportWindow", () => {
     const solvedRow = screen.getByText("FDX1738").closest("tr")!;
     expect(solvedRow.children[headers.indexOf("speed")].textContent).toBe("pass");
     const cell = solvedRow.children[headers.indexOf("V crossing (m/s)")] as HTMLElement;
-    expect(cell.textContent).toBe("70.2");
-    expect(cell.title).toBe("window 66.3–76.6 m/s · Vs1g 53.9 m/s");
+    // A proxy-judged row (no usable wind report): the ground speed, labelled GS, and a
+    // tooltip that says it was judged as the stated proxy against its window.
+    expect(cell.textContent).toBe("70.2 GS");
+    expect(cell.title).toBe(
+      "ADS-B ground speed — judged as a stated proxy, no usable wind report (wind unmodelled)" +
+        " · window 66.3–76.6 m/s · Vs1g 53.9 m/s",
+    );
+  });
+
+  it("shows the METAR-corrected airspeed estimate when a row was judged on it", () => {
+    const withWind: EvaluationReport = {
+      ...REPORT,
+      trajectories: REPORT.trajectories.map((row) => ({
+        ...row,
+        crossing_speed_ms: null,
+        crossing_ground_speed_ms: row.solved ? 70.2 : null,
+        crossing_airspeed_estimate_ms: row.solved ? 74.9 : null,
+        bounds: { ...row.bounds, speed_criterion: "vref_1p23_vs_at_n_to_vref_1g_plus_20kt_metar_airspeed_estimate" },
+      })),
+    };
+    render(
+      <EvaluationReportWindow
+        report={withWind}
+        title="Observed Baseline Evaluation Report"
+        subtitle="x"
+        onClose={() => undefined}
+      />,
+    );
+    const table = screen.getByRole("table", { name: "Per-trajectory verdicts" });
+    const headers = Array.from(table.querySelectorAll("th")).map((th) => th.textContent);
+    const solvedRow = screen.getByText("FDX1738").closest("tr")!;
+    const cell = solvedRow.children[headers.indexOf("V crossing (m/s)")] as HTMLElement;
+    expect(cell.textContent).toBe("74.9 est");
+    expect(cell.title).toContain("METAR-corrected airspeed estimate");
+    expect(cell.title).toContain("ground speed 70.2 m/s");
+    expect(cell.title).toContain("window 66.3–76.6 m/s");
   });
 
   it("toggling the speed gate off re-derives two-gate verdicts client-side", () => {

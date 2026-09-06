@@ -421,3 +421,23 @@ per-type `reference_speed_kt` derived from `1.23·Vs1g(landing_mass)` instead of
 constant (already followup-listed under the E75L case); until then quote fast-fail rates with
 the margin.
 
+## 20. Two copies of the point-mass inversion and of the OLS slope, deferred under a campaign
+
+**Verified** (2026-09-07, opus review of `dev-observed-load-factor-metar`).
+`4dTrajectory/ts_transformer/flyability.py:259-262` computes `n` from `psi_dot`/`gamma_dot`
+with the same two lines `aircraft/kinematics.load_factor_from_rates` now owns (it also
+needs `mu`, so the shared function should return the two components), and
+`flight_scenarios/start_state._slope` is `aircraft.kinematics.linear_slope` returning 0.0
+instead of raising on a degenerate abscissa. Both live on the ts dataset/eval path that a
+formal campaign was running from, so they were left untouched; fold them onto the shared
+functions between campaigns (behaviour-identical for validated records).
+
+## 19. Per-type speed-window anchors were calibrated on wind-contaminated ground speeds
+
+**Verified** (2026-09-07, `evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md` §9). The A320
+family's landing Cl_max 3.0 (§8) was derived from proxy ground speeds that the METAR
+correction now shows were reading 5–8 kt slow; with the wind in, the Airbus family sits
+mid-window and the 737 bucket (Cl_max 2.7) crosses at a median 1.37–1.41 × Vs1g(MLW), on
+the +20 kt edge, 40 % "fast". Re-derive the per-type anchors on the corrected airspeed
+(and the A21N landing mass) before quoting any observed speed-fail rate; owner item O4.
+

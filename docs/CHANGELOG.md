@@ -278,6 +278,32 @@ graph it draws is the archived chain), `2026-09-06_control_hooks_results`,
 the retired backend are fixed; `CLAUDE.md`'s Layout section states the `archive/` convention,
 and both `ENGINEERING_NOTES` and `OPEN_ITEMS` now say that reviving the combined
 lateral-barrier + vertical-nominal hook is a deliberate un-archive, not an import.
+### 2026-09-07 — observed speed gate: measured load factor + METAR headwind (report v8)
+
+Branch `dev-observed-load-factor-metar`; plan `evaluation/docs/2026-09-07_observed_speed_gate_plan.zh.md`.
+v7 anchored the gate's lower bound on the crossing load factor but declared 1 g for
+observed records, so on the ADS-B baseline — the ground truth the method is judged
+against — it changed nothing. Two changes make the baseline judged on what it flew:
+
+- **The observed load factor is measured, not assumed.** `arrival._observed_load_factor`
+  fits ψ and γ over the final 20 s of measured track before the crossing and inverts the
+  point-mass rotational equations (`aircraft/kinematics.load_factor_from_rates`, the
+  same inversion `ts_transformer/flyability.py` uses per sample); the window's facts are
+  on the row. Measured over 42,732 observed rows: median n 1.002–1.005, p99 ≤ 1.024,
+  max 1.122 (`THRESHOLD_SPEED_GATE.md` §3.5) — the 1-g assumption holds, and the 211
+  verdicts that moved are flights within a knot of the floor.
+- **The ground-speed proxy is corrected by the field's wind.** OpenSky carries no
+  airspeed, so `trajectory_data_process/metar/fetch_iem_asos.py` fetches the airport's
+  ASOS/METAR archive from IEM into `data/metar/<ICAO>/` (provenance beside each file) and
+  `evaluation/wind.py` joins the report nearest each landing (≤ 30 min, direction not
+  variable): airspeed estimate = ground speed + W·cos(direction − runway course), judged
+  under `…_metar_airspeed_estimate` with a declared ±5 kt uncertainty; `speed_marginal`
+  counts estimate-judged rows within it of a bound. No usable report ⇒ the proxy, said
+  per row and counted per batch. The join is at read time: no harvest artifact changes.
+  Measured effect and coverage: `BASELINE_SPEED_GATE_RESULTS.md` §9.
+- Schema v7 → v8 in all four homes; the ts seam reads (v6, v7, v8); the frontend shows
+  v6/v7 as prior. `--metar-root` on the evaluation CLIs, default `data/metar`.
+
 ### 2026-09-07 — evaluation review: load-factor speed gate (v7), LNAV/VNAV runways wired, one read path
 
 Branch `dev-evaluation-review-fixes`; plan + status table

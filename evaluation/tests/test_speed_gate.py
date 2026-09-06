@@ -11,7 +11,9 @@ from evaluation import evaluate_batch, evaluate_record, record_from_dict, speed_
 from evaluation.metrics import METHODOLOGY, REPORT_SCHEMA_VERSION
 from evaluation.speed_gate import (
     LOAD_FACTOR_ASSUMED_1G,
+    LOAD_FACTOR_FROM_ADSB,
     LOAD_FACTOR_FROM_CONTROLS,
+    OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID,
     OBSERVED_SPEED_CRITERION_ID,
     SPEED_CRITERION_ID,
     SPEED_GATE_UPPER_ADDITIVE_MS,
@@ -313,12 +315,13 @@ def test_report_serializes_the_speed_window_load_factor_and_counts():
     assert report["speed_result_counts"] == {"pass": 1, "fail": 0, "indeterminate": 0}
     assert report["crossing_speed_ms"]["mean"] == pytest.approx(70.0)
     assert report["crossing_load_factor"] == {
-        "mean": 1.1, "min": 1.1, "p95": 1.1, "max": 1.1, "below_1g": 0, "assumed_1g": 0,
+        "mean": 1.1, "min": 1.1, "p95": 1.1, "max": 1.1,
+        "below_1g": 0, "adsb_kinematics": 0, "assumed_1g": 0,
     }
     methodology = report["methodology"]["terminal_speed"]
     assert methodology["vref_stall_multiplier"] == 1.23
     assert set(methodology["load_factor"]["sources"]) == {
-        LOAD_FACTOR_FROM_CONTROLS, LOAD_FACTOR_ASSUMED_1G,
+        LOAD_FACTOR_FROM_CONTROLS, LOAD_FACTOR_FROM_ADSB, LOAD_FACTOR_ASSUMED_1G,
     }
     assert any("25.125" in source["document"] for source in methodology["sources"])
 
@@ -331,6 +334,9 @@ def test_the_methodology_agrees_with_itself_about_the_observed_proxy():
     speed = METHODOLOGY["terminal_speed"]
     ground = METHODOLOGY["observed_crossing_ground_speed"]
     assert speed["observed_proxy_criterion"] == OBSERVED_SPEED_CRITERION_ID
+    assert speed["observed_wind_correction"]["criterion"] == OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID
+    # The ground-speed block names BOTH ways it is used: corrected into the estimate
+    # that is judged when a report exists, judged as the proxy otherwise.
+    assert OBSERVED_AIRSPEED_ESTIMATE_CRITERION_ID in ground["use"]
     assert OBSERVED_SPEED_CRITERION_ID in ground["use"]
-    assert "the quantity their speed gate judges" in ground["use"]
-    assert "proxy" in speed["subjects"]
+    assert "metar_airspeed_estimate" in speed["subjects"] and "proxy" in speed["subjects"]
