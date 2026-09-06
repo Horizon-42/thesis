@@ -1,4 +1,6 @@
-"""Scene context → arrays: the ego grid, the masks, and the wall between observed and future."""
+"""Scene context → arrays: the entity rows, the scalars, and the wall between observed and
+future. The per-neighbour SEQUENCE half was deleted in T2 (2026-09-07); what is left is what
+`run_ts_scene_explainability.py` reads."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -44,26 +46,19 @@ def test_on_final_membership_mirrors_the_package_gate():
     assert np.array_equal(ours, theirs & (d > 0.0))
 
 
-def test_arrays_follow_the_ego_grid_and_mask_where_the_neighbour_has_no_sample(tmp_path):
+def test_entity_rows_and_scalars_are_in_the_ego_chart(tmp_path):
     scene, keys = _scene(tmp_path)
-    arrays = scene_arrays(scene, seq_len=60, dt_s=2.0)
-    assert arrays.neighbours.shape == (16, 60, 6) and arrays.neighbour_mask.shape == (16, 60)
+    arrays = scene_arrays(scene)
     assert arrays.neighbour_valid.sum() == 2 and arrays.neighbour_static.shape == (16, len(STATIC_NAMES))
     assert arrays.scalars.shape == (len(SCALAR_NAMES),)
     slot = [nb.flight_key for nb in scene.neighbours].index(keys["AHEAD"])
-    # A has samples over the whole window (started 100 s before t₀): the grid's last 100 s are inside.
-    grid = -2.0 * np.arange(59, -1, -1)
-    assert np.array_equal(arrays.neighbour_mask[slot], grid >= -100.0)
-    assert not arrays.neighbours[slot][~arrays.neighbour_mask[slot]].any()
-    # Its velocity on the grid is the inbound course at ~68 m/s; its last position is the observed one.
-    v = arrays.neighbours[slot, -1, 3:5]
     o = scene.neighbours[slot].observed
-    assert np.hypot(*v) == pytest.approx(o.ground_speed_mps, rel=0.1)
-    assert np.allclose(arrays.neighbours[slot, -1, :2], [o.e_m[-1], o.n_m[-1]], atol=1.0)
     assert arrays.neighbour_static[slot, STATIC_NAMES.index("established")] == 1.0
     assert arrays.neighbour_static[slot, STATIC_NAMES.index("eta_lead_s")] == pytest.approx(scene.ego_eta_s - o.eta_s, rel=1e-5)
+    assert arrays.neighbour_static[slot, STATIC_NAMES.index("ground_speed_mps")] == pytest.approx(o.ground_speed_mps, rel=1e-5)
+    assert arrays.neighbour_static[slot, STATIC_NAMES.index("height_m")] == pytest.approx(o.height_m[-1], rel=1e-5)
     # Empty slots are all zero and invalid.
-    assert not arrays.neighbours[2:].any() and not arrays.neighbour_mask[2:].any() and not arrays.neighbour_valid[2:].any()
+    assert not arrays.neighbour_static[2:].any() and not arrays.neighbour_valid[2:].any()
     assert arrays.scalars[SCALAR_NAMES.index("lead_gap_s")] == pytest.approx(scene.scalars.lead_gap_s, rel=1e-5)
 
 
@@ -71,19 +66,10 @@ def test_the_arrays_never_read_the_future(tmp_path):
     scene, _keys = _scene(tmp_path)
     scrambled = replace(scene, neighbours=tuple(
         replace(nb, future_label=sc.FutureLabel("not_landing", None, None)) for nb in scene.neighbours))
-    a, b = scene_arrays(scene, seq_len=30, dt_s=2.0), scene_arrays(scrambled, seq_len=30, dt_s=2.0)
-    assert np.array_equal(a.neighbours, b.neighbours) and np.array_equal(a.neighbour_static, b.neighbour_static)
-    assert np.array_equal(a.scalars, b.scalars) and np.array_equal(a.neighbour_mask, b.neighbour_mask)
+    a, b = scene_arrays(scene), scene_arrays(scrambled)
+    assert np.array_equal(a.neighbour_static, b.neighbour_static) and np.array_equal(a.neighbour_valid, b.neighbour_valid)
+    assert np.array_equal(a.scalars, b.scalars)
     # A scene with nobody ahead states so through the sentinel, never a NaN.
     alone = replace(scene, neighbours=(), scalars=replace(scene.scalars, lead_eta_s=None, lead_gap_s=None, ahead_by_eta=0))
-    s = scene_arrays(alone, seq_len=30, dt_s=2.0).scalars
+    s = scene_arrays(alone).scalars
     assert s[SCALAR_NAMES.index("lead_eta_s")] == NO_LEAD_SENTINEL_S and np.isfinite(s).all()
-
-
-def test_a_lookback_longer_than_the_scene_window_is_refused(tmp_path):
-    """The default 60 x 2 s lookback equals the 120 s window by coincidence; a longer one
-    would leave its earlier steps silently empty."""
-    scene, _keys = _scene(tmp_path)
-    with pytest.raises(ValueError, match="beyond the scene"):
-        scene_arrays(scene, seq_len=90, dt_s=2.0)
-    scene_arrays(scene, seq_len=61, dt_s=2.0)          # exactly the window: fine
