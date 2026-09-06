@@ -10,13 +10,14 @@ Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；�
 
 ## 〇、状态表（压缩 context 后从这里继续）
 
-**当前状态（2026-09-07）**：方案已定，尚未动工。下一步 = **L0**（操作参数维度的 oracle，纯 numpy
-无训练，决定解码器输出宽度）。没有在跑的 campaign。工作树需在每个 milestone 提交后再跑正式实验。
+**当前状态（2026-09-07）**：L0 完成，**N\* = 32**（96 个操作参数，对照 control 头 257 = 2.7 倍缩减，
+不是设想的 10 倍）。**L1 campaign `l1_lowdim_20260907` 在跑**（三臂，约 6–8 h）。用户决定：先看轨迹误差损失
+够不够，拟合教师（`basis_fit.json`）留作对照臂。下一步 = L1 读数 → L2 CVAE 骨架的代码。
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
-| L0 操作参数维度 oracle | **代码完成、review 已修、拟合已标定；正式测量在跑** | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + `tests/test_control_basis_oracle.py` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
-| L1 低维控制头 + 稠密监督（确定性基线） | 未开始 | `config`/`heads`/`train` 改动 + 臂 `l1_lowdim_arms.json` | 不差于 simple-v3；参数 257 → ≈4N\* |
+| L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
+| L1 低维控制头 + 稠密监督（确定性基线） | **campaign 在跑（2026-09-07 启动，`l1_lowdim_20260907`）**；无新代码 | 臂 `docs/experiments/l1_lowdim_arms.json`（L1_dense32 / L1_dense64 / L1_native32，对照 A_control_v3） | 不差于 simple-v3；参数 257 → 96；bank skill 必读 |
 | L2 CVAE 骨架（隐意图 z） | 未开始 | `latent_intent.py` + 十处接缝 | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | 未开始 | `cta_conditioning` | 给真值 CTA 时时长误差 < 5 s ∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | 未开始（数据平面 WIP 已在 `045c233`） | `scene/` + 先验网络 | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
