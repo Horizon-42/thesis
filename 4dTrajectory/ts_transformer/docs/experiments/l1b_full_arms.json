@@ -1,0 +1,34 @@
+{
+ "_comment": "L1.b CONFIRMATION at the full budget (design doc §六 L1.b). The 60-epoch screen (l1b_supervision_20260907) passed ONE arm: hr=8 + bank TV 1 — bank skill 0.711 vs the matched teacher control's 0.709 (gate 0.70; floor 0.170, twin ceiling 0.699), straight-reference bank RMS 0.17 deg (control 0.39, flown 0.41), ADE not worse on any stratum (1404 / 508 / 2991 vs 1459 / 540 / 3083); its one soft spot is straight-in FDE p50 846 vs 776. hr=8 alone had the best trajectory numbers (1396; straight-in FDE 734; vectored FDE 1905 vs 2504) but bank skill 0.665 — failed on the gate, which is bank, not ADE. hr=1 collapsed into a shared bank profile (22 % common-profile share, skill 0.516). Dose is the lever (0.516 → 0.665 from 1 to 8) and 8 is the top of the bracket, not a measured optimum; TV added +0.046 skill at 2 % of the loss with zero sign reversals in every arm — measured as helping, its mechanism (pricing reversals) unsupported. THIS FILE: 180 epochs, same base (native32, imitation 0), three arms — the screen's survivor, the same at twice the dose, and hr=16 without TV — read against L1_native32 (the 180-epoch teacher baseline: 1322 m, bank skill 0.726, straight-in FDE p50 671) with compare_constraint_arms.py and score_control_arms.py. GATES as before: bank skill >= 0.70; per-stratum ADE / FDE p50 not worse than L1_native32; VETO straight-in FDE p50 degraded beyond seed noise (671 m). DECISION: a passing arm becomes the supervision of the main line's base (the latent arms are re-based on it before the multi-airport run); if none passes at 180 the screen's verdict is reversed and the teacher (L5.a fitted) stays the main line.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_imitation_loss_weight": 0.0
+ },
+ "arms": [
+  {
+   "key": "L1b_hr8_tv1_full",
+   "label": "hr=8 + TV=1, 180 epochs (the screen's survivor)",
+   "overrides": {
+    "control_heading_rate_loss_weight": 8.0,
+    "control_bank_tv_loss_weight": 1.0
+   }
+  },
+  {
+   "key": "L1b_hr16_tv1_full",
+   "label": "hr=16 + TV=1, 180 epochs (above the screened bracket)",
+   "overrides": {
+    "control_heading_rate_loss_weight": 16.0,
+    "control_bank_tv_loss_weight": 1.0
+   }
+  },
+  {
+   "key": "L1b_hr16_full",
+   "label": "hr=16, no TV, 180 epochs (is TV still needed at the higher dose?)",
+   "overrides": {
+    "control_heading_rate_loss_weight": 16.0
+   }
+  }
+ ]
+}

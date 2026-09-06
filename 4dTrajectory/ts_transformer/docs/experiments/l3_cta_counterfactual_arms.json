@@ -1,0 +1,59 @@
+{
+ "_comment": "L3 counterfactual scan (design doc §六 L3): the same L3_cta checkpoint decoded at the truth CTA shifted by ±30 / ±60 / ±90 s (predict-only; run AFTER l3_cta_20260907 has trained). Reading, per offset and per stratum: predicted_final_time error == offset (by construction; a deviation is a bug), per-sample flyability rate vs the CTA=0 arm, chamfer / path-length ratio / lateral corridor and vertical-window compliance as a function of |offset| — smooth is the gate, a collapse (straight-line or looping paths at ±90 s) is the failure. These records are counterfactuals, never accuracy results.",
+ "arms": [
+  {
+   "key": "L3_cta_m90s",
+   "label": "CTA -90 s",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+   "predict_args": [
+    "--cta-offset-s",
+    "-90"
+   ]
+  },
+  {
+   "key": "L3_cta_m60s",
+   "label": "CTA -60 s",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+   "predict_args": [
+    "--cta-offset-s",
+    "-60"
+   ]
+  },
+  {
+   "key": "L3_cta_m30s",
+   "label": "CTA -30 s",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+   "predict_args": [
+    "--cta-offset-s",
+    "-30"
+   ]
+  },
+  {
+   "key": "L3_cta_p30s",
+   "label": "CTA +30 s",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+   "predict_args": [
+    "--cta-offset-s",
+    "30"
+   ]
+  },
+  {
+   "key": "L3_cta_p60s",
+   "label": "CTA +60 s",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+   "predict_args": [
+    "--cta-offset-s",
+    "60"
+   ]
+  },
+  {
+   "key": "L3_cta_p90s",
+   "label": "CTA +90 s",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+   "predict_args": [
+    "--cta-offset-s",
+    "90"
+   ]
+  }
+ ]
+}
