@@ -1,5 +1,8 @@
 # control 参数预测：架构、消融轴与模块状态
 
+> **代码已归档（2026-09-07，包审计 T2）。** 本文第 4/5/8 节描述的教师链路（`oracle_teacher/*` → `control/oracle/*` 八模块、`--control-teacher-schedules`、四个 `run_ts_*teacher*` / `run_ts_control_oracle.py` 运行器）已作为一个已完成 campaign 移入 `archive/oracle_teacher_2026_08/`；`transport-chart-velocity` 后端同日退役（`physical-criteria` 目标此前已随 arc 族一起删除）。调用图保留为历史记录，不重写。
+
+
 > **2026-08-18 状态说明（先读这段）**
 >
 > 本文描述的是 **2026-08-16 的代码状态**。2026-08-18 的 control 设计梳理之后，下面

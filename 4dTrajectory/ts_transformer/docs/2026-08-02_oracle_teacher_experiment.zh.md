@@ -1,5 +1,8 @@
 # Oracle-teacher 初始化实验（2026-08-02）
 
+> **代码已归档（2026-09-07，包审计 T2）。** 本文引用的教师机器（`control/oracle/*` 八模块与三个运行器）作为一个已完成 campaign 移入 `archive/oracle_teacher_2026_08/`，不在 import 路径上、不再对当前包运行；它被 `simple-v3` 的训练内模仿项取代。数字保留为历史，不重写。
+
+
 ## 1. 结论
 
 Oracle-teacher 初始化通过正式 train/validation 对照，当前应作为 control 模型的新训练基线。

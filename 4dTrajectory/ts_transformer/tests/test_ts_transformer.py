@@ -52,7 +52,6 @@ import batch_benchmark as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
 import experiment_index  # noqa: E402
 import control.loss.fixed_dt as fixed_dt_loss_module  # noqa: E402
-import control.oracle.pretraining as teacher_pretraining  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
@@ -76,7 +75,6 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
-    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -135,7 +133,6 @@ from metrics import (  # noqa: E402
     raw_kinematic_metrics, states_with_derived_velocity,
 )
 from models import build_model, parameter_count  # noqa: E402
-from control.oracle.pretraining import CachedSchedulePretrainer  # noqa: E402
 from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
@@ -372,55 +369,6 @@ def test_development_cohort_rejects_incomplete_rebuild(monkeypatch, tmp_path):
             tmp_path,
             built_ids=("KRDU:train",),
         )
-
-
-def test_invalid_teacher_arguments_do_not_begin_a_formal_run(monkeypatch, tmp_path):
-    began_run = False
-    outer_splits = {
-        "train": ["KRDU:train"],
-        "val": ["KRDU:val"],
-        "test": ["KRDU:test"],
-    }
-    monkeypatch.setattr(
-        ts_cli, "arrival_data_provenance", lambda _data: _fake_data_provenance()
-    )
-    monkeypatch.setattr(
-        ts_cli, "flight_keys_by_split", lambda _provenance, _config: outer_splits
-    )
-    monkeypatch.setattr(ts_cli, "load_flight_dicts", lambda *_args, **_kwargs: [{}])
-    monkeypatch.setattr(
-        ts_cli,
-        "_build_series_or_exit",
-        lambda *_args: (
-            [SimpleNamespace(dataset_id="KRDU:train")],
-            SimpleNamespace(to_dict=lambda: {}),
-        ),
-    )
-    monkeypatch.setattr(ts_cli, "data_selection_audit", lambda *_args: {})
-
-    def record_begin(*_args, **_kwargs):
-        nonlocal began_run
-        began_run = True
-        return tmp_path / "run" / experiment_index.RUN_MANIFEST_NAME
-
-    monkeypatch.setattr(ts_cli, "begin_run", record_begin)
-    monkeypatch.setattr(
-        ts_cli, "train", lambda *_args, **_kwargs: pytest.fail("train must not start")
-    )
-
-    with pytest.raises(SystemExit):
-        ts_cli.main([
-            "train",
-            "--data", str(tmp_path / "manifest.json"),
-            "--output-dir", str(tmp_path / "run"),
-            "--prediction-output", PREDICTION_CONTROL,
-            "--control-teacher-schedules", str(tmp_path / "teacher_schedules.npz"),
-            "--control-teacher-steps", "0",
-            "--campaign-id", "teacher-contract",
-            "--experiment-id", "invalid-steps",
-        ])
-
-    assert not began_run
 
 
 def test_predict_cli_refuses_test_without_explicit_release(tmp_path, capsys):
@@ -2481,109 +2429,6 @@ def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts(capsys):
     assert info.value.code == 2 and "recipe fields are frozen: n_segments=32" in capsys.readouterr().err
 
 
-def test_cached_teacher_pretrainer_accepts_native_control_batch(tmp_path):
-    series, config = _series(
-        n_flights=2,
-        prediction_output=PREDICTION_CONTROL,
-        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
-        control_state_duration_gradient=False,
-        seq_len=8,
-        n_segments=2,
-        d_model=16,
-        n_heads=4,
-        d_ff=32,
-        e_layers=1,
-    )
-    normalizer = Normalizer.fit(series)
-    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
-    batch = dataset.batch(np.arange(len(dataset)))
-    assert len(batch) == 6
-    final_time = batch[3]
-    dynamics = batch[5]
-    controls = (
-        dynamics["control_lower"][:, None, :]
-        + dynamics["control_upper"][:, None, :]
-    ).expand(-1, config.n_segments, -1) / 2.0
-    durations = final_time[:, None].expand(-1, config.n_segments) / config.n_segments
-    schedule_path = tmp_path / "teacher_schedules.npz"
-    np.savez_compressed(
-        schedule_path,
-        dataset_ids=np.asarray([item.dataset_id for item in series]),
-        controls=controls.numpy(),
-        segment_durations_s=durations.numpy(),
-    )
-
-    audit = CachedSchedulePretrainer(
-        schedule_path=schedule_path,
-        steps=1,
-        log_every=1,
-    )(
-        build_model(config),
-        series,
-        normalizer,
-        config,
-        torch.device("cpu"),
-    )
-
-    assert audit["dataset_ids"] == [item.dataset_id for item in series]
-    assert audit["steps"] == 1
-
-
-def _write_simple_v1_teacher_schedule(path, *, flights=32):
-    np.savez_compressed(
-        path,
-        dataset_ids=np.asarray([f"KSJC:teacher-{index}" for index in range(flights)]),
-        controls=np.zeros((flights, 64, 3), dtype=np.float32),
-        segment_durations_s=np.ones((flights, 64), dtype=np.float32),
-    )
-
-
-def test_simple_v1_teacher_rejects_optimizer_contract_drift(tmp_path, monkeypatch):
-    schedule_path = tmp_path / "teacher_schedules.npz"
-    _write_simple_v1_teacher_schedule(schedule_path)
-    monkeypatch.setattr(
-        teacher_pretraining,
-        "SIMPLE_V1_TEACHER_SCHEDULE_SHA256",
-        hashlib.sha256(schedule_path.read_bytes()).hexdigest(),
-    )
-
-    with pytest.raises(ValueError, match="1000 steps"):
-        CachedSchedulePretrainer(
-            schedule_path=schedule_path,
-            steps=1,
-            recipe_name=CONTROL_RECIPE_SIMPLE_V1,
-        )
-
-
-def test_simple_v1_teacher_rejects_schedule_hash_drift(tmp_path):
-    schedule_path = tmp_path / "teacher_schedules.npz"
-    _write_simple_v1_teacher_schedule(schedule_path)
-
-    with pytest.raises(ValueError, match="frozen schedule SHA-256"):
-        CachedSchedulePretrainer(
-            schedule_path=schedule_path,
-            recipe_name=CONTROL_RECIPE_SIMPLE_V1,
-        )
-
-
-def test_simple_v1_teacher_rejects_wrong_cohort_size(tmp_path, monkeypatch):
-    schedule_path = tmp_path / "teacher_schedules.npz"
-    _write_simple_v1_teacher_schedule(schedule_path, flights=1)
-    monkeypatch.setattr(
-        teacher_pretraining,
-        "SIMPLE_V1_TEACHER_SCHEDULE_SHA256",
-        hashlib.sha256(schedule_path.read_bytes()).hexdigest(),
-    )
-
-    with pytest.raises(ValueError, match="exactly 32 schedules"):
-        CachedSchedulePretrainer(
-            schedule_path=schedule_path,
-            recipe_name=CONTROL_RECIPE_SIMPLE_V1,
-        )
-
-
 @pytest.mark.parametrize(
     ("lower", "upper"),
     [
@@ -2602,14 +2447,8 @@ def test_control_output_is_parallel_and_requires_normalized_horizon():
         TSConfig(prediction_output=PREDICTION_CONTROL, horizon_mode=HORIZON_FULL)
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
-        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
-    ],
-)
-def test_transport_chart_dynamics_is_an_explicit_control_only_contract(backend):
+def test_transport_chart_dynamics_is_an_explicit_control_only_contract():
+    backend = CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
         control_dynamics_backend=backend,
@@ -3209,7 +3048,6 @@ def test_fixed_dt_objective_trains_both_backbones_without_duration_state_gradien
     "dynamics_backend",
     [
         CONTROL_DYNAMICS_REANCHORED_RK4,
-        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
         CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     ],
 )
@@ -3315,32 +3153,6 @@ def test_control_simple_loss_forms_one_real_dynamics_training_step():
     assert model.final_time_head.network[-1].weight.grad is not None
 
 
-def test_pipeline_carries_and_names_transport_chart_dynamics():
-    plan = pipeline_module.TrainingPlan(
-        (AIRPORT,),
-        "itransformer",
-        training_mode="pooled",
-        prediction_output=PREDICTION_CONTROL,
-        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
-    )
-    recipe = plan._recipe_args()
-    config, _source = plan.resolved_train_config(use_best_config=False)
-    prediction = pipeline_module.PredictionPlan(
-        plan, AIRPORT, ("eval",), split="val"
-    )
-
-    assert recipe[recipe.index("--control-dynamics-backend") + 1] == (
-        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY
-    )
-    assert config.control_dynamics_backend == (
-        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY
-    )
-    assert plan.train_dir.name.endswith("_tcv")
-    assert "transport_chart_velocity" not in plan.train_dir.name
-    assert "transport_chart_velocity" in prediction.category
-    assert "@transport-chart-velocity" in prediction.label
-
-
 def test_pipeline_carries_and_names_scaled_transport_chart_dynamics():
     plan = pipeline_module.TrainingPlan(
         (AIRPORT,),
@@ -3374,7 +3186,7 @@ def test_transport_chart_prediction_directory_stays_within_component_limit():
         "itransformer",
         training_mode="pooled",
         prediction_output=PREDICTION_CONTROL,
-        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        control_dynamics_backend=CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
         control_state_duration_gradient=False,
@@ -3388,8 +3200,8 @@ def test_transport_chart_prediction_directory_stays_within_component_limit():
 
     assert len(plan.train_dir.name.encode("utf-8")) <= 255
     assert len(prediction.pred_dir.name.encode("utf-8")) <= 255
-    assert "transport_chart_velocity" in prediction.category
-    assert "@transport-chart-velocity" in prediction.label
+    assert "scaled_transport_chart_velocity" in prediction.category
+    assert "@scaled-transport-chart-velocity" in prediction.label
 
 
 def test_fixed_dt_control_targets_gather_existing_two_second_reference_rows():

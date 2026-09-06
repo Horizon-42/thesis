@@ -359,31 +359,3 @@ def segment_controls(
         raw_control_max=sampled.max(axis=0),
         clipped_fraction=np.mean((sampled < lower) | (sampled > upper), axis=0),
     )
-
-
-def refine_piecewise_constant_schedule(
-    controls: np.ndarray,
-    segment_durations_s: np.ndarray,
-    *,
-    target_segments: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Split every source segment equally while preserving its exact trajectory."""
-    source_controls = np.asarray(controls, dtype=np.float64)
-    source_durations = np.asarray(segment_durations_s, dtype=np.float64)
-    if source_controls.ndim != 2 or source_controls.shape[1] != len(CONTROL_NAMES):
-        raise ValueError("controls must be [N,3]")
-    if source_durations.shape != (len(source_controls),):
-        raise ValueError("segment durations must align with controls")
-    if not np.all(np.isfinite(source_controls)):
-        raise ValueError("controls must be finite")
-    if not np.all(np.isfinite(source_durations)) or not np.all(source_durations > 0.0):
-        raise ValueError("segment durations must be positive and finite")
-    if target_segments <= len(source_controls):
-        raise ValueError("target segment count must exceed the source count")
-    factor, remainder = divmod(target_segments, len(source_controls))
-    if remainder:
-        raise ValueError("target segment count must be an integer source multiple")
-    return (
-        np.repeat(source_controls, factor, axis=0),
-        np.repeat(source_durations / factor, factor),
-    )

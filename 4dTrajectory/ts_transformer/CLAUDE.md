@@ -71,8 +71,11 @@ Single-aircraft-only and deterministic point-prediction are scope decisions for 
 
 Two orthogonal dynamics axes underneath the control path: `control_dynamics_model` ∈
 `point-mass` | `first-order-lag` is the physics; `control_dynamics_backend` ∈ `reanchored-rk4` |
-`transport-chart-velocity` | `scaled-transport-chart-velocity` is the state representation the
-long rollout carries. **The registry in `control/dynamics/backends.py` is keyed by the PAIR.**
+`scaled-transport-chart-velocity` is the state representation the long rollout carries (the
+unscaled `transport-chart-velocity` was RETIRED 2026-09-07 — a measured regression that the
+nondimensional variant replaced on 2026-08-02; `run_naming` still abbreviates it so the 13
+stored 2026-07/08 configs keep their `_tcv` names). **The registry in
+`control/dynamics/backends.py` is keyed by the PAIR.**
 The lagged model *wraps* `transport_chart_rhs` — same force equations, stall handling, transport
 term and chart projection — so it is the point-mass model plus three actuators, not a second
 flight model.
@@ -198,13 +201,19 @@ command is HELD.
 ## Layout
 
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
-prefix: `envelope`, `heads`, `duration`, `conditioning`, `dynamics/{backends,rollout,inverse}`,
-`loss/{components,fixed_dt}`, `training/diagnostics`,
-`constraints/{barrier_filter,nominal_residual,gates}`, `oracle/*` (which absorbed the old
-`oracle_teacher/` package — two halves of one idea).
+prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
+`dynamics/{backends,rollout,inverse,hooks}`, `loss/{components,fixed_dt}`,
+`training/diagnostics`, `constraints/{barrier_filter,nominal_residual,gates}`.
+
+**`archive/` is not the package.** Completed campaigns are kept there (README each, naming
+the result documents that cite them) and are OFF the import path: the 2026-08 oracle teacher
+in `archive/oracle_teacher_2026_08/` (eight modules, five runners, two test files —
+superseded by `simple-v3`'s in-training imitation term). `tests/test_architecture.py` asserts
+nothing live imports it. A finished one-off driver belongs there, not beside the live
+`run_ts_*.py` runners.
 
 **Measurement code is CODE.** Reusable logic goes in the package with tests
-(`control/oracle/basis.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
+(`control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
 a runnable experiment goes in a top-level `run_ts_*.py` runner beside the others;
 **`docs/` holds documents**. The `docs/*.py` scripts predate this rule and are a layout
 defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add to them, and

@@ -1,5 +1,8 @@
 # 隐意图 + 操作参数解码：control 预测的重做（dev 文档，2026-09-07）
 
+> **路径更新（2026-09-07，包审计 T2）：** 本文 L0 行引用的 `control/oracle/basis.py` 现在是 `control/basis_fit.py`；`control/oracle/` 的其余部分已归档到 `archive/oracle_teacher_2026_08/`。
+
+
 **取代** `2026-09-07_scene_join_anchor_design.zh.discard.md` 作为 control 路径的当前设计。旧文档的
 Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；被废除的是它的方案骨架（把汇入
 决策做成 K 个显式锚、由查询解码器输出、几何闭式画路径再由跟踪器飞）。废除理由与新方案见 §一、§二。

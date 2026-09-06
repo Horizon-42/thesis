@@ -178,13 +178,17 @@ CONTROL_DYNAMICS_MODELS = (
 )
 
 CONTROL_DYNAMICS_REANCHORED_RK4 = "reanchored-rk4"
-CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY = "transport-chart-velocity"
 CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY = (
     "scaled-transport-chart-velocity"
 )
+# ``transport-chart-velocity`` — the same chart in PHYSICAL coordinates — was the third
+# value until 2026-09-07 (package audit T2). It was a measured regression against
+# `reanchored-rk4` (2026-07-31), the nondimensional variant replaced it on 2026-08-02, and
+# every stored config that carried it is a 2026-07/08 artifact that `from_dict` already
+# refuses for other reasons (13 on disk, 0 of them loading). `run_naming` still abbreviates
+# it, because those runs' directory names are historical record.
 CONTROL_DYNAMICS_BACKENDS = (
     CONTROL_DYNAMICS_REANCHORED_RK4,
-    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
 )
 CONTROL_RECIPE_CUSTOM = "custom"
@@ -807,8 +811,9 @@ class TSConfig:
     control_gradient_clip_norm: float = 0.0
     # Rollout state representation is independent of the model/data coordinate frame.
     # The baseline re-anchors a local ENU RK4 step into geodetic state every sub-step;
-    # transport-chart-velocity integrates threshold-chart position plus moving-local-ENU
-    # physical velocity with the full WGS84 transport rate.
+    # scaled-transport-chart-velocity integrates threshold-chart position plus
+    # moving-local-ENU physical velocity with the full WGS84 transport rate, in
+    # order-one internal coordinates.
     control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4
     # Which flight model the rollout integrates. ``first-order-lag`` augments the state
     # with the three actual control values and drives them towards the model's commands;

@@ -1,4 +1,4 @@
-"""Shared physical-distance criterion for oracle and learned-control training."""
+"""Physical-distance criteria shared by the control loss and the basis-fit study."""
 
 from __future__ import annotations
 
@@ -7,25 +7,6 @@ import torch
 from channels import POSITION_IDX
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
-
-
-PHYSICAL_CRITERIA_DISTANCE_SCALE_M = 100.0
-PHYSICAL_CRITERIA_SMOOTH_MAX_TEMPERATURE = 0.1
-
-
-def smooth_maximum(
-    first: torch.Tensor,
-    second: torch.Tensor,
-    *,
-    temperature: float = PHYSICAL_CRITERIA_SMOOTH_MAX_TEMPERATURE,
-) -> torch.Tensor:
-    """Differentiable maximum with the same units and shape as its inputs."""
-    if temperature <= 0.0:
-        raise ValueError("smooth-maximum temperature must be positive")
-    return temperature * torch.logsumexp(
-        torch.stack((first, second), dim=0) / temperature,
-        dim=0,
-    )
 
 
 def fixed_dt_position_ade_m(
@@ -66,12 +47,3 @@ def terminal_position_error_m(
         normalizer.std[indices], dtype=endpoint.dtype, device=endpoint.device
     )
     return torch.linalg.vector_norm((endpoint - target) * scale, dim=-1)
-
-
-def physical_criteria_loss(
-    ade_m: torch.Tensor,
-    terminal_error_m: torch.Tensor,
-) -> torch.Tensor:
-    """Smooth worst of ADE/100 m and terminal-error/100 m, per flight."""
-    scale = PHYSICAL_CRITERIA_DISTANCE_SCALE_M
-    return smooth_maximum(ade_m / scale, terminal_error_m / scale)

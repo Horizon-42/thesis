@@ -32,8 +32,8 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_MODELS,
     CONTROL_DYNAMICS_POINT_MASS,
+    CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
-    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_RECIPE_SIMPLE_V1,
     HORIZON_NORMALIZED,
     PREDICTION_CONTROL,
@@ -71,7 +71,7 @@ def _config(model: str, **overrides) -> TSConfig:
     settings = {
         "prediction_output": PREDICTION_CONTROL,
         "control_dynamics_model": model,
-        "control_dynamics_backend": CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
         "control_rollout_integrator_dt_s": 0.1,
         "n_segments": 8,
     }
@@ -134,11 +134,11 @@ def test_every_registered_dynamics_model_has_an_inverse():
 def test_inverse_recovers_the_schedule_its_forward_model_was_rolled_with(model, backend):
     """Close the loop for EVERY registered (model, backend) pair, not just one backend.
 
-    This used to be parametrized over models only, with the backend pinned to
-    `transport-chart-velocity`, so the transport-FREE family (`reanchored-rk4`) was never
+    This used to be parametrized over models only, with the backend pinned to the
+    transport chart, so the transport-FREE family (`reanchored-rk4`) was never
     numerically inverted — the claim that it carries no transport term rested on reading
     its forward code. Rolling each registered pair forward and inverting it is what turns
-    `TRANSPORT_BACKENDS` from an assertion into a measurement.
+    the backend registry from an assertion into a measurement.
     """
     config = _config(model, control_dynamics_backend=backend)
     controls = _smooth_schedule(int(config.n_segments))
@@ -172,12 +172,17 @@ def test_inverse_recovers_the_schedule_its_forward_model_was_rolled_with(model, 
 @pytest.mark.parametrize(
     "backend",
     [
-        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        CONTROL_DYNAMICS_REANCHORED_RK4,
         CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     ],
 )
 def test_the_state_representation_does_not_change_the_recovered_schedule(backend):
-    """Nondimensionalising the state is a change of variables, not of physics."""
+    """The representation the rollout carries is a change of variables, not of physics.
+
+    The pair used to be the transport chart in physical and in nondimensional coordinates;
+    the physical one was retired in 2026-09-07's T2, so the two representations left are
+    the re-anchored local ENU map and that chart in order-one coordinates.
+    """
     config = _config(CONTROL_DYNAMICS_POINT_MASS, control_dynamics_backend=backend)
     controls = _smooth_schedule(int(config.n_segments))
     times, states = _dense_reference(config, controls, controls[0])

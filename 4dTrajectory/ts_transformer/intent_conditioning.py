@@ -38,8 +38,9 @@ predictor; the run name carries ``intent=truth-…`` so no table can quote it as
 leak red line of the design (neighbour features only from ``t ≤ t₀``) is what Phase 1
 enforces; here it is deliberately crossed, once, to size the prize.
 
-Not to be confused with ``control/oracle/*``: that is the inverse-dynamics TEACHER
-supplying control TARGETS; this module supplies INPUT covariates.
+Not to be confused with the archived inverse-dynamics teacher
+(``archive/oracle_teacher_2026_08/``), which supplied control TARGETS; this module
+supplies INPUT covariates.
 
 The lead is looked up in the tracks roster (every ``assigned`` landing on the runway,
 including arrivals the model-ready roster excludes — a landing the arrival filter dropped

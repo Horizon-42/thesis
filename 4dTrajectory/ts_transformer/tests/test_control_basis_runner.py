@@ -16,7 +16,7 @@ import pytest
 import torch
 
 from approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks
-from control.oracle.basis import inverse_dynamics_seed
+from control.basis_fit import inverse_dynamics_seed
 from flight_scenarios.identity import summary_row_key
 from run_ts_control_basis_oracle import summarise
 

@@ -7,12 +7,16 @@ the role is the submodule:
 
     control.envelope           the dimensionless box the head predicts in
     control.heads              the output heads that emit a schedule
+    control.basis_fit          batched shooting fit of a schedule to a known future
     control.dynamics.backends  the flight models a schedule can be rolled through
     control.dynamics.rollout   the one rollout API training/forecast/evaluation share
-    control.dynamics.inverse   the same models solved backwards, for teachers and targets
-    control.loss.*             tracking objectives, terminal clocks, regularizers
-    control.training.*         curriculum views and gradient diagnostics
-    control.oracle.*           future-aware teachers (direct shooting + the imitation path)
+    control.dynamics.inverse   the same models solved backwards, for targets
+    control.loss.*             the tracking objectives
+    control.training.*         gradient diagnostics
+
+The 2026-08 future-aware teachers that used to be ``control.oracle`` are a completed
+campaign, archived under ``archive/oracle_teacher_2026_08/`` (off the import path) and
+superseded by ``simple-v3``'s in-training imitation term.
 
 **Membership rule**: a module belongs here only if EVERY consumer of it is control-specific.
 That is why ``prediction_outputs`` (it holds ``StatePrediction`` too), ``terminal_state_loss``,

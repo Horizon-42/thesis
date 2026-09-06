@@ -6,8 +6,9 @@ Two independent choices meet here and are kept independent:
   control instantly; ``first-order-lag`` makes the three controls states that chase their
   command, reusing the same force equations.
 * ``control_dynamics_backend`` — the state representation the long rollout carries.
-  Re-anchored local ENU, the continuous WGS84 transport chart, or that chart in
-  nondimensional coordinates.
+  Re-anchored local ENU, or the continuous WGS84 transport chart in nondimensional
+  coordinates. (The chart in PHYSICAL coordinates was a third representation until
+  2026-09-07; it was a measured regression and is retired — see ``config.py``.)
 
 Training, validation and forecasting consume one channel/geodetic result contract, so a
 representation change never reaches the model, the loss or the data pipeline. Controls
@@ -40,8 +41,6 @@ from aerodynamic_model.torch_lag_dynamics import (
     rollout_piecewise_constant_hooked as lag_hooked_rollout,
 )
 from aerodynamic_model.torch_transport_chart_dynamics import (
-    rollout_piecewise_constant as transport_endpoint_rollout,
-    rollout_piecewise_constant_at_times as transport_dense_rollout,
     transport_chart_state_to_channels,
     transport_chart_state_to_geodetic,
 )
@@ -56,7 +55,6 @@ from config import (
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
-    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     TSConfig,
 )
 from control.envelope import physical_controls
@@ -235,56 +233,6 @@ class _TransportChartResults:
         )
 
 
-class TransportChartVelocityBackend(ControlDynamicsBackend):
-    """Continuous WGS84 chart position with physical local-ENU velocity state."""
-
-    def endpoint_rollout(
-        self,
-        inputs: RolloutInputs,
-        config: TSConfig,
-        *,
-        command_hook: CommandHook | None = None,
-    ) -> EndpointControlRollout:
-        _refuse_hook(self, command_hook)
-        return _TransportChartResults.endpoint(
-            transport_endpoint_rollout(
-                inputs.initial_state,
-                inputs.newton_controls,
-                inputs.segment_durations_s,
-                inputs.aero_params,
-                inputs.frame_params,
-                integrator_dt_s=config.control_rollout_integrator_dt_s,
-            ),
-            inputs,
-            config,
-            inputs.controls,
-        )
-
-    def dense_rollout(
-        self,
-        inputs: RolloutInputs,
-        query_offsets_s: torch.Tensor,
-        query_valid: torch.Tensor,
-        config: TSConfig,
-        *,
-        command_hook: CommandHook | None = None,
-    ) -> DenseControlRolloutChannels:
-        _refuse_hook(self, command_hook)
-        rollout = transport_dense_rollout(
-            inputs.initial_state,
-            inputs.newton_controls,
-            inputs.segment_durations_s,
-            inputs.aero_params,
-            inputs.frame_params,
-            query_offsets_s,
-            query_valid,
-            integrator_dt_s=config.control_rollout_integrator_dt_s,
-        )
-        return _TransportChartResults.dense(
-            rollout.query_states, rollout.segment_end_states, inputs, config, inputs.controls
-        )
-
-
 class ScaledTransportChartVelocityBackend(ControlDynamicsBackend):
     """Order-one internal state with the existing physical public contract."""
 
@@ -342,12 +290,12 @@ class FirstOrderLagBackend(ControlDynamicsBackend):
 
     The predicted schedule becomes a COMMAND schedule; the state carries what the aircraft
     is actually doing, starting from ``inputs.initial_controls`` — the controls the
-    observed lookback implies at the anchor. ``chart_scale`` selects whether the
-    point-mass half of the state is carried physically or nondimensionally, so the lag is
-    orthogonal to that choice rather than a fourth backend.
+    observed lookback implies at the anchor. ``chart_scale`` is the point-mass half's
+    nondimensionalisation, so the lag stays orthogonal to the state representation rather
+    than being a backend of its own.
     """
 
-    def __init__(self, chart_scale: tuple[float, ...] | None):
+    def __init__(self, chart_scale: tuple[float, ...]):
         self.chart_scale = chart_scale
 
     def _to_chart(self, states: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
@@ -461,14 +409,8 @@ _BACKENDS: dict[tuple[str, str], ControlDynamicsBackend] = {
     (CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_REANCHORED_RK4): (
         ReanchoredRK4Backend()
     ),
-    (CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY): (
-        TransportChartVelocityBackend()
-    ),
     (CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY): (
         ScaledTransportChartVelocityBackend()
-    ),
-    (CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY): (
-        FirstOrderLagBackend(None)
     ),
     (
         CONTROL_DYNAMICS_FIRST_ORDER_LAG,

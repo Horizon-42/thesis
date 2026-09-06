@@ -121,7 +121,7 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | `batch_benchmark.py` | outer-train-only CUDA throughput benchmark used by `benchmark-batch` |
 | `synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
-| `control/` (package: envelope, heads, duration, conditioning, dynamics/, loss/, training/, oracle/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, terminal clocks, teacher warm-start) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |
+| `control/` (package: envelope, heads, conditioning, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |
 
 ## Running it
 
@@ -158,8 +158,6 @@ python $TS train \
     --data trajectory_data_process/outputs/harvest/KSJC/arrivals/manifest.json \
     --eligibility-roster trajectory_data_process/outputs/harvest/KSJC/arrivals/lateral_pass_eligibility.json \
     --airport KSJC --control-recipe simple-v1 \
-    --control-teacher-schedules \
-      4dTrajectory/outputs/KSJC/experiments/oracle_teacher_20260816_current_manifest/optimized_arc24_32/teacher_schedules.npz \
     --seed 1337 --split-seed 1337 \
     --output-dir 4dTrajectory/outputs/KSJC/experiments/control_simple_v1/seed1337
 
@@ -384,10 +382,9 @@ then refuses to evaluate test again from the same experiment directory, includin
 partially failed test stage.
 
 The four `run_ts_*.py` scripts above (repo root, alongside this package) are the general
-ones. There are 13 more — kinematic-loss/overfit diagnostics for the state path, and a family
-of control/oracle-teacher production and diagnostic drivers
-(`run_ts_oracle_teacher_optimize.py`, `run_ts_control_capacity_ceiling.py`,
-…) — indexed with dates and one-line purposes in
+ones. The rest — kinematic-loss/overfit diagnostics for the state path, and the control
+path's own drivers (`run_ts_control_basis_oracle.py`, `run_ts_control_capacity_ceiling.py`,
+…) — are indexed with dates and one-line purposes in
 [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) (§7)
 rather than duplicated here.
 
@@ -667,11 +664,9 @@ fields drift from the frozen values. A third prediction output, `control-mixture
 history-only deployable selector on a best-of-K hindsight objective — a first attempt at the
 "deterministic point prediction" limitation in
 [Deliberate scope](#deliberate-scope--not-bugs-do-not-fix-without-deciding-to). All of this —
-the objective/backend/duration/clock registries, the exact call graph, the oracle-teacher
-warm-start pipeline behind `--control-teacher-schedules` (including how
-`teacher_schedules.npz` is actually produced — a root-level script, not a package
-subcommand), and which of the `control/` package's modules are live on the
-default path vs. ablation-only vs. genuinely unwired — is in
+the objective/backend/duration/clock registries, the exact call graph, and which of the
+`control/` package's modules are live on the default path vs. ablation-only vs. genuinely
+unwired — is in
 [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
 
 Control mode currently requires `--horizon-mode normalized`. It needs no inverse-control
@@ -713,12 +708,11 @@ The repository now contains routes 1 and 4; routes 2 and 3 remain distinct alter
 4. **Predict controls and integrate them** — ✅ **DONE as an opt-in output strategy**. The
    differentiable Torch rollout is numerically contract-tested against CasADi for normal and
    stalled steps, non-uniform multi-segment endpoints, and gradients through controls and
-   durations. An optional warm-start layer sits on top: `--control-teacher-schedules` imitates
-   a cached per-flight control schedule (produced offline by direct-shooting gradient descent
-   through this same Torch dynamics, no casadi — `run_ts_oracle_teacher_optimize.py`) for
-   `--control-teacher-steps` Adam steps before ordinary rollout-loss training begins. Details,
-   including why it needs no second (casadi) environment despite optimizing a per-flight
-   trajectory, are in
+   durations. The 2026-08 warm-start layer that imitated a cached per-flight control schedule
+   before ordinary rollout-loss training is a completed campaign, superseded by `simple-v3`'s
+   in-training imitation term and archived under `archive/oracle_teacher_2026_08/`. Details of
+   the rollout itself, including why it needs no second (casadi) environment despite
+   optimizing a per-flight trajectory, are in
    [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
 
 ## Historical results on real KRDU data (pre-normalized-time architecture)
@@ -1127,7 +1121,7 @@ point that later work may choose to extend, but none is an accident:
   heads, trim-residual controls, an unscaled transport-chart dynamics backend, four earlier
   tracking objectives, a K-expert mixture head — now paused), but no run has gone through a
   full train → predict → `evaluate` cycle and published an ADE/FDE/gate-pass table the way
-  the state-output results above are published. `run_ts_simple_teacher_paired_cv.py` is the
-  in-flight experiment meant to produce that table. See
+  the state-output results above are published. The paired teacher CV meant to produce that
+  table is archived with its campaign (`archive/oracle_teacher_2026_08/`). See
   [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) for
   the full design history and current module-by-module status.

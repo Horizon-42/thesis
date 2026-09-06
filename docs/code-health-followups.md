@@ -294,7 +294,7 @@ cite a `docs/` script as their data producer (`closure_output.py`, `config.py`,
 
 Done so far: `strata_masks` + `STRAIGHT_TORTUOSITY` moved into `approach_difficulty.py`
 (one source, `compare_frame_arms` imports them); `tests/conftest.py` added; the L0 basis
-fit went in as `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` with tests.
+fit went in as `control/basis_fit.py` (`control/oracle/basis.py` until T2) + `run_ts_control_basis_oracle.py` with tests.
 
 Remaining: the migration table in `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md`
 §七 (hubs first: `p1_closure_oracle`, `compare_frame_arms`, `score_control_arms`), and the

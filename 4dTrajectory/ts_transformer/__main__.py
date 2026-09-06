@@ -283,9 +283,9 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument("--kinematic-consistency-weight", type=float, default=None,
-                        help="control/oracle compatibility weight; direct state ignores it")
+                        help="control-path compatibility weight; direct state ignores it")
     parser.add_argument("--terminal-loss-weight", type=float, default=None,
-                        help="control/oracle compatibility weight; direct state ignores it")
+                        help="control-path compatibility weight; direct state ignores it")
     parser.add_argument(
         "--control-duration-parameterization",
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
@@ -633,32 +633,6 @@ def split_keys_for_current_data(
     return [key for key in checkpoint_split_keys if key.startswith(prefixes)]
 
 
-def _teacher_pretrainer_from_args(
-    args: argparse.Namespace,
-    config: TSConfig,
-    parser: argparse.ArgumentParser,
-):
-    """Validate optional teacher initialization before a formal run is created."""
-    if not args.control_teacher_schedules:
-        return None
-    if config.prediction_output != PREDICTION_CONTROL:
-        parser.error(
-            "--control-teacher-schedules requires --prediction-output control"
-        )
-    from control.oracle.pretraining import CachedSchedulePretrainer
-
-    try:
-        return CachedSchedulePretrainer(
-            schedule_path=Path(args.control_teacher_schedules),
-            steps=args.control_teacher_steps,
-            learning_rate=args.control_teacher_learning_rate,
-            gradient_clip_norm=args.control_teacher_gradient_clip_norm,
-            recipe_name=config.control_recipe_name,
-        )
-    except ValueError as exc:
-        parser.error(str(exc))
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ts_transformer",
@@ -678,20 +652,6 @@ def main(argv: list[str] | None = None) -> int:
             "development-only and cannot release outer-test"
         ),
     )
-    p_train.add_argument(
-        "--control-teacher-schedules",
-        default=None,
-        help=(
-            "cached outer-train-only control teacher .npz used for initialization; "
-            "omitting it runs the documented no-teacher ablation"
-        ),
-    )
-    p_train.add_argument("--control-teacher-steps", type=int, default=1000)
-    p_train.add_argument("--control-teacher-learning-rate", type=float, default=1e-4)
-    p_train.add_argument(
-        "--control-teacher-gradient-clip-norm", type=float, default=20.0
-    )
-
     p_cv = sub.add_parser(
         "cross-validate", help="select hyperparameters using outer-train folds only"
     )
@@ -940,11 +900,6 @@ def main(argv: list[str] | None = None) -> int:
         config, batch_auto = _config_from_args(args, parser)
         if bool(args.campaign_id) != bool(args.experiment_id):
             parser.error("--campaign-id and --experiment-id must be supplied together")
-        model_pretrainer = (
-            _teacher_pretrainer_from_args(args, config, parser)
-            if args.command == "train"
-            else None
-        )
         data_provenance = _provenance_from_args(args)
         outer_split_keys = flight_keys_by_split(data_provenance, config)
         development_cohort = None
@@ -1054,7 +1009,6 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 data_selection=data_selection,
                 auto_batch_size=batch_auto,
-                model_pretrainer=model_pretrainer,
             )
         except Exception as exc:
             if experiment_manifest is not None:

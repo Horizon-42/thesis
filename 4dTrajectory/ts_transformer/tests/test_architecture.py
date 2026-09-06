@@ -23,6 +23,10 @@ if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
 CONTROL = TS_DIR / "control"
+#: Completed campaigns kept in the repository as the record behind published numbers. They
+#: are NOT part of the package: no live module may import them, and the module walk below
+#: must not count them as consumers of anything.
+ARCHIVE = TS_DIR / "archive"
 # Shared with the state path through `fixed_anchor_validation`, `dataset` or `batching`.
 SHARED_BY_DESIGN = {
     "prediction_outputs",
@@ -41,6 +45,7 @@ def _module_files() -> list[Path]:
         and "vendor" not in path.parts
         and "tests" not in path.parts
         and "docs" not in path.parts
+        and "archive" not in path.parts
     ]
 
 
@@ -61,8 +66,32 @@ def test_no_control_prefixed_module_returns_to_the_top_level():
         f"{stragglers} belong under control/ by role, not at the top level behind a prefix"
     )
     assert (CONTROL / "__init__.py").is_file()
-    for sub in ("dynamics", "loss", "training", "oracle"):
+    for sub in ("dynamics", "loss", "training"):
         assert (CONTROL / sub / "__init__.py").is_file(), f"control/{sub} is not a package"
+
+
+def test_nothing_live_imports_the_archive():
+    """`archive/` holds completed campaigns, not package code.
+
+    They are kept so a published number has its code, and they are off the import path on
+    purpose: an archived module is not maintained against the current contracts (its
+    checkpoints are already refused, its objective and dynamics backend are retired). A
+    live import would quietly make it load-bearing again.
+    """
+    assert ARCHIVE.is_dir() and (ARCHIVE / "oracle_teacher_2026_08" / "README.md").is_file()
+    for path in _module_files():
+        offending = {name for name in _imported_names(path) if name.split(".")[0] == "archive"}
+        assert not offending, (
+            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; archive/ is a record "
+            f"of completed campaigns, never a dependency"
+        )
+    # And nothing in the archive is reachable as a package: no __init__.py on the way in.
+    assert not (ARCHIVE / "__init__.py").exists()
+    for campaign in ARCHIVE.iterdir():
+        if campaign.is_dir():
+            assert not (campaign / "__init__.py").exists(), (
+                f"{campaign.name} is importable; the archive must stay off the import path"
+            )
 
 
 def test_shared_modules_stay_outside_the_control_package():

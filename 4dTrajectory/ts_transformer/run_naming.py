@@ -68,6 +68,10 @@ _DYNAMICS_SLUG = {
     CONTROL_DYNAMICS_FIRST_ORDER_LAG: "lag",
 }
 _BACKEND_SLUG = {
+    # `transport-chart-velocity` is RETIRED from the config vocabulary (T2, 2026-09-07) and
+    # stays here on purpose: 13 stored 2026-07/08 configs carry it, their on-disk run
+    # directories are named `…_tcv`, and on-disk names are historical record. A grammar
+    # that could no longer name them would rename them.
     "transport-chart-velocity": "tcv",
     "scaled-transport-chart-velocity": "stcv",
 }
