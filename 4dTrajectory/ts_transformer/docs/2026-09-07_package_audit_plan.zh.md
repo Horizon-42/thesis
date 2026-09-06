@@ -10,7 +10,7 @@
 |---|---|---|---|
 | T0 零风险清理 | **完成并通过 review**（`55af0b7`、`57e68fc`、`7350638`；review 的 10 项修复见 CHANGELOG 2026-09-07 T0 条目）；L2 启动前合入 | 8 项（§二） | S×8 |
 | T1 删除已废除设计 | **完成**（`0702669` 跟踪器、`0898291` regularization、`c5c3a32` curriculum、`09e4420` arc 目标族 + 终端时钟、`2692e61` anchor-relative 标注） | 跟踪器、horizon curriculum、arc-length 目标族、regularization | M×3 + S |
-| T2 归档 2026-08 教师机器 | 未开始 | `control/oracle/` 八模块 + 三个运行器 + nominal 律 hook | L |
+| T2 归档 2026-08 教师机器 | **完成**（`ed7fccc` 教师归档 + `transport-chart-velocity` 退役、`f701532` 名义律 hook 归档、`56643c4` scene 序列半边）；套件 558 → 516，181/181 存储 config 仍加载，0 个运行名改变 | `control/oracle/` 八模块 + **五个**运行器 + nominal 律 hook + scene 序列半边 | L |
 | T3 结构重排 | 未开始 | `objective.py` / `validation.py` 拆出 train、config 校验拆分、dataset 拆分、CLI 拆分、后端合并 | M×5 |
 | T4 测试与运行器 | 未开始 | 13 条红测试搬家修复、`tests/support.py`、`runner_support.py`、拆 6.5k 行测试文件、20→14 运行器 | M×4 |
 | T5 `docs/*.py` 迁移 | 未开始 | 13 个脚本的迁移表（枢纽三个先） | M |
@@ -87,6 +87,23 @@ import 路径上、README 指向引用它的结果文档 `2026-08-02_oracle_teac
 - `scene/features.py` 的序列半边（`neighbours [N_MAX, L, 6]` + 掩码 + `_series_on_grid`）：L4 门不过、
   唯一消费者只读实体/标量半边——删，`scene/__init__.py` 说明。
 
+**执行时与本节不符的三处（都按测量改，不按计划改）**：
+1. `curriculum` 未被 T1 删除——T1-10 删的是 `control/training/curriculum.py`，`control/oracle/curriculum.py`
+   八模块齐全，全部归档。运行器实为**五个，其中四个是 `run_ts_*`**：`plot_teacher_training.py` 从来没有
+   这个前缀，但它只画归档 pretrainer 写的 `model_pretraining.history`，属同一 campaign。
+   **§六 T4-27 的"20 → 14"是按 `run_ts_*.py` 这个 glob 数的，同一把尺子下 T2 之后是 20 → 16**
+   （归档了四个带前缀的运行器）。
+2. 只删 `(first-order-lag, transport-chart-velocity)` 注册项不成立：删掉 `TransportChartVelocityBackend`
+   必然连 `(point-mass, …)` 一起删，留下一个没有后端的取值。**该取值整体退役**——13 个存储 config 用它，
+   全是 2026-07-31/08-01/08-02，**0 个在基线上能加载**；`run_naming` 保留 `tcv` 缩写（磁盘目录名是历史记录），
+   `test_run_naming` 钉住。
+3. `control_command_hook="nominal-residual"` **取值不退役**。六个 2026-09-06 config 带它且全部加载，
+   而 `load_checkpoint` 走 `TSConfig.from_dict`——退役取值会让三个现役 cohort 检查点**加载不了**，
+   不只是命不了名（与 T1-14 的 `anchor-relative` 同一判断）。改为 `CONTROL_HOOKS`（存储可说）/
+   `CONTROL_HOOKS_AVAILABLE`（新跑可选）两个元组：`--command-hook` 在解析处拒绝它，`build_command_hook`
+   拒绝构造它。六个 `control_nominal_*` 增益字段**退役**（先量：磁盘上无一个非默认，0 个运行名移动）。
+   臂文件是**两个**（`control_hooks_arms.json` 与 `control_hooks_v2_arms.json`），各删 R 臂。
+
 ## 五、T3 — 结构（各一次提交，M）
 
 | # | 改什么 | 理由 |
@@ -108,7 +125,7 @@ import 路径上、README 指向引用它的结果文档 `2026-08-02_oracle_teac
 | 24 | **`tests/support.py`**：`tiny_config` / `synthetic_series` / `fake_provenance` / `dynamics_context` / `terminal_contexts`（8 个助手 2–4 份拷贝，`_fake_data_provenance` 字节相同）；删 25 个文件的 `sys.path` 前言（`conftest.py` 已覆盖）；`test_closure_tracking.py` 为了 import 兄弟测试文件把 `tests/` 塞进 sys.path 的做法随 T1-9 消失 | |
 | 25 | **`runner_support.py`**：`parse_airports`×5、`write_json_atomic`×5、`series_digest`×3、`file_sha256`、`write_reports`（三个消融运行器同签名同结构）——16 份字节相同的拷贝 | |
 | 26 | **拆 `test_ts_transformer.py`**（6,507 行 217 条）按 C 给出的 19 个连续、主题单一的行段（评估协议 / 通道帧 / 窗口 / state 损失 / 划分 / 锚点 / 验证选择 / control 配置 / control 目标 / … / 端到端 CLI） | 24、25 之后是机械操作 |
-| 27 | **运行器 20 → 14**：归档 `run_ts_control_arms.py`（`run_ts_frame_ablation.py` 的 `main` 逐字相同且后者已能跑 control campaign）、`run_ts_flight_model_paired.py`（一次性、结果已进 CLAUDE.md 默认表）、`run_ts_cv.py`（`run_ts_pipeline` 的预设）；`run_ts_oracle_teacher_audit.py` 折入 `optimize --steps 0`（15 行相同的 `TSConfig` 字面量）——后两者随 T2；`README.md:388` 引用的 `run_ts_control_mixture_report.py` **不存在**，删引用。约定写进 `CLAUDE.md`：`run_ts_<subject>.py` = 现役可重跑工具；已完成的一次性驱动进 `archive/`，头一行写引用它的结果文档 | |
+| 27 | **运行器 20 → 14**（T2 之后已是 16，见 §四 执行记录第 1 条：口径是仓库根 `run_ts_*.py` 的 glob）：归档 `run_ts_control_arms.py`（`run_ts_frame_ablation.py` 的 `main` 逐字相同且后者已能跑 control campaign）、`run_ts_flight_model_paired.py`（一次性、结果已进 CLAUDE.md 默认表）、`run_ts_cv.py`（`run_ts_pipeline` 的预设）；`run_ts_oracle_teacher_audit.py` 折入 `optimize --steps 0`（15 行相同的 `TSConfig` 字面量）——后两者随 T2；`README.md:388` 引用的 `run_ts_control_mixture_report.py` **不存在**，删引用。约定写进 `CLAUDE.md`：`run_ts_<subject>.py` = 现役可重跑工具；已完成的一次性驱动进 `archive/`，头一行写引用它的结果文档 | |
 | 28 | `test_architecture.py` 的 `docs` 豁免在 T5 完成后去掉 | |
 
 ## 七、T5 — `docs/*.py` 迁移（枢纽三个先，其余随手）

@@ -19,10 +19,15 @@ from pathlib import Path
 import sys
 
 TS_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = TS_DIR.parents[1]
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
 CONTROL = TS_DIR / "control"
+#: Completed campaigns kept in the repository as the record behind published numbers. They
+#: are NOT part of the package: no live module may import them, and the module walk below
+#: must not count them as consumers of anything.
+ARCHIVE = TS_DIR / "archive"
 # Shared with the state path through `fixed_anchor_validation`, `dataset` or `batching`.
 SHARED_BY_DESIGN = {
     "prediction_outputs",
@@ -41,6 +46,23 @@ def _module_files() -> list[Path]:
         and "vendor" not in path.parts
         and "tests" not in path.parts
         and "docs" not in path.parts
+        and "archive" not in path.parts
+    ]
+
+
+def _archive_import_candidates() -> list[Path]:
+    """Everything that could import the archive and be RUN — wider than `_module_files`.
+
+    The layering checks below deliberately skip `tests/` and the root runners (a test may
+    import anything; a runner is not part of the package). The archive rule is not about
+    layering: `CLAUDE.md` says the archive is off the import path, and a test file or a
+    root `run_ts_*.py` importing it would break that claim just as loudly as a package
+    module would.
+    """
+    return [
+        *_module_files(),
+        *sorted(p for p in (TS_DIR / "tests").glob("*.py")),
+        *sorted(REPO_ROOT.glob("run_ts_*.py")),
     ]
 
 
@@ -61,8 +83,35 @@ def test_no_control_prefixed_module_returns_to_the_top_level():
         f"{stragglers} belong under control/ by role, not at the top level behind a prefix"
     )
     assert (CONTROL / "__init__.py").is_file()
-    for sub in ("dynamics", "loss", "training", "oracle"):
+    for sub in ("dynamics", "loss", "training"):
         assert (CONTROL / sub / "__init__.py").is_file(), f"control/{sub} is not a package"
+
+
+def test_nothing_live_imports_the_archive():
+    """`archive/` holds completed campaigns, not package code.
+
+    They are kept so a published number has its code, and they are off the import path on
+    purpose: an archived module is not maintained against the current contracts (its
+    checkpoints are already refused, its objective and dynamics backend are retired). A
+    live import would quietly make it load-bearing again.
+    """
+    campaigns = sorted(p.name for p in ARCHIVE.iterdir() if p.is_dir())
+    assert campaigns and all((ARCHIVE / name / "README.md").is_file() for name in campaigns), (
+        f"every archived campaign needs a README saying what it is: {campaigns}"
+    )
+    for path in _archive_import_candidates():
+        offending = {name for name in _imported_names(path) if name.split(".")[0] == "archive"}
+        assert not offending, (
+            f"{path} imports {sorted(offending)}; archive/ is a record of completed "
+            f"campaigns, never a dependency"
+        )
+    # And nothing in the archive is reachable as a package: no __init__.py on the way in.
+    assert not (ARCHIVE / "__init__.py").exists()
+    for campaign in ARCHIVE.iterdir():
+        if campaign.is_dir():
+            assert not (campaign / "__init__.py").exists(), (
+                f"{campaign.name} is importable; the archive must stay off the import path"
+            )
 
 
 def test_shared_modules_stay_outside_the_control_package():
@@ -88,7 +137,7 @@ def test_the_control_package_does_not_import_the_training_loop():
     """control/ is imported BY the training loop; it must never reach back up into it.
 
     `dataset` is deliberately NOT on this list. `Normalizer` and the window types are
-    data-plane value types the loss and the oracle genuinely consume, and `Normalizer.fit`
+    data-plane value types the loss modules genuinely consume, and `Normalizer.fit`
     balances over `FlightSeries`, so it belongs with the data plane rather than under
     `control`. The direction that matters is this one: a loss module that imported `train`
     would make the package unusable outside the loop it was extracted from.

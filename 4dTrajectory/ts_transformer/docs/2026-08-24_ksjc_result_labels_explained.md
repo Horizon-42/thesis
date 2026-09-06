@@ -1,5 +1,7 @@
 # KSJC result labels, expanded — every Prediction / Experiments entry explained
 
+> **Code archived (2026-09-07, package audit T2).** The oracle teacher this document names as the mechanism behind §2.2–§2.3's labels is a completed campaign, moved to `archive/oracle_teacher_2026_08/` and off the import path. The labels and the runs they name are unchanged.
+
 The Observe panel's **Prediction** and **Experiments** pickers name every published
 result with one grammar (single source: `4dTrajectory/ts_transformer/run_naming.py`):
 

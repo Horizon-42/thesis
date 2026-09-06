@@ -1,5 +1,8 @@
 # `control-simple-v1` 开发设计
 
+> **代码已归档（2026-09-07，包审计 T2）。** 本文引用的教师机器（`control/oracle/*` 八模块与三个运行器）作为一个已完成 campaign 移入 `archive/oracle_teacher_2026_08/`，不在 import 路径上、不再对当前包运行；它被 `simple-v3` 的训练内模仿项取代。数字保留为历史，不重写。
+
+
 日期：2026-08-16
 状态：设计已冻结并实现；尚未启动新的 development 精度实验
 数据边界：只允许 outer-train 与 outer-validation；本文不授权读取、预测或评估 outer-test

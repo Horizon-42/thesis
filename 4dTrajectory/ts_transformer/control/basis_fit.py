@@ -1,9 +1,11 @@
 """Batched direct-shooting fit of a piecewise-constant control BASIS to known futures.
 
-``control/oracle/shooting.py`` fits one flight with a curriculum and restarts; this module
-fits a whole cohort at once at a chosen width, which is what a width study needs: the
-flights carry independent parameters, so one batch is one rollout and the answer per
-flight is its own best step, never the batch mean's.
+The 2026-08 teacher's shooting fitted one flight at a time with a curriculum and restarts
+(archived, ``archive/oracle_teacher_2026_08/``); this module fits a whole cohort at once at
+a chosen width, which is what a width study needs: the flights carry independent
+parameters, so one batch is one rollout and the answer per flight is its own best step,
+never the batch mean's. It is a FIT, not a teacher — nothing here initialises a network,
+which is why it lives in ``control/`` rather than with the archived campaign.
 
 Two axes, both from the collocation optimiser's parameterisation (``DEFAULT_N_SEGMENTS``
 = 8 control segments for a whole unconstrained arrival, ``DEFAULT_N_SEG_PER_PHASE`` = 3

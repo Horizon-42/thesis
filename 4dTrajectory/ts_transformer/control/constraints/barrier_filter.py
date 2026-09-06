@@ -66,8 +66,10 @@ soft pair is the C¹ training form of the same rule.
 
 Closed-form single-constraint action projection (Dalal et al. 2018); α is the class-K
 rate of a control barrier function (Ames et al. 2019), in its discrete-time form
-(Agrawal & Sreenath 2017). Lateral: the glidepath window itself is left to the penalty or
-the nominal-law hook; the load coordination only preserves what the network asked for.
+(Agrawal & Sreenath 2017). Lateral: the glidepath window itself is left to the penalty (the
+nominal-law hook that also covered it was never adopted and is archived,
+``archive/nominal_law_hook_2026_09/``); the load coordination only preserves what the
+network asked for.
 """
 
 from __future__ import annotations

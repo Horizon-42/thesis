@@ -94,7 +94,11 @@ Everything below is serialised into every checkpoint.
   `rollout.controls`, `source.commandHook` = `hook/saturation`). Two modules in
   `control/constraints/`: `barrier` (corridor barriers → heading interval → bank interval,
   lateral only) and `nominal-residual` (L1 + glidepath law, tanh-bounded residual, both axes),
-  sharing `gates.py` (on-final on the rollout's velocity). Gotchas: (1) the command is HELD
+  sharing `gates.py` (on-final on the rollout's velocity). **`nominal-residual`'s code was
+  ARCHIVED 2026-09-07** (`archive/nominal_law_hook_2026_09/`, package audit T2): it was never
+  adopted, and with the P1.d closure tracker deleted it had no other consumer. Its
+  measurements below stand; its config value still loads and names its six stored runs, and
+  `build_command_hook` refuses to build it. Gotchas: (1) the command is HELD
   for Δt, so every rate gain is `min(gain, 1/Δt)` — `RolloutStateView.duration_s` exists for
   this; (2) `hard` = hard saturation AND hard gate, training refuses it, so a trained arm is
   compared with the SOFT predict-only arm (`F_barrier_infer_soft`) for "training through the
@@ -132,7 +136,8 @@ Everything below is serialised into every checkpoint.
   complement (KRDU endpoint height above the threshold −164 → −7 m median, vertical violation rows 46.6 → 29.1 %,
   small lateral gain) and exposes a baseline fact: the control baseline ends 157 / 162 m BELOW
   the glidepath (median, KRDU / KSJC). Next: a combined hook (barrier
-  lateral + nominal vertical) at predict time. Campaigns `docs/experiments/control_hooks_arms.json`
+  lateral + nominal vertical) at predict time — that one takes the vertical law back OUT of
+  the archive deliberately, it is not an import away. Campaigns `docs/experiments/control_hooks_arms.json`
   → `control_hooks_20260906` (v1, commit cd981f4; its trained `F_barrier_soft` checkpoint
   predates v2 and would run v2 at predict time — quote its `_pred_val` records, do not
   re-predict it) and `control_hooks_v2_arms.json` → `control_hooks_v2_20260906` (KRDU + KSJC);

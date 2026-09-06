@@ -1090,14 +1090,7 @@ class FitResult:
     best_validation_selection: float
     train_windows: int
     val_windows: int
-    model_pretraining: dict[str, Any] | None = None
     procedure_multipliers: dict[str, float] | None = None
-
-
-ModelPretrainer = Callable[
-    [nn.Module, Sequence[FlightSeries], Normalizer, TSConfig, torch.device],
-    dict[str, Any],
-]
 
 
 @dataclass(frozen=True)
@@ -2172,7 +2165,6 @@ def fit_model(
     auto_batch_size: bool = False,
     minimum_anchor_index: int | None = None,
     verbose: bool = True,
-    model_pretrainer: ModelPretrainer | None = None,
 ) -> FitResult:
     """Fit one model against explicit train/validation flights, without touching test."""
     if not train_series or not val_series:
@@ -2248,11 +2240,6 @@ def fit_model(
 
     model = build_model(config, normalizer).to(device)
     multipliers = ProcedureMultipliers.from_config(config)
-    model_pretraining = (
-        model_pretrainer(model, train_series, normalizer, config, device)
-        if model_pretrainer is not None
-        else None
-    )
     optimizer = torch.optim.Adam(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
@@ -2614,7 +2601,6 @@ def fit_model(
         best_validation_selection=best_val,
         train_windows=len(train_set),
         val_windows=val_window_count,
-        model_pretraining=model_pretraining,
         # The λ the SELECTED epoch trained with, i.e. the one belonging to the restored
         # weights (the history carries the whole trajectory).
         procedure_multipliers=best_multipliers,
@@ -2631,7 +2617,6 @@ def train(
     data_selection: dict[str, Any] | None = None,
     auto_batch_size: bool = False,
     verbose: bool = True,
-    model_pretrainer: ModelPretrainer | None = None,
 ) -> dict[str, Any]:
     """Train one model on ``series``; write ``checkpoint.pt`` + ``history.json``.
 
@@ -2671,7 +2656,6 @@ def train(
         config,
         auto_batch_size=auto_batch_size,
         verbose=verbose,
-        model_pretrainer=model_pretrainer,
     )
     model, config, normalizer, device = (
         fit.model, fit.config, fit.normalizer, fit.device
@@ -2722,8 +2706,6 @@ def train(
         "data_provenance": data_provenance,
         "data_selection": data_selection,
     }
-    if fit.model_pretraining is not None:
-        checkpoint_payload["model_pretraining"] = fit.model_pretraining
     if fit.procedure_multipliers is not None:
         # The λ the selected epoch trained with: what a reader of the history needs to
         # weigh the logged ``procedure`` component, and where the dual run stood.
@@ -2794,8 +2776,6 @@ def train(
     }
     if eligibility_digests:
         checkpoint_metadata["eligibility_rosters"] = eligibility_digests
-    if fit.model_pretraining is not None:
-        checkpoint_metadata["model_pretraining"] = fit.model_pretraining
     if data_selection is not None:
         selection_path = out / "data_selection.json"
         selection_tmp = out / "data_selection.json.tmp"
@@ -2851,8 +2831,6 @@ def train(
     }
     if eligibility_digests:
         summary["data_provenance"]["eligibility_rosters"] = eligibility_digests
-    if fit.model_pretraining is not None:
-        summary["model_pretraining"] = fit.model_pretraining
     (out / HISTORY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if verbose:

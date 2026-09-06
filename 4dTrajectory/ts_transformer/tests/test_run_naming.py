@@ -137,6 +137,18 @@ def test_dynamics_distinguishes_derivative_and_backend():
     assert "τ-bank=4s" in dynamics_name(lagged)
 
 
+def test_the_retired_transport_chart_backend_still_names_its_stored_runs():
+    """`transport-chart-velocity` left the config vocabulary in T2 (2026-09-07).
+
+    Thirteen stored 2026-07/08 configs carry it and their on-disk directories end in
+    `_tcv`. The grammar reads stored DICTS, not `TSConfig`, so it must keep naming them —
+    a grammar that fell back to a slugified spelling would rename historical record.
+    """
+    stored = _control_config(control_dynamics_backend="transport-chart-velocity")
+    assert dynamics_name(stored) == "point-mass @transport-chart-velocity"
+    assert "_tcv" in run_slug(stored).replace("-", "_")
+
+
 def test_meta_folds_past_the_cap_and_keeps_seed_first():
     config = _control_config(
         seed=2024,

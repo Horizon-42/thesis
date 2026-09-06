@@ -48,14 +48,22 @@ STATE_POSITION_ABSOLUTE = "absolute"
 # rule): it did not clear the bar it was registered against, and `corridor-bounded` did.
 # The value STAYS only because a current-cohort artifact is stored under it
 # (`4dTrajectory/outputs/*/experiments/state_v2_20260903/A_anchor_relative`), whose config
-# must keep loading and naming. **Do not choose it for a new arm.**
+# must keep loading and naming. It cannot be SELECTED: it is absent from
+# `STATE_POSITION_REFERENCES_AVAILABLE`, which is the CLI's choices and the boundary check
+# `__main__._refuse_unavailable_selection` applies to `--config-overrides` as well — the
+# same mechanism `control_command_hook="nominal-residual"` uses.
 STATE_POSITION_ANCHOR_RELATIVE = "anchor-relative"
 # The absolute output, with the position channels bounded to the final-approach corridor
 # and glidepath window on the rows the output itself places on the final
 # (final_approach_geometry): a hard constraint by construction, no weight to calibrate.
 STATE_POSITION_CORRIDOR_BOUNDED = "corridor-bounded"
+#: What a STORED config may say.
 STATE_POSITION_REFERENCES = (
     STATE_POSITION_ABSOLUTE, STATE_POSITION_ANCHOR_RELATIVE, STATE_POSITION_CORRIDOR_BOUNDED,
+)
+#: What a NEW run may select (the CLI's choices): the vetoed value is not one of them.
+STATE_POSITION_REFERENCES_AVAILABLE = (
+    STATE_POSITION_ABSOLUTE, STATE_POSITION_CORRIDOR_BOUNDED,
 )
 # Which rows the corridor binds. ``on-final``: rows inside the full-scale cone and aligned
 # with the course, read from the prediction itself (deployable). ``faf``: every row inside
@@ -178,13 +186,17 @@ CONTROL_DYNAMICS_MODELS = (
 )
 
 CONTROL_DYNAMICS_REANCHORED_RK4 = "reanchored-rk4"
-CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY = "transport-chart-velocity"
 CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY = (
     "scaled-transport-chart-velocity"
 )
+# ``transport-chart-velocity`` — the same chart in PHYSICAL coordinates — was the third
+# value until 2026-09-07 (package audit T2). It was a measured regression against
+# `reanchored-rk4` (2026-07-31), the nondimensional variant replaced it on 2026-08-02, and
+# every stored config that carried it is a 2026-07/08 artifact that `from_dict` already
+# refuses for other reasons (13 on disk, 0 of them loading). `run_naming` still abbreviates
+# it, because those runs' directory names are historical record.
 CONTROL_DYNAMICS_BACKENDS = (
     CONTROL_DYNAMICS_REANCHORED_RK4,
-    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
 )
 CONTROL_RECIPE_CUSTOM = "custom"
@@ -357,15 +369,24 @@ PROCEDURE_LOSS_FIELDS = (
 # The rollout command hook: a constraint module that rewrites each control segment's
 # command from the state at the segment's start (control/dynamics/hooks.py). ``barrier``
 # is the per-step safety layer (a barrier on the corridor gives a bank interval the command
-# is saturated into); ``nominal-residual`` is a fixed tracking law toward the centreline
-# and glidepath with the command as a bounded residual around it
-# (docs/2026-09-05_control_constraint_design.zh.md). Both act only where the corridor gate
-# says the aircraft is on the final; ``soft`` saturation keeps gradients in the training
-# loop, ``hard`` is for inference-only arms.
+# is saturated into). It acts only where the corridor gate says the aircraft is on the
+# final; ``soft`` saturation keeps gradients in the training loop, ``hard`` is for
+# inference-only arms.
 CONTROL_HOOK_OFF = "off"
 CONTROL_HOOK_BARRIER = "barrier"
+# ``nominal-residual`` — a fixed tracking law toward the centreline and glidepath with the
+# command as a bounded residual — was NEVER ADOPTED
+# (docs/2026-09-06_control_hooks_results.zh.md) and its code is archived
+# (archive/nominal_law_hook_2026_09/). The VALUE stays because six 2026-09-06 configs, and
+# the checkpoints `load_checkpoint` rebuilds from them, carry it; `build_command_hook`
+# refuses to construct it, so it cannot be chosen for new work.
 CONTROL_HOOK_NOMINAL_RESIDUAL = "nominal-residual"
+#: What a STORED config may say.
 CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL)
+#: What a NEW run may select. ``off`` is in it — the flag's own choices drop that one,
+#: because `--command-hook` exists to turn a hook ON, but a config saying ``off`` is the
+#: default and must pass the boundary check in `__main__`.
+CONTROL_HOOKS_AVAILABLE = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER)
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
@@ -412,6 +433,18 @@ RETIRED_SERIALIZED_FIELDS = (
     # The gradient-clip POLICY axis went with `final-time-decoupled`: one remaining member
     # is not a choice, it is the behaviour. `control_gradient_clip_norm` stays.
     "control_gradient_clip_policy",
+    # The nominal-law hook's six gains (T2, 2026-09-07). Its code is archived
+    # (archive/nominal_law_hook_2026_09/) and nothing else reads them — the P1.d closure
+    # tracker that also used them went in T1-9. Measured on disk: not one stored config
+    # sets any of the six away from its default, so no recomputed run name moves. The
+    # `control_command_hook="nominal-residual"` VALUE is deliberately NOT retired; six
+    # 2026-09-06 configs and their checkpoints would stop loading.
+    "control_nominal_l1_distance_m",
+    "control_nominal_vertical_lookahead_m",
+    "control_nominal_vertical_gain",
+    "control_nominal_residual_bank_max_rad",
+    "control_nominal_residual_load_max",
+    "control_nominal_speed_gain",
 )
 
 CONTROL_HOOK_FIELDS = (
@@ -419,12 +452,6 @@ CONTROL_HOOK_FIELDS = (
     "control_hook_saturation",
     "control_barrier_alpha",
     "control_barrier_heading_gain",
-    "control_nominal_l1_distance_m",
-    "control_nominal_vertical_lookahead_m",
-    "control_nominal_vertical_gain",
-    "control_nominal_residual_bank_max_rad",
-    "control_nominal_residual_load_max",
-    "control_nominal_speed_gain",
 )
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
@@ -736,7 +763,7 @@ class TSConfig:
     # diluted to 1/N of the whole-path objective. It uses the same physical position scale
     # as the path loss; the 0.25 coefficient is frozen by the development Pareto audit.
     state_endpoint_loss_weight: float = 0.25
-    # Control/oracle experiment compatibility knobs. The formal direct-state objective
+    # Cross-output compatibility knobs the control path reads. The formal direct-state objective
     # ignores both: it predicts position+duration and derives future velocity from position.
     kinematic_consistency_loss_weight: float = 3.0
     terminal_loss_weight: float = 0.02
@@ -814,8 +841,9 @@ class TSConfig:
     control_gradient_clip_norm: float = 0.0
     # Rollout state representation is independent of the model/data coordinate frame.
     # The baseline re-anchors a local ENU RK4 step into geodetic state every sub-step;
-    # transport-chart-velocity integrates threshold-chart position plus moving-local-ENU
-    # physical velocity with the full WGS84 transport rate.
+    # scaled-transport-chart-velocity integrates threshold-chart position plus
+    # moving-local-ENU physical velocity with the full WGS84 transport rate, in
+    # order-one internal coordinates.
     control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4
     # Which flight model the rollout integrates. ``first-order-lag`` augments the state
     # with the three actual control values and drives them towards the model's commands;
@@ -840,16 +868,6 @@ class TSConfig:
     # error outside the admissible interval into a turn-rate demand (1/s).
     control_barrier_alpha: float = 0.1
     control_barrier_heading_gain: float = 0.1
-    # Nominal law + residual: L1 lateral lookahead, the vertical lookahead and gain of the
-    # glidepath law, and the residual bounds around the nominal command.
-    control_nominal_l1_distance_m: float = 3000.0
-    control_nominal_vertical_lookahead_m: float = 2000.0
-    control_nominal_vertical_gain: float = 0.2
-    control_nominal_residual_bank_max_rad: float = math.radians(5.0)
-    control_nominal_residual_load_max: float = 0.1
-    # Thrust coordination of the nominal-law hook: T' = T + k·m·(V_reference − V), the
-    # reference being the network's own unhooked rollout (1/k = 10 s).
-    control_nominal_speed_gain: float = 0.1
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -1007,10 +1025,7 @@ class TSConfig:
                 raise ValueError("the command hook rides the native segment-endpoint rollout")
             if self.coordinate_frame != COORDINATE_FRAME_ENU:
                 raise ValueError("the command hook reads the threshold-anchored ENU chart")
-            for name in ("control_barrier_alpha", "control_barrier_heading_gain",
-                         "control_nominal_l1_distance_m", "control_nominal_vertical_lookahead_m",
-                         "control_nominal_vertical_gain", "control_nominal_residual_bank_max_rad",
-                         "control_nominal_residual_load_max", "control_nominal_speed_gain"):
+            for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
                 if getattr(self, name) <= 0.0:
                     raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
         if (

@@ -35,6 +35,7 @@ from config import (  # noqa: E402
     TSConfig,
 )
 from control.oracle.shooting import (  # noqa: E402
+    refine_piecewise_constant_schedule,
     ORACLE_DURATION_LEARNED,
     ORACLE_DURATION_MODES,
     ORACLE_OBJECTIVE_ALL_STATE,
@@ -49,10 +50,7 @@ from control.oracle.curriculum import (  # noqa: E402
     build_horizon_curriculum,
     build_horizon_stage_view,
 )
-from control.dynamics.inverse import (  # noqa: E402
-    refine_piecewise_constant_schedule,
-    segment_controls,
-)
+from control.dynamics.inverse import segment_controls  # noqa: E402
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,

@@ -4,16 +4,18 @@
 threshold chart and all from the OBSERVED half of every neighbour — ``future_label`` is
 never read here (``tests/test_scene_features.py`` pins that by scrambling it):
 
-* ``neighbours``: ``[N_MAX, L, 6]`` — each neighbour's chart position (e, n, height) and
-  velocity (finite differences of the position) resampled onto the ego's own lookback
-  grid (``L`` steps of ``dt_s`` ending at t₀), zero where the neighbour has no sample;
-  ``neighbour_mask``: ``[N_MAX, L]``, True where the grid time lies inside the
-  neighbour's sampled span; ``neighbour_valid``: ``[N_MAX]``.
 * ``neighbour_static``: ``[N_MAX, len(STATIC_NAMES)]`` — the entity-level quantities
   (distance to the ego, distance to the threshold, ETA, its lead over the ego's ETA,
-  established, age of the last sample, runway axes at the last sample).
+  established, age of the last sample, runway axes at the last sample);
+  ``neighbour_valid``: ``[N_MAX]``, True where a slot holds a neighbour.
 * ``scalars``: ``[len(SCALAR_NAMES)]`` — the runway-use scalars, with missing values
   (no landing yet, no lead) encoded as the stated sentinels.
+
+The SEQUENCE half — each neighbour's ``[N_MAX, L, 6]`` chart track resampled onto the
+ego's lookback grid, plus its ``[N_MAX, L]`` validity mask — was deleted 2026-09-07
+(package audit T2): the L4 explainability gate did not pass, and its only consumer reads
+the entity and scalar halves. Adding it back means re-deriving it against a model that
+actually consumes a sequence.
 
 Everything is metres, seconds and metres per second; scaling is the model's business.
 """
@@ -38,28 +40,9 @@ SHARE_UNKNOWN = 0.5                  # same-runway share when nothing landed rec
 
 @dataclass(frozen=True)
 class SceneArrays:
-    neighbours: np.ndarray        # [N_MAX, L, 6] float32
-    neighbour_mask: np.ndarray    # [N_MAX, L] bool
     neighbour_valid: np.ndarray   # [N_MAX] bool
     neighbour_static: np.ndarray  # [N_MAX, S] float32
     scalars: np.ndarray           # [K] float32
-
-
-def _series_on_grid(neighbour: Neighbour, grid_rel_s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    o = neighbour.observed
-    inside = (grid_rel_s >= o.t_rel_s[0]) & (grid_rel_s <= o.t_rel_s[-1])
-    e = np.interp(grid_rel_s, o.t_rel_s, o.e_m)
-    n = np.interp(grid_rel_s, o.t_rel_s, o.n_m)
-    h = np.interp(grid_rel_s, o.t_rel_s, o.height_m)
-    rows = np.zeros((len(grid_rel_s), 6), dtype=np.float64)
-    rows[:, 0], rows[:, 1], rows[:, 2] = e, n, h
-    if inside.sum() >= 2:
-        idx = np.flatnonzero(inside)
-        rows[idx, 3] = np.gradient(e[idx], grid_rel_s[idx])
-        rows[idx, 4] = np.gradient(n[idx], grid_rel_s[idx])
-        rows[idx, 5] = np.gradient(h[idx], grid_rel_s[idx])
-    rows[~inside] = 0.0
-    return rows, inside
 
 
 def static_row(neighbour: Neighbour, ego_eta_s: float) -> np.ndarray:
@@ -84,21 +67,11 @@ def scalar_row(scene: SceneContext) -> np.ndarray:
     ], dtype=np.float64)
 
 
-def scene_arrays(scene: SceneContext, *, seq_len: int, dt_s: float, n_max: int = N_MAX) -> SceneArrays:
-    """The arrays for one scene on the ego's lookback grid (``seq_len`` steps of ``dt_s``
-    ending at t₀, the ts window's own clock)."""
-    if (seq_len - 1) * dt_s > scene.window_s:
-        raise ValueError(
-            f"a {seq_len} x {dt_s:g} s lookback reaches {(seq_len - 1) * dt_s:g} s back, beyond the "
-            f"scene's {scene.window_s:g} s window — the earlier steps would be silently empty"
-        )
-    grid = -dt_s * np.arange(seq_len - 1, -1, -1, dtype=np.float64)
-    neighbours = np.zeros((n_max, seq_len, 6), dtype=np.float32)
-    mask = np.zeros((n_max, seq_len), dtype=bool)
+def scene_arrays(scene: SceneContext, *, n_max: int = N_MAX) -> SceneArrays:
+    """The entity and scalar arrays for one scene, in the ego's own threshold chart."""
     valid = np.zeros(n_max, dtype=bool)
     static = np.zeros((n_max, len(STATIC_NAMES)), dtype=np.float32)
     for slot, neighbour in enumerate(scene.neighbours[:n_max]):
-        rows, inside = _series_on_grid(neighbour, grid)
-        neighbours[slot], mask[slot], valid[slot] = rows, inside, True
+        valid[slot] = True
         static[slot] = static_row(neighbour, scene.ego_eta_s)
-    return SceneArrays(neighbours, mask, valid, static, scalar_row(scene).astype(np.float32))
+    return SceneArrays(valid, static, scalar_row(scene).astype(np.float32))

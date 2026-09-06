@@ -77,8 +77,11 @@ the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure outp
   `control_hooks_v2_20260906` at KRDU + KSJC; report
   `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a
   predict-time safety layer; not adopted: any hook inside the training loop (six arms, none
-  beat its predict-time counterpart), the hard gate. Open: the combined lateral-barrier +
-  vertical-nominal hook at predict time; the baseline ending 157 / 162 m below the glidepath
+  beat its predict-time counterpart), the hard gate. The nominal law's code was archived
+  2026-09-07 (`archive/nominal_law_hook_2026_09/`; it was the unadopted hook's only
+  remaining consumer once T1-9 deleted the closure tracker). Open: the combined
+  lateral-barrier + vertical-nominal hook at predict time — reviving the vertical half is a
+  deliberate un-archive, not an import; the baseline ending 157 / 162 m below the glidepath
   — traced 2026-09-07 to the last minute of the rollout (on the final it sits within ±13 m
   of the glidepath; at the truth's landing time it is 540–680 m short and 140 m low, path
   angle −4…−5° vs −3°), NOT to data, coordinates or the fitted tail (2–6 s), and read as

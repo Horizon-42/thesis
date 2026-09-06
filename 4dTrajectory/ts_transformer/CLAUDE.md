@@ -71,8 +71,11 @@ Single-aircraft-only and deterministic point-prediction are scope decisions for 
 
 Two orthogonal dynamics axes underneath the control path: `control_dynamics_model` ∈
 `point-mass` | `first-order-lag` is the physics; `control_dynamics_backend` ∈ `reanchored-rk4` |
-`transport-chart-velocity` | `scaled-transport-chart-velocity` is the state representation the
-long rollout carries. **The registry in `control/dynamics/backends.py` is keyed by the PAIR.**
+`scaled-transport-chart-velocity` is the state representation the long rollout carries (the
+unscaled `transport-chart-velocity` was RETIRED 2026-09-07 — a measured regression that the
+nondimensional variant replaced on 2026-08-02; `run_naming` still abbreviates it so the 13
+stored 2026-07/08 configs keep their `_tcv` names). **The registry in
+`control/dynamics/backends.py` is keyed by the PAIR.**
 The lagged model *wraps* `transport_chart_rhs` — same force equations, stall handling, transport
 term and chart projection — so it is the point-mass model plus three actuators, not a second
 flight model.
@@ -143,7 +146,7 @@ flight model.
 | axis | default | status |
 |---|---|---|
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs |
-| `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule — the value survives only so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads; never choose it for a new arm** |
+| `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `__main__._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport** |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option |
@@ -198,13 +201,27 @@ command is HELD.
 ## Layout
 
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
-prefix: `envelope`, `heads`, `duration`, `conditioning`, `dynamics/{backends,rollout,inverse}`,
-`loss/{components,fixed_dt}`, `training/diagnostics`,
-`constraints/{barrier_filter,nominal_residual,gates}`, `oracle/*` (which absorbed the old
-`oracle_teacher/` package — two halves of one idea).
+prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
+`dynamics/{backends,rollout,inverse,hooks}`, `loss/{components,fixed_dt}`,
+`training/diagnostics`, `constraints/{barrier_filter,gates}`.
+
+**`archive/` is not the package.** Completed campaigns are kept there (README each, naming
+the result documents that cite them, the commit they were taken from, and anything vendored
+in to keep them self-contained) and are OFF the import path:
+
+- `archive/oracle_teacher_2026_08/` — the 2026-08 inverse-dynamics teacher: eight modules,
+  five runners (four of them `run_ts_*`), two test files. Superseded by `simple-v3`'s
+  in-training imitation term.
+- `archive/nominal_law_hook_2026_09/` — the never-adopted nominal tracking law +
+  bounded-residual command hook (`nominal_residual.py`, `guidance_laws.py`). The adopted hook
+  is the predict-time barrier, which stays live.
+
+`tests/test_architecture.py` asserts nothing live imports the archive — package modules,
+`tests/` and the root `run_ts_*.py` runners alike — and that no `__init__.py` makes it
+importable. A finished one-off driver belongs there, not beside the live runners.
 
 **Measurement code is CODE.** Reusable logic goes in the package with tests
-(`control/oracle/basis.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
+(`control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
 a runnable experiment goes in a top-level `run_ts_*.py` runner beside the others;
 **`docs/` holds documents**. The `docs/*.py` scripts predate this rule and are a layout
 defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add to them, and

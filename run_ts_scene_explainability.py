@@ -43,7 +43,6 @@ for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from config import DEFAULT_DT_S, DEFAULT_SEQ_LEN  # noqa: E402
 from flight_scenarios.scene_context import scene_context  # noqa: E402
 from intent_explainability import CONTEXT_NAMES, cv_r2, population  # noqa: E402
 from scene.features import SCALAR_NAMES, STATIC_NAMES, scene_arrays  # noqa: E402
@@ -65,7 +64,7 @@ def scene_features(paths: HarvestPaths, index, row: dict, targets: dict, *, neig
         t0_utc_s=row["t0_utc_s"], ego_lat=row["anchor_lat"], ego_lon=row["anchor_lon"],
         ego_alt_hae_m=row["anchor_alt_hae_m"], ego_ground_speed_mps=row["anchor_ground_speed_mps"],
     )
-    arrays = scene_arrays(scene, seq_len=DEFAULT_SEQ_LEN, dt_s=DEFAULT_DT_S)
+    arrays = scene_arrays(scene)
     static = arrays.neighbour_static[:neighbours]
     valid = arrays.neighbour_valid[:neighbours].astype(np.float64)[:, None]
     return arrays.scalars.astype(np.float64), np.concatenate([static * valid, valid], axis=1).ravel()

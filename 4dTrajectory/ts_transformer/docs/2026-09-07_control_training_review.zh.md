@@ -3,6 +3,8 @@
 > **已取代（2026-09-07）**：§四 的 P0/P1 修法针对 64 段 control 头，该头已降级为基线（`2026-09-07_latent_intent_design.zh.md` §四）。§一–§三 的现象拆解仍然成立；教师的改进方向是**拟合教师**（L0 `basis_fit.json`），不是闭环教师。
 >
 > **另注（2026-09-07，包审计 T1-11 / T1-13）**：§三 表格和 §七.3 引用的 `control/loss/terminal_clock.py`、`control_terminal_position_loss_weight` / `control_terminal_velocity_loss_weight` 与 `control_terminal_supervision_clock` 已删除（那条终端时钟路径只在已退役的 `arc-length-geometry` 目标下可达）。阈值平面事件锚定若要做，是新写，不是复用。
+>
+> **另注（2026-09-07，包审计 T2）**：§五.5 的闭环（DAgger 式）教师建立在 `control/guidance_laws.py` 的三条制导律上，那两个文件已随未被采用的名义律 hook 归档到 `archive/nominal_law_hook_2026_09/`。要做这条路线，是把它们**有意地**取回来，不是 import 一下。
 
 **第一部分**是一个具体问题的复审，**第二部分（§七）**是整体的提升路线——现在的模型离 state of the art 还有距离，第一部分修的是几百米级的末段偏差，第二部分面对的是公里级的误差主体。
 

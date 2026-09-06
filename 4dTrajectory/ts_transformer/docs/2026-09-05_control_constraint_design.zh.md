@@ -1,5 +1,7 @@
 # control 输出的约束方案（dev 文档，2026-09-05，第六版：屏障 v2、名义律 v2）
 
+> **代码已归档（2026-09-07，包审计 T2）。** 本文引用的名义律 hook（`control/constraints/nominal_residual.py` + `control/guidance_laws.py`）从未被采用（采用的是预测期软屏障），随 P1.d 跟踪器在 T1-9 被删后失去唯一消费者，已移入 `archive/nominal_law_hook_2026_09/`：不在 import 路径上、不再可训练。`control_command_hook="nominal-residual"` 取值保留（六个 2026-09-06 配置与检查点要靠它加载），但 `build_command_hook` 拒绝构造它。数字保留为历史，不重写。
+
 承接 `2026-09-04_constraint_methods_survey.zh.md`（方法综述）和 `2026-09-05_final_constraint_results.zh.md`（state 输出上的结果）。问题：**同一个五边约束（LPV 走廊 + 下滑道窗口）在 control 输出上，除了罚项，还能怎么加？**
 
 ## 结论

@@ -74,7 +74,7 @@ from config import (  # noqa: E402
     TSConfig,
 )
 from control.loss.fixed_dt import fixed_dt_control_state_loss  # noqa: E402
-from control.oracle.basis import (  # noqa: E402
+from control.basis_fit import (  # noqa: E402
     DEFAULT_LEARNING_RATE_FLOOR,
     DURATION_MODES,
     BasisSchedule,
@@ -422,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--steps", type=int, default=600)
     parser.add_argument("--batch-size", type=int, default=256)
     # Rates are per SEGMENT: the arm at width N starts from this over N (see
-    # control.oracle.basis.width_scaled_learning_rate). 0.08 is 0.01 at the measured N=8 optimum.
+    # control.basis_fit.width_scaled_learning_rate). 0.08 is 0.01 at the measured N=8 optimum.
     parser.add_argument("--control-learning-rate", type=float, default=0.08,
                         help="starting rate at N=1 segment; each arm uses it divided by its N")
     parser.add_argument("--duration-learning-rate", type=float, default=0.08,

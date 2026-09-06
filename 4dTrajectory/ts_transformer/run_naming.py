@@ -68,6 +68,10 @@ _DYNAMICS_SLUG = {
     CONTROL_DYNAMICS_FIRST_ORDER_LAG: "lag",
 }
 _BACKEND_SLUG = {
+    # `transport-chart-velocity` is RETIRED from the config vocabulary (T2, 2026-09-07) and
+    # stays here on purpose: 13 stored 2026-07/08 configs carry it, their on-disk run
+    # directories are named `…_tcv`, and on-disk names are historical record. A grammar
+    # that could no longer name them would rename them.
     "transport-chart-velocity": "tcv",
     "scaled-transport-chart-velocity": "stcv",
 }
@@ -234,12 +238,6 @@ _ABBREV = {
     "control_hook_saturation": "hook-sat",
     "control_barrier_alpha": "barrier-alpha",
     "control_barrier_heading_gain": "barrier-gain",
-    "control_nominal_l1_distance_m": "l1",
-    "control_nominal_vertical_lookahead_m": "vert-look",
-    "control_nominal_vertical_gain": "vert-gain",
-    "control_nominal_residual_bank_max_rad": "res-bank",
-    "control_nominal_residual_load_max": "res-load",
-    "control_nominal_speed_gain": "speed-gain",
 }
 
 #: Split prefixes shared by every category-label producer (publisher, pipeline,
