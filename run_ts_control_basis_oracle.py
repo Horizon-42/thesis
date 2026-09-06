@@ -75,11 +75,13 @@ from config import (  # noqa: E402
 )
 from control.loss.fixed_dt import fixed_dt_control_state_loss  # noqa: E402
 from control.oracle.basis import (  # noqa: E402
+    DEFAULT_LEARNING_RATE_FLOOR,
     DURATION_MODES,
     BasisSchedule,
     fit_basis_schedules,
     free_number_count,
     inverse_dynamics_seed,
+    width_scaled_learning_rate,
 )
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
@@ -220,7 +222,7 @@ def score_flights(
     lower = dynamics["control_lower"].cpu().numpy().astype(np.float64)
     upper = dynamics["control_upper"].cpu().numpy().astype(np.float64)
     seed_value = fit.seed_value.cpu().numpy().astype(np.float64)
-    still_improving = fit.still_improving
+    tail_gain = fit.tail_gain.cpu().numpy().astype(np.float64)
 
     rows = []
     for row, (series, key) in enumerate(zip(series_batch, keys)):
@@ -262,7 +264,7 @@ def score_flights(
             "segment_duration_min_s": float(durations[row].min()),
             "segment_duration_max_s": float(durations[row].max()),
             "best_step": int(fit.best_step[row]),
-            "still_improving": bool(still_improving[row]),
+            "tail_gain": float(tail_gain[row]),
             "controls": controls[row].tolist(),
             "segment_durations_s": durations[row].tolist(),
         })
@@ -297,7 +299,8 @@ def summarise(rows: list[dict], masks: dict[str, np.ndarray], cohort_keys: list[
             "chamfer_p50_m": _p([row["chamfer_m"] for row in selected], 50),
             "frechet_p50_m": _p([row["frechet_m"] for row in selected], 50),
             "saturated_p50": _p([row["saturated_fraction"] for row in selected], 50),
-            "still_improving_share": float(np.mean([row["still_improving"] for row in selected])),
+            "tail_gain_p50": _p([row["tail_gain"] for row in selected], 50),
+            "tail_gain_p90": _p([row["tail_gain"] for row in selected], 90),
         }
     return out
 
@@ -340,9 +343,10 @@ def fit_arm(
 
         fit = fit_basis_schedules(
             schedule, objective, steps=args.steps,
-            control_learning_rate=args.control_learning_rate,
-            duration_learning_rate=args.duration_learning_rate,
+            control_learning_rate=width_scaled_learning_rate(args.control_learning_rate, n_segments),
+            duration_learning_rate=width_scaled_learning_rate(args.duration_learning_rate, n_segments),
             gradient_clip_norm=args.gradient_clip_norm,
+            learning_rate_floor=args.learning_rate_floor,
         )
         clip_shares.append(fit.clipped_share)
         rows += score_flights(
@@ -377,7 +381,8 @@ def render(payload: dict) -> str:
         f"flights of {payload['coverage']['scored_rows']} scored "
         f"({payload['coverage']['dropped_unscored_rows']} reference rows unscored), "
         f"anchor {payload['anchor_index']}, {payload['optimizer']['steps']} steps, "
-        f"lr {payload['optimizer']['control_learning_rate']}",
+        f"lr {payload['optimizer']['control_learning_rate']} annealed to "
+        f"x{payload['optimizer']['learning_rate_floor']}",
         f"reference {payload['reference']} (split {payload['split']}), "
         f"dynamics {payload['config']['control_dynamics_model']} / "
         f"{payload['config']['control_dynamics_backend']}",
@@ -387,7 +392,7 @@ def render(payload: dict) -> str:
         "",
         f"{'arm':>16s} {'free#':>6s} {'stratum':>46s} {'n':>5s} {'ADE mean':>9s} {'ADE p50':>8s} "
         f"{'FDE p50':>8s} {'fitADE':>8s} {'seedADE':>8s} {'chamfer':>8s} {'Frechet':>8s} "
-        f"{'sat p50':>8s} {'unconv':>7s}",
+        f"{'sat p50':>8s} {'tailp50':>8s} {'tailp90':>8s}",
     ]
     for label, arm in payload["arms"].items():
         for stratum, values in arm["strata"].items():
@@ -396,12 +401,14 @@ def render(payload: dict) -> str:
                 f"{values['ade_mean_m']:>9.1f} {values['ade_p50_m']:>8.1f} {values['fde_p50_m']:>8.1f} "
                 f"{values['fixed_dt_ade_mean_m']:>8.1f} {values['seed_fixed_dt_ade_mean_m']:>8.1f} "
                 f"{values['chamfer_p50_m']:>8.1f} {values['frechet_p50_m']:>8.1f} "
-                f"{values['saturated_p50']:>8.3f} {values['still_improving_share']:>7.2f}"
+                f"{values['saturated_p50']:>8.3f} {values['tail_gain_p50']:>8.4f} "
+                f"{values['tail_gain_p90']:>8.4f}"
             )
         lines.append("")
     verdict = payload["verdict"]
-    lines.append("unconv = share of flights whose best step was in the last 5 % of the budget; "
-                 "read the gate only when it is small.")
+    lines.append("tail = relative gain the LAST 10 % of the step budget bought (p50 / p90); "
+                 "read the gate only when both are small — under an annealed rate the "
+                 "best-step share is ~1 by construction and says nothing.")
     lines.append(f"gate: {verdict['gate']} -> {verdict['status']} "
                  f"({', '.join(verdict['passing_arms']) or 'none'})")
     return "\n".join(lines) + "\n"
@@ -421,9 +428,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=0, help="0 = the whole cohort")
     parser.add_argument("--steps", type=int, default=600)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--control-learning-rate", type=float, default=0.01)
-    parser.add_argument("--duration-learning-rate", type=float, default=0.01)
+    # Rates are per SEGMENT: the arm at width N starts from this over N (see
+    # control.oracle.basis.width_scaled_learning_rate). 0.08 is 0.01 at the measured N=8 optimum.
+    parser.add_argument("--control-learning-rate", type=float, default=0.08,
+                        help="starting rate at N=1 segment; each arm uses it divided by its N")
+    parser.add_argument("--duration-learning-rate", type=float, default=0.08,
+                        help="starting rate at N=1 segment; each arm uses it divided by its N")
     parser.add_argument("--gradient-clip-norm", type=float, default=20.0)
+    parser.add_argument("--learning-rate-floor", type=float, default=DEFAULT_LEARNING_RATE_FLOOR,
+                        help="anneal the rates to this fraction of their starting value")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args(argv)
@@ -441,6 +454,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("control_learning_rate", "duration_learning_rate", "gradient_clip_norm"):
         if getattr(args, name) <= 0.0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
+    if not 0.0 < args.learning_rate_floor <= 1.0:
+        parser.error("--learning-rate-floor must be in (0, 1]")
 
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     out.mkdir(parents=True, exist_ok=False)   # experiment artifacts are immutable
@@ -476,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
                   f"(seed fit {everything['seed_fixed_dt_ade_mean_m']:7.1f} -> "
                   f"{everything['fixed_dt_ade_mean_m']:7.1f}) | "
                   f"vectored {vectored.get('ade_mean_m', float('nan')):8.1f} m | "
-                  f"unconverged {everything['still_improving_share']:.2f} | "
+                  f"tail p50/p90 {everything['tail_gain_p50']:.4f}/{everything['tail_gain_p90']:.4f} | "
                   f"{arm['seconds']:.0f} s", flush=True)
 
     passing = [
@@ -499,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
             "control_learning_rate": args.control_learning_rate,
             "duration_learning_rate": args.duration_learning_rate,
             "gradient_clip_norm": args.gradient_clip_norm,
+            "learning_rate_floor": args.learning_rate_floor,
             "seed": args.seed,
             "device": str(device),
         },

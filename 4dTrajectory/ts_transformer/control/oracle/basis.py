@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import math
 
 import numpy as np
 import torch
@@ -45,7 +46,27 @@ DURATION_MODES = (DURATION_UNIFORM, DURATION_FREE)
 # bound has no finite logit; this is the margin the seed is held inside the box by.
 UNIT_LOGIT_MARGIN = 1e-6
 # A flight whose best step is this far into the budget was still improving when it ran out.
+# Under an annealed rate the objective falls monotonically to the last step, so this is ~1 for
+# every flight and says nothing; ``tail_gain`` is the convergence measure that survives
+# annealing — what the last TAIL_FRACTION of the budget actually bought, relative to the answer.
 STILL_IMPROVING_FRACTION = 0.95
+TAIL_FRACTION = 0.1
+# Measured on KRDU (256 flights, 400 steps, uniform durations, vectored-stratum ADE): a fixed
+# rate that converges fast reaches a bad floor and one that reaches a good floor has not
+# arrived by the budget's end — 0.05 gave 1236 m at N=8 and 1167 at N=64, 0.01 gave 642 / 411,
+# 0.002 gave 724 (71 % still improving) / 141. The rate is therefore annealed to this fraction
+# of its start.
+DEFAULT_LEARNING_RATE_FLOOR = 0.05
+# ...and the optimum moves with the WIDTH (N=8 wants ~0.01, N=64 ~0.002; annealing from one
+# start served N=8 but cost N=64 141 -> 299 m). N controls move the trajectory together, so the
+# step in trajectory space grows with N and the rate that keeps it fixed is base/N. Scaling by
+# it is what lets ONE setting serve every width — a per-width hand-tuned rate would confound
+# the width with the tuning, which is the one thing a width study must not do.
+def width_scaled_learning_rate(base: float, n_segments: int) -> float:
+    """The rate for one width: ``base`` is the rate at N = 1 segment."""
+    if base <= 0.0 or n_segments < 1:
+        raise ValueError("base rate must be positive and n_segments >= 1")
+    return base / n_segments
 # The anchor cross-check catches a mis-ALIGNED batch (kilometres, whole flights), not float
 # noise, so its tolerances are stated per component in the units each one is measured in:
 # degrees, metres, m/s, radians. 1e-5 deg is about a metre.
@@ -225,13 +246,39 @@ class BasisFitResult:
     best_value: torch.Tensor      # [B] the best objective reached
     best_step: np.ndarray         # [B] the step it was reached at
     seed_value: torch.Tensor      # [B] the objective at step 0, before any update
+    tail_value: torch.Tensor      # [B] the best objective at (1 - TAIL_FRACTION) of the budget
     clipped_share: float          # share of (flight, step) pairs the gradient clip fired on
     steps: int
+
+    @property
+    def tail_gain(self) -> torch.Tensor:
+        """What the last ``TAIL_FRACTION`` of the budget bought, relative to the answer.
+
+        The convergence measure that survives an annealed rate: near zero means more budget
+        would not move the number this study reports.
+        """
+        return (self.tail_value - self.best_value) / self.best_value.clamp(min=1e-9)
 
     @property
     def still_improving(self) -> np.ndarray:
         """Flights whose best step is at the end of the budget: the fit ran out, not converged."""
         return self.best_step >= STILL_IMPROVING_FRACTION * self.steps
+
+
+def cosine_floor_schedule(steps: int, floor: float) -> Callable[[int], float]:
+    """A multiplier that anneals every parameter group from 1.0 to ``floor`` by ``steps``.
+
+    A multiplier, not an absolute rate, so the control and duration groups keep whatever
+    ratio the caller chose between them.
+    """
+    if not 0.0 < floor <= 1.0:
+        raise ValueError(f"the learning-rate floor must be in (0, 1], got {floor!r}")
+
+    def multiplier(step: int) -> float:
+        progress = min(max(step / max(steps, 1), 0.0), 1.0)
+        return floor + (1.0 - floor) * 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return multiplier
 
 
 def fit_basis_schedules(
@@ -242,8 +289,12 @@ def fit_basis_schedules(
     control_learning_rate: float,
     duration_learning_rate: float,
     gradient_clip_norm: float,
+    learning_rate_floor: float = DEFAULT_LEARNING_RATE_FLOOR,
 ) -> BasisFitResult:
     """Adam on the batch; restore each flight's OWN best-objective parameters.
+
+    The rate is annealed from the given one down to ``learning_rate_floor`` times it, so
+    one budget serves every width (see :data:`DEFAULT_LEARNING_RATE_FLOOR`).
 
     ``objective`` returns one scalar per flight. The batch mean drives the gradient (the
     flights share no parameter, and Adam is per-parameter scale-invariant), but the best
@@ -264,12 +315,17 @@ def fit_basis_schedules(
     groups = schedule.parameter_groups(control_learning_rate, duration_learning_rate)
     parameters = [parameter for group in groups for parameter in group["params"]]
     optimizer = torch.optim.Adam(groups)
+    annealer = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, cosine_floor_schedule(steps, learning_rate_floor)
+    )
     fitted = schedule.fitted_parameters
     batch = len(schedule.final_time_s)
     best_value: torch.Tensor | None = None
     seed_value: torch.Tensor | None = None
     best_state = {name: getattr(schedule, name).detach().clone() for name in fitted}
     best_step = np.zeros(batch, dtype=int)
+    tail_value: torch.Tensor | None = None
+    tail_step = int(round((1.0 - TAIL_FRACTION) * steps))
     clipped = 0
 
     for step in range(steps + 1):
@@ -297,12 +353,15 @@ def fit_basis_schedules(
                     view = improved.reshape((-1,) + (1,) * (tensor.dim() - 1))
                     best_state[name] = torch.where(view, tensor, best_state[name])
                 best_step[improved.cpu().numpy()] = step
+            if step == tail_step:
+                tail_value = best_value.clone()
         if step == steps:
             break
         per_flight.mean().backward()
         norms = clip_gradients_per_flight(parameters, gradient_clip_norm)
         clipped += int((norms > gradient_clip_norm).sum())
         optimizer.step()
+        annealer.step()
 
     with torch.no_grad():
         for name in fitted:
@@ -311,6 +370,7 @@ def fit_basis_schedules(
         best_value=best_value,
         best_step=best_step,
         seed_value=seed_value,
+        tail_value=seed_value if tail_value is None else tail_value,
         clipped_share=clipped / float(batch * steps),
         steps=steps,
     )

@@ -37,7 +37,7 @@ def _row(key: str, ade: float) -> dict:
     return {
         "flight_key": key, "ade_m": ade, "fde_m": ade, "fixed_dt_ade_m": ade,
         "seed_fixed_dt_ade_m": ade * 2, "chamfer_m": ade, "frechet_m": ade,
-        "saturated_fraction": 0.0, "still_improving": False,
+        "saturated_fraction": 0.0, "tail_gain": 0.0,
     }
 
 

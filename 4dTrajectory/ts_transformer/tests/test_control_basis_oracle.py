@@ -12,6 +12,8 @@ from control.oracle.basis import (
     DURATION_UNIFORM,
     BasisSchedule,
     clip_gradients_per_flight,
+    cosine_floor_schedule,
+    width_scaled_learning_rate,
     fit_basis_schedules,
     free_number_count,
 )
@@ -126,6 +128,8 @@ def test_the_fit_keeps_each_flight_s_own_best_step():
     assert torch.allclose(fit.seed_value, torch.tensor([5.0, 5.0], dtype=torch.float64))
     # steps=4 -> 0.95*4 = 3.8, so only a best step of 4 counts as "still improving".
     assert np.array_equal(fit.still_improving, np.array([False, False]))
+    # The tail reference is the best at step round(0.9*4) = 4, i.e. the end: no tail gain.
+    assert torch.allclose(fit.tail_gain, torch.zeros(2, dtype=torch.float64))
 
 
 def test_the_fit_restores_the_best_parameters_not_the_last():
@@ -202,3 +206,77 @@ def test_the_clipped_share_counts_flight_steps():
     )
     assert fit.clipped_share == pytest.approx(1.0)
     assert fit.steps == 3
+
+
+def test_the_cosine_floor_schedule_starts_at_one_and_lands_on_the_floor():
+    multiplier = cosine_floor_schedule(steps=10, floor=0.05)
+    assert multiplier(0) == pytest.approx(1.0)
+    assert multiplier(5) == pytest.approx(0.05 + 0.95 * 0.5)
+    assert multiplier(10) == pytest.approx(0.05)
+    assert multiplier(99) == pytest.approx(0.05)     # clamped past the budget
+    with pytest.raises(ValueError, match="floor must be in"):
+        cosine_floor_schedule(steps=10, floor=0.0)
+
+
+def test_the_fit_anneals_both_groups_by_the_same_multiplier():
+    schedule = _schedule(DURATION_FREE, batch=1, n_segments=2)
+    seen: list[tuple[float, float]] = []
+
+    def objective(prediction):
+        seen.append(tuple(group["lr"] for group in _groups))
+        return prediction.controls.sum(dim=(1, 2))
+
+    fit_result = None
+    _groups: list[dict] = []
+    # Reach into the optimizer's groups by re-deriving them the same way the fit does.
+    original = torch.optim.Adam
+
+    class _Recording(original):
+        def __init__(self, groups, **kwargs):
+            super().__init__(groups, **kwargs)
+            _groups.extend(self.param_groups)
+
+    torch.optim.Adam = _Recording
+    try:
+        fit_result = fit_basis_schedules(
+            schedule, objective, steps=4,
+            control_learning_rate=0.1, duration_learning_rate=0.05,
+            gradient_clip_norm=1.0, learning_rate_floor=0.5,
+        )
+    finally:
+        torch.optim.Adam = original
+    assert fit_result is not None
+    assert seen[0] == pytest.approx((0.1, 0.05))
+    # Both groups keep their 2:1 ratio all the way down to the floor.
+    for control_lr, duration_lr in seen:
+        assert control_lr == pytest.approx(2.0 * duration_lr)
+    assert seen[-1][0] == pytest.approx(0.1 * 0.5)
+
+
+def test_tail_gain_measures_what_the_last_tenth_of_the_budget_bought():
+    """The convergence measure that survives annealing, where best_step is ~1 by construction."""
+    schedule = _schedule(DURATION_UNIFORM, batch=1, n_segments=2)
+    # 10 steps -> 11 objective calls; the tail reference is the best at step round(0.9*10) = 9.
+    values = torch.tensor([[100.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 25.0, 22.0, 20.0]],
+                          dtype=torch.float64)
+    calls = {"index": 0}
+
+    def objective(prediction):
+        index = calls["index"]
+        calls["index"] += 1
+        return values[:, index] + prediction.controls.sum() * 0.0
+
+    fit = fit_basis_schedules(
+        schedule, objective, steps=10,
+        control_learning_rate=1e-3, duration_learning_rate=1e-3, gradient_clip_norm=1.0,
+    )
+    assert torch.allclose(fit.best_value, torch.tensor([20.0], dtype=torch.float64))
+    assert torch.allclose(fit.tail_value, torch.tensor([22.0], dtype=torch.float64))
+    assert torch.allclose(fit.tail_gain, torch.tensor([0.1], dtype=torch.float64))
+
+
+def test_the_rate_is_scaled_by_the_width():
+    assert width_scaled_learning_rate(0.08, 8) == pytest.approx(0.01)
+    assert width_scaled_learning_rate(0.08, 64) == pytest.approx(0.00125)
+    with pytest.raises(ValueError, match="must be positive"):
+        width_scaled_learning_rate(0.0, 8)

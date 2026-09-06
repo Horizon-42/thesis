@@ -15,7 +15,7 @@ Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；�
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
-| L0 操作参数维度 oracle | **代码完成，待 review** | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + `tests/test_control_basis_oracle.py` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
+| L0 操作参数维度 oracle | **代码完成、review 已修、拟合已标定；正式测量在跑** | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + `tests/test_control_basis_oracle.py` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | 未开始 | `config`/`heads`/`train` 改动 + 臂 `l1_lowdim_arms.json` | 不差于 simple-v3；参数 257 → ≈4N\* |
 | L2 CVAE 骨架（隐意图 z） | 未开始 | `latent_intent.py` + 十处接缝 | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | 未开始 | `cta_conditioning` | 给真值 CTA 时时长误差 < 5 s ∧ 反事实 CTA 轨迹仍可飞 |
@@ -179,6 +179,19 @@ P1 标签（`closure_labels.json` 降级为**隐空间探针**，不再是回归
 **否则**：把 N\* 定在满足 200 m 的最小值上（即使 > 16），并在文档里记下搜索空间没有缩小到预期；
 若 N=64 仍 > 200 m，说明 PWC 控制基不足以表示真实航迹 → 回到 closure 作解码器，本方案的 L1 改为
 "closure 决策向量作为解码器输出"，L2 之后不变。
+
+
+> **拟合的标定（2026-09-07，256 架、uniform，不是结果）**：这个测量唯一能给出的错误答案是
+> "N 不够"，而它来自欠优化，所以先标定优化器再读 ADE(N)。三档固定学习率（400 步，雷达引导 ADE）：
+> lr 0.05 → N=8 1236 / N=64 1167；0.01 → 642 / 411；0.002 → 724（71 % 未收敛）/ 141。
+> 三点结论都进了代码：(a) **固定学习率不行**——快的地板差、好的没跑完，改成余弦退火到起点的 5 %；
+> (b) **最优学习率随宽度移动**（N=8 ≈0.01、N=64 ≈0.002，比值 ≈ 1/N），改成
+> `width_scaled_learning_rate(base, N) = base/N`，`--control-learning-rate` 的语义变为"N=1 时的速率"，
+> 默认 0.08；手调每个宽度会把宽度与调参混淆，这是宽度研究唯一不能做的事；
+> (c) **退火下"最佳步在预算末尾"恒为真**，收敛判据换成 `tail_gain` = 最后 10 % 预算买到的相对改善。
+> 标定后（1200 步）：N=8 雷达引导 495 m（tail p50 0.8 %）、N=64 **81 m**（0.9 %）——两点都收敛，
+> 对数斜率 ≈ 0.87，外推 N=16 ≈ 270、N=32 ≈ 150。**正式跑的设置由此定为
+> `--steps 1200 --control-learning-rate 0.08 --learning-rate-floor 0.05 --batch-size 256`。**
 
 **产物**：`4dTrajectory/outputs/KRDU/experiments/l0_control_basis_<date>/oracle_basis.{txt,json}`，
 逐航班拟合参数存 `basis_fit.json`（L2 的隐空间探针之一）。
