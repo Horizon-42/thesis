@@ -447,6 +447,12 @@ run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命�
 > （与 `intent=` 同一条"读了未来就必须穿在名字上"的纪律）。隐变量模型下 `latent_duration` 在 `given` 时失效
 > ——CTA 就是时长，这是有意的。门里的"时长误差 < 5 s"按构造为 0，所以 L3 真正要读的是**反事实**：
 > CTA ± 30/60/90 s 下逐样本可飞率相对 CTA=0 臂不退、且路径几何（chamfer）随 |偏移| 平滑变化而不是崩掉。
+>
+> **排期（2026-09-07 晚，用户决定：主线优先）**：`L3_cta` = L2.d 的 warm β=0.01 底座 + `cta_conditioning=given`
+> （臂文件 `l3_cta_arms.json`，campaign `l3_cta_20260907`，预测时 `--latent-samples 6`），紧接 L2.e' 之后跑；
+> 反事实扫描 `l3_cta_counterfactual_arms.json`（predict-only，±30/60/90 s，campaign `l3_cta_counterfactual_20260907`）
+> 从它的 checkpoint 出发。对照 = 同底座无 CTA 的 `L2d_warm_beta0p01`：ADE 逐分层的差就是"知道到达时刻"
+> 买到的那一半意图（预期雷达引导层动得最多）。
 
 ### L4 — 场景条件（先验吃邻机；≈2 周）
 
