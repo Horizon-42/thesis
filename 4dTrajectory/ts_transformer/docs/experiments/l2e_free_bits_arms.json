@@ -1,0 +1,43 @@
+{
+ "_comment": "L2.e' (second pre-registration) of docs/2026-09-07_latent_intent_design.zh.md: free bits as an INFORMATION BUDGET. Facts that retired the first version (a beta ladder): in all five L2 runs the KL sat under the free-bits floor (8 x 0.05 = 0.4 nats) for the whole run, and under the floor the KL gradient is identically zero — beta cannot act there, so beta 0.001 would re-measure the same equilibrium. The z-oracle (l2d_zoracle_20260907) shows what that equilibrium holds: warm beta 0.01 decodes its own posterior z to 2416 m vectored ADE (prior top-1 2643, gate 1235) and 402 -> 402 on straight-in — real, correctly-shaped route information, about a fifth of the intent. The sub-floor decay is not weight decay (lr 3e-5 x 2450 steps < 1 %); it is the low-SNR state the penalty leaves the posterior in when it crosses the floor (sigma ~ 1, mean ~ 0.3): z is nearly noise to the decoder, whose z-weights shrink under noise gradients, and the posterior has no restoring force. A budget of 1 nat/dim (8 nats total, the order of the intent's own information: d_join + T) makes that much KL free, so the posterior can hold sigma ~ 0.5, mean ~ 1 (SNR 2) at zero cost and the early 14 nats settle at the budget instead of sliding through it. Same base as L2.d (warm posterior q-std 0.1, K=1, N=32, simple-v3 supervision + teacher, beta 0.01), full 180 epochs; arms differ only in latent_free_bits_nats: 0.5 and 1.0 per dim. READOUT as L2.d plus the z-oracle; NOTE active_unit_threshold_nats = max(free_bits, 0.05) moves with the budget, so gate (1)'s 'active' means KL_dim > budget — stricter than before; report per-dim KL and total KL alongside. PRE-REGISTERED READING: (a) KL settles near the budget (4-8 nats), shuffled delta-ADE >> 200 m, z-oracle vectored moves toward 1235 m, minADE_6 < the N(0,I) control -> the budget is right; carry it to K=4 and L3; (b) the autoencoder form (top-1 worse than native32) -> take the largest budget still passing gate (3) (beta 0.01 / fb 0.05 at 1214 m is the fallback); (c) the KL still falls back under the floor -> the self-destruction is not penalty-triggered and the lever is the decoder's z-path (how z is injected), not the objective.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "latent_dim": 8,
+  "latent_prior_components": 1,
+  "latent_posterior_init_std": 0.1,
+  "latent_beta": 0.01
+ },
+ "arms": [
+  {
+   "key": "L2e_fb0p5",
+   "label": "warm posterior, beta 0.01, free bits 0.5 nat/dim (4 nats budget)",
+   "overrides": {
+    "latent_free_bits_nats": 0.5
+   },
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  },
+  {
+   "key": "L2e_fb1p0",
+   "label": "warm posterior, beta 0.01, free bits 1.0 nat/dim (8 nats budget)",
+   "overrides": {
+    "latent_free_bits_nats": 1.0
+   },
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  }
+ ]
+}
