@@ -140,6 +140,13 @@ flight model.
   a falling loss — it simply reproduces nothing. `control/dynamics/inverse.py` registers each
   inverse under the SAME config key as its forward model; a model added without one fails at
   registry lookup. The transport term (ω×v) is UNCONDITIONAL and there is no correct "off".
+- **A fitted teacher table belongs to ONE width, anchor and cohort** — `control_imitation_target=
+  "fitted"` reads per-flight schedules that reproduce the truth only at the N, the anchor and the
+  total duration they were fitted under. The DATASET build checks all four (schema, N, anchor,
+  each flight's `truth_duration_s` to 1e-6 s) and refuses a table that does not cover the cohort,
+  with the count — there is no partial mode. The teacher is **training-only**: its digest rides in
+  `checkpoint_metadata.json` / the payload's `fitted_teacher`, never in `data_provenance` (which
+  `evaluate-fit` and `freeze-test` compare for equality), and predict never needs the file.
 
 ## Current defaults and their status
 
@@ -157,6 +164,7 @@ flight model.
 | `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result |
 | `n_segments` (control) | 64 | **32 is free** (L1: 1322 vs 1333 m, bank skill 0.726 vs 0.728); the deployed head's 257 numbers become 96 |
 | `control_state_loss_grid` | native | `fixed-dt` without the imitation term (it is not registered there) trips the straight-in veto (FDE 703 → 2863) and brings the bank wiggle back — the trajectory-error loss alone is not enough |
+| `control_imitation_target` | `inverse-dynamics` | WHAT the imitation term imitates. The default's schedule, flown open-loop, lands **2.5–7.8 km** from the truth it was read off (L0), so "imitating it perfectly" is not "flying the truth". `fitted` reads the per-flight table `run_ts_control_basis_oracle.py --checkpoint` fits through the same rollout (88–433 m) and needs `control_fitted_teacher_path`; refused with `random_train_anchor`. L5.a, **not yet measured** — the arms are `docs/experiments/l5_fitted_teacher_arms.json` |
 
 Command hooks are called once per control SEGMENT, at its start, with the rollout's own state,
 returning the command flown — and **the record carries the schedule FLOWN, not the network's**.
