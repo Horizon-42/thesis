@@ -4,6 +4,62 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — Package audit T1-9 / T1-12: the closure tracker and the regularization axis deleted
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §三, rows 9 and 12
+(`0702669`, `0898291`). Two generations of abolished design removed from live code.
+
+**T1-9 — the closure tracker (`0702669`).** The P1.d delivery form — a drawn closure
+reference flown by the point-mass rollout under a command hook — was abolished by the
+latent-intent design (§四) with its review BLOCKER unfixed: the tracker's nearest-node
+search snaps onto a self-approaching reference and jumps legs on 8 of 1404 via-Dubins
+flights (endpoints 6–19 km off), which are four of the five largest "tracking gains", so
+the honest tracking cost is **+10.5 m of ADE, not +9**. Deleted:
+`control/constraints/closure_tracking.py`, `tests/test_closure_tracking.py`,
+`docs/experiments/closure_p1d_arms.json`, `forecast.tracking_config` /
+`track_closure_forecasts` / `Forecast.closure_tracked` and the `track`/`device` parameters
+that fed them, `predict --closure-track`, and `source.closureTracked` in the record. The
+closure OUTPUT is untouched and stays as a comparison arm (`closure_output.py`,
+`prediction_output=closure`, `--closure-from-labels`, the labels/template chain). No
+TSConfig field moved, so no serialization or run-name change. Suite 598 → 596 (the two
+tracker tests).
+
+**T1-12 — effort / smoothness regularization (`0898291`).** Every named recipe pinned both
+weights to 0.0, no arm file had set them since 2026-08, and the term was computed on every
+control batch and then multiplied by zero. Deleted `control/loss/regularization.py`, the
+`control_effort_loss_weight` / `control_smoothness_loss_weight` fields with their raises,
+recipe pins and `control_recipe()` entries, the whole block in
+`train.control_prediction_loss_terms`, the two `ControlLossTerms` fields and their share of
+`.total`, the two `CONTROL_LOSS_COMPONENT_NAMES` entries and extras, both CLI flags, and
+the `run_ts_pipeline` / `run_ts_control_oracle` / `run_ts_control_capacity_ceiling`
+plumbing. Both fields joined `RETIRED_SERIALIZED_FIELDS` so older checkpoints still load
+through `from_dict`; neither was in `REQUIRED_SERIALIZED_CONTROL_FIELDS`.
+
+**Run-name recount, 261 stored configs (`history.json` + `summary.json` under
+`4dTrajectory/outputs/*/experiments/**`, read only): 23 names moved** — and unlike T0's
+zero, these are the real thing, in two families. Ten are the 2026-07-29 / 08-01 POOLED
+effort–smoothness SWEEPS (`stage_c_effort`, `stage_c_smoothness`,
+`control_output/{effort,smoothness}_weight`), which genuinely set the weights:
+`custom(effort=0.0001)` → `custom`. So these two fields retire on **weaker grounds than
+`control_hook_gate` / `control_dense_state_loss_weight`** — the stored value could change
+THOSE runs — and the `RETIRED_SERIALIZED_FIELDS` comment now says so instead of claiming a
+blanket "could not change an answer". The other thirteen are 2026-08-01/02
+arc-length-geometry runs carrying the old module defaults (1e-3 / 1e-2): losing two
+residual diffs drops them under `_MAX_LISTED_DIFFS`, so the loss design UN-collapses from
+the content hash `custom-1c5a2429` / `custom-3788b8a3` into the spelled-out
+`custom(obj=arc-length-geometry, grid=fixed-dt, clock=observed, …)`. Both families are the
+grammar's documented behaviour (names describe a config against TODAY'S defaults). No
+on-disk run directory was renamed; the cached `display_name` in `outputs/*/INDEX.md` and
+`index.json` is a historical snapshot and was left alone; neither moved name is quoted in
+any doc, arm file or source.
+
+Docs, one line each and no dated doc rewritten: the package `CLAUDE.md` closure paragraph
+and Layout line, `docs/OPEN_ITEMS.md` (both tracker mentions),
+`docs/2026-09-06_closure_p1d_tracking_results.zh.md` (its supersession banner now names
+the deleted symbols and says its §一/§五 no longer execute) and
+`docs/control_parameter_prediction.zh.md` (a second 2026-09-07 note in its existing
+staleness banner).
+
 ### 2026-09-07 — Package audit T0: eight zero-risk cleanups, reviewed
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §二. One control
