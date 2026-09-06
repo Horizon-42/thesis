@@ -26,13 +26,8 @@ from batching import resolve_batch_size
 from config import (
     CONTROL_HOOK_OFF,
     HOOK_SATURATION_HARD,
-    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_OBJECTIVE,
-    CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
-    CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
-    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
-    CONTROL_ARC_TERMINAL_VECTOR_NORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
@@ -40,10 +35,8 @@ from config import (
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_LOSS_GRID_NATIVE,
-    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
-    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -60,7 +53,6 @@ from control.loss.components import (
     control_tracking_loss_terms,
 )
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
-from control.loss.terminal_clock import apply_control_terminal_clock
 from control.latent import LATENT_KL_COMPONENT, LatentControlPrediction, with_latent_kl
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -202,13 +194,6 @@ def target_contract(config: TSConfig) -> str:
             else "detached-duration-gradient"
         )
         contract = f"{base}+{config.control_state_objective}+{gradient_contract}"
-    if (
-        config.control_terminal_supervision_clock
-        != CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION
-    ):
-        contract += (
-            f"+terminal-clock={config.control_terminal_supervision_clock}-v1"
-        )
     return contract
 
 
@@ -218,24 +203,7 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
     if config.prediction_output == PREDICTION_CLOSURE:
         return CLOSURE_LOSS_COMPONENT_NAMES
     names = CONTROL_LOSS_COMPONENT_NAMES
-    arc_velocity_extensions = {
-        CONTROL_ARC_LOCAL_VELOCITY_VECTOR: (
-            "arc_horizontal_velocity",
-            "arc_vertical_velocity",
-        ),
-        CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED: (
-            "arc_horizontal_tangent",
-            "arc_horizontal_speed",
-            "arc_vertical_velocity",
-        ),
-    }
     extensions = {
-        CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
-            "terminal_velocity",
-            *arc_velocity_extensions[
-                config.control_arc_local_velocity_parameterization
-            ],
-        ),
         CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: (
             *(("velocity",) if config.control_velocity_loss_weight else ()),
             *(("imitation",) if config.control_imitation_loss_weight else ()),
@@ -641,13 +609,6 @@ def control_prediction_loss_terms(
         dynamics,
         dense_supervision,
     )
-    rollout_loss = apply_control_terminal_clock(
-        rollout_loss,
-        prediction,
-        dynamics,
-        config,
-        normalizer,
-    )
     # The final-approach penalty on the ROLLED-OUT states: the same hinge as the state
     # path, gated by the truth rows aligned to the segment endpoints, so the constraint
     # reaches the controls through the dynamics — a dynamically admissible path that is
@@ -669,12 +630,6 @@ def control_prediction_loss_terms(
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
-    runway_heading_rad = (
-        dynamics["runway_heading_rad"]
-        if config.control_state_objective
-        == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-        else normalized_anchor_state.new_zeros(len(normalized_anchor_state))
-    )
     tracking = control_tracking_loss_terms(
         rollout_loss,
         normalized_anchor_state,
@@ -682,7 +637,6 @@ def control_prediction_loss_terms(
         config,
         normalizer,
         dense_supervision,
-        runway_heading_rad,
     )
 
     return ControlLossTerms(
@@ -2204,84 +2158,9 @@ def _common_grid_validation_selection(
     )
 
 
-def _arc_length_geometry_validation_selection(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-) -> ValidationSelection:
-    details = _common_grid_validation_details(
-        model=model,
-        val_sets=val_sets,
-        normalizer=normalizer,
-        config=config,
-        device=device,
-        val_by_airport=val_by_airport,
-        precomputed_details_by_airport=precomputed_details_by_airport,
-    )
-    by_airport: dict[str, float] = {}
-    velocity_value = {
-        CONTROL_ARC_LOCAL_VELOCITY_VECTOR: lambda block: (
-            config.control_arc_horizontal_velocity_loss_weight
-            * block["arc_length_horizontal_velocity_mae_mps"]
-            / config.control_arc_horizontal_velocity_scale_mps
-            + config.control_arc_vertical_velocity_loss_weight
-            * block["arc_length_vertical_velocity_mae_mps"]
-            / config.control_arc_vertical_velocity_scale_mps
-        ),
-        CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED: lambda block: (
-            config.control_arc_tangent_loss_weight
-            * block["arc_length_horizontal_tangent_mean"]
-            + config.control_arc_horizontal_velocity_loss_weight
-            * block["arc_length_horizontal_speed_mae_mps"]
-            / config.control_arc_horizontal_velocity_scale_mps
-            + config.control_arc_vertical_velocity_loss_weight
-            * block["arc_length_vertical_velocity_mae_mps"]
-            / config.control_arc_vertical_velocity_scale_mps
-        ),
-    }[config.control_arc_local_velocity_parameterization]
-    terminal_position_key, terminal_velocity_key = {
-        CONTROL_ARC_TERMINAL_VECTOR_NORM: (
-            "arc_length_terminal_position_m",
-            "arc_length_terminal_velocity_error_mps",
-        ),
-        CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS: (
-            "arc_length_terminal_position_runway_components_m",
-            "arc_length_terminal_velocity_runway_components_mps",
-        ),
-    }[config.control_arc_terminal_parameterization]
-    for airport, block in details.items():
-        value = (
-            config.control_geometry_loss_weight
-            * block["arc_length_geometry_loss"]
-            + velocity_value(block)
-            + config.control_terminal_position_loss_weight
-            * block[terminal_position_key]
-            / config.control_terminal_position_scale_m
-            + config.control_terminal_velocity_loss_weight
-            * block[terminal_velocity_key]
-            / config.control_terminal_velocity_scale_mps
-        )
-        by_airport[airport] = float(value)
-        block["arc_length_geometry_criterion"] = float(value)
-    return ValidationSelection(
-        metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-        value=float(np.mean(list(by_airport.values()))),
-        by_airport=by_airport,
-        details_by_airport=details,
-    )
-
-
 _VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
     CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
-    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY: (
-        _arc_length_geometry_validation_selection
-    ),
 }
 
 
@@ -2451,8 +2330,7 @@ def fit_model(
         train_weight_total = 0.0
         control_diagnostics = (
             ControlTrainingDiagnosticsAccumulator(
-                config.control_gradient_clip_norm,
-                policy=config.control_gradient_clip_policy,
+                config.control_gradient_clip_norm
             )
             if config.control_gradient_clip_norm > 0.0
             else None
@@ -2714,8 +2592,7 @@ def fit_model(
                 )
                 print(
                     "             stability "
-                    f"clip={clip['policy']} "
-                    f"{clip['triggered_batches']}/{clip['batches']}  "
+                    f"clip {clip['triggered_batches']}/{clip['batches']}  "
                     f"saturation={saturation['overall_rate']:.3%}"
                 )
 

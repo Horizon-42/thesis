@@ -2,6 +2,13 @@
 
 日期：2026-08-01
 
+> **代码已退役（2026-09-07，包审计 T1-11）**：`arc-length-geometry` 目标、
+> `fixed-anchor-arc-length-geometry` 选择指标与全部 `control_geometry_*` /
+> `control_arc_*` / `control_terminal_*` 配置字段已删除（2026-08-02 之后无任何臂使用）。
+> 保留的是 `arc_length_geometry.py` 的**度量**半边（`resample_horizontal_arc_length_numpy`、
+> `arc_length_geometry_metrics`、`arc_length_velocity_metrics`）——固定锚点验证每轮仍然
+> 输出本文这套 `arc_length_*` 诊断。**本文的数字保留为历史结论，不重写。**
+
 ## 1. 实验边界
 
 本轮只研究按水平弧长对齐的局部状态误差，不使用走廊、曲率、DTW 或第二次

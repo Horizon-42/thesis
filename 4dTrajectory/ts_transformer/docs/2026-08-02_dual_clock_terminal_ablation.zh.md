@@ -1,5 +1,12 @@
 # 双时钟终端监督消融
 
+> **代码已退役（2026-09-07，包审计 T1-13）**：`control/loss/terminal_clock.py`
+> （本文的 `control_terminal_clock.py`）与 `control_terminal_supervision_clock` 轴已删除，
+> `predicted` / `predicted-detached-time` 两个取值不再存在；`state-supervision` 是唯一行为，
+> 而它的策略函数本来就是 `return result`。同日退役的还有本文依赖的 `arc-length-geometry`
+> 目标族（T1-11）与 60/120/240 s horizon curriculum（T1-10）。**本文的数字保留为历史结论，
+> 不重写。**
+
 ## 问题与边界
 
 本实验只使用 KSJC outer-train / outer-validation，未读取、生成或发布 test 预测。目标是检验：

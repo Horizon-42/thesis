@@ -2,6 +2,11 @@
 
 日期：2026-07-31
 
+> **代码已退役（2026-09-07，包审计 T1-10 / T1-11）**：第 1 节的 horizon curriculum
+> （`control_horizon_curriculum_s`）与第 3 节的 `final-time-decoupled` 梯度裁剪策略都已删除；
+> `control_gradient_clip_policy` 这根轴随之消失（只剩一个成员就不是选择，而是行为），
+> `control_gradient_clip_norm` 保留。**本文的数字保留为历史结论，不重写。**
+
 ## 适用边界
 
 本文只保留能够用于模型训练、且部署推理时不依赖未来真实航迹的优化。所有开发选择只使用

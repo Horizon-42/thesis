@@ -434,17 +434,16 @@ def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
     )
     terminal = torch.zeros(2, 6, dtype=torch.float64)
     anchor = torch.zeros(2, 6, dtype=torch.float64)
-    heading = torch.zeros(2, dtype=torch.float64)
 
     off = control_tracking_loss_terms(
-        result, anchor, terminal, _velocity_term_config(0.0), normalizer, None, heading
+        result, anchor, terminal, _velocity_term_config(0.0), normalizer, None
     )
     assert "velocity" not in off.extras
     assert "velocity" not in train_module.loss_component_names(_velocity_term_config(0.0))
 
     on_config = _velocity_term_config(0.25)
     on = control_tracking_loss_terms(
-        result, anchor, terminal, on_config, normalizer, None, heading
+        result, anchor, terminal, on_config, normalizer, None
     )
     torch.testing.assert_close(
         on.extras["velocity"], torch.tensor([1.0, 2.25], dtype=torch.float64)

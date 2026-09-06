@@ -59,10 +59,8 @@ import run_ts_predictability_report as predictability_report  # noqa: E402
 import train as train_module  # noqa: E402
 from arc_length_geometry import (  # noqa: E402
     arc_length_geometry_metrics,
-    arc_length_state_loss_terms,
     arc_length_velocity_metrics,
     resample_horizontal_arc_length_numpy,
-    resample_horizontal_arc_length_torch,
 )
 from anchor_eligibility import (  # noqa: E402
     CONTROL_ANCHOR_STALL_MARGIN, eligible_random_train_anchors,
@@ -73,27 +71,18 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, COORDINATE_FRAMES, HORIZON_FULL, HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_METRICS,
-    CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
-    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_UNIFORM,
-    CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
-    CONTROL_GRADIENT_CLIP_GLOBAL,
     CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_LOSS_GRID_NATIVE,
-    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
-    CONTROL_TERMINAL_CLOCK_PREDICTED,
-    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
-    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     CONTROL_RECIPE_SIMPLE_V1,
     PREDICTION_CONTROL,
     PREDICTION_STATE,
@@ -107,7 +96,6 @@ from control.loss.components import (  # noqa: E402
 )
 from control.training.diagnostics import (  # noqa: E402
     ControlTrainingDiagnosticsAccumulator,
-    clip_gradients_by_policy,
     clip_gradients_by_global_norm,
     gradient_norms,
 )
@@ -145,7 +133,6 @@ from control.oracle.pretraining import CachedSchedulePretrainer  # noqa: E402
 from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
-from terminal_state_loss import terminal_state_errors  # noqa: E402
 from prediction_outputs import UniformDurationControlHead  # noqa: E402
 from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
@@ -2128,8 +2115,6 @@ def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch)
         prediction_output=PREDICTION_CONTROL,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         seq_len=8,
         n_segments=2,
         batch_size=2,
@@ -2711,24 +2696,7 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_state_objective",
         "control_state_duration_gradient",
         "control_gradient_clip_norm",
-        "control_gradient_clip_policy",
         "control_dynamics_backend",
-        "control_geometry_loss_weight",
-        "control_arc_horizontal_velocity_loss_weight",
-        "control_arc_vertical_velocity_loss_weight",
-        "control_arc_horizontal_velocity_scale_mps",
-        "control_arc_vertical_velocity_scale_mps",
-        "control_arc_local_velocity_parameterization",
-        "control_arc_tangent_loss_weight",
-        "control_arc_position_end_weight",
-        "control_arc_terminal_parameterization",
-        "control_arc_terminal_cross_track_emphasis",
-        "control_arc_terminal_vertical_emphasis",
-        "control_terminal_position_loss_weight",
-        "control_terminal_velocity_loss_weight",
-        "control_terminal_position_scale_m",
-        "control_terminal_velocity_scale_mps",
-        "control_terminal_supervision_clock",
         "control_duration_uniform_floor",
     ],
 )
@@ -2740,124 +2708,6 @@ def test_legacy_control_config_without_physical_criteria_recipe_is_rejected(fiel
         TSConfig.from_dict(serialized)
 
 
-def test_arc_length_geometry_objective_requires_aligned_selection_and_weights():
-    common = {
-        "prediction_output": PREDICTION_CONTROL,
-        "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
-        "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        "control_state_objective": CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-    }
-    with pytest.raises(ValueError, match="fixed-anchor-arc-length-geometry"):
-        TSConfig(**common)
-    with pytest.raises(ValueError, match="velocity weight greater"):
-        TSConfig(
-            **common,
-            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-            control_geometry_loss_weight=1.0,
-            control_terminal_position_loss_weight=2.0,
-            control_terminal_velocity_loss_weight=1.0,
-        )
-    with pytest.raises(ValueError, match="local velocity weights"):
-        TSConfig(
-            **common,
-            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-            control_arc_horizontal_velocity_loss_weight=1.0,
-        )
-    with pytest.raises(
-        ValueError, match="control_arc_vertical_velocity_scale_mps"
-    ):
-        TSConfig(
-            **common,
-            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-            control_arc_vertical_velocity_scale_mps=0.0,
-        )
-    with pytest.raises(ValueError, match="arc-length-geometry requires n_segments >= 2"):
-        TSConfig(
-            **common,
-            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-            n_segments=1,
-        )
-    assert TSConfig(n_segments=1).n_segments == 1
-
-    config = TSConfig(
-        **common,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-    )
-
-    assert config.control_terminal_position_loss_weight > config.control_geometry_loss_weight
-    assert config.control_terminal_velocity_loss_weight > config.control_geometry_loss_weight
-    assert control_recipe(config)["geometry_loss_weight"] == pytest.approx(0.75)
-    assert control_recipe(config)[
-        "arc_horizontal_velocity_loss_weight"
-    ] == pytest.approx(0.25)
-    assert control_recipe(config)["arc_vertical_velocity_scale_mps"] == pytest.approx(2.0)
-    assert train_module.loss_component_names(config)[-3:] == (
-        "terminal_velocity",
-        "arc_horizontal_velocity",
-        "arc_vertical_velocity",
-    )
-    assert "arc-length-geometry" in train_module.target_contract(config)
-
-
-def test_predicted_terminal_clock_requires_dual_clock_physical_objective():
-    common = {
-        "prediction_output": PREDICTION_CONTROL,
-        "control_terminal_supervision_clock": CONTROL_TERMINAL_CLOCK_PREDICTED,
-    }
-    with pytest.raises(ValueError, match="observed dense-state"):
-        TSConfig(**common)
-    with pytest.raises(ValueError, match="fixed-dt state loss"):
-        TSConfig(
-            **common,
-            control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        )
-    with pytest.raises(ValueError, match="requires the arc-length-geometry"):
-        TSConfig(
-            **common,
-            control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-            control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        )
-    config = TSConfig(
-        **common,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-    )
-
-    assert control_recipe(config)["terminal_supervision_clock"] == "predicted"
-    assert "terminal-clock=predicted" in train_module.target_contract(config)
-
-
-def test_arc_loss_ablation_components_share_one_objective_and_recipe():
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-        control_arc_local_velocity_parameterization=(
-            CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED
-        ),
-        control_arc_terminal_parameterization=CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
-        control_arc_position_end_weight=4.0,
-    )
-
-    recipe = control_recipe(config)
-    assert config.control_state_objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-    assert recipe["arc_local_velocity_parameterization"] == "tangent-speed"
-    assert recipe["arc_terminal_parameterization"] == "runway-components"
-    assert recipe["arc_position_end_weight"] == pytest.approx(4.0)
-    assert train_module.loss_component_names(config)[-4:] == (
-        "terminal_velocity",
-        "arc_horizontal_tangent",
-        "arc_horizontal_speed",
-        "arc_vertical_velocity",
-    )
-    with pytest.raises(ValueError, match="control_arc_position_end_weight"):
-        replace(config, control_arc_position_end_weight=0.5)
-
-
 def test_control_gradient_clip_is_explicit_and_control_only():
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
@@ -2865,39 +2715,10 @@ def test_control_gradient_clip_is_explicit_and_control_only():
     )
 
     assert control_recipe(config)["gradient_clip_norm"] == pytest.approx(20.0)
-    assert control_recipe(config)["gradient_clip_policy"] == CONTROL_GRADIENT_CLIP_GLOBAL
     with pytest.raises(ValueError, match="finite and non-negative"):
         replace(config, control_gradient_clip_norm=-1.0)
     with pytest.raises(ValueError, match="only by prediction_output='control'"):
         TSConfig(control_gradient_clip_norm=20.0)
-    with pytest.raises(ValueError, match="requires a positive clip norm"):
-        TSConfig(
-            prediction_output=PREDICTION_CONTROL,
-            control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
-        )
-
-
-def test_final_time_decoupled_clip_requires_isolated_clock_gradients():
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL,
-        control_duration_parameterization=CONTROL_DURATION_FACTORIZED,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_duration_gradient=False,
-        control_gradient_clip_norm=20.0,
-        control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
-    )
-
-    assert config.control_gradient_clip_policy == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
-    with pytest.raises(ValueError, match="requires factorized durations"):
-        replace(config, control_duration_parameterization=CONTROL_DURATION_UNIFORM)
-    with pytest.raises(ValueError, match="requires observed state clock"):
-        replace(
-            config,
-            control_state_supervision_clock=CONTROL_STATE_CLOCK_PREDICTED,
-            control_state_duration_gradient=True,
-        )
-    with pytest.raises(ValueError, match="requires detached state-duration gradients"):
-        replace(config, control_state_duration_gradient=True)
 
 
 def test_control_gradient_clip_records_preclip_module_norms_and_caps_global_norm():
@@ -2917,10 +2738,10 @@ def test_control_gradient_clip_records_preclip_module_norms_and_caps_global_norm
     ).sum()
     loss.backward()
 
-    preclip, clipped = clip_gradients_by_global_norm(model, 1.0)
+    preclip, coefficient = clip_gradients_by_global_norm(model, 1.0)
     postclip = gradient_norms(model)
 
-    assert clipped is True
+    assert coefficient == pytest.approx(0.2)
     assert preclip == pytest.approx(
         {
             "backbone": 3.0,
@@ -2930,44 +2751,6 @@ def test_control_gradient_clip_records_preclip_module_norms_and_caps_global_norm
         }
     )
     assert postclip["total"] == pytest.approx(1.0)
-
-
-def test_final_time_decoupled_clip_caps_control_backbone_only():
-    class GradientGroups(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.feature_encoder = torch.nn.Linear(1, 1, bias=False)
-            self.control_head = torch.nn.Linear(1, 1, bias=False)
-            self.final_time_head = torch.nn.Linear(1, 1, bias=False)
-
-    model = GradientGroups()
-    x = torch.ones(1, 1)
-    loss = (
-        3.0 * model.feature_encoder(x)
-        + 4.0 * model.control_head(x)
-        + 12.0 * model.final_time_head(x)
-    ).sum()
-    loss.backward()
-
-    preclip, scopes = clip_gradients_by_policy(
-        model,
-        max_norm=1.0,
-        policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
-    )
-    postclip = gradient_norms(model)
-
-    assert preclip["total"] == pytest.approx(13.0)
-    assert scopes["control_backbone"]["pre_clip_norm"] == pytest.approx(5.0)
-    assert scopes["control_backbone"]["coefficient"] == pytest.approx(0.2)
-    assert scopes["control_backbone"]["triggered"] is True
-    assert scopes["control_backbone"]["groups"] == ["backbone", "control_head"]
-    assert scopes["control_backbone"]["capped"] is True
-    assert scopes["final_time_head"]["pre_clip_norm"] == pytest.approx(12.0)
-    assert scopes["final_time_head"]["triggered"] is False
-    assert scopes["final_time_head"]["capped"] is False
-    assert postclip["backbone"] == pytest.approx(0.6)
-    assert postclip["control_head"] == pytest.approx(0.8)
-    assert postclip["final_time_head"] == pytest.approx(12.0)
 
 
 def test_fixed_dt_rollout_closes_the_float32_duration_clock(monkeypatch):
@@ -3043,7 +2826,7 @@ def test_fixed_dt_rollout_closes_the_float32_duration_clock(monkeypatch):
 @pytest.mark.parametrize(
     ("field", "different"),
     [
-        ("control_arc_tangent_loss_weight", 0.75),
+        ("control_imitation_loss_weight", 0.75),
         ("learning_rate", 5e-4),
         ("d_model", 128),
     ],
@@ -3380,8 +3163,6 @@ def test_fixed_dt_objective_trains_both_backbones_without_duration_state_gradien
         prediction_output=PREDICTION_CONTROL,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
         seq_len=8,
         n_segments=2,
@@ -3590,11 +3371,8 @@ def test_transport_chart_prediction_directory_stays_within_component_limit():
         control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
         control_gradient_clip_norm=20.0,
-        control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
         aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT,
         coordinate_frame="runway-aligned",
     )
@@ -3606,51 +3384,6 @@ def test_transport_chart_prediction_directory_stays_within_component_limit():
     assert len(prediction.pred_dir.name.encode("utf-8")) <= 255
     assert "transport_chart_velocity" in prediction.category
     assert "@transport-chart-velocity" in prediction.label
-
-
-def test_terminal_clock_artifact_keys_are_compact_and_collision_free():
-    modes = (
-        (CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION, ""),
-        (CONTROL_TERMINAL_CLOCK_PREDICTED, "_tcp"),
-        (CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME, "_tcpdt"),
-    )
-    train_dirs = []
-    prediction_dirs = []
-    categories = []
-
-    for terminal_clock, filesystem_tag in modes:
-        plan = pipeline_module.TrainingPlan(
-            (AIRPORT,),
-            "itransformer",
-            training_mode="pooled",
-            prediction_output=PREDICTION_CONTROL,
-            control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
-            control_terminal_clock=terminal_clock,
-            control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-            control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-            control_state_duration_gradient=False,
-            # PredictionPlan derives its label from the plan's full TSConfig, which
-            # enforces the arc-length objective's paired selection metric.
-            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-        )
-        prediction = pipeline_module.PredictionPlan(
-            plan, AIRPORT, ("eval",), split="val"
-        )
-
-        assert len(plan.train_dir.name.encode("utf-8")) <= 255
-        assert len(prediction.pred_dir.name.encode("utf-8")) <= 255
-        if filesystem_tag:
-            assert filesystem_tag in plan.train_dir.name
-            assert filesystem_tag in prediction.pred_dir.name
-        train_dirs.append(plan.train_dir)
-        prediction_dirs.append(prediction.pred_dir)
-        categories.append(prediction.category)
-
-    assert len(set(train_dirs)) == len(modes)
-    assert len(set(prediction_dirs)) == len(modes)
-    assert len(set(categories)) == len(modes)
-    assert "terminal_predicted_clock" in categories[1]
-    assert "terminal_predicted_detached_time_clock" in categories[2]
 
 
 def test_fixed_dt_control_targets_gather_existing_two_second_reference_rows():
@@ -3718,13 +3451,8 @@ def test_horizontal_arc_resampling_is_independent_of_node_spacing():
     np.testing.assert_allclose(
         resample_horizontal_arc_length_numpy(sparse, points=4), expected
     )
-    torch.testing.assert_close(
-        resample_horizontal_arc_length_torch(
-            torch.from_numpy(uneven)[None],
-            torch.ones(1, len(uneven), dtype=torch.bool),
-            points=4,
-        )[0],
-        torch.from_numpy(expected),
+    np.testing.assert_allclose(
+        resample_horizontal_arc_length_numpy(uneven, points=4), expected
     )
     metrics = arc_length_geometry_metrics(
         uneven, sparse, _identity_normalizer(), points=4
@@ -3780,91 +3508,6 @@ def test_arc_position_progress_weight_emphasizes_late_geometry_error():
 
     assert early["unweighted_loss"] == pytest.approx(late["unweighted_loss"])
     assert late["loss"] > early["loss"]
-
-
-def test_arc_length_geometry_loss_has_position_and_reliable_velocity_gradients():
-    channels = len(ch.CHANNELS)
-    anchor = torch.zeros(1, channels)
-    anchor[0, list(ch.VELOCITY_IDX)] = torch.tensor([1.0, 0.0, -1.0])
-    endpoints = torch.zeros(1, 3, channels)
-    endpoints[0, :, ch.POSITION_IDX[0]] = torch.tensor([1.0, 2.0, 3.0])
-    endpoints[0, :2, ch.POSITION_IDX[1]] = 0.25
-    endpoints[0, :, list(ch.VELOCITY_IDX)] = torch.tensor([0.0, 1.0, 1.0])
-    endpoints.requires_grad_()
-    states = torch.zeros(1, 2, channels)
-    states[0, :, ch.POSITION_IDX[0]] = torch.tensor([1.0, 2.0])
-    states[0, 0, list(ch.VELOCITY_IDX)] = torch.tensor([1.0, 0.0, -1.0])
-    states[0, 1, list(ch.VELOCITY_IDX)] = 999.0
-    weights = torch.full_like(states, 1.0 / channels)
-    weights[0, 1, list(ch.VELOCITY_IDX)] = 0.0
-    supervision = FixedDTControlSupervision(
-        query_offsets_s=torch.tensor([[2.0, 4.0]], dtype=torch.float64),
-        states=states,
-        weights=weights,
-        valid=torch.ones(1, 2, dtype=torch.bool),
-    )
-    terminal = torch.zeros(1, channels)
-    terminal[0, ch.POSITION_IDX[0]] = 3.0
-
-    terms = arc_length_state_loss_terms(
-        anchor,
-        endpoints,
-        terminal,
-        supervision,
-        _identity_normalizer(),
-        points=8,
-    )
-    loss = (
-        terms.position
-        + terms.horizontal_velocity_mps
-        + terms.vertical_velocity_mps
-    ).mean()
-    loss.backward()
-
-    assert terms.position.item() > 0.0
-    assert terms.horizontal_velocity_mps.item() > 0.0
-    assert terms.horizontal_tangent.item() > 0.0
-    assert terms.horizontal_speed_mps.item() > 0.0
-    assert terms.vertical_velocity_mps.item() > 0.0
-    assert 0 < terms.velocity_valid_points.item() < 8
-    assert torch.count_nonzero(endpoints.grad[..., list(ch.POSITION_IDX)]).item() > 0
-    assert torch.count_nonzero(
-        endpoints.grad[..., list(ch.VELOCITY_IDX[:2])]
-    ).item() > 0
-    assert torch.count_nonzero(
-        endpoints.grad[..., ch.VELOCITY_IDX[2]]
-    ).item() > 0
-
-
-def test_arc_length_geometry_compacts_sparse_position_supervision_rows():
-    channels = len(ch.CHANNELS)
-    anchor = torch.zeros(1, channels)
-    endpoints = torch.zeros(1, 3, channels)
-    endpoints[0, :, ch.POSITION_IDX[0]] = torch.tensor([1.0, 3.0, 4.0])
-    states = torch.zeros(1, 4, channels)
-    states[0, :, ch.POSITION_IDX[0]] = torch.tensor([1.0, 999.0, 999.0, 3.0])
-    weights = torch.zeros_like(states)
-    weights[0, 0] = 1.0 / channels
-    weights[0, 3, list(ch.POSITION_IDX)] = 1.0 / channels
-    supervision = FixedDTControlSupervision(
-        query_offsets_s=torch.tensor([[2.0, 4.0, 6.0, 8.0]], dtype=torch.float64),
-        states=states,
-        weights=weights,
-        valid=torch.ones(1, 4, dtype=torch.bool),
-    )
-    terminal = torch.zeros(1, channels)
-    terminal[0, ch.POSITION_IDX[0]] = 4.0
-
-    terms = arc_length_state_loss_terms(
-        anchor,
-        endpoints,
-        terminal,
-        supervision,
-        _identity_normalizer(),
-        points=4,
-    )
-
-    assert terms.position.item() == pytest.approx(0.0, abs=1e-12)
 
 
 def test_fixed_anchor_arc_geometry_filters_the_same_sparse_reference_rows():
@@ -3934,40 +3577,6 @@ def test_arc_length_velocity_metrics_follow_position_alignment_and_mask_tail():
         math.sqrt(104.0) - 10.0
     )
     assert metrics["vertical_velocity_mae_mps"] == pytest.approx(1.0)
-
-
-def test_terminal_state_runway_components_rotate_enu_and_apply_emphasis():
-    channels = len(ch.CHANNELS)
-    endpoints = torch.zeros(1, 1, channels)
-    endpoints[0, 0, list(ch.POSITION_IDX)] = torch.tensor([10.0, 20.0, 3.0])
-    endpoints[0, 0, list(ch.VELOCITY_IDX)] = torch.tensor([4.0, 5.0, 6.0])
-    supervision = FixedDTControlSupervision(
-        query_offsets_s=torch.tensor([[2.0]], dtype=torch.float64),
-        states=torch.zeros(1, 1, channels),
-        weights=torch.ones(1, 1, channels),
-        valid=torch.ones(1, 1, dtype=torch.bool),
-    )
-
-    errors = terminal_state_errors(
-        endpoints,
-        torch.zeros(1, channels),
-        torch.zeros(1, channels),
-        supervision,
-        _identity_normalizer(),
-        torch.tensor([math.pi / 2]),
-        coordinate_frame="enu",
-        cross_track_emphasis=3.0,
-        vertical_emphasis=5.0,
-    )
-
-    assert errors.along_position_abs_m.item() == pytest.approx(20.0)
-    assert errors.cross_position_abs_m.item() == pytest.approx(10.0)
-    assert errors.vertical_position_abs_m.item() == pytest.approx(3.0)
-    assert errors.position_runway_components_m.item() == pytest.approx(65.0)
-    assert errors.along_velocity_abs_mps.item() == pytest.approx(5.0)
-    assert errors.cross_velocity_abs_mps.item() == pytest.approx(4.0)
-    assert errors.vertical_velocity_abs_mps.item() == pytest.approx(6.0)
-    assert errors.velocity_runway_components_mps.item() == pytest.approx(47.0)
 
 
 def test_terminal_velocity_target_falls_back_to_observed_anchor():
@@ -4128,143 +3737,6 @@ def test_fixed_dt_control_loss_forms_one_differentiable_training_step(
         parameter.grad is not None and torch.count_nonzero(parameter.grad)
         for parameter in model.parameters()
     )
-
-
-@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-@pytest.mark.parametrize(
-    ("objective", "selection"),
-    [
-        (
-            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-            CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-        ),
-    ],
-)
-def test_terminal_tracking_losses_are_differentiable_with_transport_dynamics(
-    model_name, objective, selection
-):
-    arc_ablation = (
-        {
-            "control_arc_local_velocity_parameterization": (
-                CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED
-            ),
-            "control_arc_position_end_weight": 4.0,
-            "control_arc_terminal_parameterization": (
-                CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS
-            ),
-        }
-        if objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-        else {}
-    )
-    series, config = _series(
-        n_flights=1,
-        model=model_name,
-        prediction_output=PREDICTION_CONTROL,
-        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=objective,
-        control_state_duration_gradient=False,
-        checkpoint_selection_metric=selection,
-        seq_len=8,
-        n_segments=2,
-        d_model=16,
-        n_heads=4,
-        d_ff=32,
-        e_layers=1,
-        patch_len=4,
-        stride=2,
-        final_time_scale_s=600.0,
-        control_rollout_integrator_dt_s=0.5,
-        **arc_ablation,
-    )
-    normalizer = Normalizer.fit(series)
-    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
-    x, target, weights, final_time, flight_weights, dynamics, dense = dataset.batch(
-        np.array([0])
-    )
-    model = build_model(config)
-    components = train_module.prediction_loss_components(
-        model(x, dynamics),
-        x[:, -1],
-        target,
-        weights,
-        final_time,
-        flight_weights,
-        config,
-        normalizer,
-        dynamics,
-        dense,
-    )
-    components.total.backward()
-
-    assert torch.isfinite(components.total)
-    assert components.state.item() >= 0.0
-    assert components.terminal.item() >= 0.0
-    assert components.extras["terminal_velocity"].item() >= 0.0
-    if objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY:
-        assert components.extras["arc_horizontal_tangent"].item() >= 0.0
-        assert components.extras["arc_horizontal_speed"].item() >= 0.0
-    assert any(
-        parameter.grad is not None and torch.count_nonzero(parameter.grad)
-        for parameter in model.parameters()
-    )
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
-@pytest.mark.parametrize(
-    ("objective", "selection"),
-    [
-        (
-            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-            CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-        ),
-    ],
-)
-def test_terminal_tracking_loss_cuda_transport_smoke(objective, selection):
-    series, config = _series(
-        n_flights=1,
-        model="itransformer",
-        prediction_output=PREDICTION_CONTROL,
-        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=objective,
-        control_state_duration_gradient=False,
-        checkpoint_selection_metric=selection,
-        seq_len=8,
-        n_segments=2,
-        d_model=16,
-        n_heads=4,
-        d_ff=32,
-        e_layers=1,
-        final_time_scale_s=600.0,
-        control_rollout_integrator_dt_s=0.5,
-    )
-    normalizer = Normalizer.fit(series)
-    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
-    x, target, weights, final_time, flight_weights, dynamics, dense = dataset.batch(
-        np.array([0])
-    )
-    device = torch.device("cuda")
-    model = build_model(config).to(device)
-    dynamics = {name: value.to(device) for name, value in dynamics.items()}
-    components = train_module.prediction_loss_components(
-        model(x.to(device), dynamics),
-        x[:, -1].to(device),
-        target.to(device),
-        weights.to(device),
-        final_time.to(device),
-        flight_weights.to(device),
-        config,
-        normalizer,
-        dynamics,
-        dense.to(device),
-    )
-    components.total.backward()
-
-    assert torch.isfinite(components.total)
-    assert torch.isfinite(components.extras["terminal_velocity"])
 
 
 def test_config_rejects_a_head_count_that_does_not_divide_d_model():
@@ -4549,8 +4021,12 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert "control" in prediction.category
     assert "openap_direct" in prediction.category
     assert "duration=uniform" in prediction.label
-    assert "obj=true-time-position" in prediction.label
-    assert "duration-grad=off" in prediction.label
+    # This IS the simple-v1 loss design (true-time-position on the native grid, detached
+    # duration gradients, every auxiliary weight at its default zero), so the grammar names
+    # it by that recipe rather than spelling the fields out; the dynamics field stays
+    # `point-mass`, which is what simple-v1 (not simple-v1-lag) pairs with.
+    assert "simple-v1" in prediction.label
+    assert "simple-v1-lag" not in prediction.label
 
 
 def test_pipeline_carries_and_names_control_gradient_clip():
@@ -4562,11 +4038,8 @@ def test_pipeline_carries_and_names_control_gradient_clip():
         epochs=4,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
         control_gradient_clip_norm=20.0,
-        control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
     )
     recipe = plan._recipe_args()
     config, _source = plan.resolved_train_config(use_best_config=False)
@@ -4575,23 +4048,12 @@ def test_pipeline_carries_and_names_control_gradient_clip():
     )
 
     assert config.control_gradient_clip_norm == pytest.approx(20.0)
-    assert (
-        config.control_gradient_clip_policy
-        == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
-    )
     assert recipe[recipe.index("--control-gradient-clip-norm") + 1] == "20"
-    assert (
-        recipe[recipe.index("--control-gradient-clip-policy") + 1]
-        == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
-    )
-    # The arc-length recipe suffix overruns the 255-byte path-component cap, so the
-    # directory name is head + digest; the readable recipe survives in category/label.
     assert len(plan.train_dir.name.encode("utf-8")) <= (
         pipeline_module.MAX_PATH_COMPONENT_BYTES
     )
-    assert "gradient_clip20_final_time_decoupled" in prediction.category
+    assert "gradient_clip20" in prediction.category
     assert "grad-clip=20" in prediction.label
-    assert "grad-clip-policy=final-time-decoupled" in prediction.label
 
 
 def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(

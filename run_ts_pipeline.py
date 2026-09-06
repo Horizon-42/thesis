@@ -41,11 +41,6 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-    CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
-    CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
-    CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
-    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DYNAMICS_BACKENDS,
@@ -56,19 +51,12 @@ from config import (  # noqa: E402
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_PARAMETERIZATIONS,
-    CONTROL_GRADIENT_CLIP_GLOBAL,
-    CONTROL_GRADIENT_CLIP_POLICIES,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_LOSS_GRID_NATIVE,
-    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVES,
-    CONTROL_TERMINAL_CLOCKS,
-    CONTROL_TERMINAL_CLOCK_PREDICTED,
-    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
-    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     DEFAULT_VALIDATION_COMMON_GRID_POINTS,
     HORIZON_MODES,
@@ -171,7 +159,6 @@ def _validation_selection_tag(metric: str) -> str:
     return {
         CHECKPOINT_SELECTION_COMMON_GRID_ADE: "",
         CHECKPOINT_SELECTION_OBJECTIVE: "_legacy_objective_selection",
-        CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY: "_arc_length_selection",
     }.get(metric, "")
 
 
@@ -186,32 +173,6 @@ def _control_clock_tag(prediction_output: str, state_clock: str) -> str:
     ):
         return ""
     return f"_{state_clock}_clock"
-
-
-def _control_terminal_clock_tag(
-    prediction_output: str, terminal_clock: str
-) -> str:
-    if (
-        prediction_output != PREDICTION_CONTROL
-        or terminal_clock == CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION
-    ):
-        return ""
-    return f"_terminal_{terminal_clock.replace('-', '_')}_clock"
-
-
-_CONTROL_TERMINAL_CLOCK_FILESYSTEM_TAGS = {
-    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION: "",
-    CONTROL_TERMINAL_CLOCK_PREDICTED: "_tcp",
-    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME: "_tcpdt",
-}
-
-
-def _control_terminal_clock_filesystem_tag(
-    prediction_output: str, terminal_clock: str
-) -> str:
-    if prediction_output != PREDICTION_CONTROL:
-        return ""
-    return _CONTROL_TERMINAL_CLOCK_FILESYSTEM_TAGS[terminal_clock]
 
 
 def _control_state_loss_grid_tag(prediction_output: str, loss_grid: str) -> str:
@@ -260,58 +221,6 @@ def _control_objective_tag(prediction_output: str, objective: str) -> str:
     return f"_{objective.replace('-', '_')}"
 
 
-def _terminal_tracking_recipe_tag(
-    prediction_output: str,
-    objective: str,
-    geometry_weight: float,
-    arc_horizontal_velocity_weight: float,
-    arc_vertical_velocity_weight: float,
-    arc_horizontal_velocity_scale_mps: float,
-    arc_vertical_velocity_scale_mps: float,
-    arc_local_velocity: str,
-    arc_tangent_weight: float,
-    arc_position_end_weight: float,
-    arc_terminal: str,
-    arc_terminal_cross_track_emphasis: float,
-    arc_terminal_vertical_emphasis: float,
-    terminal_position_weight: float,
-    terminal_velocity_weight: float,
-    terminal_position_scale_m: float,
-    terminal_velocity_scale_mps: float,
-) -> str:
-    if (
-        prediction_output != PREDICTION_CONTROL
-        or objective != CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-    ):
-        return ""
-
-    def compact(value: float) -> str:
-        return f"{value:g}".replace(".", "p")
-
-    tracking = {
-        CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
-            f"_g{compact(geometry_weight)}"
-            f"_ahv{compact(arc_horizontal_velocity_weight)}"
-            f"_avv{compact(arc_vertical_velocity_weight)}"
-            f"_ahvs{compact(arc_horizontal_velocity_scale_mps)}mps"
-            f"_avvs{compact(arc_vertical_velocity_scale_mps)}mps"
-            f"_lv{arc_local_velocity.replace('-', '_')}"
-            f"_at{compact(arc_tangent_weight)}"
-            f"_pe{compact(arc_position_end_weight)}"
-            f"_term{arc_terminal.replace('-', '_')}"
-            f"_tc{compact(arc_terminal_cross_track_emphasis)}"
-            f"_tu{compact(arc_terminal_vertical_emphasis)}"
-        ),
-    }[objective]
-    return (
-        f"{tracking}"
-        f"_tp{compact(terminal_position_weight)}"
-        f"_tv{compact(terminal_velocity_weight)}"
-        f"_ps{compact(terminal_position_scale_m)}m"
-        f"_vs{compact(terminal_velocity_scale_mps)}mps"
-    )
-
-
 def _control_duration_gradient_tag(
     prediction_output: str, state_duration_gradient: bool
 ) -> str:
@@ -320,16 +229,10 @@ def _control_duration_gradient_tag(
     return "_detached_duration_gradient"
 
 
-def _control_gradient_clip_tag(max_norm: float, policy: str) -> str:
+def _control_gradient_clip_tag(max_norm: float) -> str:
     if max_norm <= 0.0:
         return ""
-    compact = f"{max_norm:g}".replace(".", "p")
-    policy_tag = (
-        ""
-        if policy == CONTROL_GRADIENT_CLIP_GLOBAL
-        else f"_{policy.replace('-', '_')}"
-    )
-    return f"_gradient_clip{compact}{policy_tag}"
+    return f"_gradient_clip{f'{max_norm:g}'.replace('.', 'p')}"
 
 
 def _aircraft_filter_tag(aircraft_filter: str) -> str:
@@ -349,7 +252,7 @@ HORIZON_LABELS = {
 
 
 # ext4/APFS cap one path component at 255 bytes, and the recipe suffix outgrew that when
-# the arc-length-geometry weight block joined it (measured: 365 bytes). A name over the cap
+# the (since-retired) arc-length weight block joined it (measured: 365 bytes). A name over the cap
 # therefore keeps its readable head and ends in a digest of the WHOLE name, so two recipes
 # whose heads happen to agree still land in different directories.
 MAX_PATH_COMPONENT_BYTES = 255
@@ -396,22 +299,6 @@ class TrainingPlan:
         random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
         checkpoint_selection_metric: str = CHECKPOINT_SELECTION_COMMON_GRID_ADE,
         validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS,
-        control_geometry_weight: float = 0.75,
-        control_arc_horizontal_velocity_weight: float = 0.25,
-        control_arc_vertical_velocity_weight: float = 0.25,
-        control_arc_horizontal_velocity_scale_mps: float = 10.0,
-        control_arc_vertical_velocity_scale_mps: float = 2.0,
-        control_arc_local_velocity: str = CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
-        control_arc_tangent_weight: float = 0.25,
-        control_arc_position_end_weight: float = 4.0,
-        control_arc_terminal: str = CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
-        control_arc_terminal_cross_track_emphasis: float = 3.0,
-        control_arc_terminal_vertical_emphasis: float = 5.0,
-        control_terminal_position_weight: float = 1.0,
-        control_terminal_velocity_weight: float = 1.0,
-        control_terminal_position_scale_m: float = 100.0,
-        control_terminal_velocity_scale_mps: float = 10.0,
-        control_terminal_clock: str = CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
         control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
         control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4,
         control_dynamics_model: str = CONTROL_DYNAMICS_POINT_MASS,
@@ -421,7 +308,6 @@ class TrainingPlan:
         control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
         control_state_duration_gradient: bool = True,
         control_gradient_clip_norm: float = 0.0,
-        control_gradient_clip_policy: str = CONTROL_GRADIENT_CLIP_GLOBAL,
         control_rollout_dt: float | None = None,
         output_dir: str | Path | None = None,
     ) -> None:
@@ -454,34 +340,6 @@ class TrainingPlan:
         self.random_train_anchor_min_future_s = random_train_anchor_min_future_s
         self.checkpoint_selection_metric = checkpoint_selection_metric
         self.validation_common_grid_points = validation_common_grid_points
-        self.control_geometry_weight = control_geometry_weight
-        self.control_arc_horizontal_velocity_weight = (
-            control_arc_horizontal_velocity_weight
-        )
-        self.control_arc_vertical_velocity_weight = (
-            control_arc_vertical_velocity_weight
-        )
-        self.control_arc_horizontal_velocity_scale_mps = (
-            control_arc_horizontal_velocity_scale_mps
-        )
-        self.control_arc_vertical_velocity_scale_mps = (
-            control_arc_vertical_velocity_scale_mps
-        )
-        self.control_arc_local_velocity = control_arc_local_velocity
-        self.control_arc_tangent_weight = control_arc_tangent_weight
-        self.control_arc_position_end_weight = control_arc_position_end_weight
-        self.control_arc_terminal = control_arc_terminal
-        self.control_arc_terminal_cross_track_emphasis = (
-            control_arc_terminal_cross_track_emphasis
-        )
-        self.control_arc_terminal_vertical_emphasis = (
-            control_arc_terminal_vertical_emphasis
-        )
-        self.control_terminal_position_weight = control_terminal_position_weight
-        self.control_terminal_velocity_weight = control_terminal_velocity_weight
-        self.control_terminal_position_scale_m = control_terminal_position_scale_m
-        self.control_terminal_velocity_scale_mps = control_terminal_velocity_scale_mps
-        self.control_terminal_clock = control_terminal_clock
         self.control_duration_parameterization = control_duration_parameterization
         self.control_dynamics_backend = control_dynamics_backend
         self.control_dynamics_model = control_dynamics_model
@@ -491,7 +349,6 @@ class TrainingPlan:
         self.control_state_objective = control_state_objective
         self.control_state_duration_gradient = control_state_duration_gradient
         self.control_gradient_clip_norm = control_gradient_clip_norm
-        self.control_gradient_clip_policy = control_gradient_clip_policy
         self.control_rollout_dt = control_rollout_dt
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
@@ -508,36 +365,12 @@ class TrainingPlan:
                 prediction_output, control_dynamics_backend
             )
             + _control_clock_tag(prediction_output, control_state_clock)
-            + _control_terminal_clock_filesystem_tag(
-                prediction_output, control_terminal_clock
-            )
             + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
             + _control_objective_tag(prediction_output, control_state_objective)
-            + _terminal_tracking_recipe_tag(
-                prediction_output,
-                control_state_objective,
-                control_geometry_weight,
-                control_arc_horizontal_velocity_weight,
-                control_arc_vertical_velocity_weight,
-                control_arc_horizontal_velocity_scale_mps,
-                control_arc_vertical_velocity_scale_mps,
-                control_arc_local_velocity,
-                control_arc_tangent_weight,
-                control_arc_position_end_weight,
-                control_arc_terminal,
-                control_arc_terminal_cross_track_emphasis,
-                control_arc_terminal_vertical_emphasis,
-                control_terminal_position_weight,
-                control_terminal_velocity_weight,
-                control_terminal_position_scale_m,
-                control_terminal_velocity_scale_mps,
-            )
             + _control_duration_gradient_tag(
                 prediction_output, control_state_duration_gradient
             )
-            + _control_gradient_clip_tag(
-                control_gradient_clip_norm, control_gradient_clip_policy
-            )
+            + _control_gradient_clip_tag(control_gradient_clip_norm)
             + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
             + _anchor_tag(random_train_anchor)
@@ -619,38 +452,6 @@ class TrainingPlan:
             args += ["--aircraft-type", self.aircraft_type]
         args += ["--aircraft-filter", self.aircraft_filter]
         args += [
-            "--control-geometry-weight",
-            str(self.control_geometry_weight),
-            "--control-arc-horizontal-velocity-weight",
-            str(self.control_arc_horizontal_velocity_weight),
-            "--control-arc-vertical-velocity-weight",
-            str(self.control_arc_vertical_velocity_weight),
-            "--control-arc-horizontal-velocity-scale-mps",
-            str(self.control_arc_horizontal_velocity_scale_mps),
-            "--control-arc-vertical-velocity-scale-mps",
-            str(self.control_arc_vertical_velocity_scale_mps),
-            "--control-arc-local-velocity",
-            self.control_arc_local_velocity,
-            "--control-arc-tangent-weight",
-            str(self.control_arc_tangent_weight),
-            "--control-arc-position-end-weight",
-            str(self.control_arc_position_end_weight),
-            "--control-arc-terminal",
-            self.control_arc_terminal,
-            "--control-arc-terminal-cross-track-emphasis",
-            str(self.control_arc_terminal_cross_track_emphasis),
-            "--control-arc-terminal-vertical-emphasis",
-            str(self.control_arc_terminal_vertical_emphasis),
-            "--control-terminal-position-weight",
-            str(self.control_terminal_position_weight),
-            "--control-terminal-velocity-weight",
-            str(self.control_terminal_velocity_weight),
-            "--control-terminal-position-scale-m",
-            str(self.control_terminal_position_scale_m),
-            "--control-terminal-velocity-scale-mps",
-            str(self.control_terminal_velocity_scale_mps),
-            "--control-terminal-clock",
-            self.control_terminal_clock,
         ]
         args += [
             "--control-duration-parameterization",
@@ -669,8 +470,6 @@ class TrainingPlan:
             args += [
                 "--control-gradient-clip-norm",
                 f"{self.control_gradient_clip_norm:g}",
-                "--control-gradient-clip-policy",
-                self.control_gradient_clip_policy,
             ]
         if self.control_rollout_dt is not None:
             args += ["--control-rollout-dt", str(self.control_rollout_dt)]
@@ -816,47 +615,8 @@ class TrainingPlan:
             "control_state_supervision_clock": self.control_state_clock,
             "control_state_loss_grid": self.control_state_loss_grid,
             "control_state_objective": self.control_state_objective,
-            "control_geometry_loss_weight": self.control_geometry_weight,
-            "control_arc_horizontal_velocity_loss_weight": (
-                self.control_arc_horizontal_velocity_weight
-            ),
-            "control_arc_vertical_velocity_loss_weight": (
-                self.control_arc_vertical_velocity_weight
-            ),
-            "control_arc_horizontal_velocity_scale_mps": (
-                self.control_arc_horizontal_velocity_scale_mps
-            ),
-            "control_arc_vertical_velocity_scale_mps": (
-                self.control_arc_vertical_velocity_scale_mps
-            ),
-            "control_arc_local_velocity_parameterization": (
-                self.control_arc_local_velocity
-            ),
-            "control_arc_tangent_loss_weight": self.control_arc_tangent_weight,
-            "control_arc_position_end_weight": self.control_arc_position_end_weight,
-            "control_arc_terminal_parameterization": self.control_arc_terminal,
-            "control_arc_terminal_cross_track_emphasis": (
-                self.control_arc_terminal_cross_track_emphasis
-            ),
-            "control_arc_terminal_vertical_emphasis": (
-                self.control_arc_terminal_vertical_emphasis
-            ),
-            "control_terminal_position_loss_weight": (
-                self.control_terminal_position_weight
-            ),
-            "control_terminal_velocity_loss_weight": (
-                self.control_terminal_velocity_weight
-            ),
-            "control_terminal_position_scale_m": (
-                self.control_terminal_position_scale_m
-            ),
-            "control_terminal_velocity_scale_mps": (
-                self.control_terminal_velocity_scale_mps
-            ),
-            "control_terminal_supervision_clock": self.control_terminal_clock,
             "control_state_duration_gradient": self.control_state_duration_gradient,
             "control_gradient_clip_norm": self.control_gradient_clip_norm,
-            "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
             "control_dynamics_backend": self.control_dynamics_backend,
         }
@@ -935,47 +695,8 @@ class TrainingPlan:
             "control_state_supervision_clock": self.control_state_clock,
             "control_state_loss_grid": self.control_state_loss_grid,
             "control_state_objective": self.control_state_objective,
-            "control_geometry_loss_weight": self.control_geometry_weight,
-            "control_arc_horizontal_velocity_loss_weight": (
-                self.control_arc_horizontal_velocity_weight
-            ),
-            "control_arc_vertical_velocity_loss_weight": (
-                self.control_arc_vertical_velocity_weight
-            ),
-            "control_arc_horizontal_velocity_scale_mps": (
-                self.control_arc_horizontal_velocity_scale_mps
-            ),
-            "control_arc_vertical_velocity_scale_mps": (
-                self.control_arc_vertical_velocity_scale_mps
-            ),
-            "control_arc_local_velocity_parameterization": (
-                self.control_arc_local_velocity
-            ),
-            "control_arc_tangent_loss_weight": self.control_arc_tangent_weight,
-            "control_arc_position_end_weight": self.control_arc_position_end_weight,
-            "control_arc_terminal_parameterization": self.control_arc_terminal,
-            "control_arc_terminal_cross_track_emphasis": (
-                self.control_arc_terminal_cross_track_emphasis
-            ),
-            "control_arc_terminal_vertical_emphasis": (
-                self.control_arc_terminal_vertical_emphasis
-            ),
-            "control_terminal_position_loss_weight": (
-                self.control_terminal_position_weight
-            ),
-            "control_terminal_velocity_loss_weight": (
-                self.control_terminal_velocity_weight
-            ),
-            "control_terminal_position_scale_m": (
-                self.control_terminal_position_scale_m
-            ),
-            "control_terminal_velocity_scale_mps": (
-                self.control_terminal_velocity_scale_mps
-            ),
-            "control_terminal_supervision_clock": self.control_terminal_clock,
             "control_state_duration_gradient": self.control_state_duration_gradient,
             "control_gradient_clip_norm": self.control_gradient_clip_norm,
-            "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
             "control_dynamics_backend": self.control_dynamics_backend,
         })
@@ -1057,14 +778,6 @@ class PredictionPlan:
         control_clock = _control_clock_tag(
             training.prediction_output, training.control_state_clock
         )
-        control_terminal_clock_filesystem = (
-            _control_terminal_clock_filesystem_tag(
-                training.prediction_output, training.control_terminal_clock
-            )
-        )
-        control_terminal_clock = _control_terminal_clock_tag(
-            training.prediction_output, training.control_terminal_clock
-        )
         control_state_loss_grid = _control_state_loss_grid_tag(
             training.prediction_output, training.control_state_loss_grid
         )
@@ -1076,7 +789,6 @@ class PredictionPlan:
         )
         gradient_clip = _control_gradient_clip_tag(
             training.control_gradient_clip_norm,
-            training.control_gradient_clip_policy,
         )
         aircraft_filter = _aircraft_filter_tag(training.aircraft_filter)
         tag = f"_{experiment_tag}" if experiment_tag else ""
@@ -1084,7 +796,7 @@ class PredictionPlan:
         stem = (
             f"{scope}{training.model}{prediction_output}{control_duration}"
             f"{control_dynamics_filesystem}"
-            f"{control_clock}{control_terminal_clock_filesystem}_{horizon_tag}"
+            f"{control_clock}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
@@ -1099,7 +811,7 @@ class PredictionPlan:
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
             f"{control_duration}{control_dynamics}"
-            f"{control_terminal_clock}_{horizon_tag}"
+            f"_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
@@ -1251,34 +963,10 @@ def run_training(
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
-            if (
-                config.control_state_objective
-                == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-            ):
-                print(
-                    "   arc-geometry: "
-                    f"geometry={config.control_geometry_loss_weight:g}, "
-                    "local_velocity="
-                    f"{config.control_arc_horizontal_velocity_loss_weight:g}/"
-                    f"{config.control_arc_horizontal_velocity_scale_mps:g}mps horiz, "
-                    f"{config.control_arc_vertical_velocity_loss_weight:g}/"
-                    f"{config.control_arc_vertical_velocity_scale_mps:g}mps vertical, "
-                    f"local={config.control_arc_local_velocity_parameterization}, "
-                    f"tangent={config.control_arc_tangent_loss_weight:g}, "
-                    f"position_end={config.control_arc_position_end_weight:g}, "
-                    f"terminal_mode={config.control_arc_terminal_parameterization}, "
-                    "terminal_emphasis="
-                    f"cross×{config.control_arc_terminal_cross_track_emphasis:g}/"
-                    f"vertical×{config.control_arc_terminal_vertical_emphasis:g}, "
-                    f"position={config.control_terminal_position_loss_weight:g}/"
-                    f"{config.control_terminal_position_scale_m:g}m, "
-                    f"velocity={config.control_terminal_velocity_loss_weight:g}/"
-                    f"{config.control_terminal_velocity_scale_mps:g}mps"
-                )
             if config.control_gradient_clip_norm > 0.0:
                 print(
-                    f"   stability : gradient clip={config.control_gradient_clip_norm:g}, "
-                    f"policy={config.control_gradient_clip_policy}"
+                    "   stability : gradient clip="
+                    f"{config.control_gradient_clip_norm:g}"
                 )
         print(
             f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
@@ -1392,46 +1080,6 @@ def main() -> None:
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--batch-size", default="2048",
                         help="positive integer or auto (default: 2048)")
-    parser.add_argument("--control-geometry-weight", type=float, default=0.75)
-    parser.add_argument(
-        "--control-arc-horizontal-velocity-weight", type=float, default=0.25
-    )
-    parser.add_argument(
-        "--control-arc-vertical-velocity-weight", type=float, default=0.25
-    )
-    parser.add_argument(
-        "--control-arc-horizontal-velocity-scale-mps", type=float, default=10.0
-    )
-    parser.add_argument(
-        "--control-arc-vertical-velocity-scale-mps", type=float, default=2.0
-    )
-    parser.add_argument(
-        "--control-arc-local-velocity",
-        choices=CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
-        default=CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
-    )
-    parser.add_argument("--control-arc-tangent-weight", type=float, default=0.25)
-    parser.add_argument("--control-arc-position-end-weight", type=float, default=4.0)
-    parser.add_argument(
-        "--control-arc-terminal",
-        choices=CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
-        default=CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
-    )
-    parser.add_argument(
-        "--control-arc-terminal-cross-track-emphasis", type=float, default=3.0
-    )
-    parser.add_argument(
-        "--control-arc-terminal-vertical-emphasis", type=float, default=5.0
-    )
-    parser.add_argument("--control-terminal-position-weight", type=float, default=1.0)
-    parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
-    parser.add_argument("--control-terminal-position-scale-m", type=float, default=100.0)
-    parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=10.0)
-    parser.add_argument(
-        "--control-terminal-clock",
-        choices=CONTROL_TERMINAL_CLOCKS,
-        default=CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
-    )
     parser.add_argument(
         "--control-duration-parameterization",
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
@@ -1471,11 +1119,6 @@ def main() -> None:
         "--control-gradient-clip-norm",
         type=float,
         default=0.0,
-    )
-    parser.add_argument(
-        "--control-gradient-clip-policy",
-        choices=CONTROL_GRADIENT_CLIP_POLICIES,
-        default=CONTROL_GRADIENT_CLIP_GLOBAL,
     )
     parser.add_argument("--control-rollout-dt", type=float, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
@@ -1593,36 +1236,6 @@ def main() -> None:
             random_train_anchor_min_future_s=args.random_train_anchor_min_future_s,
             checkpoint_selection_metric=args.checkpoint_selection_metric,
             validation_common_grid_points=args.validation_common_grid_points,
-            control_geometry_weight=args.control_geometry_weight,
-            control_arc_horizontal_velocity_weight=(
-                args.control_arc_horizontal_velocity_weight
-            ),
-            control_arc_vertical_velocity_weight=(
-                args.control_arc_vertical_velocity_weight
-            ),
-            control_arc_horizontal_velocity_scale_mps=(
-                args.control_arc_horizontal_velocity_scale_mps
-            ),
-            control_arc_vertical_velocity_scale_mps=(
-                args.control_arc_vertical_velocity_scale_mps
-            ),
-            control_arc_local_velocity=args.control_arc_local_velocity,
-            control_arc_tangent_weight=args.control_arc_tangent_weight,
-            control_arc_position_end_weight=args.control_arc_position_end_weight,
-            control_arc_terminal=args.control_arc_terminal,
-            control_arc_terminal_cross_track_emphasis=(
-                args.control_arc_terminal_cross_track_emphasis
-            ),
-            control_arc_terminal_vertical_emphasis=(
-                args.control_arc_terminal_vertical_emphasis
-            ),
-            control_terminal_position_weight=args.control_terminal_position_weight,
-            control_terminal_velocity_weight=args.control_terminal_velocity_weight,
-            control_terminal_position_scale_m=args.control_terminal_position_scale_m,
-            control_terminal_velocity_scale_mps=(
-                args.control_terminal_velocity_scale_mps
-            ),
-            control_terminal_clock=args.control_terminal_clock,
             control_duration_parameterization=args.control_duration_parameterization,
             control_dynamics_backend=args.control_dynamics_backend,
             control_dynamics_model=args.control_dynamics_model,
@@ -1631,7 +1244,6 @@ def main() -> None:
             control_state_objective=args.control_state_objective,
             control_state_duration_gradient=args.control_state_duration_gradient,
             control_gradient_clip_norm=args.control_gradient_clip_norm,
-            control_gradient_clip_policy=args.control_gradient_clip_policy,
             control_rollout_dt=args.control_rollout_dt,
         )
         if not run_training(

@@ -143,8 +143,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             prediction = _heterogeneous_control_probe_prediction(prediction)
             if config.control_gradient_clip_norm > 0.0:
                 control_diagnostics = ControlTrainingDiagnosticsAccumulator(
-                    config.control_gradient_clip_norm,
-                    policy=config.control_gradient_clip_policy,
+                    config.control_gradient_clip_norm
                 )
                 control_diagnostics.record_prediction(prediction, dynamics)
         loss = prediction_loss(

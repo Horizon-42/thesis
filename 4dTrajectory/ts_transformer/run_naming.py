@@ -87,26 +87,10 @@ CONTROL_LOSS_FIELDS = (
     "control_state_objective",
     "control_state_loss_grid",
     "control_state_supervision_clock",
-    "control_terminal_supervision_clock",
     "control_state_duration_gradient",
     "control_velocity_loss_weight",
     "control_velocity_loss_scale_mps",
     "control_imitation_loss_weight",
-    "control_geometry_loss_weight",
-    "control_arc_horizontal_velocity_loss_weight",
-    "control_arc_vertical_velocity_loss_weight",
-    "control_arc_horizontal_velocity_scale_mps",
-    "control_arc_vertical_velocity_scale_mps",
-    "control_arc_local_velocity_parameterization",
-    "control_arc_tangent_loss_weight",
-    "control_arc_position_end_weight",
-    "control_arc_terminal_parameterization",
-    "control_arc_terminal_cross_track_emphasis",
-    "control_arc_terminal_vertical_emphasis",
-    "control_terminal_position_loss_weight",
-    "control_terminal_velocity_loss_weight",
-    "control_terminal_position_scale_m",
-    "control_terminal_velocity_scale_mps",
     "final_time_loss_weight",
     "final_time_scale_s",
     "position_loss_scale_m",
@@ -190,7 +174,6 @@ META_FIELDS = (
     "control_duration_parameterization",
     "control_duration_uniform_floor",
     "control_gradient_clip_norm",
-    "control_gradient_clip_policy",
     "control_rollout_integrator_dt_s",
     *CONTROL_HOOK_FIELDS,
 )
@@ -205,11 +188,9 @@ _ABBREV = {
     "control_imitation_loss_weight": "imit",
     "control_velocity_loss_weight": "vel",
     "control_velocity_loss_scale_mps": "vel-scale",
-    "control_geometry_loss_weight": "geom",
     "control_state_objective": "obj",
     "control_state_loss_grid": "grid",
     "control_state_supervision_clock": "clock",
-    "control_terminal_supervision_clock": "terminal-clock",
     "control_state_duration_gradient": "duration-grad",
     "kinematic_consistency_loss_weight": "kinematic",
     "state_endpoint_loss_weight": "endpoint",
@@ -246,7 +227,6 @@ _ABBREV = {
     "control_duration_parameterization": "duration",
     "control_duration_uniform_floor": "duration-floor",
     "control_gradient_clip_norm": "grad-clip",
-    "control_gradient_clip_policy": "grad-clip-policy",
     "control_rollout_integrator_dt_s": "rollout-dt",
     "control_command_hook": "hook",
     "control_hook_saturation": "hook-sat",
@@ -368,6 +348,18 @@ def _loss_diffs_against(
     return diffs
 
 
+def _non_loss_recipe_mismatches(
+    config: Mapping[str, Any], overrides: Mapping[str, Any]
+) -> int:
+    """How many fields a recipe freezes OUTSIDE the loss design this run disagrees with."""
+    return sum(
+        1
+        for field, expected in overrides.items()
+        if field not in CONTROL_LOSS_FIELDS
+        and _norm(config.get(field, _DEFAULTS.get(field, expected))) != _norm(expected)
+    )
+
+
 def loss_design_name(config: Mapping[str, Any]) -> str:
     """Field 4: the named recipe, or nearest-recipe + edits, or a hash version."""
     if config.get("prediction_output") == PREDICTION_CLOSURE:
@@ -383,15 +375,22 @@ def loss_design_name(config: Mapping[str, Any]) -> str:
         if not edits:
             return recipe
         return f"{recipe}+({', '.join(_diff_items(edits))})"
-    # Name the custom run against its nearest recipe: fewest loss-field edits wins,
-    # a later recipe wins ties (CONTROL_RECIPE_NAMES is oldest→newest, custom first).
+    # Name the custom run against its nearest recipe: fewest loss-field edits wins, then
+    # fewest edits among the NON-loss fields the recipe also freezes, then a later recipe
+    # (CONTROL_RECIPE_NAMES is oldest→newest, custom first). The second key exists because
+    # `simple-v1` and `simple-v1-lag` are the SAME loss design — they differ only in the
+    # flight model — so on loss fields alone every simple-v1 run would wear the `-lag` name
+    # next to a `point-mass` dynamics field.
     best_name, best_diffs = CONTROL_RECIPE_CUSTOM, _loss_diffs_against(config, {})
+    best_rank = (len(best_diffs), 0)
     for candidate in CONTROL_RECIPE_NAMES:
         if candidate == CONTROL_RECIPE_CUSTOM:
             continue
-        diffs = _loss_diffs_against(config, control_recipe_overrides(candidate))
-        if len(diffs) <= len(best_diffs):
-            best_name, best_diffs = candidate, diffs
+        overrides = control_recipe_overrides(candidate)
+        diffs = _loss_diffs_against(config, overrides)
+        rank = (len(diffs), _non_loss_recipe_mismatches(config, overrides))
+        if rank <= best_rank:
+            best_name, best_diffs, best_rank = candidate, diffs, rank
     if not best_diffs:
         return best_name
     if len(best_diffs) <= _MAX_LISTED_DIFFS:

@@ -26,6 +26,15 @@ from time_grids import output_time_grid
 
 CommonGridTruth = tuple[np.ndarray, np.ndarray, np.ndarray]
 
+# The arc-length geometry block below is a DIAGNOSTIC, computed for every control run
+# regardless of its objective. Its three shape parameters used to be `control_arc_*` config
+# fields; the arc-length-geometry OBJECTIVE that owned them was retired 2026-09-07 (package
+# audit T1-11), so they are frozen here at the values every run on disk used — which is what
+# keeps the ``arc_length_*`` keys comparable across the whole artifact history.
+ARC_LENGTH_POSITION_END_WEIGHT = 4.0
+TERMINAL_CROSS_TRACK_EMPHASIS = 3.0
+TERMINAL_VERTICAL_EMPHASIS = 5.0
+
 
 def fixed_anchor_common_truth(
     series: Sequence[FlightSeries],
@@ -154,7 +163,7 @@ def fixed_anchor_arc_length_geometry_metrics(
                 reference_positions,
                 normalizer,
                 points=points,
-                position_end_weight=config.control_arc_position_end_weight,
+                position_end_weight=ARC_LENGTH_POSITION_END_WEIGHT,
             )
         )
         reference_velocity_valid = np.concatenate((
@@ -183,10 +192,8 @@ def fixed_anchor_arc_length_geometry_metrics(
                 terminal_velocity_target[row],
                 float(item.scenario.target.psi),
                 coordinate_frame=config.coordinate_frame,
-                cross_track_emphasis=(
-                    config.control_arc_terminal_cross_track_emphasis
-                ),
-                vertical_emphasis=config.control_arc_terminal_vertical_emphasis,
+                cross_track_emphasis=TERMINAL_CROSS_TRACK_EMPHASIS,
+                vertical_emphasis=TERMINAL_VERTICAL_EMPHASIS,
             )
         )
         terminal_velocity_error[row] = np.linalg.norm(

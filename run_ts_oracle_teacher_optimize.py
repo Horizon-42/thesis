@@ -24,11 +24,9 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
-    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     PREDICTION_CONTROL,
     TSConfig,
 )
@@ -132,8 +130,9 @@ def main(argv: list[str] | None = None) -> int:
         control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+        # The arc-length-geometry objective and its paired checkpoint-selection metric
+        # were RETIRED 2026-09-07 (package audit T1-11); this finished 2026-08 campaign's
+        # config now falls back to the package defaults.
         control_state_duration_gradient=False,
         random_train_anchor=False,
         n_segments=64,
@@ -239,11 +238,8 @@ def main(argv: list[str] | None = None) -> int:
         "recipe": {
             "initialization": "inverse-dynamics",
             "duration": "uniform true outer-train final time / N; frozen",
-            "objective": "production arc-length-geometry 2+4",
-            "stages": [
-                {"label": stage.label, "horizon_s": stage.horizon_s, "steps": steps}
-                for stage, steps in stages
-            ],
+            "objective": "the package's configured control objective",
+            "steps": args.steps,
             "learning_rate": args.learning_rate,
             "gradient_clip_norm": args.gradient_clip_norm,
         },

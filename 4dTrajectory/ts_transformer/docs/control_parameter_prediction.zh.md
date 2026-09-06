@@ -13,6 +13,15 @@
 > `benchmark_validation_execution.py`、`control_oracle_curriculum` 的重复实现。
 > 第 8 节 a/b/c/d/e 五条建议均已落实。
 >
+> **2026-09-07 补充（四）**：`arc-length-geometry` 目标族与双时钟终端监督已删除（包审计
+> T1-11 / T1-13）——第 2.2 节的 `arc-length-geometry` 目标、2.6 节的
+> `control_terminal_supervision_clock`（`control_terminal_clock.py`）、
+> `fixed-anchor-arc-length-geometry` 选择指标、16 个 `control_geometry_*` / `control_arc_*` /
+> `control_terminal_*` 字段，以及 `control_gradient_clip_policy` 这根轴（连同
+> `final-time-decoupled`）都不存在了。保留的是 `arc_length_geometry.py` 与
+> `terminal_state_loss.py` 的**度量**半边：固定锚点验证每轮仍算 `arc_length_*` 诊断，
+> 其三个形状参数已冻结为 `fixed_anchor_validation.py` 的模块常量。第 2、3、6 节按此读。
+>
 > **2026-09-07 补充（三）**：horizon curriculum 已删除——`control_training_curriculum.py`
 > （后为 `control/training/curriculum.py`）、`control_horizon_curriculum_s` /
 > `control_horizon_curriculum_stage_epochs` 与两个 CLI 标志都不存在了（包审计 T1-10：
