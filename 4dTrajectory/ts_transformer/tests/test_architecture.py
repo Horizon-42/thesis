@@ -155,6 +155,52 @@ def test_the_control_package_does_not_import_the_training_loop():
         )
 
 
+def test_every_subcommand_module_exposes_the_same_triple():
+    """`__main__` is a table, not a 700-line `if` chain, and this is what makes that safe.
+
+    A command is `(help, add_cli_arguments, run_cli)`. `approach-cohorts` and
+    `benchmark-batch` supply their two callables from their own modules and carry their
+    help text in the table, which is why they have no module under `cli/`.
+    """
+    import argparse
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ts_cli_main", TS_DIR / "__main__.py")
+    main_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(main_module)
+
+    assert set(main_module.COMMANDS) == {
+        "train", "cross-validate", "approach-cohorts", "benchmark-batch",
+        "evaluate-fit", "freeze-test", "predict",
+    }
+    for name, (help_text, add_cli_arguments, run_cli) in main_module.COMMANDS.items():
+        assert help_text and callable(add_cli_arguments) and callable(run_cli), name
+        # It has to actually build: a subparser that raises is a --help that never prints.
+        add_cli_arguments(argparse.ArgumentParser(prog=name))
+
+
+def test_every_training_flag_is_named_after_the_field_it_sets():
+    """The rename that turned a hand-written flag→field table into a list of field names.
+
+    `cli.common` asserts at import that every name in `CLI_CONFIG_FIELDS` is a `TSConfig`
+    field. The other half is checked here: that each of those fields has a flag, spelled
+    exactly as the field.
+    """
+    import argparse
+
+    from cli.common import CLI_CONFIG_FIELDS, add_data_args, add_training_args
+
+    parser = argparse.ArgumentParser()
+    add_data_args(parser)          # --aircraft-type / --aircraft-filter live here
+    add_training_args(parser)
+    flags = {option for action in parser._actions for option in action.option_strings}
+    missing = [
+        name for name in CLI_CONFIG_FIELDS
+        if f"--{name.replace('_', '-')}" not in flags
+    ]
+    assert not missing, f"{missing} are config fields the CLI claims to set with no flag"
+
+
 def test_the_conditioning_names_and_their_scalings_are_one_source():
     """`mass_100t` must actually be divided by 100 t, and nothing used to check that.
 

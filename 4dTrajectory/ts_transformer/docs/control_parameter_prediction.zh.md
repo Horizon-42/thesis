@@ -88,7 +88,7 @@ train→predict→evaluate 全流程之后的机场级结果表。这是目前"�
 `simple-v1` 是 2026-08-16 那一批提交（`config.py`/`train.py`/`__main__.py` 单日各
 30+ 次提交）落地的产物，是当前推荐的、被最新根级脚本
 （`run_ts_simple_teacher_paired_cv.py` 等，见第 8 节）当作基线使用的配方。README
-的 `train --control-recipe simple-v1 ...` 示例就是这一档。
+的 `train --control-recipe-name simple-v1 ...` 示例就是这一档。
 
 ### simple-v1 的具体取值（对照 `control_simple_v1_overrides()`）
 
@@ -405,7 +405,7 @@ run_ts_oracle_teacher_optimize.py --output-dir <dir> [--airport ...] [--cohort-s
 ### 4.2 消费 `teacher_schedules.npz`
 
 ```
-__main__.py train --control-teacher-schedules <path> --control-recipe simple-v1
+__main__.py train --control-teacher-schedules <path> --control-recipe-name simple-v1
   -> oracle_teacher.pretraining.CachedSchedulePretrainer
        __post_init__: 若 recipe_name == "simple-v1",强校验
          steps==1000, learning_rate==1e-4, gradient_clip_norm==20.0,

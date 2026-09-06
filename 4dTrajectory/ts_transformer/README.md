@@ -157,7 +157,7 @@ python $TS train \
 python $TS train \
     --data trajectory_data_process/outputs/harvest/KSJC/arrivals/manifest.json \
     --eligibility-roster trajectory_data_process/outputs/harvest/KSJC/arrivals/lateral_pass_eligibility.json \
-    --airport KSJC --control-recipe simple-v1 \
+    --airport KSJC --control-recipe-name simple-v1 \
     --seed 1337 --split-seed 1337 \
     --output-dir 4dTrajectory/outputs/KSJC/experiments/control_simple_v1/seed1337
 
@@ -590,7 +590,7 @@ Two wrong guesses got corrected here, both by measuring rather than reasoning:
 taken. Keeping the same time coverage at `dt = 1 s` needs `L = 120, H = 600` — roughly 2×
 the training cost — for very little information: the source reports at ≤ 1 Hz with ragged
 gaps (a finer grid mostly interpolates), and the velocity channels come from a **15 s**
-least-squares window fit, so their bandwidth is unchanged by a denser grid. `--dt` remains
+least-squares window fit, so their bandwidth is unchanged by a denser grid. `--dt-s` remains
 a CLI knob if a future dataset (e.g. 1 Hz radar) justifies it; resizing `L`/`H` with it is
 mandatory, per the coverage math above.
 

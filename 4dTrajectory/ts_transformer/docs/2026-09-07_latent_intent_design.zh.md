@@ -260,7 +260,7 @@ wiggle"是未测的。还有一层：模仿项占损失 0.556，而逆动力学�
 
 **实现（2026-09-07，`dev-l1b`）**：分量名 `heading_rate` / `bank_tv`，与 `velocity` / `imitation` 同在
 `true-time-position` 目标下注册；在别的目标下给非 0 权重会被 config **直接拒绝**（不会静默失效）。
-CLI `--control-heading-rate-weight` / `--control-heading-rate-scale-dps` / `--control-bank-tv-weight`；
+CLI `--control-heading-rate-loss-weight` / `--control-heading-rate-loss-scale-dps` / `--control-bank-tv-loss-weight`；
 run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命名，0 处变化）。四个臂
 `L1b_native32_e60`（**同预算对照臂**，教师 64）/ `L1b_hr1` / `L1b_hr8` / `L1b_hr8_tv1`。
 
@@ -525,7 +525,7 @@ native32 checkpoint 自己的预测**（直线进近已在 445 m 内），预期
 > 拟合前按真值时长排序再分批：稠密监督按批内最长航班补齐，训练集 p50 183 s / 最长 1454 s，
 > 按划分顺序取 batch 1024 会多积分约 2.5 倍飞行秒；排序同时让产物与划分列出的顺序无关（有测试）。
 > 训练侧 config 轴 `control_imitation_target ∈ {inverse-dynamics, fitted}` + `control_fitted_teacher_path`
-> （CLI `--control-imitation-target` / `--control-fitted-teacher`；默认与四个 named recipe 的字面量都是
+> （CLI `--control-imitation-target` / `--control-fitted-teacher-path`；默认与四个 named recipe 的字面量都是
 > inverse-dynamics；两者都进 run name：`imit-target` 与 `teacher=<目录>/<文件>`——两代表是两个运行，
 > 与 `closure_labels_path` 同一条规则；728 份含 config 的存量产物重算 0 处改名）。config 先拒绝不自洽的
 > 组合：fitted 无路径、有路径非 fitted、非 control 路径、`random_train_anchor`、模仿权重为 0、

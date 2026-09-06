@@ -239,7 +239,7 @@ conda run -n aeroviz python 4dTrajectory/ts_transformer/__main__.py train \
   --data trajectory_data_process/outputs/harvest/KSJC/arrivals/manifest.json \
   --eligibility-roster trajectory_data_process/outputs/harvest/KSJC/arrivals/lateral_pass_eligibility.json \
   --airport KSJC \
-  --control-recipe simple-v1 \
+  --control-recipe-name simple-v1 \
   --control-teacher-schedules \
     4dTrajectory/outputs/KSJC/experiments/oracle_teacher_20260816_current_manifest/optimized_arc24_32/teacher_schedules.npz \
   --seed 1337 \

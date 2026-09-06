@@ -459,7 +459,9 @@ class TrainingPlan:
             "--control-dynamics-model",
             self.control_dynamics_model,
         ]
-        args += ["--control-state-clock", self.control_state_clock]
+        # The pipeline's own flag names predate the 2026-09-07 rename that made every
+        # ts_transformer flag match its TSConfig field; only the emitted flag changed.
+        args += ["--control-state-supervision-clock", self.control_state_clock]
         args += ["--control-state-loss-grid", self.control_state_loss_grid]
         args += ["--control-state-objective", self.control_state_objective]
         if not self.control_state_duration_gradient:
@@ -470,7 +472,7 @@ class TrainingPlan:
                 f"{self.control_gradient_clip_norm:g}",
             ]
         if self.control_rollout_dt is not None:
-            args += ["--control-rollout-dt", str(self.control_rollout_dt)]
+            args += ["--control-rollout-integrator-dt-s", str(self.control_rollout_dt)]
         return args
 
     def checkpoint_reuse_error(self) -> str | None:

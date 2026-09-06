@@ -41,6 +41,9 @@ ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
 import channels as ch  # noqa: E402
+import cli.common as cli_common  # noqa: E402
+import cli.evaluate_fit as cli_evaluate_fit  # noqa: E402
+import cli.train as cli_train  # noqa: E402
 from control import heads as control_models  # noqa: E402
 import batching  # noqa: E402
 import build_multiflight_capacity_report as capacity_report  # noqa: E402
@@ -332,32 +335,32 @@ def _run_development_cohort_train_cli(
         "test": ["KRDU:test"],
     }
     captured = {}
-    monkeypatch.setattr(ts_cli, "load_development_cohort", lambda _path: cohort)
+    monkeypatch.setattr(cli_common, "load_development_cohort", lambda _path: cohort)
     monkeypatch.setattr(
-        ts_cli, "arrival_data_provenance", lambda _data: _fake_data_provenance()
+        cli_common, "arrival_data_provenance", lambda _data: _fake_data_provenance()
     )
     monkeypatch.setattr(
-        ts_cli, "flight_keys_by_split", lambda _provenance, _config: outer_splits
+        cli_common, "flight_keys_by_split", lambda _provenance, _config: outer_splits
     )
     monkeypatch.setattr(
-        ts_cli, "load_flight_dicts", lambda _data, include_flight_keys: [{}]
+        cli_common, "load_flight_dicts", lambda _data, include_flight_keys: [{}]
     )
     monkeypatch.setattr(
-        ts_cli,
-        "_build_series_or_exit",
+        cli_common,
+        "build_series_or_exit",
         lambda *_args: (
             [SimpleNamespace(dataset_id=dataset_id) for dataset_id in built_ids],
             SimpleNamespace(to_dict=lambda: {"built": len(built_ids)}),
         ),
     )
-    monkeypatch.setattr(ts_cli, "data_selection_audit", lambda *_args: {})
-    monkeypatch.setattr(ts_cli, "development_cohort_audit", lambda *_args: {})
+    monkeypatch.setattr(cli_common, "data_selection_audit", lambda *_args: {})
+    monkeypatch.setattr(cli_common, "development_cohort_audit", lambda *_args: {})
 
     def capture_train(_series, _config, **kwargs):
         captured.update(kwargs)
         return {}
 
-    monkeypatch.setattr(ts_cli, "train", capture_train)
+    monkeypatch.setattr(cli_train, "run_training", capture_train)
     result = ts_cli.main([
         "train",
         "--data", str(tmp_path / "manifest.json"),
@@ -395,7 +398,7 @@ def test_development_cohort_rejects_incomplete_rebuild(monkeypatch, tmp_path):
         # The hook needs a control run to be a legal config at all, so the override is
         # applied to one: the refusal under test is "not available", not "not applicable".
         ("control_command_hook", "nominal-residual",
-         ["--prediction-output", PREDICTION_CONTROL, "--control-recipe", CONTROL_RECIPE_SIMPLE_V3]),
+         ["--prediction-output", PREDICTION_CONTROL, "--control-recipe-name", CONTROL_RECIPE_SIMPLE_V3]),
         ("state_position_reference", "anchor-relative", []),
     ],
 )
@@ -414,34 +417,35 @@ def test_a_value_a_new_run_may_not_select_does_not_begin_a_formal_run(
     overrides = tmp_path / "overrides.json"
     overrides.write_text(json.dumps({field: value}), encoding="utf-8")
     monkeypatch.setattr(
-        ts_cli, "arrival_data_provenance", lambda _data: _fake_data_provenance()
+        cli_common, "arrival_data_provenance", lambda _data: _fake_data_provenance()
     )
     monkeypatch.setattr(
-        ts_cli,
+        cli_common,
         "flight_keys_by_split",
         lambda _provenance, _config: {
             "train": ["KRDU:train"], "val": ["KRDU:val"], "test": ["KRDU:test"]
         },
     )
-    monkeypatch.setattr(ts_cli, "load_flight_dicts", lambda *_args, **_kwargs: [{}])
+    monkeypatch.setattr(cli_common, "load_flight_dicts", lambda *_args, **_kwargs: [{}])
     monkeypatch.setattr(
-        ts_cli,
-        "_build_series_or_exit",
+        cli_common,
+        "build_series_or_exit",
         lambda *_args: (
             [SimpleNamespace(dataset_id="KRDU:train")],
             SimpleNamespace(to_dict=lambda: {}),
         ),
     )
-    monkeypatch.setattr(ts_cli, "data_selection_audit", lambda *_args: {})
+    monkeypatch.setattr(cli_common, "data_selection_audit", lambda *_args: {})
 
     def record_begin(*_args, **_kwargs):
         nonlocal began_run
         began_run = True
         return tmp_path / "run" / experiment_index.RUN_MANIFEST_NAME
 
-    monkeypatch.setattr(ts_cli, "begin_run", record_begin)
+    monkeypatch.setattr(cli_common, "begin_run", record_begin)
     monkeypatch.setattr(
-        ts_cli, "train", lambda *_args, **_kwargs: pytest.fail("train must not start")
+        cli_train, "run_training",
+        lambda *_args, **_kwargs: pytest.fail("train must not start"),
     )
 
     with pytest.raises(SystemExit):
@@ -1620,7 +1624,7 @@ def test_pooled_prediction_filters_checkpoint_split_to_current_airport_subset():
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
         "manifests": [{"airport": "KAAA"}],
     }
-    assert ts_cli.split_keys_for_current_data(
+    assert cli_common.split_keys_for_current_data(
         ["KAAA:flight-a", "KBBB:flight-b", "KAAA:flight-c"], provenance
     ) == ["KAAA:flight-a", "KAAA:flight-c"]
 
@@ -2499,18 +2503,18 @@ def test_control_simple_v1_is_a_frozen_serialized_recipe():
 
 def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts(capsys):
     parser = argparse.ArgumentParser()
-    ts_cli._add_data_args(parser)
-    ts_cli._add_training_args(parser)
+    cli_common.add_data_args(parser)
+    cli_common.add_training_args(parser)
     args = parser.parse_args(
         [
             "--data", "unused.json",
             "--output-dir", "unused-output",
-            "--control-recipe", CONTROL_RECIPE_SIMPLE_V1,
+            "--control-recipe-name", CONTROL_RECIPE_SIMPLE_V1,
             "--seed", "2027",
         ]
     )
 
-    config, batch_auto = ts_cli._config_from_args(args, parser)
+    config, batch_auto = cli_common.config_from_args(args, parser)
 
     assert not batch_auto
     assert config.control_recipe_name == CONTROL_RECIPE_SIMPLE_V1
@@ -2523,12 +2527,12 @@ def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts(capsys):
         [
             "--data", "unused.json",
             "--output-dir", "unused-output",
-            "--control-recipe", CONTROL_RECIPE_SIMPLE_V1,
+            "--control-recipe-name", CONTROL_RECIPE_SIMPLE_V1,
             "--n-segments", "32",
         ]
     )
     with pytest.raises(SystemExit) as info:
-        ts_cli._config_from_args(conflicting, parser)
+        cli_common.config_from_args(conflicting, parser)
     assert info.value.code == 2 and "recipe fields are frozen: n_segments=32" in capsys.readouterr().err
 
 
@@ -3933,7 +3937,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--prediction-output") + 1] == PREDICTION_CONTROL
     assert recipe[recipe.index("--split-seed") + 1] == "1337"
     assert recipe[recipe.index("--control-duration-parameterization") + 1] == "uniform"
-    assert recipe[recipe.index("--control-state-clock") + 1] == "observed"
+    assert recipe[recipe.index("--control-state-supervision-clock") + 1] == "observed"
     assert (
         recipe[recipe.index("--control-state-loss-grid") + 1]
         == "native-segment-endpoints"
@@ -3942,7 +3946,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         recipe[recipe.index("--control-state-objective") + 1] == "true-time-position"
     )
     assert "--no-control-state-duration-gradient" in recipe
-    assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
+    assert recipe[recipe.index("--control-rollout-integrator-dt-s") + 1] == "0.5"
     assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
     assert config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
@@ -5429,11 +5433,11 @@ def test_evaluate_fit_cli_runs_train_and_validation_together(tmp_path, monkeypat
     report = SimpleNamespace(format=lambda: "built synthetic fit replay")
 
     monkeypatch.setattr(
-        ts_cli, "load_checkpoint",
+        cli_evaluate_fit, "load_checkpoint",
         lambda _path: (build_model(config), config, normalizer, payload),
     )
-    monkeypatch.setattr(ts_cli, "arrival_data_provenance", lambda _data: provenance)
-    monkeypatch.setattr(ts_cli, "require_matching_data_provenance", lambda *_args: None)
+    monkeypatch.setattr(cli_common, "arrival_data_provenance", lambda _data: provenance)
+    monkeypatch.setattr(cli_evaluate_fit, "require_matching_data_provenance", lambda *_args: None)
     loaded_keys = None
 
     def load_selected(_data, *, include_flight_keys=None):
@@ -5441,10 +5445,10 @@ def test_evaluate_fit_cli_runs_train_and_validation_together(tmp_path, monkeypat
         loaded_keys = include_flight_keys
         return flights
 
-    monkeypatch.setattr(ts_cli, "load_flight_dicts", load_selected)
-    monkeypatch.setattr(ts_cli, "dataset_flight_key", lambda flight, _index: flight["key"])
-    monkeypatch.setattr(ts_cli, "build_series", lambda *_args, **_kwargs: (series, report))
-    monkeypatch.setattr(ts_cli, "resolve_device", lambda _device: torch.device("cpu"))
+    monkeypatch.setattr(cli_evaluate_fit, "load_flight_dicts", load_selected)
+    monkeypatch.setattr(cli_evaluate_fit, "dataset_flight_key", lambda flight, _index: flight["key"])
+    monkeypatch.setattr(cli_evaluate_fit, "build_series", lambda *_args, **_kwargs: (series, report))
+    monkeypatch.setattr(cli_evaluate_fit, "resolve_device", lambda _device: torch.device("cpu"))
 
     assert ts_cli.main([
         "evaluate-fit",
