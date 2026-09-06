@@ -1,0 +1,26 @@
+{
+ "_comment": "L3 of docs/2026-09-07_latent_intent_design.zh.md: CTA conditioning, the DELIVERY form for the scheduler. Base = the main line's best arm, L2.d's warm posterior at beta 0.01 (l2_warm_posterior_20260907/L2d_warm_beta0p01: top-1 1214 m vs native32 1322, bank skill 0.729), with cta_conditioning=given: the given arrival time BECOMES the duration (the duration head and z's duration path are bypassed), and the network decides only the path that arrives then; the CTA also enters the decoder as a token. Training feeds the truth duration; a given-CTA run reads the future and wears cta=given in its name — it can never be quoted as a prediction-accuracy result. What it measures: (1) how much knowing WHEN buys on the path (ADE per stratum vs L2d_warm_beta0p01 — the timing half of the intent; expect the vectored stratum to move most), duration error 0 by construction; (2) the counterfactuals, run afterwards from this checkpoint by l3_cta_counterfactual_arms.json (predict-only, --cta-offset-s ±30/60/90 s): per-sample flyability not below the CTA=0 arm, path geometry (chamfer, path-length ratio, procedure compliance) varying smoothly with |offset| rather than collapsing, and the arrival time following the CTA exactly. Gates as pre-registered (design doc §六 L3).",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "latent_dim": 8,
+  "latent_free_bits_nats": 0.05,
+  "latent_prior_components": 1,
+  "latent_posterior_init_std": 0.1,
+  "latent_beta": 0.01,
+  "cta_conditioning": "given"
+ },
+ "arms": [
+  {
+   "key": "L3_cta",
+   "label": "warm posterior, beta 0.01, CTA given (the delivery form)",
+   "overrides": {},
+   "predict_args": [
+    "--latent-samples",
+    "6"
+   ]
+  }
+ ]
+}
