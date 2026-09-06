@@ -1,0 +1,29 @@
+{
+ "_comment": "L2 gate (3) for the L2.d warm-posterior arms (docs/2026-09-07_latent_intent_design.zh.md §六 L2.d) and the ladder's beta 0.1 checkpoint — the z-ORACLE: decode each validation flight from its POSTERIOR z (q(z | its own future), --z-from-posterior) instead of the prior top-1. Predict-only from existing checkpoints. This is the upper bound of what the latent can carry: with the true intent handed to the decoder, vectored ADE must reach <= 1235 m (C_truth_intent, the truth (d_join, T) conditioning) — if the posterior z does not buy that, z is not encoding the intent whatever the KL says. The selected checkpoints are the dead-latent epochs the selection rule picked (L2.d arm 1 collapsed by epoch ~87; arm 2 per its report), so a z-oracle at ~top-1 level here is the expected reading for a collapsed checkpoint and says nothing about the live epochs that were not kept. Reading: per arm, vectored / straight-in / all ADE and FDE p50 vs the same arm's prior top-1 (compare_constraint_arms.py, L1_native32 first). No modes/ here: --z-from-posterior is an oracle arm of its own and refuses the prior-sample options.",
+ "arms": [
+  {
+   "key": "L2z_cold_beta0p1",
+   "label": "z-oracle, cold posterior (q-std 1.0), beta 0.1 (ladder arm 1)",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l2_beta_ladder_20260907/L2b_beta0p1/checkpoint.pt",
+   "predict_args": [
+    "--z-from-posterior"
+   ]
+  },
+  {
+   "key": "L2z_warm_beta0p1",
+   "label": "z-oracle, warm posterior (q-std 0.1), beta 0.1",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l2_warm_posterior_20260907/L2d_warm_beta0p1/checkpoint.pt",
+   "predict_args": [
+    "--z-from-posterior"
+   ]
+  },
+  {
+   "key": "L2z_warm_beta0p01",
+   "label": "z-oracle, warm posterior (q-std 0.1), beta 0.01",
+   "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l2_warm_posterior_20260907/L2d_warm_beta0p01/checkpoint.pt",
+   "predict_args": [
+    "--z-from-posterior"
+   ]
+  }
+ ]
+}
