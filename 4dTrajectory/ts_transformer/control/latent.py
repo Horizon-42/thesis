@@ -372,6 +372,18 @@ def active_unit_threshold_nats(config: TSConfig) -> float:
     return max(config.latent_free_bits_nats, ACTIVE_UNIT_KL_NATS)
 
 
+def effective_latent_beta(config: TSConfig, epoch: int) -> float:
+    """The KL weight epoch ``epoch`` (1-based) trains under: ``β · min(1, e / warm-up)``.
+
+    Linear from zero, and equal to ``latent_beta`` from ``latent_beta_warmup_epochs`` on.
+    Zero warm-up (the default) is the whole run at ``latent_beta``, which is also the only
+    reason for the branch: it is the denominator.
+    """
+    if config.latent_beta_warmup_epochs == 0:
+        return config.latent_beta
+    return config.latent_beta * min(1.0, epoch / config.latent_beta_warmup_epochs)
+
+
 def with_latent_kl(
     components: LossComponents,
     prediction: LatentControlPrediction,
@@ -428,7 +440,7 @@ def with_latent_kl(
 
 
 def latent_epoch_record(
-    diagnostic_totals: Mapping[str, float], config: TSConfig
+    diagnostic_totals: Mapping[str, float], config: TSConfig, *, beta_effective: float
 ) -> dict[str, Any]:
     """The epoch's ``latent`` block from the epoch's summed diagnostics.
 
@@ -436,6 +448,12 @@ def latent_epoch_record(
     by the unweighted flight count they were summed over, never by the airport-weighted
     total the objective components use. Assembled here, beside the names, so the training
     loop restates none of them.
+
+    ``beta_effective`` is the weight this epoch's KL was charged at (:func:`
+    effective_latent_beta`). Every KL here is UNSCALED nats; the loss component
+    ``train_components.latent_kl`` is the scaled one — β_effective × the flight-weighted
+    mean of ``kl_nats_per_flight``'s per-flight terms — so the two together say both what
+    the posterior did and what it cost.
     """
     flights = max(diagnostic_totals.get("latent_flights", 0.0), 1.0)
 
@@ -459,4 +477,5 @@ def latent_epoch_record(
         "mean_displacement_sigma": per_flight("latent_mean_displacement_sigma"),
         "active_units": per_flight("latent_active_units"),
         "active_units_0p05": per_flight("latent_active_units_0p05"),
+        "beta_effective": beta_effective,
     }

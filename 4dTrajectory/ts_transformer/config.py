@@ -614,6 +614,12 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         # Every published simple-v* comparison was run against the inverse-dynamics
         # teacher; a recipe names one configuration, so the target is frozen here too.
         "control_imitation_target": CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
+        # L2.f's two latent levers are off in every named recipe, for the same reason as
+        # L1.b's: a schedule on the KL weight and an extra loss term would both change what
+        # `simple-v3` means. (The rest of the latent axis — `latent_dim` and its beta / free
+        # bits / posterior init — is deliberately NOT pinned: it predates this and every
+        # latent arm so far runs under `custom`.)
+        "latent_beta_warmup_epochs": 0,
         "control_state_duration_gradient": False,
         "control_gradient_clip_norm": 20.0,
         "control_rollout_integrator_dt_s": 0.5,
@@ -856,6 +862,14 @@ class TSConfig:
     latent_prior_components: int = 1          # K in the mixture prior; 1 = a single Gaussian
     latent_beta: float = 1.0                  # weight of KL(q ‖ p) in the objective
     latent_free_bits_nats: float = 0.0        # per-dim KL below this is not charged
+    # Epochs over which beta ramps LINEARLY from 0 to latent_beta (0 = no warm-up, the
+    # weight is its full value from epoch 1). L2.f: the penalty's mean term is what kills
+    # the posterior mean's information, and it does it in the first ten epochs, before the
+    # decoder has any use for z; a warm-up lets the decoder's z-weights grow first, so the
+    # mean has a reconstruction gradient holding it out when the penalty arrives. The
+    # earlier "annealing only postpones collapse" reading (L2.c) was about the VARIANCE
+    # term and does not carry over to the mean term.
+    latent_beta_warmup_epochs: int = 0
     # The posterior's standard deviation at initialization. 1.0 is the init the 2026-09-07
     # L2 runs collapsed under: a mean of ≈0.2 inside a unit-variance sample is noise to the
     # decoder, which learns to ignore z before the posterior can become informative — and
@@ -1228,6 +1242,8 @@ class TSConfig:
             raise ValueError("latent_dim must be >= 0 and latent_prior_components >= 1")
         if self.latent_beta < 0.0 or self.latent_free_bits_nats < 0.0:
             raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
+        if self.latent_beta_warmup_epochs < 0:
+            raise ValueError("latent_beta_warmup_epochs must be >= 0 (0 = no warm-up)")
         if self.latent_posterior_init_std <= 0.0:
             raise ValueError("latent_posterior_init_std must be positive")
 
@@ -1334,10 +1350,11 @@ class TSConfig:
             or self.latent_beta != 1.0
             or self.latent_free_bits_nats != 0.0
             or self.latent_posterior_init_std != 1.0
+            or self.latent_beta_warmup_epochs != 0
         ):
             raise ValueError(
                 "latent_prior_components / latent_beta / latent_free_bits_nats / "
-                "latent_posterior_init_std mean nothing "
+                "latent_posterior_init_std / latent_beta_warmup_epochs mean nothing "
                 "without a latent (latent_dim == 0) and would still rename the run"
             )
         if self.cta_conditioning != CTA_CONDITIONING_OFF and self.prediction_output != PREDICTION_CONTROL:

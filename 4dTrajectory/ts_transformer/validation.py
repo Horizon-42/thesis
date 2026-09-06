@@ -534,12 +534,18 @@ def evaluate_validation_airport(
     plan: ValidationBatchPlan,
     device: torch.device,
     *,
+    config: TSConfig,
     profiler: EpochProfiler | None = None,
     multipliers: ProcedureMultipliers | None = None,
 ) -> ValidationAirportEvaluation:
-    """Evaluate both validation clocks from one model forward per cached batch."""
+    """Evaluate both validation clocks from one model forward per cached batch.
+
+    ``config`` is the config the OBJECTIVE is scored under — the epoch's, which differs
+    from the dataset's own only in the annealed ``latent_beta`` (train.py). The plan's
+    dataset keeps owning the batches, the normalizer and the replay.
+    """
     dataset = plan.dataset
-    names = loss_component_names(dataset.config)
+    names = loss_component_names(config)
     component_totals = {name: 0.0 for name in names}
     flight_weight_total = 0.0
     replay_chunks: list[tuple[np.ndarray, SplitPredictionReplay]] = []
@@ -572,12 +578,12 @@ def evaluate_validation_airport(
                 prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
                 components = prediction_loss_components(
                     prediction,
-                    anchor_state(x, len(dataset.config.channels)),
+                    anchor_state(x, len(config.channels)),
                     y,
                     mask,
                     final_time_s,
                     flight_weights,
-                    dataset.config,
+                    config,
                     dataset.normalizer,
                     dynamics,
                     dense_supervision,

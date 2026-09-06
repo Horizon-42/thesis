@@ -36,6 +36,7 @@ from control.latent import (
     LATENT_KL_COMPONENT,
     LatentControlModel,
     LatentControlPrediction,
+    effective_latent_beta,
     latent_epoch_record,
     latent_kl,
     per_dimension_kl,
@@ -294,7 +295,7 @@ def test_the_epoch_record_divides_the_summed_diagnostics_by_the_flight_count():
     config = _config(latent_dim=3)
     out = with_latent_kl(components, _prediction(components=1, latent_dim=3), config, torch.ones(2))
     totals = {name: float(value) for name, value in out.diagnostics.items()}
-    record = latent_epoch_record(totals, config)
+    record = latent_epoch_record(totals, config, beta_effective=config.latent_beta)
     assert record["component_kl_nats_per_flight"] == pytest.approx(1.5)
     assert record["kl_mean_term_nats"] == pytest.approx(1.5)
     assert record["kl_variance_term_nats"] == pytest.approx(0.0, abs=1e-6)
@@ -379,8 +380,9 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
     assert set(first["latent"]) == {
         "kl_nats_per_flight", "component_kl_nats_per_flight", "kl_mean_term_nats",
         "kl_variance_term_nats", "kl_per_dim", "mean_displacement_sigma",
-        "active_units", "active_units_0p05",
+        "active_units", "active_units_0p05", "beta_effective",
     }
+    assert first["latent"]["beta_effective"] == config.latent_beta   # no warm-up
     assert 0.0 <= first["latent"]["active_units"] <= 3.0
     assert 0.0 <= first["latent"]["active_units_0p05"] <= 3.0
     # the vector is one entry per latent dimension and adds up to the analytic total
@@ -617,8 +619,39 @@ def test_config_refuses_latent_knobs_without_a_latent():
         _config(latent_dim=0, latent_beta=0.5)
     with pytest.raises(ValueError, match="mean nothing without a latent"):
         _config(latent_dim=0, latent_posterior_init_std=0.1)
+    with pytest.raises(ValueError, match="mean nothing without a latent"):
+        _config(latent_dim=0, latent_beta_warmup_epochs=40)
     with pytest.raises(ValueError, match="latent_posterior_init_std must be positive"):
         _config(latent_posterior_init_std=0.0)
+    with pytest.raises(ValueError, match="latent_beta_warmup_epochs must be >= 0"):
+        _config(latent_beta_warmup_epochs=-1)
+
+
+def test_the_beta_warmup_is_linear_from_zero_and_flat_without_one():
+    config = _config(latent_beta=0.02, latent_beta_warmup_epochs=4)
+    assert [effective_latent_beta(config, epoch) for epoch in (1, 2, 3, 4, 5, 200)] == (
+        pytest.approx([0.005, 0.01, 0.015, 0.02, 0.02, 0.02])
+    )
+    flat = _config(latent_beta=0.02)
+    assert {effective_latent_beta(flat, epoch) for epoch in range(1, 200)} == {0.02}
+    # ...and the epoch record says which weight the epoch was charged at
+    record = latent_epoch_record({}, config, beta_effective=0.005)
+    assert record["beta_effective"] == 0.005
+
+
+def test_the_warmup_names_the_run_only_when_it_is_set():
+    assert "beta-warmup" not in run_display_name(_config(latent_dim=8).to_dict())
+    assert "beta-warmup=40" in run_display_name(
+        _config(latent_dim=8, latent_beta_warmup_epochs=40).to_dict()
+    )
+
+
+def test_the_named_recipes_pin_the_warmup_off():
+    from config import CONTROL_RECIPE_NAMES, CONTROL_RECIPE_CUSTOM, control_recipe_overrides
+    for name in CONTROL_RECIPE_NAMES:
+        if name == CONTROL_RECIPE_CUSTOM:
+            continue
+        assert control_recipe_overrides(name)["latent_beta_warmup_epochs"] == 0
 
 
 @pytest.mark.parametrize("init_std", [1.0, 0.1])
@@ -676,6 +709,42 @@ def test_the_latent_model_trains_under_simple_v3_s_own_supervision(tmp_path: Pat
     assert isinstance(model, LatentControlModel)
     forecast = forecast_approach(model, series[0], loaded, normalizer, device=torch.device("cpu"))
     assert forecast.controls is not None and forecast.controls.shape[0] == config.n_segments
+
+
+def test_the_annealed_beta_is_what_the_epoch_charges_and_the_record_says_so(tmp_path: Path):
+    """β warm-up end to end: the epoch record carries the effective β, and the KL loss
+    COMPONENT is that β times the unscaled KL the same record reports (one airport, so the
+    macro weights are all 1 and the two averages are the same average). This is the
+    contract a reader of history.json depends on: `latent.kl_nats_per_flight` is nats,
+    `train_components.latent_kl` is what those nats cost."""
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
+        control_rollout_integrator_dt_s=0.5,
+        seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1,
+        final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
+        epochs=2, patience=2, batch_size=8, dropout=0.0,
+        latent_dim=3, latent_beta=0.5, latent_beta_warmup_epochs=4,
+    )
+    series, _report = build_series(
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=8, seed=3), config, airport=AIRPORT
+    )
+    provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                  "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
+    train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
+    history = json.loads((tmp_path / "run" / "history.json").read_text())["history"]
+    assert [row["latent"]["beta_effective"] for row in history] == pytest.approx([0.125, 0.25])
+    for row in history:
+        assert row["train_components"][LATENT_KL_COMPONENT] == pytest.approx(
+            row["latent"]["beta_effective"] * row["latent"]["kl_nats_per_flight"], rel=1e-5
+        )
+    # the checkpoint keeps the run's own beta, not the epoch's
+    _model, loaded, _normalizer, _payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
+    assert loaded.latent_beta == 0.5 and loaded.latent_beta_warmup_epochs == 4
 
 
 def test_the_z_oracle_decodes_the_posterior_mean_of_each_flight_s_own_future(tmp_path: Path):

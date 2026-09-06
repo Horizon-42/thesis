@@ -60,7 +60,7 @@ from evaluation_protocol import (
     TEST_RELEASE_PROTOCOL_FIELD,
     TEST_RELEASE_SCHEMA,
 )
-from control.latent import latent_epoch_record
+from control.latent import effective_latent_beta, latent_epoch_record
 from fixed_anchor_validation import CommonGridTruth
 from models import build_model, parameter_count, resolve_device
 from batch_contract import anchor_state, model_forward, unpack_batch
@@ -587,6 +587,13 @@ def fit_model(
         epoch_start_optimizer_updates = optimizer_updates
         epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
         train_anchor_sampling = train_set.anchor_statistics(config.seed + epoch)
+        # The objective THIS epoch optimizes: the run's config carrying the annealed KL
+        # weight (identical to `config` itself once the warm-up is over, and always when
+        # there is none). The training batches and the validation pass below are both
+        # scored under it, so an epoch's train and val `latent_kl` mean the same thing —
+        # the rule the procedure penalty's λ already follows.
+        beta_effective = effective_latent_beta(config, epoch)
+        epoch_config = replace(config, latent_beta=beta_effective)
 
         model.train()
         train_component_totals = {name: 0.0 for name in component_names}
@@ -644,7 +651,7 @@ def fit_model(
                     mask,
                     final_time_s,
                     flight_weights,
-                    config,
+                    epoch_config,
                     normalizer,
                     dynamics,
                     dense_supervision,
@@ -669,6 +676,7 @@ def fit_model(
                 model,
                 plan,
                 device,
+                config=epoch_config,
                 profiler=profiler,
                 multipliers=multipliers,
             )
@@ -712,7 +720,9 @@ def fit_model(
             hook_epoch["steps"] = hook_steps
         latent_epoch: dict[str, Any] = {}
         if config.latent_dim > 0:
-            latent_epoch = latent_epoch_record(train_diagnostic_totals, config)
+            latent_epoch = latent_epoch_record(
+                train_diagnostic_totals, config, beta_effective=beta_effective
+            )
         train_components = {
             name: value / max(train_weight_total, 1.0)
             for name, value in train_component_totals.items()
