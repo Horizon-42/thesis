@@ -93,6 +93,13 @@ class PosteriorEncoder(nn.Module):
             nn.Dropout(config.dropout),
             nn.Linear(config.d_model, 2 * config.latent_dim),
         )
+        # The log-variance half starts as a constant: every flight's posterior opens at
+        # exactly config.latent_posterior_init_std (its mean half keeps the default init, so
+        # z is a function of the future from step 0). See the field's comment in config.py.
+        with torch.no_grad():
+            output = self.network[-1]
+            output.weight[config.latent_dim:].zero_()
+            output.bias[config.latent_dim:].fill_(2.0 * math.log(config.latent_posterior_init_std))
 
     def forward(self, future: torch.Tensor, final_time_s: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         flat = torch.cat(

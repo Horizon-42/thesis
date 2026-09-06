@@ -13,6 +13,24 @@
 > `benchmark_validation_execution.py`、`control_oracle_curriculum` 的重复实现。
 > 第 8 节 a/b/c/d/e 五条建议均已落实。
 >
+> **2026-09-07 补充（四）**：`arc-length-geometry` 目标族与双时钟终端监督已删除（包审计
+> T1-11 / T1-13）——第 2.2 节的 `arc-length-geometry` 目标、2.6 节的
+> `control_terminal_supervision_clock`（`control_terminal_clock.py`）、
+> `fixed-anchor-arc-length-geometry` 选择指标、16 个 `control_geometry_*` / `control_arc_*` /
+> `control_terminal_*` 字段，以及 `control_gradient_clip_policy` 这根轴（连同
+> `final-time-decoupled`）都不存在了。保留的是 `arc_length_geometry.py` 与
+> `terminal_state_loss.py` 的**度量**半边：固定锚点验证每轮仍算 `arc_length_*` 诊断，
+> 其三个形状参数已冻结为 `fixed_anchor_validation.py` 的模块常量。第 2、3、6 节按此读。
+>
+> **2026-09-07 补充（三）**：horizon curriculum 已删除——`control_training_curriculum.py`
+> （后为 `control/training/curriculum.py`）、`control_horizon_curriculum_s` /
+> `control_horizon_curriculum_stage_epochs` 与两个 CLI 标志都不存在了（包审计 T1-10：
+> 默认 `()`，所有配方钉 `()`，无臂设过；它唯一合法的目标 `arc-length-geometry` 同日退役）。
+> 唯一保留的是收尾时钟修正 `close_duration_prefix`，现住在 `control/loss/fixed_dt.py`。
+> 本文 2、3、6 节提到它的地方按此读。
+>
+> **2026-09-07 补充（二）**：effort / smoothness 正则轴已删除——`control/loss/regularization.py`（本文的 `control_regularization.py`）、`control_effort_loss_weight` / `control_smoothness_loss_weight` 与两个 CLI 标志都不存在了（包审计 T1-12：所有配方钉 0.0，每批算一次乘零）。本文 2.4、3、6 节提到它的地方按此读。
+>
 > **2026-09-07 补充**：`uniform` 已是唯一的 duration 参数化——`UniformDurationControlOutputModel` /
 > `uniform_duration_control.py`（后为 `control/duration.py`）并入 `ControlOutputModel`，
 > `UniformDurationControlHead` 移到 `prediction_outputs.py`；本文第 2、3、6 节里的这些名字按此读。

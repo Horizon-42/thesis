@@ -9,6 +9,8 @@ if str(_TS_DIR) not in sys.path:
 
 from config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+    CONTROL_RECIPE_SIMPLE_V1,
+    CONTROL_RECIPE_SIMPLE_V1_LAG,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_RECIPE_SIMPLE_V2,
     CONTROL_RECIPE_SIMPLE_V3,
@@ -91,6 +93,17 @@ def test_custom_run_is_named_against_its_nearest_recipe():
         CONTROL_RECIPE_SIMPLE_V3
     )["control_imitation_loss_weight"]
     assert loss_design_name(config) == "simple-v3"
+
+
+def test_a_loss_field_tie_is_broken_by_the_flight_model_the_recipe_freezes():
+    """simple-v1 and simple-v1-lag are the same loss design (zero loss-field diffs for both);
+    the second rank key — fewest edits among the non-loss fields the recipe also freezes —
+    is what keeps a point-mass run from being named after the lag recipe (T1-11)."""
+    for recipe in (CONTROL_RECIPE_SIMPLE_V1, CONTROL_RECIPE_SIMPLE_V1_LAG):
+        config = _control_config(control_recipe_name="custom")
+        config.update(control_recipe_overrides(recipe))
+        config["control_recipe_name"] = "custom"
+        assert loss_design_name(config) == recipe
 
 
 def test_exact_v2_content_reads_as_v2():

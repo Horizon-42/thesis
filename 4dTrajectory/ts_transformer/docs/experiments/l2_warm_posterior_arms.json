@@ -1,0 +1,43 @@
+{
+ "_comment": "L2.d of docs/2026-09-07_latent_intent_design.zh.md: the WARM-STARTED posterior. The beta ladder (l2_beta_ladder_arms.json) was stopped after its first rung because beta is not what collapses the latent: L2b_beta0p1's KL trajectory is identical to L2_gauss's (peak 0.046 vs 0.045 nats/flight, active_units 0 from epoch ~8 in both) and sits UNDER the free-bits floor (8 x 0.05 = 0.4 nats) the whole run, so the KL penalty never binds at any beta. The posterior itself is the dead path: at initialization its mean is ~0.2 inside a unit-variance sample, z is noise to the decoder, the decoder's z-weights decay under noise gradients and weight decay, and the posterior then gets no gradient at all. latent_posterior_init_std=0.1 opens every posterior narrow (KL ~1.8 nats/dim at step 0, above the floor), so z carries the future from step 0 and the KL widens it at the configured beta — the trade-off the ladder was built to measure. Same base as the ladder (K=1, N=32, simple-v3 supervision + teacher, free bits 0.05/dim); arms differ only in beta: 0.1 and 0.01 (0.001 held back — it is the autoencoder end and only matters if 0.01 still collapses). READOUT as before (predict_args write modes/, random/, shuffled/). PRE-REGISTERED READING: the same gates — (1) active_units >= 3 AND shuffled delta-ADE > 200 m; (2) minADE_6 < top-1 AND < the same-K N(0,I) control; (3) top-1 not worse than L1_native32 per stratum; veto on straight-in FDE — and the pick is the LARGEST beta passing (1) without costing the top-1. Expected failure modes, stated first: (a) z becomes an autoencoder of the future (z-oracle excellent, shuffled delta-ADE huge, but top-1 worse than native32 because the prior cannot predict z) -> beta too low; (b) collapse again with the warm start -> the decoder explains the data without z whatever the init, and the next lever is an auxiliary intent target on z (L2.e), not another init.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "latent_dim": 8,
+  "latent_free_bits_nats": 0.05,
+  "latent_prior_components": 1,
+  "latent_posterior_init_std": 0.1
+ },
+ "arms": [
+  {
+   "key": "L2d_warm_beta0p1",
+   "label": "warm posterior (q-std 0.1), K=1, beta 0.1",
+   "overrides": {
+    "latent_beta": 0.1
+   },
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  },
+  {
+   "key": "L2d_warm_beta0p01",
+   "label": "warm posterior (q-std 0.1), K=1, beta 0.01",
+   "overrides": {
+    "latent_beta": 0.01
+   },
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  }
+ ]
+}

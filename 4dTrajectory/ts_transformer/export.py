@@ -155,8 +155,7 @@ def build_prediction_record(
         # Closure output: the construction that drew the path (via-Dubins or a fallback)
         # and whether it was drawn from the flight's label (the oracle arm).
         **({"closureConstruction": forecast.closure_construction,
-            "closureFromLabels": forecast.closure_from_labels,
-            "closureTracked": forecast.closure_tracked}
+            "closureFromLabels": forecast.closure_from_labels}
            if forecast.prediction_output == PREDICTION_CLOSURE else {}),
         # Latent control output: which prior sample this is (None = the top-1 the contract
         # carries) and its probability; whether it was decoded from another flight's

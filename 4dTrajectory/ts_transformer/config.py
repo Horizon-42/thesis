@@ -44,6 +44,11 @@ MODELS = ("itransformer", "patchtst")
 # KRDU forecast ~250 m NW of the aircraft from its first step
 # (docs/2026-09-03_krdu_nw_endpoint_bias.md).
 STATE_POSITION_ABSOLUTE = "absolute"
+# VETOED (2026-09-03 state-v2 campaign, by that campaign's OWN pre-registered decision
+# rule): it did not clear the bar it was registered against, and `corridor-bounded` did.
+# The value STAYS only because a current-cohort artifact is stored under it
+# (`4dTrajectory/outputs/*/experiments/state_v2_20260903/A_anchor_relative`), whose config
+# must keep loading and naming. **Do not choose it for a new arm.**
 STATE_POSITION_ANCHOR_RELATIVE = "anchor-relative"
 # The absolute output, with the position channels bounded to the final-approach corridor
 # and glidepath window on the rows the output itself places on the final
@@ -143,14 +148,6 @@ CONTROL_STATE_CLOCKS = (
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_CLOCK_OBSERVED,
 )
-CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION = "state-supervision"
-CONTROL_TERMINAL_CLOCK_PREDICTED = "predicted"
-CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME = "predicted-detached-time"
-CONTROL_TERMINAL_CLOCKS = (
-    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
-    CONTROL_TERMINAL_CLOCK_PREDICTED,
-    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
-)
 CONTROL_STATE_LOSS_GRID_NATIVE = "native-segment-endpoints"
 CONTROL_STATE_LOSS_GRID_FIXED_DT = "fixed-dt"
 CONTROL_STATE_LOSS_GRIDS = (
@@ -158,24 +155,10 @@ CONTROL_STATE_LOSS_GRIDS = (
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
 )
 CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE = "normalized-mse"
-CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY = "arc-length-geometry"
 CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION = "true-time-position"
 CONTROL_STATE_OBJECTIVES = (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
-)
-CONTROL_ARC_TERMINAL_VECTOR_NORM = "vector-norm"
-CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS = "runway-components"
-CONTROL_ARC_TERMINAL_PARAMETERIZATIONS = (
-    CONTROL_ARC_TERMINAL_VECTOR_NORM,
-    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
-)
-CONTROL_ARC_LOCAL_VELOCITY_VECTOR = "vector-components"
-CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED = "tangent-speed"
-CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS = (
-    CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
-    CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
 )
 CONTROL_DURATION_FACTORIZED = "factorized"
 CONTROL_DURATION_UNIFORM = "uniform"
@@ -204,13 +187,6 @@ CONTROL_DYNAMICS_BACKENDS = (
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
 )
-CONTROL_GRADIENT_CLIP_GLOBAL = "global"
-CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED = "final-time-decoupled"
-CONTROL_GRADIENT_CLIP_POLICIES = (
-    CONTROL_GRADIENT_CLIP_GLOBAL,
-    CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
-)
-
 CONTROL_RECIPE_CUSTOM = "custom"
 CONTROL_RECIPE_SIMPLE_V1 = "simple-v1"
 # simple-v1 with the lagged flight model substituted and nothing else changed, so the two
@@ -281,11 +257,9 @@ SIMPLE_V3_IMITATION_LOSS_WEIGHT = 64.0
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
-CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY = "fixed-anchor-arc-length-geometry"
 CHECKPOINT_SELECTION_METRICS = (
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
 )
 
 
@@ -348,7 +322,6 @@ DEFAULT_FINAL_TIME_SCALE_S = 600.0
 DEFAULT_POSITION_LOSS_SCALE_M = 10_000.0
 DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S = 60.0
 DEFAULT_VALIDATION_COMMON_GRID_POINTS = 64
-DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS = 10
 DEFAULT_CONTROL_DURATION_UNIFORM_FLOOR = 0.8
 
 # Fallback aircraft when a flight dict has no resolvable type or usable performance model.
@@ -396,13 +369,50 @@ CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RE
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
-# The hook gates on the rollout state itself; the FAF gate is not carried by the control
-# dynamics, so ``on-final`` is the only gate a hook can use.
-# Fields removed from the contract after checkpoints that store them were written. Each
-# could not change an answer (2026-09-07 package audit): `control_hook_gate` had a
-# one-member vocabulary nothing read; `control_dense_state_loss_weight` was a weight no
-# loss read. `from_dict` drops them from a stored config.
-RETIRED_SERIALIZED_FIELDS = ("control_hook_gate", "control_dense_state_loss_weight")
+
+# Fields removed from the contract after checkpoints that store them were written
+# (2026-09-07 package audit). `control_hook_gate` had a one-member vocabulary nothing
+# read and `control_dense_state_loss_weight` was a weight no loss read, so neither could
+# change an answer. `control_effort_loss_weight` / `control_smoothness_loss_weight` are
+# weaker: every named recipe pins them to 0.0 and no arm file since 2026-08 set them, but
+# the 2026-07-29 POOLED sweeps (`stage_c_effort`, `stage_c_smoothness`) DID — those ten
+# first-generation runs lose the `custom(effort=…)` / `custom(smooth=…)` item from their
+# recomputed name. `from_dict` drops all four from a stored config.
+RETIRED_SERIALIZED_FIELDS = (
+    "control_hook_gate",
+    "control_dense_state_loss_weight",
+    "control_effort_loss_weight",
+    "control_smoothness_loss_weight",
+    # The horizon curriculum (T1-10, 2026-09-07). Every recipe pinned it to ``()`` and no
+    # arm ever set it, so dropping the two fields cannot change any stored run.
+    "control_horizon_curriculum_s",
+    "control_horizon_curriculum_stage_epochs",
+    # The arc-length-geometry objective family and the dual terminal clock (T1-11 / T1-13,
+    # 2026-09-07). No arm file has used the objective since 2026-08-02; its only setters
+    # were three teacher runners whose checkpoints `load_checkpoint` already refuses (the
+    # 2026-08-18 control-unit change). The 2026-08 runs that DID set these fields therefore
+    # lose the corresponding items from their recomputed names, which is the grammar's
+    # documented behaviour, not a silent rewrite.
+    "control_geometry_loss_weight",
+    "control_arc_horizontal_velocity_loss_weight",
+    "control_arc_vertical_velocity_loss_weight",
+    "control_arc_horizontal_velocity_scale_mps",
+    "control_arc_vertical_velocity_scale_mps",
+    "control_arc_local_velocity_parameterization",
+    "control_arc_tangent_loss_weight",
+    "control_arc_position_end_weight",
+    "control_arc_terminal_parameterization",
+    "control_arc_terminal_cross_track_emphasis",
+    "control_arc_terminal_vertical_emphasis",
+    "control_terminal_position_loss_weight",
+    "control_terminal_velocity_loss_weight",
+    "control_terminal_position_scale_m",
+    "control_terminal_velocity_scale_mps",
+    "control_terminal_supervision_clock",
+    # The gradient-clip POLICY axis went with `final-time-decoupled`: one remaining member
+    # is not a choice, it is the behaviour. `control_gradient_clip_norm` stays.
+    "control_gradient_clip_policy",
+)
 
 CONTROL_HOOK_FIELDS = (
     "control_command_hook",
@@ -419,7 +429,7 @@ CONTROL_HOOK_FIELDS = (
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
 # coerce them first, through this one function, or ``[] != ()`` refuses a faithful copy.
-SEQUENCE_FIELDS = ("channels", "control_horizon_curriculum_s")
+SEQUENCE_FIELDS = ("channels",)
 
 
 def coerce_sequence_fields(settings: dict[str, Any]) -> dict[str, Any]:
@@ -517,8 +527,6 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "state_endpoint_loss_weight": 0.25,
         "kinematic_consistency_loss_weight": 0.0,
         "terminal_loss_weight": 0.0,
-        "control_effort_loss_weight": 0.0,
-        "control_smoothness_loss_weight": 0.0,
         "control_duration_parameterization": CONTROL_DURATION_UNIFORM,
         "control_duration_uniform_floor": 0.0,
         "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
@@ -529,17 +537,8 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_velocity_loss_weight": 0.0,
         "control_velocity_loss_scale_mps": 10.0,
         "control_imitation_loss_weight": 0.0,
-        "control_geometry_loss_weight": 0.0,
-        "control_arc_horizontal_velocity_loss_weight": 0.0,
-        "control_arc_vertical_velocity_loss_weight": 0.0,
-        "control_arc_tangent_loss_weight": 0.0,
-        "control_terminal_position_loss_weight": 0.0,
-        "control_terminal_velocity_loss_weight": 0.0,
-        "control_terminal_supervision_clock": CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
         "control_state_duration_gradient": False,
-        "control_horizon_curriculum_s": (),
         "control_gradient_clip_norm": 20.0,
-        "control_gradient_clip_policy": CONTROL_GRADIENT_CLIP_GLOBAL,
         "control_rollout_integrator_dt_s": 0.5,
     }
 
@@ -554,10 +553,7 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     "control_state_loss_grid",
     "control_state_objective",
     "control_state_duration_gradient",
-    "control_horizon_curriculum_s",
-    "control_horizon_curriculum_stage_epochs",
     "control_gradient_clip_norm",
-    "control_gradient_clip_policy",
     "control_dynamics_backend",
     "control_dynamics_model",
     "control_thrust_time_constant_s",
@@ -567,22 +563,6 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     # deliberately NOT here: their defaults (0.0 / 10.0 / 0.0) reproduce the behaviour of
     # every checkpoint trained before those terms existed, which is exactly the "safe
     # stand-in" test this list applies.
-    "control_geometry_loss_weight",
-    "control_arc_horizontal_velocity_loss_weight",
-    "control_arc_vertical_velocity_loss_weight",
-    "control_arc_horizontal_velocity_scale_mps",
-    "control_arc_vertical_velocity_scale_mps",
-    "control_arc_local_velocity_parameterization",
-    "control_arc_tangent_loss_weight",
-    "control_arc_position_end_weight",
-    "control_arc_terminal_parameterization",
-    "control_arc_terminal_cross_track_emphasis",
-    "control_arc_terminal_vertical_emphasis",
-    "control_terminal_position_loss_weight",
-    "control_terminal_velocity_loss_weight",
-    "control_terminal_position_scale_m",
-    "control_terminal_velocity_scale_mps",
-    "control_terminal_supervision_clock",
 )
 
 
@@ -651,7 +631,8 @@ class TSConfig:
     closure_height_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
-    # bounded to the final-approach corridor (see the constants).
+    # bounded to the final-approach corridor (see the constants). ``anchor-relative`` is
+    # VETOED for new arms — kept only so the 2026-09-03 artifact stored under it loads.
     state_position_reference: str = STATE_POSITION_ABSOLUTE
     corridor_gate: str = CORRIDOR_GATE_ON_FINAL
     # State output only: the final-approach penalty (train.procedure_loss). Hinge² on the
@@ -763,10 +744,6 @@ class TSConfig:
     # scale, not an aviation acceptance threshold; the checkpoint records it explicitly.
     position_loss_scale_m: float = DEFAULT_POSITION_LOSS_SCALE_M
     final_time_scale_s: float = DEFAULT_FINAL_TIME_SCALE_S
-    # Control-output-only regularizers. Controls are scaled by each flight's own envelope
-    # before these are evaluated, so mixed-aircraft batches share one dimensionless loss.
-    control_effort_loss_weight: float = 1e-3
-    control_smoothness_loss_weight: float = 1e-2
     # Duration-head ablation for the deterministic single-control strategy. ``factorized``
     # predicts one positive total time plus a softmax partition; ``direct`` predicts each
     # positive segment duration and derives total time by summation. Both emit the same
@@ -788,13 +765,11 @@ class TSConfig:
     # modules: segment durations still choose control-switch times, while state error is
     # evaluated independently every ``dt_s`` seconds on the observed training clock.
     control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE
-    # The default keeps the historical normalized-channel MSE. ``physical-criteria``
-    # optimizes the smooth worst of fixed-dt 3-D ADE/100 m and terminal error/100 m.
-    # ``terminal-state`` composes independently replaceable dense-state, terminal-position
-    # and terminal-velocity terms. ``arc-length-geometry`` replaces only the dense term with
-    # position SmoothL1 plus reliable local chart-velocity errors on one normalized
-    # horizontal-arc grid. Orthogonal ablation fields below change terminal decomposition,
-    # local-velocity decomposition or progress weighting without creating more objectives.
+    # The default keeps the historical normalized-channel MSE. ``true-time-position`` is
+    # the minimal physical objective simple-v1 froze: 3-D position on the rollout's own
+    # clock plus a soft observed endpoint, with the velocity and imitation terms as
+    # opt-in weights. (``physical-criteria``, ``terminal-state`` and
+    # ``arc-length-geometry`` all lived here once and are retired.)
     control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
     # The true-time-position objective scores POSITION only, so a rollout may thread the
     # right places with the wrong heading and swing back between them — the measured
@@ -811,6 +786,13 @@ class TSConfig:
     latent_prior_components: int = 1          # K in the mixture prior; 1 = a single Gaussian
     latent_beta: float = 1.0                  # weight of KL(q ‖ p) in the objective
     latent_free_bits_nats: float = 0.0        # per-dim KL below this is not charged
+    # The posterior's standard deviation at initialization. 1.0 is the init the 2026-09-07
+    # L2 runs collapsed under: a mean of ≈0.2 inside a unit-variance sample is noise to the
+    # decoder, which learns to ignore z before the posterior can become informative — and
+    # the KL then sits under the free-bits floor, so beta never binds (L2_gauss and
+    # L2b_beta0p1 had identical KL trajectories). A narrow start hands the decoder an
+    # informative z from step 0 and lets the KL widen it at the configured beta.
+    latent_posterior_init_std: float = 1.0
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
@@ -824,47 +806,12 @@ class TSConfig:
     # (per-flight skill +0.197 against +0.312), while a same-runway twin reaches +0.598 --
     # so the signal is there and only supervision was missing. Zero keeps simple-v1/v2.
     control_imitation_loss_weight: float = 0.0
-    control_geometry_loss_weight: float = 0.75
-    control_arc_horizontal_velocity_loss_weight: float = 0.25
-    control_arc_vertical_velocity_loss_weight: float = 0.25
-    control_arc_horizontal_velocity_scale_mps: float = 10.0
-    control_arc_vertical_velocity_scale_mps: float = 2.0
-    control_arc_local_velocity_parameterization: str = (
-        CONTROL_ARC_LOCAL_VELOCITY_VECTOR
-    )
-    control_arc_tangent_loss_weight: float = 0.25
-    control_arc_position_end_weight: float = 4.0
-    control_arc_terminal_parameterization: str = (
-        CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS
-    )
-    control_arc_terminal_cross_track_emphasis: float = 3.0
-    control_arc_terminal_vertical_emphasis: float = 5.0
-    control_terminal_position_loss_weight: float = 1.0
-    control_terminal_velocity_loss_weight: float = 1.0
-    control_terminal_position_scale_m: float = 100.0
-    control_terminal_velocity_scale_mps: float = 10.0
-    # Terminal state may share the state-supervision rollout or use a second deployable
-    # predicted-clock rollout. The latter keeps dense geometry on the observed clock while
-    # full-horizon terminal errors train the inference clock.
-    control_terminal_supervision_clock: str = (
-        CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION
-    )
     # Whether state-rollout gradients may update the learned duration partition. Turning
     # this off leaves the final-time loss trainable while controls own geometry fitting.
     control_state_duration_gradient: bool = True
-    # Optional physical-time single-shooting curriculum. Numeric stages are trained for
-    # ``control_horizon_curriculum_stage_epochs`` each, followed by the full horizon for
-    # the remaining epoch budget. Empty preserves the historical full-horizon training.
-    control_horizon_curriculum_s: tuple[float, ...] = ()
-    control_horizon_curriculum_stage_epochs: int = (
-        DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS
-    )
-    # Optional gradient-norm cap for deterministic control training. The default policy
-    # applies one global cap. The opt-in ablation leaves only an isolated factorized
-    # final-time head outside the combined backbone/control cap, so it requires observed
-    # state clock and detached state-duration gradients. Zero keeps historical behavior.
+    # Optional gradient-norm cap for deterministic control training: one global cap over
+    # every parameter. Zero keeps historical behavior.
     control_gradient_clip_norm: float = 0.0
-    control_gradient_clip_policy: str = CONTROL_GRADIENT_CLIP_GLOBAL
     # Rollout state representation is independent of the model/data coordinate frame.
     # The baseline re-anchors a local ENU RK4 step into geodetic state every sub-step;
     # transport-chart-velocity integrates threshold-chart position plus moving-local-ENU
@@ -1202,12 +1149,6 @@ class TSConfig:
                 f"{self.control_state_supervision_clock!r}; expected one of "
                 f"{CONTROL_STATE_CLOCKS}"
             )
-        if self.control_terminal_supervision_clock not in CONTROL_TERMINAL_CLOCKS:
-            raise ValueError(
-                "unknown control_terminal_supervision_clock "
-                f"{self.control_terminal_supervision_clock!r}; expected one of "
-                f"{CONTROL_TERMINAL_CLOCKS}"
-            )
         if self.control_state_loss_grid not in CONTROL_STATE_LOSS_GRIDS:
             raise ValueError(
                 "unknown control_state_loss_grid "
@@ -1220,24 +1161,6 @@ class TSConfig:
                 f"{self.control_state_objective!r}; expected one of "
                 f"{CONTROL_STATE_OBJECTIVES}"
             )
-        if (
-            self.control_arc_terminal_parameterization
-            not in CONTROL_ARC_TERMINAL_PARAMETERIZATIONS
-        ):
-            raise ValueError(
-                "unknown control_arc_terminal_parameterization "
-                f"{self.control_arc_terminal_parameterization!r}; expected one of "
-                f"{CONTROL_ARC_TERMINAL_PARAMETERIZATIONS}"
-            )
-        if (
-            self.control_arc_local_velocity_parameterization
-            not in CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS
-        ):
-            raise ValueError(
-                "unknown control_arc_local_velocity_parameterization "
-                f"{self.control_arc_local_velocity_parameterization!r}; expected one of "
-                f"{CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS}"
-            )
         if self.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
             if self.prediction_output != PREDICTION_CONTROL:
                 raise ValueError(
@@ -1248,17 +1171,6 @@ class TSConfig:
                 raise ValueError(
                     "fixed-dt control state loss requires "
                     "control_state_supervision_clock='observed'"
-                )
-        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    f"{self.control_state_objective} control objective is supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
-                raise ValueError(
-                    f"{self.control_state_objective} control objective requires "
-                    "control_state_loss_grid='fixed-dt'"
                 )
         if self.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
             if self.prediction_output != PREDICTION_CONTROL:
@@ -1279,67 +1191,6 @@ class TSConfig:
                 raise ValueError(
                     "true-time-position control objective requires observed state supervision"
                 )
-        if (
-            self.control_terminal_supervision_clock
-            in (
-                CONTROL_TERMINAL_CLOCK_PREDICTED,
-                CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
-            )
-        ):
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "predicted terminal supervision clock requires "
-                    "prediction_output='control'"
-                )
-            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-                raise ValueError(
-                    "predicted terminal supervision clock requires observed dense-state "
-                    "supervision"
-                )
-            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
-                raise ValueError(
-                    "predicted terminal supervision clock requires fixed-dt state loss"
-                )
-            if (
-                self.control_state_objective
-                != CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-            ):
-                raise ValueError(
-                    "predicted terminal supervision clock requires the "
-                    "arc-length-geometry objective"
-                )
-        if (
-            self.control_terminal_supervision_clock
-            == CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME
-            and self.control_duration_parameterization != CONTROL_DURATION_FACTORIZED
-        ):
-            raise ValueError(
-                "predicted-detached-time terminal supervision requires factorized "
-                "durations"
-            )
-        if (
-            self.control_state_objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-            and self.checkpoint_selection_metric
-            != CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY
-        ):
-            raise ValueError(
-                "arc-length-geometry control objective requires "
-                "checkpoint_selection_metric='fixed-anchor-arc-length-geometry'"
-            )
-        if (
-            self.control_state_objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-            and self.n_segments < 2
-        ):
-            raise ValueError("arc-length-geometry requires n_segments >= 2")
-        if (
-            self.checkpoint_selection_metric == CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY
-            and self.control_state_objective
-            != CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-        ):
-            raise ValueError(
-                "fixed-anchor-arc-length-geometry checkpoint selection requires the "
-                "arc-length-geometry control objective"
-            )
         if not self.control_state_duration_gradient:
             if self.prediction_output != PREDICTION_CONTROL:
                 raise ValueError(
@@ -1351,70 +1202,11 @@ class TSConfig:
                     "detached control-state duration gradients require "
                     "control_state_supervision_clock='observed'"
                 )
-        if self.control_horizon_curriculum_s:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "control horizon curriculum is supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
-                raise ValueError(
-                    "control horizon curriculum requires "
-                    "control_state_loss_grid='fixed-dt'"
-                )
-            if (
-                self.control_state_objective
-                != CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-            ):
-                raise ValueError(
-                    "control horizon curriculum requires a fixed-dt physical objective"
-                )
-            if self.control_state_duration_gradient:
-                raise ValueError(
-                    "control horizon curriculum requires detached state-duration gradients"
-                )
-            if self.control_duration_parameterization != CONTROL_DURATION_FACTORIZED:
-                raise ValueError(
-                    "control horizon curriculum currently requires factorized durations"
-                )
-            if self.random_train_anchor:
-                raise ValueError("control horizon curriculum requires fixed train anchors")
-            previous_horizon = 0.0
-            for horizon_s in self.control_horizon_curriculum_s:
-                if (
-                    not isinstance(horizon_s, (int, float))
-                    or not math.isfinite(horizon_s)
-                    or not 0.0 < horizon_s
-                ):
-                    raise ValueError("control curriculum horizons must be positive seconds")
-                if horizon_s <= previous_horizon:
-                    raise ValueError(
-                        "control curriculum horizons must be strictly increasing"
-                    )
-                grid_steps = round(horizon_s / self.dt_s)
-                if abs(horizon_s - grid_steps * self.dt_s) > self.dt_s * 1e-7:
-                    raise ValueError(
-                        "control curriculum horizons must align with the fixed-dt grid"
-                    )
-                previous_horizon = float(horizon_s)
-            if self.epochs <= (
-                len(self.control_horizon_curriculum_s)
-                * self.control_horizon_curriculum_stage_epochs
-            ):
-                raise ValueError(
-                    "control horizon curriculum must leave at least one full-horizon epoch"
-                )
         if (
             not math.isfinite(self.control_gradient_clip_norm)
             or self.control_gradient_clip_norm < 0.0
         ):
             raise ValueError("control_gradient_clip_norm must be finite and non-negative")
-        if self.control_gradient_clip_policy not in CONTROL_GRADIENT_CLIP_POLICIES:
-            raise ValueError(
-                "unknown control_gradient_clip_policy "
-                f"{self.control_gradient_clip_policy!r}; expected one of "
-                f"{CONTROL_GRADIENT_CLIP_POLICIES}"
-            )
         if (
             self.control_gradient_clip_norm > 0.0
             and self.prediction_output != PREDICTION_CONTROL
@@ -1423,32 +1215,12 @@ class TSConfig:
                 "control gradient clipping is supported only by "
                 "prediction_output='control'"
             )
-        if (
-            self.control_gradient_clip_policy != CONTROL_GRADIENT_CLIP_GLOBAL
-            and self.control_gradient_clip_norm <= 0.0
-        ):
-            raise ValueError(
-                "non-global control gradient clip policy requires a positive clip norm"
-            )
         if self.control_duration_parameterization not in CONTROL_DURATION_PARAMETERIZATIONS:
             raise ValueError(
                 "unknown control_duration_parameterization "
                 f"{self.control_duration_parameterization!r}; expected one of "
                 f"{CONTROL_DURATION_PARAMETERIZATIONS}"
             )
-        if self.control_gradient_clip_policy == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED:
-            if self.control_duration_parameterization != CONTROL_DURATION_FACTORIZED:
-                raise ValueError(
-                    "final-time-decoupled clipping requires factorized durations"
-                )
-            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-                raise ValueError(
-                    "final-time-decoupled clipping requires observed state clock"
-                )
-            if self.control_state_duration_gradient:
-                raise ValueError(
-                    "final-time-decoupled clipping requires detached state-duration gradients"
-                )
         if (
             self.control_duration_parameterization == CONTROL_DURATION_UNIFORM
             and self.prediction_output != PREDICTION_CONTROL
@@ -1479,7 +1251,6 @@ class TSConfig:
             "lr_plateau_patience",
             "patience",
             "validation_common_grid_points",
-            "control_horizon_curriculum_stage_epochs",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
@@ -1524,23 +1295,23 @@ class TSConfig:
             raise ValueError("kinematic_consistency_loss_weight must be non-negative")
         if self.terminal_loss_weight < 0.0:
             raise ValueError("terminal_loss_weight must be non-negative")
-        if self.control_effort_loss_weight < 0.0:
-            raise ValueError("control_effort_loss_weight must be non-negative")
-        if self.control_smoothness_loss_weight < 0.0:
-            raise ValueError("control_smoothness_loss_weight must be non-negative")
         if not 0.0 <= self.control_duration_uniform_floor < 1.0:
             raise ValueError("control_duration_uniform_floor must be in [0, 1)")
         if self.latent_dim < 0 or self.latent_prior_components < 1:
             raise ValueError("latent_dim must be >= 0 and latent_prior_components >= 1")
         if self.latent_beta < 0.0 or self.latent_free_bits_nats < 0.0:
             raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
+        if self.latent_posterior_init_std <= 0.0:
+            raise ValueError("latent_posterior_init_std must be positive")
         if self.latent_dim == 0 and (
             self.latent_prior_components != 1
             or self.latent_beta != 1.0
             or self.latent_free_bits_nats != 0.0
+            or self.latent_posterior_init_std != 1.0
         ):
             raise ValueError(
-                "latent_prior_components / latent_beta / latent_free_bits_nats mean nothing "
+                "latent_prior_components / latent_beta / latent_free_bits_nats / "
+                "latent_posterior_init_std mean nothing "
                 "without a latent (latent_dim == 0) and would still rename the run"
             )
         if self.cta_conditioning not in CTA_CONDITIONINGS:
@@ -1563,89 +1334,6 @@ class TSConfig:
                 "the latent intent lives on the control output; "
                 f"prediction_output={self.prediction_output!r} has no control head to decode it"
             )
-        for name, value in (
-            ("control_geometry_loss_weight", self.control_geometry_loss_weight),
-            (
-                "control_arc_horizontal_velocity_loss_weight",
-                self.control_arc_horizontal_velocity_loss_weight,
-            ),
-            (
-                "control_arc_vertical_velocity_loss_weight",
-                self.control_arc_vertical_velocity_loss_weight,
-            ),
-            ("control_arc_tangent_loss_weight", self.control_arc_tangent_loss_weight),
-            (
-                "control_terminal_position_loss_weight",
-                self.control_terminal_position_loss_weight,
-            ),
-            (
-                "control_terminal_velocity_loss_weight",
-                self.control_terminal_velocity_loss_weight,
-            ),
-        ):
-            if not math.isfinite(value) or value < 0.0:
-                raise ValueError(f"{name} must be finite and non-negative")
-        for name, value in (
-            (
-                "control_arc_horizontal_velocity_scale_mps",
-                self.control_arc_horizontal_velocity_scale_mps,
-            ),
-            (
-                "control_arc_vertical_velocity_scale_mps",
-                self.control_arc_vertical_velocity_scale_mps,
-            ),
-            (
-                "control_terminal_position_scale_m",
-                self.control_terminal_position_scale_m,
-            ),
-            (
-                "control_terminal_velocity_scale_mps",
-                self.control_terminal_velocity_scale_mps,
-            ),
-            (
-                "control_arc_terminal_cross_track_emphasis",
-                self.control_arc_terminal_cross_track_emphasis,
-            ),
-            (
-                "control_arc_terminal_vertical_emphasis",
-                self.control_arc_terminal_vertical_emphasis,
-            ),
-        ):
-            if not math.isfinite(value) or value <= 0.0:
-                raise ValueError(f"{name} must be finite and positive")
-        if (
-            not math.isfinite(self.control_arc_position_end_weight)
-            or self.control_arc_position_end_weight < 1.0
-        ):
-            raise ValueError("control_arc_position_end_weight must be finite and >= 1")
-        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY:
-            if (
-                self.control_terminal_position_loss_weight
-                <= self.control_geometry_loss_weight
-            ):
-                raise ValueError(
-                    f"{self.control_state_objective} requires terminal position weight "
-                    "greater than "
-                    "geometry weight"
-                )
-            if (
-                self.control_terminal_velocity_loss_weight
-                <= self.control_geometry_loss_weight
-            ):
-                raise ValueError(
-                    f"{self.control_state_objective} requires terminal velocity weight "
-                    "greater than "
-                    "geometry weight"
-                )
-            if self.control_terminal_velocity_loss_weight <= max(
-                self.control_arc_horizontal_velocity_loss_weight,
-                self.control_arc_vertical_velocity_loss_weight,
-                self.control_arc_tangent_loss_weight,
-            ):
-                raise ValueError(
-                    "arc-length-geometry requires terminal velocity weight greater "
-                    "than local velocity weights"
-                )
 
     @property
     def procedure_loss_active(self) -> bool:
@@ -1758,9 +1446,6 @@ class TSConfig:
         for name in RETIRED_SERIALIZED_FIELDS:
             data.pop(name, None)
         data["channels"] = tuple(data["channels"])
-        data["control_horizon_curriculum_s"] = tuple(
-            data["control_horizon_curriculum_s"]
-        )
         return cls(**data)
 
 
@@ -1768,8 +1453,6 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
     """Serialize the complete recipe for a control-output strategy."""
     base: dict[str, Any] = {
         "reference_velocity_source": config.reference_velocity_source,
-        "effort_loss_weight": config.control_effort_loss_weight,
-        "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": config.control_duration_parameterization,
         "duration_uniform_floor": config.control_duration_uniform_floor,
         "dynamics_backend": config.control_dynamics_backend,
@@ -1782,43 +1465,8 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "velocity_loss_weight": config.control_velocity_loss_weight,
         "velocity_loss_scale_mps": config.control_velocity_loss_scale_mps,
         "imitation_loss_weight": config.control_imitation_loss_weight,
-        "geometry_loss_weight": config.control_geometry_loss_weight,
-        "arc_horizontal_velocity_loss_weight": (
-            config.control_arc_horizontal_velocity_loss_weight
-        ),
-        "arc_vertical_velocity_loss_weight": (
-            config.control_arc_vertical_velocity_loss_weight
-        ),
-        "arc_horizontal_velocity_scale_mps": (
-            config.control_arc_horizontal_velocity_scale_mps
-        ),
-        "arc_vertical_velocity_scale_mps": (
-            config.control_arc_vertical_velocity_scale_mps
-        ),
-        "arc_local_velocity_parameterization": (
-            config.control_arc_local_velocity_parameterization
-        ),
-        "arc_tangent_loss_weight": config.control_arc_tangent_loss_weight,
-        "arc_position_end_weight": config.control_arc_position_end_weight,
-        "arc_terminal_parameterization": config.control_arc_terminal_parameterization,
-        "arc_terminal_cross_track_emphasis": (
-            config.control_arc_terminal_cross_track_emphasis
-        ),
-        "arc_terminal_vertical_emphasis": (
-            config.control_arc_terminal_vertical_emphasis
-        ),
-        "terminal_position_loss_weight": config.control_terminal_position_loss_weight,
-        "terminal_velocity_loss_weight": config.control_terminal_velocity_loss_weight,
-        "terminal_position_scale_m": config.control_terminal_position_scale_m,
-        "terminal_velocity_scale_mps": config.control_terminal_velocity_scale_mps,
-        "terminal_supervision_clock": config.control_terminal_supervision_clock,
         "state_duration_gradient": config.control_state_duration_gradient,
-        "horizon_curriculum_s": list(config.control_horizon_curriculum_s),
-        "horizon_curriculum_stage_epochs": (
-            config.control_horizon_curriculum_stage_epochs
-        ),
         "gradient_clip_norm": config.control_gradient_clip_norm,
-        "gradient_clip_policy": config.control_gradient_clip_policy,
     }
     if config.control_recipe_name != CONTROL_RECIPE_CUSTOM:
         base["name"] = config.control_recipe_name

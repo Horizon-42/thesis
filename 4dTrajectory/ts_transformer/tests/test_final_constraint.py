@@ -513,7 +513,7 @@ def test_recipe_content_survives_a_json_round_trip_under_its_frozen_check(tmp_pa
     path.write_text(json.dumps(settings))
     config = TSConfig(**json.loads(path.read_text()))
     assert config.control_recipe_name == "simple-v3"
-    assert config.channels == tuple(ch.CHANNELS) and config.control_horizon_curriculum_s == ()
+    assert config.channels == tuple(ch.CHANNELS)
     assert config.procedure_loss_active and config.prediction_output == "control"
     # The CLI path: it must get past the recipe check and fail only on the missing data.
     completed = subprocess.run(

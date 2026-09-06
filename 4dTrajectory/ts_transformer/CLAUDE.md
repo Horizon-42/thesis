@@ -40,8 +40,8 @@ point of the package, not a migration in progress.
   rollout of the shared point-mass equations turns them into the trajectory, so every prediction
   is dynamically admissible by construction.
 - **`closure`** (scene design P1.c, 2026-09-05; **a COMPARISON ARM since 2026-09-07** — the
-  latent-intent design demoted it, and its tracker below is RETIRED with an unfixed BLOCKER:
-  a nearest-node search that jumps legs on 0.6 % of flights) regresses 14 DECISION numbers — the join
+  latent-intent design demoted it, and its P1.d tracker was DELETED 2026-09-07 with its BLOCKER
+  unfixed: a nearest-node search that jumps legs on 0.6 % of flights) regresses 14 DECISION numbers — the join
   distance, a via pose in runway axes, K=4 slowness knots (the duration is their integral),
   K=4 height knots — and `closure_output.reconstruct` draws the trajectory in closed form
   (`closure_geometry.via_dubins` + `closure_profile`; velocities = tangent × ground speed).
@@ -52,12 +52,10 @@ point of the package, not a migration in progress.
   `checkpoint_selection_metric=fixed-anchor-objective` (the loop never draws the path), no
   random anchors; a labels file must be the airport's own and cover the cohort (a run refuses
   one that covers no flight, prints the covered share otherwise). The drawn path has no
-  dynamics of its own (22 % fully flyable); **`predict --closure-track` flies it with the
-  point-mass rollout under `control/constraints/closure_tracking.py`** (a command hook:
-  L1 + curvature feed-forward, the glidepath law on the reference height, a PI speed hold
-  with the along-track error) for ≤ 100 m of ADE (+10.5 m after the wrong-leg snaps are
-  excluded) and 92 % fully flyable — it WAS the delivery form (P1.d, 2026-09-06) and is
-  not any more; do not build on it.
+  dynamics of its own (22 % fully flyable); the P1.d tracker that flew it with the point-mass
+  rollout (`control/constraints/closure_tracking.py`, `predict --closure-track`) is RETIRED —
+  code DELETED 2026-09-07, its numbers (+10.5 m of ADE, 92 % fully flyable) kept as history in
+  `docs/2026-09-06_closure_p1d_tracking_results.zh.md`. Do not rebuild it.
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches
@@ -145,7 +143,7 @@ flight model.
 | axis | default | status |
 |---|---|---|
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs |
-| `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); `anchor-relative` vetoed by its own pre-registered rule |
+| `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule — the value survives only so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads; never choose it for a new arm** |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport** |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option |
@@ -201,7 +199,7 @@ command is HELD.
 
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
 prefix: `envelope`, `heads`, `duration`, `conditioning`, `dynamics/{backends,rollout,inverse}`,
-`loss/{components,terminal_clock,fixed_dt,regularization}`, `training/{curriculum,diagnostics}`,
+`loss/{components,fixed_dt}`, `training/diagnostics`,
 `constraints/{barrier_filter,nominal_residual,gates}`, `oracle/*` (which absorbed the old
 `oracle_teacher/` package — two halves of one idea).
 

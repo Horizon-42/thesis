@@ -9,7 +9,7 @@
 | 工作包 | 状态 | 内容 | 工作量 |
 |---|---|---|---|
 | T0 零风险清理 | **完成并通过 review**（`55af0b7`、`57e68fc`、`7350638`；review 的 10 项修复见 CHANGELOG 2026-09-07 T0 条目）；L2 启动前合入 | 8 项（§二） | S×8 |
-| T1 删除已废除设计 | 未开始 | 跟踪器、horizon curriculum、arc-length 目标族、regularization | M×3 + S |
+| T1 删除已废除设计 | **完成**（`0702669` 跟踪器、`0898291` regularization、`c5c3a32` curriculum、`09e4420` arc 目标族 + 终端时钟、`2692e61` anchor-relative 标注） | 跟踪器、horizon curriculum、arc-length 目标族、regularization | M×3 + S |
 | T2 归档 2026-08 教师机器 | 未开始 | `control/oracle/` 八模块 + 三个运行器 + nominal 律 hook | L |
 | T3 结构重排 | 未开始 | `objective.py` / `validation.py` 拆出 train、config 校验拆分、dataset 拆分、CLI 拆分、后端合并 | M×5 |
 | T4 测试与运行器 | 未开始 | 13 条红测试搬家修复、`tests/support.py`、`runner_support.py`、拆 6.5k 行测试文件、20→14 运行器 | M×4 |
@@ -56,12 +56,12 @@ campaign 的 predict/eval 步会 import 主树的当前代码，中途合入会�
 
 | # | 改什么 | 证据 / 风险 | 量 |
 |---|---|---|---|
-| 9 | **closure 跟踪器**：`control/constraints/closure_tracking.py`、`tests/test_closure_tracking.py`、`forecast.py` 的 `tracking_config` / `track_closure_forecasts` / `--closure-track` 路径（≈110 行）、`__main__` 标志、`docs/experiments/closure_p1d_arms.json` | 设计文档 §四 批准；带未修 BLOCKER；`2026-09-06_closure_p1d_tracking_results.zh.md` 加"代码已退役，跟踪代价修正为 +10.5 m"banner。closure 输出本身**保留**作对照臂 | M |
-| 10 | **horizon curriculum 的死半边**：`control/training/curriculum.py` ≈150 行、`train.py` 约 10 处 `training_stage` 穿线、两个 config 字段；保留 `close_duration_prefix`（同时把它开头五个不可达的形状 guard 删掉，只留 `allclose`） | 默认 `()`，所有 recipe 钉 `()`，无臂设过；字段在 `REQUIRED_SERIALIZED_CONTROL_FIELDS`——移除是宽松方向，旧检查点仍能加载 | M |
-| 11 | **`arc-length-geometry` 目标族**：目标、`fixed-anchor-arc-length-geometry` 选择指标、16 个 `control_arc_*` / `control_terminal_*` 字段、`train.py:2320-2400`、`fixed_anchor_validation.py:110-315`、`components._arc_length_geometry_objective`；随之删 `predicted-detached-time` / `final-time-decoupled`、`CONTROL_GRADIENT_CLIP_POLICIES` 第二值；**保留** `arc_length_geometry.resample_horizontal_arc_length_numpy`（`geometric_metrics` 在用）与三个 `*_metrics_numpy`（验证每轮在用） | 27 个臂文件 0 使用；ENGINEERING_NOTES / OPEN_ITEMS / README 0 提及；唯一 setter 是三个 2026-08 教师运行器；约 20 条测试点名它；2026-08 教师检查点将不能加载（它们早已因单位变更被拒） | M |
-| 12 | **`control/loss/regularization.py`** + `control_effort_loss_weight` / `control_smoothness_loss_weight` + 两个 CLI 标志 | 所有 recipe 钉 0.0，无臂设过，每批算一次乘零 | S |
-| 13 | `control/loss/terminal_clock.py` + `control_terminal_supervision_clock` 轴（随 11 一起，`state-supervision` 策略是 `return result`） | `2026-08-02_dual_clock_terminal_ablation.zh.md` 引用其数字——归档而非删除 | S |
-| 14 | `state_position_reference="anchor-relative"`：被自己预注册的规则否决，删或在字段注释写"vetoed" | 只有历史臂文件用 | S |
+| 9 ✅`0702669` | **closure 跟踪器**：`control/constraints/closure_tracking.py`、`tests/test_closure_tracking.py`、`forecast.py` 的 `tracking_config` / `track_closure_forecasts` / `--closure-track` 路径（≈110 行）、`__main__` 标志、`docs/experiments/closure_p1d_arms.json` | 设计文档 §四 批准；带未修 BLOCKER；`2026-09-06_closure_p1d_tracking_results.zh.md` 加"代码已退役，跟踪代价修正为 +10.5 m"banner。closure 输出本身**保留**作对照臂 | M |
+| 10 ✅`c5c3a32` | **horizon curriculum 的死半边**：`control/training/curriculum.py` ≈150 行、`train.py` 约 10 处 `training_stage` 穿线、两个 config 字段；保留 `close_duration_prefix`（同时把它开头五个不可达的形状 guard 删掉，只留 `allclose`） | 默认 `()`，所有 recipe 钉 `()`，无臂设过；字段在 `REQUIRED_SERIALIZED_CONTROL_FIELDS`——移除是宽松方向，旧检查点仍能加载 | M |
+| 11 ✅`09e4420` | **`arc-length-geometry` 目标族**：目标、`fixed-anchor-arc-length-geometry` 选择指标、16 个 `control_arc_*` / `control_terminal_*` 字段、`train.py:2320-2400`、`fixed_anchor_validation.py:110-315`、`components._arc_length_geometry_objective`；随之删 `predicted-detached-time` / `final-time-decoupled`、`CONTROL_GRADIENT_CLIP_POLICIES` 第二值；**保留** `arc_length_geometry.resample_horizontal_arc_length_numpy`（`geometric_metrics` 在用）与三个 `*_metrics_numpy`（验证每轮在用）。**执行时发现本行自相矛盾**：删掉 `fixed_anchor_validation.py:110-315` 就删掉了每轮调用那三个 `*_metrics_numpy` 的 `fixed_anchor_arc_length_geometry_metrics`。按"保留"执行——该块是与目标无关的**诊断**，`train._common_grid_validation_details` 与 `build_multiflight_capacity_report.py` 今天在读它的 ~30 个 `arc_length_*` 键；它的三个形状参数冻结为 `fixed_anchor_validation.py` 的模块常量。 | 27 个臂文件 0 使用；ENGINEERING_NOTES / OPEN_ITEMS / README 0 提及；唯一 setter 是三个 2026-08 教师运行器；约 20 条测试点名它；2026-08 教师检查点将不能加载（它们早已因单位变更被拒） | M |
+| 12 ✅`0898291` | **`control/loss/regularization.py`** + `control_effort_loss_weight` / `control_smoothness_loss_weight` + 两个 CLI 标志 | 所有 recipe 钉 0.0，无臂设过，每批算一次乘零 | S |
+| 13 ✅`09e4420` | `control/loss/terminal_clock.py` + `control_terminal_supervision_clock` 轴（随 11 一起，`state-supervision` 策略是 `return result`）。**两个文件的删除被并发的 docs 提交 `1c83d7c` 卷入，落在那里而不是 `09e4420`。** | `2026-08-02_dual_clock_terminal_ablation.zh.md` 引用其数字——已加 banner，不重写 | S |
+| 14 ✅`2692e61` | `state_position_reference="anchor-relative"`：**保留取值**（`state_v2_20260903/A_anchor_relative` 是现役 cohort 产物，删了它的 config 就加载不了），在常量注释与 `CLAUDE.md` 默认表写明 vetoed、不得用于新臂 | 只有历史臂文件用 | S |
 
 ## 四、T2 — 归档 2026-08 教师机器（一次提交，L）
 
