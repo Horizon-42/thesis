@@ -1,0 +1,43 @@
+{
+ "_comment": "L2.e' of docs/2026-09-07_latent_intent_design.zh.md: the warm posterior's next two rungs. L2.d (l2_warm_posterior_20260907) at beta 0.01 kept z alive to the end (active_units 2.82, 0.17 nats/flight at the best epoch 175) and is the best point estimate so far (top-1 ADE 1214 vs native32's 1322, 65 % paired win, vectored -227 m, bank skill 0.729), but gates (1) and (2) still fail: z carries only 0.17 nats and six samples from the trained prior lose to six N(0, I) draws (1004 vs 947 m minADE_6) — the prior is NARROWER than N(0, I), i.e. the decoder's z-direction is meaningful beyond the trained range and q/p are simply compressed. The units say why: at beta 0.01 a nat still costs 0.01 loss units, above the whole 0.009 the position term could pay, so z can only earn through the imitation term. Same base as L2.d (warm posterior q-std 0.1, K=1, N=32, simple-v3 supervision + teacher, free bits 0.05/dim), full 180 epochs (the erosion dynamics are slow; a 60-epoch screen cannot see them); arms differ only in beta: 0.001 and 0.0001. READOUT as L2.d, plus the z-oracle (a predict-only arms file in the shape of l2d_zoracle_arms.json). PRE-REGISTERED READING: (a) the autoencoder form appears (top-1 worse than native32, z-oracle excellent) -> take the largest beta still passing gate (3) — beta 0.01 is already the fallback winner; (b) z still carries < 1 nat at 0.001 -> the price is not beta but the position term's units (position_loss_scale_m), change that next, not beta; (c) gates (1)(2) pass -> carry that beta to K=4 and to L3. Gates and veto as before; gate (3) of the z-oracle (vectored <= 1235 m) read on every arm.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "latent_dim": 8,
+  "latent_free_bits_nats": 0.05,
+  "latent_prior_components": 1,
+  "latent_posterior_init_std": 0.1
+ },
+ "arms": [
+  {
+   "key": "L2e_warm_beta0p001",
+   "label": "warm posterior (q-std 0.1), K=1, beta 0.001",
+   "overrides": {
+    "latent_beta": 0.001
+   },
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  },
+  {
+   "key": "L2e_warm_beta0p0001",
+   "label": "warm posterior (q-std 0.1), K=1, beta 0.0001",
+   "overrides": {
+    "latent_beta": 0.0001
+   },
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  }
+ ]
+}

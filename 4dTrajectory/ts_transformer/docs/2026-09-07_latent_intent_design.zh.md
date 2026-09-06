@@ -23,7 +23,7 @@ L2 的 base = native32 + 教师**。包审计 T0 完成待 review。下一步 = 
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **完成（2026-09-07）**：native32 全体 ADE 1322 vs 基线 1333（配对胜率 52.6 %，bank skill 0.726 vs 0.728）——**N=32 免费**；dense/无教师 2515/2603，否决触发，wiggle 回归——**轨迹误差损失单独不够**。结果 `2026-09-07_l1_lowdim_results.zh.md` | `l1_lowdim_20260907/`（readout、readout_bank） | 不差于 simple-v3 ✓；参数 257 → 96 ✓；bank skill ✓（native32） |
 | L1.b 监督替代教师 | **预注册（2026-09-07）**：② 航向率损失；③ ② + bank TV（① 模仿 0 撤销：simple-v2 的 bank skill 0.124 已回答）——教师只给坡度命名；模仿目标与 rollout 不一致也是 z 无利可图的候选原因 | `l1b_supervision_arms.json`、`control_heading_rate_loss_weight`、`control_bank_tv_loss_weight` | 见 §六 L1.b |
-| L2 CVAE 骨架（隐意图 z） | **`L2_gauss`（β=1）与 `L2b_beta0p1`（β=0.1）都坍缩，KL 轨迹相同且低于 free-bits 地板——β 不是约束，阶梯停在第一阶；β=0.1 的 top-1 与 native32 打平（雷达引导 FDE −235 m）。死路是后验初始化 → L2.d 热启动后验（`latent_posterior_init_std=0.1`）预注册，campaign `l2_warm_posterior_20260907`（见 §六 L2 末）** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
+| L2 CVAE 骨架（隐意图 z） | **L2.d 热启动后验 β=0.01：z 活到最后（2.8 维、0.17 nat），top-1 全分层优于 native32（1214 vs 1322，胜率 65 %，雷达引导 −227 m），bank skill 0.729 最好；门 (3)+否决过，(1)(2) 败——信息量太小、先验比 N(0,I) 窄 → L2.e' β ∈ {0.001, 0.0001} 预注册（见 §六 L2 末）；冷启动与 β ≥ 0.1 全部坍缩** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
 | L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | **L5.a 拟合教师已预注册（2026-09-07，用户决定：400 步 + batch 1024 + 网络初值；契约见 §六 L5.a），待 T2 合入后实现**；其余未开始 | `run_ts_control_basis_oracle.py --checkpoint`、`control_imitation_target`、`l5_fitted_teacher_arms.json` | 见 §七 |
@@ -346,6 +346,35 @@ wiggle"是未测的。还有一层：模仿项占损失 0.556，而逆动力学�
 > 低；(b) 热启动下仍坍缩 → 解码器不靠 z 就能解释数据，下一杠杆是 z 上的辅助意图目标（L2.e：z → 剩余
 > 时长 / d_join 的训练期辅助头，标签来自 `truth_duration_s` 与 closure labels），不是再换初始化。
 > campaign `l2_warm_posterior_20260907`。
+
+> **L2.d 结果（2026-09-07，campaign `l2_warm_posterior_20260907`）。** 热启动奏效：两臂都把 8 个维度活着保持
+> 了 50+ 轮（冷启动为 0 轮）。β=0.1 在第 ~87 轮衰亡（best epoch 138：active 0，KL 0.08），且选择指标在 z 死
+> 的过程中单调变好（活着的最好 epoch 71：1466 m / 5.85 维；被选的 138：1356 / 0 维）——**确定性 top-1 回放
+> 的选择规则奖励 z 的死亡**，这是一个结构性冲突，留作后账。**β=0.01 活到最后**（180 轮未早停，best 175：
+> active 2.82、KL 0.17 nat/航班），而且是至今最好的点估计：
+>
+> | 分层 | native32 ADE | **warm β=0.01** | native32 FDE p50 | **warm β=0.01** | 配对胜率（中位 Δ） |
+> |---|---:|---:|---:|---:|---|
+> | 全体 | 1322 | **1214** | 864 | **827** | 65.3 %（−44 m） |
+> | 直线进近 | 445 | **402** | 671 | **594** | 62.5 %（−24 m） |
+> | 雷达引导 | 2870 | **2643** | 1982 | **1851** | 70.4 %（−169 m） |
+>
+> bank skill **0.729**（八臂最好，直线参考 bank RMS 0.30° 低于观测 0.41°）；chamfer p50 165 vs 224。门：
+> (3) 全分层通过，否决干净（直线 FDE 594 < 671）；(1) **险败**——active 2.82 < 3、shuffled ΔADE +19 m
+> （雷达引导 +39）< 200：解码器读 z，但读得很淡；(2) **败**——minADE_6 1004 < top-1 1214（真实的 210 m 多
+> 模态，散布 325 m），但 **N(0,I) 对照 947 更好**，各分层皆然：随机 z 的 best-of-6 胜过训练先验的 best-of-6。
+> 读法：这既不是 (a) 也不是 (b)，是第三种——**z 活着、被用、点估计全面改善，但信息量只有 0.17 nat，
+> 先验比 N(0,I) 还窄**。N(0,I) 胜出说明解码器的 z 方向有意义且超出训练分布仍有效，只是 q/p 被压得太集中：
+> 量纲论证在 β=0.01 仍成立——每 nat 0.01 个损失单位，仍高于位置项能买到的全部 0.009——z 只能靠模仿项挣，
+> 所以信息停在 0.17 nat。**下一杠杆仍是 β，不是先验形状**（0.17 nat 无物可摊）；K=4 混合在 z 携带数 nat
+> 之后再上。
+>
+> **L2.e' 预注册（2026-09-07）：热启动后验 β ∈ {0.001, 0.0001}**，K=1、同 base、跑满 180 轮（衰亡动力学慢，
+> 筛选档看不出）；臂文件 `docs/experiments/l2e_warm_beta_arms.json`，campaign `l2e_warm_beta_20260907`；读数同
+> L2.d 加 z-oracle（`l2d_zoracle_arms.json` 同形，predict-only）。**预注册读法**：(a) 出现自编码器形态（top-1
+> 劣于 native32、z-oracle 极好）→ 取仍满足门 (3) 的最大 β（β=0.01 已是兜底赢家）；(b) 0.001 下 z 仍 < 1 nat
+> → 价格不在 β 而在位置项的量纲（`position_loss_scale_m`），下一步改它而不是再降 β；(c) 过门 (1)(2) → 把该 β
+> 带到 K=4 与 L3。z-oracle 的门 (3)（雷达引导 ≤ 1235 m）在每个臂上都读。
 
 ### L3 — CTA 条件化（交付形态；≈2 天）
 
