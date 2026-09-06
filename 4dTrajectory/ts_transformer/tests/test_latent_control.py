@@ -494,3 +494,42 @@ def test_a_mixture_prior_starts_with_distinguishable_components():
 def test_config_refuses_latent_knobs_without_a_latent():
     with pytest.raises(ValueError, match="mean nothing without a latent"):
         _config(latent_dim=0, latent_beta=0.5)
+
+
+def test_the_latent_model_trains_under_simple_v3_s_own_supervision(tmp_path: Path):
+    """The likely L2 base is the native endpoint grid + true-time-position + the imitation
+    teacher (simple-v3's objective). The latent's KL must ride beside those terms, and the
+    imitation teacher's per-flight inverse must be built for a latent run too."""
+    from config import (
+        CONTROL_STATE_LOSS_GRID_NATIVE,
+        CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+    )
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_UNIFORM,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_NATIVE,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+        control_imitation_loss_weight=4.0,
+        control_velocity_loss_weight=0.003,
+        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
+        control_rollout_integrator_dt_s=0.5,
+        seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1,
+        final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
+        epochs=1, patience=1, batch_size=8, dropout=0.0,
+        latent_dim=3, latent_free_bits_nats=0.01,
+    )
+    series, report = build_series(
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=8, seed=3), config, airport=AIRPORT
+    )
+    assert report.built == 8, report.format()
+    provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                  "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
+    train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
+    first = json.loads((tmp_path / "run" / "history.json").read_text())["history"][0]
+    for name in ("state", "velocity", "imitation", LATENT_KL_COMPONENT):
+        assert name in first["train_components"], name
+    model, loaded, normalizer, _payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
+    assert isinstance(model, LatentControlModel)
+    forecast = forecast_approach(model, series[0], loaded, normalizer, device=torch.device("cpu"))
+    assert forecast.controls is not None and forecast.controls.shape[0] == config.n_segments
