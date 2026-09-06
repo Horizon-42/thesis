@@ -258,10 +258,12 @@ class LatentControlModel(ControlFeatureModel):
         dynamics: dict[str, torch.Tensor],
     ) -> ControlPrediction:
         decoder_features = self.latent_fusion(torch.cat([features, latent], dim=-1))
-        raw_duration = self.final_time_head.raw(history) + self.latent_duration(latent).squeeze(-1)
-        final_time_s = self.final_time(
-            F.softplus(raw_duration) * self.final_time_head.scale_s, dynamics
-        )
+        if self.cta_given:
+            # The given CTA is the duration; the head and z's duration path are inert.
+            final_time_s = dynamics["cta_s"].to(features.dtype)
+        else:
+            raw_duration = self.final_time_head.raw(history) + self.latent_duration(latent).squeeze(-1)
+            final_time_s = F.softplus(raw_duration) * self.final_time_head.scale_s
         return self.control_head(
             decoder_features, final_time_s,
             lower=dynamics["control_lower"], upper=dynamics["control_upper"],

@@ -28,7 +28,7 @@ class UniformDurationControlOutputModel(ControlFeatureModel):
         features = self.fused_features(history, dynamics)
         return self.control_head(
             features,
-            self.final_time(self.final_time_head(history), dynamics),
+            self.final_time(history, dynamics),
             lower=dynamics["control_lower"],
             upper=dynamics["control_upper"],
         )

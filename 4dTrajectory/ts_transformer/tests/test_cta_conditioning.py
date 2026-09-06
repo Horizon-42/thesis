@@ -30,7 +30,8 @@ from control.conditioning import DYNAMICS_CONDITION_NAMES
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
 from export import build_prediction_record, observed_series_metrics, write_batch
-from forecast import forecast_approaches
+import batching
+from forecast import forecast_approaches, latent_mode_forecasts, shuffled_latent_forecasts
 from models import build_model
 from run_naming import run_display_name
 from synthetic import synthetic_arrivals
@@ -107,7 +108,7 @@ def test_the_dataset_feeds_the_truth_duration_as_the_cta():
     series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=3, seed=3), config, airport=AIRPORT)
     windows = FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
     _x, _y, _w, final_time, _fw, dynamics, _sup = windows.batch(np.array([0, 1, 2]))
-    assert torch.allclose(dynamics["cta_s"].to(torch.float32), final_time)
+    assert torch.equal(dynamics["cta_s"].to(torch.float32), final_time)   # IS the duration, not near it
     anchor = windows.index[0][1]
     assert dynamics["cta_s"][0] == pytest.approx(truth_duration_s(series[0], anchor))
 
@@ -118,9 +119,14 @@ def test_train_then_forecast_at_the_truth_cta_and_at_a_counterfactual(tmp_path: 
     provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
                   "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
     train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
+    history = json.loads((tmp_path / "run" / "history.json").read_text())["history"]
+    assert all(row["train_components"]["final_time"] == 0.0 for row in history)   # an identity
     model, loaded, normalizer, _payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert loaded.cta_conditioning == CTA_CONDITIONING_GIVEN
     assert "cta=given" in run_display_name(loaded.to_dict())
+    # the duration head was never trained: still at its initialization
+    fresh = build_model(loaded)
+    assert torch.equal(model.final_time_head.network[-1].weight, fresh.final_time_head.network[-1].weight)
 
     anchor = loaded.seq_len - 1
     identity = forecast_approaches(model, series[:3], loaded, normalizer, device=torch.device("cpu"))
@@ -143,12 +149,38 @@ def test_train_then_forecast_at_the_truth_cta_and_at_a_counterfactual(tmp_path: 
     states = json.loads((out / summary["results"][0]["states_file"]).read_text())
     assert states["source"]["ctaOffsetS"] == 60.0
     assert states["source"]["ctaS"] == pytest.approx(truth_duration_s(series[0], anchor) + 60.0)
+    assert summary["results"][0]["cta_offset_s"] == 60.0 and summary["mode"].endswith(":cta+60s")
+    assert summary["results"][0]["final_time_error_s"] == pytest.approx(60.0)   # by construction
 
 
 def test_the_offset_is_refused_off_the_cta_path():
     config = _config(cta_conditioning="off")
     model = build_model(config).eval()
     series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3), config, airport=AIRPORT)
-    with pytest.raises(ValueError, match="CTA-conditioned"):
-        forecast_approaches(model, series, TSConfig(prediction_output=PREDICTION_STATE, seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1, device="cpu"),
-                            Normalizer.fit(series), device=torch.device("cpu"), cta_offset_s=30.0)
+    with pytest.raises(ValueError, match="cta_conditioning=given only"):
+        forecast_approaches(model, series, config, Normalizer.fit(series), device=torch.device("cpu"), cta_offset_s=30.0)
+
+
+def test_the_latent_decodes_carry_the_same_offset_as_the_top1():
+    torch.manual_seed(0)
+    config = _config(latent_dim=3)
+    model = build_model(config).eval()
+    series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=3, seed=3), config, airport=AIRPORT)
+    normalizer = Normalizer.fit(series)
+    anchor = config.seq_len - 1
+    modes = latent_mode_forecasts(model, series, config, normalizer, samples=2, seed=0,
+                                  device=torch.device("cpu"), cta_offset_s=45.0)
+    shuffled = shuffled_latent_forecasts(model, series, config, normalizer, seed=0,
+                                         device=torch.device("cpu"), cta_offset_s=45.0)
+    for item, mode0, mode1, shuf in zip(series, modes[0], modes[1], shuffled):
+        expected = truth_duration_s(item, anchor) + 45.0
+        for f in (mode0, mode1, shuf):
+            assert f.cta_offset_s == 45.0 and f.cta_s == pytest.approx(expected)
+            assert f.predicted_final_time_s == pytest.approx(expected)
+
+
+def test_the_auto_batch_probe_carries_the_cta(monkeypatch):
+    """`--batch-size auto` runs the real training step on a probe batch; under `given` that
+    step reads dynamics["cta_s"], so the probe must carry one."""
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
+    batching._probe_training_step(_config(), 2, torch.device("cpu"))

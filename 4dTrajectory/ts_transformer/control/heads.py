@@ -49,11 +49,16 @@ class ControlFeatureModel(nn.Module):
             parts.append(self.cta_encoder(cta))
         return self.feature_fusion(torch.cat(parts, dim=-1))
 
-    def final_time(self, head_value: torch.Tensor, dynamics: dict[str, torch.Tensor]) -> torch.Tensor:
-        """The duration the schedule is rolled over: the given CTA, or the head's prediction."""
+    def final_time(self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]) -> torch.Tensor:
+        """The duration the schedule is rolled over: the given CTA, or the head's prediction.
+
+        Under ``given`` the duration head is INERT for the life of the run — never called,
+        never trained, kept at its initialization — so a given checkpoint resumed as
+        ``off`` would start from an untrained duration head.
+        """
         if self.cta_given:
-            return dynamics["cta_s"].to(head_value.dtype)
-        return head_value
+            return dynamics["cta_s"].to(history.dtype)
+        return self.final_time_head(history)
 
 
 # What "doing nothing" means before any gradient arrives: 20% of installed thrust, wings
@@ -131,7 +136,7 @@ class ControlOutputModel(ControlFeatureModel):
         features = self.fused_features(history, dynamics)
         return self.control_head(
             features,
-            self.final_time(self.final_time_head(history), dynamics),
+            self.final_time(history, dynamics),
             lower=dynamics["control_lower"],
             upper=dynamics["control_upper"],
         )

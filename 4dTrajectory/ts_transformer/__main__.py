@@ -51,8 +51,8 @@ _TS_DIR = Path(__file__).resolve().parent
 if str(_TS_DIR) not in sys.path:
     sys.path.insert(0, str(_TS_DIR))
 
-from config import (
-    CTA_CONDITIONING_GIVEN,  # noqa: E402
+from config import (  # noqa: E402
+    CTA_CONDITIONING_GIVEN,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
@@ -1337,6 +1337,7 @@ def main(argv: list[str] | None = None) -> int:
             for index, mode_forecasts in enumerate(latent_mode_forecasts(
                 model, batch_series, config, normalizer,
                 samples=args.latent_samples, seed=args.latent_seed + start, device=device,
+                cta_offset_s=args.cta_offset_s,
             )):
                 for offset, (s, forecast) in enumerate(zip(batch_series, mode_forecasts, strict=True)):
                     mode_records[index].append(build_prediction_record(
@@ -1351,6 +1352,7 @@ def main(argv: list[str] | None = None) -> int:
                 model, batch_series, config, normalizer,
                 samples=args.latent_random,
                 seed=args.latent_seed + LATENT_RANDOM_SEED_OFFSET + start, device=device,
+                cta_offset_s=args.cta_offset_s,
             )):
                 for offset, (s, forecast) in enumerate(zip(batch_series, random_forecasts, strict=True)):
                     random_records[index].append(build_prediction_record(
@@ -1363,6 +1365,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.latent_shuffle:
             for offset, (s, forecast) in enumerate(zip(batch_series, shuffled_latent_forecasts(
                 model, batch_series, config, normalizer, seed=args.latent_seed + start, device=device,
+                cta_offset_s=args.cta_offset_s,
             ), strict=True)):
                 shuffled_records.append(build_prediction_record(
                     s, forecast, index=start + offset, model_name=config.model,
