@@ -22,15 +22,23 @@ change you are making go in `docs/code-health-followups.md` instead.
   five to worst. `summary.json` now carries the covariates per row and an
   `accuracy.difficulty` block; published tables predate them and need re-deriving. →
   `4dTrajectory/ts_transformer/CLAUDE.md`
-- **The optimizer batch has NOT been run since the harvest grew; nothing is on disk to reuse.**
-  `flight_scenarios/outputs` is empty and `4dTrajectory/outputs/<ICAO>` holds only ts artifacts,
-  so `--skip-optimize` has nothing to find and the run is from scratch. The arrival manifests
-  were re-harvested 2026-08-15…17 for all five airports (the old "KSJC and KSTL need a
-  re-harvest" item is closed) but need the v5 re-roster above first; after it,
+- **The optimizer batch has NOT been run since the harvest grew; no SOLVES are on disk.**
+  `4dTrajectory/outputs/<ICAO>` holds only ts artifacts, so `--skip-optimize` has nothing to find
+  and the solve run is from scratch. **`flight_scenarios/outputs` is NOT empty** (this item said
+  it was until 2026-09-06): all ten `*_scenarios.json` + their `.selection.json` are there, 92 MB,
+  built 2026-08-23. Whether they can be reused as-is is UNVERIFIED — the arrival manifests were
+  rewritten 2026-08-24, one day later, though their per-airport `available` counts still match the
+  selections exactly. Let the runner's prepared-input signature check decide; do not assume either
+  way.
+  The arrival manifests were re-harvested 2026-08-15…17 for all five airports (the old
+  "KSJC and KSTL need a re-harvest" item is closed) but need the v5 re-roster above first; after it,
   `prepare_scenario_inputs.py --skip-observed` is safe and skips rebuilding the observed
   CZML/report tail.
-  **Scale**: 42,725 rostered arrivals; at the default `--max-per-runway 2000` the batch is
-  **23,453 flights / 70,359 solves**, estimated ~30 h at `--jobs 24` and **12.3 GiB** of
+  **Scale**: **42,650** rostered arrivals (re-measured 2026-09-06; this said 42,725, which was
+  the 2026-08-19 roster generation). At the default `--max-per-runway 2000`, read off the
+  `.selection.json` files on disk, the batch is **23,429 flights / 70,287 solves** for `runway`
+  — `fitted_adsb` selects the same flights and then drops the 20 `UnusableFittedApproach` ones
+  (23,409 / 70,227) — estimated ~30 h at `--jobs 24` and **12.3 GiB** of
   artifacts (`--rollout-dt 1.0` → 8.1 GiB). Free space is the binding constraint and moves
   with the ts_transformer experiments, so check it right before launching.
   The runner refuses to start if the estimate does not fit. Order: prepare → optimize

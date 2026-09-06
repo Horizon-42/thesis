@@ -82,14 +82,20 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   layer.** The strict builder raises on any flight it cannot build, which is right for a
   library and wrong for a batch: **35 flights of the 42,725 rostered arrivals (0.08 %) have
   no usable fitted final approach** (KMSY 1, KRDU 1, KSJC 25, KSMF 8, KSTL 0) and aborted the
-  fitted-ADS-B dataset for 4 of the 5 airports. They now raise `UnusableFittedApproach` (its
-  own type, so a broad `except ValueError` cannot swallow a real contract violation next to
-  it) and the batch layer drops and NAMES them.
+  fitted-ADS-B dataset for 4 of the 5 airports. **That count is against the 2026-08-19 roster
+  generation; the roster is now 42,650 and the 35 has NOT been re-measured** — the numerator
+  needs an uncapped rebuild, so quote it as a ~0.08 % rate, not as a current tally. What IS
+  current: over the capped selections on disk, 20 flights are dropped (KMSY 1, KRDU 0, KSJC 13,
+  KSMF 6, KSTL 0), same shape. They now raise `UnusableFittedApproach` (its own type, so a
+  broad `except ValueError` cannot swallow a real contract violation next to it) and the
+  batch layer drops and NAMES them.
 - **`--max-per-runway` caps the population, and the cap is written down.** Default 2000 via
-  `prepare_scenario_inputs.py`; at that value the fleet is 23,453 flights / 70,359 solves
-  instead of 42,725 / 128,175. Selection is evenly spaced over landing time within each
-  runway, so a capped runway still spans the whole harvest window. It is derived from the
-  arrival ROSTER alone — no source track is opened for a discarded flight, which is also why
+  `prepare_scenario_inputs.py`; at that value the fleet is 23,429 flights / 70,287 solves
+  instead of 42,650 / 127,950 (both re-read off the `.selection.json` files on disk
+  2026-09-06; this used to say 23,453 / 70,359 against 42,725 / 128,175). Selection is evenly
+  spaced over landing time within each runway, so a capped runway still spans the whole
+  harvest window. It is derived from the arrival ROSTER alone — no source track is opened
+  for a discarded flight, which is also why
   a capped KRDU build costs 0.9 GB / 7 s instead of 2.4 GB / 24 s — and therefore does not
   depend on the target type: **both prepared datasets select the same flights**, which is
   what keeps the per-flight comparison between `fitted_adsb` and `runway` paired. Every

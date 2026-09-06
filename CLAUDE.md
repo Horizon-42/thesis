@@ -224,7 +224,8 @@ Only the hazards that must fire unprompted are repeated here.
 
 - **`--evaluate-only` DELETES the v5 arrivals roster.** All five
   `outputs/harvest/<ICAO>/arrivals/manifest.json` are `harvest-arrivals-v5-takeoff-excluded`
-  (verified on disk 2026-09-03, 42,725 arrivals) with their `lateral_pass_eligibility.json`.
+  (re-measured on disk 2026-09-06, **42,650** arrivals — KRDU 14,435 / KSJC 11,082 / KSTL 8,767 /
+  KSMF 4,219 / KMSY 4,147) with their `lateral_pass_eligibility.json`.
   Do not re-run it without need.
 - **All control-output ts checkpoints are stale as of 2026-08-18** — the control contract
   changed units (newtons → fraction of installed thrust) and `TSConfig` gained required fields,
@@ -235,8 +236,14 @@ Only the hazards that must fire unprompted are repeated here.
   re-deriving. → `4dTrajectory/ts_transformer/CLAUDE.md`
 - **Quote only current-artifact numbers** — the KRDU ts run has three generations and the first
   is not reproducible; the gate-pass conclusion still needs re-deriving after the datum fix.
-- **The optimizer batch has nothing on disk to reuse** — `flight_scenarios/outputs` is empty, so
-  `--skip-optimize` finds nothing and the run is from scratch: ~23,453 flights / 70,359 solves,
-  ~30 h at `--jobs 24`, 12.3 GiB (`--rollout-dt 1.0` → 8.1 GiB). Free space is the binding
-  constraint and moves with the ts experiments, so check it right before launching; the runner
-  refuses to start if its estimate does not fit.
+- **The optimizer batch has no SOLVES on disk, but the prepared inputs DO exist** —
+  `flight_scenarios/outputs` is NOT empty (it holds all ten `*_scenarios.json` + their
+  `.selection.json`, 92 MB, built 2026-08-23); what is missing is `4dTrajectory/outputs/<ICAO>`
+  solve records, so `--skip-optimize` still has nothing to reuse. Whether the 08-23 scenarios can
+  be reused as-is is UNVERIFIED — the runner validates prepared-input signatures, so let it
+  decide rather than assuming. Scale, read off the selections on disk: **23,429 flights /
+  70,287 solves** (`runway`; `fitted_adsb` selects the same flights and then drops the 20
+  `UnusableFittedApproach` ones → 23,409 / 70,227), ~30 h at `--jobs 24`, 12.3 GiB
+  (`--rollout-dt 1.0` → 8.1 GiB). Free space is the binding constraint and moves with the ts
+  experiments, so check it right before launching; the runner refuses to start if its estimate
+  does not fit.

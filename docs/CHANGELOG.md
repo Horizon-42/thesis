@@ -4,6 +4,56 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-06 — Disk reclaim (29.7 GB) and three stale roster facts corrected
+
+The root filesystem hit 100 % (2.3 GB free). Reclaimed **29.7 GB** with no research
+artifact touched: `~/.cache/opensky` (18 GB, 3133 raw parquet, untouched since
+2026-08-14 — pyopensky's download cache, superseded by the materialised `tracks/`, and
+its own config already says `purge = 90 days`), browser/vcpkg/bazelisk caches (2 GB),
+`studys/**/__pycache__` (43 MB), and two superseded harvest generations:
+`harvest-may-2026` (4.5 GB — already merged into the live harvest, `provenance.merge`
+completed 2026-08-12) and `harvest-pre-source-timed-20260815` (5.0 GB — the pre-fix
+backup of the current `harvest-tracks-v2-source-timing`). Checked first that the merge's
+hard links no longer shared inodes, so both deletions were real space rather than
+link-count decrements. `conda clean --all` reclaims nothing (already clean).
+Still available and NOT taken: `journalctl --vacuum-size=200M` (3.9 GB, needs sudo);
+`public/data/airports/trajectories.czml` (2.4 GB, one command to regenerate); the
+21 GB of per-flight `*_states.json`/`*_eval.json` under the 116 `*_pred*` dirs — whose
+`summary.json`/`evaluation_report.json` (1.2 GB) carry every published number, but which
+a running experiment was reading at the time.
+
+Verifying the survivors surfaced three documented facts that were wrong, all corrected:
+
+- **The v5 arrivals roster is 42,650, not 42,725.** Corroborated independently by the five
+  `arrivals/manifest.json` (`counts.included`, mtime 2026-08-24) and the ten
+  `.selection.json` (`available`, 2026-08-23), which agree exactly: KRDU 14,435 /
+  KSJC 11,082 / KSTL 8,767 / KSMF 4,219 / KMSY 4,147. 42,725 was the real count of the
+  **2026-08-19** roster generation; the root `CLAUDE.md` claimed it was "verified on disk
+  2026-09-03", i.e. the number was copied forward rather than re-measured.
+- **`flight_scenarios/outputs` is NOT empty.** Both the root `CLAUDE.md` Open Items and
+  `docs/open-items.md` said it was, and concluded "the run is from scratch". All ten
+  `*_scenarios.json` + `.selection.json` are on disk (92 MB, built 2026-08-23). What is
+  actually missing is the *solve* records under `4dTrajectory/outputs/<ICAO>`, so
+  `--skip-optimize` still finds nothing — the conclusion held, the reason did not. Whether
+  the 08-23 scenarios are reusable is left UNVERIFIED on purpose (the manifests were
+  rewritten one day later, though their counts still match): the runner's prepared-input
+  signature check decides.
+- **The capped batch is 23,429 flights / 70,287 solves** (`runway`), not 23,453 / 70,359 —
+  read off the selections rather than restated. `fitted_adsb` selects the same flights and
+  then drops the 20 `UnusableFittedApproach` ones (23,409 / 70,227), which confirms the
+  "both prepared datasets select the same flights" invariant rather than breaking it.
+
+The `35 of 42,725 (0.08 %)` unfittable measurement in `flight_scenarios/CLAUDE.md` was
+NOT rebased — changing a denominator under an unremeasured numerator would manufacture a
+result — it is now attributed to its roster generation, with the current capped-selection
+figure (20 dropped, same per-airport shape) beside it. The 2026-08-19 CHANGELOG entries
+keep 42,725: they are dated history and correct as written.
+
+Also found, not deleted: `outputs/harvest/.KSJC-reclassify-akrwpor_`, an orphaned
+reclassify staging copy (170 MB, 8351 files, no `manifest.json` so nothing can read it,
+every file separately inoded and duplicated in the live tree, timestamped 8 minutes
+before the reclassify completed).
+
 ### 2026-09-06 — Snapshot before a redesign: the tracker review, the P2 data plane as WIP
 
 The opus review of the closure tracker (`control/constraints/closure_tracking.py`)
