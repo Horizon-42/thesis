@@ -247,6 +247,33 @@ in to keep them self-contained) and are OFF the import path:
 `tests/` and the root `run_ts_*.py` runners alike — and that no `__init__.py` makes it
 importable. A finished one-off driver belongs there, not beside the live runners.
 
+**Runners for the anytime / calibrated-ETA line** (2026-09-07,
+`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`):
+
+- `run_ts_anytime_curve.py` — **A0-fixed**: replays `--checkpoint LABEL=PATH` (repeatable) from
+  a grid of REMAINING-PATH anchors and reports ADE / FDE / |Δt| per bin per stratum. Three
+  things it exists to keep right: the strata are computed once at **L−1 and fixed for every
+  bin** (relabel per bin and a flight leaves the vectored stratum exactly when it rolls out on
+  final — a survivor curve reads as an improving one); the bin coordinate is
+  `approach_difficulty.remaining_path_profile_m`, which the covariate itself reads, so a
+  consumer binning on distance-to-go never restates the arc length; and the reading carries the
+  out-of-distribution cost of an L−1-trained checkpoint, so it is **never quoted without an
+  A0-random arm**. `cta_conditioning=given` is refused (its duration IS the truth's).
+  **`--min-future-s 60` empties the 2 km bin and most of the 4 km one** (≈27 s / 53 s of truth
+  left at approach speed) — stated as `n=0 / partial`, but s_freeze can then only be read at
+  ≥ 6 km.
+- `run_ts_eta_error_readout.py` — **B0**: |`final_time_error_s`| p50/p80/p90 and the SIGNED
+  p10/p50/p90 (same for `fde_m`) per stratum, straight out of existing `summary.json` files.
+  Measured 2026-09-07 on KRDU val: vectored |Δt| p80 **65.8–72.5 s** against straight-in
+  **12.0–20.3 s**, so one pooled ETA interval cannot serve both strata.
+
+**A replay runner must fingerprint the data the way the checkpoint was trained** — with the
+pre-split lateral-pass roster (`lateral_eligibility.default_lateral_pass_roster_path`) when the
+checkpoint's provenance carries an `eligibility` block. Without it the v5 cohort fingerprints as
+14 435 KRDU arrivals against the checkpoint's 14 378 and `require_matching_data_provenance`
+reports "the manifest changed". `run_ts_control_basis_oracle.py --checkpoint` still has the
+plain call and will hit this on every v5 checkpoint (`docs/code-health-followups.md`).
+
 **Measurement code is CODE.** Reusable logic goes in the package with tests
 (`control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
 a runnable experiment goes in a top-level `run_ts_*.py` runner beside the others;

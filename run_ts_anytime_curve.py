@@ -131,8 +131,9 @@ class Arm:
 def load_arm(label: str, path: Path, split: str, device: torch.device) -> Arm:
     """Every refusal this runner can make about a checkpoint, before it reads one track.
 
-    The airports come from the checkpoint's own provenance (never chosen here) and the
-    manifests are checked against it exactly as `predict` does.
+    The airports come from the checkpoint's own provenance — never chosen here, which is
+    why the fingerprint is compared strictly rather than as the airport SUBSET `predict`
+    allows for a pooled checkpoint narrowed by ``--data``.
     """
     model, config, normalizer, payload = load_checkpoint(path)
     if config.cta_conditioning == CTA_CONDITIONING_GIVEN:

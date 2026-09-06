@@ -4,6 +4,91 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — ts_transformer A0 / B0: the re-anchoring curve and the arrival-time error distribution
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+§二 2.1–2.4 and §三 3.1, branch `dev-a0`. Both are MEASUREMENTS on existing checkpoints and
+existing prediction directories — no training, no new model axis.
+
+**Why.** Every evaluation in this package anchors at L−1 (`seq_len − 1`, 120 s after the 25 km
+slice starts), which is the moment the ego history knows least about where the controller is
+going to send the aircraft. The 962 m of intent in the C_pred → C_truth_intent budget is a
+property of that INSTANT, not of the flight: it gets exposed as the aircraft flies. Nothing in
+the package had ever measured that — each flight has exactly one anchor and one ADE. A0 asks
+how the error falls as the remaining path shrinks; B0 asks how wide an arrival-time interval
+would have to be, which is the number B1 (quantile head) and B2 (conformal) would be built
+against.
+
+**`run_ts_anytime_curve.py` (A0-fixed).** `--checkpoint LABEL=PATH`, repeatable; the cohort is
+each checkpoint's own `val` split, rebuilt the way `predict` rebuilds it; bins are REMAINING
+PATH (`--bins-km 20,16,12,8,6,4,2`), and a flight's anchor in a bin is the observed sample
+whose remaining path is closest to the bin value, empty when it has no full lookback or under
+`--min-future-s` of truth after it. Scored with the package's own `observed_series_metrics`.
+Writes `anytime_curve.json` + `.txt` with the §2.4 readings (vectored ADE monotone within
+±22 m; the largest s > 4 km under 1500 m; s_freeze, reported not gated). Three design points:
+
+- **The strata are computed once at L−1 and fixed for every bin.** This is the whole
+  difference between a curve and a survivor curve: relabel per bin and a flight leaves the
+  vectored stratum exactly when it rolls out on the centreline, so the stratum improves
+  because its hard members left it. Held down by a test with a two-flight cohort — one
+  vectored at L−1 and established by 4 km, one straight-in — which must read vectored n=1 /
+  established n=0 at the 4 km bin where per-bin labels would read 0 and 2.
+- **The bin coordinate is the covariate's own arithmetic.** `approach_difficulty` gains
+  `remaining_path_profile_m` (the per-sample form, one suffix sum) and
+  `approach_difficulty()` now reads its own `remaining_path_m` out of it. The anchor grid and
+  the NEAR / FAR strata therefore cannot become two definitions of one name.
+- **`observed_series_metrics` was already anchor-aware** (`series.times[forecast.anchor]`,
+  truth = supervision rows after it, difficulty at that anchor), so nothing at the export
+  boundary had to change — asserted, not assumed: a forecast that copies the truth from a
+  late anchor scores ADE 0 there.
+
+Refusals: `cta_conditioning=given` (its duration IS the truth's, so its curve improves for
+free), the sealed `test` split, and a malformed `LABEL=PATH` — all before the immutable output
+directory is created, which is why the checkpoints are loaded first and the tracks second.
+
+**`run_ts_eta_error_readout.py` (B0).** A pure readout of `summary.json`: per stratum the
+|`final_time_error_s`| p50/p80/p90 and the SIGNED p10/p50/p90, and the same quantiles of
+`fde_m`. Measured on the three KRDU val arms (1404 flights each, full coverage):
+
+| arm | vectored \|Δt\| p80 | straight-in \|Δt\| p80 | signed p50 (all) |
+|---|---:|---:|---:|
+| native32 | 72.5 s | 20.3 s | +3.5 s |
+| L2.d warm β=0.01 | 68.6 s | 18.9 s | +3.4 s |
+| closure C_pred | 65.8 s | 12.0 s | −1.4 s |
+
+Four things that decide B1/B2's shape: per-stratum calibration is necessary, not a refinement
+(the vectored stratum is 3.6–5.5× the straight-in one, so a pooled interval is absurd for
+straight-in flights); B is not dead on arrival but has only about one doubling of margin
+against the §三 veto of a 120 s vectored interval; the error is near-symmetric but OFF-CENTRE
+(+3.4/+3.5 s late for the control arms, −1.4 s early for closure), so a quantile head beats
+"point ± δ"; and closure's FDE p50 of 11 m is a construction artifact (it draws the path onto
+the threshold) sitting next to a 996 m ADE — the standing "read both metric families" rule,
+with a fresh example.
+
+**A replay runner must fingerprint the data the way the checkpoint was trained.** The v5
+cohort is eligibility-bound: `arrival_data_provenance(manifests)` without
+`eligibility_rosters` lists 14 435 KRDU arrival candidates where the checkpoint carries the
+14 378 eligible ones, and `require_matching_data_provenance` then reports "the manifest
+changed" on a checkpoint and a manifest that are both correct. The new runner reads the roster
+exactly when the checkpoint's provenance carries an `eligibility` block (not a flag — a
+checkpoint trained before the sidecar existed must not be handed one). The same plain call is
+still in `run_ts_control_basis_oracle.py --checkpoint`, where it is a live blocker for L5.a's
+unrun fit: `docs/code-health-followups.md` §19.
+
+**Measured while verifying, not results** (2 flights, CPU): all three §2.2 arms replay at
+anchors 87–241 against L−1 = 59, closure included — `closure_output.reconstruct` draws from
+the ANCHOR STATE and its labels only ever enter training and `--closure-from-labels`, so the
+closure arm stays in A0-fixed rather than being dropped from it.
+
+**Known gap in the design's own grid**: `--min-future-s 60` empties the 2 km bin and most of
+the 4 km one (≈27 s and ≈53 s of truth left at approach speed). The readout states it
+(`n=0 / cov 0.00 / partial`) and gate 2 only asks about s > 4 km, but **s_freeze can then only
+be read at ≥ 6 km**; reading it closer in needs a lower floor, which changes the bins'
+population and must be quoted with the result.
+
+Tests: `4dTrajectory/ts_transformer/tests/test_anytime_curve.py` (17) and
+`test_eta_error_readout.py` (7); package suite 580 → 604.
+
 ### 2026-09-07 — ts_transformer L1.b: two supervision terms that replace the imitation teacher's job of naming the bank
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md` §六 L1.b, branch

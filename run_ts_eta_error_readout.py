@@ -174,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     print(text, end="")
     if args.json is not None:
         out = args.json if args.json.is_absolute() else REPO_ROOT / args.json
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, indent=2))
         print(f"wrote {out}")
     return 0

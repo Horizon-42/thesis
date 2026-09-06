@@ -421,3 +421,25 @@ per-type `reference_speed_kt` derived from `1.23·Vs1g(landing_mass)` instead of
 constant (already followup-listed under the E75L case); until then quote fast-fail rates with
 the margin.
 
+
+## 19. `run_ts_control_basis_oracle.py --checkpoint` fingerprints the data without the eligibility roster
+
+**Verified** (2026-09-07, hit while building `run_ts_anytime_curve.py`): the teacher-table mode
+calls `require_matching_data_provenance(payload, arrival_data_provenance(manifests))` with no
+`eligibility_rosters`, while every current checkpoint's `data_provenance` is
+`ts-arrival-data-v3-eligibility-bound` and carries the pre-split lateral-pass roster. The
+fingerprint taken without the roster lists all 14 435 KRDU arrival candidates where the
+checkpoint carries the 14 378 eligible ones, so the strict comparison fails with "checkpoint
+training data does not match the current arrival manifests" — on a checkpoint and a manifest
+that are both correct. Reproduced against `l1_lowdim_20260907/L1_native32`,
+`l2_warm_posterior_20260907/L2d_warm_beta0p01` and `closure_p1c_20260905/C_pred`.
+
+This is a live blocker for **L5.a**, whose fit "has not run" (`docs/OPEN_ITEMS.md`): the
+documented command dies at the provenance check before it fits anything.
+
+**Fix** (the shape `run_ts_anytime_curve.current_provenance` uses): read the roster exactly when
+the checkpoint's own provenance has an `eligibility` block —
+`[default_lateral_pass_roster_path(path) for path in manifests] if
+provenance_eligibility_digests(payload["data_provenance"]) else None`. Not a flag: a checkpoint
+trained before the sidecar existed must not be handed one. Deferred here because the L0/L5
+runner belongs to another branch's change.
