@@ -481,6 +481,43 @@ run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命�
 > ——这个数在第 1 轮就能看出问题，本应一开始就有；`run_ts_latent_probe.py --checkpoint` 读同样的量。
 > **门**：后验均值位移中位 > 1 σ（信息在均值里）、shuffled ΔADE > 200 m、minADE_6 < N(0,I) 对照、top-1 不劣于
 > native32（1322）；否决同前。K=4 与 L3 的 z 版本都等这里的胜者。L2.d 的 warm β=0.01（1214 m）仍是兜底。
+>
+> **实现（2026-09-07，`dev-l2f`：`be56088` 诊断、`60dd620` 退火、`6233967` 辅助目标、`63d1fdd` 探针、
+> `59640bd` 臂文件）。**
+> - **诊断**（`control/latent.py`）：`latent_kl` 改返回 `LatentKL` 记录（`charged` / `per_dimension` /
+>   `mean_term_per_dimension` / `displacement_sigma` / 取诊断的那个先验分量的 `prior_mean`、`prior_logvar`；
+>   方差项是 `per_dimension − mean_term` 的**余数**，不是第二个闭式——目标收取的那个数必须逐比特不变）。
+>   `with_latent_kl` 因此多记五个诊断，`latent_epoch_record` 组装 history 的 `latent` 块：
+>   `kl_per_dim`（逐维，对航班取平均）、`kl_mean_term_nats` / `kl_variance_term_nats`（逐航班）、
+>   `mean_displacement_sigma`（|μ_q−μ_p|/σ_p 的中位；中位不可加，所以是**各 batch 中位数的航班加权平均**，
+>   与 `active_units` 同形）、`active_units_0p05`（固定 0.05 nat 的尺子；`active_units` 保持随预算移动的旧定义
+>   ——L2.e' 三臂各按自己的阈值计数，门 (1) 因此读不出来）。`run_ts_latent_readout.py --history
+>   <run>/history.json` 打印被选 epoch 的这一块（epoch 号读产物自己的 `fit_diagnostics.training_objective`）。
+> - **β 退火**：`latent_beta_warmup_epochs`（默认 0；无 latent 拒绝、负值拒绝；四个 named recipe 钉 0；
+>   run name `beta-warmup=40`）。第 e 轮（1 起）的有效权重 = `latent_beta · min(1, e/warmup)`，
+>   `control.latent.effective_latent_beta` 是唯一写法；每轮的目标是 `replace(config, latent_beta=有效值)`，
+>   训练批次与验证遍历**同用它**（`evaluate_validation_airport` 因此显式收下它要打分的 config），
+>   所以同一轮的 train / val `latent_kl` 含义相同——与 procedure 惩罚的 λ 同一条规矩。history 里
+>   `train_components.latent_kl` 仍是**被收取的**损失项（有效 β × 航班加权均值 KL），`latent` 块里全是未缩放
+>   的 nat，旁边多一个 `beta_effective`；checkpoint 选择不变。
+> - **辅助意图目标**：`latent_aux_duration_weight`（默认 0；无 latent 拒绝、负值/非有限拒绝、
+>   `cta_conditioning=given` 拒绝——CTA 已经把时长交给解码器了；四个 recipe 钉 0；run name `aux-T=1`）。
+>   训练期头 `aux_duration: Linear(latent_dim→1)` 只作用在**后验样本**上，只在权重非零时构造（且在
+>   `__init__` **最末**构造，别的模块的初始化抽样因此与无此臂完全相同，两臂配对），`decode` 从不调用它，
+>   记录里没有任何它的痕迹。损失分量 `latent_aux` = 权重 × 航班加权 MSE（目标 = batch 自己的 `final_time` /
+>   `final_time_scale_s`），只在权重非零时注册（`loss_component_names` 与适配器同一个条件、同一个文件）。
+> - **探针**：`run_ts_latent_probe.py --checkpoint LABEL=PATH --split val [--limit N] --out <dir>`——
+>   逐 checkpoint 打印参考探针那张表（先验/后验的逐维跨航班 std 与中位 σ、位移的逐维中位与总中位/p90、
+>   逐维 KL 及其均值/方差拆分、每航班总量、先验总 std 对 N(0,I)——总 std 含分量宽度**与**均值的跨航班散布，
+>   参考脚本的标签这么写但只算了前者），人群按回放规矩重建（`load_arm` / `cohort_series`，即
+>   `checkpoint_data_provenance` 那条 roster 规则），拒绝 `cta=given`（共用加载器）与无 latent 的 checkpoint，
+>   产物目录不可变。**后验读未来，所以这里的数永远不是预测结果。**
+> - **臂文件** `docs/experiments/l2f_mean_information_arms.json`（base = L2.d + fb 0.05 + β 0.01；
+>   `L2f_anneal` / `L2f_aux_T`；predict `--latent-samples 6 --latent-random 6 --latent-shuffle`）。
+> - **建头时量到的一件事（诚实记下，直接影响门 (1) 的读法）**：合成数据三个种子、配对初始化，辅助目标让 KL
+>   的**均值项**三比三变大（102.60→108.06、26.854→26.917、15.48→15.69，轮数越多差越大），但**位移中位**只有
+>   二比三变大（种子 11 反而小 0.6 %）。原因是目标的形状——一个标量读出只需要**一个**隐维方向，八维上的
+>   中位数看不见它。`L2f_aux_T` 必须同时读 `kl_per_dim` 与 `kl_mean_term_nats`，并在结果里说明判决靠的是哪个。
 
 ### L3 — CTA 条件化（交付形态；≈2 天）
 

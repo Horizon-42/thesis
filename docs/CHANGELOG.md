@@ -4,6 +4,60 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — ts_transformer L2.f: the latent's information was in the wrong half of the KL
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md` §六 L2.f, branch
+`dev-l2f` (`be56088` diagnostics, `60dd620` β annealing, `6233967` the auxiliary duration
+target, `63d1fdd` `run_ts_latent_probe.py`, `59640bd` the arm file). Nothing here changes an
+existing run: all three code commits are bit-exact at the defaults, proved by 2-epoch
+synthetic trains of four configs (plain control simple-v3/N=32, latent control, state,
+closure) before and after each — 0 numbers changed, only the new keys added — and the run
+grammar recount found 0 of 362 stored configs renamed.
+
+**Why.** L2.e' spent three 180-epoch arms on free bits as an information budget and read the
+result as "the budget works, the information is just small". A direct probe of the three
+checkpoints said otherwise: in every arm the posterior MEAN sat on the prior mean —
+|μ_q − μ_p| under 0.2 prior σ per flight — and the whole budget went into narrowing the
+posterior. z was a denoised constant. That explains the shuffled ΔADE of +47/+16 m, the
+z-oracle's mere 227 m, the N(0, I) control beating the trained prior's best-of-6, and top-1
+getting worse as the budget grew (1214 / 1260 / 1387 m). The mechanism: above the free-bits
+floor the penalty's gradient on the KL's MEAN term is proportional to the displacement, so it
+flattens each flight's posterior mean onto the prior within the first ten epochs — before the
+decoder has learned to read z — and nothing afterwards brings the information back.
+
+**Not one number a training run wrote could have shown this.** Total KL, active units and
+shuffled ΔADE are all blind to WHERE the KL is spent. So the epoch record gained the split
+(`kl_mean_term_nats` / `kl_variance_term_nats`, the variance term as the REMAINDER of
+`per_dimension_kl` so the charged number stays bit-identical), `kl_per_dim`,
+`mean_displacement_sigma` (a median is not summable: the flight-weighted mean of the per-batch
+medians, the same shape as `active_units`) and `active_units_0p05` — the FIXED ruler, because
+`active_unit_threshold_nats` moves with the free-bits budget and made that gate unreadable
+across arms. `run_ts_latent_readout.py --history <run>/history.json` prints the kept epoch's
+block; `run_ts_latent_probe.py --checkpoint LABEL=PATH` measures the same quantities off a
+checkpoint (the scratch probe, now code beside the other replay runners, sharing A0's cohort
+rebuild so the roster rule keeps one owner).
+
+**Two levers, one arm each** (`docs/experiments/l2f_mean_information_arms.json`, base = L2.d's
+warm posterior + free bits 0.05 + β 0.01): `latent_beta_warmup_epochs=40` ramps β linearly
+from 0 so the decoder's z-weights grow before the mean term is charged (the L2.c "annealing
+only postpones collapse" reading was about the VARIANCE term — recorded, not quietly
+reversed); `latent_aux_duration_weight=1.0` adds a train-only `Linear(latent_dim→1)` on the
+POSTERIOR SAMPLE predicting `truth_duration_s / final_time_scale_s`, a restoring force on the
+mean that does not go through the decoder. The head is never called in `decode`, so z stays
+latent and no record carries it; the combination with `cta_conditioning=given` is refused (the
+CTA already hands the duration over).
+
+**Two things worth keeping.** (1) The epoch's objective is now `replace(config,
+latent_beta=effective)` and the VALIDATION pass is scored under the same one, so an epoch's
+train and val `latent_kl` mean the same thing — the rule the procedure penalty's λ already
+followed; `train_components.latent_kl` keeps its meaning (the term actually charged) and the
+`latent` block is unscaled nats plus `beta_effective`. (2) Measured while building the aux
+head (synthetic, three seeds, paired init): the target raises the KL's mean term in 3 of 3
+seeds but the displacement MEDIAN in only 2 of 3, because a scalar read-out needs ONE latent
+direction and a median over eight dimensions can miss it. The test asserts the monotone
+quantity and the arm file says to read `kl_per_dim` beside gate (1)'s median rather than
+weakening either.
+
 ### 2026-09-07 — ts_transformer A0 / B0: the re-anchoring curve and the arrival-time error distribution
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`

@@ -108,6 +108,18 @@ flight model.
 - **A new loss term must be added to `objective.loss_component_names`**, not only to the
   objective's `extras` — otherwise `KeyError` on the first batch, *after* the slow dataset
   build.
+- **A latent run's total KL says nothing about WHERE it is spent, and that is the whole
+  failure mode.** Three 180-epoch arms were read as "the information is just small" while
+  every posterior mean sat ON the prior mean (displacement 0.05–0.2 prior σ) and the budget
+  bought only a narrower posterior. `history.json`'s `latent` block therefore carries
+  `kl_mean_term_nats` / `kl_variance_term_nats` (the split; the variance term is the
+  REMAINDER of `per_dimension_kl`, never a second closed form), `mean_displacement_sigma`,
+  `kl_per_dim` and `active_units_0p05` — the FIXED 0.05-nat ruler, because
+  `active_units` moves with the free-bits budget and made that gate unreadable across arms.
+  Read them with `run_ts_latent_readout.py --history <run>/history.json`, or off a
+  checkpoint with `run_ts_latent_probe.py`. A scalar auxiliary target concentrates the
+  information in ONE dimension, so on such an arm the median displacement can miss what
+  `kl_per_dim` shows.
 - **A supervision term on the turn rate reads the RHS, never a restated identity.** The
   shared point-mass RHS integrates `ψ̇ = g·n_realized·sin φ / (V·cos γ)` with the
   STALL-LIMITED load factor; the textbook `g·tan φ / V` equals it only on a coordinated
@@ -178,7 +190,8 @@ flight model.
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried) |
 | `--project-final` | off | deployment fallback; FAF-gated wrecks vectored flights |
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
-| `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` mean nothing without it and are refused |
+| `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` / `latent_posterior_init_std` and L2.f's two below mean nothing without it and are refused |
+| `latent_beta_warmup_epochs` / `latent_aux_duration_weight` | 0 / 0.0 | L2.f's two levers on the POSTERIOR MEAN, which is where the information died (see the trap below). The first ramps β linearly from 0 over N epochs (`effective_latent_beta`, the one place the schedule is written; the epoch's objective is `replace(config, latent_beta=…)` and the validation pass is scored under the SAME one); the second adds a train-only `Linear(latent_dim→1)` on the POSTERIOR SAMPLE predicting `truth_duration_s / final_time_scale_s` (component `latent_aux`, registered iff weighted, never called in `decode`, refused under `cta_conditioning=given`). Named `beta-warmup=` / `aux-T=`; the four named recipes pin both off. Arms: `docs/experiments/l2f_mean_information_arms.json` |
 | `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result |
 | `n_segments` (control) | 64 | **32 is free** (L1: 1322 vs 1333 m, bank skill 0.726 vs 0.728); the deployed head's 257 numbers become 96 |
 | `control_state_loss_grid` | native | `fixed-dt` without the imitation term (it is not registered there) trips the straight-in veto (FDE 703 → 2863) and brings the bank wiggle back — the trajectory-error loss alone is not enough |
@@ -301,6 +314,17 @@ importable. A finished one-off driver belongs there, not beside the live runners
   present-but-null `established_at_anchor` would otherwise read as False and change stratum.
   Measured 2026-09-07 on KRDU val: vectored |Δt| p80 **65.8–72.5 s** against straight-in
   **12.0–20.3 s**, so one pooled ETA interval cannot serve both strata.
+
+**The latent line's own runner** (`docs/2026-09-07_latent_intent_design.zh.md` §六 L2.f):
+
+- `run_ts_latent_probe.py` — **L2.f**: the training-side densities of one or more latent
+  checkpoints on a split (`--checkpoint LABEL=PATH`, repeatable), through the SAME cohort
+  rebuild as A0 (`load_arm` / `cohort_series`, so the roster rule has one owner): prior and
+  posterior per-dimension spread, the posterior mean's displacement in prior sigmas, the
+  per-dimension KL and its mean/variance split, the prior's total std against N(0, I).
+  Refuses a non-latent checkpoint (no posterior) and, through the shared loader, a
+  `cta=given` / `intent=truth-…` one. **The posterior reads the future: never a prediction
+  result.**
 
 **A replay runner fingerprints through `data_provenance.checkpoint_data_provenance(payload,
 manifests)`, never `arrival_data_provenance(manifests)`** — the helper reads the pre-split
