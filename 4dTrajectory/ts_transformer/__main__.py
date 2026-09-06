@@ -215,20 +215,6 @@ def _cv_parameters(value: str) -> tuple[str, ...]:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def _positive_float_csv(value: str) -> tuple[float, ...]:
-    try:
-        parsed = tuple(float(token.strip()) for token in value.split(",") if token.strip())
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "horizon curriculum must be a comma-separated list of seconds"
-        ) from exc
-    if not parsed or any(item <= 0.0 for item in parsed):
-        raise argparse.ArgumentTypeError(
-            "horizon curriculum must contain positive seconds"
-        )
-    return parsed
-
-
 def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--control-recipe",
@@ -430,22 +416,6 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
             "allow state-rollout loss to update duration fractions; use --no-control-"
             "state-duration-gradient to train the final-time clock independently"
         ),
-    )
-    parser.add_argument(
-        "--control-horizon-curriculum",
-        type=_positive_float_csv,
-        default=None,
-        metavar="SECONDS,...",
-        help=(
-            "physical-time control prefixes trained before the full horizon, e.g. "
-            "60,120,240; train/validation only"
-        ),
-    )
-    parser.add_argument(
-        "--control-horizon-stage-epochs",
-        type=int,
-        default=None,
-        help="epochs per numeric control-horizon curriculum stage (default: 10)",
     )
     parser.add_argument(
         "--control-gradient-clip-norm",
@@ -659,11 +629,6 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_state_loss_grid", args.control_state_loss_grid),
         ("control_state_objective", args.control_state_objective),
         ("control_state_duration_gradient", args.control_state_duration_gradient),
-        ("control_horizon_curriculum_s", args.control_horizon_curriculum),
-        (
-            "control_horizon_curriculum_stage_epochs",
-            args.control_horizon_stage_epochs,
-        ),
         ("control_gradient_clip_norm", args.control_gradient_clip_norm),
         ("control_gradient_clip_policy", args.control_gradient_clip_policy),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),

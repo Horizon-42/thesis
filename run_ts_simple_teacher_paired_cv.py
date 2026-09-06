@@ -61,7 +61,6 @@ from control.oracle.evaluation import evaluate_schedule, move_dynamics  # noqa: 
 from train import prediction_loss_components  # noqa: E402
 from control.oracle.optimization import (  # noqa: E402
     BatchedOracleTeacher,
-    teacher_optimization_stages,
     optimize_teacher_controls,
 )
 from control.oracle.pretraining import CachedSchedulePretrainer  # noqa: E402
@@ -315,8 +314,7 @@ def optimize_fold_teacher(
     directory: Path,
     fold_index: int,
     contract_sha256: str,
-    prefix_steps: int,
-    full_steps: int,
+    steps: int,
     learning_rate: float,
     gradient_clip_norm: float,
     log_every: int,
@@ -356,7 +354,6 @@ def optimize_fold_teacher(
         dynamics["control_upper"],
         final_time,
     ).to(device)
-    stages = teacher_optimization_stages(prefix_steps, full_steps)
     history = optimize_teacher_controls(
         teacher,
         x=x,
@@ -367,7 +364,7 @@ def optimize_fold_teacher(
         supervision=supervision,
         config=config,
         normalizer=normalizer,
-        stages=stages,
+        steps=steps,
         learning_rate=learning_rate,
         gradient_clip_norm=gradient_clip_norm,
         log_every=log_every,
@@ -444,13 +441,8 @@ def optimize_fold_teacher(
 
 
 def _best_epoch(fit: Any) -> Any:
-    eligible = [
-        row
-        for row in fit.history
-        if not row.training_stage or row.training_stage.get("is_full_horizon", True)
-    ]
     return min(
-        eligible,
+        fit.history,
         key=lambda row: (
             row.validation_selection_value
             if row.validation_selection_value is not None
@@ -653,8 +645,7 @@ def _build_contract(
     folds: Sequence[Sequence[FlightSeries]],
     teacher_ids_by_fold: Sequence[Sequence[str]],
     cohort_size: int,
-    prefix_steps: int,
-    full_steps: int,
+    teacher_steps: int,
     teacher_learning_rate: float,
     teacher_gradient_clip_norm: float,
     pretraining_steps: int,
@@ -704,8 +695,7 @@ def _build_contract(
         "teacher_optimization": {
             "cohort_size": cohort_size,
             "selection_namespace": TEACHER_NAMESPACE,
-            "prefix_steps_per_stage": prefix_steps,
-            "full_steps": full_steps,
+            "steps": teacher_steps,
             "learning_rate": teacher_learning_rate,
             "gradient_clip_norm": teacher_gradient_clip_norm,
         },
@@ -735,8 +725,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--split-seed", type=int, default=1337)
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--teacher-prefix-steps", type=int, default=30)
-    parser.add_argument("--teacher-full-steps", type=int, default=150)
+    parser.add_argument("--teacher-steps", type=int, default=240)
     parser.add_argument("--teacher-learning-rate", type=float, default=1e-4)
     parser.add_argument("--teacher-gradient-clip-norm", type=float, default=20.0)
     parser.add_argument("--teacher-log-every", type=int, default=10)
@@ -748,8 +737,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in (
         "folds",
         "cohort_size",
-        "teacher_prefix_steps",
-        "teacher_full_steps",
+        "teacher_steps",
         "teacher_log_every",
         "pretraining_steps",
     ):
@@ -840,8 +828,7 @@ def main(argv: list[str] | None = None) -> int:
         folds=folds,
         teacher_ids_by_fold=teacher_ids_by_fold,
         cohort_size=args.cohort_size,
-        prefix_steps=args.teacher_prefix_steps,
-        full_steps=args.teacher_full_steps,
+        teacher_steps=args.teacher_steps,
         teacher_learning_rate=args.teacher_learning_rate,
         teacher_gradient_clip_norm=args.teacher_gradient_clip_norm,
         pretraining_steps=args.pretraining_steps,
@@ -880,8 +867,7 @@ def main(argv: list[str] | None = None) -> int:
             directory=fold_dir / "teacher_schedule",
             fold_index=fold_index,
             contract_sha256=contract_sha256,
-            prefix_steps=args.teacher_prefix_steps,
-            full_steps=args.teacher_full_steps,
+            steps=args.teacher_steps,
             learning_rate=args.teacher_learning_rate,
             gradient_clip_norm=args.teacher_gradient_clip_norm,
             log_every=args.teacher_log_every,

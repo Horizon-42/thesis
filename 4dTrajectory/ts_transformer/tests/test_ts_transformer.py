@@ -105,11 +105,6 @@ from control.loss.components import (  # noqa: E402
     control_tracking_loss_terms,
     last_reliable_terminal_velocity_target,
 )
-from control.training.curriculum import (  # noqa: E402
-    ControlTrainingStage,
-    build_control_training_stage_view,
-    build_control_training_stages,
-)
 from control.training.diagnostics import (  # noqa: E402
     ControlTrainingDiagnosticsAccumulator,
     clip_gradients_by_policy,
@@ -2168,8 +2163,6 @@ def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch)
         model,
         plan,
         torch.device("cpu"),
-        None,
-        include_deployable_replay=True,
     )
     shared_common = train_module.evaluate_fixed_anchor_common_grid(
         model,
@@ -2717,8 +2710,6 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
     [
         "control_state_objective",
         "control_state_duration_gradient",
-        "control_horizon_curriculum_s",
-        "control_horizon_curriculum_stage_epochs",
         "control_gradient_clip_norm",
         "control_gradient_clip_policy",
         "control_dynamics_backend",
@@ -2867,34 +2858,6 @@ def test_arc_loss_ablation_components_share_one_objective_and_recipe():
         replace(config, control_arc_position_end_weight=0.5)
 
 
-def test_control_horizon_curriculum_is_a_strict_physical_training_mode():
-    config = TSConfig(
-        prediction_output=PREDICTION_CONTROL,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-        control_state_duration_gradient=False,
-        control_horizon_curriculum_s=(60.0, 120.0, 240.0),
-        control_horizon_curriculum_stage_epochs=10,
-        epochs=31,
-    )
-
-    assert config.control_horizon_curriculum_s == (60.0, 120.0, 240.0)
-    assert "horizon-curriculum=60,120,240s" in train_module.target_contract(config)
-    assert "x10epochs" in train_module.target_contract(config)
-    assert control_recipe(config)["horizon_curriculum_s"] == [60.0, 120.0, 240.0]
-
-    with pytest.raises(ValueError, match="strictly increasing"):
-        replace(config, control_horizon_curriculum_s=(120.0, 60.0))
-    with pytest.raises(ValueError, match="align with the fixed-dt grid"):
-        replace(config, control_horizon_curriculum_s=(61.0,))
-    with pytest.raises(ValueError, match="leave at least one full-horizon epoch"):
-        replace(config, epochs=30)
-    with pytest.raises(ValueError, match="fixed train anchors"):
-        replace(config, random_train_anchor=True)
-
-
 def test_control_gradient_clip_is_explicit_and_control_only():
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
@@ -3007,155 +2970,8 @@ def test_final_time_decoupled_clip_caps_control_backbone_only():
     assert postclip["final_time_head"] == pytest.approx(12.0)
 
 
-def test_control_horizon_curriculum_builds_exact_batched_prefix_views():
-    controls = torch.zeros(2, 4, 3)
-    prediction = ControlPrediction(
-        controls=controls,
-        segment_durations=torch.tensor(
-            [[25.0, 25.0, 25.0, 25.0], [10.0, 10.0, 10.0, 10.0]]
-        ),
-        final_time_s=torch.tensor([100.0, 40.0]),
-    )
-    offsets = torch.arange(2.0, 102.0, 2.0).repeat(2, 1)
-    valid = torch.zeros(2, 50, dtype=torch.bool)
-    valid[0, :50] = True
-    valid[1, :20] = True
-    states = torch.zeros(2, 50, len(ch.CHANNELS))
-    states[0, :, 0] = torch.arange(50)
-    states[1, :, 0] = 100.0 + torch.arange(50)
-    supervision = FixedDTControlSupervision(
-        query_offsets_s=offsets,
-        states=states,
-        weights=torch.ones_like(states),
-        valid=valid,
-    )
-    terminal = torch.stack((states[0, 49], states[1, 19]))
-    stage = ControlTrainingStage("60s", 60.0, 1, 10)
-
-    view = build_control_training_stage_view(
-        prediction,
-        supervision,
-        terminal,
-        prediction.final_time_s,
-        stage,
-    )
-
-    torch.testing.assert_close(
-        view.prediction.segment_durations,
-        torch.tensor([[25.0, 25.0, 10.0, 0.0], [10.0, 10.0, 10.0, 10.0]]),
-    )
-    torch.testing.assert_close(
-        view.segment_valid,
-        torch.tensor([[True, True, True, False], [True, True, True, True]]),
-    )
-    assert view.supervision.query_offsets_s.shape == (2, 30)
-    assert view.supervision.valid.sum(dim=1).tolist() == [30, 20]
-    assert view.terminal_target[:, 0].tolist() == pytest.approx([29.0, 119.0])
-
-
-def test_control_horizon_curriculum_keeps_exact_float64_query_boundary():
-    fractions = torch.softmax(torch.linspace(-1.0, 1.0, 64), dim=0)
-    prediction = ControlPrediction(
-        controls=torch.zeros(1, 64, 3),
-        segment_durations=(fractions * 328.0).unsqueeze(0),
-        final_time_s=torch.tensor([328.0]),
-    )
-    offsets = torch.arange(2.0, 62.0, 2.0, dtype=torch.float64).unsqueeze(0)
-    states = torch.zeros(1, 30, len(ch.CHANNELS))
-    supervision = FixedDTControlSupervision(
-        query_offsets_s=offsets,
-        states=states,
-        weights=torch.ones_like(states),
-        valid=torch.ones(1, 30, dtype=torch.bool),
-    )
-
-    view = build_control_training_stage_view(
-        prediction,
-        supervision,
-        states[:, -1],
-        prediction.final_time_s,
-        ControlTrainingStage("60s", 60.0, 1, 10),
-    )
-
-    assert view.prediction.segment_durations.dtype == torch.float64
-    torch.testing.assert_close(
-        view.prediction.segment_durations.sum(dim=1),
-        torch.tensor([60.0], dtype=torch.float64),
-        rtol=0.0,
-        atol=1e-12,
-    )
-    assert view.supervision.query_offsets_s[0, -1] <= (
-        view.prediction.segment_durations.sum(dim=1)[0]
-    )
-
-
-def test_control_horizon_curriculum_repairs_float32_duration_total_before_boundary():
-    prediction = ControlPrediction(
-        controls=torch.zeros(1, 64, 3),
-        segment_durations=torch.full((1, 64), 0.93749994, dtype=torch.float32),
-        final_time_s=torch.tensor([60.0], dtype=torch.float32),
-    )
-    offsets = torch.arange(2.0, 62.0, 2.0, dtype=torch.float64).unsqueeze(0)
-    states = torch.zeros(1, 30, len(ch.CHANNELS))
-    supervision = FixedDTControlSupervision(
-        query_offsets_s=offsets,
-        states=states,
-        weights=torch.ones_like(states),
-        valid=torch.ones(1, 30, dtype=torch.bool),
-    )
-
-    assert prediction.segment_durations.to(torch.float64).sum() < 60.0
-    view = build_control_training_stage_view(
-        prediction,
-        supervision,
-        states[:, -1],
-        prediction.final_time_s,
-        ControlTrainingStage("60s", 60.0, 1, 10),
-    )
-
-    # Dense rollout validates against the last cumulative segment boundary, so protect that
-    # exact path rather than a separately reduced sum.
-    total = view.prediction.segment_durations.cumsum(dim=1)[0, -1]
-    torch.testing.assert_close(
-        total, torch.tensor(60.0, dtype=torch.float64), rtol=0.0, atol=1e-12
-    )
-    assert view.supervision.query_offsets_s[0, -1] <= total
-
-
-def test_full_control_stage_repairs_float32_duration_total_before_boundary():
-    torch.manual_seed(0)
-    durations = torch.softmax(torch.randn(1, 64), dim=1) * 580.0
-    prediction = ControlPrediction(
-        controls=torch.zeros(1, 64, 3),
-        segment_durations=durations,
-        final_time_s=torch.tensor([580.0]),
-    )
-    states = torch.zeros(1, 1, len(ch.CHANNELS))
-    supervision = FixedDTControlSupervision(
-        query_offsets_s=torch.tensor([[580.0]], dtype=torch.float64),
-        states=states,
-        weights=torch.ones_like(states),
-        valid=torch.ones(1, 1, dtype=torch.bool),
-    )
-
-    assert prediction.segment_durations.to(torch.float64).sum() < 580.0
-    view = build_control_training_stage_view(
-        prediction,
-        supervision,
-        states[:, -1],
-        prediction.final_time_s,
-        ControlTrainingStage("full", None, 1, None),
-    )
-
-    total = view.prediction.segment_durations.cumsum(dim=1)[0, -1]
-    torch.testing.assert_close(
-        total, torch.tensor(580.0, dtype=torch.float64), rtol=0.0, atol=1e-12
-    )
-    assert view.supervision.query_offsets_s[0, -1] <= total
-
-
-def test_fixed_dt_rollout_closes_duration_clock_without_training_stage(monkeypatch):
-    """Report replay must be safe even when it calls the rollout seam directly."""
+def test_fixed_dt_rollout_closes_the_float32_duration_clock(monkeypatch):
+    """The dense seam must hand the rollout a clock that closes on the float64 total."""
     torch.manual_seed(0)
     durations = torch.softmax(torch.randn(1, 64), dim=1) * 580.0
     prediction = ControlPrediction(
@@ -3179,7 +2995,6 @@ def test_fixed_dt_rollout_closes_duration_clock_without_training_stage(monkeypat
             query_valid,
             config,
             *,
-            segment_valid,
             command_hook=None,
         ):
             del command_hook
@@ -3274,62 +3089,6 @@ def test_capacity_report_masks_unsupervised_reference_velocity_placeholders():
     assert charts["reference_vertical_speed_mps"] == [-1.0, None, None]
     assert charts["reference_consistency_mps"] == [0.0, None, None]
     assert charts["reference_acceleration_mps2"] == [0.0, None, None]
-
-
-def test_control_horizon_curriculum_schedule_reserves_full_training():
-    stages = build_control_training_stages(
-        (60.0, 120.0, 240.0), epochs_per_stage=10, total_epochs=35
-    )
-
-    assert [(stage.label, stage.start_epoch, stage.end_epoch) for stage in stages] == [
-        ("60s", 1, 10),
-        ("120s", 11, 20),
-        ("240s", 21, 30),
-        ("full", 31, None),
-    ]
-
-
-def test_control_horizon_curriculum_selects_checkpoint_only_after_full_stage():
-    series, config = _series(
-        n_flights=2,
-        prediction_output=PREDICTION_CONTROL,
-        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
-        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
-        control_state_duration_gradient=False,
-        control_horizon_curriculum_s=(2.0,),
-        control_horizon_curriculum_stage_epochs=1,
-        control_gradient_clip_norm=20.0,
-        epochs=2,
-        patience=1,
-        seq_len=8,
-        n_segments=2,
-        d_model=8,
-        d_ff=16,
-        n_heads=2,
-        e_layers=1,
-        batch_size=2,
-        control_rollout_integrator_dt_s=2.0,
-        device="cpu",
-    )
-
-    fit = train_module.fit_model(series[:1], series[1:], config, verbose=False)
-
-    assert [row.training_stage["label"] for row in fit.history] == ["2s", "full"]
-    assert fit.history[0].validation_selection_metric == "curriculum-prefix-objective"
-    assert (
-        fit.history[1].validation_selection_metric
-        == CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY
-    )
-    assert fit.best_validation_selection == pytest.approx(
-        fit.history[1].validation_selection_value
-    )
-    for row in fit.history:
-        diagnostics = row.control_training_diagnostics
-        assert diagnostics["clip"]["max_norm"] == pytest.approx(20.0)
-        assert diagnostics["clip"]["batches"] == 1
-        assert 0.0 <= diagnostics["control_saturation"]["overall_rate"] <= 1.0
 
 
 def test_state_config_without_duration_parameterization_remains_loadable():
@@ -3650,7 +3409,6 @@ def test_fixed_dt_objective_trains_both_backbones_without_duration_state_gradien
         normalizer,
         dynamics,
         dense,
-        ControlTrainingStage("2s", 2.0, 1, 1),
     )
     loss.backward()
 
@@ -3835,8 +3593,6 @@ def test_transport_chart_prediction_directory_stays_within_component_limit():
         control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
         checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
-        control_horizon_curriculum_s=(60.0, 120.0, 240.0),
-        control_horizon_curriculum_stage_epochs=1,
         control_gradient_clip_norm=20.0,
         control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
         aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT,
@@ -4797,7 +4553,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert "duration-grad=off" in prediction.label
 
 
-def test_pipeline_carries_and_names_control_horizon_curriculum():
+def test_pipeline_carries_and_names_control_gradient_clip():
     plan = pipeline_module.TrainingPlan(
         (AIRPORT,),
         "itransformer",
@@ -4809,8 +4565,6 @@ def test_pipeline_carries_and_names_control_horizon_curriculum():
         control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
         checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
         control_state_duration_gradient=False,
-        control_horizon_curriculum_s=(2.0, 4.0),
-        control_horizon_curriculum_stage_epochs=1,
         control_gradient_clip_norm=20.0,
         control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
     )
@@ -4820,10 +4574,6 @@ def test_pipeline_carries_and_names_control_horizon_curriculum():
         plan, AIRPORT, ("eval",), split="val"
     )
 
-    assert recipe[recipe.index("--control-horizon-curriculum") + 1] == "2,4"
-    assert recipe[recipe.index("--control-horizon-stage-epochs") + 1] == "1"
-    assert config.control_horizon_curriculum_s == (2.0, 4.0)
-    assert config.control_horizon_curriculum_stage_epochs == 1
     assert config.control_gradient_clip_norm == pytest.approx(20.0)
     assert (
         config.control_gradient_clip_policy
@@ -4839,10 +4589,7 @@ def test_pipeline_carries_and_names_control_horizon_curriculum():
     assert len(plan.train_dir.name.encode("utf-8")) <= (
         pipeline_module.MAX_PATH_COMPONENT_BYTES
     )
-    assert "horizon_curriculum_2_4s_x1" in prediction.category
     assert "gradient_clip20_final_time_decoupled" in prediction.category
-    assert "curriculum=2/4" in prediction.label
-    assert "curriculum-epochs=1" in prediction.label
     assert "grad-clip=20" in prediction.label
     assert "grad-clip-policy=final-time-decoupled" in prediction.label
 

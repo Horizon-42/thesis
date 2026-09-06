@@ -22,7 +22,6 @@ from config import (
 from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from control.loss.components import ControlStateLossResult
-from control.training.curriculum import ControlTrainingStage
 from dataset import Normalizer
 from prediction_outputs import ControlPrediction
 
@@ -34,7 +33,6 @@ TerminalClockStrategy = Callable[
         dict[str, torch.Tensor],
         TSConfig,
         Normalizer,
-        ControlTrainingStage,
     ],
     ControlStateLossResult,
 ]
@@ -46,9 +44,8 @@ def _state_supervision_terminal(
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
     normalizer: Normalizer,
-    stage: ControlTrainingStage,
 ) -> ControlStateLossResult:
-    del prediction, dynamics, config, normalizer, stage
+    del prediction, dynamics, config, normalizer
     return result
 
 
@@ -58,12 +55,7 @@ def _predicted_clock_terminal(
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
     normalizer: Normalizer,
-    stage: ControlTrainingStage,
 ) -> ControlStateLossResult:
-    # Numeric curriculum stages supervise physical prefix boundaries, not a deployment
-    # endpoint. Dual-clock terminal training begins with the full-horizon stage.
-    if not stage.is_full_horizon:
-        return result
     return _roll_out_terminal_endpoints(
         result,
         prediction.controls,
@@ -80,7 +72,6 @@ def _predicted_clock_terminal_detached_time(
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
     normalizer: Normalizer,
-    stage: ControlTrainingStage,
 ) -> ControlStateLossResult:
     """Supervise deployable endpoints without steering the total-time head.
 
@@ -90,8 +81,6 @@ def _predicted_clock_terminal_detached_time(
     Terminal gradients therefore still train controls and duration fractions, but the
     explicitly supervised final-time loss is the sole owner of the total-time head.
     """
-    if not stage.is_full_horizon:
-        return result
     fractions = prediction.segment_durations / prediction.segment_durations.sum(
         dim=1, keepdim=True
     )
@@ -143,9 +132,8 @@ def apply_control_terminal_clock(
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
     normalizer: Normalizer,
-    stage: ControlTrainingStage,
 ) -> ControlStateLossResult:
     """Attach endpoints from the configured terminal clock to a dense-loss result."""
     return _TERMINAL_CLOCK_STRATEGIES[config.control_terminal_supervision_clock](
-        result, prediction, dynamics, config, normalizer, stage
+        result, prediction, dynamics, config, normalizer
     )

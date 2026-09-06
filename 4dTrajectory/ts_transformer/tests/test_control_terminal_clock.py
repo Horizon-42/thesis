@@ -25,7 +25,6 @@ from config import (  # noqa: E402
     TSConfig,
 )
 from control.loss.components import ControlStateLossResult  # noqa: E402
-from control.training.curriculum import ControlTrainingStage  # noqa: E402
 from dataset import Normalizer  # noqa: E402
 from prediction_outputs import ControlPrediction  # noqa: E402
 
@@ -92,7 +91,6 @@ def test_predicted_terminal_clock_attaches_deployable_endpoints_and_gradients(mo
         dynamics,
         _config(),
         Normalizer(mean=np.zeros(6), std=np.ones(6)),
-        ControlTrainingStage("full", None, 1, None),
     )
     dual.terminal_end_states[:, -1, 0].sum().backward()
 
@@ -142,38 +140,9 @@ def test_detached_time_terminal_trains_partition_but_not_total_time(monkeypatch)
         },
         config,
         Normalizer(mean=np.zeros(6), std=np.ones(6)),
-        ControlTrainingStage("full", None, 1, None),
     )
     dual.terminal_end_states[:, 0, 0].sum().backward()
 
     torch.testing.assert_close(total_time.grad, torch.zeros_like(total_time))
     assert duration_logits.grad is not None
     assert duration_logits.grad.abs().sum() > 0
-
-
-def test_predicted_terminal_clock_keeps_observed_prefix_during_curriculum(monkeypatch):
-    monkeypatch.setattr(
-        control_rollout_module,
-        "control_dynamics_backend",
-        lambda config: (_ for _ in ()).throw(AssertionError("rollout must not run")),
-    )
-    prediction = ControlPrediction(
-        controls=torch.zeros(1, 2, 3),
-        segment_durations=torch.ones(1, 2),
-        final_time_s=torch.tensor([2.0]),
-    )
-    result = ControlStateLossResult(
-        normalized_mse=torch.zeros(1),
-        normalized_segment_end_states=torch.zeros(1, 2, 6),
-    )
-
-    prefix = terminal_clock_module.apply_control_terminal_clock(
-        result,
-        prediction,
-        {},
-        _config(),
-        Normalizer(mean=np.zeros(6), std=np.ones(6)),
-        ControlTrainingStage("60s", 60.0, 1, 10),
-    )
-
-    assert prefix is result

@@ -49,7 +49,6 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DYNAMICS_BACKENDS,
-    CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_MODELS,
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
@@ -70,7 +69,6 @@ from config import (  # noqa: E402
     CONTROL_TERMINAL_CLOCK_PREDICTED,
     CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
     CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
-    DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     DEFAULT_VALIDATION_COMMON_GRID_POINTS,
     HORIZON_MODES,
@@ -322,15 +320,6 @@ def _control_duration_gradient_tag(
     return "_detached_duration_gradient"
 
 
-def _control_horizon_curriculum_tag(
-    horizons_s: tuple[float, ...], stage_epochs: int
-) -> str:
-    if not horizons_s:
-        return ""
-    horizons = "_".join(f"{value:g}".replace(".", "p") for value in horizons_s)
-    return f"_horizon_curriculum_{horizons}s_x{stage_epochs}"
-
-
 def _control_gradient_clip_tag(max_norm: float, policy: str) -> str:
     if max_norm <= 0.0:
         return ""
@@ -431,10 +420,6 @@ class TrainingPlan:
         control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE,
         control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
         control_state_duration_gradient: bool = True,
-        control_horizon_curriculum_s: tuple[float, ...] = (),
-        control_horizon_curriculum_stage_epochs: int = (
-            DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS
-        ),
         control_gradient_clip_norm: float = 0.0,
         control_gradient_clip_policy: str = CONTROL_GRADIENT_CLIP_GLOBAL,
         control_rollout_dt: float | None = None,
@@ -505,10 +490,6 @@ class TrainingPlan:
         self.control_state_loss_grid = control_state_loss_grid
         self.control_state_objective = control_state_objective
         self.control_state_duration_gradient = control_state_duration_gradient
-        self.control_horizon_curriculum_s = tuple(control_horizon_curriculum_s)
-        self.control_horizon_curriculum_stage_epochs = (
-            control_horizon_curriculum_stage_epochs
-        )
         self.control_gradient_clip_norm = control_gradient_clip_norm
         self.control_gradient_clip_policy = control_gradient_clip_policy
         self.control_rollout_dt = control_rollout_dt
@@ -553,10 +534,6 @@ class TrainingPlan:
             )
             + _control_duration_gradient_tag(
                 prediction_output, control_state_duration_gradient
-            )
-            + _control_horizon_curriculum_tag(
-                control_horizon_curriculum_s,
-                control_horizon_curriculum_stage_epochs,
             )
             + _control_gradient_clip_tag(
                 control_gradient_clip_norm, control_gradient_clip_policy
@@ -688,13 +665,6 @@ class TrainingPlan:
         args += ["--control-state-objective", self.control_state_objective]
         if not self.control_state_duration_gradient:
             args.append("--no-control-state-duration-gradient")
-        if self.control_horizon_curriculum_s:
-            args += [
-                "--control-horizon-curriculum",
-                ",".join(f"{value:g}" for value in self.control_horizon_curriculum_s),
-                "--control-horizon-stage-epochs",
-                str(self.control_horizon_curriculum_stage_epochs),
-            ]
         if self.control_gradient_clip_norm > 0.0:
             args += [
                 "--control-gradient-clip-norm",
@@ -885,10 +855,6 @@ class TrainingPlan:
             ),
             "control_terminal_supervision_clock": self.control_terminal_clock,
             "control_state_duration_gradient": self.control_state_duration_gradient,
-            "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
-            "control_horizon_curriculum_stage_epochs": (
-                self.control_horizon_curriculum_stage_epochs
-            ),
             "control_gradient_clip_norm": self.control_gradient_clip_norm,
             "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
@@ -1008,10 +974,6 @@ class TrainingPlan:
             ),
             "control_terminal_supervision_clock": self.control_terminal_clock,
             "control_state_duration_gradient": self.control_state_duration_gradient,
-            "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
-            "control_horizon_curriculum_stage_epochs": (
-                self.control_horizon_curriculum_stage_epochs
-            ),
             "control_gradient_clip_norm": self.control_gradient_clip_norm,
             "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
@@ -1112,10 +1074,6 @@ class PredictionPlan:
         duration_gradient = _control_duration_gradient_tag(
             training.prediction_output, training.control_state_duration_gradient
         )
-        horizon_curriculum = _control_horizon_curriculum_tag(
-            training.control_horizon_curriculum_s,
-            training.control_horizon_curriculum_stage_epochs,
-        )
         gradient_clip = _control_gradient_clip_tag(
             training.control_gradient_clip_norm,
             training.control_gradient_clip_policy,
@@ -1127,8 +1085,7 @@ class PredictionPlan:
             f"{scope}{training.model}{prediction_output}{control_duration}"
             f"{control_dynamics_filesystem}"
             f"{control_clock}{control_terminal_clock_filesystem}_{horizon_tag}"
-            f"{control_state_loss_grid}{control_objective}{duration_gradient}"
-            f"{horizon_curriculum}{gradient_clip}"
+            f"{control_state_loss_grid}{control_objective}{duration_gradient}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -1143,8 +1100,7 @@ class PredictionPlan:
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
             f"{control_duration}{control_dynamics}"
             f"{control_terminal_clock}_{horizon_tag}"
-            f"{control_state_loss_grid}{control_objective}{duration_gradient}"
-            f"{horizon_curriculum}{gradient_clip}"
+            f"{control_state_loss_grid}{control_objective}{duration_gradient}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -1319,14 +1275,6 @@ def run_training(
                     f"velocity={config.control_terminal_velocity_loss_weight:g}/"
                     f"{config.control_terminal_velocity_scale_mps:g}mps"
                 )
-            if config.control_horizon_curriculum_s:
-                horizons = "→".join(
-                    f"{value:g}s" for value in config.control_horizon_curriculum_s
-                )
-                print(
-                    f"   curriculum: {horizons} × "
-                    f"{config.control_horizon_curriculum_stage_epochs} epochs -> full"
-                )
             if config.control_gradient_clip_norm > 0.0:
                 print(
                     f"   stability : gradient clip={config.control_gradient_clip_norm:g}, "
@@ -1378,20 +1326,6 @@ def _parse_csv(raw: str, allowed: tuple[str, ...], flag: str) -> tuple[str, ...]
     if unknown or not tokens:
         raise argparse.ArgumentTypeError(f"{flag} takes a comma list from {allowed}, got {raw!r}")
     return tokens
-
-
-def _parse_positive_float_csv(raw: str) -> tuple[float, ...]:
-    try:
-        values = tuple(float(token.strip()) for token in raw.split(",") if token.strip())
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "--control-horizon-curriculum takes comma-separated seconds"
-        ) from exc
-    if not values or any(value <= 0.0 for value in values):
-        raise argparse.ArgumentTypeError(
-            "--control-horizon-curriculum requires positive seconds"
-        )
-    return values
 
 
 def main() -> None:
@@ -1532,17 +1466,6 @@ def main() -> None:
         "--control-state-duration-gradient",
         action=argparse.BooleanOptionalAction,
         default=True,
-    )
-    parser.add_argument(
-        "--control-horizon-curriculum",
-        type=_parse_positive_float_csv,
-        default=(),
-        metavar="SECONDS,...",
-    )
-    parser.add_argument(
-        "--control-horizon-stage-epochs",
-        type=int,
-        default=DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
     )
     parser.add_argument(
         "--control-gradient-clip-norm",
@@ -1707,10 +1630,6 @@ def main() -> None:
             control_state_loss_grid=args.control_state_loss_grid,
             control_state_objective=args.control_state_objective,
             control_state_duration_gradient=args.control_state_duration_gradient,
-            control_horizon_curriculum_s=args.control_horizon_curriculum,
-            control_horizon_curriculum_stage_epochs=(
-                args.control_horizon_stage_epochs
-            ),
             control_gradient_clip_norm=args.control_gradient_clip_norm,
             control_gradient_clip_policy=args.control_gradient_clip_policy,
             control_rollout_dt=args.control_rollout_dt,

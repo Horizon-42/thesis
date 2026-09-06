@@ -294,7 +294,7 @@ class ClosureOutputModel(nn.Module):
 def closure_loss_components(prediction: ClosurePrediction, normalized_anchor_state, target_states, state_weights,
                             target_final_time_s, flight_weights: torch.Tensor, config: TSConfig,
                             normalizer: "Normalizer", dynamics: dict[str, torch.Tensor] | None = None,
-                            dense_supervision=None, training_stage=None, *, multipliers=None):
+                            dense_supervision=None, *, multipliers=None):
     """L1 regression of the decision vector against the flight's label, over the valid
     flights: ``state`` = the geometry (the join distance and the via's mean distance
     error at the 10 km scale, the heading as its unit vector), ``final_time`` = the
@@ -305,7 +305,7 @@ def closure_loss_components(prediction: ClosurePrediction, normalized_anchor_sta
     contributes zero (the dataset refuses a labels file with no valid flight at all, and
     reports the covered share, so a low share is visible, never silent)."""
     del normalized_anchor_state, target_states, state_weights, target_final_time_s, normalizer
-    del dense_supervision, training_stage, multipliers
+    del dense_supervision, multipliers
     if dynamics is None or CONTEXT_DECISION not in dynamics:
         raise ValueError("the closure loss needs the per-flight label context")
     ks = config.closure_slowness_knots

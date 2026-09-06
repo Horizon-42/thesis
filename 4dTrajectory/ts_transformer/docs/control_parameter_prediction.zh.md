@@ -13,6 +13,13 @@
 > `benchmark_validation_execution.py`、`control_oracle_curriculum` 的重复实现。
 > 第 8 节 a/b/c/d/e 五条建议均已落实。
 >
+> **2026-09-07 补充（三）**：horizon curriculum 已删除——`control_training_curriculum.py`
+> （后为 `control/training/curriculum.py`）、`control_horizon_curriculum_s` /
+> `control_horizon_curriculum_stage_epochs` 与两个 CLI 标志都不存在了（包审计 T1-10：
+> 默认 `()`，所有配方钉 `()`，无臂设过；它唯一合法的目标 `arc-length-geometry` 同日退役）。
+> 唯一保留的是收尾时钟修正 `close_duration_prefix`，现住在 `control/loss/fixed_dt.py`。
+> 本文 2、3、6 节提到它的地方按此读。
+>
 > **2026-09-07 补充（二）**：effort / smoothness 正则轴已删除——`control/loss/regularization.py`（本文的 `control_regularization.py`）、`control_effort_loss_weight` / `control_smoothness_loss_weight` 与两个 CLI 标志都不存在了（包审计 T1-12：所有配方钉 0.0，每批算一次乘零）。本文 2.4、3、6 节提到它的地方按此读。
 >
 > **2026-09-07 补充**：`uniform` 已是唯一的 duration 参数化——`UniformDurationControlOutputModel` /

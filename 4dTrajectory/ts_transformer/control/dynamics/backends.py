@@ -117,7 +117,6 @@ class ControlDynamicsBackend(ABC):
         query_valid: torch.Tensor,
         config: TSConfig,
         *,
-        segment_valid: torch.Tensor | None,
         command_hook: CommandHook | None = None,
     ) -> DenseControlRolloutChannels:
         """Roll once and expose channel states at queries and segment boundaries."""
@@ -166,7 +165,6 @@ class ReanchoredRK4Backend(ControlDynamicsBackend):
         query_valid: torch.Tensor,
         config: TSConfig,
         *,
-        segment_valid: torch.Tensor | None,
         command_hook: CommandHook | None = None,
     ) -> DenseControlRolloutChannels:
         _refuse_hook(self, command_hook)
@@ -177,7 +175,6 @@ class ReanchoredRK4Backend(ControlDynamicsBackend):
             inputs.aero_params,
             query_offsets_s,
             query_valid,
-            segment_valid=segment_valid,
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
         runway_aligned = config.coordinate_frame == "runway-aligned"
@@ -270,7 +267,6 @@ class TransportChartVelocityBackend(ControlDynamicsBackend):
         query_valid: torch.Tensor,
         config: TSConfig,
         *,
-        segment_valid: torch.Tensor | None,
         command_hook: CommandHook | None = None,
     ) -> DenseControlRolloutChannels:
         _refuse_hook(self, command_hook)
@@ -282,7 +278,6 @@ class TransportChartVelocityBackend(ControlDynamicsBackend):
             inputs.frame_params,
             query_offsets_s,
             query_valid,
-            segment_valid=segment_valid,
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
         return _TransportChartResults.dense(
@@ -320,7 +315,6 @@ class ScaledTransportChartVelocityBackend(ControlDynamicsBackend):
         query_valid: torch.Tensor,
         config: TSConfig,
         *,
-        segment_valid: torch.Tensor | None,
         command_hook: CommandHook | None = None,
     ) -> DenseControlRolloutChannels:
         _refuse_hook(self, command_hook)
@@ -332,7 +326,6 @@ class ScaledTransportChartVelocityBackend(ControlDynamicsBackend):
             inputs.frame_params,
             query_offsets_s,
             query_valid,
-            segment_valid=segment_valid,
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
         return _TransportChartResults.dense(
@@ -433,7 +426,6 @@ class FirstOrderLagBackend(ControlDynamicsBackend):
         query_valid: torch.Tensor,
         config: TSConfig,
         *,
-        segment_valid: torch.Tensor | None,
         command_hook: CommandHook | None = None,
     ) -> DenseControlRolloutChannels:
         # A hook decides each segment's command from the state at its start; the dense
@@ -454,7 +446,6 @@ class FirstOrderLagBackend(ControlDynamicsBackend):
             query_offsets_s,
             query_valid,
             chart_scale=self.chart_scale,
-            segment_valid=segment_valid,
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
         return _TransportChartResults.dense(

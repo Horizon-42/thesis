@@ -657,7 +657,7 @@ entirely (`final_time_s / N`, no learned partition) — it is what
 **`control_recipe_name`** (`custom` default / `simple-v1`) is the top-level switch over this
 whole design space. `custom` preserves every axis above plus several more not summarised in
 this README (tracking objective, loss grid, terminal-supervision clock, dynamics-rollout
-backend, horizon curriculum, gradient-clip policy — five registries, each a
+backend, gradient-clip policy — five registries, each a
 `config.<field> → implementation` dict, not scattered branching). `simple-v1` freezes one
 concrete point in that space (uniform duration, absolute controls, the
 `scaled-transport-chart-velocity` dynamics backend, a minimal "true-time-position" tracking

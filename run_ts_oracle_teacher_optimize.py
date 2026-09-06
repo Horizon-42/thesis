@@ -40,7 +40,6 @@ from train import prediction_loss_components  # noqa: E402
 from control.oracle.optimization import (  # noqa: E402
     BatchedOracleTeacher,
     optimize_teacher_controls,
-    teacher_optimization_stages,
 )
 from control.oracle.targets import build_inverse_dynamics_target  # noqa: E402
 
@@ -96,8 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--cohort-size", type=int, default=32)
-    parser.add_argument("--prefix-steps", type=int, default=30)
-    parser.add_argument("--full-steps", type=int, default=150)
+    parser.add_argument("--steps", type=int, default=240)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--gradient-clip-norm", type=float, default=20.0)
     parser.add_argument("--log-every", type=int, default=10)
@@ -106,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--split-seed", type=int, default=1337)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args(argv)
-    for name in ("cohort_size", "prefix_steps", "full_steps", "log_every"):
+    for name in ("cohort_size", "steps", "log_every"):
         if getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if args.learning_rate <= 0.0 or args.gradient_clip_norm <= 0.0:
@@ -182,7 +180,6 @@ def main(argv: list[str] | None = None) -> int:
         dynamics["control_upper"],
         final_time,
     ).to(device)
-    stages = teacher_optimization_stages(args.prefix_steps, args.full_steps)
     history = optimize_teacher_controls(
         teacher,
         x=x,
@@ -193,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         supervision=supervision,
         config=config,
         normalizer=normalizer,
-        stages=stages,
+        steps=args.steps,
         learning_rate=args.learning_rate,
         gradient_clip_norm=args.gradient_clip_norm,
         log_every=args.log_every,

@@ -348,7 +348,6 @@ DEFAULT_FINAL_TIME_SCALE_S = 600.0
 DEFAULT_POSITION_LOSS_SCALE_M = 10_000.0
 DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S = 60.0
 DEFAULT_VALIDATION_COMMON_GRID_POINTS = 64
-DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS = 10
 DEFAULT_CONTROL_DURATION_UNIFORM_FLOOR = 0.8
 
 # Fallback aircraft when a flight dict has no resolvable type or usable performance model.
@@ -396,8 +395,7 @@ CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RE
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
-# The hook gates on the rollout state itself; the FAF gate is not carried by the control
-# dynamics, so ``on-final`` is the only gate a hook can use.
+
 # Fields removed from the contract after checkpoints that store them were written
 # (2026-09-07 package audit). `control_hook_gate` had a one-member vocabulary nothing
 # read and `control_dense_state_loss_weight` was a weight no loss read, so neither could
@@ -411,6 +409,10 @@ RETIRED_SERIALIZED_FIELDS = (
     "control_dense_state_loss_weight",
     "control_effort_loss_weight",
     "control_smoothness_loss_weight",
+    # The horizon curriculum (T1-10, 2026-09-07). Every recipe pinned it to ``()`` and no
+    # arm ever set it, so dropping the two fields cannot change any stored run.
+    "control_horizon_curriculum_s",
+    "control_horizon_curriculum_stage_epochs",
 )
 
 CONTROL_HOOK_FIELDS = (
@@ -428,7 +430,7 @@ CONTROL_HOOK_FIELDS = (
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
 # coerce them first, through this one function, or ``[] != ()`` refuses a faithful copy.
-SEQUENCE_FIELDS = ("channels", "control_horizon_curriculum_s")
+SEQUENCE_FIELDS = ("channels",)
 
 
 def coerce_sequence_fields(settings: dict[str, Any]) -> dict[str, Any]:
@@ -544,7 +546,6 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_terminal_velocity_loss_weight": 0.0,
         "control_terminal_supervision_clock": CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
         "control_state_duration_gradient": False,
-        "control_horizon_curriculum_s": (),
         "control_gradient_clip_norm": 20.0,
         "control_gradient_clip_policy": CONTROL_GRADIENT_CLIP_GLOBAL,
         "control_rollout_integrator_dt_s": 0.5,
@@ -561,8 +562,6 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     "control_state_loss_grid",
     "control_state_objective",
     "control_state_duration_gradient",
-    "control_horizon_curriculum_s",
-    "control_horizon_curriculum_stage_epochs",
     "control_gradient_clip_norm",
     "control_gradient_clip_policy",
     "control_dynamics_backend",
@@ -855,13 +854,6 @@ class TSConfig:
     # Whether state-rollout gradients may update the learned duration partition. Turning
     # this off leaves the final-time loss trainable while controls own geometry fitting.
     control_state_duration_gradient: bool = True
-    # Optional physical-time single-shooting curriculum. Numeric stages are trained for
-    # ``control_horizon_curriculum_stage_epochs`` each, followed by the full horizon for
-    # the remaining epoch budget. Empty preserves the historical full-horizon training.
-    control_horizon_curriculum_s: tuple[float, ...] = ()
-    control_horizon_curriculum_stage_epochs: int = (
-        DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS
-    )
     # Optional gradient-norm cap for deterministic control training. The default policy
     # applies one global cap. The opt-in ablation leaves only an isolated factorized
     # final-time head outside the combined backbone/control cap, so it requires observed
@@ -1354,59 +1346,6 @@ class TSConfig:
                     "detached control-state duration gradients require "
                     "control_state_supervision_clock='observed'"
                 )
-        if self.control_horizon_curriculum_s:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "control horizon curriculum is supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
-                raise ValueError(
-                    "control horizon curriculum requires "
-                    "control_state_loss_grid='fixed-dt'"
-                )
-            if (
-                self.control_state_objective
-                != CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
-            ):
-                raise ValueError(
-                    "control horizon curriculum requires a fixed-dt physical objective"
-                )
-            if self.control_state_duration_gradient:
-                raise ValueError(
-                    "control horizon curriculum requires detached state-duration gradients"
-                )
-            if self.control_duration_parameterization != CONTROL_DURATION_FACTORIZED:
-                raise ValueError(
-                    "control horizon curriculum currently requires factorized durations"
-                )
-            if self.random_train_anchor:
-                raise ValueError("control horizon curriculum requires fixed train anchors")
-            previous_horizon = 0.0
-            for horizon_s in self.control_horizon_curriculum_s:
-                if (
-                    not isinstance(horizon_s, (int, float))
-                    or not math.isfinite(horizon_s)
-                    or not 0.0 < horizon_s
-                ):
-                    raise ValueError("control curriculum horizons must be positive seconds")
-                if horizon_s <= previous_horizon:
-                    raise ValueError(
-                        "control curriculum horizons must be strictly increasing"
-                    )
-                grid_steps = round(horizon_s / self.dt_s)
-                if abs(horizon_s - grid_steps * self.dt_s) > self.dt_s * 1e-7:
-                    raise ValueError(
-                        "control curriculum horizons must align with the fixed-dt grid"
-                    )
-                previous_horizon = float(horizon_s)
-            if self.epochs <= (
-                len(self.control_horizon_curriculum_s)
-                * self.control_horizon_curriculum_stage_epochs
-            ):
-                raise ValueError(
-                    "control horizon curriculum must leave at least one full-horizon epoch"
-                )
         if (
             not math.isfinite(self.control_gradient_clip_norm)
             or self.control_gradient_clip_norm < 0.0
@@ -1482,7 +1421,6 @@ class TSConfig:
             "lr_plateau_patience",
             "patience",
             "validation_common_grid_points",
-            "control_horizon_curriculum_stage_epochs",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
@@ -1757,9 +1695,6 @@ class TSConfig:
         for name in RETIRED_SERIALIZED_FIELDS:
             data.pop(name, None)
         data["channels"] = tuple(data["channels"])
-        data["control_horizon_curriculum_s"] = tuple(
-            data["control_horizon_curriculum_s"]
-        )
         return cls(**data)
 
 
@@ -1810,10 +1745,6 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "terminal_velocity_scale_mps": config.control_terminal_velocity_scale_mps,
         "terminal_supervision_clock": config.control_terminal_supervision_clock,
         "state_duration_gradient": config.control_state_duration_gradient,
-        "horizon_curriculum_s": list(config.control_horizon_curriculum_s),
-        "horizon_curriculum_stage_epochs": (
-            config.control_horizon_curriculum_stage_epochs
-        ),
         "gradient_clip_norm": config.control_gradient_clip_norm,
         "gradient_clip_policy": config.control_gradient_clip_policy,
     }
