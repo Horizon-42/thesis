@@ -564,6 +564,11 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_velocity_loss_weight": 0.0,
         "control_velocity_loss_scale_mps": 10.0,
         "control_imitation_loss_weight": 0.0,
+        # L1.b's two supervision terms are off in every named recipe: they are the
+        # candidates measured AGAINST simple-v3's teacher, not part of it.
+        "control_heading_rate_loss_weight": 0.0,
+        "control_heading_rate_loss_scale_dps": 1.5,
+        "control_bank_tv_loss_weight": 0.0,
         "control_state_duration_gradient": False,
         "control_gradient_clip_norm": 20.0,
         "control_rollout_integrator_dt_s": 0.5,
@@ -833,6 +838,24 @@ class TSConfig:
     # (per-flight skill +0.197 against +0.312), while a same-runway twin reaches +0.598 --
     # so the signal is there and only supervision was missing. Zero keeps simple-v1/v2.
     control_imitation_loss_weight: float = 0.0
+    # L1.b (latent-intent design §六): supervision that names the bank WITHOUT a teacher.
+    # Naming the bank is the imitation term's only real job, and its target solves
+    # equations the rollout does not fly (open-loop it drifts 2.5-7.8 km from the truth),
+    # so the decoder is pinned to controls that do not reproduce the track. These two
+    # price the same information THROUGH the rollout instead.
+    #
+    # ``control_heading_rate_loss_weight`` scores the rollout's own turn rate at the
+    # segment endpoints against the flown track's, in deg/s divided by
+    # ``control_heading_rate_loss_scale_dps``. That scale is the unit the residual is read
+    # in, not the dose: 1.5 deg/s is half a standard-rate turn, so missing a standard-rate
+    # turn entirely costs 4 before the weight. ``control_bank_tv_loss_weight`` is the
+    # structural half — the mean absolute step between adjacent COMMANDED banks, in units
+    # of half the bank box. Both register ONLY under the true-time-position objective,
+    # beside the velocity and imitation terms; a non-zero weight under any other objective
+    # is refused below rather than silently ignored.
+    control_heading_rate_loss_weight: float = 0.0
+    control_heading_rate_loss_scale_dps: float = 1.5
+    control_bank_tv_loss_weight: float = 0.0
     # Whether state-rollout gradients may update the learned duration partition. Turning
     # this off leaves the final-time loss trainable while controls own geometry fitting.
     control_state_duration_gradient: bool = True
@@ -1123,6 +1146,29 @@ class TSConfig:
             or self.control_imitation_loss_weight < 0.0
         ):
             raise ValueError("control_imitation_loss_weight must be finite and non-negative")
+        for name in ("control_heading_rate_loss_weight", "control_bank_tv_loss_weight"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
+            # Both terms are built by the true-time-position objective only. Elsewhere the
+            # weight would be a number that cannot change an answer.
+            if (
+                value
+                and self.control_state_objective
+                != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION
+            ):
+                raise ValueError(
+                    f"{name} is only built by the "
+                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION} objective, not "
+                    f"{self.control_state_objective!r}"
+                )
+        if (
+            not math.isfinite(self.control_heading_rate_loss_scale_dps)
+            or self.control_heading_rate_loss_scale_dps <= 0.0
+        ):
+            raise ValueError(
+                "control_heading_rate_loss_scale_dps must be finite and positive"
+            )
         for name in (
             "control_thrust_time_constant_s",
             "control_bank_time_constant_s",
@@ -1480,6 +1526,9 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "velocity_loss_weight": config.control_velocity_loss_weight,
         "velocity_loss_scale_mps": config.control_velocity_loss_scale_mps,
         "imitation_loss_weight": config.control_imitation_loss_weight,
+        "heading_rate_loss_weight": config.control_heading_rate_loss_weight,
+        "heading_rate_loss_scale_dps": config.control_heading_rate_loss_scale_dps,
+        "bank_tv_loss_weight": config.control_bank_tv_loss_weight,
         "state_duration_gradient": config.control_state_duration_gradient,
         "gradient_clip_norm": config.control_gradient_clip_norm,
     }

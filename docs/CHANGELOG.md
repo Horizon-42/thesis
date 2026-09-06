@@ -4,6 +4,116 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — ts_transformer L1.b: two supervision terms that replace the imitation teacher's job of naming the bank
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md` §六 L1.b, branch
+`dev-l1b`. The imitation teacher's one real job is to NAME THE BANK — position is derivative
+order 0, velocity order 1, bank order 2, and nothing else in the objective reaches it
+(unsupervised bank skill 0.124, below a trivial baseline; simple-v3's teacher takes it to
+0.735). But its target is solved by inverse dynamics from the flown track and is NOT
+consistent with the rollout: flown open-loop it drifts 2.5–7.8 km, so the decoder is pinned
+to controls that do not reproduce the track and the position and imitation terms fight.
+Both new terms price the same information THROUGH the rollout instead.
+
+**`heading_rate` (arm ②, `control_heading_rate_loss_weight`, default 0).** Per flight, the
+masked mean over the N segment endpoints of
+`((ψ̇_pred − ψ̇_obs) / control_heading_rate_loss_scale_dps)²`, deg/s.
+
+- *Target* — `dataset.reference_heading_rate_supervision`, training-only (it reads the
+  future, so it sits beside `reference_control_supervision`, never in `dynamics_arrays`):
+  the observed ψ from the velocity channels through `states_from_channels` (the modeling
+  layer's math-ENU heading, so the sign convention is the rollout's own), `np.unwrap`-ed,
+  then a CENTRAL DIFFERENCE over `HEADING_RATE_SMOOTHING_WINDOW_S = 10 s`, sampled at the
+  endpoint times. ADS-B reports a quantised track angle; a single 2 s difference of it is
+  noise, not a turn rate, so the window is a stated constant rather than a free parameter.
+  **The constant is NOMINAL**: the half-width is `int(round(W / 2 / dt_s))` samples and the
+  realized span `2 · half · dt_s`, so at the package default `dt_s = 2 s` it is
+  half = round(2.5) = 2 and a span of **8 s, not 10** — quote the realized span. Rounding
+  goes both ways (`dt_s = 3 s` → 12 s, `5.05 s` → 10.1 s; stated at the constant), and a
+  `dt_s` too coarse for even one sample of half-width is REFUSED with its numbers rather
+  than floored to one and silently widened. Weight zero past the last measured velocity,
+  read at the ENDPOINTS rather than at the segment midpoints the imitation mask uses (a
+  turn rate is a quantity at an instant, a piecewise-constant control one over a segment) —
+  the same cut the velocity term makes, **not the same numbers**: this is a hard 0/1 step,
+  the velocity term's an interpolated per-channel weight.
+- *Index pairing* — the target's uniform `(k+1)·T/N` endpoints ARE the rollout's
+  `cumsum(segment_durations)` only through one chain: `true-time-position` ⇒ `TSConfig`
+  admits `control_duration_parameterization="uniform"` only ⇒ endpoints at `(k+1)·T/N`.
+  Under a non-uniform partition row k of the two sides would be different physical instants.
+  `reference_control_supervision`'s midpoints carry the identical unstated assumption; both
+  docstrings now name the chain.
+- *Model side* — `train.control_heading_rate_mse` calls
+  `aerodynamic_model.torch_dynamics.heading_rate_rad_s`, which reads the ψ row out of
+  `enu_rhs` ITSELF at the rollout's endpoint state. **The pre-registration wrote the
+  relation as `g·tan φ / V`; the RHS actually integrates `g·n_realized·sin φ / (V·cos γ)`
+  with the stall-limited load factor.** The two coincide only on a coordinated level turn
+  (`n = cos γ / cos φ`), and calling the RHS is what makes "model-consistent by
+  construction" true rather than approximately true. It is evaluated on the controls the
+  aircraft had ACTUALLY reached: `EndpointControlRollout` gains `actual_controls` —
+  `inputs.controls` under the point-mass backends, `lag_actuator_states` under the
+  first-order lag. Pricing the command under the lag would charge a turn the rollout never
+  flew. (The chart backends add the moving-frame `ω×v` term on top of the force part, which
+  this expression omits: mean 3.5e-4 – 9.0e-4 deg/s, worst ~3e-3 at bank 0.3 rad / 60 m/s,
+  i.e. ≤ 0.2 % of the 1.5 deg/s scale — stated in the docstring rather than silently
+  dropped.)
+
+**`bank_tv` (arm ③, `control_bank_tv_loss_weight`, default 0).** Per flight, the mean
+absolute step between adjacent COMMANDED banks divided by `CONTROL_HALF_WIDTH[BANK_INDEX]`
+(new constant, so nothing hard-codes a 1). The commanded schedule is the one the head owns —
+penalising the lagged actual bank would charge the actuator for the command it was given.
+**It prices REVERSALS, not slope, and it cannot start on its own** — both read off the
+subgradient of `|x|` and both pinned by a test. On a monotone run the interior terms cancel
+(`+1` from the left step, `−1` from the right), so a smooth roll-in costs exactly what a
+single step of the same total size costs, while a schedule that turns around pays at every
+turn. At EXACT flatness the value AND the gradient are zero — a stationary point, and the
+one every run begins at, because `control.heads._initialize_control_head` zeroes the
+projection so all N commands are identical. Only the other terms leave it. If arm ③ reads
+"the TV term changed nothing", that is the live explanation to check before the dose.
+
+Both register in `loss_component_names` under `control_state_objective=true-time-position`
+ONLY, exactly where `velocity` and `imitation` do, and **`TSConfig` REFUSES a non-zero
+weight under any other objective** rather than accepting a number that cannot change an
+answer — the fixed-dt grid silently having no imitation term is the trap this avoids
+repeating. All three fields are spelled as literals (0.0 / 1.5 / 0.0) in
+`control_simple_v1_overrides()`, the ONE recipe literal dict every named recipe derives from,
+so a default that later moves cannot redefine a published comparison. CLI
+`--control-heading-rate-weight` / `--control-heading-rate-scale-dps` /
+`--control-bank-tv-weight`; `run_naming` abbreviations `hr` / `hr-scale` / `bank-tv`.
+**Run-name recount over the 306 stored configs on disk: 0 changed** (every one predates the
+fields and reads their defaults).
+
+Arms `docs/experiments/l1b_supervision_arms.json`, SCREENING tier, FOUR arms on
+`base_recipe: simple-v3` with `control_recipe_name: custom`, `n_segments: 32`, imitation 0,
+`epochs: 60`: `L1b_native32_e60` (the MATCHED CONTROL — the same base with the teacher back
+at 64, i.e. L1_native32 at the screening budget), then `L1b_hr1` / `L1b_hr8` /
+`L1b_hr8_tv1`. The control arm is not optional: the published native32 numbers (1322 m,
+bank skill 0.726) come from a 180-epoch run that never early-stopped, i.e. a budget-limited
+upper bound, so reading a 60-epoch screening number against them would confound supervision
+with budget. Early stopping is LIVE at 60 epochs (patience 20), and the epoch an arm reaches
+is part of its reading. The doses are a CALIBRATION, not a claim: the imitation dose curve
+was a noisy plateau between ~11.8× and ~47× the position term, so the analogous
+heading-rate dose is unknown and 1.0 / 8.0 bracket it; the TV dose is a first probe. The
+bank-skill gate reads "≥ 0.70, i.e. within 0.03 of native32's 0.726" — note the same-runway
+twin CEILING is 0.699, so the gate means "not below native32 beyond noise", never "reach the
+ceiling". Naming: with the teacher at zero the nearest recipe by loss-field distance is
+simple-v2, so the treatment arms resolve as `simple-v2+(hr=…)` — read that as "simple-v2 +
+heading rate", not "v3 minus the teacher"; v2 IS the no-teacher loss design, and the control
+arm wears the v3 name because it carries the teacher. Nothing has been trained; the campaign
+is queued separately.
+
+Suite 522 → 546 (`tests/test_supervision_terms.py`, 23, plus one in `test_run_naming.py`).
+The sign convention is pinned by testing the TWO HALVES AGAINST EACH OTHER — fly a constant
+positive bank, rebuild the observed target from the track that rollout flew, require the same
+sign and magnitude — never against a hand-picked sign. Note what the constant-rate fixtures
+canNOT catch, and say so in their docstrings: on a constant-rate turn every smoothing width
+and every endpoint index gives the same answer, so those two are pinned by the jitter test
+and the mask/anchor tests instead.
+
+Reviewed 2026-09-07: behaviour clean (bit-exact at weight 0 over 22,428 leaves, sign
+hand-checked on 185 real endpoints, lag indexing exact including the hooked path, 0 run names
+moved); the findings above are the documentation and reading-rule fixes that followed, plus
+the coarse-`dt_s` refusal and two new tests (the TV subgradient behaviour, the refusal).
+
 ### 2026-09-07 — Package audit T2: the 2026-08 oracle teacher and the nominal-law hook archived, the scene features' sequence half deleted
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §四 (`ed7fccc`,

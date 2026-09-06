@@ -40,6 +40,9 @@ import numpy as np
 
 
 CONTROL_NAMES = ("thrust_fraction", "bank_rad", "load_factor")
+# The bank column, so a term acting on bank alone (the total-variation penalty) never
+# hard-codes a 1.
+BANK_INDEX = CONTROL_NAMES.index("bank_rad")
 
 MIN_THRUST_FRACTION = -0.2
 MAX_THRUST_FRACTION = 1.0

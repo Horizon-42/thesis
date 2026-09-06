@@ -1,21 +1,41 @@
 {
- "_comment": "L1.b of docs/2026-09-07_latent_intent_design.zh.md: supervision instead of a teacher. The imitation teacher's one job is to name the bank (position is order 0, bank order 2; L1's teacherless dense arms put 6x the observed bank energy into a common profile). Whether the FIRST-order velocity term alone holds the bank is already measured (CLAUDE.md: unsupervised bank skill 0.124, below a trivial baseline; simple-v3's imitation term takes it to 0.735), so there is NO imitation-0 arm here. Arms: 2 = heading-rate loss through the rollout (model-consistent, no inverse dynamics), 3 = 2 + bank total-variation; both on the L1_native32 base (custom, N=32, native segment endpoints, true-time-position, velocity 0.003 @ 10 m/s) with the imitation weight at 0. SCREENING TIER: qualitative questions (collapse, wiggle) run 60 epochs first (~20 min per arm); survivors rerun at 180 for the gates. Second motive: the imitation term is 0.556 of the loss and its inverse-dynamics target is inconsistent with the rollout (flown open-loop it drifts 2.5-7.8 km) — the decoder is pinned to controls that do not reproduce the track, a candidate reason z has nothing to earn in L2; L2.e waits for this campaign's winner. PRE-REGISTERED GATES: bank skill >= 0.70 (score_control_arms.py; native32 0.726, floor 0.17, ceiling 0.70), ADE / FDE p50 per stratum not worse than L1_native32 (compare_constraint_arms.py, L1_native32 first). VETO: straight-in FDE p50 degraded beyond seed noise (671 m). DECISION RULE: if arm 2 passes, the teacher line becomes a comparison arm and L5.a's fitted teacher stays only as the upper bound; if none passes, the fitted teacher is the main-line teacher.",
+ "_comment": "L1.b of docs/2026-09-07_latent_intent_design.zh.md: supervision instead of a teacher. The imitation teacher's one job is to name the bank (position is order 0, bank order 2; L1's teacherless dense arms put 6x the observed bank energy into a common profile). Whether the FIRST-order velocity term alone holds the bank is already measured (CLAUDE.md: unsupervised bank skill 0.124, below a trivial baseline; simple-v3's imitation term takes it to 0.735), so there is NO imitation-0 arm here. Arms: 2 = heading-rate loss through the rollout (model-consistent, no inverse dynamics), 3 = 2 + bank total-variation; both on the L1_native32 base (custom, N=32, native segment endpoints, true-time-position, velocity 0.003 @ 10 m/s) with the imitation weight at 0. SCREENING TIER (user decision): qualitative questions (collapse, wiggle) run 60 epochs first (~20 min per arm); survivors rerun at 180 for the gates. `epochs` is a config field, so the base sets it; simple-v3's patience 20 is under 60 and stays as the recipe has it. Second motive: the imitation term is 0.556 of the loss and its inverse-dynamics target is inconsistent with the rollout (flown open-loop it drifts 2.5-7.8 km) — the decoder is pinned to controls that do not reproduce the track, a candidate reason z has nothing to earn in L2; L2.e waits for this campaign's winner. IMPLEMENTATION (2026-09-07): `control_heading_rate_loss_weight` scores dpsi/dt in deg/s at the N segment endpoints, divided by `control_heading_rate_loss_scale_dps` (1.5 = half a standard-rate turn; the unit the residual is read in, not the dose). Model side is read out of `enu_rhs` ITSELF (`aerodynamic_model.torch_dynamics.heading_rate_rad_s`) on the rollout's endpoint state and the ACTUAL controls there (`EndpointControlRollout.actual_controls` — under the first-order lag that is the actuator state, not the command). Target side is the observed psi from the velocity channels (math-ENU, so the sign convention is the rollout's own), unwrapped, differentiated with a 10 s central difference (`dataset.HEADING_RATE_SMOOTHING_WINDOW_S`) and masked to zero past the last measured velocity. NOTE the pre-registration wrote the relation as g*tan(mu)/V; the RHS actually integrates g*n_realized*sin(mu)/(V*cos gamma) with the stall-limited load factor, and the code calls the RHS — the two coincide only on a coordinated level turn, and calling the RHS is what makes 'model-consistent by construction' true rather than approximately true. `control_bank_tv_loss_weight` is the mean |step| between adjacent COMMANDED banks, in units of half the bank box. DOSE: a CALIBRATION, not a claim. The imitation dose curve was a noisy plateau between ~11.8x and ~47x the position term, so the analogous heading-rate dose is unknown; 1.0 and 8.0 are chosen to BRACKET it at this scale rather than to predict it. If the two doses behave alike the plateau is wide and the dose is not the lever; if they differ, the winner sets the 180-epoch arm. The TV dose 1.0 is a first probe with no prior at all, and note what the term can do: |x| has subgradient sign(x), so a monotone run cancels in its interior and EXACT flatness is a stationary point (value 0 and gradient 0 — where the zeroed head initialization starts every run). It prices REVERSALS, not slope; 'TV changed nothing' is that first and a small dose second. MATCHED CONTROL, and it is not optional: `L1b_native32_e60` is L1_native32 (imitation 64.0) at THIS budget. The published native32 numbers (1322 m pooled ADE, bank skill 0.726) come from a 180-epoch run that never early-stopped, i.e. a budget-limited upper bound; reading a 60-epoch screening number against them would confound the supervision axis with the budget. Compare screening arms only against `L1b_native32_e60`. Early stopping is LIVE here (patience 20 < 60 epochs), so an arm may stop before the budget and the epoch reached is part of its reading. NAMING: with the imitation weight at 0 the nearest recipe by loss-field distance is simple-v2, so the treatment arms resolve as `simple-v2+(hr=...)`, not `simple-v3+(...)`. Read them as 'simple-v2 + heading rate', not as 'v3 minus the teacher' — v2 IS the no-teacher loss design, and the control arm carries the v3 name because it carries the teacher. PRE-REGISTERED GATES: bank skill >= 0.70 (score_control_arms.py, read against the random-flight floor 0.17 and the same-runway twin ceiling 0.699 — never against 1.0). Note 0.70 is ABOVE that ceiling by 0.001 and 0.026 below native32's 0.726: the gate means 'not below native32 beyond noise', NOT 'reach the ceiling', and the operative comparison is against `L1b_native32_e60` at the same budget. ADE / FDE p50 per stratum not worse than that control arm (compare_constraint_arms.py, the control arm first). VETO: straight-in FDE p50 degraded beyond seed noise (671 m). DECISION RULE: if arm 2 passes, the teacher line becomes a comparison arm and L5.a's fitted teacher stays only as the upper bound; if none passes, the fitted teacher is the main-line teacher.",
  "base_recipe": "simple-v3",
  "base": {
   "control_recipe_name": "custom",
   "n_segments": 32,
-  "control_imitation_loss_weight": 0.0
+  "control_imitation_loss_weight": 0.0,
+  "epochs": 60
  },
  "arms": [
   {
-   "key": "L1b_heading_rate",
-   "label": "N=32, no teacher, heading-rate loss through the rollout (PENDING implementation: control_heading_rate_loss_weight)",
-   "overrides": {}
+   "key": "L1b_native32_e60",
+   "label": "MATCHED CONTROL: L1_native32 (the imitation teacher at 64) at the screening budget",
+   "overrides": {
+    "control_imitation_loss_weight": 64.0
+   }
   },
   {
-   "key": "L1b_heading_rate_tv",
-   "label": "arm 2 + bank total-variation (PENDING implementation: control_bank_tv_loss_weight)",
-   "overrides": {}
+   "key": "L1b_hr1",
+   "label": "N=32, no teacher, heading-rate loss at 1.0 (the low bracket)",
+   "overrides": {
+    "control_heading_rate_loss_weight": 1.0
+   }
+  },
+  {
+   "key": "L1b_hr8",
+   "label": "N=32, no teacher, heading-rate loss at 8.0 (the high bracket)",
+   "overrides": {
+    "control_heading_rate_loss_weight": 8.0
+   }
+  },
+  {
+   "key": "L1b_hr8_tv1",
+   "label": "arm 2 at 8.0 + bank total-variation 1.0 (the structural half)",
+   "overrides": {
+    "control_heading_rate_loss_weight": 8.0,
+    "control_bank_tv_loss_weight": 1.0
+   }
   }
  ]
 }

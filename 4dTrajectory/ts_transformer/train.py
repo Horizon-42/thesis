@@ -88,7 +88,9 @@ from final_approach_geometry import corridor_violations, runway_axes, truth_fina
 from models import build_model, parameter_count, resolve_device
 from batch_contract import LossComponents, anchor_state, model_forward, unpack_batch
 from io_utils import file_sha256
-from control.envelope import CONTROL_HALF_WIDTH
+from control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
+from control.dynamics.backends import EndpointControlRollout
+from aerodynamic_model.torch_dynamics import heading_rate_rad_s
 from prediction_outputs import ControlPrediction, StatePrediction
 from closure_output import (
     ClosurePrediction,
@@ -207,6 +209,8 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
         CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: (
             *(("velocity",) if config.control_velocity_loss_weight else ()),
             *(("imitation",) if config.control_imitation_loss_weight else ()),
+            *(("heading_rate",) if config.control_heading_rate_loss_weight else ()),
+            *(("bank_tv",) if config.control_bank_tv_loss_weight else ()),
         ),
     }
     return (
@@ -469,6 +473,88 @@ def control_imitation_mse(
     )
 
 
+def control_heading_rate_mse(
+    rollout: EndpointControlRollout,
+    config: TSConfig,
+    dynamics: dict[str, torch.Tensor],
+) -> torch.Tensor | None:
+    """Per-flight MSE between the ROLLOUT's own turn rate and the flown track's, deg/s.
+
+    The predicted side is read out of the RHS the rollout integrates
+    (:func:`aerodynamic_model.torch_dynamics.heading_rate_rad_s`) at each segment END,
+    evaluated on the state the rollout reached there and on the controls the aircraft had
+    ACTUALLY reached (the commands under the point-mass model, the actuator states after
+    the lag). Nothing about the coordinated-turn identity is restated, so this term cannot
+    ask for a turn the model would not fly — which is exactly what the imitation teacher's
+    inverse-dynamics target does not guarantee.
+
+    Both sides are divided by ``control_heading_rate_loss_scale_dps``, and endpoints past
+    the last measured velocity carry zero weight (see
+    :func:`dataset.reference_heading_rate_supervision`) — the same cut the velocity term
+    makes, not the same numbers (that mask is an interpolated per-channel weight, this one
+    a hard 0/1 step).
+
+    **The two sides are paired BY INDEX, and that is only a like-for-like comparison
+    because of one chain**: this term is built by the ``true-time-position`` objective, which
+    ``TSConfig`` admits only with ``control_duration_parameterization="uniform"``, so the
+    rollout's ``cumsum(segment_durations)`` is exactly the target's ``(k+1)·T/N``. Row k of
+    each side is therefore the same physical instant. Admitting a non-uniform partition here
+    would silently compare different times, exactly as it would for the imitation term.
+    """
+    if not config.control_heading_rate_loss_weight:
+        return None
+    states = rollout.geodetic_states
+    dtype, device = states.dtype, states.device
+
+    def cast(value: torch.Tensor) -> torch.Tensor:
+        return value.to(dtype=dtype, device=device)
+
+    predicted_dps = torch.rad2deg(
+        heading_rate_rad_s(
+            states,
+            physical_controls(
+                cast(rollout.actual_controls), cast(dynamics["max_thrust_n"])
+            ),
+            # Per-flight ``[B,6]`` against per-endpoint ``[B,N,7]`` states.
+            cast(dynamics["aero_params"]).unsqueeze(-2),
+        )
+    )
+    target = cast(dynamics["reference_heading_rate_dps"])
+    weight = cast(dynamics["reference_heading_rate_weight"])
+    delta = (predicted_dps - target) / config.control_heading_rate_loss_scale_dps
+    return (delta.square() * weight).sum(dim=1) / weight.sum(dim=1).clamp(min=1.0)
+
+
+def control_bank_total_variation(
+    controls: torch.Tensor, config: TSConfig
+) -> torch.Tensor | None:
+    """Per-flight mean |bank step| between adjacent COMMANDED segments, in half-box units.
+
+    A structural constraint rather than a target: it prices the schedule's roughness
+    without naming a value, so it can only remove the wiggle the teacherless arms grew, not
+    put a shape in. The commanded schedule is the one the head owns — penalising the lagged
+    actual bank would charge the actuator for the command it was given.
+
+    **What it actually prices is REVERSALS, not slope**, and the gradient says so twice.
+    ``|x|`` has subgradient ``sign(x)``, so on any run of segments banking monotonically
+    the interior terms cancel (segment k gets ``+1`` from its left step and ``-1`` from its
+    right) and only the run's two ends are charged: a smooth roll-in costs the same as a
+    step of the same total size, while a wiggle that turns around pays at every turn. At
+    EXACT flatness it is a stationary point — value 0 and gradient 0 together, which is
+    where ``control.heads._initialize_control_head`` starts every run (a zeroed projection
+    makes all N commands identical) — so this term alone never leaves the flat schedule;
+    the position, velocity and heading-rate terms do, and only then does it begin to bind.
+    If arm ③ reads "the TV term changed nothing", that is the live explanation to check
+    first, before concluding the dose was too small.
+    """
+    if not config.control_bank_tv_loss_weight:
+        return None
+    bank = controls[..., BANK_INDEX]
+    return (bank[:, 1:] - bank[:, :-1]).abs().mean(dim=1) / float(
+        CONTROL_HALF_WIDTH[BANK_INDEX]
+    )
+
+
 def _native_endpoint_control_state_loss(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
@@ -535,6 +621,8 @@ def _native_endpoint_control_state_loss(
         physical_position_mse=physical_position_mse,
         physical_velocity_mse=physical_velocity_mse,
         control_imitation_mse=control_imitation_mse(prediction, config, dynamics),
+        control_heading_rate_mse=control_heading_rate_mse(rollout, config, dynamics),
+        control_bank_tv=control_bank_total_variation(prediction.controls, config),
         aligned_targets=aligned_targets,
         aligned_weights=aligned_weights,
         hook_diagnostics=command_hook.diagnostics() if command_hook is not None else {},

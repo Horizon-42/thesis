@@ -107,6 +107,17 @@ flight model.
   flagged `horizonCapped`; their gate verdicts are cap artifacts, not model error.
 - **A new loss term must be added to `loss_component_names`**, not only to the objective's
   `extras` — otherwise `KeyError` on the first batch, *after* the slow dataset build.
+- **A supervision term on the turn rate reads the RHS, never a restated identity.** The
+  shared point-mass RHS integrates `ψ̇ = g·n_realized·sin φ / (V·cos γ)` with the
+  STALL-LIMITED load factor; the textbook `g·tan φ / V` equals it only on a coordinated
+  level turn. `aerodynamic_model.torch_dynamics.heading_rate_rad_s` reads the ψ row out of
+  `enu_rhs` itself for exactly this reason, and it is evaluated on
+  `EndpointControlRollout.actual_controls` — the commands under the point-mass model, the
+  ACTUATOR STATES under the lag. Pricing the command under the lag charges a turn the
+  rollout never flew. Its target's uniform `(k+1)·T/N` endpoints coincide with the
+  rollout's `cumsum(segment_durations)` ONLY through `true-time-position ⇒ uniform
+  durations` (the config refuses anything else); `reference_control_supervision`'s midpoints
+  ride on the same chain.
 - **The anchor state is `batch_contract.anchor_state(x, C)`, never `x[:, -1]`** — a history
   is `[B, L, C + K]` with `K` input-only conditioning columns (`target_conditioning`,
   `intent_conditioning`), and the control loss refuses a `[B, C + K]` anchor on the first
@@ -157,6 +168,8 @@ flight model.
 | `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result |
 | `n_segments` (control) | 64 | **32 is free** (L1: 1322 vs 1333 m, bank skill 0.726 vs 0.728); the deployed head's 257 numbers become 96 |
 | `control_state_loss_grid` | native | `fixed-dt` without the imitation term (it is not registered there) trips the straight-in veto (FDE 703 → 2863) and brings the bank wiggle back — the trajectory-error loss alone is not enough |
+| `control_heading_rate_loss_weight` (+ `_scale_dps` 1.5) | 0 | L1.b arm ②: the teacherless way to name the bank — the rollout's own ψ̇ at the segment endpoints against the flown track's. `_scale_dps` is the UNIT the residual is read in (half a standard-rate turn), not the dose. Doses 1.0 / 8.0 bracket an unknown; **not measured yet** |
+| `control_bank_tv_loss_weight` | 0 | L1.b arm ③: mean \|step\| between adjacent COMMANDED banks, in half-box units. **It prices REVERSALS, not slope** — `sign(x)` cancels on a monotone run's interior — and exact flatness is a STATIONARY POINT (value 0 and gradient 0), which is where the zeroed head init starts every run, so it never leaves a flat schedule on its own. "TV changed nothing" is that before it is a dose. **Not measured yet**. Both terms register under `true-time-position` ONLY (where `velocity`/`imitation` live) and `TSConfig` REFUSES a non-zero weight under any other objective rather than ignoring it |
 
 Command hooks are called once per control SEGMENT, at its start, with the rollout's own state,
 returning the command flown — and **the record carries the schedule FLOWN, not the network's**.

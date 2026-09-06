@@ -95,6 +95,12 @@ CONTROL_LOSS_FIELDS = (
     "control_velocity_loss_weight",
     "control_velocity_loss_scale_mps",
     "control_imitation_loss_weight",
+    # L1.b's teacherless bank supervision (heading rate through the rollout, bank total
+    # variation). Every stored config predates them and carries the defaults, so adding
+    # them here renames nothing.
+    "control_heading_rate_loss_weight",
+    "control_heading_rate_loss_scale_dps",
+    "control_bank_tv_loss_weight",
     "final_time_loss_weight",
     "final_time_scale_s",
     "position_loss_scale_m",
@@ -194,6 +200,9 @@ _ABBREV = {
     "control_imitation_loss_weight": "imit",
     "control_velocity_loss_weight": "vel",
     "control_velocity_loss_scale_mps": "vel-scale",
+    "control_heading_rate_loss_weight": "hr",
+    "control_heading_rate_loss_scale_dps": "hr-scale",
+    "control_bank_tv_loss_weight": "bank-tv",
     "control_state_objective": "obj",
     "control_state_loss_grid": "grid",
     "control_state_supervision_clock": "clock",
