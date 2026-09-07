@@ -4,6 +4,19 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — ts_transformer straight-in residual decomposition: along-track deceleration-timing scatter, not lateral, not the total duration
+
+`run_ts_straight_in_residual_readout.py` (new CPU runner) projects each flight's prediction error on
+the observed heading / right normal / vertical over the common window and reads the speed schedule
+by remaining distance. KRDU val straight-in (904): along-track RMS p50 333 m vs cross 112 m and
+vertical 78 m (along = 89 % of horizontal error²), concentrated in the last 5 km (p10..p90
+−819..+591 m); with the TRUE arrival time given (L3_cta) the bias goes (−191 → +8 m) but the RMS
+does not (333 → 316 m). Speed residual per band ≤ 1.6 m/s, deceleration point median offset 0.0 km
+with p10/p90 ±1.4 km, explaining 21–22 % of the last-band along variance (slope −225 m per km; the
+tower wind explained 10 %). Reading: the residual is the deceleration schedule — a speed-instruction
+intent — not dynamics. Results doc `4dTrajectory/ts_transformer/docs/2026-09-08_straight_in_residual_readout.zh.md`;
+a deceleration-point oracle arm (L3.b) is drafted there, decision pending.
+
 ### 2026-09-08 — ts_transformer wind readout: the tower headwind explains a tenth of the straight-in along-track residual
 
 `run_ts_wind_residual_readout.py` (new CPU runner) joins each scored flight of a prediction
