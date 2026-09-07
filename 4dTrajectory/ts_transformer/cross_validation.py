@@ -33,7 +33,7 @@ from config import (
     TSConfig,
 )
 from io_utils import write_json_atomic
-from data_provenance import provenance_eligibility_digests, provenance_manifest_digests
+from data_provenance import provenance_eligible_set_digests, provenance_manifest_digests
 from dataset import FlightSeries
 from splits import cross_validation_folds, split_by_flight
 from models import resolve_device
@@ -254,7 +254,7 @@ def _candidate_run_contract(
         "cv_patience": cv_patience,
         "auto_batch_size": auto_batch_size,
         "arrival_manifests": provenance_manifest_digests(data_provenance),
-        "eligibility_rosters": provenance_eligibility_digests(data_provenance),
+        "eligible_sets": provenance_eligible_set_digests(data_provenance),
     }
     # Keep the in-memory contract in the same JSON-native representation that is
     # restored on resume (notably, dataclass tuple fields become JSON arrays).
@@ -288,7 +288,11 @@ def _load_candidate_progress(
         or payload.get("run_contract") != run_contract
     ):
         raise ValueError(
-            "candidate checkpoint does not match the current CV run contract"
+            f"{path} does not match the current CV run contract, so the candidates it "
+            "already finished cannot be resumed into this search. A progress file written "
+            "before 2026-09-08 always says this: the contract now names the eligible SET "
+            "(`eligible_sets`) where it named the roster files. Delete the file to restart "
+            "the search from candidate 0"
         )
     completed = payload.get("completed_candidates")
     rows = payload.get("candidates")
@@ -384,7 +388,7 @@ def cross_validate(
     )
     candidates = _candidate_overrides(base_config, selected_parameters)
     outer_split = _split_audit(outer_train, outer_val, outer_test)
-    eligibility_digests = provenance_eligibility_digests(data_provenance)
+    eligible_sets = provenance_eligible_set_digests(data_provenance)
     manifest_digests = provenance_manifest_digests(data_provenance)
     run_contract = _candidate_run_contract(
         base_config=base_config,
@@ -545,8 +549,8 @@ def cross_validate(
         "best_mean_val_macro_loss": best["mean_val_macro_loss"],
         "best_overrides": best_overrides,
     }
-    if eligibility_digests:
-        results["eligibility_rosters"] = eligibility_digests
+    if eligible_sets:
+        results["eligible_sets"] = eligible_sets
     write_json_atomic(out / RESULTS_NAME, results, allow_nan=False)
     write_json_atomic(out / BEST_CONFIG_NAME, best_overrides, allow_nan=False)
     if verbose:

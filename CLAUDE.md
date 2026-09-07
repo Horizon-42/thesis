@@ -199,6 +199,11 @@ Short index; the full text (with measurements) is in the named file, which loads
 - **Observed tracks have TWO time windows** (first reception vs the 25 km arrival slice, median
   45 s apart). The comparison overlay must use the model one, or the group renders ~5 km early
   and it reads as model error. → `aeroviz_backend/CLAUDE.md`
+- **A ts checkpoint's data identity is the eligible SET, never the eligibility roster's bytes** —
+  the roster embeds upstream provenance (which observed evaluation report it was joined against),
+  which legitimately moves over an unchanged set; a byte-bound identity refused every checkpoint
+  the day the reports were regenerated (2026-09-07). →
+  `4dTrajectory/ts_transformer/CLAUDE.md`
 - **One definition of every geodetic constant** (`geokit.METRES_PER_DEG_LAT`,
   `wgs84_curvature_radii`); the frontend `geoConstants.json` and the casadi RHS are generated
   mirrors. → `geokit/CLAUDE.md`

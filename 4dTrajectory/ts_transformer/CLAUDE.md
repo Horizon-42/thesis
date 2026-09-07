@@ -331,12 +331,12 @@ command is HELD.
 |---|---|---|
 | `objective.py` | what is a prediction scored against | 1,079 |
 | `validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 1,162 |
-| `train.py` | the epoch, the cohort, the checkpoint | 1,246 |
+| `train.py` | the epoch, the cohort, the checkpoint | 1,248 |
 | `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` / `RemainingPathUniformAnchor` = one per flight per epoch, drawn uniformly over samples or over the flight's remaining-path span; `training_window_class` is the one place the two anchor axes pick a class) | 1,941 |
 | `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 159 |
 | `anchor_strata.py` | the remaining-path VALUES both sides of that edge read: the grid's km, the strata they cut, the train-anchor draw law (leaf — no `dataset`, no torch) | 105 |
-| `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 258 |
-| `splits.py` | which split a flight belongs to | 192 |
+| `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 503 |
+| `splits.py` | which split a flight belongs to | 197 |
 | `cli/` | one module per subcommand (`common` 857, `predict` 484, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze` 42, `__init__` 15) | 1,644 |
 | `__main__.py` | the bootstrap and the `COMMANDS` table it dispatches from | 131 |
 
@@ -467,6 +467,44 @@ fingerprints as 14 435 KRDU arrivals against the checkpoint's 14 378 and
 `require_matching_data_provenance` reports "the manifest changed" on a correct pair. The A0
 runner hit it first; the L5.a fitter had the same plain call and died at startup on every v5
 checkpoint until `e8df12f` (`docs/code-health-followups.md` §19).
+
+**The ts identity of an eligibility roster is its eligible SET, never the roster file's
+bytes** (`data_provenance`, schema `ts-arrival-data-v4-eligible-set`, 2026-09-08). The roster
+embeds UPSTREAM provenance — `sources.evaluation_report_sha256` — so regenerating the observed
+evaluation moves its bytes over an eligible set that did not change by one flight. That is not
+hypothetical: on 2026-09-07 the five observed reports went v6 → v9 with byte-identical eligible
+sets (KRDU 14 378 keys), and the byte-bound v3 identity then refused EVERY checkpoint trained
+before it — `predict`, `evaluate-fit`, `run_ts_*` replay runners and `publish_ts_experiment_
+trajectories.py` (which held a second copy of the comparison). So:
+- the compared eligibility entry is `{schema_version, policy, eligible_set_sha256}`, hashed by
+  `eligible_set_digest(keys)` — THE one definition, which `splits.data_selection_audit` also
+  hashes its split rosters with, and which the publisher and `run_ts_pipeline` import rather
+  than re-deriving. **The roster's `counts` are NOT in it**: three of the five are reject
+  tallies read off the observed evaluation (`excluded_lateral_indeterminate`,
+  `evaluation_only`), so a re-graded flight that never was eligible would move them and refuse
+  the checkpoint — the same defect, one level down. The other two are already compared as
+  `arrival_candidate_count` and `source_records`;
+- the byte facts and the counts stay AUDITABLE and out of every comparison:
+  `data_selection.pre_split_eligibility[*].roster_sources` (from `eligibility_sources`) keeps
+  the roster path, its digest, its counts and the evaluation report it was joined against;
+- a checkpoint carrying the retired `ts-arrival-data-v3-eligibility-bound` fingerprint stays
+  usable EXACTLY: its eligible set is re-derivable from the checkpoint alone — **`source_records`
+  IS the eligible set** (the roster's keys are validated to exist in the manifest, so the records
+  that survive the filter are exactly the eligible ones) — so `require_matching_data_provenance`
+  compares it to today's per airport, refuses by name with both set digests, and then reads the
+  v3 entry as today's. It deliberately reads NOTHING else from the payload: an earlier version
+  rebuilt the checkpoint's `TSConfig` to recompute `data_selection`'s split digests, which
+  re-imposed the model-recipe contract on a reader that needs none of it and raised `TypeError`
+  on three real pooled checkpoints. Never by a registry of old roster bytes;
+- `checkpoint_metadata.json` / `history.json` name the map `eligible_sets`; artifacts written
+  before 2026-09-08 name `eligibility_rosters` (roster bytes) and are read through the
+  checkpoint payload instead — a CV `cv_results.json` of that generation can only be checked by
+  bytes, so `run_ts_pipeline` re-runs CV when they moved (and prints which reason it was);
+- **an IN-FLIGHT `cross_validation/cv_candidate_progress.json` from before 2026-09-08 is refused
+  on resume**: the run contract it is bound to now names `eligible_sets` where it named the
+  roster files, so `_load_candidate_progress` raises — naming the file and saying to delete it —
+  rather than silently re-running finished candidates. Deleting that one file restarts the
+  search from candidate 0; a finished `cv_results.json` is read, not refused.
 
 **Measurement code is CODE.** Reusable logic goes in the package with tests
 (`control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);

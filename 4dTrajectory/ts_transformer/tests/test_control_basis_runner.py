@@ -470,7 +470,7 @@ def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoin
                                     "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64,
                                                    "source_records": [], "eligibility": eligibility}]}}
 
-    provenance_module.checkpoint_data_provenance(payload({"roster_sha256": "b" * 64}), manifests)
+    provenance_module.checkpoint_data_provenance(payload({"eligible_set_sha256": "b" * 64}), manifests)
     assert seen["rosters"] == [manifests[0].resolve().parent / "lateral_pass_eligibility.json"]
     provenance_module.checkpoint_data_provenance(payload(None), manifests)
     assert seen["rosters"] is None

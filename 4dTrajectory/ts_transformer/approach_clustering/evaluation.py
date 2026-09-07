@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Sequence
 
-from data_provenance import arrival_data_provenance, require_matching_data_provenance
+from data_provenance import checkpoint_data_provenance, require_matching_data_provenance
 from dataset import build_series, load_flight_dicts
 from development_cohorts import load_development_cohort
 from models import resolve_device
@@ -25,12 +25,16 @@ def compare_checkpoints(
 ) -> dict:
     cohort = load_development_cohort(cohort_path)
     validation_ids = set(cohort.val_flight_ids)
-    provenance = arrival_data_provenance(data)
     flights = load_flight_dicts(data, include_flight_keys=validation_ids)
     results = []
     reference_config = None
+    provenance = None
     for label, checkpoint in zip(labels, checkpoints, strict=True):
         model, config, normalizer, payload = load_checkpoint(checkpoint)
+        if provenance is None:
+            # The checkpoint's own rule decides whether the pre-split roster is read; the
+            # arms are then compared against ONE fingerprint (they must share the cohort).
+            provenance = checkpoint_data_provenance(payload, [data])
         require_matching_data_provenance(payload, provenance)
         if not validation_ids <= set(payload["split"]["val"]):
             raise ValueError(f"{label} checkpoint does not contain the comparison cohort")

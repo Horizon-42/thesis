@@ -300,7 +300,13 @@ class ExperimentCheckpoint:
     checkpoint: Path
     checkpoint_sha256: str
     arrival_manifests: dict[str, str]
-    eligibility_rosters: dict[str, str]
+    #: airport -> eligible-set digest. Empty for metadata written before 2026-09-08, whose
+    #: only eligibility identity was the roster FILE's digest; those are verified through
+    #: the checkpoint's own provenance instead (`preflight_error`).
+    eligible_sets: dict[str, str]
+    #: airports this run applied a pre-split roster to — which is what decides whether
+    #: `predict` is handed one, in either metadata generation.
+    eligibility_airports: tuple[str, ...]
     config: dict[str, Any]
 
     @property
@@ -375,14 +381,17 @@ def discover_checkpoints(
             for key, value in manifests.items()
         ):
             raise ValueError(f"{metadata_path} has no valid arrival_manifests map")
-        rosters = metadata.get("eligibility_rosters")
+        eligible_sets = metadata.get("eligible_sets")
+        legacy_rosters = metadata.get("eligibility_rosters")
+        rosters = eligible_sets if eligible_sets is not None else legacy_rosters
         if rosters is None:
             rosters = {}
         if not isinstance(rosters, dict) or not all(
             isinstance(key, str) and isinstance(value, str)
             for key, value in rosters.items()
         ):
-            raise ValueError(f"{metadata_path} has no valid eligibility_rosters map")
+            key = "eligible_sets" if eligible_sets is not None else "eligibility_rosters"
+            raise ValueError(f"{metadata_path} has no valid {key} map")
         declared_sha = metadata.get("checkpoint_sha256")
         checkpoint_sha = declared_sha if isinstance(declared_sha, str) else _sha256(checkpoint)
         checkpoints.append(ExperimentCheckpoint(
@@ -392,7 +401,8 @@ def discover_checkpoints(
             checkpoint=checkpoint,
             checkpoint_sha256=checkpoint_sha,
             arrival_manifests=dict(sorted(manifests.items())),
-            eligibility_rosters=dict(sorted(rosters.items())),
+            eligible_sets=dict(sorted((eligible_sets or {}).items())),
+            eligibility_airports=tuple(sorted(rosters)),
             config=_checkpoint_config(directory),
         ))
     return checkpoints
@@ -564,7 +574,7 @@ class PublicationPlan:
             "--checkpoint", str(self.experiment.checkpoint),
             "--data", str(self.data_manifest),
         ]
-        if self.airport in self.experiment.eligibility_rosters:
+        if self.airport in self.experiment.eligibility_airports:
             predict += ["--eligibility-roster", str(self.eligibility_roster)]
         predict += [
             "--output-dir", str(self.output_dir),
@@ -600,6 +610,46 @@ class PublicationPlan:
             steps.insert(0, ("predict", predict))
         return steps
 
+    def _eligibility_error(self) -> str | None:
+        """Refuse a roster that no longer selects the flights the checkpoint was trained on.
+
+        The identity is the eligible SET — the package's own `eligible_set_digest`, not a
+        second comparison written here. This preflight held its own byte comparison until
+        2026-09-08, and blocked every publication the morning the observed evaluation was
+        regenerated (v6 -> v9) over eligible sets that had not changed at all.
+        """
+        if self.airport not in self.experiment.eligibility_airports:
+            return None
+        if not self.eligibility_roster.is_file():
+            return f"missing eligibility roster {self.eligibility_roster}"
+        from data_provenance import (   # the package's rule, imported where it is needed
+            checkpoint_data_provenance,
+            require_matching_data_provenance,
+            roster_eligible_set_digest,
+        )
+        expected = self.experiment.eligible_sets.get(self.airport)
+        if expected is not None:
+            actual = roster_eligible_set_digest(self.eligibility_roster)
+            if actual != expected:
+                return (
+                    f"eligible set changed for {self.airport}: "
+                    f"checkpoint={expected}, current={actual}"
+                )
+            return None
+        # Metadata that predates `eligible_sets` names only the roster's bytes, so the
+        # answer comes from the checkpoint payload — one path, torch load included.
+        from train import load_checkpoint_payload
+        try:
+            payload = load_checkpoint_payload(self.experiment.checkpoint)
+            require_matching_data_provenance(
+                payload,
+                checkpoint_data_provenance(payload, [self.data_manifest]),
+                allow_subset=True,
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            return f"checkpoint predates the eligible-set identity and {exc}"
+        return None
+
     def preflight_error(self) -> str | None:
         if not self.experiment.checkpoint.is_file():
             return f"missing checkpoint {self.experiment.checkpoint}"
@@ -616,16 +666,9 @@ class PublicationPlan:
                 f"arrival manifest SHA-256 mismatch for {self.airport}: "
                 f"checkpoint={expected}, current={actual}"
             )
-        expected_roster = self.experiment.eligibility_rosters.get(self.airport)
-        if expected_roster is not None:
-            if not self.eligibility_roster.is_file():
-                return f"missing eligibility roster {self.eligibility_roster}"
-            actual_roster = _sha256(self.eligibility_roster)
-            if actual_roster != expected_roster:
-                return (
-                    f"eligibility roster SHA-256 mismatch for {self.airport}: "
-                    f"checkpoint={expected_roster}, current={actual_roster}"
-                )
+        eligibility_error = self._eligibility_error()
+        if eligibility_error is not None:
+            return eligibility_error
         if self.prediction_dir is not None:
             reused = _load_object(self.summary)
             produced_by = Path(str(reused.get("checkpoint") or ""))

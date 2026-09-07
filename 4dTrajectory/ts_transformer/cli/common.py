@@ -53,7 +53,7 @@ from config import (
     control_recipe_overrides,
 )
 from cross_validation import validate_cv_parameters
-from data_provenance import arrival_data_provenance
+from data_provenance import arrival_data_provenance, eligibility_sources
 from dataset import build_series, load_flight_dicts
 from development_cohorts import development_cohort_audit, load_development_cohort
 from experiment_index import begin_run, finish_run
@@ -822,6 +822,13 @@ def prepare_training_run(
     data_selection = data_selection_audit(
         series, build_report, config, outer_split_keys
     )
+    # The compared identity (the eligible SET) plus the roster's byte facts, which are
+    # recorded HERE and nowhere that is compared: `sources.evaluation_report_sha256` moves
+    # whenever the observed evaluation is regenerated over an identical eligible set.
+    roster_sources = {
+        source["airport"]: source
+        for source in eligibility_sources(getattr(args, "eligibility_roster", None))
+    }
     data_selection["pre_split_eligibility"] = [
         {
             "airport": entry["airport"],
@@ -830,6 +837,11 @@ def prepare_training_run(
                 entry["eligibility"]
                 if isinstance(entry.get("eligibility"), dict)
                 else {"policy": "none"}
+            ),
+            **(
+                {"roster_sources": roster_sources[entry["airport"]]}
+                if entry["airport"] in roster_sources
+                else {}
             ),
         }
         for entry in data_provenance["manifests"]

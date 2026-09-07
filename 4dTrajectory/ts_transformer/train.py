@@ -46,7 +46,7 @@ from control.basis_fit import FittedTeacherTable, load_fitted_teacher
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
-    provenance_eligibility_digests,
+    provenance_eligible_set_digests,
     provenance_manifest_digests,
 )
 from dataset import (
@@ -956,7 +956,7 @@ def train(
     if data_provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
         raise ValueError("data_provenance is not a TS arrival-data fingerprint")
     manifest_digests = provenance_manifest_digests(data_provenance)
-    eligibility_digests = provenance_eligibility_digests(data_provenance)
+    eligible_sets = provenance_eligible_set_digests(data_provenance)
 
     series = usable_series(series, config, verbose=verbose)
     train_series, val_series, test_series = split_by_flight(series, config)
@@ -1113,8 +1113,10 @@ def train(
             "test": _keys_sha256(checkpoint_test_keys),
         },
     }
-    if eligibility_digests:
-        checkpoint_metadata["eligibility_rosters"] = eligibility_digests
+    if eligible_sets:
+        # The eligible SET, not the roster file's bytes: regenerating the observed
+        # evaluation moves those bytes with the set unchanged (data_provenance).
+        checkpoint_metadata["eligible_sets"] = eligible_sets
     if fitted_teacher is not None:
         checkpoint_metadata["fitted_teacher"] = fitted_teacher
     if data_selection is not None:
@@ -1170,8 +1172,8 @@ def train(
         "data_selection": data_selection,
         "history": [vars(h) for h in fit.history],
     }
-    if eligibility_digests:
-        summary["data_provenance"]["eligibility_rosters"] = eligibility_digests
+    if eligible_sets:
+        summary["data_provenance"]["eligible_sets"] = eligible_sets
     (out / HISTORY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if verbose:
@@ -1200,11 +1202,21 @@ def train(
     return summary
 
 
-def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, dict[str, Any]]:
-    """Rebuild a trained model from a checkpoint written by :func:`train`."""
+def load_checkpoint_payload(path: str | Path) -> dict[str, Any]:
+    """The stored payload alone — no model build, no contract checks.
+
+    For a preflight that only needs the checkpoint's `data_provenance` / `data_selection`
+    blocks (the publisher, the pipeline's reuse check): such a reader must not pay the
+    model build, nor be refused by a model contract it never touches.
+    """
     # weights_only=True: the payload is tensors + primitives only (config/normalizer are
     # plain dicts and lists), so nothing here needs — or should get — pickle execution.
-    payload = torch.load(Path(path), map_location="cpu", weights_only=True)
+    return torch.load(Path(path), map_location="cpu", weights_only=True)
+
+
+def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, dict[str, Any]]:
+    """Rebuild a trained model from a checkpoint written by :func:`train`."""
+    payload = load_checkpoint_payload(path)
     config = TSConfig.from_dict(payload["config"])
     expected_contract = target_contract(config)
     if payload.get("target_contract") != expected_contract:
