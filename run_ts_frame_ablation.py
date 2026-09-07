@@ -108,16 +108,24 @@ def _evaluation_steps(key: str, pred_dir: Path) -> list[tuple[str, list[str], Pa
 
 def predict_only_steps(
     key: str, checkpoint: Path, predict_args: list[str], *, airport: str, campaign: Path,
-    split: str, device: str,
+    split: str, device: str, produced_by: str | None = None,
 ) -> list[tuple[str, list[str], Path]]:
-    """Predict + evaluate from an EXISTING checkpoint: no training, no config of its own."""
-    if not checkpoint.is_file():
+    """Predict + evaluate from an existing checkpoint: no training, no config of its own.
+
+    ``produced_by`` names a training arm EARLIER IN THE SAME FILE whose checkpoint this is
+    (the L1.c hook arms read the campaign's own penalty arms); then the checkpoint cannot
+    exist at plan time and the check moves to the step itself, which refuses by name if the
+    producing arm never wrote it. A checkpoint from outside the campaign keeps the eager
+    check: a typo there is a plan-time error, not a mid-campaign one.
+    """
+    if produced_by is None and not checkpoint.is_file():
         raise FileNotFoundError(f"{key}: checkpoint {checkpoint} does not exist")
     manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
     roster = HARVEST_ROOT / airport / "arrivals" / "lateral_pass_eligibility.json"
     pred_dir = campaign / f"{key}_pred_{split}"
     return [
-        (f"{key}: predict ({split}, from {checkpoint.parent.name})", [
+        (f"{key}: predict ({split}, from {checkpoint.parent.name})"
+         + (f" — produced by arm {produced_by}" if produced_by else ""), [
             sys.executable, str(TS_SCRIPT), "predict",
             "--checkpoint", str(checkpoint),
             "--data", str(manifest), "--eligibility-roster", str(roster),
@@ -210,6 +218,9 @@ def main(argv: list[str] | None = None) -> int:
 
     steps: list[tuple[str, list[str], Path]] = []
     trained_arms = 0
+    # Checkpoints the training arms of THIS file write, in file order: a later predict-only
+    # arm may read one before it exists (the check moves to the step).
+    produced: dict[Path, str] = {}
     for arm in arms:
         key = arm["key"]
         if "checkpoint" in arm:
@@ -217,14 +228,17 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error(f"arm {key}: a predict-only arm takes the checkpoint's config, "
                              "not overrides")
             checkpoint = REPO_ROOT / arm["checkpoint"].format(airport=airport)
+            produced_by = produced.get(checkpoint.resolve())
             print(f"  arm {key:<26s} predict-only from {checkpoint} "
-                  f"{' '.join(arm.get('predict_args', []))}")
+                  f"{' '.join(arm.get('predict_args', []))}"
+                  + (f" (produced by arm {produced_by})" if produced_by else ""))
             steps += predict_only_steps(
                 key, checkpoint, [str(a).format(airport=airport) for a in arm.get("predict_args", [])], airport=airport,
-                campaign=campaign, split=args.split, device=args.device,
+                campaign=campaign, split=args.split, device=args.device, produced_by=produced_by,
             )
             continue
         trained_arms += 1
+        produced[(campaign / key / "checkpoint.pt").resolve()] = key
         config_path, config, declared = arm_config(
             base, arm.get("overrides", {}), campaign / key / "config.json",
             write=not args.dry_run,
@@ -255,6 +269,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run:
             print(f"  {header}\n    {' '.join(command)}")
             continue
+        if " — produced by arm " in label:
+            produced_checkpoint = Path(command[command.index("--checkpoint") + 1])
+            if not produced_checkpoint.is_file():
+                producer = label.split(" — produced by arm ")[1]
+                raise FileNotFoundError(
+                    f"{label}: {produced_checkpoint} was never written — arm {producer} did not "
+                    "train (see its steps above); nothing to predict from"
+                )
         print(f"\n=== {header} ===\n{' '.join(command)}", flush=True)
         subprocess.run(command, cwd=REPO_ROOT, check=True)
     return 0
