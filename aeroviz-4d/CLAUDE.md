@@ -86,6 +86,17 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   Symptom to recognise: `Port 5173 is in use, trying another one…` plus a restart streak means a
   stale dev server is alive — `ss -ltnp | grep 5173`, and count a pid's watches via
   `/proc/<pid>/fdinfo/<fd>`.
+- **…and the price of that ignore: a RUNNING dev server never sees a newly published category.**
+  Vite caches the public-directory file list and refreshes it from the watcher — exactly what
+  `server.watch.ignored` switches off for this tree — so a comparison directory created after the
+  server booted 404s and the SPA fallback returns `index.html`. The frontend reports it as
+  *"Expected JSON from …/comparison_index.json, but received HTML. The airport data file is
+  probably missing"* — about a file that is on disk and readable. `categories.json` keeps working
+  (it existed at boot; only its CONTENT changed), so the picker lists a category it cannot load,
+  and that combination IS the signature. Fix: restart the frontend dev server after publishing
+  NEW categories; `curl -o /dev/null -w '%{content_type}\n' <index url>` says which side you are
+  on (`application/json` = served, `text/html` = fallback). Overwriting files that already
+  existed at boot needs no restart. Verified 2026-09-07 on the anytime publication.
 - **`.flight-ops-panel` has `backdrop-filter`** → it becomes the containing block for
   `position:fixed` descendants AND clips overflow; floating windows must render via React portal
   into `document.body`.

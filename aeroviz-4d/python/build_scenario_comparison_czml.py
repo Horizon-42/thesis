@@ -104,11 +104,13 @@ FAILED_COLOR = (200, 60, 60, 200)        # unsolved scenario — reference only,
 OFF_TARGET_COLOR = (255, 205, 40, 235)       # the simulator/result path
 OFF_TARGET_REF_COLOR = (150, 118, 25, 200)   # the observed reference (dark amber)
 PREDICTION_COLOR = (170, 90, 230, 225)       # learned prediction — "Predicted" (purple)
-# The lookback window the predictor was CONDITIONED on: observed samples, so the same hue as
-# the forecast they lead into but faded, reading as one continuous track that goes from "given"
-# to "predicted". Without it the purple line starts in mid-air at the anchor with nothing
-# joining it to the beginning of the approach.
-LOOKBACK_COLOR = (170, 90, 230, 85)          # model input window — "Lookback" (faded purple)
+# The OBSERVED track leading into the forecast: same hue as the prediction but faded, so the
+# pair reads as one continuous track going from "given" to "predicted". Without it the purple
+# line starts in mid-air at the anchor with nothing joining it to the beginning of the approach.
+# It is the track BEFORE the anchor, which is the model's input window only when the anchor is
+# L−1 (`seq_len − 1`) — the case every batch except a re-anchored anytime record. See
+# `_lookback_states`.
+LOOKBACK_COLOR = (170, 90, 230, 85)          # observed-before-anchor — "Lookback" (faded purple)
 
 # Trailing-tail length (seconds) for the optimizer/simulator paths: the tail fades behind the
 # moving aircraft as playback advances, so the head (current position) is distinguishable from the
@@ -177,12 +179,20 @@ def _time_shifted(states: list[dict[str, Any]], offset_s: float) -> list[dict[st
 
 
 def _lookback_states(observed_states: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The observed samples the predictor was shown: everything up to and including the anchor.
+    """The observed track before the forecast: everything up to and including the anchor.
 
-    A prediction record rebases time so ``t = 0`` IS the anchor, which makes the lookback the
+    A prediction record rebases time so ``t = 0`` IS the anchor, which makes this the
     negative-``t`` half of ``observed_states``. The anchor sample itself (``t == 0``) belongs to
     both halves — it is literally the same state object in the record — so keeping it here joins
-    the faded input segment to the prediction with no gap.
+    the faded segment to the prediction with no gap.
+
+    **It is the model's input window only at the L−1 anchor.** There the two coincide exactly
+    (the record's series starts at the arrival window and the anchor is ``seq_len − 1``), which
+    is why every batch but one can read this line as "what the model was shown". A re-anchored
+    anytime record (`run_ts_anytime_curve.py --write-records`) anchors hundreds of seconds
+    later, so this segment is the whole approach flown so far while the model saw only its last
+    ``seq_len`` samples. The record carries no ``seq_len``, so narrowing it here is not possible
+    without a record-contract field — see `docs/code-health-followups.md`.
     """
     return [state for state in observed_states if state["t"] <= 0.0]
 
