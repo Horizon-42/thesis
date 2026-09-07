@@ -22,6 +22,15 @@
    "overrides": {
     "patience": 180
    }
+  },
+  {
+   "key": "A0_random_hr8_tv1_grid",
+   "label": "the p180 arm, selected on the anchor grid (patience 180 kept)",
+   "overrides": {
+    "patience": 180,
+    "checkpoint_selection_metric": "anchor-grid-common-grid-ade"
+   },
+   "_comment": "A1 (design doc §2.4, built 2026-09-07): the same arm as A0_random_hr8_tv1_p180, selected on `anchor-grid-common-grid-ade` instead of `fixed-anchor-common-grid-ade`. WHY, measured on the first arm: on the re-anchoring grid A0_random draws BETTER geometry than the fixed arm at EVERY anchor (chamfer p50 -114 to -524 m) and better ADE at <= 8 km, while the L-1 metric that selected its checkpoint scored 2949 m against native32's 1322 and early-stopped it at epoch 30 with its best at epoch 10. `fixed-anchor-common-grid-ade` scores the validation set at the L-1 anchor ONLY — the one anchor a random-anchor model is least specialised for — so it freezes such a model early on a metric blind to what the model improves. The new metric averages the SAME common-grid ADE over five anchor sets (L-1 and the 16/12/8/6 km remaining-path bins of `anchor_grid`, each flight at its own closest admissible sample), equal weight per set. The 20/4/2 km bins of the measurement grid are NOT selected on: 20 km covers ~35 % of the cohort and 4/2 km are partial-to-empty under the 60 s future floor. READING, against the two earlier arms: (1) the best epoch — the p20 arm's was 10 and the p180 arm's is the control for 'was it only the stopping rule'; this arm's best epoch is the answer to 'was it the metric'; (2) the per-epoch `validation_anchor_grid` block in history.json — each anchor set's ADE and its flight count, so the curve's shape is visible during training instead of only in an A0 replay; (3) the L-1 veto is still READ (the block records `fixed_anchor_common_grid_ade_m` every epoch, the same number the other two arms selected on) but it is NO LONGER the selection: an arm whose L-1 score is worse than native32 beyond seed noise while its grid mean and its 16/12/8/6 km ADEs beat both earlier arms is the anytime deliverable, not a failure. Cost: ~5x the checkpoint-selection pass (four extra deployable replays of the validation split; the L-1 pass is reused, not rebuilt), measured at 0.046 -> 0.238 s per epoch on a synthetic control run. No numbers here yet — this arm has not been trained."
   }
  ]
 }
