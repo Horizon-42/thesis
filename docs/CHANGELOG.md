@@ -4,6 +4,18 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — ts_transformer wind readout: the tower headwind explains a tenth of the straight-in along-track residual
+
+`run_ts_wind_residual_readout.py` (new CPU runner) joins each scored flight of a prediction
+directory to the field's ASOS/METAR headwind at its landing time (`evaluation.wind`, the table
+`dev-observed-load-factor-metar` brought in under `data/metar/`) and regresses the speed,
+duration and endpoint along-track residuals on it. KRDU val straight-in (839 flights with a
+report): speed-residual slope +0.62 ± 0.13 m/s per m/s headwind, duration slope −2.0 ± 0.5 s
+per m/s, four wind bins monotone — the signal is physical — but R² = 0.10 (residual sd 4.8 → 4.5
+m/s); the endpoint along-track error is unrelated (R² 0.01). Decision: no wind GPU arm; the
+predicted rollout stays wind-free. Results doc
+`4dTrajectory/ts_transformer/docs/2026-09-08_wind_residual_readout.zh.md`.
+
 ### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
