@@ -135,9 +135,10 @@ def test_arrival_provenance_is_filtered_by_a_bound_roster(tmp_path: Path) -> Non
 
     assert [row["flight_key"] for row in entry["source_records"]] == ["A", "C"]
     assert entry["eligibility"]["policy"] == "evaluation.lateral_result == pass"
-    assert entry["eligibility"]["roster_sha256"] == hashlib.sha256(
-        roster_path.read_bytes()
+    assert entry["eligibility"]["eligible_set_sha256"] == hashlib.sha256(
+        b"A\nC"
     ).hexdigest()
+    assert "roster_sha256" not in entry["eligibility"]
     assert sum(
         len(keys)
         for keys in splits.flight_keys_by_split(provenance, TSConfig()).values()

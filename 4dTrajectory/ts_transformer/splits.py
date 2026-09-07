@@ -19,13 +19,16 @@ from aircraft.query_aircraft_parameters import (
     openap_source_label,
 )
 from config import TSConfig
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA, eligible_set_digest
 
 if TYPE_CHECKING:   # annotations only: importing `dataset` here would drag torch in
     from dataset import BuildReport, FlightSeries
 
 
 DATA_SELECTION_SCHEMA = "ts-data-selection-v2-pre-split-eligibility"
+#: How a flight's split is decided. Recorded in every audit, and the string a stored audit
+#: must still say for `data_provenance` to be able to recompute its split identities.
+SPLIT_ASSIGNMENT_METHOD = "sha256(seed:airport-qualified-flight-id)"
 
 
 def _split_fraction(flight_id: str, seed: int) -> float:
@@ -88,10 +91,10 @@ def data_selection_audit(
             "data-selection audit received outer-test trajectory series during development"
         )
 
-    def digest(keys: Sequence[str]) -> str:
-        payload = "\n".join(sorted(keys)).encode()
-        return hashlib.sha256(payload).hexdigest()
-
+    # THE set digest (`data_provenance.eligible_set_digest`), not a local copy of it: the
+    # eligible identities below are what a legacy checkpoint's eligible set is re-verified
+    # against, and a second implementation would break that the day the two drifted.
+    digest = eligible_set_digest
     direct_typecodes = openap_direct_typecodes()
     direct_digest = hashlib.sha256("\n".join(direct_typecodes).encode()).hexdigest()
     return {
@@ -105,7 +108,7 @@ def data_selection_audit(
             "values": list(direct_typecodes),
         },
         "split_policy": {
-            "method": "sha256(seed:airport-qualified-flight-id)",
+            "method": SPLIT_ASSIGNMENT_METHOD,
             "split_seed": config.resolved_split_seed,
             "eligibility_applied_before_split_assignment": True,
             "aircraft_filter_applied_after_split_assignment": True,

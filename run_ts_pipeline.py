@@ -80,6 +80,11 @@ from cross_validation import (  # noqa: E402
     applicable_cv_parameters,
     parameter_grid,
 )
+from data_provenance import (  # noqa: E402
+    checkpoint_data_provenance,
+    require_matching_data_provenance,
+    roster_eligible_set_digest,
+)
 from evaluation_protocol import TEST_RELEASE_NAME  # noqa: E402
 from lateral_eligibility import (  # noqa: E402
     default_lateral_pass_roster_path,
@@ -93,6 +98,7 @@ from train import (  # noqa: E402
     CHECKPOINT_METADATA_NAME,
     CHECKPOINT_METADATA_SCHEMA,
     CHECKPOINT_NAME,
+    load_checkpoint_payload,
 )
 
 TRAINING_MODES = ("per-airport", "pooled")
@@ -129,7 +135,22 @@ def _manifest_digests(airports: tuple[str, ...]) -> dict[str, str]:
     return {airport: _file_sha256(arrival_manifest_path(airport)) for airport in airports}
 
 
-def _eligibility_digests(airports: tuple[str, ...]) -> dict[str, str]:
+def _eligible_set_digests(airports: tuple[str, ...]) -> dict[str, str]:
+    """What a stored artifact is compared against: the SET each roster selects."""
+    return {
+        airport: roster_eligible_set_digest(
+            default_lateral_pass_roster_path(arrival_manifest_path(airport))
+        )
+        for airport in airports
+    }
+
+
+def _roster_byte_digests(airports: tuple[str, ...]) -> dict[str, str]:
+    """The roster FILES' digests — only for reading artifacts written before 2026-09-08.
+
+    Those recorded the bytes; equal bytes still prove an equal set, so a match is sound.
+    A difference proves nothing either way, which is why nothing NEW is compared this way.
+    """
     return {
         airport: _file_sha256(default_lateral_pass_roster_path(arrival_manifest_path(airport)))
         for airport in airports
@@ -475,6 +496,32 @@ class TrainingPlan:
             args += ["--control-rollout-integrator-dt-s", str(self.control_rollout_dt)]
         return args
 
+    def _eligibility_reuse_error(self, metadata: dict) -> str | None:
+        """Was this checkpoint trained on the eligible set the rosters name today?
+
+        Metadata written from 2026-09-08 answers it by itself (`eligible_sets`). Older
+        metadata recorded the roster FILES' digests, which move when the observed
+        evaluation is regenerated over an identical set — so the answer is taken from the
+        checkpoint's own provenance instead of retraining on a byte difference.
+        """
+        stored_sets = metadata.get("eligible_sets")
+        if stored_sets is not None:
+            if stored_sets != _eligible_set_digests(self.airports):
+                return "checkpoint was trained against different eligible sets"
+            return None
+        if metadata.get("eligibility_rosters") is None:
+            # This runner always trains WITH the rosters, so a checkpoint that carries no
+            # eligibility at all was trained on a different cohort.
+            return "checkpoint was trained without the pre-split eligibility rosters"
+        try:
+            payload = load_checkpoint_payload(self.checkpoint)
+            require_matching_data_provenance(
+                payload, checkpoint_data_provenance(payload, list(self.data_manifests))
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            return f"checkpoint predates the eligible-set identity and {exc}"
+        return None
+
     def checkpoint_reuse_error(self) -> str | None:
         if not self.checkpoint.is_file():
             return f"missing checkpoint {self.checkpoint}"
@@ -497,8 +544,9 @@ class TrainingPlan:
             return "checkpoint failed SHA-256 validation"
         if metadata.get("arrival_manifests") != _manifest_digests(self.airports):
             return "checkpoint was trained against different arrival manifests"
-        if metadata.get("eligibility_rosters") != _eligibility_digests(self.airports):
-            return "checkpoint was trained against different eligibility rosters"
+        eligibility_error = self._eligibility_reuse_error(metadata)
+        if eligibility_error is not None:
+            return eligibility_error
         if metadata.get("random_train_anchor") != self.random_train_anchor:
             return (
                 "checkpoint random_train_anchor="
@@ -568,8 +616,17 @@ class TrainingPlan:
             return "cross-validation best_config.json disagrees with cv_results.json"
         if results.get("arrival_manifests") != _manifest_digests(self.airports):
             return "cross-validation used different arrival manifests"
-        if results.get("eligibility_rosters") != _eligibility_digests(self.airports):
-            return "cross-validation used different eligibility rosters"
+        stored_sets = results.get("eligible_sets")
+        if stored_sets is not None:
+            if stored_sets != _eligible_set_digests(self.airports):
+                return "cross-validation used different eligible sets"
+        elif results.get("eligibility_rosters") not in (
+            None, _roster_byte_digests(self.airports)
+        ):
+            # Pre-2026-09-08 results name the roster FILES and carry no eligible-set
+            # identity; unlike a checkpoint there is no payload to ask, so a byte
+            # difference (which the observed evaluation alone can cause) is unverifiable.
+            return "cross-validation predates the eligible-set identity and its roster bytes moved"
         base_config = results.get("base_config")
         expected_config = self._expected_cv_base_config()
         if base_config != expected_config:
