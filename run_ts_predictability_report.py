@@ -48,7 +48,7 @@ from config import (  # noqa: E402
 
 from control.dynamics.rollout import rollout_control_dense  # noqa: E402
 from data_provenance import (  # noqa: E402
-    arrival_data_provenance,
+    checkpoint_data_provenance,
     require_matching_data_provenance,
 )
 from dataset import FlightSeries, build_series, dynamics_arrays, load_flight_dicts  # noqa: E402
@@ -1110,7 +1110,7 @@ def main() -> None:
     provenance = reference.payload["data_provenance"]
     airports = tuple(entry["airport"] for entry in provenance["manifests"])
     manifests = [pipeline.arrival_manifest_path(airport) for airport in airports]
-    current_provenance = arrival_data_provenance(manifests)
+    current_provenance = checkpoint_data_provenance(reference.payload, manifests)
     for run in runs:
         require_matching_data_provenance(run.payload, current_provenance)
 

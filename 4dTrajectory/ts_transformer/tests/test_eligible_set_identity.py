@@ -134,9 +134,10 @@ def _v3_payload(provenance: dict, config: TSConfig) -> dict:
     """A checkpoint payload carrying the RETIRED byte-bound fingerprint.
 
     The eligibility block below is a frozen literal of the v3 shape — a mirror of the
-    schema this build no longer writes, which is the only way a test can still produce
-    one. Everything else (the split identities the re-verification recomputes) comes from
-    the real `splits` audit, so this fixture cannot drift from what training wrote.
+    schema this build no longer writes (roster bytes, the upstream report's digest, and
+    the roster's reject tallies), which is the only way a test can still produce one. The
+    rest of the payload comes from the real audit, so the fixture cannot drift from what
+    training wrote.
     """
     manifests = []
     for entry in provenance["manifests"]:
@@ -148,7 +149,13 @@ def _v3_payload(provenance: dict, config: TSConfig) -> dict:
                 "policy": eligibility["policy"],
                 "roster_sha256": "9" * 64,          # the roster file as it was that day
                 "evaluation_report_sha256": "8" * 64,
-                "counts": eligibility["counts"],
+                "counts": {
+                    "arrival_candidates": entry["arrival_candidate_count"],
+                    "eligible_lateral_pass": len(entry["source_records"]),
+                    "excluded_lateral_fail": 2,
+                    "excluded_lateral_indeterminate": 0,
+                    "evaluation_only": 0,
+                },
             },
         })
     outer = flight_keys_by_split(provenance, config)
@@ -197,12 +204,11 @@ def test_one_swapped_eligible_key_is_refused_although_the_counts_are_unchanged(
     manifest, roster = _harvest(tmp_path, flights)
     stored = arrival_data_provenance(manifest, eligibility_rosters=[roster])
 
+    before_counts = json.loads(roster.read_text(encoding="utf-8"))["counts"]
     _swap_one_eligible_key(roster, manifest)
     current = arrival_data_provenance(manifest, eligibility_rosters=[roster])
 
-    assert current["manifests"][0]["eligibility"]["counts"] == (
-        stored["manifests"][0]["eligibility"]["counts"]
-    )
+    assert json.loads(roster.read_text(encoding="utf-8"))["counts"] == before_counts
     assert current["manifests"][0]["eligibility"]["eligible_set_sha256"] != (
         stored["manifests"][0]["eligibility"]["eligible_set_sha256"]
     )
@@ -212,6 +218,71 @@ def test_one_swapped_eligible_key_is_refused_although_the_counts_are_unchanged(
         require_matching_data_provenance(
             {"data_provenance": stored}, current, allow_subset=True
         )
+
+
+def test_a_regraded_reject_does_not_refuse_the_checkpoint(tmp_path: Path) -> None:
+    """The roster's REJECT tallies are report-derived and must not be an identity.
+
+    `excluded_lateral_indeterminate` / `evaluation_only` count flights that were never
+    eligible; a regenerated report that moves one of them leaves the eligible set exactly
+    as it was. Comparing the roster's `counts` would refuse the checkpoint for it — the
+    incident's own failure mode, one level down.
+    """
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
+    manifest, roster = _harvest(tmp_path, flights)
+    stored = arrival_data_provenance(manifest, eligibility_rosters=[roster])
+
+    report = default_evaluation_report_path(manifest)
+    document = json.loads(report.read_text(encoding="utf-8"))
+    regraded = 0
+    for row in document["trajectories"]:
+        if row["lateral_result"] == "fail":
+            row["lateral_result"] = "indeterminate"     # still not eligible
+            regraded += 1
+    assert regraded
+    report.write_text(json.dumps(document), encoding="utf-8")
+    build_lateral_pass_roster(manifest, report, roster)
+    current = arrival_data_provenance(manifest, eligibility_rosters=[roster])
+
+    roster_counts = json.loads(roster.read_text(encoding="utf-8"))["counts"]
+    assert roster_counts["excluded_lateral_indeterminate"] == regraded
+    require_matching_data_provenance({"data_provenance": stored}, current)
+
+
+def test_a_fingerprint_taken_without_the_roster_says_so(tmp_path: Path) -> None:
+    """The §19 misdiagnosis: without the roster the current entry lists every candidate."""
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
+    manifest, roster = _harvest(tmp_path, flights)
+    stored = arrival_data_provenance(manifest, eligibility_rosters=[roster])
+
+    rosterless = arrival_data_provenance(manifest)
+
+    with pytest.raises(ValueError, match="WITHOUT the pre-split eligibility roster"):
+        require_matching_data_provenance(
+            {"data_provenance": stored}, rosterless, allow_subset=True
+        )
+
+
+def test_a_legacy_checkpoint_without_a_data_selection_audit_still_loads(
+    tmp_path: Path,
+) -> None:
+    """The eligible set comes from the checkpoint's own `source_records`, nothing else.
+
+    Rebuilding the checkpoint's `TSConfig` to read a `data_selection` block would refuse
+    three real pooled checkpoints whose stored configs this build no longer accepts.
+    """
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
+    manifest, roster = _harvest(tmp_path, flights)
+    payload = _v3_payload(
+        arrival_data_provenance(manifest, eligibility_rosters=[roster]), TSConfig()
+    )
+    del payload["data_selection"]
+    payload["config"] = {"retired_field": "a recipe this build cannot rebuild"}
+
+    _reserialise(roster)
+    current = arrival_data_provenance(manifest, eligibility_rosters=[roster])
+
+    require_matching_data_provenance(payload, current, allow_subset=True)
 
 
 @pytest.mark.parametrize("allow_subset", [False, True])
@@ -245,7 +316,7 @@ def test_a_legacy_checkpoint_is_refused_when_the_eligible_set_moved(
     _swap_one_eligible_key(roster, manifest)
     current = arrival_data_provenance(manifest, eligibility_rosters=[roster])
 
-    with pytest.raises(ValueError, match=f"eligible flight set changed.*{AIRPORT}"):
+    with pytest.raises(ValueError, match=f"eligible flight set for {AIRPORT} changed"):
         require_matching_data_provenance(payload, current, allow_subset=True)
 
 
@@ -402,7 +473,7 @@ def test_the_publisher_preflight_reads_a_legacy_checkpoint_through_the_package(
     assert plan.preflight_error() is None
 
     _swap_one_eligible_key(roster, manifest)
-    assert "eligible flight set changed" in (plan.preflight_error() or "")
+    assert f"eligible flight set for {AIRPORT} changed" in (plan.preflight_error() or "")
 
 
 def test_the_pipeline_reuses_a_legacy_checkpoint_whose_roster_bytes_moved(
@@ -427,7 +498,44 @@ def test_the_pipeline_reuses_a_legacy_checkpoint_whose_roster_bytes_moved(
     assert plan._eligibility_reuse_error(legacy) is None
 
     _swap_one_eligible_key(roster, manifest)
-    assert "eligible flight set changed" in (plan._eligibility_reuse_error(legacy) or "")
+    assert f"eligible flight set for {AIRPORT} changed" in (
+        plan._eligibility_reuse_error(legacy) or ""
+    )
+
+
+def test_the_pipeline_refuses_artifacts_produced_without_the_rosters(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """This runner always trains and searches WITH the rosters, so a rosterless artifact
+    describes a different cohort — for the checkpoint AND for cross-validation."""
+    import run_ts_pipeline as pipeline
+
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
+    harvest = tmp_path / "harvest"
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", harvest)
+    manifest, _roster = _harvest(harvest / AIRPORT, flights)
+    plan = pipeline.TrainingPlan(
+        (AIRPORT,), "itransformer", training_mode="per-airport", output_dir=tmp_path / "run"
+    )
+
+    assert plan._eligibility_reuse_error({}) == (
+        "checkpoint was trained without the pre-split eligibility rosters"
+    )
+    plan.cv_dir.mkdir(parents=True)
+    plan.cv_results.write_text(
+        json.dumps({
+            "schema_version": pipeline.CV_RESULTS_SCHEMA,
+            "best_overrides": {},
+            "arrival_manifests": {
+                AIRPORT: hashlib.sha256(manifest.read_bytes()).hexdigest()
+            },
+        }),
+        encoding="utf-8",
+    )
+    plan.best_config.write_text(json.dumps({}), encoding="utf-8")
+    assert plan.cv_reuse_error() == (
+        "cross-validation ran without the pre-split eligibility rosters"
+    )
 
 
 def test_the_training_audit_still_records_the_roster_byte_facts(

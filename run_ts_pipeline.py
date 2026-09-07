@@ -620,9 +620,10 @@ class TrainingPlan:
         if stored_sets is not None:
             if stored_sets != _eligible_set_digests(self.airports):
                 return "cross-validation used different eligible sets"
-        elif results.get("eligibility_rosters") not in (
-            None, _roster_byte_digests(self.airports)
-        ):
+        elif results.get("eligibility_rosters") is None:
+            # This runner always searches WITH the rosters (as the checkpoint check says).
+            return "cross-validation ran without the pre-split eligibility rosters"
+        elif results.get("eligibility_rosters") != _roster_byte_digests(self.airports):
             # Pre-2026-09-08 results name the roster FILES and carry no eligible-set
             # identity; unlike a checkpoint there is no payload to ask, so a byte
             # difference (which the observed evaluation alone can cause) is unverifiable.

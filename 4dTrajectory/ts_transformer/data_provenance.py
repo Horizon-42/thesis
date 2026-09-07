@@ -137,6 +137,9 @@ def eligibility_sources(
             "evaluation_report": sources.get("evaluation_report"),
             "evaluation_report_sha256": sources.get("evaluation_report_sha256"),
             "evaluation_report_schema": sources.get("evaluation_report_schema"),
+            # The reject tallies live here, with the report they were read off — never in
+            # the compared identity, which they do not describe.
+            "counts": roster.get("counts"),
         })
     return entries
 
@@ -186,10 +189,16 @@ def arrival_data_provenance(
                 raise ValueError(f"{roster_path} was built for a different arrival manifest")
             keys = _roster_eligible_keys(roster_path, roster)
             eligible_keys = set(keys)
+            # No `counts`: three of the roster's five are REJECT tallies read off the
+            # observed evaluation (`excluded_lateral_indeterminate`, `evaluation_only`),
+            # so a re-graded flight that never was eligible would move them and refuse the
+            # checkpoint — the same defect this schema exists to remove. The two that do
+            # describe the eligible cohort are already compared as
+            # `arrival_candidate_count` and `source_records`; all five stay auditable in
+            # `eligibility_sources`.
             eligibility = {
                 "schema_version": roster["schema_version"],
                 "policy": roster["policy"],
-                "counts": roster.get("counts"),
                 "eligible_set_sha256": eligible_set_digest(keys),
             }
 
@@ -274,8 +283,11 @@ def provenance_eligible_set_digests(
     """Compact airport -> pre-split eligible-set digest, for a CURRENT fingerprint."""
     if provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
         raise ValueError("data_provenance is not a multi-airport TS fingerprint")
+    manifests = provenance.get("manifests")
+    if not isinstance(manifests, list) or not manifests:
+        raise ValueError("data_provenance has no arrival manifests")
     result: dict[str, str] = {}
-    for entry in provenance.get("manifests", []):
+    for entry in manifests:
         if not isinstance(entry, dict):
             raise ValueError("data_provenance manifest entry is not an object")
         airport = entry.get("airport")
@@ -368,81 +380,42 @@ def _require_comparable_eligibility(
 
 
 def _require_unchanged_eligible_sets(
-    checkpoint_payload: dict[str, Any],
-    stored: dict[str, Any],
-    current: dict[str, Any],
+    stored: dict[str, Any], current: dict[str, Any]
 ) -> None:
-    """Verify a v3 checkpoint's eligible set against TODAY's rosters, by its own digests.
+    """Verify a v3 checkpoint's eligible SET against today's rosters, per airport.
 
-    A v3 provenance bound the roster's BYTES, which have since moved for reasons that are
-    not the checkpoint's data (see the module docstring). What it also carries is the split
-    identity digests `splits.data_selection_audit` wrote over the airport-qualified ids of
-    every eligible flight — so the eligible set is re-derivable, and this recomputes those
-    three digests from the current rosters' keys, through the same `splits` code path and
-    with the run's own stored seed and method. Airports the caller did not supply keep the
-    checkpoint's own records: `allow_subset` verifies the supplied airports, nothing else.
+    A v3 provenance bound the roster's BYTES, which move for reasons that are not the
+    checkpoint's data (module docstring). What it ALSO carries is the eligible set itself:
+    ``source_records`` IS that set. So the identity is re-derivable from the checkpoint
+    alone, and this compares it. Airports the caller did not supply are not verified —
+    `allow_subset` checks the supplied ones, nothing else.
+
+    This runs BEFORE the full comparison, which would catch the same difference through
+    `source_records` and report it as "the manifest changed". Its job is the accurate
+    message: which airport, and the two set digests. It deliberately reads NOTHING else
+    from the payload — an earlier version rebuilt the checkpoint's `TSConfig` to recompute
+    the `data_selection` split digests, which re-imposed the model-recipe contract on a
+    reader that needs none of it and raised `TypeError` on three real pooled checkpoints
+    whose stored configs this build no longer accepts.
     """
-    # Local imports: `splits` imports THIS module (a module-level import would close the
-    # cycle), and neither belongs on the fingerprint's import graph for the common path.
-    from config import TSConfig
-    from splits import SPLIT_ASSIGNMENT_METHOD, flight_keys_by_split
-
-    selection = checkpoint_payload.get("data_selection")
-    split_policy = selection.get("split_policy") if isinstance(selection, dict) else None
-    stored_splits = selection.get("splits") if isinstance(selection, dict) else None
-    if not isinstance(split_policy, dict) or not isinstance(stored_splits, dict):
-        raise ValueError(
-            "checkpoint carries the retired byte-bound arrival provenance and no "
-            "data_selection split identities to re-verify its eligible set against; "
-            "retrain it against the current arrival manifests"
-        )
-    if split_policy.get("method") != SPLIT_ASSIGNMENT_METHOD:
-        raise ValueError(
-            f"checkpoint split method {split_policy.get('method')!r} is not this build's "
-            f"{SPLIT_ASSIGNMENT_METHOD!r}; its split identities cannot be recomputed"
-        )
-    config = TSConfig.from_dict(checkpoint_payload["config"])
-    if config.resolved_split_seed != split_policy.get("split_seed"):
-        raise ValueError(
-            f"checkpoint split seed {split_policy.get('split_seed')!r} disagrees with its "
-            f"own config's {config.resolved_split_seed!r}"
-        )
-
     current_entries = {
         entry["airport"]: entry
         for entry in current.get("manifests", [])
         if isinstance(entry, dict) and isinstance(entry.get("airport"), str)
     }
-    today = {
-        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "manifests": [
-            current_entries.get(entry.get("airport"), entry)
-            for entry in stored["manifests"]
-        ],
-    }
-    recomputed = {
-        name: eligible_set_digest(keys)
-        for name, keys in flight_keys_by_split(today, config).items()
-    }
-    expected = {
-        name: (stored_splits.get(name) or {}).get("eligible_identity_sha256")
-        for name in recomputed
-    }
-    if recomputed != expected:
-        changed = sorted(
-            entry["airport"]
-            for entry in stored["manifests"]
-            if entry.get("airport") in current_entries
-            and _eligible_keys(current_entries[entry["airport"]]) != _eligible_keys(entry)
-        )
-        raise ValueError(
-            "the eligible flight set changed since this checkpoint was trained "
-            f"({', '.join(changed) or 'airports not identified'}): split identities are now "
-            + ", ".join(f"{name}={recomputed[name]}" for name in sorted(recomputed))
-            + " against the checkpoint's "
-            + ", ".join(f"{name}={expected.get(name)}" for name in sorted(recomputed))
-            + " — retrain instead of reusing this checkpoint"
-        )
+    for entry in stored["manifests"]:
+        airport = entry.get("airport")
+        if airport not in current_entries:
+            continue
+        was, now = _eligible_keys(entry), _eligible_keys(current_entries[airport])
+        if was != now:
+            raise ValueError(
+                f"the eligible flight set for {airport} changed since this checkpoint was "
+                f"trained: {len(was)} flights ({eligible_set_digest(was)}) against today's "
+                f"{len(now)} ({eligible_set_digest(now)}), "
+                f"{len(was - now)} dropped and {len(now - was)} added — retrain instead of "
+                "reusing this checkpoint"
+            )
 
 
 def _stored_in_current_form(
@@ -455,8 +428,9 @@ def _stored_in_current_form(
     A v3 fingerprint differs from a v4 one only in HOW it names the eligibility roster: by
     the file's bytes rather than by the set the file selects. Once the set is verified, the
     v3 entry says the same thing as today's, so it is rewritten into the current form and
-    the rest of the comparison (manifest digest, candidate count, source records, counts,
-    policy) runs unchanged. Nothing is written back to the checkpoint.
+    the rest of the comparison (manifest digest, candidate count, source records, policy)
+    runs unchanged. Nothing is written back to the checkpoint — the freeze-test ledger
+    hashes the STORED object and must keep matching.
     """
     schema = stored.get("schema_version")
     if schema == ARRIVAL_DATA_PROVENANCE_SCHEMA:
@@ -471,7 +445,7 @@ def _stored_in_current_form(
     if not isinstance(manifests, list) or not manifests:
         raise ValueError("checkpoint data_provenance has no arrival manifests")
     if provenance_has_eligibility(stored):
-        _require_unchanged_eligible_sets(checkpoint_payload, stored, current)
+        _require_unchanged_eligible_sets(stored, current)
     upgraded: list[dict[str, Any]] = []
     for entry in manifests:
         eligibility = entry.get("eligibility") if isinstance(entry, dict) else None
@@ -483,7 +457,6 @@ def _stored_in_current_form(
             "eligibility": {
                 "schema_version": eligibility.get("schema_version"),
                 "policy": eligibility.get("policy"),
-                "counts": eligibility.get("counts"),
                 "eligible_set_sha256": eligible_set_digest(_eligible_keys(entry)),
             },
         })

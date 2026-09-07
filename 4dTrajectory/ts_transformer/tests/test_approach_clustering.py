@@ -148,8 +148,8 @@ def test_comparison_rebuilds_with_checkpoint_aircraft_type(
 
     monkeypatch.setattr(
         clustering_evaluation,
-        "arrival_data_provenance",
-        lambda _data: {"schema_version": "test"},
+        "checkpoint_data_provenance",
+        lambda _payload, _manifests: {"schema_version": "test"},
     )
     monkeypatch.setattr(
         clustering_evaluation,

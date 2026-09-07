@@ -23,34 +23,60 @@ predict step: that roster generation no longer exists on disk.
 
 **The fix** (branch `dev-provenance`). The compared identity is the SET:
 `ARRIVAL_DATA_PROVENANCE_SCHEMA` = `ts-arrival-data-v4-eligible-set`, whose eligibility entry is
-`{schema_version, policy, counts, eligible_set_sha256}` with
+`{schema_version, policy, eligible_set_sha256}` with
 `eligible_set_sha256 = sha256("\n".join(sorted(keys)))` — one function,
 `data_provenance.eligible_set_digest`, which `splits.data_selection_audit` now hashes its split
 rosters with and which `run_ts_pipeline` and the publisher import instead of re-deriving. The
-byte facts stay auditable and out of every comparison: `eligibility_sources(rosters)` records the
-roster path, its digest and the evaluation report under
+roster's `counts` left the compared entry too: three of the five are reject tallies read off the
+observed evaluation (`excluded_lateral_indeterminate`, `evaluation_only`), so a re-graded flight
+that never was eligible would move them and refuse the checkpoint — the same defect one level
+down, reproduced on the real KRDU roster before it was removed. The byte facts and the counts
+stay auditable and out of every comparison: `eligibility_sources(rosters)` records the roster
+path, its digest, its counts and the evaluation report under
 `data_selection.pre_split_eligibility[*].roster_sources`. `checkpoint_metadata.json` /
 `history.json` name the map `eligible_sets`.
 
 **Legacy checkpoints stay usable exactly, with no registry of old bytes and no flag.** A stored
-`ts-arrival-data-v3-eligibility-bound` fingerprint is re-verified against TODAY's rosters through
-the checkpoint's own `data_selection.splits[train|val|test].eligible_identity_sha256`: the three
-digests are recomputed from the current eligible keys via the same `splits.flight_keys_by_split`
-code path, with the run's stored `split_policy.split_seed` and `method` (a different method
-string is refused, not worked around); if they match, the v3 entry is treated as the current
-form and the rest of the comparison runs unchanged; if not, the refusal names the airport and
-the three digest pairs. Pooled checkpoints recompute over all their manifests together. The
-publisher's byte comparison is deleted — it now compares `eligible_set_digest` of the current
+`ts-arrival-data-v3-eligibility-bound` fingerprint carries the eligible set itself —
+`source_records` IS that set, since the roster's keys are validated to exist in the manifest — so
+it is compared to today's per airport, and a difference is refused by name with both set digests
+instead of the generic "the manifest changed". The verification deliberately reads nothing else
+from the payload: a first version recomputed the checkpoint's own
+`data_selection.splits[*].eligible_identity_sha256` through `splits.flight_keys_by_split`, which
+needed `TSConfig.from_dict(payload["config"])` and therefore re-imposed the model-recipe contract
+on a reader that needs none of it — it raised `TypeError` (uncaught by the publisher and the
+pipeline) on three real pooled checkpoints whose stored configs this build no longer accepts, and
+it would have refused the 2026-07-29 `ts-data-selection-v1` audits, which name the same split
+method but a different digest field. Verified by sweeping all 200 checkpoints under
+`4dTrajectory/outputs` through `require_matching_data_provenance(payload,
+checkpoint_data_provenance(payload, manifests))` at HEAD and after: 65 → 66 accepted, exactly one
+newly accepted (`l1b_full_20260907/L1b_hr16_tv1_full`, the 08:55 arm), zero newly refused, zero
+crashes; of the 134 still refused, 99 predate the multi-airport fingerprint entirely and 21 have
+a genuinely changed eligible set (KSJC 18, KMSY 3) that now says so by name.
+
+The publisher's byte comparison is deleted — it compares `eligible_set_digest` of the current
 roster against the metadata's `eligible_sets`, and for older metadata loads the checkpoint
 payload and goes through `require_matching_data_provenance(..., allow_subset=True)`.
 `run_ts_pipeline`'s checkpoint reuse check does the same; its CV reuse check can only compare
 bytes for pre-2026-09-08 `cv_results.json` (nothing in that artifact names the set), so a moved
-roster re-runs CV there and only there.
+roster re-runs CV there and only there. Four replay paths that fingerprinted WITHOUT the roster
+(`run_ts_clock_attribution`, `run_ts_control_capacity_ceiling`, `run_ts_predictability_report`,
+`approach_clustering.evaluation` — the `code-health-followups.md` §19 class, all four broken
+against the v5 cohort) now go through `checkpoint_data_provenance`, and a fingerprint taken
+without a roster the checkpoint recorded says exactly that instead of "the manifest changed".
 
-**Verification.** ts suite 688 passed / 1 skipped (679 before, +9 new in
-`tests/test_eligible_set_identity.py`: byte-independence, one swapped key with counts unchanged,
-a v3 payload accepted and refused, the predict CLI on a synthetic v3 checkpoint, both publisher
-preflight paths, and the `pre_split_eligibility` byte facts). A 2-epoch synthetic train before
+**Two costs to know about.** The CV run contract renames its `eligibility_rosters` key, so an
+IN-FLIGHT `cross_validation` progress file is refused on resume ("does not match the current CV
+run contract") and its candidates must be re-run — finished `cv_results.json` files are read, not
+refused. And a `checkpoint_metadata.json` written before this change carries no `eligible_sets`,
+so the publisher and the pipeline pay one `torch.load` of the payload to answer the same question.
+
+**Verification.** ts suite 693 passed / 1 skipped (679 before, +14 new in
+`tests/test_eligible_set_identity.py`: byte-independence, one swapped key with the counts
+unchanged, a re-graded reject accepted, a fingerprint taken without the roster, a v3 payload
+accepted and refused, a v3 payload with no `data_selection` and an unreadable config, the predict
+CLI on a synthetic v3 checkpoint, both publisher preflight paths, both pipeline reuse paths, and
+the `pre_split_eligibility` byte facts). A 2-epoch synthetic train before
 and after is bit-identical in model weights, forecast digest, metrics, splits, normalizer and
 config — only the provenance/metadata blocks and wall-clock timings differ. Run-name recount over
 169 stored configs: 0 renamed, 0 errors. On the real KRDU data (read-only):

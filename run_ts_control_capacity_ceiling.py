@@ -37,7 +37,7 @@ import run_ts_predictability_report as common_report  # noqa: E402
 from config import PREDICTION_CONTROL  # noqa: E402
 from control.dynamics.rollout import rollout_control_endpoints  # noqa: E402
 from data_provenance import (  # noqa: E402
-    arrival_data_provenance,
+    checkpoint_data_provenance,
     require_matching_data_provenance,
 )
 from dataset import (  # noqa: E402
@@ -499,7 +499,7 @@ def main() -> None:
     provenance = payload["data_provenance"]
     airports = tuple(entry["airport"] for entry in provenance["manifests"])
     manifests = [pipeline.arrival_manifest_path(airport) for airport in airports]
-    require_matching_data_provenance(payload, arrival_data_provenance(manifests))
+    require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
     print(
         f"loading {len(train_keys)} train + {len(val_keys)} validation identities; "
         "outer-test source tracks stay closed",

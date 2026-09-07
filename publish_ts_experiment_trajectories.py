@@ -193,7 +193,8 @@ def discover_checkpoints(
             isinstance(key, str) and isinstance(value, str)
             for key, value in rosters.items()
         ):
-            raise ValueError(f"{metadata_path} has no valid eligible_sets map")
+            key = "eligible_sets" if eligible_sets is not None else "eligibility_rosters"
+            raise ValueError(f"{metadata_path} has no valid {key} map")
         declared_sha = metadata.get("checkpoint_sha256")
         checkpoint_sha = declared_sha if isinstance(declared_sha, str) else _sha256(checkpoint)
         checkpoints.append(ExperimentCheckpoint(

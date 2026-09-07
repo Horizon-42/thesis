@@ -383,18 +383,26 @@ hypothetical: on 2026-09-07 the five observed reports went v6 → v9 with byte-i
 sets (KRDU 14 378 keys), and the byte-bound v3 identity then refused EVERY checkpoint trained
 before it — `predict`, `evaluate-fit`, `run_ts_*` replay runners and `publish_ts_experiment_
 trajectories.py` (which held a second copy of the comparison). So:
-- the compared eligibility entry is `{schema_version, policy, counts, eligible_set_sha256}`,
-  hashed by `eligible_set_digest(keys)` — THE one definition, which `splits.data_selection_audit`
-  also hashes its split rosters with, and which the publisher and `run_ts_pipeline` import
-  rather than re-deriving;
-- the byte facts stay AUDITABLE and out of every comparison:
+- the compared eligibility entry is `{schema_version, policy, eligible_set_sha256}`, hashed by
+  `eligible_set_digest(keys)` — THE one definition, which `splits.data_selection_audit` also
+  hashes its split rosters with, and which the publisher and `run_ts_pipeline` import rather
+  than re-deriving. **The roster's `counts` are NOT in it**: three of the five are reject
+  tallies read off the observed evaluation (`excluded_lateral_indeterminate`,
+  `evaluation_only`), so a re-graded flight that never was eligible would move them and refuse
+  the checkpoint — the same defect, one level down. The other two are already compared as
+  `arrival_candidate_count` and `source_records`;
+- the byte facts and the counts stay AUDITABLE and out of every comparison:
   `data_selection.pre_split_eligibility[*].roster_sources` (from `eligibility_sources`) keeps
-  the roster path, its digest and the evaluation report it was joined against;
+  the roster path, its digest, its counts and the evaluation report it was joined against;
 - a checkpoint carrying the retired `ts-arrival-data-v3-eligibility-bound` fingerprint stays
-  usable EXACTLY: `require_matching_data_provenance` re-verifies its eligible set by recomputing
-  the checkpoint's own `data_selection.splits[train|val|test].eligible_identity_sha256` from
-  today's rosters through the same `splits` code path, with the run's stored seed and method,
-  and refuses by name if the set moved. Never by a registry of old roster bytes, never by counts;
+  usable EXACTLY: its eligible set is re-derivable from the checkpoint alone — **`source_records`
+  IS the eligible set** (the roster's keys are validated to exist in the manifest, so the records
+  that survive the filter are exactly the eligible ones) — so `require_matching_data_provenance`
+  compares it to today's per airport, refuses by name with both set digests, and then reads the
+  v3 entry as today's. It deliberately reads NOTHING else from the payload: an earlier version
+  rebuilt the checkpoint's `TSConfig` to recompute `data_selection`'s split digests, which
+  re-imposed the model-recipe contract on a reader that needs none of it and raised `TypeError`
+  on three real pooled checkpoints. Never by a registry of old roster bytes;
 - `checkpoint_metadata.json` / `history.json` name the map `eligible_sets`; artifacts written
   before 2026-09-08 name `eligibility_rosters` (roster bytes) and are read through the
   checkpoint payload instead — a CV `cv_results.json` of that generation can only be checked by
