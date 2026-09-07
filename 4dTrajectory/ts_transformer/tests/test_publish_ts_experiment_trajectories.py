@@ -220,6 +220,175 @@ def test_reused_prediction_dir_skips_predict_and_is_never_archived(monkeypatch, 
     assert publisher._loose_prediction_records(plan.output_dir) == []
 
 
+# ── anytime bins: one category per re-anchored bin ──────────────────────────
+
+def _anytime_records(tmp_path: Path, checkpoint: Path, *, limit: int = 0,
+                     records: int = 236, schema: str | None = None) -> Path:
+    """A record directory as `run_ts_anytime_curve.py --write-records` writes one."""
+    directory = tmp_path / "anytime_records_20260908" / "records" / "L1_native32" / "12km"
+    _write_json(directory / "summary.json", {
+        "checkpoint": str(checkpoint), "split": "val",
+        "results": [{"id": "AAL1", "arr_airport": "KRDU"}],
+        "anytime": {
+            "schema": schema or publisher.ANYTIME_RECORDS_SCHEMA,
+            "campaign": "anytime_records_20260908",
+            "arm": "A0-fixed",
+            "label": "L1_native32",
+            "bin_m": 12000.0,
+            "bin_label": "12km",
+            "anchor_rule": "the closest sample",
+            "min_future_s": 60.0,
+            "split": "val",
+            "limit": limit,
+            "split_flights": 1404,
+            "measured_flights": limit or 1404,
+            "records": records,
+            "coverage": records / (limit or 1404),
+        },
+    })
+    return directory
+
+
+def _anytime_plan(tmp_path: Path, experiment, directory: Path) -> "publisher.PublicationPlan":
+    return publisher.PublicationPlan(
+        experiment,
+        "KRDU",
+        "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=directory,
+    )
+
+
+def test_an_anytime_bin_publishes_as_its_own_category_under_the_campaign(
+    monkeypatch, tmp_path,
+):
+    """A bin is a re-anchored SUBSET of the split, so it gets its own key, its own picker
+    entry (the picker dedupes by experiment id) and the campaign as its group — otherwise
+    only the first bin published would ever be selectable, under the training campaign."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _anytime_plan(tmp_path, experiment, _anytime_records(tmp_path, checkpoint))
+    plain = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+    )
+
+    assert plan.category == f"{plain.category[: -len('_val')]}_a12km_val"
+    assert plan.category != plain.category
+    assert plan.experiment_group == "anytime_records_20260908"
+    metadata = plan.experiment_metadata
+    assert metadata["id"] == f"{experiment.experiment_id}@12km"
+    assert metadata["id"] != plain.experiment_metadata["id"]
+    assert metadata["group"] == "anytime_records_20260908"
+    assert metadata["label"].endswith("@ 12km remaining (236 of 1404 flights)")
+    assert plan.category_label.endswith(metadata["label"])
+    # Its own evaluation report and publication manifest: bins must not overwrite each
+    # other's verdicts in the split's directory.
+    assert plan.output_dir == plain.output_dir / "a12km"
+    publish = dict(plan.commands())["publish-czml"]
+    assert publish[publish.index("--experiment-id") + 1] == metadata["id"]
+    assert publish[publish.index("--experiment-group") + 1] == "anytime_records_20260908"
+
+
+def test_an_anytime_label_states_the_limit_it_was_measured_under(monkeypatch, tmp_path):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    directory = _anytime_records(tmp_path, checkpoint, limit=300, records=236)
+
+    plan = _anytime_plan(tmp_path, experiment, directory)
+
+    assert plan.experiment_metadata["label"].endswith(
+        "@ 12km remaining (236 of 300 flights, --limit 300 of 1404 in the split)"
+    )
+
+
+def test_an_anytime_publication_manifest_refreshes_to_the_same_label(monkeypatch, tmp_path):
+    """The bin rides in the manifest, so a label refresh never reopens the record directory
+    (which is read-only, and may have been archived elsewhere) to recompute the same name."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _anytime_plan(
+        tmp_path, experiment, _anytime_records(tmp_path, checkpoint, limit=300)
+    )
+    _write_json(plan.evaluation_report, {"trajectories": [], "summary": {}})
+    _write_json(plan.publication_manifest, publisher._publication_document(
+        plan, status="completed", completed_steps=("evaluate", "publish-czml"),
+    ))
+    manifest = plan.comparison_dir.parent / "categories.json"
+    _write_json(manifest, {"categories": [{"key": plan.category, "label": "stale"}]})
+
+    seen, patched = publisher.refresh_labels_from_manifests(
+        tmp_path / "published", tmp_path / "frontend"
+    )
+
+    assert (seen, patched) == (1, 1)
+    category = json.loads(manifest.read_text())["categories"][0]
+    assert category["label"] == plan.category_label
+    assert category["experiment"] == plan.experiment_metadata
+
+
+def test_a_pooled_anytime_bin_is_refused_rather_than_filed_under_one_airport(
+    monkeypatch, tmp_path,
+):
+    """The runner replays the checkpoint's WHOLE split and offers no airport narrowing, so a
+    pooled checkpoint's bin is one cohort over every airport it was trained on. The publisher
+    fans out one plan per airport — publishing that directory would file all five airports'
+    flights under each airport's category and print the pooled count as that airport's."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(publisher, "_sha256", lambda path: (
+        "manifest-sha" if path == manifest else experiment.checkpoint_sha256
+    ))
+    directory = _anytime_records(tmp_path, checkpoint)
+    summary = json.loads((directory / "summary.json").read_text())
+    summary["results"] = [{"id": "AAL1", "arr_airport": "KRDU"},
+                          {"id": "UAL2", "arr_airport": "KSJC"}]
+    _write_json(directory / "summary.json", summary)
+
+    plan = _anytime_plan(tmp_path, experiment, directory)
+
+    assert "not just KRDU" in (plan.preflight_error() or "")
+
+
+def test_the_same_checkpoint_cannot_be_given_two_prediction_dirs(monkeypatch, tmp_path):
+    """Publishing several bins of one checkpoint is the expected workflow, and the obvious
+    attempt is to repeat the flag — which used to keep the last one silently."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    directory = _anytime_records(tmp_path, checkpoint)
+
+    with pytest.raises(SystemExit):
+        publisher.main([
+            "--experiment-index", str(index),
+            "--checkpoint", "campaign/stage/run_seed1337",
+            "--reuse-prediction-dir", f"campaign/stage/run_seed1337={directory}",
+            "--reuse-prediction-dir", f"campaign/stage/run_seed1337={directory.parent}",
+        ])
+
+
+def test_an_unknown_anytime_schema_is_refused_rather_than_published_as_the_split(
+    monkeypatch, tmp_path,
+):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    directory = _anytime_records(tmp_path, checkpoint, schema="ts-anytime-records-v99")
+
+    plan = _anytime_plan(tmp_path, experiment, directory)
+    with pytest.raises(ValueError, match="unknown schema"):
+        _ = plan.category
+
+
 def test_reused_prediction_dir_must_match_the_checkpoint_and_split(monkeypatch, tmp_path):
     index, _checkpoint = _indexed_checkpoint(tmp_path)
     experiment = publisher.discover_checkpoints(index)[0]

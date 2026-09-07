@@ -43,6 +43,16 @@ A `cta_conditioning=given` or `intent_conditioning=truth-…` checkpoint is REFU
 the future at every anchor, so their curves would improve for free. The output directory is
 an immutable artifact, is written only once the measurement has succeeded, and nothing is
 written back to the data plane.
+
+**``--write-records``** additionally keeps every forecast the curve was scored on, as a full
+prediction directory per checkpoint and bin (``<out>/records/<label>/<bin>km/``, written by
+``export.write_batch``) — the same shape ``predict`` writes, so ``python -m evaluation`` and
+the comparison-CZML publisher take it unchanged and an anytime prediction becomes something
+a viewer can SEE, not only a table. The records and the curve come out of ONE forward pass:
+the summary's metrics ARE the curve's metrics, never a second replay. Each directory's
+``summary.json`` carries an ``anytime`` block stating the bin, the anchor rule, the coverage
+and any ``--limit`` — a bin holds fewer flights than the split (that gap is what the curve
+measures), so whoever publishes it can say whose numbers these are.
 """
 
 from __future__ import annotations
@@ -51,6 +61,7 @@ import argparse
 from dataclasses import dataclass, replace
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import time
@@ -74,6 +85,7 @@ from anchor_grid import (  # noqa: E402
     PARTIAL_COVERAGE,
     anchors_for_bin,
     bin_anchor,
+    bin_label,
     remaining_path_profiles,
     strata_fixed_at_l1,
 )
@@ -98,7 +110,12 @@ from dataset import (  # noqa: E402
     build_series,
     load_flight_dicts,
 )
-from export import observed_series_metrics  # noqa: E402
+from export import (  # noqa: E402
+    PredictionRecord,
+    build_prediction_record,
+    observed_series_metrics,
+    write_batch,
+)
 from forecast import forecast_approaches  # noqa: E402
 from io_utils import file_sha256  # noqa: E402
 from models import resolve_device  # noqa: E402
@@ -106,6 +123,12 @@ from train import load_checkpoint, usable_series  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 
 RESULT_SCHEMA = "ts-anytime-curve-a0-v2"
+#: The ``anytime`` block ``--write-records`` adds to each record directory's summary. It is
+#: what a downstream publisher reads to name the subset: a bin is a re-anchored SUBSET of the
+#: split, and its errors must never be presented as the split's.
+RECORDS_SCHEMA = "ts-anytime-records-v1"
+#: Where the records live under the artifact — one directory per checkpoint label and bin.
+RECORDS_DIR = "records"
 
 # The grid itself is the package's (`anchor_grid`), shared with the checkpoint-selection
 # metric that scores four of these bins; this module only spells it for argparse.
@@ -163,6 +186,7 @@ class Grid:
     min_future_s: float
     batch_size: int | None
     limit: int
+    write_records: bool = False
 
 
 # ── the cell: one table drives the JSON, the text and the empty cell ─────────
@@ -335,13 +359,21 @@ def _geometry(series, forecast) -> dict[str, float]:
 
 
 def measure_bin(model, series, profiles, keys, target_m, *, config, normalizer, device,
-                batch_size: int, min_future_s: float) -> dict[str, dict]:
+                batch_size: int, min_future_s: float, split: str,
+                build_records: bool = False,
+                ) -> tuple[dict[str, dict], list[tuple[int, PredictionRecord, dict]]]:
     """Every flight that HAS an anchor at ``target_m``, scored from it.
 
     Flights are grouped by anchor index because that is what one forecast call takes; the
     groups are then chunked so a bin never builds a batch bigger than the checkpoint's own.
     On real data the anchors are nearly all distinct, so the effective batch is small (≈2.7
     at KRDU) — the grouping is for correctness, not for speed.
+
+    With ``build_records`` the publishable record is assembled from the SAME forecast whose
+    metrics went into the row, and returned beside it as ``(cohort index, record, metrics)``
+    — the pairs `write_batch` needs, positionally aligned by construction. A second pass
+    would be a second measurement, and the published trajectory would no longer be the one
+    the curve scored.
     """
     groups: dict[int, list[int]] = {}
     for index, anchor in anchors_for_bin(
@@ -351,6 +383,7 @@ def measure_bin(model, series, profiles, keys, target_m, *, config, normalizer, 
         groups.setdefault(anchor, []).append(index)
 
     rows: dict[str, dict] = {}
+    records: list[tuple[int, PredictionRecord, dict]] = []
     for anchor in sorted(groups):
         members = groups[anchor]
         for start in range(0, len(members), batch_size):
@@ -374,7 +407,12 @@ def measure_bin(model, series, profiles, keys, target_m, *, config, normalizer, 
                     "chamfer_m": float(geometry["chamfer_m"]),
                     "frechet_m": float(geometry["frechet_m"]),
                 }
-    return rows
+                if build_records:
+                    records.append((index, build_prediction_record(
+                        item, forecast, index=index, model_name=config.model,
+                        horizon_mode=config.horizon_mode, split=split,
+                    ), metrics))
+    return rows, records
 
 
 def stratum_block(selected: list[dict], stratum_size: int) -> dict:
@@ -556,6 +594,14 @@ def render(payload: dict) -> str:
             + ("" if arm["command_hook"] is None else f", hook {arm['command_hook']}"),
             f"   {arm['checkpoint']}",
         ]
+        if arm["record_dirs"]:
+            # In BIN order, not lexicographic — `sorted` on the paths reads 10, 12, 4, 8 km.
+            written = [arm["record_dirs"][str(value)] for value in bins_m
+                       if str(value) in arm["record_dirs"]]
+            lines.append(
+                "   records (the SAME forecasts these cells score, publishable as they "
+                f"are): {', '.join(written)}"
+            )
         for stratum, size in arm["stratum_n_at_l1"].items():
             lines += ["", f"   {stratum}  [{size} flights at L-1]", header]
             for value in bins_m:
@@ -605,9 +651,85 @@ def _render_verdicts(verdict: dict) -> list[str]:
     ]
 
 
+# ── the publishable records (--write-records) ───────────────────────────────
+
+@dataclass(frozen=True)
+class RecordSink:
+    """Where ``--write-records`` puts the records, and what the artifact will be CALLED.
+
+    ``root`` is inside the staging directory (so a crash publishes nothing), while
+    ``campaign`` is the name the artifact is renamed to — the heading a publisher groups
+    the bins under. Taking the name from ``root.parent`` would write the staging directory's
+    throwaway name into every summary.
+    """
+
+    root: Path
+    campaign: str
+
+
+def records_summary_block(arm: Arm, grid: Grid, target_m: float, *, campaign: str,
+                          measured: int, records: int) -> dict:
+    """The ``anytime`` block that tells a reader of one record directory what it IS.
+
+    A bin is a re-anchored SUBSET of the split — the flights whose geometry put an
+    admissible sample near ``target_m`` — narrowed again by any ``--limit``. Every number a
+    publisher would need to say so is here: nothing downstream has to re-derive the bin from
+    a directory name.
+    """
+    return {
+        "schema": RECORDS_SCHEMA,
+        # The artifact directory the whole campaign was written under: the publisher groups
+        # its bins under this heading, so the picker shows one campaign, not nine models.
+        "campaign": campaign,
+        "arm": arm.arm,
+        "label": arm.label,
+        "bin_m": float(target_m),
+        "bin_label": bin_label(target_m),
+        "anchor_rule": ANCHOR_DEFINITION,
+        "min_future_s": grid.min_future_s,
+        "split": grid.split,
+        # `limit` is 0 for a whole-split run; `measured` is what was actually built, and
+        # `records` the flights that HAD an anchor in this bin. coverage is of the measured
+        # cohort, exactly as the curve's cells report it.
+        "limit": grid.limit,
+        "split_flights": len(arm.payload["split"][grid.split]),
+        "measured_flights": measured,
+        "records": records,
+        "coverage": records / measured if measured else 0.0,
+    }
+
+
+def write_bin_records(arm: Arm, grid: Grid, target_m: float, sink: RecordSink,
+                      pairs: list[tuple[int, PredictionRecord, dict]], *,
+                      measured: int) -> str | None:
+    """One bin's prediction directory, or None when the bin held no flight.
+
+    Ordered by the cohort's own order rather than by anchor (the forecast loop batches by
+    anchor), so two runs of the same measurement write the same summary.
+    """
+    if not pairs:
+        return None
+    ordered = sorted(pairs, key=lambda pair: pair[0])
+    directory = sink.root / arm.label / bin_label(target_m)
+    write_batch(
+        [record for _, record, _ in ordered],
+        output_dir=directory,
+        config_dict=arm.config.to_dict(),
+        flight_metrics=[metrics for _, _, metrics in ordered],
+        checkpoint=str(arm.path),
+        split=grid.split,
+        extra_summary={"anytime": records_summary_block(
+            arm, grid, target_m, campaign=sink.campaign,
+            measured=measured, records=len(ordered),
+        )},
+    )
+    return str(directory.relative_to(sink.root.parent))
+
+
 # ── the run ─────────────────────────────────────────────────────────────────
 
-def measure_checkpoint(arm: Arm, series: list, grid: Grid, device: torch.device) -> dict:
+def measure_checkpoint(arm: Arm, series: list, grid: Grid, device: torch.device,
+                       sink: RecordSink | None = None) -> dict:
     """One arm's whole curve: the strata fixed at L−1, then every bin scored from its own
     anchor."""
     started = time.time()
@@ -626,11 +748,13 @@ def measure_checkpoint(arm: Arm, series: list, grid: Grid, device: torch.device)
           f"device {device}", flush=True)
 
     curve: dict[float, dict] = {}
+    record_dirs: dict[str, str] = {}
     for target_m in grid.bins_m:
-        rows = measure_bin(
+        rows, pairs = measure_bin(
             arm.model, series, profiles, keys, target_m, config=config,
             normalizer=arm.normalizer, device=device, batch_size=batch_size,
-            min_future_s=grid.min_future_s,
+            min_future_s=grid.min_future_s, split=grid.split,
+            build_records=sink is not None,
         )
         curve[target_m] = {
             "strata": summarise_bin(rows, masks, keys, stratum_size),
@@ -638,6 +762,15 @@ def measure_checkpoint(arm: Arm, series: list, grid: Grid, device: torch.device)
             # any paired reading (this runner's monotonicity verdict included) needs them.
             "flights": rows,
         }
+        if sink is not None:
+            written = write_bin_records(
+                arm, grid, target_m, sink, pairs, measured=len(series)
+            )
+            if written is None:
+                print(f"  {target_m / 1000:>5.1f} km: no flight has an anchor here — "
+                      "no record directory written", flush=True)
+            else:
+                record_dirs[str(target_m)] = written
         everything = curve[target_m]["strata"][STRATUM_ALL]
         vectored = curve[target_m]["strata"][STRATUM_VECTORED]
         print(f"  {target_m / 1000:>5.1f} km: {everything['n']:>5d} flights "
@@ -672,6 +805,9 @@ def measure_checkpoint(arm: Arm, series: list, grid: Grid, device: torch.device)
         # Keyed by the bin's metres as a string: JSON object keys are strings, and a float
         # key silently becomes one anyway.
         "bins": {str(value): curve[value] for value in grid.bins_m},
+        # Present only under --write-records: the artifact-relative prediction directory
+        # per bin, so a publisher never has to guess the path from a bin value.
+        "record_dirs": record_dirs,
         "verdicts": verdicts(grid, curve, masks, keys),
     }
 
@@ -702,6 +838,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="measure only the first N flights of each split — a smoke test "
                              "on a real checkpoint; coverage denominators come from the "
                              "flights actually built and the artifact carries both counts")
+    parser.add_argument("--write-records", action="store_true",
+                        help="also keep every forecast the curve scored, as a full "
+                             f"prediction directory per checkpoint and bin under "
+                             f"<out>/{RECORDS_DIR}/<label>/<bin>km/ — the shape `predict` "
+                             "writes, so `python -m evaluation` and the comparison-CZML "
+                             "publisher take it unchanged. Each summary.json carries an "
+                             "`anytime` block naming the bin, the anchor rule, the coverage "
+                             "and any --limit. NOTE it is stricter than the curve alone: the "
+                             "record contract refuses a non-finite metric, so a flight whose "
+                             "cell the curve would have printed as NaN aborts the run")
     parser.add_argument("--command-hook",
                         choices=[hook for hook in CONTROL_HOOKS_AVAILABLE
                                  if hook != CONTROL_HOOK_OFF],
@@ -758,6 +904,7 @@ def parse_grid(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Gri
         min_future_s=args.min_future_s,
         batch_size=args.batch_size,
         limit=args.limit,
+        write_records=args.write_records,
     )
 
 
@@ -780,33 +927,53 @@ def main(argv: list[str] | None = None) -> int:
         for label, path in arms.items()
     ]
 
-    payload = {
-        "schema": RESULT_SCHEMA,
-        "grid": {
-            "split": grid.split,
-            "bins_m": list(grid.bins_m),
-            "min_future_s": grid.min_future_s,
-            "limit": grid.limit,
-        },
-        "anchor_definition": ANCHOR_DEFINITION,
-        "strata_anchor": "L-1 (seq_len - 1), computed once and fixed for every bin",
-        "geometry_truth": GEOMETRY_TRUTH,
-        "partial_coverage_threshold": PARTIAL_COVERAGE,
-        "device": str(device),
-        "checkpoints": {
-            arm.label: measure_checkpoint(arm, cohort_series(arm, grid), grid, device)
-            for arm in loaded
-        },
-    }
-    text = render(payload)
-    # The artifact appears whole: a run that dies mid-measurement leaves a `.partial-*`
-    # directory next to it, never a half-written curve under the name a reader will cite.
+    # The artifact appears whole: everything is built inside a `.partial-*` directory that is
+    # renamed into place only once the measurement has succeeded, and removed if it has not —
+    # no half-written curve, and no half-written record set, under the name a reader cites.
+    # Staged only AFTER every checkpoint has loaded, so a refused invocation leaves nothing.
     out.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(dir=out.parent, prefix=f"{out.name}.partial-"))
-    (staged / "anytime_curve.json").write_text(json.dumps(payload, indent=2))
-    (staged / "anytime_curve.txt").write_text(text)
-    staged.chmod(0o755)                     # mkdtemp is 0700; the artifact is readable
-    staged.rename(out)
+    try:
+        sink = (
+            RecordSink(staged / RECORDS_DIR, out.name) if grid.write_records else None
+        )
+        payload = {
+            "schema": RESULT_SCHEMA,
+            "grid": {
+                "split": grid.split,
+                "bins_m": list(grid.bins_m),
+                "min_future_s": grid.min_future_s,
+                "limit": grid.limit,
+                "write_records": grid.write_records,
+            },
+            "anchor_definition": ANCHOR_DEFINITION,
+            "strata_anchor": "L-1 (seq_len - 1), computed once and fixed for every bin",
+            "geometry_truth": GEOMETRY_TRUTH,
+            "partial_coverage_threshold": PARTIAL_COVERAGE,
+            "device": str(device),
+            "checkpoints": {
+                arm.label: measure_checkpoint(
+                    arm, cohort_series(arm, grid), grid, device, sink
+                )
+                for arm in loaded
+            },
+        }
+        text = render(payload)
+        (staged / "anytime_curve.json").write_text(json.dumps(payload, indent=2))
+        (staged / "anytime_curve.txt").write_text(text)
+        staged.chmod(0o755)                 # mkdtemp is 0700; the artifact is readable
+        # Inside the try as well: `out.exists()` was checked before the checkpoints loaded,
+        # and with --write-records the measurement between then and now can run for hours.
+        # If something else claimed the name meanwhile, the rename raises and the staged
+        # directory — by then the whole record set — must go with it.
+        staged.rename(out)
+    except BaseException:
+        # A Ctrl-C here throws away everything measured so far; say which path went, or the
+        # only trace of a long run disappears silently.
+        print(f"\nremoving the staged artifact {staged} — the run did not complete",
+              file=sys.stderr, flush=True)
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
     print()
     print(text, end="")
     print(f"wrote {out / 'anytime_curve.txt'} and {out / 'anytime_curve.json'}")

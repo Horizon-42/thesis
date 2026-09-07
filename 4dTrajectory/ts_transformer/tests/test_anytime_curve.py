@@ -258,13 +258,14 @@ def test_the_forecast_at_a_late_anchor_reads_the_history_ending_there(
         return history
 
     monkeypatch.setattr(forecast_module, "_history_at_anchor", spy)
-    rows = runner.measure_bin(
+    rows, records = runner.measure_bin(
         arm.model, series, profiles, keys, 4_000.0, config=arm.config,
         normalizer=arm.normalizer, device=torch.device("cpu"), batch_size=8,
-        min_future_s=10.0,
+        min_future_s=10.0, split="val",
     )
 
     assert set(rows) == set(keys)
+    assert records == []                    # no --write-records: nothing is assembled
     for item, profile, key in zip(series, profiles, keys):
         anchor = runner.bin_anchor(
             item, profile, 4_000.0, seq_len=arm.config.seq_len, min_future_s=10.0
@@ -457,7 +458,7 @@ def test_the_curve_runs_end_to_end_and_states_its_coverage(
     assert payload["schema"] == runner.RESULT_SCHEMA
     assert payload["grid"] == {
         "split": "val", "bins_m": [20_000.0, 10_000.0, 4_000.0],
-        "min_future_s": 10.0, "limit": 0,
+        "min_future_s": 10.0, "limit": 0, "write_records": False,
     }
     assert "closest" in payload["anchor_definition"]
     assert payload["strata_anchor"].startswith("L-1")
@@ -525,8 +526,130 @@ def test_the_curve_runs_end_to_end_and_states_its_coverage(
     assert "1. paired vectored ADE p50" in text
     assert verdicts["monotone"]["status"].upper() in text
     assert "3. s_freeze" in text and "duration head cannot predict below ~125 s" in text
+    assert arm["record_dirs"] == {}                        # no --write-records was asked for
+    assert "records (" not in text
     # The bin's flight count reaches the terminal too, not only the artifact.
     assert "4.0 km:" in capsys.readouterr().out
+
+
+# ── --write-records: the forecasts the curve scored, publishable as they are ─
+
+def test_write_records_publishes_the_forecasts_the_curve_itself_scored(
+    monkeypatch, tmp_path, trained_checkpoint, built_series
+) -> None:
+    """The record set and the curve come out of ONE forward pass.
+
+    Three things make a published anytime prediction mean what it says, and each is checked
+    against the curve rather than against itself: the record is anchored at the BIN's anchor
+    (`source.anchorTimeS` is that sample's time — the shared clock §六 7 puts a re-anchored
+    forecast on), its states begin AT that sample, and the summary's per-flight error is the
+    very number the curve's cell was computed from. A second replay would satisfy the first
+    two and quietly break the third.
+    """
+    flights, checkpoint = trained_checkpoint
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    out = tmp_path / "with_records"
+    assert runner.main([
+        "--checkpoint", f"tiny={checkpoint}", "--out", str(out), "--device", "cpu",
+        "--bins-km", "10", "--min-future-s", "10", "--write-records",
+    ]) == 0
+
+    payload = json.loads((out / "anytime_curve.json").read_text())
+    assert payload["grid"]["write_records"] is True
+    arm = payload["checkpoints"]["tiny"]
+    assert arm["record_dirs"] == {"10000.0": f"{runner.RECORDS_DIR}/tiny/10km"}
+    directory = out / runner.RECORDS_DIR / "tiny" / "10km"
+    summary = json.loads((directory / "summary.json").read_text())
+
+    # The summary says WHOSE numbers these are (§六 2: a bin is a subset, never the split).
+    block = summary["anytime"]
+    assert block["schema"] == runner.RECORDS_SCHEMA
+    assert block["campaign"] == out.name and block["label"] == "tiny"
+    assert block["arm"] == runner.ARM_FIXED
+    assert block["bin_m"] == 10_000.0 and block["bin_label"] == "10km"
+    assert block["anchor_rule"] == runner.ANCHOR_DEFINITION
+    assert block["min_future_s"] == 10.0 and block["split"] == "val" and block["limit"] == 0
+    cell = arm["bins"]["10000.0"]["strata"][STRATUM_ALL]
+    assert block["records"] == len(summary["results"]) == cell["n"]
+    assert block["measured_flights"] == arm["flights"]
+    assert block["split_flights"] == arm["split_flights"]
+    assert block["coverage"] == pytest.approx(cell["coverage"])
+
+    by_key = {series.dataset_id: series for series in built_series}
+    rows = arm["bins"]["10000.0"]["flights"]
+    assert summary["results"]                              # the bin is populated at all
+    for result in summary["results"]:
+        stem = result["states_file"][: -len("_states.json")]
+        row = rows[f"{AIRPORT}:{stem}"]
+        states = json.loads((directory / result["states_file"]).read_text())
+        anchor = row["anchor_index"]
+        # 1. the record is anchored at the BIN's anchor, not at L−1...
+        assert anchor > arm["anchor_l1"]
+        assert states["source"]["anchorIndex"] == anchor
+        assert states["source"]["anchorTimeS"] == pytest.approx(
+            float(by_key[f"{AIRPORT}:{stem}"].times[anchor])
+        )
+        # 2. ...and its first predicted row IS that sample: t=0 there, at the observed
+        # position, which is what lets a viewer place it on the observed flight's clock.
+        assert states["predicted_states"][0]["t"] == 0.0
+        assert states["observed_states"][anchor]["t"] == 0.0
+        for axis in ("lat", "lon"):
+            assert states["predicted_states"][0][axis] == pytest.approx(
+                states["observed_states"][anchor][axis]
+            )
+        # 3. one forward pass: the published error IS the curve's.
+        assert result["ade_m"] == row["ade_m"]
+        assert result["fde_m"] == row["fde_m"]
+        assert result["final_time_error_s"] == row["final_time_error_s"]
+        assert result["predicted_final_time_s"] == row["predicted_final_time_s"]
+
+    assert "records (the SAME forecasts" in (out / "anytime_curve.txt").read_text()
+
+
+def test_a_limited_record_run_states_the_limit_it_was_taken_under(
+    monkeypatch, tmp_path, trained_checkpoint
+) -> None:
+    """A subset's numbers must never read as the split's: the block carries both counts."""
+    flights, checkpoint = trained_checkpoint
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    out = tmp_path / "limited_records"
+    assert runner.main([
+        "--checkpoint", f"tiny={checkpoint}", "--out", str(out), "--device", "cpu",
+        "--bins-km", "10", "--min-future-s", "10", "--limit", "2", "--write-records",
+    ]) == 0
+
+    block = json.loads(
+        (out / runner.RECORDS_DIR / "tiny" / "10km" / "summary.json").read_text()
+    )["anytime"]
+    assert block["limit"] == 2
+    assert block["measured_flights"] == 2
+    assert block["split_flights"] > 2
+    assert block["records"] <= 2
+
+
+def test_a_failed_record_run_stages_nothing_under_the_published_name(
+    monkeypatch, tmp_path, trained_checkpoint
+) -> None:
+    """The records are built INSIDE the staging directory, so a crash after some bins have
+    been written still leaves no half-published record set a viewer could load."""
+    flights, checkpoint = trained_checkpoint
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    real = runner.write_bin_records
+
+    def explode_on_the_second(*args, **kwargs):
+        if getattr(explode_on_the_second, "seen", False):
+            raise RuntimeError("the writer died")
+        explode_on_the_second.seen = True
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "write_bin_records", explode_on_the_second)
+    out = tmp_path / "never_records"
+    with pytest.raises(RuntimeError, match="the writer died"):
+        runner.main(["--checkpoint", f"tiny={checkpoint}", "--out", str(out),
+                     "--device", "cpu", "--bins-km", "10,8", "--min-future-s", "10",
+                     "--write-records"])
+    assert not out.exists()
+    assert not list(tmp_path.glob("never_records.partial-*"))
 
 
 def test_the_geometry_is_reported_beside_the_time_aligned_error(built_series) -> None:

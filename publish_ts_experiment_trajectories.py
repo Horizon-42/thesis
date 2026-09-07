@@ -11,6 +11,13 @@ that directory is read-only here. ``--result-source prediction`` publishes a
 primary result under Prediction; the default ``experiment`` source includes checkpoint metadata
 for the Experiments picker.
 
+A reused directory written by ``run_ts_anytime_curve.py --write-records`` carries an
+``anytime`` block naming the remaining-path bin its forecasts were anchored in. Such a
+directory publishes as its OWN category — key, picker entry and label suffixed with the bin,
+grouped under the anytime campaign — because it holds a re-anchored SUBSET of the split, not
+the split: the label states the bin and how many flights it holds, so a bin's error can never
+be read as the split's.
+
 Outer-test is not a valid option here.  This command is for development train/validation
 inspection only.
 """
@@ -24,9 +31,9 @@ import re
 import subprocess
 import sys
 import tarfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -52,6 +59,12 @@ PUBLICATION_SCHEMA = "ts-experiment-publication-v1"
 PUBLICATION_INDEX_SCHEMA = "ts-experiment-publication-index-v1"
 PUBLICATION_MANIFEST = "publication.json"
 DEVELOPMENT_SPLITS = ("train", "val")
+
+#: A MIRROR of ``run_ts_anytime_curve.RECORDS_SCHEMA`` — the block that runner writes into
+#: each record directory's ``summary.json``. Not imported: that module pulls in torch and the
+#: whole ts package, and this script is a subprocess orchestrator that must stay importable
+#: without them. Change the two together.
+ANYTIME_RECORDS_SCHEMA = "ts-anytime-records-v1"
 
 
 def _utc_now() -> str:
@@ -93,6 +106,75 @@ def _path_for_manifest(path: Path) -> str:
         return str(resolved.relative_to(REPO_ROOT.resolve()))
     except ValueError:
         return str(resolved)
+
+
+@dataclass(frozen=True)
+class AnytimeBin:
+    """One re-anchored bin of an anytime record campaign: what a category must SAY about it.
+
+    Read off the reused prediction directory's own ``summary.json``; absent for every other
+    prediction directory, and a publication is then exactly what it was before. The bin is
+    the single source of the category's identity — key suffix, picker group and label — so
+    nothing downstream has to parse a directory name to learn which anchor it is looking at.
+    """
+
+    campaign: str
+    #: The runner's own spelling of the bin (``12km``) — one spelling for the directory it
+    #: wrote, the category key and the label, so none of the three can drift.
+    bin_label: str
+    records: int
+    measured_flights: int
+    split_flights: int
+    limit: int
+
+    @property
+    def key_suffix(self) -> str:
+        """``a12km`` — the ``a`` keeps the fragment from opening with a digit."""
+        return f"a{self.bin_label}"
+
+    @property
+    def label_suffix(self) -> str:
+        """The bin AND its population: a subset's numbers must never read as the split's.
+
+        Both denominators, because they answer different questions: ``records`` of
+        ``measured_flights`` is how much of the replayed cohort reached this bin (the rest
+        never flew a sample near it), and ``--limit`` of ``split_flights`` is how much of the
+        split was replayed at all.
+        """
+        counts = f"{self.records} of {self.measured_flights} flights"
+        if self.limit:
+            counts += f", --limit {self.limit} of {self.split_flights} in the split"
+        return f"@ {self.bin_label} remaining ({counts})"
+
+
+def _anytime_from_block(block: dict[str, Any]) -> AnytimeBin:
+    """The fields this publisher uses, named once.
+
+    Both sources are read through here: the record directory's summary block (which carries
+    more than a category needs — arm, anchor rule, coverage) and the publication manifest's
+    own copy. Selecting rather than splatting is what lets the two shapes differ, and what
+    keeps a field this publisher stops using from breaking a refresh of an older manifest.
+    """
+    return AnytimeBin(
+        campaign=str(block["campaign"]),
+        bin_label=str(block["bin_label"]),
+        records=int(block["records"]),
+        measured_flights=int(block["measured_flights"]),
+        split_flights=int(block["split_flights"]),
+        limit=int(block["limit"]),
+    )
+
+
+def _anytime_bin(summary_path: Path) -> AnytimeBin | None:
+    block = _load_object(summary_path).get("anytime")
+    if block is None:
+        return None
+    if block.get("schema") != ANYTIME_RECORDS_SCHEMA:
+        raise ValueError(
+            f"{summary_path} carries an anytime block of unknown schema "
+            f"{block.get('schema')!r} (this publisher speaks {ANYTIME_RECORDS_SCHEMA})"
+        )
+    return _anytime_from_block(block)
 
 
 @dataclass(frozen=True)
@@ -229,6 +311,19 @@ class PublicationPlan:
                 f"reused prediction directory {self.prediction_dir} has no summary.json"
             )
 
+    @cached_property
+    def anytime(self) -> AnytimeBin | None:
+        """The re-anchored bin these records are, or None for an ordinary L−1 batch.
+
+        Reads the reused directory's summary DIRECTLY rather than through ``self.summary``:
+        that property goes via ``records_dir`` → ``output_dir``, and ``output_dir`` now reads
+        this one. Today the cycle is broken only by ``or`` short-circuiting; spelling the
+        path here means it cannot come back as a ``RecursionError``.
+        """
+        if self.prediction_dir is None:
+            return None
+        return _anytime_bin(self.prediction_dir / "summary.json")
+
     @property
     def data_manifest(self) -> Path:
         return self.harvest_root / self.airport / "arrivals" / "manifest.json"
@@ -239,13 +334,17 @@ class PublicationPlan:
 
     @property
     def output_dir(self) -> Path:
-        return (
+        base = (
             self.raw_output_root
             / self.experiment.directory_name
             / self.result_source
             / self.airport
             / self.split
         )
+        # One checkpoint publishes once per BIN, so each bin owns its evaluation report and
+        # publication manifest — sharing the split's directory would have the bins overwrite
+        # each other's verdicts.
+        return base if self.anytime is None else base / self.anytime.key_suffix
 
     @property
     def records_dir(self) -> Path:
@@ -276,7 +375,12 @@ class PublicationPlan:
     @property
     def category(self) -> str:
         run = _safe_stem(self.experiment.run_id, limit=42).lower()
-        return f"{self.result_source}_{run}_{self.experiment.token}_{self.split}"
+        bin_key = "" if self.anytime is None else f"_{self.anytime.key_suffix}"
+        return f"{self.result_source}_{run}_{self.experiment.token}{bin_key}_{self.split}"
+
+    @property
+    def experiment_group(self) -> str | None:
+        return _experiment_group(self.experiment.campaign, self.anytime)
 
     @property
     def comparison_dir(self) -> Path:
@@ -289,17 +393,19 @@ class PublicationPlan:
     @property
     def category_label(self) -> str:
         return _publication_label(
-            self.split, self.result_source, self.experiment.config, self.experiment.run_id
+            self.split, self.result_source, self.experiment.config, self.experiment.run_id,
+            anytime=self.anytime,
         )
 
     @property
     def experiment_metadata(self) -> dict[str, Any]:
         return _publication_experiment_metadata(
             experiment_id=self.experiment.experiment_id,
-            campaign=self.experiment.campaign,
+            campaign=self.experiment_group,
             checkpoint=self.experiment.checkpoint_relative,
             config=self.experiment.config,
             run_id=self.experiment.run_id,
+            anytime=self.anytime,
         )
 
     def commands(self) -> list[tuple[str, list[str]]]:
@@ -329,8 +435,8 @@ class PublicationPlan:
         ]
         if self.result_source == "experiment":
             publish += [
-                "--experiment-id", self.experiment.experiment_id,
-                "--experiment-group", self.experiment.campaign,
+                "--experiment-id", self.experiment_metadata["id"],
+                "--experiment-group", self.experiment_group,
                 "--experiment-checkpoint", self.experiment.checkpoint_relative,
             ]
         steps = [
@@ -384,6 +490,24 @@ class PublicationPlan:
                     f"reused predictions in {self.prediction_dir} are the "
                     f"{reused.get('split')!r} split, not {self.split!r}"
                 )
+            # An anytime record directory holds the checkpoint's WHOLE split — the runner
+            # replays the cohort its provenance names and offers no airport narrowing — so a
+            # pooled checkpoint's bin is a five-airport population. Publishing it once per
+            # airport would file every airport's flights under each airport's category and
+            # print the pooled count as that airport's. Refuse rather than mislabel; the
+            # per-airport publication needs an airport dimension in the records themselves.
+            if self.anytime is not None:
+                airports = {
+                    str(row.get("arr_airport") or "").upper()
+                    for row in reused.get("results") or ()
+                }
+                if airports != {self.airport}:
+                    return (
+                        f"reused anytime records in {self.prediction_dir} cover "
+                        f"{sorted(airports)}, not just {self.airport}: a bin of a pooled "
+                        "checkpoint is one cohort over every airport it was trained on, and "
+                        "publishing it per airport would file all of them under each"
+                    )
         return None
 
     def is_complete(self) -> bool:
@@ -403,13 +527,35 @@ class PublicationPlan:
         )
 
 
+def _experiment_group(campaign: str | None, anytime: AnytimeBin | None) -> str | None:
+    """The heading the picker files a model under.
+
+    An anytime bin belongs to its RECORD campaign, not to the campaign the checkpoint was
+    trained in: that is what puts all of one campaign's bins under one heading instead of
+    scattering them across the training campaigns they were replayed from.
+    """
+    return campaign if anytime is None else anytime.campaign
+
+
+def _run_label(
+    config: dict[str, Any], run_id: str, anytime: AnytimeBin | None
+) -> str:
+    """The canonical run name, plus which anchor these particular records were taken at.
+
+    ONE definition, used by the category label and by the picker entry — a bin whose picker
+    entry did not say "@ 12 km" would be indistinguishable from the L−1 publication of the
+    same checkpoint.
+    """
+    name = run_display_name(config, extra=(run_id,))
+    return name if anytime is None else f"{name} {anytime.label_suffix}"
+
+
 def _publication_label(
-    split: str, result_source: str, config: dict[str, Any], run_id: str
+    split: str, result_source: str, config: dict[str, Any], run_id: str,
+    anytime: AnytimeBin | None = None,
 ) -> str:
     kind = "Experiment" if result_source == "experiment" else "Predicted"
-    return category_display_label(
-        split, run_display_name(config, extra=(run_id,)), kind=kind
-    )
+    return category_display_label(split, _run_label(config, run_id, anytime), kind=kind)
 
 
 def _publication_experiment_metadata(
@@ -419,12 +565,15 @@ def _publication_experiment_metadata(
     checkpoint: str,
     config: dict[str, Any],
     run_id: str,
+    anytime: AnytimeBin | None = None,
 ) -> dict[str, Any]:
     return {
-        "id": experiment_id,
+        # The picker DEDUPES by id, so each bin of a checkpoint needs its own — otherwise
+        # only the first bin published would ever appear in the Experiments list.
+        "id": experiment_id if anytime is None else f"{experiment_id}@{anytime.bin_label}",
         "group": campaign,
         "checkpoint": checkpoint,
-        "label": run_display_name(config, extra=(run_id,)),
+        "label": _run_label(config, run_id, anytime),
         "model": config.get("model"),
         "predictionOutput": config.get("prediction_output", "state"),
         "horizonMode": config.get("horizon_mode", "normalized"),
@@ -509,19 +658,25 @@ def refresh_labels_from_manifests(
         run_id = document.get("runId") or ""
         split = document.get("split") or ""
         result_source = document.get("resultSource") or "experiment"
+        # The bin travels in the manifest so a refresh never has to reopen the (read-only,
+        # possibly moved) record directory to recompute the same label.
+        anytime = (
+            _anytime_from_block(document["anytime"]) if document.get("anytime") else None
+        )
         metadata = None
         if result_source == "experiment":
             metadata = _publication_experiment_metadata(
                 experiment_id=document.get("experimentId") or run_id,
-                campaign=document.get("campaign"),
+                campaign=_experiment_group(document.get("campaign"), anytime),
                 checkpoint=document.get("checkpoint") or "",
                 config=config,
                 run_id=run_id,
+                anytime=anytime,
             )
         found = _apply_category_refresh(
             frontend_airports_root / document["airport"] / "comparison" / "categories.json",
             document["category"],
-            _publication_label(split, result_source, config, run_id),
+            _publication_label(split, result_source, config, run_id, anytime),
             result_source,
             metadata,
         )
@@ -567,6 +722,8 @@ def _publication_document(
         "config": plan.experiment.config,
         "recordRetention": plan.record_retention,
     }
+    if plan.anytime is not None:
+        document["anytime"] = asdict(plan.anytime)
     if plan.records_archive.is_file():
         document["recordsArchive"] = {
             "file": plan.records_archive.name,
@@ -894,9 +1051,17 @@ def main(argv: list[str] | None = None) -> int:
         experiment_id, separator, directory = assignment.partition("=")
         if not separator:
             parser.error(f"--reuse-prediction-dir expects EXPERIMENT_ID=DIR, got {assignment!r}")
-        reused_dirs[
-            _normalize_checkpoint_id(experiment_id, experiment_root=experiment_root)
-        ] = Path(directory).resolve()
+        normalized = _normalize_checkpoint_id(experiment_id, experiment_root=experiment_root)
+        # One invocation publishes ONE directory per checkpoint. Silently keeping the last
+        # would turn the obvious way to ask for several anytime bins at once into a run that
+        # publishes only the last of them and says nothing.
+        if normalized in reused_dirs:
+            parser.error(
+                f"--reuse-prediction-dir names {normalized!r} twice ({reused_dirs[normalized]} "
+                f"and {directory}); one invocation publishes one directory per checkpoint — "
+                "run it once per anytime bin"
+            )
+        reused_dirs[normalized] = Path(directory).resolve()
     unknown = set(reused_dirs) - {checkpoint.experiment_id for checkpoint in checkpoints}
     if unknown:
         parser.error(f"--reuse-prediction-dir names an unselected run: {sorted(unknown)[0]}")
