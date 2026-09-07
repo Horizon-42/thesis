@@ -1,0 +1,18 @@
+{
+  "_comment": "L3.c delay absorption inside the corridor (design doc §六 L3.c, pre-registered 2026-09-08, user decision; runs AFTER A0.b, before B1_point_matched). The counterfactual scan showed a LATE CTA is absorbed by leaving the corridor: at +30/+60/+90 s the L3_cta checkpoint stretches the path (length ratio 1.12/1.28/1.51), drifts +558/+1517/+3156 m across track at the threshold and the fully-flyable share falls to 0.3/0/0 %. A scheduler mostly asks for delay. These predict-only arms put the ADOPTED inference-time safety layer (soft barrier command hook, control_hooks_v2_20260906: FDE 1650 -> 1449, straight-in endpoint |xt| p95 1821 -> 70 m on A_control_v3) on the SAME checkpoint at offsets 0 (control) and +30/+60/+90 s and ask where the delay goes once the corridor is enforced: absorbed by speed, pushed upstream of the join, or not absorbed (the rollout arrives early because the barrier will not let the path stretch). The no-hook offsets already exist in l3_cta_counterfactual_20260907 and are the paired comparison. Gates in the doc. Readouts: compare_constraint_arms (reference = l3_cta_20260907/L3_cta, i.e. offset 0 without the hook) over the four hook arms plus the three no-hook offsets; flyability from each arm's flyability_report.json (whole-trajectory fully-flyable share, the definition the counterfactual used); final_time_error_s per arm (the CTA-obedience / unabsorbed-delay measurement); run_ts_straight_in_residual_readout.py on the +60 s hook arm and the +60 s no-hook arm for the speed-by-remaining-distance bands.",
+  "base_recipe": "simple-v3",
+  "arms": [
+    {"key": "L3c_hook_p0s", "label": "L3_cta at the true CTA + soft barrier hook (the control: what the hook costs on the CTA base)",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--command-hook", "barrier", "--hook-saturation", "soft"]},
+    {"key": "L3c_hook_p30s", "label": "CTA +30 s + soft barrier hook",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--cta-offset-s", "30", "--command-hook", "barrier", "--hook-saturation", "soft"]},
+    {"key": "L3c_hook_p60s", "label": "CTA +60 s + soft barrier hook",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--cta-offset-s", "60", "--command-hook", "barrier", "--hook-saturation", "soft"]},
+    {"key": "L3c_hook_p90s", "label": "CTA +90 s + soft barrier hook",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--cta-offset-s", "90", "--command-hook", "barrier", "--hook-saturation", "soft"]}
+  ]
+}
