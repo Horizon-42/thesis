@@ -4,6 +4,48 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — ts_transformer: hard procedure constraints in training — literature survey (83 papers) and the H0–H6 integration plan
+
+**The question.** How to put the final-approach corridor + glidepath window into the TRAINING of
+both output paths as a hard constraint, given that a hinge penalty was vetoed on both paths, the
+tanh-bounded output was adopted on `state`, and the CBF barrier filter is a net gain at predict
+time but made the `control` network lazy when trained through (six arms).
+
+**What was done (docs only, no code, no training).** Three literature clusters collected and
+annotated into `docs/literature/procedure_hard_constraints/` (`README.md` index, `notes_{A,B,C}.md`
+with every core formula transcribed from the PDF, `download.sh`; 80 PDFs, three paywalled papers
+quoted from abstracts and marked unverified). The survey + plan is
+`4dTrajectory/ts_transformer/docs/2026-09-08_hard_constraints_survey_and_integration_plan.md`.
+
+**What the literature settles.** (i) HardNet-Aff's parallel projection collapses to the runway-axis
+clamp — the closed-form justification of `corridor-bounded`; its Prop. 7 (an in-corridor row is left
+untouched, which the tanh does not do) is a cheap arm. (ii) The lazy network is a known, measured
+effect of training through a filter with `CC` bookkeeping (OptLayer): Pizarro Bejarano 2025 removes
+it with a correction penalty `α‖u_uncert − u_cert‖²` (uncertified return 11 → 211 as α 0.1 → 10),
+Krasowski 2023's projection + adaption penalty gives the lowest intervention rate, Oh & Fisac 2026
+prove no performance penalty for a least-restrictive filter used at train AND test (so an accuracy
+loss reads as over-restriction or infeasible gate entry), and Geiger & Straehle 2022 prove test-time
+-only filtering has a quadratic-in-horizon imitation error against linear for train-and-test — the
+adopted predict-time-only form is the quadratic case. A saturating filter is many-to-one; the gauge
+map (Tabas & Zhang) is a bijection onto the state-dependent safe set, which is the structural cure.
+(iii) The C_dual divergence was correct optimisation of an unbounded dual (best response to a
+violated constraint is `+∞`, Gallego-Posada 2022 / Chamon 2023): anneal the level, learn it (Hounie
+2023 resilient constrained learning, whose `u*` is the measured reachable violation rate), or use
+νPI / PID instead of plain ascent. (iv) The gate is a discrete mode to be PREDICTED (TNT / DenseTNT /
+annealed WTA; the map-adaptive goal-based predictor supervises modes from exactly our cross-track
+test). (v) Verified gap: none of twelve aviation TP papers enforces a corridor or glidepath window
+or predicts the establishment point.
+
+**Plan (§4, nothing built).** H0 gate readout (no training) → H1 `state`: learned monotone
+commitment gate (hazard form, BCE on the truth gate, calibrated false-open threshold) × geometric
+membership, clamp-vs-tanh and `xt(d)` side arms → H2 `control`: H2-0 predict-time `(α, k)`
+permissiveness sweep + feasible-entry count; H2-a correction penalty at three doses with a
+committed, feasible-entry gate; H2-b OptLayer-CPC form (raw rollout scored beside the filtered
+one); H2-c bijective bank-interval map instead of saturation; every arm predicted with AND without
+the hook → H3 vertical load-factor barrier + speed hold → H4 resilient / νPI Lagrangian only if
+L1.c passes → H5 solver stage, H6 constrained generation. Runs in the `../thesis-hc` worktree
+(`dev-hard-constraints`); the queued L1.c arm file is untouched.
+
 ### 2026-09-08 — B2 calibration: the half cut is probeable (`--half-seed` + `--readout-only`), and the deployed-vs-mirror coverage gap is mostly the cut
 
 **The question.** On the KRDU B1/B3 quantile arms the DEPLOYED cross-half coverage (fit on half A,

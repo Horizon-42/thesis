@@ -600,6 +600,7 @@ fallbacks and the relabel tooling: `docs/ENGINEERING_NOTES.md`.
 |---|---|
 | designing an experiment / changing loss, rollout, output layer | `docs/ENGINEERING_NOTES.md` |
 | picking up work, checking what a campaign settled | `docs/OPEN_ITEMS.md` |
+| putting the procedure constraint into TRAINING as a hard constraint (either path), or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` (survey with formulas + H0–H6 plan; papers in repo `docs/literature/procedure_hard_constraints/`) |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

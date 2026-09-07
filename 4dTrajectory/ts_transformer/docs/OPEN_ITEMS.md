@@ -75,6 +75,21 @@ the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure outp
   `flight_scenarios/scene_context`, `ts_transformer/scene/features`) is committed as WIP
   (`045c233`): 13 tests, not reviewed, no explainability measurement, no KRDU index
   built. Not started: any scene encoder.
+- **Hard procedure constraints in TRAINING — survey + plan written 2026-09-08, nothing built
+  (`docs/2026-09-08_hard_constraints_survey_and_integration_plan.md`; 83 papers annotated with
+  their core formulas in repo `docs/literature/procedure_hard_constraints/`).** What the
+  literature settles against our evidence: the tanh-bounded state output is HardNet-Aff's
+  closed-form clamp (its Prop. 7 clamp-vs-tanh is a cheap arm); the lazy control network is the
+  known result of training through a filter with `CC` bookkeeping and is removed by a swept
+  correction penalty `α‖u_raw − u_filtered‖²` (Pizarro Bejarano 2025), the OptLayer-CPC form
+  (raw rollout scored beside the filtered one), a feasible-entry committed gate, or a bijective
+  gauge map onto the barrier's bank interval — and predict-time-only filtering carries a
+  quadratic-in-horizon imitation error (Geiger & Straehle 2022), so it is not the end state; the
+  C_dual divergence was an unreachable level (dual best response `+∞`), fixed by annealing /
+  learning the level (Hounie 2023) with νPI. Plan H0–H6 in §4: H0 gate readout (no GPU) → H1
+  learned monotone commitment gate on `state` → H2 control arms on the L1.c base (after L1.c,
+  every arm predicted with AND without the hook) → H3 vertical barrier → H4 only if L1.c passes.
+  Work lives in the `../thesis-hc` worktree (`dev-hard-constraints`), unmerged.
 - **Control command-hook campaigns DONE 2026-09-06 (`control_hooks_20260906` v1 at KRDU,
   `control_hooks_v2_20260906` at KRDU + KSJC; report
   `docs/2026-09-06_control_hooks_results.zh.md`).** Adopted: the v2 soft barrier as a
