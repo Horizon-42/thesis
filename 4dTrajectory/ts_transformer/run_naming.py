@@ -193,6 +193,11 @@ META_FIELDS = (
     "random_train_anchor",
     "training_cohort_min_future_s",
     "checkpoint_selection_metric",
+    # A0.b: WHICH validation number the LR scheduler measures its plateau on. Two runs that
+    # differ only here train under different learning-rate schedules from the epoch the two
+    # numbers part, so it is an identity field. Every stored config predates it and carries
+    # the default, so adding it renames nothing (recounted on disk).
+    "lr_plateau_metric",
     "control_duration_parameterization",
     "control_duration_uniform_floor",
     "control_gradient_clip_norm",
@@ -250,6 +255,7 @@ _ABBREV = {
     "procedure_loss_epsilon": "proc-eps",
     "reference_velocity_source": "ref-vel",
     "checkpoint_selection_metric": "select",
+    "lr_plateau_metric": "lr-metric",
     "training_cohort_min_future_s": "min-future",
     "random_train_anchor": "random-anchor",
     "control_duration_parameterization": "duration",

@@ -305,6 +305,22 @@ CHECKPOINT_SELECTION_COMMON_GRID_METRICS = (
     CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
 )
 
+# WHICH number `ReduceLROnPlateau` measures its plateau on. Checkpoint selection is
+# `checkpoint_selection_metric` either way — this axis only decides when the learning rate
+# is halved.
+#
+# `selection` is what every run before this axis existed did: the scheduler was stepped with
+# the checkpoint-selection value, which is right while the two move together and wrong the
+# moment they part. A0.b (`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+# §2.4c) measured them parting on a random-anchor arm: the validation OBJECTIVE improved to
+# epoch 60 (1.147 -> 0.707) while the selection metric — a dense-grid ADE — stalled after
+# epoch 8, so the LR was halved from epoch 20 on and reached 9.4e-7 by epoch 60. The model
+# stopped training at the epoch the READOUT stalled, not the epoch the loss did. Every
+# fixed-anchor arm improves on both for a hundred epochs, which is why this never showed.
+LR_PLATEAU_METRIC_SELECTION = "selection"
+LR_PLATEAU_METRIC_OBJECTIVE = "objective"
+LR_PLATEAU_METRICS = (LR_PLATEAU_METRIC_SELECTION, LR_PLATEAU_METRIC_OBJECTIVE)
+
 
 def uses_control_dynamics(prediction_output: str) -> bool:
     """Whether an output strategy requires per-flight aircraft dynamics."""
@@ -597,6 +613,7 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "weight_decay": 0.0,
         "lr_plateau_factor": 0.5,
         "lr_plateau_patience": 8,
+        "lr_plateau_metric": LR_PLATEAU_METRIC_SELECTION,
         "patience": 20,
         "val_fraction": 0.15,
         "test_fraction": 0.15,
@@ -801,6 +818,10 @@ class TSConfig:
     weight_decay: float = 0.0
     lr_plateau_factor: float = 0.5
     lr_plateau_patience: int = 3
+    # WHICH validation number the plateau is measured on (`selection` = the checkpoint
+    # metric, today's behaviour; `objective` = the macro validation objective the epoch
+    # record already carries as `val_loss`). It never changes which epoch is KEPT.
+    lr_plateau_metric: str = LR_PLATEAU_METRIC_SELECTION
     patience: int = 20              # early-stopping patience, in epochs without val improvement
     seed: int = 1337
     # ``seed`` controls model initialisation and epoch shuffling.  Leave this unset to
@@ -1125,6 +1146,11 @@ class TSConfig:
         if self.cta_conditioning not in CTA_CONDITIONINGS:
             raise ValueError(
                 f"unknown cta_conditioning {self.cta_conditioning!r}; expected one of {CTA_CONDITIONINGS}"
+            )
+        if self.lr_plateau_metric not in LR_PLATEAU_METRICS:
+            raise ValueError(
+                f"unknown lr_plateau_metric {self.lr_plateau_metric!r}; expected one of "
+                f"{LR_PLATEAU_METRICS}"
             )
 
     def _validate_recipe(self) -> None:

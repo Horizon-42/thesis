@@ -39,6 +39,7 @@ from config import (
     HORIZON_MODES,
     INTENT_CONDITIONINGS,
     INTENT_FIELDS,
+    LR_PLATEAU_METRICS,
     MODELS,
     PREDICTION_OUTPUTS,
     PROCEDURE_LOSS_FIELDS,
@@ -184,6 +185,16 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--lr-plateau-factor", type=float, default=None)
     parser.add_argument("--lr-plateau-patience", type=int, default=None)
+    parser.add_argument(
+        "--lr-plateau-metric",
+        choices=LR_PLATEAU_METRICS,
+        default=None,
+        help=(
+            "which validation number the LR scheduler measures its plateau on: the "
+            "checkpoint-selection value ('selection', the default) or the macro validation "
+            "objective ('objective'). Never changes which epoch is kept"
+        ),
+    )
     parser.add_argument("--fitted-tail-position-weight", type=float, default=None,
                         help="position-only weight for fitted ADS-B tail rows (default: 0.25)")
     parser.add_argument("--fitted-terminal-position-weight", type=float, default=None,
@@ -487,6 +498,7 @@ CLI_CONFIG_FIELDS = (
     "learning_rate",
     "lr_plateau_factor",
     "lr_plateau_patience",
+    "lr_plateau_metric",
     "patience",
     "fitted_tail_position_weight",
     "fitted_terminal_position_weight",

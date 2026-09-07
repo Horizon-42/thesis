@@ -5638,6 +5638,9 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
             "name": "ReduceLROnPlateau",
             "factor": config.lr_plateau_factor,
             "patience": config.lr_plateau_patience,
+            # WHICH number it stepped on — the axis is read off the config here, so this
+            # mirror cannot claim a metric the run did not use.
+            "metric": config.lr_plateau_metric,
         },
         "split_sha256": {
             split: hashlib.sha256("\n".join(sorted(payload["split"][split])).encode()).hexdigest()
