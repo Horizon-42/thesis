@@ -4,7 +4,7 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
-### 2026-09-07 — 33 prediction categories published: anytime bins, the constraint experiments, and the identity that makes them coexist
+### 2026-09-07 — 69 prediction categories published, and the identity that lets one checkpoint hold several
 
 Branch `dev-publish2`. The A0 curve
 (`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
@@ -110,8 +110,40 @@ running cannot serve a category directory created after it booted — `server.wa
 `public/data` is exactly what would have refreshed vite's public-file list — and the SPA fallback
 returns `index.html`, which the frontend reports as *"the airport data file is probably missing"*
 for a file that is on disk. `categories.json` keeps working, so the picker lists a category it
-cannot load. Restart the frontend after publishing new categories — it applies to both of
-today's publishes, and the 24 constraint categories are new since the 5173 server last restarted.
+cannot load. Restart the frontend after publishing new categories. Two further traps in that
+restart, both hit today: killing the `npm run dev` wrapper leaves its **vite node child** holding
+the port, and the supervisor's replacement then finds 5173 occupied and **silently falls back to
+5175** — so the app looks restarted while the stale process still answers. Kill the node process.
+
+### The rest of the day: the frame arms and the KRDU back catalogue
+
+Two more passes finished the backlog. The remaining 2026-09-03 airport-frame ablation arms
+(`B_airport_enu`, `C_airport_enu_target`, `A_threshold_enu_target`, seed 1337) went up for both
+airports — six categories, each with its own checkpoint, no variant needed. Then thirty KRDU
+categories in five groups: the six shifted-CTA counterfactuals (`l3_cta_counterfactual`, all
+predict-only on the published `L3_cta` checkpoint, so all six are variants, and **each label
+carries its scored count** because a shifted CTA below the 60 s floor drops flights — 1214 of
+1404 at −90 s, 1392 at −60 s, 1400 at −30 s, 1402 at +30 s, all 1404 at +60/+90 s); the five
+closure error-budget arms (four of them variants — the `C_pred` checkpoint now carries its
+baseline plus three); the two teacher-free dense arms; ten remaining latent arms (three of them
+z-oracle decodes of an already-published checkpoint); and seven screening/scene/anchor arms.
+KRDU ended at **77** categories and KSJC at **46**, from 23 and 31 this morning. Nothing was
+skipped beyond what was asked (the `_s2024` replicates, the superseded v1 hook campaign, and the
+hard-barrier `F_barrier_infer` arms).
+
+**Review of the variant flag** (`3ed0911`) found the guard that makes all of this safe was
+itself unsafe. It compared the RENDERED `predictionDir` string — and every manifest on disk
+stores an ABSOLUTE path, because a worktree resolves `4dTrajectory/outputs` into the main tree
+and `relative_to(REPO_ROOT)` fails, while the same publication run from the main tree renders it
+relative. A byte-identical republish therefore read as a collision, and the blocked branch then
+wrote its document over the *completed* manifest, losing `accuracy`/`evaluation` and wedging the
+category. The guard now resolves both sides (`samefile` when both exist), a blocked preflight
+never overwrites a completed manifest, and new manifests render relative where they can — **the
+manifests already written keep their absolute values and need no rewrite**. `--category-variant`
+without `--reuse-prediction-dir` (a relabelled copy of the baseline) is refused at the boundary,
+as is the both-identities conflict; only a completed manifest holds a category; the multi-airport
+refusal now covers any reused directory; and `PUBLICATION_SCHEMA` is v2 so an old reader skips a
+variant manifest instead of writing the baseline's id onto it.
 
 ### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
 
