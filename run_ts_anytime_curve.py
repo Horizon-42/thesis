@@ -71,6 +71,7 @@ import geometric_metrics as gm  # noqa: E402
 from anchor_grid import (  # noqa: E402
     DEFAULT_ANCHOR_GRID_KM,
     DEFAULT_GRID_MIN_FUTURE_S,
+    PARTIAL_COVERAGE,
     anchors_for_bin,
     bin_anchor,
     remaining_path_profiles,
@@ -120,9 +121,10 @@ SPLITS = ("val", "train", FORBIDDEN_SPLIT)
 ARM_FIXED = "A0-fixed"
 ARM_RANDOM = "A0-random"
 
-# §六 2: a bin holding under half of its stratum is marked `partial` and does not enter a
-# verdict — the flights it lost are the ones whose geometry never reached that bin.
-PARTIAL_COVERAGE = 0.5
+# §六 2's threshold is `anchor_grid.PARTIAL_COVERAGE`, imported above: a bin holding under
+# half of its stratum is marked `partial` and does not enter a verdict — the flights it
+# lost are the ones whose geometry never reached that bin. The selection metric drops such
+# a bin for the same reason, off the same constant.
 # §2.4's three readings. The tolerance is the frame-arm seed floor the package already
 # quotes (5–22 m pooled ADE); the 1.5 km / 4 km pair is Phase 0's gate asked at a later
 # anchor; the freeze point is reported, never gated.

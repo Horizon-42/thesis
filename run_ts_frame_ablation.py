@@ -40,7 +40,8 @@ publish the arms you want to look at afterwards with
 ``publish_ts_experiment_trajectories.py``).
 
 Resumable: an arm whose artifact already exists skips that step, so a crash or a stop
-costs only the step in flight — ``run_ts_control_arms.py`` had to be re-declared to resume.
+costs only the step in flight — the runner this one replaced
+(``ts_transformer/archive/control_arms_runner_2026_08/``) had to be re-declared to resume.
 """
 
 from __future__ import annotations
@@ -71,14 +72,24 @@ ESTIMATED_BYTES_PER_ARM = 400 * 1024**2
 MINIMUM_FREE_BYTES = 2 * 1024**3
 
 
-def arm_config(base: dict, overrides: dict, destination: Path) -> tuple[Path, TSConfig]:
-    """Write the arm's complete override set and return the resolved config for naming."""
+def arm_config(base: dict, overrides: dict, destination: Path, *,
+               write: bool = True) -> tuple[Path, TSConfig, dict]:
+    """Resolve the arm's complete override set; write it only when the campaign will run.
+
+    The config is CONSTRUCTED either way — an unrunnable arm must fail here, before
+    training, and finding that out is most of what a dry run is for. Only the FILE is
+    conditional: a dry run that creates directories is not a dry run, and one pointed at a
+    read-only or shared outputs tree used to leave a campaign directory behind.
+    """
     settings = dict(base)
     settings.update(overrides)
     config = TSConfig(**settings)  # validates: an unrunnable arm fails here, before training
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(settings, indent=1), encoding="utf-8")
-    return destination, config
+    if write:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(settings, indent=1), encoding="utf-8")
+    # The settings are RETURNED rather than read back off disk: the file is conditional,
+    # and a step builder that reads it would work only on a run that already wrote it.
+    return destination, config, settings
 
 
 def _evaluation_steps(key: str, pred_dir: Path) -> list[tuple[str, list[str], Path]]:
@@ -119,9 +130,9 @@ def predict_only_steps(
 
 
 def arm_steps(
-    key: str, label: str, config_path: Path, config: TSConfig, *, airport: str,
-    campaign: Path, split: str, device: str, seed: int | None, split_seed: int | None,
-    formal: bool = True, predict_args: list[str] = (),
+    key: str, label: str, config_path: Path, config: TSConfig, declared: dict, *,
+    airport: str, campaign: Path, split: str, device: str, seed: int | None,
+    split_seed: int | None, formal: bool = True, predict_args: list[str] = (),
 ) -> list[tuple[str, list[str], Path]]:
     """(step label, command, artifact whose existence means the step is done)."""
     manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
@@ -131,9 +142,10 @@ def arm_steps(
     py = sys.executable
     identity: list[str] = []
     # ``seed``/``split_seed`` inside the arm's overrides win; the CLI supplies defaults.
-    if "seed" not in json.loads(config_path.read_text()) and seed is not None:
+    # ``declared`` is what `arm_config` resolved, not the file — a dry run writes none.
+    if "seed" not in declared and seed is not None:
         identity += ["--seed", str(seed)]
-    if "split_seed" not in json.loads(config_path.read_text()) and split_seed is not None:
+    if "split_seed" not in declared and split_seed is not None:
         identity += ["--split-seed", str(split_seed)]
     # A formal run stamps an experiment manifest (git commit, command, data selection) and
     # refuses a dirty worktree — including untracked files that are not this campaign's.
@@ -213,14 +225,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             continue
         trained_arms += 1
-        config_path, config = arm_config(
-            base, arm.get("overrides", {}), campaign / key / "config.json"
+        config_path, config, declared = arm_config(
+            base, arm.get("overrides", {}), campaign / key / "config.json",
+            write=not args.dry_run,
         )
         predict_args = [str(a).format(airport=airport) for a in arm.get("predict_args", [])]
         print(f"  arm {key:<26s} {run_display_name(config.to_dict(), extra=(key,))} {' '.join(predict_args)}")
         print(f"      slug {run_slug(config.to_dict())}")
         steps += arm_steps(
-            key, arm.get("label", key), config_path, config, airport=airport,
+            key, arm.get("label", key), config_path, config, declared, airport=airport,
             campaign=campaign, split=args.split, device=args.device,
             seed=args.seed, split_seed=args.split_seed, formal=not args.informal,
             predict_args=predict_args,

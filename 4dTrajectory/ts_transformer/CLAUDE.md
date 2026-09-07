@@ -214,16 +214,26 @@ weights all read the one number):
 |---|---|---|
 | `fixed-anchor-objective` | the validation objective itself | the loop never draws the path it would be judged on — **the closure output, which `TSConfig` requires it for**. **Refused for a latent run**: that objective decodes a posterior sample, so it reads the future and is stochastic |
 | `fixed-anchor-common-grid-ade` | airport-macro common-grid ADE at the **L−1 anchor** | the default, and right for every fixed-anchor arm — L−1 is where they train and where they are judged |
-| `anchor-grid-common-grid-ade` | the same ADE at **five anchor sets**, equal weight per SET: L−1 plus `anchor_grid`'s 16 / 12 / 8 / 6 km remaining-path bins, each flight at its own closest admissible sample (full lookback, ≥ 60 s of truth after it) | **a random-anchor arm**. The fixed metric scores the ONE anchor such a model is least specialised for and froze `A0_random_hr8_tv1` at epoch 10 (L−1 ADE 2949 vs native32's 1322) while that checkpoint drew BETTER geometry than the fixed arm at every anchor (chamfer p50 −114…−524 m). Each set's ADE is the mean over the flights that HAVE that anchor — absent, never scored 0 — and the per-set values + counts land in `history.json`'s `validation_anchor_grid` block every epoch, `fixed_anchor_common_grid_ade_m` among them so the L−1 veto stays readable. A bin no validation flight can reach is REFUSED, not dropped from the mean. Costs ≈ 5× the selection pass (four extra deployable replays; the L−1 pass is reused) |
+| `anchor-grid-common-grid-ade` | the same ADE at **every anchor set the cohort supports**, equal weight per SET: L−1 plus whichever of `anchor_grid`'s 16 / 12 / 8 / 6 km CANDIDATE bins clears the coverage gate, each flight at its own closest admissible sample (full lookback, ≥ 60 s of truth after it) | **a random-anchor arm**. The fixed metric scores the ONE anchor such a model is least specialised for and froze `A0_random_hr8_tv1` at epoch 10 (L−1 ADE 2949 vs native32's 1322) while that checkpoint drew BETTER geometry than the fixed arm at every anchor (chamfer p50 −114…−524 m). Each set's ADE is the mean over the flights that HAVE that anchor — absent, never scored 0 — then the airport macro; the per-set values, counts and `dropped_bins` land in `history.json`'s `validation_anchor_grid` block every epoch, `fixed_anchor_common_grid_ade_m` among them so the L−1 veto stays readable. Costs ≈ 4–5× the selection stage (one extra deployable replay per surviving bin; the L−1 pass is reused), ≈ +12–15 % per epoch at KRDU scale. **Refused with `cta_conditioning=given` or `intent_conditioning=truth-…`** — the grid re-reads the oracle at every bin anchor, so the metric would be selecting on how fast it converges |
 
 **`anchor_grid.py` is the one definition of the grid** — bins (`DEFAULT_ANCHOR_GRID_KM`
-20/16/12/8/6/4/2 km, `VALIDATION_ANCHOR_GRID_KM` the four the metric selects on), the 60 s
-future floor, the per-flight `bin_anchor` rule and the fixed-at-L−1 `strata_fixed_at_l1` rule.
-`run_ts_anytime_curve.py` and the selection metric import the SAME objects
-(`tests/test_anchor_grid.py` asserts identity, not equality): two grids that merely agreed
-today would make "the curve improved" and "this epoch was selected on the curve" claims about
-different anchors. 20 km is excluded from selection at ~35 % coverage, 4 / 2 km as
-partial-to-empty under the floor (≈ 53 s / 27 s of truth left).
+20/16/12/8/6/4/2 km, `VALIDATION_ANCHOR_GRID_KM` the four the metric may select on), the
+60 s future floor, `PARTIAL_COVERAGE` = 0.5, the per-flight `bin_anchor` rule and the
+fixed-at-L−1 `strata_fixed_at_l1` rule. `run_ts_anytime_curve.py` and the selection metric
+import the SAME objects (`tests/test_anchor_grid.py` asserts identity, not equality): two
+grids that merely agreed today would make "the curve improved" and "this epoch was selected
+on the curve" claims about different anchors.
+
+**A candidate bin is a candidate, not a guarantee.** Measured coverage of the KRDU
+validation cohort (1404 flights, 60 s floor): **20 km 33.7 %** (excluded outright),
+**16 km 37 %**, **12 km 78.7 %**, **8 / 6 km 99.7 %** — the median flight has **13.4 km**
+left at L−1, and 4 / 2 km are partial-to-empty under the floor (≈ 53 s / 27 s of truth
+left). So `build_anchor_grid_validation_plans` DROPS a bin under `PARTIAL_COVERAGE` for any
+airport — on that cohort, 16 km — with a printed notice and a `dropped_bins` record, and
+refuses the metric outright when fewer than two bins survive. An equal-weighted fifth of a
+selection value must not come from a long-haul subcohort. **Which bins survive is a property
+of the cohort, not of the model**, so every arm on the same split is selected on the same
+sets and their values are comparable.
 
 Command hooks are called once per control SEGMENT, at its start, with the rollout's own state,
 returning the command flown — and **the record carries the schedule FLOWN, not the network's**.
@@ -273,10 +283,10 @@ command is HELD.
 | module | the question | lines |
 |---|---|---|
 | `objective.py` | what is a prediction scored against | 1,079 |
-| `validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 869 |
-| `train.py` | the epoch, the cohort, the checkpoint | 1,194 |
-| `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` = one per flight per epoch) | 1,742 |
-| `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 138 |
+| `validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 1,162 |
+| `train.py` | the epoch, the cohort, the checkpoint | 1,236 |
+| `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` = one per flight per epoch) | 1,809 |
+| `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 150 |
 | `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 258 |
 | `splits.py` | which split a flight belongs to | 192 |
 | `cli/` | one module per subcommand (`common` 817, `predict` 422, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze_test` 42, `__init__` 15) | 1,542 |

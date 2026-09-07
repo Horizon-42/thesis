@@ -26,6 +26,11 @@ from time_grids import output_time_grid
 
 CommonGridTruth = tuple[np.ndarray, np.ndarray, np.ndarray]
 
+#: What every block scored at the deployment anchor calls it. A block scored somewhere else
+#: carries its own label instead — an "anchor" field that always says ``L-1`` is worse than
+#: none, because it is read as a claim.
+FIXED_ANCHOR_LABEL = "fixed L-1"
+
 # The arc-length geometry block below is a DIAGNOSTIC, computed for every control run
 # regardless of its objective. Its three shape parameters used to be `control_arc_*` config
 # fields; the arc-length-geometry OBJECTIVE that owned them was retired 2026-09-07 (package
@@ -468,8 +473,15 @@ def fixed_anchor_common_grid_ade_metrics(
     *,
     points: int,
     common_truth: CommonGridTruth | None = None,
+    anchor_label: str = FIXED_ANCHOR_LABEL,
 ) -> dict[str, Any]:
-    """Lean formal selector: common true-time per-flight 3D ADE and FDE only."""
+    """Lean formal selector: common true-time per-flight 3D ADE and FDE only.
+
+    ``anchor_label`` says WHERE the reading was taken. It defaults to the deployment
+    contract's ``L-1``; a caller that supplies its own ``common_truth`` at other anchors
+    (the anchor-grid selection metric) names them, so the published block never claims an
+    anchor it was not scored at.
+    """
     (
         _truth,
         _common,
@@ -494,6 +506,7 @@ def fixed_anchor_common_grid_ade_metrics(
         true_duration_s,
         capped,
         error,
+        anchor_label=anchor_label,
     )
 
 
@@ -504,11 +517,13 @@ def _common_grid_ade_result(
     true_duration_s: np.ndarray,
     capped: np.ndarray,
     error: np.ndarray,
+    *,
+    anchor_label: str = FIXED_ANCHOR_LABEL,
 ) -> dict[str, Any]:
     predicted_final_time_s = np.asarray(predicted_final_time_s, dtype=np.float64)
     time_error = predicted_final_time_s - true_duration_s
     return {
-        "anchor": "fixed L-1",
+        "anchor": anchor_label,
         "metric_grid": "common true physical-time grid",
         "points": points,
         "flights": flights,
@@ -595,7 +610,8 @@ def fixed_anchor_common_grid_report_metrics(
         predicted_arrival - truth[:, -1, list(POSITION_IDX)], axis=-1
     )
     return {
-        "anchor": "fixed L-1",
+        # This report path always builds its own truth at L-1 (no `common_truth` hook).
+        "anchor": FIXED_ANCHOR_LABEL,
         "metric_grid": "common true physical-time grid",
         "points": points,
         "flights": len(series),

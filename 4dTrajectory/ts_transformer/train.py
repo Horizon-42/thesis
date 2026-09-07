@@ -515,10 +515,14 @@ def fit_model(
                     f"validation plan for {airport} omitted required common-grid truth"
                 )
             val_common_truth_by_airport[airport] = plan.common_truth
-    # The anchor-grid metric's four extra anchor sets: built once here beside the L-1
-    # plans (the fifth set), replayed every epoch. The L-1 pass is NOT rebuilt for them.
+    # The anchor-grid metric's extra anchor sets: built once here beside the L-1 plans
+    # (which are the metric's first set), replayed every epoch. The L-1 pass is NOT
+    # rebuilt for them, and a candidate bin this cohort cannot cover is dropped here with
+    # a printed notice rather than averaged in.
     anchor_grid_plans = (
-        build_anchor_grid_validation_plans(val_sets, config.batch_size)
+        build_anchor_grid_validation_plans(
+            val_sets, config.batch_size, minimum_anchor_index=minimum_anchor_index
+        )
         if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_ANCHOR_GRID_ADE
         else None
     )
@@ -583,8 +587,13 @@ def fit_model(
         if anchor_grid_plans is not None:
             coverage = anchor_grid_coverage(anchor_grid_plans)
             print("  grid       L-1 + " + ", ".join(
-                f"{float(bin_m) / 1000:g} km ({sum(flights.values())} flights)"
-                for bin_m, flights in coverage.items()
+                f"{label} ({sum(flights.values())} flights)"
+                for label, flights in coverage.items()
+            ) + (
+                "" if not anchor_grid_plans.dropped else
+                "; dropped " + ", ".join(
+                    item["bin"] for item in anchor_grid_plans.dropped
+                ) + f" under {anchor_grid_plans.minimum_coverage:.0%} coverage"
             ))
         if minimum_anchor_index is not None:
             print(f"  anchor     common minimum index {minimum_anchor_index} "

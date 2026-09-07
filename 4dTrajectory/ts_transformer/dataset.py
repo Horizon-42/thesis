@@ -1159,6 +1159,11 @@ class TrajectoryWindows(Dataset, ABC):
     anchor_description: str
     anchor_policy: str
     sampling_version: str
+    #: Whether the batch carries the CONTROL SUPERVISION targets (the imitation schedule and
+    #: the heading-rate reference). Every training and validation window set does; a
+    #: replay-only set (`ExplicitAnchorTrajectoryWindows(supervision=False)`) does not,
+    #: because nothing reads them there and the imitation target is anchor-bound.
+    control_supervision: bool = True
 
     def __init__(
         self,
@@ -1464,7 +1469,7 @@ class TrajectoryWindows(Dataset, ABC):
         if self.config.cta_conditioning == CTA_CONDITIONING_GIVEN:
             # Training feeds the truth as the controlled time of arrival.
             arrays["cta_s"] = np.array(truth_duration_s(series, anchor), dtype=np.float64)
-        if self.config.control_imitation_loss_weight:
+        if self.config.control_imitation_loss_weight and self.control_supervision:
             anchor_time = float(series.times[anchor])
             # The fitted teacher replaces the inversion outright — its schedule was fitted
             # over the WHOLE supervised horizon through the rollout, so every segment
@@ -1488,7 +1493,7 @@ class TrajectoryWindows(Dataset, ABC):
                     ),
                 )
             )
-        if self.config.control_heading_rate_loss_weight:
+        if self.config.control_heading_rate_loss_weight and self.control_supervision:
             # Same supervised horizon and same last-measured instant as the imitation
             # target above; the heading-rate target only masks at the endpoints instead of
             # the midpoints, and costs no inverse-dynamics solve.
@@ -1670,6 +1675,13 @@ class ExplicitAnchorTrajectoryWindows(FixedAnchorTrajectoryWindows):
     flight with an index the flight can actually be anchored at: the caller
     (:mod:`anchor_grid`) has already decided which flights have a reading at this bin, so a
     gap here is a cohort bug, not a case to skip.
+
+    ``supervision=False`` skips the per-flight CONTROL SUPERVISION targets — the
+    inverse-dynamics (or fitted) imitation schedule and the heading-rate reference. A
+    replay-only consumer reads neither, and building them here would be worse than
+    wasteful: the imitation target is ANCHOR-BOUND, so a
+    ``control_imitation_target="fitted"`` run would silently carry the inverse-dynamics
+    teacher at these anchors instead of its own table.
     """
 
     anchor_description = "one explicit anchor per flight"
@@ -1683,10 +1695,17 @@ class ExplicitAnchorTrajectoryWindows(FixedAnchorTrajectoryWindows):
         normalizer: Normalizer,
         *,
         anchors: Mapping[str, int],
+        minimum_anchor_index: int | None = None,
         fitted_teacher: FittedTeacherTable | None = None,
+        supervision: bool = True,
     ):
         self._anchor_by_flight = dict(anchors)
-        super().__init__(series, config, normalizer, fitted_teacher=fitted_teacher)
+        self.control_supervision = supervision
+        super().__init__(
+            series, config, normalizer,
+            minimum_anchor_index=minimum_anchor_index,
+            fitted_teacher=fitted_teacher,
+        )
 
     def _eligible_anchors(
         self, series: FlightSeries, anchors: Sequence[int]

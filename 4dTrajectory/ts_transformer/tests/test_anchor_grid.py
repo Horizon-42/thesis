@@ -67,6 +67,9 @@ def test_the_runner_grid_is_the_packages() -> None:
     assert runner.anchors_for_bin is anchor_grid.anchors_for_bin
     assert runner.strata_fixed_at_l1 is anchor_grid.strata_fixed_at_l1
     assert runner.DEFAULT_MIN_FUTURE_S == anchor_grid.DEFAULT_GRID_MIN_FUTURE_S
+    # The `partial` threshold is one number: the curve refuses to READ such a bin and the
+    # selection metric refuses to AVERAGE it, off the same constant.
+    assert runner.PARTIAL_COVERAGE is anchor_grid.PARTIAL_COVERAGE
     assert runner.DEFAULT_BINS_KM == "20,16,12,8,6,4,2"
     assert tuple(
         float(token) for token in runner.DEFAULT_BINS_KM.split(",")
@@ -74,14 +77,20 @@ def test_the_runner_grid_is_the_packages() -> None:
 
 
 def test_the_selection_bins_are_bins_of_the_measurement_grid() -> None:
-    """A1 reads a SUBSET of A0's grid — never a fifth number nobody plotted."""
+    """A1's CANDIDATES are a subset of A0's grid — never a bin nobody plotted.
+
+    Which candidates a run actually selects on is decided per cohort against
+    `PARTIAL_COVERAGE` (`validation.build_anchor_grid_validation_plans`); on the real KRDU
+    validation cohort 16 km is dropped at 37 %.
+    """
     assert set(anchor_grid.VALIDATION_ANCHOR_GRID_KM) <= set(
         anchor_grid.DEFAULT_ANCHOR_GRID_KM
     )
     assert anchor_grid.VALIDATION_ANCHOR_GRID_KM == (16, 12, 8, 6)
     assert anchor_grid.VALIDATION_ANCHOR_GRID_M == (16000.0, 12000.0, 8000.0, 6000.0)
-    # The three bins A0 measures and A1 refuses to select on, with their reasons in the
-    # module docstring: 20 km is under half coverage, 4 / 2 km are under the future floor.
+    # The three bins A0 measures and A1 will not even consider, with their reasons in the
+    # module docstring: 20 km is under half coverage on every measured cohort, and
+    # 4 / 2 km are under the future floor by construction.
     assert set(anchor_grid.DEFAULT_ANCHOR_GRID_KM) - set(
         anchor_grid.VALIDATION_ANCHOR_GRID_KM
     ) == {20, 4, 2}
@@ -128,11 +137,12 @@ def test_the_bin_map_is_the_per_flight_rule_applied_once_per_flight(cohort) -> N
         }
 
 
-def test_the_four_selection_bins_are_populated_and_four_km_is_not(cohort) -> None:
+def test_the_four_candidate_bins_are_populated_and_four_km_is_not(cohort) -> None:
     """The coverage claim behind `VALIDATION_ANCHOR_GRID_KM`, on a real anchor rule.
 
     4 km leaves ≈ 45-50 s of truth on this cohort, under the 60 s floor — which is exactly
-    why it is measured by A0 and not selected on by A1.
+    why it is measured by A0 and not a candidate for A1. The four candidates are fully
+    covered HERE; on the real KRDU cohort 16 km is not, and the coverage gate drops it.
     """
     profiles = anchor_grid.remaining_path_profiles(cohort)
     populated = {
