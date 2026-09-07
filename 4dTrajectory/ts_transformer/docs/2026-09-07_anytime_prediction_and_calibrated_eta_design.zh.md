@@ -21,6 +21,7 @@ checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
 | A0 重锚曲线（测量） | **代码完成（2026-09-07，`dev-a0` `3f7a849` + 测试 `5f408df`）；回放未跑（GPU 排队）** | `run_ts_anytime_curve.py`（新 runner）+ `approach_difficulty.remaining_path_profile_m`（逐样本剩余路程，与协变量同一算术）+ `tests/test_anytime_curve.py`（17 项）；产物 `anytime_a0_<date>/anytime_curve.{json,txt}` | 曲线单调（±22 m）；雷达引导 ADE < 1.5 km 的剩余路程点存在且 > 4 km |
+| A1.a 网格选点指标（A1 的前置：先让随机锚点臂能被正确选点） | **代码完成（2026-09-07，分支 `dev-a1`）；臂未跑** | `anchor_grid.py`（网格的唯一定义：bin、60 s 地板、逐航班锚点规则、L−1 固定分层规则；runner 改为 import 它）+ `checkpoint_selection_metric=anchor-grid-common-grid-ade`（五个锚点集的 common-grid ADE 均值，`history.json` 每轮记 `validation_anchor_grid` 块）+ 臂 `A0_random_hr8_tv1_grid`；测试 `tests/test_anchor_grid.py`（10）+ `tests/test_anchor_grid_selection.py`（12） | 无门，是选点规则；旧指标逐位不变（4 臂 × 2 轮 × 232 个 history 浮点全等） |
 | A1 流式评估协议 | 未做 | `evaluation_protocol` 新增按剩余路程分 bin 的锚点网格；`compare_constraint_arms.py` 增列 | 无门，是读数 |
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
 | A3 学习的递归先验 | 未做，取决于 A2 | `control/latent.py` 先验网络吃上一轮后验 | 仅当 A2 有增益 |
@@ -219,6 +220,25 @@ bin 取剩余路程最接近 bin 值的样本为锚点；锚点前不足 120 s �
 **否决**：A0-random 在 L−1 处劣于 native32 超过种子噪声，说明随机锚点训练损害了 base，A2 / A3 都在
 一个更差的 base 上做，先停。
 
+**这条否决在第一臂上触发了，而它触发的方式暴露了一个更早的错误：选点指标本身（A1，2026-09-07 建成）。**
+第一臂 `A0_random_hr8_tv1` 的 L−1 ADE 是 2949 m 对 native32 的 1322 m，看上去是彻底失败；但同一个
+checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（chamfer p50 −114…−524 m），且 ≤ 8 km 处 ADE 也更好。
+原因不是训练，是选点：`fixed-anchor-common-grid-ade` **只在 L−1 这一个锚点上给验证集打分**，而那正是
+随机锚点模型最不专门化的锚点。于是模型一旦开始在整个锚点区间上分摊容量，L−1 分数就停滞，patience 20
+在第 30 轮触发、第 10 轮的权重被冻结——**指标对这个臂要改善的东西是盲的**。
+
+因此：**随机锚点臂的选点指标是网格，不是 L−1**。`checkpoint_selection_metric=anchor-grid-common-grid-ade`
+把同一个 common-grid ADE 在**五个锚点集**上各算一次并取均值——L−1 加 `anchor_grid.VALIDATION_ANCHOR_GRID_KM`
+的 16 / 12 / 8 / 6 km 四个 bin，每架飞机在每个 bin 上取自己剩余路程最近且可锚（回看足 120 s、锚点后真值
+≥ 60 s）的样本。**每个锚点集等权**（把所有 (航班, 锚点) 对合并会按覆盖率给远端 bin 加权，正好在雷达引导
+航班多的臂上把远端 bin 稀释掉）；**每个集的 ADE 只在拥有该锚点的航班上取平均**（缺该 bin 的航班是缺席，
+不是记 0）。20 km（覆盖率 ~35 %，低于 A0 自己的 0.5 `partial` 线）与 4 / 2 km（60 s 地板下部分到全空）
+**不进选点**——这是 A0 网格的一个子集，不是第五个没人画过的数。
+
+**L−1 仍然每轮记录**（`validation_anchor_grid.fixed_anchor_common_grid_ade_m`，与另一指标选的是同一个数），
+所以上面这条否决照旧可读——它只是不再决定保留哪一轮。代价：选点这一段约 **5×**（四次额外的 deployable
+replay；L−1 那一次是复用的，不重算），在合成 control 小跑上实测 0.046 → 0.238 s/轮。
+
 ### 2.5 A2 的门
 
 同一锚点网格上，A2 的雷达引导 ADE(s) 与时长误差不劣于 A1（无状态）；候选权重的熵随 s 单调下降
@@ -336,6 +356,13 @@ AMAN 的直接回答，也是 IPOPT 最优解给不了的东西。
 1. **分层标签在 L−1 锚点算一次并固定**，所有锚点网格上的读数用同一标签。否则曲线是幸存者曲线。
 2. **每个 bin 打印航班数**；bin 内航班少于该分层的 50 % 时该点标 `partial`，不进门。
 3. **A0 的两臂必须同时报**；只报 A0-fixed 的曲线会把分布外代价读成"越近越准"。
+3b. **网格只有一个定义**（`anchor_grid.py`）：runner 画曲线的 bin / 地板 / 逐航班锚点规则，与
+   `anchor-grid-common-grid-ade` 选点用的是同一批对象（测试 `runner.bin_anchor is
+   anchor_grid.bin_anchor`）。两份"今天恰好一致"的网格会让"曲线变好了"和"这一轮是按曲线选的"
+   变成关于不同锚点的两句话。
+3c. **随机锚点臂用网格选点，固定锚点臂不必**（§2.4）。L−1 指标对随机锚点臂是盲的——它只在那个臂
+   最不专门化的锚点上打分——但它每轮仍被记录（`fixed_anchor_common_grid_ade_m`），因为 §2.4 的
+   否决要读它。**选点指标进 run name**（`select=…`，`META_FIELDS`），按网格选出来的是另一个 run。
 4. **校准集永远不是 test，也不是训练集**；δ 表随 checkpoint 元数据走，没有表就不声称校准。
 5. **`cta=self-q` 与 `cta=given` 是两种臂**，run name 必须区分；只有前者可作为预测结果引用。
 6. **分位数是时长的，不是航迹的**；扇面覆盖率是读数不是覆盖保证，文档与 README 不得写成后者。
@@ -392,7 +419,8 @@ AMAN 的直接回答，也是 IPOPT 最优解给不了的东西。
 
 | 概念 | 代码里的名字 |
 |---|---|
-| 锚点网格 / 重锚曲线 | `run_ts_anytime_curve.py`，产物 `anytime_a0_<date>/`，读数键 `remaining_path_bin_m` |
+| 锚点网格 / 重锚曲线 | `anchor_grid.py`（网格本身）+ `run_ts_anytime_curve.py`，产物 `anytime_a0_<date>/`，读数键 `remaining_path_bin_m` |
+| 网格选点指标 | config `checkpoint_selection_metric=anchor-grid-common-grid-ade`，`anchor_grid.VALIDATION_ANCHOR_GRID_KM`，`history.json` 的 `validation_anchor_grid` 块，run name `select=anchor-grid-common-grid-ade` |
 | 随机锚点臂 | `random_train_anchor=True` + L1.b 监督（`control_heading_rate_loss_weight=8`, `control_bank_tv_loss_weight=1`） |
 | 候选重加权 | `forecast.reweighted_mode_forecasts`，`predict --stream-dt 10` |
 | 分位数时长头 | config `duration_head ∈ point \| quantile`，`prediction_outputs.QuantileFinalTimeHead`，`source.durationQuantilesS` |

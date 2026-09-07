@@ -4,6 +4,86 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+§2.4, branch `dev-a1` (`364adaf` the grid module, `4d563f5` the metric + tests, `04de172`
+the arm, and the commit carrying this entry for the docs). It is A1's PREREQUISITE, not the
+A1 row of that status table: that row is the streaming evaluation protocol
+(`evaluation_protocol` anchor grid + `compare_constraint_arms.py`), still not done, and this
+work is the new `A1.a` row beside it.
+
+**The measurement that motivated it.** The A0-random arm (`docs/experiments/a0_random_arms.json`,
+random train anchors + L1.b's teacherless supervision) early-stopped at epoch 30 with its
+best at epoch 10 and failed the L−1 veto badly — ADE 2949 m against native32's 1322, FDE
+p50 3784 vs 864. But the same checkpoint, replayed on the re-anchoring grid, draws **better
+geometry than the fixed arm at every anchor** (chamfer p50 −114…−524 m) and better ADE at
+≤ 8 km. The arm was not worse; it was **frozen early by a metric that cannot see what it
+improves**. `checkpoint_selection_metric=fixed-anchor-common-grid-ade` scores the validation
+set at the L−1 anchor ONLY — the one anchor a random-anchor model is least specialised for
+— so once such a model starts spending capacity across the anchor range, the L−1 number
+stalls and patience fires.
+
+**One grid, two consumers.** The remaining-path grid moved out of `run_ts_anytime_curve.py`
+into `4dTrajectory/ts_transformer/anchor_grid.py`: the bins
+(`DEFAULT_ANCHOR_GRID_KM = 20, 16, 12, 8, 6, 4, 2` km), the 60 s future floor, the
+per-flight `bin_anchor` rule (closest sample by remaining path, THEN admissibility) and the
+fixed-at-L−1 `strata_fixed_at_l1` rule. The runner imports the same objects — a test asserts
+identity, not equality — because two grids that merely agreed today would make "the curve
+improved" and "this epoch was selected on the curve" statements about different anchors. The
+runner's own 24 tests passed untouched.
+
+**The metric.** `checkpoint_selection_metric=anchor-grid-common-grid-ade` averages the SAME
+common-grid ADE over five anchor sets: L−1 plus `VALIDATION_ANCHOR_GRID_KM = 16, 12, 8, 6`
+km, each flight at its own closest admissible sample. Those four are the readable bins:
+20 km covers ~35 % of the cohort (below A0's own 0.5 `partial` line) and 4 / 2 km are
+partial-to-empty under the 60 s floor (≈ 53 s / 27 s of truth left). Equal weight **per
+anchor set** — pooling all (flight, anchor) pairs would weight each bin by its coverage and
+fade the far bins out exactly on the arms whose flights are vectored — and each set's ADE is
+the mean over the flights that HAVE that anchor (per airport, then airport-macro, which is
+what the existing metric already means, so the L−1 term IS its value). A flight absent from
+a bin is absent from its mean, never scored 0; a bin no validation flight can reach is
+REFUSED rather than dropped, because a five-set metric that quietly became a four-set one is
+not comparable across arms. `history.json` gains a `validation_anchor_grid` block every
+epoch (per set: ADE, flight count, per-airport split, plus `fixed_anchor_common_grid_ade_m`
+so the L−1 veto stays readable) and the epoch line prints the five values.
+
+The ADE itself is never restated: `fixed_anchor_common_truth` became the L−1 case of
+`common_truth_at_anchors`, each bin's cached plan carries its own truth, and
+`dataset.ExplicitAnchorTrajectoryWindows` is the fixed-anchor policy with a caller-supplied
+anchor per flight — same caching, same batch plan, same replay. The four extra sets are
+built once per fit and replayed by `validation.replay_validation_plan` (one deployable
+forward per batch, no objective); the L−1 pass is reused, not rebuilt.
+
+**Cost**, measured on a synthetic control run (40 flights, 7 val, 3 epochs): median
+`val_checkpoint_selection_s` **0.046 → 0.238 s**, i.e. 5.2× the selection stage and 1.5× the
+whole validation stage (0.390 → 0.590 s); epoch total 4.774 → 4.838 s. That timer now also
+covers the selection call itself, which it did not before.
+
+**Nothing stored changes.** Every existing metric is bit-exact: 2-epoch synthetic trains for
+control / latent / state / closure before and after, **232 history floats compared** (control
+50, latent 78, state 54, closure 50), 0 changed — the only difference is the new
+`validation_anchor_grid` key, empty on every other metric exactly as `latent` / `procedure`
+/ `command_hook` already are. The naming/loading audit over every config-bearing artifact
+under `4dTrajectory/outputs` — 799 stored configs (`history.json` 195, `summary.json` 225,
+`fit_evaluation.json` 189, `experiment_manifest.json` 97 and nine smaller kinds) recomputed
+through `run_naming` and reloaded through `TSConfig.from_dict`, plus 93 campaign
+`config.json` override sets rendered as a new run would be: **892 artifacts, 0 changed** in
+name, slug or loading.
+
+**Naming.** `checkpoint_selection_metric` was already a `META_FIELDS` entry, so a
+grid-selected run gets `select=anchor-grid-common-grid-ade` in its display name and always a
+distinct slug; past six meta deviations it folds into `+N more`, where `run_slug` hashes it.
+Moving it up the tuple so it is always spelled was measured and rejected: it would rename 27
+of 195 stored configs.
+
+**The arm.** `A0_random_hr8_tv1_grid` = the p180 arm with that one field changed (verified by
+diffing the generated configs). Not trained yet; the reading is pre-registered in its
+`_comment`. Its dry-run goes through `run_ts_frame_ablation.py`, which is the runner that
+honours the file's `base` block — **`run_ts_control_arms.py` reads only `base_recipe` and
+silently ignores `base`**, so running one of these arm files through it would train the plain
+recipe under the arm's name.
+
 ### 2026-09-07 — ts_transformer L2.f: the latent's information was in the wrong half of the KL
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md` §六 L2.f, branch
