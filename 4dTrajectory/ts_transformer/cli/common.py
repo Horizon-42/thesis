@@ -24,6 +24,7 @@ from config import (
     CONTROL_DYNAMICS_MODELS,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_HOOKS_AVAILABLE,
+    CTA_CONDITIONINGS_AVAILABLE,
     CONTROL_HOOK_FIELDS,
     CONTROL_IMITATION_TARGETS,
     CONTROL_RECIPE_CUSTOM,
@@ -543,6 +544,10 @@ if _unknown:  # fail at import: a renamed TSConfig field must rename its flag to
 #: on artifacts trained under a value that has since been archived or vetoed. Selecting one
 #: for a NEW run is a different act, and this is where it is refused.
 _NEW_RUN_VOCABULARIES = (
+    ("cta_conditioning", CTA_CONDITIONINGS_AVAILABLE,
+     "`self-q` is what `predict --cta-from-quantiles` stamps on the config it writes beside "
+     "the records (B3) — the CTA is the model's own quantile, decided at prediction time; "
+     "there is nothing to train under it"),
     ("control_command_hook", CONTROL_HOOKS_AVAILABLE,
      "the nominal-law hook is archived (archive/nominal_law_hook_2026_09/); its numbers are "
      "in docs/2026-09-06_control_hooks_results.zh.md"),

@@ -168,6 +168,11 @@ def build_prediction_record(
         # offset) — a record that reads the future says so.
         **({"ctaS": forecast.cta_s, "ctaOffsetS": forecast.cta_offset_s}
            if forecast.cta_s is not None else {}),
+        # B1, quantile duration head: all five DURATION_QUANTILES in seconds, in level
+        # order — the median included, so the record is a complete interval and a reader
+        # never has to splice `durationHeadFinalTimeS` back into position 2.
+        **({"durationQuantilesS": [float(value) for value in forecast.duration_quantiles_s]}
+           if forecast.duration_quantiles_s is not None else {}),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,
@@ -475,6 +480,9 @@ def write_batch(
             # A CTA-conditioned run reads the future; the row it is compared on says so.
             "cta_s": source.get("ctaS"),
             "cta_offset_s": source.get("ctaOffsetS"),
+            # B1: absent (None) on every point-head row, so a readout can tell a quantile
+            # arm from a point one without opening a config.
+            "duration_quantiles_s": source.get("durationQuantilesS"),
             "z_from_posterior": bool(source.get("zFromPosterior", False)),
             "true_final_time_s": metrics["true_final_time_s"],
             "final_time_error_s": metrics["final_time_error_s"],

@@ -33,6 +33,7 @@ from config import (
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+    DURATION_HEAD_QUANTILE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -58,7 +59,7 @@ from control.loss.fixed_dt import fixed_dt_control_state_loss
 from dataset import Normalizer
 from final_approach_geometry import corridor_violations, runway_axes, truth_final_gate
 from fixed_dt_supervision import FixedDTControlSupervision
-from prediction_outputs import ControlPrediction, StatePrediction
+from prediction_outputs import ControlPrediction, StatePrediction, pinball_duration_loss
 from time_grids import batch_time_grid
 
 
@@ -665,9 +666,17 @@ def control_prediction_loss_terms(
             multipliers,
         )
         procedure_extra = {"procedure": procedure}
+    # B1: the quantile head REPLACES the point head's squared residual with the sum of the
+    # five pinball losses — same component name, same units, same weight — so
+    # `loss_component_names` is unchanged and every history row and readout keys on
+    # `final_time` exactly as before.
     time_loss = (
-        (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
-    ).square()
+        pinball_duration_loss(
+            prediction.duration_quantiles_s, target_final_time_s, config.final_time_scale_s
+        )
+        if config.duration_head == DURATION_HEAD_QUANTILE
+        else ((prediction.final_time_s - target_final_time_s) / config.final_time_scale_s).square()
+    )
     tracking = control_tracking_loss_terms(
         rollout_loss,
         normalized_anchor_state,

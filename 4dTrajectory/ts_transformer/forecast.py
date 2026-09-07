@@ -97,6 +97,11 @@ class Forecast:
     # Latent control output only: decoded from the POSTERIOR mean q(z | this flight's own
     # future) — the z-oracle upper bound. Reads the future; never a prediction result.
     z_from_posterior: bool = False
+    # B1, quantile duration head only: the five `DURATION_QUANTILES` in seconds, in level
+    # order. `predicted_final_time_s` above is still the ONE duration this trajectory was
+    # rolled over (the median, or a CTA); these are the interval around it, and §六 6 —
+    # they are quantiles of the DURATION, never of the trajectory.
+    duration_quantiles_s: np.ndarray | None = None
 
     @property
     def n_steps(self) -> int:
@@ -232,6 +237,11 @@ def _control_prediction_batch(
             [item.segment_durations for item in predictions], dim=0
         ),
         final_time_s=torch.cat([item.final_time_s for item in predictions], dim=0),
+        # The contract's own discriminator: a point head emits None for every row.
+        duration_quantiles_s=(
+            torch.cat([item.duration_quantiles_s for item in predictions], dim=0)
+            if predictions[0].duration_quantiles_s is not None else None
+        ),
     )
 
 
@@ -301,6 +311,10 @@ def _forecast_control_batch(
     predicted_final_time = (
         prediction.final_time_s.detach().cpu().numpy().astype(np.float64)
     )
+    duration_quantiles = (
+        prediction.duration_quantiles_s.detach().cpu().numpy().astype(np.float64)
+        if prediction.duration_quantiles_s is not None else None
+    )
     forecasts: list[Forecast] = []
     for row, (item, row_offsets) in enumerate(zip(series, offsets, strict=True)):
         count = len(row_offsets)
@@ -331,6 +345,9 @@ def _forecast_control_batch(
             z_from_posterior=z_from_posterior,
             cta_s=None if cta is None else float(cta[row]),
             cta_offset_s=None if cta is None else float(cta_offset_s),
+            duration_quantiles_s=(
+                None if duration_quantiles is None else duration_quantiles[row]
+            ),
         ))
     return forecasts
 
