@@ -29,9 +29,9 @@ from trajectory_data_process.harvest.arrivals import resolve_arrival_manifest
 
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v4-eligible-set"
-#: The retired byte-bound schema. Checkpoints carrying it stay usable exactly: their
-#: eligible set is re-verified against today's rosters through the checkpoint's OWN split
-#: identity digests (`_require_unchanged_eligible_sets`), never against stored roster bytes.
+#: The retired byte-bound schema. Checkpoints carrying it stay usable exactly: their own
+#: ``source_records`` IS the eligible set, so it is compared to today's rosters per airport
+#: (`_require_unchanged_eligible_sets`), never against the roster bytes they recorded.
 LEGACY_ELIGIBILITY_BOUND_SCHEMA = "ts-arrival-data-v3-eligibility-bound"
 READABLE_ARRIVAL_DATA_PROVENANCE_SCHEMAS = (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -42,10 +42,10 @@ READABLE_ARRIVAL_DATA_PROVENANCE_SCHEMAS = (
 def eligible_set_digest(keys: Iterable[str]) -> str:
     """The content identity of a set of flight identities: sorted, newline-joined, sha256.
 
-    THE one definition. `splits.data_selection_audit` hashes its split rosters with it, the
-    provenance's ``eligible_set_sha256`` is it, and the legacy re-verification recomputes
-    the checkpoint's stored split digests with it — a second implementation anywhere would
-    make a v3 checkpoint unverifiable the day the two drifted.
+    THE one definition: the provenance's ``eligible_set_sha256`` is it, the legacy check
+    reports both sides of a changed set with it, `splits.data_selection_audit` hashes its
+    split rosters with it, and the publisher and `run_ts_pipeline` compare stored artifacts
+    through it. A second implementation would be a second answer to "same data?".
     """
     return hashlib.sha256("\n".join(sorted(keys)).encode()).hexdigest()
 
@@ -374,8 +374,9 @@ def _require_comparable_eligibility(
     if rosterless:
         raise ValueError(
             f"the current arrival fingerprint for {', '.join(rosterless)} was taken WITHOUT "
-            "the pre-split eligibility roster this checkpoint recorded; build it with "
-            "data_provenance.checkpoint_data_provenance(payload, manifests)"
+            "the pre-split eligibility roster this checkpoint recorded; pass "
+            "--eligibility-roster <airport>/arrivals/lateral_pass_eligibility.json (a runner "
+            "builds it with data_provenance.checkpoint_data_provenance(payload, manifests))"
         )
 
 
@@ -419,9 +420,7 @@ def _require_unchanged_eligible_sets(
 
 
 def _stored_in_current_form(
-    checkpoint_payload: dict[str, Any],
-    stored: dict[str, Any],
-    current: dict[str, Any],
+    stored: dict[str, Any], current: dict[str, Any]
 ) -> dict[str, Any]:
     """The checkpoint's stored fingerprint, expressed the way today's is built.
 
@@ -477,7 +476,7 @@ def require_matching_data_provenance(
             "arrivals/manifest.json"
         )
     _require_comparable_eligibility(stored, current)
-    stored = _stored_in_current_form(checkpoint_payload, stored, current)
+    stored = _stored_in_current_form(stored, current)
     if not allow_subset and stored != current:
         raise ValueError(
             "checkpoint training data does not match the current arrival manifests; "

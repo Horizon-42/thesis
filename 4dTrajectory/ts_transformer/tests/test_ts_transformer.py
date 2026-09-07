@@ -4485,7 +4485,12 @@ def test_cross_validation_rejects_candidate_checkpoint_from_another_contract(
     progress["run_contract_sha256"] = "0" * 64
     progress_path.write_text(json.dumps(progress), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="candidate checkpoint.*contract"):
+    # The refusal must name the FILE and the remedy: every progress file written before the
+    # 2026-09-08 eligible-set rename lands here, and deleting it is the only way forward.
+    with pytest.raises(
+        ValueError,
+        match=rf"{cv.PROGRESS_NAME}.*current CV run contract.*Delete the file",
+    ):
         cv.cross_validate(
             series,
             config,

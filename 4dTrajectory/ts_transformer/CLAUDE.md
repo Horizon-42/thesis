@@ -406,7 +406,12 @@ trajectories.py` (which held a second copy of the comparison). So:
 - `checkpoint_metadata.json` / `history.json` name the map `eligible_sets`; artifacts written
   before 2026-09-08 name `eligibility_rosters` (roster bytes) and are read through the
   checkpoint payload instead — a CV `cv_results.json` of that generation can only be checked by
-  bytes, so `run_ts_pipeline` re-runs CV when they moved.
+  bytes, so `run_ts_pipeline` re-runs CV when they moved (and prints which reason it was);
+- **an IN-FLIGHT `cross_validation/cv_candidate_progress.json` from before 2026-09-08 is refused
+  on resume**: the run contract it is bound to now names `eligible_sets` where it named the
+  roster files, so `_load_candidate_progress` raises — naming the file and saying to delete it —
+  rather than silently re-running finished candidates. Deleting that one file restarts the
+  search from candidate 0; a finished `cv_results.json` is read, not refused.
 
 **Measurement code is CODE.** Reusable logic goes in the package with tests
 (`control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);

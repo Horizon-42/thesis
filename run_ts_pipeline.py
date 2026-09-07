@@ -506,6 +506,9 @@ class TrainingPlan:
         """
         stored_sets = metadata.get("eligible_sets")
         if stored_sets is not None:
+            # A roster that cannot be read at all raises out of here rather than becoming a
+            # reuse-error string: an unreadable roster is not "this checkpoint is stale",
+            # and the run must stop, --dry-run included.
             if stored_sets != _eligible_set_digests(self.airports):
                 return "checkpoint was trained against different eligible sets"
             return None
@@ -971,8 +974,10 @@ def run_training(
     print(f"   training  : {plan.train_dir}")
     if skip_train and not reuse:
         print(f"   (checkpoint not reusable: {reuse_error} → rebuilding)")
-    if skip_cv and not reuse and plan.cv_reuse_error() is not None:
-        print("   (CV skipped and no reusable CV artifact → base hyperparameters)")
+    if skip_cv and not reuse and (cv_error := plan.cv_reuse_error()) is not None:
+        # Say WHY, like the checkpoint line above: "its roster bytes moved" and "ran
+        # without the pre-split eligibility rosters" are different operator decisions.
+        print(f"   (CV artifact not reusable: {cv_error} → base hyperparameters)")
 
     def print_final_config(label: str, command: list[str]) -> None:
         if not label.startswith("final train"):

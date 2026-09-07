@@ -288,7 +288,11 @@ def _load_candidate_progress(
         or payload.get("run_contract") != run_contract
     ):
         raise ValueError(
-            "candidate checkpoint does not match the current CV run contract"
+            f"{path} does not match the current CV run contract, so the candidates it "
+            "already finished cannot be resumed into this search. A progress file written "
+            "before 2026-09-08 always says this: the contract now names the eligible SET "
+            "(`eligible_sets`) where it named the roster files. Delete the file to restart "
+            "the search from candidate 0"
         )
     completed = payload.get("completed_candidates")
     rows = payload.get("candidates")

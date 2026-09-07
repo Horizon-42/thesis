@@ -494,13 +494,75 @@ def test_the_pipeline_reuses_a_legacy_checkpoint_whose_roster_bytes_moved(
     torch.save(_v3_payload(provenance, TSConfig()), plan.checkpoint)
     legacy = {"eligibility_rosters": {AIRPORT: "9" * 64}}   # the roster file, as it was
 
+    current = {"eligible_sets": {
+        AIRPORT: provenance["manifests"][0]["eligibility"]["eligible_set_sha256"]
+    }}                                  # what every checkpoint trained from now on carries
+
     _reserialise(roster)
     assert plan._eligibility_reuse_error(legacy) is None
+    assert plan._eligibility_reuse_error(current) is None
 
     _swap_one_eligible_key(roster, manifest)
     assert f"eligible flight set for {AIRPORT} changed" in (
         plan._eligibility_reuse_error(legacy) or ""
     )
+    assert plan._eligibility_reuse_error(current) == (
+        "checkpoint was trained against different eligible sets"
+    )
+
+
+def test_the_pipeline_reuses_cross_validation_by_its_eligible_set(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The CV twin: today's artifact names the set, an older one only the roster bytes."""
+    import run_ts_pipeline as pipeline
+
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
+    harvest = tmp_path / "harvest"
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", harvest)
+    manifest, roster = _harvest(harvest / AIRPORT, flights)
+    provenance = arrival_data_provenance(manifest, eligibility_rosters=[roster])
+    plan = pipeline.TrainingPlan(
+        (AIRPORT,), "itransformer", training_mode="per-airport", output_dir=tmp_path / "run"
+    )
+    plan.cv_dir.mkdir(parents=True)
+    plan.best_config.write_text(json.dumps({}), encoding="utf-8")
+
+    def write_results(**eligibility) -> None:
+        plan.cv_results.write_text(
+            json.dumps({
+                "schema_version": pipeline.CV_RESULTS_SCHEMA,
+                "best_overrides": {},
+                "arrival_manifests": {
+                    AIRPORT: hashlib.sha256(manifest.read_bytes()).hexdigest()
+                },
+                **eligibility,
+            }),
+            encoding="utf-8",
+        )
+
+    # today's artifact: the eligible set, so a rewritten roster is invisible
+    write_results(eligible_sets={
+        AIRPORT: provenance["manifests"][0]["eligibility"]["eligible_set_sha256"]
+    })
+    _reserialise(roster)
+    assert "eligib" not in (plan.cv_reuse_error() or "")
+
+    # an artifact from before 2026-09-08 can only be checked by the roster's bytes
+    write_results(eligibility_rosters={
+        AIRPORT: hashlib.sha256(roster.read_bytes()).hexdigest()
+    })
+    assert "eligib" not in (plan.cv_reuse_error() or "")
+    _reserialise(roster)
+    assert plan.cv_reuse_error() == (
+        "cross-validation predates the eligible-set identity and its roster bytes moved"
+    )
+
+    _swap_one_eligible_key(roster, manifest)
+    write_results(eligible_sets={
+        AIRPORT: provenance["manifests"][0]["eligibility"]["eligible_set_sha256"]
+    })
+    assert plan.cv_reuse_error() == "cross-validation used different eligible sets"
 
 
 def test_the_pipeline_refuses_artifacts_produced_without_the_rosters(

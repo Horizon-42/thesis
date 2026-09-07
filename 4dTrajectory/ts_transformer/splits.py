@@ -26,8 +26,7 @@ if TYPE_CHECKING:   # annotations only: importing `dataset` here would drag torc
 
 
 DATA_SELECTION_SCHEMA = "ts-data-selection-v2-pre-split-eligibility"
-#: How a flight's split is decided. Recorded in every audit, and the string a stored audit
-#: must still say for `data_provenance` to be able to recompute its split identities.
+#: How a flight's split is decided, as recorded in every data-selection audit.
 SPLIT_ASSIGNMENT_METHOD = "sha256(seed:airport-qualified-flight-id)"
 
 
@@ -91,9 +90,9 @@ def data_selection_audit(
             "data-selection audit received outer-test trajectory series during development"
         )
 
-    # THE set digest (`data_provenance.eligible_set_digest`), not a local copy of it: the
-    # eligible identities below are what a legacy checkpoint's eligible set is re-verified
-    # against, and a second implementation would break that the day the two drifted.
+    # THE set digest (`data_provenance.eligible_set_digest`), not a local copy of it: these
+    # identities and the arrival provenance's ``eligible_set_sha256`` describe the same
+    # cohort, and two implementations would be two answers to "is this the same data?".
     digest = eligible_set_digest
     direct_typecodes = openap_direct_typecodes()
     direct_digest = hashlib.sha256("\n".join(direct_typecodes).encode()).hexdigest()
