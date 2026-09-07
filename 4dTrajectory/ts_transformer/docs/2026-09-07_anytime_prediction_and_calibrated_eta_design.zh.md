@@ -24,7 +24,7 @@ A0 / B0 用现有 checkpoint 与现有预测目录即可做，排在 L2.e′ 之
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
 | A0 重锚曲线（测量） | **fixed 两臂 + random 三臂都回放了（§2.4b/c）**：random 训练在第 8–10 轮后于每个锚点集退化——机制是 LR 调度器挂在停滞的选择指标上（第 60 轮 lr 9e-7）+ 锚点按时间均匀采样偏向近跑道 | `anytime_a0_20260907/`、`anytime_a0_random*_20260907/`、`a0_random_20260907/` | 门 1 过、门 2 12–16 km、门 3 被时长地板挡住；random 的 L−1 否决三臂皆败 |
-| A0.b 两条机制的修正（§2.4c） | **代码完成并过评审（2026-09-07，分支 `dev-a0b`：`12d35ce`、`23cae12`、`965077a`、`f8a1726`，评审修正见 §2.4c 实现）；两臂未训练** | `lr_plateau_metric ∈ {selection, objective}`（调度器读验证目标而不是选择指标；β 预热或 λ 对偶步下被拒）+ `random_train_anchor_sampling ∈ {uniform, remaining-path-uniform}`（在航班自身剩余路程区间上均匀抽、取最近可用锚点；**评审否掉了先抽层的写法**，分层只留作记账）+ 每轮 `train_anchor_sampling.remaining_path_strata` 与 `_population` 计数；臂 `A0b_lr_objective` / `A0b_lr_objective_path_uniform`；测试 `tests/test_lr_plateau_metric.py`（11）+ `tests/test_random_anchor_sampling.py`（27） | 读法见 §2.4c；两个默认值都是今天的行为，四条固定锚点路径逐字节等价、935 个产物重算命名 0 变化 |
+| A0.b 两条机制的修正（§2.4c/§2.4d） | **跑完（2026-09-08，`a0_random_20260907/A0b_*`，回放 `anytime_a0b_20260908`）**：最佳轮 8 → 155/173，选择指标 1100 → 743/710；**s_freeze 首次达到**（8 km，\|Δt\| p80 22.0/19.8 s），时长头不再卡在 ~125 s 地板（6 km 处预测 91–94 s）；V2 16 km（1321/1317 m）；L−1 否决仍未过（全体 1782 vs 1322），但差距是昨天的三分之一；path_uniform 每行更好 | `readout_a0b.{json,txt}`、`anytime_curve.{txt,json}` | 门 1 过、门 2 16 km、门 3 8 km；L−1 否决未过，见 §2.4d |
 | A1.a 网格选点指标（A1 的前置：先让随机锚点臂能被正确选点） | **代码完成（2026-09-07，分支 `dev-a1`）；臂未跑** | `anchor_grid.py`（网格的唯一定义：bin、60 s 地板、逐航班锚点规则、L−1 固定分层规则；runner 改为 import 它）+ `checkpoint_selection_metric=anchor-grid-common-grid-ade`（五个锚点集的 common-grid ADE 均值，`history.json` 每轮记 `validation_anchor_grid` 块）+ 臂 `A0_random_hr8_tv1_grid`；测试 `tests/test_anchor_grid.py`（7）+ `tests/test_anchor_grid_selection.py`（17）+ `tests/test_frame_ablation_runner.py`（3） | 无门，是选点规则；旧指标逐位不变（4 臂 × 2 轮 × 232 个 history 浮点全等） |
 | A0.pub 重锚预测的可视化交付（曲线之外的那一半） | **完成（2026-09-07，分支 `dev-publish2`）**：曲线与记录同一次前向；KRDU val `--limit 300` 三个 checkpoint × 12/8/6 km 共 9 个类别已发布，浏览器核对过（预测从进近中段起画，不在 25 km 切片起点） | `run_ts_anytime_curve.py --write-records` → `<out>/records/<label>/<bin>km/`（`export.write_batch`，`summary.json` 多一个 `anytime` 块，schema `ts-anytime-records-v1`）+ `publish_ts_experiment_trajectories.py` 按 bin 建类别（key `…_a12km_val`、picker id `<run>@12km`、group = 记录 campaign、标签写明 bin 与航班数）；产物 `anytime_records_20260908/`（317 MB，回放 2 min 30 s）；CZML 侧**无需修改**（早已按 `source.anchorTimeS` 平移，§六 7），新增测试钉住晚锚点 | 无门，是交付形态；12 km 覆盖 244/300，8/6 km 300/300 |
 | A1 流式评估协议 | 未做 | `evaluation_protocol` 新增按剩余路程分 bin 的锚点网格；`compare_constraint_arms.py` 增列 | 无门，是读数 |
@@ -442,6 +442,35 @@ checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（ch
   外加 campaign 的 `config.json` 覆盖集按新 run 重算）name / slug / 是否可加载 **0 个变化**。测试套件 680 → **719** 全绿。
 - **臂**：`docs/experiments/a0_random_arms.json` 追加 `A0b_lr_objective` 与 `A0b_lr_objective_path_uniform`
   （都在 `_grid` 配方上）。dry-run 通过，两条新 slug 尾部 `…_8-more_7cfd2b7f` / `…_9-more_48f49b41`。**未训练**。
+
+### 2.4d A0.b 结果（2026-09-08，`a0_random_20260907` 的 `A0b_lr_objective` / `A0b_lr_objective_path_uniform`，回放 `anytime_a0b_20260908`）
+
+两臂都跑满 180 轮未早停（最佳轮 155 / 173，仍在下降）。**预注册的第一条机制成立**：LR 平台调度器盯着停滞的 L−1 选择指标提前砍学习率——
+改读训练目标后退化消失。第二条（时间均匀采样偏向近跑道，改剩余路程均匀）在其上再拿 20–90 m。
+
+| 臂 | 最佳轮 | 锚点网格选择指标 | L−1 | 12 km | 8 km | 6 km |
+|---|---:|---:|---:|---:|---:|---:|
+| `A0_random_hr8_tv1_grid`（09-07） | 8 | 1100 | 2990 | 722 | 390 | 298 |
+| `A0b_lr_objective` | 155 | 743 | 1871 | 581 | 303 | 217 |
+| `A0b_lr_objective_path_uniform` | 173 | **710** | **1782** | **561** | **283** | **212** |
+
+回放（雷达引导，三 checkpoint 含 native32 固定锚点对照）：
+
+| | `A0b_lr_objective` | `A0b_lr_objective_path_uniform` | native32（固定） |
+|---|---|---|---|
+| 门 1 单调 | 过 | 过 | 过 |
+| 门 2（ADE p50 < 1500 m 的最远 s） | 16 km（1321 m） | 16 km（1317 m） | 16 km（1382 m） |
+| **门 3 s_freeze（\|Δt\| p80 < 30 s）** | **8 km（22.0 s）** | **8 km（19.8 s）** | 未达到 |
+| 预测时长 p50 逐 bin（20/16/12/8/6 km） | 235/207/161/113/94 s | 239/207/162/114/91 s | 323/258/204/182/179 s |
+
+**s_freeze 在本项目里第一次被达到。** 时长头不再卡在 ~125 s 的地板上（native32 在 6 km 仍报 179 s，A0.b 报 91–94 s，
+跟着真值剩余时间走）——这是调度器修正的直接后果，不是新的头。
+
+**L−1 否决仍未过**（1404 架配对，全体 ADE / FDE p50 / chamfer）：native32 1322 / 864 / 224，`path_uniform` 1782 / 1477 / 229
+（直线 628 / 1315 / **84**——chamfer 优于 native32 的 109；雷达引导 3839 / 1981 / 1691）。差距从昨天的 2949 缩到 1782，是随机锚点化的
+代价的三分之一，但仍超种子噪声。读法：随机锚点臂在 L−1 不是固定锚点臂的替代，在它训练的整个锚点范围上是；两者的交付形态
+应当分开——**A2 的设计问题**（待用户决定）：(a) 两模型交付（L−1 用固定锚点臂，之后用随机锚点臂），或 (b) 混合锚点训练
+（L−1 锚点加权 + 剩余路程均匀），门仍是 L−1 不劣于 native32 超过种子噪声。两臂在预算上限仍在下降，180 轮不是收敛值。
 
 ### 2.5 A2 的门
 
