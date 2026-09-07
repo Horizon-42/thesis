@@ -27,10 +27,19 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from anchor_grid import (
+    DEFAULT_GRID_MIN_FUTURE_S,
+    VALIDATION_ANCHOR_GRID_KM,
+    VALIDATION_ANCHOR_GRID_M,
+    anchors_for_bin,
+    remaining_path_profiles,
+)
 from batch_contract import anchor_state, model_forward, unpack_batch
 from closure_output import ClosurePrediction, replay_batch as closure_replay_batch
 from config import (
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     PREDICTION_STATE,
     TSConfig,
@@ -40,6 +49,7 @@ from control.basis_fit import FittedTeacherTable
 from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from dataset import (
+    ExplicitAnchorTrajectoryWindows,
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
@@ -48,6 +58,7 @@ from dataset import (
 )
 from fixed_anchor_validation import (
     CommonGridTruth,
+    common_truth_at_anchors,
     fixed_anchor_common_truth,
     fixed_anchor_common_grid_ade_metrics,
     fixed_anchor_common_grid_metrics,
@@ -455,8 +466,15 @@ def build_validation_batch_plan(
     batch_size: int,
     *,
     duration_bucketed: bool = False,
+    common_truth: CommonGridTruth | None = None,
 ) -> ValidationBatchPlan:
-    """Build each fixed validation tensor once; optionally group no-grad rows by duration."""
+    """Build each fixed validation tensor once; optionally group no-grad rows by duration.
+
+    ``common_truth`` is the truth cache the selection metric scores against. It is the
+    ``L-1`` one by default; an anchor-grid set passes its own, because its truth is
+    measured from ITS anchors and computing the L-1 one for it would be both wasted and
+    wrong.
+    """
     if not isinstance(dataset, FixedAnchorTrajectoryWindows):
         raise TypeError("validation batching requires a fixed-anchor dataset")
     durations = np.asarray([
@@ -505,20 +523,20 @@ def build_validation_batch_plan(
     )
     if not np.array_equal(np.sort(covered), np.arange(len(dataset), dtype=np.int64)):
         raise ValueError("validation duration buckets must cover every row exactly once")
+    if common_truth is None and (
+        dataset.config.checkpoint_selection_metric
+        in CHECKPOINT_SELECTION_COMMON_GRID_METRICS
+    ):
+        common_truth = fixed_anchor_common_truth(
+            dataset.series,
+            dataset.config,
+            dataset.config.validation_common_grid_points,
+        )
     return ValidationBatchPlan(
         dataset=dataset,
         batches=tuple(batches),
         bucket_flights=bucket_flights,
-        common_truth=(
-            fixed_anchor_common_truth(
-                dataset.series,
-                dataset.config,
-                dataset.config.validation_common_grid_points,
-            )
-            if dataset.config.checkpoint_selection_metric
-            == CHECKPOINT_SELECTION_COMMON_GRID_ADE
-            else None
-        ),
+        common_truth=common_truth,
     )
 
 
@@ -636,6 +654,127 @@ def evaluate_validation_airport(
     )
 
 
+def replay_validation_plan(
+    model: nn.Module,
+    plan: ValidationBatchPlan,
+    device: torch.device,
+) -> SplitPredictionReplay:
+    """The DEPLOYABLE replay of one cached plan: one forward per batch, no objective.
+
+    `evaluate_validation_airport` scores the objective and replays in the same pass; an
+    anchor-grid set is scored on the replay alone, so it does neither the loss nor the
+    posterior forward. ``model_forward`` without ``future`` is the deployable decode for
+    every output — a latent model's prior top-1, not its posterior sample.
+    """
+    model.eval()
+    chunks: list[tuple[np.ndarray, SplitPredictionReplay]] = []
+    with torch.no_grad():
+        for batch in plan.batches:
+            (
+                x,
+                y,
+                mask,
+                final_time_s,
+                _flight_weights,
+                dynamics,
+                _dense_supervision,
+            ) = unpack_batch(batch.raw_batch)
+            x, y, mask = x.to(device), y.to(device), mask.to(device)
+            final_time_s = final_time_s.to(device)
+            dynamics = move_dynamics(dynamics, device)
+            chunks.append((
+                batch.indices,
+                _prediction_batch_replay(
+                    model_forward(model, x, dynamics),
+                    x,
+                    y,
+                    mask,
+                    final_time_s,
+                    dynamics,
+                    plan.dataset,
+                ),
+            ))
+    return _merge_prediction_replays(chunks, count=len(plan.dataset))
+
+
+#: The anchor-grid metric's cached validation work: bin (metres of remaining path) ->
+#: airport -> that airport's flights anchored at the bin. Built once per fit, replayed
+#: every epoch, exactly like the ``L-1`` plans beside it.
+AnchorGridPlans = dict[float, dict[str, ValidationBatchPlan]]
+
+
+def build_anchor_grid_validation_plans(
+    val_sets: dict[str, TrajectoryWindows],
+    batch_size: int,
+) -> AnchorGridPlans:
+    """One cached validation plan per (bin, airport), at each flight's own bin anchor.
+
+    The bins, the future floor and the per-flight anchor rule are `anchor_grid`'s — the
+    same ones `run_ts_anytime_curve.py` draws the curve on. A flight with no admissible
+    anchor at a bin is simply absent from that bin's plan (it has no reading there, and a
+    reading taken elsewhere on its track would not be one). A bin no flight can reach is
+    refused here rather than silently dropped from the mean: a five-set metric that
+    quietly became a four-set one would not be comparable across arms.
+
+    No ``fitted_teacher`` is passed on purpose: a fitted table is bound to the L−1 anchor
+    it was fitted at, and these sets score a REPLAY, never an objective — nothing here
+    reads the imitation supervision the table would have replaced.
+    """
+    plans: AnchorGridPlans = {}
+    for target_m in VALIDATION_ANCHOR_GRID_M:
+        by_airport: dict[str, ValidationBatchPlan] = {}
+        for airport, dataset in val_sets.items():
+            config = dataset.config
+            series = dataset.series
+            anchors = anchors_for_bin(
+                series,
+                remaining_path_profiles(series),
+                target_m,
+                seq_len=config.seq_len,
+                min_future_s=DEFAULT_GRID_MIN_FUTURE_S,
+            )
+            if not anchors:
+                raise ValueError(
+                    f"no {airport} validation flight can be anchored at "
+                    f"{target_m / 1000:g} km of remaining path with "
+                    f"{DEFAULT_GRID_MIN_FUTURE_S:g} s of truth after it, so the "
+                    f"{CHECKPOINT_SELECTION_ANCHOR_GRID_ADE} metric has no reading there; "
+                    "this cohort cannot support the anchor grid"
+                )
+            subset = [series[index] for index in anchors]
+            windows = ExplicitAnchorTrajectoryWindows(
+                subset,
+                config,
+                dataset.normalizer,
+                anchors={
+                    series[index].dataset_id: anchor
+                    for index, anchor in anchors.items()
+                },
+            )
+            by_airport[airport] = build_validation_batch_plan(
+                windows,
+                batch_size,
+                common_truth=common_truth_at_anchors(
+                    subset,
+                    config,
+                    config.validation_common_grid_points,
+                    list(anchors.values()),
+                ),
+            )
+        plans[target_m] = by_airport
+    return plans
+
+
+def anchor_grid_coverage(plans: AnchorGridPlans) -> dict[str, dict[str, int]]:
+    """Bin -> airport -> flights with a reading there. Every bounded coverage is stated."""
+    return {
+        f"{target_m:g}": {
+            airport: len(plan.dataset) for airport, plan in by_airport.items()
+        }
+        for target_m, by_airport in plans.items()
+    }
+
+
 @dataclass(frozen=True)
 class ValidationSelection:
     """One deterministic checkpoint-selection result over fixed-anchor validation."""
@@ -644,6 +783,9 @@ class ValidationSelection:
     value: float
     by_airport: dict[str, float]
     details_by_airport: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: The anchor-grid metric's per-anchor-set record: which bins were scored, on how many
+    #: flights, and what each scored. Empty for every other metric.
+    anchor_grid: dict[str, Any] = field(default_factory=dict)
 
 
 def _objective_validation_selection(
@@ -655,8 +797,10 @@ def _objective_validation_selection(
     device: torch.device,
     val_by_airport: dict[str, float],
     precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
+    anchor_grid_plans: AnchorGridPlans | None = None,
 ) -> ValidationSelection:
     del model, val_sets, normalizer, config, device, precomputed_details_by_airport
+    del anchor_grid_plans
     return ValidationSelection(
         metric=CHECKPOINT_SELECTION_OBJECTIVE,
         value=float(np.mean(list(val_by_airport.values()))),
@@ -697,7 +841,10 @@ def common_grid_validation_details(
                 model, dataset, normalizer, device, config.batch_size
             )
         )
-        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE:
+        if (
+            config.checkpoint_selection_metric
+            in CHECKPOINT_SELECTION_COMMON_GRID_METRICS
+        ):
             block = fixed_anchor_common_grid_ade_metrics(
                 dataset.series,
                 config,
@@ -804,7 +951,9 @@ def _common_grid_validation_selection(
     device: torch.device,
     val_by_airport: dict[str, float],
     precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
+    anchor_grid_plans: AnchorGridPlans | None = None,
 ) -> ValidationSelection:
+    del anchor_grid_plans
     details = common_grid_validation_details(
         model=model, val_sets=val_sets, normalizer=normalizer, config=config,
         device=device, val_by_airport=val_by_airport,
@@ -821,7 +970,131 @@ def _common_grid_validation_selection(
     )
 
 
+#: The key the ``L-1`` anchor set carries in the recorded grid block. It is the anchor the
+#: whole package evaluates at, not a bin of the remaining-path grid, so it is named rather
+#: than numbered.
+ANCHOR_GRID_L1_KEY = "l-1"
+
+
+def _anchor_set_block(
+    ade_by_airport: dict[str, float], flights_by_airport: dict[str, int]
+) -> dict[str, Any]:
+    """One anchor set's published cell: its ADE, and the coverage it was read on.
+
+    The set's ADE is the AIRPORT MACRO — the mean over airports of each airport's
+    flight-mean ADE — which is what `fixed-anchor-common-grid-ade` already means, so the
+    ``L-1`` cell of this block IS that metric's value and the two are comparable. On a
+    single-airport run (every arm in this line) the macro and the flight mean coincide.
+    """
+    return {
+        "flights": sum(flights_by_airport.values()),
+        "ade_m": float(np.mean(list(ade_by_airport.values()))),
+        "by_airport": {
+            airport: {"flights": flights_by_airport[airport], "ade_m": ade}
+            for airport, ade in ade_by_airport.items()
+        },
+    }
+
+
+def _anchor_grid_validation_selection(
+    *,
+    model: nn.Module,
+    val_sets: dict[str, TrajectoryWindows],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    val_by_airport: dict[str, float],
+    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
+    anchor_grid_plans: AnchorGridPlans | None = None,
+) -> ValidationSelection:
+    """The mean, over FIVE anchor sets, of that set's common-grid ADE.
+
+    The five sets are ``L-1`` and `anchor_grid`'s four remaining-path bins
+    (16 / 12 / 8 / 6 km), each flight anchored at its own closest admissible sample.
+
+    Two facts decide what the number is, and both are deliberate:
+
+    * **equal weight per ANCHOR SET.** The five sets contribute one fifth each, whatever
+      their coverage. Pooling all (flight, anchor) pairs instead would weight each bin by
+      how many flights happened to reach it, i.e. by the cohort's route mix — the far bins
+      would fade out of the metric exactly on the arms whose flights are vectored.
+    * **each set's ADE is the mean over the flights that HAVE that anchor**, per airport,
+      then the airport macro (`_anchor_set_block`). A flight absent from a bin is absent
+      from that bin's mean; it is never scored 0 and never carried over from another bin.
+
+    The ADE itself is `fixed_anchor_validation`'s common-grid ADE at every set — the same
+    evaluator, the same query grid, only the anchor (and hence the truth cache) moves. The
+    ``L-1`` term is therefore exactly the value `fixed-anchor-common-grid-ade` selects on,
+    and it is recorded every epoch beside the four bins so the two metrics stay readable
+    against each other.
+
+    Lower is better, like every other selection metric.
+    """
+    if anchor_grid_plans is None:
+        raise ValueError(
+            f"{CHECKPOINT_SELECTION_ANCHOR_GRID_ADE} needs its cached anchor-grid plans; "
+            "build them once per fit with build_anchor_grid_validation_plans"
+        )
+    fixed = _common_grid_validation_selection(
+        model=model, val_sets=val_sets, normalizer=normalizer, config=config,
+        device=device, val_by_airport=val_by_airport,
+        precomputed_details_by_airport=precomputed_details_by_airport,
+    )
+    sets: dict[str, dict[str, Any]] = {
+        ANCHOR_GRID_L1_KEY: _anchor_set_block(
+            fixed.by_airport,
+            {airport: len(dataset) for airport, dataset in val_sets.items()},
+        )
+    }
+    ade_by_airport_by_set: list[dict[str, float]] = [dict(fixed.by_airport)]
+    for target_m, by_airport in anchor_grid_plans.items():
+        ade_by_airport = {}
+        for airport, plan in by_airport.items():
+            replay = replay_validation_plan(model, plan, device)
+            block = fixed_anchor_common_grid_ade_metrics(
+                plan.dataset.series,
+                config,
+                replay.anchors,
+                replay.predicted,
+                replay.predicted_time_s,
+                replay.segment_durations_s,
+                points=config.validation_common_grid_points,
+                common_truth=plan.common_truth,
+            )
+            ade_by_airport[airport] = float(block["ade_m"])
+        ade_by_airport_by_set.append(ade_by_airport)
+        sets[f"{target_m:g}"] = _anchor_set_block(
+            ade_by_airport,
+            {airport: len(plan.dataset) for airport, plan in by_airport.items()},
+        )
+    value = float(np.mean([block["ade_m"] for block in sets.values()]))
+    return ValidationSelection(
+        metric=CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
+        value=value,
+        # Per airport, the same mean over the same five sets — the decomposition of the
+        # value, not a second definition of it.
+        by_airport={
+            airport: float(np.mean([
+                ade_by_airport[airport] for ade_by_airport in ade_by_airport_by_set
+            ]))
+            for airport in val_sets
+        },
+        details_by_airport=fixed.details_by_airport,
+        anchor_grid={
+            "selection_metric": CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
+            "grid_km": list(VALIDATION_ANCHOR_GRID_KM),
+            "min_future_s": DEFAULT_GRID_MIN_FUTURE_S,
+            "anchor_sets": sets,
+            "mean_ade_m": value,
+            # The other metric's number, named so a reader comparing arms does not have to
+            # know this block's key convention. It IS anchor_sets["l-1"]["ade_m"].
+            "fixed_anchor_common_grid_ade_m": sets[ANCHOR_GRID_L1_KEY]["ade_m"],
+        },
+    )
+
+
 VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
     CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE: _anchor_grid_validation_selection,
 }

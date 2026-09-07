@@ -25,6 +25,7 @@ from config import (
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_DYNAMICS_POINT_MASS,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_OBJECTIVE,
     HORIZON_NORMALIZED,
@@ -50,6 +51,10 @@ SELECTION_METRIC_DESCRIPTIONS = {
     CHECKPOINT_SELECTION_OBJECTIVE: SELECTION_METRIC,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: (
         "mean outer-train-fold airport-macro fixed-anchor common physical-time ADE"
+    ),
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE: (
+        "mean outer-train-fold airport-macro common physical-time ADE, averaged over the "
+        "five anchor sets (L-1 and the 16/12/8/6 km remaining-path bins)"
     ),
 }
 CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {

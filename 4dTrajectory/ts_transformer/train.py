@@ -30,7 +30,8 @@ from batching import resolve_batch_size
 from config import (
     CONTROL_HOOK_OFF,
     HOOK_SATURATION_HARD,
-    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
@@ -78,6 +79,8 @@ from prediction_outputs import ControlPrediction
 from training_performance import EpochProfiler
 from validation import (
     VALIDATION_SELECTIONS,
+    anchor_grid_coverage,
+    build_anchor_grid_validation_plans,
     common_grid_validation_details,
     evaluate_validation_airport,
     predict_split,
@@ -119,6 +122,11 @@ class EpochResult:
     validation_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE
     validation_selection_value: float | None = None
     validation_selection_by_airport: dict[str, float] = field(default_factory=dict)
+    # The anchor-grid metric's per-anchor-set record: the five sets it averages, each with
+    # the flights that HAVE that anchor and the common-grid ADE over them, so the shape of
+    # the anytime curve is visible during training and not only after a replay. Empty for
+    # every other selection metric.
+    validation_anchor_grid: dict[str, Any] = field(default_factory=dict)
     train_anchor_sampling: dict[str, Any] = field(default_factory=dict)
     control_training_diagnostics: dict[str, Any] = field(default_factory=dict)
     timing: dict[str, float] = field(default_factory=dict)
@@ -323,7 +331,7 @@ def evaluate_fixed_anchor_series(
     )
     common_grid_metrics = (
         formal_metrics
-        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE
+        if config.checkpoint_selection_metric in CHECKPOINT_SELECTION_COMMON_GRID_METRICS
         else evaluate_fixed_anchor_common_grid(
             model, dataset, normalizer, config, device, replay=replay
         )
@@ -499,7 +507,7 @@ def fit_model(
         for airport, dataset in val_sets.items()
     }
     val_common_truth_by_airport: dict[str, CommonGridTruth] | None = None
-    if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE:
+    if config.checkpoint_selection_metric in CHECKPOINT_SELECTION_COMMON_GRID_METRICS:
         val_common_truth_by_airport = {}
         for airport, plan in val_batch_plans.items():
             if plan.common_truth is None:
@@ -507,6 +515,13 @@ def fit_model(
                     f"validation plan for {airport} omitted required common-grid truth"
                 )
             val_common_truth_by_airport[airport] = plan.common_truth
+    # The anchor-grid metric's four extra anchor sets: built once here beside the L-1
+    # plans (the fifth set), replayed every epoch. The L-1 pass is NOT rebuilt for them.
+    anchor_grid_plans = (
+        build_anchor_grid_validation_plans(val_sets, config.batch_size)
+        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_ANCHOR_GRID_ADE
+        else None
+    )
     val_window_count = sum(len(dataset) for dataset in val_sets.values())
     if not len(train_set) or not val_window_count:
         raise ValueError(
@@ -565,6 +580,12 @@ def fit_model(
         print(
             f"  selection  {config.checkpoint_selection_metric} on fixed L-1 validation"
         )
+        if anchor_grid_plans is not None:
+            coverage = anchor_grid_coverage(anchor_grid_plans)
+            print("  grid       L-1 + " + ", ".join(
+                f"{float(bin_m) / 1000:g} km ({sum(flights.values())} flights)"
+                for bin_m, flights in coverage.items()
+            ))
         if minimum_anchor_index is not None:
             print(f"  anchor     common minimum index {minimum_anchor_index} "
                   f"({minimum_anchor_index * config.dt_s:.0f}s after track entry)")
@@ -758,10 +779,6 @@ def fit_model(
             replays_by_airport=replay_by_airport,
             common_truth_by_airport=val_common_truth_by_airport,
         )
-        profiler.add_cpu_seconds(
-            "val_checkpoint_selection_s",
-            time.perf_counter() - selection_metrics_started,
-        )
         validation_selection = VALIDATION_SELECTIONS[
             config.checkpoint_selection_metric
         ](
@@ -772,6 +789,14 @@ def fit_model(
             device=device,
             val_by_airport=val_by_airport,
             precomputed_details_by_airport=common_grid_details,
+            anchor_grid_plans=anchor_grid_plans,
+        )
+        # Everything the selection metric costs, including the anchor grid's four extra
+        # replays — a metric whose price is not in its own timer is a metric nobody can
+        # budget for.
+        profiler.add_cpu_seconds(
+            "val_checkpoint_selection_s",
+            time.perf_counter() - selection_metrics_started,
         )
         if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
             raise RuntimeError(
@@ -799,6 +824,7 @@ def fit_model(
             validation_selection_metric=validation_selection.metric,
             validation_selection_value=validation_selection.value,
             validation_selection_by_airport=validation_selection.by_airport,
+            validation_anchor_grid=validation_selection.anchor_grid,
             train_anchor_sampling=train_anchor_sampling,
             control_training_diagnostics=control_training_diagnostics,
             timing=timing,
@@ -833,6 +859,14 @@ def fit_model(
                     f"{validation_selection.metric}="
                     f"{validation_selection.value:.1f}"
                 )
+            if validation_selection.anchor_grid:
+                # The curve's shape, per epoch: the mean is one number and hides which
+                # anchors moved. `n` rides along because bins hold different flights.
+                print("             anchor set  " + "  ".join(
+                    f"{name}={block['ade_m']:.0f}(n{block['flights']})"
+                    for name, block in
+                    validation_selection.anchor_grid["anchor_sets"].items()
+                ))
             print(
                 "             val parts  "
                 + "  ".join(

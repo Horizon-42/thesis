@@ -283,9 +283,26 @@ SIMPLE_V3_IMITATION_LOSS_WEIGHT = 64.0
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
+# A1 (`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`): the SAME
+# common-grid ADE, averaged over five anchor sets — L−1 plus `anchor_grid`'s four
+# remaining-path bins — instead of L−1 alone. For a random-anchor arm the fixed metric is
+# blind to what the arm improves: it scores the one anchor such a model is LEAST
+# specialised for, and froze `A0_random_hr8_tv1` at epoch 10 while that arm's geometry was
+# better than the fixed arm's at every anchor on the re-anchoring grid.
+CHECKPOINT_SELECTION_ANCHOR_GRID_ADE = "anchor-grid-common-grid-ade"
 CHECKPOINT_SELECTION_METRICS = (
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
+)
+#: The metrics scored on a deployable common-grid REPLAY rather than on the training
+#: objective. They share the lean ADE evaluator and the cached common-grid truth, so every
+#: site that asks "does this run need the replay path" reads this tuple rather than one
+#: metric name — which is how the anchor-grid metric would otherwise have silently taken
+#: the full-diagnostic path and paid for twenty metrics it does not select on.
+CHECKPOINT_SELECTION_COMMON_GRID_METRICS = (
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
 )
 
 

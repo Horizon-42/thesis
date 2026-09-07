@@ -36,27 +36,36 @@ TERMINAL_CROSS_TRACK_EMPHASIS = 3.0
 TERMINAL_VERTICAL_EMPHASIS = 5.0
 
 
-def fixed_anchor_common_truth(
+def common_truth_at_anchors(
     series: Sequence[FlightSeries],
     config: TSConfig,
     points: int,
+    anchors: Sequence[int],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return physical truth, remaining durations and normalized query progress."""
+    """Return physical truth, remaining durations and normalized query progress.
+
+    One anchor per flight, explicit: the L−1 deployment contract is
+    :func:`fixed_anchor_common_truth` below, and the ``anchor-grid-common-grid-ade``
+    selection metric passes its own remaining-path anchors here. The truth is the same
+    object in both cases — the flight's supervision rows resampled at equal fractions of
+    the time it still has to fly — which is what makes the anchor sets comparable.
+    """
     if points <= 1:
         raise ValueError("common-grid points must be greater than one")
+    if len(anchors) != len(series):
+        raise ValueError("one common-grid anchor per flight is required")
     progress = np.arange(1, points + 1, dtype=np.float64) / points
     truth = np.empty((len(series), points, len(config.channels)), dtype=np.float32)
     durations = np.empty(len(series), dtype=np.float64)
-    anchor = config.seq_len - 1
-    for row, item in enumerate(series):
+    for row, (item, anchor) in enumerate(zip(series, anchors)):
         if item.n_samples <= anchor:
             raise ValueError(
-                f"flight {item.dataset_id!r} has no fixed L-1 anchor {anchor}"
+                f"flight {item.dataset_id!r} has no anchor {anchor}"
             )
         duration = float(item.supervision_times[-1] - item.times[anchor])
         if duration <= 0.0:
             raise ValueError(
-                f"flight {item.dataset_id!r} has no future after fixed anchor"
+                f"flight {item.dataset_id!r} has no future after anchor {anchor}"
             )
         durations[row] = duration
         query_times = item.times[anchor] + progress * duration
@@ -69,6 +78,17 @@ def fixed_anchor_common_truth(
             for channel in range(len(config.channels))
         ])
     return truth, durations, progress
+
+
+def fixed_anchor_common_truth(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    points: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The deployment contract's truth: one fixed ``L-1`` anchor for every flight."""
+    return common_truth_at_anchors(
+        series, config, points, [config.seq_len - 1] * len(series)
+    )
 
 
 def fixed_anchor_common_weights_and_terminal_velocity(

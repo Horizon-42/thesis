@@ -29,7 +29,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -1655,6 +1655,49 @@ class FixedAnchorTrajectoryWindows(TrajectoryWindows):
         indices = self.range_starts[self.eligible_series].copy()
         np.random.default_rng(seed).shuffle(indices)
         return indices
+
+
+class ExplicitAnchorTrajectoryWindows(FixedAnchorTrajectoryWindows):
+    """One CALLER-SUPPLIED anchor per flight — still one deterministic window each.
+
+    The fixed-anchor policy places every flight at the same index (``L-1``, or a common
+    ``minimum_anchor_index``); a remaining-path bin places each flight where ITS OWN
+    geometry put the bin, so the anchors differ flight by flight. Everything downstream is
+    unchanged — the same caching, the same batches, the same validation batch plan — which
+    is why this subclasses the fixed policy rather than restating it.
+
+    ``anchors`` maps ``FlightSeries.dataset_id`` to the anchor index, and must cover every
+    flight with an index the flight can actually be anchored at: the caller
+    (:mod:`anchor_grid`) has already decided which flights have a reading at this bin, so a
+    gap here is a cohort bug, not a case to skip.
+    """
+
+    anchor_description = "one explicit anchor per flight"
+    anchor_policy = "explicit"
+    sampling_version = "explicit-anchor-v1"
+
+    def __init__(
+        self,
+        series: Sequence[FlightSeries],
+        config: TSConfig,
+        normalizer: Normalizer,
+        *,
+        anchors: Mapping[str, int],
+        fitted_teacher: FittedTeacherTable | None = None,
+    ):
+        self._anchor_by_flight = dict(anchors)
+        super().__init__(series, config, normalizer, fitted_teacher=fitted_teacher)
+
+    def _eligible_anchors(
+        self, series: FlightSeries, anchors: Sequence[int]
+    ) -> Sequence[int]:
+        wanted = self._anchor_by_flight[series.dataset_id]
+        if wanted not in anchors:
+            raise ValueError(
+                f"flight {series.dataset_id!r} cannot be anchored at {wanted} "
+                f"(admissible anchors: {anchors})"
+            )
+        return [wanted]
 
 
 class RandomAnchorTrajectoryWindows(TrajectoryWindows):
