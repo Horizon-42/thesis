@@ -123,7 +123,7 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | `fixed_anchor_validation.py` / `evaluation_protocol.py` | deterministic fixed-anchor metrics and the one-way outer-test release gate |
 | `approach_clustering/` | train-only approach geometry clustering and shared-cohort comparison CLI |
 | `batch_benchmark.py` | outer-train-only CUDA throughput benchmark used by `benchmark-batch` |
-| `__main__.py` / `cli/` | the subcommand table, and one module per subcommand (`train`, `cross_validate`, `evaluate_fit`, `freeze_test`, `predict`, plus `common`) — each exposes `HELP` / `add_cli_arguments()` / `run_cli()` |
+| `__main__.py` / `cli/` | the subcommand table, and one module per subcommand (`train`, `cross_validate`, `evaluate_fit`, `freeze`, `predict`, plus `common`) — each exposes `HELP` / `add_cli_arguments()` / `run_cli()` |
 | `synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
 | `control/` (package: envelope, heads, conditioning, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |

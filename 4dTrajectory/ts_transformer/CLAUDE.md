@@ -289,7 +289,7 @@ command is HELD.
 | `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 150 |
 | `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 258 |
 | `splits.py` | which split a flight belongs to | 192 |
-| `cli/` | one module per subcommand (`common` 817, `predict` 422, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze_test` 42, `__init__` 15) | 1,542 |
+| `cli/` | one module per subcommand (`common` 817, `predict` 422, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze` 42, `__init__` 15) | 1,542 |
 | `__main__.py` | the bootstrap and the `COMMANDS` table it dispatches from | 131 |
 
 Two edges that a change must not reverse: `evaluation_protocol` reaches

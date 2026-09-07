@@ -473,7 +473,7 @@ check on that path and a green test with it.
 **BREAKING (CLI): one module per subcommand, and fifteen flags renamed** (`dba2450` T3-19).
 `__main__.main` 679 → `__main__.py` 131 lines (and `cli/` 1,542): a bootstrap plus a `COMMANDS` table of
 `(help, add_cli_arguments, run_cli)`, the pattern `approach_clustering/cli.py` already used.
-`cli/{train,cross_validate,evaluate_fit,freeze_test,predict}.py` + `cli/common.py`. Every
+`cli/{train,cross_validate,evaluate_fit,freeze,predict}.py` + `cli/common.py`. Every
 flag that sets a `TSConfig` field is now named after that field, so the 58-pair hand-written
 `cli_values` mapping is a list of 55 field names with an import-time assertion (57 after
 T3-21 adds the two barrier gains). Old spellings

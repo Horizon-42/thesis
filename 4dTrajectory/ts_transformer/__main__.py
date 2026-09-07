@@ -67,7 +67,7 @@ import batch_benchmark  # noqa: E402
 from cli import (  # noqa: E402
     cross_validate as cross_validate_cli,
     evaluate_fit as evaluate_fit_cli,
-    freeze_test as freeze_test_cli,
+    freeze as freeze_test_cli,
     predict as predict_cli,
     train as train_cli,
 )
