@@ -115,6 +115,11 @@ CONTROL_LOSS_FIELDS = (
     "latent_beta",
     "latent_free_bits_nats",
     "latent_posterior_init_std",
+    # L2.f: the KL weight's warm-up and the auxiliary intent target on z. Every stored
+    # config predates them and carries the defaults, so adding them here renames nothing
+    # (recounted on disk).
+    "latent_beta_warmup_epochs",
+    "latent_aux_duration_weight",
 )
 #: The closure output's objective fields; its base name bumps when the regression
 #: itself is redesigned.
@@ -203,6 +208,8 @@ _TAU_FIELDS = (
 
 _ABBREV = {
     "latent_posterior_init_std": "q-std",
+    "latent_beta_warmup_epochs": "beta-warmup",
+    "latent_aux_duration_weight": "aux-T",
     "control_imitation_loss_weight": "imit",
     "control_imitation_target": "imit-target",
     "control_velocity_loss_weight": "vel",

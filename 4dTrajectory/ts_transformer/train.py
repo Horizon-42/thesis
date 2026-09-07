@@ -60,6 +60,7 @@ from evaluation_protocol import (
     TEST_RELEASE_PROTOCOL_FIELD,
     TEST_RELEASE_SCHEMA,
 )
+from control.latent import effective_latent_beta, latent_epoch_record
 from fixed_anchor_validation import CommonGridTruth
 from models import build_model, parameter_count, resolve_device
 from batch_contract import anchor_state, model_forward, unpack_batch
@@ -130,10 +131,11 @@ class EpochResult:
     # the step count (per-step shares and per-step means, whatever the hook counts), plus
     # ``steps`` itself.
     command_hook: dict[str, float] = field(default_factory=dict)
-    # The latent intent's epoch record (control/latent.py): KL nats per flight and the number
-    # of latent dimensions carrying more than ACTIVE_UNIT_KL_NATS — the posterior-collapse
-    # reading, which looks exactly like "converged" on every other number.
-    latent: dict[str, float] = field(default_factory=dict)
+    # The latent intent's epoch record (control/latent.latent_epoch_record): the KL charged
+    # and its analytic per-dimension form, the KL's mean/variance split, the posterior mean's
+    # displacement from the prior mean in prior sigmas, and the active-unit counts — the
+    # posterior-collapse reading, which looks exactly like "converged" on every other number.
+    latent: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -585,6 +587,13 @@ def fit_model(
         epoch_start_optimizer_updates = optimizer_updates
         epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
         train_anchor_sampling = train_set.anchor_statistics(config.seed + epoch)
+        # The objective THIS epoch optimizes: the run's config carrying the annealed KL
+        # weight (identical to `config` itself once the warm-up is over, and always when
+        # there is none). The training batches and the validation pass below are both
+        # scored under it, so an epoch's train and val `latent_kl` mean the same thing —
+        # the rule the procedure penalty's λ already follows.
+        beta_effective = effective_latent_beta(config, epoch)
+        epoch_config = replace(config, latent_beta=beta_effective)
 
         model.train()
         train_component_totals = {name: 0.0 for name in component_names}
@@ -642,7 +651,7 @@ def fit_model(
                     mask,
                     final_time_s,
                     flight_weights,
-                    config,
+                    epoch_config,
                     normalizer,
                     dynamics,
                     dense_supervision,
@@ -667,6 +676,7 @@ def fit_model(
                 model,
                 plan,
                 device,
+                config=epoch_config,
                 profiler=profiler,
                 multipliers=multipliers,
             )
@@ -708,22 +718,11 @@ def fit_model(
                 if name.startswith("hook_") and name != "hook_steps"
             }
             hook_epoch["steps"] = hook_steps
-        latent_epoch: dict[str, float] = {}
+        latent_epoch: dict[str, Any] = {}
         if config.latent_dim > 0:
-            # Both totals are UNWEIGHTED sums over flights (control/latent.py), so they are
-            # divided by the unweighted flight count they were summed over, never by the
-            # airport-weighted total the objective components use.
-            flights = max(train_diagnostic_totals.get("latent_flights", 0.0), 1.0)
-            latent_epoch = {
-                # what the objective charged (free bits applied; MC for a mixture)
-                "kl_nats_per_flight": train_diagnostic_totals.get("latent_kl_nats", 0.0) / flights,
-                # analytic KL per flight against the most responsible component — the
-                # quantity active_units is read from
-                "component_kl_nats_per_flight": (
-                    train_diagnostic_totals.get("latent_component_kl_nats", 0.0) / flights
-                ),
-                "active_units": train_diagnostic_totals.get("latent_active_units", 0.0) / flights,
-            }
+            latent_epoch = latent_epoch_record(
+                train_diagnostic_totals, config, beta_effective=beta_effective
+            )
         train_components = {
             name: value / max(train_weight_total, 1.0)
             for name, value in train_component_totals.items()

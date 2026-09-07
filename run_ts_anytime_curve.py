@@ -226,27 +226,34 @@ class Arm:
         return ARM_RANDOM if self.config.random_train_anchor else ARM_FIXED
 
 
+#: What `load_arm` calls the measurement in its refusals. A second runner reusing this
+#: loader (`run_ts_latent_probe.py`) must speak in its own voice, or a probe user is told
+#: their checkpoint was rejected for the sake of a curve they did not ask for.
+ANYTIME_INSTRUMENT = "the anytime curve"
+
+
 def load_arm(label: str, path: Path, grid: Grid, device: torch.device,
-             *, command_hook: str | None = None, hook_saturation: str | None = None) -> Arm:
+             *, command_hook: str | None = None, hook_saturation: str | None = None,
+             instrument: str = ANYTIME_INSTRUMENT) -> Arm:
     """Every refusal this runner can make about a checkpoint, before it reads one track.
 
     The airports come from the checkpoint's own provenance — never chosen here, which is
     why the fingerprint is compared strictly rather than as the airport SUBSET `predict`
-    allows for a pooled checkpoint narrowed by ``--data``.
+    allows for a pooled checkpoint narrowed by ``--data``. ``instrument`` names the
+    measurement in the refusals, for the runners that share this loader.
     """
     model, config, normalizer, payload = load_checkpoint(path)
     if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
         raise SystemExit(
             f"{label} ({path}): cta_conditioning=given reads the future — the CTA IS the "
-            "truth duration — so its anytime curve would be an identity check that gets "
-            "better for free, not a prediction that gets better with observation"
+            f"truth duration — so {instrument} would be reading an answer it was handed, "
+            "not a prediction"
         )
     if config.intent_conditioning != INTENT_CONDITIONING_NONE:
         raise SystemExit(
             f"{label} ({path}): intent_conditioning={config.intent_conditioning!r} reads the "
-            "FUTURE (the truth join point / the lead's true landing time), and it reads it "
-            "afresh at every anchor — the curve would measure how fast the oracle's own "
-            "answer arrives, not how fast intent is exposed to the aircraft"
+            f"FUTURE (the truth join point / the lead's true landing time), so {instrument} "
+            "would be measuring the oracle, not the model"
         )
     if grid.split not in payload["split"]:
         raise SystemExit(f"{label} ({path}): the checkpoint has no {grid.split!r} split")

@@ -2265,6 +2265,7 @@ def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch)
         model,
         plan,
         torch.device("cpu"),
+        config=config,
     )
     shared_common = validation.evaluate_fixed_anchor_common_grid(
         model,

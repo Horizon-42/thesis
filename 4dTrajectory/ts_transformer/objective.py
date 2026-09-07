@@ -46,7 +46,13 @@ from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from control.dynamics.backends import EndpointControlRollout
 from control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
-from control.latent import LATENT_KL_COMPONENT, LatentControlPrediction, with_latent_kl
+from control.latent import (
+    LATENT_AUX_COMPONENT,
+    LATENT_KL_COMPONENT,
+    LatentControlPrediction,
+    with_latent_aux_duration,
+    with_latent_kl,
+)
 from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
 from control.loss.fixed_dt import fixed_dt_control_state_loss
 from dataset import Normalizer
@@ -169,6 +175,9 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
         *extensions.get(config.control_state_objective, ()),
         *(("procedure",) if config.procedure_loss_active else ()),
         *((LATENT_KL_COMPONENT,) if config.latent_dim > 0 else ()),
+        # The auxiliary target is opt-in; the adapter below adds it under the same
+        # condition, and the two must be read together.
+        *((LATENT_AUX_COMPONENT,) if config.latent_aux_duration_weight else ()),
     )
 
 
@@ -991,13 +1000,19 @@ def _latent_control_loss_adapter(
     *,
     multipliers: ProcedureMultipliers | None = None,
 ) -> LossComponents:
-    """The control objective on the decoded schedule, plus the latent's KL term."""
+    """The control objective on the decoded schedule, plus the latent's own terms."""
     components = _control_loss_adapter(
         prediction, normalized_anchor_state, target_states, state_weights,
         target_final_time_s, flight_weights, config, normalizer, dynamics,
         dense_supervision, multipliers=multipliers,
     )
-    return with_latent_kl(components, prediction, config, flight_weights)
+    components = with_latent_kl(components, prediction, config, flight_weights)
+    # Same condition as `loss_component_names` above: registered iff it is charged.
+    if config.latent_aux_duration_weight:
+        components = with_latent_aux_duration(
+            components, prediction, config, target_final_time_s, flight_weights
+        )
+    return components
 
 
 PredictionLossHandler = Callable[..., LossComponents]

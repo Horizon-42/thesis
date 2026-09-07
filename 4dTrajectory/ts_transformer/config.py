@@ -614,6 +614,19 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         # Every published simple-v* comparison was run against the inverse-dynamics
         # teacher; a recipe names one configuration, so the target is frozen here too.
         "control_imitation_target": CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
+        # The WHOLE latent axis is pinned off: a named recipe is a published DETERMINISTIC
+        # comparison arm, so `simple-v*` means "no latent intent" by definition and a latent
+        # run is `custom` — which is what every latent arm file has always said. Pinning only
+        # L2.f's two levers would have drawn an incoherent line: a `simple-v3` run could then
+        # choose its beta but not its warm-up. Measured before adopting (2026-09-07): no
+        # stored artifact changes name or slug, and none stops loading.
+        "latent_dim": 0,
+        "latent_prior_components": 1,
+        "latent_beta": 1.0,
+        "latent_free_bits_nats": 0.0,
+        "latent_posterior_init_std": 1.0,
+        "latent_beta_warmup_epochs": 0,
+        "latent_aux_duration_weight": 0.0,
         "control_state_duration_gradient": False,
         "control_gradient_clip_norm": 20.0,
         "control_rollout_integrator_dt_s": 0.5,
@@ -856,6 +869,22 @@ class TSConfig:
     latent_prior_components: int = 1          # K in the mixture prior; 1 = a single Gaussian
     latent_beta: float = 1.0                  # weight of KL(q ‖ p) in the objective
     latent_free_bits_nats: float = 0.0        # per-dim KL below this is not charged
+    # Epochs over which beta ramps LINEARLY from 0 to latent_beta (0 = no warm-up, the
+    # weight is its full value from epoch 1). L2.f: the penalty's mean term is what kills
+    # the posterior mean's information, and it does it in the first ten epochs, before the
+    # decoder has any use for z; a warm-up lets the decoder's z-weights grow first, so the
+    # mean has a reconstruction gradient holding it out when the penalty arrives. The
+    # earlier "annealing only postpones collapse" reading (L2.c) was about the VARIANCE
+    # term and does not carry over to the mean term.
+    latent_beta_warmup_epochs: int = 0
+    # A TRAINING-ONLY auxiliary target on z (L2.f, arm 2): weight of the MSE between a
+    # linear read-out of the posterior sample and the normalized remaining duration
+    # (truth_duration_s / final_time_scale_s). It says outright what z must carry — the
+    # "when" half of the intent — and gives the posterior mean a restoring force that does
+    # not depend on the decoder having learned to use z. The head is never called at
+    # inference and nothing about z reaches a record. Refused under cta_conditioning=given,
+    # where the CTA already hands the duration to the decoder.
+    latent_aux_duration_weight: float = 0.0
     # The posterior's standard deviation at initialization. 1.0 is the init the 2026-09-07
     # L2 runs collapsed under: a mean of ≈0.2 inside a unit-variance sample is noise to the
     # decoder, which learns to ignore z before the posterior can become informative — and
@@ -1228,6 +1257,13 @@ class TSConfig:
             raise ValueError("latent_dim must be >= 0 and latent_prior_components >= 1")
         if self.latent_beta < 0.0 or self.latent_free_bits_nats < 0.0:
             raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
+        if self.latent_beta_warmup_epochs < 0:
+            raise ValueError("latent_beta_warmup_epochs must be >= 0 (0 = no warm-up)")
+        if (
+            not math.isfinite(self.latent_aux_duration_weight)
+            or self.latent_aux_duration_weight < 0.0
+        ):
+            raise ValueError("latent_aux_duration_weight must be finite and non-negative")
         if self.latent_posterior_init_std <= 0.0:
             raise ValueError("latent_posterior_init_std must be positive")
 
@@ -1334,11 +1370,20 @@ class TSConfig:
             or self.latent_beta != 1.0
             or self.latent_free_bits_nats != 0.0
             or self.latent_posterior_init_std != 1.0
+            or self.latent_beta_warmup_epochs != 0
+            or self.latent_aux_duration_weight != 0.0
         ):
             raise ValueError(
                 "latent_prior_components / latent_beta / latent_free_bits_nats / "
-                "latent_posterior_init_std mean nothing "
+                "latent_posterior_init_std / latent_beta_warmup_epochs / "
+                "latent_aux_duration_weight mean nothing "
                 "without a latent (latent_dim == 0) and would still rename the run"
+            )
+        if self.latent_aux_duration_weight and self.cta_conditioning != CTA_CONDITIONING_OFF:
+            raise ValueError(
+                "latent_aux_duration_weight teaches z to carry the remaining duration, and "
+                f"cta_conditioning={self.cta_conditioning!r} already hands that duration to "
+                "the decoder — the auxiliary target would be supervising a known input"
             )
         if self.cta_conditioning != CTA_CONDITIONING_OFF and self.prediction_output != PREDICTION_CONTROL:
             raise ValueError(
