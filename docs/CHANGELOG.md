@@ -506,8 +506,9 @@ Writes `anytime_curve.json` + `.txt` with the §2.4 readings. Six design points:
   beside it.
 - **Both metric families, per cell.** Time-free chamfer and Fréchet
   (`geometric_metrics.path_metrics`, truth = the post-anchor supervision rows ADE is scored
-  against) sit next to ADE / FDE / |Δt|. The closure arm is why: at 12 km it scores ADE 6.7–8.1
-  km with a 172–176 s duration error against native32's 1128 m / 63 s — off its training
+  against) sit next to ADE / FDE / |Δt|. The closure arm is why: at 12 km it scores (SUPERSEDED: first replay before the closure fix `4ecfb69`; re-read 2026-09-08 from
+  `anytime_a0_20260907/anytime_curve.json`, vectored: closure ADE mean 3649 / p50 621 m, FDE p50 402 m,
+  |Δt| p50/p80 17/185 s vs native32 771 / 585 m, 1343 m, 45/85 s) — off its training
   anchor it is an out-of-distribution CONTROL, not a competitor, and reading one family alone
   says the opposite.
 - **The arm is a per-checkpoint fact**, named from its own `random_train_anchor`

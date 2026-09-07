@@ -80,7 +80,7 @@ closure 臂便宜约两个数量级（它的前向没有 rollout）。先用 `--
 后者的真值汇入点/前机落地时间在**每个锚点都重新读一次未来**，曲线会变成「oracle 收敛得多快」）。
 
 **closure 在 A0-fixed 里是对照，不是竞争者**：它离开 L−1 后分布外代价最大。同一批 KRDU val 航班上，
-12 km 处 closure 的雷达引导 ADE ≈ 6.7–8.1 km、时长误差 ≈ 172–176 s，而 native32 是 1128 m / 63 s——
+12 km 处 closure 的雷达引导 ADE ≈ 6.7–8.1 km、时长误差 ≈ 172–176 s，而 native32 是 1128 m / 63 s（**已过时**：这是 closure 修复 `4ecfb69` 之前的第一次回放；当前产物 `anytime_a0_20260907/anytime_curve.json` 2026-09-08 复核为 closure 雷达引导 ADE 均值 3649 / p50 621 m、FDE p50 402 m、|Δt| p50/p80 17/185 s，native32 771 / 585 m、FDE p50 1343 m、|Δt| 45/85 s——结论不变：closure 的 ADE 均值/p95 与 |Δt| p80 离开 L−1 后最差，FDE p50 按构造最好）——
 closure 在 L−1 处的 996 m 是它的强项，重锚后不是。读它是为了量分布外代价，不是为了比谁准。
 
 **§2.3 的网格与 `--min-future-s 60` 在近端互相矛盾**：2 km 处真值只剩约 27 s（75 m/s），4 km 处约
