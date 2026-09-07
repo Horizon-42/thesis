@@ -190,7 +190,9 @@ bias 是 192 = 64 段 × 3 控制量，正好就是那条共用剖面。10.5 倍
 
 ```
   声明   docs/experiments/<name>_arms.json      每臂只改一个字段
-  跑     run_ts_control_arms.py                 train → predict → evaluate → publish
+  跑     run_ts_frame_ablation.py               train → predict → evaluate → publish
+         （2026-09-07 起；当年用的 run_ts_control_arms.py 已归档到
+          ts_transformer/archive/control_arms_runner_2026_08/，它会静默忽略 arms 文件的 base 块）
   评分   docs/score_control_arms.py <campaign>  与本文第 3 节同一套指标
 ```
 

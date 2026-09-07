@@ -115,6 +115,11 @@ CONTROL_LOSS_FIELDS = (
     "latent_beta",
     "latent_free_bits_nats",
     "latent_posterior_init_std",
+    # L2.f: the KL weight's warm-up and the auxiliary intent target on z. Every stored
+    # config predates them and carries the defaults, so adding them here renames nothing
+    # (recounted on disk).
+    "latent_beta_warmup_epochs",
+    "latent_aux_duration_weight",
 )
 #: The closure output's objective fields; its base name bumps when the regression
 #: itself is redesigned.
@@ -124,7 +129,6 @@ CLOSURE_LOSS_FIELDS = (
     "closure_height_knots",
     "closure_geometry_loss_weight",
     "closure_timing_loss_weight",
-    "closure_timing_scale_s",
     "closure_height_loss_weight",
 )
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
@@ -204,6 +208,8 @@ _TAU_FIELDS = (
 
 _ABBREV = {
     "latent_posterior_init_std": "q-std",
+    "latent_beta_warmup_epochs": "beta-warmup",
+    "latent_aux_duration_weight": "aux-T",
     "control_imitation_loss_weight": "imit",
     "control_imitation_target": "imit-target",
     "control_velocity_loss_weight": "vel",
@@ -242,8 +248,6 @@ _ABBREV = {
     "procedure_loss_vertical_weight": "proc-vert",
     "procedure_loss_dual_step": "proc-dual",
     "procedure_loss_epsilon": "proc-eps",
-    "procedure_loss_lateral_scale_m": "proc-lat-scale",
-    "procedure_loss_vertical_scale_m": "proc-vert-scale",
     "reference_velocity_source": "ref-vel",
     "checkpoint_selection_metric": "select",
     "training_cohort_min_future_s": "min-future",
@@ -486,6 +490,26 @@ def meta_items(config: Mapping[str, Any]) -> list[str]:
     return items
 
 
+def dropped_meta_diffs(config: Mapping[str, Any]) -> list[tuple[str, Any]]:
+    """The META_FIELDS deviations `meta_items` folded into ``+N more``.
+
+    The display name may fold them: a human reading a table wants six items, not twenty.
+    A DIRECTORY name may not — two runs whose only difference is past the cut would share
+    one, and the second would write over the first. `run_slug` therefore hashes these.
+    ``control_barrier_alpha`` / ``_heading_gain`` are last in ``META_FIELDS``, so the two
+    gains of the very campaign the T3 CLI work enabled are the first things to fold.
+    """
+    recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
+    frozen = frozenset(control_recipe_overrides(recipe))
+    diffs = _field_diffs(config, META_FIELDS, exclude=frozen)
+    diffs = [
+        (field, value)
+        for field, value in diffs
+        if not (field == "split_seed" and value == config.get("seed", _DEFAULTS["seed"]))
+    ]
+    return diffs[_MAX_LISTED_META:]
+
+
 def output_name(config: Mapping[str, Any]) -> str:
     """Field 1: the output contract; a control output with a latent intent says so
     (``control+z8``, ``control+z8k4`` for a K=4 mixture prior) — a latent run is a
@@ -542,11 +566,15 @@ def run_slug(config: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
         backend != CONTROL_DYNAMICS_REANCHORED_RK4
     ):
         dyn += f"-{_BACKEND_SLUG.get(backend, _slugify(str(backend)))}"
+    dropped = dropped_meta_diffs(config)
     tokens = [
         _slugify(output_name(config)),
         _BACKBONE_SLUG.get(backbone, _slugify(backbone)),
         dyn,
         _slugify(loss_design_name(config)),
         *(_slugify(item) for item in (*meta_items(config), *extra)),
+        # The folded tail, as a hash: a slug names a FUTURE directory, and two runs that
+        # differ only past `_MAX_LISTED_META` must not be handed the same one.
+        *([_diff_hash(dropped)] if dropped else []),
     ]
     return "_".join(tokens)

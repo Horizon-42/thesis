@@ -97,7 +97,7 @@ sum(segment_durations) = final_time_s
 
 每个控制段经 float64 Torch RK4 rollout，默认最大积分步长为 `0.5 s`。当前位置和速度都
 来自同一次动力学 rollout，因此 state 模式使用的 kinematic consistency loss 在 control
-模式中恒为 0；`--kinematic-consistency-weight` 对 control 结果不起选择作用，不应继续对它
+模式中恒为 0；`--kinematic-consistency-loss-weight` 对 control 结果不起选择作用，不应继续对它
 做消融或把日志中的 0 误判为 loss 缺失。
 
 control loss 为：
@@ -272,7 +272,7 @@ conda run -n aeroviz python \
   --terminal-loss-weight 0.02 \
   --control-effort-weight 0.001 \
   --control-smoothness-weight 0.01 \
-  --control-rollout-dt 0.5 \
+  --control-rollout-integrator-dt-s 0.5 \
   --aircraft-filter openap-direct \
   --seed 1337 \
   --split-seed 1337

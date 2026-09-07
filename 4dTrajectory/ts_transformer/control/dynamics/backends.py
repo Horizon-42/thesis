@@ -10,6 +10,15 @@ Two independent choices meet here and are kept independent:
   coordinates. (The chart in PHYSICAL coordinates was a third representation until
   2026-09-07; it was a measured regression and is retired — see ``config.py``.)
 
+A backend is a ROW, not a class: ``(endpoint_fn, dense_fn, post_fn)``. The first two roll
+the schedule and hand back whatever state their integrator carries, ALREADY converted to
+the representation ``post_fn`` reads — geodetic ``[B,N,7]`` for the re-anchored row, a
+PHYSICAL transport-chart state for the other two (the scaled row rescales, the lagged row
+drops its actuator block). ``post_fn`` turns that into the one public pair every consumer
+reads, ``(channels, geodetic)``. Two rows share `_chart_post` and two share their hook
+policy, which is the whole reason for the table: the three implementations differed in six
+lines each and agreed on the rest.
+
 Training, validation and forecasting consume one channel/geodetic result contract, so a
 representation change never reaches the model, the loss or the data pipeline. Controls
 arrive in the dimensionless envelope (``control_envelope``); conversion to the newton
@@ -18,8 +27,9 @@ contract ``aerodynamic_model`` expects happens once, here, at the boundary.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import partial
+from typing import Callable
 
 import torch
 
@@ -102,8 +112,279 @@ class DenseControlRolloutChannels:
     controls: torch.Tensor
 
 
-class ControlDynamicsBackend(ABC):
-    @abstractmethod
+#: ``(states, controls_flown, actual_controls)`` in the backend's own representation.
+EndpointFn = Callable[[RolloutInputs, TSConfig, CommandHook | None], tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor
+]]
+#: ``(query_states, segment_end_states, controls_flown)``.
+DenseFn = Callable[
+    [RolloutInputs, torch.Tensor, torch.Tensor, TSConfig, CommandHook | None],
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+]
+#: One backend state ``->`` the public ``(channels, geodetic)`` pair.
+PostFn = Callable[[torch.Tensor, RolloutInputs, TSConfig], tuple[torch.Tensor, torch.Tensor]]
+
+
+def _reads_command_hook(function):
+    """Mark a rollout function that actually looks at ``command_hook``.
+
+    ``runs_hooks=True`` on a row whose functions ``del command_hook`` would advertise a
+    hook and silently fly the unhooked schedule — a wrong trajectory with no error. The
+    assertion under ``_BACKENDS`` requires the flag and the mark to agree, in both
+    directions, so the claim cannot drift from the code.
+    """
+    function.reads_command_hook = True
+    return function
+
+
+def _runway_aligned(config: TSConfig) -> bool:
+    return config.coordinate_frame == "runway-aligned"
+
+
+def _geodetic_post(
+    states: torch.Tensor, inputs: RolloutInputs, config: TSConfig
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The re-anchored backend already carries geodetic state; only channels are derived."""
+    return (
+        geodetic_states_to_channels(
+            states, inputs.frame_params, runway_aligned=_runway_aligned(config)
+        ),
+        states,
+    )
+
+
+def _chart_post(
+    states: torch.Tensor, inputs: RolloutInputs, config: TSConfig
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """A PHYSICAL transport-chart state to the public contract."""
+    return (
+        transport_chart_state_to_channels(
+            states, inputs.frame_params, runway_aligned=_runway_aligned(config)
+        ),
+        transport_chart_state_to_geodetic(states, inputs.frame_params),
+    )
+
+
+def _reanchored_endpoint(
+    inputs: RolloutInputs, config: TSConfig, command_hook: CommandHook | None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    del command_hook
+    geodetic = reanchored_endpoint_rollout(
+        inputs.initial_state,
+        inputs.newton_controls,
+        inputs.segment_durations_s,
+        inputs.aero_params,
+        integrator_dt_s=config.control_rollout_integrator_dt_s,
+    )
+    return geodetic, inputs.controls, inputs.controls
+
+
+def _reanchored_dense(
+    inputs: RolloutInputs,
+    query_offsets_s: torch.Tensor,
+    query_valid: torch.Tensor,
+    config: TSConfig,
+    command_hook: CommandHook | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    del command_hook
+    rollout = reanchored_dense_rollout(
+        inputs.initial_state,
+        inputs.newton_controls,
+        inputs.segment_durations_s,
+        inputs.aero_params,
+        query_offsets_s,
+        query_valid,
+        integrator_dt_s=config.control_rollout_integrator_dt_s,
+    )
+    return rollout.query_states, rollout.segment_end_states, inputs.controls
+
+
+def _scaled_chart_endpoint(
+    inputs: RolloutInputs, config: TSConfig, command_hook: CommandHook | None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    del command_hook
+    scaled = scaled_transport_endpoint_rollout(
+        inputs.initial_state,
+        inputs.newton_controls,
+        inputs.segment_durations_s,
+        inputs.aero_params,
+        inputs.frame_params,
+        integrator_dt_s=config.control_rollout_integrator_dt_s,
+    )
+    return (
+        scaled_to_physical_transport_chart_state(scaled),
+        inputs.controls,
+        inputs.controls,
+    )
+
+
+def _scaled_chart_dense(
+    inputs: RolloutInputs,
+    query_offsets_s: torch.Tensor,
+    query_valid: torch.Tensor,
+    config: TSConfig,
+    command_hook: CommandHook | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    del command_hook
+    rollout = scaled_transport_dense_rollout(
+        inputs.initial_state,
+        inputs.newton_controls,
+        inputs.segment_durations_s,
+        inputs.aero_params,
+        inputs.frame_params,
+        query_offsets_s,
+        query_valid,
+        integrator_dt_s=config.control_rollout_integrator_dt_s,
+    )
+    return (
+        scaled_to_physical_transport_chart_state(rollout.query_states),
+        scaled_to_physical_transport_chart_state(rollout.segment_end_states),
+        inputs.controls,
+    )
+
+
+def _lag_hooked_schedule(
+    inputs: RolloutInputs,
+    config: TSConfig,
+    command_hook: CommandHook,
+    chart_scale: tuple[float, ...],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Segment-end augmented states and the effective commands under the hook."""
+    state_scale = lag_state_scale(chart_scale, inputs.frame_params)
+
+    def view_of(
+        state: torch.Tensor, duration_s: torch.Tensor, reference: RolloutStateView | None
+    ) -> RolloutStateView:
+        return RolloutStateView(
+            chart=lag_state_to_transport_chart(state, state_scale),
+            actuators=lag_actuator_states(state, state_scale),
+            duration_s=duration_s,
+            reference=reference,
+        )
+
+    def raw_hook(
+        state: torch.Tensor, command: torch.Tensor, duration_s: torch.Tensor, segment: int,
+        reference: torch.Tensor | None,
+    ) -> torch.Tensor:
+        reference_view = None if reference is None else view_of(reference, duration_s, None)
+        return command_hook(view_of(state, duration_s, reference_view), command, segment)
+
+    return lag_hooked_rollout(
+        inputs.initial_state,
+        inputs.initial_controls,
+        inputs.controls,
+        inputs.segment_durations_s,
+        inputs.aero_params,
+        inputs.frame_params,
+        inputs.frame_params.new_tensor(config.control_time_constants_s),
+        inputs.max_thrust_n,
+        raw_hook,
+        track_reference=command_hook.needs_reference,
+        chart_scale=chart_scale,
+        integrator_dt_s=config.control_rollout_integrator_dt_s,
+    )
+
+
+@_reads_command_hook
+def _lag_endpoint(
+    inputs: RolloutInputs,
+    config: TSConfig,
+    command_hook: CommandHook | None,
+    *,
+    chart_scale: tuple[float, ...],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """The predicted schedule is a COMMAND schedule; the state carries what was flown.
+
+    It starts from ``inputs.initial_controls`` — the controls the observed lookback implies
+    at the anchor. ``chart_scale`` is the point-mass half's nondimensionalisation, so the
+    lag stays orthogonal to the state representation rather than being one of its own.
+    """
+    if command_hook is not None:
+        states, flown = _lag_hooked_schedule(inputs, config, command_hook, chart_scale)
+    else:
+        flown = inputs.controls
+        states = lag_endpoint_rollout(
+            inputs.initial_state,
+            inputs.initial_controls,
+            inputs.controls,
+            inputs.segment_durations_s,
+            inputs.aero_params,
+            inputs.frame_params,
+            inputs.frame_params.new_tensor(config.control_time_constants_s),
+            inputs.max_thrust_n,
+            chart_scale=chart_scale,
+            integrator_dt_s=config.control_rollout_integrator_dt_s,
+        )
+    state_scale = lag_state_scale(chart_scale, inputs.frame_params)
+    return (
+        lag_state_to_transport_chart(states, state_scale),
+        flown,
+        # The three controls the actuators had REACHED at each segment end.
+        lag_actuator_states(states, state_scale),
+    )
+
+
+@_reads_command_hook
+def _lag_dense(
+    inputs: RolloutInputs,
+    query_offsets_s: torch.Tensor,
+    query_valid: torch.Tensor,
+    config: TSConfig,
+    command_hook: CommandHook | None,
+    *,
+    chart_scale: tuple[float, ...],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # A hook decides each segment's command from the state at its start; the dense
+    # engine's adjoint takes the schedule as an input, so the hooked schedule is settled
+    # first (one segmented rollout) and then integrated densely as-is.
+    commands = inputs.controls
+    if command_hook is not None:
+        _states, commands = _lag_hooked_schedule(inputs, config, command_hook, chart_scale)
+    rollout = lag_dense_rollout(
+        inputs.initial_state,
+        inputs.initial_controls,
+        commands,
+        inputs.segment_durations_s,
+        inputs.aero_params,
+        inputs.frame_params,
+        inputs.frame_params.new_tensor(config.control_time_constants_s),
+        inputs.max_thrust_n,
+        query_offsets_s,
+        query_valid,
+        chart_scale=chart_scale,
+        integrator_dt_s=config.control_rollout_integrator_dt_s,
+    )
+    state_scale = lag_state_scale(chart_scale, inputs.frame_params)
+    return (
+        lag_state_to_transport_chart(rollout.query_states, state_scale),
+        lag_state_to_transport_chart(rollout.segment_end_states, state_scale),
+        commands,
+    )
+
+
+@dataclass(frozen=True)
+class ControlDynamicsBackend:
+    """One ``(control_dynamics_model, control_dynamics_backend)`` pair, as three functions."""
+
+    #: The ``(control_dynamics_model, control_dynamics_backend)`` pair this row is keyed
+    #: by, quoted verbatim in the refusal below so the message names what a config says.
+    key: tuple[str, str]
+    endpoint_fn: EndpointFn
+    dense_fn: DenseFn
+    post_fn: PostFn
+    #: Only a state that carries the actuators can be shown to a hook, which is the
+    #: first-order-lag rollout. Anywhere else a hook would be silently ignored.
+    runs_hooks: bool = False
+
+    def _admit(self, command_hook: CommandHook | None) -> None:
+        if command_hook is not None and not self.runs_hooks:
+            model, backend = self.key
+            raise NotImplementedError(
+                f"control_dynamics_model={model!r} with control_dynamics_backend="
+                f"{backend!r} does not run command hooks; the first-order-lag backends do "
+                "(their state carries the chart and the actuators a hook reads)"
+            )
+
     def endpoint_rollout(
         self,
         inputs: RolloutInputs,
@@ -112,8 +393,11 @@ class ControlDynamicsBackend(ABC):
         command_hook: CommandHook | None = None,
     ) -> EndpointControlRollout:
         """Roll learned segments and expose the shared public representations."""
+        self._admit(command_hook)
+        states, controls, actual_controls = self.endpoint_fn(inputs, config, command_hook)
+        channels, geodetic = self.post_fn(states, inputs, config)
+        return EndpointControlRollout(channels, geodetic, controls, actual_controls)
 
-    @abstractmethod
     def dense_rollout(
         self,
         inputs: RolloutInputs,
@@ -124,326 +408,65 @@ class ControlDynamicsBackend(ABC):
         command_hook: CommandHook | None = None,
     ) -> DenseControlRolloutChannels:
         """Roll once and expose channel states at queries and segment boundaries."""
-
-
-def _refuse_hook(backend: ControlDynamicsBackend, command_hook: CommandHook | None) -> None:
-    if command_hook is not None:
-        raise NotImplementedError(
-            f"{type(backend).__name__} does not run command hooks; the first-order-lag "
-            "backends do (their state carries the chart and the actuators a hook reads)"
+        self._admit(command_hook)
+        query_states, end_states, controls = self.dense_fn(
+            inputs, query_offsets_s, query_valid, config, command_hook
         )
-
-
-class ReanchoredRK4Backend(ControlDynamicsBackend):
-    """Local ENU RK4 re-anchored into geodetic state every substep; casadi's twin."""
-
-    def endpoint_rollout(
-        self,
-        inputs: RolloutInputs,
-        config: TSConfig,
-        *,
-        command_hook: CommandHook | None = None,
-    ) -> EndpointControlRollout:
-        _refuse_hook(self, command_hook)
-        geodetic = reanchored_endpoint_rollout(
-            inputs.initial_state,
-            inputs.newton_controls,
-            inputs.segment_durations_s,
-            inputs.aero_params,
-            integrator_dt_s=config.control_rollout_integrator_dt_s,
-        )
-        return EndpointControlRollout(
-            geodetic_states_to_channels(
-                geodetic,
-                inputs.frame_params,
-                runway_aligned=config.coordinate_frame == "runway-aligned",
-            ),
-            geodetic,
-            inputs.controls,
-            inputs.controls,
-        )
-
-    def dense_rollout(
-        self,
-        inputs: RolloutInputs,
-        query_offsets_s: torch.Tensor,
-        query_valid: torch.Tensor,
-        config: TSConfig,
-        *,
-        command_hook: CommandHook | None = None,
-    ) -> DenseControlRolloutChannels:
-        _refuse_hook(self, command_hook)
-        rollout = reanchored_dense_rollout(
-            inputs.initial_state,
-            inputs.newton_controls,
-            inputs.segment_durations_s,
-            inputs.aero_params,
-            query_offsets_s,
-            query_valid,
-            integrator_dt_s=config.control_rollout_integrator_dt_s,
-        )
-        runway_aligned = config.coordinate_frame == "runway-aligned"
+        query_channels, query_geodetic = self.post_fn(query_states, inputs, config)
+        end_channels, end_geodetic = self.post_fn(end_states, inputs, config)
         return DenseControlRolloutChannels(
-            geodetic_states_to_channels(
-                rollout.query_states, inputs.frame_params, runway_aligned=runway_aligned
-            ),
-            geodetic_states_to_channels(
-                rollout.segment_end_states,
-                inputs.frame_params,
-                runway_aligned=runway_aligned,
-            ),
-            rollout.query_states,
-            rollout.segment_end_states,
-            inputs.controls,
-        )
-
-
-class _TransportChartResults:
-    """Shared conversion from a physical transport-chart state to the public contract."""
-
-    @staticmethod
-    def endpoint(
-        chart_states: torch.Tensor,
-        inputs: RolloutInputs,
-        config: TSConfig,
-        controls: torch.Tensor,
-        actual_controls: torch.Tensor,
-    ) -> EndpointControlRollout:
-        return EndpointControlRollout(
-            transport_chart_state_to_channels(
-                chart_states,
-                inputs.frame_params,
-                runway_aligned=config.coordinate_frame == "runway-aligned",
-            ),
-            transport_chart_state_to_geodetic(chart_states, inputs.frame_params),
-            controls,
-            actual_controls,
-        )
-
-    @staticmethod
-    def dense(
-        query_states: torch.Tensor,
-        endpoint_states: torch.Tensor,
-        inputs: RolloutInputs,
-        config: TSConfig,
-        controls: torch.Tensor,
-    ) -> DenseControlRolloutChannels:
-        runway_aligned = config.coordinate_frame == "runway-aligned"
-        return DenseControlRolloutChannels(
-            transport_chart_state_to_channels(
-                query_states, inputs.frame_params, runway_aligned=runway_aligned
-            ),
-            transport_chart_state_to_channels(
-                endpoint_states, inputs.frame_params, runway_aligned=runway_aligned
-            ),
-            transport_chart_state_to_geodetic(query_states, inputs.frame_params),
-            transport_chart_state_to_geodetic(endpoint_states, inputs.frame_params),
-            controls,
-        )
-
-
-class ScaledTransportChartVelocityBackend(ControlDynamicsBackend):
-    """Order-one internal state with the existing physical public contract."""
-
-    def endpoint_rollout(
-        self,
-        inputs: RolloutInputs,
-        config: TSConfig,
-        *,
-        command_hook: CommandHook | None = None,
-    ) -> EndpointControlRollout:
-        _refuse_hook(self, command_hook)
-        scaled = scaled_transport_endpoint_rollout(
-            inputs.initial_state,
-            inputs.newton_controls,
-            inputs.segment_durations_s,
-            inputs.aero_params,
-            inputs.frame_params,
-            integrator_dt_s=config.control_rollout_integrator_dt_s,
-        )
-        return _TransportChartResults.endpoint(
-            scaled_to_physical_transport_chart_state(scaled),
-            inputs,
-            config,
-            inputs.controls,
-            inputs.controls,
-        )
-
-    def dense_rollout(
-        self,
-        inputs: RolloutInputs,
-        query_offsets_s: torch.Tensor,
-        query_valid: torch.Tensor,
-        config: TSConfig,
-        *,
-        command_hook: CommandHook | None = None,
-    ) -> DenseControlRolloutChannels:
-        _refuse_hook(self, command_hook)
-        rollout = scaled_transport_dense_rollout(
-            inputs.initial_state,
-            inputs.newton_controls,
-            inputs.segment_durations_s,
-            inputs.aero_params,
-            inputs.frame_params,
-            query_offsets_s,
-            query_valid,
-            integrator_dt_s=config.control_rollout_integrator_dt_s,
-        )
-        return _TransportChartResults.dense(
-            scaled_to_physical_transport_chart_state(rollout.query_states),
-            scaled_to_physical_transport_chart_state(rollout.segment_end_states),
-            inputs,
-            config,
-            inputs.controls,
-        )
-
-
-class FirstOrderLagBackend(ControlDynamicsBackend):
-    """Transport-chart dynamics whose three controls are lagged states.
-
-    The predicted schedule becomes a COMMAND schedule; the state carries what the aircraft
-    is actually doing, starting from ``inputs.initial_controls`` — the controls the
-    observed lookback implies at the anchor. ``chart_scale`` is the point-mass half's
-    nondimensionalisation, so the lag stays orthogonal to the state representation rather
-    than being a backend of its own.
-    """
-
-    def __init__(self, chart_scale: tuple[float, ...]):
-        self.chart_scale = chart_scale
-
-    def _to_chart(self, states: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
-        return lag_state_to_transport_chart(
-            states, lag_state_scale(self.chart_scale, reference)
-        )
-
-    def _actuators(self, states: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
-        """The three controls the actuators had REACHED at each segment end."""
-        return lag_actuator_states(
-            states, lag_state_scale(self.chart_scale, reference)
-        )
-
-    def _hooked_schedule(
-        self, inputs: RolloutInputs, config: TSConfig, command_hook: CommandHook
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Segment-end augmented states and the effective commands under the hook."""
-        state_scale = lag_state_scale(self.chart_scale, inputs.frame_params)
-
-        def view_of(state: torch.Tensor, duration_s: torch.Tensor, reference: RolloutStateView | None) -> RolloutStateView:
-            return RolloutStateView(
-                chart=lag_state_to_transport_chart(state, state_scale),
-                actuators=lag_actuator_states(state, state_scale),
-                duration_s=duration_s,
-                reference=reference,
-            )
-
-        def raw_hook(
-            state: torch.Tensor, command: torch.Tensor, duration_s: torch.Tensor, segment: int,
-            reference: torch.Tensor | None,
-        ) -> torch.Tensor:
-            reference_view = None if reference is None else view_of(reference, duration_s, None)
-            return command_hook(view_of(state, duration_s, reference_view), command, segment)
-
-        return lag_hooked_rollout(
-            inputs.initial_state,
-            inputs.initial_controls,
-            inputs.controls,
-            inputs.segment_durations_s,
-            inputs.aero_params,
-            inputs.frame_params,
-            inputs.frame_params.new_tensor(config.control_time_constants_s),
-            inputs.max_thrust_n,
-            raw_hook,
-            track_reference=command_hook.needs_reference,
-            chart_scale=self.chart_scale,
-            integrator_dt_s=config.control_rollout_integrator_dt_s,
-        )
-
-    def endpoint_rollout(
-        self,
-        inputs: RolloutInputs,
-        config: TSConfig,
-        *,
-        command_hook: CommandHook | None = None,
-    ) -> EndpointControlRollout:
-        if command_hook is not None:
-            states, effective = self._hooked_schedule(inputs, config, command_hook)
-            return _TransportChartResults.endpoint(
-                self._to_chart(states, inputs.frame_params),
-                inputs,
-                config,
-                effective,
-                self._actuators(states, inputs.frame_params),
-            )
-        states = lag_endpoint_rollout(
-            inputs.initial_state,
-            inputs.initial_controls,
-            inputs.controls,
-            inputs.segment_durations_s,
-            inputs.aero_params,
-            inputs.frame_params,
-            inputs.frame_params.new_tensor(config.control_time_constants_s),
-            inputs.max_thrust_n,
-            chart_scale=self.chart_scale,
-            integrator_dt_s=config.control_rollout_integrator_dt_s,
-        )
-        return _TransportChartResults.endpoint(
-            self._to_chart(states, inputs.frame_params),
-            inputs,
-            config,
-            inputs.controls,
-            self._actuators(states, inputs.frame_params),
-        )
-
-    def dense_rollout(
-        self,
-        inputs: RolloutInputs,
-        query_offsets_s: torch.Tensor,
-        query_valid: torch.Tensor,
-        config: TSConfig,
-        *,
-        command_hook: CommandHook | None = None,
-    ) -> DenseControlRolloutChannels:
-        # A hook decides each segment's command from the state at its start; the dense
-        # engine's adjoint takes the schedule as an input, so the hooked schedule is
-        # settled first (one segmented rollout) and then integrated densely as-is.
-        commands = inputs.controls
-        if command_hook is not None:
-            _states, commands = self._hooked_schedule(inputs, config, command_hook)
-        rollout = lag_dense_rollout(
-            inputs.initial_state,
-            inputs.initial_controls,
-            commands,
-            inputs.segment_durations_s,
-            inputs.aero_params,
-            inputs.frame_params,
-            inputs.frame_params.new_tensor(config.control_time_constants_s),
-            inputs.max_thrust_n,
-            query_offsets_s,
-            query_valid,
-            chart_scale=self.chart_scale,
-            integrator_dt_s=config.control_rollout_integrator_dt_s,
-        )
-        return _TransportChartResults.dense(
-            self._to_chart(rollout.query_states, inputs.frame_params),
-            self._to_chart(rollout.segment_end_states, inputs.frame_params),
-            inputs,
-            config,
-            commands,
+            query_channels, end_channels, query_geodetic, end_geodetic, controls
         )
 
 
 _BACKENDS: dict[tuple[str, str], ControlDynamicsBackend] = {
-    (CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_REANCHORED_RK4): (
-        ReanchoredRK4Backend()
+    (CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_REANCHORED_RK4): ControlDynamicsBackend(
+        # Local ENU RK4 re-anchored into geodetic state every substep; casadi's twin.
+        key=(CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_REANCHORED_RK4),
+        endpoint_fn=_reanchored_endpoint,
+        dense_fn=_reanchored_dense,
+        post_fn=_geodetic_post,
     ),
-    (CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY): (
-        ScaledTransportChartVelocityBackend()
+    (
+        CONTROL_DYNAMICS_POINT_MASS,
+        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    ): ControlDynamicsBackend(
+        # Order-one internal state with the existing physical public contract.
+        key=(CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY),
+        endpoint_fn=_scaled_chart_endpoint,
+        dense_fn=_scaled_chart_dense,
+        post_fn=_chart_post,
     ),
     (
         CONTROL_DYNAMICS_FIRST_ORDER_LAG,
         CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
-    ): FirstOrderLagBackend(SCALED_TRANSPORT_CHART_REFERENCE_UNITS),
+    ): ControlDynamicsBackend(
+        key=(
+            CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+            CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+        ),
+        endpoint_fn=partial(
+            _lag_endpoint, chart_scale=SCALED_TRANSPORT_CHART_REFERENCE_UNITS
+        ),
+        dense_fn=partial(_lag_dense, chart_scale=SCALED_TRANSPORT_CHART_REFERENCE_UNITS),
+        post_fn=_chart_post,
+        runs_hooks=True,
+    ),
 }
+
+
+def _unwrap(function):
+    return getattr(function, "func", function)
+
+
+for _key, _row in _BACKENDS.items():
+    assert _row.key == _key, f"{_row.key} is registered under {_key}"
+    for _fn in (_row.endpoint_fn, _row.dense_fn):
+        _reads = getattr(_unwrap(_fn), "reads_command_hook", False)
+        assert _reads == _row.runs_hooks, (
+            f"{_key} declares runs_hooks={_row.runs_hooks} but "
+            f"{_unwrap(_fn).__name__} {'reads' if _reads else 'ignores'} command_hook"
+        )
 
 
 def control_dynamics_backend(config: TSConfig) -> ControlDynamicsBackend:

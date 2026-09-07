@@ -47,14 +47,11 @@ from config import (  # noqa: E402
 )
 
 from control.dynamics.rollout import rollout_control_dense  # noqa: E402
-from dataset import (  # noqa: E402
-    FlightSeries,
+from data_provenance import (  # noqa: E402
     arrival_data_provenance,
-    build_series,
-    dynamics_arrays,
-    load_flight_dicts,
     require_matching_data_provenance,
 )
+from dataset import FlightSeries, build_series, dynamics_arrays, load_flight_dicts  # noqa: E402
 from fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_common_truth,
     resample_prediction_to_physical_time,

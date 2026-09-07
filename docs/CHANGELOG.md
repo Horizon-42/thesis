@@ -4,6 +4,517 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+§2.4, branch `dev-a1` (`364adaf` the grid module, `4d563f5` the metric + tests, `04de172`
+the arm, `d4ca2c3` the docs, and one review-fix commit carrying the coverage gate, the
+oracle refusals and the dry-run fix). It is A1's PREREQUISITE, not the A1 row of that status
+table: that row is the streaming evaluation protocol (`evaluation_protocol` anchor grid +
+`compare_constraint_arms.py`), still not done, and this work is the new `A1.a` row beside it.
+
+**The measurement that motivated it.** The A0-random arm (`docs/experiments/a0_random_arms.json`,
+random train anchors + L1.b's teacherless supervision) early-stopped at epoch 30 with its
+best at epoch 10 and failed the L−1 veto badly — ADE 2949 m against native32's 1322, FDE
+p50 3784 vs 864. But the same checkpoint, replayed on the re-anchoring grid, draws **better
+geometry than the fixed arm at every anchor** (chamfer p50 −114…−524 m) and better ADE at
+≤ 8 km. The arm was not worse; it was **frozen early by a metric that cannot see what it
+improves**. `checkpoint_selection_metric=fixed-anchor-common-grid-ade` scores the validation
+set at the L−1 anchor ONLY — the one anchor a random-anchor model is least specialised for
+— so once such a model starts spending capacity across the anchor range, the L−1 number
+stalls and patience fires.
+
+**One grid, two consumers.** The remaining-path grid moved out of `run_ts_anytime_curve.py`
+into `4dTrajectory/ts_transformer/anchor_grid.py`: the bins
+(`DEFAULT_ANCHOR_GRID_KM = 20, 16, 12, 8, 6, 4, 2` km), the 60 s future floor, the
+per-flight `bin_anchor` rule (closest sample by remaining path, THEN admissibility) and the
+fixed-at-L−1 `strata_fixed_at_l1` rule. The runner imports the same objects — a test asserts
+identity, not equality — because two grids that merely agreed today would make "the curve
+improved" and "this epoch was selected on the curve" statements about different anchors. The
+runner's own 24 tests passed untouched.
+
+**The metric.** `checkpoint_selection_metric=anchor-grid-common-grid-ade` averages the SAME
+common-grid ADE over L−1 plus whichever of `VALIDATION_ANCHOR_GRID_KM = 16, 12, 8, 6` km the
+cohort can cover, each flight at its own closest admissible sample. Equal weight **per anchor
+set** — pooling all (flight, anchor) pairs would weight each bin by its coverage and fade the
+far bins out exactly on the arms whose flights are vectored — and each set's ADE is the mean
+over the flights that HAVE that anchor (per airport, then airport-macro, which is what the
+existing metric already means, so the L−1 term IS its value). A flight absent from a bin is
+absent from its mean, never scored 0. `history.json` gains a `validation_anchor_grid` block
+every epoch (per set: ADE, flight count, per-airport split, plus `dropped_bins` and
+`fixed_anchor_common_grid_ade_m` so the L−1 veto stays readable) and the epoch line prints
+the values.
+
+**A candidate bin is not a bin the metric will use.** Measured coverage of the KRDU
+validation cohort (1404 flights, 60 s floor): 20 km **33.7 %**, 16 km **37 %**, 12 km
+**78.7 %**, 8 and 6 km **99.7 %** — the median flight has only **13.4 km** left at L−1. So
+20 km is not a candidate at all, 4 / 2 km are partial-to-empty under the floor (≈ 53 s /
+27 s of truth left), and of the four candidates a bin under `anchor_grid.PARTIAL_COVERAGE`
+(0.5, the SAME constant A0 marks a point `partial` with) is dropped at plan build with a
+printed notice and a `dropped_bins` record — on that cohort, 16 km. Otherwise an
+equal-weighted fifth of the selection value would come from the long-haul subcohort that
+reached it. Fewer than two surviving bins refuses the metric outright: that is the L−1
+metric with a companion, not a curve. **Which bins survive is a property of the cohort, not
+of the model**, so every arm on the same split is selected on the same sets.
+
+**Two oracle inputs are refused** under this metric (`TSConfig.__post_init__`):
+`cta_conditioning=given` and `intent_conditioning != none`. Both read the future, and the
+grid re-reads it AT EVERY BIN ANCHOR — the same reason `run_ts_anytime_curve.py` refuses
+those checkpoints — so selecting an epoch on them would be selecting on how fast the oracle
+converges. Both stay allowed under the L−1 metric, which reads the oracle once.
+
+The ADE itself is never restated: `fixed_anchor_common_truth` became the L−1 case of
+`common_truth_at_anchors`, each bin's cached plan carries its own truth, and
+`dataset.ExplicitAnchorTrajectoryWindows` is the fixed-anchor policy with a caller-supplied
+anchor per flight — same caching, same batch plan, same replay. The four extra sets are
+built once per fit and replayed by `validation.replay_validation_plan` (one deployable
+forward per batch, no objective); the L−1 pass is reused, not rebuilt.
+
+**Cost**: the selection stage grows by about one deployable replay of the validation split
+per surviving bin. Measured on a synthetic control run (40 flights, 7 val, 3 epochs, all four
+bins alive): median `val_checkpoint_selection_s` **0.046 → 0.238 s** — 5.2× the selection
+stage, 1.5× the whole validation stage (0.390 → 0.590 s). At KRDU scale, with three surviving
+bins, the review's estimate is **≈ 4–5× the selection stage and +12–15 % per epoch**, i.e.
+**+7–9 min on a 180-epoch arm**. That timer now also covers the selection call itself, which
+it did not before.
+
+**Nothing stored changes.** Every existing metric is bit-exact: 2-epoch synthetic trains for
+control / latent / state / closure before and after, **232 history floats compared** (control
+50, latent 78, state 54, closure 50), 0 changed — the only difference is the new
+`validation_anchor_grid` key, empty on every other metric exactly as `latent` / `procedure`
+/ `command_hook` already are. The naming/loading audit over every config-bearing artifact
+under `4dTrajectory/outputs` — 816 stored configs (`summary.json` 239, `history.json` 196,
+`fit_evaluation.json` 190, `experiment_manifest.json` 98 and eleven smaller kinds) recomputed
+through `run_naming` and reloaded through `TSConfig.from_dict`, plus 93 campaign
+`config.json` override sets rendered as a new run would be: **909 artifacts, 0 changed** in
+name, slug or loading. (That tree is live — the GPU queue in the main worktree added 16
+artifacts between the before and after scans — so the comparison is over the intersection
+and the denominator is a snapshot, not a constant.)
+
+**Naming.** `checkpoint_selection_metric` was already a `META_FIELDS` entry, so a
+grid-selected run gets `select=anchor-grid-common-grid-ade` in its display name and always a
+distinct slug; past six meta deviations it folds into `+N more`, where `run_slug` hashes it.
+Moving it up the tuple so it is always spelled was measured and rejected: over every
+config-bearing artifact under `4dTrajectory/outputs` it would rename **27 of 196
+`history.json`** and **128 of 816 across all kinds** (all 38 `overfit_result.json`, all 15
+`oracle_result.json`, 27 of 190 `fit_evaluation.json`, 6 of 239 `summary.json`, …). Those
+totals move as the shared outputs tree grows — the review measured 27 of 165 and 64 of 667
+on an earlier snapshot of the same tree — so the reproducible statement is the SCOPE (any
+JSON under that root with a top-level `config` object, recomputed through `run_naming`), not
+the denominator.
+
+**The arm.** `A0_random_hr8_tv1_grid` = the p180 arm with that one field changed (verified by
+diffing the generated configs). Not trained yet; the reading is pre-registered in its
+`_comment`, including that the two earlier arms carry NO `validation_anchor_grid` block, so
+comparing against them needs an A0 replay of their checkpoints, read mean-to-mean (A0's own
+verdicts read the ADE median, which is not what this metric selects on).
+
+**One runner archived, one dry run fixed.** `run_ts_frame_ablation.py` is now the only
+arm-campaign driver; `run_ts_control_arms.py` moved to
+`ts_transformer/archive/control_arms_runner_2026_08/` with a README, as audit T4-27
+scheduled. Two behaviours found by using it made keeping it live a hazard: **it reads only
+`base_recipe` and silently ignores an arm file's `base` block** (every declaration written
+since 2026-09-03 has one, so it would have trained the bare recipe under the arm's name),
+and **its `--dry-run` wrote `config.json` for every arm** — pointed at `4dTrajectory/outputs`,
+a read-only symlink in a development worktree, a dry run left a campaign directory in the
+shared tree. `run_ts_frame_ablation.arm_config` now takes `write=not --dry-run` and still
+CONSTRUCTS every config (finding an unrunnable arm is most of what a dry run is for), and
+`arm_steps` takes the resolved settings instead of reading the file back.
+
+### 2026-09-07 — ts_transformer L2.f: the latent's information was in the wrong half of the KL
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md` §六 L2.f, branch
+`dev-l2f` (`be56088` diagnostics, `60dd620` β annealing, `6233967` the auxiliary duration
+target, `63d1fdd` `run_ts_latent_probe.py`, `59640bd` the arm file, then one review-fix
+commit). Nothing here changes an existing run: every code commit is bit-exact at the
+defaults, proved by 2-epoch synthetic trains of four configs (plain control simple-v3/N=32,
+latent control, state, closure) before and after each — 0 numbers changed, only the new keys
+added (the review's own re-run moved exactly one value, `mean_displacement_sigma`, when its
+median convention was fixed to `torch.quantile`; that key is new here, so nothing stored
+changes). The audit scope for the naming/loading check is every config-bearing artifact
+under `4dTrajectory/outputs`: **606 stored configs** (`history.json`, `fit_evaluation.json`, `summary.json`) recomputed through
+`run_naming` and re-loaded through `TSConfig.from_dict`, plus **91 campaign `config.json`
+override sets** reconstructed as a new run would — 697 artifacts, **0 changed** in name, slug
+or loading verdict.
+
+**Why.** L2.e' spent three 180-epoch arms on free bits as an information budget and read the
+result as "the budget works, the information is just small". A direct probe of the three
+checkpoints said otherwise: in every arm the posterior MEAN sat on the prior mean —
+|μ_q − μ_p| under 0.2 prior σ per flight — and the whole budget went into narrowing the
+posterior. z was a denoised constant. That explains the shuffled ΔADE of +47/+16 m, the
+z-oracle's mere 227 m, the N(0, I) control beating the trained prior's best-of-6, and top-1
+getting worse as the budget grew (1214 / 1260 / 1387 m). The mechanism: above the free-bits
+floor the penalty's gradient on the KL's MEAN term is proportional to the displacement, so it
+flattens each flight's posterior mean onto the prior within the first ten epochs — before the
+decoder has learned to read z — and nothing afterwards brings the information back.
+
+**Not one number a training run wrote could have shown this.** Total KL, active units and
+shuffled ΔADE are all blind to WHERE the KL is spent. So the epoch record gained the split
+(`component_kl_mean_term_nats` / `component_kl_variance_term_nats`, the variance term as the
+REMAINDER of `per_dimension_kl` so the charged number stays bit-identical — and named
+`component_*` because the three sum to the analytic `component_kl_nats_per_flight`, NOT to
+the charged `kl_nats_per_flight`), `component_kl_per_dim`, `mean_displacement_sigma` (a
+median is not summable: the flight-weighted mean of the per-batch medians, the same shape as
+`active_units`, and taken with `torch.quantile(…, 0.5)` rather than `torch.median`, which
+returns the lower of two middle values — an outside reader must land on the same number) and
+`active_units_0p05` — the FIXED ruler, because `active_unit_threshold_nats` moves with the
+free-bits budget and made that gate unreadable across arms. The gate sentence itself
+(`displacement_verdict`) and its ruler (`DEAD_MEAN_DISPLACEMENT_SIGMA = 1.0`) live in
+`control/latent.py`, so no surface restates either. `run_ts_latent_readout.py --history
+<run>/history.json` prints the kept epoch's block and needs no `--arm` (this is the epoch-1
+reading, before the arm has predicted anything); `run_ts_latent_probe.py --checkpoint
+LABEL=PATH` measures the same quantities off a checkpoint (the scratch probe, now code beside
+the other replay runners, sharing A0's cohort rebuild so the roster rule keeps one owner; its
+prior total std comes from the MIXTURE's own moments, so a K>1 prior's range — which lives
+between its components — is not read off one of them, and `--limit` is documented as a prefix
+of the split, not a sample).
+
+**Two levers, one arm each** (`docs/experiments/l2f_mean_information_arms.json`, base = L2.d's
+warm posterior + free bits 0.05 + β 0.01): `latent_beta_warmup_epochs=40` ramps β linearly
+from 0 so the decoder's z-weights grow before the mean term is charged (the L2.c "annealing
+only postpones collapse" reading was about the VARIANCE term — recorded, not quietly
+reversed); `latent_aux_duration_weight=1.0` adds a train-only `Linear(latent_dim→1)` on the
+POSTERIOR SAMPLE predicting `truth_duration_s / final_time_scale_s`, a restoring force on the
+mean that does not go through the decoder. The head is never called in `decode`, so z stays
+latent and no record carries it; the combination with `cta_conditioning=given` is refused (the
+CTA already hands the duration over).
+
+**Three things worth keeping.** (1) The epoch's objective is now `replace(config,
+latent_beta=effective)` and the VALIDATION pass is scored under the same one, so an epoch's
+train and val `latent_kl` mean the same thing — the rule the procedure penalty's λ already
+followed; `train_components.latent_kl` keeps its meaning (the term actually charged) and the
+`latent` block is unscaled nats plus `beta_effective`. (2) Measured while building the aux
+head (synthetic, three seeds, paired init): the target raises the KL's mean term in 3 of 3
+seeds but the displacement MEDIAN in only 2 of 3, because a scalar read-out needs ONE latent
+direction and a median over eight dimensions can miss it. The test asserts the monotone
+quantity and the arm file says to read `component_kl_per_dim` beside gate (1)'s median rather
+than being weakened to pass. **And the aux target is literally an INPUT of the posterior
+encoder** (the true duration), so a small `latent_aux` proves only that one latent coordinate
+can copy one input: the verdict needs the KL mean term to move AND a downstream gate to move.
+(3) `simple-v*` now pins the WHOLE latent axis at its defaults, so a named recipe is
+non-latent by definition and a latent run is `custom` — which every latent arm file already
+said. Pinning only L2.f's two levers, as the first draft did, would have let a `simple-v3`
+run choose its β but not its warm-up.
+
+### 2026-09-07 — ts_transformer A0 / B0: the re-anchoring curve and the arrival-time error distribution
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+§二 2.1–2.4 and §三 3.1, branch `dev-a0` (`3f7a849` A0, `fe84e76` B0, `5f408df` tests, then
+the merge of `dev-l2` and this branch's review-fix commit). Both are MEASUREMENTS on existing
+checkpoints and existing prediction directories — no training, no new model axis.
+
+**Why.** Every evaluation in this package anchors at L−1 (`seq_len − 1`, 120 s after the 25 km
+slice starts), which is the moment the ego history knows least about where the controller is
+going to send the aircraft. The 962 m of intent in the C_pred → C_truth_intent budget is a
+property of that INSTANT, not of the flight: it gets exposed as the aircraft flies. Nothing in
+the package had ever measured that — each flight has exactly one anchor and one ADE. A0 asks
+how the error falls as the remaining path shrinks; B0 asks how wide an arrival-time interval
+would have to be, which is the number B1 (quantile head) and B2 (conformal) would be built
+against.
+
+**`run_ts_anytime_curve.py` (A0).** `--checkpoint LABEL=PATH`, repeatable; the cohort is each
+checkpoint's own `val` split, rebuilt the way `predict` rebuilds it; bins are REMAINING PATH
+(`--bins-km 20,16,12,8,6,4,2`), and a flight's anchor in a bin is the observed sample whose
+remaining path is closest to the bin value, empty when it has no full lookback or under
+`--min-future-s` of truth after it. Scored with the package's own `observed_series_metrics`.
+Writes `anytime_curve.json` + `.txt` with the §2.4 readings. Six design points:
+
+- **The strata are computed once at L−1 and fixed for every bin.** This is the whole
+  difference between a curve and a survivor curve: relabel per bin and a flight leaves the
+  vectored stratum exactly when it rolls out on the centreline, so the stratum improves
+  because its hard members left it. Held down by a test with a two-flight cohort — one
+  vectored at L−1 and established by 4 km, one straight-in — which must read vectored n=1 /
+  established n=0 at the 4 km bin where per-bin labels would read 0 and 2.
+- **The bin coordinate is the covariate's own arithmetic.** `approach_difficulty` gains
+  `remaining_path_profile_m` (the per-sample form, one suffix sum) and
+  `approach_difficulty()` now reads its own `remaining_path_m` out of it. The anchor grid and
+  the NEAR / FAR strata therefore cannot become two definitions of one name.
+- **Bins hold different flights, so the curve is read PAIRED.** A bin's population is the
+  flights whose geometry put a sample there; an unpaired difference of two medians mixes "the
+  model got better" with "this bin got easier flights". The monotonicity verdict compares
+  adjacent bins over the flights present in BOTH and prints that n, and every per-flight row
+  stays in the artifact so another paired reading needs no re-run. It reads the ADE
+  **median** (the package's convention for a heavy-tailed error); mean and p95 are published
+  beside it.
+- **Both metric families, per cell.** Time-free chamfer and Fréchet
+  (`geometric_metrics.path_metrics`, truth = the post-anchor supervision rows ADE is scored
+  against) sit next to ADE / FDE / |Δt|. The closure arm is why: at 12 km it scores ADE 6.7–8.1
+  km with a 172–176 s duration error against native32's 1128 m / 63 s — off its training
+  anchor it is an out-of-distribution CONTROL, not a competitor, and reading one family alone
+  says the opposite.
+- **The arm is a per-checkpoint fact**, named from its own `random_train_anchor`
+  (`A0-fixed` / `A0-random`): one run may hold both, their difference IS the
+  out-of-distribution cost §六 3 asks for, and the out-of-distribution warning is printed only
+  for the arms that need it.
+- **`observed_series_metrics` was already anchor-aware** (`series.times[forecast.anchor]`,
+  truth = supervision rows after it, difficulty at that anchor), so nothing at the export
+  boundary had to change — asserted, not assumed: a forecast that copies the truth from a
+  late anchor scores ADE, chamfer and Fréchet 0 there.
+
+Refusals, all before the immutable output directory exists: `cta_conditioning=given` (its
+duration IS the truth's) and `intent_conditioning=truth-…` (its oracle channels are re-read
+at EVERY anchor, so the curve would measure how fast the oracle converges — three such
+checkpoints exist under `scene_phase0_20260905`), the sealed `test` split, a malformed
+`LABEL=PATH`, and a `--command-hook` without its saturation or on a non-control checkpoint.
+The artifact is staged in a `.partial-*` directory and renamed, so a crash mid-measurement
+never leaves a half-written curve under the name a reader will cite. `--limit N` is the smoke
+test on a real checkpoint (the artifact says so, and the coverage denominators are the
+flights actually built).
+
+**`run_ts_eta_error_readout.py` (B0).** A pure readout of `summary.json`: per stratum the
+|`final_time_error_s`| p50/p80/p90 and the SIGNED p10/p50/p90, and the same quantiles of
+`fde_m`. A row is used only if it carries every metric AND every `STRATA_COVARIATES` field —
+the tuple `strata_masks` reads, now exported, because a present-but-null
+`established_at_anchor` would pass a numeric-only filter and then read as False, moving that
+flight into the vectored stratum unnoticed. Measured on the three KRDU val arms (1404 flights
+each, full coverage):
+
+| arm | vectored \|Δt\| p80 | straight-in \|Δt\| p80 | signed p50 (all) |
+|---|---:|---:|---:|
+| native32 | 72.5 s | 20.3 s | +3.5 s |
+| L2.d warm β=0.01 | 68.6 s | 18.9 s | +3.4 s |
+| closure C_pred | 65.8 s | 12.0 s | −1.4 s |
+
+Four things that decide B1/B2's shape: per-stratum calibration is necessary, not a refinement
+(the vectored stratum is 3.6–5.5× the straight-in one, so a pooled interval is absurd for
+straight-in flights); B is not dead on arrival but has only about one doubling of margin
+against the §三 veto of a 120 s vectored interval; the error is near-symmetric but OFF-CENTRE
+(+3.4/+3.5 s late for the control arms, −1.4 s early for closure), so a quantile head beats
+"point ± δ"; and closure's FDE p50 of 11 m is a construction artifact (it draws the path onto
+the threshold) sitting next to a 996 m ADE — the standing "read both metric families" rule,
+with a fresh example.
+
+**A replay runner must fingerprint the data the way the checkpoint was trained.** The v5
+cohort is eligibility-bound: `arrival_data_provenance(manifests)` without
+`eligibility_rosters` lists 14 435 KRDU arrival candidates where the checkpoint carries the
+14 378 eligible ones, and `require_matching_data_provenance` then reports "the manifest
+changed" on a checkpoint and a manifest that are both correct. Found here, fixed for the
+package in `e8df12f` as `data_provenance.checkpoint_data_provenance(payload, manifests)` (the
+roster is read iff the checkpoint recorded one), which this runner calls — its own copy was
+deleted when `dev-l2` merged. It had been a live startup blocker for L5.a's unrun fit.
+
+**Two things measured while verifying, which are not results**: all three §2.2 arms replay at
+anchors 87–260 against L−1 = 59 (closure included — `closure_output.reconstruct` draws from
+the ANCHOR STATE and its labels only ever enter training and `--closure-from-labels`); and
+the whole A0-fixed run costs ≈76 min per control arm on CPU at 1404 flights × 7 bins, with
+the closure arm roughly two orders of magnitude cheaper. Batching is by ANCHOR, and real
+anchors are nearly all distinct, so the effective batch is ≈2.7 and `--batch-size` barely
+matters.
+
+**Two gaps this work found in the design's own plan**, both now written into it:
+
+- `--min-future-s 60` empties the 2 km bin and most of the 4 km one (≈27 s and ≈53 s of truth
+  left at approach speed). The readout states it (`n=0 / cov 0.00 / partial`) and gate 2 only
+  asks about s > 4 km, but **s_freeze can then only be read at ≥ 6 km**. Reading it closer in
+  needs a lower floor, which changes the bins' population and must be quoted with the result —
+  and the **~125 s duration-head floor** makes |Δt| p80 RISE toward the runway anyway
+  (L1_native32 vectored: 64 s at 12 km, 141 s at 4 km), so every cell now prints its predicted
+  duration p50 and the freeze block names the floor.
+- **The A0-random arm cannot be trained yet**: `random_train_anchor=True` raises
+  `TypeError: RandomAnchorTrajectoryWindows.__init__() got an unexpected keyword argument
+  'fitted_teacher'` before the first epoch (introduced by `e9e3639`, no current recipe uses
+  random anchors, so the suite is green). Since §六 3 forbids publishing the fixed arm's
+  curve alone, that one-line fix gates the whole A0 reading —
+  `docs/code-health-followups.md` §20.
+
+Tests: `4dTrajectory/ts_transformer/tests/test_anytime_curve.py` (24) and
+`test_eta_error_readout.py` (10); package suite 616 → 626.
+
+### 2026-09-07 — ts_transformer T3 review: the guards that did not grow with the module map
+
+`e1fe10f` (code + tests) and this entry, branch `dev-t3`. The independent review passed on
+behaviour — 15,241 in-process leaves and 316,993 CLI-path leaves identical, 0 import cycles,
+every moved function body AST-identical, 0 stored names or load verdicts moved — and found
+what a structural pass systematically misses: a guard that stayed where it was.
+
+- **`dataset` was accidentally re-exporting `DYNAMICS_CONDITION_NAMES`.** The import had no
+  use in `dataset`, but three tests read it THROUGH `dataset`, so the follow-up entry saying
+  it was "safe to delete" would have cost seven failures. They import it from
+  `control.conditioning` now.
+- **Four renamed flags still worked.** argparse accepts any unambiguous PREFIX by default,
+  so `--dt`, `--control-recipe`, `--closure-labels` and `--control-fitted-teacher` kept
+  parsing after the T3-19 rename — a stale command line setting the field it looks like it
+  sets while reading as up to date. `allow_abbrev=False` on every parser, and a test that
+  runs all fifteen old spellings through `main()` and requires "unrecognized arguments".
+- **`RETIRED_SERIALIZED_FIELDS` dropped non-default values silently**, and its header
+  ("could not have changed the run") was false for the three fields T3-21 put in it — they
+  are live loss denominators. Split into the unread kind (dropped by name) and
+  `RETIRED_CONSTANT_FIELDS`, a `{field: constant}` map that drops a stored value only when
+  it EQUALS the constant and otherwise refuses, naming the key and the value. Exposure is
+  zero — 0 non-default across the artifacts on disk — so no stored config changes verdict.
+  The three constants are single-sourced in `config.py` rather than mirrored.
+- **The barrier gains could not reach the delivery form.** T3-21 put them on `train`, where
+  the hook cannot be enabled without training through it, while the ADOPTED use is
+  `predict --command-hook barrier`. Both are on `predict` now, folded into the existing
+  `replace(...)` and refused without the hook, behind `cli.predict.PREDICT_CONFIG_FLAGS` —
+  the same import-time assertion `CLI_CONFIG_FIELDS` carries. `--command-hook` /
+  `--hook-saturation` keep their short names on purpose: two arm files spell them in
+  still-re-runnable `predict_args`, and renaming rewrites a finished campaign's record.
+- **One `latent_dim` refusal came back**, in `_latent_batch` — T3-22 removed four copies on
+  the grounds that `__main__` checks, which is true of the CLI and not of the library's other
+  callers. It is in `_latent_batch` rather than the fan-out because two of the four entries
+  read the prior in between and would die on `AttributeError: prior_logits` first.
+- **`CLI_CONFIG_FIELDS` was guarded in two directions of three**: deleting a name left its
+  flag parsed and ignored. `NON_CONFIG_DESTS` freezes the infrastructure dests and the
+  documented exceptions, and the test now asserts set equality.
+- Also: `validation` added to the control-layering ban; the two-way `dataset` ↔ `control/`
+  edge stated and pinned (the four modules `dataset` imports must stay `dataset`-free);
+  `splits` guards its annotation-only `dataset` import and joins the torch ban;
+  `validation._dataset_loss_components` moved into the test module that was its only caller;
+  the import-boundary helper proves its poison is live before importing anything;
+  `test_architecture` resolves relative imports; all four point-mass hook refusals covered.
+- **`run_slug` now hashes the diffs `_MAX_LISTED_META` folds into `+N more`.** The barrier
+  gains are LAST in `META_FIELDS`, so two runs differing only in them were the first pair to
+  fold — and a slug names a FUTURE directory, so they would have shared one. 131 stored
+  configs' slugs gain a 6-hex suffix; nothing on disk is renamed (existing directories are
+  historical record), display names are untouched, and there are 0 actual collisions before
+  or after, so the fix is prophylactic.
+
+Numbers this entry and the one below it got wrong, re-counted: `__main__.main` was 679 lines
+not 714; `__post_init__` had 97 `raise` statements not 123; `cli_values` was 58 pairs and
+`CLI_CONFIG_FIELDS` 55 (57 after T3-21), not 60 and 54; `_refuse_hook` had 4 call sites not
+six. The equivalence itemization is restated so it no longer reads as a partition of 9,197,
+and two claims are softened: `evaluation_protocol` shed torch and openap but still loads
+numpy and the harvest package, and the `cta_offset` guard is kept for its test as well as
+for its non-CLI caller. Stale module references fixed in `config.py`, `forecast.py`,
+`final_approach_geometry.py`, `control/loss/components.py`, `docs/ENGINEERING_NOTES.md` and
+four `docs/*.md`; `README.md`'s Layout table gains `objective`, `validation`,
+`data_provenance`, `splits` and `cli/`.
+
+Suite 583 → **591 passed**.
+
+
+### 2026-09-07 — ts_transformer package audit T3: the structural rearrangement (eight commits)
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md` §五, branch `dev-t3`,
+base `4e00c59`. Nothing here changes a number: every item is a move, and the series is
+closed by an equivalence proof rather than by an assertion. Suite 580 → 583 (three new
+architecture / boundary tests); stored-config sweep at base and at HEAD over every
+`history.json` / `summary.json` / `checkpoint_metadata.json` under
+`4dTrajectory/outputs/*/experiments/**`: 306 shared configs, 233 load at both, **0 load
+verdicts changed, 0 run names changed**.
+
+**The training plane is five modules now, one question each** (`3d3dba0` T3-15,
+`7a27791` T3-16, `ae9d83f` T3-18). `train.py` was 3,027 lines holding three of them.
+
+| module | question | lines |
+|---|---|---|
+| `objective.py` | what a prediction is scored against | 1,079 (new) |
+| `validation.py` | how a fitted model is replayed on a split, which epoch is kept | 869 (new) |
+| `train.py` | the epoch, the cohort, the checkpoint | 1,194 |
+| `data_provenance.py` | which arrival rosters produced this run | 258 (new) |
+| `splits.py` | which split a flight belongs to | 192 (new) |
+| `dataset.py` | observed arrivals → model windows | 1,742 |
+
+Each carve was verified line-for-line against `4e00c59`: 924, 754, 221 and 147 non-blank
+lines moved unchanged. Two consequences worth keeping:
+
+- `batching._probe_training_step`'s three in-function imports are gone. The deferred
+  `from train import prediction_loss` existed only to break a cycle (`train` imports
+  `resolve_batch_size`); with the objective in its own module there is none, and `dataset` /
+  `fixed_dt_supervision` had been deferred alongside it for no reason of their own.
+- `evaluation_protocol` took `require_matching_data_provenance` from `dataset`, so reading
+  the test-release ledger imported torch and openap to compare two dicts. It reaches
+  `data_provenance` now, and
+  `test_the_provenance_and_protocol_modules_do_not_reach_the_data_plane` imports it with
+  `torch` banned. It is not import-free: `data_provenance` still pulls numpy and the harvest
+  package through `trajectory_data_process.harvest.arrivals`. Torch and openap are what
+  went.
+
+**`TSConfig.__post_init__` is five named validators** (`24aee2d` T3-17): 544 lines and 97
+raises, in an order nobody could hold, become `_validate_vocabulary` → `_validate_recipe` →
+`_validate_ranges` → `_validate_output_contract` → `_validate_control_contract`, and the
+order is the argument for it (a value must be in its vocabulary, then in its bounds, before
+a cross-field rule can read it). The `n_segments` default sits BETWEEN the vocabulary pass
+and the rest, because `DEFAULT_N_SEGMENTS_BY_MODEL[self.model]` would raise `KeyError`
+instead of the vocabulary's `ValueError` if it ran first.
+
+**The plan was wrong twice, and both are now measured facts in the code.**
+
+1. `control_state_loss_grid` is NOT derivable from `control_state_objective` after T1-11.
+   Census over the 306 stored configs: 159 `(control, true-time-position, native)`, 62 + 8
+   `(state|closure, normalized-mse, native)`, **4 `(control, normalized-mse, fixed-dt)`** —
+   the arms `CLAUDE.md`'s defaults table describes. `true-time-position` does pin the native
+   grid; `normalized-mse` runs on both. Two values under one objective is not a function, so
+   the six mutual raises stay, with the census in `_validate_control_contract`'s docstring.
+2. Of the seven `*_scale` fields "never non-default on disk", only three may become module
+   constants. `control_simple_v1_overrides` pins `position_loss_scale_m`,
+   `final_time_scale_s`, `control_velocity_loss_scale_mps` and
+   `control_heading_rate_loss_scale_dps` as LITERALS — that is what T0-7 did, so that a
+   module default cannot silently redefine a published simple-v* comparison. Retiring them
+   would reinstall exactly that hazard.
+
+**Three units retired, two hook gains gained flags** (`4148a53` T3-21).
+`objective.PROCEDURE_LATERAL_SCALE_M` (100 m), `objective.PROCEDURE_VERTICAL_SCALE_M` (30 m)
+and `closure_output.CLOSURE_TIMING_SCALE_S` (60 s) leave `TSConfig` into
+`RETIRED_SERIALIZED_FIELDS` (143 / 143 / 81 stored configs carry them, none at anything but
+the default), out of both `run_naming` tuples. `--control-barrier-alpha` and
+`--control-barrier-heading-gain` exist at last: `--config-overrides` JSON was the only way to
+set either, which is how six 2026-09-06 configs carry the first campaign's heading gain 0.3
+rather than a chosen value.
+
+**A dynamics backend is a row, not a class** (`2fc5560` T3-20). Three near-identical classes
+behind an ABC become `ControlDynamicsBackend(description, endpoint_fn, dense_fn, post_fn,
+runs_hooks)`; `_TransportChartResults` was `post_fn` written twice, and `_refuse_hook`'s four
+call sites become one `_admit` driven by `runs_hooks`. Bit-exactness was measured, not
+asserted: all three registered pairs (and the lagged one again under a barrier hook), endpoint
+and dense, 13 tensor digests plus the control gradient each — byte-identical.
+
+**The four latent forecast entries share one fan-out** (`c48adf8` T3-22): `_latent_batch` +
+`_latent_forecasts(latents, probabilities, …)`, where `probabilities is None` states once
+what four call sites used to imply — latents that are not prior samples carry no mode index.
+The four `latent_dim < 1` re-checks are gone (`__main__` refuses every latent flag against a
+non-latent checkpoint, twice) — the T3 review put ONE back, in `_latent_batch`, for the
+library's own callers. The `cta_offset` guard in `forecast_approaches` is NOT gone, against
+the plan: `test_the_offset_is_refused_off_the_cta_path` pins it, and the entry has a caller
+outside the CLI (`run_ts_runway_hypotheses.py`), so deleting it would have removed the only
+check on that path and a green test with it.
+
+**BREAKING (CLI): one module per subcommand, and fifteen flags renamed** (`dba2450` T3-19).
+`__main__.main` 679 → `__main__.py` 131 lines (and `cli/` 1,542): a bootstrap plus a `COMMANDS` table of
+`(help, add_cli_arguments, run_cli)`, the pattern `approach_clustering/cli.py` already used.
+`cli/{train,cross_validate,evaluate_fit,freeze_test,predict}.py` + `cli/common.py`. Every
+flag that sets a `TSConfig` field is now named after that field, so the 58-pair hand-written
+`cli_values` mapping is a list of 55 field names with an import-time assertion (57 after
+T3-21 adds the two barrier gains). Old spellings
+are not accepted:
+
+    --closure-labels                 -> --closure-labels-path
+    --dt                             -> --dt-s
+    --fitted-tail-weight             -> --fitted-tail-position-weight
+    --fitted-terminal-weight         -> --fitted-terminal-position-weight
+    --kinematic-consistency-weight   -> --kinematic-consistency-loss-weight
+    --control-thrust-tau-s           -> --control-thrust-time-constant-s
+    --control-bank-tau-s             -> --control-bank-time-constant-s
+    --control-load-tau-s             -> --control-load-time-constant-s
+    --control-state-clock            -> --control-state-supervision-clock
+    --control-fitted-teacher         -> --control-fitted-teacher-path
+    --control-heading-rate-weight    -> --control-heading-rate-loss-weight
+    --control-heading-rate-scale-dps -> --control-heading-rate-loss-scale-dps
+    --control-bank-tv-weight         -> --control-bank-tv-loss-weight
+    --control-rollout-dt             -> --control-rollout-integrator-dt-s
+    --control-recipe                 -> --control-recipe-name
+
+Updated wherever spelled: `run_ts_flight_model_paired.py`, the two flags `run_ts_pipeline.py`
+EMITS (its own same-named flags are a separate CLI surface and keep their names, with a
+comment at the emission site), `tests/test_ts_transformer.py`, the package `README.md` and
+eight `docs/*.md`. Older entries BELOW in this file (newest first) keep the spelling they
+were written with.
+
+**The equivalence proof that closes the series.** Six tiny CPU runs on synthetic KRDU
+arrivals, fixed seeds, two epochs, trained once at `4e00c59` and once at `4148a53`: simple-v3
+supervision content at N=32, the latent config (`latent_dim=8`, posterior init 0.1, β=0.01,
+free bits 0.5), the L1.b terms armed (heading-rate 8, bank-TV 1), `state`, `closure`, and the
+lagged model under `control_command_hook=barrier`. **9,197 leaf values compared, 8,951
+identical.** The categories that carry the claim, each counted separately (they do not
+partition the 9,197 — the rest are the strings and identities around them): 6,752
+`history.json` floats, 6 state-dict SHA-256s, 6 target contracts, 6 checkpoint metadata
+schemas, 750 forecast field digests (top-1 everywhere, plus 2 prior modes, the z-oracle and
+the shuffle on the latent run), 6 run display names, 6 slugs, 72 normalizer statistics, 34
+split rosters — 0 differences in any of them. The 246 that differ: 240 wall-clock timings,
+and the 6 `.pt` file digests, which move because the serialized config lost the three fields
+T3-21 retired (111 → 108 fields, every shared value equal).
+
 ### 2026-09-07 — evaluation v9: the speed gate anchors on the type's PUBLISHED approach speed (O4)
 
 Branch `dev-observed-load-factor-metar`. Under the wind-corrected v8 gate 26 % of the
@@ -50,6 +561,7 @@ dedicated folder.
 - Docs: `THRESHOLD_SPEED_GATE.md` §1/§2/§3.1/§3.2/§4/§5/§6/§7/§8/§9/§10 rewritten;
   `evaluation/CLAUDE.md`, `README.md`, root open item, `open-items.md`, followups #16/#19
   resolved, `trajectory_data_process/CLAUDE.md`, `flight_scenarios/CLAUDE.md`.
+
 
 ### 2026-09-07 — ts_transformer L1.b: two supervision terms that replace the imitation teacher's job of naming the bank
 

@@ -6,6 +6,49 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## ts_transformer: two dead loss helpers (2026-09-07)
+
+**Verified** by AST walk over the module, on `dev-t3`: `objective.masked_mse` and
+`objective.position_velocity_consistency_loss` have no live caller — only
+`tests/test_ts_transformer.py`. They moved with the rest of the objective in T3-15 rather
+than being deleted there, because T3 is a structural pass and a deletion is a T1-shaped
+change with its own evidence to state (the `kinematic` component is weighted zero on every
+path today, which is why they went quiet). Deleting both would also remove four tests that
+currently test nothing else.
+
+**Judgement**: safe to delete, and it should be decided together with whether the
+kinematic-consistency term is ever coming back.
+
+**Corrected 2026-09-07 (T3 review)**: this entry also listed `dataset`'s unused
+`DYNAMICS_CONDITION_NAMES` import as safe to delete. It was NOT — three tests read the name
+through `dataset`, so removing the import alone cost seven failures. That is now fixed
+properly (the tests import from `control.conditioning`, `dataset` no longer re-exports it),
+and it is the reason this file states verified-vs-judgement: "unused inside this module" is
+not "unreferenced", and only the second one licenses a deletion.
+
+## ts_transformer: train_only_diagnostics is one unreferenced helper (2026-09-07)
+
+**Verified**: `select_outer_train_series` was deleted in the T3 review — its only caller went
+to `archive/oracle_teacher_2026_08/` in T2. What is left in the module is
+`rank_outer_train_candidates`, which has no caller either, live or archived.
+
+**Judgement**: the module should go with the runner cleanup (T4-27), not before — deleting a
+file is cheap, but the split-discipline it documents ("open exactly one outer-train flight,
+never val/test") is worth keeping in view while the capacity diagnostics are being reworked.
+
+## ts_transformer: run_ts_pipeline's flags no longer match the ones it emits (2026-09-07)
+
+**Verified**: T3-19 renamed fifteen `ts_transformer` flags to the `TSConfig` field each sets.
+`run_ts_pipeline.py` emits two of them (`--control-state-supervision-clock`,
+`--control-rollout-integrator-dt-s`) but keeps its own older names
+(`--control-state-clock`, `--control-rollout-dt`) on its own CLI, with a comment at the
+emission site saying so.
+
+**Judgement**: renaming the pipeline's surface too would make one setting have one name
+everywhere, at the cost of breaking a habit and a running campaign's command lines. Out of
+T3's scope ("update every runner that SPELLS one of the renamed flags"); worth doing when no
+campaign is in flight.
+
 Opened 2026-08-17, during the `final_approach` / `evaluation` design pass.
 
 ---
@@ -479,3 +522,48 @@ B788 −8; +8 B735, +6 B734 — the bizjet rows fly fallback A320 dynamics, so a
 solve of one fails v9 by 30–70 kt. Feed the floor's reference and the target V_ref from
 `aircraft.reference_speeds` (the same table the gate reads) when the optimizer is next
 re-solved; do not widen the gate (`THRESHOLD_SPEED_GATE.md` §7).
+
+## 19. ~~`run_ts_control_basis_oracle.py --checkpoint` fingerprints the data without the eligibility roster~~ FIXED (`e8df12f`)
+
+**Verified** (2026-09-07, hit while building `run_ts_anytime_curve.py`): the teacher-table mode
+called `require_matching_data_provenance(payload, arrival_data_provenance(manifests))` with no
+`eligibility_rosters`, while every current checkpoint's `data_provenance` is
+`ts-arrival-data-v3-eligibility-bound` and carries the pre-split lateral-pass roster. The
+fingerprint taken without the roster lists all 14 435 KRDU arrival candidates where the
+checkpoint carries the 14 378 eligible ones, so the strict comparison failed with "checkpoint
+training data does not match the current arrival manifests" — on a checkpoint and a manifest
+that are both correct. Reproduced against `l1_lowdim_20260907/L1_native32`,
+`l2_warm_posterior_20260907/L2d_warm_beta0p01` and `closure_p1c_20260905/C_pred`; it was a live
+blocker for **L5.a**, whose documented fit died at the check before fitting anything.
+
+**Fixed 2026-09-07 by `e8df12f`**: the rule has one owner,
+`data_provenance.checkpoint_data_provenance(payload, manifests)` — the roster is read iff the
+checkpoint recorded one, so a checkpoint trained before the sidecar existed is not handed one.
+The fitter uses it for both the check and the table's stamp; `run_ts_anytime_curve.py` calls the
+same helper (its own copy of the rule was deleted when `dev-l2` merged). Kept here as the record
+of why the helper exists: **a new replaying runner that calls `arrival_data_provenance` directly
+reintroduces this**, and a test that patches that function is what hid it the first time.
+
+## 20. `random_train_anchor=True` training raises before the first epoch
+
+**Verified** (2026-09-07, hit while building the A0 arm-label test): `train.fit_model` builds
+its training window set as
+
+```python
+training_dataset_class = {False: FixedAnchorTrajectoryWindows,
+                          True: RandomAnchorTrajectoryWindows}[config.random_train_anchor]
+train_set = training_dataset_class(..., fitted_teacher=fitted_teacher)
+```
+
+but `RandomAnchorTrajectoryWindows.__init__` takes no `fitted_teacher`, so any
+`random_train_anchor=True` run dies with `TypeError:
+RandomAnchorTrajectoryWindows.__init__() got an unexpected keyword argument 'fitted_teacher'`
+before a single epoch. Introduced by `e9e3639` (L5.a: the fitted teacher became a
+training-time input); no current recipe uses random anchors, which is why the suite is green.
+
+It is a **prerequisite for the A0-random arm** (anytime design §2.2): that arm is exactly
+`random_train_anchor=True` + the L1.b teacherless supervision, and §六 3 says the fixed arm's
+curve must not be published alone. The fitted teacher is refused with random anchors anyway
+(`TSConfig`), so the fix is to pass it only to the fixed-anchor class, or to accept and
+refuse it in the random one — one line either way, plus a test that constructs the random
+window set through `fit_model`.

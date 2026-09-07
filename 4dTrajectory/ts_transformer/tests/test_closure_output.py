@@ -23,7 +23,8 @@ import closure_geometry as cg  # noqa: E402
 import closure_output as co  # noqa: E402
 import closure_profile as cp  # noqa: E402
 from config import CHECKPOINT_SELECTION_OBJECTIVE, PREDICTION_CLOSURE, TSConfig  # noqa: E402
-from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, Normalizer, build_series  # noqa: E402
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from dataset import Normalizer, build_series  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records  # noqa: E402
 from evaluation.thresholds import AssessmentContext  # noqa: E402
@@ -32,7 +33,8 @@ from forecast import forecast_approach, forecast_closure_from_labels  # noqa: E4
 from models import build_model  # noqa: E402
 from run_naming import run_display_name  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
-from train import load_checkpoint, loss_component_names, prediction_loss_components, target_contract, train  # noqa: E402
+from objective import loss_component_names, prediction_loss_components, target_contract  # noqa: E402
+from train import load_checkpoint, train  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 TINY = dict(seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1, final_time_scale_s=2.0,
@@ -79,8 +81,9 @@ def test_closure_config_contract(tmp_path):
     name = run_display_name(config.to_dict())
     assert name.startswith("closure ·") and "closed-form" in name and "closure-v1" in name
     assert f"labels={labels.parent.name}/labels.json" in name          # the file, with its directory
-    assert "timing-scale" in run_display_name(_closure_config(labels, closure_timing_scale_s=30.0).to_dict()) or \
-        "closure-timing-scale-s=30" in run_display_name(_closure_config(labels, closure_timing_scale_s=30.0).to_dict())
+    # `closure_timing_scale_s` was retired to `closure_output.CLOSURE_TIMING_SCALE_S`
+    # (T3-21, 2026-09-07): a unit, not a swept knob, so there is no longer a value for the
+    # name to carry. The knot widths below are the closure axis the name still reports.
     assert "closure-v1(closure-slowness-knots=8" in run_display_name(_closure_config(labels, closure_slowness_knots=8).to_dict())
     with pytest.raises(ValueError, match="closure_labels_path"):
         TSConfig(prediction_output=PREDICTION_CLOSURE, **TINY)

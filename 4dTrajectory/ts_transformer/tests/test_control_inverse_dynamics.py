@@ -426,7 +426,7 @@ def _velocity_term_config(weight: float) -> TSConfig:
 
 def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
     """The true-time-position objective scored position only; this adds the velocity."""
-    import train as train_module
+    import objective
     from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
     from dataset import Normalizer
 
@@ -444,7 +444,7 @@ def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
         result, anchor, terminal, _velocity_term_config(0.0), normalizer, None
     )
     assert "velocity" not in off.extras
-    assert "velocity" not in train_module.loss_component_names(_velocity_term_config(0.0))
+    assert "velocity" not in objective.loss_component_names(_velocity_term_config(0.0))
 
     on_config = _velocity_term_config(0.25)
     on = control_tracking_loss_terms(
@@ -455,17 +455,17 @@ def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
     )
     # The position term is untouched, so turning the velocity term on is additive.
     torch.testing.assert_close(on.state, off.state)
-    assert "velocity" in train_module.loss_component_names(on_config)
+    assert "velocity" in objective.loss_component_names(on_config)
 
 
 def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
     """Fitted-tail velocity weights are zero, so placeholders cannot enter the loss."""
-    import train as train_module
+    import objective
     from dataset import Normalizer
 
     config = _velocity_term_config(1.0)
     channels = len(config.channels)
-    prediction_zero_weights = train_module._native_endpoint_control_state_loss
+    prediction_zero_weights = objective._native_endpoint_control_state_loss
 
     torch.manual_seed(0)
     controls = torch.zeros(1, config.n_segments, 3, dtype=torch.float64, requires_grad=True)
@@ -545,7 +545,7 @@ def test_the_imitation_term_scores_the_schedule_and_masks_the_fitted_tail():
     """
     from control.envelope import CONTROL_HALF_WIDTH
     from prediction_outputs import ControlPrediction
-    from train import control_imitation_mse
+    from objective import control_imitation_mse
 
     config = _imitation_config(0.05)
     target = torch.zeros(2, 8, 3, dtype=torch.float64)
@@ -633,7 +633,7 @@ def test_an_enabled_loss_term_is_reported_as_its_own_component():
     whatever keys the objective actually returned, so an extra term with no name raises
     KeyError on the first batch -- after dataset build, which is the slow part.
     """
-    from train import loss_component_names
+    from objective import loss_component_names
 
     off = loss_component_names(_imitation_config(0.0))
     on = loss_component_names(_imitation_config(0.05))
@@ -675,7 +675,7 @@ def test_simple_v3_is_the_settled_production_recipe():
     config = TSConfig(control_recipe_name=CONTROL_RECIPE_SIMPLE_V3, **v3)
     assert TSConfig.from_dict(config.to_dict()) == config
     # The term must actually be wired into training, not merely stored.
-    from train import loss_component_names
+    from objective import loss_component_names
 
     assert "imitation" in loss_component_names(config)
     with pytest.raises(ValueError, match="recipe fields are frozen"):

@@ -14,16 +14,18 @@
 
 ## 〇、状态表（压缩 context 后从这里继续）
 
-**当前状态（2026-09-07）**：本文为设计稿，未建任何代码；A0 / B0 是两项纯测量，用现有 checkpoint 与
-现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 之前或并行（CPU 读数不占 GPU）。
+**当前状态（2026-09-07）**：A0 / B0 的**代码已建成**（分支 `dev-a0`，命令见 §〇.1）；B0 已在现有产物上
+跑出读数（§〇.2），A0-fixed 的回放是 GPU 队列里的作业，未跑。其余各项仍为设计稿。A0 / B0 用现有
+checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 之前或并行（B0 是纯 CPU 读数，A0 只推理）。
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
-| A0 重锚曲线（测量） | 未做 | `run_ts_anytime_curve.py`（新 runner）；产物 `anytime_a0_<date>/` | 曲线单调；雷达引导 ADE < 1.5 km 的剩余路程点存在且 > 4 km |
+| A0 重锚曲线（测量） | **fixed 两臂 + random 三臂都回放了（§2.4b/c）**：random 训练在第 8–10 轮后于每个锚点集退化——机制是 LR 调度器挂在停滞的选择指标上（第 60 轮 lr 9e-7）+ 锚点按时间均匀采样偏向近跑道；A0.b（调度器读目标、按剩余路程分层采样）预注册待定 | `anytime_a0_20260907/`、`anytime_a0_random*_20260907/`、`a0_random_20260907/` | 门 1 过、门 2 12–16 km、门 3 被时长地板挡住；random 的 L−1 否决三臂皆败 |
+| A1.a 网格选点指标（A1 的前置：先让随机锚点臂能被正确选点） | **代码完成（2026-09-07，分支 `dev-a1`）；臂未跑** | `anchor_grid.py`（网格的唯一定义：bin、60 s 地板、逐航班锚点规则、L−1 固定分层规则；runner 改为 import 它）+ `checkpoint_selection_metric=anchor-grid-common-grid-ade`（五个锚点集的 common-grid ADE 均值，`history.json` 每轮记 `validation_anchor_grid` 块）+ 臂 `A0_random_hr8_tv1_grid`；测试 `tests/test_anchor_grid.py`（7）+ `tests/test_anchor_grid_selection.py`（17）+ `tests/test_frame_ablation_runner.py`（3） | 无门，是选点规则；旧指标逐位不变（4 臂 × 2 轮 × 232 个 history 浮点全等） |
 | A1 流式评估协议 | 未做 | `evaluation_protocol` 新增按剩余路程分 bin 的锚点网格；`compare_constraint_arms.py` 增列 | 无门，是读数 |
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
 | A3 学习的递归先验 | 未做，取决于 A2 | `control/latent.py` 先验网络吃上一轮后验 | 仅当 A2 有增益 |
-| B0 时长误差分布（测量） | 未做 | 现有 `summary.json` 的 `final_time_error_s`，按分层 | 无门，定区间宽度的量级 |
+| B0 时长误差分布（测量） | **完成（2026-09-07，`dev-a0` `fe84e76` + 测试 `5f408df`）**，读数见 §〇.2 | `run_ts_eta_error_readout.py`（新 runner）+ `tests/test_eta_error_readout.py`（7 项）：读现有 `summary.json` 的 `final_time_error_s` 与 `fde_m`，按 `strata_masks` 分层报 \|Δt\| p50/p80/p90 与带号 p10/p50/p90 | 无门，定区间宽度的量级 |
 | B1 分位数时长头 | 未做 | config 轴 `duration_head ∈ point \| quantile`；`prediction_outputs.QuantileFinalTimeHead` | 中位数不劣于点估计头（种子噪声内） |
 | B2 split-conformal 校准 | 未做 | `calibration.py`（新，顶层）；校准表进 `checkpoint_metadata.json` | 校准后 80 % 区间实测覆盖 ∈ [0.76, 0.84] |
 | B3 分位数条件航迹 | 未做 | `predict --cta-from-quantiles`：CTA 来自自身分位数头，不读未来 | 每条分位数航迹可飞率不低于 top-1；真值落在扇面内的份额 ≥ 名义覆盖 |
@@ -46,6 +48,89 @@
 
 Phase 0 的另外三条测量决定了本文的方向：雷达引导层 4D 误差的主项是**时序**；`corr(剩余路程, 时长) = 0.83`
 而 `corr(d_join, 时长) = 0.29`；因果上下文对 d_join 的 R² 只到 0.38，L4 场景实体特征零增量。
+
+### 〇.1 A0 / B0 的运行命令（2026-09-07 建成）
+
+A0-fixed，§2.2 的三个臂一次跑完。三个 checkpoint 都已实测能在**非默认锚点**回放（KRDU val，CPU，
+锚点 87–260 对 L−1 = 59）。
+
+```bash
+conda activate aeroviz
+E=4dTrajectory/outputs/KRDU/experiments
+python run_ts_anytime_curve.py \
+    --checkpoint L1_native32=$E/l1_lowdim_20260907/L1_native32/checkpoint.pt \
+    --checkpoint L2d_warm_beta0p01=$E/l2_warm_posterior_20260907/L2d_warm_beta0p01/checkpoint.pt \
+    --checkpoint C_pred=$E/closure_p1c_20260905/C_pred/checkpoint.pt \
+    --out $E/anytime_a0_20260907 --split val --bins-km 20,16,12,8,6,4,2 --min-future-s 60
+```
+
+**规模与代价**：3 臂 × 7 bin × 1404 架 ≈ 2.9 万次「前向 + dense rollout」。合批是**按锚点**做的
+（同一次 `forecast_approaches` 只吃一个锚点），而真实数据上锚点几乎两两不同，**有效批量 ≈ 2.7**，
+`--batch-size` 基本不起作用。实测 control 臂在 CPU 上约 **76 min / 臂**（1404 架 × 7 bin），
+closure 臂便宜约两个数量级（它的前向没有 rollout）。先用 `--limit N` 冒烟（产物会标 SMOKE TEST，
+覆盖率分母取实际建成的航班数），确认无误再跑全量。
+
+`--command-hook barrier --hook-saturation soft` 与 `predict` 同义，用于给「已采用的交付形态」画曲线；
+`cta_conditioning=given` 与 `intent_conditioning=truth-…` 的 checkpoint 一律拒绝（前者时长即真值，
+后者的真值汇入点/前机落地时间在**每个锚点都重新读一次未来**，曲线会变成「oracle 收敛得多快」）。
+
+**closure 在 A0-fixed 里是对照，不是竞争者**：它离开 L−1 后分布外代价最大。同一批 KRDU val 航班上，
+12 km 处 closure 的雷达引导 ADE ≈ 6.7–8.1 km、时长误差 ≈ 172–176 s，而 native32 是 1128 m / 63 s——
+closure 在 L−1 处的 996 m 是它的强项，重锚后不是。读它是为了量分布外代价，不是为了比谁准。
+
+**§2.3 的网格与 `--min-future-s 60` 在近端互相矛盾**：2 km 处真值只剩约 27 s（75 m/s），4 km 处约
+53 s，都在 60 s 地板之下，所以按字面这两个 bin 对绝大多数航班是空的。读数会把它们打成
+`n=0 / cov 0.00 / partial`（不会静默），且 §2.4 的门 2 只问 s > 4 km，不依赖它们——但 **s_freeze
+就只能在 ≥ 6 km 的 bin 上定**；若曲线到 6 km 仍 > 30 s，要定出 s_freeze 必须以更低的地板重跑
+（例如 `--min-future-s 20`），并把地板写在结果里，因为它改变的是 bin 的人口而不只是范围。
+
+**时长头有 ~125 s 地板**（包级已知陷阱），所以剩余路程小到一定程度后 **\|Δt\| 反而随着接近跑道上升**：
+L1_native32 的雷达引导 \|Δt\| p80 从 12 km 的 64 s 涨到 4 km 的 141 s。读数因此每格都打印
+`pred T p50`，freeze 段也把这个地板写出来；s_freeze 不存在时打印「not reached in the bins read」，
+不打印裸的 never。
+
+B0，同三个臂的 `_pred_val` 目录，纯读数（秒级，CPU）：
+
+```bash
+python run_ts_eta_error_readout.py \
+    L1_native32=$E/l1_lowdim_20260907/L1_native32_pred_val \
+    L2d_warm_beta0p01=$E/l2_warm_posterior_20260907/L2d_warm_beta0p01_pred_val \
+    C_pred=$E/closure_p1c_20260905/C_pred_pred_val \
+    --json $E/b0_eta_error_20260907/eta_error.json
+```
+
+> §〇.2 的数字是用上面这条命令去掉 `--json` 读出来的（写产物的那一步要在主工作树跑，
+> `4dTrajectory/outputs` 在 dev 工作树里是只读软链）。**引用这些数字之前，产物
+> `b0_eta_error_20260907/eta_error.json` 必须先由上面的完整命令写出来**——本仓的规矩是只引当前产物。
+
+### 〇.2 B0 的读数（KRDU val，1404 架，2026-09-07 当前产物，覆盖 1404/1404）
+
+其中 \|Δt\| = \|`final_time_error_s`\|，秒；带号为负 = 预测偏早。
+
+| 臂 | 分层 | n | \|Δt\| p50 | p80 | p90 | 带号 p10 | p50 | p90 | FDE p50 | p80 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| native32 | 全体 | 1404 | 14.9 | 39.9 | 63.8 | −42.3 | +3.5 | +38.3 | 864 | 2142 |
+| native32 | 直线进近 | 904 | 9.9 | 20.3 | 26.5 | −17.7 | +3.6 | +21.7 | 671 | 1139 |
+| native32 | 雷达引导 | 497 | 39.3 | 72.5 | 87.1 | −74.8 | +2.2 | +67.0 | 1982 | 4831 |
+| L2.d β=0.01 | 全体 | 1404 | 14.1 | 39.3 | 63.7 | −41.0 | +3.4 | +37.8 | 827 | 2027 |
+| L2.d β=0.01 | 直线进近 | 904 | 9.4 | 18.9 | 25.6 | −17.7 | +3.4 | +20.3 | 594 | 1041 |
+| L2.d β=0.01 | 雷达引导 | 497 | 39.2 | 68.6 | 82.8 | −70.7 | +3.8 | +68.3 | 1852 | 4517 |
+| closure C_pred | 全体 | 1404 | 9.9 | 32.3 | 57.3 | −35.0 | −1.4 | +28.8 | 11 | 774 |
+| closure C_pred | 直线进近 | 904 | 6.3 | 12.0 | 15.7 | −13.5 | −0.8 | +10.7 | 12 | 477 |
+| closure C_pred | 雷达引导 | 497 | 33.7 | 65.8 | 81.5 | −74.3 | −7.1 | +56.6 | 11 | 2403 |
+
+四条结论，都直接决定 B1–B2 的形状：
+
+1. **按分层校准是必须的，不是精细化**：雷达引导层的 \|Δt\| p80 是直线进近层的 3.6–5.5 倍
+   （65.8–72.5 s 对 12.0–20.3 s）。合并校准会给直线航班一个荒谬的宽区间——§3.2 的前提在数据上成立。
+2. **B 不是一开始就死的，但余量只有一倍**：§三的否决线是雷达引导层区间宽度中位数 > 120 s；
+   当前 p80 是 65.8–72.5 s，一个覆盖 80 % 的对称区间宽度就已是这个数的两倍量级。
+   B2 之后贴着否决线是可能结局，这正是 §八 风险 4。
+3. **区间不能以 0 为中心**：带号 p50 是 +3.4/+3.5 s（native32、L2.d 偏晚）与 −1.4 s（closure 偏早），
+   而直线进近层的 p10/p90 落在 ±13–22 s，即分布本身近似对称但**有偏移**。分位数头（B1）
+   而不是「点估计 ± δ」是对的形态。
+4. **closure 的 FDE p50 = 11 m 不是精度**：它按构造把路径画到跑道头，终点误差因此几乎为零，
+   而它的 ADE 仍是 996 m。这条正是「两组指标一起读」的样例，FDE 单独读会得出相反结论。
 
 ---
 
@@ -96,30 +181,138 @@ CTA 条件放进同一个采样器的方式，只在 L2 的 CVAE 承载不了意
 输入分布（离入口更近、更低、更慢、常已建立）与训练分布不同。A0 因此必须是**两臂**：
 
 - **A0-fixed**：现有 checkpoint（native32、L2.d warm β=0.01、closure）在锚点网格上回放。读数含分布外效应。
+  三者都已实测能在非默认锚点回放（§〇.1），其中 **closure 是分布外代价的对照臂**，不是精度竞争者。
+  `cta_conditioning=given` 与 `intent_conditioning=truth-…` 的 checkpoint 被 runner 拒绝：
+  两者都读未来，且后者在每个锚点都重读一次。
 - **A0-random**：`random_train_anchor=True` 训练的臂。`CLAUDE.md` 记录了随机锚点 + 模仿教师是性能悬崖
   （逐样本逐轮重算逆动力学），且拟合教师表按锚点绑定、closure 标签拒绝随机锚点。**唯一与随机锚点相容
   且已通过筛选的监督是 L1.b 的无教师组合**（hr=8 + TV=1，bank skill 0.711 vs 教师对照 0.709，ADE 不劣）。
   A0-random 的臂 = native32 + hr8 + tv1 + `random_train_anchor=True`（`random_train_anchor_min_future_s`
-  保持 60 s）。这也是 L1.b 的一个独立用途。
+  = **20 s**，不是 60：60 s 契约下训练集 6851 架里有 3 架没有任何可用锚点——它们 L−1 之后的真值不足 60 s，而固定
+  锚点策略接受任何正的未来——`train()` 拒绝静默丢弃；20 s 让训练队列与所有固定锚点臂完全相同，且正是曲线最需要的
+  近跑道区间。重锚时的 `--min-future-s 60` 是另一个量：哪些 bin 可读，不是哪些锚点被训练）。这也是 L1.b 的一个独立用途。
 
 两臂的差 = 分布外代价；曲线的形状从 A0-random 读，与当前 base 的可比性从 A0-fixed 读。
+臂名由每个 checkpoint 自己的 `random_train_anchor` 决定并写进它自己的块（`A0-fixed` / `A0-random`），
+一次运行可以同时含两臂，读数会说明；分布外的告诫只对 fixed 臂打印。
+**注意（2026-09-07 实测）**：`random_train_anchor=True` 的训练当前**跑不起来**——
+`RandomAnchorTrajectoryWindows.__init__()` 不接受 `train.fit_model` 传入的 `fitted_teacher`
+（`TypeError`，先于任何 epoch）。A0-random 臂开工前必须先修这个。
 
 ### 2.3 锚点网格
 
-按**剩余路程**分 bin 而不是按时间：剩余路程是从真值算的协变量（`approach_difficulty.remaining_path_m`），
-与现有 NEAR / FAR 分层同源，且对不同速度的航班可比。网格 {20, 16, 12, 8, 6, 4, 2} km，每架飞机在每个
+按**剩余路程**分 bin 而不是按时间：剩余路程是从真值算的协变量（`approach_difficulty.remaining_path_m`；
+逐样本形式 `remaining_path_profile_m`，2026-09-07 建成，协变量自己也从它读，所以两者不可能变成一个名字
+的两种定义），与现有 NEAR / FAR 分层同源，且对不同速度的航班可比。网格 {20, 16, 12, 8, 6, 4, 2} km，每架飞机在每个
 bin 取剩余路程最接近 bin 值的样本为锚点；锚点前不足 120 s 或锚点后剩余不足 60 s 的 bin 记为空，
 读数打印每个 bin 的航班数（有界覆盖必须声明）。分层沿用 `strata_masks`，**分层标签按 L−1 锚点算一次
 并固定**，否则一架飞机在 8 km 处"已建立"就从雷达引导层消失，曲线变成幸存者曲线。
 
 ### 2.4 A0 的门（预注册）
 
-1. 雷达引导层 ADE(s) 随 s 减小单调下降（允许种子噪声 ±22 m 的逆序）。
+1. 雷达引导层 ADE(s) 随 s 减小单调下降（允许种子噪声 ±22 m 的逆序）。**读的是 ADE 中位数**
+   （`ade_p50_m`，本包读重尾误差的惯例；均值与 p95 同时报出但不进门），而且是**配对**读：
+   相邻两个 bin 只在两边都出现的航班上比较，读数打印配对航班数 n。bin 的人口不同，
+   不配对的两个中位数之差混了「模型变准」与「这个 bin 的航班更容易」。
 2. 存在 s\* > 4 km 使雷达引导 ADE(s\*) < 1.5 km（Phase 0 的门，在 L−1 处不可达；这里问它在哪里变得可达）。
 3. 时长误差 p80(s) 首次 < 30 s 的 s 记为 s_freeze；报告它，不设门。
 
 **否决**：A0-random 在 L−1 处劣于 native32 超过种子噪声，说明随机锚点训练损害了 base，A2 / A3 都在
 一个更差的 base 上做，先停。
+
+### 2.4b A0 结果（2026-09-07 夜，`anytime_a0_20260907` 与 `anytime_a0_random_20260907`）
+
+**A0-fixed**（三个 L−1 训练的 checkpoint 回放，1404 架，bin 20/16/12/8/6/4/2 km，`--min-future-s 60`）：native32 与
+warm β=0.01 的雷达引导 ADE p50 曲线单调（门 1 过），warm 在每个 bin 都优于 native32（20 km 处 −274 m，6 km 处
+差别消失）；门 2 两者都在 16 km（1382 / 1301 m）；closure `C_pred` 远端最准（12 km 处 FDE p50 26 m）但 8 → 6 km
+崩溃（雷达引导 ADE 613 → 3990 m，门 1 败）。**门 3（s_freeze）三臂都读不出**：时长头 ~125 s 地板使 |Δt| 越近跑道越
+大（6 km 处各臂 p50 80–143 s，而剩余只有约 170 s）——近端时序通道无信息，是 B 线的问题不是曲线的问题。
+2 km bin 全空（60 s 地板），4 km 覆盖 0.30 标 partial；20/16 km 覆盖 0.35/0.37，直线进近层远端几乎为空。
+
+**A0-random**（`A0_random_hr8_tv1`：随机锚点 + hr8+TV，20 s 训练契约，队列与固定臂完全一致）：训练 30 轮早停，
+最好 epoch 10；**L−1 否决惨败**（ADE 2949 vs 1322，FDE p50 3784 vs 864，胜率 6.8 %）。但回放时（与 native32
+逐 bin 配对）：
+
+| s km | A0_random 雷达引导 ADE p50 | native32 | chamfer p50 A0_random / native32 |
+|---:|---:|---:|---|
+| 20 | 2622 | 2708 | 2124 / 2584 |
+| 16 | 1847 | 1382 | 1325 / 1439 |
+| 12 | 756 | 585 | 426 / 652 |
+| 8 | 377 | 385 | 326 / 850 |
+| 6 | 298 | 338 | 606 / 1051 |
+
+**chamfer 六个 bin 全优（−114…−524 m）**，8 km 以内 ADE 也优，门 2 从 16 km 推进到 12 km——一个只用了 17 % 预算、
+在 L−1 惨败的 checkpoint，在整段进近上画出的几何比固定臂好。读法：`fixed-anchor-common-grid-ade` 只在 L−1 打分，
+随机锚点模型在那里最不擅长，选择规则把它冻在第 10 轮；它真正改善的量（全程几何）对选择指标不可见。16 km bin
+的退化（+465 m ADE、FDE +1530）是真实的，尚无解释。**决定**：(i) `A0_random_hr8_tv1_p180`（关早停）测停止规则
+的份额；(ii) **A1 提前实现**——按锚点网格的验证指标 `anchor-grid-common-grid-ade`（L−1 + 16/12/8/6 km 五个锚点集
+的 common-grid ADE 等权平均），第三臂 `A0_random_hr8_tv1_grid` 用它选 checkpoint。
+
+**这条否决在第一臂上触发了，而它触发的方式暴露了一个更早的错误：选点指标本身（A1，2026-09-07 建成）。**
+第一臂 `A0_random_hr8_tv1` 的 L−1 ADE 是 2949 m 对 native32 的 1322 m，看上去是彻底失败；但同一个
+checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（chamfer p50 −114…−524 m），且 ≤ 8 km 处 ADE 也更好。
+原因不是训练，是选点：`fixed-anchor-common-grid-ade` **只在 L−1 这一个锚点上给验证集打分**，而那正是
+随机锚点模型最不专门化的锚点。于是模型一旦开始在整个锚点区间上分摊容量，L−1 分数就停滞，patience 20
+在第 30 轮触发、第 10 轮的权重被冻结——**指标对这个臂要改善的东西是盲的**。
+
+因此：**随机锚点臂的选点指标是网格，不是 L−1**。`checkpoint_selection_metric=anchor-grid-common-grid-ade`
+把同一个 common-grid ADE 在**若干个锚点集**上各算一次并取均值——L−1 加
+`anchor_grid.VALIDATION_ANCHOR_GRID_KM`（16 / 12 / 8 / 6 km）中**这批数据能覆盖的那些 bin**，
+每架飞机在每个 bin 上取自己剩余路程最近且可锚（回看足 120 s、锚点后真值 ≥ 60 s）的样本。
+**每个锚点集等权**（把所有 (航班, 锚点) 对合并会按覆盖率给远端 bin 加权，正好在雷达引导
+航班多的臂上把远端 bin 稀释掉）；**每个集的 ADE 只在拥有该锚点的航班上取平均**（缺该 bin 的航班是缺席，
+不是记 0），再按机场取宏平均——与 `fixed-anchor-common-grid-ade` 同一口径，所以 L−1 那一项就是它的值。
+
+**覆盖率闸门（2026-09-07 复核后加）**：候选 bin 不等于会被选点的 bin。KRDU val（1404 架、60 s 地板）
+实测覆盖率为 **20 km 33.7 %、16 km 37 %、12 km 78.7 %、8 / 6 km 99.7 %**，中位航班在 L−1 处只剩
+**13.4 km**。所以 20 km 直接不入候选，4 / 2 km 在 60 s 地板下部分到全空也不入候选；而 16 km 虽是候选，
+在这批数据上会被闸门 **丢弃**（低于 `anchor_grid.PARTIAL_COVERAGE` = 0.5，与 A0 判读 `partial` 的是
+同一个常数），打印通知并记进 `validation_anchor_grid.dropped_bins`。否则等权的五分之一会来自
+「飞得远的那部分航班」这个子群。**幸存的 bin 是数据的性质、不是模型的性质**，同一 split 上每条臂的
+选点集完全相同，因此值可比；幸存不足两个则整个指标被拒（那不是曲线，是 L−1 加一个陪衬）。
+
+**L−1 仍然每轮记录**（`validation_anchor_grid.fixed_anchor_common_grid_ade_m`，与另一指标选的是同一个数），
+所以上面这条否决照旧可读——它只是不再决定保留哪一轮。代价：选点这一段约 **4–5×**（每个幸存 bin 一次
+额外的 deployable replay；L−1 那一次是复用的，不重算），KRDU 规模下每轮约 **+12–15 %**，180 轮的臂
+多花 7–9 分钟。
+
+**拒绝**：`cta_conditioning=given` 与 `intent_conditioning != none` 在这个指标下被 `TSConfig` 拒绝——
+网格在每个 bin 锚点都会把 oracle 重读一次（与 A0 runner 拒绝这两种 checkpoint 是同一条理由），
+按它选轮次等于按「oracle 收敛得多快」选。
+
+### 2.4c A0-random 第二轮（2026-09-08 凌晨，`a0_random_20260907` 的 `_p180` 与 `_grid`）
+
+两臂都跑满 180 轮：`_p180`（关早停，L−1 选点）最好 epoch **仍是 10**（2949.5，之后 3388 → 3088 平台）；`_grid`
+（网格选点，16 km bin 覆盖 37 % 被丢弃并记录，剩 L−1 + 12/8/6 km）最好 epoch **8**（网格均值 1100：L−1 2990、12 km
+722、8 km 390、6 km 298）。逐锚点集看：L−1 与 12 km 在第 8–10 轮后**退化**（12 km 722 → 1324，接近翻倍），8 km 从第 3 轮
+的 314 退到 406，只有 6 km 一直改善（291 → 218）。两个预注册解释都不成立：不是停止规则（关了早停也在第 10 轮），
+也不是选点指标能救的（没有好的晚期 checkpoint 可选）。
+
+**history.json 给出了机制**（`_grid` 臂）：
+
+| epoch | lr | train loss | val 目标 | val state | 选择指标（网格均值） |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 3.0e-5 | 0.884 | 1.147 | 0.264 | **1100** |
+| 15 | 3.0e-5 | 0.466 | 0.836 | 0.150 | — |
+| 20 | 1.5e-5 | 0.487 | 0.786 | 0.139 | 1384 |
+| 30 | 7.5e-6 | 0.414 | 0.765 | 0.131 | — |
+| 60 | 9.4e-7 | 0.424 | 0.707 | 0.102 | 1289 |
+| 100 | 2.9e-8 | 0.487 | 0.705 | 0.101 | — |
+| 180 | 1.5e-8 | 0.521 | 0.706 | 0.102 | 1285 |
+
+1. **验证目标一直在改善到第 60 轮**（1.147 → 0.707，val state 0.264 → 0.102），而选择指标（common-grid ADE）在第
+   8–10 轮之后变差——目标（段端点、真值时钟）与读数（稠密网格 ADE）在随机锚点模型上**分道**。
+2. **`ReduceLROnPlateau` 挂在选择指标上**：指标一停滞，学习率从第 20 轮起被逐次腰斩，第 60 轮 9e-7、第 100 轮 3e-8
+   ——模型从第 30 轮起实际上不再训练，被冻在指标停滞时的状态；固定锚点臂的指标改善 100 轮以上，所以从没暴露。
+3. **锚点采样按时间均匀**：一架飞机在航迹上每个样本一个候选锚点，近跑道的样本远多于远端的（短航班只贡献近端
+   锚点），训练分布偏向小剩余路程——6 km 集持续改善、L−1 与 12 km 退化，正是这个偏斜的样子。
+
+**A0.b 预注册（待用户决定）**：两臂，同 `_grid` 配方（随机锚点 20 s、hr8+TV、网格选点、patience 180）：
+(i) `lr_plateau_metric=objective`（新 config 轴：调度器读验证目标而不是选择指标；固定锚点臂默认值不变，位级等价）；
+(ii) (i) + 锚点按剩余路程分层均匀采样（`random_train_anchor_sampling=remaining-path-strata`：先均匀抽 bin，再在 bin 内
+抽样本；同一 `eligible_random_train_anchors` 契约）。读法：L−1 / 12 km 集不再在第 10 轮后退化、最好 epoch 晚于 60；
+三臂回放对照。**否决**同前（L−1 不劣于 native32 超过种子噪声）——目前三个随机锚点臂的 L−1 都在 2949–2990，
+远超种子噪声，说明这条线的底座还没成立。
 
 ### 2.5 A2 的门
 
@@ -238,6 +431,16 @@ AMAN 的直接回答，也是 IPOPT 最优解给不了的东西。
 1. **分层标签在 L−1 锚点算一次并固定**，所有锚点网格上的读数用同一标签。否则曲线是幸存者曲线。
 2. **每个 bin 打印航班数**；bin 内航班少于该分层的 50 % 时该点标 `partial`，不进门。
 3. **A0 的两臂必须同时报**；只报 A0-fixed 的曲线会把分布外代价读成"越近越准"。
+3b. **网格只有一个定义**（`anchor_grid.py`）：runner 画曲线的 bin / 地板 / 逐航班锚点规则，与
+   `anchor-grid-common-grid-ade` 选点用的是同一批对象（测试 `runner.bin_anchor is
+   anchor_grid.bin_anchor`）。两份"今天恰好一致"的网格会让"曲线变好了"和"这一轮是按曲线选的"
+   变成关于不同锚点的两句话。
+3c. **随机锚点臂用网格选点，固定锚点臂不必**（§2.4）。L−1 指标对随机锚点臂是盲的——它只在那个臂
+   最不专门化的锚点上打分——但它每轮仍被记录（`fixed_anchor_common_grid_ade_m`），因为 §2.4 的
+   否决要读它。**选点指标进 run name**（`select=…`，`META_FIELDS`），按网格选出来的是另一个 run。
+3d. **覆盖率不足的 bin 不进选点均值**：闸门与 §六 2 用同一个 `PARTIAL_COVERAGE`，丢弃的 bin 连同
+   它的覆盖率写进 `dropped_bins`。**幸存集是 cohort 的性质**，同一 split 上各臂一致——否则「A 臂
+   的均值比 B 臂低」可能只是两条臂在不同的 bin 上取平均。
 4. **校准集永远不是 test，也不是训练集**；δ 表随 checkpoint 元数据走，没有表就不声称校准。
 5. **`cta=self-q` 与 `cta=given` 是两种臂**，run name 必须区分；只有前者可作为预测结果引用。
 6. **分位数是时长的，不是航迹的**；扇面覆盖率是读数不是覆盖保证，文档与 README 不得写成后者。
@@ -294,7 +497,8 @@ AMAN 的直接回答，也是 IPOPT 最优解给不了的东西。
 
 | 概念 | 代码里的名字 |
 |---|---|
-| 锚点网格 / 重锚曲线 | `run_ts_anytime_curve.py`，产物 `anytime_a0_<date>/`，读数键 `remaining_path_bin_m` |
+| 锚点网格 / 重锚曲线 | `anchor_grid.py`（网格本身）+ `run_ts_anytime_curve.py`，产物 `anytime_a0_<date>/`，读数键 `remaining_path_bin_m` |
+| 网格选点指标 | config `checkpoint_selection_metric=anchor-grid-common-grid-ade`，`anchor_grid.VALIDATION_ANCHOR_GRID_KM`，`history.json` 的 `validation_anchor_grid` 块，run name `select=anchor-grid-common-grid-ade` |
 | 随机锚点臂 | `random_train_anchor=True` + L1.b 监督（`control_heading_rate_loss_weight=8`, `control_bank_tv_loss_weight=1`） |
 | 候选重加权 | `forecast.reweighted_mode_forecasts`，`predict --stream-dt 10` |
 | 分位数时长头 | config `duration_head ∈ point \| quantile`，`prediction_outputs.QuantileFinalTimeHead`，`source.durationQuantilesS` |

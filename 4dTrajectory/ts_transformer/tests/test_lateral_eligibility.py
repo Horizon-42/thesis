@@ -16,8 +16,10 @@ for path in (TS_DIR, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import dataset  # noqa: E402
+import data_provenance  # noqa: E402
 import run_ts_pipeline  # noqa: E402
+import splits  # noqa: E402
+from config import TSConfig  # noqa: E402
 from lateral_eligibility import (  # noqa: E402
     EVALUATION_REPORT_SCHEMA,
     LATERAL_PASS_ROSTER_SCHEMA,
@@ -126,7 +128,7 @@ def test_arrival_provenance_is_filtered_by_a_bound_roster(tmp_path: Path) -> Non
     roster_path = default_lateral_pass_roster_path(manifest)
     build_lateral_pass_roster(manifest, report, roster_path)
 
-    provenance = dataset.arrival_data_provenance(
+    provenance = data_provenance.arrival_data_provenance(
         manifest, eligibility_rosters=[roster_path]
     )
     entry = provenance["manifests"][0]
@@ -138,7 +140,7 @@ def test_arrival_provenance_is_filtered_by_a_bound_roster(tmp_path: Path) -> Non
     ).hexdigest()
     assert sum(
         len(keys)
-        for keys in dataset.flight_keys_by_split(provenance, dataset.TSConfig()).values()
+        for keys in splits.flight_keys_by_split(provenance, TSConfig()).values()
     ) == 2
 
 
@@ -151,7 +153,7 @@ def test_arrival_provenance_rejects_roster_bound_to_old_manifest(tmp_path: Path)
     manifest.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ValueError, match="different arrival manifest"):
-        dataset.arrival_data_provenance(
+        data_provenance.arrival_data_provenance(
             manifest, eligibility_rosters=[roster_path]
         )
 

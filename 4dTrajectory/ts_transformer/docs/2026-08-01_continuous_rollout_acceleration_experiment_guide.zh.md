@@ -61,7 +61,7 @@ piecewise-constant control 边界后不保证更快；adjoint 主要节省显存
 正式训练 CLI 已有：
 
 ```text
---control-rollout-dt <seconds>
+--control-rollout-integrator-dt-s <seconds>
 ```
 
 但 `run_ts_control_fixed_dt_overfit.py` 当前没有暴露这一参数。做单航迹步长消融前，应只增加
@@ -182,7 +182,7 @@ patience、control regularization 完全不变，只改变 rollout execution rec
 ..._transport_chart_velocity_terminal_state_rk4_dt20_...
 ```
 
-在 runner 暴露 `--control-rollout-dt` 后，命令结构为：
+在 runner 暴露 `--control-rollout-integrator-dt-s` 后，命令结构为：
 
 ```bash
 conda run -n aeroviz python run_ts_control_fixed_dt_overfit.py \
@@ -192,7 +192,7 @@ conda run -n aeroviz python run_ts_control_fixed_dt_overfit.py \
   --learning-rate 1e-4 --n-segments 64 \
   --control-dynamics-backend transport-chart-velocity \
   --control-state-objective terminal-state \
-  --control-rollout-dt <0.5|1.0|2.0> \
+  --control-rollout-integrator-dt-s <0.5|1.0|2.0> \
   --device cuda \
   --output-dir <unique-output-dir>
 ```

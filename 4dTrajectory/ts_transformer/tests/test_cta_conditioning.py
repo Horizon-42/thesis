@@ -8,6 +8,7 @@ run name wears ``cta=given``.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -28,7 +29,8 @@ from config import (
 )
 from control.conditioning import DYNAMICS_CONDITION_NAMES
 from control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from dataset import ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
 from export import build_prediction_record, observed_series_metrics, write_batch
 import batching
 from forecast import forecast_approaches, latent_mode_forecasts, shuffled_latent_forecasts
@@ -36,6 +38,11 @@ from models import build_model
 from run_naming import run_display_name
 from synthetic import synthetic_arrivals
 from train import load_checkpoint, train
+
+_CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_cta_test", Path(__file__).resolve().parents[1] / "__main__.py")
+assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
+ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
+_CLI_SPEC.loader.exec_module(ts_cli)
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -182,15 +189,57 @@ def test_the_latent_decodes_carry_the_same_offset_as_the_top1():
 def test_the_auto_batch_probe_carries_the_cta(monkeypatch):
     """`--batch-size auto` runs the real training step on a probe batch; under `given` that
     step reads dynamics["cta_s"], so the probe must carry one — a finite CTA per row."""
-    import train as train_module
     seen: list[torch.Tensor] = []
-    original = train_module.model_forward
+    original = batching.model_forward
 
     def recording_forward(model, history, dynamics, future=None):
         seen.append(dynamics["cta_s"])
         return original(model, history, dynamics, future=future)
 
-    monkeypatch.setattr(train_module, "model_forward", recording_forward)
+    monkeypatch.setattr(batching, "model_forward", recording_forward)
     monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
     batching._probe_training_step(_config(), 2, torch.device("cpu"))
     assert seen and seen[0].shape == (2,) and torch.all(torch.isfinite(seen[0])) and torch.all(seen[0] > 0)
+
+
+def test_a_counterfactual_cta_skips_the_flights_it_cannot_be_asked_of(tmp_path: Path, monkeypatch):
+    """The L3 scan died at −90 s: truth durations start at ~21 s, so the shifted CTA went
+    below zero and the rollout refused. Flights whose CTA would leave less than the
+    package's minimum remaining future are skipped and COUNTED in summary.json — never
+    clamped, which would silently change the offset the scan is read against — and an
+    offset that leaves no flight is refused."""
+    from config import DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S
+    import cli.predict as predict_module
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)
+    config = _config()
+    series, _report = build_series(flights, config, airport=AIRPORT)
+    provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                  "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
+    train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
+    _model, loaded, _normalizer, payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
+    monkeypatch.setattr(predict_module, "provenance_from_args", lambda _args: provenance)
+    monkeypatch.setattr(predict_module, "load_flight_dicts", lambda _path, include_flight_keys=None: flights)
+    anchor = loaded.seq_len - 1
+    val_ids = set(payload["split"]["val"])
+    durations = sorted(truth_duration_s(item, anchor) for item in series if item.dataset_id in val_ids)
+    assert len(durations) >= 3
+    # an offset that leaves the longest flight flyable and the shortest not
+    offset = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S - (durations[0] + durations[-1]) / 2.0
+    expected_skipped = sum(1 for d in durations if d + offset < DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S)
+    assert 0 < expected_skipped < len(durations)
+
+    def run(out: Path, cta_offset: float) -> int:
+        return ts_cli.main([
+            "predict", "--checkpoint", str(tmp_path / "run" / "checkpoint.pt"),
+            "--data", str(tmp_path / "manifest.json"), "--airport", AIRPORT,
+            "--output-dir", str(out), "--split", "val", "--device", "cpu",
+            "--cta-offset-s", str(cta_offset),
+        ])
+
+    assert run(tmp_path / "scan", offset) == 0
+    summary = json.loads((tmp_path / "scan" / "summary.json").read_text())
+    assert summary["skipped"] == {"cta_below_min_future": expected_skipped}
+    assert len(summary["results"]) == len(durations) - expected_skipped
+    assert all(row["final_time_error_s"] == pytest.approx(offset, abs=1e-3) for row in summary["results"])
+    with pytest.raises(SystemExit):
+        run(tmp_path / "none", -(durations[-1] + 1.0))

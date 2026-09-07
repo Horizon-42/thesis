@@ -123,35 +123,40 @@ describe("airportData helpers", () => {
     }] })).toBe(false);
   });
 
-  it("accepts control-mixture experiment metadata without rejecting sibling categories", () => {
-    const baseline = {
-      key: "observed",
-      label: "Observed ADS-B",
-      dir: "observed",
-      groups: 0,
-      constrained: false,
-    };
-    const mixture = {
-      key: "experiment_mixture_val",
-      label: "Control mixture · validation",
-      dir: "experiment_mixture_val",
-      groups: 3,
-      constrained: false,
-      datasetSplit: "val",
-      resultSource: "experiment",
-      experiment: {
-        id: "campaign/stage/control_mixture_seed1337",
-        group: "campaign",
-        checkpoint: "campaign/stage/control_mixture_seed1337/checkpoint.pt",
-        model: "itransformer",
-        predictionOutput: "control-mixture",
-        horizonMode: "normalized",
-        seed: 1337,
-      },
-    };
+  // Every value of config.PREDICTION_OUTPUTS must survive here: one unlisted output rejects
+  // its own category AND, through `.every`, empties the airport's entire manifest.
+  it.each(["state", "control", "closure"])(
+    "accepts %s experiment metadata without rejecting sibling categories",
+    (predictionOutput) => {
+      const baseline = {
+        key: "observed",
+        label: "Observed ADS-B",
+        dir: "observed",
+        groups: 0,
+        constrained: false,
+      };
+      const arm = {
+        key: `experiment_${predictionOutput}_val`,
+        label: `${predictionOutput} · validation`,
+        dir: `experiment_${predictionOutput}_val`,
+        groups: 3,
+        constrained: false,
+        datasetSplit: "val",
+        resultSource: "experiment",
+        experiment: {
+          id: `campaign/stage/${predictionOutput}_seed1337`,
+          group: "campaign",
+          checkpoint: `campaign/stage/${predictionOutput}_seed1337/checkpoint.pt`,
+          model: "itransformer",
+          predictionOutput,
+          horizonMode: "normalized",
+          seed: 1337,
+        },
+      };
 
-    expect(isComparisonCategoriesManifest({ categories: [baseline, mixture] })).toBe(true);
-  });
+      expect(isComparisonCategoriesManifest({ categories: [baseline, arm] })).toBe(true);
+    },
+  );
 
   it("distinguishes report-only evaluation categories from drawable comparisons", () => {
     expect(

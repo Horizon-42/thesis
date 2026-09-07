@@ -26,6 +26,11 @@ from time_grids import output_time_grid
 
 CommonGridTruth = tuple[np.ndarray, np.ndarray, np.ndarray]
 
+#: What every block scored at the deployment anchor calls it. A block scored somewhere else
+#: carries its own label instead — an "anchor" field that always says ``L-1`` is worse than
+#: none, because it is read as a claim.
+FIXED_ANCHOR_LABEL = "fixed L-1"
+
 # The arc-length geometry block below is a DIAGNOSTIC, computed for every control run
 # regardless of its objective. Its three shape parameters used to be `control_arc_*` config
 # fields; the arc-length-geometry OBJECTIVE that owned them was retired 2026-09-07 (package
@@ -36,27 +41,36 @@ TERMINAL_CROSS_TRACK_EMPHASIS = 3.0
 TERMINAL_VERTICAL_EMPHASIS = 5.0
 
 
-def fixed_anchor_common_truth(
+def common_truth_at_anchors(
     series: Sequence[FlightSeries],
     config: TSConfig,
     points: int,
+    anchors: Sequence[int],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return physical truth, remaining durations and normalized query progress."""
+    """Return physical truth, remaining durations and normalized query progress.
+
+    One anchor per flight, explicit: the L−1 deployment contract is
+    :func:`fixed_anchor_common_truth` below, and the ``anchor-grid-common-grid-ade``
+    selection metric passes its own remaining-path anchors here. The truth is the same
+    object in both cases — the flight's supervision rows resampled at equal fractions of
+    the time it still has to fly — which is what makes the anchor sets comparable.
+    """
     if points <= 1:
         raise ValueError("common-grid points must be greater than one")
+    if len(anchors) != len(series):
+        raise ValueError("one common-grid anchor per flight is required")
     progress = np.arange(1, points + 1, dtype=np.float64) / points
     truth = np.empty((len(series), points, len(config.channels)), dtype=np.float32)
     durations = np.empty(len(series), dtype=np.float64)
-    anchor = config.seq_len - 1
-    for row, item in enumerate(series):
+    for row, (item, anchor) in enumerate(zip(series, anchors)):
         if item.n_samples <= anchor:
             raise ValueError(
-                f"flight {item.dataset_id!r} has no fixed L-1 anchor {anchor}"
+                f"flight {item.dataset_id!r} has no anchor {anchor}"
             )
         duration = float(item.supervision_times[-1] - item.times[anchor])
         if duration <= 0.0:
             raise ValueError(
-                f"flight {item.dataset_id!r} has no future after fixed anchor"
+                f"flight {item.dataset_id!r} has no future after anchor {anchor}"
             )
         durations[row] = duration
         query_times = item.times[anchor] + progress * duration
@@ -69,6 +83,17 @@ def fixed_anchor_common_truth(
             for channel in range(len(config.channels))
         ])
     return truth, durations, progress
+
+
+def fixed_anchor_common_truth(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    points: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The deployment contract's truth: one fixed ``L-1`` anchor for every flight."""
+    return common_truth_at_anchors(
+        series, config, points, [config.seq_len - 1] * len(series)
+    )
 
 
 def fixed_anchor_common_weights_and_terminal_velocity(
@@ -448,8 +473,15 @@ def fixed_anchor_common_grid_ade_metrics(
     *,
     points: int,
     common_truth: CommonGridTruth | None = None,
+    anchor_label: str = FIXED_ANCHOR_LABEL,
 ) -> dict[str, Any]:
-    """Lean formal selector: common true-time per-flight 3D ADE and FDE only."""
+    """Lean formal selector: common true-time per-flight 3D ADE and FDE only.
+
+    ``anchor_label`` says WHERE the reading was taken. It defaults to the deployment
+    contract's ``L-1``; a caller that supplies its own ``common_truth`` at other anchors
+    (the anchor-grid selection metric) names them, so the published block never claims an
+    anchor it was not scored at.
+    """
     (
         _truth,
         _common,
@@ -474,6 +506,7 @@ def fixed_anchor_common_grid_ade_metrics(
         true_duration_s,
         capped,
         error,
+        anchor_label=anchor_label,
     )
 
 
@@ -484,11 +517,13 @@ def _common_grid_ade_result(
     true_duration_s: np.ndarray,
     capped: np.ndarray,
     error: np.ndarray,
+    *,
+    anchor_label: str = FIXED_ANCHOR_LABEL,
 ) -> dict[str, Any]:
     predicted_final_time_s = np.asarray(predicted_final_time_s, dtype=np.float64)
     time_error = predicted_final_time_s - true_duration_s
     return {
-        "anchor": "fixed L-1",
+        "anchor": anchor_label,
         "metric_grid": "common true physical-time grid",
         "points": points,
         "flights": flights,
@@ -575,7 +610,8 @@ def fixed_anchor_common_grid_report_metrics(
         predicted_arrival - truth[:, -1, list(POSITION_IDX)], axis=-1
     )
     return {
-        "anchor": "fixed L-1",
+        # This report path always builds its own truth at L-1 (no `common_truth` hook).
+        "anchor": FIXED_ANCHOR_LABEL,
         "metric_grid": "common true physical-time grid",
         "points": points,
         "flights": len(series),

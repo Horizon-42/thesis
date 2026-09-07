@@ -12,15 +12,19 @@ experiment; it was halted to free the machine.
 | `v5_w28` | 28 | ~20.6 | not started |
 | `v5_w64` | 64 | 47 | not started |
 
-`run_ts_control_arms.py` has **no resume or skip logic** — pointing it at the original
-four-arm declaration would retrain the finished baseline. Use the three-arm declaration
-instead, writing into the SAME campaign directory so all four score together.
+This plan was written for `run_ts_control_arms.py`, which had **no resume or skip logic**
+— pointing it at the original four-arm declaration would retrain the finished baseline, so
+the three-arm declaration exists to avoid that. That runner was archived on 2026-09-07
+(`ts_transformer/archive/control_arms_runner_2026_08/`); its replacement
+`run_ts_frame_ablation.py` skips any step whose artifact already exists, so the ORIGINAL
+four-arm declaration is now the right one to point it at. Either way, write into the SAME
+campaign directory so all four score together.
 
 ## Resume command
 
 ```bash
 cd /home/supercomputing/studys/thesis
-conda run --no-capture-output -n aeroviz python -u run_ts_control_arms.py \
+conda run --no-capture-output -n aeroviz python -u run_ts_frame_ablation.py \
   --arms 4dTrajectory/ts_transformer/docs/experiments/imitation_ksjc_v5_remaining_arms.json \
   --campaign 4dTrajectory/outputs/KSJC/experiments/imitation_v5 --airport KSJC
 ```

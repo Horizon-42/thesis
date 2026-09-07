@@ -41,21 +41,30 @@ ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
 import channels as ch  # noqa: E402
+import cli.common as cli_common  # noqa: E402
+from control.conditioning import DYNAMICS_CONDITION_NAMES  # noqa: E402
+import cli.evaluate_fit as cli_evaluate_fit  # noqa: E402
+import cli.train as cli_train  # noqa: E402
 from control import heads as control_models  # noqa: E402
 import batching  # noqa: E402
 import build_multiflight_capacity_report as capacity_report  # noqa: E402
 import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
 import control.dynamics.rollout as control_rollout_module  # noqa: E402
+import batch_contract  # noqa: E402
+from batch_contract import anchor_state, model_forward, unpack_batch  # noqa: E402
 import dataset as dataset_module  # noqa: E402
+import splits  # noqa: E402
 import batch_benchmark as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
 import experiment_index  # noqa: E402
 import control.loss.fixed_dt as fixed_dt_loss_module  # noqa: E402
+import objective  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
 import train as train_module  # noqa: E402
+import validation  # noqa: E402
 from arc_length_geometry import (  # noqa: E402
     arc_length_geometry_metrics,
     arc_length_velocity_metrics,
@@ -101,11 +110,24 @@ from control.training.diagnostics import (  # noqa: E402
     clip_gradients_by_global_norm,
     gradient_norms,
 )
+from data_provenance import (  # noqa: E402
+    ARRIVAL_DATA_PROVENANCE_SCHEMA,
+    arrival_data_provenance,
+    require_matching_data_provenance,
+)
+from dataset import iter_batches  # noqa: E402
 from dataset import (  # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
-    Normalizer, RandomAnchorTrajectoryWindows, arrival_data_provenance, build_series,
-    cross_validation_folds, require_matching_data_provenance, split_by_flight,
-    split_name_for_dataset_id, window_anchors,
+    FixedAnchorTrajectoryWindows,
+    FlightEpochSampler,
+    Normalizer,
+    RandomAnchorTrajectoryWindows,
+    build_series,
+    window_anchors,
+)
+from splits import (  # noqa: E402
+    cross_validation_folds,
+    split_by_flight,
+    split_name_for_dataset_id,
 )
 from development_cohorts import DEVELOPMENT_COHORT_SCHEMA, DevelopmentCohort  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
@@ -145,12 +167,14 @@ from synthetic import synthetic_arrivals  # noqa: E402
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     SCHEMA_VERSION as ARRIVAL_MANIFEST_SCHEMA,
 )
+from objective import (  # noqa: E402
+    STATE_LOSS_COMPONENT_NAMES, loss_component_names, masked_mse,
+    move_dynamics, move_fixed_dt_supervision, position_velocity_consistency_loss,
+    prediction_loss, prediction_loss_components, state_prediction_loss_components,
+)
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
-    STATE_LOSS_COMPONENT_NAMES,
-    evaluate_fit_splits,
-    load_checkpoint, masked_mse, position_velocity_consistency_loss,
-    prediction_loss, state_prediction_loss_components, train,
+    evaluate_fit_splits, load_checkpoint, train,
 )
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -315,32 +339,32 @@ def _run_development_cohort_train_cli(
         "test": ["KRDU:test"],
     }
     captured = {}
-    monkeypatch.setattr(ts_cli, "load_development_cohort", lambda _path: cohort)
+    monkeypatch.setattr(cli_common, "load_development_cohort", lambda _path: cohort)
     monkeypatch.setattr(
-        ts_cli, "arrival_data_provenance", lambda _data: _fake_data_provenance()
+        cli_common, "arrival_data_provenance", lambda _data: _fake_data_provenance()
     )
     monkeypatch.setattr(
-        ts_cli, "flight_keys_by_split", lambda _provenance, _config: outer_splits
+        cli_common, "flight_keys_by_split", lambda _provenance, _config: outer_splits
     )
     monkeypatch.setattr(
-        ts_cli, "load_flight_dicts", lambda _data, include_flight_keys: [{}]
+        cli_common, "load_flight_dicts", lambda _data, include_flight_keys: [{}]
     )
     monkeypatch.setattr(
-        ts_cli,
-        "_build_series_or_exit",
+        cli_common,
+        "build_series_or_exit",
         lambda *_args: (
             [SimpleNamespace(dataset_id=dataset_id) for dataset_id in built_ids],
             SimpleNamespace(to_dict=lambda: {"built": len(built_ids)}),
         ),
     )
-    monkeypatch.setattr(ts_cli, "data_selection_audit", lambda *_args: {})
-    monkeypatch.setattr(ts_cli, "development_cohort_audit", lambda *_args: {})
+    monkeypatch.setattr(cli_common, "data_selection_audit", lambda *_args: {})
+    monkeypatch.setattr(cli_common, "development_cohort_audit", lambda *_args: {})
 
     def capture_train(_series, _config, **kwargs):
         captured.update(kwargs)
         return {}
 
-    monkeypatch.setattr(ts_cli, "train", capture_train)
+    monkeypatch.setattr(cli_train, "run_training", capture_train)
     result = ts_cli.main([
         "train",
         "--data", str(tmp_path / "manifest.json"),
@@ -378,7 +402,7 @@ def test_development_cohort_rejects_incomplete_rebuild(monkeypatch, tmp_path):
         # The hook needs a control run to be a legal config at all, so the override is
         # applied to one: the refusal under test is "not available", not "not applicable".
         ("control_command_hook", "nominal-residual",
-         ["--prediction-output", PREDICTION_CONTROL, "--control-recipe", CONTROL_RECIPE_SIMPLE_V3]),
+         ["--prediction-output", PREDICTION_CONTROL, "--control-recipe-name", CONTROL_RECIPE_SIMPLE_V3]),
         ("state_position_reference", "anchor-relative", []),
     ],
 )
@@ -397,34 +421,35 @@ def test_a_value_a_new_run_may_not_select_does_not_begin_a_formal_run(
     overrides = tmp_path / "overrides.json"
     overrides.write_text(json.dumps({field: value}), encoding="utf-8")
     monkeypatch.setattr(
-        ts_cli, "arrival_data_provenance", lambda _data: _fake_data_provenance()
+        cli_common, "arrival_data_provenance", lambda _data: _fake_data_provenance()
     )
     monkeypatch.setattr(
-        ts_cli,
+        cli_common,
         "flight_keys_by_split",
         lambda _provenance, _config: {
             "train": ["KRDU:train"], "val": ["KRDU:val"], "test": ["KRDU:test"]
         },
     )
-    monkeypatch.setattr(ts_cli, "load_flight_dicts", lambda *_args, **_kwargs: [{}])
+    monkeypatch.setattr(cli_common, "load_flight_dicts", lambda *_args, **_kwargs: [{}])
     monkeypatch.setattr(
-        ts_cli,
-        "_build_series_or_exit",
+        cli_common,
+        "build_series_or_exit",
         lambda *_args: (
             [SimpleNamespace(dataset_id="KRDU:train")],
             SimpleNamespace(to_dict=lambda: {}),
         ),
     )
-    monkeypatch.setattr(ts_cli, "data_selection_audit", lambda *_args: {})
+    monkeypatch.setattr(cli_common, "data_selection_audit", lambda *_args: {})
 
     def record_begin(*_args, **_kwargs):
         nonlocal began_run
         began_run = True
         return tmp_path / "run" / experiment_index.RUN_MANIFEST_NAME
 
-    monkeypatch.setattr(ts_cli, "begin_run", record_begin)
+    monkeypatch.setattr(cli_common, "begin_run", record_begin)
     monkeypatch.setattr(
-        ts_cli, "train", lambda *_args, **_kwargs: pytest.fail("train must not start")
+        cli_train, "run_training",
+        lambda *_args, **_kwargs: pytest.fail("train must not start"),
     )
 
     with pytest.raises(SystemExit):
@@ -1603,7 +1628,7 @@ def test_pooled_prediction_filters_checkpoint_split_to_current_airport_subset():
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
         "manifests": [{"airport": "KAAA"}],
     }
-    assert ts_cli.split_keys_for_current_data(
+    assert cli_common.split_keys_for_current_data(
         ["KAAA:flight-a", "KBBB:flight-b", "KAAA:flight-c"], provenance
     ) == ["KAAA:flight-a", "KAAA:flight-c"]
 
@@ -1763,7 +1788,7 @@ def test_manifest_split_keys_are_resolved_without_loading_trajectory_values():
         }],
     }
 
-    resolved = dataset_module.flight_keys_by_split(provenance, config)
+    resolved = splits.flight_keys_by_split(provenance, config)
 
     assert set(resolved) == {"train", "val", "test"}
     assert sum(map(len, resolved.values())) == 20
@@ -2130,7 +2155,7 @@ def test_common_grid_checkpoint_selection_reuses_one_truth_cache(monkeypatch):
     )
     train_series, val_series, _test_series = split_by_flight(series, config)
     cached_truth_ids: list[int] = []
-    original = train_module.fixed_anchor_common_grid_ade_metrics
+    original = validation.fixed_anchor_common_grid_ade_metrics
 
     def record_cache(*args, **kwargs):
         cached_truth = kwargs.get("common_truth")
@@ -2139,7 +2164,7 @@ def test_common_grid_checkpoint_selection_reuses_one_truth_cache(monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(
-        train_module,
+        validation,
         "fixed_anchor_common_grid_ade_metrics",
         record_cache,
     )
@@ -2147,6 +2172,58 @@ def test_common_grid_checkpoint_selection_reuses_one_truth_cache(monkeypatch):
 
     assert len(cached_truth_ids) == config.epochs
     assert len(set(cached_truth_ids)) == 1
+
+
+def _two_pass_loss_components(
+    model,
+    dataset,
+    device: torch.device,
+    batch_size: int,
+) -> dict[str, float]:
+    """The two-pass reference the shared validation forward is checked against.
+
+    It re-runs the objective on its own, so `evaluate_validation_airport`'s single forward
+    has something independent to be equal to. It lived in `validation.py` until the T3
+    review pointed out it has no production caller — a test oracle that ships inside the
+    module it is testing is one edit away from being the thing it checks.
+    """
+    names = loss_component_names(dataset.config)
+    component_totals = {name: 0.0 for name in names}
+    flight_weight_total = 0.0
+    with torch.no_grad():
+        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
+            (
+                x,
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                dynamics,
+                dense_supervision,
+            ) = unpack_batch(raw_batch)
+            x, y, mask = x.to(device), y.to(device), mask.to(device)
+            final_time_s = final_time_s.to(device)
+            flight_weights = flight_weights.to(device)
+            dynamics = move_dynamics(dynamics, device)
+            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
+            prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
+            components = prediction_loss_components(
+                prediction,
+                anchor_state(x, len(dataset.config.channels)),
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                dataset.config,
+                dataset.normalizer,
+                dynamics,
+                dense_supervision,
+            )
+            for name, value in components.tensors().items():
+                component_totals[name] += float(value) * len(flight_weights)
+            flight_weight_total += float(flight_weights.sum())
+    denominator = max(flight_weight_total, 1.0)
+    return {name: value / denominator for name, value in component_totals.items()}
 
 
 def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch):
@@ -2167,29 +2244,30 @@ def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch)
     normalizer = Normalizer.fit(series)
     dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
     model = build_model(config).eval()
-    legacy_components = train_module._dataset_loss_components(
+    legacy_components = _two_pass_loss_components(
         model, dataset, torch.device("cpu"), config.batch_size
     )
-    legacy_common = train_module.evaluate_fixed_anchor_common_grid(
+    legacy_common = validation.evaluate_fixed_anchor_common_grid(
         model, dataset, normalizer, config, torch.device("cpu")
     )
 
     calls = 0
-    original_forward = train_module.model_forward
+    original_forward = validation.model_forward
 
     def counted_forward(*args, **kwargs):
         nonlocal calls
         calls += 1
         return original_forward(*args, **kwargs)
 
-    monkeypatch.setattr(train_module, "model_forward", counted_forward)
-    plan = train_module.build_validation_batch_plan(dataset, config.batch_size)
-    shared = train_module._evaluate_validation_airport(
+    monkeypatch.setattr(validation, "model_forward", counted_forward)
+    plan = validation.build_validation_batch_plan(dataset, config.batch_size)
+    shared = validation.evaluate_validation_airport(
         model,
         plan,
         torch.device("cpu"),
+        config=config,
     )
-    shared_common = train_module.evaluate_fixed_anchor_common_grid(
+    shared_common = validation.evaluate_fixed_anchor_common_grid(
         model,
         dataset,
         normalizer,
@@ -2225,7 +2303,7 @@ def test_control_validation_replay_uses_dense_dynamics_queries():
     dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
     raw_batch = next(dataset_module.iter_batches(dataset, 1, shuffle=False, seed=0))
     x, y, mask, final_time_s, _weights, dynamics, _dense = (
-        train_module.unpack_batch(raw_batch)
+        batch_contract.unpack_batch(raw_batch)
     )
     assert dynamics is not None
     midpoint = 0.5 * (dynamics["control_lower"] + dynamics["control_upper"])
@@ -2235,7 +2313,7 @@ def test_control_validation_replay_uses_dense_dynamics_queries():
         final_time_s=torch.tensor([2.0], dtype=torch.float32),
     )
 
-    replay = train_module._prediction_batch_replay(
+    replay = validation._prediction_batch_replay(
         prediction, x, y, mask, final_time_s, dynamics, dataset
     )
 
@@ -2297,14 +2375,14 @@ def test_fit_evaluation_reuses_one_prediction_pass_per_split(monkeypatch):
     normalizer = Normalizer.fit(train_series)
     model = build_model(config)
     calls = 0
-    original_forward = train_module.model_forward
+    original_forward = validation.model_forward
 
     def counted_forward(*args, **kwargs):
         nonlocal calls
         calls += 1
         return original_forward(*args, **kwargs)
 
-    monkeypatch.setattr(train_module, "model_forward", counted_forward)
+    monkeypatch.setattr(validation, "model_forward", counted_forward)
     evaluate_fit_splits(
         model, train_series, val_series, normalizer, config, torch.device("cpu")
     )
@@ -2475,25 +2553,25 @@ def test_control_simple_v1_is_a_frozen_serialized_recipe():
     assert config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE
     assert control_recipe(config)["name"] == CONTROL_RECIPE_SIMPLE_V1
     assert TSConfig.from_dict(config.to_dict()) == config
-    assert "bounded-control-uniform-duration" in train_module.target_contract(config)
+    assert "bounded-control-uniform-duration" in objective.target_contract(config)
     with pytest.raises(ValueError, match="simple-v1 recipe fields are frozen"):
         replace(config, n_segments=32)
 
 
 def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts(capsys):
     parser = argparse.ArgumentParser()
-    ts_cli._add_data_args(parser)
-    ts_cli._add_training_args(parser)
+    cli_common.add_data_args(parser)
+    cli_common.add_training_args(parser)
     args = parser.parse_args(
         [
             "--data", "unused.json",
             "--output-dir", "unused-output",
-            "--control-recipe", CONTROL_RECIPE_SIMPLE_V1,
+            "--control-recipe-name", CONTROL_RECIPE_SIMPLE_V1,
             "--seed", "2027",
         ]
     )
 
-    config, batch_auto = ts_cli._config_from_args(args, parser)
+    config, batch_auto = cli_common.config_from_args(args, parser)
 
     assert not batch_auto
     assert config.control_recipe_name == CONTROL_RECIPE_SIMPLE_V1
@@ -2506,12 +2584,12 @@ def test_control_simple_v1_cli_applies_defaults_and_rejects_conflicts(capsys):
         [
             "--data", "unused.json",
             "--output-dir", "unused-output",
-            "--control-recipe", CONTROL_RECIPE_SIMPLE_V1,
+            "--control-recipe-name", CONTROL_RECIPE_SIMPLE_V1,
             "--n-segments", "32",
         ]
     )
     with pytest.raises(SystemExit) as info:
-        ts_cli._config_from_args(conflicting, parser)
+        cli_common.config_from_args(conflicting, parser)
     assert info.value.code == 2 and "recipe fields are frozen: n_segments=32" in capsys.readouterr().err
 
 
@@ -2541,7 +2619,7 @@ def test_transport_chart_dynamics_is_an_explicit_control_only_contract():
     )
 
     assert control_recipe(config)["dynamics_backend"] == backend
-    assert f"+dynamics={backend}-v1" in train_module.target_contract(config)
+    assert f"+dynamics={backend}-v1" in objective.target_contract(config)
     with pytest.raises(ValueError, match="requires a control prediction output"):
         TSConfig(control_dynamics_backend=backend)
 
@@ -2825,7 +2903,7 @@ def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
     )
 
-    supervised = train_module.control_state_supervision_prediction(
+    supervised = objective.control_state_supervision_prediction(
         prediction, torch.tensor([8.0, 10.0]), config
     )
 
@@ -2836,7 +2914,7 @@ def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
     )
     torch.testing.assert_close(supervised.final_time_s, torch.tensor([8.0, 10.0]))
     torch.testing.assert_close(prediction.final_time_s, torch.tensor([4.0, 5.0]))
-    assert train_module.target_contract(config) == (
+    assert objective.target_contract(config) == (
         "bounded-control-nonuniform-duration-casadi-rollout-observed-clock-aligned-v3"
         "+duration-uniform-floor=0.8-v1"
     )
@@ -2850,7 +2928,7 @@ def test_predicted_control_state_clock_preserves_original_training_behavior():
     )
     config = TSConfig(prediction_output=PREDICTION_CONTROL)
 
-    assert train_module.control_state_supervision_prediction(
+    assert objective.control_state_supervision_prediction(
         prediction, torch.tensor([8.0]), config
     ) is prediction
 
@@ -2878,7 +2956,7 @@ def test_control_models_use_per_sample_bounds_and_aircraft_condition(
     lower = torch.tensor([[0.0, -0.5, 0.5], [0.0, -0.7, 0.6]])
     upper = torch.tensor([[10_000.0, 0.5, 1.8], [250_000.0, 0.7, 2.0]])
     dynamics = {
-        "condition": torch.rand(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.rand(2, len(DYNAMICS_CONDITION_NAMES)),
         "control_lower": lower,
         "control_upper": upper,
     }
@@ -2963,7 +3041,7 @@ def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
         "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }
 
-    components = train_module.prediction_loss_components(
+    components = objective.prediction_loss_components(
         prediction,
         torch.zeros(1, channel_count),
         target,
@@ -3022,7 +3100,7 @@ def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monk
         "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }
 
-    components = train_module.control_prediction_loss_components(
+    components = objective.control_prediction_loss_components(
         prediction,
         torch.zeros(1, config.enc_in),
         target,
@@ -3059,7 +3137,7 @@ def test_control_model_starts_from_neutral_uniform_rollout():
     lower = torch.tensor([CONTROL_LOWER, CONTROL_LOWER], dtype=torch.float32)
     upper = torch.tensor([CONTROL_UPPER, CONTROL_UPPER], dtype=torch.float32)
     dynamics = {
-        "condition": torch.randn(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.randn(2, len(DYNAMICS_CONDITION_NAMES)),
         "control_lower": lower,
         "control_upper": upper,
     }
@@ -3583,7 +3661,7 @@ def test_formal_common_grid_selector_reuses_identical_precomputed_truth():
     normalizer = Normalizer.fit(series)
     dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
     model = build_model(config).eval()
-    replay = train_module._predict_split(
+    replay = validation.predict_split(
         model,
         dataset,
         normalizer,
@@ -3916,7 +3994,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--prediction-output") + 1] == PREDICTION_CONTROL
     assert recipe[recipe.index("--split-seed") + 1] == "1337"
     assert recipe[recipe.index("--control-duration-parameterization") + 1] == "uniform"
-    assert recipe[recipe.index("--control-state-clock") + 1] == "observed"
+    assert recipe[recipe.index("--control-state-supervision-clock") + 1] == "observed"
     assert (
         recipe[recipe.index("--control-state-loss-grid") + 1]
         == "native-segment-endpoints"
@@ -3925,7 +4003,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         recipe[recipe.index("--control-state-objective") + 1] == "true-time-position"
     )
     assert "--no-control-state-duration-gradient" in recipe
-    assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
+    assert recipe[recipe.index("--control-rollout-integrator-dt-s") + 1] == "0.5"
     assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
     assert config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
@@ -4173,14 +4251,17 @@ def test_auto_batch_probe_executes_the_shared_physics_loss(monkeypatch):
         n_heads=2,
         e_layers=1,
     )
-    original_loss = train_module.prediction_loss
+    # "Shared" is the claim under test: the probe must run the package's ONE objective,
+    # not a copy of it that can drift.
+    assert batching.prediction_loss is objective.prediction_loss
+    original_loss = objective.prediction_loss
     calls: list[tuple[torch.Size, torch.Size]] = []
 
     def tracked_loss(prediction, anchor, target, *args):
         calls.append((anchor.shape, target.shape))
         return original_loss(prediction, anchor, target, *args)
 
-    monkeypatch.setattr(train_module, "prediction_loss", tracked_loss)
+    monkeypatch.setattr(batching, "prediction_loss", tracked_loss)
     monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
 
     batching._probe_training_step(config, 2, torch.device("cpu"))
@@ -4997,7 +5078,7 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
     assert loaded_config == config
     assert loaded_config.prediction_output == PREDICTION_CONTROL
     assert isinstance(model(torch.zeros(1, config.seq_len, config.enc_in), {
-        "condition": torch.ones(1, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.ones(1, len(DYNAMICS_CONDITION_NAMES)),
         "control_lower": torch.tensor([CONTROL_LOWER], dtype=torch.float32),
         "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }), ControlPrediction)
@@ -5409,11 +5490,11 @@ def test_evaluate_fit_cli_runs_train_and_validation_together(tmp_path, monkeypat
     report = SimpleNamespace(format=lambda: "built synthetic fit replay")
 
     monkeypatch.setattr(
-        ts_cli, "load_checkpoint",
+        cli_evaluate_fit, "load_checkpoint",
         lambda _path: (build_model(config), config, normalizer, payload),
     )
-    monkeypatch.setattr(ts_cli, "arrival_data_provenance", lambda _data: provenance)
-    monkeypatch.setattr(ts_cli, "require_matching_data_provenance", lambda *_args: None)
+    monkeypatch.setattr(cli_common, "arrival_data_provenance", lambda _data: provenance)
+    monkeypatch.setattr(cli_evaluate_fit, "require_matching_data_provenance", lambda *_args: None)
     loaded_keys = None
 
     def load_selected(_data, *, include_flight_keys=None):
@@ -5421,10 +5502,10 @@ def test_evaluate_fit_cli_runs_train_and_validation_together(tmp_path, monkeypat
         loaded_keys = include_flight_keys
         return flights
 
-    monkeypatch.setattr(ts_cli, "load_flight_dicts", load_selected)
-    monkeypatch.setattr(ts_cli, "dataset_flight_key", lambda flight, _index: flight["key"])
-    monkeypatch.setattr(ts_cli, "build_series", lambda *_args, **_kwargs: (series, report))
-    monkeypatch.setattr(ts_cli, "resolve_device", lambda _device: torch.device("cpu"))
+    monkeypatch.setattr(cli_evaluate_fit, "load_flight_dicts", load_selected)
+    monkeypatch.setattr(cli_evaluate_fit, "dataset_flight_key", lambda flight, _index: flight["key"])
+    monkeypatch.setattr(cli_evaluate_fit, "build_series", lambda *_args, **_kwargs: (series, report))
+    monkeypatch.setattr(cli_evaluate_fit, "resolve_device", lambda _device: torch.device("cpu"))
 
     assert ts_cli.main([
         "evaluate-fit",
@@ -5603,16 +5684,40 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
 def test_a_stored_config_carrying_a_retired_field_still_loads_and_an_unknown_one_does_not():
     """Checkpoints written before a field was retired keep loading; a genuinely unknown key
     is still refused, so the retired list stays honest."""
-    from config import RETIRED_SERIALIZED_FIELDS
+    from config import RETIRED_CONSTANT_FIELDS, RETIRED_SERIALIZED_FIELDS
     from dataclasses import fields as dataclass_fields
     live = {field.name for field in dataclass_fields(TSConfig)}
-    assert not (set(RETIRED_SERIALIZED_FIELDS) & live), "a retired field is still declared"
+    retired = set(RETIRED_SERIALIZED_FIELDS) | set(RETIRED_CONSTANT_FIELDS)
+    assert not (retired & live), "a retired field is still declared"
+    assert not (set(RETIRED_SERIALIZED_FIELDS) & set(RETIRED_CONSTANT_FIELDS)), (
+        "a field cannot be both unread and a measured constant"
+    )
     stored = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
     for name in RETIRED_SERIALIZED_FIELDS:
         stored[name] = 0.25
     assert TSConfig.from_dict(stored).prediction_output == PREDICTION_CONTROL
     with pytest.raises(TypeError):
         TSConfig.from_dict({**stored, "never_a_field": 1})
+
+
+def test_a_measured_constant_field_is_dropped_at_its_constant_and_refused_anywhere_else():
+    """The other retirement kind: these three WERE read, so a different value is history.
+
+    `procedure_loss_{lateral,vertical}_scale_m` and `closure_timing_scale_s` are loss
+    denominators. They were retired because nothing on disk ever moved them — not because
+    nothing read them — so dropping a non-default value by name would silently reinterpret
+    an artifact produced under a scale this build no longer has.
+    """
+    from config import RETIRED_CONSTANT_FIELDS
+
+    base = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
+    at_constant = {**base, **RETIRED_CONSTANT_FIELDS}
+    assert TSConfig.from_dict(at_constant).prediction_output == PREDICTION_CONTROL
+
+    for name, constant in RETIRED_CONSTANT_FIELDS.items():
+        with pytest.raises(ValueError, match=f"{name}=") as info:
+            TSConfig.from_dict({**at_constant, name: constant * 2})
+        assert repr(constant * 2) in str(info.value) and "retired" in str(info.value)
 
 
 L1_NATIVE32_CHECKPOINT = _REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32/checkpoint.pt"

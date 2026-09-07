@@ -23,19 +23,25 @@ from batch_contract import unpack_batch  # noqa: E402
 from config import (  # noqa: E402
     CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
 from dataset import (  # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series,
-    final_approach_arrays, probe_dynamics, probe_final_approach,
+    FixedAnchorTrajectoryWindows,
+    Normalizer,
+    build_series,
+    final_approach_arrays,
+    probe_dynamics,
+    probe_final_approach,
 )
 from export import build_prediction_record  # noqa: E402
 from forecast import Forecast, forecast_approach, project_onto_final  # noqa: E402
 from models import build_model  # noqa: E402
 from prediction_outputs import StateOutputLayer, StatePrediction  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
-from train import (  # noqa: E402
-    STATE_LOSS_COMPONENT_NAMES, ProcedureMultipliers, load_checkpoint, procedure_loss,
-    state_prediction_loss_components, train,
+from objective import (  # noqa: E402
+    STATE_LOSS_COMPONENT_NAMES, ProcedureMultipliers, procedure_loss,
+    state_prediction_loss_components,
 )
+from train import load_checkpoint, train  # noqa: E402
 from trajectory_data_process.harvest.arrivals import SCHEMA_VERSION as ARRIVAL_SCHEMA  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -446,7 +452,7 @@ def test_dual_history_records_the_lambda_used_and_the_next_one(tmp_path):
 
 def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
     from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, PREDICTION_CONTROL
-    from train import loss_component_names
+    from objective import loss_component_names
 
     config = TSConfig(prediction_output=PREDICTION_CONTROL, procedure_loss_lateral_weight=1e-3)
     assert config.procedure_loss_active and "procedure" in loss_component_names(config)

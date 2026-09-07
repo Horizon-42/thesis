@@ -27,6 +27,8 @@ from config import (  # noqa: E402
     HOOK_SATURATION_HARD, PREDICTION_CONTROL, TSConfig, recipe_settings,
 )
 from control.constraints import BarrierFilter, build_command_hook  # noqa: E402
+from dataclasses import fields as dataclass_fields  # noqa: E402
+
 from control.constraints.gates import on_final_weight, runway_axes_view  # noqa: E402
 from control.dynamics import rollout as control_rollout  # noqa: E402
 from control.dynamics.hooks import RolloutStateView  # noqa: E402
@@ -311,6 +313,39 @@ def test_hook_config_is_guarded_and_named():
     assert "hook=" not in run_display_name(TSConfig(**recipe_settings("simple-v3", keep_name=True)).to_dict())
     with pytest.raises(ValueError, match="archived"):
         build_command_hook(_hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL), _context(1))
+
+
+def test_the_predict_side_gains_are_a_guarded_table_and_need_the_hook():
+    """The barrier's gains reach the ADOPTED delivery form, and only with the hook on.
+
+    `predict --command-hook barrier --hook-saturation soft` is what `CLAUDE.md` names as
+    the adopted use, so gains that existed only on `train` (where the hook cannot be
+    enabled without also training through it) were unreachable where they matter. They are
+    overrides of a checkpoint value rather than settings of a new run, so they live in
+    `cli.predict.PREDICT_CONFIG_FLAGS`, asserted against `TSConfig` at import the way
+    `cli.common.CLI_CONFIG_FIELDS` is.
+    """
+    import argparse
+
+    import cli.predict as cli_predict
+
+    live = {field.name for field in dataclass_fields(TSConfig)}
+    assert set(cli_predict.PREDICT_CONFIG_FLAGS) <= live
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    cli_predict.add_cli_arguments(parser)
+    flags = {option for action in parser._actions for option in action.option_strings}
+    assert set(cli_predict.PREDICT_CONFIG_FLAGS.values()) <= flags
+
+    # Two of the four keep a short name on purpose; the other two are named after the field.
+    assert cli_predict.PREDICT_CONFIG_FLAGS["control_barrier_alpha"] == "--control-barrier-alpha"
+    assert cli_predict.PREDICT_CONFIG_FLAGS["control_command_hook"] == "--command-hook"
+
+    # A gain without --command-hook changes nothing, so it is refused rather than ignored.
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "--data", "x.json", "--output-dir", "out", "--checkpoint", "c.pt",
+            "--control-barrier-alpha",
+        ])
 
 
 def test_training_refuses_hard_saturation_and_logs_the_hook(tmp_path):

@@ -26,9 +26,8 @@ from config import (  # noqa: E402
     INTENT_JOIN_CHANNELS, INTENT_LEAD_CHANNELS, PREDICTION_CONTROL, TSConfig,
     intent_channel_names,
 )
-from dataset import (  # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, Normalizer, build_series,
-)
+from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
 from forecast import _history_at_anchor, forecast_approach  # noqa: E402
 from models import build_model  # noqa: E402
 from run_naming import run_display_name  # noqa: E402

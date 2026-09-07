@@ -1,4 +1,9 @@
-"""Training loop: configured-time-grid state loss plus final-time/physics losses.
+"""The training loop: the epoch, the cohort it runs on, and the checkpoint it writes.
+
+Two modules under it carry what used to be inline here. What a prediction is scored
+against is ``objective.py``; how a fitted model is replayed on a split and which epoch is
+kept is ``validation.py``. This module drives the optimizer over the first and calls the
+second once per epoch.
 
 The checkpoint carries the config, the fitted normalizer and the flight ids of each split
 alongside the weights. That is what makes inference reproducible without re-deriving
@@ -12,310 +17,85 @@ import hashlib
 import json
 import math
 import time
-from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 import numpy as np
 import torch
 import torch.nn as nn
 
-from channels import CHANNELS, IDX, POSITION_IDX, VELOCITY_IDX
+from channels import CHANNELS
 from batching import resolve_batch_size
 from config import (
     CONTROL_HOOK_OFF,
     HOOK_SATURATION_HARD,
-    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
-    CONTROL_DYNAMICS_REANCHORED_RK4,
-    CONTROL_DURATION_FACTORIZED,
-    CONTROL_DURATION_UNIFORM,
-    CONTROL_STATE_CLOCK_OBSERVED,
-    CONTROL_STATE_CLOCK_PREDICTED,
-    CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    CONTROL_STATE_LOSS_GRID_NATIVE,
-    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-    CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
-    PREDICTION_CLOSURE,
-    PREDICTION_STATE,
     TSConfig,
     control_recipe,
     uses_control_dynamics,
 )
 from control.basis_fit import FittedTeacherTable, load_fitted_teacher
-from control.dynamics import rollout as control_rollout
-from control.constraints import build_command_hook
-from control.loss.components import (
-    ControlStateLossResult,
-    control_tracking_loss_terms,
-)
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
-from control.latent import LATENT_KL_COMPONENT, LatentControlPrediction, with_latent_kl
-from dataset import (
+from data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
+    provenance_eligibility_digests,
+    provenance_manifest_digests,
+)
+from dataset import (
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
     RandomAnchorTrajectoryWindows,
-    TrajectoryWindows,
     iter_batches,
-    provenance_eligibility_digests,
-    provenance_manifest_digests,
-    split_by_flight,
     window_anchors,
 )
+from splits import split_by_flight
 from evaluation_protocol import (
     TEST_RELEASE_NAME,
     TEST_RELEASE_PROTOCOL_FIELD,
     TEST_RELEASE_SCHEMA,
 )
-from fixed_anchor_validation import (
-    CommonGridTruth,
-    fixed_anchor_common_truth,
-    fixed_anchor_common_grid_ade_metrics,
-    fixed_anchor_common_grid_metrics,
-    fixed_anchor_common_grid_report_metrics,
-)
-from fixed_dt_supervision import FixedDTControlSupervision
-from metrics import (
-    raw_kinematic_metrics,
-    states_with_derived_velocity,
-)
-from final_approach_geometry import corridor_violations, runway_axes, truth_final_gate
+from control.latent import effective_latent_beta, latent_epoch_record
+from fixed_anchor_validation import CommonGridTruth
 from models import build_model, parameter_count, resolve_device
-from batch_contract import LossComponents, anchor_state, model_forward, unpack_batch
+from batch_contract import anchor_state, model_forward, unpack_batch
 from io_utils import file_sha256
-from control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
-from control.dynamics.backends import EndpointControlRollout
-from aerodynamic_model.torch_dynamics import heading_rate_rad_s
-from prediction_outputs import ControlPrediction, StatePrediction
-from closure_output import (
-    ClosurePrediction,
-    closure_loss_components,
-    replay_batch as closure_replay_batch,
+from objective import (
+    PROCEDURE_DIAGNOSTICS,
+    ProcedureMultipliers,
+    loss_component_names,
+    move_dynamics,
+    move_fixed_dt_supervision,
+    prediction_loss_components,
+    target_contract,
 )
-from time_grids import batch_time_grid, numpy_inference_time_grid
+from prediction_outputs import ControlPrediction
 from training_performance import EpochProfiler
+from validation import (
+    VALIDATION_SELECTIONS,
+    anchor_grid_coverage,
+    build_anchor_grid_validation_plans,
+    common_grid_validation_details,
+    evaluate_validation_airport,
+    predict_split,
+    validation_datasets,
+    build_validation_batch_plan,
+    evaluate_fixed_anchor_common_grid,
+    evaluate_split,
+)
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
 CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v35-true-time-endpoint-loss"
-STATE_TARGET_CONTRACTS = {
-    HORIZON_NORMALIZED: "normalized-output-true-time-physical-position-duration-v1",
-    HORIZON_FULL: "full-horizon-physical-position-duration-v1",
-    HORIZON_WINDOW: "recursive-window-physical-position-duration-v1",
-}
 HISTORY_NAME = "history.json"
 FIT_EVALUATION_NAME = "fit_evaluation.json"
 FIT_EVALUATION_SCHEMA = "ts-fit-evaluation-v3-common-true-time-endpoint"
-STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal", "procedure")
-CONTROL_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
-# The closure output's regression groups wear the four fixed names (LossComponents
-# always emits them): state = geometry, final_time = slowness in seconds, kinematic =
-# height, terminal = 0.
-CLOSURE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
-CONTROL_TARGET_CONTRACTS = {
-    (
-        CONTROL_DURATION_FACTORIZED,
-        CONTROL_STATE_CLOCK_PREDICTED,
-        CONTROL_STATE_LOSS_GRID_NATIVE,
-    ): (
-        "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
-    ),
-    (
-        CONTROL_DURATION_FACTORIZED,
-        CONTROL_STATE_CLOCK_OBSERVED,
-        CONTROL_STATE_LOSS_GRID_NATIVE,
-    ): (
-        "bounded-control-nonuniform-duration-casadi-rollout-observed-clock-aligned-v3"
-    ),
-    (
-        CONTROL_DURATION_FACTORIZED,
-        CONTROL_STATE_CLOCK_OBSERVED,
-        CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    ): "bounded-control-nonuniform-duration-fixed-dt-state-loss-v1",
-    (
-        CONTROL_DURATION_UNIFORM,
-        CONTROL_STATE_CLOCK_PREDICTED,
-        CONTROL_STATE_LOSS_GRID_NATIVE,
-    ): "bounded-control-uniform-duration-casadi-rollout-clock-aligned-v1",
-    (
-        CONTROL_DURATION_UNIFORM,
-        CONTROL_STATE_CLOCK_OBSERVED,
-        CONTROL_STATE_LOSS_GRID_NATIVE,
-    ): "bounded-control-uniform-duration-casadi-rollout-observed-clock-aligned-v1",
-    (
-        CONTROL_DURATION_UNIFORM,
-        CONTROL_STATE_CLOCK_OBSERVED,
-        CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    ): "bounded-control-uniform-duration-fixed-dt-state-loss-v1",
-}
-
-
-def target_contract(config: TSConfig) -> str:
-    if config.prediction_output == PREDICTION_STATE:
-        return STATE_TARGET_CONTRACTS[config.horizon_mode]
-    if config.prediction_output == PREDICTION_CLOSURE:
-        # The decision vector's shape IS the contract: a different knot count is a
-        # different head, and a checkpoint of one must not load into the other.
-        return (
-            f"closure-v1-slowness{config.closure_slowness_knots}"
-            f"-height{config.closure_height_knots}"
-        )
-    base = CONTROL_TARGET_CONTRACTS[
-        (
-            config.control_duration_parameterization,
-            config.control_state_supervision_clock,
-            config.control_state_loss_grid,
-        )
-    ]
-    if config.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
-        base += (
-            f"+duration-uniform-floor={config.control_duration_uniform_floor:g}-v1"
-        )
-    if config.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4:
-        base += f"+dynamics={config.control_dynamics_backend}-v1"
-    if config.control_duration_parameterization == CONTROL_DURATION_UNIFORM:
-        contract = (
-            base
-            if config.control_state_objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
-            else f"{base}+{config.control_state_objective}"
-        )
-    elif (
-        config.control_state_objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
-        and config.control_state_duration_gradient
-    ):
-        return base
-    else:
-        gradient_contract = (
-            "joint-duration-gradient"
-            if config.control_state_duration_gradient
-            else "detached-duration-gradient"
-        )
-        contract = f"{base}+{config.control_state_objective}+{gradient_contract}"
-    return contract
-
-
-def loss_component_names(config: TSConfig) -> tuple[str, ...]:
-    if config.prediction_output == PREDICTION_STATE:
-        return STATE_LOSS_COMPONENT_NAMES
-    if config.prediction_output == PREDICTION_CLOSURE:
-        return CLOSURE_LOSS_COMPONENT_NAMES
-    names = CONTROL_LOSS_COMPONENT_NAMES
-    extensions = {
-        CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION: (
-            *(("velocity",) if config.control_velocity_loss_weight else ()),
-            *(("imitation",) if config.control_imitation_loss_weight else ()),
-            *(("heading_rate",) if config.control_heading_rate_loss_weight else ()),
-            *(("bank_tv",) if config.control_bank_tv_loss_weight else ()),
-        ),
-    }
-    return (
-        *names,
-        *extensions.get(config.control_state_objective, ()),
-        *(("procedure",) if config.procedure_loss_active else ()),
-        *((LATENT_KL_COMPONENT,) if config.latent_dim > 0 else ()),
-    )
-
-
-def move_dynamics(
-    dynamics: dict[str, torch.Tensor] | None, device: torch.device
-) -> dict[str, torch.Tensor] | None:
-    if dynamics is None:
-        return None
-    return {name: value.to(device) for name, value in dynamics.items()}
-
-
-def move_fixed_dt_supervision(
-    supervision: FixedDTControlSupervision | None,
-    device: torch.device,
-) -> FixedDTControlSupervision | None:
-    return None if supervision is None else supervision.to(device)
-
-
-def align_control_targets_to_prediction_clock(
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    predicted_segment_durations_s: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Interpolate normalized truth onto learned cumulative control timestamps.
-
-    Control targets arrive on the normalized true clock ``i * T_true / N``. A learned
-    non-uniform partition instead produces endpoints at ``cumsum(Delta_t_hat)``. Comparing
-    rows by index would therefore compare different physical times. Prepending the observed
-    anchor supplies the ``t=0`` node; queries after the true endpoint clamp to its terminal
-    state while the separate final-time loss continues to penalize their clock error.
-    """
-    query_offsets_s = predicted_segment_durations_s.cumsum(dim=1)
-    return align_control_targets_to_query_clock(
-        normalized_anchor_state,
-        target_states,
-        state_weights,
-        query_offsets_s,
-        target_final_time_s,
-    )
-
-
-def align_control_targets_to_query_clock(
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    query_offsets_s: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Interpolate normalized truth onto arbitrary predicted physical timestamps."""
-    if target_states.shape != state_weights.shape or target_states.ndim != 3:
-        raise ValueError("control targets and weights must be aligned [B,N,C] tensors")
-    batch, segments, channels = target_states.shape
-    if normalized_anchor_state.shape != (batch, channels):
-        raise ValueError("normalized control anchors must be [B,C]")
-    if query_offsets_s.ndim != 2 or query_offsets_s.shape[0] != batch:
-        raise ValueError("control target query offsets must be [B,M]")
-    if target_final_time_s.shape != (batch,):
-        raise ValueError("target final time must be [B]")
-    if torch.any(target_final_time_s <= 0.0):
-        raise ValueError("control target final time must be positive")
-
-    dtype, device = target_states.dtype, target_states.device
-    anchor = normalized_anchor_state.to(dtype=dtype, device=device).unsqueeze(1)
-    source_states = torch.cat((anchor, target_states), dim=1)
-    # The anchor is always an observed input row, so all channels carry the measured-row
-    # weight used by dataset._build_supervision. Later fitted-tail masks come from targets.
-    anchor_weights = torch.full(
-        (batch, 1, channels),
-        1.0 / channels,
-        dtype=state_weights.dtype,
-        device=state_weights.device,
-    )
-    source_weights = torch.cat((anchor_weights, state_weights), dim=1)
-
-    query_progress = (
-        query_offsets_s.to(dtype=dtype, device=device)
-        / target_final_time_s.to(dtype=dtype, device=device).unsqueeze(1)
-    ).clamp(min=0.0, max=1.0)
-    source_coordinate = query_progress * segments
-    left_index = torch.floor(source_coordinate).to(torch.long).clamp(max=segments)
-    right_index = (left_index + 1).clamp(max=segments)
-    fraction = source_coordinate - left_index.to(dtype)
-
-    def interpolate(source: torch.Tensor) -> torch.Tensor:
-        gather_shape = left_index.unsqueeze(-1).expand(-1, -1, channels)
-        left = torch.gather(source, 1, gather_shape)
-        right = torch.gather(
-            source,
-            1,
-            right_index.unsqueeze(-1).expand(-1, -1, channels),
-        )
-        return left + fraction.unsqueeze(-1) * (right - left)
-
-    return interpolate(source_states), interpolate(source_weights)
-
 
 
 def _split_sha256(series: Sequence[FlightSeries]) -> str:
@@ -326,815 +106,6 @@ def _split_sha256(series: Sequence[FlightSeries]) -> str:
 def _keys_sha256(keys: Iterable[str]) -> str:
     payload = "\n".join(sorted(keys)).encode()
     return hashlib.sha256(payload).hexdigest()
-
-
-def masked_mse(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """Weighted MSE over supervised channel values only.
-
-    All three tensors use ``[B,N,C]``. Measured rows weight all channels equally, while
-    fitted rows weight position only.
-    """
-    error = (predicted - target) ** 2 * mask
-    denominator = mask.sum()
-    return error.sum() / denominator.clamp(min=1.0)
-
-
-@dataclass(frozen=True)
-class ControlLossTerms:
-    """Per-flight weighted control objectives before airport-macro reduction."""
-
-    state: torch.Tensor
-    final_time: torch.Tensor
-    terminal: torch.Tensor
-    extras: dict[str, torch.Tensor] = field(default_factory=dict)
-    # Batch-level counts that are not objectives (see LossComponents.diagnostics).
-    diagnostics: dict[str, torch.Tensor] = field(default_factory=dict)
-
-    @property
-    def total(self) -> torch.Tensor:
-        return (
-            self.state
-            + self.final_time
-            + self.terminal
-            + sum(self.extras.values(), self.state.new_zeros(()))
-        )
-
-
-def position_velocity_consistency_loss(
-    normalized_anchor_state: torch.Tensor,
-    normalized_states: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    normalizer: Normalizer,
-    *,
-    config: TSConfig | None = None,
-    state_weights: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Per-flight displacement implied by position versus integrated velocity.
-
-    State predictions are standardized channel-wise, so the positions and velocities are
-    decoded before differencing. The displacement residual is divided by each fitted
-    position scale. Unlike dividing finite-difference velocity by velocity scale, this does
-    not make the position gradient grow as ``1 / dt`` when N increases. Ground-truth
-    duration defines ``dt`` during training, so the time head cannot shrink this loss.
-    """
-    _batch_size, n_segments, _channels = normalized_states.shape
-    normalized_states = torch.cat(
-        (normalized_anchor_state.unsqueeze(1), normalized_states), dim=1
-    )
-    position_indices = list(POSITION_IDX)
-    velocity_indices = [IDX["edot"], IDX["ndot"], IDX["udot"]]
-    dtype, device = normalized_states.dtype, normalized_states.device
-    position_mean = torch.as_tensor(
-        normalizer.mean[position_indices], dtype=dtype, device=device
-    )
-    position_scale = torch.as_tensor(
-        normalizer.std[position_indices], dtype=dtype, device=device
-    )
-    velocity_mean = torch.as_tensor(
-        normalizer.mean[velocity_indices], dtype=dtype, device=device
-    )
-    velocity_scale = torch.as_tensor(
-        normalizer.std[velocity_indices], dtype=dtype, device=device
-    )
-
-    positions = (
-        normalized_states[..., position_indices] * position_scale + position_mean
-    )
-    velocities = (
-        normalized_states[..., velocity_indices] * velocity_scale + velocity_mean
-    )
-    if config is None:
-        durations = (target_final_time_s / n_segments).to(dtype=dtype).view(-1, 1)
-        durations = durations.expand(-1, n_segments)
-        active = torch.ones_like(durations, dtype=torch.bool)
-    else:
-        durations, active = batch_time_grid(target_final_time_s.to(dtype=dtype), config)
-    if state_weights is not None:
-        active = active & (state_weights.sum(dim=-1) > 0.0)
-    interval_velocity = 0.5 * (velocities[:, 1:] + velocities[:, :-1])
-    displacement_residual = (
-        positions[:, 1:] - positions[:, :-1]
-        - interval_velocity * durations.unsqueeze(-1)
-    )
-    normalized_residual = displacement_residual / position_scale
-    squared = normalized_residual.square() * active.unsqueeze(-1)
-    denominator = (active.sum(dim=1) * len(position_indices)).clamp(min=1)
-    return squared.sum(dim=(1, 2)) / denominator
-
-
-def control_state_supervision_prediction(
-    prediction: ControlPrediction,
-    target_final_time_s: torch.Tensor,
-    config: TSConfig,
-) -> ControlPrediction:
-    """Select the training clock without changing the deployable model output.
-
-    The observed-clock candidate preserves the model's learned non-uniform duration
-    fractions but scales them to the known train/validation total for state supervision.
-    The original prediction remains available to the independent final-time loss and is
-    still the only clock used at inference.
-    """
-    if config.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-        return prediction
-    fractions = prediction.segment_durations / prediction.segment_durations.sum(
-        dim=1, keepdim=True
-    )
-    if not config.control_state_duration_gradient:
-        fractions = fractions.detach()
-    durations = fractions * target_final_time_s.unsqueeze(1)
-    return ControlPrediction(
-        controls=prediction.controls,
-        segment_durations=durations,
-        final_time_s=target_final_time_s,
-    )
-
-
-def control_imitation_mse(
-    prediction: ControlPrediction,
-    config: TSConfig,
-    dynamics: dict[str, torch.Tensor],
-) -> torch.Tensor | None:
-    """Per-flight MSE between the predicted schedule and the one the flown track implies.
-
-    Both sides live in the dimensionless control box, and each channel is divided by half
-    its box width so a full-scale error costs the same in thrust, bank and load factor.
-    Under ``control_imitation_target="inverse-dynamics"`` the segments past the last
-    measured velocity carry zero weight (see :func:`dataset.reference_control_supervision`);
-    under ``"fitted"`` every segment carries weight one, because that schedule was fitted
-    over the whole supervised horizon. This function reads whichever pair the dataset put
-    in the batch and cannot tell them apart — which is the point of the axis.
-    """
-    if not config.control_imitation_loss_weight:
-        return None
-    target = dynamics["reference_controls"].to(prediction.controls.dtype)
-    weight = dynamics["reference_control_weight"].to(prediction.controls.dtype)
-    scale = torch.as_tensor(
-        CONTROL_HALF_WIDTH, dtype=prediction.controls.dtype, device=prediction.controls.device
-    )
-    delta = (prediction.controls - target) / scale
-    return (delta.square().mean(dim=-1) * weight).sum(dim=1) / weight.sum(dim=1).clamp(
-        min=1.0
-    )
-
-
-def control_heading_rate_mse(
-    rollout: EndpointControlRollout,
-    config: TSConfig,
-    dynamics: dict[str, torch.Tensor],
-) -> torch.Tensor | None:
-    """Per-flight MSE between the ROLLOUT's own turn rate and the flown track's, deg/s.
-
-    The predicted side is read out of the RHS the rollout integrates
-    (:func:`aerodynamic_model.torch_dynamics.heading_rate_rad_s`) at each segment END,
-    evaluated on the state the rollout reached there and on the controls the aircraft had
-    ACTUALLY reached (the commands under the point-mass model, the actuator states after
-    the lag). Nothing about the coordinated-turn identity is restated, so this term cannot
-    ask for a turn the model would not fly — which is exactly what the imitation teacher's
-    inverse-dynamics target does not guarantee.
-
-    Both sides are divided by ``control_heading_rate_loss_scale_dps``, and endpoints past
-    the last measured velocity carry zero weight (see
-    :func:`dataset.reference_heading_rate_supervision`) — the same cut the velocity term
-    makes, not the same numbers (that mask is an interpolated per-channel weight, this one
-    a hard 0/1 step).
-
-    **The two sides are paired BY INDEX, and that is only a like-for-like comparison
-    because of one chain**: this term is built by the ``true-time-position`` objective, which
-    ``TSConfig`` admits only with ``control_duration_parameterization="uniform"``, so the
-    rollout's ``cumsum(segment_durations)`` is exactly the target's ``(k+1)·T/N``. Row k of
-    each side is therefore the same physical instant. Admitting a non-uniform partition here
-    would silently compare different times, exactly as it would for the imitation term.
-    """
-    if not config.control_heading_rate_loss_weight:
-        return None
-    states = rollout.geodetic_states
-    dtype, device = states.dtype, states.device
-
-    def cast(value: torch.Tensor) -> torch.Tensor:
-        return value.to(dtype=dtype, device=device)
-
-    predicted_dps = torch.rad2deg(
-        heading_rate_rad_s(
-            states,
-            physical_controls(
-                cast(rollout.actual_controls), cast(dynamics["max_thrust_n"])
-            ),
-            # Per-flight ``[B,6]`` against per-endpoint ``[B,N,7]`` states.
-            cast(dynamics["aero_params"]).unsqueeze(-2),
-        )
-    )
-    target = cast(dynamics["reference_heading_rate_dps"])
-    weight = cast(dynamics["reference_heading_rate_weight"])
-    delta = (predicted_dps - target) / config.control_heading_rate_loss_scale_dps
-    return (delta.square() * weight).sum(dim=1) / weight.sum(dim=1).clamp(min=1.0)
-
-
-def control_bank_total_variation(
-    controls: torch.Tensor, config: TSConfig
-) -> torch.Tensor | None:
-    """Per-flight mean |bank step| between adjacent COMMANDED segments, in half-box units.
-
-    A structural constraint rather than a target: it prices the schedule's roughness
-    without naming a value, so it can only remove the wiggle the teacherless arms grew, not
-    put a shape in. The commanded schedule is the one the head owns — penalising the lagged
-    actual bank would charge the actuator for the command it was given.
-
-    **What it actually prices is REVERSALS, not slope**, and the gradient says so twice.
-    ``|x|`` has subgradient ``sign(x)``, so on any run of segments banking monotonically
-    the interior terms cancel (segment k gets ``+1`` from its left step and ``-1`` from its
-    right) and only the run's two ends are charged: a smooth roll-in costs the same as a
-    step of the same total size, while a wiggle that turns around pays at every turn. At
-    EXACT flatness it is a stationary point — value 0 and gradient 0 together, which is
-    where ``control.heads._initialize_control_head`` starts every run (a zeroed projection
-    makes all N commands identical) — so this term alone never leaves the flat schedule;
-    the position, velocity and heading-rate terms do, and only then does it begin to bind.
-    If arm ③ reads "the TV term changed nothing", that is the live explanation to check
-    first, before concluding the dose was too small.
-    """
-    if not config.control_bank_tv_loss_weight:
-        return None
-    bank = controls[..., BANK_INDEX]
-    return (bank[:, 1:] - bank[:, :-1]).abs().mean(dim=1) / float(
-        CONTROL_HALF_WIDTH[BANK_INDEX]
-    )
-
-
-def _native_endpoint_control_state_loss(
-    prediction: ControlPrediction,
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dynamics: dict[str, torch.Tensor],
-    dense_supervision: FixedDTControlSupervision | None,
-) -> ControlStateLossResult:
-    """Historical loss on learned segment endpoints, isolated from dense supervision."""
-    del dense_supervision
-    command_hook = build_command_hook(config, dynamics)
-    rollout = control_rollout.rollout_control_endpoints(
-        prediction.controls,
-        prediction.segment_durations,
-        dynamics,
-        config,
-        command_hook=command_hook,
-    )
-    physical_channels = rollout.channels
-    dtype, device = physical_channels.dtype, physical_channels.device
-    mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)
-    scale = torch.as_tensor(normalizer.std, dtype=dtype, device=device)
-    normalized_states = (physical_channels - mean) / scale
-    aligned_targets, aligned_weights = align_control_targets_to_prediction_clock(
-        normalized_anchor_state,
-        target_states,
-        state_weights,
-        prediction.segment_durations,
-        target_final_time_s,
-    )
-    state_error = (
-        (normalized_states - aligned_targets) ** 2 * aligned_weights
-    ).sum(dim=(1, 2))
-    state_loss = state_error / aligned_weights.sum(dim=(1, 2)).clamp(min=1.0)
-    def physical_channel_mse(indices, physical_scale: float) -> torch.Tensor:
-        """Weighted per-flight MSE over one channel group, in its own physical unit.
-
-        The supervision weights carry the masking: fitted-tail velocity rows are already
-        zero, so a velocity term never trains on the extrapolated placeholders.
-        """
-        columns = list(indices)
-        weights = aligned_weights[..., columns].sum(dim=-1)
-        delta = (
-            normalized_states[..., columns] - aligned_targets[..., columns]
-        ) * scale[columns]
-        return (
-            (delta.square().sum(dim=-1) * weights).sum(dim=1)
-            / weights.sum(dim=1).clamp(min=1.0)
-            / (physical_scale**2)
-        )
-
-    physical_position_mse = physical_channel_mse(
-        POSITION_IDX, config.position_loss_scale_m
-    )
-    physical_velocity_mse = physical_channel_mse(
-        VELOCITY_IDX, config.control_velocity_loss_scale_mps
-    )
-    return ControlStateLossResult(
-        normalized_mse=state_loss,
-        normalized_segment_end_states=normalized_states,
-        physical_position_mse=physical_position_mse,
-        physical_velocity_mse=physical_velocity_mse,
-        control_imitation_mse=control_imitation_mse(prediction, config, dynamics),
-        control_heading_rate_mse=control_heading_rate_mse(rollout, config, dynamics),
-        control_bank_tv=control_bank_total_variation(prediction.controls, config),
-        aligned_targets=aligned_targets,
-        aligned_weights=aligned_weights,
-        hook_diagnostics=command_hook.diagnostics() if command_hook is not None else {},
-    )
-
-
-def _fixed_dt_control_state_loss(
-    prediction: ControlPrediction,
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dynamics: dict[str, torch.Tensor],
-    dense_supervision: FixedDTControlSupervision | None,
-) -> ControlStateLossResult:
-    """Dense regular-dt strategy; data preparation and rollout live in separate modules."""
-    del normalized_anchor_state, target_states, state_weights, target_final_time_s
-    if dense_supervision is None:
-        raise ValueError("fixed-dt control state loss requires dense supervision targets")
-    from control.loss.fixed_dt import fixed_dt_control_state_loss
-
-    result = fixed_dt_control_state_loss(
-        prediction,
-        dense_supervision,
-        config,
-        normalizer,
-        dynamics,
-    )
-    return ControlStateLossResult(
-        result.per_flight_loss,
-        result.normalized_segment_end_states,
-        result.physical_query_states,
-    )
-
-
-_CONTROL_STATE_LOSS_HANDLERS = {
-    CONTROL_STATE_LOSS_GRID_NATIVE: _native_endpoint_control_state_loss,
-    CONTROL_STATE_LOSS_GRID_FIXED_DT: _fixed_dt_control_state_loss,
-}
-
-
-def control_prediction_loss_terms(
-    prediction: ControlPrediction,
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dynamics: dict[str, torch.Tensor],
-    dense_supervision: FixedDTControlSupervision | None = None,
-    *,
-    multipliers: "ProcedureMultipliers | None" = None,
-) -> ControlLossTerms:
-    """Per-flight state/control terms through the differentiable dynamics rollout."""
-    state_prediction = control_state_supervision_prediction(
-        prediction, target_final_time_s, config
-    )
-    terminal_target = target_states[:, -1]
-    rollout_loss = _CONTROL_STATE_LOSS_HANDLERS[
-        config.control_state_loss_grid
-    ](
-        state_prediction,
-        normalized_anchor_state,
-        target_states,
-        state_weights,
-        target_final_time_s,
-        config,
-        normalizer,
-        dynamics,
-        dense_supervision,
-    )
-    # The final-approach penalty on the ROLLED-OUT states: the same hinge as the state
-    # path, gated by the truth rows aligned to the segment endpoints, so the constraint
-    # reaches the controls through the dynamics — a dynamically admissible path that is
-    # pushed toward the corridor, never a clamped one.
-    procedure_extra: dict[str, torch.Tensor] = {}
-    procedure_diagnostics: dict[str, torch.Tensor] = {}
-    if config.procedure_loss_active:
-        # TSConfig admits the penalty on the native grid only, which fills these.
-        procedure, procedure_diagnostics = procedure_loss(
-            rollout_loss.normalized_segment_end_states,
-            rollout_loss.aligned_targets,
-            rollout_loss.aligned_weights[..., list(POSITION_IDX)].sum(dim=-1),
-            config,
-            normalizer,
-            dynamics,
-            multipliers,
-        )
-        procedure_extra = {"procedure": procedure}
-    time_loss = (
-        (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
-    ).square()
-    tracking = control_tracking_loss_terms(
-        rollout_loss,
-        normalized_anchor_state,
-        terminal_target,
-        config,
-        normalizer,
-        dense_supervision,
-    )
-
-    return ControlLossTerms(
-        state=tracking.state,
-        final_time=config.final_time_loss_weight * time_loss,
-        terminal=tracking.terminal_position,
-        extras={**tracking.extras, **procedure_extra},
-        diagnostics={**rollout_loss.hook_diagnostics, **procedure_diagnostics},
-    )
-
-
-def control_prediction_loss_components(
-    prediction: ControlPrediction,
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    flight_weights: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dynamics: dict[str, torch.Tensor],
-    dense_supervision: FixedDTControlSupervision | None = None,
-    *,
-    multipliers: "ProcedureMultipliers | None" = None,
-) -> LossComponents:
-    terms = control_prediction_loss_terms(
-        prediction,
-        normalized_anchor_state,
-        target_states,
-        state_weights,
-        target_final_time_s,
-        config,
-        normalizer,
-        dynamics,
-        dense_supervision,
-        multipliers=multipliers,
-    )
-
-    def weighted_mean(values: torch.Tensor) -> torch.Tensor:
-        return (values * flight_weights).mean()
-
-    zero = weighted_mean(terms.state.new_zeros(terms.state.shape))
-    return LossComponents(
-        state=weighted_mean(terms.state),
-        final_time=weighted_mean(terms.final_time),
-        # State/velocity consistency is structural because both come from one dynamics rollout.
-        kinematic=zero,
-        terminal=weighted_mean(terms.terminal),
-        extras={
-            name: weighted_mean(value)
-            for name, value in terms.extras.items()
-        },
-        diagnostics=terms.diagnostics,
-    )
-
-
-def _sample_uniform_progress_nodes(
-    nodes: torch.Tensor,
-    query_progress: torch.Tensor,
-) -> torch.Tensor:
-    """Differentiably sample ``[B,N+1,D]`` nodes defined at progress ``0..1``."""
-    if nodes.ndim != 3 or query_progress.ndim != 2:
-        raise ValueError("progress sampling requires [B,N+1,D] nodes and [B,Q] queries")
-    if nodes.shape[0] != query_progress.shape[0] or nodes.shape[1] < 2:
-        raise ValueError("progress sampling batch/segment shapes do not align")
-    segments = nodes.shape[1] - 1
-    scaled = query_progress.clamp(min=0.0, max=1.0) * segments
-    left = torch.floor(scaled).to(torch.long).clamp(max=segments - 1)
-    fraction = (scaled - left.to(scaled.dtype)).unsqueeze(-1)
-    gather_index = left.unsqueeze(-1).expand(-1, -1, nodes.shape[-1])
-    left_values = torch.gather(nodes, 1, gather_index)
-    right_values = torch.gather(nodes, 1, gather_index + 1)
-    return left_values + fraction * (right_values - left_values)
-
-
-@dataclass
-class ProcedureMultipliers:
-    """The procedure penalty's weights λ, one per constraint family.
-
-    Fixed at the configured weights when ``procedure_loss_dual_step`` is zero; otherwise
-    the dual variables of ``min L_pred  s.t.  violation rate ≤ ε``, raised once per epoch
-    by the measured excess (dual ascent on the RATE, with the hinge² as the primal
-    surrogate), so the weight is found rather than swept.
-    """
-
-    lateral: float
-    vertical: float
-
-    @classmethod
-    def from_config(cls, config: TSConfig) -> "ProcedureMultipliers | None":
-        if not config.procedure_loss_active:
-            return None
-        return cls(
-            lateral=config.procedure_loss_lateral_weight,
-            vertical=config.procedure_loss_vertical_weight,
-        )
-
-    def update(self, lateral_rate: float, vertical_rate: float, config: TSConfig) -> None:
-        step = config.procedure_loss_dual_step
-        if step <= 0.0:
-            return
-        self.lateral = max(0.0, self.lateral + step * (lateral_rate - config.procedure_loss_epsilon))
-        self.vertical = max(0.0, self.vertical + step * (vertical_rate - config.procedure_loss_epsilon))
-
-    def to_dict(self) -> dict[str, float]:
-        return {"lateral": self.lateral, "vertical": self.vertical}
-
-
-PROCEDURE_DIAGNOSTICS = (
-    "procedure_gated_rows", "procedure_lateral_violations", "procedure_vertical_violations",
-)
-
-
-def procedure_loss(
-    predicted_states: torch.Tensor,
-    target_states: torch.Tensor,
-    point_weights: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dynamics: dict[str, torch.Tensor] | None,
-    multipliers: ProcedureMultipliers | None,
-) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-    """The final-approach penalty, PER FLIGHT ``[B]``: metres outside the corridor /
-    glidepath window, squared at the runway scale, on rows where the OBSERVED track is
-    established (the truth gate), weighted by λ — and the counts the dual update needs.
-    ``predicted_states`` are normalized rows aligned index-for-index with ``target_states``
-    (the state output, or a control rollout's segment endpoints).
-
-    Rows are paired by index: the same physical time under the ``full``/``window`` grids,
-    the same progress fraction under ``normalized``. The gate is decided by the truth row
-    (and a predicted row already past the threshold, ``d ≤ 0``, is not charged — it is
-    truncated at inference), the violation measured on the predicted row, so a model that
-    is early or late onto the final is charged where the flight actually was on it.
-    """
-    if not config.procedure_loss_active:
-        return point_weights.new_zeros(point_weights.shape[0]), {}
-    if dynamics is None:
-        raise ValueError(
-            "the procedure loss needs the per-flight final-approach context in the batch"
-        )
-    dtype, device = predicted_states.dtype, predicted_states.device
-    mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)
-    std = torch.as_tensor(normalizer.std, dtype=dtype, device=device)
-    predicted = predicted_states * std + mean
-    truth = target_states.to(dtype) * std + mean
-    psi = dynamics["runway_heading_rad"].to(dtype)
-    tan_gpa = dynamics["glidepath_tan"].to(dtype)
-    valid = point_weights > 0.0
-    d_truth, xt_truth = runway_axes(truth[..., IDX["e"]], truth[..., IDX["n"]], psi)
-    d_pred, xt_pred = runway_axes(predicted[..., IDX["e"]], predicted[..., IDX["n"]], psi)
-    gate = truth_final_gate(d_truth, xt_truth, valid) & (d_pred > 0.0)
-    lateral_m, vertical_m = corridor_violations(d_pred, xt_pred, predicted[..., IDX["u"]], tan_gpa)
-    gate_weight = gate.to(dtype)
-    gated_rows = gate_weight.sum(dim=1)
-    lateral_sq = ((lateral_m / config.procedure_loss_lateral_scale_m) ** 2 * gate_weight).sum(dim=1)
-    vertical_sq = ((vertical_m / config.procedure_loss_vertical_scale_m) ** 2 * gate_weight).sum(dim=1)
-    per_flight_lateral = lateral_sq / gated_rows.clamp(min=1.0)
-    per_flight_vertical = vertical_sq / gated_rows.clamp(min=1.0)
-    weights = multipliers or ProcedureMultipliers.from_config(config)
-    term = weights.lateral * per_flight_lateral + weights.vertical * per_flight_vertical
-    diagnostics = {
-        "procedure_gated_rows": gate.sum().detach(),
-        "procedure_lateral_violations": ((lateral_m > 0.0) & gate).sum().detach(),
-        "procedure_vertical_violations": ((vertical_m > 0.0) & gate).sum().detach(),
-    }
-    return term, diagnostics
-
-
-def state_prediction_loss_components(
-    prediction: StatePrediction,
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    flight_weights: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dynamics: dict[str, torch.Tensor] | None = None,
-    dense_supervision: FixedDTControlSupervision | None = None,
-    *,
-    multipliers: ProcedureMultipliers | None = None,
-) -> LossComponents:
-    """Return the direct-state physical-position/time airport-macro objective."""
-    del dense_supervision
-    if prediction.states.shape != target_states.shape:
-        raise ValueError("state prediction and target tensors must align")
-
-    position_indices = list(POSITION_IDX)
-    position_std = torch.as_tensor(
-        normalizer.std[position_indices],
-        dtype=prediction.states.dtype,
-        device=prediction.states.device,
-    )
-    predicted_position = prediction.states[..., position_indices]
-    target_position = target_states[..., position_indices]
-    point_weights = state_weights[..., position_indices].sum(dim=-1)
-
-    # The output endpoint is the last position carrying supervision, not necessarily the
-    # final tensor row: fixed-horizon targets can contain a padded suffix. This is a second
-    # task over the same physical target, not a runway-centre prior or a fitted trajectory.
-    valid_position = point_weights > 0.0
-    if not torch.all(valid_position.any(dim=1)):
-        raise ValueError("every state target must contain a supervised position endpoint")
-    if torch.any(valid_position[:, 1:] & ~valid_position[:, :-1]):
-        raise ValueError("supervised state positions must form a contiguous prefix")
-    last_index = valid_position.sum(dim=1) - 1
-    gather_index = last_index[:, None, None].expand(-1, 1, len(position_indices))
-    predicted_endpoint = torch.gather(predicted_position, 1, gather_index).squeeze(1)
-    target_endpoint = torch.gather(target_position, 1, gather_index).squeeze(1)
-
-    if config.horizon_mode == HORIZON_NORMALIZED:
-        points = config.validation_common_grid_points
-        progress = torch.arange(
-            1,
-            points + 1,
-            dtype=prediction.states.dtype,
-            device=prediction.states.device,
-        ) / points
-        truth_progress = progress.unsqueeze(0).expand(len(target_states), -1)
-        prediction_progress = (
-            truth_progress
-            * target_final_time_s.unsqueeze(1)
-            / prediction.final_time_s.unsqueeze(1).clamp(min=1e-6)
-        ).clamp(min=0.0, max=1.0)
-        anchor_position = normalized_anchor_state[:, None, position_indices]
-        predicted_nodes = torch.cat((anchor_position, predicted_position), dim=1)
-        target_nodes = torch.cat((anchor_position, target_position), dim=1)
-        anchor_weight = point_weights[:, :1]
-        weight_nodes = torch.cat((anchor_weight, point_weights), dim=1)
-        predicted_position = _sample_uniform_progress_nodes(
-            predicted_nodes, prediction_progress
-        )
-        target_position = _sample_uniform_progress_nodes(
-            target_nodes, truth_progress
-        )
-        point_weights = _sample_uniform_progress_nodes(
-            weight_nodes.unsqueeze(-1), truth_progress
-        ).squeeze(-1)
-
-    physical_delta = (predicted_position - target_position) * position_std
-    squared_distance = physical_delta.square().sum(dim=-1)
-    state_loss = (
-        (squared_distance * point_weights).sum(dim=1)
-        / point_weights.sum(dim=1).clamp(min=1e-12)
-        / (config.position_loss_scale_m**2)
-    )
-    endpoint_delta = (predicted_endpoint - target_endpoint) * position_std
-    endpoint_loss = (
-        endpoint_delta.square().sum(dim=-1)
-        / (config.position_loss_scale_m**2)
-    )
-    time_loss = (
-        (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
-    ).square()
-    zero = state_loss.new_zeros(state_loss.shape)
-    # On the row grid (not the resampled progress nodes): the gate is a per-row decision.
-    procedure, procedure_diagnostics = procedure_loss(
-        prediction.states,
-        target_states,
-        state_weights[..., position_indices].sum(dim=-1),
-        config,
-        normalizer,
-        dynamics,
-        multipliers,
-    )
-
-    def weighted_mean(values: torch.Tensor) -> torch.Tensor:
-        return (values * flight_weights).mean()
-
-    return LossComponents(
-        state=weighted_mean(state_loss),
-        final_time=config.final_time_loss_weight * weighted_mean(time_loss),
-        kinematic=weighted_mean(zero),
-        terminal=config.state_endpoint_loss_weight * weighted_mean(endpoint_loss),
-        extras={"procedure": weighted_mean(procedure)},
-        diagnostics=procedure_diagnostics,
-    )
-
-
-def _control_loss_adapter(
-    prediction,
-    normalized_anchor_state,
-    target_states,
-    state_weights,
-    target_final_time_s,
-    flight_weights,
-    config,
-    normalizer,
-    dynamics,
-    dense_supervision,
-    *,
-    multipliers: ProcedureMultipliers | None = None,
-) -> LossComponents:
-    if dynamics is None:
-        raise ValueError("control prediction loss requires per-flight dynamics")
-    return control_prediction_loss_components(
-        prediction,
-        normalized_anchor_state,
-        target_states,
-        state_weights,
-        target_final_time_s,
-        flight_weights,
-        config,
-        normalizer,
-        dynamics,
-        dense_supervision,
-        multipliers=multipliers,
-    )
-
-
-def _latent_control_loss_adapter(
-    prediction: LatentControlPrediction,
-    normalized_anchor_state,
-    target_states,
-    state_weights,
-    target_final_time_s,
-    flight_weights,
-    config,
-    normalizer,
-    dynamics,
-    dense_supervision,
-    *,
-    multipliers: ProcedureMultipliers | None = None,
-) -> LossComponents:
-    """The control objective on the decoded schedule, plus the latent's KL term."""
-    components = _control_loss_adapter(
-        prediction, normalized_anchor_state, target_states, state_weights,
-        target_final_time_s, flight_weights, config, normalizer, dynamics,
-        dense_supervision, multipliers=multipliers,
-    )
-    return with_latent_kl(components, prediction, config, flight_weights)
-
-
-PredictionLossHandler = Callable[..., LossComponents]
-PREDICTION_LOSS_HANDLERS: dict[type, PredictionLossHandler] = {
-    StatePrediction: state_prediction_loss_components,
-    ControlPrediction: _control_loss_adapter,
-    LatentControlPrediction: _latent_control_loss_adapter,
-    ClosurePrediction: closure_loss_components,
-}
-
-
-def prediction_loss_components(
-    prediction: StatePrediction | ControlPrediction,
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    flight_weights: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dynamics: dict[str, torch.Tensor] | None = None,
-    dense_supervision: FixedDTControlSupervision | None = None,
-    *,
-    multipliers: ProcedureMultipliers | None = None,
-) -> LossComponents:
-    """Dispatch the configured output contract to its isolated objective."""
-    try:
-        handler = PREDICTION_LOSS_HANDLERS[type(prediction)]
-    except KeyError as error:
-        raise TypeError(
-            f"unsupported prediction type: {type(prediction).__name__}"
-        ) from error
-    return handler(
-        prediction,
-        normalized_anchor_state,
-        target_states,
-        state_weights,
-        target_final_time_s,
-        flight_weights,
-        config,
-        normalizer,
-        dynamics,
-        dense_supervision,
-        multipliers=multipliers,
-    )
-
-
-def prediction_loss(
-    prediction: StatePrediction | ControlPrediction,
-    normalized_anchor_state: torch.Tensor,
-    target_states: torch.Tensor,
-    state_weights: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    flight_weights: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dynamics: dict[str, torch.Tensor] | None = None,
-    dense_supervision: FixedDTControlSupervision | None = None,
-) -> torch.Tensor:
-    """Airport-macro state/time/physics loss, one sample per flight and epoch."""
-    # Weights are normalized to mean one across the complete epoch. Keeping the minibatch
-    # denominator independent of its airport composition gives an unbiased stochastic
-    # estimate of that fixed airport-macro objective.
-    return prediction_loss_components(
-        prediction,
-        normalized_anchor_state,
-        target_states,
-        state_weights,
-        target_final_time_s,
-        flight_weights,
-        config,
-        normalizer,
-        dynamics,
-        dense_supervision,
-    ).total
 
 
 @dataclass
@@ -1151,6 +122,11 @@ class EpochResult:
     validation_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE
     validation_selection_value: float | None = None
     validation_selection_by_airport: dict[str, float] = field(default_factory=dict)
+    # The anchor-grid metric's per-anchor-set record: the five sets it averages, each with
+    # the flights that HAVE that anchor and the common-grid ADE over them, so the shape of
+    # the anytime curve is visible during training and not only after a replay. Empty for
+    # every other selection metric.
+    validation_anchor_grid: dict[str, Any] = field(default_factory=dict)
     train_anchor_sampling: dict[str, Any] = field(default_factory=dict)
     control_training_diagnostics: dict[str, Any] = field(default_factory=dict)
     timing: dict[str, float] = field(default_factory=dict)
@@ -1163,10 +139,11 @@ class EpochResult:
     # the step count (per-step shares and per-step means, whatever the hook counts), plus
     # ``steps`` itself.
     command_hook: dict[str, float] = field(default_factory=dict)
-    # The latent intent's epoch record (control/latent.py): KL nats per flight and the number
-    # of latent dimensions carrying more than ACTIVE_UNIT_KL_NATS — the posterior-collapse
-    # reading, which looks exactly like "converged" on every other number.
-    latent: dict[str, float] = field(default_factory=dict)
+    # The latent intent's epoch record (control/latent.latent_epoch_record): the KL charged
+    # and its analytic per-dimension form, the KL's mean/variance split, the posterior mean's
+    # displacement from the prior mean in prior sigmas, and the active-unit counts — the
+    # posterior-collapse reading, which looks exactly like "converged" on every other number.
+    latent: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -1186,329 +163,6 @@ class FitResult:
     # The teacher table this fit supervised its imitation term with, parsed ONCE by
     # ``fit_model`` and handed back so the caller can stamp its digest without reopening it.
     fitted_teacher: FittedTeacherTable | None = None
-
-
-@dataclass(frozen=True)
-class SplitPredictionReplay:
-    """One immutable deployable prediction pass reused by every metric view."""
-
-    predicted: np.ndarray
-    truth: np.ndarray
-    mask: np.ndarray
-    predicted_time_s: np.ndarray
-    truth_time_s: np.ndarray
-    anchors: np.ndarray
-    segment_durations_s: np.ndarray
-
-
-def _prediction_batch_replay(
-    output: StatePrediction | ControlPrediction,
-    x: torch.Tensor,
-    y: torch.Tensor,
-    mask: torch.Tensor,
-    final_time_s: torch.Tensor,
-    dynamics: dict[str, torch.Tensor] | None,
-    dataset: TrajectoryWindows,
-) -> SplitPredictionReplay:
-    """Materialize deployable physical arrays from an already-computed model output."""
-    metric_targets = y
-    metric_weights = mask
-    if uses_control_dynamics(dataset.config.prediction_output):
-        deployable = output
-        if dynamics is None:
-            raise ValueError("control replay requires per-flight dynamics")
-        points = dataset.config.validation_common_grid_points
-        progress = torch.arange(
-            1,
-            points + 1,
-            dtype=torch.float64,
-            device=deployable.segment_durations.device,
-        ) / points
-        predicted_total_s = deployable.segment_durations.to(torch.float64).sum(dim=1)
-        query_offsets_s = predicted_total_s.unsqueeze(1) * progress.unsqueeze(0)
-        query_valid = torch.ones_like(query_offsets_s, dtype=torch.bool)
-        rollout = control_rollout.rollout_control_dense(
-            deployable.controls,
-            deployable.segment_durations,
-            dynamics,
-            query_offsets_s,
-            query_valid,
-            dataset.config,
-            command_hook=build_command_hook(dataset.config, dynamics),
-        )
-        predicted_physical = (
-            rollout.query_channels.detach().cpu().numpy().astype(np.float32)
-        )
-        metric_targets, metric_weights = align_control_targets_to_query_clock(
-            anchor_state(x, len(dataset.config.channels)),
-            y,
-            mask,
-            query_offsets_s,
-            final_time_s,
-        )
-        segment_durations_s = np.broadcast_to(
-            (
-                predicted_total_s.detach().cpu().numpy().astype(np.float64)
-                / points
-            )[:, None],
-            (len(x), points),
-        ).copy()
-        predicted_time_s = deployable.final_time_s.detach().cpu().numpy()
-    elif isinstance(output, ClosurePrediction):
-        # Drawn, not rolled out: every decision reconstructed in numpy and sampled on the
-        # target grid's fractions of its own duration (the context carries the course).
-        if dynamics is None:
-            raise ValueError("closure replay requires the per-flight label context")
-        anchors_physical = dataset.normalizer.decode(
-            anchor_state(x, len(dataset.config.channels))
-            .detach().cpu().numpy().astype(np.float64)
-        )
-        predicted_physical, segment_durations_s, predicted_time_s = closure_replay_batch(
-            output, anchors_physical, dynamics, dataset.config, dataset.config.pred_len
-        )
-    else:
-        if not isinstance(output, StatePrediction):
-            raise TypeError("state replay requires StatePrediction")
-        out = output.states.detach().cpu().numpy()
-        predicted_physical = dataset.normalizer.decode(
-            out.astype(np.float64)
-        ).astype(np.float32)
-        segment_durations_s = numpy_inference_time_grid(
-            output.final_time_s.detach().cpu().numpy(), dataset.config
-        )[0]
-        predicted_time_s = output.final_time_s.detach().cpu().numpy()
-
-    # Decode in float64 (the normalizer stats' dtype), store float32: a pooled split is
-    # tens of thousands of [N,C] windows and metre-scale metrics do not need float64 storage.
-    truth = dataset.normalizer.decode(
-        metric_targets.detach().cpu().numpy().astype(np.float64)
-    ).astype(np.float32)
-    anchors = dataset.normalizer.decode(
-        anchor_state(x, len(dataset.config.channels))
-        .detach().cpu().numpy().astype(np.float64)
-    ).astype(np.float32)
-    if dataset.config.prediction_output == PREDICTION_STATE:
-        # The state output predicts positions + duration only; the control rollout and
-        # the closure reconstruction both carry exact velocities.
-        predicted_physical = states_with_derived_velocity(
-            anchors,
-            predicted_physical,
-            segment_durations_s,
-        ).astype(np.float32)
-    raw_mask = metric_weights.detach().cpu().numpy()
-    if raw_mask.ndim == 3:
-        raw_mask = np.all(raw_mask > 0.0, axis=-1).astype(np.float32)
-    return SplitPredictionReplay(
-        predicted=predicted_physical,
-        truth=truth,
-        mask=raw_mask,
-        predicted_time_s=predicted_time_s,
-        truth_time_s=final_time_s.detach().cpu().numpy(),
-        anchors=anchors,
-        segment_durations_s=segment_durations_s,
-    )
-
-
-def _merge_prediction_replays(
-    chunks: Sequence[tuple[np.ndarray, SplitPredictionReplay]],
-    *,
-    count: int,
-) -> SplitPredictionReplay:
-    """Restore dataset order after validation-only duration bucketing."""
-    if not chunks:
-        raise ValueError("prediction replay requires at least one batch")
-    indices = np.concatenate([item[0] for item in chunks])
-    order = np.argsort(indices, kind="stable")
-    if not np.array_equal(indices[order], np.arange(count, dtype=np.int64)):
-        raise ValueError("prediction replay indices must cover the dataset exactly once")
-
-    def merged(name: str) -> np.ndarray:
-        return np.concatenate(
-            [getattr(item[1], name) for item in chunks], axis=0
-        )[order]
-
-    return SplitPredictionReplay(
-        predicted=merged("predicted"),
-        truth=merged("truth"),
-        mask=merged("mask"),
-        predicted_time_s=merged("predicted_time_s"),
-        truth_time_s=merged("truth_time_s"),
-        anchors=merged("anchors"),
-        segment_durations_s=merged("segment_durations_s"),
-    )
-
-
-def _predict_split(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    normalizer: Normalizer,
-    device: torch.device,
-    batch_size: int,
-) -> SplitPredictionReplay:
-    """Return physical anchor/output arrays, masks, predicted time and true time."""
-    model.eval()
-    chunks: list[tuple[np.ndarray, SplitPredictionReplay]] = []
-    cursor = 0
-    with torch.no_grad():
-        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
-            (
-                x,
-                y,
-                mask,
-                final_time_s,
-                _flight_weights,
-                dynamics,
-                _dense_supervision,
-            ) = unpack_batch(raw_batch)
-            x_device = x.to(device)
-            y_device = y.to(device)
-            mask_device = mask.to(device)
-            final_time_device = final_time_s.to(device)
-            dynamics_device = move_dynamics(dynamics, device)
-            output = model_forward(model, x_device, dynamics_device)
-            batch_replay = _prediction_batch_replay(
-                output,
-                x_device,
-                y_device,
-                mask_device,
-                final_time_device,
-                dynamics_device,
-                dataset,
-            )
-            batch_count = len(x)
-            chunks.append(
-                (np.arange(cursor, cursor + batch_count, dtype=np.int64), batch_replay)
-            )
-            cursor += batch_count
-    return _merge_prediction_replays(
-        chunks,
-        count=len(dataset),
-    )
-
-
-def evaluate_split(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    *,
-    replay: SplitPredictionReplay | None = None,
-) -> dict[str, Any]:
-    """Formal fixed-anchor metrics on the common true-physical-time grid."""
-    replay = replay or _predict_split(
-        model, dataset, normalizer, device, config.batch_size
-    )
-    block = fixed_anchor_common_grid_report_metrics(
-        dataset.series,
-        config,
-        replay.anchors,
-        replay.predicted,
-        replay.predicted_time_s,
-        replay.segment_durations_s,
-        points=config.validation_common_grid_points,
-    )
-    indices_by_airport: dict[str, list[int]] = {}
-    for index, item in enumerate(dataset.series):
-        indices_by_airport.setdefault(item.airport or "<unknown>", []).append(index)
-    by_airport: dict[str, dict[str, Any]] = {}
-    for airport, indices in sorted(indices_by_airport.items()):
-        selected = np.asarray(indices, dtype=np.int64)
-        airport_block = fixed_anchor_common_grid_report_metrics(
-            [dataset.series[index] for index in indices],
-            config,
-            replay.anchors[selected],
-            replay.predicted[selected],
-            replay.predicted_time_s[selected],
-            replay.segment_durations_s[selected],
-            points=config.validation_common_grid_points,
-        )
-        by_airport[airport] = {
-            key: airport_block[key]
-            for key in (
-                "flights",
-                "ade_m",
-                "fde_m",
-                "arrival_endpoint_error_m",
-                "horizontal_m",
-                "along_track_m",
-                "cross_track_m",
-                "vertical_m",
-                "final_time_s",
-                "prediction_horizon_cap_rate",
-                "invalid_flights",
-            )
-        }
-    block["flight_micro_ade_m"] = block["ade_m"]
-    block["flight_micro_fde_m"] = block["fde_m"]
-    block["per_airport"] = by_airport
-    block["airport_macro"] = {
-        "ade_m": float(np.mean([item["ade_m"] for item in by_airport.values()])),
-        "fde_m": float(np.mean([item["fde_m"] for item in by_airport.values()])),
-        "arrival_endpoint_error_m": float(np.mean([
-            item["arrival_endpoint_error_m"]["mean"]
-            for item in by_airport.values()
-        ])),
-        "final_time_mae_s": float(np.mean([
-            item["final_time_s"]["mae"] for item in by_airport.values()
-        ])),
-    }
-    # Compatibility scalar names now point at the single formal airport-macro score.
-    block["ade_m"] = block["airport_macro"]["ade_m"]
-    block["fde_m"] = block["airport_macro"]["fde_m"]
-    # Raw model nodes on their own predicted clock: no measured-track interpolation,
-    # spline, filtering or CZML resampling. Durations are explicit [B,N] so this call site
-    # remains valid when the output layer moves from uniform to nonuniform segments.
-    active_segments = replay.segment_durations_s > 0.0
-    block["raw_kinematics"] = raw_kinematic_metrics(
-        replay.anchors,
-        replay.predicted,
-        replay.segment_durations_s,
-        valid_segments=active_segments,
-    )
-    observed_nodes, observed_duration_s, _ = fixed_anchor_common_truth(
-        dataset.series, config, replay.predicted.shape[1]
-    )
-    observed_segment_durations_s = np.broadcast_to(
-        (observed_duration_s / replay.predicted.shape[1])[:, None],
-        replay.segment_durations_s.shape,
-    ).copy()
-    block["raw_kinematics_observed_baseline"] = raw_kinematic_metrics(
-        replay.anchors,
-        observed_nodes,
-        observed_segment_durations_s,
-    )
-    return block
-
-
-def evaluate_fixed_anchor_common_grid(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    *,
-    replay: SplitPredictionReplay | None = None,
-) -> dict[str, Any]:
-    """Deployable fixed-anchor metrics on one shared physical-time grid."""
-    replay = replay or _predict_split(
-        model, dataset, normalizer, device, config.batch_size
-    )
-    block = fixed_anchor_common_grid_metrics(
-        dataset.series,
-        config,
-        replay.anchors,
-        replay.predicted,
-        replay.predicted_time_s,
-        replay.segment_durations_s,
-        points=config.validation_common_grid_points,
-        normalizer=normalizer,
-    )
-    return {
-        key: value
-        for key, value in block.items()
-        if not isinstance(value, np.ndarray)
-    }
 
 
 def _generalization_metric(train_value: float, val_value: float) -> dict[str, float | None]:
@@ -1633,9 +287,9 @@ def evaluate_fit_splits(
             ),
         }
     }
-    objective = _training_objective_diagnostics(history, config)
-    if objective is not None:
-        diagnostics["training_objective"] = objective
+    training_objective = _training_objective_diagnostics(history, config)
+    if training_objective is not None:
+        diagnostics["training_objective"] = training_objective
 
     return {
         "schema_version": FIT_EVALUATION_SCHEMA,
@@ -1671,13 +325,13 @@ def evaluate_fixed_anchor_series(
         raise ValueError(
             f"fixed-anchor {split_name} replay covers {len(dataset)}/{len(series)} flights"
         )
-    replay = _predict_split(model, dataset, normalizer, device, config.batch_size)
+    replay = predict_split(model, dataset, normalizer, device, config.batch_size)
     formal_metrics = evaluate_split(
         model, dataset, normalizer, config, device, replay=replay
     )
     common_grid_metrics = (
         formal_metrics
-        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE
+        if config.checkpoint_selection_metric in CHECKPOINT_SELECTION_COMMON_GRID_METRICS
         else evaluate_fixed_anchor_common_grid(
             model, dataset, normalizer, config, device, replay=replay
         )
@@ -1775,483 +429,6 @@ def filter_training_cohort(
     return retained, audit
 
 
-def _validation_datasets(
-    series: Sequence[FlightSeries],
-    config: TSConfig,
-    normalizer: Normalizer,
-    *,
-    minimum_anchor_index: int | None = None,
-    fitted_teacher: FittedTeacherTable | None = None,
-) -> dict[str, TrajectoryWindows]:
-    by_airport: dict[str, list[FlightSeries]] = {}
-    for item in series:
-        by_airport.setdefault(item.airport or "<unknown>", []).append(item)
-    return {
-        airport: FixedAnchorTrajectoryWindows(
-            group,
-            config,
-            normalizer,
-            minimum_anchor_index=minimum_anchor_index,
-            fitted_teacher=fitted_teacher,
-        )
-        for airport, group in sorted(by_airport.items())
-    }
-
-
-VALIDATION_DURATION_BUCKETS_S = (180.0, 360.0, 600.0)
-
-
-@dataclass(frozen=True)
-class ValidationBatch:
-    indices: np.ndarray
-    raw_batch: tuple
-    bucket: str
-    query_points: int
-
-
-@dataclass(frozen=True)
-class ValidationBatchPlan:
-    """Cached, validation-only batches grouped by fixed-anchor remaining duration."""
-
-    dataset: TrajectoryWindows
-    batches: tuple[ValidationBatch, ...]
-    bucket_flights: dict[str, int]
-    common_truth: CommonGridTruth | None
-
-    @property
-    def flights(self) -> int:
-        return len(self.dataset)
-
-    @property
-    def query_points(self) -> int:
-        return sum(batch.query_points for batch in self.batches)
-
-
-def _duration_bucket_label(bucket: int) -> str:
-    lower = 0.0 if bucket == 0 else VALIDATION_DURATION_BUCKETS_S[bucket - 1]
-    if bucket < len(VALIDATION_DURATION_BUCKETS_S):
-        upper = VALIDATION_DURATION_BUCKETS_S[bucket]
-        return f"({lower:g},{upper:g}]s"
-    return f"({lower:g},inf)s"
-
-
-def build_validation_batch_plan(
-    dataset: TrajectoryWindows,
-    batch_size: int,
-    *,
-    duration_bucketed: bool = False,
-) -> ValidationBatchPlan:
-    """Build each fixed validation tensor once; optionally group no-grad rows by duration."""
-    if not isinstance(dataset, FixedAnchorTrajectoryWindows):
-        raise TypeError("validation batching requires a fixed-anchor dataset")
-    durations = np.asarray([
-        dataset.series[series_index].supervision_times[-1]
-        - dataset.series[series_index].times[anchor]
-        for series_index, anchor in dataset.index
-    ], dtype=np.float64)
-    bucket_ids = (
-        np.searchsorted(
-            np.asarray(VALIDATION_DURATION_BUCKETS_S, dtype=np.float64),
-            durations,
-            side="left",
-        )
-        if duration_bucketed
-        else np.zeros(len(dataset), dtype=np.int64)
-    )
-    batches: list[ValidationBatch] = []
-    bucket_flights: dict[str, int] = {}
-    bucket_count = len(VALIDATION_DURATION_BUCKETS_S) + 1 if duration_bucketed else 1
-    for bucket in range(bucket_count):
-        indices = np.flatnonzero(bucket_ids == bucket).astype(np.int64, copy=False)
-        if not len(indices):
-            continue
-        label = _duration_bucket_label(bucket) if duration_bucketed else "unbucketed"
-        bucket_flights[label] = len(indices)
-        for start in range(0, len(indices), batch_size):
-            batch_indices = indices[start : start + batch_size]
-            raw_batch = dataset.batch(batch_indices)
-            dense = unpack_batch(raw_batch)[-1]
-            query_points = (
-                int(dense.valid.sum())
-                if dense is not None
-                else len(batch_indices) * dataset.config.pred_len
-            )
-            batches.append(
-                ValidationBatch(
-                    indices=batch_indices,
-                    raw_batch=raw_batch,
-                    bucket=label,
-                    query_points=query_points,
-                )
-            )
-    covered = (
-        np.concatenate([batch.indices for batch in batches])
-        if batches else np.array([], dtype=np.int64)
-    )
-    if not np.array_equal(np.sort(covered), np.arange(len(dataset), dtype=np.int64)):
-        raise ValueError("validation duration buckets must cover every row exactly once")
-    return ValidationBatchPlan(
-        dataset=dataset,
-        batches=tuple(batches),
-        bucket_flights=bucket_flights,
-        common_truth=(
-            fixed_anchor_common_truth(
-                dataset.series,
-                dataset.config,
-                dataset.config.validation_common_grid_points,
-            )
-            if dataset.config.checkpoint_selection_metric
-            == CHECKPOINT_SELECTION_COMMON_GRID_ADE
-            else None
-        ),
-    )
-
-
-@dataclass(frozen=True)
-class ValidationAirportEvaluation:
-    components: dict[str, float]
-    replay: SplitPredictionReplay
-    profile: dict[str, Any]
-
-
-def _evaluate_validation_airport(
-    model: nn.Module,
-    plan: ValidationBatchPlan,
-    device: torch.device,
-    *,
-    profiler: EpochProfiler | None = None,
-    multipliers: ProcedureMultipliers | None = None,
-) -> ValidationAirportEvaluation:
-    """Evaluate both validation clocks from one model forward per cached batch."""
-    dataset = plan.dataset
-    names = loss_component_names(dataset.config)
-    component_totals = {name: 0.0 for name in names}
-    flight_weight_total = 0.0
-    replay_chunks: list[tuple[np.ndarray, SplitPredictionReplay]] = []
-    started = time.perf_counter()
-    with torch.no_grad():
-        for batch in plan.batches:
-            section = profiler.section if profiler is not None else None
-            data_context = section("val_data_s") if section else nullcontext()
-            with data_context:
-                (
-                    x,
-                    y,
-                    mask,
-                    final_time_s,
-                    flight_weights,
-                    dynamics,
-                    dense_supervision,
-                ) = unpack_batch(batch.raw_batch)
-                x, y, mask = x.to(device), y.to(device), mask.to(device)
-                final_time_s = final_time_s.to(device)
-                flight_weights = flight_weights.to(device)
-                dynamics = move_dynamics(dynamics, device)
-                dense_supervision = move_fixed_dt_supervision(
-                    dense_supervision, device
-                )
-            objective_context = (
-                section("val_objective_s") if section else nullcontext()
-            )
-            with objective_context:
-                prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
-                components = prediction_loss_components(
-                    prediction,
-                    anchor_state(x, len(dataset.config.channels)),
-                    y,
-                    mask,
-                    final_time_s,
-                    flight_weights,
-                    dataset.config,
-                    dataset.normalizer,
-                    dynamics,
-                    dense_supervision,
-                    multipliers=multipliers,
-                )
-            for name, value in components.tensors().items():
-                component_totals[name] += float(value) * len(flight_weights)
-            flight_weight_total += float(flight_weights.sum())
-            selection_context = (
-                section("val_checkpoint_selection_s") if section else nullcontext()
-            )
-            with selection_context:
-                # The DEPLOYABLE replay: what the checkpoint predicts without the
-                # truth's future. A latent model's objective forward above decoded a
-                # posterior sample (it read the future); the replay the fixed-anchor
-                # selection metrics score must be the prior top-1 decode. (The
-                # objective-based selection metric would still read the posterior —
-                # config refuses it for a latent run.)
-                deployable = (
-                    model_forward(model, x, dynamics)
-                    if getattr(model, "consumes_future", False) else prediction
-                )
-                replay_chunks.append((
-                    batch.indices,
-                    _prediction_batch_replay(
-                        deployable,
-                        x,
-                        y,
-                        mask,
-                        final_time_s,
-                        dynamics,
-                        dataset,
-                    ),
-                ))
-    denominator = max(flight_weight_total, 1.0)
-    replay = _merge_prediction_replays(replay_chunks, count=len(dataset))
-    profile = {
-        "flights": plan.flights,
-        "batches": len(plan.batches),
-        "query_points": plan.query_points,
-        "wall_s": time.perf_counter() - started,
-        "duration_bucket_flights": dict(plan.bucket_flights),
-    }
-    return ValidationAirportEvaluation(
-        components={
-            name: value / denominator for name, value in component_totals.items()
-        },
-        replay=replay,
-        profile=profile,
-    )
-
-
-def _dataset_loss_components(
-    model: nn.Module,
-    dataset: TrajectoryWindows,
-    device: torch.device,
-    batch_size: int,
-    *,
-    multipliers: ProcedureMultipliers | None = None,
-) -> dict[str, float]:
-    names = loss_component_names(dataset.config)
-    component_totals = {name: 0.0 for name in names}
-    flight_weight_total = 0.0
-    with torch.no_grad():
-        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
-            (
-                x,
-                y,
-                mask,
-                final_time_s,
-                flight_weights,
-                dynamics,
-                dense_supervision,
-            ) = unpack_batch(raw_batch)
-            x, y, mask = x.to(device), y.to(device), mask.to(device)
-            final_time_s = final_time_s.to(device)
-            flight_weights = flight_weights.to(device)
-            dynamics = move_dynamics(dynamics, device)
-            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
-            prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
-            components = prediction_loss_components(
-                prediction,
-                anchor_state(x, len(dataset.config.channels)),
-                y,
-                mask,
-                final_time_s,
-                flight_weights,
-                dataset.config,
-                dataset.normalizer,
-                dynamics,
-                dense_supervision,
-                multipliers=multipliers,
-            )
-            for name, value in components.tensors().items():
-                component_totals[name] += float(value) * len(flight_weights)
-            flight_weight_total += float(flight_weights.sum())
-    denominator = max(flight_weight_total, 1.0)
-    return {name: value / denominator for name, value in component_totals.items()}
-
-
-@dataclass(frozen=True)
-class ValidationSelection:
-    """One deterministic checkpoint-selection result over fixed-anchor validation."""
-
-    metric: str
-    value: float
-    by_airport: dict[str, float]
-    details_by_airport: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-def _objective_validation_selection(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-) -> ValidationSelection:
-    del model, val_sets, normalizer, config, device, precomputed_details_by_airport
-    return ValidationSelection(
-        metric=CHECKPOINT_SELECTION_OBJECTIVE,
-        value=float(np.mean(list(val_by_airport.values()))),
-        by_airport=dict(val_by_airport),
-    )
-
-
-def _common_grid_validation_details(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-    replays_by_airport: dict[str, SplitPredictionReplay] | None = None,
-    common_truth_by_airport: dict[str, CommonGridTruth] | None = None,
-) -> dict[str, dict[str, Any]]:
-    del val_by_airport
-    if precomputed_details_by_airport is not None:
-        if set(precomputed_details_by_airport) != set(val_sets):
-            raise ValueError("precomputed validation details do not match airport sets")
-        return precomputed_details_by_airport
-    if replays_by_airport is not None and set(replays_by_airport) != set(val_sets):
-        raise ValueError("validation replays do not match airport sets")
-    if (
-        common_truth_by_airport is not None
-        and set(common_truth_by_airport) != set(val_sets)
-    ):
-        raise ValueError("validation common-truth caches do not match airport sets")
-    details: dict[str, dict[str, Any]] = {}
-    for airport, dataset in val_sets.items():
-        replay = (
-            replays_by_airport[airport]
-            if replays_by_airport is not None
-            else _predict_split(
-                model, dataset, normalizer, device, config.batch_size
-            )
-        )
-        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE:
-            block = fixed_anchor_common_grid_ade_metrics(
-                dataset.series,
-                config,
-                replay.anchors,
-                replay.predicted,
-                replay.predicted_time_s,
-                replay.segment_durations_s,
-                points=config.validation_common_grid_points,
-                common_truth=(
-                    common_truth_by_airport[airport]
-                    if common_truth_by_airport is not None
-                    else None
-                ),
-            )
-            details[airport] = {
-                "ade_m": block["ade_m"],
-                "fde_m": block["fde_m"],
-                "final_time_mae_s": block["final_time_mae_s"],
-                "flights": block["flights"],
-            }
-            continue
-        block = evaluate_fixed_anchor_common_grid(
-            model,
-            dataset,
-            normalizer,
-            config,
-            device,
-            replay=replay,
-        )
-        details[airport] = {
-            "ade_m": block["ade_m"],
-            "fde_m": block["fde_m"],
-            "dense_state_loss": block["dense_state_loss"],
-            "terminal_velocity_error_mps": block[
-                "terminal_velocity_error_mps"
-            ],
-            "final_time_mae_s": block["final_time_mae_s"],
-            "flights": block["flights"],
-            "arc_length_geometry_loss": block["arc_length_geometry_loss"],
-            "arc_length_geometry_unweighted_loss": block[
-                "arc_length_geometry_unweighted_loss"
-            ],
-            "arc_length_distance_mean_m": block["arc_length_distance_mean_m"],
-            "arc_length_path_length_ratio": block[
-                "arc_length_path_length_ratio"
-            ],
-            "arc_length_path_length_log_error": block[
-                "arc_length_path_length_log_error"
-            ],
-            "arc_length_horizontal_velocity_mae_mps": block[
-                "arc_length_horizontal_velocity_mae_mps"
-            ],
-            "arc_length_horizontal_velocity_p95_mps": block[
-                "arc_length_horizontal_velocity_p95_mps"
-            ],
-            "arc_length_horizontal_tangent_mean": block[
-                "arc_length_horizontal_tangent_mean"
-            ],
-            "arc_length_horizontal_tangent_p95": block[
-                "arc_length_horizontal_tangent_p95"
-            ],
-            "arc_length_horizontal_speed_mae_mps": block[
-                "arc_length_horizontal_speed_mae_mps"
-            ],
-            "arc_length_horizontal_speed_p95_mps": block[
-                "arc_length_horizontal_speed_p95_mps"
-            ],
-            "arc_length_vertical_velocity_mae_mps": block[
-                "arc_length_vertical_velocity_mae_mps"
-            ],
-            "arc_length_vertical_velocity_p95_mps": block[
-                "arc_length_vertical_velocity_p95_mps"
-            ],
-            "arc_length_horizontal_mean_m": block[
-                "arc_length_horizontal_mean_m"
-            ],
-            "arc_length_horizontal_p95_m": block[
-                "arc_length_horizontal_p95_m"
-            ],
-            "arc_length_vertical_mae_m": block["arc_length_vertical_mae_m"],
-            "arc_length_vertical_p95_m": block["arc_length_vertical_p95_m"],
-            "arc_length_terminal_position_m": block[
-                "arc_length_terminal_position_m"
-            ],
-            "arc_length_terminal_velocity_error_mps": block[
-                "arc_length_terminal_velocity_error_mps"
-            ],
-            "arc_length_terminal_position_runway_components_m": block[
-                "arc_length_terminal_position_runway_components_m"
-            ],
-            "arc_length_terminal_velocity_runway_components_mps": block[
-                "arc_length_terminal_velocity_runway_components_mps"
-            ],
-        }
-    return details
-
-
-def _common_grid_validation_selection(
-    *,
-    model: nn.Module,
-    val_sets: dict[str, TrajectoryWindows],
-    normalizer: Normalizer,
-    config: TSConfig,
-    device: torch.device,
-    val_by_airport: dict[str, float],
-    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
-) -> ValidationSelection:
-    details = _common_grid_validation_details(
-        model=model, val_sets=val_sets, normalizer=normalizer, config=config,
-        device=device, val_by_airport=val_by_airport,
-        precomputed_details_by_airport=precomputed_details_by_airport,
-    )
-    by_airport = {
-        airport: float(block["ade_m"]) for airport, block in details.items()
-    }
-    return ValidationSelection(
-        metric=CHECKPOINT_SELECTION_COMMON_GRID_ADE,
-        value=float(np.mean(list(by_airport.values()))),
-        by_airport=by_airport,
-        details_by_airport=details,
-    )
-
-
-_VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
-    CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
-    CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
-}
 
 
 def fit_model(
@@ -2318,7 +495,7 @@ def fit_model(
         present, valid, total = train_set.closure_coverage
         print(f"  closure labels: {present} of {total} training flights in the file, {valid} valid "
               f"({valid / max(total, 1):.1%} regress; the rest are in the batch, out of the loss)")
-    val_sets = _validation_datasets(
+    val_sets = validation_datasets(
         val_series,
         config,
         normalizer,
@@ -2330,7 +507,7 @@ def fit_model(
         for airport, dataset in val_sets.items()
     }
     val_common_truth_by_airport: dict[str, CommonGridTruth] | None = None
-    if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE:
+    if config.checkpoint_selection_metric in CHECKPOINT_SELECTION_COMMON_GRID_METRICS:
         val_common_truth_by_airport = {}
         for airport, plan in val_batch_plans.items():
             if plan.common_truth is None:
@@ -2338,6 +515,17 @@ def fit_model(
                     f"validation plan for {airport} omitted required common-grid truth"
                 )
             val_common_truth_by_airport[airport] = plan.common_truth
+    # The anchor-grid metric's extra anchor sets: built once here beside the L-1 plans
+    # (which are the metric's first set), replayed every epoch. The L-1 pass is NOT
+    # rebuilt for them, and a candidate bin this cohort cannot cover is dropped here with
+    # a printed notice rather than averaged in.
+    anchor_grid_plans = (
+        build_anchor_grid_validation_plans(
+            val_sets, config.batch_size, minimum_anchor_index=minimum_anchor_index
+        )
+        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_ANCHOR_GRID_ADE
+        else None
+    )
     val_window_count = sum(len(dataset) for dataset in val_sets.values())
     if not len(train_set) or not val_window_count:
         raise ValueError(
@@ -2396,6 +584,17 @@ def fit_model(
         print(
             f"  selection  {config.checkpoint_selection_metric} on fixed L-1 validation"
         )
+        if anchor_grid_plans is not None:
+            coverage = anchor_grid_coverage(anchor_grid_plans)
+            print("  grid       L-1 + " + ", ".join(
+                f"{label} ({sum(flights.values())} flights)"
+                for label, flights in coverage.items()
+            ) + (
+                "" if not anchor_grid_plans.dropped else
+                "; dropped " + ", ".join(
+                    item["bin"] for item in anchor_grid_plans.dropped
+                ) + f" under {anchor_grid_plans.minimum_coverage:.0%} coverage"
+            ))
         if minimum_anchor_index is not None:
             print(f"  anchor     common minimum index {minimum_anchor_index} "
                   f"({minimum_anchor_index * config.dt_s:.0f}s after track entry)")
@@ -2418,6 +617,13 @@ def fit_model(
         epoch_start_optimizer_updates = optimizer_updates
         epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
         train_anchor_sampling = train_set.anchor_statistics(config.seed + epoch)
+        # The objective THIS epoch optimizes: the run's config carrying the annealed KL
+        # weight (identical to `config` itself once the warm-up is over, and always when
+        # there is none). The training batches and the validation pass below are both
+        # scored under it, so an epoch's train and val `latent_kl` mean the same thing —
+        # the rule the procedure penalty's λ already follows.
+        beta_effective = effective_latent_beta(config, epoch)
+        epoch_config = replace(config, latent_beta=beta_effective)
 
         model.train()
         train_component_totals = {name: 0.0 for name in component_names}
@@ -2475,7 +681,7 @@ def fit_model(
                     mask,
                     final_time_s,
                     flight_weights,
-                    config,
+                    epoch_config,
                     normalizer,
                     dynamics,
                     dense_supervision,
@@ -2496,10 +702,11 @@ def fit_model(
 
         model.eval()
         val_evaluations = {
-            airport: _evaluate_validation_airport(
+            airport: evaluate_validation_airport(
                 model,
                 plan,
                 device,
+                config=epoch_config,
                 profiler=profiler,
                 multipliers=multipliers,
             )
@@ -2541,22 +748,11 @@ def fit_model(
                 if name.startswith("hook_") and name != "hook_steps"
             }
             hook_epoch["steps"] = hook_steps
-        latent_epoch: dict[str, float] = {}
+        latent_epoch: dict[str, Any] = {}
         if config.latent_dim > 0:
-            # Both totals are UNWEIGHTED sums over flights (control/latent.py), so they are
-            # divided by the unweighted flight count they were summed over, never by the
-            # airport-weighted total the objective components use.
-            flights = max(train_diagnostic_totals.get("latent_flights", 0.0), 1.0)
-            latent_epoch = {
-                # what the objective charged (free bits applied; MC for a mixture)
-                "kl_nats_per_flight": train_diagnostic_totals.get("latent_kl_nats", 0.0) / flights,
-                # analytic KL per flight against the most responsible component — the
-                # quantity active_units is read from
-                "component_kl_nats_per_flight": (
-                    train_diagnostic_totals.get("latent_component_kl_nats", 0.0) / flights
-                ),
-                "active_units": train_diagnostic_totals.get("latent_active_units", 0.0) / flights,
-            }
+            latent_epoch = latent_epoch_record(
+                train_diagnostic_totals, config, beta_effective=beta_effective
+            )
         train_components = {
             name: value / max(train_weight_total, 1.0)
             for name, value in train_component_totals.items()
@@ -2582,7 +778,7 @@ def fit_model(
             for airport, evaluation in val_evaluations.items()
         }
         selection_metrics_started = time.perf_counter()
-        common_grid_details = _common_grid_validation_details(
+        common_grid_details = common_grid_validation_details(
             model=model,
             val_sets=val_sets,
             normalizer=normalizer,
@@ -2592,11 +788,7 @@ def fit_model(
             replays_by_airport=replay_by_airport,
             common_truth_by_airport=val_common_truth_by_airport,
         )
-        profiler.add_cpu_seconds(
-            "val_checkpoint_selection_s",
-            time.perf_counter() - selection_metrics_started,
-        )
-        validation_selection = _VALIDATION_SELECTIONS[
+        validation_selection = VALIDATION_SELECTIONS[
             config.checkpoint_selection_metric
         ](
             model=model,
@@ -2606,6 +798,14 @@ def fit_model(
             device=device,
             val_by_airport=val_by_airport,
             precomputed_details_by_airport=common_grid_details,
+            anchor_grid_plans=anchor_grid_plans,
+        )
+        # Everything the selection metric costs, including the anchor grid's four extra
+        # replays — a metric whose price is not in its own timer is a metric nobody can
+        # budget for.
+        profiler.add_cpu_seconds(
+            "val_checkpoint_selection_s",
+            time.perf_counter() - selection_metrics_started,
         )
         if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
             raise RuntimeError(
@@ -2633,6 +833,7 @@ def fit_model(
             validation_selection_metric=validation_selection.metric,
             validation_selection_value=validation_selection.value,
             validation_selection_by_airport=validation_selection.by_airport,
+            validation_anchor_grid=validation_selection.anchor_grid,
             train_anchor_sampling=train_anchor_sampling,
             control_training_diagnostics=control_training_diagnostics,
             timing=timing,
@@ -2667,6 +868,14 @@ def fit_model(
                     f"{validation_selection.metric}="
                     f"{validation_selection.value:.1f}"
                 )
+            if validation_selection.anchor_grid:
+                # The curve's shape, per epoch: the mean is one number and hides which
+                # anchors moved. `n` rides along because bins hold different flights.
+                print("             anchor set  " + "  ".join(
+                    f"{name}={block['ade_m']:.0f}(n{block['flights']})"
+                    for name, block in
+                    validation_selection.anchor_grid["anchor_sets"].items()
+                ))
             print(
                 "             val parts  "
                 + "  ".join(

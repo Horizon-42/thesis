@@ -13,18 +13,21 @@ Phase 0 / P0 / P1.a–d 的**测量与产物全部保留并被本文引用**；�
 
 ## 〇、状态表（压缩 context 后从这里继续）
 
-**当前状态（2026-09-07）**：L0、L1 完成；L2（隐意图）、L3（CTA）代码完成并经 review，在 `dev-l2`；L4 前置测量
-门不过（场景编码器不建）。**L1 的答案：N=32 免费（1322 vs 1333），轨迹误差损失单独不够（dense 2515）——
-L2 的 base = native32 + 教师**。包审计 T0 完成待 review。下一步 = 合入 `dev-leg-ctrl` → L2 campaign 入队
-（`l2_latent_arms.json`：L2_gauss / L2_mix4，预测时 `--latent-samples 6 --latent-random 6 --latent-shuffle`）。
+**当前状态（2026-09-07）**：L0、L1 完成；L4 前置测量门不过（场景编码器不建）；L3（CTA）代码完成待跑。
+**L1 的答案：N=32 免费（1322 vs 1333），轨迹误差损失单独不够（dense 2515）——L2 的 base = native32 + 教师**。
+**L2 已跑四轮**：L2.c（β 阶梯，全坍缩）、L2.d（热启动后验，warm β=0.01 是至今最好的点估计 1214 m）、
+L2.e'（free bits 当预算：KL 保住了，top-1 反而变差），以及解释这一切的探针——三臂的**后验均值都坐在先验
+均值上**（位移 < 0.2 σ），预算全花在收窄方差上。**下一步 = L2.f campaign**（`l2f_mean_information_arms.json`：
+`L2f_anneal` β 退火 40 轮 / `L2f_aux_T` z 上的辅助时长目标，预测时
+`--latent-samples 6 --latent-random 6 --latent-shuffle`），代码在 `dev-l2f`；兜底是 L2.d 的 1214 m。
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **完成（2026-09-07）**：native32 全体 ADE 1322 vs 基线 1333（配对胜率 52.6 %，bank skill 0.726 vs 0.728）——**N=32 免费**；dense/无教师 2515/2603，否决触发，wiggle 回归——**轨迹误差损失单独不够**。结果 `2026-09-07_l1_lowdim_results.zh.md` | `l1_lowdim_20260907/`（readout、readout_bank） | 不差于 simple-v3 ✓；参数 257 → 96 ✓；bank skill ✓（native32） |
-| L1.b 监督替代教师 | **筛选通过（2026-09-07）**：hr=8 + TV=1 bank skill 0.711 vs 教师对照 0.709，bank RMS 0.17°（观测 0.41°），ADE 不劣；hr=8 单独 0.665 败（轨迹最好）；hr=1 坍进共同剖面 → 教师线降为对照，`l1b_full_arms.json` 180 轮确认（hr8+tv1 / hr16+tv1 / hr16）排今晚 | `l1b_supervision_arms.json`、`l1b_full_arms.json` | 见 §六 L1.b |
-| L2 CVAE 骨架（隐意图 z） | **L2.d 热启动后验 β=0.01：z 活到最后（2.8 维、0.17 nat），top-1 全分层优于 native32（1214 vs 1322，胜率 65 %，雷达引导 −227 m），bank skill 0.729 最好；门 (3)+否决过，(1)(2) 败——信息量太小、先验比 N(0,I) 窄；z-oracle 雷达引导 2416 m（门 1235）：z 只带约五分之一的意图。KL 一直在 free-bits 地板之下，β 在那里不起作用 → L2.e' 第二版：free bits 当信息预算 ∈ {0.5, 1.0} nat/dim（见 §六 L2 末）；冷启动与 β ≥ 0.1 全部坍缩** | `control/latent.py`、`config` 四字段、`models`/`batch_contract`/`train`/`run_naming`/`forecast`/`export`/`__main__` 接缝、`run_ts_latent_readout.py`、`tests/test_latent_control.py`（21 项，含整链） | 不坍缩 ∧ minADE_K < top-1 ∧ z-oracle 臂 ≤ 1235 m |
-| L3 CTA 条件化（交付形态） | **代码完成（2026-09-07，`dev-l2`）**：`cta_conditioning ∈ off \| given`，给定 CTA 直接**成为**时长（不回归），`predict --cta-offset-s` 反事实；7 项测试 | `config`/`control/heads`（CTA token + `final_time` 规则）/`dataset`/`forecast`/`export`/`run_naming`/`__main__`、`tests/test_cta_conditioning.py` | 给真值 CTA 时时长误差 = 0（恒等，按构造）∧ 反事实 CTA 轨迹仍可飞 |
+| L1.b 监督替代教师 | **180 轮第一臂分裂（2026-09-07 夜）**：hr8+TV bank skill 0.713（门 0.726），ADE 略劣、FDE 各分层全优（直线 632 vs 671），bank RMS 0.12° 比观测还直（抄近路）；教师线暂不降级，hr16 两臂决定 | `l1b_full_arms.json` | 见 §六 L1.b |
+| L2 CVAE 骨架（隐意图 z） | **L2.f 两臂都败（2026-09-08）：退火 1318 / 位移 0.13 σ，辅助头 1365 / 位移 0.18 σ；七个臂后验均值全坐在先验均值上，先验总 σ 0.27–0.58——量纲定案（见 §六 L2 末）。建议：停止加臂，只留 `position_loss_scale_m` 1 km 的量纲测试臂；主线转 B 线；点估计保留 warm β=0.01（1214）** | `l2f_mean_information_20260907/`（含 `probe/`） | 见 §六 L2 末 |
+| L3 CTA 条件化（交付形态） | **跑完（2026-09-07 晚）**：给定真值到达时刻，全体 ADE 1214 → 841，雷达引导 2643 → 1596（胜率 87 %），时长误差 0 按构造；几何只小改（chamfer 165 → 128）；反事实扫描修复后排队列末尾 | `l3_cta_20260907`、`l3_cta_counterfactual_arms.json` | 见 §六 L3 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | **L5.a 拟合教师代码完成（2026-09-07，`dev-l5`）**：拟合器 `--checkpoint` 模式、config 轴、臂文件、29 项测试；拟合本身是 GPU 作业，未跑。其余未开始 | `run_ts_control_basis_oracle.py --checkpoint`、`control_imitation_target` / `control_fitted_teacher_path`、`control/basis_fit.py` 的表加载器、`docs/experiments/l5_fitted_teacher_arms.json`、`tests/test_fitted_teacher.py` | 见 §七 |
 
@@ -271,11 +274,21 @@ wiggle"是未测的。还有一层：模仿项占损失 0.556，而逆动力学�
 hr=1 不是"效果弱"而是把模型推进共同坡度剖面（22 %），比无教师的 dense 臂还差。保留意见：过门只赢 0.002、单种子；
 直线 FDE 846 是弱点而 hr=8 单独最好（734）。**确认臂**（`l1b_full_arms.json`，180 轮，对照 L1_native32 的 1322 /
 0.726 / 671）：hr8+tv1、hr16+tv1、hr16；过门者成为主线底座的监督（隐变量臂在多机场前换底座），都不过则筛选结论翻转、
-拟合教师回到主线。**筛选档**：坍缩 / wiggle 这类定性问题用 60 轮（约 20 min/臂）先筛，过筛的臂再跑满 180 轮出门数（`epochs` 是 config 字段，臂文件直接设；不减航班——减航班改变总体，数字不再可比，而且加速比更小）。
+拟合教师回到主线。
+
+**180 轮确认，第一臂（2026-09-07 夜，`l1b_full_20260907/L1b_hr8_tv1_full`，116/180 早停，对照 L1_native32 的 180 轮）：
+分裂而非通过。** bank skill **0.713**（门 0.726，差 0.013）；ADE 各分层略劣（全体 1332 vs 1322，直线 461 vs 445，
+雷达引导 2872 vs 2870，胜率 44–48 %）；**FDE p50 各分层全部更好**（全体 848 vs 864，直线 **632 vs 671**，雷达引导
+**1722 vs 1982**，胜率 51–61 %）；否决过（直线 FDE 好 39 m）。坡度几何是测过最干净的：直线参考 bank RMS **0.12°**
+（native32 0.34°，观测 0.41°）、共同剖面 2.2 %、无反转——但比真实飞机还直，配合雷达引导路径长度比 0.88（native32
+0.93）和 chamfer 变差（1040 vs 901）而 FDE 改善 260 m，读法是**抄近路**：用更短更顺的路径到达正确终点，bank skill
+是对观测剖面的逐航班相关，过度平滑在这里失分。结论：教师线**不能**据此降级为对照——终点指标赢、路径指标输，
+门差 0.013；剂量（hr16 两臂，排在 A0 之后）决定翻不翻。A0-random 臂按预注册仍用这个配方（它是唯一与随机锚点
+相容的监督），其 L−1 否决线是"不劣于 native32 超过种子噪声"，10 m 在噪声内。**筛选档**：坍缩 / wiggle 这类定性问题用 60 轮（约 20 min/臂）先筛，过筛的臂再跑满 180 轮出门数（`epochs` 是 config 字段，臂文件直接设；不减航班——减航班改变总体，数字不再可比，而且加速比更小）。
 
 **实现（2026-09-07，`dev-l1b`）**：分量名 `heading_rate` / `bank_tv`，与 `velocity` / `imitation` 同在
 `true-time-position` 目标下注册；在别的目标下给非 0 权重会被 config **直接拒绝**（不会静默失效）。
-CLI `--control-heading-rate-weight` / `--control-heading-rate-scale-dps` / `--control-bank-tv-weight`；
+CLI `--control-heading-rate-loss-weight` / `--control-heading-rate-loss-scale-dps` / `--control-bank-tv-loss-weight`；
 run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命名，0 处变化）。四个臂
 `L1b_native32_e60`（**同预算对照臂**，教师 64）/ `L1b_hr1` / `L1b_hr8` / `L1b_hr8_tv1`。
 
@@ -447,6 +460,124 @@ run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命�
 > K=4 与 L3；(b) 出现自编码器形态（top-1 劣于 native32）→ 取仍过门 (3) 的最大预算（β=0.01 / fb 0.05 的
 > 1214 m 已是兜底）；(c) KL 仍掉回地板之下 → 自毁不是由惩罚触发的，杠杆在解码器的 z 通路（注入方式）。
 
+
+> **L2.e' 结果（2026-09-07，campaign `l2e_free_bits_20260907`）。** 预算生效：raw KL 停在 2.59（预算 4.0）与 6.60
+> （预算 8.0）nat，第 50 轮起平稳不再下滑——(c) 作废。但 **信息越多 top-1 越差**：fb 0.05 / 0.5 / 1.0 的 top-1
+> 1214 / 1260 / 1387 m，雷达引导 2643 / 2747 / 3052；shuffled ΔADE +47 / +16 m；minADE_6 仍输给 N(0,I) 对照
+> （1069 vs 1012；1238 vs 1184）；bank 不受影响（0.719–0.729）。fb 0.5 仍过门 (3)（胜率 58 %），fb 1.0 不过。
+>
+> **直接测量后验与先验（`run_ts_latent_probe.py` 的前身，200 架 val，三个 checkpoint）——问题终于看清了**：
+>
+> | 臂 | q 均值对 p 均值的位移 / p σ（逐维中位） | q σ | p σ | KL/dim |
+> |---|---|---:|---:|---:|
+> | warm β=0.01 fb 0.05 | 0.05–0.11 | 0.40 | 0.44 | 0.03 |
+> | fb 0.5 | 0.10–0.20 | 0.23 | 0.49 | 0.32 |
+> | fb 1.0 | 0.11–0.19 | 0.15 | 0.58 | 0.83 |
+>
+> **三个臂的后验均值都坐在先验均值上**——逐航班位移不到 0.2 个先验 σ。预算全部花在**把后验方差收窄**上
+> （KL 的方差项），均值项几乎为零：z 是一个去噪的常数，不携带该航班的任何信息。这同时解释了 shuffled ΔADE
+> ≈ 0、z-oracle 只买 227 m、N(0,I) 对照赢（它的样本比先验宽）、以及 top-1 随预算变差（q σ 与 p σ 的差距
+> 拉大，训练时解码器见到的 z 与推理时不一致）。机制：训练最初 10 轮 z 是有信息的（KL 14 nat、8 维活跃），
+> 预算之上的 β 惩罚首先压缩 KL 的**均值项**（梯度与位移成正比），把各航班的 q 均值拉到 p 均值上；等 KL 落到
+> 预算之下时均值信息已经没了，解码器的 z 权重也随之适应了一个近似常数的 z，此后没有任何梯度把均值信息拉
+> 回来。free bits 只是让"无信息的窄后验"免费。
+>
+> **L2.f 预注册（2026-09-07）：让后验均值带上信息的两条路，各一臂，同 base（热启动、fb 0.05、K=1）。**
+> 1. `L2f_anneal`：**β 退火** 0 → 0.01，线性 40 轮（`latent_beta_warmup_epochs=40`）。标准疗法：在解码器学会
+>    用 z 之前不施加均值项压力，让 z 权重先长大，之后均值信息有重建梯度作为恢复力。此前"退火无用"的判断
+>    只对方差项成立，对均值项不成立——诚实记下。
+> 2. `L2f_aux_T`：**z 上的辅助意图目标**（训练期头 `latent_aux_duration_weight=1.0`）：从后验样本 z 线性预测
+>    归一化剩余时长 (T / final_time_scale_s)，MSE。它直接定义 z 必须携带什么（意图的"何时"一半），给后验均值
+>    一个不依赖解码器的恢复力；先验从上下文预测不了 T → 先验必须变宽 → K 个样本才真正散布在可能的到达
+>    时刻上。z 仍是隐变量（辅助头只在训练期），符合"意图是隐空间、不是输出"的约束。
+> 同一提交把诊断补上：history 的 `latent` 块记逐维 KL、KL 均值项/方差项拆分、后验均值位移（/p σ 的中位）
+> ——这个数在第 1 轮就能看出问题，本应一开始就有；`run_ts_latent_probe.py --checkpoint` 读同样的量。
+> **门**：后验均值位移中位 > 1 σ（信息在均值里）、shuffled ΔADE > 200 m、minADE_6 < N(0,I) 对照、top-1 不劣于
+> native32（1322）；否决同前。K=4 与 L3 的 z 版本都等这里的胜者。L2.d 的 warm β=0.01（1214 m）仍是兜底。
+>
+> **实现（2026-09-07，`dev-l2f`：`be56088` 诊断、`60dd620` 退火、`6233967` 辅助目标、`63d1fdd` 探针、
+> `59640bd` 臂文件）。**
+> - **诊断**（`control/latent.py`）：`latent_kl` 改返回 `LatentKL` 记录（`charged` / `per_dimension` /
+>   `mean_term_per_dimension` / `displacement_sigma` / 取诊断的那个先验分量的 `prior_mean`、`prior_logvar`；
+>   方差项是 `per_dimension − mean_term` 的**余数**，不是第二个闭式——目标收取的那个数必须逐比特不变）。
+>   `with_latent_kl` 因此多记五个诊断，`latent_epoch_record` 组装 history 的 `latent` 块：
+>   `component_kl_per_dim`（逐维，对航班取平均）、`component_kl_mean_term_nats` /
+>   `component_kl_variance_term_nats`（逐航班）——名字里的 component 是要紧的：这三个加起来等于
+>   `component_kl_nats_per_flight`（对最负责分量的解析 KL），**不等于**被收取的 `kl_nats_per_flight`
+>   （free bits 与混合估计把两者分开）——、`mean_displacement_sigma`（|μ_q−μ_p|/σ_p 的中位；中位不可加，
+>   所以是**各 batch 中位数的航班加权平均**，与 `active_units` 同形；用 `torch.quantile(…, 0.5)` 而不是
+>   `torch.median`（后者取偶数个数里较小的那个中位），外部读者用 numpy 复算才落在同一个数上）、
+>   `active_units_0p05`（固定 0.05 nat 的尺子；`active_units` 保持随预算移动的旧定义——L2.e' 三臂各按自己的
+>   阈值计数，门 (1) 因此读不出来）。判定句子（位移 > 1 σ 才算"信息在均值里"）是
+>   `control.latent.displacement_verdict` 一处，读出脚本与探针共用同一把尺（`DEAD_MEAN_DISPLACEMENT_SIGMA`）。
+>   `run_ts_latent_readout.py --history <run>/history.json` 打印被选 epoch 的这一块（epoch 号读产物自己的
+>   `fit_diagnostics.training_objective`）；**`--history` 可以单独用**——第 1 轮就要看的数，那时还没有任何预测。
+> - **β 退火**：`latent_beta_warmup_epochs`（默认 0；无 latent 拒绝、负值拒绝；
+>   run name `beta-warmup=40`）。第 e 轮（1 起）的有效权重 = `latent_beta · min(1, e/warmup)`，
+>   `control.latent.effective_latent_beta` 是唯一写法；每轮的目标是 `replace(config, latent_beta=有效值)`，
+>   训练批次与验证遍历**同用它**（`evaluate_validation_airport` 因此显式收下它要打分的 config），
+>   所以同一轮的 train / val `latent_kl` 含义相同——与 procedure 惩罚的 λ 同一条规矩。history 里
+>   `train_components.latent_kl` 仍是**被收取的**损失项（有效 β × 航班加权均值 KL），`latent` 块里全是未缩放
+>   的 nat，旁边多一个 `beta_effective`；checkpoint 选择不变。
+> - **辅助意图目标**：`latent_aux_duration_weight`（默认 0；无 latent 拒绝、负值/非有限拒绝、
+>   `cta_conditioning=given` 拒绝——CTA 已经把时长交给解码器了；run name `aux-T=1`）。
+>   训练期头 `aux_duration: Linear(latent_dim→1)` 只作用在**后验样本**上，只在权重非零时构造（且在
+>   `__init__` **最末**构造，别的模块的初始化抽样因此与无此臂完全相同，两臂配对），`decode` 从不调用它，
+>   记录里没有任何它的痕迹。损失分量 `latent_aux` = 权重 × 航班加权 MSE（目标 = batch 自己的 `final_time` /
+>   `final_time_scale_s`），只在权重非零时注册（`loss_component_names` 与适配器同一个条件、同一个文件）。
+>   **读法上的要害（review 提出，写进臂文件）**：这个目标就是后验编码器的**输入之一**（真值时长），所以
+>   `latent_aux` 小本身什么也不证明——一个隐维复制一个输入即可。判决必须靠 KL 均值项 / 逐维 KL 动了
+>   **并且**下游指标动了（shuffled ΔADE、minADE_6、top-1）。
+> - **recipe 把整条隐变量轴钉死**（review 采纳）：`control_simple_v1_overrides` 现在钉住全部 7 个
+>   `latent_*` 字段的默认值，于是"named recipe = 确定性对照臂"按定义成立，隐变量运行一律 `custom`
+>   （所有隐变量臂文件本来就这么写）。只钉 L2.f 两个杠杆是不自洽的：那样 `simple-v3` 能改 β 却不能改退火。
+>   逐产物复算：无一改名、无一改 slug、无一 `from_dict` 失败。
+> - **探针**：`run_ts_latent_probe.py --checkpoint LABEL=PATH --split val [--limit N] --out <dir>`——
+>   逐 checkpoint 打印参考探针那张表（先验/后验的逐维跨航班 std 与中位 σ、位移的逐维中位与总中位/p90、
+>   逐维 KL 及其均值/方差拆分、每航班总量、先验总 std 对 N(0,I)——总 std 由**混合分布自己的矩**算
+>   （`Σπμ` 与 `Σπ(σ²+μ²)−E[z]²`，再加 E[z] 的跨航班方差；K=1 退化成分量自身的 (μ, σ²)），因为 K>1 的先验
+>   量程主要在**分量之间**；参考脚本的标签这么写但只算了宽度那一半），人群按回放规矩重建
+>   （`load_arm` / `cohort_series`，即 `checkpoint_data_provenance` 那条 roster 规则），拒绝 `cta=given`
+>   （共用加载器，带 `instrument` 参数所以每个 runner 用自己的措辞）与无 latent 的 checkpoint，产物目录不可变。
+>   `--limit N` 是**划分的前缀**不是抽样（KRDU 100 → 200 架之间位移中位动了 25 %），旗标与产物都写明，
+>   限量表不得与全量数并列引用。**后验读未来，所以这里的数永远不是预测结果。**
+> - **臂文件** `docs/experiments/l2f_mean_information_arms.json`（base = L2.d + fb 0.05 + β 0.01；
+>   `L2f_anneal` / `L2f_aux_T`；predict `--latent-samples 6 --latent-random 6 --latent-shuffle`）。
+> - **建头时量到的一件事（诚实记下，直接影响门 (1) 的读法）**：合成数据三个种子、配对初始化，辅助目标让 KL
+>   的**均值项**三比三变大（102.60→108.06、26.854→26.917、15.48→15.69，轮数越多差越大），但**位移中位**只有
+>   二比三变大（种子 11 反而小 0.6 %）。原因是目标的形状——一个标量读出只需要**一个**隐维方向，八维上的
+>   中位数看不见它。`L2f_aux_T` 必须同时读 `component_kl_per_dim` 与 `component_kl_mean_term_nats`，
+>   并在结果里说明判决靠的是哪个。
+
+> **L2.f 结果（2026-09-08 凌晨，campaign `l2f_mean_information_20260907`）：两臂都败，L2 线的病根定案。**
+>
+> | 臂 | top-1 ADE | 后验均值位移（σ） | active_0.05 | raw KL（均值项 / 方差项） | shuffled ΔADE | minADE_6 / N(0,I) 对照 | 先验总 σ |
+> |---|---:|---:|---:|---|---:|---|---:|
+> | L2f_anneal（β 0→0.01，40 轮） | 1318 | 0.131（探针 0.049） | 1.2 | 0.31（0.21 / 0.11） | +8 | 1241 / 1164 | 0.41 |
+> | L2f_aux_T（z→T 辅助头，w=1） | 1365 | 0.176（探针 0.083） | 6.0 | 0.70（0.46 / 0.24） | +21 | 1305 / 1160 | 0.27 |
+> | 兜底 warm β=0.01 | **1214** | 0.079 | 2.8 | 0.17 | +19 | 1004 / 947 | 0.58 |
+>
+> 退火：预热期位移升到 0.23，β 到位后回落——解码器学会用 z 之后惩罚照样把均值信息压掉；辅助头：KL 与活跃维数
+> 都被抬起来（信息"更多"），但均值位移仍 < 0.2 σ、top-1 反而最差、`latent_aux` 0.006 而下游无一项移动——臂文件预
+> 注册的失败形态逐字兑现。探针把七个隐变量臂的共同事实摆在一起：**后验均值永远坐在先验均值上**（位移 0.05–0.18
+> σ），KL 的一半是方差项；**学到的先验总 σ 只有 0.27–0.58**（N(0,I) 是 1.0）——这就是五个 campaign 里"随机 z 打败
+> 训练先验"的全部原因。机制归结为量纲：损失以 (m / 10 km)² 计，位置项与辅助项能买到的增益都在 0.01 个损失单位
+> 量级，而 β=0.01 下一个 nat 就是 0.01；free bits 给出的免费容量被花在收窄方差（永远可得的小增益）而不是让均值依
+> 赖未来（需要编码器学到一个解码器能用的映射）。β、free bits、热启动、退火、辅助目标——五个杠杆都动过，没有一个
+> 让 q(z|future) 真正依赖未来。
+>
+> **建议（待用户决定，2026-09-08 早）**：(1) 隐变量线**停止加臂**，warm β=0.01 保留为点估计模型（+8 % 是真实的）；
+> 只留一个"量纲测试"臂作为最终判决——`position_loss_scale_m` 10 km → 1 km（位置增益放大 100 倍）、β 0.01、其余同
+> 兜底；它若仍不让均值依赖未来，L2 线以负结果收官。(2) 主线转向 B 线（`2026-09-07_anytime_prediction_and_calibrated_eta_design`）：
+> L3 已证明"何时"值 373 m，B1 分位数时长头 + B2 conformal 校准 + B3 `cta=self-q` 逐分位数解码，不读未来地交付到达
+> 时刻区间与每个分位数一条可飞航迹——调度程序要的正是这个，且不依赖 z。(3) A 线（随机锚点 + 网格选点）今夜
+> 出结果，决定多步预测的底座。
+>
+> **用户决定（2026-09-08 早）**：隐变量线按建议收官——只跑一个量纲测试臂 `L2z_units`（`position_loss_scale_m` 1 km、
+> 其余同 warm β=0.01；臂文件 `l2_units_test_arms.json`），无论结果如何不再加臂；warm β=0.01 保留为点估计模型。
+> **B 线（校准的到达时刻分布）成为主线，A 线并行**；两者的设计、门与实施顺序在
+> `2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`。
+
 ### L3 — CTA 条件化（交付形态；≈2 天）
 
 `cta_conditioning ∈ off | given`。`given` 时把目标到达时刻（训练用真值时长）作为解码器的条件标量。
@@ -468,6 +599,22 @@ run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命�
 > 反事实扫描 `l3_cta_counterfactual_arms.json`（predict-only，±30/60/90 s，campaign `l3_cta_counterfactual_20260907`）
 > 从它的 checkpoint 出发。对照 = 同底座无 CTA 的 `L2d_warm_beta0p01`：ADE 逐分层的差就是"知道到达时刻"
 > 买到的那一半意图（预期雷达引导层动得最多）。
+>
+> **L3 结果（2026-09-07 晚，campaign `l3_cta_20260907`）。** 180 轮未早停，时长误差逐轮恒为 0（按构造）。对照同底座无
+> CTA 的 warm β=0.01：
+>
+> | 分层 | 无 CTA ADE / FDE p50 / chamfer | **给定 CTA** | 配对胜率（中位 Δ） |
+> |---|---|---|---|
+> | 全体 | 1214 / 827 / 165 | **841 / 745 / 128** | 65.5 %（−57 m） |
+> | 直线进近 | 402 / 594 / 84 | 392 / 586 / 66 | — |
+> | 雷达引导 | 2643 / 1851 / 827 | **1596 / 1180 / 721** | **87.3 %（−896 m）** |
+>
+> 知道"何时"买到 373 m 的全体 ADE，几乎全在雷达引导层（−1047 m）；直线进近只动 10 m。这是误差预算里"时序
+> 一半"的直接测量，也给隐变量线标了尺度：z 至今只抓到 108 m，而单单告知到达时刻值 373 m。几何改善远小于时序
+> （chamfer 165 → 128，雷达引导 827 → 721）：模型在"何时"上好得多，"何处"仍是开放的一半；可飞率 8.3 %。
+> **注意**：这是 oracle（真值落地时刻），841 m 是完美 ETA 的上界，不是可达的工作点；校准 ETA（B 线）是它的
+> 诚实版本。反事实扫描第一次在 −90 s 失败（短航班的 CTA 变负，rollout 拒绝非正段时长）——修复：CTA 低于
+> 60 s 最小剩余未来的航班跳过并在 summary 里计数（`cf4bb36`），扫描重排队列末尾。
 
 ### L4 — 场景条件（先验吃邻机；≈2 周）
 
@@ -546,7 +693,7 @@ native32 checkpoint 自己的预测**（直线进近已在 445 m 内），预期
 > 拟合前按真值时长排序再分批：稠密监督按批内最长航班补齐，训练集 p50 183 s / 最长 1454 s，
 > 按划分顺序取 batch 1024 会多积分约 2.5 倍飞行秒；排序同时让产物与划分列出的顺序无关（有测试）。
 > 训练侧 config 轴 `control_imitation_target ∈ {inverse-dynamics, fitted}` + `control_fitted_teacher_path`
-> （CLI `--control-imitation-target` / `--control-fitted-teacher`；默认与四个 named recipe 的字面量都是
+> （CLI `--control-imitation-target` / `--control-fitted-teacher-path`；默认与四个 named recipe 的字面量都是
 > inverse-dynamics；两者都进 run name：`imit-target` 与 `teacher=<目录>/<文件>`——两代表是两个运行，
 > 与 `closure_labels_path` 同一条规则；728 份含 config 的存量产物重算 0 处改名）。config 先拒绝不自洽的
 > 组合：fitted 无路径、有路径非 fitted、非 control 路径、`random_train_anchor`、模仿权重为 0、
