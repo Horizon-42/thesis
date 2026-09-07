@@ -26,6 +26,7 @@ checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
 | A3 学习的递归先验 | 未做，取决于 A2 | `control/latent.py` 先验网络吃上一轮后验 | 仅当 A2 有增益 |
 | B0 时长误差分布（测量） | **完成（2026-09-07，`dev-a0` `fe84e76` + 测试 `5f408df`）**，读数见 §〇.2 | `run_ts_eta_error_readout.py`（新 runner）+ `tests/test_eta_error_readout.py`（7 项）：读现有 `summary.json` 的 `final_time_error_s` 与 `fde_m`，按 `strata_masks` 分层报 \|Δt\| p50/p80/p90 与带号 p10/p50/p90 | 无门，定区间宽度的量级 |
+| 风读数（测量，B0 的旁证） | **完成（2026-09-08）**：直线进近速度残差对塔台顶风斜率 +0.62 ± 0.13 m/s/(m/s)、时长斜率 −2.0 ± 0.5 s/(m/s)，但 R² 0.10；终点沿航迹误差与风无关（R² 0.01）。**不开风臂**，见 `2026-09-08_wind_residual_readout.zh.md` | `run_ts_wind_residual_readout.py` + `l1_lowdim_20260907/wind_readout.json` | 无门；定风的效应量 |
 | B1 分位数时长头 | 未做 | config 轴 `duration_head ∈ point \| quantile`；`prediction_outputs.QuantileFinalTimeHead` | 中位数不劣于点估计头（种子噪声内） |
 | B2 split-conformal 校准 | 未做 | `calibration.py`（新，顶层）；校准表进 `checkpoint_metadata.json` | 校准后 80 % 区间实测覆盖 ∈ [0.76, 0.84] |
 | B3 分位数条件航迹 | 未做 | `predict --cta-from-quantiles`：CTA 来自自身分位数头，不读未来 | 每条分位数航迹可飞率不低于 top-1；真值落在扇面内的份额 ≥ 名义覆盖 |

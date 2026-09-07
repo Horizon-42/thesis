@@ -176,6 +176,23 @@ started from — so none of them come from the `simple-v3` work):
 - `4dTrajectory/optimization/collocation/tests/test_optimizer.py::test_fixed_time_objective_weights_control_effort_at_one`
   — 1 failure, already documented in `4dTrajectory/CLAUDE.md` as a numpy 2.x regression.
 
+**Re-verified 2026-09-08** (main tree at `1db22dd`, after the `dev-observed-load-factor-metar`
+merge and the `cli/freeze.py` rename that restored ts_transformer test collection): **15
+failures**, the 13 above plus two that are new since 2026-08-20 and both predate the merge
+(their causing commits are ancestors of `787e9a2`):
+
+- `trajectory_data_process/tests/test_ts_pipeline.py::test_prediction_labels_distinguish_coordinate_frames`
+  — the twelfth pipeline drift: asserts `'ENU' in plan.label`, the label now reads
+  `state · iTransformer · kinematic · state-v1 · pooled cohort`. Same family as the eleven.
+- `4dTrajectory/optimization/tests/test_scenario_optimization.py::test_write_reference_records_from_observed_tracks`
+  — `evaluation.records` now refuses a reference record whose `source.arr_airport` is empty
+  (`records.py:108`, from the speed-gate work `bb643d5`..`53ae8e8`), and the optimizer's
+  `write_reference_records` fixture never set it. Either the writer must carry `arr_airport`
+  (the record contract says it should) or the fixture is stale — not investigated which.
+
+Every ts_transformer test passes in the same run (they had been uncollectable, not failing,
+while `cli/freeze_test.py` matched the `*_test.py` pattern); `aeroviz-4d/python` 155 passed.
+
 **Judgement**: the eleven are assertion drift rather than broken behaviour — the pipeline
 itself runs — but that is inferred from the assertion text, not from exercising the runner.
 

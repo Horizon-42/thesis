@@ -4,6 +4,18 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — ts_transformer wind readout: the tower headwind explains a tenth of the straight-in along-track residual
+
+`run_ts_wind_residual_readout.py` (new CPU runner) joins each scored flight of a prediction
+directory to the field's ASOS/METAR headwind at its landing time (`evaluation.wind`, the table
+`dev-observed-load-factor-metar` brought in under `data/metar/`) and regresses the speed,
+duration and endpoint along-track residuals on it. KRDU val straight-in (839 flights with a
+report): speed-residual slope +0.62 ± 0.13 m/s per m/s headwind, duration slope −2.0 ± 0.5 s
+per m/s, four wind bins monotone — the signal is physical — but R² = 0.10 (residual sd 4.8 → 4.5
+m/s); the endpoint along-track error is unrelated (R² 0.01). Decision: no wind GPU arm; the
+predicted rollout stays wind-free. Results doc
+`4dTrajectory/ts_transformer/docs/2026-09-08_wind_residual_readout.zh.md`.
+
 ### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
@@ -473,7 +485,7 @@ check on that path and a green test with it.
 **BREAKING (CLI): one module per subcommand, and fifteen flags renamed** (`dba2450` T3-19).
 `__main__.main` 679 → `__main__.py` 131 lines (and `cli/` 1,542): a bootstrap plus a `COMMANDS` table of
 `(help, add_cli_arguments, run_cli)`, the pattern `approach_clustering/cli.py` already used.
-`cli/{train,cross_validate,evaluate_fit,freeze_test,predict}.py` + `cli/common.py`. Every
+`cli/{train,cross_validate,evaluate_fit,freeze,predict}.py` + `cli/common.py`. Every
 flag that sets a `TSConfig` field is now named after that field, so the 58-pair hand-written
 `cli_values` mapping is a list of 55 field names with an import-time assertion (57 after
 T3-21 adds the two barrier gains). Old spellings
