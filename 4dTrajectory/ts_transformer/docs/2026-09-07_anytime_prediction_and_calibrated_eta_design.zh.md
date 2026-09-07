@@ -32,9 +32,9 @@ A0 / B0 用现有 checkpoint 与现有预测目录即可做，排在 L2.e′ 之
 | A3 学习的递归先验 | 未做，取决于 A2 | `control/latent.py` 先验网络吃上一轮后验 | 仅当 A2 有增益 |
 | B0 时长误差分布（测量） | **完成（2026-09-07，`dev-a0` `fe84e76` + 测试 `5f408df`）**，读数见 §〇.2 | `run_ts_eta_error_readout.py`（新 runner）+ `tests/test_eta_error_readout.py`（7 项）：读现有 `summary.json` 的 `final_time_error_s` 与 `fde_m`，按 `strata_masks` 分层报 \|Δt\| p50/p80/p90 与带号 p10/p50/p90 | 无门，定区间宽度的量级 |
 | 风读数（测量，B0 的旁证） | **完成（2026-09-08）**：直线进近速度残差对塔台顶风斜率 +0.62 ± 0.13 m/s/(m/s)、时长斜率 −2.0 ± 0.5 s/(m/s)，但 R² 0.10；终点沿航迹误差与风无关（R² 0.01）。**不开风臂**，见 `2026-09-08_wind_residual_readout.zh.md` | `run_ts_wind_residual_readout.py` + `l1_lowdim_20260907/wind_readout.json` | 无门；定风的效应量 |
-| B1 分位数时长头 | **代码完成（2026-09-07，分支 `dev-b1`，`9f4149a`）；臂未跑**，命令见 §〇.3；**臂不是干净的单轴隔离**，pinball 项比点估计项重约 26 倍（数与条件第三臂见臂文件 `_comment`） | config 轴 `duration_head ∈ point \| quantile`（默认 `point`，配方按字面钉住，所以分位数臂必然是 `custom`，名字带 `T=q5`）+ `prediction_outputs.QuantileFinalTimeHead` / `pinball_duration_loss` + `control.heads.ControlFeatureModel.duration()`（时长与分位数的唯一规则，每次前向只读一次头）+ 记录字段 `source.durationQuantilesS` / 行 `duration_quantiles_s`；臂 `docs/experiments/b1_quantile_arms.json`；测试 `tests/test_duration_quantiles.py`（15）。**默认位级等价已证**：control / latent k1 / latent k4 / state / closure / cta=given 六个 2 轮合成训练对 `c2fccda`，1519 个非墙钟叶子全等；168 份在盘配置重算名字，0 处改名 | 中位数不劣于点估计头（种子噪声内） |
-| B2 split-conformal 校准 | **代码完成（2026-09-07，分支 `dev-b1`，`585b0e1` + review 修 §〇.4）；臂未跑** | `calibration.py`（新，顶层，被 `forecast` / `predict` / 两个读数共用：CQR 分数、有限样本 δ、区间算术、分层优先级、`deployed` 块、`checkpoint_metadata.json` 的 `conformal` 边车，schema `ts-conformal-cqr-v2`）+ runner `run_ts_eta_calibration.py --checkpoint PATH --out DIR [--allow-smoke-table]`（只读时长头，无 rollout 无 CTA，秒级 CPU；半 A 拟合**部署的** δ、半 B 量覆盖率，镜像只作稳定性核对）；`predict` 读表后写 `source.durationIntervalS` / `durationIntervalStratum` / `durationIntervalCohort` / `calibrated`；测试 `tests/test_eta_calibration.py`（24） | **部署**覆盖率 80 % 区间 ∈ [0.76, 0.84]（`deployed` 块，非逐分层行） |
-| B3 分位数条件航迹 | **代码完成（2026-09-07，分支 `dev-b1`，`ebdb00c`）；臂未跑** | `predict --cta-from-quantiles`：CTA 取自身的 q_τ，不读未来；写 `quantiles/q10…q90/`（有校准表时另加 `a20lo` / `a20hi` 两个端点目录），top-1 记录就是 q50 那一次解码；写出的 config 被改盖为 `cta_conditioning=self-q`，所以每个命名面都说 `cta=self-q`（训练目录仍诚实地写 `cta=given`）；校准端点目录 `a20lo` / `a20hi` 是 predict 的另一个开关 `--interval-endpoints`（默认关，扇面的门只读五片 qNN）；读数 `run_ts_quantile_fan_readout.py --arm <pred_dir>`（其 `cal.hit` 列在 val 臂上是**样本内**并被标注）；测试 `tests/test_cta_from_quantiles.py`（9，走真 CLI） | 每条分位数航迹可飞率不低于 top-1；真值落在扇面内的份额 ≥ 名义覆盖 |
+| B1 分位数时长头 | **跑完（2026-09-08，`b1_quantile_20260907/B1_quantile`，`73d829f`，164 轮早停）**：对预注册参照 native32 全分层更好（ADE 1282 vs 1322，直线 420 vs 445，雷达引导 2805 vs 2870，胜率 56 %）；对 L2d（隐变量臂，仅作上下文）劣 68 m；\|Δt\| p50 全体 11.5 s / 雷达引导 38.8 s，MAE 条款待读；变动超种子噪声 → 预注册的对照臂 `B1_point_matched` 触发，已加入臂文件待跑 | `b1_quantile_arms.json`、`readout_vs_native32.json` | 门 1 ADE 条款过，MAE 条款待读；见 §3.5 |
+| B2 split-conformal 校准 | **跑完（2026-09-08）**：部署覆盖率 B1 80 % **0.745 未过**（门 0.76–0.84）/ 50 % 0.450 过（压线）；B3 0.775 / 0.477 两档过；直线进近 80 % 宽度 28–32 s，雷达引导 **142–146 s → 否决线（120 s）触发**；镜像半区覆盖率一致高出部署值 5–10 点（远超二项噪声），半区种子探针进行中 | `B*_calibration/eta_calibration.{txt,json}` | 门 2 B1 半过、B3 过；否决触发；见 §3.5 |
+| B3 分位数条件航迹 | **跑完（2026-09-08，`B3_quantile_cta`，`77e6d3a`，129 轮早停）**：扇形内航班里最近分位数航迹的 chamfer 优于 top-1 的份额 **70.9 %**（107 vs 137 m；直线 53 vs 75；雷达引导 704 vs 949），在扇形内份额 0.84；`cal.hit*` 为样本内，不作覆盖率读 | `quantile_fan.{json,txt}` | 门 3 过；见 §3.5 |
 | B4 区间宽度随剩余时间（A × B） | 未做 | A1 网格 × B2 区间 | 交付物本身：冻结点曲线 |
 | C0 拟合表检索上界（测量） | 未做，前置 = L5.a 拟合表 | `run_ts_schedule_retrieval.py`（新）：按锚点状态取最近 K 条拟合控制序列各自 rollout | minADE_16 < native32 top-1；记忆上界 = 真值航班自己的拟合序列 |
 | C1 控制空间条件扩散 | 未做 | `control/diffusion.py`，config 轴 `control_sampler ∈ none \| diffusion`，run name `control+dif` | minADE_16 < top-1 且 < 同 K 的无条件采样对照；直线进近 top-1 不退 |
@@ -558,6 +558,43 @@ q_0.1 … q_0.9（校准后），每个分位数写一个 `quantiles/qNN/` 完�
 在雷达引导层超过 120 s，此时区间没有调度意义，说明 T 的不确定性不是校准能收的，回到 A。
 
 ---
+
+### 3.5 B1–B3 结果（2026-09-08，`b1_quantile_20260907`，KRDU val 1404，单种子）
+
+| 臂 | 提交 | 轮数 | 选择指标（fixed-anchor common-grid ADE） |
+|---|---|---:|---:|
+| native32（预注册参照） | — | 180 | — |
+| L2d_warm_beta0p01（隐变量臂，仅上下文） | — | — | 1213.4 |
+| `B1_quantile` | `73d829f` | 164/180 早停（最佳 144） | 1281.8 |
+| `B3_quantile_cta` | `77e6d3a` | 129/180 早停（最佳 109） | 1014.2（给定 CTA） |
+
+两臂提交不同（B3 在主树一次文档提交造成的脏树拒绝后重启），训练路径无差异。
+
+**门 1**（对 native32：q50 时长误差在 25.9 s MAE 的种子噪声内，且全体 ADE 不劣于 1322 m）：ADE 条款**过**——B1 全分层更好
+（ADE 1282 / 420 / 2805 vs 1322 / 445 / 2870，FDE p50 860 / 595 / 1935 vs 864 / 671 / 1982，配对胜率 55.6–55.8 %）；MAE 条款待读
+（\|Δt\| p50 全体 11.5 s、直线 7.3 s、雷达引导 38.8 s）。第一次读数误以 L2d 为参照得出"全分层劣 68 m"，已更正；对 L2d 的劣势只作上下文。
+ADE 变动（−40 m）超过种子噪声，按预注册触发对照臂 `B1_point_matched`（点估计头 + `final_time_loss_weight` 26.0），分辨"分位数头本身"
+与"时长项重了 26 倍"。
+
+**门 2**（部署覆盖率，80 % ∈ [0.76, 0.84]、50 % ∈ [0.45, 0.55]）：
+
+| 臂 | α | 部署覆盖率 | 宽度中位 s | 直线 / 雷达引导宽度 s | 镜像半区覆盖率 |
+|---|---|---:|---:|---:|---:|
+| B1 | 0.2 | **0.745 未过** | 33.5 | 28 / **142** | 0.839 |
+| B1 | 0.5 | 0.450 过 | 16.5 | 14 / 74 | 0.557 |
+| B3 | 0.2 | 0.775 过 | 38.2 | 32 / **146** | 0.823 |
+| B3 | 0.5 | 0.477 过 | 18.4 | 15 / 76 | 0.548 |
+
+**门 3**（B3 扇形几何）：过——扇形内航班（84 %）里最近分位数航迹的 chamfer 优于 top-1 的份额 70.9 %（107 vs 137 m）。
+
+**否决触发**：雷达引导 80 % 区间中位宽度 142 / 146 s（扇形读数 149 s）> 120 s。直线进近 FDE 条款干净（595 vs 594）。
+读法：直线进近的 80 % 区间 ~30 s 宽且覆盖率合规，对调度程序可用；雷达引导 ±70 s 是真实的不确定性（控制器何时转向，
+同 L2/L4 的 962 m 意图），校准只是如实报出，不是校准能收窄的——与"CTA 为脊柱"一致：雷达引导的时间应由调度程序指定
+（B3 给定 CTA 后门 2 / 门 3 全过）。是否按否决字面"退回 A"：待用户决定。
+
+**半区不可交换**：镜像覆盖率在两臂两档一致高出部署值 5–10 点（n≈700 时二项 SE ≈ 1.5 点，3–6σ，单向）。半区规则固定用训练种子
+且每次运行重写部署表，无法直接探针；已在 `dev-b2a` 给 runner 加 `--half-seed` + `--readout-only`，五种子只读探针进行中，
+结果决定 B1 的 0.745 是"擦线"还是分割假象。
 
 ## 四、C. 控制参数空间的条件扩散 + rollout 引导
 

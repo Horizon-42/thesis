@@ -25,6 +25,7 @@
    "predict_args": [
     "--cta-from-quantiles"
    ]
-  }
+  },
+    {"key": "B1_point_matched", "label": "point head at the pinball-matched duration weight (the pre-registered disambiguation arm: B1_quantile moved pooled ADE 1322 -> 1282 vs native32, beyond seed noise)", "overrides": {"duration_head": "point", "final_time_loss_weight": 26.0}}
  ]
 }
