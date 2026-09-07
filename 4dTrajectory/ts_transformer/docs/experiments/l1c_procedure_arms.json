@@ -1,0 +1,18 @@
+{
+  "_comment": "L1.c of docs/2026-09-07_latent_intent_design.zh.md (pre-registered 2026-09-08, user decision: priority raised to right after L1.b hr16). The training-time LPV corridor + glidepath penalty (objective.procedure_loss, hinge^2 on the metres outside k*hw(d) / the glidepath window on truth-established rows, control path = through the rollout dynamics) was vetoed on 2026-09-05 on simple-v3 WITH the imitation teacher at 64 (87 % of the loss): FDE better, vectored ADE +658 m, bank collapse at 5e-3. L1.b removes the teacher, so whether the term integrates without the mid-path cost is unmeasured -- that is the new evidence. BASE = the L1.b decision rule's main-line supervision: hr8+TV (the 180-epoch survivor) as committed here; if an hr16 arm passes the L1.b gate the base is edited to that arm BEFORE this campaign is launched (one line, recorded in the doc). Doses: 2e-4 is the control-path PARITY dose (1e-3 was 4.4x the position term at epoch 1 on control vs 0.78x on state; 1e-3/4.4 = 2.3e-4), 1e-3 is the dose whose 09-05 result is on file. Two predict-only arms put the soft barrier hook (the deployable inference-time alternative, net gain on 09-06) on the base and on the parity arm, so the reading is 'training-time term vs inference hook vs both' on ONE base. Gates in the doc: violation rate down >= 5 points AND vectored ADE not worse than base by > 30 m AND bank skill >= 0.70; veto: vectored ADE > +100 m or straight-in FDE worse than seed noise. Dual step stays 0 (diverged on state, not re-tested). Order matters: the predict-only arms read checkpoints the earlier arms write.",
+  "base_recipe": "simple-v3",
+  "base": {"control_recipe_name": "custom", "n_segments": 32, "control_imitation_loss_weight": 0.0,
+           "control_heading_rate_loss_weight": 8.0, "control_bank_tv_loss_weight": 1.0},
+  "arms": [
+    {"key": "L1c_lpv_2e-4", "label": "L1.b base + LPV corridor/glidepath penalty at the control-path parity dose (lambda 2e-4)",
+     "overrides": {"procedure_loss_lateral_weight": 0.0002, "procedure_loss_vertical_weight": 0.0002}},
+    {"key": "L1c_lpv_1e-3", "label": "L1.b base + the penalty at the 2026-09-05 dose (lambda 1e-3), for continuity",
+     "overrides": {"procedure_loss_lateral_weight": 0.001, "procedure_loss_vertical_weight": 0.001}},
+    {"key": "L1c_base_barrier_infer", "label": "L1.b base checkpoint + soft barrier hook at prediction time (the deployable alternative)",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l1b_full_20260907/L1b_hr8_tv1_full/checkpoint.pt",
+     "predict_args": ["--command-hook", "barrier", "--hook-saturation", "soft"]},
+    {"key": "L1c_lpv_2e-4_barrier_infer", "label": "parity-dose penalty arm + soft barrier hook at prediction time (do they combine?)",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l1c_procedure_20260908/L1c_lpv_2e-4/checkpoint.pt",
+     "predict_args": ["--command-hook", "barrier", "--hook-saturation", "soft"]}
+  ]
+}
