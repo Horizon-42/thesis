@@ -137,6 +137,10 @@ Modeling pipeline: `arrivals/manifest.json` → `flight_scenarios` (`FlightScena
   (`experiment_index.begin_run`) — so creating one mid-campaign would abort the next arm. On this
   machine `.git/info/exclude` carries `.claude/worktrees/` (local, not committed); re-add it
   after a fresh clone before working in a worktree beside a running campaign.
+- **A killed formal run leaves a `running` `experiment_manifest.json` that makes the relaunch
+  refuse the arm directory as occupied** (`begin_run` writes the manifest before training
+  starts). Recovery: if the directory holds only `config.json` + the manifest, move it aside
+  as `<arm>.aborted-<UTC>` (evidence, never deleted) and rerun the campaign with `--resume`.
 - Env spec backups (regenerate `aeroviz` if ever needed): `.env-backup/aeroviz-pip-freeze.txt`,
   `aeroviz-conda-explicit.txt`, `aeroviz-environment.yml`.
 - GPU: RTX 4060, 8 GB (compute capability 8.9), cu128 wheels.
