@@ -572,6 +572,11 @@ run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命�
 > L3 已证明"何时"值 373 m，B1 分位数时长头 + B2 conformal 校准 + B3 `cta=self-q` 逐分位数解码，不读未来地交付到达
 > 时刻区间与每个分位数一条可飞航迹——调度程序要的正是这个，且不依赖 z。(3) A 线（随机锚点 + 网格选点）今夜
 > 出结果，决定多步预测的底座。
+>
+> **用户决定（2026-09-08 早）**：隐变量线按建议收官——只跑一个量纲测试臂 `L2z_units`（`position_loss_scale_m` 1 km、
+> 其余同 warm β=0.01；臂文件 `l2_units_test_arms.json`），无论结果如何不再加臂；warm β=0.01 保留为点估计模型。
+> **B 线（校准的到达时刻分布）成为主线，A 线并行**；两者的设计、门与实施顺序在
+> `2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`。
 
 ### L3 — CTA 条件化（交付形态；≈2 天）
 

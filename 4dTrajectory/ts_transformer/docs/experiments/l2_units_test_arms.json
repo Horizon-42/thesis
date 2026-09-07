@@ -1,0 +1,29 @@
+{
+ "_comment": "The latent line's FINAL arm (user decision 2026-09-08): the units test. Seven latent arms never made q(z|future) depend on the future (posterior mean on the prior mean, 0.05-0.18 prior-sigma), and the mechanism named is the objective's units — position is scored in (m / position_loss_scale_m=10 km)^2, so every gain z could earn is ~0.01 loss units against a KL price of 0.01 per nat at beta 0.01. This arm multiplies the position gain by 100 (position_loss_scale_m 1 km) on the L2.d base (warm posterior q-std 0.1, beta 0.01, free bits 0.05, K=1) and changes nothing else. NOTE the recipe's imitation dose (64) and velocity weight (0.003) were calibrated at the 10 km scale, so the position term's share of the loss changes by 100x here — this arm is a mechanism test, not a candidate model; its top-1 is read but the verdict is the posterior-mean displacement (probe: median > 1 sigma) and the shuffled delta-ADE (> 200 m). READING: if the mean now depends on the future, the units were the cause and a re-calibrated latent recipe could be built later; if it still sits on the prior mean, the line closes as a negative result: on this objective a CVAE cannot carry the intent. No further latent arms either way.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "latent_dim": 8,
+  "latent_free_bits_nats": 0.05,
+  "latent_prior_components": 1,
+  "latent_posterior_init_std": 0.1,
+  "latent_beta": 0.01,
+  "position_loss_scale_m": 1000.0
+ },
+ "arms": [
+  {
+   "key": "L2z_units",
+   "label": "warm posterior, beta 0.01, position_loss_scale_m 1 km (the units test)",
+   "overrides": {},
+   "predict_args": [
+    "--latent-samples",
+    "6",
+    "--latent-random",
+    "6",
+    "--latent-shuffle"
+   ]
+  }
+ ]
+}
