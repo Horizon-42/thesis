@@ -1,4 +1,4 @@
-"""The remaining-path anchor grid — ONE definition, two consumers.
+"""The remaining-path anchor grid — ONE definition, three consumers.
 
 The A0 curve (``run_ts_anytime_curve.py``) replays a trained checkpoint from a grid of
 later anchors; the ``anchor-grid-common-grid-ade`` checkpoint-selection metric
@@ -7,6 +7,12 @@ ever drifted apart, "the anytime curve improved" and "this epoch was selected on
 anytime curve" would be claims about different anchors. So the bins, the future floor, the
 per-flight anchor rule and the fixed-at-L−1 stratum rule live here and nowhere else — the
 runner and the metric both import them.
+
+The third consumer is TRAINING: ``random_train_anchor_sampling="remaining-path-strata"``
+(A0.b) draws each epoch's anchor uniformly over the strata the same grid values cut, so the
+anchors a model is trained at, scored at and read at are three uses of one set of
+boundaries. ``dataset`` imports those (:data:`REMAINING_PATH_STRATA_EDGES_M`,
+:func:`remaining_path_strata`) at call time, because this module reads ``dataset``.
 
 Anytime-prediction design
 (``docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md``) §2.3, §六 1–2.
@@ -89,6 +95,46 @@ VALIDATION_ANCHOR_GRID_M = tuple(
 def bin_label(target_m: float) -> str:
     """The published name of a bin: ``"16km"``, never a bare ``16000`` that reads as an ADE."""
     return f"{target_m / 1000:g}km"
+
+
+#: The strata a ``random_train_anchor_sampling="remaining-path-strata"`` train anchor is
+#: drawn uniformly over — the measurement grid read as EDGES rather than as targets, in
+#: ASCENDING metres. Reading one tuple two ways is deliberate: the sampler's strata and the
+#: curve's bins are then the same 2 / 4 / 6 / 8 / 12 / 16 / 20 km boundaries by
+#: construction, and cannot become two meanings of one word.
+#:
+#: The seven edges make EIGHT strata, because the two open ends the targets leave uncovered
+#: are strata of their own: under 2 km (the last seconds before the runway, where the
+#: duration head floors) and beyond 20 km (the long entries; the median KRDU flight has
+#: 13.4 km left at L−1, so this end is thin). Every admissible anchor must land in exactly
+#: one stratum, or a uniform draw over strata would silently drop the flights outside them.
+REMAINING_PATH_STRATA_EDGES_M = tuple(
+    sorted(float(km) * 1000.0 for km in DEFAULT_ANCHOR_GRID_KM)
+)
+
+#: The published name of each stratum, ascending, one per interval. Spelled through
+#: :func:`bin_label` so the km rendering keeps one owner.
+REMAINING_PATH_STRATA_LABELS = (
+    f"<{bin_label(REMAINING_PATH_STRATA_EDGES_M[0])}",
+    *(
+        f"{bin_label(low)}-{bin_label(high)}"
+        for low, high in zip(
+            REMAINING_PATH_STRATA_EDGES_M, REMAINING_PATH_STRATA_EDGES_M[1:]
+        )
+    ),
+    f">={bin_label(REMAINING_PATH_STRATA_EDGES_M[-1])}",
+)
+
+
+def remaining_path_strata(series: FlightSeries) -> np.ndarray:
+    """The remaining-path stratum index of EVERY observed sample of one flight: ``[N]``.
+
+    ``np.digitize`` over :data:`REMAINING_PATH_STRATA_EDGES_M` on the same profile the bins
+    are chosen from, so a sample's stratum and its bin are two readings of one length. Index
+    ``i`` is :data:`REMAINING_PATH_STRATA_LABELS` ``[i]``: 0 is under the first edge, the
+    last is at or beyond the last edge.
+    """
+    return np.digitize(remaining_path_profile_m(series), REMAINING_PATH_STRATA_EDGES_M)
 
 
 def remaining_path_profiles(series: Sequence[FlightSeries]) -> list[np.ndarray]:

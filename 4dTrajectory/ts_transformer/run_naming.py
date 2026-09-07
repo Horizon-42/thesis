@@ -191,6 +191,10 @@ META_FIELDS = (
     "use_norm",
     "revin",
     "random_train_anchor",
+    # A0.b: HOW the random anchor is drawn. Two runs that differ only here see different
+    # anchor distributions every epoch, so it is as identity-bearing as the flag above it.
+    # Every stored config predates it and carries the default (recounted on disk).
+    "random_train_anchor_sampling",
     "training_cohort_min_future_s",
     "checkpoint_selection_metric",
     # A0.b: WHICH validation number the LR scheduler measures its plateau on. Two runs that
@@ -258,6 +262,7 @@ _ABBREV = {
     "lr_plateau_metric": "lr-metric",
     "training_cohort_min_future_s": "min-future",
     "random_train_anchor": "random-anchor",
+    "random_train_anchor_sampling": "anchors",
     "control_duration_parameterization": "duration",
     "control_duration_uniform_floor": "duration-floor",
     "control_gradient_clip_norm": "grad-clip",

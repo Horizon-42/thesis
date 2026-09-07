@@ -53,8 +53,8 @@ from dataset import (
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
-    RandomAnchorTrajectoryWindows,
     iter_batches,
+    training_window_class,
     window_anchors,
 )
 from splits import split_by_flight
@@ -482,11 +482,7 @@ def fit_model(
         if config.uses_fitted_teacher
         else None
     )
-    training_dataset_class = {
-        False: FixedAnchorTrajectoryWindows,
-        True: RandomAnchorTrajectoryWindows,
-    }[config.random_train_anchor]
-    train_set = training_dataset_class(
+    train_set = training_window_class(config)(
         train_series,
         config,
         normalizer,

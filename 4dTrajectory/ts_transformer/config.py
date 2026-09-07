@@ -321,6 +321,26 @@ LR_PLATEAU_METRIC_SELECTION = "selection"
 LR_PLATEAU_METRIC_OBJECTIVE = "objective"
 LR_PLATEAU_METRICS = (LR_PLATEAU_METRIC_SELECTION, LR_PLATEAU_METRIC_OBJECTIVE)
 
+# HOW a random train anchor is drawn from the flight's admissible ones (A0.b, design §2.4c).
+# Admissibility is NOT part of this axis: `eligible_random_train_anchors` and the
+# `random_train_anchor_min_future_s` contract decide WHICH anchors exist, both policies draw
+# from exactly that set, and the training cohort is therefore identical under either.
+#
+# `uniform` draws over the SAMPLES, which is uniform over time and so biased toward the
+# runway: every flight contributes near-runway samples and only the long ones contribute far
+# anchors (measured on the KRDU train split: median anchor 107, i.e. 214 s into a track whose
+# anchors run to index 467). `remaining-path-strata` draws a remaining-path stratum first —
+# uniformly among the strata the flight HAS anchors in — then a sample inside it, so a
+# flight's far anchors are drawn as often as its near ones. The skew's measured signature is
+# the A0-random arm's per-anchor-set curve: the 6 km set improved for 180 epochs while L−1
+# and 12 km degraded after epoch 10.
+RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM = "uniform"
+RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA = "remaining-path-strata"
+RANDOM_TRAIN_ANCHOR_SAMPLINGS = (
+    RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA,
+)
+
 
 def uses_control_dynamics(prediction_output: str) -> bool:
     """Whether an output strategy requires per-flight aircraft dynamics."""
@@ -620,6 +640,7 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "random_train_anchor": False,
         "training_cohort_min_future_s": 0.0,
         "random_train_anchor_min_future_s": 60.0,
+        "random_train_anchor_sampling": RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
         "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
         "validation_common_grid_points": 64,
         "fitted_tail_position_weight": 0.25,
@@ -842,6 +863,10 @@ class TSConfig:
     # target and do not represent the fixed-anchor deployment task. This train-only floor is
     # frozen before validation; fixed-anchor train/validation windows do not use it.
     random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S
+    # HOW that random anchor is drawn from the admissible ones — uniformly over the samples
+    # (today's, and uniform over TIME) or uniformly over the remaining-path strata. It
+    # cannot change WHICH anchors are admissible, so both policies train the same cohort.
+    random_train_anchor_sampling: str = RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM
     # One formal development score: fixed-anchor, common true-physical-time, airport-macro
     # 3D ADE.  It is shared by CV, the LR scheduler, early stopping and checkpointing.
     checkpoint_selection_metric: str = CHECKPOINT_SELECTION_COMMON_GRID_ADE
@@ -1152,6 +1177,12 @@ class TSConfig:
                 f"unknown lr_plateau_metric {self.lr_plateau_metric!r}; expected one of "
                 f"{LR_PLATEAU_METRICS}"
             )
+        if self.random_train_anchor_sampling not in RANDOM_TRAIN_ANCHOR_SAMPLINGS:
+            raise ValueError(
+                f"unknown random_train_anchor_sampling "
+                f"{self.random_train_anchor_sampling!r}; expected one of "
+                f"{RANDOM_TRAIN_ANCHOR_SAMPLINGS}"
+            )
 
     def _validate_recipe(self) -> None:
         """A named recipe's fields are frozen at the values that define it.
@@ -1324,6 +1355,15 @@ class TSConfig:
             raise ValueError(
                 "control output uses learned non-uniform segments and currently requires "
                 "horizon_mode='normalized'; state output retains normalized/full/window"
+            )
+        if (
+            self.random_train_anchor_sampling != RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM
+            and not self.random_train_anchor
+        ):
+            raise ValueError(
+                f"random_train_anchor_sampling={self.random_train_anchor_sampling!r} names "
+                "HOW a random train anchor is drawn, and random_train_anchor=False draws "
+                "none — the fixed policy anchors every flight at L-1"
             )
         if self.uses_final_approach_context and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(

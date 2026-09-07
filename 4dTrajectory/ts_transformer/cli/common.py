@@ -43,6 +43,7 @@ from config import (
     MODELS,
     PREDICTION_OUTPUTS,
     PROCEDURE_LOSS_FIELDS,
+    RANDOM_TRAIN_ANCHOR_SAMPLINGS,
     STATE_POSITION_REFERENCES_AVAILABLE,
     TARGET_CONDITIONINGS,
     TIME_CONSTANT_FIELDS,
@@ -447,6 +448,17 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         help="minimum future duration available after a random train anchor (default: 60 s)",
     )
     parser.add_argument(
+        "--random-train-anchor-sampling",
+        choices=RANDOM_TRAIN_ANCHOR_SAMPLINGS,
+        default=None,
+        help=(
+            "how that anchor is drawn from the admissible ones: uniformly over the samples "
+            "('uniform', the default, which is uniform over TIME and biased toward the "
+            "runway) or uniformly over the anchor_grid remaining-path strata "
+            "('remaining-path-strata'). Refused without --random-train-anchor"
+        ),
+    )
+    parser.add_argument(
         "--checkpoint-selection-metric",
         choices=CHECKPOINT_SELECTION_METRICS,
         default=None,
@@ -540,6 +552,7 @@ CLI_CONFIG_FIELDS = (
     "random_train_anchor",
     "training_cohort_min_future_s",
     "random_train_anchor_min_future_s",
+    "random_train_anchor_sampling",
     "checkpoint_selection_metric",
     "validation_common_grid_points",
 )
