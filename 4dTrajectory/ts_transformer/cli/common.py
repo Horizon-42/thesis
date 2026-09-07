@@ -39,9 +39,11 @@ from config import (
     HORIZON_MODES,
     INTENT_CONDITIONINGS,
     INTENT_FIELDS,
+    LR_PLATEAU_METRICS,
     MODELS,
     PREDICTION_OUTPUTS,
     PROCEDURE_LOSS_FIELDS,
+    RANDOM_TRAIN_ANCHOR_SAMPLINGS,
     STATE_POSITION_REFERENCES_AVAILABLE,
     TARGET_CONDITIONINGS,
     TIME_CONSTANT_FIELDS,
@@ -184,6 +186,16 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--lr-plateau-factor", type=float, default=None)
     parser.add_argument("--lr-plateau-patience", type=int, default=None)
+    parser.add_argument(
+        "--lr-plateau-metric",
+        choices=LR_PLATEAU_METRICS,
+        default=None,
+        help=(
+            "which validation number the LR scheduler measures its plateau on: the "
+            "checkpoint-selection value ('selection', the default) or the macro validation "
+            "objective ('objective'). Never changes which epoch is kept"
+        ),
+    )
     parser.add_argument("--fitted-tail-position-weight", type=float, default=None,
                         help="position-only weight for fitted ADS-B tail rows (default: 0.25)")
     parser.add_argument("--fitted-terminal-position-weight", type=float, default=None,
@@ -436,6 +448,17 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         help="minimum future duration available after a random train anchor (default: 60 s)",
     )
     parser.add_argument(
+        "--random-train-anchor-sampling",
+        choices=RANDOM_TRAIN_ANCHOR_SAMPLINGS,
+        default=None,
+        help=(
+            "how that anchor is drawn from the admissible ones: uniformly over the samples "
+            "('uniform', the default, which is uniform in TIME and, pooled over flights, "
+            "over-weights the near end) or uniformly across the flight's own remaining-path "
+            "span ('remaining-path-uniform'). Refused without --random-train-anchor"
+        ),
+    )
+    parser.add_argument(
         "--checkpoint-selection-metric",
         choices=CHECKPOINT_SELECTION_METRICS,
         default=None,
@@ -487,6 +510,7 @@ CLI_CONFIG_FIELDS = (
     "learning_rate",
     "lr_plateau_factor",
     "lr_plateau_patience",
+    "lr_plateau_metric",
     "patience",
     "fitted_tail_position_weight",
     "fitted_terminal_position_weight",
@@ -528,6 +552,7 @@ CLI_CONFIG_FIELDS = (
     "random_train_anchor",
     "training_cohort_min_future_s",
     "random_train_anchor_min_future_s",
+    "random_train_anchor_sampling",
     "checkpoint_selection_metric",
     "validation_common_grid_points",
 )

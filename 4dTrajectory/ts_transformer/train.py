@@ -36,6 +36,8 @@ from config import (
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
+    LR_PLATEAU_METRIC_OBJECTIVE,
+    LR_PLATEAU_METRIC_SELECTION,
     TSConfig,
     control_recipe,
     uses_control_dynamics,
@@ -51,8 +53,8 @@ from dataset import (
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
-    RandomAnchorTrajectoryWindows,
     iter_batches,
+    training_window_class,
     window_anchors,
 )
 from splits import split_by_flight
@@ -480,11 +482,7 @@ def fit_model(
         if config.uses_fitted_teacher
         else None
     )
-    training_dataset_class = {
-        False: FixedAnchorTrajectoryWindows,
-        True: RandomAnchorTrajectoryWindows,
-    }[config.random_train_anchor]
-    train_set = training_dataset_class(
+    train_set = training_window_class(config)(
         train_series,
         config,
         normalizer,
@@ -816,7 +814,14 @@ def fit_model(
             raise RuntimeError(
                 f"validation selection metric {validation_selection.metric} is not finite"
             )
-        scheduler.step(validation_selection.value)
+        # The plateau is measured on ONE of the two numbers this epoch already produced —
+        # never on a third one computed here, so the scheduler and the record cannot
+        # disagree about what stalled. Which one is `lr_plateau_metric`; the kept epoch is
+        # `validation_selection` either way.
+        scheduler.step({
+            LR_PLATEAU_METRIC_SELECTION: validation_selection.value,
+            LR_PLATEAU_METRIC_OBJECTIVE: val_loss,
+        }[config.lr_plateau_metric])
         timing = profiler.finish(
             optimizer_updates=optimizer_updates - epoch_start_optimizer_updates
         )
@@ -1096,6 +1101,11 @@ def train(
             "name": "ReduceLROnPlateau",
             "factor": config.lr_plateau_factor,
             "patience": config.lr_plateau_patience,
+            # WHICH of the epoch record's two numbers the plateau was measured on:
+            # `selection` = `validation_selection_value`, `objective` = `val_loss`. The
+            # values themselves are already in every epoch; this is the link between them
+            # and the learning-rate column beside them.
+            "metric": config.lr_plateau_metric,
         },
         "split_sha256": {
             "train": _split_sha256(train_series),

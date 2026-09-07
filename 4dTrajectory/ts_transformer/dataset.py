@@ -66,6 +66,15 @@ from anchor_eligibility import (
     eligible_random_train_anchors,
     random_train_anchor_eligibility_policy,
 )
+# The remaining-path axis, from the LEAF that owns its values. `anchor_grid` re-exports the
+# same objects for every reading consumer; it imports this module, so the training sampler
+# reads them from underneath rather than through it.
+from anchor_strata import (
+    REMAINING_PATH_STRATA_LABELS,
+    remaining_path_strata,
+    remaining_path_uniform_offset,
+)
+from approach_difficulty import remaining_path_profile_m
 from config import (
     CTA_CONDITIONING_GIVEN,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
@@ -76,6 +85,8 @@ from config import (
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
     STATE_POSITION_CORRIDOR_BOUNDED,
     TSConfig,
     uses_control_dynamics,
@@ -1350,6 +1361,14 @@ class TrajectoryWindows(Dataset, ABC):
     def epoch_indices(self, seed: int) -> np.ndarray:
         """Return the concrete mode's one-flight-per-epoch sample indices."""
 
+    def _sampling_extras(self, _indices: np.ndarray) -> dict[str, Any]:
+        """Per-epoch audit rows only one anchor policy can produce.
+
+        Empty here: a policy that stores ONE anchor per flight has no distribution to
+        report — where its anchors sit is the definition of the policy.
+        """
+        return {}
+
     def anchor_statistics(self, seed: int) -> dict[str, Any]:
         """Audit the exact one-window-per-flight sample selected for an epoch."""
         indices = self.epoch_indices(seed)
@@ -1357,6 +1376,7 @@ class TrajectoryWindows(Dataset, ABC):
         series_indices = np.array(
             [self.index[int(index)][0] for index in indices], dtype=np.int64
         )
+        extras = self._sampling_extras(indices)
         if not len(indices):
             return {
                 "policy": self.anchor_policy,
@@ -1371,6 +1391,7 @@ class TrajectoryWindows(Dataset, ABC):
                     self.temporal_candidate_anchors - self.eligible_candidate_anchors
                 ),
                 "samples": 0,
+                **extras,
             }
         anchor_times = np.array([
             self.series[int(series_index)].times[int(anchor)]
@@ -1412,6 +1433,7 @@ class TrajectoryWindows(Dataset, ABC):
             "anchor_time_s": distribution(anchor_times),
             "remaining_time_s": distribution(remaining_times),
             "fixed_anchor_fraction": float(np.mean(anchors == self.config.seq_len - 1)),
+            **extras,
         }
 
     def _sample_arrays(
@@ -1747,6 +1769,22 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
             minimum_future_s=config.random_train_anchor_min_future_s,
             fitted_teacher=fitted_teacher,
         )
+        # The remaining path AT every stored anchor, and the stratum it falls in, both
+        # aligned with `self.index`. The path is what `remaining-path-uniform` draws on; the
+        # strata are BOOKKEEPING — the histogram both policies' epochs are counted in, which
+        # is the only place a draw law's pull toward or away from the runway is visible while
+        # a run trains.
+        self.anchor_remaining_path_m = np.empty(len(self.index), dtype=np.float64)
+        self.anchor_strata = np.empty(len(self.index), dtype=np.int64)
+        for s_idx, (start, count) in self.series_ranges.items():
+            if count:
+                anchors = [anchor for _s_idx, anchor in self.index[start : start + count]]
+                self.anchor_remaining_path_m[start : start + count] = (
+                    remaining_path_profile_m(self.series[s_idx])[anchors]
+                )
+                self.anchor_strata[start : start + count] = remaining_path_strata(
+                    self.series[s_idx]
+                )[anchors]
 
     def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         return anchors
@@ -1755,6 +1793,28 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
         self, series: FlightSeries, anchors: Sequence[int]
     ) -> Sequence[int]:
         return eligible_random_train_anchors(series, anchors, self.config)
+
+    def _strata_histogram(self, strata: np.ndarray) -> dict[str, int]:
+        counts = np.bincount(strata, minlength=len(REMAINING_PATH_STRATA_LABELS))
+        return {
+            label: int(count)
+            for label, count in zip(REMAINING_PATH_STRATA_LABELS, counts, strict=True)
+        }
+
+    def _sampling_extras(self, indices: np.ndarray) -> dict[str, Any]:
+        """The epoch's REALISED anchors per stratum, beside the POPULATION they came from.
+
+        One draw per flight, so the drawn counts sum to the epoch's flights while the
+        population counts sum to every stored admissible anchor. Neither number means much
+        alone: a draw law is over- or under-weighting a stratum only relative to how many
+        admissible anchors sit in it, which is exactly the comparison that showed
+        uniform-in-time over-weighting the near end. Recorded under BOTH policies, and the
+        only place either can be read while a run is training.
+        """
+        return {
+            "remaining_path_strata": self._strata_histogram(self.anchor_strata[indices]),
+            "remaining_path_strata_population": self._strata_histogram(self.anchor_strata),
+        }
 
     def epoch_indices(self, seed: int) -> np.ndarray:
         starts = self.range_starts[self.eligible_series]
@@ -1775,6 +1835,81 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
         return indices
 
 
+class RemainingPathUniformAnchorTrajectoryWindows(RandomAnchorTrajectoryWindows):
+    """One random valid anchor per flight and epoch, uniform in REMAINING PATH.
+
+    The uniform policy draws over a flight's admissible SAMPLES, i.e. uniformly in TIME.
+    Pooled over flights that over-weights the near end relative to the anchor population it
+    draws from — every flight gets one draw whatever its length, and a kilometre near the
+    runway holds more samples than a kilometre at 25 km because the aircraft is slower
+    there. Measured on the whole KRDU validation split (1404 flights, 181,906 admissible
+    anchors, 200 epochs): the draws put 34.3 % under 6 km where the population has 25.1 %,
+    and 17.9 % beyond 20 km where the population has 32.9 %.
+
+    Here the draw is placed uniformly across the flight's OWN admissible remaining-path span
+    and the nearest admissible anchor is taken (`anchor_strata.remaining_path_uniform_offset`)
+    — equal weight per kilometre rather than per sample, which on that cohort moves those two
+    shares to 31.0 % and 21.0 %. It comes from the same per-flight per-epoch hash the uniform
+    policy uses, so the epoch's anchors are still a function of (seed, epoch, flight) and
+    nothing else.
+
+    NOT a stratum draw: A0.b's first draft drew an `anchor_strata` stratum uniformly and then
+    a sample inside it, which moved training TOWARD the runway (review measurement on 700
+    KRDU val flights: share ≥ 20 km 16.9 % → 4.1 %, mean remaining path 12.2 → 8.0 km)
+    because the grid cuts the near end into four 2-km strata and leaves the far end ONE open
+    stratum spanning 20–123 km.
+
+    Admissibility is UNCHANGED (`eligible_random_train_anchors`, the same future contract),
+    so this policy trains the same cohort on the same anchor population; only which of them
+    each epoch sees changes.
+    """
+
+    anchor_description = (
+        "one random valid train anchor per flight and epoch, uniform in remaining path"
+    )
+    anchor_policy = "remaining-path-uniform-random"
+    sampling_version = "per-flight-hash-v3-remaining-path-uniform"
+
+    def epoch_indices(self, seed: int) -> np.ndarray:
+        offsets = np.array([
+            remaining_path_uniform_offset(
+                self.anchor_remaining_path_m[start : start + count],
+                # The flight's own draw for this epoch, as a fraction of its span. One
+                # 8-byte digest read, the same construction as the uniform policy's.
+                int.from_bytes(
+                    hashlib.sha256(
+                        f"{self.sampling_version}:{seed}:"
+                        f"{self.series[int(series_index)].dataset_id}".encode()
+                    ).digest()[:8],
+                    "big",
+                ) / 2 ** 64,
+            )
+            for series_index, start, count in zip(
+                self.eligible_series,
+                self.range_starts[self.eligible_series],
+                self.range_counts[self.eligible_series],
+            )
+        ], dtype=np.int64)
+        indices = self.range_starts[self.eligible_series] + offsets
+        rng = np.random.default_rng(seed)
+        rng.shuffle(indices)
+        return indices
+
+
+#: The training window class each ``random_train_anchor_sampling`` value names. One table,
+#: read by `train.fit_model` and the batch benchmark alike, so "which sampler did that run
+#: use" has a single answer.
+RANDOM_ANCHOR_WINDOW_CLASSES = {
+    RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM: RandomAnchorTrajectoryWindows,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM: RemainingPathUniformAnchorTrajectoryWindows,
+}
+
+
+def training_window_class(config: TSConfig) -> type[TrajectoryWindows]:
+    """The window class a training run's two anchor axes select."""
+    if not config.random_train_anchor:
+        return FixedAnchorTrajectoryWindows
+    return RANDOM_ANCHOR_WINDOW_CLASSES[config.random_train_anchor_sampling]
 
 
 class FlightEpochSampler(Sampler[int]):

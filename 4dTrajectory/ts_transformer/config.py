@@ -305,6 +305,49 @@ CHECKPOINT_SELECTION_COMMON_GRID_METRICS = (
     CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
 )
 
+# WHICH number `ReduceLROnPlateau` measures its plateau on. Checkpoint selection is
+# `checkpoint_selection_metric` either way — this axis only decides when the learning rate
+# is halved.
+#
+# `selection` is what every run before this axis existed did: the scheduler was stepped with
+# the checkpoint-selection value, which is right while the two move together and wrong the
+# moment they part. A0.b (`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+# §2.4c) measured them parting on a random-anchor arm: the validation OBJECTIVE improved to
+# epoch 60 (1.147 -> 0.707) while the selection metric — a dense-grid ADE — stalled after
+# epoch 8, so the LR was halved from epoch 20 on and reached 9.4e-7 by epoch 60. The model
+# stopped training at the epoch the READOUT stalled, not the epoch the loss did. Every
+# fixed-anchor arm improves on both for a hundred epochs, which is why this never showed.
+LR_PLATEAU_METRIC_SELECTION = "selection"
+LR_PLATEAU_METRIC_OBJECTIVE = "objective"
+LR_PLATEAU_METRICS = (LR_PLATEAU_METRIC_SELECTION, LR_PLATEAU_METRIC_OBJECTIVE)
+
+# HOW a random train anchor is drawn from the flight's admissible ones (A0.b, design §2.4c).
+# Admissibility is NOT part of this axis: `eligible_random_train_anchors` and the
+# `random_train_anchor_min_future_s` contract decide WHICH anchors exist, both policies draw
+# from exactly that set, and the training cohort is therefore identical under either.
+#
+# `uniform` draws over the SAMPLES, i.e. uniformly in TIME. Pooled over flights that
+# OVER-WEIGHTS THE NEAR END relative to the anchor population actually stored: every flight
+# gets one draw whatever its length, and the aircraft is slow near the runway, so a kilometre
+# there holds more samples than a kilometre at 25 km. Measured on the whole KRDU validation
+# split (1404 flights, 181,906 admissible anchors, 200 epochs): the draws put 34.3 % under
+# 6 km where the population has 25.1 %, and 17.9 % beyond 20 km where the population has
+# 32.9 %. `remaining-path-uniform` places the draw uniformly across the flight's OWN
+# admissible remaining-path span and takes the nearest admissible anchor — equal weight per
+# kilometre rather than per sample — which moves those to 31.0 % and 21.0 %.
+#
+# NOT a stratum draw. A0.b's first draft drew an `anchor_strata` stratum uniformly and then a
+# sample inside it; that moved training TOWARD the runway (review measurement, 700 KRDU val
+# flights: mean remaining path 12.2 -> 8.0 km, share >= 20 km 16.9 % -> 4.1 %), because the
+# grid cuts the near end into four 2-km strata and leaves the far end ONE open stratum
+# spanning 20-123 km. The strata survive only as the histogram the draws are COUNTED in.
+RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM = "uniform"
+RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM = "remaining-path-uniform"
+RANDOM_TRAIN_ANCHOR_SAMPLINGS = (
+    RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM,
+)
+
 
 def uses_control_dynamics(prediction_output: str) -> bool:
     """Whether an output strategy requires per-flight aircraft dynamics."""
@@ -597,12 +640,14 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "weight_decay": 0.0,
         "lr_plateau_factor": 0.5,
         "lr_plateau_patience": 8,
+        "lr_plateau_metric": LR_PLATEAU_METRIC_SELECTION,
         "patience": 20,
         "val_fraction": 0.15,
         "test_fraction": 0.15,
         "random_train_anchor": False,
         "training_cohort_min_future_s": 0.0,
         "random_train_anchor_min_future_s": 60.0,
+        "random_train_anchor_sampling": RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
         "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
         "validation_common_grid_points": 64,
         "fitted_tail_position_weight": 0.25,
@@ -801,6 +846,10 @@ class TSConfig:
     weight_decay: float = 0.0
     lr_plateau_factor: float = 0.5
     lr_plateau_patience: int = 3
+    # WHICH validation number the plateau is measured on (`selection` = the checkpoint
+    # metric, today's behaviour; `objective` = the macro validation objective the epoch
+    # record already carries as `val_loss`). It never changes which epoch is KEPT.
+    lr_plateau_metric: str = LR_PLATEAU_METRIC_SELECTION
     patience: int = 20              # early-stopping patience, in epochs without val improvement
     seed: int = 1337
     # ``seed`` controls model initialisation and epoch shuffling.  Leave this unset to
@@ -821,6 +870,10 @@ class TSConfig:
     # target and do not represent the fixed-anchor deployment task. This train-only floor is
     # frozen before validation; fixed-anchor train/validation windows do not use it.
     random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S
+    # HOW that random anchor is drawn from the admissible ones — uniformly over the samples
+    # (today's, and uniform over TIME) or uniformly over the remaining-path strata. It
+    # cannot change WHICH anchors are admissible, so both policies train the same cohort.
+    random_train_anchor_sampling: str = RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM
     # One formal development score: fixed-anchor, common true-physical-time, airport-macro
     # 3D ADE.  It is shared by CV, the LR scheduler, early stopping and checkpointing.
     checkpoint_selection_metric: str = CHECKPOINT_SELECTION_COMMON_GRID_ADE
@@ -1126,6 +1179,17 @@ class TSConfig:
             raise ValueError(
                 f"unknown cta_conditioning {self.cta_conditioning!r}; expected one of {CTA_CONDITIONINGS}"
             )
+        if self.lr_plateau_metric not in LR_PLATEAU_METRICS:
+            raise ValueError(
+                f"unknown lr_plateau_metric {self.lr_plateau_metric!r}; expected one of "
+                f"{LR_PLATEAU_METRICS}"
+            )
+        if self.random_train_anchor_sampling not in RANDOM_TRAIN_ANCHOR_SAMPLINGS:
+            raise ValueError(
+                f"unknown random_train_anchor_sampling "
+                f"{self.random_train_anchor_sampling!r}; expected one of "
+                f"{RANDOM_TRAIN_ANCHOR_SAMPLINGS}"
+            )
 
     def _validate_recipe(self) -> None:
         """A named recipe's fields are frozen at the values that define it.
@@ -1299,6 +1363,39 @@ class TSConfig:
                 "control output uses learned non-uniform segments and currently requires "
                 "horizon_mode='normalized'; state output retains normalized/full/window"
             )
+        if (
+            self.random_train_anchor_sampling != RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM
+            and not self.random_train_anchor
+        ):
+            raise ValueError(
+                f"random_train_anchor_sampling={self.random_train_anchor_sampling!r} names "
+                "HOW a random train anchor is drawn, and random_train_anchor=False draws "
+                "none — the fixed policy anchors every flight at L-1"
+            )
+        # A scheduler that watches the objective must watch a COMPARABLE objective. Two
+        # things move the number under the model's feet, and under either the plateau
+        # scheduler could halve the learning rate straight through a schedule that is still
+        # ramping: the KL warm-up (`effective_latent_beta` reweights the objective every
+        # epoch until the ramp ends) and the procedure penalty's dual step (λ is updated
+        # once per epoch, so the same trajectory is priced differently each time).
+        if self.lr_plateau_metric == LR_PLATEAU_METRIC_OBJECTIVE:
+            if self.latent_beta_warmup_epochs > 0:
+                raise ValueError(
+                    "lr_plateau_metric='objective' with "
+                    f"latent_beta_warmup_epochs={self.latent_beta_warmup_epochs}: the "
+                    "validation objective is scored under THIS epoch's beta, so it rises "
+                    "with the ramp and the plateau scheduler would cut the learning rate "
+                    "through the warm-up. Select on the objective only at a fixed beta"
+                )
+            if self.procedure_loss_dual_step > 0.0:
+                raise ValueError(
+                    "lr_plateau_metric='objective' with "
+                    f"procedure_loss_dual_step={self.procedure_loss_dual_step:g}: the "
+                    "penalty multipliers move once per epoch, so the objective prices the "
+                    "same trajectory differently each epoch and its plateau is not the "
+                    "model's. Use fixed multipliers, or step the scheduler on the "
+                    "selection metric"
+                )
         if self.uses_final_approach_context and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(
                 "the final-approach corridor (corridor-bounded output / procedure loss) is "

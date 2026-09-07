@@ -41,13 +41,12 @@ from config import (  # noqa: E402
 )
 from cross_validation import CV_OVERRIDE_FIELDS  # noqa: E402
 from dataset import (  # noqa: E402
-    FixedAnchorTrajectoryWindows,
     Normalizer,
-    RandomAnchorTrajectoryWindows,
     TrajectoryWindows,
     build_series,
     dataset_flight_key,
     iter_batches,
+    training_window_class,
 )
 from splits import split_name_for_dataset_id  # noqa: E402
 from batch_contract import anchor_state  # noqa: E402
@@ -390,11 +389,7 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         raise RuntimeError("non-training flight reached the batch benchmark")
 
     normalizer = Normalizer.fit(series, balance_airports_and_flights=True)
-    dataset_class = {
-        False: FixedAnchorTrajectoryWindows,
-        True: RandomAnchorTrajectoryWindows,
-    }[config.random_train_anchor]
-    dataset = dataset_class(series, config, normalizer)
+    dataset = training_window_class(config)(series, config, normalizer)
     if not len(dataset):
         parser.error("outer-train produced an empty benchmark dataset")
     data_audit["usable_outer_train_flights"] = len(series)
