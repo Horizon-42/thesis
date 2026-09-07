@@ -509,3 +509,28 @@ curve must not be published alone. The fitted teacher is refused with random anc
 (`TSConfig`), so the fix is to pass it only to the fixed-anchor class, or to accept and
 refuse it in the random one — one line either way, plus a test that constructs the random
 window set through `fit_model`.
+
+## 21. The drawn "Lookback" is the whole track before the anchor, not the model's input window
+
+**Verified** (2026-09-07, found reviewing the anytime record publication):
+`build_scenario_comparison_czml._lookback_states` returns every observed sample with `t <= 0`
+and the entity is named `Lookback`, coloured `LOOKBACK_COLOR` and labelled *"Predictor input"*
+in the frontend legend. That is exact at the L−1 anchor — the record's series starts at the
+arrival window and the anchor is `seq_len − 1`, so "everything before the anchor" IS the
+`seq_len`-sample input window — and it is what every batch published before 2026-09-07 was.
+
+A re-anchored anytime record (`run_ts_anytime_curve.py --write-records`) breaks the
+coincidence: at the 12 km bin the anchor is sample ~207–216 of a 60-sample lookback, so the
+faded line draws ~430 s of approach under a name that claims the model was conditioned on all
+of it. Nothing is mis-PLACED (the anchor, the forecast and the reference are all on the right
+clock — that is `source.anchorTimeS` and is tested); only the faded segment's *meaning* is
+overstated.
+
+The builder cannot narrow it on its own: the states record carries `anchorIndex` and
+`anchorTimeS` but no `seq_len`. The fix is a record-contract field —
+`build_prediction_record` stamping `source.lookbackSamples` (= `config.seq_len`, which every
+call site has) and the builder slicing the last N samples ending at the anchor — plus a
+republish of anything already written, since existing records lack the field. Deferred because
+it changes the contract and would restate every published prediction directory; documented at
+both ends (`LOOKBACK_COLOR`, `_lookback_states`) so nobody reads the line as the input window
+in the meantime.
