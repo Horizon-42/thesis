@@ -2,7 +2,14 @@
 Adding correct speed gate. done
 
 # Runway Conditions
-## 
+## Runway Threshold as Origin 
+
+## Airport Reference as Origin
+
+## Explicit Runway Threshold and Airport Reference as Origin
+
+
+
 
 # Control Legs
 Before: Every time step
