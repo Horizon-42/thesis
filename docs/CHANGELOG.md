@@ -4,6 +4,73 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-07 — ts_transformer A0.b: the random-anchor arm was frozen by its own learning-rate schedule, and trained mostly near the runway
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+§2.4c, branch `dev-a0b` (`12d35ce` the scheduler axis, `23cae12` the sampling axis,
+`965077a` the two arms). Two config axes, both defaulting to today's behaviour. **Neither
+arm has been trained** — this is the code the §2.4c reading needs.
+
+**What the second round measured.** `A0_random_hr8_tv1_p180` (early stopping off) still
+peaked at epoch 10, and `A0_random_hr8_tv1_grid` (anchor-grid selection, the A1 lever)
+peaked at epoch **8** — so neither pre-registered explanation survives: it was not the
+stopping rule, and it was not a metric the grid could fix. The `_grid` arm's `history.json`
+gave the mechanism instead. Its validation OBJECTIVE kept improving to epoch 60 (1.147 →
+0.707, val state 0.264 → 0.102) while its selection metric stalled after epoch 8 (1100 →
+1289 at 60). `ReduceLROnPlateau` was stepped with the **selection** value, so the learning
+rate was halved from epoch 20 and reached **9.4e-7 by epoch 60** and 2.9e-8 by 100: from
+about epoch 30 the model was not training, it was frozen at the epoch the *readout*
+stalled. Per anchor set, 12 km went 722 → 1324 and only the 6 km set improved (291 → 218)
+— the shape of a model that is mostly being shown the last few kilometres.
+
+**`lr_plateau_metric ∈ {selection, objective}`** (default `selection`, pinned as a literal
+in every named recipe). Under `objective` the scheduler steps on the macro validation
+objective — the SAME `val_loss` the epoch record writes, chosen from the two numbers the
+epoch already produced rather than computed again — and **checkpoint selection is
+unchanged** either way. `checkpoint_metadata.json`'s `lr_scheduler.metric` says which it
+stepped on; the run name carries `lr-metric=objective`.
+
+**`random_train_anchor_sampling ∈ {uniform, remaining-path-strata}`** (default `uniform`,
+refused without `random_train_anchor`). `uniform` draws one of a flight's admissible
+SAMPLES, which is uniform over TIME and therefore biased toward the runway — on the KRDU
+train split the median drawn anchor index is **107** on tracks whose anchors run to 467.
+The new policy draws a remaining-path **stratum** uniformly among the strata that flight
+has admissible anchors in, then a sample inside it, from the same per-flight per-epoch
+sha256 (bytes 0–7 the stratum, 8–15 the sample), so determinism is unchanged.
+
+**The strata are the grid, not a second list.** `anchor_grid.REMAINING_PATH_STRATA_EDGES_M`
+is `DEFAULT_ANCHOR_GRID_KM` read as EDGES rather than as targets (2/4/6/8/12/16/20 km
+ascending); seven edges cut **eight** strata, because the two open ends `<2km` and `>=20km`
+must be strata of their own or a uniform draw over strata would silently drop the anchors
+outside every interval. A sample's stratum is `np.digitize` on the same
+`remaining_path_profile_m` the bins are chosen from. `dataset` reads them at CALL TIME
+inside `RandomAnchorTrajectoryWindows.__init__`, because `anchor_grid` imports `dataset` —
+the same cycle break the closure labels use two lines away, and the only alternative was
+restating the boundaries where the sampler needs them.
+
+**Admissibility is not part of the axis.** `eligible_random_train_anchors` and the 20 s
+future contract still decide which anchors exist, so both policies store the identical
+anchors for the identical cohort. Every epoch now records the REALISED distribution in
+`history.json`'s `train_anchor_sampling.remaining_path_strata` under **both** policies: the
+uniform one's counts *are* the skew above, and there is nowhere else to read them while a
+run trains. The counts sum to the epoch's flights (one draw each).
+
+**Equivalence at the defaults, measured against `4943724`**: 2-epoch synthetic trains for
+control / latent / state / closure are **byte-identical**, and a random-anchor `uniform`
+arm differs only by the added `remaining_path_strata` key — all 342 numeric leaves
+unchanged, `sample_sha256` included. Recount over the **935** config-bearing artifacts
+under `4dTrajectory/outputs` (199 `history.json`, 255 `summary.json`, 193
+`fit_evaluation.json`, 100 `experiment_manifest.json`, 95 campaign `config.json`, 93
+others): **0** changed name, slug or loading. Suite 680 → **706**.
+
+**Arms** (`4dTrajectory/ts_transformer/docs/experiments/a0_random_arms.json`, both on the
+`_grid` recipe — random anchors 20 s, hr=8 + bank TV=1, patience 180, anchor-grid
+selection): `A0b_lr_objective` and `A0b_lr_objective_strata`, so the pair separates the two
+mechanisms instead of confounding them. The pre-registered reading: the L−1 and 12 km
+anchor sets must stop degrading after epoch 10, the best epoch must be later than 60, and
+the L−1 veto against native32's 1322 m is read as before — all three random-anchor arms so
+far sit at 2949–2990 m, so this line's base is not established yet.
+
 ### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`

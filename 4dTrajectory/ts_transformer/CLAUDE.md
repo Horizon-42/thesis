@@ -204,6 +204,8 @@ flight model.
 | `control_heading_rate_loss_weight` (+ `_scale_dps` 1.5) | 0 | L1.b arm ②: the teacherless way to name the bank — the rollout's own ψ̇ at the segment endpoints against the flown track's. `_scale_dps` is the UNIT the residual is read in (half a standard-rate turn), not the dose. Doses 1.0 / 8.0 bracket an unknown; **not measured yet** |
 | `control_bank_tv_loss_weight` | 0 | L1.b arm ③: mean \|step\| between adjacent COMMANDED banks, in half-box units. **It prices REVERSALS, not slope** — `sign(x)` cancels on a monotone run's interior — and exact flatness is a STATIONARY POINT (value 0 and gradient 0), which is where the zeroed head init starts every run, so it never leaves a flat schedule on its own. "TV changed nothing" is that before it is a dose. **Not measured yet**. Both terms register under `true-time-position` ONLY (where `velocity`/`imitation` live) and `TSConfig` REFUSES a non-zero weight under any other objective rather than ignoring it |
 | `checkpoint_selection_metric` | `fixed-anchor-common-grid-ade` | WHICH epoch's weights the checkpoint keeps — see the table below. Lower is better for all three; the value NAMES the run (`select=…`, a `META_FIELDS` entry) |
+| `lr_plateau_metric` | `selection` | WHICH number `ReduceLROnPlateau` measures its plateau on — never which epoch is KEPT. `objective` steps it with the macro validation objective (the SAME `val_loss` the epoch record writes, not a third number), `selection` with the checkpoint-selection value. It matters exactly when the two PART, which a fixed-anchor arm never does: on A0-random's `_grid` arm the objective improved to epoch 60 (1.147 → 0.707) while the grid ADE stalled after epoch 8, so the scheduler halved the LR from epoch 20 and reached **9.4e-7 by 60** — the model stopped training at the epoch the READOUT stalled. `checkpoint_metadata.json`'s `lr_scheduler.metric` says which it stepped on; names the run `lr-metric=objective`. A0.b (i) |
+| `random_train_anchor_sampling` | `uniform` | HOW a random train anchor is drawn — refused without `random_train_anchor`. It cannot change WHICH anchors are admissible (`eligible_random_train_anchors` + the future contract), so both policies train the identical cohort on the identical anchor population. `uniform` draws over the flight's admissible SAMPLES, which is uniform over TIME and biased toward the runway (KRDU train: median drawn anchor index **107** on tracks whose anchors run to 467). `remaining-path-strata` draws a stratum uniformly among the ones that flight HAS anchors in, then a sample inside it. Every epoch records the REALISED counts per stratum in `history.json`'s `train_anchor_sampling.remaining_path_strata` — under BOTH policies, because the uniform one's counts ARE the skew. Names the run `anchors=remaining-path-strata`; `sampling_version` distinguishes the two in `training_anchor_contract`. A0.b (ii) |
 | `control_imitation_target` | `inverse-dynamics` | WHAT the imitation term imitates. The default's schedule, flown open-loop, lands **2.5–7.8 km** from the truth it was read off (L0), so "imitating it perfectly" is not "flying the truth". `fitted` reads the per-flight table `run_ts_control_basis_oracle.py --checkpoint` fits through the same rollout (88–433 m) and needs `control_fitted_teacher_path` (which names the run: `teacher=<dir>/<file>`); refused with `random_train_anchor`, with `control_imitation_loss_weight=0`, and off `control_state_objective=true-time-position` (the only objective the term is registered under). L5.a, **not yet measured** — the arms are `docs/experiments/l5_fitted_teacher_arms.json` |
 
 **The three checkpoint-selection metrics** (`config.CHECKPOINT_SELECTION_METRICS`, dispatched
@@ -218,11 +220,18 @@ weights all read the one number):
 
 **`anchor_grid.py` is the one definition of the grid** — bins (`DEFAULT_ANCHOR_GRID_KM`
 20/16/12/8/6/4/2 km, `VALIDATION_ANCHOR_GRID_KM` the four the metric may select on), the
-60 s future floor, `PARTIAL_COVERAGE` = 0.5, the per-flight `bin_anchor` rule and the
-fixed-at-L−1 `strata_fixed_at_l1` rule. `run_ts_anytime_curve.py` and the selection metric
-import the SAME objects (`tests/test_anchor_grid.py` asserts identity, not equality): two
-grids that merely agreed today would make "the curve improved" and "this epoch was selected
-on the curve" claims about different anchors.
+60 s future floor, `PARTIAL_COVERAGE` = 0.5, the per-flight `bin_anchor` rule, the
+fixed-at-L−1 `strata_fixed_at_l1` rule, and the TRAINING strata
+(`REMAINING_PATH_STRATA_EDGES_M` = the same bin values read as EDGES, ascending, so the
+seven of them cut **eight** strata with the two open ends `<2km` / `>=20km`;
+`remaining_path_strata(series)` is `np.digitize` on the same profile the bins are chosen
+from). `run_ts_anytime_curve.py` and the selection metric import the SAME objects
+(`tests/test_anchor_grid.py` asserts identity, not equality): two grids that merely agreed
+today would make "the curve improved" and "this epoch was selected on the curve" claims
+about different anchors. **`dataset` imports the strata at CALL TIME** (inside
+`RandomAnchorTrajectoryWindows.__init__`) because `anchor_grid` reads `dataset` — that
+edge runs one way only, so the grid stays the single definition rather than being restated
+where the sampler needs it.
 
 **A candidate bin is a candidate, not a guarantee.** Measured coverage of the KRDU
 validation cohort (1404 flights, 60 s floor): **20 km 33.7 %** (excluded outright),
@@ -284,12 +293,12 @@ command is HELD.
 |---|---|---|
 | `objective.py` | what is a prediction scored against | 1,079 |
 | `validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 1,162 |
-| `train.py` | the epoch, the cohort, the checkpoint | 1,236 |
-| `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` = one per flight per epoch) | 1,809 |
-| `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 150 |
+| `train.py` | the epoch, the cohort, the checkpoint | 1,246 |
+| `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` / `StratifiedRandomAnchor` = one per flight per epoch, drawn uniformly over samples or over remaining-path strata; `training_window_class` is the one place the two anchor axes pick a class) | 1,938 |
+| `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at, and which strata a random TRAIN anchor is drawn over (no torch) | 196 |
 | `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 258 |
 | `splits.py` | which split a flight belongs to | 192 |
-| `cli/` | one module per subcommand (`common` 817, `predict` 422, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze_test` 42, `__init__` 15) | 1,542 |
+| `cli/` | one module per subcommand (`common` 857, `predict` 484, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze_test` 42, `__init__` 15) | 1,644 |
 | `__main__.py` | the bootstrap and the `COMMANDS` table it dispatches from | 131 |
 
 Two edges that a change must not reverse: `evaluation_protocol` reaches
