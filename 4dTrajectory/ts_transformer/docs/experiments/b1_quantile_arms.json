@@ -1,0 +1,30 @@
+{
+ "_comment": "B1 + B3 of docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md (§三). BASE = L1_native32's content — custom, N=32, simple-v3's own supervision (native segment endpoints, true-time-position, imitation 64, velocity 0.003), the DETERMINISTIC point-estimate base and deliberately NOT the latent one: TSConfig refuses duration_head=quantile with latent_dim>0 (z reaches the duration by shifting the point head's single logit, and under a posterior sample the quantiles would be conditioned on the flight's own future — an interval B2 could not honestly calibrate). The only change is duration_head=quantile, so the run is `custom` (the recipes pin the head at `point`) and its name carries T=q5. WHAT EACH ARM MEASURES. B1_quantile isolates point-vs-quantile on one axis: the head emits DURATION_QUANTILES (0.1/0.25/0.5/0.75/0.9), the median walks the existing final_time_s contract (it IS the duration the rollout flies), and the loss swaps the squared final-time residual for the sum of five pinball losses under the SAME component name. B3_quantile_cta adds cta_conditioning=given so the CTA-conditioned decoder is trained (the rollout flies the truth duration in training, exactly as L3 built it) while the quantile head trains as a TARGET beside it; at predict `--cta-from-quantiles` decodes each flight at its OWN q_tau, so its top-1 reads no future, wears cta=self-q and IS quotable — unlike L3_cta, which is the oracle ceiling this arm is read against. PRE-REGISTERED GATES (§三 3.4). (1) B1: q50's duration error is within seed noise of L1_native32's 25.9 s MAE, and pooled ADE is not worse than native32's 1322 m — the duration moved, so every trajectory moved, and 'the interval is free' is the claim being tested. (2) B2: after run_ts_eta_calibration.py, the realised coverage of the 80 % interval is in [0.76, 0.84] and of the 50 % interval in [0.45, 0.55], IN EACH STRATUM SEPARATELY — the runner measures it on the half its delta was NOT fitted on and prints both halves. (3) B3: among the flights whose truth duration falls inside [q10, q90], the truth path's chamfer to the NEAREST of the five decoded trajectories is below its chamfer to q50 (run_ts_quantile_fan_readout.py, column 'min<q50'); read the whole-cohort row beside it, never instead of it. B3's top-1 is compared to native32 (1322 / vectored 2870) AND to L3_cta's 841 (vectored 1596), which is the perfect-ETA ceiling, not a working point. VETO (same as L2's): straight-in top-1 FDE degraded beyond seed noise on either arm; and B2's own veto — a calibrated median interval width above 120 s in the vectored stratum means T's uncertainty is not something calibration can collect, and the line goes back to A. B0's measured |dt| p80 (vectored 65.8-72.5 s, straight-in 12.0-20.3 s) says a symmetric 80 % interval starts at roughly twice that, so this veto has about a factor of one in hand. THE CALIBRATION STEP IS NOT OPTIONAL AND IS NOT PART OF TRAINING — between train and predict, per arm: `python run_ts_eta_calibration.py --checkpoint $E/b1_quantile_<date>/<ARM>/checkpoint.pt --out $E/b1_quantile_<date>/<ARM>_calibration` (val split only; it writes the conformal table into that checkpoint's own checkpoint_metadata.json, which is what makes predict stamp source.durationIntervalS instead of calibrated:false). Predict RE-RUN after calibrating is what produces the calibrated records; a directory predicted before the table exists says calibrated:false and is not wrong, just uncalibrated.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_state_loss_grid": "native-segment-endpoints",
+  "control_state_objective": "true-time-position",
+  "control_imitation_loss_weight": 64.0,
+  "control_velocity_loss_weight": 0.003,
+  "duration_head": "quantile"
+ },
+ "arms": [
+  {
+   "key": "B1_quantile",
+   "label": "N=32 native supervision, quantile duration head (point-vs-quantile isolation)",
+   "overrides": {}
+  },
+  {
+   "key": "B3_quantile_cta",
+   "label": "the same, CTA-conditioned: trained on the given CTA, predicted at its own quantiles (cta=self-q)",
+   "overrides": {
+    "cta_conditioning": "given"
+   },
+   "predict_args": [
+    "--cta-from-quantiles"
+   ]
+  }
+ ]
+}
