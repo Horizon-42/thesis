@@ -1,0 +1,16 @@
+Bombardier, Challenger 3500 product page (https://bombardier.com/en/aircraft/challenger-3500),
+Specifications -> Weights. Retrieved 2026-09-07. Values as printed on the page
+(the page prints a US-units block and a metric block; both are reproduced).
+
+  Maximum ramp weight          40,750 lb / 18,484 kg
+  Maximum takeoff weight       40,600 lb / 18,416 kg
+  Maximum landing weight       34,150 lb / 15,490 kg
+  Maximum zero-fuel weight     28,200 lb / 12,791 kg
+  Basic operating weight       24,800 lb / 11,249 kg
+  Maximum fuel weight          14,150 lb / 6,418 kg
+  Maximum payload              3,400 lb / 1,542 kg
+
+  Page footer: "All specifications and data are approximate, may change without notice
+  and subject to certain operating rules, assumptions and conditions."
+
+  No approach speed is published on the page.

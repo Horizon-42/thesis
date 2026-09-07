@@ -1,0 +1,16 @@
+Bombardier, Challenger 650 product page (https://bombardier.com/en/aircraft/challenger-650),
+Specifications -> Weights. Retrieved 2026-09-07. Values as printed on the page
+(the page prints a US-units block and a metric block; both are reproduced).
+
+  Maximum ramp weight          48,300 lb / 21,909 kg
+  Maximum takeoff weight       48,200 lb / 21,863 kg
+  Maximum landing weight       38,000 lb / 17,237 kg
+  Maximum zero-fuel weight     32,000 lb / 14,515 kg
+  Basic operating weight       27,150 lb / 12,315 kg
+  Maximum fuel weight          20,000 lb / 9,072 kg
+  Maximum payload              4,850 lb / 2,200 kg
+
+  Page footer: "All specifications and data are approximate, may change without notice
+  and subject to certain operating rules, assumptions and conditions."
+
+  No approach speed is published on the page.

@@ -1,0 +1,9 @@
+Textron Aviation, Cessna Citation CJ4 Gen3 product card (Model 525C)
+https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_cj4_gen3_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight          17,110 lb     7,761 kg
+  Basic Operating Weight      10,300 lb     4,672 kg
+  Useful Load                  6,930 lb     3,143 kg
+
+  No approach speed and no landing weight are published on the card.

@@ -1,0 +1,22 @@
+Piper Aircraft, Inc., 2026 Archer LX specification foldover, weights block. Verbatim.
+https://www.piper.com/wp-content/uploads/2019/01/2026_Archer_LX_Foldover.pdf
+The sheet is a multi-column layout; pdftotext -layout interleaves the option lists with
+the weights column, so the surrounding text below is the neighbouring column, not a note
+on the weights.
+
+  Weight
+  Maximum Takeoff Weight:                 Awareness Package                                                    Additional Options*
+  2,550 lb I 1,157 kg                     • Terrain Awareness and Warning System (TAWS-B)                      • Cargo Net                        • Halotron Fire Extinguisher
+  Maximum Ramp Weight:                    • GTS 800 Traffic Advisory System                                    • Wheel Fairing Deletion           • United Kingdom Lighting
+                                          • GDL 69A Satellite Radio/Weather                                    • Angle of Attack Indicator          Package
+  2,558 lb I 1,160 kg
+                                                                                                               • BendixKing KN 63 DME             • Jeppesen Chartview
+  Standard Empty Weight:                                                                                       • BendixKing KR 87 ADF             • AmSafe Seatbelts Pilot
+  1,688 lb I 766 kg                                                                                            • Wet Compass                        and Co-Pilot Positions
+  
+  Standard Useful Load:                   *Package options subject to change. Additional Special Options quoted upon request
+  870 lb I 395 kg
+                                          Garmin®, G1000® NXi, GDL® and SafeTaxi® are registered trademarks of Garmin Ltd. or its subsidiaries.
+                                          GDU™, GFC™, GMA™, GTS™, GTX™, PlaneSync™ and SVT™ are trademarks of Garmin Ltd. or its subsidiaries.
+  © 2026 Piper Aircraft, Inc. | 2926 Piper Drive, Vero Beach, FL 32960 | 772.299.2403 | Piper.com
+  

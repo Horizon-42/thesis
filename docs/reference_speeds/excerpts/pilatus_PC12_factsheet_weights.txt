@@ -1,0 +1,40 @@
+Pilatus Aircraft Ltd, 'PC-12 PRO - Just the Facts' (2025), WEIGHTS block. Verbatim.
+
+Take-off distance over 50 ft obstacle
+                                                                                            Weights
+                                                                     2,485 ft     758 m
+Maximum take-off weight, ISA, sea level, dry paved runway                                                                                     U.S.         Metric
+
+
+Landing distance over 50 ft obstacle                                 2,170 ft     661 m     Maximum ramp weight                       10,495 lb         4,760 kg
+Maximum landing weight, ISA, sea level, dry paved runway
+
+
+
+Rate of climb                                                    1,920 ft/min   9.75 m/s    Maximum take-off weight                   10,450 lb         4,740 kg
+
+
+Time to climb sea level to flight level 250                           19 min      19 min    Maximum landing weight                      9,921 lb        4,500 kg
+
+
+Stall speed                                                          67 KIAS    124 km/h    Maximum zero fuel weight                    9,039 lb        4,100 kg
+Maximum landing weight, landing configuration, ISA, sea level
+
+
+
+
+                                                                                            Usable fuel (402 U.S. gallons/1,552 l)      2,704 lb        1,227 kg
+
+
+                                                                                            Maximum payload                            2,336 lb         1,060 kg
+
+
+                                                                                            Maximum payload with full fuel              1,087 lb         493 kg
+
+
+                                                                                            Basic operating weight                      6,703 lb        3,040 kg
+
+
+
+
+                                                                                                                                                                    10 — 11

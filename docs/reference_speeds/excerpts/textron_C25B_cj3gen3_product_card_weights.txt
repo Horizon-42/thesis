@@ -1,0 +1,9 @@
+Textron Aviation, Cessna Citation CJ3 Gen3 product card (Model 525B)
+https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_cj3_gen3_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight          13,870 lb     6,291 kg
+  Empty Weight                 8,540 lb     3,874 kg
+  Useful Load                  5,530 lb     2,508 kg
+
+  No approach speed and no landing weight are published on the card.

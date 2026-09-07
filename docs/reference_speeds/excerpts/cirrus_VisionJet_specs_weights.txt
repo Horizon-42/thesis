@@ -1,0 +1,12 @@
+Cirrus Aircraft, Vision Jet (SF50) product page (https://cirrusaircraft.com/aircraft/vision-jet/),
+'Aircraft Specifications -> Weight' block. Retrieved 2026-09-07. Verbatim.
+
+  Maximum Ramp Weight 6,040 lbs (2,740 kg)
+  Maximum Takeoff Weight 6,000 lbs (2,727 kg)
+  Basic Empty Weight 3,550 lbs (1,610 kg)
+  Max Zero Fuel Weight 4,900 lbs (2,223 kg)
+  Maximum Usable Fuel 296 gal (2,000 lbs / 907 kg)
+
+  Cirrus publishes NO maximum landing weight for the SF50 on this page or in the
+  G3 Vision Jet product brochure; that is why the malw of this row comes from the
+  EASA type certificate data sheet instead. No approach speed is published.

@@ -1,0 +1,15 @@
+EASA, Type Certificate Data Sheet No. EASA.IM.A.615 (Cirrus Design Corporation SF50),
+Issue 6, 01 June 2026. Item 11, verbatim.
+
+
+
+                   11.            Maximum Certified Weights:                Ramp:            2740 kg (6040 lb)
+                                                                            Takeoff:         2722 kg (6000 lb)
+                                                                            Landing:         2517 kg (5550 lb)
+                                                                            Zero Fuel:       2223 kg (4900 lb)
+
+
+
+  The TCDS states no minimum weight and no operating empty weight; NOTE 2 only requires
+  that a weight and balance report be provided per aircraft. It is used here for the
+  landing weight alone.

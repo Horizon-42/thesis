@@ -1,0 +1,9 @@
+Textron Aviation, Beechcraft Bonanza G36 product card
+https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/bonanza_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight           3,805 lb     1,726 kg
+  Basic Empty Weight           2,605 lb     1,182 kg
+  Useful Load                  1,213 lb       550 kg
+
+  No approach speed and no landing weight are published on the card.

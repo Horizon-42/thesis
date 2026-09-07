@@ -1,0 +1,9 @@
+Textron Aviation, Beechcraft King Air 260 product card (Model B200GT)
+https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/king_air_260_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight          12,500 lb     5,670 kg
+  Basic Operating Weight       8,830 lb     4,005 kg
+  Useful Load                  3,760 lb     1,706 kg
+
+  No approach speed and no landing weight are published on the card.

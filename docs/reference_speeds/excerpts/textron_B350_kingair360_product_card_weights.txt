@@ -1,0 +1,9 @@
+Textron Aviation, Beechcraft King Air 360 product card (Model B300)
+https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/king_air_360_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight          15,000 lb     6,804 kg
+  Basic Operating Weight       9,955 lb     4,516 kg
+  Useful Load                  5,145 lb     2,334 kg
+
+  No approach speed and no landing weight are published on the card.

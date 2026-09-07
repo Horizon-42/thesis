@@ -1,0 +1,16 @@
+Bombardier, Global 6500 product page (https://bombardier.com/en/aircraft/global-6500),
+Specifications -> Weights. Retrieved 2026-09-07. Values as printed on the page
+(the page prints a US-units block and a metric block; both are reproduced).
+
+  Maximum ramp weight          99,750 lb / 45,246 kg
+  Maximum takeoff weight       99,500 lb / 45,132 kg
+  Maximum landing weight       78,600 lb / 35,652 kg
+  Maximum zero-fuel weight     58,000 lb / 26,308 kg
+  Basic operating weight       52,230 lb / 23,691 kg
+  Maximum fuel weight          45,050 lb / 20,434 kg
+  Maximum payload              5,770 lb / 2,617 kg
+
+  Page footer: "All specifications and data are approximate, may change without notice
+  and subject to certain operating rules, assumptions and conditions."
+
+  No approach speed is published on the page.

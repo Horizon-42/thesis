@@ -1,0 +1,40 @@
+Boeing, 717-200 Airplane Characteristics for Airport Planning, D6-58330 Rev B, November 2014.
+Section 2.1 GENERAL CHARACTERISTICS, MODEL 717-200, printed page 7 = PDF page 11.
+
+This PDF's text layer is a broken font subset (pdftotext returns mojibake for every
+body font in the document), so the table below was READ FROM THE RENDERED PAGE IMAGE,
+cell by cell, rather than copied from the text layer. The column headings and the two
+notes are reproduced as printed.
+
+  CHARACTERISTICS        UNITS      |------------ BASIC AIRPLANE ------------|  HIGH GROSS
+                                                                                 WEIGHT
+                                                                                 OPTION
+  MAX DESIGN             POUNDS      111,000  115,000  117,000  119,000        122,000
+    TAXI WEIGHT          KILOGRAMS    50,349   52,163   53,070   53,977         55,338
+  MAX DESIGN             POUNDS      110,000  114,000  116,000  118,000        121,000
+    TAKEOFF WEIGHT       KILOGRAMS    49,895   51,709   52,617   53,524         54,884
+  MAX DESIGN             POUNDS      100,000  102,000  102,000  102,000        110,000
+    LANDING WEIGHT       KILOGRAMS    45,362   46,269   46,269   46,269         49,898
+  MAX DESIGN ZERO        POUNDS       94,000   96,000   96,000   96,000        100,500
+    FUEL WEIGHT          KILOGRAMS    42,638   43,545   43,545   43,545         45,586
+  SPEC OPERATING         POUNDS       67,500   67,500   67,500   67,500         68,500
+    EMPTY WEIGHT (1)     KILOGRAMS    30,617   30,617   30,617   30,617         31,071
+  MAX STRUCTURAL         POUNDS       26,500   28,500   28,500   28,500         32,000
+    PAYLOAD              KILOGRAMS    12,020   12,928   12,928   12,928         14,515
+  SEATING CAPACITY       MIXED CLASS     106      106      106      106            106
+
+  NOTES: (1) TYPICAL SPEC OPERATING WEIGHT FOR A CONFIGURATION OF 106 PASSENGERS.
+             CONSULT WITH AIRLINE FOR SPECIFIC WEIGHTS AND CONFIGURATIONS.
+             DELIVERED AIRPLANES MAY HAVE DIFFERENT WEIGHTS DEPENDING ON AIRLINE REQUIREMENT.
+         (2) INCLUDES OPTIONAL FWD 460 GAL AND AFT 270 GAL AUX FUEL TANKS.
+
+Also read (PDF page 10, printed page 6), section 2.1 definitions:
+  "Maximum Design Landing Weight (MLW). Maximum weight for landing as limited by aircraft
+   strength and airworthiness requirements."
+  "Operating Empty Weight (OEW). Weight of structure, powerplant, furnishing systems,
+   unusable fuel and other unusable propulsion agents, and other items of equipment that
+   are considered an integral part of a particular airplane configuration. Also included
+   are certain standard items, personnel, equipment, and supplies necessary for full
+   operations, excluding usable fuel and payload."
+
+No approach speed is published anywhere in this document.

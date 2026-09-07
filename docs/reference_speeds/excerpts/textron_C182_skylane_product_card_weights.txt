@@ -1,0 +1,9 @@
+Textron Aviation, Cessna Skylane product card (Model 182T)
+https://cessna.txtav.com/-/media/cessna/files/product-cards/piston/skylane_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight           3,100 lb     1,406 kg
+  Basic Empty Weight           2,000 lb       907 kg
+  Useful Load                  1,110 lb       503 kg
+
+  No approach speed and no landing weight are published on the card.

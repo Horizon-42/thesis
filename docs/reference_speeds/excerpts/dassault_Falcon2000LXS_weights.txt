@@ -1,0 +1,47 @@
+Dassault Aviation, Falcon 2000LXS Backgrounder, WEIGHTS and PERFORMANCE blocks. Verbatim.
+https://www.dassaultfalcon.com/app/uploads/2023/02/Falcon-2000LXS-Backgrounder.pdf
+
+  FALCON 2000LXS SPECIFICATIONS
+  
+  PERFORMANCE
+  
+        •      Range: 4,000 nm (7,410 km) at Normal Cruise (6 pax, 2 crew, NBAA IFR Reserves)
+        •      Maximum Mach Operating (MMO) speed: Mach .85 – Mach .862
+        •      Takeoff Distance (SL-ISA, Max Takeoff Weight): 4,675 ft (1,425 m)
+        •      Landing Distance (FAR 91, 6 pax, SL, NBAA IFR reserves): 2,260 ft (689 m)
+        •      Approach Speed, Vref (Typical Landing Weight): 105 kias (194 kph)
+        •      Maximum Certified Altitude: 47,000 ft (14,326 m)
+  
+  ENGINES & AVIONICS
+  
+        •      2 Pratt & Whitney Canada PW308C
+        •      7,000 lb / 31.14 kN (Thrust, ISA + 15°C, SL)
+        •      EASy II Flight Deck
+        •      With Honeywell Primus Epic System
+  
+   EXTERNAL DIMENSIONS
+  
+        •      Wing Span: 70 ft 2 in (21.38 m)
+        •      Length: 66 ft 4 in (20.23 m)
+        •      Height: 23 ft 4 in (7.11 m)
+  
+   INTERNAL DIMENSIONS
+  
+        •      Cabin Height: 74 in (1.88 m)
+        •      Cabin Width: 92 in (2.34 m)
+        •      Cabin Length (excluding flight deck and baggage): 26 ft 2 in (7.98 m)
+        •      Cabin Volume (excluding flight deck and baggage): 1,024 ft3 (29 m3)
+        •      Baggage Volume: 130.6 ft3 (3.7 m3)
+  
+  WEIGHTS/CAPACITIES
+  
+        •      Maximum Takeoff Weight: 42,800 lb (19,414 kg)
+        •      Maximum Landing Weight: 39,300 lb (17,826 kg)
+        •      Maximum Zero-Fuel Weight: 29,700 lb (13,472 kg)
+        •      Maximum Fuel Weight: 16,660 lb (7,557 kg)
+  
+  
+  
+
+  No operating empty weight / basic operating weight is published anywhere in the
+  backgrounder, and the quoted Vref is at a TYPICAL landing weight, not at MLW.

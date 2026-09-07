@@ -1,0 +1,96 @@
+Airbus, A220 Aircraft Characteristics Publication (ACP), Issue 013-00, 27 Nov 2025
+(BD500-3AB48-13800-00). Verbatim, PDF page 73 (A220-100) and PDF page 109 (A220-300).
+The Bombardier-heritage overview table on PDF page 30 additionally prints an Operating
+Weight Empty of 77,650 lb (35 221 kg) for the A220-100 and 81,750 lb (37 081 kg) for the
+A220-300; the Minimum Flight Weight below is the lower figure and the one the table uses.
+
+--- PDF page 73, BD500-A-J00-00-00-12AAA-030A-A, Table 2 / Table 3 Aircraft characteristics ---
+
+
+
+ See applicability on the                                                                BD500-A-J00-00-00-12AAA-030A-A
+ first page of the DM
+ BD500-A-J00-00-00-12AAA-030A-A
+                                                                                                                    2025-10-29 Page 2
+                                                                                         BD500-3AB48-13800-00
+
+
+
+
+                        Description                                                 A220-100
+
+                             Mode                                                   Passenger
+
+                 Standard seating capacity                                             120
+
+              Maximum Ramp Weight (MRW)                                       141,500 lb (64,183 kg)
+
+            Maximum Take-Off Weight (MTOW)                                    140,500 lb (63,730 kg)
+
+             Maximum Landing Weight (MLW)                                     120,500 lb (54,658 kg)
+
+           Maximum Zero Fuel Weight (MZFW)                                    116,000 lb (52,617 kg)
+
+               Minimum Flight Weight (MFW)                                     77,000 lb (34,927 kg)
+
+                Maximum fuel tank capacity                                    5,756 US gal (21 805 L)
+
+                       Unusable fuel                                             220.5 lb (100 kg)
+
+         Maximum cargo volume - Overhead bins                                    280 ft³ (7,93 m³)
+
+ 1      Optional engine models: PW1521G and PW1524G
+
+
+Applicability: 50062, 50066-50067, 50069, 50071, 50078, 50085-50086, 54888
+
+                                           Table 3 Aircraft characteristics
+                        Description                                                 A220-100
+
+                          Engines                                                                       1
+                                                                         2 Pure Power™ PW1519G
+
+                             Mode                                                   Passenger
+
+              Maximum Ramp Weight (MRW)                                       135,000 lb (61,235 kg)
+
+            Maximum Take-Off Weight (MTOW)                                    134,000 lb (60,781 kg)
+
+             Maximum Landing Weight (MLW)                                     112,500 lb (51,029 kg)
+
+           Maximum Zero Fuel Weight (MZFW)                                    108,000 lb (48,987 kg)
+
+               Minimum Flight Weight (MFW)                                     77,000 lb (34,927 kg)
+
+ 1      Optional engine models: PW1521G and PW1524G
+
+ 1.3           System fluid capacities
+                                          Table 4 System fluid capacities
+
+--- PDF page 109, BD500-A-J00-00-00-12AAB-030A-A, Table 2 Aircraft characteristics ---
+
+
+                     Description                                                 A220-300
+
+              Standard seating capacity                                             140
+
+           Maximum Ramp Weight (MRW)                                       157,000 lb (71,214 kg)
+
+         Maximum Take-Off Weight (MTOW)                                    156,300 lb (70,896 kg)
+
+           Maximum Landing Weight (MLW)                                    134,500 lb (61,008 kg)
+
+         Maximum Zero Fuel Weight (MZFW)                                   128,000 lb (58,060 kg)
+
+            Minimum Flight Weight (MFW)                                    80,000 lb (36,287 kg)
+
+             Maximum fuel tank capacity                                5,681 US gal (21 508 L)
+
+                     Unusable fuel                                           220.5 lb (100 kg)
+
+       Maximum cargo volume - Overhead bins                                   332 ft³ (9,40 m³)
+
+1     Optional engine model: PW1524G
+
+1.3          System fluid capacities
+                                        Table 3 System fluid capacities

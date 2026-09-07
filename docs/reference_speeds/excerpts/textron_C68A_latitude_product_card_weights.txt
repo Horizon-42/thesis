@@ -1,0 +1,9 @@
+Textron Aviation, Cessna Citation Latitude product card (Model 680A)
+https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_latitude_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight          30,800 lb    13,971 kg
+  Basic Operating Weight      18,656 lb     8,462 kg
+  Full Fuel Payload            1,000 lb       454 kg
+
+  No approach speed and no landing weight are published on the card.

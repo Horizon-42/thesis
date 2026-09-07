@@ -1,0 +1,21 @@
+Piper Aircraft, Inc., 2026 M500 brochure, specification block. Verbatim.
+https://www.piper.com/wp-content/uploads/2019/01/2026_M500_Brochure_V2.pdf
+The sheet is a multi-column layout; pdftotext -layout interleaves the option lists with
+the weights column, so the surrounding text below is the neighbouring column, not a note
+on the weights.
+
+  Propeller                                        Dimensions                           Weight                                           Max Range                      Max Cabin
+                                                                                                                                         (ISA, No Wind)                 Differential
+  Hartzell 4-Blade                                 Wingspan:                            Maximum Takeoff Weight:
+                                                                                                                                         1,000 nm | 1,852 km            5.5 psi
+  Constant Speed                                   43 ft I 13.1 m                       5,092 lb I 2,310 kg
+  Full Feathering                                  Height:                              Maximum Ramp Weight:
+  Reversible                                       11.3 ft I 3.4 m                      5,134 lb I 2,329 kg                              Max Cruise                     Landing
+                                                   Length:                              Standard Empty Weight:                           Speed                          Distance
+  Engine                                           29.5 ft I 9 m                        3,436 lb I 1,559 kg                              260 ktas | 482 km/hr           (Over 50’ Obstacle)
+                                                                                                                                                                        2,110 ft | 643 m
+  Pratt & Whitney PT6A-42A                         Cabin Volume:                        Standard Useful Load:
+  Flat-Rated at 500 SHP                            165 cu ft I 4.7 cu m                 1,698 lb I 770 kg
+                                                   Cabin Width:                                                                          Max Approved                   Takeoff
+  Fuel Capacity                                    4.1 ft I 1.3 m                                                                        Altitude                       Distance
+  Useable                                          Cabin Length:                                                                         30,000 ft | 9,144 m            (Over 50’ Obstacle)

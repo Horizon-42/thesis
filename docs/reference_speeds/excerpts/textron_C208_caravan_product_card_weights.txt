@@ -1,0 +1,9 @@
+Textron Aviation, Cessna Caravan product card (Model 208)
+https://cessna.txtav.com/-/media/cessna/files/product-cards/turboprop/caravan_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight           8,000 lb     3,629 kg
+  Empty Weight                 4,730 lb     2,145 kg
+  Useful Load                  3,305 lb     1,499 kg
+
+  No approach speed and no landing weight are published on the card.

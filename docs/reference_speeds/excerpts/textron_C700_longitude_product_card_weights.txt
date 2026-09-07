@@ -1,0 +1,9 @@
+Textron Aviation, Cessna Citation Longitude product card (Model 700)
+https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_longitude_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight          39,500 lb    17,917 kg
+  Basic Operating Weight      23,600 lb    10,705 kg
+  Full Fuel Payload            1,600 lb       726 kg
+
+  No approach speed and no landing weight are published on the card.

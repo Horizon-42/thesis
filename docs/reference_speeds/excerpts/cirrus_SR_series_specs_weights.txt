@@ -1,0 +1,14 @@
+Cirrus Aircraft, SR Series product page (https://cirrusaircraft.com/aircraft/sr22/),
+'All Specs' block. Retrieved 2026-09-07. The one page carries the SR20, SR22 and SR22T
+columns; the three are told apart by horsepower (215 / 310 / 315 hp). Verbatim.
+
+  SR20   Horsepower 215 hp   Max Cruise Speed 155 ktas
+         Useful Load 1,003 lbs   Max Gross Weight 3,150 lbs (1,429kg)   Base Weight 2,147 lbs (947 kg)
+
+  SR22   Horsepower 310 hp   Max Cruise Speed 183 ktas
+         Useful Load 1,328 lbs   Max Gross Weight 3,600 lbs (1,633kg)   Base Weight 2,272 lbs (1030 kg)
+
+  SR22T  Horsepower 315 hp   Max Cruise Speed 213 ktas
+         Useful Load 1,238 lbs   Max Gross Weight 3,600 lbs (1,633kg)   Base Weight 2,362 lbs (1071 kg)
+
+  No landing weight and no approach speed are published on the page.

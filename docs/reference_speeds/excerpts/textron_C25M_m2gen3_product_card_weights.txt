@@ -1,0 +1,9 @@
+Textron Aviation, Cessna Citation M2 Gen3 product card (Model 525)
+https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_m2_gen3_product_card.pdf
+Retrieved 2026-09-07. WEIGHTS block, verbatim (lb and kg exactly as printed).
+
+  Max Takeoff Weight          10,700 lb     4,853 kg
+  Empty Weight                 6,990 lb     3,171 kg
+  Useful Load                  3,810 lb     1,728 kg
+
+  No approach speed and no landing weight are published on the card.

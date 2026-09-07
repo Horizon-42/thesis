@@ -1,0 +1,41 @@
+Bombardier, CRJ700 Airport Planning Manual CSP B-020 Rev 15, page 00-02-01 (PDF page 26).
+Verbatim.
+
+
+
+
+ CSP B−020 − MASTER
+ EFFECTIVITY: **ON A/C ALL
+                                                                                                         Page 1
+                                                                         00−02−01                   May 20/2010
+                                                F
+                                          AIRPORT PLANNING MANUAL
+
+                       Description                                               Model CL−600−2C10
+
+Maximum Landing Weight (MTLW)                                                     67000 lb (30390 kg)
+
+Minimum Flight Weight (MFW)                                                       42000 lb (19051 kg)
+
+Maximum Zero Fuel Weight (MZFW)                                                   62300 lb (28259 kg)
+
+Maximum Fuel Tank Capacity                                                       2903 US gal (10989 L)
+
+                                                                                  19595 lb (8888 kg)¹
+
+Unusable Fuel                                                                    33.8 US gal (127.95 L)
+
+                                                                                  228.2 lb (103.5 kg)¹
+
+Maximum Cargo Volume − Aft Baggage Compartment                                    437.5 pi³ (12.39 m³)²
+
+Maximum Cargo Volume − Forward Under Floor                                        109.0 pi³ (3.09 m³)²
+Baggage
+
+Maximum Cargo Volume − Under−seat storage                                         126.0 pi³ (3.57 m³)²
+
+Maximum Cargo Volume − Overhead bins                                              114.06 pi³ (3.23 m³)²
+
+¹ Weight is calculated with a fuel density of 6.75 lb/US gal (0.809 kg/L).
+
+² Cargo volume can be changed to agree with different interior configurations.

@@ -222,6 +222,256 @@
    "sha256": "per file, see docs/reference_speeds/excerpts/openap_2_4_oew.csv",
    "local_path": "conda env aeroviz: site-packages/openap/data/aircraft/<type>.yml (not copied into data/)",
    "readme": "docs/reference_speeds/README.md#openap_2_4"
+  },
+  "airbus_a220_acp_issue013": {
+   "title": "A220 Aircraft Characteristics Publication (ACP)",
+   "publisher": "Airbus",
+   "document": "Issue 013-00, 27 November 2025 (BD500-3AB48-13800-00)",
+   "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-12/A220-ACP-Issue013-00-27Nov2025.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
+   "local_path": "data/reference_speeds/airbus/A220-ACP-Issue013-00-27Nov2025.pdf",
+   "readme": "docs/reference_speeds/README.md#airbus_a220_acp_issue013"
+  },
+  "bombardier_crj700_apm_r15": {
+   "title": "CRJ700 Airport Planning Manual",
+   "publisher": "Bombardier",
+   "document": "CSP B-020 Rev 15 (page 00-02-01 dated May 20/2010)",
+   "url": "https://customer.aero.bombardier.com/webd/BAG/CustSite/BRAD/RACSDocument.nsf/51aae8b2b3bfdf6685256c300045ff31/ec63f8639ff3ab9d85257c1500635bd8/$FILE/ATTE8Q23.pdf/CRJ700APMR15.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "195e92c0b358f347342a51d4f084a13f721fc099015b82439f7acd22b7ad45ce",
+   "local_path": "data/reference_speeds/bombardier/CRJ700APMR15.pdf",
+   "readme": "docs/reference_speeds/README.md#bombardier_crj700_apm_r15"
+  },
+  "boeing_717_acap_rev_b": {
+   "title": "717-200 Airplane Characteristics for Airport Planning",
+   "publisher": "Boeing",
+   "document": "D6-58330 Rev B, November 2014",
+   "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/717.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "5d7310882b997826ec78edc442ce766466710e0870984608dd14860886efa093",
+   "local_path": "data/reference_speeds/boeing/717.pdf",
+   "readme": "docs/reference_speeds/README.md#boeing_717_acap_rev_b"
+  },
+  "bombardier_challenger3500_specs": {
+   "title": "Challenger 3500 product page, Specifications block",
+   "publisher": "Bombardier",
+   "document": "product page (HTML) as served 2026-09-07",
+   "url": "https://bombardier.com/en/aircraft/challenger-3500",
+   "retrieved": "2026-09-07",
+   "sha256": "ca1afcade8cd0ce0be3540769a29771b17425491f8102b80e1d27fda1b18d359",
+   "local_path": "data/reference_speeds/bombardier/bombardier_challenger-3500.html",
+   "readme": "docs/reference_speeds/README.md#bombardier_challenger3500_specs"
+  },
+  "bombardier_challenger650_specs": {
+   "title": "Challenger 650 product page, Specifications block",
+   "publisher": "Bombardier",
+   "document": "product page (HTML) as served 2026-09-07",
+   "url": "https://bombardier.com/en/aircraft/challenger-650",
+   "retrieved": "2026-09-07",
+   "sha256": "fcc96c7b5012771265148e7956e2cb321b548d1a2ccc290f6302da59ce36909b",
+   "local_path": "data/reference_speeds/bombardier/bombardier_challenger-650.html",
+   "readme": "docs/reference_speeds/README.md#bombardier_challenger650_specs"
+  },
+  "bombardier_global6500_specs": {
+   "title": "Global 6500 product page, Specifications block",
+   "publisher": "Bombardier",
+   "document": "product page (HTML) as served 2026-09-07",
+   "url": "https://bombardier.com/en/aircraft/global-6500",
+   "retrieved": "2026-09-07",
+   "sha256": "f4e3b62cfe35759a9fb745781150259aa1f058f938a48beb96c27e403846d886",
+   "local_path": "data/reference_speeds/bombardier/bombardier_global-6500.html",
+   "readme": "docs/reference_speeds/README.md#bombardier_global6500_specs"
+  },
+  "pilatus_pc12_factsheet": {
+   "title": "PC-12 PRO - Just the Facts",
+   "publisher": "Pilatus Aircraft Ltd",
+   "document": "2025 edition (file PC-12-PRO-Just-The-Facts-2025-web.pdf)",
+   "url": "https://www.pilatus-aircraft.com/assets/files/PC-12-PRO-Just-The-Facts-2025-web.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "e19a79473f05458cd83b71807d7b8ddebb8edb557b578086770f311d8f990203",
+   "local_path": "data/reference_speeds/pilatus/PC-12-PRO-Just-The-Facts-2025-web.pdf",
+   "readme": "docs/reference_speeds/README.md#pilatus_pc12_factsheet"
+  },
+  "textron_citation_latitude_product_card": {
+   "title": "Cessna Citation Latitude product card (Model 680A)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_latitude_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "377b8319cd88ed04c02b3a0f27371905f8a68ee2456ed67468ac97908c8972be",
+   "local_path": "data/reference_speeds/textron/citation_latitude_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_citation_latitude_product_card"
+  },
+  "textron_citation_longitude_product_card": {
+   "title": "Cessna Citation Longitude product card (Model 700)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_longitude_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "a1e9d2e42cfddfb2232d58f8218d275d4af15d5d54ecfd6c483f1143e22d5b6c",
+   "local_path": "data/reference_speeds/textron/citation_longitude_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_citation_longitude_product_card"
+  },
+  "textron_citation_cj3_gen3_product_card": {
+   "title": "Cessna Citation CJ3 Gen3 product card (Model 525B)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_cj3_gen3_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "c9f1fa1e73ee68e46366c3eed33c34dd5fdb70be8625f8d7c0b72d1dd56780e7",
+   "local_path": "data/reference_speeds/textron/citation_cj3_gen3_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_citation_cj3_gen3_product_card"
+  },
+  "textron_citation_cj4_gen3_product_card": {
+   "title": "Cessna Citation CJ4 Gen3 product card (Model 525C)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_cj4_gen3_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "9c67bf6a98de659f97841170aff6fd55a98afbeb4369ed58eb4501146a436f30",
+   "local_path": "data/reference_speeds/textron/citation_cj4_gen3_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_citation_cj4_gen3_product_card"
+  },
+  "textron_citation_m2_gen3_product_card": {
+   "title": "Cessna Citation M2 Gen3 product card (Model 525)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_m2_gen3_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "0ae9432d51f63be557e0e035a7589c1ab951cd79bbc045246ebe92889c96496f",
+   "local_path": "data/reference_speeds/textron/citation_m2_gen3_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_citation_m2_gen3_product_card"
+  },
+  "textron_caravan_product_card": {
+   "title": "Cessna Caravan product card (Model 208)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/turboprop/caravan_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "37248e00073bee31791ffee44bbea482753187729ac841358a26643a594019ba",
+   "local_path": "data/reference_speeds/textron/caravan_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_caravan_product_card"
+  },
+  "textron_skylane_product_card": {
+   "title": "Cessna Skylane product card (Model 182T)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://cessna.txtav.com/-/media/cessna/files/product-cards/piston/skylane_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "822d777046be61fc264dcf2947d5fb2965601fe90651dc2cbc463e10b75cd7c7",
+   "local_path": "data/reference_speeds/textron/skylane_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_skylane_product_card"
+  },
+  "textron_king_air_360_product_card": {
+   "title": "Beechcraft King Air 360 product card (Model B300)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/king_air_360_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "36a0ece4210b8487a8999d19a8ed66052420b47f3c8dcc763a3ef60aa3c50b3d",
+   "local_path": "data/reference_speeds/textron/king_air_360_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_king_air_360_product_card"
+  },
+  "textron_king_air_260_product_card": {
+   "title": "Beechcraft King Air 260 product card (Model B200GT)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/king_air_260_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "ea962cb5c1ce2f596a9ea70912993ec43af19c1caabe9adf2469c770519fefcc",
+   "local_path": "data/reference_speeds/textron/king_air_260_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_king_air_260_product_card"
+  },
+  "textron_bonanza_product_card": {
+   "title": "Beechcraft Bonanza G36 product card (Model G36)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/bonanza_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "587d951feca2d3b251e537082afa35e6afef70bbadecdcd6eb14a7d40e92addb",
+   "local_path": "data/reference_speeds/textron/bonanza_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_bonanza_product_card"
+  },
+  "textron_baron_product_card": {
+   "title": "Beechcraft Baron G58 product card (Model G58)",
+   "publisher": "Textron Aviation",
+   "document": "undated product card PDF",
+   "url": "https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/baron_product_card.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "bfef90840da9287bc94fb7f0fb9c539709652f6d4acb77b4cdc2973ad1314cd7",
+   "local_path": "data/reference_speeds/textron/baron_product_card.pdf",
+   "readme": "docs/reference_speeds/README.md#textron_baron_product_card"
+  },
+  "cirrus_sr_series_specs": {
+   "title": "SR Series product page, All Specs block (SR20 / SR22 / SR22T)",
+   "publisher": "Cirrus Aircraft",
+   "document": "product page (HTML) as served 2026-09-07",
+   "url": "https://cirrusaircraft.com/aircraft/sr22/",
+   "retrieved": "2026-09-07",
+   "sha256": "72459d59823f08d426b4ec1966413c00a86a28dbf688f89d4807209a0fa95af7",
+   "local_path": "data/reference_speeds/cirrus/cirrusaircraft_sr22.html",
+   "readme": "docs/reference_speeds/README.md#cirrus_sr_series_specs"
+  },
+  "cirrus_vision_jet_specs": {
+   "title": "Vision Jet (SF50) product page, Aircraft Specifications block",
+   "publisher": "Cirrus Aircraft",
+   "document": "product page (HTML) as served 2026-09-07",
+   "url": "https://cirrusaircraft.com/aircraft/vision-jet/",
+   "retrieved": "2026-09-07",
+   "sha256": "4ef8cbc0a6234fd847a22715f03aa17228399a06ce4778c20243a986920a0332",
+   "local_path": "data/reference_speeds/cirrus/cirrusaircraft_vision-jet.html",
+   "readme": "docs/reference_speeds/README.md#cirrus_vision_jet_specs"
+  },
+  "easa_tcds_sf50_issue6": {
+   "title": "Type Certificate Data Sheet EASA.IM.A.615 - Cirrus SF50",
+   "publisher": "EASA",
+   "document": "TCDS No. EASA.IM.A.615, Issue 6, 01 June 2026",
+   "url": "https://www.easa.europa.eu/en/downloads/24242/en",
+   "retrieved": "2026-09-07",
+   "sha256": "24bae613e45c18994d014957fdd9a5944d3230285f94f51e1f88bc57a37bb738",
+   "local_path": "data/reference_speeds/easa/EASA_TCDS_IM_A_615_SF50_Issue6.pdf",
+   "readme": "docs/reference_speeds/README.md#easa_tcds_sf50_issue6"
+  },
+  "piper_archer_lx_2026": {
+   "title": "2026 Archer LX specification foldover",
+   "publisher": "Piper Aircraft, Inc.",
+   "document": "2026_Archer_LX_Foldover.pdf",
+   "url": "https://www.piper.com/wp-content/uploads/2019/01/2026_Archer_LX_Foldover.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "1c6146ddcfa9a441e5873728edf1f22b64a4bb9207c9981f4df7ae410154d137",
+   "local_path": "data/reference_speeds/piper/2026_Archer_LX_Foldover.pdf",
+   "readme": "docs/reference_speeds/README.md#piper_archer_lx_2026"
+  },
+  "piper_m500_2026": {
+   "title": "2026 M500 brochure",
+   "publisher": "Piper Aircraft, Inc.",
+   "document": "2026_M500_Brochure_V2.pdf",
+   "url": "https://www.piper.com/wp-content/uploads/2019/01/2026_M500_Brochure_V2.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "6c42fcce6686b17548e9068a97c983f14274f803b25e68f152bc27aa066530dc",
+   "local_path": "data/reference_speeds/piper/2026_M500_Brochure_V2.pdf",
+   "readme": "docs/reference_speeds/README.md#piper_m500_2026"
+  },
+  "diamond_da40ng_folder_2025": {
+   "title": "DA40 NG Product Folder 2025",
+   "publisher": "Diamond Aircraft Industries",
+   "document": "DA40_NG_Product_Folder_2025_SCREEN.pdf",
+   "url": "https://www.diamondaircraft.com/fileadmin/diamondaircraft/documents/da40/DA40_NG_Product_Folder_2025_SCREEN.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "f9512ef36cf7e6277aa42d13c87617a19dd7eed63789c24c462d6e2e9d9895d3",
+   "local_path": "data/reference_speeds/diamond/DA40_NG_Product_Folder_2025_SCREEN.pdf",
+   "readme": "docs/reference_speeds/README.md#diamond_da40ng_folder_2025"
+  },
+  "dassault_falcon2000lxs_backgrounder": {
+   "title": "Falcon 2000LXS Backgrounder",
+   "publisher": "Dassault Aviation",
+   "document": "Falcon-2000LXS-Backgrounder.pdf (served from /app/uploads/2023/02/)",
+   "url": "https://www.dassaultfalcon.com/app/uploads/2023/02/Falcon-2000LXS-Backgrounder.pdf",
+   "retrieved": "2026-09-07",
+   "sha256": "55e2f344889141b387259998fe2a205f64bb01b7c1e36dc6fca2b9f2dc8b0ab3",
+   "local_path": "data/reference_speeds/dassault/Falcon-2000LXS-Backgrounder.pdf",
+   "readme": "docs/reference_speeds/README.md#dassault_falcon2000lxs_backgrounder"
   }
  },
  "types": {
@@ -1168,6 +1418,1510 @@
      "note": "2.1.8 Model 737-500 MAX DESIGN LANDING WEIGHT 110,000 lb (49,895 kg), matches the FAA MALW exactly; no approach speed is published"
     }
    ]
+  },
+  "BCS3": {
+   "approach_speed_kt": 135,
+   "approach_speed_min_kt": 135,
+   "approach_speed_max_kt": 135,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 60600,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 133,600",
+   "min_mass_kg": 36287,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "airbus_a220_acp_issue013",
+   "min_mass_note": "Table 2 Aircraft characteristics, A220-300 (BD-500-1A11), PDF page 109: Minimum Flight Weight (MFW) 80,000 lb (36,287 kg)",
+   "corroboration": [
+    {
+     "source": "airbus_a220_acp_issue013",
+     "mlw_kg": 61008,
+     "note": "Table 2, A220-300, PDF page 109: Maximum Landing Weight 134,500 lb (61,008 kg); the FAA MALW of 133,600 lb (60,600 kg) is a lower weight variant. No approach speed is published"
+    }
+   ]
+  },
+  "E55P": {
+   "approach_speed_kt": 116,
+   "approach_speed_min_kt": 116,
+   "approach_speed_max_kt": 116,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 7568,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 16,685"
+  },
+  "CRJ7": {
+   "approach_speed_kt": 135,
+   "approach_speed_min_kt": 135,
+   "approach_speed_max_kt": 135,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 30391,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 67,000",
+   "min_mass_kg": 19051,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "bombardier_crj700_apm_r15",
+   "min_mass_note": "page 00-02-01 (PDF page 26), Model CL-600-2C10: Minimum Flight Weight (MFW) 42,000 lb (19,051 kg)",
+   "corroboration": [
+    {
+     "source": "bombardier_crj700_apm_r15",
+     "mlw_kg": 30390,
+     "note": "page 00-02-01 (PDF page 26): Maximum Landing Weight (MTLW) 67,000 lb (30,390 kg), the same weight as the FAA MALW. No approach speed is published in this revision"
+    }
+   ]
+  },
+  "BCS1": {
+   "approach_speed_kt": 130,
+   "approach_speed_min_kt": 130,
+   "approach_speed_max_kt": 130,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 54200,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 119,490",
+   "min_mass_kg": 34927,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "airbus_a220_acp_issue013",
+   "min_mass_note": "Table 2/Table 3 Aircraft characteristics, A220-100 (BD-500-1A10), PDF page 73: Minimum Flight Weight (MFW) 77,000 lb (34,927 kg), the same value for both weight variants",
+   "corroboration": [
+    {
+     "source": "airbus_a220_acp_issue013",
+     "mlw_kg": 54658,
+     "note": "Table 2, A220-100, PDF page 73: Maximum Landing Weight 120,500 lb (54,658 kg) for the high-weight variant and 112,500 lb (51,029 kg) for the basic one; the FAA MALW of 119,490 lb (54,200 kg) sits between them. No approach speed is published"
+    }
+   ]
+  },
+  "P28A": {
+   "approach_speed_kt": 70,
+   "approach_speed_min_kt": 70,
+   "approach_speed_max_kt": 70,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 966,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,130",
+   "min_mass_kg": 766,
+   "min_mass_kind": "SEW",
+   "min_mass_source": "piper_archer_lx_2026",
+   "min_mass_note": "specification block: Standard Empty Weight 1,688 lb (766 kg), Archer LX (PA-28-181)"
+  },
+  "CL35": {
+   "approach_speed_kt": 124,
+   "approach_speed_min_kt": 124,
+   "approach_speed_max_kt": 124,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 15490,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 34,150",
+   "min_mass_kg": 11249,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "bombardier_challenger3500_specs",
+   "min_mass_note": "Specifications, Weights: Basic operating weight 24,800 lb (11,249 kg). The Challenger 3500 is the current build of the Challenger 350 that carries the CL35 designator",
+   "corroboration": [
+    {
+     "source": "bombardier_challenger3500_specs",
+     "mlw_kg": 15490,
+     "note": "Specifications, Weights: Maximum landing weight 34,150 lb (15,490 kg), the same weight as the FAA MALW. No approach speed is published"
+    }
+   ]
+  },
+  "PC12": {
+   "approach_speed_kt": 85,
+   "approach_speed_min_kt": 85,
+   "approach_speed_max_kt": 85,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Corrected CMG based on Pilatus PC12-NGX brochure.",
+   "malw_kg": 4500,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 9,921",
+   "min_mass_kg": 3040,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "pilatus_pc12_factsheet",
+   "min_mass_note": "WEIGHTS block: Basic operating weight 6,703 lb (3,040 kg), PC-12 PRO",
+   "corroboration": [
+    {
+     "source": "pilatus_pc12_factsheet",
+     "mlw_kg": 4500,
+     "note": "WEIGHTS block: Maximum landing weight 9,921 lb (4,500 kg), the same weight as the FAA MALW. No approach speed is published (the sheet gives a stall speed of 67 KIAS)"
+    }
+   ]
+  },
+  "C68A": {
+   "approach_speed_kt": 100,
+   "approach_speed_min_kt": 100,
+   "approach_speed_max_kt": 100,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 12508,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 27,575",
+   "min_mass_kg": 8462,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "textron_citation_latitude_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Operating Weight 18,656 lb (8,462 kg)"
+  },
+  "CL30": {
+   "approach_speed_kt": 126,
+   "approach_speed_min_kt": 126,
+   "approach_speed_max_kt": 126,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 15309,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 33,750"
+  },
+  "E75S": {
+   "approach_speed_kt": 124,
+   "approach_speed_min_kt": 124,
+   "approach_speed_max_kt": 124,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 34000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 74,957",
+   "min_mass_kg": 21500,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "embraer_e175_apm",
+   "min_mass_note": "Table 2.1 Aircraft General Characteristics, PDF page 18: BOW 21,500 kg (47,399 lb) for STD/LR/LL. E75S is the short-wing Embraer 175; the APM's weight table is the same for both wings, the AR variant is 22,500 kg",
+   "corroboration": [
+    {
+     "source": "embraer_e175_apm",
+     "mlw_kg": 34000,
+     "note": "Table 2.1, PDF page 18: MLW 34,000 kg (74,957 lb) for STD/LR/LL, the same weight as the FAA MALW. No approach speed is published"
+    }
+   ]
+  },
+  "E545": {
+   "approach_speed_kt": 111,
+   "approach_speed_min_kt": 111,
+   "approach_speed_max_kt": 111,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 14750,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 32,518"
+  },
+  "C25B": {
+   "approach_speed_kt": 108,
+   "approach_speed_min_kt": 108,
+   "approach_speed_max_kt": 108,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 5783,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 12,750",
+   "min_mass_kg": 3874,
+   "min_mass_kind": "EW",
+   "min_mass_source": "textron_citation_cj3_gen3_product_card",
+   "min_mass_note": "WEIGHTS block: Empty Weight 8,540 lb (3,874 kg), Citation CJ3 Gen3"
+  },
+  "C680": {
+   "approach_speed_kt": 108,
+   "approach_speed_min_kt": 108,
+   "approach_speed_max_kt": 108,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 12292,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 27,100"
+  },
+  "B712": {
+   "approach_speed_kt": 139,
+   "approach_speed_min_kt": 139,
+   "approach_speed_max_kt": 139,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 45359,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 100,000",
+   "min_mass_kg": 30617,
+   "min_mass_kind": "OEW",
+   "min_mass_source": "boeing_717_acap_rev_b",
+   "min_mass_note": "section 2.1 General Characteristics, Model 717-200, printed page 7 (PDF page 11): SPEC OPERATING EMPTY WEIGHT 67,500 lb (30,617 kg) for the four basic-airplane weight variants; the high-gross-weight option is 68,500 lb (31,071 kg)",
+   "corroboration": [
+    {
+     "source": "boeing_717_acap_rev_b",
+     "mlw_kg": 45359,
+     "note": "section 2.1, printed page 7 (PDF page 11): MAX DESIGN LANDING WEIGHT 100,000 lb (45,362 kg) for the lowest basic weight variant - the same weight as the FAA MALW - rising to 102,000 lb across the basic variants and 110,000 lb with the high-gross-weight option. No approach speed is published"
+    }
+   ]
+  },
+  "CL60": {
+   "approach_speed_kt": 137,
+   "approach_speed_min_kt": 137,
+   "approach_speed_max_kt": 137,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 17237,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 38,000",
+   "min_mass_kg": 12315,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "bombardier_challenger650_specs",
+   "min_mass_note": "Specifications, Weights: Basic operating weight 27,150 lb (12,315 kg). The Challenger 650 is the current build of the CL-600-2B16 family that carries the CL60 designator",
+   "corroboration": [
+    {
+     "source": "bombardier_challenger650_specs",
+     "mlw_kg": 17237,
+     "note": "Specifications, Weights: Maximum landing weight 38,000 lb (17,237 kg), the same weight as the FAA MALW. No approach speed is published"
+    }
+   ]
+  },
+  "C750": {
+   "approach_speed_kt": 131,
+   "approach_speed_min_kt": 131,
+   "approach_speed_max_kt": 131,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 14424,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 31,800"
+  },
+  "B350": {
+   "approach_speed_kt": 107,
+   "approach_speed_min_kt": 107,
+   "approach_speed_max_kt": 107,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 6804,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 15,000",
+   "min_mass_kg": 4516,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "textron_king_air_360_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Operating Weight 9,955 lb (4,516 kg), King Air 360 (Model B300), the current build of the Super King Air 350"
+  },
+  "G280": {
+   "approach_speed_kt": 125,
+   "approach_speed_min_kt": 125,
+   "approach_speed_max_kt": 125,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 14832,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 32,700"
+  },
+  "H25B": {
+   "approach_speed_kt": 137,
+   "approach_speed_min_kt": 137,
+   "approach_speed_max_kt": 137,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 10591,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 23,350"
+  },
+  "C208": {
+   "approach_speed_kt": 79,
+   "approach_speed_min_kt": 79,
+   "approach_speed_max_kt": 79,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 3538,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 7,800",
+   "min_mass_kg": 2145,
+   "min_mass_kind": "EW",
+   "min_mass_source": "textron_caravan_product_card",
+   "min_mass_note": "WEIGHTS block: Empty Weight 4,730 lb (2,145 kg), Model 208 Caravan"
+  },
+  "GLF4": {
+   "approach_speed_kt": 144,
+   "approach_speed_min_kt": 144,
+   "approach_speed_max_kt": 144,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 29937,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 66,000"
+  },
+  "C700": {
+   "approach_speed_kt": 121,
+   "approach_speed_min_kt": 121,
+   "approach_speed_max_kt": 121,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 15195,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 33,500",
+   "min_mass_kg": 10705,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "textron_citation_longitude_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Operating Weight 23,600 lb (10,705 kg)"
+  },
+  "GLEX": {
+   "approach_speed_kt": 131,
+   "approach_speed_min_kt": 131,
+   "approach_speed_max_kt": 131,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 35652,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 78,600",
+   "min_mass_kg": 23691,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "bombardier_global6500_specs",
+   "min_mass_note": "Specifications, Weights: Basic operating weight 52,230 lb (23,691 kg). The Global 6500 is the current build of the BD-700-1A10 family that carries the GLEX designator",
+   "corroboration": [
+    {
+     "source": "bombardier_global6500_specs",
+     "mlw_kg": 35652,
+     "note": "Specifications, Weights: Maximum landing weight 78,600 lb (35,652 kg), the same weight as the FAA MALW. No approach speed is published"
+    }
+   ]
+  },
+  "C560": {
+   "approach_speed_kt": 103,
+   "approach_speed_min_kt": 103,
+   "approach_speed_max_kt": 103,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "According to FSB data, If flaps configuration is set for 15 or 20 degrees (not full flaps), AAC is C.",
+   "malw_kg": 6895,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 15,200"
+  },
+  "F2TH": {
+   "approach_speed_kt": 130,
+   "approach_speed_min_kt": 130,
+   "approach_speed_max_kt": 130,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "According to FSB data, If flaps are not down (not flaps), AAC is D.",
+   "malw_kg": 17826,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 39,300",
+   "corroboration": [
+    {
+     "source": "dassault_falcon2000lxs_backgrounder",
+     "mlw_kg": 17826,
+     "note": "WEIGHTS block: Maximum Landing Weight 39,300 lb (17,826 kg), the same weight as the FAA MALW. The backgrounder quotes Approach Speed, Vref 105 KIAS at a TYPICAL landing weight, not at MLW, so it is not comparable with the FAA figure and is not used"
+    }
+   ]
+  },
+  "BE20": {
+   "approach_speed_kt": 107,
+   "approach_speed_min_kt": 107,
+   "approach_speed_max_kt": 107,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 5670,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 12,500",
+   "min_mass_kg": 4005,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "textron_king_air_260_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Operating Weight 8,830 lb (4,005 kg), King Air 260, the current build of the Model 200 family"
+  },
+  "SR22": {
+   "approach_speed_kt": 78,
+   "approach_speed_min_kt": 78,
+   "approach_speed_max_kt": 78,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1542,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,400. ANOMALY: this MALW exceeds the row's own MTOW_lb of 2,358 - the FAA MTOW cell carries roughly the type's empty weight (Cirrus publishes Base Weight 2,272 lb and Max Gross Weight 3,600 lb), so the two weight cells of this row cannot both be right. The MALW is carried as published.",
+   "min_mass_kg": 1030,
+   "min_mass_kind": "BW",
+   "min_mass_source": "cirrus_sr_series_specs",
+   "min_mass_note": "All Specs, SR22 (310 hp): Base Weight 2,272 lb (1,030 kg) against Max Gross Weight 3,600 lb"
+  },
+  "LJ60": {
+   "approach_speed_kt": 125,
+   "approach_speed_min_kt": 125,
+   "approach_speed_max_kt": 125,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 8845,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 19,500"
+  },
+  "BE40": {
+   "approach_speed_kt": 114,
+   "approach_speed_min_kt": 114,
+   "approach_speed_max_kt": 114,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 7121,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 15,700"
+  },
+  "TBM7": {
+   "approach_speed_kt": 74,
+   "approach_speed_min_kt": 74,
+   "approach_speed_max_kt": 74,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2835,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 6,250"
+  },
+  "BE36": {
+   "approach_speed_kt": 77,
+   "approach_speed_min_kt": 77,
+   "approach_speed_max_kt": 77,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1656,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,650",
+   "min_mass_kg": 1182,
+   "min_mass_kind": "BEW",
+   "min_mass_source": "textron_bonanza_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Empty Weight 2,605 lb (1,182 kg), Bonanza G36"
+  },
+  "E550": {
+   "approach_speed_kt": 113,
+   "approach_speed_min_kt": 113,
+   "approach_speed_max_kt": 113,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 15660,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 34,524"
+  },
+  "GALX": {
+   "approach_speed_kt": 130,
+   "approach_speed_min_kt": 130,
+   "approach_speed_max_kt": 130,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 13608,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 30,000"
+  },
+  "F900": {
+   "approach_speed_kt": 130,
+   "approach_speed_min_kt": 130,
+   "approach_speed_max_kt": 130,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "According to FSB data, If flaps are not down (not flaps), AAC is D.",
+   "malw_kg": 20185,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 44,500"
+  },
+  "BE30": {
+   "approach_speed_kt": 107,
+   "approach_speed_min_kt": 107,
+   "approach_speed_max_kt": 107,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 6350,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 14,000"
+  },
+  "DA40": {
+   "approach_speed_kt": 77,
+   "approach_speed_min_kt": 77,
+   "approach_speed_max_kt": 77,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1092,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,407",
+   "min_mass_kg": 903,
+   "min_mass_kind": "EW",
+   "min_mass_source": "diamond_da40ng_folder_2025",
+   "min_mass_note": "DA40 NG Facts and Specifications: Empty weight without options 903 kg (1,991 lbs)"
+  },
+  "SF50": {
+   "approach_speed_kt": 87,
+   "approach_speed_min_kt": 87,
+   "approach_speed_max_kt": 87,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 2517,
+   "malw_source": "easa_tcds_sf50_issue6",
+   "malw_note": "ANOMALY: the FAA row's MALW_lb cell reads 'N/A' - the database publishes no landing weight for this type. EASA TCDS EASA.IM.A.615 Issue 6 item 11 Maximum Certified Weights gives Landing: 2517 kg (5550 lb), and that value is used here. The FAA approach speed of 87 kt is defined at MALW, so pairing it with the certified landing weight is an assumption this pack makes explicitly.",
+   "min_mass_kg": 1610,
+   "min_mass_kind": "BEW",
+   "min_mass_source": "cirrus_vision_jet_specs",
+   "min_mass_note": "Aircraft Specifications, Weight: Basic Empty Weight 3,550 lbs (1,610 kg)",
+   "corroboration": [
+    {
+     "source": "cirrus_vision_jet_specs",
+     "note": "Aircraft Specifications, Weight: Maximum Takeoff Weight 6,000 lbs (2,727 kg); Cirrus publishes no landing weight, which is why the malw here comes from the EASA TCDS"
+    }
+   ]
+  },
+  "C25C": {
+   "approach_speed_kt": 111,
+   "approach_speed_min_kt": 111,
+   "approach_speed_max_kt": 111,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 7103,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 15,660",
+   "min_mass_kg": 4672,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "textron_citation_cj4_gen3_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Operating Weight 10,300 lb (4,672 kg), Citation CJ4 Gen3"
+  },
+  "S22T": {
+   "approach_speed_kt": 77,
+   "approach_speed_min_kt": 77,
+   "approach_speed_max_kt": 77,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1633,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,600",
+   "min_mass_kg": 1071,
+   "min_mass_kind": "BW",
+   "min_mass_source": "cirrus_sr_series_specs",
+   "min_mass_note": "All Specs, SR22T (315 hp): Base Weight 2,362 lb (1,071 kg) against Max Gross Weight 3,600 lb"
+  },
+  "BE9L": {
+   "approach_speed_kt": 100,
+   "approach_speed_min_kt": 100,
+   "approach_speed_max_kt": 100,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 4354,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 9,600"
+  },
+  "BE58": {
+   "approach_speed_kt": 95,
+   "approach_speed_min_kt": 95,
+   "approach_speed_max_kt": 95,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2449,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 5,400",
+   "min_mass_kg": 1798,
+   "min_mass_kind": "BEW",
+   "min_mass_source": "textron_baron_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Empty Weight 3,965 lb (1,798 kg), Baron G58"
+  },
+  "T210": {
+   "approach_speed_kt": 73,
+   "approach_speed_min_kt": 73,
+   "approach_speed_max_kt": 73,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1724,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,800"
+  },
+  "AT43": {
+   "approach_speed_kt": 104,
+   "approach_speed_min_kt": 104,
+   "approach_speed_max_kt": 104,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 16402,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 36,160"
+  },
+  "GA6C": {
+   "approach_speed_kt": 129,
+   "approach_speed_min_kt": 129,
+   "approach_speed_max_kt": 129,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report. Moved the wingspan to winglet column.",
+   "malw_kg": 34836,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 76,800"
+  },
+  "PRM1": {
+   "approach_speed_kt": 120,
+   "approach_speed_min_kt": 120,
+   "approach_speed_max_kt": 120,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 5262,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 11,600"
+  },
+  "HDJT": {
+   "approach_speed_kt": 111,
+   "approach_speed_min_kt": 111,
+   "approach_speed_max_kt": 111,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 4472,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 9,859. ANOMALY: this MALW exceeds the row's own MTOW_lb of 9,039; Honda publishes an HA-420 maximum takeoff weight above 10,000 lb, so the FAA MTOW cell is the wrong one. The MALW is carried as published."
+  },
+  "C650": {
+   "approach_speed_kt": 126,
+   "approach_speed_min_kt": 126,
+   "approach_speed_max_kt": 126,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 7711,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 17,000"
+  },
+  "M20P": {
+   "approach_speed_kt": 77,
+   "approach_speed_min_kt": 77,
+   "approach_speed_max_kt": 77,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1451,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,200"
+  },
+  "C425": {
+   "approach_speed_kt": 98,
+   "approach_speed_min_kt": 98,
+   "approach_speed_max_kt": 98,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 3629,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 8,000"
+  },
+  "GL7T": {
+   "approach_speed_kt": 125,
+   "approach_speed_min_kt": 125,
+   "approach_speed_max_kt": 125,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 38918,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 85,799"
+  },
+  "P28R": {
+   "approach_speed_kt": 73,
+   "approach_speed_min_kt": 73,
+   "approach_speed_max_kt": 73,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1315,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,900. ANOMALY: this MALW exceeds the row's own MTOW_lb of 2,758. The MALW is carried as published."
+  },
+  "P46T": {
+   "approach_speed_kt": 75,
+   "approach_speed_min_kt": 75,
+   "approach_speed_max_kt": 75,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2200,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 4,850",
+   "min_mass_kg": 1559,
+   "min_mass_kind": "SEW",
+   "min_mass_source": "piper_m500_2026",
+   "min_mass_note": "specification block: Standard Empty Weight 3,436 lb (1,559 kg), M500 (PA-46-500TP), the current build of the Malibu Meridian"
+  },
+  "E50P": {
+   "approach_speed_kt": 100,
+   "approach_speed_min_kt": 100,
+   "approach_speed_max_kt": 100,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 4430,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 9,766"
+  },
+  "LJ31": {
+   "approach_speed_kt": 120,
+   "approach_speed_min_kt": 120,
+   "approach_speed_max_kt": 120,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 6940,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 15,300"
+  },
+  "FA50": {
+   "approach_speed_kt": 124,
+   "approach_speed_min_kt": 124,
+   "approach_speed_max_kt": 124,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 16200,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 35,715"
+  },
+  "P180": {
+   "approach_speed_kt": 121,
+   "approach_speed_min_kt": 121,
+   "approach_speed_max_kt": 121,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 5216,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 11,500"
+  },
+  "C510": {
+   "approach_speed_kt": 105,
+   "approach_speed_min_kt": 105,
+   "approach_speed_max_kt": 105,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 3629,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 8,000"
+  },
+  "BT36": {
+   "approach_speed_kt": 73,
+   "approach_speed_min_kt": 73,
+   "approach_speed_max_kt": 73,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1746,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,850"
+  },
+  "BE35": {
+   "approach_speed_kt": 72,
+   "approach_speed_min_kt": 72,
+   "approach_speed_max_kt": 72,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1542,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,400"
+  },
+  "C182": {
+   "approach_speed_kt": 65,
+   "approach_speed_min_kt": 65,
+   "approach_speed_max_kt": 65,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1338,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,950",
+   "min_mass_kg": 907,
+   "min_mass_kind": "BEW",
+   "min_mass_source": "textron_skylane_product_card",
+   "min_mass_note": "WEIGHTS block: Basic Empty Weight 2,000 lb (907 kg), current Model 182T Skylane"
+  },
+  "PA38": {
+   "approach_speed_kt": 60,
+   "approach_speed_min_kt": 60,
+   "approach_speed_max_kt": 60,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 757,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 1,670"
+  },
+  "E35L": {
+   "approach_speed_kt": 124,
+   "approach_speed_min_kt": 124,
+   "approach_speed_max_kt": 124,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 18500,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 40,785"
+  },
+  "P32R": {
+   "approach_speed_kt": 80,
+   "approach_speed_min_kt": 80,
+   "approach_speed_max_kt": 80,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1633,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,600"
+  },
+  "FA7X": {
+   "approach_speed_kt": 104,
+   "approach_speed_min_kt": 104,
+   "approach_speed_max_kt": 104,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 28304,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 62,400"
+  },
+  "A30B": {
+   "approach_speed_kt": 137,
+   "approach_speed_min_kt": 137,
+   "approach_speed_max_kt": 137,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 136000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 299,829"
+  },
+  "AA5": {
+   "approach_speed_kt": 69,
+   "approach_speed_min_kt": 69,
+   "approach_speed_max_kt": 69,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 998,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,200"
+  },
+  "C150": {
+   "approach_speed_kt": 55,
+   "approach_speed_min_kt": 55,
+   "approach_speed_max_kt": 55,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 726,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 1,600"
+  },
+  "C25M": {
+   "approach_speed_kt": 100,
+   "approach_speed_min_kt": 100,
+   "approach_speed_max_kt": 100,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 4491,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 9,900",
+   "min_mass_kg": 3171,
+   "min_mass_kind": "EW",
+   "min_mass_source": "textron_citation_m2_gen3_product_card",
+   "min_mass_note": "WEIGHTS block: Empty Weight 6,990 lb (3,171 kg), Citation M2 Gen3"
+  },
+  "SW4": {
+   "approach_speed_kt": 112,
+   "approach_speed_min_kt": 112,
+   "approach_speed_max_kt": 112,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 7110,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 15,675"
+  },
+  "G150": {
+   "approach_speed_kt": 130,
+   "approach_speed_min_kt": 130,
+   "approach_speed_max_kt": 130,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 9843,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 21,700"
+  },
+  "PA34": {
+   "approach_speed_kt": 81,
+   "approach_speed_min_kt": 81,
+   "approach_speed_max_kt": 81,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2047,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 4,513"
+  },
+  "PA46": {
+   "approach_speed_kt": 75,
+   "approach_speed_min_kt": 75,
+   "approach_speed_max_kt": 75,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1769,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,900"
+  },
+  "C414": {
+   "approach_speed_kt": 95,
+   "approach_speed_min_kt": 95,
+   "approach_speed_max_kt": 95,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 3062,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 6,750"
+  },
+  "SR20": {
+   "approach_speed_kt": 74,
+   "approach_speed_min_kt": 74,
+   "approach_speed_max_kt": 74,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1315,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,900. ANOMALY: this MALW exceeds the row's own MTOW_lb of 2,126 - the FAA MTOW cell carries roughly the type's empty weight (Cirrus publishes Base Weight 2,147 lb and Max Gross Weight 3,150 lb), so the two weight cells of this row cannot both be right. The MALW is carried as published.",
+   "min_mass_kg": 947,
+   "min_mass_kind": "BW",
+   "min_mass_source": "cirrus_sr_series_specs",
+   "min_mass_note": "All Specs, SR20 (215 hp): Base Weight 2,147 lb (947 kg) against Max Gross Weight 3,150 lb"
+  },
+  "C340": {
+   "approach_speed_kt": 94,
+   "approach_speed_min_kt": 94,
+   "approach_speed_max_kt": 94,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2717,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 5,990"
+  },
+  "GA5C": {
+   "approach_speed_kt": 132,
+   "approach_speed_min_kt": 132,
+   "approach_speed_max_kt": 132,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report. Moved the wingspan to winglet column.",
+   "malw_kg": 29189,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 64,350"
+  },
+  "B78X": {
+   "approach_speed_kt": 149,
+   "approach_speed_min_kt": 149,
+   "approach_speed_max_kt": 149,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Approach speed estimated by Virginia Tech.",
+   "malw_kg": 201849,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 445,000"
+  },
+  "DA42": {
+   "approach_speed_kt": 88,
+   "approach_speed_min_kt": 88,
+   "approach_speed_max_kt": 88,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1700,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,748"
+  },
+  "C210": {
+   "approach_speed_kt": 85,
+   "approach_speed_min_kt": 85,
+   "approach_speed_max_kt": 85,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1724,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,800"
+  },
+  "LJ35": {
+   "approach_speed_kt": 128,
+   "approach_speed_min_kt": 128,
+   "approach_speed_max_kt": 128,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 6486,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 14,300"
+  },
+  "FA20": {
+   "approach_speed_kt": 107,
+   "approach_speed_min_kt": 107,
+   "approach_speed_max_kt": 107,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 12392,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 27,320"
+  },
+  "EA50": {
+   "approach_speed_kt": 91,
+   "approach_speed_min_kt": 91,
+   "approach_speed_max_kt": 91,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 2456,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 5,415"
+  },
+  "C82R": {
+   "approach_speed_kt": 64,
+   "approach_speed_min_kt": 64,
+   "approach_speed_max_kt": 64,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1338,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,950"
+  },
+  "PA32": {
+   "approach_speed_kt": 78,
+   "approach_speed_min_kt": 78,
+   "approach_speed_max_kt": 78,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1633,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,600"
+  },
+  "BE33": {
+   "approach_speed_kt": 69,
+   "approach_speed_min_kt": 69,
+   "approach_speed_max_kt": 69,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1542,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,400"
+  },
+  "C30J": {
+   "approach_speed_kt": 128,
+   "approach_speed_min_kt": 128,
+   "approach_speed_max_kt": 128,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 58967,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 130,000"
+  },
+  "PA44": {
+   "approach_speed_kt": 66,
+   "approach_speed_min_kt": 66,
+   "approach_speed_max_kt": 66,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1724,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,800"
+  },
+  "P28B": {
+   "approach_speed_kt": 62,
+   "approach_speed_min_kt": 62,
+   "approach_speed_max_kt": 62,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1361,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,000"
+  },
+  "C421": {
+   "approach_speed_kt": 96,
+   "approach_speed_min_kt": 96,
+   "approach_speed_max_kt": 96,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 3266,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 7,200"
+  },
+  "PAY2": {
+   "approach_speed_kt": 100,
+   "approach_speed_min_kt": 100,
+   "approach_speed_max_kt": 100,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 4082,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 9,000"
+  },
+  "HA4T": {
+   "approach_speed_kt": 128,
+   "approach_speed_min_kt": 128,
+   "approach_speed_max_kt": 128,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 15195,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 33,500"
+  },
+  "H25C": {
+   "approach_speed_kt": 132,
+   "approach_speed_min_kt": 132,
+   "approach_speed_max_kt": 132,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 11340,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 25,000"
+  },
+  "SB20": {
+   "approach_speed_kt": 122,
+   "approach_speed_min_kt": 122,
+   "approach_speed_max_kt": 122,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 22000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 48,501"
+  },
+  "FA10": {
+   "approach_speed_kt": 107,
+   "approach_speed_min_kt": 107,
+   "approach_speed_max_kt": 107,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 8001,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 17,640"
+  },
+  "B190": {
+   "approach_speed_kt": 121,
+   "approach_speed_min_kt": 109,
+   "approach_speed_max_kt": 121,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.  Verify with aircraft operator if they are using an approved Supplemental Type Certificate with a “Flaps Approach” or “Flaps 17” configuration during a Normal Landing; if so, and the aircraft has regular use, select AAC C. Flap reading (FAA definitions sheet): the 109 kt minimum is the optimum (full) landing-flap value; the 121 kt maximum applies at a reduced landing flap setting.",
+   "malw_kg": 7257,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 16,000"
+  },
+  "C180": {
+   "approach_speed_kt": 64,
+   "approach_speed_min_kt": 64,
+   "approach_speed_max_kt": 64,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1270,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,800"
+  },
+  "BE9T": {
+   "approach_speed_kt": 108,
+   "approach_speed_min_kt": 108,
+   "approach_speed_max_kt": 108,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 4967,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 10,950"
+  },
+  "PA24": {
+   "approach_speed_kt": 75,
+   "approach_speed_min_kt": 75,
+   "approach_speed_max_kt": 75,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1315,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,900"
+  },
+  "PA27": {
+   "approach_speed_kt": 91,
+   "approach_speed_min_kt": 91,
+   "approach_speed_max_kt": 91,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2241,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 4,940"
+  },
+  "TEX2": {
+   "approach_speed_kt": 103,
+   "approach_speed_min_kt": 103,
+   "approach_speed_max_kt": 103,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 3130,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 6,900. ANOMALY: this MALW exceeds the row's own MTOW_lb of 6,500. The MALW is carried as published."
+  },
+  "H25A": {
+   "approach_speed_kt": 125,
+   "approach_speed_min_kt": 125,
+   "approach_speed_max_kt": 125,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 10000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 22,046"
+  },
+  "COL4": {
+   "approach_speed_kt": 78,
+   "approach_speed_min_kt": 78,
+   "approach_speed_max_kt": 78,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1465,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,230"
+  },
+  "AEST": {
+   "approach_speed_kt": 96,
+   "approach_speed_min_kt": 96,
+   "approach_speed_max_kt": 96,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2722,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 6,000"
+  },
+  "TBM9": {
+   "approach_speed_kt": 85,
+   "approach_speed_min_kt": 85,
+   "approach_speed_max_kt": 85,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 3186,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 7,024"
+  },
+  "B36T": {
+   "approach_speed_kt": 73,
+   "approach_speed_min_kt": 73,
+   "approach_speed_max_kt": 73,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1656,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,650"
+  },
+  "C152": {
+   "approach_speed_kt": 56,
+   "approach_speed_min_kt": 56,
+   "approach_speed_max_kt": 56,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 760,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 1,675"
+  },
+  "C185": {
+   "approach_speed_kt": 64,
+   "approach_speed_min_kt": 64,
+   "approach_speed_max_kt": 64,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1520,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,350"
+  },
+  "TB20": {
+   "approach_speed_kt": 75,
+   "approach_speed_min_kt": 75,
+   "approach_speed_max_kt": 75,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1397,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,080"
+  },
+  "C177": {
+   "approach_speed_kt": 52,
+   "approach_speed_min_kt": 52,
+   "approach_speed_max_kt": 52,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1134,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 2,500"
+  },
+  "DHC6": {
+   "approach_speed_kt": 74,
+   "approach_speed_min_kt": 74,
+   "approach_speed_max_kt": 74,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 5579,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 12,300"
+  },
+  "PA31": {
+   "approach_speed_kt": 95,
+   "approach_speed_min_kt": 95,
+   "approach_speed_max_kt": 95,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2948,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 6,500"
+  },
+  "AT73": {
+   "approach_speed_kt": 109,
+   "approach_speed_min_kt": 109,
+   "approach_speed_max_kt": 109,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 21350,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 47,068"
+  },
+  "BL17": {
+   "approach_speed_kt": 79,
+   "approach_speed_min_kt": 79,
+   "approach_speed_max_kt": 79,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1508,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,325"
+  },
+  "BE10": {
+   "approach_speed_kt": 111,
+   "approach_speed_min_kt": 111,
+   "approach_speed_max_kt": 111,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 5085,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 11,210"
+  },
+  "C240": {
+   "approach_speed_kt": 78,
+   "approach_speed_min_kt": 78,
+   "approach_speed_max_kt": 78,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1551,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,420"
+  },
+  "B764": {
+   "approach_speed_kt": 150,
+   "approach_speed_min_kt": 150,
+   "approach_speed_max_kt": 150,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 158757,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 350,000"
+  },
+  "C310": {
+   "approach_speed_kt": 87,
+   "approach_speed_min_kt": 87,
+   "approach_speed_max_kt": 87,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 2495,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 5,500"
+  },
+  "A346": {
+   "approach_speed_kt": 153,
+   "approach_speed_min_kt": 153,
+   "approach_speed_max_kt": 153,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 265000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 584,225"
+  },
+  "P32T": {
+   "approach_speed_kt": 80,
+   "approach_speed_min_kt": 80,
+   "approach_speed_max_kt": 80,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 1633,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 3,600"
+  },
+  "BE60": {
+   "approach_speed_kt": 98,
+   "approach_speed_min_kt": 98,
+   "approach_speed_max_kt": 98,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 3073,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 6,775"
+  },
+  "CH7B": {
+   "approach_speed_kt": 56,
+   "approach_speed_min_kt": 56,
+   "approach_speed_max_kt": 56,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 816,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 1,800"
+  },
+  "CRJ1": {
+   "approach_speed_kt": 141,
+   "approach_speed_min_kt": 141,
+   "approach_speed_max_kt": 141,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 21319,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 47,000"
+  },
+  "E135": {
+   "approach_speed_kt": 124,
+   "approach_speed_min_kt": 124,
+   "approach_speed_max_kt": 124,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 18700,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 41,226"
+  },
+  "SBR1": {
+   "approach_speed_kt": 126,
+   "approach_speed_min_kt": 126,
+   "approach_speed_max_kt": 126,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 7938,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 17,500"
+  },
+  "GLF3": {
+   "approach_speed_kt": 140,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 140,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 26535,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 58,500"
+  },
+  "MU2": {
+   "approach_speed_kt": 105,
+   "approach_speed_min_kt": 105,
+   "approach_speed_max_kt": 105,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 5001,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 11,025"
+  },
+  "MD83": {
+   "approach_speed_kt": 144,
+   "approach_speed_min_kt": 144,
+   "approach_speed_max_kt": 144,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 63276,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 139,500"
+  },
+  "WW24": {
+   "approach_speed_kt": 129,
+   "approach_speed_min_kt": 129,
+   "approach_speed_max_kt": 129,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 8618,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 19,000"
+  },
+  "FA8X": {
+   "approach_speed_kt": 106,
+   "approach_speed_min_kt": 106,
+   "approach_speed_max_kt": 106,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 28304,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 62,400"
+  },
+  "MD88": {
+   "approach_speed_kt": 130,
+   "approach_speed_min_kt": 130,
+   "approach_speed_max_kt": 130,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 58967,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 130,000"
+  },
+  "B722": {
+   "approach_speed_kt": 133,
+   "approach_speed_min_kt": 133,
+   "approach_speed_max_kt": 133,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 68039,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 150,000"
+  },
+  "C441": {
+   "approach_speed_kt": 98,
+   "approach_speed_min_kt": 98,
+   "approach_speed_max_kt": 98,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 4246,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 9,360"
   }
  }
 }
