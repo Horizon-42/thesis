@@ -20,11 +20,13 @@ from typing import Any, Sequence
 
 import torch
 
+from anchor_grid import VALIDATION_ANCHOR_GRID_KM
 from batching import resolve_batch_size
 from config import (
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_DYNAMICS_POINT_MASS,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_OBJECTIVE,
     HORIZON_NORMALIZED,
@@ -50,6 +52,14 @@ SELECTION_METRIC_DESCRIPTIONS = {
     CHECKPOINT_SELECTION_OBJECTIVE: SELECTION_METRIC,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: (
         "mean outer-train-fold airport-macro fixed-anchor common physical-time ADE"
+    ),
+    # The bins are formatted from the constant: a restated list here would go stale the
+    # first time the candidate grid moves.
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE: (
+        "mean outer-train-fold airport-macro common physical-time ADE, averaged over the "
+        "anchor sets that clear the coverage gate (L-1 and whichever of the "
+        f"{'/'.join(f'{km:g}' for km in VALIDATION_ANCHOR_GRID_KM)} km remaining-path "
+        "candidate bins the cohort covers)"
     ),
 }
 CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {

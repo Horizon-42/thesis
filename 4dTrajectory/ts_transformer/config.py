@@ -283,9 +283,26 @@ SIMPLE_V3_IMITATION_LOSS_WEIGHT = 64.0
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
+# A1 (`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`): the SAME
+# common-grid ADE, averaged over five anchor sets — L−1 plus `anchor_grid`'s four
+# remaining-path bins — instead of L−1 alone. For a random-anchor arm the fixed metric is
+# blind to what the arm improves: it scores the one anchor such a model is LEAST
+# specialised for, and froze `A0_random_hr8_tv1` at epoch 10 while that arm's geometry was
+# better than the fixed arm's at every anchor on the re-anchoring grid.
+CHECKPOINT_SELECTION_ANCHOR_GRID_ADE = "anchor-grid-common-grid-ade"
 CHECKPOINT_SELECTION_METRICS = (
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
+)
+#: The metrics scored on a deployable common-grid REPLAY rather than on the training
+#: objective. They share the lean ADE evaluator and the cached common-grid truth, so every
+#: site that asks "does this run need the replay path" reads this tuple rather than one
+#: metric name — which is how the anchor-grid metric would otherwise have silently taken
+#: the full-diagnostic path and paid for twenty metrics it does not select on.
+CHECKPOINT_SELECTION_COMMON_GRID_METRICS = (
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
 )
 
 
@@ -1401,6 +1418,25 @@ class TSConfig:
                 "the latent intent lives on the control output; "
                 f"prediction_output={self.prediction_output!r} has no control head to decode it"
             )
+        # The anchor-grid metric re-anchors the validation replay at every bin, so an
+        # oracle input is re-read from the future AT EACH ANCHOR — the same reason
+        # `run_ts_anytime_curve.py` refuses these two checkpoints outright. Selecting an
+        # epoch on that is selecting on how fast the oracle converges.
+        if self.checkpoint_selection_metric == CHECKPOINT_SELECTION_ANCHOR_GRID_ADE:
+            if self.cta_conditioning == CTA_CONDITIONING_GIVEN:
+                raise ValueError(
+                    "cta_conditioning=given reads the future — the CTA IS the truth "
+                    f"duration — and {CHECKPOINT_SELECTION_ANCHOR_GRID_ADE} would re-read "
+                    "it at every bin anchor, so the metric would be selecting on an answer "
+                    "it was handed, not on a prediction"
+                )
+            if self.intent_conditioning != INTENT_CONDITIONING_NONE:
+                raise ValueError(
+                    f"intent_conditioning={self.intent_conditioning!r} reads the FUTURE "
+                    "(the truth join point / the lead's true landing time) and "
+                    f"{CHECKPOINT_SELECTION_ANCHOR_GRID_ADE} re-reads it afresh at every "
+                    "bin anchor, so the metric would be selecting on the oracle, not the model"
+                )
 
     def _validate_control_contract(self) -> None:
         """The control path's internal consistency.

@@ -68,13 +68,16 @@ import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 
 import geometric_metrics as gm  # noqa: E402
-from approach_difficulty import (  # noqa: E402
-    STRATUM_ALL,
-    STRATUM_VECTORED,
-    approach_difficulty,
-    remaining_path_profile_m,
-    strata_masks,
+from anchor_grid import (  # noqa: E402
+    DEFAULT_ANCHOR_GRID_KM,
+    DEFAULT_GRID_MIN_FUTURE_S,
+    PARTIAL_COVERAGE,
+    anchors_for_bin,
+    bin_anchor,
+    remaining_path_profiles,
+    strata_fixed_at_l1,
 )
+from approach_difficulty import STRATUM_ALL, STRATUM_VECTORED  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
     CONTROL_HOOKS_AVAILABLE,
@@ -94,7 +97,6 @@ from dataset import (  # noqa: E402
     Normalizer,
     build_series,
     load_flight_dicts,
-    truth_duration_s,
 )
 from export import observed_series_metrics  # noqa: E402
 from forecast import forecast_approaches  # noqa: E402
@@ -105,8 +107,10 @@ import run_ts_pipeline as pipeline  # noqa: E402
 
 RESULT_SCHEMA = "ts-anytime-curve-a0-v2"
 
-DEFAULT_BINS_KM = "20,16,12,8,6,4,2"
-DEFAULT_MIN_FUTURE_S = 60.0
+# The grid itself is the package's (`anchor_grid`), shared with the checkpoint-selection
+# metric that scores four of these bins; this module only spells it for argparse.
+DEFAULT_BINS_KM = ",".join(f"{value:g}" for value in DEFAULT_ANCHOR_GRID_KM)
+DEFAULT_MIN_FUTURE_S = DEFAULT_GRID_MIN_FUTURE_S
 # The outer-test split stays sealed (repo experiment rule): a curve read on it would spend
 # the one-shot ledger on a measurement that has no gate.
 FORBIDDEN_SPLIT = "test"
@@ -117,9 +121,10 @@ SPLITS = ("val", "train", FORBIDDEN_SPLIT)
 ARM_FIXED = "A0-fixed"
 ARM_RANDOM = "A0-random"
 
-# §六 2: a bin holding under half of its stratum is marked `partial` and does not enter a
-# verdict — the flights it lost are the ones whose geometry never reached that bin.
-PARTIAL_COVERAGE = 0.5
+# §六 2's threshold is `anchor_grid.PARTIAL_COVERAGE`, imported above: a bin holding under
+# half of its stratum is marked `partial` and does not enter a verdict — the flights it
+# lost are the ones whose geometry never reached that bin. The selection metric drops such
+# a bin for the same reason, off the same constant.
 # §2.4's three readings. The tolerance is the frame-arm seed floor the package already
 # quotes (5–22 m pooled ADE); the 1.5 km / 4 km pair is Phase 0's gate asked at a later
 # anchor; the freeze point is reported, never gated.
@@ -307,22 +312,6 @@ def cohort_series(arm: Arm, grid: Grid) -> list:
     return [by_id[key] for key in wanted]
 
 
-def bin_anchor(series, profile: np.ndarray, target_m: float, *,
-               seq_len: int, min_future_s: float) -> int | None:
-    """The flight's anchor for one remaining-path bin, or None when the bin is empty.
-
-    The sample is chosen on remaining path ALONE and only then tested for eligibility: a
-    flight whose closest sample cannot be an anchor has no reading at that bin, rather than
-    a reading taken somewhere else on its track.
-    """
-    anchor = int(np.argmin(np.abs(profile - target_m)))
-    if anchor < seq_len - 1:
-        return None
-    if truth_duration_s(series, anchor) < min_future_s:
-        return None
-    return anchor
-
-
 # ── one bin: forecast at each flight's own anchor, score after it ────────────
 
 def _geometry(series, forecast) -> dict[str, float]:
@@ -355,12 +344,11 @@ def measure_bin(model, series, profiles, keys, target_m, *, config, normalizer, 
     at KRDU) — the grouping is for correctness, not for speed.
     """
     groups: dict[int, list[int]] = {}
-    for index, (item, profile) in enumerate(zip(series, profiles)):
-        anchor = bin_anchor(
-            item, profile, target_m, seq_len=config.seq_len, min_future_s=min_future_s
-        )
-        if anchor is not None:
-            groups.setdefault(anchor, []).append(index)
+    for index, anchor in anchors_for_bin(
+        series, profiles, target_m,
+        seq_len=config.seq_len, min_future_s=min_future_s,
+    ).items():
+        groups.setdefault(anchor, []).append(index)
 
     rows: dict[str, dict] = {}
     for anchor in sorted(groups):
@@ -629,13 +617,9 @@ def measure_checkpoint(arm: Arm, series: list, grid: Grid, device: torch.device)
     # §六 1: ONE label per flight, taken at the evaluation anchor and reused at every bin.
     # Relabelling per bin would drop each flight out of the vectored stratum exactly when
     # it rolled out on the centreline, and the curve would measure the survivors.
-    difficulty = {
-        key: approach_difficulty(item, anchor_l1).to_dict()
-        for key, item in zip(keys, series)
-    }
-    masks = strata_masks(difficulty, keys)
+    masks = strata_fixed_at_l1(series, keys, seq_len=config.seq_len)
     stratum_size = {stratum: int(mask.sum()) for stratum, mask in masks.items()}
-    profiles = [remaining_path_profile_m(item) for item in series]
+    profiles = remaining_path_profiles(series)
     batch_size = grid.batch_size or config.batch_size
     print(f"{arm.label} [{arm.arm}]: {'/'.join(arm.airports)} {grid.split} split, "
           f"{len(series)} flights, anchor L-1 {anchor_l1}, batch {batch_size}, "

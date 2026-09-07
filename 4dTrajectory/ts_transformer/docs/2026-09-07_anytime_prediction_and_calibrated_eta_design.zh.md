@@ -21,6 +21,7 @@ checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
 | A0 重锚曲线（测量） | **两臂都回放了（2026-09-07 夜，§2.4b）**：fixed 曲线单调、warm 逐 bin 优于 native32、closure 8→6 km 崩溃；random 臂 L−1 惨败（早停第 10 轮）但 chamfer 六 bin 全优——选择指标只看 L−1 → A1 提前 | `anytime_a0_20260907/`、`anytime_a0_random_20260907/` | 门 1 过、门 2 12–16 km、门 3 被时长地板挡住 |
+| A1.a 网格选点指标（A1 的前置：先让随机锚点臂能被正确选点） | **代码完成（2026-09-07，分支 `dev-a1`）；臂未跑** | `anchor_grid.py`（网格的唯一定义：bin、60 s 地板、逐航班锚点规则、L−1 固定分层规则；runner 改为 import 它）+ `checkpoint_selection_metric=anchor-grid-common-grid-ade`（五个锚点集的 common-grid ADE 均值，`history.json` 每轮记 `validation_anchor_grid` 块）+ 臂 `A0_random_hr8_tv1_grid`；测试 `tests/test_anchor_grid.py`（7）+ `tests/test_anchor_grid_selection.py`（17）+ `tests/test_frame_ablation_runner.py`（3） | 无门，是选点规则；旧指标逐位不变（4 臂 × 2 轮 × 232 个 history 浮点全等） |
 | A1 流式评估协议 | 未做 | `evaluation_protocol` 新增按剩余路程分 bin 的锚点网格；`compare_constraint_arms.py` 增列 | 无门，是读数 |
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
 | A3 学习的递归先验 | 未做，取决于 A2 | `control/latent.py` 先验网络吃上一轮后验 | 仅当 A2 有增益 |
@@ -247,6 +248,38 @@ warm β=0.01 的雷达引导 ADE p50 曲线单调（门 1 过），warm 在每�
 的份额；(ii) **A1 提前实现**——按锚点网格的验证指标 `anchor-grid-common-grid-ade`（L−1 + 16/12/8/6 km 五个锚点集
 的 common-grid ADE 等权平均），第三臂 `A0_random_hr8_tv1_grid` 用它选 checkpoint。
 
+**这条否决在第一臂上触发了，而它触发的方式暴露了一个更早的错误：选点指标本身（A1，2026-09-07 建成）。**
+第一臂 `A0_random_hr8_tv1` 的 L−1 ADE 是 2949 m 对 native32 的 1322 m，看上去是彻底失败；但同一个
+checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（chamfer p50 −114…−524 m），且 ≤ 8 km 处 ADE 也更好。
+原因不是训练，是选点：`fixed-anchor-common-grid-ade` **只在 L−1 这一个锚点上给验证集打分**，而那正是
+随机锚点模型最不专门化的锚点。于是模型一旦开始在整个锚点区间上分摊容量，L−1 分数就停滞，patience 20
+在第 30 轮触发、第 10 轮的权重被冻结——**指标对这个臂要改善的东西是盲的**。
+
+因此：**随机锚点臂的选点指标是网格，不是 L−1**。`checkpoint_selection_metric=anchor-grid-common-grid-ade`
+把同一个 common-grid ADE 在**若干个锚点集**上各算一次并取均值——L−1 加
+`anchor_grid.VALIDATION_ANCHOR_GRID_KM`（16 / 12 / 8 / 6 km）中**这批数据能覆盖的那些 bin**，
+每架飞机在每个 bin 上取自己剩余路程最近且可锚（回看足 120 s、锚点后真值 ≥ 60 s）的样本。
+**每个锚点集等权**（把所有 (航班, 锚点) 对合并会按覆盖率给远端 bin 加权，正好在雷达引导
+航班多的臂上把远端 bin 稀释掉）；**每个集的 ADE 只在拥有该锚点的航班上取平均**（缺该 bin 的航班是缺席，
+不是记 0），再按机场取宏平均——与 `fixed-anchor-common-grid-ade` 同一口径，所以 L−1 那一项就是它的值。
+
+**覆盖率闸门（2026-09-07 复核后加）**：候选 bin 不等于会被选点的 bin。KRDU val（1404 架、60 s 地板）
+实测覆盖率为 **20 km 33.7 %、16 km 37 %、12 km 78.7 %、8 / 6 km 99.7 %**，中位航班在 L−1 处只剩
+**13.4 km**。所以 20 km 直接不入候选，4 / 2 km 在 60 s 地板下部分到全空也不入候选；而 16 km 虽是候选，
+在这批数据上会被闸门 **丢弃**（低于 `anchor_grid.PARTIAL_COVERAGE` = 0.5，与 A0 判读 `partial` 的是
+同一个常数），打印通知并记进 `validation_anchor_grid.dropped_bins`。否则等权的五分之一会来自
+「飞得远的那部分航班」这个子群。**幸存的 bin 是数据的性质、不是模型的性质**，同一 split 上每条臂的
+选点集完全相同，因此值可比；幸存不足两个则整个指标被拒（那不是曲线，是 L−1 加一个陪衬）。
+
+**L−1 仍然每轮记录**（`validation_anchor_grid.fixed_anchor_common_grid_ade_m`，与另一指标选的是同一个数），
+所以上面这条否决照旧可读——它只是不再决定保留哪一轮。代价：选点这一段约 **4–5×**（每个幸存 bin 一次
+额外的 deployable replay；L−1 那一次是复用的，不重算），KRDU 规模下每轮约 **+12–15 %**，180 轮的臂
+多花 7–9 分钟。
+
+**拒绝**：`cta_conditioning=given` 与 `intent_conditioning != none` 在这个指标下被 `TSConfig` 拒绝——
+网格在每个 bin 锚点都会把 oracle 重读一次（与 A0 runner 拒绝这两种 checkpoint 是同一条理由），
+按它选轮次等于按「oracle 收敛得多快」选。
+
 ### 2.5 A2 的门
 
 同一锚点网格上，A2 的雷达引导 ADE(s) 与时长误差不劣于 A1（无状态）；候选权重的熵随 s 单调下降
@@ -364,6 +397,16 @@ AMAN 的直接回答，也是 IPOPT 最优解给不了的东西。
 1. **分层标签在 L−1 锚点算一次并固定**，所有锚点网格上的读数用同一标签。否则曲线是幸存者曲线。
 2. **每个 bin 打印航班数**；bin 内航班少于该分层的 50 % 时该点标 `partial`，不进门。
 3. **A0 的两臂必须同时报**；只报 A0-fixed 的曲线会把分布外代价读成"越近越准"。
+3b. **网格只有一个定义**（`anchor_grid.py`）：runner 画曲线的 bin / 地板 / 逐航班锚点规则，与
+   `anchor-grid-common-grid-ade` 选点用的是同一批对象（测试 `runner.bin_anchor is
+   anchor_grid.bin_anchor`）。两份"今天恰好一致"的网格会让"曲线变好了"和"这一轮是按曲线选的"
+   变成关于不同锚点的两句话。
+3c. **随机锚点臂用网格选点，固定锚点臂不必**（§2.4）。L−1 指标对随机锚点臂是盲的——它只在那个臂
+   最不专门化的锚点上打分——但它每轮仍被记录（`fixed_anchor_common_grid_ade_m`），因为 §2.4 的
+   否决要读它。**选点指标进 run name**（`select=…`，`META_FIELDS`），按网格选出来的是另一个 run。
+3d. **覆盖率不足的 bin 不进选点均值**：闸门与 §六 2 用同一个 `PARTIAL_COVERAGE`，丢弃的 bin 连同
+   它的覆盖率写进 `dropped_bins`。**幸存集是 cohort 的性质**，同一 split 上各臂一致——否则「A 臂
+   的均值比 B 臂低」可能只是两条臂在不同的 bin 上取平均。
 4. **校准集永远不是 test，也不是训练集**；δ 表随 checkpoint 元数据走，没有表就不声称校准。
 5. **`cta=self-q` 与 `cta=given` 是两种臂**，run name 必须区分；只有前者可作为预测结果引用。
 6. **分位数是时长的，不是航迹的**；扇面覆盖率是读数不是覆盖保证，文档与 README 不得写成后者。
@@ -420,7 +463,8 @@ AMAN 的直接回答，也是 IPOPT 最优解给不了的东西。
 
 | 概念 | 代码里的名字 |
 |---|---|
-| 锚点网格 / 重锚曲线 | `run_ts_anytime_curve.py`，产物 `anytime_a0_<date>/`，读数键 `remaining_path_bin_m` |
+| 锚点网格 / 重锚曲线 | `anchor_grid.py`（网格本身）+ `run_ts_anytime_curve.py`，产物 `anytime_a0_<date>/`，读数键 `remaining_path_bin_m` |
+| 网格选点指标 | config `checkpoint_selection_metric=anchor-grid-common-grid-ade`，`anchor_grid.VALIDATION_ANCHOR_GRID_KM`，`history.json` 的 `validation_anchor_grid` 块，run name `select=anchor-grid-common-grid-ade` |
 | 随机锚点臂 | `random_train_anchor=True` + L1.b 监督（`control_heading_rate_loss_weight=8`, `control_bank_tv_loss_weight=1`） |
 | 候选重加权 | `forecast.reweighted_mode_forecasts`，`predict --stream-dt 10` |
 | 分位数时长头 | config `duration_head ∈ point \| quantile`，`prediction_outputs.QuantileFinalTimeHead`，`source.durationQuantilesS` |

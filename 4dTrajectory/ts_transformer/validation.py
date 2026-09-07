@@ -21,16 +21,26 @@ from __future__ import annotations
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
 import torch
 import torch.nn as nn
 
+from anchor_grid import (
+    DEFAULT_GRID_MIN_FUTURE_S,
+    PARTIAL_COVERAGE,
+    VALIDATION_ANCHOR_GRID_M,
+    anchors_for_bin,
+    bin_label,
+    remaining_path_profiles,
+)
 from batch_contract import anchor_state, model_forward, unpack_batch
 from closure_output import ClosurePrediction, replay_batch as closure_replay_batch
 from config import (
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     PREDICTION_STATE,
     TSConfig,
@@ -40,6 +50,7 @@ from control.basis_fit import FittedTeacherTable
 from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
 from dataset import (
+    ExplicitAnchorTrajectoryWindows,
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
@@ -48,6 +59,7 @@ from dataset import (
 )
 from fixed_anchor_validation import (
     CommonGridTruth,
+    common_truth_at_anchors,
     fixed_anchor_common_truth,
     fixed_anchor_common_grid_ade_metrics,
     fixed_anchor_common_grid_metrics,
@@ -217,19 +229,23 @@ def _merge_prediction_replays(
     )
 
 
-def predict_split(
+def _replay_batches(
     model: nn.Module,
     dataset: TrajectoryWindows,
-    normalizer: Normalizer,
+    batches: Iterable[tuple[np.ndarray, tuple]],
     device: torch.device,
-    batch_size: int,
 ) -> SplitPredictionReplay:
-    """Return physical anchor/output arrays, masks, predicted time and true time."""
+    """One DEPLOYABLE forward per batch, replayed into physical arrays and reassembled.
+
+    ``model_forward`` without ``future`` is the deployable decode for every output — a
+    latent model's prior top-1, never its posterior sample. ``batches`` yields each raw
+    batch with the dataset rows it holds, which is the only thing that differs between a
+    sequential pass over a whole window set and a cached validation plan.
+    """
     model.eval()
     chunks: list[tuple[np.ndarray, SplitPredictionReplay]] = []
-    cursor = 0
     with torch.no_grad():
-        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
+        for indices, raw_batch in batches:
             (
                 x,
                 y,
@@ -239,30 +255,43 @@ def predict_split(
                 dynamics,
                 _dense_supervision,
             ) = unpack_batch(raw_batch)
-            x_device = x.to(device)
-            y_device = y.to(device)
-            mask_device = mask.to(device)
-            final_time_device = final_time_s.to(device)
-            dynamics_device = move_dynamics(dynamics, device)
-            output = model_forward(model, x_device, dynamics_device)
-            batch_replay = _prediction_batch_replay(
-                output,
-                x_device,
-                y_device,
-                mask_device,
-                final_time_device,
-                dynamics_device,
-                dataset,
-            )
-            batch_count = len(x)
-            chunks.append(
-                (np.arange(cursor, cursor + batch_count, dtype=np.int64), batch_replay)
-            )
-            cursor += batch_count
-    return _merge_prediction_replays(
-        chunks,
-        count=len(dataset),
-    )
+            x = x.to(device)
+            y = y.to(device)
+            mask = mask.to(device)
+            final_time_s = final_time_s.to(device)
+            dynamics = move_dynamics(dynamics, device)
+            chunks.append((
+                indices,
+                _prediction_batch_replay(
+                    model_forward(model, x, dynamics),
+                    x,
+                    y,
+                    mask,
+                    final_time_s,
+                    dynamics,
+                    dataset,
+                ),
+            ))
+    return _merge_prediction_replays(chunks, count=len(dataset))
+
+
+def predict_split(
+    model: nn.Module,
+    dataset: TrajectoryWindows,
+    normalizer: Normalizer,
+    device: torch.device,
+    batch_size: int,
+) -> SplitPredictionReplay:
+    """Return physical anchor/output arrays, masks, predicted time and true time."""
+
+    def sequential():
+        cursor = 0
+        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
+            count = len(raw_batch[0])
+            yield np.arange(cursor, cursor + count, dtype=np.int64), raw_batch
+            cursor += count
+
+    return _replay_batches(model, dataset, sequential(), device)
 
 
 def evaluate_split(
@@ -455,8 +484,15 @@ def build_validation_batch_plan(
     batch_size: int,
     *,
     duration_bucketed: bool = False,
+    common_truth: CommonGridTruth | None = None,
 ) -> ValidationBatchPlan:
-    """Build each fixed validation tensor once; optionally group no-grad rows by duration."""
+    """Build each fixed validation tensor once; optionally group no-grad rows by duration.
+
+    ``common_truth`` is the truth cache the selection metric scores against. It is the
+    ``L-1`` one by default; an anchor-grid set passes its own, because its truth is
+    measured from ITS anchors and computing the L-1 one for it would be both wasted and
+    wrong.
+    """
     if not isinstance(dataset, FixedAnchorTrajectoryWindows):
         raise TypeError("validation batching requires a fixed-anchor dataset")
     durations = np.asarray([
@@ -505,20 +541,20 @@ def build_validation_batch_plan(
     )
     if not np.array_equal(np.sort(covered), np.arange(len(dataset), dtype=np.int64)):
         raise ValueError("validation duration buckets must cover every row exactly once")
+    if common_truth is None and (
+        dataset.config.checkpoint_selection_metric
+        in CHECKPOINT_SELECTION_COMMON_GRID_METRICS
+    ):
+        common_truth = fixed_anchor_common_truth(
+            dataset.series,
+            dataset.config,
+            dataset.config.validation_common_grid_points,
+        )
     return ValidationBatchPlan(
         dataset=dataset,
         batches=tuple(batches),
         bucket_flights=bucket_flights,
-        common_truth=(
-            fixed_anchor_common_truth(
-                dataset.series,
-                dataset.config,
-                dataset.config.validation_common_grid_points,
-            )
-            if dataset.config.checkpoint_selection_metric
-            == CHECKPOINT_SELECTION_COMMON_GRID_ADE
-            else None
-        ),
+        common_truth=common_truth,
     )
 
 
@@ -636,6 +672,160 @@ def evaluate_validation_airport(
     )
 
 
+def replay_validation_plan(
+    model: nn.Module,
+    plan: ValidationBatchPlan,
+    device: torch.device,
+) -> SplitPredictionReplay:
+    """The DEPLOYABLE replay of one cached plan: one forward per batch, no objective.
+
+    `evaluate_validation_airport` scores the objective and replays in the same pass; an
+    anchor-grid set is scored on the replay alone, so it does neither the loss nor the
+    posterior forward.
+    """
+    return _replay_batches(
+        model,
+        plan.dataset,
+        ((batch.indices, batch.raw_batch) for batch in plan.batches),
+        device,
+    )
+
+
+#: The anchor-grid metric's cached validation work and what the cohort cost it.
+@dataclass(frozen=True)
+class AnchorGridPlans:
+    """The bins this cohort can be selected on, and the ones it could not.
+
+    ``bins`` is bin (metres of remaining path) -> airport -> that airport's flights
+    anchored there; built once per fit and replayed every epoch, exactly like the ``L-1``
+    plans beside it. ``dropped`` records every candidate bin the coverage gate removed,
+    with the coverage that removed it — a bounded coverage is stated, never implied.
+
+    Which bins survive is a property of the COHORT (the airport, the split and the future
+    floor), not of the model, so every arm trained on the same split is selected on the
+    same sets and their values are comparable.
+    """
+
+    bins: dict[float, dict[str, ValidationBatchPlan]]
+    dropped: tuple[dict[str, Any], ...]
+    minimum_coverage: float = PARTIAL_COVERAGE
+
+
+#: A grid with fewer surviving bins than this is not a curve, it is the L−1 metric with a
+#: companion — at that point the run should say so instead of pretending to average.
+MINIMUM_ANCHOR_GRID_BINS = 2
+
+
+def build_anchor_grid_validation_plans(
+    val_sets: dict[str, TrajectoryWindows],
+    batch_size: int,
+    *,
+    minimum_anchor_index: int | None = None,
+) -> AnchorGridPlans:
+    """One cached validation plan per (bin, airport), at each flight's own bin anchor.
+
+    The bins, the future floor, the per-flight anchor rule and the coverage threshold are
+    `anchor_grid`'s — the same ones `run_ts_anytime_curve.py` draws the curve on. A flight
+    with no admissible anchor at a bin is simply absent from that bin's plan (it has no
+    reading there, and a reading taken elsewhere on its track would not be one).
+
+    A bin whose coverage falls below `anchor_grid.PARTIAL_COVERAGE` for ANY airport is
+    DROPPED, because its value would describe the long-haul subcohort that reached it
+    rather than the split — on the real KRDU validation cohort that is the 16 km bin, at
+    37 %. The drop is printed and recorded, never silent. The run is refused only when
+    fewer than `MINIMUM_ANCHOR_GRID_BINS` bins survive beside L−1.
+
+    No ``fitted_teacher`` is passed on purpose: a fitted table is bound to the L−1 anchor
+    it was fitted at, and these sets score a REPLAY, never an objective. For the same
+    reason the window sets are built ``supervision=False``: nothing here reads an imitation
+    or heading-rate target, and building one would quietly hand a `fitted` run the
+    inverse-dynamics teacher instead.
+    """
+    bins: dict[float, dict[str, ValidationBatchPlan]] = {}
+    dropped: list[dict[str, Any]] = []
+    for target_m in VALIDATION_ANCHOR_GRID_M:
+        anchors_by_airport = {
+            airport: anchors_for_bin(
+                dataset.series,
+                remaining_path_profiles(dataset.series),
+                target_m,
+                seq_len=dataset.config.seq_len,
+                min_future_s=DEFAULT_GRID_MIN_FUTURE_S,
+                minimum_anchor_index=minimum_anchor_index,
+            )
+            for airport, dataset in val_sets.items()
+        }
+        coverage = {
+            airport: len(anchors) / len(val_sets[airport].series)
+            for airport, anchors in anchors_by_airport.items()
+        }
+        if min(coverage.values()) < PARTIAL_COVERAGE:
+            worst = min(coverage, key=coverage.get)
+            reason = (
+                f"{bin_label(target_m)} covers "
+                + ", ".join(f"{airport} {share:.1%}" for airport, share in coverage.items())
+                + f" of the validation cohort, under the {PARTIAL_COVERAGE:.0%} "
+                f"`partial` threshold ({worst} is the binding one); its value would "
+                "describe the flights whose geometry reached it, not the split"
+            )
+            print(f"  grid drop  {reason}", flush=True)
+            dropped.append({
+                "bin_m": target_m,
+                "bin": bin_label(target_m),
+                "coverage": coverage,
+                "flights": {a: len(x) for a, x in anchors_by_airport.items()},
+                "reason": reason,
+            })
+            continue
+        by_airport: dict[str, ValidationBatchPlan] = {}
+        for airport, anchors in anchors_by_airport.items():
+            dataset = val_sets[airport]
+            config = dataset.config
+            subset = [dataset.series[index] for index in anchors]
+            windows = ExplicitAnchorTrajectoryWindows(
+                subset,
+                config,
+                dataset.normalizer,
+                anchors={
+                    dataset.series[index].dataset_id: anchor
+                    for index, anchor in anchors.items()
+                },
+                minimum_anchor_index=minimum_anchor_index,
+                supervision=False,
+            )
+            by_airport[airport] = build_validation_batch_plan(
+                windows,
+                batch_size,
+                common_truth=common_truth_at_anchors(
+                    subset,
+                    config,
+                    config.validation_common_grid_points,
+                    list(anchors.values()),
+                ),
+            )
+        bins[target_m] = by_airport
+    if len(bins) < MINIMUM_ANCHOR_GRID_BINS:
+        raise ValueError(
+            f"only {len(bins)} of {len(VALIDATION_ANCHOR_GRID_M)} candidate bins clear the "
+            f"{PARTIAL_COVERAGE:.0%} coverage threshold on this validation cohort, so "
+            f"{CHECKPOINT_SELECTION_ANCHOR_GRID_ADE} would be the L-1 metric with a "
+            f"companion rather than a curve; select on "
+            f"{CHECKPOINT_SELECTION_COMMON_GRID_ADE} instead. Dropped: "
+            + "; ".join(item["reason"] for item in dropped)
+        )
+    return AnchorGridPlans(bins=bins, dropped=tuple(dropped))
+
+
+def anchor_grid_coverage(plans: AnchorGridPlans) -> dict[str, dict[str, int]]:
+    """Bin -> airport -> flights with a reading there. Every bounded coverage is stated."""
+    return {
+        bin_label(target_m): {
+            airport: len(plan.dataset) for airport, plan in by_airport.items()
+        }
+        for target_m, by_airport in plans.bins.items()
+    }
+
+
 @dataclass(frozen=True)
 class ValidationSelection:
     """One deterministic checkpoint-selection result over fixed-anchor validation."""
@@ -644,6 +834,9 @@ class ValidationSelection:
     value: float
     by_airport: dict[str, float]
     details_by_airport: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: The anchor-grid metric's per-anchor-set record: which bins were scored, on how many
+    #: flights, and what each scored. Empty for every other metric.
+    anchor_grid: dict[str, Any] = field(default_factory=dict)
 
 
 def _objective_validation_selection(
@@ -655,8 +848,10 @@ def _objective_validation_selection(
     device: torch.device,
     val_by_airport: dict[str, float],
     precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
+    anchor_grid_plans: AnchorGridPlans | None = None,
 ) -> ValidationSelection:
     del model, val_sets, normalizer, config, device, precomputed_details_by_airport
+    del anchor_grid_plans
     return ValidationSelection(
         metric=CHECKPOINT_SELECTION_OBJECTIVE,
         value=float(np.mean(list(val_by_airport.values()))),
@@ -697,7 +892,10 @@ def common_grid_validation_details(
                 model, dataset, normalizer, device, config.batch_size
             )
         )
-        if config.checkpoint_selection_metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE:
+        if (
+            config.checkpoint_selection_metric
+            in CHECKPOINT_SELECTION_COMMON_GRID_METRICS
+        ):
             block = fixed_anchor_common_grid_ade_metrics(
                 dataset.series,
                 config,
@@ -804,7 +1002,9 @@ def _common_grid_validation_selection(
     device: torch.device,
     val_by_airport: dict[str, float],
     precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
+    anchor_grid_plans: AnchorGridPlans | None = None,
 ) -> ValidationSelection:
+    del anchor_grid_plans
     details = common_grid_validation_details(
         model=model, val_sets=val_sets, normalizer=normalizer, config=config,
         device=device, val_by_airport=val_by_airport,
@@ -821,7 +1021,142 @@ def _common_grid_validation_selection(
     )
 
 
+#: The key the ``L-1`` anchor set carries in the recorded grid block. It is the anchor the
+#: whole package evaluates at, not a bin of the remaining-path grid, so it is named rather
+#: than numbered.
+ANCHOR_GRID_L1_KEY = "l-1"
+
+
+def _anchor_set_block(
+    ade_by_airport: dict[str, float], flights_by_airport: dict[str, int]
+) -> dict[str, Any]:
+    """One anchor set's published cell: its ADE, and the coverage it was read on.
+
+    The set's ADE is the AIRPORT MACRO — the mean over airports of each airport's
+    flight-mean ADE — which is what `fixed-anchor-common-grid-ade` already means, so the
+    ``L-1`` cell of this block IS that metric's value and the two are comparable. On a
+    single-airport run (every arm in this line) the macro and the flight mean coincide.
+    """
+    return {
+        "flights": sum(flights_by_airport.values()),
+        "ade_m": float(np.mean(list(ade_by_airport.values()))),
+        "by_airport": {
+            airport: {"flights": flights_by_airport[airport], "ade_m": ade}
+            for airport, ade in ade_by_airport.items()
+        },
+    }
+
+
+def _anchor_grid_validation_selection(
+    *,
+    model: nn.Module,
+    val_sets: dict[str, TrajectoryWindows],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    val_by_airport: dict[str, float],
+    precomputed_details_by_airport: dict[str, dict[str, Any]] | None = None,
+    anchor_grid_plans: AnchorGridPlans | None = None,
+) -> ValidationSelection:
+    """The mean, over the SURVIVING anchor sets, of that set's common-grid ADE.
+
+    The sets are ``L-1`` plus every candidate bin of `anchor_grid.VALIDATION_ANCHOR_GRID_KM`
+    that cleared the coverage gate on this cohort (`build_anchor_grid_validation_plans`),
+    each flight anchored at its own closest admissible sample. **Which bins survive is a
+    property of the cohort, not of the model**, so every arm on the same split is selected
+    on the same sets; the ones that did not survive are listed in ``dropped_bins`` with the
+    coverage that dropped them.
+
+    Two facts decide what the number is, and both are deliberate:
+
+    * **equal weight per ANCHOR SET.** Each surviving set contributes 1/N, whatever its
+      coverage. Pooling all (flight, anchor) pairs instead would weight each bin by how
+      many flights happened to reach it, i.e. by the cohort's route mix — the far bins
+      would fade out of the metric exactly on the arms whose flights are vectored.
+    * **each set's ADE is the mean over the flights that HAVE that anchor**, per airport,
+      then the airport macro (`_anchor_set_block`). A flight absent from a bin is absent
+      from that bin's mean; it is never scored 0 and never carried over from another bin.
+
+    The ADE itself is `fixed_anchor_validation`'s common-grid ADE at every set — the same
+    evaluator, the same query grid, only the anchor (and hence the truth cache) moves. The
+    ``L-1`` term is therefore exactly the value `fixed-anchor-common-grid-ade` selects on,
+    and it is recorded every epoch beside the bins so the two metrics stay readable against
+    each other.
+
+    Lower is better, like every other selection metric.
+    """
+    if anchor_grid_plans is None:
+        raise ValueError(
+            f"{CHECKPOINT_SELECTION_ANCHOR_GRID_ADE} needs its cached anchor-grid plans; "
+            "build them once per fit with build_anchor_grid_validation_plans"
+        )
+    fixed = _common_grid_validation_selection(
+        model=model, val_sets=val_sets, normalizer=normalizer, config=config,
+        device=device, val_by_airport=val_by_airport,
+        precomputed_details_by_airport=precomputed_details_by_airport,
+    )
+    sets: dict[str, dict[str, Any]] = {
+        ANCHOR_GRID_L1_KEY: _anchor_set_block(
+            fixed.by_airport,
+            {airport: len(dataset) for airport, dataset in val_sets.items()},
+        )
+    }
+    ade_by_airport_by_set: list[dict[str, float]] = [dict(fixed.by_airport)]
+    for target_m, by_airport in anchor_grid_plans.bins.items():
+        ade_by_airport = {}
+        for airport, plan in by_airport.items():
+            replay = replay_validation_plan(model, plan, device)
+            block = fixed_anchor_common_grid_ade_metrics(
+                plan.dataset.series,
+                config,
+                replay.anchors,
+                replay.predicted,
+                replay.predicted_time_s,
+                replay.segment_durations_s,
+                points=config.validation_common_grid_points,
+                common_truth=plan.common_truth,
+                anchor_label=f"remaining path {bin_label(target_m)}",
+            )
+            ade_by_airport[airport] = float(block["ade_m"])
+        ade_by_airport_by_set.append(ade_by_airport)
+        sets[bin_label(target_m)] = _anchor_set_block(
+            ade_by_airport,
+            {airport: len(plan.dataset) for airport, plan in by_airport.items()},
+        )
+    value = float(np.mean([block["ade_m"] for block in sets.values()]))
+    return ValidationSelection(
+        metric=CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
+        value=value,
+        # Per airport, the same mean over the same sets — the decomposition of the value,
+        # not a second definition of it.
+        by_airport={
+            airport: float(np.mean([
+                ade_by_airport[airport] for ade_by_airport in ade_by_airport_by_set
+            ]))
+            for airport in val_sets
+        },
+        details_by_airport=fixed.details_by_airport,
+        anchor_grid={
+            "selection_metric": CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
+            "grid_km": [
+                float(target_m) / 1000.0 for target_m in anchor_grid_plans.bins
+            ],
+            "min_future_s": DEFAULT_GRID_MIN_FUTURE_S,
+            "minimum_coverage": anchor_grid_plans.minimum_coverage,
+            "anchor_sets": sets,
+            # The candidate bins this COHORT could not support, with the coverage that
+            # dropped them: a bounded coverage is stated, never implied.
+            "dropped_bins": [dict(item) for item in anchor_grid_plans.dropped],
+            "mean_ade_m": value,
+            # The other metric's number, named so a reader comparing arms does not have to
+            # know this block's key convention. It IS anchor_sets["l-1"]["ade_m"].
+            "fixed_anchor_common_grid_ade_m": sets[ANCHOR_GRID_L1_KEY]["ade_m"],
+        },
+    )
+
+
 VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
     CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
+    CHECKPOINT_SELECTION_ANCHOR_GRID_ADE: _anchor_grid_validation_selection,
 }
