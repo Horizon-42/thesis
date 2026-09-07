@@ -405,6 +405,31 @@ def test_the_publisher_preflight_reads_a_legacy_checkpoint_through_the_package(
     assert "eligible flight set changed" in (plan.preflight_error() or "")
 
 
+def test_the_pipeline_reuses_a_legacy_checkpoint_whose_roster_bytes_moved(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`run_ts_pipeline` must not retrain a checkpoint because a roster was rewritten."""
+    import run_ts_pipeline as pipeline
+
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
+    harvest = tmp_path / "harvest"
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", harvest)
+    manifest, roster = _harvest(harvest / AIRPORT, flights)
+    provenance = arrival_data_provenance(manifest, eligibility_rosters=[roster])
+    plan = pipeline.TrainingPlan(
+        (AIRPORT,), "itransformer", training_mode="per-airport", output_dir=tmp_path / "run"
+    )
+    plan.train_dir.mkdir(parents=True)
+    torch.save(_v3_payload(provenance, TSConfig()), plan.checkpoint)
+    legacy = {"eligibility_rosters": {AIRPORT: "9" * 64}}   # the roster file, as it was
+
+    _reserialise(roster)
+    assert plan._eligibility_reuse_error(legacy) is None
+
+    _swap_one_eligible_key(roster, manifest)
+    assert "eligible flight set changed" in (plan._eligibility_reuse_error(legacy) or "")
+
+
 def test_the_training_audit_still_records_the_roster_byte_facts(
     tmp_path: Path, monkeypatch
 ) -> None:
