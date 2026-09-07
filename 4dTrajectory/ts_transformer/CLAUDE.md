@@ -74,6 +74,14 @@ point of the package, not a migration in progress.
   five go to `source.durationQuantilesS`, and `run_ts_eta_calibration.py` turns them into a
   calibrated interval. `predict --cta-from-quantiles` then decodes each flight at its OWN
   quantile — the run name says `cta=self-q`, and that one IS a prediction result.
+  **`duration_head=two-head` (B1.b, 2026-09-08) carries BOTH heads**: the point head drives
+  the rollout duration exactly as `point` does and the quantile head emits only the
+  published distribution. It exists because `B1_point_matched` showed the two gains come
+  from different mechanisms and do not overlap — the PATH gain is the duration term's
+  WEIGHT (point head at `final_time_loss_weight` 26: ADE 1248 vs native32's 1322) and the
+  ARRIVAL-TIME gain is the quantile HEAD (MAE 23.9 vs 25.9 s pooled, 10.3 vs 13.6 s
+  straight-in) — so under `quantile`, where the rollout flies q50, the head's path cost is
+  forced onto the trajectory for nothing.
 
 Single-aircraft-only and deterministic point-prediction are scope decisions for all three (README).
 
@@ -233,7 +241,8 @@ flight model.
 | `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` / `latent_posterior_init_std` and L2.f's two below mean nothing without it and are refused |
 | `latent_beta_warmup_epochs` / `latent_aux_duration_weight` | 0 / 0.0 | L2.f's two levers on the POSTERIOR MEAN, which is where the information died (see the contract above). The first ramps β linearly from 0 over N epochs (`effective_latent_beta`, the one place the schedule is written; the epoch's objective is `replace(config, latent_beta=…)` and the validation pass is scored under the SAME one); the second adds a train-only `Linear(latent_dim→1)` on the POSTERIOR SAMPLE predicting `truth_duration_s / final_time_scale_s` (component `latent_aux`, registered iff weighted, never called in `decode`, refused under `cta_conditioning=given`). Named `beta-warmup=` / `aux-T=`. Arms: `docs/experiments/l2f_mean_information_arms.json` |
 | `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result. **`self-q` is a PREDICT-TIME label, not a trainable value** (`CTA_CONDITIONINGS_AVAILABLE` keeps it out of a new run): `predict --cta-from-quantiles` stamps it on the config it writes beside the records, so the directory that read no future cannot be named like the one that did |
-| `duration_head` | `point` | `quantile` = B1's five `DURATION_QUANTILES` of the SAME duration (`QuantileFinalTimeHead`, monotone by cumulative softplus; the median IS `final_time_s`). The loss swaps the squared final-time residual for the sum of five pinball losses **under the same component name**, so `loss_component_names` is unchanged. Refused off the control output, and refused with `latent_dim > 0` — z reaches the duration by shifting the point head's ONE logit, and under a posterior sample the quantiles would be conditioned on the flight's own future. The named recipes pin it at `point`, so a quantile run is `custom` and wears `T=q5` |
+| `duration_head` | `point` | `quantile` = B1's five `DURATION_QUANTILES` of the SAME duration (`QuantileFinalTimeHead`, monotone by cumulative softplus; the median IS `final_time_s`). The loss swaps the squared final-time residual for the sum of five pinball losses **under the same component name**, so `loss_component_names` is unchanged. `two-head` = B1.b: BOTH heads, the POINT head driving the rollout (`final_time_head`, the same module and state-dict keys `point` trains) and `duration_quantile_head` emitting the interval. **The second head is built LAST** so a `two-head` arm and a `point` arm start parameter-for-parameter identical (measured: 34 shared keys, 0 differ) — `_initialize_duration_head` zeroes only the last layer, so building it earlier would shift the point head's hidden draw and unpair the arms gate 1 compares single-seed. The training dropout stream still cannot be matched — its pinball rides in a component of its OWN, `duration_quantile`, so `loss_component_names` gains one entry there and only there. Every value but `point` is refused off the control output and refused with `latent_dim > 0` — z reaches the duration by shifting the point head's ONE logit, and under a posterior sample the quantiles would be conditioned on the flight's own future. The named recipes pin it at `point`, so a quantile or two-head run is `custom` and wears `T=q5` / `T=2h` |
+| `duration_quantile_loss_weight` | `1.0` | B1.b: what weighs the pinball sum. Under `quantile` it multiplies the `final_time` component the pinball replaced (the 1.0 that multiplied it before the field existed, so nothing moved); under `two-head` it weighs the separate `duration_quantile` component. **Refused non-default under `point`** — there is no such head — and symmetrically `final_time_loss_weight` is **refused non-default under `quantile`**, where the pinball replaced the point term outright. Named in a run only when it deviates (`pinball=3`) |
 | `n_segments` (control) | 64 | **32 is free** (L1: 1322 vs 1333 m, bank skill 0.726 vs 0.728); the deployed head's 257 numbers become 96 |
 | `control_state_loss_grid` | native | `fixed-dt` without the imitation term (it is not registered there) trips the straight-in veto (FDE 703 → 2863) and brings the bank wiggle back — the trajectory-error loss alone is not enough |
 | `control_heading_rate_loss_weight` (+ `_scale_dps` 1.5) | 0 | L1.b arm ②: the teacherless way to name the bank — the rollout's own ψ̇ at the segment endpoints against the flown track's. `_scale_dps` is the UNIT the residual is read in (half a standard-rate turn), not the dose. Doses 1.0 / 8.0 bracket an unknown; **not measured yet** |
@@ -412,7 +421,7 @@ importable. A finished one-off driver belongs there, not beside the live runners
   narrowing, so the directory holds every airport's flights; the publisher refuses it rather
   than filing all of them under each airport's category.
 - `run_ts_eta_calibration.py` — **B2**: split-conformal (CQR) calibration of a
-  `duration_head=quantile` checkpoint's interval. Reads the DURATION HEAD ALONE
+  quantile-bearing checkpoint's interval (`duration_head` ∈ `quantile`, `two-head`). Reads the DURATION HEAD ALONE
   (`forecast.duration_quantile_predictions` — one forward per flight, no rollout, no CTA),
   which is why it is seconds of CPU and why it may load a `cta=given` checkpoint
   (`load_arm(..., refuse_cta_given=False)`, the only instrument that may; the

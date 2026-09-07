@@ -17,7 +17,7 @@ from config import (
     CORRIDOR_GATES,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_OFF,
-    DURATION_HEAD_QUANTILE,
+    DURATION_HEADS_WITH_QUANTILES,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -101,10 +101,11 @@ class Forecast:
     # Latent control output only: decoded from the POSTERIOR mean q(z | this flight's own
     # future) — the z-oracle upper bound. Reads the future; never a prediction result.
     z_from_posterior: bool = False
-    # B1, quantile duration head only: the five `DURATION_QUANTILES` in seconds, in level
-    # order. `predicted_final_time_s` above is still the ONE duration this trajectory was
-    # rolled over (the median, or a CTA); these are the interval around it, and §六 6 —
-    # they are quantiles of the DURATION, never of the trajectory.
+    # B1 / B1.b, quantile-bearing duration heads only: the five `DURATION_QUANTILES` in
+    # seconds, in level order. `predicted_final_time_s` above is still the ONE duration this
+    # trajectory was rolled over — under `quantile` the MEDIAN of these, under `two-head`
+    # the POINT head's (a different number), under any CTA arm the CTA. These are the
+    # interval, and §六 6 — quantiles of the DURATION, never of the trajectory.
     duration_quantiles_s: np.ndarray | None = None
     # B2: the CALIBRATED interval per alpha, `[{"alpha", "lo", "hi"}]`, and the stratum whose
     # conformal delta widened it. None = this checkpoint has no calibration table, and the
@@ -434,13 +435,15 @@ def duration_quantile_predictions(
     No rollout, no controls, and NO CTA: the quantile head reads the history alone
     (`control.heads.ControlFeatureModel.duration_quantiles`), which is what lets B2 calibrate
     and B3 decode a ``cta_conditioning=given`` checkpoint without first handing it an arrival
-    time it would have had to read from the future. Batched per flight like every other
+    time it would have had to read from the future. Under ``two-head`` (B1.b) it is the
+    quantile head that answers here — never the point head that drove the rollout — so the
+    interval B2 calibrates is the one the records publish. Batched per flight like every other
     forward here, so the arithmetic is the one `predict` runs.
     """
-    if config.duration_head != DURATION_HEAD_QUANTILE:
+    if config.duration_head not in DURATION_HEADS_WITH_QUANTILES:
         raise ValueError(
-            "duration quantiles need a checkpoint trained with duration_head='quantile'; "
-            f"this one has {config.duration_head!r}"
+            "duration quantiles need a checkpoint trained with duration_head in "
+            f"{DURATION_HEADS_WITH_QUANTILES}; this one has {config.duration_head!r}"
         )
     device = device or next(model.parameters()).device
     anchor = default_anchor(config) if anchor is None else anchor

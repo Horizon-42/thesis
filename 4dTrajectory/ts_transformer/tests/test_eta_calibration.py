@@ -499,18 +499,20 @@ def test_the_runner_refuses_a_probe_half_seed_unless_it_is_a_readout(
     assert "--half-seed" in message and "--readout-only" in message
 
 
-def _stubbed_runner(monkeypatch, samples: list[CalibrationSample], split_seed: int):
+def _stubbed_runner(monkeypatch, samples: list[CalibrationSample], split_seed: int,
+                    duration_head: str = DURATION_HEAD_QUANTILE):
     """The runner with its checkpoint load, cohort rebuild and forward pass replaced.
 
     Those three are what make the real thing need a trained model and the arrival manifests,
     and they decide none of what is under test here: which seed cuts the halves, and whether
-    the checkpoint's sidecar is written, are `main`'s own control flow.
+    the checkpoint's sidecar is written, are `main`'s own control flow. ``duration_head`` is
+    the one config field it reads (B1.b's `two-head` calibrates the same way).
     """
     runner = _runner()
     truths = {sample.key: sample.truth_final_time_s for sample in samples}
     covariates = {sample.key: sample.covariates for sample in samples}
     arm = SimpleNamespace(
-        config=SimpleNamespace(duration_head=DURATION_HEAD_QUANTILE,
+        config=SimpleNamespace(duration_head=duration_head,
                                resolved_split_seed=split_seed),
         airports=("KRDU",), model=object(), normalizer=object(),
     )

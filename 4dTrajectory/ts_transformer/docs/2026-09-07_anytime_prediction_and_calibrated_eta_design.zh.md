@@ -501,7 +501,7 @@ config 轴 `duration_head ∈ point | quantile`（默认 `point`，进 checkpoin
 > 那五个分位数就成了 p(T | z ~ q(z | 本机自己的未来)) 的分位数，B2 会把一个条件在答案上的区间
 > 当成 p(T | history) 去校准。宁可拒绝，不做近似。命名的 `q5` 取自 `len(DURATION_QUANTILES)`。
 
-### 3.1b B1.b 双头时长（2026-09-08 预注册；用户决定，排队；代码待建）
+### 3.1b B1.b 双头时长（2026-09-08 预注册；用户决定，排队；代码已建）
 
 `B1_point_matched` 把 B1 的两种收益分开了：航迹收益来自时长权重（点估计头 26× → ADE 1248、chamfer 177），到达时刻收益来自分位数头
 （MAE 23.9 / 直线 10.3 s），互不重叠。B1_quantile 里 rollout 时长就是分位数头的 q50，分位数头的航迹代价被强加到路径上。
@@ -515,6 +515,38 @@ config 轴 `duration_head ∈ point | quantile`（默认 `point`，进 checkpoin
 全体时长 MAE 在 B1_quantile 的 23.9 s 的 1 s 内（直线 10.3 s 的 1 s 内），同时成立；(2) 五切分部署覆盖率在门 2 带内；(3) 门 3.4-3 扇形几何
 同 B3。**否决**：任一指标比其单头来源劣超噪声（ADE > 1278 或 MAE > 24.9 s）——两头互相干扰，交付形态维持两模型。
 另排 `B1_point_matched_s2024`（第二种子）确认 74 m 后再改主线配方的时长权重。
+
+> **实现（2026-09-08，`dev-b1b`）**：`duration_head` 加第三个取值 `two-head`，`DURATION_HEADS_WITH_QUANTILES` /
+> `DURATION_HEADS_WITH_POINT` 两个谓词只写一次，所有消费方（记录、`forecast.duration_quantile_predictions`、
+> `run_ts_eta_calibration.py`、`predict --cta-from-quantiles`、扇面读数）都改读谓词而不是等于某一档。
+> **点估计头仍叫 `final_time_head`**——同一个类、同一批 state-dict 键、同一个 rollout 时长；分位数头是并排的第二个模块
+> `duration_quantile_head`，由 `quantile_duration_head_for` 唯一构造，初始化沿用 B1 的规则（中位数落在点估计头的起点），
+> `point` / `quantile` 两档一个参数都不多。**第二个头最后建**（与 `control/latent.py` 里 `aux_duration` 最后建同因）：
+> `_initialize_duration_head` 只清零最后一层，点估计头的隐藏层是活的随机抽样，先建第二个头会挪动那次抽样，
+> `two-head` 与 `point` 两条臂就不再同种子配对——而门 1 正是单种子、30 m 带内对 `B1_point_matched` 的比较。
+> 建在最后之后实测：同种子下两个模型 34 个共享参数全等。**训练期的 dropout 流仍配不齐**（第二个头在 `duration()`
+> 里抽样），所以两条臂共享的是初始化，不是轨迹。
+> `ControlFeatureModel.quantile_head()` 是“分位数从哪个模块出”的唯一规则（写成方法而不是属性：把同一个模块绑两个名字，
+> state-dict 就会把它发布两遍）；`duration()` 里 `point_duration` 为真时时长取点估计头，`cta_conditioning=given` 下仍是 CTA、
+> 点估计头惰性、分位数头照常训练。
+> **两项损失各有各的权重**：`final_time` 分量在 `point` / `two-head` 下都是点估计的平方残差 ×`final_time_loss_weight`
+> （语义不变）；pinball 在 `two-head` 下是自己的分量 `duration_quantile`（`loss_component_names` 只在这一档多一项），
+> 权重是新字段 `duration_quantile_loss_weight`（默认 1.0）。`quantile` 档下 pinball 仍占 `final_time` 这个名字（B1 的契约，
+> 所有存档 history 行都按它取数），但乘它的数改为同一个新字段——两者默认都是 1.0，且 `quantile` 档拒绝非默认的
+> `final_time_loss_weight`，所以那里乘的还是原来那个 1.0，逐位不变。
+> **四条拒绝，每条自报理由**：`two-head` 不在 control 输出上；`two-head` 与 `latent_dim > 0`（与 `quantile` 同因——
+> 训练解后验样本，分位数会条件在本机自己的未来上）；`quantile` 档下非默认 `final_time_loss_weight`（没有点项可加权）；
+> `point` 档下非默认 `duration_quantile_loss_weight`（没有分位数头）。**第五处“权重无项可加权”写进文档而不设拒绝**：
+> `cta_conditioning=given` 下 CTA 就是真值时长、也就是目标本身，`final_time` 项恒为 0，`final_time_loss_weight`
+> 在 `point` / `two-head` 上都无项可加权——不拒绝是因为那会对已存档的 L3 `cta=given` 臂追加新规，理由写在
+> `duration()` 的 docstring 里。命名：`T=2h`（`_VALUE_ABBREV` 第二个条目），
+> 新权重进 `CONTROL_LOSS_FIELDS`、只在非默认时显示为 `pinball=<w>`；配方不钉这个权重——头钉在 `point` 时它已被直接拒绝，
+> 钉一个永远不会绑定的界比不钉更糟。
+> **读数**：`run_ts_eta_error_readout.py` 的 `final_time_error_s` 量的是 **rollout 飞的那个时长**（`two-head` 下＝点估计头），
+> 所以加了一块 `duration_q50_error_s`——由行里已有的 `duration_quantiles_s` 与 `true_final_time_s` 现算 `q50 − 真值`，
+> 只在带分位数的臂上出现，**门 1 的 MAE 读这一块**（每块也补了 `mae`，`RESULT_SCHEMA` 升到
+> `ts-eta-error-readout-b0-v3`）；`quantile` 档下两块是同一次测量的两份。臂文件 `b1b_two_head_arms.json` 里的字段名与
+> 实现一致，未改。
 
 ### 3.2 split-conformal 校准（B2）
 

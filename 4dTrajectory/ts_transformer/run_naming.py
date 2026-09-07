@@ -44,6 +44,7 @@ from config import (
     CONTROL_HOOK_FIELDS,
     CTA_FIELDS,
     DURATION_HEAD_QUANTILE,
+    DURATION_HEAD_TWO_HEAD,
     DURATION_QUANTILES,
     INTENT_FIELDS,
     PROCEDURE_LOSS_FIELDS,
@@ -107,6 +108,10 @@ CONTROL_LOSS_FIELDS = (
     # has to, because two runs on the same weight and different teachers are different runs.
     "control_imitation_target",
     "final_time_loss_weight",
+    # B1.b: what weighs the quantile head's pinball sum. Under `point` a non-default value
+    # is refused outright, so no stored config can carry one and adding it here renames
+    # nothing (recounted on disk); the named recipes leave it open for the same reason.
+    "duration_quantile_loss_weight",
     "final_time_scale_s",
     "position_loss_scale_m",
     # The final-approach penalty is an objective on BOTH paths (it acts on the control
@@ -164,8 +169,9 @@ META_FIELDS = (
     *INTENT_FIELDS,
     # The CTA axis reads the future the same way: a given-CTA run must wear it.
     *CTA_FIELDS,
-    # B1: which duration head. The interval a run publishes is part of what it IS, and the
-    # named recipes pin this at `point`, so a quantile run is `custom` and this item shows.
+    # B1 / B1.b: which duration head. The interval a run publishes is part of what it IS,
+    # and the named recipes pin this at `point`, so a `quantile` or `two-head` run is
+    # `custom` and this item shows (`T=q5` / `T=2h`).
     "duration_head",
     "d_model",
     "n_heads",
@@ -220,11 +226,15 @@ _TAU_FIELDS = (
     ("control_load_time_constant_s", "τ-load"),
 )
 
-#: Values whose display form is not the value itself. One entry, and it exists because the
+#: Values whose display form is not the value itself. One field, and it exists because the
 #: design names the item ``T=q5``: the 5 is ``len(DURATION_QUANTILES)``, so the name moves
-#: with the tuple instead of restating its length.
+#: with the tuple instead of restating its length. ``two-head`` is ``T=2h`` — the two heads,
+#: short enough to sit in a run name beside the weight that tells them apart.
 _VALUE_ABBREV: dict[str, dict[Any, str]] = {
-    "duration_head": {DURATION_HEAD_QUANTILE: f"q{len(DURATION_QUANTILES)}"},
+    "duration_head": {
+        DURATION_HEAD_QUANTILE: f"q{len(DURATION_QUANTILES)}",
+        DURATION_HEAD_TWO_HEAD: "2h",
+    },
 }
 
 _ABBREV = {
@@ -249,6 +259,7 @@ _ABBREV = {
     "fitted_tail_position_weight": "tail",
     "fitted_terminal_position_weight": "fitted-terminal",
     "final_time_loss_weight": "final-time",
+    "duration_quantile_loss_weight": "pinball",
     "final_time_scale_s": "time-scale",
     "position_loss_scale_m": "pos-scale",
     "learning_rate": "lr",
