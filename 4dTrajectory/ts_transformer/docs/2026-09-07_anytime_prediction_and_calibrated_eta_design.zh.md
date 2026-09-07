@@ -35,6 +35,7 @@ A0 / B0 用现有 checkpoint 与现有预测目录即可做，排在 L2.e′ 之
 | B1 分位数时长头 | **跑完（2026-09-08，`b1_quantile_20260907/B1_quantile`，`73d829f`，164 轮早停）**：对预注册参照 native32 全分层更好（ADE 1282 vs 1322，直线 420 vs 445，雷达引导 2805 vs 2870，胜率 56 %；时长 MAE 23.9 vs 25.9 s）；**门 1 两条款过**；`B1_point_matched` 分辨：ADE 收益来自时长权重（点估计头 26× → 1248，比 native32 好 74 m）、MAE 收益来自分位数头（23.9 / 直线 10.3 s）；对 L2d（隐变量臂，仅作上下文）劣 68 m；变动超种子噪声 → 预注册的对照臂 `B1_point_matched` 触发，已加入臂文件待跑 | `b1_quantile_arms.json`、`readout_vs_native32.json`、`eta_error_vs_native32.json` | 门 1 过；见 §3.5 |
 | B2 split-conformal 校准 | **跑完（2026-09-08）**：部署覆盖率 B1 80 % **0.745 未过**（门 0.76–0.84）/ 50 % 0.450 过（压线）；B3 0.775 / 0.477 两档过；直线进近 80 % 宽度 28–32 s，雷达引导 **142–146 s → 否决线（120 s）触发**；镜像半区覆盖率一致高出部署值 5–10 点（远超二项噪声），半区种子探针进行中 | `B*_calibration/eta_calibration.{txt,json}` | 门 2 B1 半过、B3 过；否决触发；见 §3.5 |
 | B3 分位数条件航迹 | **跑完（2026-09-08，`B3_quantile_cta`，`77e6d3a`，129 轮早停）**：扇形内航班里最近分位数航迹的 chamfer 优于 top-1 的份额 **70.9 %**（107 vs 137 m；直线 53 vs 75；雷达引导 704 vs 949），在扇形内份额 0.84；`cal.hit*` 为样本内，不作覆盖率读 | `quantile_fan.{json,txt}` | 门 3 过；见 §3.5 |
+| B1.b 双头时长 | **预注册（2026-09-08，用户决定）；代码待建**：点估计头（26×）驱动 rollout，分位数头只出 ETA 分布；排入队列 | `b1b_two_head_arms.json` | ADE ≤ 1278 ∧ MAE ≤ 24.9 s ∧ 五切分覆盖在带内；见 §3.1b |
 | B4 区间宽度随剩余时间（A × B） | 未做 | A1 网格 × B2 区间 | 交付物本身：冻结点曲线 |
 | C0 拟合表检索上界（测量） | 未做，前置 = L5.a 拟合表 | `run_ts_schedule_retrieval.py`（新）：按锚点状态取最近 K 条拟合控制序列各自 rollout | minADE_16 < native32 top-1；记忆上界 = 真值航班自己的拟合序列 |
 | C1 控制空间条件扩散 | 未做 | `control/diffusion.py`，config 轴 `control_sampler ∈ none \| diffusion`，run name `control+dif` | minADE_16 < top-1 且 < 同 K 的无条件采样对照；直线进近 top-1 不退 |
@@ -499,6 +500,21 @@ config 轴 `duration_head ∈ point | quantile`（默认 `point`，进 checkpoin
 > z 走的是“平移点估计头那一个 logit”，累积 softplus 头有五个；更要命的是训练解的是后验样本，
 > 那五个分位数就成了 p(T | z ~ q(z | 本机自己的未来)) 的分位数，B2 会把一个条件在答案上的区间
 > 当成 p(T | history) 去校准。宁可拒绝，不做近似。命名的 `q5` 取自 `len(DURATION_QUANTILES)`。
+
+### 3.1b B1.b 双头时长（2026-09-08 预注册；用户决定，排队；代码待建）
+
+`B1_point_matched` 把 B1 的两种收益分开了：航迹收益来自时长权重（点估计头 26× → ADE 1248、chamfer 177），到达时刻收益来自分位数头
+（MAE 23.9 / 直线 10.3 s），互不重叠。B1_quantile 里 rollout 时长就是分位数头的 q50，分位数头的航迹代价被强加到路径上。
+**B1.b = `duration_head=two-head`**：点估计头（权重 `final_time_loss_weight`，臂里 26）驱动 rollout 时长；分位数头（pinball，权重
+`duration_quantile_loss_weight`，默认 1.0）只出 ETA 分布，供 B2 校准、B3 解码；记录同时带 `durationHeadFinalTimeS`（点）和
+`durationQuantilesS`。实现约束：默认路径逐位不变（`point` / `quantile` 两档行为与命名不动；`quantile` 档下非默认的
+`final_time_loss_weight` 拒绝——那里没有点项可加权；存档配置重算命名 0 改动）；`latent_dim > 0` 与 `two-head` 同样拒绝。
+
+臂 `b1b_two_head_arms.json` / `B1b_two_head`，同 B1 底座，单种子，campaign `b1b_two_head_20260908`；校准与 predict 步骤同 §〇.3
+（校准读分位数头，`--cta-from-quantiles` 用分位数头）。**门**：(1) 全体 ADE 在 B1_point_matched 的 1248 m 的种子噪声（30 m）内 **且**
+全体时长 MAE 在 B1_quantile 的 23.9 s 的 1 s 内（直线 10.3 s 的 1 s 内），同时成立；(2) 五切分部署覆盖率在门 2 带内；(3) 门 3.4-3 扇形几何
+同 B3。**否决**：任一指标比其单头来源劣超噪声（ADE > 1278 或 MAE > 24.9 s）——两头互相干扰，交付形态维持两模型。
+另排 `B1_point_matched_s2024`（第二种子）确认 74 m 后再改主线配方的时长权重。
 
 ### 3.2 split-conformal 校准（B2）
 
