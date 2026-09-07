@@ -189,6 +189,85 @@ def test_refresh_labels_only_walks_publication_manifests(monkeypatch, tmp_path):
     assert category["resultSource"] == "experiment"
 
 
+def test_reused_prediction_dir_skips_predict_and_is_never_archived(monkeypatch, tmp_path):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    campaign_records = tmp_path / "experiments" / "campaign" / "stage" / "run_seed1337_pred_val"
+    _write_json(campaign_records / "summary.json", {
+        "checkpoint": str(checkpoint), "split": "val", "results": [],
+    })
+    (campaign_records / "flight_states.json").write_text("{}", encoding="utf-8")
+    plan = publisher.PublicationPlan(
+        experiment,
+        "KRDU",
+        "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=campaign_records,
+    )
+
+    commands = dict(plan.commands())
+    assert "predict" not in commands
+    assert commands["evaluate"][commands["evaluate"].index("--input") + 1] == str(campaign_records)
+    publish = commands["publish-czml"]
+    assert publish[publish.index("--summary") + 1] == str(campaign_records / "summary.json")
+    # The evaluation report and the publication manifest stay in the publisher's own directory,
+    # so the campaign's prediction directory is only ever read.
+    assert plan.evaluation_report.parent == plan.output_dir
+    assert plan.output_dir != campaign_records
+    assert publisher._loose_prediction_records(plan.output_dir) == []
+
+
+def test_reused_prediction_dir_must_match_the_checkpoint_and_split(monkeypatch, tmp_path):
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(
+        publisher, "_sha256", lambda path: (
+            "manifest-sha" if path == manifest else experiment.checkpoint_sha256
+        ),
+    )
+    foreign = tmp_path / "foreign_pred_val"
+    _write_json(foreign / "summary.json", {
+        "checkpoint": str(tmp_path / "other" / "checkpoint.pt"), "split": "val",
+    })
+    plan = publisher.PublicationPlan(
+        experiment,
+        "KRDU",
+        "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=foreign,
+    )
+
+    assert "were produced by" in (plan.preflight_error() or "")
+
+    _write_json(foreign / "summary.json", {
+        "checkpoint": str(experiment.checkpoint), "split": "train",
+    })
+    assert "'train' split" in (plan.preflight_error() or "")
+
+    _write_json(foreign / "summary.json", {
+        "checkpoint": str(experiment.checkpoint), "split": "val",
+    })
+    assert plan.preflight_error() is None
+
+
+def test_reused_prediction_dir_requires_a_summary(tmp_path):
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+
+    with pytest.raises(ValueError, match="no summary.json"):
+        publisher.PublicationPlan(
+            experiment, "KRDU", "val", prediction_dir=tmp_path / "nowhere",
+        )
+
+
 def test_publication_plan_cannot_access_outer_test(tmp_path):
     index, _checkpoint = _indexed_checkpoint(tmp_path)
     experiment = publisher.discover_checkpoints(index)[0]

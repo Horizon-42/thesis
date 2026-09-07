@@ -136,13 +136,13 @@ describe("trajectory result sources", () => {
     );
   });
 
-  it("preserves the control-mixture output identity in experiment options", () => {
-    const mixture = experiment("val");
-    mixture.experiment = {
-      ...mixture.experiment!,
-      predictionOutput: "control-mixture",
+  it("preserves the closure output identity in experiment options", () => {
+    const closure = experiment("val");
+    closure.experiment = {
+      ...closure.experiment!,
+      predictionOutput: "closure",
     };
 
-    expect(experimentOptions([mixture])[0]?.predictionOutput).toBe("control-mixture");
+    expect(experimentOptions([closure])[0]?.predictionOutput).toBe("closure");
   });
 });

@@ -118,10 +118,16 @@ export const OBSERVED_EVALUATION_REPORT_FILE = "evaluation_report.json";
 
 export type ComparisonResultSource = "prediction" | "experiment";
 
+/**
+ * MUST match `4dTrajectory/ts_transformer/config.py::PREDICTION_OUTPUTS` — an unlisted value
+ * fails `isComparisonCategory`, and one failing category empties the whole airport's manifest.
+ * (`control-mixture` was listed here but no producer ever emitted it; `closure` was emitted
+ * and not listed, which is what took the KRDU picker down.)
+ */
 export const EXPERIMENT_PREDICTION_OUTPUTS = [
   "state",
   "control",
-  "control-mixture",
+  "closure",
 ] as const;
 export type ExperimentPredictionOutput = typeof EXPERIMENT_PREDICTION_OUTPUTS[number];
 
