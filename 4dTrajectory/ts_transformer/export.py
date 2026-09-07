@@ -171,7 +171,14 @@ def build_prediction_record(
         # B1, quantile duration head: all five DURATION_QUANTILES in seconds, in level
         # order — the median included, so the record is a complete interval and a reader
         # never has to splice `durationHeadFinalTimeS` back into position 2.
-        **({"durationQuantilesS": [float(value) for value in forecast.duration_quantiles_s]}
+        **({"durationQuantilesS": [float(value) for value in forecast.duration_quantiles_s],
+            # B2: `calibrated` is written for EVERY quantile record — false is the claim
+            # that this checkpoint has no conformal table, and a reader must not have to
+            # infer it from a missing key (design §六 4).
+            "calibrated": forecast.duration_interval_s is not None,
+            **({"durationIntervalS": forecast.duration_interval_s,
+                "durationIntervalStratum": forecast.duration_interval_stratum}
+               if forecast.duration_interval_s is not None else {})}
            if forecast.duration_quantiles_s is not None else {}),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
@@ -483,6 +490,9 @@ def write_batch(
             # B1: absent (None) on every point-head row, so a readout can tell a quantile
             # arm from a point one without opening a config.
             "duration_quantiles_s": source.get("durationQuantilesS"),
+            "duration_interval_s": source.get("durationIntervalS"),
+            "duration_interval_stratum": source.get("durationIntervalStratum"),
+            "calibrated": source.get("calibrated"),
             "z_from_posterior": bool(source.get("zFromPosterior", False)),
             "true_final_time_s": metrics["true_final_time_s"],
             "final_time_error_s": metrics["final_time_error_s"],

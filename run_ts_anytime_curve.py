@@ -239,16 +239,22 @@ ANYTIME_INSTRUMENT = "the anytime curve"
 
 def load_arm(label: str, path: Path, grid: Grid, device: torch.device,
              *, command_hook: str | None = None, hook_saturation: str | None = None,
-             instrument: str = ANYTIME_INSTRUMENT) -> Arm:
+             instrument: str = ANYTIME_INSTRUMENT, refuse_cta_given: bool = True) -> Arm:
     """Every refusal this runner can make about a checkpoint, before it reads one track.
 
     The airports come from the checkpoint's own provenance — never chosen here, which is
     why the fingerprint is compared strictly rather than as the airport SUBSET `predict`
     allows for a pooled checkpoint narrowed by ``--data``. ``instrument`` names the
     measurement in the refusals, for the runners that share this loader.
+
+    ``refuse_cta_given=False`` is for the ONE instrument the CTA cannot corrupt: the ETA
+    calibration (B2) reads the DURATION HEAD alone — no rollout, no CTA token — so a
+    ``given`` checkpoint's quantiles are the same function of the history that a prediction
+    would use. The intent refusal below still applies to it, because that oracle is IN the
+    history. Every instrument that draws a trajectory keeps the default.
     """
     model, config, normalizer, payload = load_checkpoint(path)
-    if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
+    if refuse_cta_given and config.cta_conditioning == CTA_CONDITIONING_GIVEN:
         raise SystemExit(
             f"{label} ({path}): cta_conditioning=given reads the future — the CTA IS the "
             f"truth duration — so {instrument} would be reading an answer it was handed, "

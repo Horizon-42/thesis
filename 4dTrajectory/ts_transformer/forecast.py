@@ -9,10 +9,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from approach_difficulty import approach_difficulty
 from batch_contract import model_forward
+from calibration import conformal_intervals, interval_stratum
 from channels import IDX, horizontal_distance_m
 from config import (
     CTA_CONDITIONING_GIVEN,
+    DURATION_HEAD_QUANTILE,
     CORRIDOR_GATES,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
@@ -102,6 +105,12 @@ class Forecast:
     # rolled over (the median, or a CTA); these are the interval around it, and §六 6 —
     # they are quantiles of the DURATION, never of the trajectory.
     duration_quantiles_s: np.ndarray | None = None
+    # B2: the CALIBRATED interval per alpha, `[{"alpha", "lo", "hi"}]`, and the stratum whose
+    # conformal delta widened it. None = this checkpoint has no calibration table, and the
+    # record then says `calibrated: false` rather than passing raw quantiles off as an
+    # interval (design §六 4).
+    duration_interval_s: list[dict[str, float]] | None = None
+    duration_interval_stratum: str | None = None
 
     @property
     def n_steps(self) -> int:
@@ -260,6 +269,7 @@ def _forecast_control_batch(
     histories: np.ndarray | None = None,
     dynamics: dict[str, torch.Tensor] | None = None,
     cta_offset_s: float = 0.0,
+    conformal: dict | None = None,
 ) -> list[Forecast]:
     """Predict and densely roll a heterogeneous batch of bounded control schedules.
 
@@ -348,8 +358,64 @@ def _forecast_control_batch(
             duration_quantiles_s=(
                 None if duration_quantiles is None else duration_quantiles[row]
             ),
+            **_calibrated_interval_fields(
+                item, anchor, None if duration_quantiles is None else duration_quantiles[row],
+                conformal,
+            ),
         ))
     return forecasts
+
+
+def _calibrated_interval_fields(
+    series: FlightSeries, anchor: int, quantiles_s: np.ndarray | None, conformal: dict | None
+) -> dict[str, object]:
+    """The record's calibrated interval, or nothing at all (B2).
+
+    The stratum is decided from the flight's OWN difficulty covariates at THIS anchor,
+    through `calibration.interval_stratum` — the same `strata_masks` cut the table was
+    fitted per, so a record and the delta it was widened by name one population.
+    """
+    if quantiles_s is None or conformal is None:
+        return {}
+    stratum = interval_stratum(conformal, approach_difficulty(series, anchor).to_dict())
+    return {
+        "duration_interval_s": conformal_intervals(quantiles_s, conformal, stratum),
+        "duration_interval_stratum": stratum,
+    }
+
+
+def duration_quantile_predictions(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    *,
+    anchor: int | None = None,
+    device: torch.device | None = None,
+) -> np.ndarray:
+    """The duration head's five quantiles per flight, ``[B, Q]`` seconds — nothing else.
+
+    No rollout, no controls, and NO CTA: the quantile head reads the history alone
+    (`control.heads.ControlFeatureModel.duration_quantiles`), which is what lets B2 calibrate
+    and B3 decode a ``cta_conditioning=given`` checkpoint without first handing it an arrival
+    time it would have had to read from the future. Batched per flight like every other
+    forward here, so the arithmetic is the one `predict` runs.
+    """
+    if config.duration_head != DURATION_HEAD_QUANTILE:
+        raise ValueError(
+            "duration quantiles need a checkpoint trained with duration_head='quantile'; "
+            f"this one has {config.duration_head!r}"
+        )
+    device = device or next(model.parameters()).device
+    anchor = default_anchor(config) if anchor is None else anchor
+    histories = _history_batch(series, config, normalizer, anchor)
+    model.eval()
+    with torch.no_grad():
+        rows = [
+            model.duration_quantiles(torch.from_numpy(history[None]).to(device))
+            for history in histories
+        ]
+    return torch.cat(rows, dim=0).cpu().numpy().astype(np.float64)
 
 
 def _latent_prior_batch(
@@ -925,6 +991,7 @@ def forecast_approaches(
     truncate: bool = True,
     project_final: str | None = None,
     cta_offset_s: float = 0.0,
+    conformal: dict | None = None,
 ) -> list[Forecast]:
     """Predict one inference batch through the same dense path used by fit evaluation.
 
@@ -942,7 +1009,8 @@ def forecast_approaches(
         if project_final is not None:
             raise ValueError("the final-approach projection applies to state forecasts only")
         return _forecast_control_batch(
-            model, series, config, normalizer, anchor, device, cta_offset_s=cta_offset_s
+            model, series, config, normalizer, anchor, device,
+            cta_offset_s=cta_offset_s, conformal=conformal,
         )
     if config.prediction_output == PREDICTION_CLOSURE:
         if project_final is not None:

@@ -11,9 +11,11 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import fields, replace
+from pathlib import Path
 
 from config import (
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+    DURATION_HEAD_QUANTILE,
     TSConfig,
     CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_OFF,
@@ -22,6 +24,7 @@ from config import (
     HOOK_SATURATIONS,
     PREDICTION_CLOSURE,
 )
+from calibration import load_conformal_table
 from data_provenance import require_matching_data_provenance
 from closure_output import load_labels
 from dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
@@ -34,6 +37,7 @@ from export import (
     accuracy_block, build_prediction_record, observed_series_metrics, write_batch,
 )
 from flyability import report_for_records
+from io_utils import file_sha256
 from forecast import (
     forecast_approaches,
     forecast_closure_from_labels,
@@ -282,6 +286,20 @@ def run_cli(
               f"{DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S:g} s of remaining future; "
               f"{skipped['cta_below_min_future']} skipped (stated in summary.json)")
         series = kept
+    # B2: the checkpoint's own conformal table, if it has ever been calibrated. Bound to
+    # the weights by sha256 — a table left over from another checkpoint RAISES rather than
+    # widening this run's intervals by someone else's delta.
+    conformal = None
+    if config.duration_head == DURATION_HEAD_QUANTILE:
+        conformal = load_conformal_table(args.checkpoint, file_sha256(Path(args.checkpoint)))
+        if conformal is None:
+            print("  quantile duration head, NOT calibrated: records carry the raw "
+                  "durationQuantilesS and calibrated=false (run run_ts_eta_calibration.py)")
+        else:
+            print(f"  quantile duration head, calibrated on {conformal['calibration_flights']} "
+                  f"{conformal['split']} flights: records carry durationIntervalS per alpha "
+                  f"{list(conformal['alphas'])}")
+
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, flight_metrics = [], []
@@ -371,6 +389,7 @@ def run_cli(
                 truncate=not args.no_truncate,
                 project_final=args.project_final,
                 cta_offset_s=args.cta_offset_s,
+                conformal=conformal,
             )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)
