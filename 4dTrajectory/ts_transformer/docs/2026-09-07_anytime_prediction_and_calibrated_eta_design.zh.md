@@ -20,7 +20,7 @@ checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
-| A0 重锚曲线（测量） | **两臂都回放了（2026-09-07 夜，§2.4b）**：fixed 曲线单调、warm 逐 bin 优于 native32、closure 8→6 km 崩溃；random 臂 L−1 惨败（早停第 10 轮）但 chamfer 六 bin 全优——选择指标只看 L−1 → A1 提前 | `anytime_a0_20260907/`、`anytime_a0_random_20260907/` | 门 1 过、门 2 12–16 km、门 3 被时长地板挡住 |
+| A0 重锚曲线（测量） | **fixed 两臂 + random 三臂都回放了（§2.4b/c）**：random 训练在第 8–10 轮后于每个锚点集退化——机制是 LR 调度器挂在停滞的选择指标上（第 60 轮 lr 9e-7）+ 锚点按时间均匀采样偏向近跑道；A0.b（调度器读目标、按剩余路程分层采样）预注册待定 | `anytime_a0_20260907/`、`anytime_a0_random*_20260907/`、`a0_random_20260907/` | 门 1 过、门 2 12–16 km、门 3 被时长地板挡住；random 的 L−1 否决三臂皆败 |
 | A1.a 网格选点指标（A1 的前置：先让随机锚点臂能被正确选点） | **代码完成（2026-09-07，分支 `dev-a1`）；臂未跑** | `anchor_grid.py`（网格的唯一定义：bin、60 s 地板、逐航班锚点规则、L−1 固定分层规则；runner 改为 import 它）+ `checkpoint_selection_metric=anchor-grid-common-grid-ade`（五个锚点集的 common-grid ADE 均值，`history.json` 每轮记 `validation_anchor_grid` 块）+ 臂 `A0_random_hr8_tv1_grid`；测试 `tests/test_anchor_grid.py`（7）+ `tests/test_anchor_grid_selection.py`（17）+ `tests/test_frame_ablation_runner.py`（3） | 无门，是选点规则；旧指标逐位不变（4 臂 × 2 轮 × 232 个 history 浮点全等） |
 | A1 流式评估协议 | 未做 | `evaluation_protocol` 新增按剩余路程分 bin 的锚点网格；`compare_constraint_arms.py` 增列 | 无门，是读数 |
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
@@ -279,6 +279,40 @@ checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（ch
 **拒绝**：`cta_conditioning=given` 与 `intent_conditioning != none` 在这个指标下被 `TSConfig` 拒绝——
 网格在每个 bin 锚点都会把 oracle 重读一次（与 A0 runner 拒绝这两种 checkpoint 是同一条理由），
 按它选轮次等于按「oracle 收敛得多快」选。
+
+### 2.4c A0-random 第二轮（2026-09-08 凌晨，`a0_random_20260907` 的 `_p180` 与 `_grid`）
+
+两臂都跑满 180 轮：`_p180`（关早停，L−1 选点）最好 epoch **仍是 10**（2949.5，之后 3388 → 3088 平台）；`_grid`
+（网格选点，16 km bin 覆盖 37 % 被丢弃并记录，剩 L−1 + 12/8/6 km）最好 epoch **8**（网格均值 1100：L−1 2990、12 km
+722、8 km 390、6 km 298）。逐锚点集看：L−1 与 12 km 在第 8–10 轮后**退化**（12 km 722 → 1324，接近翻倍），8 km 从第 3 轮
+的 314 退到 406，只有 6 km 一直改善（291 → 218）。两个预注册解释都不成立：不是停止规则（关了早停也在第 10 轮），
+也不是选点指标能救的（没有好的晚期 checkpoint 可选）。
+
+**history.json 给出了机制**（`_grid` 臂）：
+
+| epoch | lr | train loss | val 目标 | val state | 选择指标（网格均值） |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 3.0e-5 | 0.884 | 1.147 | 0.264 | **1100** |
+| 15 | 3.0e-5 | 0.466 | 0.836 | 0.150 | — |
+| 20 | 1.5e-5 | 0.487 | 0.786 | 0.139 | 1384 |
+| 30 | 7.5e-6 | 0.414 | 0.765 | 0.131 | — |
+| 60 | 9.4e-7 | 0.424 | 0.707 | 0.102 | 1289 |
+| 100 | 2.9e-8 | 0.487 | 0.705 | 0.101 | — |
+| 180 | 1.5e-8 | 0.521 | 0.706 | 0.102 | 1285 |
+
+1. **验证目标一直在改善到第 60 轮**（1.147 → 0.707，val state 0.264 → 0.102），而选择指标（common-grid ADE）在第
+   8–10 轮之后变差——目标（段端点、真值时钟）与读数（稠密网格 ADE）在随机锚点模型上**分道**。
+2. **`ReduceLROnPlateau` 挂在选择指标上**：指标一停滞，学习率从第 20 轮起被逐次腰斩，第 60 轮 9e-7、第 100 轮 3e-8
+   ——模型从第 30 轮起实际上不再训练，被冻在指标停滞时的状态；固定锚点臂的指标改善 100 轮以上，所以从没暴露。
+3. **锚点采样按时间均匀**：一架飞机在航迹上每个样本一个候选锚点，近跑道的样本远多于远端的（短航班只贡献近端
+   锚点），训练分布偏向小剩余路程——6 km 集持续改善、L−1 与 12 km 退化，正是这个偏斜的样子。
+
+**A0.b 预注册（待用户决定）**：两臂，同 `_grid` 配方（随机锚点 20 s、hr8+TV、网格选点、patience 180）：
+(i) `lr_plateau_metric=objective`（新 config 轴：调度器读验证目标而不是选择指标；固定锚点臂默认值不变，位级等价）；
+(ii) (i) + 锚点按剩余路程分层均匀采样（`random_train_anchor_sampling=remaining-path-strata`：先均匀抽 bin，再在 bin 内
+抽样本；同一 `eligible_random_train_anchors` 契约）。读法：L−1 / 12 km 集不再在第 10 轮后退化、最好 epoch 晚于 60；
+三臂回放对照。**否决**同前（L−1 不劣于 native32 超过种子噪声）——目前三个随机锚点臂的 L−1 都在 2949–2990，
+远超种子噪声，说明这条线的底座还没成立。
 
 ### 2.5 A2 的门
 
