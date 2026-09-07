@@ -257,8 +257,14 @@ def arrival_data_provenance(
 
 
 def provenance_manifest_digests(provenance: dict[str, Any]) -> dict[str, str]:
-    """Compact airport -> manifest digest view used by import-light runners."""
-    if provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
+    """Compact airport -> manifest digest view used by import-light runners.
+
+    Reads every READABLE schema: the manifest digest has the same shape in the legacy
+    v3 fingerprint, and the replay runners (anytime curve, basis oracle) put this view of a
+    STORED checkpoint into their own provenance blocks — a v3 checkpoint must not crash
+    them (2026-09-08: the A0.b replay died here on the v3 grid arm).
+    """
+    if provenance.get("schema_version") not in READABLE_ARRIVAL_DATA_PROVENANCE_SCHEMAS:
         raise ValueError("data_provenance is not a multi-airport TS fingerprint")
     manifests = provenance.get("manifests")
     if not isinstance(manifests, list) or not manifests:

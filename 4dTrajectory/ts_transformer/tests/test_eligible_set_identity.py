@@ -646,3 +646,21 @@ def test_the_training_audit_still_records_the_roster_byte_facts(
     ).hexdigest()
     # The provenance the checkpoint is compared against carries neither.
     assert "roster_sha256" not in entry and "evaluation_report_sha256" not in entry
+
+
+def test_the_manifest_digest_view_reads_a_legacy_fingerprint_and_refuses_a_foreign_one() -> None:
+    """A replay runner puts a STORED checkpoint's manifest digests into its own provenance;
+    the v3 grid checkpoint must be readable there, an unknown schema must not."""
+    from data_provenance import (
+        LEGACY_ELIGIBILITY_BOUND_SCHEMA,
+        provenance_manifest_digests,
+    )
+
+    digest = "ab" * 32
+    legacy = {
+        "schema_version": LEGACY_ELIGIBILITY_BOUND_SCHEMA,
+        "manifests": [{"airport": "KRDU", "arrival_manifest_sha256": digest, "eligibility": {}}],
+    }
+    assert provenance_manifest_digests(legacy) == {"KRDU": digest}
+    with pytest.raises(ValueError, match="not a multi-airport TS fingerprint"):
+        provenance_manifest_digests({**legacy, "schema_version": "ts-arrival-data-v2-something"})
