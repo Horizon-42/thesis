@@ -10,8 +10,10 @@ pooled δ — and that is the number the design's gate reads. The table is a sid
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -24,6 +26,7 @@ from approach_difficulty import (
     STRATUM_VECTORED,
 )
 from calibration import (
+    CALIBRATION_HALF_RULE,
     CONFORMAL_ALPHAS,
     CONFORMAL_METADATA_KEY,
     CONFORMAL_SCHEMA,
@@ -40,7 +43,7 @@ from calibration import (
     render,
     write_conformal_table,
 )
-from config import DURATION_HEAD_POINT, DURATION_QUANTILES
+from config import DURATION_HEAD_POINT, DURATION_HEAD_QUANTILE, DURATION_QUANTILES
 
 from tests.test_duration_quantiles import _config  # the tiny quantile-head config
 
@@ -146,6 +149,9 @@ def test_the_halves_are_deterministic_equal_and_disjoint():
     assert abs(len(first) - len(second)) <= 1
     assert (calibration_halves(keys, 7)[0] == first).all()
     assert not (calibration_halves(keys, 8)[0] == first).all()   # the seed decides
+    # Two probe seeds cut two different cohorts — which is the whole point of being able to
+    # pass one: a coverage that survives the re-cut is a property of the flights.
+    assert set(calibration_halves(keys, 2024)[0]) != set(calibration_halves(keys, 99)[0])
 
 
 # ── the table ───────────────────────────────────────────────────────────────
@@ -213,6 +219,58 @@ def test_the_deployed_block_catches_a_fall_through_the_per_stratum_rows_hide():
     assert groups[fell_through]["coverage"] < 0.5
     # ...and the deployed pooled number sits between them, which is the point of publishing it.
     assert block["deployed"]["coverage"] < block["strata"][STRATUM_ALL]["coverage"]
+
+
+#: The alphas block of `_cohort(1600, narrow_s=25.0)` calibrated at ``split_seed=1``, as it
+#: stood before ``--half-seed`` existed (2026-09-08, commit 0fedf08). The half seed is now a
+#: parameter, and the ONE thing that must not change is the answer when nobody passes it. If a
+#: deliberate change to the alphas block moves this, re-pin it — what it guards is the CUT.
+DEPLOYED_ALPHAS_SHA256 = "5ac3de6c026a8b36c815c2a63a7351d97d681b2c0db97d59f4e26b0a228f3ba1"
+
+
+def _alphas_digest(table: dict) -> str:
+    return hashlib.sha256(json.dumps(table["alphas"], sort_keys=True).encode()).hexdigest()
+
+
+def test_the_default_half_seed_is_the_split_seed_and_the_table_is_unchanged():
+    """The deployed cut is the checkpoint's own ``split_seed``, and passing it explicitly is
+    the same table to the byte — so ``--half-seed 1337`` on a run whose split_seed is 1337 is
+    a CONTROL that reproduces the deployed numbers rather than a second calibration."""
+    samples = _cohort(1600, narrow_s=25.0)
+    default = calibrate(samples, split_seed=1, split="val", checkpoint_sha256=CHECKPOINT_SHA)
+    explicit = calibrate(samples, split_seed=1, split="val",
+                         checkpoint_sha256=CHECKPOINT_SHA, half_seed=1)
+    assert default == explicit
+    assert _alphas_digest(default) == DEPLOYED_ALPHAS_SHA256
+    # ...and the numbers that digest stands for, spelled out so a failure is readable.
+    block = default["alphas"]["0.2"]["strata"][STRATUM_ALL]
+    assert block["delta_s"] == 24.220483062742744
+    assert block["coverage"] == 0.80625 and block["stability_coverage"] == 0.7975
+    assert default["half_seed"] == 1 and default["deployed_half_rule"] is True
+    assert default["half_rule"] == CALIBRATION_HALF_RULE
+
+
+def test_a_probe_half_seed_cuts_different_halves_and_says_so():
+    """A different seed is a different pair of halves, so different deltas and different
+    coverages — the measurement the flag exists to make. The table carries the seed it was
+    cut with, and its rule text stops it being read as the deployed one."""
+    samples = _cohort(1600, narrow_s=25.0)
+    deployed = calibrate(samples, split_seed=1, split="val", checkpoint_sha256=CHECKPOINT_SHA)
+    probes = [
+        calibrate(samples, split_seed=1, split="val", checkpoint_sha256=CHECKPOINT_SHA,
+                  half_seed=seed)
+        for seed in (2024, 7)
+    ]
+    for probe, seed in zip(probes, (2024, 7)):
+        assert probe["half_seed"] == seed and probe["deployed_half_rule"] is False
+        assert "NOT THE DEPLOYED RULE" in probe["half_rule"]
+        assert f"conformal:{seed}:" in probe["half_rule"]
+        assert _alphas_digest(probe) != DEPLOYED_ALPHAS_SHA256
+        assert "PROBE HALF RULE" in render(probe)
+        # The cohort, the head and the split are identical — only the cut moved.
+        assert probe["split_seed"] == deployed["split_seed"]
+        assert probe["half_flights"] == deployed["half_flights"]
+    assert _alphas_digest(probes[0]) != _alphas_digest(probes[1])
 
 
 def test_a_head_that_is_already_calibrated_needs_no_widening():
@@ -337,6 +395,20 @@ def test_a_smoke_table_is_refused_at_the_sidecar_unless_it_is_asked_for(tmp_path
     assert load_conformal_table(tmp_path / "checkpoint.pt", CHECKPOINT_SHA)["smoke_test"]
 
 
+def test_a_probe_table_can_never_reach_the_sidecar(tmp_path: Path):
+    """A deployed delta comes from the documented half rule alone: the refusal is at the
+    write site as well as at the flag, and unlike the smoke table it has no escape hatch."""
+    probe = calibrate(
+        _cohort(400, narrow_s=10.0), split_seed=1, split="val",
+        checkpoint_sha256=CHECKPOINT_SHA, half_seed=2024,
+    )
+    metadata_path = _metadata(tmp_path)
+    for permission in ({}, {"allow_smoke": True}):
+        with pytest.raises(ValueError, match="PROBE of the half rule"):
+            write_conformal_table(metadata_path, probe, **permission)
+    assert CONFORMAL_METADATA_KEY not in json.loads(metadata_path.read_text())
+
+
 def test_a_full_table_carries_its_cohort_and_needs_no_permission(tmp_path: Path):
     table = calibrate(
         _cohort(400, narrow_s=10.0), split_seed=1, split="val",
@@ -409,6 +481,91 @@ def test_the_runner_only_deploys_a_smoke_table_when_asked():
     )
     assert asked.allow_smoke_table is True
     assert parser.parse_args(["--checkpoint", "c.pt", "--out", "o"]).limit == 0
+
+
+def test_the_runner_refuses_a_probe_half_seed_unless_it_is_a_readout(
+    tmp_path: Path, capsys
+):
+    """`--half-seed` re-cuts the halves, and a DEPLOYED table comes from the documented rule
+    alone — so the flag is refused on its own, before any checkpoint is read, and the refusal
+    names the flag that makes it admissible."""
+    runner = _runner()
+    default = runner.build_parser().parse_args(["--checkpoint", "c.pt", "--out", "o"])
+    assert default.half_seed is None and default.readout_only is False
+    with pytest.raises(SystemExit):
+        runner.main(["--checkpoint", str(tmp_path / "checkpoint.pt"),
+                     "--out", str(tmp_path / "out"), "--half-seed", "2024"])
+    message = capsys.readouterr().err
+    assert "--half-seed" in message and "--readout-only" in message
+
+
+def _stubbed_runner(monkeypatch, samples: list[CalibrationSample], split_seed: int):
+    """The runner with its checkpoint load, cohort rebuild and forward pass replaced.
+
+    Those three are what make the real thing need a trained model and the arrival manifests,
+    and they decide none of what is under test here: which seed cuts the halves, and whether
+    the checkpoint's sidecar is written, are `main`'s own control flow.
+    """
+    runner = _runner()
+    truths = {sample.key: sample.truth_final_time_s for sample in samples}
+    covariates = {sample.key: sample.covariates for sample in samples}
+    arm = SimpleNamespace(
+        config=SimpleNamespace(duration_head=DURATION_HEAD_QUANTILE,
+                               resolved_split_seed=split_seed),
+        airports=("KRDU",), model=object(), normalizer=object(),
+    )
+    monkeypatch.setattr(runner, "resolve_device", lambda _name: "cpu")
+    monkeypatch.setattr(runner, "load_arm", lambda *args, **kwargs: arm)
+    monkeypatch.setattr(runner, "cohort_series", lambda _arm, _grid: [
+        SimpleNamespace(dataset_id=sample.key) for sample in samples
+    ])
+    monkeypatch.setattr(runner, "default_anchor", lambda _config: 0)
+    monkeypatch.setattr(runner, "duration_quantile_predictions", lambda *args, **kwargs:
+                        np.stack([sample.quantiles_s for sample in samples]))
+    monkeypatch.setattr(runner, "truth_duration_s",
+                        lambda item, _anchor: truths[item.dataset_id])
+    monkeypatch.setattr(runner, "approach_difficulty", lambda item, _anchor:
+                        SimpleNamespace(to_dict=lambda: covariates[item.dataset_id]))
+    return runner
+
+
+def test_readout_only_writes_the_table_and_leaves_the_sidecar_byte_for_byte(
+    tmp_path: Path, monkeypatch
+):
+    """The probe may read a checkpoint the campaign is deploying, so `--readout-only` must
+    not write one byte of its metadata — and the deployed run below is what proves that
+    assertion could have failed."""
+    from io_utils import file_sha256
+
+    samples = _cohort(400, narrow_s=10.0)
+    runner = _stubbed_runner(monkeypatch, samples, split_seed=1)
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"weights")
+    metadata_path = _metadata(tmp_path, sha=file_sha256(checkpoint))
+    before = metadata_path.read_bytes()
+
+    def run(out: str, *flags: str) -> dict:
+        assert runner.main(["--checkpoint", str(checkpoint), "--out", str(tmp_path / out),
+                            "--device", "cpu", *flags]) == 0
+        return json.loads((tmp_path / out / runner.JSON_NAME).read_text())["conformal"]
+
+    probe = run("probe", "--readout-only", "--half-seed", "2024")
+    assert metadata_path.read_bytes() == before
+    assert probe["half_seed"] == 2024 and probe["deployed_half_rule"] is False
+    assert "PROBE HALF RULE" in (tmp_path / "probe" / runner.TEXT_NAME).read_text()
+
+    # The default seed under --readout-only is the deployed cut, read and not written.
+    control = run("control", "--readout-only")
+    assert metadata_path.read_bytes() == before
+    assert control["half_seed"] == 1 and control["deployed_half_rule"] is True
+    assert control["alphas"] != probe["alphas"]
+
+    # ...and without the flag the same command deploys, so "untouched" above is a difference.
+    deployed = run("deployed")
+    assert metadata_path.read_bytes() != before
+    stored = json.loads(metadata_path.read_text())[CONFORMAL_METADATA_KEY]
+    assert stored == deployed and stored["half_seed"] == 1
+    assert deployed["alphas"] == control["alphas"]      # the flag changes only the writing
 
 
 # ── predict reads it ────────────────────────────────────────────────────────
