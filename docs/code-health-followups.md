@@ -584,3 +584,21 @@ curve must not be published alone. The fitted teacher is refused with random anc
 (`TSConfig`), so the fix is to pass it only to the fixed-anchor class, or to accept and
 refuse it in the random one — one line either way, plus a test that constructs the random
 window set through `fit_model`.
+
+## 24. OpenSky typecodes absent from the Doc 8643 snapshot (H900, CL61, G450, F2EX, F2LX, G650, AS29)
+
+**Verified** (2026-09-08, 38 observed rows). The identity resolver rejects an OpenSky typecode
+the ICAO Doc 8643 snapshot does not list, and OpenSky uses a few marketing codes for which
+the ICAO designator is known (H900 → H25B, CL61 → CL60, G450 → GLF4, F2EX/F2LX → F2TH,
+G650 → GLF6). An alias table in `aircraft/icao_type_designators.py` (`normalize_typecode`),
+each entry with its source, would resolve them; do not accept unknown codes generally.
+
+## 25. 1,164 observed rows: FAA-registered airframes whose model has no unambiguous ICAO typecode
+
+**Verified** (2026-09-08). The FAA registry names the model but the model→ICAO crosswalk in
+`build_aircraft_identity_database.py` leaves it ambiguous (policy: never guess), and OpenSky
+has no typecode for the address either. A third identity source with per-address types
+(the tar1090 / adsb.lol basic aircraft database, or OpenSky's current CSV — the snapshot in
+`data/AIRCRAFT/aircraftDatabase.csv` is from 2026-07) would settle most of them; add it to
+the builder as a lower-authority source validated against Doc 8643, the way OpenSky is.
+Plus 283 rows unmatched anywhere (mostly foreign registrations: Mexico, Ireland, Canada).

@@ -26,12 +26,27 @@ store, roster.
   stall facts (2026-08-24)** — `harvest/observed.py` marks the event's direct bracket or
   appends the one inferred crossing row (built by `flight_scenarios.crossing_span`), so
   evaluation grades the STATES through one shared interpolation instead of re-reading
-  the event; and it resolves each flight's airframe from its icao24
-  (`flight_scenarios.resolve_airframe`, the scenarios' own chain) to write
+  the event; and it resolves each flight's IDENTITY from its icao24
+  (`flight_scenarios.resolve_airframe`, the scenarios' own resolver) to write
   `source.aircraft_type` — the ICAO type the baseline speed gate looks its PUBLISHED
-  approach-speed window up by (v9) — and the landing mass the states carry
-  (unresolvable → `NOMINAL_MASS_KG`, no aircraft_type, speed grades indeterminate).
-  `source.landing_aero` (v6–v8's stall inputs) is no longer written.
+  approach-speed window up by (v9) — **whenever the identity resolves, dynamics or
+  not**: the states' mass is the type's OpenAP landing mass when OpenAP models the
+  type, else `NOMINAL_MASS_KG` (`source.mass_source` = `openap_landing_mass` /
+  `nominal` / `explicit`; the gate never reads an observed record's mass). Until
+  2026-09-08 the type was written only when OpenAP had dynamics, which silently
+  dropped 9,056 of the 10,541 untyped observed rows (BCS3 1,582, E55P 719, CRJ7 674,
+  BCS1 482, P28A 409, … 167 types) — 21 % of the fleet graded speed-indeterminate for
+  want of a mass nothing used. An unresolvable identity (1,485 rows: 1,164 FAA models
+  with no unambiguous ICAO type, 283 unmatched, 38 OpenSky codes absent from the Doc
+  8643 snapshot) gets no `aircraft_type`. `source.landing_aero` (v6–v8's stall inputs)
+  is no longer written.
+- **`--observed-only` rebuilds ONLY `approach/`** (records, `summary.json`, the report and
+  its publication) from stored tracks — `arrivals/` and `lateral_pass_eligibility.json`
+  untouched, no CZML. It is the mode for an observed-record contract change (a new
+  `source` field, a resolver fix); `--evaluate-only` also rebuilds `arrivals/` and
+  deletes the lateral roster, `--reclassify-existing` re-derives assignment. The
+  regenerated report's hash still moves the ts `data_provenance` (the roster records
+  it; `docs/open-items.md`).
   Target kinematics and `final_time_s` stay anchored to the last MEASURED row. Records
   in `approach/records/` from before this date fail evaluation loudly ("no
   crossing_span") — rebuild with `--evaluate-only`.

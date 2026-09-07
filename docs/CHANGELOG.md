@@ -16,6 +16,19 @@ m/s); the endpoint along-track error is unrelated (R² 0.01). Decision: no wind 
 predicted rollout stays wind-free. Results doc
 `4dTrajectory/ts_transformer/docs/2026-09-08_wind_residual_readout.zh.md`.
 
+### 2026-09-08 — observed records name their type whenever the identity resolves; `--observed-only`
+
+Of the 10,541 observed rows the v9 gate could not type (24.7 %), 9,056 resolve to an ICAO
+type OpenAP does not model — the observed writer demanded OpenAP dynamics just to pick a
+states mass the gate never reads, and dropped the type with it. `flight_scenarios.
+resolve_airframe` now returns `(mass or None, typecode)` whenever the identity resolves;
+`harvest/observed.py` writes `aircraft_type` for those rows with the nominal mass and says
+so (`source.mass_source`). New harvest mode `--observed-only` rebuilds only `approach/`
+(records, summary, report, publication; no arrivals rebuild, no roster deletion, no CZML).
+The remaining 1,485 untyped rows are identity gaps (followups #24/#25); the published
+speed pack is being extended to the 167 recovered types. Tests: harvest writer (identity
+without dynamics, mass_source), `resolve_airframe` unit test.
+
 ### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`

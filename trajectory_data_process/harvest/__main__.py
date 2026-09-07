@@ -98,6 +98,14 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--evaluate-only", action="store_true",
                         help="skip download; rebuild arrivals/, approach/, and publication")
     mode.add_argument(
+        "--observed-only", action="store_true",
+        help=(
+            "skip download; rebuild ONLY approach/ (the observed evaluation records, "
+            "their report and its publication) from stored tracks -- arrivals/ and "
+            "its lateral-pass roster are left untouched, and no CZML is rendered"
+        ),
+    )
+    mode.add_argument(
         "--reclassify-existing",
         action="store_true",
         help="skip download; rerun assignment/fitting from stored tracks, then rebuild",
@@ -156,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     code = args.airport.upper()
     paths = HarvestPaths(root=args.output, code=code)
-    if not args.evaluate_only and not args.reclassify_existing \
+    if not args.evaluate_only and not args.observed_only and not args.reclassify_existing \
             and not args.merge_source and not args.rebuild_fresh_from \
             and not args.full_redownload:
         completed = _completed_download_manifest(
@@ -226,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             jobs=args.jobs,
         )
         print(f"[harvest] reclassified stored tracks without download: {manifest['counts']}")
-    elif args.evaluate_only:
+    elif args.evaluate_only or args.observed_only:
         manifest = read_manifest(paths)
         print(f"[harvest] reusing stored tracks: {manifest['counts']}")
     else:
@@ -253,15 +261,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[harvest] {args.airport}: {manifest['counts']} over "
               f"{result.chunks_fetched} chunks")
 
-    arrivals = write_arrival_records(
-        airport, paths, entry_radius_km=args.entry_radius_km
-    )
-    print(
-        f"[harvest] model-ready arrivals: {arrivals['counts']} -> "
-        f"{arrival_manifest_path(paths)} "
-        f"({arrivals['altitude_filter']['repaired_samples']} altitude outlier(s) "
-        f"repaired on read)"
-    )
+    if args.observed_only:
+        print("[harvest] --observed-only: arrivals/ and its lateral-pass roster left untouched")
+    else:
+        arrivals = write_arrival_records(
+            airport, paths, entry_radius_km=args.entry_radius_km
+        )
+        print(
+            f"[harvest] model-ready arrivals: {arrivals['counts']} -> "
+            f"{arrival_manifest_path(paths)} "
+            f"({arrivals['altitude_filter']['repaired_samples']} altitude outlier(s) "
+            f"repaired on read)"
+        )
 
     summary = write_observed_records(airport, paths)
     report = evaluate_batch(
@@ -279,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
             "[harvest] staging rebuild: frontend CZML/publication skipped; "
             "validate the new output before publishing it explicitly"
         )
-    if not args.no_czml and not staging_rebuild:
+    if not args.no_czml and not staging_rebuild and not args.observed_only:
         rendered = render_observed_czml(
             paths, frontend_data_root=args.frontend_data, multiplier=args.multiplier
         )

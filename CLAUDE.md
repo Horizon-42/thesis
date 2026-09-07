@@ -238,7 +238,8 @@ Only the hazards that must fire unprompted are repeated here.
   the current writer version `harvest-arrivals-v6-published-vertical-path` (2026-09-07: the
   cohort gains KRDU 32 + KSMF 35R via the RNAV approach-leg TCH, +1,876 arrivals on the next
   harvest, which changes every ts dataset split). Do not re-run it without need, and never
-  under a running campaign.
+  under a running campaign. **To rebuild only the observed evaluation records/report
+  (`approach/`) use `--observed-only`** — it leaves `arrivals/` and the lateral roster alone.
 - **All control-output ts checkpoints are stale as of 2026-08-18** — the control contract
   changed units (newtons → fraction of installed thrust) and `TSConfig` gained required fields,
   so `load_checkpoint` refuses them. `state` checkpoints are unaffected, but any trained before

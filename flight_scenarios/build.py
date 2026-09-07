@@ -232,28 +232,30 @@ def resolve_airframe(
     *,
     declared_type: str | None = None,
     aircraft_provider: str = "auto",
-) -> tuple[float, str] | None:
-    """``(landing_mass_kg, typecode)`` for one airframe, or None.
+) -> tuple[float | None, str] | None:
+    """``(landing_mass_kg or None, typecode)`` for one airframe, or None.
 
-    The SAME identity→OpenAP chain ``build_scenario`` uses, for the harvest's
-    observed records: the landing mass their state samples carry, and the ICAO type
-    the evaluation speed gate looks its PUBLISHED approach-speed window up by
-    (``evaluation.speed_gate.TYPECODE_KEYS``). No fallback type on purpose: an
-    unresolvable airframe returns None and the caller grades speed indeterminate,
+    For the harvest's observed records. The IDENTITY (icao24 → ICAO type, the same
+    resolver ``build_scenario`` uses) is what the evaluation speed gate looks its
+    PUBLISHED approach-speed window up by (``evaluation.speed_gate.TYPECODE_KEYS``),
+    so it is returned whenever it resolves. The mass is the type's OpenAP/preset
+    landing mass when those dynamics exist, else None -- an observed record's mass is
+    an assumption the states carry, not something the gate reads, so a type OpenAP
+    does not model (BCS3, E55P, CRJ7, most bizjets and GA: 21 % of the observed
+    fleet) must not lose its type over it. No fallback type on purpose: an
+    unresolvable identity returns None and the caller grades speed indeterminate,
     loudly, instead of judging a bizjet against an A320 window.
     """
-    try:
-        selection = _resolve_aircraft(
-            {"type": declared_type, "icao24": icao24},
-            None,
-            aircraft_provider=aircraft_provider,
-        )
-    except KeyError:
-        return None
-    return (
-        selection.aircraft.landing_mass,
-        selection.identity.typecode or "UNKNOWN",
+    identity = get_default_identity_resolver().resolve(
+        declared_type=declared_type, icao24=icao24
     )
+    if identity.typecode is None:
+        return None
+    try:
+        aircraft = aircraft_for_code(identity.typecode, provider=aircraft_provider)
+    except KeyError:
+        return None, identity.typecode
+    return aircraft.landing_mass, identity.typecode
 
 
 def _resolve_aircraft(

@@ -52,13 +52,15 @@ from trajectory_data_process.harvest.store import (
 )
 from trajectory_data_process.harvest.threshold_event import require_current_threshold_event
 
-# Fallback mass for the state samples when the airframe cannot be resolved from its
-# icao24. A resolved record instead carries its type's landing mass and its ICAO
-# type (``aircraft_type``) — the SAME identity→OpenAP chain the scenarios use — and
-# the type is what the baseline's speed gate looks its PUBLISHED approach-speed
-# window up by. An UNRESOLVED record keeps this nominal mass, gets no
-# ``aircraft_type``, and grades speed-indeterminate, loudly: judging an unknown
-# airframe against an invented window would be false precision.
+# Fallback mass for the state samples when the airframe's type has no OpenAP/preset
+# dynamics, or cannot be resolved from its icao24 at all. A resolved record carries
+# its ICAO type (``aircraft_type``, the SAME identity chain the scenarios use) — the
+# key the baseline's speed gate looks its PUBLISHED approach-speed window up by —
+# and its type's landing mass when the dynamics exist, this nominal mass otherwise
+# (``mass_source`` says which; the gate never reads the mass of an observed record).
+# An UNRESOLVED identity gets no ``aircraft_type`` and grades speed-indeterminate,
+# loudly: judging an unknown airframe against an invented window would be false
+# precision.
 NOMINAL_MASS_KG = 60_000.0
 
 RECORDS_DIR = "records"
@@ -78,24 +80,28 @@ def observed_record(
     """One stored track as an ``evaluation.records`` record, in MSL.
 
     Evaluation consumes the threshold event already produced by runway assignment;
-    it does not refit these state samples. The mass and the ICAO type come from the
-    flight's own resolved airframe (icao24 → identity → OpenAP, the same chain the
-    scenarios use); the type is the key the speed gate looks the published window up
-    by. An unresolvable airframe falls back to ``NOMINAL_MASS_KG`` with no
-    ``aircraft_type`` and grades speed-indeterminate. An explicit ``mass_kg``
-    bypasses resolution (tests, synthetic tracks) and writes no type.
+    it does not refit these state samples. The ICAO type comes from the flight's own
+    resolved identity (icao24 → identity, the same chain the scenarios use) and is
+    the key the speed gate looks the published window up by; the mass is the type's
+    OpenAP landing mass when those dynamics exist, else ``NOMINAL_MASS_KG``. An
+    unresolvable identity falls back to the nominal mass with no ``aircraft_type``
+    and grades speed-indeterminate. An explicit ``mass_kg`` bypasses resolution
+    (tests, synthetic tracks) and writes no type.
     """
     if runway.threshold_crossing_height_m is None:
         raise ValueError(
             f"{runway.airport} {runway.ident} publishes no vertically guided RNAV approach"
         )
     aircraft_type: str | None = None
+    mass_source = "explicit"
     if mass_kg is None:
         resolved = resolve_airframe(track.get("icao24"))
         if resolved is not None:
             mass_kg, aircraft_type = resolved
+        if mass_kg is None:
+            mass_kg, mass_source = NOMINAL_MASS_KG, "nominal"
         else:
-            mass_kg = NOMINAL_MASS_KG
+            mass_source = "openap_landing_mass"
     event = track.get("observed_threshold_event")
     if not isinstance(event, dict):
         raise ValueError(
@@ -165,9 +171,10 @@ def observed_record(
             "baro_vnav_minima": runway.baro_vnav_minima,
             # The resolved airframe's ICAO type designator: the key the speed gate
             # looks its published approach speed up by (evaluation.speed_gate
-            # TYPECODE_KEYS) — present only when the airframe resolved (see
-            # NOMINAL_MASS_KG above).
+            # TYPECODE_KEYS) — present whenever the identity resolved, dynamics or
+            # not (see NOMINAL_MASS_KG above); mass_source says what the states' m is.
             **({"aircraft_type": aircraft_type} if aircraft_type is not None else {}),
+            "mass_source": mass_source,
             "source_integrity": track.get("source_integrity"),
             # Copy policy-free producer output verbatim.  Benchmark selection and
             # limits remain evaluation-owned.

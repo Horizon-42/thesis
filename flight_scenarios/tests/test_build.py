@@ -183,3 +183,29 @@ def test_scenario_output_name_distinguishes_target_mode():
         "KRDU", threshold=False, fitted_adsb=True
     ) == "KRDU_arrivals_fitted_adsb_scenarios.json"
     assert scenario_output_name("KRDU", threshold=True) == "KRDU_arrivals_threshold_scenarios.json"
+
+
+def test_resolve_airframe_names_the_type_even_when_openap_has_no_dynamics(monkeypatch):
+    """The harvest's observed records need the TYPE (the published speed window's key)
+    far more than a modelled mass: an identity OpenAP cannot fly still resolves, with
+    no mass; an unresolvable identity returns None."""
+    from types import SimpleNamespace
+
+    import flight_scenarios.build as build
+
+    class _Resolver:
+        def __init__(self, typecode):
+            self.typecode = typecode
+
+        def resolve(self, *, declared_type, icao24):
+            return SimpleNamespace(typecode=self.typecode)
+
+    monkeypatch.setattr(build, "get_default_identity_resolver", lambda: _Resolver("E55P"))
+    assert build.resolve_airframe("abc123") == (None, "E55P")
+
+    monkeypatch.setattr(build, "get_default_identity_resolver", lambda: _Resolver("A320"))
+    mass, typecode = build.resolve_airframe("abc123")
+    assert typecode == "A320" and mass == A320.landing_mass
+
+    monkeypatch.setattr(build, "get_default_identity_resolver", lambda: _Resolver(None))
+    assert build.resolve_airframe("abc123") is None
