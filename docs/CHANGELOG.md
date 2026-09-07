@@ -18,6 +18,14 @@ them apart.
 `duration_head` gains a third value, `two-head`. The POINT head stays `final_time_head` — the same
 class, the same state-dict keys and the same rollout duration `point` has — and the quantile head is
 a second module `duration_quantile_head` beside it, emitting nothing but the published distribution.
+**The second head is built LAST**, after `final_time_head` and `control_head`, for the reason
+`control/latent.py` builds `aux_duration` last: `_initialize_duration_head` zeroes only the last
+layer, so the point head's HIDDEN layer is a live random draw, and an extra `nn.Linear` constructed
+ahead of it shifts that draw. Built last, a `two-head` model and a `point` model at the same seed
+agree on all 34 shared parameters (measured) — which is what gate 1 needs, being a single-seed ADE
+comparison against `B1_point_matched` inside a 30 m band. The TRAINING dropout stream still cannot
+be matched (the second head draws inside `duration()`): the two arms share an initialization, not a
+trajectory.
 `config.DURATION_HEADS_WITH_QUANTILES` / `DURATION_HEADS_WITH_POINT` are the two predicates every
 consumer now asks (records, `forecast.duration_quantile_predictions`, `run_ts_eta_calibration.py`,
 `predict --cta-from-quantiles`), so "does this checkpoint publish an interval" cannot drift from the

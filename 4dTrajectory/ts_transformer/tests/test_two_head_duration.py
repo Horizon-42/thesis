@@ -125,9 +125,34 @@ def test_the_rollout_flies_the_point_head_and_never_the_median():
     assert prediction.duration_quantiles_s.shape == (len(history), len(DURATION_QUANTILES))
 
 
+def test_two_head_is_seed_matched_to_point_parameter_for_parameter():
+    """Gate 1 of §三 3.1b is a SINGLE-SEED ADE comparison against `B1_point_matched` inside a
+    30 m band, so `two-head` must start from the same point head and the same backbone that
+    arm did — not merely predict the same number on the first batch.
+
+    `_initialize_duration_head` zeroes only the LAST layer, so `final_time_head.network[1]`
+    is a live random draw: building the second head before it (rather than last) shifts that
+    draw and silently unpairs the two arms. Output equality cannot see it — with the last
+    layer zeroed both heads emit their bias whatever the hidden layer holds — so this
+    compares the TENSORS.
+    """
+    torch.manual_seed(0)
+    two = build_model(_two_head())
+    torch.manual_seed(0)
+    point = build_model(_config(duration_head=DURATION_HEAD_POINT))
+    shared = point.state_dict()
+    two_state = two.state_dict()
+    assert set(two_state) - set(shared) == {
+        f"duration_quantile_head.network.{index}.{kind}"
+        for index in (1, 4) for kind in ("weight", "bias")
+    }
+    differing = [key for key in shared if not torch.equal(shared[key], two_state[key])]
+    assert differing == []
+
+
 def test_both_heads_start_where_the_point_head_starts():
-    """B1's initialization rule holds per HEAD, so a `two-head` run and a `point` run make
-    the same first prediction and differ only in what they learn."""
+    """B1's initialization rule holds per HEAD: on the first batch the point head and the
+    quantile head's median agree, so the two arms differ only in what they LEARN."""
     torch.manual_seed(0)
     two = build_model(_two_head()).eval()
     torch.manual_seed(0)
@@ -401,10 +426,14 @@ def test_the_record_carries_the_point_duration_and_the_quantile_interval(
         published = source["durationQuantilesS"]
         assert len(published) == len(DURATION_QUANTILES) and published == sorted(published)
         assert row["duration_quantiles_s"] == published
-        # The rollout's duration is the POINT head's, so the record's own two numbers are
-        # not required to agree — under `quantile` they would be the same number twice.
+        # The rollout's duration is the POINT head's — and the record proves it: under
+        # `quantile` these two WOULD be the same number, so an implementation that flew q50
+        # fails here as well as in the forward-pass test above.
         assert source["durationHeadFinalTimeS"] == pytest.approx(
             row["predicted_final_time_s"]
+        )
+        assert source["durationHeadFinalTimeS"] != pytest.approx(
+            published[DURATION_MEDIAN_INDEX]
         )
         assert source["calibrated"] is False
 
@@ -426,7 +455,14 @@ def test_the_record_carries_the_point_duration_and_the_quantile_interval(
 def test_the_calibration_runner_takes_a_two_head_checkpoint(tmp_path: Path, monkeypatch):
     """The runner reads the QUANTILE head (one forward, no rollout, no CTA) — so which head
     drives the rollout is none of its business, and only a head with no quantiles at all is
-    refused."""
+    refused.
+
+    This stubs the checkpoint load, the cohort and the forward, so it covers the runner's
+    CONFIG GATE and its control flow only. That the forward really reads the quantile head
+    on a two-head model is the assertion in
+    `test_the_record_carries_the_point_duration_and_the_quantile_interval`, which runs
+    `duration_quantile_predictions` against a trained one.
+    """
     from tests.test_eta_calibration import _cohort, _metadata, _stubbed_runner
 
     samples = _cohort(400, narrow_s=10.0)

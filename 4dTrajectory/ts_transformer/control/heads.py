@@ -62,11 +62,16 @@ class ControlFeatureModel(nn.Module):
             nn.GELU(),
             nn.LayerNorm(config.d_model),
         )
-        # The SECOND duration head (B1.b), or None under every other value. It is built
-        # here, in the base, because `duration_quantiles` below reads it and both control
-        # models inherit that rule; `final_time_head` stays the subclasses' to build,
-        # because WHAT it is depends on the same axis (see `duration_head_for`).
-        self.duration_quantile_head = quantile_duration_head_for(config)
+        # The SECOND duration head (B1.b). Declared here because `duration_quantiles` below
+        # reads it and both control models inherit that rule, but BUILT LAST by the subclass
+        # that can have one (`ControlOutputModel`), for the reason `aux_duration` is built
+        # last in `control/latent.py`: every module before it must draw the initialization it
+        # would draw without it. Built here, the extra `nn.Linear` would consume RNG ahead of
+        # `final_time_head`, whose hidden layer is a live random draw
+        # (`_initialize_duration_head` zeroes only the last layer) — and a `two-head` arm
+        # would then start from a different point head than the `point` arm gate 1 compares
+        # it against, single-seed, inside a 30 m band.
+        self.duration_quantile_head = None
 
     def fused_features(
         self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]
@@ -120,7 +125,12 @@ class ControlFeatureModel(nn.Module):
 
         Under a CTA the duration IS the CTA. The POINT head is then INERT for the life of
         the run — never called, never trained, kept at its initialization — so a given
-        checkpoint resumed as ``off`` would start from an untrained duration head. The
+        checkpoint resumed as ``off`` would start from an untrained duration head, and its
+        ``durationHeadFinalTimeS`` would be that untrained head's number. ``cta_s`` is the
+        truth duration, i.e. the objective's own target, so ``final_time_loss_weight`` then
+        weighs an identically-zero term: on a ``given`` arm it is a weight with nothing to
+        weigh, for BOTH ``point`` and ``two-head``. It is documented rather than refused
+        because the refusal would be new law over the stored L3 ``cta=given`` arms. The
         QUANTILE head is still read and still trained there, deliberately: B3 decodes a
         ``given`` checkpoint at its own quantiles, which only exist if the head learned them.
         """
@@ -257,6 +267,12 @@ class ControlOutputModel(ControlFeatureModel):
         self.control_head = control_head_for(config)
         _initialize_control_head(self.control_head)
         _initialize_duration_head(self.final_time_head)
+        # LAST (see the base class): with it built here, every parameter a `point` run has
+        # draws exactly what it would have drawn, so two arms that differ only in
+        # `duration_head` start from the same point head and the same backbone. What cannot
+        # be matched is the TRAINING dropout stream — the second head draws inside
+        # `duration()` — so the two are the same INITIALIZATION, not the same trajectory.
+        self.duration_quantile_head = quantile_duration_head_for(config)
 
     def forward(self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]):
         features = self.fused_features(history, dynamics)

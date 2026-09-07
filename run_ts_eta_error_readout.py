@@ -117,14 +117,21 @@ def q50_errors(rows: dict[str, dict], keys: list[str]) -> np.ndarray | None:
     quantiles or none does; a partial set means the directory holds two decodes and is
     refused rather than averaged over.
     """
-    carried = [key for key in keys
-               if all(rows[key].get(name) is not None for name in Q50_SOURCE_FIELDS)]
+    carried = [key for key in keys if rows[key].get("duration_quantiles_s") is not None]
     if not carried:
         return None
     if len(carried) != len(keys):
         raise SystemExit(
-            f"{len(carried)} of {len(keys)} scored rows carry {Q50_SOURCE_FIELDS[0]}: one arm "
+            f"{len(carried)} of {len(keys)} scored rows carry duration_quantiles_s: one arm "
             "is one duration head, so this directory is not one arm"
+        )
+    # `true_final_time_s` is written on every scored row (`export.py`), so a missing one is
+    # a broken directory, not a point-head arm — and it must say which field it is.
+    missing = [key for key in keys if rows[key].get("true_final_time_s") is None]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} of {len(keys)} scored rows carry duration_quantiles_s but no "
+            "true_final_time_s; the q50 error cannot be derived from this directory"
         )
     return np.array(
         [rows[key]["duration_quantiles_s"][DURATION_MEDIAN_INDEX]
@@ -173,6 +180,13 @@ def readout(label: str, pred_dir: Path) -> dict:
 
 
 def render(payload: dict) -> str:
+    # v3 added `mae` to every block and `metrics` to every arm, and this reads both. A v2
+    # artifact is re-rendered by re-running the readout, not by half-filling the table.
+    if payload.get("schema") != RESULT_SCHEMA:
+        raise SystemExit(
+            f"schema {payload.get('schema')!r} is not {RESULT_SCHEMA}; re-run the readout "
+            "on the prediction directory rather than re-rendering the stored block"
+        )
     lines = [
         "B0 arrival-time error distribution — the width a calibrated interval would need",
         "|dt| = |final_time_error_s| (seconds); signed dt < 0 = predicted EARLY. FDE is "

@@ -24,11 +24,14 @@ SATURATION_THRESHOLD_FRACTION = 0.01
 def _gradient_group(parameter_name: str) -> str:
     if parameter_name.startswith("control_head."):
         return "control_head"
-    # B1.b's second head is a duration head too: without it, its gradients would be
-    # reported as the backbone's and the two heads' norms could not be read apart.
-    if parameter_name.startswith(
-        ("final_time_head.", "global_duration_head.", "duration_quantile_head.")
-    ):
+    # B1.b's second head is a duration head too, and it is grouped WITH the point head:
+    # without this its gradients would be counted as the BACKBONE's, which is worse. The
+    # cost is accepted and stated — on a `two-head` run this norm is the sum of both heads'
+    # and cannot be read apart. Splitting them would need a fourth `GRADIENT_GROUPS` entry,
+    # i.e. a new key in EVERY run's history, and that is not free.
+    # (`global_duration_head.` was here and is gone: it matched no parameter anywhere in the
+    # tree, `archive/` included.)
+    if parameter_name.startswith(("final_time_head.", "duration_quantile_head.")):
         return "final_time_head"
     return "backbone"
 

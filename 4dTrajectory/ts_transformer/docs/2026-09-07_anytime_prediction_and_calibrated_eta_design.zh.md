@@ -519,9 +519,13 @@ config 轴 `duration_head ∈ point | quantile`（默认 `point`，进 checkpoin
 > **实现（2026-09-08，`dev-b1b`）**：`duration_head` 加第三个取值 `two-head`，`DURATION_HEADS_WITH_QUANTILES` /
 > `DURATION_HEADS_WITH_POINT` 两个谓词只写一次，所有消费方（记录、`forecast.duration_quantile_predictions`、
 > `run_ts_eta_calibration.py`、`predict --cta-from-quantiles`、扇面读数）都改读谓词而不是等于某一档。
-> **点估计头仍叫 `final_time_head`**——同一个类、同一批 state-dict 键、同一个 rollout 时长，所以 `two-head` 与 `point`
-> 只差“多了一个头”；分位数头是并排的第二个模块 `duration_quantile_head`，由 `quantile_duration_head_for` 唯一构造，
-> 初始化沿用 B1 的规则（中位数落在点估计头的起点），`point` / `quantile` 两档一个参数都不多。
+> **点估计头仍叫 `final_time_head`**——同一个类、同一批 state-dict 键、同一个 rollout 时长；分位数头是并排的第二个模块
+> `duration_quantile_head`，由 `quantile_duration_head_for` 唯一构造，初始化沿用 B1 的规则（中位数落在点估计头的起点），
+> `point` / `quantile` 两档一个参数都不多。**第二个头最后建**（与 `control/latent.py` 里 `aux_duration` 最后建同因）：
+> `_initialize_duration_head` 只清零最后一层，点估计头的隐藏层是活的随机抽样，先建第二个头会挪动那次抽样，
+> `two-head` 与 `point` 两条臂就不再同种子配对——而门 1 正是单种子、30 m 带内对 `B1_point_matched` 的比较。
+> 建在最后之后实测：同种子下两个模型 34 个共享参数全等。**训练期的 dropout 流仍配不齐**（第二个头在 `duration()`
+> 里抽样），所以两条臂共享的是初始化，不是轨迹。
 > `ControlFeatureModel.quantile_head()` 是“分位数从哪个模块出”的唯一规则（写成方法而不是属性：把同一个模块绑两个名字，
 > state-dict 就会把它发布两遍）；`duration()` 里 `point_duration` 为真时时长取点估计头，`cta_conditioning=given` 下仍是 CTA、
 > 点估计头惰性、分位数头照常训练。
@@ -532,7 +536,10 @@ config 轴 `duration_head ∈ point | quantile`（默认 `point`，进 checkpoin
 > `final_time_loss_weight`，所以那里乘的还是原来那个 1.0，逐位不变。
 > **四条拒绝，每条自报理由**：`two-head` 不在 control 输出上；`two-head` 与 `latent_dim > 0`（与 `quantile` 同因——
 > 训练解后验样本，分位数会条件在本机自己的未来上）；`quantile` 档下非默认 `final_time_loss_weight`（没有点项可加权）；
-> `point` 档下非默认 `duration_quantile_loss_weight`（没有分位数头）。命名：`T=2h`（`_VALUE_ABBREV` 第二个条目），
+> `point` 档下非默认 `duration_quantile_loss_weight`（没有分位数头）。**第五处“权重无项可加权”写进文档而不设拒绝**：
+> `cta_conditioning=given` 下 CTA 就是真值时长、也就是目标本身，`final_time` 项恒为 0，`final_time_loss_weight`
+> 在 `point` / `two-head` 上都无项可加权——不拒绝是因为那会对已存档的 L3 `cta=given` 臂追加新规，理由写在
+> `duration()` 的 docstring 里。命名：`T=2h`（`_VALUE_ABBREV` 第二个条目），
 > 新权重进 `CONTROL_LOSS_FIELDS`、只在非默认时显示为 `pinball=<w>`；配方不钉这个权重——头钉在 `point` 时它已被直接拒绝，
 > 钉一个永远不会绑定的界比不钉更糟。
 > **读数**：`run_ts_eta_error_readout.py` 的 `final_time_error_s` 量的是 **rollout 飞的那个时长**（`two-head` 下＝点估计头），

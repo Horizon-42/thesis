@@ -144,9 +144,11 @@ def build_prediction_record(
         "horizonMode": horizon_mode,
         "forecastPasses": forecast.passes,
         "predictedFinalTimeS": forecast.final_time_s,
-        # The duration the head handed the rollout, before truncation/capping. Under
-        # `two-head` this is the POINT head's; the quantile head rides out below and the two
-        # are not the same number.
+        # The duration the head handed the rollout, before truncation/capping: the point
+        # head's under `point` and `two-head`, the median quantile under `quantile`, and the
+        # CTA under any `cta_conditioning` — so under `two-head` it is the POINT head's and
+        # `durationQuantilesS` below is a different number, EXCEPT on a CTA arm, where the
+        # CTA is the duration and `--cta-from-quantiles` makes that CTA exactly q50.
         "durationHeadFinalTimeS": forecast.predicted_final_time_s,
         "truncatedAtThreshold": forecast.truncated_at_threshold,
         "horizonCapped": forecast.horizon_capped,

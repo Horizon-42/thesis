@@ -137,6 +137,13 @@ DURATION_HEADS = (DURATION_HEAD_POINT, DURATION_HEAD_QUANTILE, DURATION_HEAD_TWO
 #: rollout" cannot drift apart from the table above.
 DURATION_HEADS_WITH_QUANTILES = (DURATION_HEAD_QUANTILE, DURATION_HEAD_TWO_HEAD)
 DURATION_HEADS_WITH_POINT = (DURATION_HEAD_POINT, DURATION_HEAD_TWO_HEAD)
+# They must PARTITION the vocabulary, and this is where that is enforced: every head emits
+# a duration, so `ControlFeatureModel.duration` reads "not point-bearing" as "take the
+# median quantile". A fourth value forgotten in both tuples would raise inside the forward
+# pass instead of at config construction, so it fails at import here instead.
+assert set(DURATION_HEADS_WITH_QUANTILES) | set(DURATION_HEADS_WITH_POINT) == set(DURATION_HEADS), (
+    "every duration_head must carry a point head, a quantile head, or both"
+)
 #: The quantile levels, in order. ONE definition: the head, the pinball loss, the record
 #: field, `calibration.py` and every readout read this tuple, so "the five quantiles" cannot
 #: become two different sets of five. §六 6: these are quantiles of the DURATION, never of

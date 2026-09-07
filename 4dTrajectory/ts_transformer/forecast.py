@@ -101,10 +101,11 @@ class Forecast:
     # Latent control output only: decoded from the POSTERIOR mean q(z | this flight's own
     # future) — the z-oracle upper bound. Reads the future; never a prediction result.
     z_from_posterior: bool = False
-    # B1, quantile duration head only: the five `DURATION_QUANTILES` in seconds, in level
-    # order. `predicted_final_time_s` above is still the ONE duration this trajectory was
-    # rolled over (the median, or a CTA); these are the interval around it, and §六 6 —
-    # they are quantiles of the DURATION, never of the trajectory.
+    # B1 / B1.b, quantile-bearing duration heads only: the five `DURATION_QUANTILES` in
+    # seconds, in level order. `predicted_final_time_s` above is still the ONE duration this
+    # trajectory was rolled over — under `quantile` the MEDIAN of these, under `two-head`
+    # the POINT head's (a different number), under any CTA arm the CTA. These are the
+    # interval, and §六 6 — quantiles of the DURATION, never of the trajectory.
     duration_quantiles_s: np.ndarray | None = None
     # B2: the CALIBRATED interval per alpha, `[{"alpha", "lo", "hi"}]`, and the stratum whose
     # conformal delta widened it. None = this checkpoint has no calibration table, and the
