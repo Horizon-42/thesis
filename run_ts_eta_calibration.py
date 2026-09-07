@@ -28,6 +28,14 @@ What it does, and why each part is not negotiable:
   was not fitted on, measures what it covered — that measurement is the published number.
   The mirror (fit on B, score on A) is printed beside it as a STABILITY check and is never
   averaged in: a mean of the two would be fitted on every flight it is then scored against.
+- **The cut itself can be probed, and only read.** When the deployed coverage and its mirror
+  disagree by more than binomial noise, one fixed seed cannot say whether the cohort splits
+  that way or the one half rule ever tried does. ``--half-seed N`` re-cuts the halves through
+  the same `calibration.calibration_halves`; it is REFUSED without ``--readout-only``, which
+  writes the readout to ``--out`` and does not touch the checkpoint's sidecar. The table
+  records the seed it was cut with and says, in its own bytes and at the top of the text, when
+  that is not the deployed rule — and `calibration.write_conformal_table` refuses such a table
+  even if a caller reaches it directly. A deployed δ comes from the documented rule alone.
 - **The DEPLOYED coverage is the gate's number.** Per-stratum δ are measured on their own
   stratum's members, but a flight is handed the first stratum in
   `calibration.INTERVAL_STRATUM_PRECEDENCE` that it is in AND that has a δ — so a flight
@@ -107,6 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="write a --limit table into the checkpoint's sidecar anyway; "
                              "`predict` would then deploy a delta fitted on a prefix of the "
                              "split. The table says so wherever it travels")
+    parser.add_argument("--half-seed", type=int, default=None, metavar="INT",
+                        help="cut the two halves with this seed instead of the checkpoint's "
+                             "split_seed — a PROBE of the half rule itself, refused unless "
+                             "--readout-only is given with it (default: the split_seed, "
+                             "which is the deployed rule)")
+    parser.add_argument("--readout-only", action="store_true",
+                        help="write the readout to --out and REFUSE to touch the "
+                             "checkpoint's checkpoint_metadata.json: nothing is deployed")
     parser.add_argument("--device", default="auto")
     return parser
 
@@ -122,6 +138,13 @@ def main(argv: list[str] | None = None) -> int:
             "gate) and the training split's quantiles are fitted to their own targets, so "
             f"its delta would be near zero. Calibrate on {CALIBRATION_SPLIT!r}"
         )
+    if args.half_seed is not None and not args.readout_only:
+        parser.error(
+            f"--half-seed {args.half_seed} re-cuts the two halves, and the DEPLOYED delta "
+            "comes from the documented half rule — the checkpoint's own split_seed — and "
+            "from nothing else. Pass --readout-only with --half-seed: the probe table is "
+            "then written to --out and the checkpoint's sidecar is left untouched"
+        )
     device = resolve_device(args.device)
     grid = Grid(split=args.split, bins_m=(), min_future_s=0.0, batch_size=None, limit=args.limit)
     arm = load_arm(
@@ -135,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
             f"duration_head={DURATION_HEAD_QUANTILE!r} (B1)"
         )
     metadata_path = args.checkpoint.parent / "checkpoint_metadata.json"
-    if not metadata_path.is_file():
+    if not args.readout_only and not metadata_path.is_file():
         raise SystemExit(
             f"{metadata_path} does not exist; the conformal table is a sidecar of the "
             "checkpoint's own metadata and there is nothing to attach it to"
@@ -162,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         checkpoint_sha256=file_sha256(args.checkpoint),
         airports=arm.airports,
         limit=args.limit,
+        half_seed=args.half_seed,
     )
     # The readout is written and printed BEFORE the sidecar: a --limit run whose table the
     # sidecar refuses is still a smoke test someone wanted to read.
@@ -176,6 +200,9 @@ def main(argv: list[str] | None = None) -> int:
         "conformal": table,
     }, indent=2))
     (out / TEXT_NAME).write_text(text)
+    if args.readout_only:
+        print(f"wrote {out / JSON_NAME} — READOUT ONLY, {metadata_path} [conformal] untouched")
+        return 0
     write_conformal_table(metadata_path, table, allow_smoke=args.allow_smoke_table)
     print(f"wrote {out / JSON_NAME} and {metadata_path} [conformal]")
     return 0

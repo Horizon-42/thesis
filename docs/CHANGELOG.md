@@ -4,6 +4,52 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — B2 calibration: the half cut is probeable (`--half-seed` + `--readout-only`), and the deployed-vs-mirror coverage gap is mostly the cut
+
+**The question.** On the KRDU B1/B3 quantile arms the DEPLOYED cross-half coverage (fit on half A,
+score on half B) sat 5–10 points BELOW its own mirror (fit on B, score on A) — B1_quantile α=0.2
+pooled 0.748 vs 0.839 at n≈702 per half, where binomial SE is ≈1.5 points. Either the one fixed
+half rule (`sha256('conformal:{split_seed}:{flight_key}')`, `split_seed` = 1337) splits the cohort
+systematically, or the gap is real. It could not be asked: there was no seed flag, and every runner
+invocation rewrote the deployed `conformal` sidecar.
+
+**The change.** `run_ts_eta_calibration.py` gains `--half-seed INT` (default: the checkpoint's
+`split_seed`, i.e. today's cut, bit-identical numbers) and `--readout-only` (writes the readout to
+`--out`, refuses to touch `checkpoint_metadata.json`). `--half-seed` is REFUSED without
+`--readout-only`, before any checkpoint is read, and the refusal names both flags: a deployed δ
+comes from the documented rule alone. The seed is threaded into the single
+`calibration.calibration_halves` (no second hash); the table carries `half_seed` and
+`deployed_half_rule`, a probe table's `half_rule` says `PROBE, NOT THE DEPLOYED RULE`, `render`
+opens with a `PROBE HALF RULE` banner, and `calibration.write_conformal_table` refuses a probe
+table with no escape hatch (unlike the smoke table's `--allow-smoke-table`). `CONFORMAL_SCHEMA`
+stays `ts-conformal-cqr-v2` deliberately: no stored δ changes meaning and no reader of a stored
+table reads the two new fields, so a bump would have refused every deployed sidecar over a
+provenance field.
+
+**The measurement** (KRDU val, 1404 flights, halves 702/702, CPU, ~11 s per run; five seeds
+1337/2024/7/99/31337 × two arms, all `--readout-only`; both
+`checkpoint_metadata.json` sha256 verified unchanged before and after). The gap **flips sign**:
+B1_quantile α=0.2 pooled `coverage − stability` = −0.091 (seed 1337, the deployed cut), −0.040,
++0.006, −0.023, +0.036 — mean −0.023, and the deployed-block coverage moves 0.745 / 0.791 / 0.805 /
+0.793 / 0.818 (mean **0.790**, nominal 0.80). At α=0.5 the deployed block reads 0.450 / 0.480 /
+0.533 / 0.497 / 0.469 (mean **0.486**, nominal 0.50). B3_quantile_cta is the same picture at a
+smaller amplitude: α=0.2 deployed 0.775 / 0.795 / 0.811 / 0.802 / 0.811 (mean **0.799**), α=0.5
+0.477 / 0.480 / 0.517 / 0.484 / 0.486 (mean **0.489**).
+
+**Reading.** The 5–10 point gap is an artefact of the ONE cut that was ever tried, not a cohort
+split: averaged over five cuts both coverages bracket nominal (B1 α=0.2: 0.788 deployed / 0.810
+mirror). The two are strongly ANTI-correlated by construction — a cut that hands half A the easier
+flights fits a δ too small, which under-covers B and over-covers A when mirrored — so the GAP has a
+much wider spread (sd ≈ 0.05 across seeds) than either coverage alone (binomial SE 0.015), and the
+deployed cut sits ≈1.4 sd low. **Consequence for gate 3.4-2**: B1_quantile's α=0.2 verdict is
+cut-dependent — 0.745 at the deployed seed is outside the [0.76, 0.84] band, the other four seeds
+(0.791–0.818) are inside; B3 passes at all five. Quote the deployed number with its cut noise, or
+read the gate on the five-cut mean. Neither this nor the mirror repairs the deeper issue already
+recorded in `calibration.py`: the calibration split is also the selection split, and the
+guarantee-bearing read stays the pre-registered single test-split measurement at `freeze-test`.
+Probe artifacts (not committed):
+`/tmp/.../scratchpad/b2a/{B1_quantile,B3_quantile_cta}_seed_{1337,2024,7,99,31337}/`.
+
 ### 2026-09-08 — ts_transformer straight-in residual decomposition: along-track deceleration-timing scatter, not lateral, not the total duration
 
 `run_ts_straight_in_residual_readout.py` (new CPU runner) projects each flight's prediction error on

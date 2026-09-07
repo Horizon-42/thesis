@@ -420,7 +420,17 @@ importable. A finished one-off driver belongs there, not beside the live runners
   split is halved by the checkpoint's own `split_seed`: **half A fits the DEPLOYED δ and
   half B measures what it covered** — the mirror is a stability check, never averaged in.
   `--split test` / `train` are refused with the reason; a `--limit` SMOKE table is refused
-  at the sidecar unless `--allow-smoke-table`. Per stratum
+  at the sidecar unless `--allow-smoke-table`. **The cut itself is probeable, READ-ONLY**:
+  `--half-seed N` re-cuts the halves through the same `calibration_halves` and is refused
+  without `--readout-only` (which writes the readout to `--out` and touches no sidecar), the
+  table then carrying `half_seed` / `deployed_half_rule` and a `PROBE HALF RULE` banner that
+  `write_conformal_table` refuses with no escape hatch — a deployed δ comes from the
+  documented rule alone. **Read a single cut's deployed coverage with its CUT noise**: over
+  five seeds on KRDU val the two coverages are strongly anti-correlated (a δ fitted on an
+  easy half under-covers the other and over-covers when mirrored), so the deployed−mirror
+  gap has sd ≈ 0.05 against a binomial SE of 0.015 and FLIPS SIGN; B1_quantile α=0.2 reads
+  0.745 at the deployed seed 1337 and 0.791–0.818 at four others (mean 0.790), i.e. gate
+  3.4-2's verdict on that arm is cut-dependent (2026-09-08, `docs/CHANGELOG.md`). Per stratum
   (`approach_difficulty.strata_masks`), and only the three
   `calibration.INTERVAL_STRATUM_PRECEDENCE` can deploy are fitted at all; below
   `calibration.MIN_CALIBRATION_FLIGHTS` = 30 in a half the stratum is REFUSED and a flight

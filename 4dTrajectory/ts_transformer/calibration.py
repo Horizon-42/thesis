@@ -76,7 +76,10 @@ from config import DURATION_QUANTILES
 #: The table's own version. Bump it when the meaning of a stored δ changes; `predict`
 #: refuses a table it does not recognise rather than applying it under new rules. v2: δ is
 #: half A's alone (v1 deployed the mean of both halves, which nothing measured), and the
-#: table carries the ``deployed`` block and its own cohort.
+#: table carries the ``deployed`` block and its own cohort. ``half_seed`` /
+#: ``deployed_half_rule`` were ADDED to v2 without a bump (2026-09-08): they say which cut
+#: produced the table, no stored δ changes meaning, and no reader of a stored table reads
+#: them — bumping would have refused every deployed sidecar over a provenance field.
 CONFORMAL_SCHEMA = "ts-conformal-cqr-v2"
 
 #: The miscoverage levels calibrated, and the quantile PAIR each is built from. α = 0.2 is
@@ -208,25 +211,41 @@ def interval_coverage(
     return float(np.mean((truth_s >= lo_s - delta_s) & (truth_s <= hi_s + delta_s)))
 
 
-#: How the two halves are cut, recorded in the table so a reader can reproduce them.
+#: How the two halves are cut, recorded in the table so a reader can reproduce them. THE
+#: deployed rule: the seed hashed is the checkpoint's own ``split_seed``, and only a table
+#: cut this way may reach the sidecar (`write_conformal_table` refuses any other).
 CALIBRATION_HALF_RULE = (
     "sort flights by sha256('conformal:{split_seed}:{flight_key}'); first half = A (fits "
     "the deployed delta), second half = B (measures its coverage)"
 )
 
+#: The SAME cut under a probe seed. A deployed coverage that sits well below its own mirror
+#: is either a real property of the cohort or an artefact of the one half rule that was ever
+#: tried, and the two cannot be told apart without re-cutting the halves — so
+#: `run_ts_eta_calibration.py --half-seed` exists, refuses to run without ``--readout-only``,
+#: and the table it produces says here, in its own bytes, that it is not deployable.
+PROBE_HALF_RULE = (
+    "PROBE, NOT THE DEPLOYED RULE: sort flights by "
+    "sha256('conformal:{half_seed}:{{flight_key}}') — half_seed {half_seed} instead of this "
+    "checkpoint's split_seed {split_seed}; first half = A (fits the delta), second half = B "
+    "(measures its coverage). A re-cut of the same cohort, for reading only"
+)
 
-def calibration_halves(keys: Sequence[str], split_seed: int) -> tuple[np.ndarray, np.ndarray]:
+
+def calibration_halves(keys: Sequence[str], half_seed: int) -> tuple[np.ndarray, np.ndarray]:
     """Two deterministic halves of the calibration cohort, as index arrays.
 
-    Keyed on the run's own ``split_seed`` and the flight identity, hashed the way
-    `splits.py` hashes the outer split — a DIFFERENT question (which half of val), so it
-    carries its own salt and the two partitions are independent. Sorted-and-cut rather than
-    thresholded, so the halves are exactly equal (± one flight) whatever the cohort size,
-    and independent of the order the caller happened to build the flights in. Half A is the
-    first: it fits the deployed δ, B is the held-out half (`CALIBRATION_HALF_RULE`).
+    Keyed on ``half_seed`` — the run's own ``split_seed`` on every deployable table — and on
+    the flight identity, hashed the way `splits.py` hashes the outer split: a DIFFERENT
+    question (which half of val), so it carries its own salt and the two partitions are
+    independent. Sorted-and-cut rather than thresholded, so the halves are exactly equal
+    (± one flight) whatever the cohort size, and independent of the order the caller happened
+    to build the flights in. Half A is the first: it fits the deployed δ, B is the held-out
+    half (`CALIBRATION_HALF_RULE`). This is the ONE definition of the cut — a probe threads a
+    different seed through it and never a second hash.
     """
     order = np.argsort([
-        hashlib.sha256(f"conformal:{split_seed}:{key}".encode()).hexdigest()
+        hashlib.sha256(f"conformal:{half_seed}:{key}".encode()).hexdigest()
         for key in keys
     ], kind="stable")
     cut = len(order) // 2
@@ -348,6 +367,7 @@ def calibrate(
     checkpoint_sha256: str,
     airports: Sequence[str] = (),
     limit: int = 0,
+    half_seed: int | None = None,
 ) -> dict[str, Any]:
     """The conformal table: α → stratum → δ, the coverage it realised, and what refused.
 
@@ -359,6 +379,12 @@ def calibrate(
     ``airports`` and ``limit`` are the table's own COHORT: a δ fitted at one airport and
     applied at another is a different calibration, and a ``--limit`` smoke table has to be
     visible as one everywhere it travels.
+
+    ``half_seed`` defaults to ``split_seed``, which is `CALIBRATION_HALF_RULE` — the one rule
+    a deployable table may be cut by. Anything else is a PROBE of the half split itself: the
+    table says so in ``deployed_half_rule`` and ``half_rule``, and `write_conformal_table`
+    refuses it. It exists so "the deployed coverage sits below its mirror" can be read as a
+    property of the cohort or of the cut, which one fixed seed cannot answer.
     """
     if not samples:
         raise ValueError("calibration needs at least one flight")
@@ -371,7 +397,9 @@ def calibrate(
     masks = strata_masks({sample.key: sample.covariates for sample in samples}, keys)
     quantiles = np.stack([sample.quantiles_s for sample in samples])
     truth = np.array([sample.truth_final_time_s for sample in samples], dtype=np.float64)
-    fit_half, held_out = calibration_halves(keys, split_seed)
+    half_seed = split_seed if half_seed is None else int(half_seed)
+    deployed_half_rule = half_seed == split_seed
+    fit_half, held_out = calibration_halves(keys, half_seed)
     alphas: dict[str, Any] = {}
     for alpha in CONFORMAL_ALPHAS:
         blocks = {
@@ -408,7 +436,13 @@ def calibrate(
         "min_calibration_flights": MIN_CALIBRATION_FLIGHTS,
         "calibration_flights": len(samples),
         "half_flights": [int(len(fit_half)), int(len(held_out))],
-        "half_rule": CALIBRATION_HALF_RULE,
+        # The seed the halves were actually cut with, and whether that is the deployed rule.
+        # Every number below is a function of this cut, so it travels with them.
+        "half_seed": half_seed,
+        "deployed_half_rule": deployed_half_rule,
+        "half_rule": CALIBRATION_HALF_RULE if deployed_half_rule else PROBE_HALF_RULE.format(
+            half_seed=half_seed, split_seed=split_seed
+        ),
         "interval_stratum_precedence": list(INTERVAL_STRATUM_PRECEDENCE),
         # The cohort this table belongs to. `limit` non-zero means it was fitted on a PREFIX
         # of the split, which is a smoke test and is marked as one everywhere it travels.
@@ -489,7 +523,18 @@ def write_conformal_table(
     A SMOKE table (``--limit``) is refused unless the caller says otherwise: the sidecar is
     what `predict` deploys, and a δ fitted on the first 200 flights of the split would
     otherwise widen every record of a full run with nothing at the write site saying so.
+
+    A PROBE table (a ``half_seed`` other than the checkpoint's ``split_seed``) is refused
+    outright, with no escape hatch: a deployed δ comes from `CALIBRATION_HALF_RULE` and from
+    nothing else, so re-cutting the halves is a reading, never a deployment.
     """
+    if not table["deployed_half_rule"]:
+        raise ValueError(
+            f"this table was cut with half_seed {table['half_seed']}, not the checkpoint's "
+            f"split_seed {table['split_seed']}: it is a PROBE of the half rule, and a "
+            "deployed delta comes from the documented rule alone. Re-run without "
+            "--half-seed to deploy, or keep it as --readout-only"
+        )
     if table["smoke_test"] and not allow_smoke:
         raise ValueError(
             f"this table was fitted on a --limit {table['limit']} PREFIX of the "
@@ -555,7 +600,7 @@ def render(table: dict[str, Any]) -> str:
         "B2 split-conformal ETA calibration (CQR) — "
         f"{table['calibration_flights']} {table['split']} flights, halves "
         f"{table['half_flights'][0]}/{table['half_flights'][1]}, split_seed "
-        f"{table['split_seed']}"
+        f"{table['split_seed']}, half_seed {table['half_seed']}"
         + (f", airports {'/'.join(table['airports'])}" if table["airports"] else ""),
         f"half rule: {table['half_rule']}",
         "delta widens [q_lo, q_hi] on BOTH sides. The DEPLOYED delta is half A's; 'coverage' "
@@ -568,6 +613,11 @@ def render(table: dict[str, Any]) -> str:
     if table["smoke_test"]:
         lines.insert(0, f"SMOKE TEST: --limit {table['limit']}, a PREFIX of the split — not "
                         "a calibration of the cohort")
+    if not table["deployed_half_rule"]:
+        lines.insert(0, f"PROBE HALF RULE: halves cut with half_seed {table['half_seed']}, "
+                        f"NOT this checkpoint's split_seed {table['split_seed']} — a reading "
+                        "of how much the numbers below depend on the cut. This table is not "
+                        "deployable and the sidecar refuses it")
     for alpha in CONFORMAL_ALPHAS:
         block = table["alphas"][_alpha_key(alpha)]
         low, high = block["quantile_pair"]
