@@ -43,6 +43,7 @@ from synthetic import synthetic_arrivals
 from train import train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
+SELECTION_METRIC = "fixed-anchor-common-grid-ade"
 _REAL_SCHEDULER = torch.optim.lr_scheduler.ReduceLROnPlateau
 
 
@@ -87,15 +88,15 @@ class _SchedulerSpy(_REAL_SCHEDULER):
         return super().step(metrics, epoch)
 
 
-def _two_epoch_run(tmp_path: Path, name: str, **overrides) -> list[dict]:
+def _two_epoch_run(tmp_path: Path, name: str, *, epochs: int = 2, **overrides) -> list[dict]:
     settings = dict(recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=False))
     settings.update(
         n_segments=8, control_imitation_loss_weight=0.0,
         seq_len=8, d_model=16, n_heads=4, d_ff=32, e_layers=1,
         final_time_scale_s=2.0, device="cpu",
-        epochs=2, patience=2, batch_size=8, dropout=0.0,
+        epochs=epochs, patience=epochs, batch_size=8, dropout=0.0,
         control_rollout_integrator_dt_s=0.5,
-        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
+        checkpoint_selection_metric=SELECTION_METRIC,
     )
     settings.update(overrides)
     config = TSConfig(**settings)
@@ -140,10 +141,82 @@ def test_the_scheduler_block_says_which_metric_it_stepped_on(tmp_path: Path):
     assert metadata["lr_scheduler"]["metric"] == LR_PLATEAU_METRIC_OBJECTIVE
 
 
-def test_checkpoint_selection_is_unchanged_by_the_axis(tmp_path: Path):
-    """The scheduler watches one number; the kept epoch is still the selection metric's best."""
-    history = _two_epoch_run(tmp_path, "objective", lr_plateau_metric=LR_PLATEAU_METRIC_OBJECTIVE)
-    summary = json.loads((tmp_path / "objective" / "history.json").read_text())
-    best = min(epoch["validation_selection_value"] for epoch in history)
-    assert summary["validation_selection"]["best_value"] == pytest.approx(best)
-    assert summary["config"]["lr_plateau_metric"] == LR_PLATEAU_METRIC_OBJECTIVE
+#: The staged selection values: one improvement, then a STALL — the A0-random `_grid` arm's
+#: shape, small enough to write down. The objective meanwhile improves every epoch by more
+#: than `ReduceLROnPlateau`'s relative threshold, which is what makes the two arms diverge.
+_STALLED_SELECTION = (100.0, 99.0, 99.0, 99.0, 99.0, 99.0)
+
+
+def _stall_the_selection_metric(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the real metric's machinery, replace only the NUMBER it reports."""
+    import train as train_module
+
+    real = train_module.VALIDATION_SELECTIONS[SELECTION_METRIC]
+    staged = iter(_STALLED_SELECTION)
+
+    def stalled(**kwargs):
+        return replace(real(**kwargs), value=next(staged))
+
+    monkeypatch.setitem(train_module.VALIDATION_SELECTIONS, SELECTION_METRIC, stalled)
+
+
+def test_the_axis_moves_the_learning_rate_and_not_the_kept_epoch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Both arms over four epochs of a STALLED selection metric and an improving objective —
+    the situation the axis exists for. The learning-rate columns must DIFFER (the axis does
+    something) while each run still keeps the epoch its selection metric scored best (the
+    axis does only that)."""
+    rates = {}
+    for metric in (LR_PLATEAU_METRIC_SELECTION, LR_PLATEAU_METRIC_OBJECTIVE):
+        with monkeypatch.context() as patch:
+            _stall_the_selection_metric(patch)
+            history = _two_epoch_run(
+                tmp_path, metric, epochs=len(_STALLED_SELECTION), lr_plateau_patience=1,
+                learning_rate=1e-2, lr_plateau_metric=metric,
+            )
+        assert [epoch["validation_selection_value"] for epoch in history] == list(
+            _STALLED_SELECTION
+        )
+        # The objective really is improving, or the comparison below proves nothing.
+        losses = [epoch["val_loss"] for epoch in history]
+        assert losses == sorted(losses, reverse=True)
+        summary = json.loads((tmp_path / metric / "history.json").read_text())
+        assert summary["validation_selection"]["best_value"] == pytest.approx(
+            min(_STALLED_SELECTION)
+        )
+        assert summary["config"]["lr_plateau_metric"] == metric
+        rates[metric] = [epoch["learning_rate"] for epoch in history]
+    # The stalled metric cuts the rate; the improving objective does not.
+    assert rates[LR_PLATEAU_METRIC_SELECTION] != rates[LR_PLATEAU_METRIC_OBJECTIVE], rates
+    assert rates[LR_PLATEAU_METRIC_OBJECTIVE] == [1e-2] * len(_STALLED_SELECTION)
+    assert rates[LR_PLATEAU_METRIC_SELECTION][-1] < 1e-2
+
+
+def test_the_objective_is_refused_while_the_kl_warm_up_reweights_it(tmp_path: Path):
+    """A ramping beta rescales the objective every epoch, so its plateau is not the model's."""
+    with pytest.raises(ValueError, match="latent_beta_warmup_epochs"):
+        TSConfig(**{
+            **recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=False),
+            "latent_dim": 4, "latent_beta_warmup_epochs": 10,
+            "lr_plateau_metric": LR_PLATEAU_METRIC_OBJECTIVE,
+        })
+
+
+def test_the_objective_is_refused_while_the_procedure_multipliers_move():
+    with pytest.raises(ValueError, match="procedure_loss_dual_step"):
+        TSConfig(
+            procedure_loss_lateral_weight=1.0,
+            procedure_loss_dual_step=0.5,
+            lr_plateau_metric=LR_PLATEAU_METRIC_OBJECTIVE,
+        )
+
+
+def test_a_fixed_beta_latent_run_may_still_watch_the_objective():
+    """The refusal is about a MOVING objective, not about the latent path as such."""
+    config = TSConfig(**{
+        **recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=False),
+        "latent_dim": 4, "latent_beta": 0.01,
+        "lr_plateau_metric": LR_PLATEAU_METRIC_OBJECTIVE,
+    })
+    assert config.lr_plateau_metric == LR_PLATEAU_METRIC_OBJECTIVE

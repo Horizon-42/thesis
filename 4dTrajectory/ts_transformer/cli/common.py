@@ -453,9 +453,9 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "how that anchor is drawn from the admissible ones: uniformly over the samples "
-            "('uniform', the default, which is uniform over TIME and biased toward the "
-            "runway) or uniformly over the anchor_grid remaining-path strata "
-            "('remaining-path-strata'). Refused without --random-train-anchor"
+            "('uniform', the default, which is uniform in TIME and, pooled over flights, "
+            "over-weights the near end) or uniformly across the flight's own remaining-path "
+            "span ('remaining-path-uniform'). Refused without --random-train-anchor"
         ),
     )
     parser.add_argument(

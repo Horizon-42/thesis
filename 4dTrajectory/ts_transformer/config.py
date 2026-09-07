@@ -326,19 +326,26 @@ LR_PLATEAU_METRICS = (LR_PLATEAU_METRIC_SELECTION, LR_PLATEAU_METRIC_OBJECTIVE)
 # `random_train_anchor_min_future_s` contract decide WHICH anchors exist, both policies draw
 # from exactly that set, and the training cohort is therefore identical under either.
 #
-# `uniform` draws over the SAMPLES, which is uniform over time and so biased toward the
-# runway: every flight contributes near-runway samples and only the long ones contribute far
-# anchors (measured on the KRDU train split: median anchor 107, i.e. 214 s into a track whose
-# anchors run to index 467). `remaining-path-strata` draws a remaining-path stratum first —
-# uniformly among the strata the flight HAS anchors in — then a sample inside it, so a
-# flight's far anchors are drawn as often as its near ones. The skew's measured signature is
-# the A0-random arm's per-anchor-set curve: the 6 km set improved for 180 epochs while L−1
-# and 12 km degraded after epoch 10.
+# `uniform` draws over the SAMPLES, i.e. uniformly in TIME. Pooled over flights that
+# OVER-WEIGHTS THE NEAR END relative to the anchor population actually stored: every flight
+# gets one draw whatever its length, and the aircraft is slow near the runway, so a kilometre
+# there holds more samples than a kilometre at 25 km. Measured on the whole KRDU validation
+# split (1404 flights, 181,906 admissible anchors, 200 epochs): the draws put 34.3 % under
+# 6 km where the population has 25.1 %, and 17.9 % beyond 20 km where the population has
+# 32.9 %. `remaining-path-uniform` places the draw uniformly across the flight's OWN
+# admissible remaining-path span and takes the nearest admissible anchor — equal weight per
+# kilometre rather than per sample — which moves those to 31.0 % and 21.0 %.
+#
+# NOT a stratum draw. A0.b's first draft drew an `anchor_strata` stratum uniformly and then a
+# sample inside it; that moved training TOWARD the runway (review measurement, 700 KRDU val
+# flights: mean remaining path 12.2 -> 8.0 km, share >= 20 km 16.9 % -> 4.1 %), because the
+# grid cuts the near end into four 2-km strata and leaves the far end ONE open stratum
+# spanning 20-123 km. The strata survive only as the histogram the draws are COUNTED in.
 RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM = "uniform"
-RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA = "remaining-path-strata"
+RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM = "remaining-path-uniform"
 RANDOM_TRAIN_ANCHOR_SAMPLINGS = (
     RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
-    RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM,
 )
 
 
@@ -1365,6 +1372,30 @@ class TSConfig:
                 "HOW a random train anchor is drawn, and random_train_anchor=False draws "
                 "none — the fixed policy anchors every flight at L-1"
             )
+        # A scheduler that watches the objective must watch a COMPARABLE objective. Two
+        # things move the number under the model's feet, and under either the plateau
+        # scheduler could halve the learning rate straight through a schedule that is still
+        # ramping: the KL warm-up (`effective_latent_beta` reweights the objective every
+        # epoch until the ramp ends) and the procedure penalty's dual step (λ is updated
+        # once per epoch, so the same trajectory is priced differently each time).
+        if self.lr_plateau_metric == LR_PLATEAU_METRIC_OBJECTIVE:
+            if self.latent_beta_warmup_epochs > 0:
+                raise ValueError(
+                    "lr_plateau_metric='objective' with "
+                    f"latent_beta_warmup_epochs={self.latent_beta_warmup_epochs}: the "
+                    "validation objective is scored under THIS epoch's beta, so it rises "
+                    "with the ramp and the plateau scheduler would cut the learning rate "
+                    "through the warm-up. Select on the objective only at a fixed beta"
+                )
+            if self.procedure_loss_dual_step > 0.0:
+                raise ValueError(
+                    "lr_plateau_metric='objective' with "
+                    f"procedure_loss_dual_step={self.procedure_loss_dual_step:g}: the "
+                    "penalty multipliers move once per epoch, so the objective prices the "
+                    "same trajectory differently each epoch and its plateau is not the "
+                    "model's. Use fixed multipliers, or step the scheduler on the "
+                    "selection metric"
+                )
         if self.uses_final_approach_context and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(
                 "the final-approach corridor (corridor-bounded output / procedure loss) is "

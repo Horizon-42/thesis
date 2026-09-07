@@ -1,27 +1,29 @@
 """`random_train_anchor_sampling`: WHERE along the approach a random train anchor is drawn.
 
 A0.b of `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §2.4c. The
-uniform policy draws over a flight's admissible SAMPLES, which is uniform over time and so
-biased toward the runway; the KRDU A0-random arm's 6 km validation set improved for 180
-epochs while L−1 and 12 km degraded after epoch 10, which is what that skew looks like.
+default `uniform` policy draws over a flight's admissible SAMPLES, i.e. uniformly in TIME;
+pooled over flights that over-weights the near end relative to the stored anchor population,
+because every flight gets one draw whatever its length and a kilometre near the runway holds
+more samples than a kilometre at 25 km. `remaining-path-uniform` places the draw uniformly
+across the flight's own admissible remaining-path span instead.
 
 What the tests hold:
 
-* the strata ARE `anchor_grid`'s bins read as edges — nothing restates 2/4/6/8/12/16/20 km,
-  and a sample's stratum is the same remaining path the bins are chosen from;
-* the stratified draw is uniform over the strata a flight HAS anchors in, the uniform draw
-  is proportional to how many samples sit in each — the two laws, measured;
+* the strata are `anchor_grid`'s bins read as edges — nothing restates 2/4/6/8/12/16/20 km —
+  and each label owns a HAND-PINNED interval, not a restatement of `np.digitize`;
+* the two draw LAWS, measured on a flight whose anchors are dense near the runway and sparse
+  far out: `uniform` follows the sample density, `remaining-path-uniform` follows the span;
 * both draws are the flight's own per-epoch hash: same seed and epoch, same anchor;
-* admissibility is untouched, so the two policies store the same anchors for the same
-  cohort (the 20 s membership guard behaves identically);
-* every epoch records the realised distribution, under BOTH policies, and the counts sum to
-  the flights — one draw per flight is the invariant that makes the numbers readable.
+* admissibility is untouched, so the two policies store the same anchors for the same cohort
+  (the 20 s membership guard behaves identically);
+* every epoch records the realised distribution AND the population it was drawn from, under
+  both policies — the drawn counts sum to the flights, the population counts to the stored
+  anchors, and neither means anything without the other.
 """
 
 from __future__ import annotations
 
 import json
-from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
@@ -35,10 +37,11 @@ from anchor_grid import (
     REMAINING_PATH_STRATA_LABELS,
     remaining_path_strata,
 )
+from anchor_strata import remaining_path_uniform_offset
 from approach_difficulty import remaining_path_profile_m
 from config import (
     CONTROL_RECIPE_SIMPLE_V3,
-    RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM,
     RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
     RANDOM_TRAIN_ANCHOR_SAMPLINGS,
     TSConfig,
@@ -51,7 +54,7 @@ from dataset import (
     FixedAnchorTrajectoryWindows,
     Normalizer,
     RandomAnchorTrajectoryWindows,
-    StratifiedRandomAnchorTrajectoryWindows,
+    RemainingPathUniformAnchorTrajectoryWindows,
     build_series,
     training_window_class,
 )
@@ -62,17 +65,35 @@ from train import train
 AIRPORT, RUNWAY = "KRDU", "05L"
 
 
-# ── the strata are the grid ──────────────────────────────────────────────────
+# ── the strata are the grid, and each label owns an interval ─────────────────
 
 def test_the_strata_edges_are_the_measurement_grid_read_as_edges():
     assert REMAINING_PATH_STRATA_EDGES_M == tuple(
         sorted(float(km) * 1000.0 for km in DEFAULT_ANCHOR_GRID_KM)
     )
     # Seven edges, eight strata: the two open ends are strata of their own, so every
-    # admissible anchor lands in exactly one.
+    # admissible anchor is counted in exactly one column.
     assert len(REMAINING_PATH_STRATA_LABELS) == len(REMAINING_PATH_STRATA_EDGES_M) + 1
-    assert REMAINING_PATH_STRATA_LABELS[0] == "<2km"
-    assert REMAINING_PATH_STRATA_LABELS[-1] == ">=20km"
+
+
+@pytest.mark.parametrize(
+    "remaining_path_m, label",
+    [
+        (0.0, "<2km"),
+        (1999.0, "<2km"),
+        (2000.0, "2km-4km"),        # an edge belongs to the stratum ABOVE it
+        (7999.9, "6km-8km"),
+        (8000.0, "8km-12km"),
+        (19999.0, "16km-20km"),
+        (20000.0, ">=20km"),
+        (123_000.0, ">=20km"),      # the far end is open, and really is that wide
+    ],
+)
+def test_each_label_owns_its_interval(remaining_path_m: float, label: str):
+    """Pinned by hand, not by restating `np.digitize`: a silently shifted edge would move
+    every published histogram column by one stratum."""
+    index = int(np.digitize([remaining_path_m], REMAINING_PATH_STRATA_EDGES_M)[0])
+    assert REMAINING_PATH_STRATA_LABELS[index] == label
 
 
 def test_a_samples_stratum_is_the_remaining_path_the_bins_are_chosen_from():
@@ -93,7 +114,7 @@ def test_a_samples_stratum_is_the_remaining_path_the_bins_are_chosen_from():
 
 def test_the_axis_defaults_to_todays_policy():
     assert RANDOM_TRAIN_ANCHOR_SAMPLINGS == (
-        RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM, RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA
+        RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM, RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM
     )
     assert TSConfig().random_train_anchor_sampling == RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM
 
@@ -103,9 +124,9 @@ def test_an_unknown_sampling_policy_is_refused():
         TSConfig(random_train_anchor=True, random_train_anchor_sampling="stratified")
 
 
-def test_strata_sampling_is_refused_without_random_anchors():
+def test_path_uniform_sampling_is_refused_without_random_anchors():
     with pytest.raises(ValueError, match="random_train_anchor=False draws"):
-        TSConfig(random_train_anchor_sampling=RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA)
+        TSConfig(random_train_anchor_sampling=RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM)
 
 
 def test_every_named_recipe_pins_the_default_as_a_literal():
@@ -123,11 +144,13 @@ def test_the_policy_names_the_run_and_selects_the_window_class():
     assert "anchors=" not in run_display_name(plain.to_dict())
     assert training_window_class(plain) is RandomAnchorTrajectoryWindows
     assert training_window_class(TSConfig()) is FixedAnchorTrajectoryWindows
-    stratified = replace(
-        plain, random_train_anchor_sampling=RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA
+    path_uniform = replace(
+        plain, random_train_anchor_sampling=RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM
     )
-    assert "anchors=remaining-path-strata" in run_display_name(stratified.to_dict())
-    assert training_window_class(stratified) is StratifiedRandomAnchorTrajectoryWindows
+    assert "anchors=remaining-path-uniform" in run_display_name(path_uniform.to_dict())
+    assert training_window_class(path_uniform) is (
+        RemainingPathUniformAnchorTrajectoryWindows
+    )
 
 
 # ── the two draw laws ────────────────────────────────────────────────────────
@@ -155,45 +178,56 @@ def _windows(sampling: str, *, n_flights: int = 1):
     return training_window_class(config)(series, config, normalizer)
 
 
-#: One flight's anchors, hand-assigned to three strata in wildly unequal numbers — a
-#: near-runway-heavy track, which is exactly the shape a real short arrival has.
-_HAND_STRATA = (0, 4, 7)
-_HAND_TAIL_SIZES = (10, 3)
+#: A flight whose admissible anchors are DENSE near the runway and SPARSE far out — the real
+#: shape, exaggerated so the two laws cannot agree: most samples sit in the first eighth of
+#: the span. Uniform-in-sample must follow the counts, uniform-in-path the span.
+_NEAR_SAMPLES = 90
+_NEAR_SPAN_M, _FAR_SPAN_M = 5_000.0, 40_000.0
 
 
 def _hand_built(sampling: str):
+    """One flight, its stored anchors relabelled with a hand-made remaining-path profile."""
     windows = _windows(sampling)
     stored = len(windows.index)
-    sizes = (stored - sum(_HAND_TAIL_SIZES), *_HAND_TAIL_SIZES)
-    windows.anchor_strata = np.repeat(_HAND_STRATA, sizes)
-    return windows, dict(zip(_HAND_STRATA, sizes))
+    assert stored >= _NEAR_SAMPLES + 10
+    near = np.linspace(0.0, _NEAR_SPAN_M, _NEAR_SAMPLES, endpoint=False)
+    far = np.linspace(_NEAR_SPAN_M, _FAR_SPAN_M, stored - _NEAR_SAMPLES)
+    # Descending with the index, as a real profile is: the last anchor is the nearest.
+    windows.anchor_remaining_path_m = np.concatenate((far[::-1], near[::-1]))
+    return windows
 
 
-def _drawn_strata(windows, epochs: int = 3000) -> Counter:
-    counts: Counter = Counter()
-    for epoch in range(1, epochs + 1):
-        counts.update(windows.anchor_strata[windows.epoch_indices(epoch)].tolist())
-    return counts
+def _near_share(windows, epochs: int = 2000) -> float:
+    """The share of drawn anchors inside the near block, over many epochs."""
+    drawn = np.concatenate([
+        windows.anchor_remaining_path_m[windows.epoch_indices(epoch)]
+        for epoch in range(1, epochs + 1)
+    ])
+    return float(np.mean(drawn < _NEAR_SPAN_M))
 
 
-def test_the_stratified_draw_is_uniform_over_the_strata_a_flight_has():
-    windows, sizes = _hand_built(RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA)
-    draws = _drawn_strata(windows)
-    assert set(draws) == set(_HAND_STRATA), "a stratum the flight has no anchors in was drawn"
-    total = sum(draws.values())
-    for stratum in _HAND_STRATA:
-        assert draws[stratum] / total == pytest.approx(1 / len(_HAND_STRATA), abs=0.03)
-    # ...and it is emphatically NOT the sample-count law the uniform policy follows.
-    assert draws[_HAND_STRATA[0]] / total < 0.5 < sizes[_HAND_STRATA[0]] / len(windows.index)
+def test_the_uniform_draw_follows_the_sample_density():
+    windows = _hand_built(RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM)
+    expected = _NEAR_SAMPLES / len(windows.index)
+    assert expected > 0.6, "the fixture must make the two laws disagree"
+    assert _near_share(windows) == pytest.approx(expected, abs=0.03)
 
 
-def test_the_uniform_draw_is_proportional_to_the_samples_in_each_stratum():
-    windows, sizes = _hand_built(RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM)
-    draws = _drawn_strata(windows)
-    total = sum(draws.values())
-    stored = len(windows.index)
-    for stratum in _HAND_STRATA:
-        assert draws[stratum] / total == pytest.approx(sizes[stratum] / stored, abs=0.03)
+def test_the_path_uniform_draw_follows_the_span():
+    """Equal weight per kilometre: the near block is an eighth of the span, so it takes
+    about an eighth of the draws — not the share its sample count would take."""
+    windows = _hand_built(RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM)
+    assert _near_share(windows) == pytest.approx(_NEAR_SPAN_M / _FAR_SPAN_M, abs=0.03)
+
+
+def test_the_offset_law_is_nearest_within_the_flights_own_span():
+    """The draw is placed across [min, max] and snapped to the nearest admissible anchor —
+    so both ends are reachable and a single-anchor flight still returns it."""
+    remaining = np.array([20_000.0, 12_000.0, 4_000.0])
+    assert remaining_path_uniform_offset(remaining, 0.0) == 2      # the minimum
+    assert remaining_path_uniform_offset(remaining, 0.999) == 0    # the maximum
+    assert remaining_path_uniform_offset(remaining, 0.5) == 1      # 12 km is nearest
+    assert remaining_path_uniform_offset(np.array([7_000.0]), 0.4) == 0
 
 
 @pytest.mark.parametrize("sampling", RANDOM_TRAIN_ANCHOR_SAMPLINGS)
@@ -207,33 +241,46 @@ def test_the_draw_is_the_flights_own_per_epoch_hash(sampling: str):
 def test_the_two_policies_store_the_same_anchors_for_the_same_cohort():
     """Admissibility is not part of this axis: the 20 s guard admits the same population."""
     uniform = _windows(RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM, n_flights=4)
-    strata = _windows(RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA, n_flights=4)
-    assert uniform.index == strata.index
-    assert np.array_equal(uniform.anchor_strata, strata.anchor_strata)
-    assert uniform.eligible_candidate_anchors == strata.eligible_candidate_anchors
-    assert uniform.sampling_version != strata.sampling_version
+    path_uniform = _windows(RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM, n_flights=4)
+    assert uniform.index == path_uniform.index
+    assert np.array_equal(uniform.anchor_strata, path_uniform.anchor_strata)
+    assert np.array_equal(
+        uniform.anchor_remaining_path_m, path_uniform.anchor_remaining_path_m
+    )
+    assert uniform.eligible_candidate_anchors == path_uniform.eligible_candidate_anchors
+    assert uniform.sampling_version != path_uniform.sampling_version
+    # ...and they must not draw the same anchors, or the axis changes nothing.
+    assert not np.array_equal(uniform.epoch_indices(7), path_uniform.epoch_indices(7))
 
 
-def test_the_stored_strata_are_the_strata_of_the_stored_anchors():
-    windows = _windows(RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA, n_flights=4)
-    expected = [
+def test_the_stored_path_and_strata_are_those_of_the_stored_anchors():
+    windows = _windows(RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM, n_flights=4)
+    expected_strata = [
         int(remaining_path_strata(windows.series[s_idx])[anchor])
         for s_idx, anchor in windows.index
     ]
-    assert windows.anchor_strata.tolist() == expected
+    expected_path = [
+        float(remaining_path_profile_m(windows.series[s_idx])[anchor])
+        for s_idx, anchor in windows.index
+    ]
+    assert windows.anchor_strata.tolist() == expected_strata
+    assert windows.anchor_remaining_path_m.tolist() == pytest.approx(expected_path)
 
 
 # ── the per-epoch record ─────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("sampling", RANDOM_TRAIN_ANCHOR_SAMPLINGS)
-def test_the_epoch_record_counts_the_realised_anchors_per_stratum(sampling: str):
+def test_the_epoch_record_counts_the_draws_beside_the_population(sampling: str):
     windows = _windows(sampling, n_flights=4)
     statistics = windows.anchor_statistics(5)
-    block = statistics["remaining_path_strata"]
-    assert list(block) == list(REMAINING_PATH_STRATA_LABELS)
-    # One draw per flight: the counts are a distribution over the epoch's flights, so they
-    # sum to it. A count that summed to the WINDOWS would be reporting the population.
-    assert sum(block.values()) == len(windows.eligible_series) == statistics["samples"]
+    drawn = statistics["remaining_path_strata"]
+    population = statistics["remaining_path_strata_population"]
+    assert list(drawn) == list(REMAINING_PATH_STRATA_LABELS)
+    assert list(population) == list(REMAINING_PATH_STRATA_LABELS)
+    # One draw per flight; the population is every stored admissible anchor. A drawn count
+    # that summed to the windows would be reporting the population, and vice versa.
+    assert sum(drawn.values()) == len(windows.eligible_series) == statistics["samples"]
+    assert sum(population.values()) == len(windows.index)
 
 
 def test_a_fixed_anchor_window_set_records_no_strata_block():
@@ -280,11 +327,12 @@ def test_a_two_epoch_run_trains_and_records_the_distribution(
     summary = json.loads((tmp_path / sampling / "history.json").read_text())
     flights = summary["flights"]["train"]
     for epoch in summary["history"]:
-        block = epoch["train_anchor_sampling"]["remaining_path_strata"]
-        assert sum(block.values()) == flights
+        block = epoch["train_anchor_sampling"]
+        assert sum(block["remaining_path_strata"].values()) == flights
+        assert sum(block["remaining_path_strata_population"].values()) > flights
     contract = summary["training_anchor_contract"]
     assert contract["sampling_version"] == (
-        "per-flight-hash-v3-remaining-path-strata"
-        if sampling == RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA
+        "per-flight-hash-v3-remaining-path-uniform"
+        if sampling == RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM
         else "per-flight-hash-v2-output-eligibility"
     )

@@ -63,3 +63,17 @@ def test_the_provenance_and_protocol_modules_do_not_reach_the_data_plane() -> No
         "torch", "data_provenance", "evaluation_protocol", "splits"
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_the_remaining_path_axis_is_a_leaf_under_dataset() -> None:
+    """`anchor_strata` owns the grid's VALUES so both sides of one import edge can read them.
+
+    `anchor_grid` imports `dataset` (`FlightSeries`, `truth_duration_s`) while `dataset`
+    needs the same kilometres for the training-anchor draw, so the values cannot live in
+    `anchor_grid` without either a cycle or a second copy. They live in this leaf,
+    `anchor_grid` re-exports them, and `dataset` imports it at module scope — which stays
+    legal only while the leaf reaches neither `dataset` nor torch.
+    """
+    for banned in ("dataset", "torch"):
+        completed = _import_without(banned, "anchor_strata")
+        assert completed.returncode == 0, completed.stderr

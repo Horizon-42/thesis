@@ -66,6 +66,15 @@ from anchor_eligibility import (
     eligible_random_train_anchors,
     random_train_anchor_eligibility_policy,
 )
+# The remaining-path axis, from the LEAF that owns its values. `anchor_grid` re-exports the
+# same objects for every reading consumer; it imports this module, so the training sampler
+# reads them from underneath rather than through it.
+from anchor_strata import (
+    REMAINING_PATH_STRATA_LABELS,
+    remaining_path_strata,
+    remaining_path_uniform_offset,
+)
+from approach_difficulty import remaining_path_profile_m
 from config import (
     CTA_CONDITIONING_GIVEN,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
@@ -76,7 +85,7 @@ from config import (
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
-    RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM,
     RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
     STATE_POSITION_CORRIDOR_BOUNDED,
     TSConfig,
@@ -1760,24 +1769,22 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
             minimum_future_s=config.random_train_anchor_min_future_s,
             fitted_teacher=fitted_teacher,
         )
-        # The remaining-path stratum of every STORED anchor, aligned with `self.index`.
-        # `remaining-path-strata` draws on it; `uniform` only COUNTS it, which is the point:
-        # a uniform draw over samples is uniform over time, and the skew that produces (a
-        # short flight contributes only near-runway anchors) is invisible until an epoch's
-        # anchors are counted per stratum.
-        #
-        # Imported here rather than at module scope because `anchor_grid` reads THIS module
-        # (`FlightSeries`, `truth_duration_s`), so the grid can only be read back at call
-        # time — the same reason as the closure-label import above. The grid stays the one
-        # definition of the boundaries either way.
-        from anchor_grid import REMAINING_PATH_STRATA_LABELS, remaining_path_strata
-        self.strata_labels = REMAINING_PATH_STRATA_LABELS
-        self.anchor_strata = np.zeros(len(self.index), dtype=np.int64)
+        # The remaining path AT every stored anchor, and the stratum it falls in, both
+        # aligned with `self.index`. The path is what `remaining-path-uniform` draws on; the
+        # strata are BOOKKEEPING — the histogram both policies' epochs are counted in, which
+        # is the only place a draw law's pull toward or away from the runway is visible while
+        # a run trains.
+        self.anchor_remaining_path_m = np.empty(len(self.index), dtype=np.float64)
+        self.anchor_strata = np.empty(len(self.index), dtype=np.int64)
         for s_idx, (start, count) in self.series_ranges.items():
             if count:
+                anchors = [anchor for _s_idx, anchor in self.index[start : start + count]]
+                self.anchor_remaining_path_m[start : start + count] = (
+                    remaining_path_profile_m(self.series[s_idx])[anchors]
+                )
                 self.anchor_strata[start : start + count] = remaining_path_strata(
                     self.series[s_idx]
-                )[[anchor for _s_idx, anchor in self.index[start : start + count]]]
+                )[anchors]
 
     def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         return anchors
@@ -1787,21 +1794,26 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
     ) -> Sequence[int]:
         return eligible_random_train_anchors(series, anchors, self.config)
 
-    def _sampling_extras(self, indices: np.ndarray) -> dict[str, Any]:
-        """The epoch's REALISED anchors, counted per remaining-path stratum.
-
-        One draw per flight, so the counts sum to the epoch's flights. Recorded under both
-        policies: the uniform one's counts ARE the skew the stratified one exists to remove,
-        and a per-epoch record is the only place it can be read while a run is training.
-        """
-        counts = np.bincount(
-            self.anchor_strata[indices], minlength=len(self.strata_labels)
-        )
+    def _strata_histogram(self, strata: np.ndarray) -> dict[str, int]:
+        counts = np.bincount(strata, minlength=len(REMAINING_PATH_STRATA_LABELS))
         return {
-            "remaining_path_strata": {
-                label: int(count)
-                for label, count in zip(self.strata_labels, counts, strict=True)
-            }
+            label: int(count)
+            for label, count in zip(REMAINING_PATH_STRATA_LABELS, counts, strict=True)
+        }
+
+    def _sampling_extras(self, indices: np.ndarray) -> dict[str, Any]:
+        """The epoch's REALISED anchors per stratum, beside the POPULATION they came from.
+
+        One draw per flight, so the drawn counts sum to the epoch's flights while the
+        population counts sum to every stored admissible anchor. Neither number means much
+        alone: a draw law is over- or under-weighting a stratum only relative to how many
+        admissible anchors sit in it, which is exactly the comparison that showed
+        uniform-in-time over-weighting the near end. Recorded under BOTH policies, and the
+        only place either can be read while a run is training.
+        """
+        return {
+            "remaining_path_strata": self._strata_histogram(self.anchor_strata[indices]),
+            "remaining_path_strata_population": self._strata_histogram(self.anchor_strata),
         }
 
     def epoch_indices(self, seed: int) -> np.ndarray:
@@ -1823,20 +1835,29 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
         return indices
 
 
-class StratifiedRandomAnchorTrajectoryWindows(RandomAnchorTrajectoryWindows):
-    """One random valid anchor per flight and epoch, uniform over REMAINING-PATH STRATA.
+class RemainingPathUniformAnchorTrajectoryWindows(RandomAnchorTrajectoryWindows):
+    """One random valid anchor per flight and epoch, uniform in REMAINING PATH.
 
-    The uniform policy draws over a flight's admissible SAMPLES, which is uniform over time
-    and therefore biased toward the runway: every flight contributes near-runway samples and
-    only the long ones contribute far anchors. Measured consequence on the KRDU A0-random
-    arm (design §2.4c): the 6 km validation anchor set improved for 180 epochs while L−1 and
-    12 km degraded after epoch 10.
+    The uniform policy draws over a flight's admissible SAMPLES, i.e. uniformly in TIME.
+    Pooled over flights that over-weights the near end relative to the anchor population it
+    draws from — every flight gets one draw whatever its length, and a kilometre near the
+    runway holds more samples than a kilometre at 25 km because the aircraft is slower
+    there. Measured on the whole KRDU validation split (1404 flights, 181,906 admissible
+    anchors, 200 epochs): the draws put 34.3 % under 6 km where the population has 25.1 %,
+    and 17.9 % beyond 20 km where the population has 32.9 %.
 
-    Here a flight's anchors are grouped into the `anchor_grid` strata, one of the strata the
-    flight ACTUALLY HAS anchors in is drawn uniformly, and then a sample inside it — so a
-    flight's far anchors are drawn as often as its near ones. Both draws come from the
-    flight's own per-epoch hash, exactly as the uniform policy's single draw does, so the
-    epoch's anchors are a function of (seed, epoch, flight) and nothing else.
+    Here the draw is placed uniformly across the flight's OWN admissible remaining-path span
+    and the nearest admissible anchor is taken (`anchor_strata.remaining_path_uniform_offset`)
+    — equal weight per kilometre rather than per sample, which on that cohort moves those two
+    shares to 31.0 % and 21.0 %. It comes from the same per-flight per-epoch hash the uniform
+    policy uses, so the epoch's anchors are still a function of (seed, epoch, flight) and
+    nothing else.
+
+    NOT a stratum draw: A0.b's first draft drew an `anchor_strata` stratum uniformly and then
+    a sample inside it, which moved training TOWARD the runway (review measurement on 700
+    KRDU val flights: share ≥ 20 km 16.9 % → 4.1 %, mean remaining path 12.2 → 8.0 km)
+    because the grid cuts the near end into four 2-km strata and leaves the far end ONE open
+    stratum spanning 20–123 km.
 
     Admissibility is UNCHANGED (`eligible_random_train_anchors`, the same future contract),
     so this policy trains the same cohort on the same anchor population; only which of them
@@ -1844,50 +1865,35 @@ class StratifiedRandomAnchorTrajectoryWindows(RandomAnchorTrajectoryWindows):
     """
 
     anchor_description = (
-        "one random valid train anchor per flight and epoch, uniform over remaining-path strata"
+        "one random valid train anchor per flight and epoch, uniform in remaining path"
     )
-    anchor_policy = "remaining-path-strata-random"
-    sampling_version = "per-flight-hash-v3-remaining-path-strata"
-
-    @functools.cached_property
-    def stratum_offsets(self) -> list[list[np.ndarray]]:
-        """Per flight, its stored offsets grouped by stratum — ascending, non-empty only.
-
-        The two draws are ``groups[h1 % len(groups)]`` then ``group[h2 % len(group)]``:
-        uniform over the strata this flight HAS (an absent stratum is never drawn and never
-        wastes a draw), then uniform inside the chosen one.
-        """
-        groups: list[list[np.ndarray]] = []
-        for index in range(len(self.series)):
-            start, count = self.series_ranges[index]
-            strata = self.anchor_strata[start : start + count]
-            groups.append(
-                [np.flatnonzero(strata == value) for value in np.unique(strata)]
-            )
-        return groups
+    anchor_policy = "remaining-path-uniform-random"
+    sampling_version = "per-flight-hash-v3-remaining-path-uniform"
 
     def epoch_indices(self, seed: int) -> np.ndarray:
-        groups_by_flight = self.stratum_offsets
         offsets = np.array([
-            self._draw_offset(
-                groups_by_flight[int(series_index)],
-                hashlib.sha256(
-                    f"{self.sampling_version}:{seed}:"
-                    f"{self.series[int(series_index)].dataset_id}".encode()
-                ).digest(),
+            remaining_path_uniform_offset(
+                self.anchor_remaining_path_m[start : start + count],
+                # The flight's own draw for this epoch, as a fraction of its span. One
+                # 8-byte digest read, the same construction as the uniform policy's.
+                int.from_bytes(
+                    hashlib.sha256(
+                        f"{self.sampling_version}:{seed}:"
+                        f"{self.series[int(series_index)].dataset_id}".encode()
+                    ).digest()[:8],
+                    "big",
+                ) / 2 ** 64,
             )
-            for series_index in self.eligible_series
+            for series_index, start, count in zip(
+                self.eligible_series,
+                self.range_starts[self.eligible_series],
+                self.range_counts[self.eligible_series],
+            )
         ], dtype=np.int64)
         indices = self.range_starts[self.eligible_series] + offsets
         rng = np.random.default_rng(seed)
         rng.shuffle(indices)
         return indices
-
-    @staticmethod
-    def _draw_offset(groups: list[np.ndarray], digest: bytes) -> int:
-        """The stratum from the digest's first 8 bytes, the sample inside it from the next 8."""
-        group = groups[int.from_bytes(digest[:8], "big") % len(groups)]
-        return int(group[int.from_bytes(digest[8:16], "big") % len(group)])
 
 
 #: The training window class each ``random_train_anchor_sampling`` value names. One table,
@@ -1895,7 +1901,7 @@ class StratifiedRandomAnchorTrajectoryWindows(RandomAnchorTrajectoryWindows):
 #: use" has a single answer.
 RANDOM_ANCHOR_WINDOW_CLASSES = {
     RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM: RandomAnchorTrajectoryWindows,
-    RANDOM_TRAIN_ANCHOR_SAMPLING_STRATA: StratifiedRandomAnchorTrajectoryWindows,
+    RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM: RemainingPathUniformAnchorTrajectoryWindows,
 }
 
 

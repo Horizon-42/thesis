@@ -21,7 +21,7 @@ checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
 | A0 重锚曲线（测量） | **fixed 两臂 + random 三臂都回放了（§2.4b/c）**：random 训练在第 8–10 轮后于每个锚点集退化——机制是 LR 调度器挂在停滞的选择指标上（第 60 轮 lr 9e-7）+ 锚点按时间均匀采样偏向近跑道 | `anytime_a0_20260907/`、`anytime_a0_random*_20260907/`、`a0_random_20260907/` | 门 1 过、门 2 12–16 km、门 3 被时长地板挡住；random 的 L−1 否决三臂皆败 |
-| A0.b 两条机制的修正（§2.4c） | **代码完成（2026-09-07，分支 `dev-a0b`：`12d35ce`、`23cae12`、`965077a`）；两臂未训练** | `lr_plateau_metric ∈ {selection, objective}`（调度器读验证目标而不是选择指标）+ `random_train_anchor_sampling ∈ {uniform, remaining-path-strata}`（先按剩余路程分层等概率抽层、再层内抽样本，分层边界即 `anchor_grid` 的 bin 当边界读）+ 每轮 `train_anchor_sampling.remaining_path_strata` 计数；臂 `A0b_lr_objective` / `A0b_lr_objective_strata`；测试 `tests/test_lr_plateau_metric.py`（8）+ `tests/test_random_anchor_strata.py`（18） | 读法见 §2.4c；两个默认值都是今天的行为，四条固定锚点路径逐字节等价、935 个产物重算命名 0 变化 |
+| A0.b 两条机制的修正（§2.4c） | **代码完成并过评审（2026-09-07，分支 `dev-a0b`：`12d35ce`、`23cae12`、`965077a`、`f8a1726`，评审修正见 §2.4c 实现）；两臂未训练** | `lr_plateau_metric ∈ {selection, objective}`（调度器读验证目标而不是选择指标；β 预热或 λ 对偶步下被拒）+ `random_train_anchor_sampling ∈ {uniform, remaining-path-uniform}`（在航班自身剩余路程区间上均匀抽、取最近可用锚点；**评审否掉了先抽层的写法**，分层只留作记账）+ 每轮 `train_anchor_sampling.remaining_path_strata` 与 `_population` 计数；臂 `A0b_lr_objective` / `A0b_lr_objective_path_uniform`；测试 `tests/test_lr_plateau_metric.py`（11）+ `tests/test_random_anchor_sampling.py`（27） | 读法见 §2.4c；两个默认值都是今天的行为，四条固定锚点路径逐字节等价、935 个产物重算命名 0 变化 |
 | A1.a 网格选点指标（A1 的前置：先让随机锚点臂能被正确选点） | **代码完成（2026-09-07，分支 `dev-a1`）；臂未跑** | `anchor_grid.py`（网格的唯一定义：bin、60 s 地板、逐航班锚点规则、L−1 固定分层规则；runner 改为 import 它）+ `checkpoint_selection_metric=anchor-grid-common-grid-ade`（五个锚点集的 common-grid ADE 均值，`history.json` 每轮记 `validation_anchor_grid` 块）+ 臂 `A0_random_hr8_tv1_grid`；测试 `tests/test_anchor_grid.py`（7）+ `tests/test_anchor_grid_selection.py`（17）+ `tests/test_frame_ablation_runner.py`（3） | 无门，是选点规则；旧指标逐位不变（4 臂 × 2 轮 × 232 个 history 浮点全等） |
 | A1 流式评估协议 | 未做 | `evaluation_protocol` 新增按剩余路程分 bin 的锚点网格；`compare_constraint_arms.py` 增列 | 无门，是读数 |
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
@@ -305,13 +305,18 @@ checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（ch
    8–10 轮之后变差——目标（段端点、真值时钟）与读数（稠密网格 ADE）在随机锚点模型上**分道**。
 2. **`ReduceLROnPlateau` 挂在选择指标上**：指标一停滞，学习率从第 20 轮起被逐次腰斩，第 60 轮 9e-7、第 100 轮 3e-8
    ——模型从第 30 轮起实际上不再训练，被冻在指标停滞时的状态；固定锚点臂的指标改善 100 轮以上，所以从没暴露。
-3. **锚点采样按时间均匀**：一架飞机在航迹上每个样本一个候选锚点，近跑道的样本远多于远端的（短航班只贡献近端
-   锚点），训练分布偏向小剩余路程——6 km 集持续改善、L−1 与 12 km 退化，正是这个偏斜的样子。
+3. **锚点采样按时间均匀**：每架飞机每轮抽一个样本，抽样对样本（≈对时间）均匀。**逐航班看这不算偏斜**——
+   一架飞机的可用锚点从 index 59 起、中位 84 个，按构造中位就落在 100.8，实测抽中中位 108，两者一致，所以
+   「抽中锚点中位 107」本身不是证据。**偏斜在汇总层**：每架飞机无论长短都只贡献一次抽样，而近跑道飞得慢、
+   每公里的样本数多于 25 km 处，所以把所有航班合起来看，抽样分布比**存下的可用锚点总体**更靠近跑道。实测
+   （KRDU val 全体 1404 架、20 s 契约下 181,906 个可用锚点、200 轮）：抽中 < 6 km 占 **34.3 %**，总体只占
+   **25.1 %**；抽中 ≥ 20 km 占 **17.9 %**，总体占 **32.9 %**。6 km 集持续改善、L−1 与 12 km 退化，与这个方向一致。
 
 **A0.b 预注册（待用户决定）**：两臂，同 `_grid` 配方（随机锚点 20 s、hr8+TV、网格选点、patience 180）：
 (i) `lr_plateau_metric=objective`（新 config 轴：调度器读验证目标而不是选择指标；固定锚点臂默认值不变，位级等价）；
-(ii) (i) + 锚点按剩余路程分层均匀采样（`random_train_anchor_sampling=remaining-path-strata`：先均匀抽 bin，再在 bin 内
-抽样本；同一 `eligible_random_train_anchors` 契约）。读法：L−1 / 12 km 集不再在第 10 轮后退化、最好 epoch 晚于 60；
+(ii) (i) + 锚点按剩余路程均匀采样（`random_train_anchor_sampling=remaining-path-uniform`；预注册时写的是「先抽 bin
+再在 bin 内抽样本」，评审实测该写法把训练锚点推向跑道，已按下面的实现改为在航班自身剩余路程区间上均匀抽；同一
+`eligible_random_train_anchors` 契约）。读法：L−1 / 12 km 集不再在第 10 轮后退化、最好 epoch 晚于 60；
 三臂回放对照。**否决**同前（L−1 不劣于 native32 超过种子噪声）——目前三个随机锚点臂的 L−1 都在 2949–2990，
 远超种子噪声，说明这条线的底座还没成立。
 
@@ -323,25 +328,52 @@ checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（ch
   `checkpoint_selection_metric` 决定）。`checkpoint_metadata.json` 的 `lr_scheduler.metric` 写明这一轮按哪个数
   停；run name 记 `lr-metric=objective`。测试 `tests/test_lr_plateau_metric.py`（8 项，其中 spy 逐轮断言
   `scheduler.step` 收到的值就是 history 里对应的那一列）。
-- (ii) **`random_train_anchor_sampling ∈ {uniform, remaining-path-strata}`**（默认 `uniform`；没有
-  `random_train_anchor` 时被拒）。**分层边界就是网格**：`anchor_grid.REMAINING_PATH_STRATA_EDGES_M` =
-  `DEFAULT_ANCHOR_GRID_KM` 当作**边界**读（升序 2/4/6/8/12/16/20 km），七条边界切出**八层**——两个开口端
-  `<2km`、`>=20km` 各自成层，否则落在区间外的锚点会被「按层等概率抽」悄悄丢掉；某个样本的层号 =
-  `np.digitize(remaining_path_profile_m(series), edges)`，与 bin 读的是同一条剩余路程。抽法：先在**该航班有
-  可用锚点的层**里等概率抽一层，再在层内等概率抽一个样本；两次都取自与 `uniform` 同源的逐航班逐轮 sha256
-  （前 8 字节选层、次 8 字节选样本），`sampling_version` = `per-flight-hash-v3-remaining-path-strata`，随
-  `training_anchor_contract` 进 checkpoint。**可用性契约不变**（`eligible_random_train_anchors` + 20 s），
-  两个策略存下的锚点集合逐位相同，只有每轮抽中的那一个不同。`history.json` 每轮的
-  `train_anchor_sampling.remaining_path_strata` 记**实际抽中**的锚点按层计数，**两个策略都记**——`uniform`
-  那份就是本节说的偏斜本身，其它地方读不到；计数之和 = 该轮航班数（每架一次）。run name 记
-  `anchors=remaining-path-strata`。测试 `tests/test_random_anchor_strata.py`（18 项）。
+- (ii) **`random_train_anchor_sampling ∈ {uniform, remaining-path-uniform}`**（默认 `uniform`；没有
+  `random_train_anchor` 时被拒）。抽法：把该航班这一轮的抽样值**均匀放在它自己可用锚点的剩余路程区间
+  `[min, max]` 上，取最近的可用锚点**（`anchor_strata.remaining_path_uniform_offset`）——**每公里等权**，
+  而不是每样本等权；抽样值取自与 `uniform` 同源的逐航班逐轮 sha256（前 8 字节 / 2^64），
+  `sampling_version` = `per-flight-hash-v3-remaining-path-uniform`，随 `training_anchor_contract` 进 checkpoint。
+  取「最近」而不是「夹逼」，是因为可用锚点不是等距格点（飞得快的段稀、被 eligibility 去掉的地方缺），且只有
+  一个可用锚点的航班也必须能返回它。**可用性契约不变**（`eligible_random_train_anchors` + 20 s），两个策略
+  存下的锚点集合逐位相同，只有每轮抽中的那一个不同。
+- **两条抽样律的实测对照**（KRDU val 全体 1404 架、181,906 个可用锚点、200 轮，脚本按本节配方重建队列）：
+  「总体」= 存下的可用锚点按层的份额，后两列 = 抽中锚点按层的份额。
+
+  | 剩余路程层 | 总体 | `uniform` | `remaining-path-uniform` |
+  |---|---:|---:|---:|
+  | < 2 km | 3.8 % | 5.4 % | 4.4 % |
+  | 2–4 km | 10.7 % | 14.5 % | 13.4 % |
+  | 4–6 km | 10.6 % | 14.4 % | 13.2 % |
+  | 6–8 km | 10.3 % | 13.8 % | 13.1 % |
+  | 8–12 km | 17.7 % | 23.4 % | 24.5 % |
+  | 12–16 km | 8.5 % | 7.4 % | 7.3 % |
+  | 16–20 km | 5.5 % | 3.2 % | 3.2 % |
+  | **≥ 20 km** | **32.9 %** | **17.9 %** | **21.0 %** |
+  | 均值 / p50 / p90 | 17.2 / 11.2 / 40.8 km | 12.4 / 8.3 / 32.3 km | 13.4 / 8.9 / 35.3 km |
+
+  新律把抽样**推向总体**：≥ 20 km 17.9 → 21.0 %，< 6 km 34.3 → 31.0 %，承载 12 km 锚点集的 8–16 km 段
+  30.8 → 31.8 %。**被否掉的写法**（评审实测，700 架 KRDU val）：先按层等概率抽再层内抽，方向是**反的**——
+  均值 12.2 → 8.0 km、p90 31.8 → 14.7 km、≥ 20 km 16.9 → 4.1 %、8–16 km 31.6 → 27.4 %，因为网格把近端切成四个
+  2 km 层，而远端是**一个**跨 20–123 km、装着 33 % 锚点的开口层，等权分层等于给它八分之一的概率。所以
+  **分层只留作记账**：`history.json` 每轮的 `train_anchor_sampling.remaining_path_strata` 记实际抽中的按层计数，
+  旁边 `_population` 记它们抽自的总体，**两个策略都记**——只看抽中份额说明不了过采样，只有对着总体才读得出来；
+  抽中之和 = 该轮航班数，总体之和 = 存下的可用锚点数。run name 记 `anchors=remaining-path-uniform`。
+  测试 `tests/test_random_anchor_sampling.py`（27 项）。
+- **分层的值下沉到叶子模块**：`anchor_grid` 读 `dataset`，而 `dataset` 需要同一批公里数来抽锚点，所以
+  `DEFAULT_ANCHOR_GRID_KM`、分层边界/标签、`remaining_path_strata`、抽样律搬进 `anchor_strata.py`（无 torch、
+  无 `dataset`），`anchor_grid` 原样 re-export（同一批对象，identity 测试照旧），`dataset` 直接 import。
+  边界由 `tests/test_import_boundaries.py` 钉住。
+- **`objective` 的两条拒绝**：`latent_beta_warmup_epochs > 0`（β 逐轮变，目标本身在被重新加权）与
+  `procedure_loss_dual_step > 0`（λ 逐轮更新，同一条航迹每轮定价不同）下 `lr_plateau_metric=objective` 被拒——
+  这两种情况里「目标的平台期」不是模型的平台期，调度器会直接把学习率砍穿正在爬升的 schedule。
 - **默认位级等价（实测，对 `4943724`）**：control / latent / state / closure 四条固定锚点路径的 2 轮合成训练
-  history **逐字节相同**；随机锚点 `uniform` 臂只多出 `remaining_path_strata` 这个键，342 个数值叶子（含
-  `sample_sha256`）全部不变，即 uniform 的抽样本身未被触碰。**重算命名**：`4dTrajectory/outputs` 下 935 个带
-  config 的产物（199 history.json、255 summary.json、193 fit_evaluation.json、100 experiment_manifest.json、
-  95 campaign config.json、93 其它）name / slug / 是否可加载 **0 个变化**。测试套件 680 → 706 全绿。
-- **臂**：`docs/experiments/a0_random_arms.json` 追加 `A0b_lr_objective` 与 `A0b_lr_objective_strata`（都在
-  `_grid` 配方上）。dry-run 通过，两条新 slug 尾部 `…_8-more_7cfd2b7f` / `…_9-more_b2d8c669`。**未训练**。
+  history **逐字节相同**；随机锚点 `uniform` 臂只多出 `remaining_path_strata` / `_population` 两个键，342 个
+  数值叶子（含 `sample_sha256`）全部不变，即 uniform 的抽样本身未被触碰。**重算命名**：`4dTrajectory/outputs`
+  下 935 个带 config 的产物（199 history.json、255 summary.json、193 fit_evaluation.json、
+  100 experiment_manifest.json、95 campaign config.json、93 其它；判据 = 任何含顶层 `config` 对象的 JSON，
+  外加 campaign 的 `config.json` 覆盖集按新 run 重算）name / slug / 是否可加载 **0 个变化**。测试套件 680 → **719** 全绿。
+- **臂**：`docs/experiments/a0_random_arms.json` 追加 `A0b_lr_objective` 与 `A0b_lr_objective_path_uniform`
+  （都在 `_grid` 配方上）。dry-run 通过，两条新 slug 尾部 `…_8-more_7cfd2b7f` / `…_9-more_48f49b41`。**未训练**。
 
 ### 2.5 A2 的门
 
