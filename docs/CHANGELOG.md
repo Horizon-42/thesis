@@ -4,6 +4,66 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — ts_transformer: B1.b — the two-head duration (`duration_head=two-head`), the point head drives the rollout and the quantile head publishes the ETA
+
+**The question.** B1 delivered two gains and `B1_point_matched` showed they come from different
+mechanisms and do not overlap: the PATH gain is the duration term's WEIGHT (a point head at
+`final_time_loss_weight` 26 reaches ADE 1248 / chamfer 177 against native32's 1322 / 224), and the
+ARRIVAL-TIME gain is the quantile HEAD (pooled duration MAE 23.9 vs 25.9 s, straight-in 10.3 vs
+13.6). Under `duration_head=quantile` the rollout's duration IS q50, so the quantile head's path
+cost is forced onto the trajectory to buy the arrival time. Taking both needed a head that keeps
+them apart.
+
+**The change (design §三 3.1b, pre-registered 2026-09-08; code on `dev-b1b`).**
+`duration_head` gains a third value, `two-head`. The POINT head stays `final_time_head` — the same
+class, the same state-dict keys and the same rollout duration `point` has — and the quantile head is
+a second module `duration_quantile_head` beside it, emitting nothing but the published distribution.
+`config.DURATION_HEADS_WITH_QUANTILES` / `DURATION_HEADS_WITH_POINT` are the two predicates every
+consumer now asks (records, `forecast.duration_quantile_predictions`, `run_ts_eta_calibration.py`,
+`predict --cta-from-quantiles`), so "does this checkpoint publish an interval" cannot drift from the
+head table. `ControlFeatureModel.quantile_head()` is the one rule for WHICH module the quantiles
+come from — a method, not an attribute, because binding one module under two names would publish
+every one of its tensors twice in `state_dict`.
+
+**Two terms, two weights.** `final_time` stays the point head's squared residual at
+`final_time_loss_weight` under `point` and `two-head`; the pinball sum rides in a component of its
+OWN, `duration_quantile`, at the new `duration_quantile_loss_weight` (default 1.0), and
+`loss_component_names` gains that entry under `two-head` and nowhere else. Under `quantile` the
+pinball keeps the name `final_time` (B1's contract — every stored history row keys on it) but is now
+multiplied by the new field: both defaults are 1.0 and a non-default `final_time_loss_weight` is
+refused there, so the number is the one it always was.
+
+**Four refusals, each naming its reason.** `two-head` off the control output; `two-head` with
+`latent_dim > 0` (the same reason as `quantile` — training decodes a posterior sample, so the five
+would be quantiles of p(T | z ~ q(z | this flight's own future)), an interval conditioned on the
+answer); a non-default `final_time_loss_weight` under `quantile` (no point term to weigh — every
+stored `quantile` run carries the default, so nothing on disk is refused by it); a non-default
+`duration_quantile_loss_weight` under `point` (no such head). The named recipes still pin the head
+at `point` and deliberately do NOT pin the new weight: with the head pinned, a non-default value is
+already refused, and a bound that cannot bind reads as though it had.
+
+**The readout separates the two heads.** `run_ts_eta_error_readout.py`'s `final_time_error_s` is the
+error of the duration the ROLLOUT flew — the POINT head under `two-head` — so an arm whose rows carry
+`duration_quantiles_s` now also gets a `duration_q50_error_s` block, derived as `q50 − truth` from
+the row's own published fields (no new stored number to disagree with them). **Gate 1 of §三 3.1b
+reads its MAE**; every block gained `mae` beside the quantiles, and `RESULT_SCHEMA` is
+`ts-eta-error-readout-b0-v3`. Under `quantile` the two blocks are the same measurement twice.
+`control/training/diagnostics.py` counts the second head's gradients in the `final_time_head` group,
+not the backbone's.
+
+**Naming.** `T=2h` (a second `_VALUE_ABBREV` entry beside `T=q5`); the new weight enters
+`CONTROL_LOSS_FIELDS` and shows only when it deviates (`pinball=3`). `B1b_two_head` dry-runs as
+`control · iTransformer · first-order-lag @scaled-transport-chart-velocity · simple-v3+(final-time=26)
+· T=2h, …` — the arm sets the pinball weight at its default, so it does not appear.
+
+**Verified.** Bit-exact at every pre-existing value: 2-epoch synthetic trains for control / latent
+k=1 / latent k=4 / state / closure / cta=given / **quantile** / **cta=given+quantile** against
+`39e86ce`, comparing every history float, the state-dict digest and a forecast digest — **2021
+non-wall-clock leaves, 0 differ**; the only added leaf is `/config/duration_quantile_loss_weight`.
+Names recounted over every stored run config on disk: **175 configs, 0 renamed, 0 errors**. Suite
+**830 passed, 1 skipped** (809 + 21 in `tests/test_two_head_duration.py`). The arm file
+`docs/experiments/b1b_two_head_arms.json` needed no change — its field names were already these.
+
 ### 2026-09-08 — ts_transformer: hard procedure constraints in training — literature survey (83 papers) and the H0–H6 integration plan
 
 **The question.** How to put the final-approach corridor + glidepath window into the TRAINING of

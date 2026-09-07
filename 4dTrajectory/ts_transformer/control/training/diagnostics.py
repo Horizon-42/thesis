@@ -24,7 +24,11 @@ SATURATION_THRESHOLD_FRACTION = 0.01
 def _gradient_group(parameter_name: str) -> str:
     if parameter_name.startswith("control_head."):
         return "control_head"
-    if parameter_name.startswith(("final_time_head.", "global_duration_head.")):
+    # B1.b's second head is a duration head too: without it, its gradients would be
+    # reported as the backbone's and the two heads' norms could not be read apart.
+    if parameter_name.startswith(
+        ("final_time_head.", "global_duration_head.", "duration_quantile_head.")
+    ):
         return "final_time_head"
     return "backbone"
 

@@ -34,6 +34,7 @@ from config import (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     DURATION_HEAD_QUANTILE,
+    DURATION_HEAD_TWO_HEAD,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -71,6 +72,11 @@ STATE_TARGET_CONTRACTS = {
 
 STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal", "procedure")
 CONTROL_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
+#: B1.b: the quantile head's own component, present under `duration_head='two-head'` alone.
+#: Under `quantile` the pinball sum REPLACED the point term and kept the name `final_time`
+#: (B1, and every stored history row keys on it); under `two-head` both terms exist, so
+#: neither can be read out of the other and the pinball gets a name of its own.
+DURATION_QUANTILE_COMPONENT = "duration_quantile"
 # The closure output's regression groups wear the four fixed names (LossComponents
 # always emits them): state = geometry, final_time = slowness in seconds, kinematic =
 # height, terminal = 0.
@@ -179,6 +185,9 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
         # The auxiliary target is opt-in; the adapter below adds it under the same
         # condition, and the two must be read together.
         *((LATENT_AUX_COMPONENT,) if config.latent_aux_duration_weight else ()),
+        # B1.b: the pinball sum beside the point term, never instead of it.
+        *((DURATION_QUANTILE_COMPONENT,)
+          if config.duration_head == DURATION_HEAD_TWO_HEAD else ()),
     )
 
 
@@ -666,16 +675,34 @@ def control_prediction_loss_terms(
             multipliers,
         )
         procedure_extra = {"procedure": procedure}
-    # B1: the quantile head REPLACES the point head's squared residual with the sum of the
-    # five pinball losses — same component name, same units, same weight — so
-    # `loss_component_names` is unchanged and every history row and readout keys on
-    # `final_time` exactly as before.
+    # B1: under `quantile` the sum of the five pinball losses REPLACES the point head's
+    # squared residual — same component name, same units — so `loss_component_names` is
+    # unchanged and every history row and readout keys on `final_time` exactly as before.
+    # Its weight moved to `duration_quantile_loss_weight` when B1.b split the two terms;
+    # both default to 1.0 and `final_time_loss_weight` is refused off its default under
+    # `quantile`, so the number multiplying the pinball there is the one it always was.
+    time_loss_weight = (
+        config.duration_quantile_loss_weight
+        if config.duration_head == DURATION_HEAD_QUANTILE
+        else config.final_time_loss_weight
+    )
     time_loss = (
         pinball_duration_loss(
             prediction.duration_quantiles_s, target_final_time_s, config.final_time_scale_s
         )
         if config.duration_head == DURATION_HEAD_QUANTILE
         else ((prediction.final_time_s - target_final_time_s) / config.final_time_scale_s).square()
+    )
+    # B1.b: `two-head` has BOTH heads, so `final_time` above stays the POINT head's squared
+    # residual at its own weight (the term the ROLLOUT's duration comes from) and the
+    # pinball sum rides beside it in its own component — the two gains B1 delivered priced
+    # independently, which is the whole construction.
+    duration_quantile_extra = (
+        {DURATION_QUANTILE_COMPONENT: config.duration_quantile_loss_weight
+         * pinball_duration_loss(
+             prediction.duration_quantiles_s, target_final_time_s, config.final_time_scale_s
+         )}
+        if config.duration_head == DURATION_HEAD_TWO_HEAD else {}
     )
     tracking = control_tracking_loss_terms(
         rollout_loss,
@@ -688,9 +715,9 @@ def control_prediction_loss_terms(
 
     return ControlLossTerms(
         state=tracking.state,
-        final_time=config.final_time_loss_weight * time_loss,
+        final_time=time_loss_weight * time_loss,
         terminal=tracking.terminal_position,
-        extras={**tracking.extras, **procedure_extra},
+        extras={**tracking.extras, **procedure_extra, **duration_quantile_extra},
         diagnostics={**rollout_loss.hook_diagnostics, **procedure_diagnostics},
     )
 

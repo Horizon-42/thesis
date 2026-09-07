@@ -78,7 +78,7 @@ from calibration import (  # noqa: E402
     render,
     write_conformal_table,
 )
-from config import DURATION_HEAD_QUANTILE  # noqa: E402
+from config import DURATION_HEADS_WITH_QUANTILES  # noqa: E402
 from dataset import truth_duration_s  # noqa: E402
 from forecast import default_anchor, duration_quantile_predictions  # noqa: E402
 from io_utils import file_sha256  # noqa: E402
@@ -100,7 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
     )
     parser.add_argument("--checkpoint", type=Path, required=True,
-                        help="a checkpoint trained with duration_head=quantile")
+                        help="a checkpoint whose duration head emits quantiles "
+                             "(duration_head=quantile or two-head)")
     parser.add_argument("--out", type=Path, required=True,
                         help="directory for the readout (the table itself goes into the "
                              "checkpoint's own checkpoint_metadata.json)")
@@ -151,11 +152,11 @@ def main(argv: list[str] | None = None) -> int:
         "calibration", args.checkpoint, grid, device,
         instrument=CALIBRATION_INSTRUMENT, refuse_cta_given=False,
     )
-    if arm.config.duration_head != DURATION_HEAD_QUANTILE:
+    if arm.config.duration_head not in DURATION_HEADS_WITH_QUANTILES:
         raise SystemExit(
             f"{args.checkpoint}: duration_head={arm.config.duration_head!r} emits one number, "
-            "and there is no interval to calibrate. Train the arm with "
-            f"duration_head={DURATION_HEAD_QUANTILE!r} (B1)"
+            "and there is no interval to calibrate. Train the arm with duration_head in "
+            f"{DURATION_HEADS_WITH_QUANTILES} (B1 / B1.b)"
         )
     metadata_path = args.checkpoint.parent / "checkpoint_metadata.json"
     if not args.readout_only and not metadata_path.is_file():

@@ -118,13 +118,25 @@ CTA_CONDITIONINGS = (
 CTA_CONDITIONINGS_AVAILABLE = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
 CTA_FIELDS = ("cta_conditioning",)
 
-# The duration head (B1, §三 3.1). ``point`` is the package's original scalar
-# ``FinalTimeHead``; ``quantile`` is ``prediction_outputs.QuantileFinalTimeHead`` — five
-# monotone quantiles of the SAME quantity, trained by the sum of their pinball losses in
-# place of the point head's squared error (the loss component keeps the name ``final_time``).
+# The duration head (B1, §三 3.1; B1.b, §三 3.1b). ``point`` is the package's original
+# scalar ``FinalTimeHead``; ``quantile`` is ``prediction_outputs.QuantileFinalTimeHead`` —
+# five monotone quantiles of the SAME quantity, trained by the sum of their pinball losses
+# in place of the point head's squared error (the loss component keeps the name
+# ``final_time``); ``two-head`` carries BOTH — the point head drives the rollout duration
+# exactly as under ``point``, and the quantile head emits nothing but the published ETA
+# distribution. `B1_point_matched` dissociated the two gains B1 delivered: the PATH gain is
+# the duration term's weight (point head) and the ARRIVAL-TIME gain is the quantile head,
+# and they do not overlap. ``two-head`` takes both without the quantile head's path cost
+# being forced onto the rollout.
 DURATION_HEAD_POINT = "point"
 DURATION_HEAD_QUANTILE = "quantile"
-DURATION_HEADS = (DURATION_HEAD_POINT, DURATION_HEAD_QUANTILE)
+DURATION_HEAD_TWO_HEAD = "two-head"
+DURATION_HEADS = (DURATION_HEAD_POINT, DURATION_HEAD_QUANTILE, DURATION_HEAD_TWO_HEAD)
+#: WHICH head exists under each value — the two predicates every consumer asks, written
+#: once, so "does this checkpoint publish an interval" and "does a point estimate drive the
+#: rollout" cannot drift apart from the table above.
+DURATION_HEADS_WITH_QUANTILES = (DURATION_HEAD_QUANTILE, DURATION_HEAD_TWO_HEAD)
+DURATION_HEADS_WITH_POINT = (DURATION_HEAD_POINT, DURATION_HEAD_TWO_HEAD)
 #: The quantile levels, in order. ONE definition: the head, the pinball loss, the record
 #: field, `calibration.py` and every readout read this tuple, so "the five quantiles" cannot
 #: become two different sets of five. §六 6: these are quantiles of the DURATION, never of
@@ -432,6 +444,11 @@ DEFAULT_N_SEGMENTS = DEFAULT_N_SEGMENTS_BY_MODEL[MODELS[0]]
 # ``final_time_s`` is emitted in physical seconds.  The scale only nondimensionalizes its
 # loss; it is not a duration cap and does not change the value returned at inference.
 DEFAULT_FINAL_TIME_SCALE_S = 600.0
+# The two duration-term weights, one per head. Named because the refusals below compare
+# against them: a weight that has no term to weigh under the configured head is refused,
+# and "non-default" has to mean exactly one number to both the field and the refusal.
+DEFAULT_FINAL_TIME_LOSS_WEIGHT = 1.0
+DEFAULT_DURATION_QUANTILE_LOSS_WEIGHT = 1.0
 DEFAULT_POSITION_LOSS_SCALE_M = 10_000.0
 DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S = 60.0
 DEFAULT_VALIDATION_COMMON_GRID_POINTS = 64
@@ -689,7 +706,10 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "control_duration_uniform_floor": 0.0,
         # A named recipe is a published DETERMINISTIC point-estimate arm: like the seven
         # `latent_*` fields, the duration head is pinned at its default here, so a QUANTILE
-        # run is `custom` and its name carries `T=q5` instead of hiding behind a recipe.
+        # or TWO-HEAD run is `custom` and its name carries `T=q5` / `T=2h` instead of hiding
+        # behind a recipe. `duration_quantile_loss_weight` is deliberately NOT pinned beside
+        # it: with the head pinned at `point`, a non-default value is already refused
+        # outright, and a bound that cannot bind reads as though it had.
         "duration_head": "point",
         "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
         "control_dynamics_model": CONTROL_DYNAMICS_POINT_MASS,
@@ -915,7 +935,16 @@ class TSConfig:
     # not diluted by the rest of the short extrapolated tail.
     fitted_tail_position_weight: float = 0.25
     fitted_terminal_position_weight: float = 1.0
-    final_time_loss_weight: float = 1.0
+    # What weighs the POINT head's squared duration residual. Under `duration_head`
+    # `quantile` there is no point term, and a non-default value here is refused rather
+    # than silently weighing nothing.
+    final_time_loss_weight: float = DEFAULT_FINAL_TIME_LOSS_WEIGHT
+    # ...and what weighs the QUANTILE head's five pinball losses (B1.b). Under `quantile`
+    # it multiplies the `final_time` component the pinball sum replaced (default 1.0, which
+    # is the number that multiplied it before this field existed); under `two-head` it is
+    # the weight of the SEPARATE `duration_quantile` component beside the point term. Under
+    # `point` there is no such term and a non-default value is refused.
+    duration_quantile_loss_weight: float = DEFAULT_DURATION_QUANTILE_LOSS_WEIGHT
     # One explicit output-endpoint task prevents the last physical position from being
     # diluted to 1/N of the whole-path objective. It uses the same physical position scale
     # as the path loss; the 0.25 coefficient is frozen by the development Pareto audit.
@@ -996,9 +1025,11 @@ class TSConfig:
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
-    # WHAT the duration head emits (DURATION_HEADS, B1): one point estimate, or the five
-    # DURATION_QUANTILES. `quantile` belongs to the control output only, and its median walks
-    # the existing `final_time_s` contract, so every downstream reader is unchanged.
+    # WHAT the duration head emits (DURATION_HEADS, B1/B1.b): one point estimate, the five
+    # DURATION_QUANTILES, or both. Every value but `point` belongs to the control output
+    # only. Under `quantile` the median walks the existing `final_time_s` contract (it IS
+    # the duration the rollout flies); under `two-head` the POINT head walks it and the
+    # quantiles are published beside it. Either way every downstream reader is unchanged.
     duration_head: str = DURATION_HEAD_POINT
     control_velocity_loss_scale_mps: float = 10.0
     # Direct supervision of the control schedule against the one inverted from the flown
@@ -1361,6 +1392,8 @@ class TSConfig:
             raise ValueError("fitted_terminal_position_weight must be non-negative")
         if self.final_time_loss_weight < 0.0:
             raise ValueError("final_time_loss_weight must be non-negative")
+        if self.duration_quantile_loss_weight < 0.0:
+            raise ValueError("duration_quantile_loss_weight must be non-negative")
         if self.state_endpoint_loss_weight < 0.0:
             raise ValueError("state_endpoint_loss_weight must be non-negative")
         if self.kinematic_consistency_loss_weight < 0.0:
@@ -1543,12 +1576,13 @@ class TSConfig:
             raise ValueError(
                 f"unknown duration_head {self.duration_head!r}; expected one of {DURATION_HEADS}"
             )
-        if self.duration_head == DURATION_HEAD_QUANTILE:
+        if self.duration_head in DURATION_HEADS_WITH_QUANTILES:
             if self.prediction_output != PREDICTION_CONTROL:
                 raise ValueError(
-                    "the quantile duration head is the control path's (B1): its median is the "
-                    "duration the rollout flies and the other four are a record field; "
-                    f"prediction_output={self.prediction_output!r} has no such head"
+                    f"duration_head={self.duration_head!r} publishes a duration interval "
+                    "beside a rolled-out schedule, and that head is the control path's "
+                    f"(B1 / B1.b); prediction_output={self.prediction_output!r} has no "
+                    "such head"
                 )
             if self.latent_dim > 0:
                 # Not a plumbing limitation. `control/latent.py` reaches the duration by
@@ -1558,12 +1592,38 @@ class TSConfig:
                 # five would be quantiles of p(T | z ~ q(z | this flight's own future)) — an
                 # interval conditioned on the answer, which B2 would then calibrate as if it
                 # were p(T | history). The combination is refused rather than approximated.
+                # `two-head` is refused for the SAME reason: its quantile head is trained
+                # under the posterior sample exactly as the single one would be, and it is
+                # the head B2 calibrates whichever head drives the rollout.
                 raise ValueError(
-                    "duration_head='quantile' and latent_dim > 0 are refused together: z "
-                    "reaches the duration by shifting the point head's single logit, and "
-                    "under a posterior sample the quantiles would be conditioned on the "
-                    "flight's own future — not a predictive interval to calibrate"
+                    f"duration_head={self.duration_head!r} and latent_dim > 0 are refused "
+                    "together: z reaches the duration by shifting the point head's single "
+                    "logit, and under a posterior sample the quantiles would be conditioned "
+                    "on the flight's own future — not a predictive interval to calibrate"
                 )
+        # B1.b: each duration weight is refused where its term does not exist, rather than
+        # being carried into the checkpoint as a number that changed nothing. Under
+        # `quantile` the pinball sum REPLACED the point term, so `final_time_loss_weight`
+        # has nothing to weigh (every stored `quantile` run carries the default);
+        # symmetrically, `point` has no pinball sum. `two-head` is the one value where both
+        # weights bind, which is the whole point of it.
+        if (self.duration_head == DURATION_HEAD_QUANTILE
+                and self.final_time_loss_weight != DEFAULT_FINAL_TIME_LOSS_WEIGHT):
+            raise ValueError(
+                f"final_time_loss_weight={self.final_time_loss_weight!r} weighs the POINT "
+                "head's squared duration residual, and duration_head='quantile' has no "
+                "point term — the pinball sum replaced it under the same component name. "
+                "Weigh the pinball with duration_quantile_loss_weight, or take the point "
+                f"term back with duration_head={DURATION_HEAD_TWO_HEAD!r}"
+            )
+        if (self.duration_head == DURATION_HEAD_POINT
+                and self.duration_quantile_loss_weight != DEFAULT_DURATION_QUANTILE_LOSS_WEIGHT):
+            raise ValueError(
+                f"duration_quantile_loss_weight={self.duration_quantile_loss_weight!r} "
+                "weighs the QUANTILE head's pinball losses, and duration_head='point' has "
+                f"no such head; select duration_head={DURATION_HEAD_QUANTILE!r} or "
+                f"{DURATION_HEAD_TWO_HEAD!r}"
+            )
         if self.latent_dim > 0 and self.checkpoint_selection_metric == CHECKPOINT_SELECTION_OBJECTIVE:
             raise ValueError(
                 "a latent control run cannot select its checkpoint on the validation objective: "

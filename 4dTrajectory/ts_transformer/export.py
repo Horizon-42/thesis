@@ -144,6 +144,9 @@ def build_prediction_record(
         "horizonMode": horizon_mode,
         "forecastPasses": forecast.passes,
         "predictedFinalTimeS": forecast.final_time_s,
+        # The duration the head handed the rollout, before truncation/capping. Under
+        # `two-head` this is the POINT head's; the quantile head rides out below and the two
+        # are not the same number.
         "durationHeadFinalTimeS": forecast.predicted_final_time_s,
         "truncatedAtThreshold": forecast.truncated_at_threshold,
         "horizonCapped": forecast.horizon_capped,
@@ -176,7 +179,10 @@ def build_prediction_record(
            if forecast.cta_s is not None else {}),
         # B1, quantile duration head: all five DURATION_QUANTILES in seconds, in level
         # order — the median included, so the record is a complete interval and a reader
-        # never has to splice `durationHeadFinalTimeS` back into position 2.
+        # never has to splice `durationHeadFinalTimeS` back into position 2. Under B1.b's
+        # `two-head` those are two DIFFERENT numbers on purpose: `durationHeadFinalTimeS` is
+        # the POINT head's duration (the one the states above were rolled over) and this is
+        # the quantile head's distribution (the one B2 calibrates and B3 decodes).
         **({"durationQuantilesS": [float(value) for value in forecast.duration_quantiles_s],
             # B2: `calibrated` is written for EVERY quantile record — false is the claim
             # that this checkpoint has no conformal table, and a reader must not have to

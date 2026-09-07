@@ -17,7 +17,7 @@ import numpy as np
 
 from config import (
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
-    DURATION_HEAD_QUANTILE,
+    DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
     DURATION_QUANTILES,
     TSConfig,
@@ -356,10 +356,11 @@ def run_cli(
             parser.error("--cta-from-quantiles needs a checkpoint trained with "
                          "cta_conditioning=given: without the CTA token the decoder has "
                          "nowhere to put the quantile")
-        if config.duration_head != DURATION_HEAD_QUANTILE:
-            parser.error("--cta-from-quantiles needs a checkpoint trained with "
-                         f"duration_head={DURATION_HEAD_QUANTILE!r}; a point head has one "
-                         "duration and there is no fan to decode")
+        if config.duration_head not in DURATION_HEADS_WITH_QUANTILES:
+            parser.error("--cta-from-quantiles needs a checkpoint whose duration head emits "
+                         f"quantiles ({', '.join(DURATION_HEADS_WITH_QUANTILES)}); "
+                         f"duration_head={config.duration_head!r} has one duration and "
+                         "there is no fan to decode")
         if args.cta_offset_s:
             parser.error("--cta-from-quantiles and --cta-offset-s are two different arms: "
                          "the first reads the model's own duration, the second shifts the "
@@ -409,7 +410,7 @@ def run_cli(
     # the weights by sha256 — a table left over from another checkpoint RAISES rather than
     # widening this run's intervals by someone else's delta.
     conformal = None
-    if config.duration_head == DURATION_HEAD_QUANTILE:
+    if config.duration_head in DURATION_HEADS_WITH_QUANTILES:
         conformal = load_conformal_table(args.checkpoint, file_sha256(Path(args.checkpoint)))
         if conformal is None:
             print("  quantile duration head, NOT calibrated: records carry the raw "

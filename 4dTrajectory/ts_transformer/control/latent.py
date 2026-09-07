@@ -320,9 +320,9 @@ class LatentControlModel(ControlFeatureModel):
             nn.GELU(),
             nn.LayerNorm(config.d_model),
         )
-        # `TSConfig` refuses `duration_head='quantile'` with a latent, so this is the point
-        # head; the builder is shared so the two models cannot diverge on the one head that
-        # is allowed here.
+        # `TSConfig` refuses every quantile-bearing `duration_head` with a latent, so this
+        # is the point head; the builder is shared so the two models cannot diverge on the
+        # one head that is allowed here.
         self.final_time_head = duration_head_for(config)
         # z's path to the duration: an additive term on the head's unconstrained logit, zero
         # at initialization so the duration starts exactly where the plain head would. A
@@ -334,7 +334,7 @@ class LatentControlModel(ControlFeatureModel):
             self.latent_duration.bias.zero_()
         self.control_head = control_head_for(config)
         _initialize_control_head(self.control_head)
-        _initialize_duration_head(self.final_time_head, config)
+        _initialize_duration_head(self.final_time_head)
         # The auxiliary intent target (L2.f): built only when it is weighted, so a
         # checkpoint trained without it has no such parameters to load. It reads the
         # POSTERIOR SAMPLE and nothing else, and `decode` never calls it — z's path to the

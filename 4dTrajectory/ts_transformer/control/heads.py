@@ -18,6 +18,9 @@ from config import (
     CTA_CONDITIONING_OFF,
     DURATION_HEAD_POINT,
     DURATION_HEAD_QUANTILE,
+    DURATION_HEAD_TWO_HEAD,
+    DURATION_HEADS_WITH_POINT,
+    DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
 )
 from prediction_outputs import (
@@ -46,7 +49,10 @@ class ControlFeatureModel(nn.Module):
         # model's own duration quantiles — because they differ in WHERE the number comes
         # from, not in what the network does with it.
         self.cta_given = config.cta_conditioning != CTA_CONDITIONING_OFF
-        self.quantile_duration = config.duration_head == DURATION_HEAD_QUANTILE
+        # WHICH duration heads this run carries. Both are True only under `two-head`, where
+        # the point head drives the rollout and the quantile head is published beside it.
+        self.quantile_duration = config.duration_head in DURATION_HEADS_WITH_QUANTILES
+        self.point_duration = config.duration_head in DURATION_HEADS_WITH_POINT
         self.cta_scale_s = config.final_time_scale_s
         self.cta_encoder = (
             nn.Sequential(nn.Linear(1, config.d_model), nn.GELU()) if self.cta_given else None
@@ -56,6 +62,11 @@ class ControlFeatureModel(nn.Module):
             nn.GELU(),
             nn.LayerNorm(config.d_model),
         )
+        # The SECOND duration head (B1.b), or None under every other value. It is built
+        # here, in the base, because `duration_quantiles` below reads it and both control
+        # models inherit that rule; `final_time_head` stays the subclasses' to build,
+        # because WHAT it is depends on the same axis (see `duration_head_for`).
+        self.duration_quantile_head = quantile_duration_head_for(config)
 
     def fused_features(
         self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]
@@ -68,6 +79,22 @@ class ControlFeatureModel(nn.Module):
             parts.append(self.cta_encoder(cta))
         return self.feature_fusion(torch.cat(parts, dim=-1))
 
+    def quantile_head(self) -> QuantileFinalTimeHead | None:
+        """WHICH module holds the quantiles, or None under ``point``.
+
+        Under ``quantile`` the duration head IS the quantile head (``final_time_head``, so
+        the state-dict keys are the ones B1 trained); under ``two-head`` it is the second
+        head beside it. A method rather than an attribute because binding the same module
+        under two names would publish it twice in ``state_dict``.
+        """
+        if not self.quantile_duration:
+            return None
+        return (
+            self.duration_quantile_head
+            if self.duration_quantile_head is not None
+            else self.final_time_head
+        )
+
     def duration_quantiles(self, history: torch.Tensor) -> torch.Tensor | None:
         """The five ``DURATION_QUANTILES`` in seconds, ``[B, Q]``; None under the point head.
 
@@ -75,7 +102,8 @@ class ControlFeatureModel(nn.Module):
         reaches the control head, not this one. That is what lets B3 ask a ``given``
         checkpoint for its own quantiles without handing it an arrival time first.
         """
-        return self.final_time_head(history) if self.quantile_duration else None
+        head = self.quantile_head()
+        return None if head is None else head(history)
 
     def duration(
         self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]
@@ -84,6 +112,11 @@ class ControlFeatureModel(nn.Module):
 
         The ONE rule for both, so a duration head cannot be read twice per forward pass —
         with dropout live in training, two calls are two different answers.
+
+        WHICH number the rollout gets is the whole of `duration_head`: the point head's
+        under ``point`` and ``two-head`` (B1.b: the quantile head then trains beside it and
+        touches the path only through the shared trunk), the MEDIAN quantile under
+        ``quantile`` (B1: it walks the `final_time_s` contract).
 
         Under a CTA the duration IS the CTA. The POINT head is then INERT for the life of
         the run — never called, never trained, kept at its initialization — so a given
@@ -94,8 +127,8 @@ class ControlFeatureModel(nn.Module):
         quantiles = self.duration_quantiles(history)
         if self.cta_given:
             return dynamics["cta_s"].to(history.dtype), quantiles
-        if quantiles is None:
-            return self.final_time_head(history), None
+        if self.point_duration:
+            return self.final_time_head(history), quantiles
         return quantiles[:, DURATION_MEDIAN_INDEX], quantiles
 
 
@@ -150,33 +183,53 @@ def _quantile_increment_bias(raw_bias: float) -> float:
     return math.log(math.expm1(share))
 
 
-#: The last-layer bias each duration head starts from, per `duration_head`. One table, so
-#: "where the duration starts" is written once for both heads.
+#: The last-layer bias each duration head starts from, keyed by the head's TYPE rather than
+#: by `duration_head` — under `two-head` one config builds one of each, and "where the
+#: duration starts" is a property of the head, written once.
 _DURATION_HEAD_INITIAL_BIAS = {
-    DURATION_HEAD_POINT: lambda raw_bias: raw_bias,
-    DURATION_HEAD_QUANTILE: _quantile_increment_bias,
+    FinalTimeHead: lambda raw_bias: raw_bias,
+    QuantileFinalTimeHead: _quantile_increment_bias,
 }
 
 
 def _initialize_duration_head(
-    head: FinalTimeHead | QuantileFinalTimeHead, config: TSConfig, raw_bias: float = 0.0
+    head: FinalTimeHead | QuantileFinalTimeHead, raw_bias: float = 0.0
 ) -> None:
     with torch.no_grad():
         final_layer = head.network[-1]
         final_layer.weight.zero_()
-        final_layer.bias.fill_(_DURATION_HEAD_INITIAL_BIAS[config.duration_head](raw_bias))
+        final_layer.bias.fill_(_DURATION_HEAD_INITIAL_BIAS[type(head)](raw_bias))
 
 
 #: The duration head per `duration_head` — the ONE construction site, like `control_head_for`
 #: below, so the deterministic model and the latent model cannot build different heads.
+#: Under `two-head` this is the POINT head: same class, same `final_time_head.*` state-dict
+#: keys and the same rollout duration as `point`, with the quantile head added beside it by
+#: `quantile_duration_head_for`.
 _DURATION_HEADS = {
     DURATION_HEAD_POINT: FinalTimeHead,
     DURATION_HEAD_QUANTILE: QuantileFinalTimeHead,
+    DURATION_HEAD_TWO_HEAD: FinalTimeHead,
 }
 
 
 def duration_head_for(config: TSConfig) -> FinalTimeHead | QuantileFinalTimeHead:
     return _DURATION_HEADS[config.duration_head](config)
+
+
+def quantile_duration_head_for(config: TSConfig) -> QuantileFinalTimeHead | None:
+    """The SECOND duration head — built under `two-head` alone, initialized with it.
+
+    None everywhere else, and that None is load-bearing: it is what
+    ``ControlFeatureModel.quantile_head`` reads to decide whether the quantiles come from a
+    head of their own or from ``final_time_head`` itself, and it is why a `point` or
+    `quantile` run registers not one parameter more than it did before B1.b.
+    """
+    if config.duration_head != DURATION_HEAD_TWO_HEAD:
+        return None
+    head = QuantileFinalTimeHead(config)
+    _initialize_duration_head(head)
+    return head
 
 
 # The control head per duration parameterization — the ONE construction site, so the
@@ -203,7 +256,7 @@ class ControlOutputModel(ControlFeatureModel):
         self.final_time_head = duration_head_for(config)
         self.control_head = control_head_for(config)
         _initialize_control_head(self.control_head)
-        _initialize_duration_head(self.final_time_head, config)
+        _initialize_duration_head(self.final_time_head)
 
     def forward(self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]):
         features = self.fused_features(history, dynamics)
