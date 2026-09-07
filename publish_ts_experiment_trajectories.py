@@ -4,7 +4,10 @@
 The script is intentionally an orchestration layer.  It does not define another trajectory
 or evaluation format; every job calls the existing predictor, the shared ``evaluation`` package,
 and the existing comparison-CZML publisher in that order.  Publications are resumable and kept
-under a checkpoint-specific raw-output directory. ``--result-source prediction`` publishes a
+under a checkpoint-specific raw-output directory.  ``--reuse-prediction-dir`` publishes the
+records a campaign already wrote (its extra predict flags — latent sampling, closure labels,
+a given CTA — are not reconstructable from the checkpoint alone) instead of predicting again;
+that directory is read-only here. ``--result-source prediction`` publishes a
 primary result under Prediction; the default ``experiment`` source includes checkpoint metadata
 for the Experiments picker.
 
@@ -209,6 +212,7 @@ class PublicationPlan:
     frontend_airports_root: Path = FRONTEND_AIRPORTS_ROOT
     device: str = "auto"
     record_retention: str = "archive"
+    prediction_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if self.split not in DEVELOPMENT_SPLITS:
@@ -220,6 +224,10 @@ class PublicationPlan:
             raise ValueError(f"unknown result source {self.result_source!r}")
         if self.record_retention not in {"loose", "archive"}:
             raise ValueError(f"unknown record retention {self.record_retention!r}")
+        if self.prediction_dir is not None and not (self.prediction_dir / "summary.json").is_file():
+            raise ValueError(
+                f"reused prediction directory {self.prediction_dir} has no summary.json"
+            )
 
     @property
     def data_manifest(self) -> Path:
@@ -240,8 +248,18 @@ class PublicationPlan:
         )
 
     @property
+    def records_dir(self) -> Path:
+        """Where the per-flight records and their summary.json live.
+
+        The predict step writes them into ``output_dir``; ``--reuse-prediction-dir`` instead
+        points at a directory an experiment campaign already produced (which this command then
+        only ever reads — it is not ours to archive or delete).
+        """
+        return self.prediction_dir or self.output_dir
+
+    @property
     def summary(self) -> Path:
-        return self.output_dir / "summary.json"
+        return self.records_dir / "summary.json"
 
     @property
     def evaluation_report(self) -> Path:
@@ -315,15 +333,17 @@ class PublicationPlan:
                 "--experiment-group", self.experiment.campaign,
                 "--experiment-checkpoint", self.experiment.checkpoint_relative,
             ]
-        return [
-            ("predict", predict),
+        steps = [
             ("evaluate", [
                 py, "-m", "evaluation",
-                "--input", str(self.output_dir),
+                "--input", str(self.records_dir),
                 "--output", str(self.evaluation_report),
             ]),
             ("publish-czml", publish),
         ]
+        if self.prediction_dir is None:
+            steps.insert(0, ("predict", predict))
+        return steps
 
     def preflight_error(self) -> str | None:
         if not self.experiment.checkpoint.is_file():
@@ -350,6 +370,19 @@ class PublicationPlan:
                 return (
                     f"eligibility roster SHA-256 mismatch for {self.airport}: "
                     f"checkpoint={expected_roster}, current={actual_roster}"
+                )
+        if self.prediction_dir is not None:
+            reused = _load_object(self.summary)
+            produced_by = Path(str(reused.get("checkpoint") or ""))
+            if produced_by.resolve() != self.experiment.checkpoint.resolve():
+                return (
+                    f"reused predictions in {self.prediction_dir} were produced by "
+                    f"{produced_by}, not {self.experiment.checkpoint}"
+                )
+            if reused.get("split") != self.split:
+                return (
+                    f"reused predictions in {self.prediction_dir} are the "
+                    f"{reused.get('split')!r} split, not {self.split!r}"
                 )
         return None
 
@@ -525,6 +558,10 @@ def _publication_document(
         "resultSource": plan.result_source,
         "category": plan.category,
         "rawOutputDir": _path_for_manifest(plan.output_dir),
+        "predictionDir": (
+            _path_for_manifest(plan.prediction_dir)
+            if plan.prediction_dir is not None else None
+        ),
         "frontendDir": _path_for_manifest(plan.comparison_dir),
         "completedSteps": list(completed_steps),
         "config": plan.experiment.config,
@@ -643,7 +680,7 @@ def run_publication(
     if not force and plan.is_complete():
         if not dry_run:
             refresh_category_metadata(plan)
-            if plan.record_retention == "archive":
+            if plan.record_retention == "archive" and plan.prediction_dir is None:
                 archived = archive_prediction_records(plan)
             else:
                 archived = 0
@@ -690,7 +727,7 @@ def run_publication(
             print(f"\n=== [{context} · {label}] ===\n{' '.join(command)}", flush=True)
             subprocess.run(command, cwd=REPO_ROOT, check=True)
             completed.append(label)
-        if plan.record_retention == "archive":
+        if plan.record_retention == "archive" and plan.prediction_dir is None:
             archived = archive_prediction_records(plan, replace=True)
             completed.append("archive-records")
             print(f"  ✓ archived {archived} per-flight records -> {plan.records_archive}")
@@ -777,6 +814,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--campaign", action="append", default=None)
     parser.add_argument("--airport", action="append", default=None)
     parser.add_argument(
+        "--reuse-prediction-dir",
+        action="append",
+        default=None,
+        metavar="EXPERIMENT_ID=DIR",
+        help=(
+            "publish the records a campaign already wrote instead of predicting again; "
+            "DIR is read-only here (never archived or deleted) and its summary.json must "
+            "name this checkpoint and split. Repeat per checkpoint"
+        ),
+    )
+    parser.add_argument(
         "--split",
         action="append",
         choices=DEVELOPMENT_SPLITS,
@@ -841,6 +889,18 @@ def main(argv: list[str] | None = None) -> int:
     if not checkpoints:
         parser.error("no completed indexed checkpoints matched the selection")
 
+    reused_dirs: dict[str, Path] = {}
+    for assignment in args.reuse_prediction_dir or ():
+        experiment_id, separator, directory = assignment.partition("=")
+        if not separator:
+            parser.error(f"--reuse-prediction-dir expects EXPERIMENT_ID=DIR, got {assignment!r}")
+        reused_dirs[
+            _normalize_checkpoint_id(experiment_id, experiment_root=experiment_root)
+        ] = Path(directory).resolve()
+    unknown = set(reused_dirs) - {checkpoint.experiment_id for checkpoint in checkpoints}
+    if unknown:
+        parser.error(f"--reuse-prediction-dir names an unselected run: {sorted(unknown)[0]}")
+
     requested_airports = {value.strip().upper() for value in args.airport} if args.airport else None
     splits = tuple(args.split or DEVELOPMENT_SPLITS)
     plans: list[PublicationPlan] = []
@@ -860,6 +920,7 @@ def main(argv: list[str] | None = None) -> int:
                     frontend_airports_root=args.frontend_airports_root.resolve(),
                     device=args.device,
                     record_retention=args.record_retention,
+                    prediction_dir=reused_dirs.get(checkpoint.experiment_id),
                 ))
     if not plans:
         parser.error("no checkpoint provenance contains the requested airport(s)")
