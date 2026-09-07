@@ -204,6 +204,8 @@ flight model.
 | `control_heading_rate_loss_weight` (+ `_scale_dps` 1.5) | 0 | L1.b arm ②: the teacherless way to name the bank — the rollout's own ψ̇ at the segment endpoints against the flown track's. `_scale_dps` is the UNIT the residual is read in (half a standard-rate turn), not the dose. Doses 1.0 / 8.0 bracket an unknown; **not measured yet** |
 | `control_bank_tv_loss_weight` | 0 | L1.b arm ③: mean \|step\| between adjacent COMMANDED banks, in half-box units. **It prices REVERSALS, not slope** — `sign(x)` cancels on a monotone run's interior — and exact flatness is a STATIONARY POINT (value 0 and gradient 0), which is where the zeroed head init starts every run, so it never leaves a flat schedule on its own. "TV changed nothing" is that before it is a dose. **Not measured yet**. Both terms register under `true-time-position` ONLY (where `velocity`/`imitation` live) and `TSConfig` REFUSES a non-zero weight under any other objective rather than ignoring it |
 | `checkpoint_selection_metric` | `fixed-anchor-common-grid-ade` | WHICH epoch's weights the checkpoint keeps — see the table below. Lower is better for all three; the value NAMES the run (`select=…`, a `META_FIELDS` entry) |
+| `lr_plateau_metric` | `selection` | WHICH number `ReduceLROnPlateau` measures its plateau on — never which epoch is KEPT. `objective` steps it with the macro validation objective (the SAME `val_loss` the epoch record writes, not a third number), `selection` with the checkpoint-selection value. It matters exactly when the two PART, which a fixed-anchor arm never does: on A0-random's `_grid` arm the objective improved to epoch 60 (1.147 → 0.707) while the grid ADE stalled after epoch 8, so the scheduler halved the LR from epoch 20 and reached **9.4e-7 by 60** — the model stopped training at the epoch the READOUT stalled. `checkpoint_metadata.json`'s `lr_scheduler.metric` says which it stepped on; names the run `lr-metric=objective`. **`objective` is REFUSED while the objective itself moves under the model's feet**: a `latent_beta_warmup_epochs` ramp reweights it every epoch and a `procedure_loss_dual_step` reprices the same trajectory every epoch, and under either the plateau scheduler would cut the rate straight through a schedule that is still ramping. A0.b (i) |
+| `random_train_anchor_sampling` | `uniform` | HOW a random train anchor is drawn — refused without `random_train_anchor`. It cannot change WHICH anchors are admissible (`eligible_random_train_anchors` + the future contract), so both policies train the identical cohort on the identical anchor population. `uniform` draws over the flight's admissible SAMPLES, i.e. uniformly in TIME; **pooled over flights that over-weights the near end relative to the stored population**, because every flight gets one draw whatever its length and a kilometre near the runway holds more samples than one at 25 km (whole KRDU val split, 1404 flights / 181,906 anchors / 200 epochs: draws **34.3 %** under 6 km against **25.1 %** of the population, **17.9 %** beyond 20 km against **32.9 %**). `remaining-path-uniform` places the draw uniformly across the flight's OWN admissible remaining-path span and takes the nearest anchor — equal weight per km — moving those to 31.0 % and 21.0 %. **A stratum draw was tried first and REJECTED**: it moved training toward the runway (≥ 20 km 16.9 → 4.1 %) because the grid cuts the near end into four 2-km strata and leaves one open stratum spanning 20–123 km. Every epoch records the drawn counts per stratum BESIDE the population they came from (`history.json`'s `train_anchor_sampling.remaining_path_strata{,_population}`), under both policies — neither number means anything alone. Names the run `anchors=remaining-path-uniform`; `sampling_version` distinguishes the two in `training_anchor_contract`. A0.b (ii) |
 | `control_imitation_target` | `inverse-dynamics` | WHAT the imitation term imitates. The default's schedule, flown open-loop, lands **2.5–7.8 km** from the truth it was read off (L0), so "imitating it perfectly" is not "flying the truth". `fitted` reads the per-flight table `run_ts_control_basis_oracle.py --checkpoint` fits through the same rollout (88–433 m) and needs `control_fitted_teacher_path` (which names the run: `teacher=<dir>/<file>`); refused with `random_train_anchor`, with `control_imitation_loss_weight=0`, and off `control_state_objective=true-time-position` (the only objective the term is registered under). L5.a, **not yet measured** — the arms are `docs/experiments/l5_fitted_teacher_arms.json` |
 
 **The three checkpoint-selection metrics** (`config.CHECKPOINT_SELECTION_METRICS`, dispatched
@@ -223,6 +225,16 @@ fixed-at-L−1 `strata_fixed_at_l1` rule. `run_ts_anytime_curve.py` and the sele
 import the SAME objects (`tests/test_anchor_grid.py` asserts identity, not equality): two
 grids that merely agreed today would make "the curve improved" and "this epoch was selected
 on the curve" claims about different anchors.
+
+**The grid's VALUES live one level down, in the leaf `anchor_strata.py`**, and `anchor_grid`
+re-exports them — because `anchor_grid` imports `dataset` while `dataset` needs the same
+kilometres for the training-anchor draw, so a single home would mean a cycle or a second
+copy. The leaf owns `DEFAULT_ANCHOR_GRID_KM`, the strata those values cut when read as EDGES
+(`REMAINING_PATH_STRATA_EDGES_M`: seven edges, **eight** strata, the open ends `<2km` and
+`>=20km`), `remaining_path_strata` (`np.digitize` on the same profile the bins are chosen
+from) and the draw law `remaining_path_uniform_offset`. It must stay free of `dataset` and
+torch — `tests/test_import_boundaries.py` pins that, and it is the whole reason `dataset`
+can import it at module scope.
 
 **A candidate bin is a candidate, not a guarantee.** Measured coverage of the KRDU
 validation cohort (1404 flights, 60 s floor): **20 km 33.7 %** (excluded outright),
@@ -284,12 +296,13 @@ command is HELD.
 |---|---|---|
 | `objective.py` | what is a prediction scored against | 1,079 |
 | `validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 1,162 |
-| `train.py` | the epoch, the cohort, the checkpoint | 1,236 |
-| `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` = one per flight per epoch) | 1,809 |
-| `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 150 |
+| `train.py` | the epoch, the cohort, the checkpoint | 1,246 |
+| `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` / `RemainingPathUniformAnchor` = one per flight per epoch, drawn uniformly over samples or over the flight's remaining-path span; `training_window_class` is the one place the two anchor axes pick a class) | 1,941 |
+| `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 159 |
+| `anchor_strata.py` | the remaining-path VALUES both sides of that edge read: the grid's km, the strata they cut, the train-anchor draw law (leaf — no `dataset`, no torch) | 105 |
 | `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 258 |
 | `splits.py` | which split a flight belongs to | 192 |
-| `cli/` | one module per subcommand (`common` 817, `predict` 422, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze` 42, `__init__` 15) | 1,542 |
+| `cli/` | one module per subcommand (`common` 857, `predict` 484, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze` 42, `__init__` 15) | 1,644 |
 | `__main__.py` | the bootstrap and the `COMMANDS` table it dispatches from | 131 |
 
 Two edges that a change must not reverse: `evaluation_protocol` reaches

@@ -28,6 +28,111 @@ so (`source.mass_source`). New harvest mode `--observed-only` rebuilds only `app
 The remaining 1,485 untyped rows are identity gaps (followups #24/#25); the published
 speed pack is being extended to the 167 recovered types. Tests: harvest writer (identity
 without dynamics, mass_source), `resolve_airframe` unit test.
+### 2026-09-07 — ts_transformer A0.b: the random-anchor arm was frozen by its own learning-rate schedule, and drew its anchors nearer the runway than its own anchor population
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+§2.4c, branch `dev-a0b` (`12d35ce` the scheduler axis, `23cae12` the sampling axis,
+`965077a` the two arms, `f8a1726` the docs, and one review-fix commit that REPLACED the
+sampling law — see below). Two config axes, both defaulting to today's behaviour. **Neither
+arm has been trained** — this is the code the §2.4c reading needs.
+
+**What the second round measured.** `A0_random_hr8_tv1_p180` (early stopping off) still
+peaked at epoch 10, and `A0_random_hr8_tv1_grid` (anchor-grid selection, the A1 lever)
+peaked at epoch **8** — so neither pre-registered explanation survives: it was not the
+stopping rule, and it was not a metric the grid could fix. The `_grid` arm's `history.json`
+gave the mechanism instead. Its validation OBJECTIVE kept improving to epoch 60 (1.147 →
+0.707, val state 0.264 → 0.102) while its selection metric stalled after epoch 8 (1100 →
+1289 at 60). `ReduceLROnPlateau` was stepped with the **selection** value, so the learning
+rate was halved from epoch 20 and reached **9.4e-7 by epoch 60** and 2.9e-8 by 100: from
+about epoch 30 the model was not training, it was frozen at the epoch the *readout*
+stalled. Per anchor set, 12 km went 722 → 1324 and only the 6 km set improved (291 → 218)
+— the shape of a model that is mostly being shown the last few kilometres.
+
+**`lr_plateau_metric ∈ {selection, objective}`** (default `selection`, pinned as a literal
+in every named recipe). Under `objective` the scheduler steps on the macro validation
+objective — the SAME `val_loss` the epoch record writes, chosen from the two numbers the
+epoch already produced rather than computed again — and **checkpoint selection is
+unchanged** either way. `checkpoint_metadata.json`'s `lr_scheduler.metric` says which it
+stepped on; the run name carries `lr-metric=objective`.
+
+**Two things the objective must not be watched through.** `objective` is REFUSED under
+`latent_beta_warmup_epochs > 0` (the ramp reweights the objective every epoch) and under
+`procedure_loss_dual_step > 0` (λ moves every epoch, so the same trajectory is priced
+differently each time). In both the plateau would be the schedule's, not the model's, and
+the scheduler would cut the rate straight through a ramp.
+
+**`random_train_anchor_sampling ∈ {uniform, remaining-path-uniform}`** (default `uniform`,
+refused without `random_train_anchor`). `uniform` draws one of a flight's admissible
+SAMPLES, i.e. uniformly in TIME. **Per flight that is not a skew** — a flight's anchors
+start at index 59 and the median flight has 84 of them, so a uniform draw centres at 100.8
+by construction and lands at a measured median of 108; "median drawn anchor 107" was never
+evidence of anything. **The skew is in the pooling**: every flight gets one draw whatever
+its length, and a kilometre near the runway holds more samples than a kilometre at 25 km
+because the aircraft is slower there, so the drawn distribution sits nearer the runway than
+the anchor POPULATION it draws from. `remaining-path-uniform` places the draw uniformly
+across the flight's OWN admissible remaining-path span and takes the nearest admissible
+anchor — equal weight per kilometre — from the same per-flight per-epoch sha256, so
+determinism is unchanged.
+
+**Measured on the whole KRDU validation split** (1404 flights, 181,906 admissible anchors
+under the 20 s contract, 200 epochs) — the share of the stored anchor POPULATION against
+each law's share of the DRAWS:
+
+| remaining path | population | `uniform` | `remaining-path-uniform` |
+|---|---:|---:|---:|
+| < 2 km | 3.8 % | 5.4 % | 4.4 % |
+| 2–4 km | 10.7 % | 14.5 % | 13.4 % |
+| 4–6 km | 10.6 % | 14.4 % | 13.2 % |
+| 6–8 km | 10.3 % | 13.8 % | 13.1 % |
+| 8–12 km | 17.7 % | 23.4 % | 24.5 % |
+| 12–16 km | 8.5 % | 7.4 % | 7.3 % |
+| 16–20 km | 5.5 % | 3.2 % | 3.2 % |
+| **≥ 20 km** | **32.9 %** | **17.9 %** | **21.0 %** |
+| mean / p50 / p90 | 17.2 / 11.2 / 40.8 km | 12.4 / 8.3 / 32.3 km | 13.4 / 8.9 / 35.3 km |
+
+So the new law moves the draws TOWARD the population: ≥ 20 km 17.9 → 21.0 %, < 6 km 34.3 →
+31.0 %, and the 8–16 km band carrying the 12 km selection anchor set 30.8 → 31.8 %.
+
+**A stratum draw was written first and REJECTED by the review's own measurement** (700 KRDU
+val flights): drawing an `anchor_strata` stratum uniformly and then a sample inside it moved
+training the WRONG WAY — mean remaining path 12.2 → 8.0 km, p90 31.8 → 14.7 km, ≥ 20 km
+16.9 → 4.1 %, and the 8–16 km band 31.6 → 27.4 %, i.e. the very set the arm exists to fix.
+The cause is the grid's own shape: it cuts the near end into four 2-km strata while the far
+end is ONE open stratum spanning 20–123 km that holds a third of the anchors, so equal
+weight per stratum gives that third an eighth of the probability. **The strata survive only
+as bookkeeping**: every epoch records the drawn counts per stratum BESIDE the population
+they came from (`train_anchor_sampling.remaining_path_strata` and `_population`, under both
+policies) — a drawn share alone cannot show over-weighting, which is exactly the mistake the
+first draft made.
+
+**The grid's values moved down a level.** `anchor_grid` imports `dataset` while `dataset`
+needs the same kilometres to draw an anchor, so `DEFAULT_ANCHOR_GRID_KM`, the strata edges
+and labels, `remaining_path_strata` and the draw law now live in the leaf `anchor_strata.py`
+(no `dataset`, no torch) and `anchor_grid` re-exports the same objects — one import site for
+every reading consumer, a module-scope import for the sampler, and no call-time import.
+`tests/test_import_boundaries.py` pins the leaf.
+
+**Admissibility is not part of the axis.** `eligible_random_train_anchors` and the 20 s
+future contract still decide which anchors exist, so both policies store the identical
+anchors for the identical cohort; only which one each epoch sees changes.
+
+**Equivalence at the defaults, measured against `4943724`**: 2-epoch synthetic trains for
+control / latent / state / closure are **byte-identical**, and a random-anchor `uniform`
+arm differs only by the added `remaining_path_strata` keys — all 342 numeric leaves
+unchanged, `sample_sha256` included. Recount over the **935** config-bearing artifacts
+under `4dTrajectory/outputs` — every JSON with a top-level `config` object, plus every
+campaign `config.json` override set rebuilt as a new run would render it (199
+`history.json`, 255 `summary.json`, 193 `fit_evaluation.json`, 100
+`experiment_manifest.json`, 95 campaign `config.json`, 93 others): **0** changed name, slug
+or loading. Suite 680 → **719**.
+
+**Arms** (`4dTrajectory/ts_transformer/docs/experiments/a0_random_arms.json`, both on the
+`_grid` recipe — random anchors 20 s, hr=8 + bank TV=1, patience 180, anchor-grid
+selection): `A0b_lr_objective` and `A0b_lr_objective_path_uniform`, so the pair separates
+the two mechanisms instead of confounding them. The pre-registered reading: the L−1 and 12 km
+anchor sets must stop degrading after epoch 10, the best epoch must be later than 60, and
+the L−1 veto against native32's 1322 m is read as before — all three random-anchor arms so
+far sit at 2949–2990 m, so this line's base is not established yet.
 
 ### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
 
