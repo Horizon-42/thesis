@@ -57,25 +57,61 @@ for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
         sys.path.insert(0, str(path))
 
 import torch  # noqa: E402
+import torch.nn.functional as F  # noqa: E402
 
 from batch_contract import model_forward, unpack_batch  # noqa: E402
-from control.latent import LatentControlPrediction, latent_kl  # noqa: E402
+from control.latent import (  # noqa: E402
+    LatentControlPrediction,
+    displacement_verdict,
+    latent_kl,
+    sigma_from_logvar,
+)
 from dataset import FixedAnchorTrajectoryWindows  # noqa: E402
 from models import resolve_device  # noqa: E402
 from objective import move_dynamics  # noqa: E402
 from run_ts_anytime_curve import Arm, Grid, cohort_series, load_arm, parse_arms  # noqa: E402
 
 RESULT_SCHEMA = "ts-latent-probe-v1"
+#: How the shared replay loader names this measurement in its refusals.
+INSTRUMENT = "this posterior probe"
 #: The outer-test split stays sealed (repo experiment rule): a diagnostic has no gate.
 FORBIDDEN_SPLIT = "test"
 SPLITS = ("val", "train", FORBIDDEN_SPLIT)
-#: Below this median displacement the posterior mean is the prior mean and z carries nothing
-#: per flight, whatever the total KL says (L2.e' measured 0.05–0.2 in three dead arms).
-DEAD_MEAN_DISPLACEMENT_SIGMA = 1.0
+#: What `--limit` means, stated in the artifact as well as the flag: it is not a sample.
+LIMIT_MEANING = (
+    "--limit N takes the FIRST N flight keys of the checkpoint's split, in the split's own "
+    "order — a prefix, not a random sample. Between 100 and 200 KRDU flights the displacement "
+    "median moved 25 %, so a limited table is a smoke test and must never be quoted beside a "
+    "full-split number."
+)
+
+#: Every median here is `torch.quantile(..., 0.5)` rather than `torch.median`, which returns
+#: the LOWER of the two middle values on an even count — the training-side diagnostic uses
+#: the same convention, and an outside reader reproducing it with numpy lands on this one.
+MEDIAN = 0.5
 
 
-def _percentile(values: torch.Tensor, quantile: float) -> torch.Tensor:
-    return torch.quantile(values, quantile, dim=0)
+def _quantile(values: torch.Tensor, quantile: float, dim: int | None = None) -> torch.Tensor:
+    return (
+        torch.quantile(values.flatten(), quantile) if dim is None
+        else torch.quantile(values, quantile, dim=dim)
+    )
+
+
+def mixture_moments(
+    logits: torch.Tensor, mean: torch.Tensor, logvar: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-flight mean and variance of the MIXTURE prior itself, ``[B, Z]`` each.
+
+    ``E[z] = Σ π_k μ_k`` and ``Var[z] = Σ π_k (σ_k² + μ_k²) − E[z]²`` — the law of total
+    variance, i.e. the within-component width plus the spread BETWEEN components, which is
+    where a K>1 prior keeps most of its range. With K = 1 the sum has one term and this
+    reduces to ``(μ, σ²)``, the single component's own moments.
+    """
+    weights = F.softmax(logits, dim=-1).unsqueeze(-1)                      # [B, K, 1]
+    expectation = (weights * mean).sum(dim=1)                              # [B, Z]
+    second_moment = (weights * (logvar.exp() + mean.square())).sum(dim=1)
+    return expectation, second_moment - expectation.square()
 
 
 def densities(arm: Arm, series: list, device: torch.device) -> dict[str, torch.Tensor]:
@@ -104,14 +140,22 @@ def densities(arm: Arm, series: list, device: torch.device) -> dict[str, torch.T
         if not isinstance(prediction, LatentControlPrediction):
             raise SystemExit(f"{arm.label}: {type(prediction).__name__} carries no latent")
         kl = latent_kl(prediction, free_bits_nats=arm.config.latent_free_bits_nats)
+        # The mixture's OWN moments, per flight, beside the one component the analytic
+        # diagnostics are taken against: for K > 1 the prior's range lives mostly BETWEEN
+        # the components, and the selected one cannot show it.
+        prior_expectation, prior_variance = mixture_moments(
+            prediction.prior_logits, prediction.prior_mean, prediction.prior_logvar
+        )
         chunk = {
             "posterior_mean": prediction.posterior_mean,
-            "posterior_sigma": (0.5 * prediction.posterior_logvar).exp(),
+            "posterior_sigma": sigma_from_logvar(prediction.posterior_logvar),
             "prior_mean": kl.prior_mean,
-            "prior_sigma": (0.5 * kl.prior_logvar).exp(),
-            "kl_per_dim": kl.per_dimension,
-            "kl_mean_term_per_dim": kl.mean_term_per_dimension,
-            "kl_variance_term_per_dim": kl.variance_term_per_dimension,
+            "prior_sigma": sigma_from_logvar(kl.prior_logvar),
+            "prior_expectation": prior_expectation,
+            "prior_variance": prior_variance,
+            "component_kl_per_dim": kl.per_dimension,
+            "component_kl_mean_term_per_dim": kl.mean_term_per_dimension,
+            "component_kl_variance_term_per_dim": kl.variance_term_per_dimension,
             "displacement_sigma": kl.displacement_sigma,
             "charged_kl": kl.charged.unsqueeze(-1),
         }
@@ -124,12 +168,15 @@ def probe_checkpoint(arm: Arm, series: list, device: torch.device) -> dict:
     """The reference probe's table for one checkpoint, over the whole split."""
     d = densities(arm, series, device)
     prior_mean, prior_sigma = d["prior_mean"], d["prior_sigma"]
-    # What a prior SAMPLE spans across the cohort: the component's own width plus the
-    # spread of its mean between flights. N(0, I) — what `predict --latent-random` draws
+    # What a prior SAMPLE spans across the cohort: the MIXTURE's own per-flight variance
+    # (within-component width + between-component spread, `mixture_moments`) plus the spread
+    # of its per-flight mean between flights. N(0, I) — what `predict --latent-random` draws
     # from — is 1.0 on this scale, and it beat the trained prior's best-of-6 in L2.d/e'.
     # Population spread (correction=0) everywhere a cohort is summarized: the cohort IS
     # the population here, and a one-flight `--limit 1` smoke test stays defined.
-    prior_total_variance = prior_sigma.square().mean(dim=0) + prior_mean.var(dim=0, correction=0)
+    prior_total_variance = (
+        d["prior_variance"].mean(dim=0) + d["prior_expectation"].var(dim=0, correction=0)
+    )
     displacement = d["displacement_sigma"]
     return {
         "checkpoint": str(arm.path),
@@ -146,18 +193,22 @@ def probe_checkpoint(arm: Arm, series: list, device: torch.device) -> dict:
         "beta_warmup_epochs": int(arm.config.latent_beta_warmup_epochs),
         "aux_duration_weight": arm.config.latent_aux_duration_weight,
         "prior_mean_across_flight_std": prior_mean.std(dim=0, correction=0).tolist(),
-        "prior_sigma_median": prior_sigma.median(dim=0).values.tolist(),
+        "prior_sigma_median": _quantile(prior_sigma, MEDIAN, dim=0).tolist(),
         "posterior_mean_across_flight_std": d["posterior_mean"].std(dim=0, correction=0).tolist(),
-        "posterior_sigma_median": d["posterior_sigma"].median(dim=0).values.tolist(),
-        "displacement_sigma_median_per_dim": displacement.median(dim=0).values.tolist(),
-        "displacement_sigma_median": float(displacement.median()),
-        "displacement_sigma_p90": float(_percentile(displacement.flatten(), 0.9)),
-        "kl_per_dim_nats": d["kl_per_dim"].mean(dim=0).tolist(),
-        "kl_mean_term_per_dim_nats": d["kl_mean_term_per_dim"].mean(dim=0).tolist(),
-        "kl_variance_term_per_dim_nats": d["kl_variance_term_per_dim"].mean(dim=0).tolist(),
-        "kl_nats_per_flight": float(d["kl_per_dim"].sum(dim=1).mean()),
-        "kl_mean_term_nats_per_flight": float(d["kl_mean_term_per_dim"].sum(dim=1).mean()),
-        "kl_variance_term_nats_per_flight": float(d["kl_variance_term_per_dim"].sum(dim=1).mean()),
+        "posterior_sigma_median": _quantile(d["posterior_sigma"], MEDIAN, dim=0).tolist(),
+        "displacement_sigma_median_per_dim": _quantile(displacement, MEDIAN, dim=0).tolist(),
+        "displacement_sigma_median": float(_quantile(displacement, MEDIAN)),
+        "displacement_sigma_p90": float(_quantile(displacement, 0.9)),
+        "component_kl_per_dim_nats": d["component_kl_per_dim"].mean(dim=0).tolist(),
+        "component_kl_mean_term_per_dim_nats":
+            d["component_kl_mean_term_per_dim"].mean(dim=0).tolist(),
+        "component_kl_variance_term_per_dim_nats":
+            d["component_kl_variance_term_per_dim"].mean(dim=0).tolist(),
+        "component_kl_nats_per_flight": float(d["component_kl_per_dim"].sum(dim=1).mean()),
+        "component_kl_mean_term_nats_per_flight":
+            float(d["component_kl_mean_term_per_dim"].sum(dim=1).mean()),
+        "component_kl_variance_term_nats_per_flight":
+            float(d["component_kl_variance_term_per_dim"].sum(dim=1).mean()),
         "charged_kl_nats_per_flight": float(d["charged_kl"].mean()),
         "prior_total_std": float(prior_total_variance.mean().sqrt()),
     }
@@ -170,10 +221,14 @@ def _vector(values: list[float], digits: int = 3) -> str:
 def render(payload: dict) -> str:
     lines = [
         f"latent probe — split {payload['split']}, {payload['device']}"
-        + (f", limit {payload['limit']}" if payload["limit"] else ""),
+        + (f", LIMIT {payload['limit']} (a prefix of the split, not a sample)"
+           if payload["limit"] else ""),
     ]
     for label, block in payload["checkpoints"].items():
-        share = block["kl_mean_term_nats_per_flight"] / max(block["kl_nats_per_flight"], 1e-12)
+        share = (
+            block["component_kl_mean_term_nats_per_flight"]
+            / block["component_kl_nats_per_flight"]
+        )
         lines += [
             "",
             f"== {label}  ({block['flights']} flights, latent_dim {block['latent_dim']}, "
@@ -187,23 +242,22 @@ def render(payload: dict) -> str:
             f"  post   mean: across-flight std per dim   {_vector(block['posterior_mean_across_flight_std'])}",
             f"  post   sigma: median per dim             {_vector(block['posterior_sigma_median'])}",
             f"  |q mean − p mean| / p sigma, median/dim  {_vector(block['displacement_sigma_median_per_dim'], 2)}",
-            f"  KL per dim (nats, mean over flights)     {_vector(block['kl_per_dim_nats'])}",
-            f"    of which the MEAN term                 {_vector(block['kl_mean_term_per_dim_nats'])}",
-            f"    of which the VARIANCE term             {_vector(block['kl_variance_term_per_dim_nats'])}",
-            f"  totals per flight: KL {block['kl_nats_per_flight']:.3f} nats "
-            f"= mean {block['kl_mean_term_nats_per_flight']:.3f} + variance "
-            f"{block['kl_variance_term_nats_per_flight']:.3f} ({share:.0%} in the mean); "
-            f"charged {block['charged_kl_nats_per_flight']:.3f}",
-            f"  displacement median {block['displacement_sigma_median']:.3f} sigma "
-            f"(p90 {block['displacement_sigma_p90']:.3f}) — "
-            + ("z carries per-flight information"
-               if block["displacement_sigma_median"] > DEAD_MEAN_DISPLACEMENT_SIGMA
-               else f"UNDER {DEAD_MEAN_DISPLACEMENT_SIGMA:g} sigma: the posterior mean sits on "
-                    "the prior mean, so z is a constant however large the KL is"),
-            f"  prior total std {block['prior_total_std']:.3f} (N(0, I) = 1.0; a narrower "
-            "prior is why the random-latent control can beat the trained one)",
+            f"  component KL per dim (nats, mean/flight) {_vector(block['component_kl_per_dim_nats'])}",
+            f"    of which the MEAN term                 {_vector(block['component_kl_mean_term_per_dim_nats'])}",
+            f"    of which the VARIANCE term             {_vector(block['component_kl_variance_term_per_dim_nats'])}",
+            f"  totals per flight: component KL {block['component_kl_nats_per_flight']:.3f} "
+            f"nats = mean {block['component_kl_mean_term_nats_per_flight']:.3f} + variance "
+            f"{block['component_kl_variance_term_nats_per_flight']:.3f} ({share:.0%} in the "
+            f"mean); charged {block['charged_kl_nats_per_flight']:.3f}",
+            f"  {displacement_verdict(block['displacement_sigma_median'])} "
+            f"(p90 {block['displacement_sigma_p90']:.3f})",
+            f"  prior total std {block['prior_total_std']:.3f} (the mixture's own moments; "
+            "N(0, I) = 1.0, and a narrower prior is why the random-latent control can beat "
+            "the trained one)",
         ]
     lines.append("")
+    if payload["limit"]:
+        lines.append(LIMIT_MEANING)
     lines.append("The posterior reads the truth's future: these are TRAINING-side densities, "
                  "never a prediction result.")
     return "\n".join(lines) + "\n"
@@ -218,8 +272,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="a latent control checkpoint; repeat for more arms")
     parser.add_argument("--split", default="val", choices=SPLITS)
     parser.add_argument("--limit", type=int, default=0,
-                        help="probe only the first N flights of the split (a smoke test; "
-                             "the artifact states the count)")
+                        help="probe only the FIRST N flight keys of the split — a prefix, "
+                             "not a sample, and the tables move with it (25 % on the "
+                             "displacement median between 100 and 200 KRDU flights). A smoke "
+                             "test; never quote a limited table beside a full-split one")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--out", type=Path, required=True,
                         help="output directory (immutable; must not exist)")
@@ -243,7 +299,10 @@ def main(argv: list[str] | None = None) -> int:
     # Load every checkpoint FIRST: the CTA/intent refusals, the missing split and the
     # provenance check live in the shared loader, and the latent refusal is here. A
     # rejected invocation must leave nothing behind.
-    loaded = [load_arm(label, path, grid, device) for label, path in arms.items()]
+    loaded = [
+        load_arm(label, path, grid, device, instrument=INSTRUMENT)
+        for label, path in arms.items()
+    ]
     for arm in loaded:
         if arm.config.latent_dim < 1:
             raise SystemExit(
@@ -255,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": RESULT_SCHEMA,
         "split": args.split,
         "limit": args.limit,
+        "limit_meaning": LIMIT_MEANING,
         "device": str(device),
         "measured": "the training-side densities q(z | future) and p(z | context) at the "
                     "fixed L-1 anchor; the posterior reads the future by construction",
@@ -264,8 +324,10 @@ def main(argv: list[str] | None = None) -> int:
         },
     }
     text = render(payload)
-    # The artifact appears whole: a run that dies mid-measurement leaves a `.partial-*`
-    # directory beside it, never a half-written table under the name a reader will cite.
+    # The artifact appears whole. The measurement is finished BEFORE anything is written,
+    # so a run that dies mid-measurement leaves nothing at all; the staging directory covers
+    # the write itself, whose failure leaves a `.partial-*` beside the artifact rather than
+    # a half-written table under the name a reader will cite.
     out.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(dir=out.parent, prefix=f"{out.name}.partial-"))
     (staged / "latent_probe.json").write_text(json.dumps(payload, indent=2))

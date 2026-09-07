@@ -110,16 +110,22 @@ flight model.
   build.
 - **A latent run's total KL says nothing about WHERE it is spent, and that is the whole
   failure mode.** Three 180-epoch arms were read as "the information is just small" while
-  every posterior mean sat ON the prior mean (displacement 0.05–0.2 prior σ) and the budget
-  bought only a narrower posterior. `history.json`'s `latent` block therefore carries
-  `kl_mean_term_nats` / `kl_variance_term_nats` (the split; the variance term is the
-  REMAINDER of `per_dimension_kl`, never a second closed form), `mean_displacement_sigma`,
-  `kl_per_dim` and `active_units_0p05` — the FIXED 0.05-nat ruler, because
-  `active_units` moves with the free-bits budget and made that gate unreadable across arms.
-  Read them with `run_ts_latent_readout.py --history <run>/history.json`, or off a
-  checkpoint with `run_ts_latent_probe.py`. A scalar auxiliary target concentrates the
-  information in ONE dimension, so on such an arm the median displacement can miss what
-  `kl_per_dim` shows.
+  every posterior mean sat ON the prior mean (displacement 0.05–0.2 prior σ against a gate
+  of one) and the budget bought only a narrower posterior. `history.json`'s `latent` block
+  therefore carries `component_kl_mean_term_nats` / `component_kl_variance_term_nats` (the
+  split; the variance term is the REMAINDER of `per_dimension_kl`, never a second closed
+  form), `mean_displacement_sigma`, `component_kl_per_dim` and `active_units_0p05` — the
+  FIXED 0.05-nat ruler, because `active_units` moves with the free-bits budget and made that
+  gate unreadable across arms. **The three `component_*` numbers sum to
+  `component_kl_nats_per_flight`, NOT to the charged `kl_nats_per_flight`** (free bits and
+  the mixture estimator separate the two). Read them with `run_ts_latent_readout.py
+  --history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
+  a checkpoint with `run_ts_latent_probe.py`; the gate sentence is
+  `control.latent.displacement_verdict` and its ruler `DEAD_MEAN_DISPLACEMENT_SIGMA`, so no
+  surface restates either. A scalar auxiliary target concentrates the information in ONE
+  dimension, so on such an arm the median displacement can miss what `component_kl_per_dim`
+  shows — and that target is an INPUT of the posterior encoder, so a small `latent_aux`
+  proves nothing on its own.
 - **A supervision term on the turn rate reads the RHS, never a restated identity.** The
   shared point-mass RHS integrates `ψ̇ = g·n_realized·sin φ / (V·cos γ)` with the
   STALL-LIMITED load factor; the textbook `g·tan φ / V` equals it only on a coordinated
@@ -184,14 +190,14 @@ flight model.
 |---|---|---|
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs |
 | `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `cli.common._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
-| control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport** |
+| control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `closure_output.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried) |
 | `--project-final` | off | deployment fallback; FAF-gated wrecks vectored flights |
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
 | `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` / `latent_posterior_init_std` and L2.f's two below mean nothing without it and are refused |
-| `latent_beta_warmup_epochs` / `latent_aux_duration_weight` | 0 / 0.0 | L2.f's two levers on the POSTERIOR MEAN, which is where the information died (see the trap below). The first ramps β linearly from 0 over N epochs (`effective_latent_beta`, the one place the schedule is written; the epoch's objective is `replace(config, latent_beta=…)` and the validation pass is scored under the SAME one); the second adds a train-only `Linear(latent_dim→1)` on the POSTERIOR SAMPLE predicting `truth_duration_s / final_time_scale_s` (component `latent_aux`, registered iff weighted, never called in `decode`, refused under `cta_conditioning=given`). Named `beta-warmup=` / `aux-T=`; the four named recipes pin both off. Arms: `docs/experiments/l2f_mean_information_arms.json` |
+| `latent_beta_warmup_epochs` / `latent_aux_duration_weight` | 0 / 0.0 | L2.f's two levers on the POSTERIOR MEAN, which is where the information died (see the contract above). The first ramps β linearly from 0 over N epochs (`effective_latent_beta`, the one place the schedule is written; the epoch's objective is `replace(config, latent_beta=…)` and the validation pass is scored under the SAME one); the second adds a train-only `Linear(latent_dim→1)` on the POSTERIOR SAMPLE predicting `truth_duration_s / final_time_scale_s` (component `latent_aux`, registered iff weighted, never called in `decode`, refused under `cta_conditioning=given`). Named `beta-warmup=` / `aux-T=`. Arms: `docs/experiments/l2f_mean_information_arms.json` |
 | `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result |
 | `n_segments` (control) | 64 | **32 is free** (L1: 1322 vs 1333 m, bank skill 0.726 vs 0.728); the deployed head's 257 numbers become 96 |
 | `control_state_loss_grid` | native | `fixed-dt` without the imitation term (it is not registered there) trips the straight-in veto (FDE 703 → 2863) and brings the bank wiggle back — the trajectory-error loss alone is not enough |
@@ -323,7 +329,10 @@ importable. A finished one-off driver belongs there, not beside the live runners
   posterior per-dimension spread, the posterior mean's displacement in prior sigmas, the
   per-dimension KL and its mean/variance split, the prior's total std against N(0, I).
   Refuses a non-latent checkpoint (no posterior) and, through the shared loader, a
-  `cta=given` / `intent=truth-…` one. **The posterior reads the future: never a prediction
+  `cta=given` / `intent=truth-…` one (that loader takes an `instrument` name so each runner
+  refuses in its own voice). `--limit N` is a PREFIX of the split, not a sample — the
+  displacement median moved 25 % between 100 and 200 KRDU flights, so a limited table is a
+  smoke test and the artifact says so. **The posterior reads the future: never a prediction
   result.**
 
 **A replay runner fingerprints through `data_provenance.checkpoint_data_provenance(payload,

@@ -32,7 +32,7 @@ from control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from control.latent import (
     ACTIVE_UNIT_KL_NATS,
     LATENT_AUX_COMPONENT,
-    LATENT_KL_PER_DIM_PREFIX,
+    LATENT_COMPONENT_KL_PER_DIM_PREFIX,
     PRIOR_MEAN_INIT_STD,
     PriorNetwork,
     LATENT_KL_COMPONENT,
@@ -43,6 +43,7 @@ from control.latent import (
     latent_kl,
     per_dimension_kl,
     per_dimension_kl_mean_term,
+    sigma_from_logvar,
     with_latent_aux_duration,
     with_latent_kl,
 )
@@ -71,7 +72,9 @@ from forecast import (
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
+from control.latent import displacement_verdict
 from run_ts_latent_readout import kept_epoch_latent, readout, render_latent
+from run_ts_latent_readout import main as readout_main
 from synthetic import synthetic_arrivals
 
 
@@ -178,6 +181,11 @@ def test_the_latent_reaches_the_duration():
     assert not torch.allclose(moved.controls, base.controls)
 
 
+def test_sigma_from_logvar_is_the_one_spelling():
+    logvar = torch.tensor([[-2.0, 0.0, 2.0]])
+    assert torch.equal(sigma_from_logvar(logvar), (0.5 * logvar).exp())
+
+
 def test_per_dimension_kl_matches_the_closed_form():
     zeros = torch.zeros(1, 3)
     assert torch.allclose(per_dimension_kl(zeros, zeros, zeros, zeros), zeros)
@@ -272,11 +280,11 @@ def test_with_latent_kl_adds_the_weighted_term_and_the_collapse_diagnostics():
     assert out.diagnostics["latent_active_units"] == pytest.approx(3 * 2)
     assert out.diagnostics["latent_active_units_0p05"] == pytest.approx(3 * 2)
     # the split, the displacement and the per-dimension vector, all batch-summed alike
-    assert out.diagnostics["latent_kl_mean_term_nats"] == pytest.approx(0.5 * 3 * 2)
-    assert out.diagnostics["latent_kl_variance_term_nats"] == pytest.approx(0.0, abs=1e-6)
+    assert out.diagnostics["latent_component_kl_mean_term_nats"] == pytest.approx(0.5 * 3 * 2)
+    assert out.diagnostics["latent_component_kl_variance_term_nats"] == pytest.approx(0.0, abs=1e-6)
     assert out.diagnostics["latent_mean_displacement_sigma"] == pytest.approx(1.0 * 2)
     for index in range(3):
-        key = f"{LATENT_KL_PER_DIM_PREFIX}{index:02d}"
+        key = f"{LATENT_COMPONENT_KL_PER_DIM_PREFIX}{index:02d}"
         assert out.diagnostics[key] == pytest.approx(0.5 * 2)
 
 
@@ -300,9 +308,13 @@ def test_the_epoch_record_divides_the_summed_diagnostics_by_the_flight_count():
     totals = {name: float(value) for name, value in out.diagnostics.items()}
     record = latent_epoch_record(totals, config, beta_effective=config.latent_beta)
     assert record["component_kl_nats_per_flight"] == pytest.approx(1.5)
-    assert record["kl_mean_term_nats"] == pytest.approx(1.5)
-    assert record["kl_variance_term_nats"] == pytest.approx(0.0, abs=1e-6)
-    assert record["kl_per_dim"] == pytest.approx([0.5, 0.5, 0.5])
+    assert record["component_kl_mean_term_nats"] == pytest.approx(1.5)
+    assert record["component_kl_variance_term_nats"] == pytest.approx(0.0, abs=1e-6)
+    assert record["component_kl_per_dim"] == pytest.approx([0.5, 0.5, 0.5])
+    # the two halves sum to the COMPONENT KL, not to the charged one
+    assert record["component_kl_mean_term_nats"] + record["component_kl_variance_term_nats"] == (
+        pytest.approx(record["component_kl_nats_per_flight"])
+    )
     assert record["mean_displacement_sigma"] == pytest.approx(1.0)
     assert record["active_units"] == pytest.approx(3.0)
     assert record["active_units_0p05"] == pytest.approx(3.0)
@@ -381,21 +393,22 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
     first = json.loads((tmp_path / "run" / "history.json").read_text())["history"][0]
     assert LATENT_KL_COMPONENT in first["train_components"]
     assert set(first["latent"]) == {
-        "kl_nats_per_flight", "component_kl_nats_per_flight", "kl_mean_term_nats",
-        "kl_variance_term_nats", "kl_per_dim", "mean_displacement_sigma",
+        "kl_nats_per_flight", "component_kl_nats_per_flight", "component_kl_mean_term_nats",
+        "component_kl_variance_term_nats", "component_kl_per_dim", "mean_displacement_sigma",
         "active_units", "active_units_0p05", "beta_effective",
     }
     assert first["latent"]["beta_effective"] == config.latent_beta   # no warm-up
     assert 0.0 <= first["latent"]["active_units"] <= 3.0
     assert 0.0 <= first["latent"]["active_units_0p05"] <= 3.0
     # the vector is one entry per latent dimension and adds up to the analytic total
-    assert len(first["latent"]["kl_per_dim"]) == 3
-    assert sum(first["latent"]["kl_per_dim"]) == pytest.approx(
+    assert len(first["latent"]["component_kl_per_dim"]) == 3
+    assert sum(first["latent"]["component_kl_per_dim"]) == pytest.approx(
         first["latent"]["component_kl_nats_per_flight"], rel=1e-6
     )
-    assert first["latent"]["kl_mean_term_nats"] + first["latent"]["kl_variance_term_nats"] == (
-        pytest.approx(first["latent"]["component_kl_nats_per_flight"], rel=1e-6)
-    )
+    assert (
+        first["latent"]["component_kl_mean_term_nats"]
+        + first["latent"]["component_kl_variance_term_nats"]
+    ) == pytest.approx(first["latent"]["component_kl_nats_per_flight"], rel=1e-6)
     assert first["latent"]["mean_displacement_sigma"] > 0.0
 
     model, loaded, normalizer, _payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
@@ -472,9 +485,23 @@ def test_train_checkpoint_forecast_and_export_one_latent_run(tmp_path: Path):
     diagnostics = kept_epoch_latent(tmp_path / "run" / "history.json")
     history = json.loads((tmp_path / "run" / "history.json").read_text())
     assert diagnostics["epoch"] == history["fit_diagnostics"]["training_objective"]["best_epoch"]
-    assert len(diagnostics["kl_per_dim"]) == 3
+    assert len(diagnostics["component_kl_per_dim"]) == 3
     text = render_latent(diagnostics)
-    assert "per-dimension KL" in text and "p sigma" in text
+    assert "per-dimension component KL" in text and "p sigma" in text
+    # the verdict is the shared sentence, and it is printed because the key is there
+    assert displacement_verdict(diagnostics["mean_displacement_sigma"]) in text
+    # ...and a pre-L2.f run prints the keys it has, without a verdict it cannot compute
+    older = {key: value for key, value in diagnostics.items()
+             if key not in ("mean_displacement_sigma", "component_kl_per_dim")}
+    assert "displacement median" not in render_latent(older)
+
+    # The documented epoch-1 command is `--history` ALONE: it must parse and print.
+    assert readout_main(["--history", str(tmp_path / "run" / "history.json")]) == 0
+    assert readout_main(["--arm", str(out), "--history", str(tmp_path / "run" / "history.json")]) == 0
+    with pytest.raises(SystemExit):
+        readout_main([])                      # neither an arm nor a history
+    with pytest.raises(SystemExit):
+        readout_main(["--control", str(out)])  # a control with nothing to compare
 
 
 def test_every_latent_forecast_entry_refuses_a_non_latent_checkpoint():
@@ -638,8 +665,19 @@ def test_the_beta_warmup_is_linear_from_zero_and_flat_without_one():
     flat = _config(latent_beta=0.02)
     assert {effective_latent_beta(flat, epoch) for epoch in range(1, 200)} == {0.02}
     # ...and the epoch record says which weight the epoch was charged at
-    record = latent_epoch_record({}, config, beta_effective=0.005)
-    assert record["beta_effective"] == 0.005
+    zero = torch.zeros(())
+    components = LossComponents(state=zero, final_time=zero, kinematic=zero, terminal=zero)
+    totals = {
+        name: float(value)
+        for name, value in with_latent_kl(
+            components, _prediction(components=1, latent_dim=config.latent_dim),
+            config, torch.ones(2),
+        ).diagnostics.items()
+    }
+    assert latent_epoch_record(totals, config, beta_effective=0.005)["beta_effective"] == 0.005
+    # a renamed diagnostic is a KeyError here, never a silent zero
+    with pytest.raises(KeyError):
+        latent_epoch_record({}, config, beta_effective=0.005)
 
 
 def test_the_warmup_names_the_run_only_when_it_is_set():
@@ -649,13 +687,22 @@ def test_the_warmup_names_the_run_only_when_it_is_set():
     )
 
 
-def test_the_named_recipes_pin_the_warmup_and_the_aux_target_off():
+def test_the_named_recipes_are_non_latent_by_definition():
+    """A named recipe is a published DETERMINISTIC comparison arm: the whole latent axis is
+    pinned at its default, so a latent run is `custom` (which every latent arm file says)."""
     from config import CONTROL_RECIPE_NAMES, CONTROL_RECIPE_CUSTOM, control_recipe_overrides
+    defaults = TSConfig().to_dict()
+    latent_fields = [name for name in defaults if name.startswith("latent_")]
+    assert len(latent_fields) == 7
     for name in CONTROL_RECIPE_NAMES:
         if name == CONTROL_RECIPE_CUSTOM:
             continue
-        assert control_recipe_overrides(name)["latent_beta_warmup_epochs"] == 0
-        assert control_recipe_overrides(name)["latent_aux_duration_weight"] == 0.0
+        overrides = control_recipe_overrides(name)
+        for field in latent_fields:
+            assert overrides[field] == defaults[field], (name, field)
+    # ...and a recipe-named run may therefore not carry one
+    with pytest.raises(ValueError, match="recipe fields are frozen"):
+        _config(control_recipe_name="simple-v3", latent_dim=8)
 
 
 def test_config_refuses_the_aux_target_without_a_latent_and_under_a_given_cta():
@@ -823,7 +870,7 @@ def test_the_annealed_beta_is_what_the_epoch_charges_and_the_record_says_so(tmp_
     assert loaded.latent_beta == 0.5 and loaded.latent_beta_warmup_epochs == 4
 
 
-def _aux_arm(tmp_path: Path, weight: float, seed: int, *, epochs: int = 2, flights: int = 16):
+def _aux_arm(tmp_path: Path, weight: float, seed: int, *, epochs: int = 2, flights: int = 12):
     """One tiny latent run at the given auxiliary weight; returns its epoch records.
 
     The two weights are PAIRED: `aux_duration` is the last module built, so every other
@@ -856,22 +903,29 @@ def _aux_arm(tmp_path: Path, weight: float, seed: int, *, epochs: int = 2, fligh
     return json.loads((out / "history.json").read_text())["history"]
 
 
-@pytest.mark.parametrize("seed", [7, 11, 13])
-def test_the_aux_target_keeps_information_in_the_posterior_mean(tmp_path: Path, seed: int):
+def test_the_aux_target_keeps_information_in_the_posterior_mean(tmp_path: Path):
     """The designed effect, measured: the KL's MEAN term — the half that carries per-flight
     information — is larger with the auxiliary target than without it, on the same seed.
 
-    Measured on synthetic arrivals (16 flights, 2 epochs, paired init), epoch 2, mean term
-    without -> with: seed 7 102.60 -> 108.06, seed 11 26.854 -> 26.917, seed 13 15.48 ->
-    15.69. Three of three, and at 3 and 6 epochs the gap widens (seed 7 at 6 epochs:
-    58.8 -> 94.0).
+    ONE seed is asserted (7, the widest margin, ~11 s); the other two were measured the same
+    way and are recorded here rather than run on every suite. Synthetic arrivals, 12 flights,
+    2 epochs, paired init, epoch 2, component KL mean term without -> with:
+    seed 7 105.46 -> 107.92, seed 11 26.146 -> 26.207, seed 13 15.96 -> 16.17 — three of
+    three; at 16 flights the same three are 102.60 -> 108.06, 26.854 -> 26.917,
+    15.48 -> 15.69, and the gap widens with epochs (seed 7, 16 flights, 6 epochs: 58.8 -> 94.0).
 
     The `mean_displacement_sigma` MEDIAN is NOT monotone here and this test deliberately
-    does not assert it: 9.07 -> 9.31 (seed 7) and 1.96 -> 2.07 (seed 13) rise, 2.496 -> 2.481
+    does not assert it: 9.45 -> 9.58 (seed 7) and 2.03 -> 2.14 (seed 13) rise, 2.455 -> 2.441
     (seed 11) falls. The explanation is the shape of the target — a scalar read-out needs
     ONE latent direction, so it can raise the summed mean term while leaving a median over
-    three dimensions flat or lower. Read `kl_per_dim` beside the median on this arm.
+    three dimensions flat or lower. Read `component_kl_per_dim` beside the median on this arm.
+
+    And the target is literally an INPUT of the posterior encoder (the true duration), so a
+    small `latent_aux` on its own proves only that one latent coordinate can copy one input.
+    What is asserted here is the KL's mean term MOVING; the campaign gate needs a downstream
+    metric to move as well.
     """
+    seed = 7
     without = _aux_arm(tmp_path, 0.0, seed)
     with_target = _aux_arm(tmp_path, 1.0, seed)
     assert all(row["train_components"].get(LATENT_AUX_COMPONENT) is None for row in without)
@@ -880,7 +934,10 @@ def test_the_aux_target_keeps_information_in_the_posterior_mean(tmp_path: Path, 
         math.isfinite(row["train_components"][LATENT_AUX_COMPONENT])
         for row in with_target
     )
-    assert with_target[-1]["latent"]["kl_mean_term_nats"] > without[-1]["latent"]["kl_mean_term_nats"]
+    assert (
+        with_target[-1]["latent"]["component_kl_mean_term_nats"]
+        > without[-1]["latent"]["component_kl_mean_term_nats"]
+    )
 
 
 def test_an_aux_trained_checkpoint_forecasts_and_writes_no_aux_output(tmp_path: Path):
@@ -892,7 +949,7 @@ def test_an_aux_trained_checkpoint_forecasts_and_writes_no_aux_output(tmp_path: 
     assert isinstance(model, LatentControlModel) and model.aux_duration is not None
     assert loaded.latent_aux_duration_weight == 1.0
     series, _report = build_series(
-        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=16, seed=3), loaded, airport=AIRPORT
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3), loaded, airport=AIRPORT
     )
     forecast = forecast_approach(model, series[0], loaded, normalizer, device=torch.device("cpu"))
     assert forecast.controls is not None

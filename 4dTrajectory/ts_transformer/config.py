@@ -614,11 +614,17 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         # Every published simple-v* comparison was run against the inverse-dynamics
         # teacher; a recipe names one configuration, so the target is frozen here too.
         "control_imitation_target": CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
-        # L2.f's two latent levers are off in every named recipe, for the same reason as
-        # L1.b's: a schedule on the KL weight and an extra loss term would both change what
-        # `simple-v3` means. (The rest of the latent axis — `latent_dim` and its beta / free
-        # bits / posterior init — is deliberately NOT pinned: it predates this and every
-        # latent arm so far runs under `custom`.)
+        # The WHOLE latent axis is pinned off: a named recipe is a published DETERMINISTIC
+        # comparison arm, so `simple-v*` means "no latent intent" by definition and a latent
+        # run is `custom` — which is what every latent arm file has always said. Pinning only
+        # L2.f's two levers would have drawn an incoherent line: a `simple-v3` run could then
+        # choose its beta but not its warm-up. Measured before adopting (2026-09-07): no
+        # stored artifact changes name or slug, and none stops loading.
+        "latent_dim": 0,
+        "latent_prior_components": 1,
+        "latent_beta": 1.0,
+        "latent_free_bits_nats": 0.0,
+        "latent_posterior_init_std": 1.0,
         "latent_beta_warmup_epochs": 0,
         "latent_aux_duration_weight": 0.0,
         "control_state_duration_gradient": False,

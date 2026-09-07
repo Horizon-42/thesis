@@ -57,10 +57,16 @@ LATENT_AUX_COMPONENT = "latent_aux"
 # nothing; with no budget, above this floor (nats). Read with the budget in mind: the count
 # says "dimensions the objective is paying for", which is the collapse signal.
 ACTIVE_UNIT_KL_NATS = 0.05
-#: The per-dimension KL reaches the epoch record as one summed diagnostic per dimension
-#: (a batch diagnostic is a scalar the loop adds up); ``latent_epoch_record`` reassembles
-#: the vector, so the index format lives here and nowhere else.
-LATENT_KL_PER_DIM_PREFIX = "latent_kl_dim"
+#: The ruler for the posterior mean's displacement, in prior sigmas: the L2.f gate
+#: ("the information is in the MEAN") is a median above one sigma. It is a GATE, not the
+#: observed value — the three collapsed L2.e' arms measured 0.05-0.2. Read by every surface
+#: that prints the displacement (`run_ts_latent_readout.py`, `run_ts_latent_probe.py`), so
+#: the number a reader is judged against is written once.
+DEAD_MEAN_DISPLACEMENT_SIGMA = 1.0
+#: The per-dimension component KL reaches the epoch record as one summed diagnostic per
+#: dimension (a batch diagnostic is a scalar the loop adds up); ``latent_epoch_record``
+#: reassembles the vector, so the index format lives here and nowhere else.
+LATENT_COMPONENT_KL_PER_DIM_PREFIX = "latent_component_kl_dim"
 # Both log-variances are bare linear outputs; a transient excursion turns exp() into inf and
 # the KL into NaN grads that the loop's divergence guard misdiagnoses as a learning-rate
 # problem. Bounded here, and stated: σ² ∈ [e⁻⁸, e⁸].
@@ -150,6 +156,29 @@ class PriorNetwork(nn.Module):
         return logits, mean, logvar.clamp(-LOGVAR_BOUND, LOGVAR_BOUND)
 
 
+def displacement_verdict(median_sigma: float) -> str:
+    """The one sentence every surface prints about a posterior mean's displacement.
+
+    Beside the ruler it reads, so the readout and the probe cannot disagree about what
+    counts as a live latent.
+    """
+    if median_sigma > DEAD_MEAN_DISPLACEMENT_SIGMA:
+        return (f"displacement median {median_sigma:.3f} sigma > "
+                f"{DEAD_MEAN_DISPLACEMENT_SIGMA:g}: z carries per-flight information")
+    return (f"displacement median {median_sigma:.3f} sigma is NOT above "
+            f"{DEAD_MEAN_DISPLACEMENT_SIGMA:g}: the posterior mean sits on the prior mean, "
+            "so z is a constant however large the KL is")
+
+
+def sigma_from_logvar(logvar: torch.Tensor) -> torch.Tensor:
+    """``exp(logvar / 2)`` — the standard deviation both densities carry as a log-variance.
+
+    One spelling, because every reader of a sigma here (the reparameterization, the prior
+    samples, the probe's tables) must agree on it to the last bit.
+    """
+    return (0.5 * logvar).exp()
+
+
 def _gaussian_log_density(z: torch.Tensor, mean: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
     """Sum over the last dim of log N(z; mean, exp(logvar))."""
     return -0.5 * (((z - mean) ** 2) / logvar.exp() + logvar + _LOG_2PI).sum(dim=-1)
@@ -227,7 +256,7 @@ def _latent_kl(
         charged=charged,
         per_dimension=per_dimension_kl(q_mean, q_logvar, p_mean, p_logvar),
         mean_term_per_dimension=per_dimension_kl_mean_term(q_mean, p_mean, p_logvar),
-        displacement_sigma=(q_mean - p_mean).abs() / (0.5 * p_logvar).exp(),
+        displacement_sigma=(q_mean - p_mean).abs() / sigma_from_logvar(p_logvar),
         prior_mean=p_mean,
         prior_logvar=p_logvar,
     )
@@ -332,7 +361,7 @@ class LatentControlModel(ControlFeatureModel):
             2, index.unsqueeze(2)
         ).squeeze(2)
         noise = torch.randn(chosen_mean.shape, generator=generator, device=mean.device, dtype=mean.dtype)
-        return chosen_mean + noise * (0.5 * chosen_logvar).exp(), component
+        return chosen_mean + noise * sigma_from_logvar(chosen_logvar), component
 
     def decode(
         self, features: torch.Tensor, history: torch.Tensor, latent: torch.Tensor,
@@ -366,7 +395,7 @@ class LatentControlModel(ControlFeatureModel):
         if latent is None:
             if future is not None:
                 posterior_mean, posterior_logvar = self.posterior(*future)
-                latent = posterior_mean + torch.randn_like(posterior_mean) * (0.5 * posterior_logvar).exp()
+                latent = posterior_mean + torch.randn_like(posterior_mean) * sigma_from_logvar(posterior_logvar)
             else:
                 latent = self.top1_latent(logits, prior_mean)
         controls = self.decode(features, history, latent, dynamics)
@@ -438,9 +467,14 @@ def with_latent_kl(
     # its WIDTH costs. L2.e' measured a budget spent entirely on the second — the mean term
     # dies in the first ten epochs and nothing brings it back — so the two are recorded
     # from epoch 1 rather than reconstructed from a probe afterwards.
-    diagnostics["latent_kl_mean_term_nats"] = kl.mean_term_per_dimension.detach().sum()
-    diagnostics["latent_kl_variance_term_nats"] = kl.variance_term_per_dimension.detach().sum()
-    diagnostics["latent_mean_displacement_sigma"] = kl.displacement_sigma.detach().median() * flights
+    diagnostics["latent_component_kl_mean_term_nats"] = kl.mean_term_per_dimension.detach().sum()
+    diagnostics["latent_component_kl_variance_term_nats"] = kl.variance_term_per_dimension.detach().sum()
+    # `torch.quantile(..., 0.5)` and not `torch.median`, which returns the LOWER of the two
+    # middle values on an even count: an outside reader computing a median off the same
+    # flights (numpy, the probe) has to land on the same number.
+    diagnostics["latent_mean_displacement_sigma"] = (
+        torch.quantile(kl.displacement_sigma.detach().flatten(), 0.5) * flights
+    )
     mean_kl_per_dim = kl_dim.mean(dim=0)
     diagnostics["latent_active_units"] = (
         mean_kl_per_dim > active_unit_threshold_nats(config)
@@ -452,7 +486,7 @@ def with_latent_kl(
         mean_kl_per_dim > ACTIVE_UNIT_KL_NATS
     ).sum().to(kl_dim.dtype) * flights
     for index, value in enumerate(kl_dim.sum(dim=0)):
-        diagnostics[f"{LATENT_KL_PER_DIM_PREFIX}{index:02d}"] = value
+        diagnostics[f"{LATENT_COMPONENT_KL_PER_DIM_PREFIX}{index:02d}"] = value
     return replace(
         components,
         extras={**components.extras, LATENT_KL_COMPONENT: config.latent_beta * (charged * weights).mean()},
@@ -509,25 +543,29 @@ def latent_epoch_record(
     mean of ``kl_nats_per_flight``'s per-flight terms — so the two together say both what
     the posterior did and what it cost.
     """
-    flights = max(diagnostic_totals.get("latent_flights", 0.0), 1.0)
+    # Indexed, not `.get(name, 0.0)`: every key is written by `with_latent_kl` on every
+    # batch of a latent run, so a missing one is a renamed key, and a zero would hide it.
+    flights = diagnostic_totals["latent_flights"]
 
     def per_flight(name: str) -> float:
-        return diagnostic_totals.get(name, 0.0) / flights
+        return diagnostic_totals[name] / flights
 
     return {
         # what the objective charged (free bits applied; MC for a mixture)
         "kl_nats_per_flight": per_flight("latent_kl_nats"),
-        # analytic KL per flight against the most responsible component — the quantity
-        # active_units is read from — and its two halves
+        # the analytic KL per flight against the most responsible component — the quantity
+        # active_units is read from — and its two halves, which sum to IT and not to the
+        # charged KL above (free bits and the mixture estimator separate the two)
         "component_kl_nats_per_flight": per_flight("latent_component_kl_nats"),
-        "kl_mean_term_nats": per_flight("latent_kl_mean_term_nats"),
-        "kl_variance_term_nats": per_flight("latent_kl_variance_term_nats"),
-        "kl_per_dim": [
-            per_flight(f"{LATENT_KL_PER_DIM_PREFIX}{index:02d}")
+        "component_kl_mean_term_nats": per_flight("latent_component_kl_mean_term_nats"),
+        "component_kl_variance_term_nats": per_flight("latent_component_kl_variance_term_nats"),
+        "component_kl_per_dim": [
+            per_flight(f"{LATENT_COMPONENT_KL_PER_DIM_PREFIX}{index:02d}")
             for index in range(config.latent_dim)
         ],
         # |μ_q − μ_p| / σ_p, median over flights and dimensions (flight-weighted mean of
-        # the per-batch medians): under ~0.2 means z is the prior's mean wearing noise.
+        # the per-batch medians): below DEAD_MEAN_DISPLACEMENT_SIGMA the posterior mean
+        # sits on the prior mean and z is a constant, whatever the KL says.
         "mean_displacement_sigma": per_flight("latent_mean_displacement_sigma"),
         "active_units": per_flight("latent_active_units"),
         "active_units_0p05": per_flight("latent_active_units_0p05"),

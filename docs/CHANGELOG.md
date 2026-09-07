@@ -8,11 +8,17 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 
 `4dTrajectory/ts_transformer/docs/2026-09-07_latent_intent_design.zh.md` §六 L2.f, branch
 `dev-l2f` (`be56088` diagnostics, `60dd620` β annealing, `6233967` the auxiliary duration
-target, `63d1fdd` `run_ts_latent_probe.py`, `59640bd` the arm file). Nothing here changes an
-existing run: all three code commits are bit-exact at the defaults, proved by 2-epoch
-synthetic trains of four configs (plain control simple-v3/N=32, latent control, state,
-closure) before and after each — 0 numbers changed, only the new keys added — and the run
-grammar recount found 0 of 362 stored configs renamed.
+target, `63d1fdd` `run_ts_latent_probe.py`, `59640bd` the arm file, then one review-fix
+commit). Nothing here changes an existing run: every code commit is bit-exact at the
+defaults, proved by 2-epoch synthetic trains of four configs (plain control simple-v3/N=32,
+latent control, state, closure) before and after each — 0 numbers changed, only the new keys
+added (the review's own re-run moved exactly one value, `mean_displacement_sigma`, when its
+median convention was fixed to `torch.quantile`; that key is new here, so nothing stored
+changes). The audit scope for the naming/loading check is every config-bearing artifact
+under `4dTrajectory/outputs`: **606 stored configs** (`history.json`, `fit_evaluation.json`, `summary.json`) recomputed through
+`run_naming` and re-loaded through `TSConfig.from_dict`, plus **91 campaign `config.json`
+override sets** reconstructed as a new run would — 697 artifacts, **0 changed** in name, slug
+or loading verdict.
 
 **Why.** L2.e' spent three 180-epoch arms on free bits as an information budget and read the
 result as "the budget works, the information is just small". A direct probe of the three
@@ -27,15 +33,24 @@ decoder has learned to read z — and nothing afterwards brings the information 
 
 **Not one number a training run wrote could have shown this.** Total KL, active units and
 shuffled ΔADE are all blind to WHERE the KL is spent. So the epoch record gained the split
-(`kl_mean_term_nats` / `kl_variance_term_nats`, the variance term as the REMAINDER of
-`per_dimension_kl` so the charged number stays bit-identical), `kl_per_dim`,
-`mean_displacement_sigma` (a median is not summable: the flight-weighted mean of the per-batch
-medians, the same shape as `active_units`) and `active_units_0p05` — the FIXED ruler, because
-`active_unit_threshold_nats` moves with the free-bits budget and made that gate unreadable
-across arms. `run_ts_latent_readout.py --history <run>/history.json` prints the kept epoch's
-block; `run_ts_latent_probe.py --checkpoint LABEL=PATH` measures the same quantities off a
-checkpoint (the scratch probe, now code beside the other replay runners, sharing A0's cohort
-rebuild so the roster rule keeps one owner).
+(`component_kl_mean_term_nats` / `component_kl_variance_term_nats`, the variance term as the
+REMAINDER of `per_dimension_kl` so the charged number stays bit-identical — and named
+`component_*` because the three sum to the analytic `component_kl_nats_per_flight`, NOT to
+the charged `kl_nats_per_flight`), `component_kl_per_dim`, `mean_displacement_sigma` (a
+median is not summable: the flight-weighted mean of the per-batch medians, the same shape as
+`active_units`, and taken with `torch.quantile(…, 0.5)` rather than `torch.median`, which
+returns the lower of two middle values — an outside reader must land on the same number) and
+`active_units_0p05` — the FIXED ruler, because `active_unit_threshold_nats` moves with the
+free-bits budget and made that gate unreadable across arms. The gate sentence itself
+(`displacement_verdict`) and its ruler (`DEAD_MEAN_DISPLACEMENT_SIGMA = 1.0`) live in
+`control/latent.py`, so no surface restates either. `run_ts_latent_readout.py --history
+<run>/history.json` prints the kept epoch's block and needs no `--arm` (this is the epoch-1
+reading, before the arm has predicted anything); `run_ts_latent_probe.py --checkpoint
+LABEL=PATH` measures the same quantities off a checkpoint (the scratch probe, now code beside
+the other replay runners, sharing A0's cohort rebuild so the roster rule keeps one owner; its
+prior total std comes from the MIXTURE's own moments, so a K>1 prior's range — which lives
+between its components — is not read off one of them, and `--limit` is documented as a prefix
+of the split, not a sample).
 
 **Two levers, one arm each** (`docs/experiments/l2f_mean_information_arms.json`, base = L2.d's
 warm posterior + free bits 0.05 + β 0.01): `latent_beta_warmup_epochs=40` ramps β linearly
@@ -47,7 +62,7 @@ mean that does not go through the decoder. The head is never called in `decode`,
 latent and no record carries it; the combination with `cta_conditioning=given` is refused (the
 CTA already hands the duration over).
 
-**Two things worth keeping.** (1) The epoch's objective is now `replace(config,
+**Three things worth keeping.** (1) The epoch's objective is now `replace(config,
 latent_beta=effective)` and the VALIDATION pass is scored under the same one, so an epoch's
 train and val `latent_kl` mean the same thing — the rule the procedure penalty's λ already
 followed; `train_components.latent_kl` keeps its meaning (the term actually charged) and the
@@ -55,8 +70,14 @@ followed; `train_components.latent_kl` keeps its meaning (the term actually char
 head (synthetic, three seeds, paired init): the target raises the KL's mean term in 3 of 3
 seeds but the displacement MEDIAN in only 2 of 3, because a scalar read-out needs ONE latent
 direction and a median over eight dimensions can miss it. The test asserts the monotone
-quantity and the arm file says to read `kl_per_dim` beside gate (1)'s median rather than
-weakening either.
+quantity and the arm file says to read `component_kl_per_dim` beside gate (1)'s median rather
+than being weakened to pass. **And the aux target is literally an INPUT of the posterior
+encoder** (the true duration), so a small `latent_aux` proves only that one latent coordinate
+can copy one input: the verdict needs the KL mean term to move AND a downstream gate to move.
+(3) `simple-v*` now pins the WHOLE latent axis at its defaults, so a named recipe is
+non-latent by definition and a latent run is `custom` — which every latent arm file already
+said. Pinning only L2.f's two levers, as the first draft did, would have let a `simple-v3`
+run choose its β but not its warm-up.
 
 ### 2026-09-07 — ts_transformer A0 / B0: the re-anchoring curve and the arrival-time error distribution
 

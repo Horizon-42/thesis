@@ -5,7 +5,9 @@ What must not drift, because each would make the table read like a working laten
 * the posterior comes from the SAME entry the training loop uses (`model_forward` with the
   truth's future), not a second call into the encoder;
 * the KL's split is the one `control/latent.py` charges — mean term plus variance term add
-  back up to the per-dimension KL, per dimension;
+  back up to the per-dimension COMPONENT KL, per dimension;
+* the prior's total std is the MIXTURE's own moments, so a K>1 prior's range (which lives
+  between its components) is not read off one of them;
 * the cohort is the checkpoint's own split, rebuilt through the shared replay loader, so
   the roster rule has one owner;
 * a checkpoint with no posterior (no latent) or one that reads the future a second way
@@ -16,6 +18,7 @@ What must not drift, because each would make the table read like a working laten
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -32,6 +35,7 @@ from config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
+from control.latent import displacement_verdict
 from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from dataset import build_series, dataset_flight_key
 from synthetic import synthetic_arrivals
@@ -121,29 +125,35 @@ def test_the_probe_reports_both_densities_and_a_kl_split_that_adds_up(
     assert block["latent_dim"] == LATENT_DIM and block["flights"] >= 2
     for key in ("prior_mean_across_flight_std", "prior_sigma_median",
                 "posterior_mean_across_flight_std", "posterior_sigma_median",
-                "displacement_sigma_median_per_dim", "kl_per_dim_nats",
-                "kl_mean_term_per_dim_nats", "kl_variance_term_per_dim_nats"):
+                "displacement_sigma_median_per_dim", "component_kl_per_dim_nats",
+                "component_kl_mean_term_per_dim_nats",
+                "component_kl_variance_term_per_dim_nats"):
         assert len(block[key]) == LATENT_DIM, key
-        assert all(value == pytest.approx(value) for value in block[key]), key   # finite
+        assert all(math.isfinite(value) for value in block[key]), key
     # The split is the one the objective charges: the variance term is the REMAINDER of
     # the per-dimension KL, so the two add back up to within the model dtype's rounding
     # (float32; the probe's own reductions are float64).
     for total, mean_term, variance_term in zip(
-        block["kl_per_dim_nats"], block["kl_mean_term_per_dim_nats"],
-        block["kl_variance_term_per_dim_nats"],
+        block["component_kl_per_dim_nats"], block["component_kl_mean_term_per_dim_nats"],
+        block["component_kl_variance_term_per_dim_nats"],
     ):
         assert mean_term + variance_term == pytest.approx(total, rel=1e-6)
     assert (
-        block["kl_mean_term_nats_per_flight"] + block["kl_variance_term_nats_per_flight"]
-        == pytest.approx(block["kl_nats_per_flight"], rel=1e-6)
+        block["component_kl_mean_term_nats_per_flight"]
+        + block["component_kl_variance_term_nats_per_flight"]
+        == pytest.approx(block["component_kl_nats_per_flight"], rel=1e-6)
     )
-    assert block["kl_nats_per_flight"] == pytest.approx(sum(block["kl_per_dim_nats"]), rel=1e-9)
+    assert block["component_kl_nats_per_flight"] == pytest.approx(
+        sum(block["component_kl_per_dim_nats"]), rel=1e-9
+    )
     # the warm posterior opened at 0.1 and one epoch cannot widen it far
     assert all(0.0 < value < 1.0 for value in block["posterior_sigma_median"])
     assert block["prior_total_std"] > 0.0
     text = (tmp_path / "probe" / "latent_probe.txt").read_text()
     assert "|q mean − p mean| / p sigma" in text and "MEAN term" in text
     assert "never a prediction result" in text
+    # the verdict is the shared sentence, on the shared ruler
+    assert displacement_verdict(block["displacement_sigma_median"]) in text
 
 
 def test_the_probe_artifact_is_immutable_and_the_limit_narrows_the_cohort(
@@ -152,6 +162,9 @@ def test_the_probe_artifact_is_immutable_and_the_limit_narrows_the_cohort(
     flights, checkpoint = latent_checkpoint
     payload = _run(monkeypatch, flights, tmp_path, checkpoint, tmp_path / "one", "--limit", "1")
     assert payload["limit"] == 1 and payload["checkpoints"]["arm"]["flights"] == 1
+    # a limit is a PREFIX of the split, and the artifact says so where a reader will see it
+    assert "prefix, not a random sample" in payload["limit_meaning"]
+    assert payload["limit_meaning"] in (tmp_path / "one" / "latent_probe.txt").read_text()
     with pytest.raises(FileExistsError, match="immutable"):
         _run(monkeypatch, flights, tmp_path, checkpoint, tmp_path / "one", "--limit", "1")
 
@@ -184,3 +197,35 @@ def test_the_probe_refuses_the_sealed_split(monkeypatch, tmp_path, latent_checkp
     with pytest.raises(SystemExit):
         probe.main(["--checkpoint", f"arm={checkpoint}", "--split", "test",
                     "--out", str(tmp_path / "probe")])
+
+
+def test_the_prior_total_std_is_the_mixture_s_own_moments():
+    """K>1 keeps most of its range BETWEEN the components, so the total must come from the
+    mixture's moments and not from one of them."""
+    # two components at ±1 with negligible width and equal weights: E[z] = 0, Var = 1
+    logits = torch.zeros(1, 2)
+    mean = torch.tensor([[[-1.0], [1.0]]])
+    logvar = torch.full((1, 2, 1), -40.0)
+    expectation, variance = probe.mixture_moments(logits, mean, logvar)
+    assert expectation == pytest.approx(0.0, abs=1e-6)
+    assert float(variance) == pytest.approx(1.0, rel=1e-5)
+    # K = 1 reduces to that component's own moments
+    single_mean, single_logvar = torch.tensor([[[0.3, -0.2]]]), torch.tensor([[[0.0, 1.0]]])
+    one_expectation, one_variance = probe.mixture_moments(
+        torch.zeros(1, 1), single_mean, single_logvar
+    )
+    assert torch.allclose(one_expectation, single_mean[:, 0])
+    assert torch.allclose(one_variance, single_logvar[:, 0].exp(), atol=1e-6)
+
+
+def test_the_probe_runs_on_a_mixture_prior(monkeypatch, tmp_path):
+    """A K=4 checkpoint end to end: the diagnostics are taken against the most responsible
+    component per flight (the artifact says so) and the prior's total std is the mixture's."""
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=16, seed=3)
+    checkpoint = _train(_config(latent_prior_components=4), tmp_path / "mixture", flights)
+    payload = _run(monkeypatch, flights, tmp_path, checkpoint, tmp_path / "probe")
+    block = payload["checkpoints"]["arm"]
+    assert block["prior_components"] == 4
+    assert "most responsible" in block["component"]
+    assert math.isfinite(block["prior_total_std"]) and block["prior_total_std"] > 0.0
+    assert len(block["component_kl_per_dim_nats"]) == LATENT_DIM
