@@ -11,6 +11,19 @@ that directory is read-only here. ``--result-source prediction`` publishes a
 primary result under Prediction; the default ``experiment`` source includes checkpoint metadata
 for the Experiments picker.
 
+**One checkpoint, several prediction directories.** Everything a category is named from —
+the key, the picker's experiment id, the label — is derived from the CHECKPOINT, so two
+directories of one checkpoint collide unless something tells them apart. That something is a
+``CategoryVariant``, and it has exactly two sources: a directory written by
+``run_ts_anytime_curve.py --write-records`` carries an ``anytime`` block naming the
+remaining-path bin its forecasts were anchored in (its label then states the bin and how many
+flights it holds, so a re-anchored SUBSET's error can never be read as the split's, and its
+picker heading is the record campaign); anything else — a predict-time projection or command
+hook published beside the baseline whose checkpoint it reuses — names one with
+``--category-variant SLUG[=LABEL]``. Giving both is refused, and so is publishing a second
+directory onto a category some other directory already holds: they must coexist, never
+overwrite.
+
 Outer-test is not a valid option here.  This command is for development train/validation
 inspection only.
 """
@@ -24,9 +37,9 @@ import re
 import subprocess
 import sys
 import tarfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -48,10 +61,21 @@ FRONTEND_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airport
 TS_SCRIPT = REPO_ROOT / "4dTrajectory" / "ts_transformer" / "__main__.py"
 CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
 
-PUBLICATION_SCHEMA = "ts-experiment-publication-v1"
+#: Stamped into every manifest written from here on. v2 means "a category may be one of
+#: several publications of its checkpoint" — a v1 reader would take a variant's category and
+#: write the BASELINE's experiment id onto it, so it must skip these rather than refresh them.
+PUBLICATION_SCHEMA = "ts-experiment-publication-v2"
+#: What this reader accepts: v1 manifests predate the variant and describe a lone publication.
+PUBLICATION_SCHEMAS_READ = ("ts-experiment-publication-v1", PUBLICATION_SCHEMA)
 PUBLICATION_INDEX_SCHEMA = "ts-experiment-publication-index-v1"
 PUBLICATION_MANIFEST = "publication.json"
 DEVELOPMENT_SPLITS = ("train", "val")
+
+#: A MIRROR of ``run_ts_anytime_curve.RECORDS_SCHEMA`` — the block that runner writes into
+#: each record directory's ``summary.json``. Not imported: that module pulls in torch and the
+#: whole ts package, and this script is a subprocess orchestrator that must stay importable
+#: without them. Change the two together.
+ANYTIME_RECORDS_SCHEMA = "ts-anytime-records-v1"
 
 
 def _utc_now() -> str:
@@ -87,12 +111,185 @@ def _safe_stem(value: str, *, limit: int = 56) -> str:
 
 
 def _path_for_manifest(path: Path) -> str:
-    """Use a repository-relative path when possible, otherwise an absolute path."""
-    resolved = path.resolve()
-    try:
-        return str(resolved.relative_to(REPO_ROOT.resolve()))
-    except ValueError:
-        return str(resolved)
+    """A repository-relative path when possible, otherwise an absolute one.
+
+    Tried BEFORE resolving as well as after: in a worktree, `4dTrajectory/outputs` is a
+    symlink into the main tree, so resolving first turns a path that is lexically inside the
+    repository into an absolute one outside it, and the manifest stops being portable.
+    """
+    for candidate, root in ((path, REPO_ROOT), (path.resolve(), REPO_ROOT.resolve())):
+        try:
+            return str(candidate.relative_to(root))
+        except ValueError:
+            continue
+    return str(path.resolve())
+
+
+def _same_prediction_dir(claimed: str | None, ours: Path | None) -> bool:
+    """Do a manifest's stored prediction directory and this plan's name the same place?
+
+    Compared as PATHS, never as strings. Every manifest written before this fix stored an
+    absolute path (a worktree resolves `4dTrajectory/outputs` into the main tree, so the
+    relative attempt failed), while the same publication run from the main tree now renders
+    it relative — string equality would call a byte-identical republish a collision. So a
+    relative value is resolved against the repository and both sides are resolved through
+    their symlinks; `samefile` decides whenever both exist, since two different paths can be
+    one directory.
+    """
+    if claimed is None or ours is None:
+        return claimed is None and ours is None
+    theirs = Path(claimed)
+    if not theirs.is_absolute():
+        theirs = REPO_ROOT / theirs
+    if theirs.exists() and ours.exists():
+        return theirs.samefile(ours)
+    return theirs.resolve() == ours.resolve()
+
+
+@dataclass(frozen=True)
+class CategoryVariant:
+    """What tells two publications of the SAME checkpoint apart.
+
+    A checkpoint is published more than once whenever the prediction directory — not the
+    training — is what differs: one directory per remaining-path bin
+    (``run_ts_anytime_curve.py --write-records``), or one per predict-time variant (an
+    inference projection, a command hook applied at predict time only). Every part of a
+    category's identity is derived from the CHECKPOINT — the key, the picker's experiment id,
+    the label — so without something to tell those publications apart the second silently
+    overwrites the first. This is that something, and a publication has at most one.
+
+    ``id_suffix`` is separate from ``key_suffix`` because the two live in different alphabets:
+    a category key is a filesystem directory name, an experiment id is a display/lookup
+    identity that may carry ``@``.
+    """
+
+    #: Appended to the category key (hence to the frontend directory name).
+    key_suffix: str
+    #: Appended to ``experiment.id`` after ``@``. The picker DEDUPES by that id.
+    id_suffix: str
+    #: Appended to the canonical run display name, in the picker and the category label.
+    label_suffix: str
+    #: Picker heading override, or None to keep the checkpoint's own training campaign.
+    group: str | None = None
+
+
+#: A ``--category-variant`` slug: a directory-name fragment that must not open with a digit
+#: (the category key reads as `<source>_<run>_<token>_<slug>_<split>`) and must not contain a
+#: path separator. Lower-cased and length-capped like the rest of the key (`_safe_stem`), so
+#: what is typed and what appears on disk cannot differ by case alone.
+_VARIANT_SLUG = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+#: The anytime bins' own key shape (`a12km`). A flag slug must not be able to impersonate one:
+#: the two would be indistinguishable in a key while meaning different things.
+_ANYTIME_KEY_SHAPE = re.compile(r"^a\d+(\.\d+)?km$")
+#: `references/` is the record contract's own subdirectory inside a prediction batch.
+_RESERVED_VARIANT_SLUGS = frozenset({"references"})
+
+
+def _parse_category_variant(value: str) -> CategoryVariant:
+    """``SLUG`` or ``SLUG=LABEL`` → the variant every derived name is suffixed with."""
+    slug, separator, label = value.partition("=")
+    slug, label = slug.strip(), label.strip()
+    if not _VARIANT_SLUG.match(slug):
+        raise ValueError(
+            f"--category-variant slug {slug!r} must start with a letter and contain only "
+            "letters, digits, '_' and '-' — it becomes part of a category key"
+        )
+    normalized = _safe_stem(slug, limit=24).lower()
+    if normalized in _RESERVED_VARIANT_SLUGS:
+        raise ValueError(
+            f"--category-variant slug {slug!r} is reserved by the record contract"
+        )
+    if _ANYTIME_KEY_SHAPE.match(normalized):
+        raise ValueError(
+            f"--category-variant slug {slug!r} has the shape an anytime bin's key takes "
+            "(a12km); pick one that cannot be mistaken for a re-anchored bin"
+        )
+    if separator and not label:
+        raise ValueError(f"--category-variant {value!r} has an empty label after '='")
+    slug = normalized
+    return CategoryVariant(
+        key_suffix=slug, id_suffix=slug, label_suffix=label or slug,
+    )
+
+
+@dataclass(frozen=True)
+class AnytimeBin:
+    """One re-anchored bin of an anytime record campaign: what a category must SAY about it.
+
+    Read off the reused prediction directory's own ``summary.json``; absent for every other
+    prediction directory, and a publication is then exactly what it was before. The bin is
+    the single source of the category's identity — key suffix, picker group and label — so
+    nothing downstream has to parse a directory name to learn which anchor it is looking at.
+    """
+
+    campaign: str
+    #: The runner's own spelling of the bin (``12km``) — one spelling for the directory it
+    #: wrote, the category key and the label, so none of the three can drift.
+    bin_label: str
+    records: int
+    measured_flights: int
+    split_flights: int
+    limit: int
+
+    @property
+    def variant(self) -> CategoryVariant:
+        """The bin, as the one thing that tells its publication from the checkpoint's others.
+
+        ``a12km`` for the key — the ``a`` keeps the fragment from opening with a digit — and
+        the bare ``12km`` for the experiment id, which has no such constraint. The group is
+        the RECORD campaign, so a campaign's bins sit under one picker heading instead of
+        scattering across the training campaigns they were replayed from.
+        """
+        return CategoryVariant(
+            key_suffix=f"a{self.bin_label}",
+            id_suffix=self.bin_label,
+            label_suffix=self.label_suffix,
+            group=self.campaign,
+        )
+
+    @property
+    def label_suffix(self) -> str:
+        """The bin AND its population: a subset's numbers must never read as the split's.
+
+        Both denominators, because they answer different questions: ``records`` of
+        ``measured_flights`` is how much of the replayed cohort reached this bin (the rest
+        never flew a sample near it), and ``--limit`` of ``split_flights`` is how much of the
+        split was replayed at all.
+        """
+        counts = f"{self.records} of {self.measured_flights} flights"
+        if self.limit:
+            counts += f", --limit {self.limit} of {self.split_flights} in the split"
+        return f"@ {self.bin_label} remaining ({counts})"
+
+
+def _anytime_from_block(block: dict[str, Any]) -> AnytimeBin:
+    """The fields this publisher uses, named once.
+
+    Both sources are read through here: the record directory's summary block (which carries
+    more than a category needs — arm, anchor rule, coverage) and the publication manifest's
+    own copy. Selecting rather than splatting is what lets the two shapes differ, and what
+    keeps a field this publisher stops using from breaking a refresh of an older manifest.
+    """
+    return AnytimeBin(
+        campaign=str(block["campaign"]),
+        bin_label=str(block["bin_label"]),
+        records=int(block["records"]),
+        measured_flights=int(block["measured_flights"]),
+        split_flights=int(block["split_flights"]),
+        limit=int(block["limit"]),
+    )
+
+
+def _anytime_bin(summary_path: Path) -> AnytimeBin | None:
+    block = _load_object(summary_path).get("anytime")
+    if block is None:
+        return None
+    if block.get("schema") != ANYTIME_RECORDS_SCHEMA:
+        raise ValueError(
+            f"{summary_path} carries an anytime block of unknown schema "
+            f"{block.get('schema')!r} (this publisher speaks {ANYTIME_RECORDS_SCHEMA})"
+        )
+    return _anytime_from_block(block)
 
 
 @dataclass(frozen=True)
@@ -213,6 +410,9 @@ class PublicationPlan:
     device: str = "auto"
     record_retention: str = "archive"
     prediction_dir: Path | None = None
+    #: ``--category-variant``. The other source is the reused directory's own anytime block;
+    #: a publication takes at most one of the two (see ``category_variant``).
+    variant: CategoryVariant | None = None
 
     def __post_init__(self) -> None:
         if self.split not in DEVELOPMENT_SPLITS:
@@ -228,6 +428,48 @@ class PublicationPlan:
             raise ValueError(
                 f"reused prediction directory {self.prediction_dir} has no summary.json"
             )
+        if self.variant is not None and self.prediction_dir is None:
+            # Without a reused directory the predict step would run again and differ only in
+            # --output-dir: the same checkpoint, the same flags, the same forecasts, published
+            # a second time under a relabelled key. A variant distinguishes DIRECTORIES.
+            raise ValueError(
+                f"--category-variant {self.variant.key_suffix!r} needs "
+                "--reuse-prediction-dir: without one it would republish the checkpoint's own "
+                "prediction under a second name, not a different prediction"
+            )
+        if self.variant is not None and self.anytime is not None:
+            # Checked HERE, at construction, so a batch cannot die halfway through with a
+            # traceback: two answers to "which publication is this" is the ambiguity the
+            # variant exists to remove.
+            raise ValueError(
+                f"{self.prediction_dir} describes its own anytime bin "
+                f"({self.anytime.bin_label}) and --category-variant "
+                f"{self.variant.key_suffix!r} names another; a publication has one identity"
+            )
+
+    @cached_property
+    def anytime(self) -> AnytimeBin | None:
+        """The re-anchored bin these records are, or None for an ordinary L−1 batch.
+
+        Reads the reused directory's summary DIRECTLY rather than through ``self.summary``:
+        that property goes via ``records_dir`` → ``output_dir``, and ``output_dir`` now reads
+        this one. Today the cycle is broken only by ``or`` short-circuiting; spelling the
+        path here means it cannot come back as a ``RecursionError``.
+        """
+        if self.prediction_dir is None:
+            return None
+        return _anytime_bin(self.prediction_dir / "summary.json")
+
+    @cached_property
+    def category_variant(self) -> CategoryVariant | None:
+        """The ONE thing that tells this publication from the checkpoint's others.
+
+        Two sources can supply it and a publication takes at most one: a record directory
+        that describes its own bin, and ``--category-variant`` on the command line. Both at
+        once is refused at construction (``__post_init__``), so by the time anything reads
+        this there is one answer.
+        """
+        return self.variant if self.anytime is None else self.anytime.variant
 
     @property
     def data_manifest(self) -> Path:
@@ -239,13 +481,18 @@ class PublicationPlan:
 
     @property
     def output_dir(self) -> Path:
-        return (
+        base = (
             self.raw_output_root
             / self.experiment.directory_name
             / self.result_source
             / self.airport
             / self.split
         )
+        # One checkpoint publishes once per VARIANT, so each owns its evaluation report and
+        # publication manifest — sharing the split's directory would have them overwrite each
+        # other's verdicts.
+        variant = self.category_variant
+        return base if variant is None else base / variant.key_suffix
 
     @property
     def records_dir(self) -> Path:
@@ -276,7 +523,13 @@ class PublicationPlan:
     @property
     def category(self) -> str:
         run = _safe_stem(self.experiment.run_id, limit=42).lower()
-        return f"{self.result_source}_{run}_{self.experiment.token}_{self.split}"
+        variant = self.category_variant
+        suffix = "" if variant is None else f"_{variant.key_suffix}"
+        return f"{self.result_source}_{run}_{self.experiment.token}{suffix}_{self.split}"
+
+    @property
+    def experiment_group(self) -> str | None:
+        return _experiment_group(self.experiment.campaign, self.category_variant)
 
     @property
     def comparison_dir(self) -> Path:
@@ -289,17 +542,19 @@ class PublicationPlan:
     @property
     def category_label(self) -> str:
         return _publication_label(
-            self.split, self.result_source, self.experiment.config, self.experiment.run_id
+            self.split, self.result_source, self.experiment.config, self.experiment.run_id,
+            variant=self.category_variant,
         )
 
     @property
     def experiment_metadata(self) -> dict[str, Any]:
         return _publication_experiment_metadata(
             experiment_id=self.experiment.experiment_id,
-            campaign=self.experiment.campaign,
+            campaign=self.experiment_group,
             checkpoint=self.experiment.checkpoint_relative,
             config=self.experiment.config,
             run_id=self.experiment.run_id,
+            variant=self.category_variant,
         )
 
     def commands(self) -> list[tuple[str, list[str]]]:
@@ -329,8 +584,8 @@ class PublicationPlan:
         ]
         if self.result_source == "experiment":
             publish += [
-                "--experiment-id", self.experiment.experiment_id,
-                "--experiment-group", self.experiment.campaign,
+                "--experiment-id", self.experiment_metadata["id"],
+                "--experiment-group", self.experiment_group,
                 "--experiment-checkpoint", self.experiment.checkpoint_relative,
             ]
         steps = [
@@ -384,6 +639,49 @@ class PublicationPlan:
                     f"reused predictions in {self.prediction_dir} are the "
                     f"{reused.get('split')!r} split, not {self.split!r}"
                 )
+            # ANY reused directory, not only an anytime one: the publisher fans out a plan
+            # per airport of the checkpoint's provenance, so a directory holding several
+            # airports' flights would be filed whole under each airport's category with the
+            # pooled count printed as that airport's. (The anytime runner is simply the one
+            # that always produces such a directory — it replays the cohort its provenance
+            # names and offers no airport narrowing.) Refuse rather than mislabel.
+            airports = {
+                str(row.get("arr_airport") or "").upper()
+                for row in reused.get("results") or ()
+            }
+            if airports and airports != {self.airport}:
+                return (
+                    f"reused predictions in {self.prediction_dir} cover {sorted(airports)}, "
+                    f"not just {self.airport}: this publication is one airport's category, "
+                    "and a directory spanning several would be filed whole under each"
+                )
+        # Two prediction directories must never land on ONE category. Everything a category
+        # is named from comes from the checkpoint, so publishing a second directory of the
+        # same checkpoint without a variant would silently replace the first — its CZML, its
+        # evaluation report and its picker entry. Refuse and name the variant flag; the
+        # variant is what makes them coexist.
+        # Only a COMPLETED manifest holds a category: a failed or blocked attempt left its
+        # document behind without owning anything, and treating it as an owner would wedge the
+        # category permanently. The comparison is by PATH, not by string — see
+        # `_same_prediction_dir`, without which a byte-identical republish from the other tree
+        # reads as a collision.
+        if self.publication_manifest.is_file():
+            existing = _load_object(self.publication_manifest)
+            claimed = existing.get("predictionDir")
+            if (
+                existing.get("status") == "completed"
+                and not _same_prediction_dir(claimed, self.prediction_dir)
+            ):
+                ours = (
+                    "a predict run" if self.prediction_dir is None
+                    else _path_for_manifest(self.prediction_dir)
+                )
+                return (
+                    f"category {self.category!r} was already published from "
+                    f"{claimed or 'a predict run'} and this would republish it from {ours}; "
+                    "give one of them a --category-variant so the two can coexist instead of "
+                    "overwriting each other"
+                )
         return None
 
     def is_complete(self) -> bool:
@@ -403,13 +701,81 @@ class PublicationPlan:
         )
 
 
+def _manifest_is_completed(path: Path) -> bool:
+    """Does a publication manifest on disk record a COMPLETED publication?
+
+    Unreadable or absent counts as "no": the question is only ever asked to decide whether
+    something worth keeping is already there.
+    """
+    if not path.is_file():
+        return False
+    try:
+        return _load_object(path).get("status") == "completed"
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _variant_from_document(document: dict[str, Any]) -> CategoryVariant | None:
+    """The variant a completed publication was made under, straight from its manifest.
+
+    It travels in the manifest so a label refresh never has to reopen the (read-only, possibly
+    moved) prediction directory to recompute the same name. Manifests written before the
+    variant became a first-class thing carry only the anytime block, which describes exactly
+    one variant — so those are read through the bin.
+    """
+    block = document.get("anytime")
+    if block:
+        # DERIVED, never the stored rendering: `AnytimeBin.label_suffix` owns how a bin reads,
+        # so a wording change there must reach every anytime publication on the next refresh.
+        return _anytime_from_block(block).variant
+    stored = document.get("variant")
+    if not stored:
+        return None
+    group = stored.get("group")
+    if group is not None and not isinstance(group, str):
+        # The picker groups by this value; a non-string silently drops the whole category.
+        raise ValueError(
+            f"stored variant group must be a string or null, got {group!r}"
+        )
+    return CategoryVariant(
+        key_suffix=str(stored["key_suffix"]),
+        id_suffix=str(stored["id_suffix"]),
+        label_suffix=str(stored["label_suffix"]),
+        group=group,
+    )
+
+
+def _experiment_group(campaign: str | None, variant: CategoryVariant | None) -> str | None:
+    """The heading the picker files a model under.
+
+    A variant may override it: an anytime bin belongs to its RECORD campaign, not to the
+    campaign its checkpoint was trained in, which is what puts one campaign's bins under one
+    heading instead of scattering them across the training campaigns they were replayed from.
+    """
+    if variant is None or variant.group is None:
+        return campaign
+    return variant.group
+
+
+def _run_label(
+    config: dict[str, Any], run_id: str, variant: CategoryVariant | None
+) -> str:
+    """The canonical run name, plus which anchor these particular records were taken at.
+
+    ONE definition, used by the category label and by the picker entry — a bin whose picker
+    entry did not say "@ 12 km" would be indistinguishable from the L−1 publication of the
+    same checkpoint.
+    """
+    name = run_display_name(config, extra=(run_id,))
+    return name if variant is None else f"{name} {variant.label_suffix}"
+
+
 def _publication_label(
-    split: str, result_source: str, config: dict[str, Any], run_id: str
+    split: str, result_source: str, config: dict[str, Any], run_id: str,
+    variant: CategoryVariant | None = None,
 ) -> str:
     kind = "Experiment" if result_source == "experiment" else "Predicted"
-    return category_display_label(
-        split, run_display_name(config, extra=(run_id,)), kind=kind
-    )
+    return category_display_label(split, _run_label(config, run_id, variant), kind=kind)
 
 
 def _publication_experiment_metadata(
@@ -419,12 +785,15 @@ def _publication_experiment_metadata(
     checkpoint: str,
     config: dict[str, Any],
     run_id: str,
+    variant: CategoryVariant | None = None,
 ) -> dict[str, Any]:
     return {
-        "id": experiment_id,
+        # The picker DEDUPES by id, so each bin of a checkpoint needs its own — otherwise
+        # only the first bin published would ever appear in the Experiments list.
+        "id": experiment_id if variant is None else f"{experiment_id}@{variant.id_suffix}",
         "group": campaign,
         "checkpoint": checkpoint,
-        "label": run_display_name(config, extra=(run_id,)),
+        "label": _run_label(config, run_id, variant),
         "model": config.get("model"),
         "predictionOutput": config.get("prediction_output", "state"),
         "horizonMode": config.get("horizon_mode", "normalized"),
@@ -500,7 +869,7 @@ def refresh_labels_from_manifests(
     for manifest_path in sorted(output_root.rglob(PUBLICATION_MANIFEST)):
         document = _load_object(manifest_path)
         if (
-            document.get("schemaVersion") != PUBLICATION_SCHEMA
+            document.get("schemaVersion") not in PUBLICATION_SCHEMAS_READ
             or document.get("status") != "completed"
         ):
             continue
@@ -509,19 +878,21 @@ def refresh_labels_from_manifests(
         run_id = document.get("runId") or ""
         split = document.get("split") or ""
         result_source = document.get("resultSource") or "experiment"
+        variant = _variant_from_document(document)
         metadata = None
         if result_source == "experiment":
             metadata = _publication_experiment_metadata(
                 experiment_id=document.get("experimentId") or run_id,
-                campaign=document.get("campaign"),
+                campaign=_experiment_group(document.get("campaign"), variant),
                 checkpoint=document.get("checkpoint") or "",
                 config=config,
                 run_id=run_id,
+                variant=variant,
             )
         found = _apply_category_refresh(
             frontend_airports_root / document["airport"] / "comparison" / "categories.json",
             document["category"],
-            _publication_label(split, result_source, config, run_id),
+            _publication_label(split, result_source, config, run_id, variant),
             result_source,
             metadata,
         )
@@ -567,6 +938,14 @@ def _publication_document(
         "config": plan.experiment.config,
         "recordRetention": plan.record_retention,
     }
+    if plan.anytime is not None:
+        # The domain fact, and the ONLY thing stored for an anytime publication: its variant
+        # is a rendering of this block, and re-deriving it on read is what lets the label
+        # wording change without rewriting every manifest.
+        document["anytime"] = asdict(plan.anytime)
+    elif plan.category_variant is not None:
+        # A flag slug has no domain object behind it, so the rendering IS the record.
+        document["variant"] = asdict(plan.category_variant)
     if plan.records_archive.is_file():
         document["recordsArchive"] = {
             "file": plan.records_archive.name,
@@ -654,7 +1033,7 @@ def rebuild_publication_index(output_root: Path = RAW_OUTPUT_ROOT) -> dict[str, 
                 document = _load_object(path)
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
-            if document.get("schemaVersion") == PUBLICATION_SCHEMA:
+            if document.get("schemaVersion") in PUBLICATION_SCHEMAS_READ:
                 publications.append(document)
     result = {
         "schemaVersion": PUBLICATION_INDEX_SCHEMA,
@@ -701,12 +1080,19 @@ def run_publication(
     error = plan.preflight_error()
     if error:
         print(f"  ⚠ blocked {context}: {error}")
-        if not dry_run:
+        # A blocked attempt must never overwrite a COMPLETED manifest. It publishes nothing,
+        # so the previous publication still stands on disk — but its document carries the
+        # accuracy and evaluation blocks, and replacing it with a blocked one loses them,
+        # flips the publication index, and makes `is_complete()` false forever, so the next
+        # run blocks again on the same stale reason. Refuse loudly, write nothing.
+        if not dry_run and not _manifest_is_completed(plan.publication_manifest):
             _write_json_atomic(
                 plan.publication_manifest,
                 _publication_document(plan, status="blocked", failure=error),
             )
             rebuild_publication_index(plan.raw_output_root)
+        elif not dry_run:
+            print(f"     (kept the completed manifest at {plan.publication_manifest})")
         return "blocked"
 
     commands = plan.commands()
@@ -825,6 +1211,20 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--category-variant",
+        default=None,
+        metavar="SLUG[=LABEL]",
+        help=(
+            "publish this run as a distinct category of the SAME checkpoint: SLUG is "
+            "appended to the category key and to the picker's experiment id, and LABEL (or "
+            "SLUG) to the display label. Needed whenever two prediction directories share a "
+            "checkpoint — a predict-time projection or hook beside its own baseline — "
+            "because everything else in a category's identity comes from the checkpoint. A "
+            "directory written by `run_ts_anytime_curve.py --write-records` names its own "
+            "bin instead, and giving both is refused"
+        ),
+    )
+    parser.add_argument(
         "--split",
         action="append",
         choices=DEVELOPMENT_SPLITS,
@@ -894,12 +1294,27 @@ def main(argv: list[str] | None = None) -> int:
         experiment_id, separator, directory = assignment.partition("=")
         if not separator:
             parser.error(f"--reuse-prediction-dir expects EXPERIMENT_ID=DIR, got {assignment!r}")
-        reused_dirs[
-            _normalize_checkpoint_id(experiment_id, experiment_root=experiment_root)
-        ] = Path(directory).resolve()
+        normalized = _normalize_checkpoint_id(experiment_id, experiment_root=experiment_root)
+        # One invocation publishes ONE directory per checkpoint. Silently keeping the last
+        # would turn the obvious way to ask for several anytime bins at once into a run that
+        # publishes only the last of them and says nothing.
+        if normalized in reused_dirs:
+            parser.error(
+                f"--reuse-prediction-dir names {normalized!r} twice ({reused_dirs[normalized]} "
+                f"and {directory}); one invocation publishes one directory per checkpoint — "
+                "run it once per anytime bin"
+            )
+        reused_dirs[normalized] = Path(directory).resolve()
     unknown = set(reused_dirs) - {checkpoint.experiment_id for checkpoint in checkpoints}
     if unknown:
         parser.error(f"--reuse-prediction-dir names an unselected run: {sorted(unknown)[0]}")
+
+    variant = None
+    if args.category_variant is not None:
+        try:
+            variant = _parse_category_variant(args.category_variant)
+        except ValueError as error:
+            parser.error(str(error))
 
     requested_airports = {value.strip().upper() for value in args.airport} if args.airport else None
     splits = tuple(args.split or DEVELOPMENT_SPLITS)
@@ -921,6 +1336,7 @@ def main(argv: list[str] | None = None) -> int:
                     device=args.device,
                     record_retention=args.record_retention,
                     prediction_dir=reused_dirs.get(checkpoint.experiment_id),
+                    variant=variant,
                 ))
     if not plans:
         parser.error("no checkpoint provenance contains the requested airport(s)")

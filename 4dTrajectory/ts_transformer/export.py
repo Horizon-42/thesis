@@ -414,12 +414,18 @@ def write_batch(
     checkpoint: str | None = None,
     split: str = "test",
     skipped: dict[str, int] | None = None,
+    extra_summary: dict[str, Any] | None = None,
 ) -> list[Path]:
     """Write every record plus the ``summary.json`` manifest. Returns the eval-file paths.
 
     ``skipped`` states any bounded coverage the caller applied before predicting (today: the
     flights a counterfactual CTA offset could not be asked of); it is written as
     ``summary["skipped"]`` so a readout never mistakes a subset for the split.
+
+    ``extra_summary`` adds top-level summary keys the CALLER owns and no reader of the
+    record contract may assume (today: ``run_ts_anytime_curve.py``'s ``anytime`` block,
+    which states which remaining-path bin these records were anchored in). A key that
+    collides with the contract's own is refused rather than silently overwriting it.
 
     ``flight_metrics`` is ``observed_series_metrics`` per record, positionally aligned. It is
     required, not optional: a prediction batch's error against the observed track is its
@@ -544,6 +550,13 @@ def write_batch(
         "accuracy": accuracy,
         "results": rows,
     }
+    collisions = sorted(set(extra_summary or ()) & set(summary))
+    if collisions:
+        raise ValueError(
+            f"extra_summary would overwrite the record contract's own summary key(s): "
+            f"{collisions}"
+        )
+    summary.update(extra_summary or {})
     (out / "summary.json").write_text(
         json.dumps(summary, indent=2, allow_nan=False), encoding="utf-8"
     )

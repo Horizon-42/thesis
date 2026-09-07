@@ -220,6 +220,521 @@ def test_reused_prediction_dir_skips_predict_and_is_never_archived(monkeypatch, 
     assert publisher._loose_prediction_records(plan.output_dir) == []
 
 
+# ── --category-variant: two prediction dirs, one checkpoint ─────────────────
+
+def _plain_prediction_dir(tmp_path: Path, checkpoint: Path, name: str) -> Path:
+    """A prediction directory with no anytime block — an ordinary predict run."""
+    directory = tmp_path / name
+    _write_json(directory / "summary.json", {
+        "checkpoint": str(checkpoint), "split": "val",
+        "results": [{"id": "AAL1", "arr_airport": "KRDU"}],
+    })
+    return directory
+
+
+def _variant_plan(tmp_path, experiment, directory, variant):
+    return publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=directory,
+        variant=variant,
+    )
+
+
+def test_a_category_variant_separates_two_publications_of_one_checkpoint(
+    monkeypatch, tmp_path,
+):
+    """A predict-time variant (an inference projection, a hook applied only at predict) has
+    no checkpoint of its own — it reuses its baseline's. Everything a category is named from
+    comes from that checkpoint, so without a variant the two would be one category."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    baseline = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=_plain_prediction_dir(tmp_path, checkpoint, "base_pred_val"),
+    )
+    projected = _variant_plan(
+        tmp_path, experiment,
+        _plain_prediction_dir(tmp_path, checkpoint, "project_pred_val"),
+        publisher._parse_category_variant("project-on-final=projection, on-final gate"),
+    )
+
+    # What has to hold is that the two publications cannot land on each other — the key, the
+    # picker id and the output directory all differ, and each still carries the slug so a
+    # human can tell which is which. (Asserting the exact format string would only restate
+    # the f-string being tested.)
+    metadata = projected.experiment_metadata
+    assert projected.category != baseline.category
+    assert metadata["id"] != baseline.experiment_metadata["id"]
+    assert projected.output_dir != baseline.output_dir
+    assert projected.comparison_dir != baseline.comparison_dir
+    for value in (projected.category, metadata["id"], str(projected.output_dir)):
+        assert "project-on-final" in value
+    # ...and the baseline is untouched by the variant existing.
+    assert "project-on-final" not in baseline.category
+    assert baseline.category.endswith("_val") and projected.category.endswith("_val")
+    # The variant does NOT move the picker heading: this is still the training campaign's arm.
+    assert metadata["group"] == baseline.experiment_metadata["group"] == experiment.campaign
+    assert metadata["label"].endswith("projection, on-final gate")
+    assert projected.category_label.endswith(metadata["label"])
+    publish = dict(projected.commands())["publish-czml"]
+    assert publish[publish.index("--experiment-id") + 1] == metadata["id"]
+
+
+def test_a_variant_slug_defaults_its_own_label_and_rejects_an_unusable_one():
+    plain = publisher._parse_category_variant("barrier-infer-soft")
+    assert plain.key_suffix == plain.id_suffix == plain.label_suffix == "barrier-infer-soft"
+    assert plain.group is None
+    # The slug lands in a category key, i.e. a directory name: it is lower-cased and capped
+    # like every other fragment of that key, so what is typed and what appears on disk cannot
+    # differ by case alone.
+    assert publisher._parse_category_variant("Barrier-INFER").key_suffix == "barrier-infer"
+    assert len(publisher._parse_category_variant("x" * 80).key_suffix) <= 24
+    # A label given after '=' is display text and keeps its own casing.
+    assert publisher._parse_category_variant("Ab=Soft Barrier").label_suffix == "Soft Barrier"
+    for bad in (
+        "12km",              # a key fragment must not open with a digit
+        "a/b",               # nor hold a path separator
+        "", "with space", "slug=",
+        "references",        # reserved by the record contract
+        "a12km", "a6.5km",   # would be indistinguishable from an anytime bin's key
+    ):
+        with pytest.raises(ValueError):
+            publisher._parse_category_variant(bad)
+
+
+def test_a_second_prediction_dir_on_one_category_is_refused_not_overwritten(
+    monkeypatch, tmp_path,
+):
+    """The whole point of the variant: without one, the second publication would silently
+    replace the first's CZML, evaluation report and picker entry."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(publisher, "_sha256", lambda path: (
+        "manifest-sha" if path == manifest else experiment.checkpoint_sha256
+    ))
+    first = _plain_prediction_dir(tmp_path, checkpoint, "base_pred_val")
+    second = _plain_prediction_dir(tmp_path, checkpoint, "project_pred_val")
+    published = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=first,
+    )
+    _write_json(published.publication_manifest, {
+        "schemaVersion": publisher.PUBLICATION_SCHEMA, "status": "completed",
+        "predictionDir": publisher._path_for_manifest(first),
+    })
+
+    # The same directory again is a legitimate republication...
+    assert published.preflight_error() is None
+    # ...a different one under the same name is not.
+    collides = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=second,
+    )
+    assert "--category-variant" in (collides.preflight_error() or "")
+    # ...and giving it one clears the collision by giving it its own category.
+    assert _variant_plan(
+        tmp_path, experiment, second,
+        publisher._parse_category_variant("project-on-final"),
+    ).preflight_error() is None
+
+
+def test_a_directory_that_names_its_own_bin_refuses_a_second_identity(monkeypatch, tmp_path):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    # At CONSTRUCTION, so a batch cannot die halfway through with a traceback.
+    with pytest.raises(ValueError, match="one identity"):
+        _variant_plan(
+            tmp_path, experiment, _anytime_records(tmp_path, checkpoint),
+            publisher._parse_category_variant("something-else"),
+        )
+
+
+def test_a_variant_publication_refreshes_from_its_manifest(monkeypatch, tmp_path):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _variant_plan(
+        tmp_path, experiment,
+        _plain_prediction_dir(tmp_path, checkpoint, "project_pred_val"),
+        publisher._parse_category_variant("project-faf=projection, FAF gate"),
+    )
+    _write_json(plan.evaluation_report, {"trajectories": [], "summary": {}})
+    _write_json(plan.publication_manifest, publisher._publication_document(
+        plan, status="completed", completed_steps=("evaluate", "publish-czml"),
+    ))
+    categories = plan.comparison_dir.parent / "categories.json"
+    _write_json(categories, {"categories": [{"key": plan.category, "label": "stale"}]})
+
+    seen, patched = publisher.refresh_labels_from_manifests(
+        tmp_path / "published", tmp_path / "frontend"
+    )
+
+    assert (seen, patched) == (1, 1)
+    entry = json.loads(categories.read_text())["categories"][0]
+    assert entry["label"] == plan.category_label
+    assert entry["experiment"] == plan.experiment_metadata
+
+
+def test_a_variant_without_a_reused_directory_is_refused(tmp_path):
+    """`--category-variant` distinguishes DIRECTORIES. With no reused directory the predict
+    step would run again and differ only in --output-dir — the same checkpoint, the same
+    flags, the same forecasts, published a second time under a relabelled key."""
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+
+    with pytest.raises(ValueError, match="needs --reuse-prediction-dir"):
+        publisher.PublicationPlan(
+            experiment, "KRDU", "val",
+            variant=publisher._parse_category_variant("some-variant"),
+        )
+
+
+def test_the_same_directory_named_two_ways_is_not_a_collision(monkeypatch, tmp_path):
+    """Every manifest written before the fix stored an ABSOLUTE predictionDir (a worktree
+    resolves `4dTrajectory/outputs` into the main tree, so the relative attempt failed) while
+    the same run from the main tree renders it relative. Compared as strings, a byte-identical
+    republish reads as a collision — and the blocked document then destroys the completed
+    manifest. Compared as paths, it is simply the same directory."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(publisher, "_sha256", lambda path: (
+        "manifest-sha" if path == manifest else experiment.checkpoint_sha256
+    ))
+    directory = _plain_prediction_dir(tmp_path, checkpoint, "base_pred_val")
+    plan = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=directory,
+    )
+    # Stored the OTHER way round from how this run renders it.
+    for spelling in (str(directory.resolve()), str(directory.relative_to(tmp_path))):
+        _write_json(plan.publication_manifest, {
+            "schemaVersion": publisher.PUBLICATION_SCHEMA, "status": "completed",
+            "predictionDir": spelling,
+        })
+        assert plan.preflight_error() is None, spelling
+
+
+def test_a_blocked_preflight_never_destroys_a_completed_manifest(monkeypatch, tmp_path):
+    """A blocked attempt publishes nothing, so the previous publication still stands. Writing
+    a blocked document over it loses `accuracy`/`evaluation`, flips the index, and makes
+    is_complete() false forever — so the next run blocks again on the same stale reason."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",          # no manifest here -> preflight blocks
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=_plain_prediction_dir(tmp_path, checkpoint, "base_pred_val"),
+    )
+    completed = {
+        "schemaVersion": publisher.PUBLICATION_SCHEMA, "status": "completed",
+        "predictionDir": publisher._path_for_manifest(plan.prediction_dir),
+        "accuracy": {"ade_m": {"median": 1.0}}, "evaluation": {"summary": {}},
+    }
+    _write_json(plan.publication_manifest, completed)
+
+    assert plan.preflight_error() is not None
+    assert publisher.run_publication(
+        plan, dry_run=False, force=True, fail_fast=False
+    ) == "blocked"
+
+    assert json.loads(plan.publication_manifest.read_text()) == completed
+
+
+def test_a_failed_attempts_manifest_does_not_hold_the_category(monkeypatch, tmp_path):
+    """Only a COMPLETED manifest owns a category — otherwise one failed attempt would wedge
+    it against every later directory, including the one that should own it."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(publisher, "_sha256", lambda path: (
+        "manifest-sha" if path == manifest else experiment.checkpoint_sha256
+    ))
+    plan = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=_plain_prediction_dir(tmp_path, checkpoint, "second_pred_val"),
+    )
+    _write_json(plan.publication_manifest, {
+        "schemaVersion": publisher.PUBLICATION_SCHEMA, "status": "failed",
+        "predictionDir": "some/other/dir",
+    })
+
+    assert plan.preflight_error() is None
+
+
+def test_any_reused_directory_spanning_airports_is_refused(monkeypatch, tmp_path):
+    """Not only an anytime one: the publisher fans out a plan per airport, so any directory
+    holding several airports' flights would be filed whole under each."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(publisher, "_sha256", lambda path: (
+        "manifest-sha" if path == manifest else experiment.checkpoint_sha256
+    ))
+    directory = _plain_prediction_dir(tmp_path, checkpoint, "pooled_pred_val")
+    summary = json.loads((directory / "summary.json").read_text())
+    summary["results"] = [{"id": "A", "arr_airport": "KRDU"},
+                          {"id": "B", "arr_airport": "KSJC"}]
+    _write_json(directory / "summary.json", summary)
+    plan = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=directory,
+    )
+
+    assert "not just KRDU" in (plan.preflight_error() or "")
+
+
+def test_an_anytime_manifest_refreshes_from_its_block_not_a_stored_rendering(
+    monkeypatch, tmp_path,
+):
+    """An anytime publication stores its BIN, not the rendered suffix, so the label formula
+    stays in `AnytimeBin.label_suffix` and a wording change there reaches every such
+    publication on the next refresh."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _anytime_plan(
+        tmp_path, experiment, _anytime_records(tmp_path, checkpoint, limit=300)
+    )
+    _write_json(plan.evaluation_report, {"trajectories": [], "summary": {}})
+    document = publisher._publication_document(
+        plan, status="completed", completed_steps=("evaluate", "publish-czml"),
+    )
+    # The bin travels; the rendering does not.
+    assert "anytime" in document and "variant" not in document
+    _write_json(plan.publication_manifest, document)
+    categories = plan.comparison_dir.parent / "categories.json"
+    _write_json(categories, {"categories": [{"key": plan.category, "label": "stale"}]})
+
+    seen, patched = publisher.refresh_labels_from_manifests(
+        tmp_path / "published", tmp_path / "frontend"
+    )
+
+    assert (seen, patched) == (1, 1)
+    entry = json.loads(categories.read_text())["categories"][0]
+    assert entry["label"] == plan.category_label
+    assert entry["experiment"] == plan.experiment_metadata
+    # ...and it really was derived: a changed formula moves the refreshed label with it.
+    monkeypatch.setattr(
+        publisher.AnytimeBin, "label_suffix",
+        property(lambda self: f"@ {self.bin_label} REWORDED"),
+    )
+    publisher.refresh_labels_from_manifests(tmp_path / "published", tmp_path / "frontend")
+    assert json.loads(categories.read_text())["categories"][0]["label"].endswith("REWORDED")
+
+
+def test_a_stored_variant_group_must_be_a_string(tmp_path):
+    """The picker groups by this value; a non-string silently drops the whole category."""
+    with pytest.raises(ValueError, match="group must be a string"):
+        publisher._variant_from_document({"variant": {
+            "key_suffix": "x", "id_suffix": "x", "label_suffix": "x", "group": 7,
+        }})
+
+
+# ── anytime bins: one category per re-anchored bin ──────────────────────────
+
+def _anytime_records(tmp_path: Path, checkpoint: Path, *, limit: int = 0,
+                     records: int = 236, schema: str | None = None) -> Path:
+    """A record directory as `run_ts_anytime_curve.py --write-records` writes one."""
+    directory = tmp_path / "anytime_records_20260908" / "records" / "L1_native32" / "12km"
+    _write_json(directory / "summary.json", {
+        "checkpoint": str(checkpoint), "split": "val",
+        "results": [{"id": "AAL1", "arr_airport": "KRDU"}],
+        "anytime": {
+            "schema": schema or publisher.ANYTIME_RECORDS_SCHEMA,
+            "campaign": "anytime_records_20260908",
+            "arm": "A0-fixed",
+            "label": "L1_native32",
+            "bin_m": 12000.0,
+            "bin_label": "12km",
+            "anchor_rule": "the closest sample",
+            "min_future_s": 60.0,
+            "split": "val",
+            "limit": limit,
+            "split_flights": 1404,
+            "measured_flights": limit or 1404,
+            "records": records,
+            "coverage": records / (limit or 1404),
+        },
+    })
+    return directory
+
+
+def _anytime_plan(tmp_path: Path, experiment, directory: Path) -> "publisher.PublicationPlan":
+    return publisher.PublicationPlan(
+        experiment,
+        "KRDU",
+        "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=directory,
+    )
+
+
+def test_an_anytime_bin_publishes_as_its_own_category_under_the_campaign(
+    monkeypatch, tmp_path,
+):
+    """A bin is a re-anchored SUBSET of the split, so it gets its own key, its own picker
+    entry (the picker dedupes by experiment id) and the campaign as its group — otherwise
+    only the first bin published would ever be selectable, under the training campaign."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _anytime_plan(tmp_path, experiment, _anytime_records(tmp_path, checkpoint))
+    plain = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+    )
+
+    assert plan.category == f"{plain.category[: -len('_val')]}_a12km_val"
+    assert plan.category != plain.category
+    assert plan.experiment_group == "anytime_records_20260908"
+    metadata = plan.experiment_metadata
+    assert metadata["id"] == f"{experiment.experiment_id}@12km"
+    assert metadata["id"] != plain.experiment_metadata["id"]
+    assert metadata["group"] == "anytime_records_20260908"
+    assert metadata["label"].endswith("@ 12km remaining (236 of 1404 flights)")
+    assert plan.category_label.endswith(metadata["label"])
+    # Its own evaluation report and publication manifest: bins must not overwrite each
+    # other's verdicts in the split's directory.
+    assert plan.output_dir == plain.output_dir / "a12km"
+    publish = dict(plan.commands())["publish-czml"]
+    assert publish[publish.index("--experiment-id") + 1] == metadata["id"]
+    assert publish[publish.index("--experiment-group") + 1] == "anytime_records_20260908"
+
+
+def test_an_anytime_label_states_the_limit_it_was_measured_under(monkeypatch, tmp_path):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    directory = _anytime_records(tmp_path, checkpoint, limit=300, records=236)
+
+    plan = _anytime_plan(tmp_path, experiment, directory)
+
+    assert plan.experiment_metadata["label"].endswith(
+        "@ 12km remaining (236 of 300 flights, --limit 300 of 1404 in the split)"
+    )
+
+
+def test_an_anytime_publication_manifest_refreshes_to_the_same_label(monkeypatch, tmp_path):
+    """The bin rides in the manifest, so a label refresh never reopens the record directory
+    (which is read-only, and may have been archived elsewhere) to recompute the same name."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _anytime_plan(
+        tmp_path, experiment, _anytime_records(tmp_path, checkpoint, limit=300)
+    )
+    _write_json(plan.evaluation_report, {"trajectories": [], "summary": {}})
+    _write_json(plan.publication_manifest, publisher._publication_document(
+        plan, status="completed", completed_steps=("evaluate", "publish-czml"),
+    ))
+    manifest = plan.comparison_dir.parent / "categories.json"
+    _write_json(manifest, {"categories": [{"key": plan.category, "label": "stale"}]})
+
+    seen, patched = publisher.refresh_labels_from_manifests(
+        tmp_path / "published", tmp_path / "frontend"
+    )
+
+    assert (seen, patched) == (1, 1)
+    category = json.loads(manifest.read_text())["categories"][0]
+    assert category["label"] == plan.category_label
+    assert category["experiment"] == plan.experiment_metadata
+
+
+def test_a_pooled_anytime_bin_is_refused_rather_than_filed_under_one_airport(
+    monkeypatch, tmp_path,
+):
+    """The runner replays the checkpoint's WHOLE split and offers no airport narrowing, so a
+    pooled checkpoint's bin is one cohort over every airport it was trained on. The publisher
+    fans out one plan per airport — publishing that directory would file all five airports'
+    flights under each airport's category and print the pooled count as that airport's."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(publisher, "_sha256", lambda path: (
+        "manifest-sha" if path == manifest else experiment.checkpoint_sha256
+    ))
+    directory = _anytime_records(tmp_path, checkpoint)
+    summary = json.loads((directory / "summary.json").read_text())
+    summary["results"] = [{"id": "AAL1", "arr_airport": "KRDU"},
+                          {"id": "UAL2", "arr_airport": "KSJC"}]
+    _write_json(directory / "summary.json", summary)
+
+    plan = _anytime_plan(tmp_path, experiment, directory)
+
+    assert "not just KRDU" in (plan.preflight_error() or "")
+
+
+def test_the_same_checkpoint_cannot_be_given_two_prediction_dirs(monkeypatch, tmp_path):
+    """Publishing several bins of one checkpoint is the expected workflow, and the obvious
+    attempt is to repeat the flag — which used to keep the last one silently."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    directory = _anytime_records(tmp_path, checkpoint)
+
+    with pytest.raises(SystemExit):
+        publisher.main([
+            "--experiment-index", str(index),
+            "--checkpoint", "campaign/stage/run_seed1337",
+            "--reuse-prediction-dir", f"campaign/stage/run_seed1337={directory}",
+            "--reuse-prediction-dir", f"campaign/stage/run_seed1337={directory.parent}",
+        ])
+
+
+def test_an_unknown_anytime_schema_is_refused_rather_than_published_as_the_split(
+    monkeypatch, tmp_path,
+):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    directory = _anytime_records(tmp_path, checkpoint, schema="ts-anytime-records-v99")
+
+    plan = _anytime_plan(tmp_path, experiment, directory)
+    with pytest.raises(ValueError, match="unknown schema"):
+        _ = plan.category
+
+
 def test_reused_prediction_dir_must_match_the_checkpoint_and_split(monkeypatch, tmp_path):
     index, _checkpoint = _indexed_checkpoint(tmp_path)
     experiment = publisher.discover_checkpoints(index)[0]

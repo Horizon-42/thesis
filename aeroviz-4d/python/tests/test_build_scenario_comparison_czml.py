@@ -1058,6 +1058,101 @@ def test_prediction_is_shifted_onto_the_references_timeline(tmp_path):
     assert _sample_at(reference, 0)[:2] == _sample_at(lookback, 0)[:2]
 
 
+# An "anytime" prediction: the SAME record contract, re-anchored MID-APPROACH. The anytime
+# runner (`run_ts_anytime_curve.py --write-records`) forecasts each flight from where it still
+# had ~12 km of path left to fly, which on a real arrival is a few hundred seconds into the
+# 25 km slice — not the 120 s L−1 anchor every other prediction batch shares. Nothing here is
+# a second schema: t=0 is still the anchor and the anchor is still `source.anchorTimeS`, which
+# is exactly why the placement has to come off that field and never off an assumed L−1.
+MID_APPROACH_LOOKBACK = [
+    {**STATES[0], "t": -240.0, "lat": 35.90, "lon": -78.30},
+    {**STATES[0], "t": -120.0, "lat": 35.85, "lon": -78.35},
+    {**STATES[0], "t": -60.0, "lat": 35.80, "lon": -78.40},
+]
+MID_APPROACH_STATE_DATA = {
+    "source": {
+        "id": "AFR074", "predictor": "itransformer", "anchorTimeS": 240.0,
+        "hae_minus_msl_m": -33.5,
+    },
+    "final_time_s": 5.0,
+    "predicted_states": STATES,
+    "observed_states": MID_APPROACH_LOOKBACK + STATES,
+}
+# The same arrival window (t=0 at terminal-ring entry) as ARRIVAL_WINDOW_CZML, long enough to
+# reach the anchor: the reference must still cover the forecast after the shift.
+MID_APPROACH_WINDOW_CZML = [
+    {"id": "document", "clock": {}},
+    {
+        "id": "AFR074_05L",
+        "name": "AFR074",
+        "position": {
+            "cartographicDegrees": [
+                0.0, -78.30, 35.90, 2900.0,
+                120.0, -78.35, 35.85, 2800.0,
+                180.0, -78.40, 35.80, 2700.0,
+                240.0, STATES[0]["lon"], STATES[0]["lat"], 2500.0,
+                245.0, STATES[1]["lon"], STATES[1]["lat"], 2400.0,
+            ]
+        },
+        "path": {
+            "leadTime": 0, "trailTime": 300,
+            "material": {"solidColor": {"color": {"rgba": [255, 140, 0, 200]}}},
+        },
+    },
+]
+
+
+def test_a_mid_approach_anchor_is_drawn_where_the_flight_was_then(tmp_path):
+    # The anytime delivery form. A record anchored at 240 s must be drawn 240 s along the
+    # observed flight's clock — the shift is whatever `anchorTimeS` says, not the L−1 value
+    # every other batch happens to share. Drawn from t=0 instead, the forecast would begin at
+    # the 25 km slice entry, kilometres from where the aircraft actually was, and would read
+    # as a gross model error rather than as a publication bug.
+    (tmp_path / "AFR074_05L_states.json").write_text(
+        json.dumps(MID_APPROACH_STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+
+    czml, _ = build_runway_comparison(
+        results, tmp_path, MID_APPROACH_WINDOW_CZML, airport="KRDU")
+    lookback = next(p for p in czml if p["id"] == "look-AFR074_05L")
+    prediction = next(p for p in czml if p["id"] == "pred-AFR074_05L")
+    reference = next(p for p in czml if p["id"] == "ref-AFR074_05L")
+
+    # The forecast starts MID-approach, at the anchor — never at the window's start.
+    assert _offsets(prediction) == [240.0, 245.0]
+    # The faded segment is the observed track BEFORE the anchor — at a re-anchored record that
+    # is more than the model's input window, which is why it is no longer named as one
+    # (`_lookback_states`, and follow-up 21 in docs/code-health-followups.md). What it must do
+    # is meet the forecast exactly, so the pair draws as one track.
+    assert _offsets(lookback) == [0.0, 120.0, 180.0, 240.0]
+    assert _sample_at(lookback, -1) == _sample_at(prediction, 0)
+    # ...and where it starts is where the observed flight was at 240 s — the reference's own
+    # sample at that offset — so the purple line leaves the white one instead of crossing it.
+    assert _offsets(reference) == [0.0, 120.0, 180.0, 240.0, 245.0]
+    assert _sample_at(reference, 3)[:2] == _sample_at(prediction, 0)[:2]
+    # The reference (the ARRIVAL window, the model's origin) still spans the whole group.
+    assert _offsets(reference)[0] == _offsets(lookback)[0] == 0.0
+    assert max(_offsets(reference)) >= max(_offsets(prediction))
+    # ...and the clock is derived from the SHIFTED entities, so playback reaches the forecast.
+    assert comparison_builder._entity_last_time(prediction) == 245.0
+
+
+def test_a_mid_approach_group_still_requires_the_arrival_window_reference(tmp_path):
+    # The later the anchor, the further ahead a full-track reference puts the group — and the
+    # check has to keep firing, because a mid-approach forecast drawn against the wrong origin
+    # is entirely plausible-looking.
+    import pytest
+
+    (tmp_path / "AFR074_05L_states.json").write_text(
+        json.dumps(MID_APPROACH_STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+
+    with pytest.raises(ValueError, match="requires the arrival window"):
+        build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+
+
 def test_a_full_track_reference_is_refused_for_a_prediction_group(tmp_path):
     # The other half of the same alignment. `anchorTimeS` puts the group on the ARRIVAL
     # window's origin (t=0 = terminal-ring entry); a reference copied from the airport-wide

@@ -394,6 +394,23 @@ importable. A finished one-off driver belongs there, not beside the live runners
   (≈27 s / 53 s of truth left at approach speed) — stated as `n=0 / partial`, but s_freeze can
   then only be read at ≥ 6 km, and the **~125 s duration-head floor** makes |Δt| p80 RISE
   toward the runway anyway (L1_native32 vectored: 64 s at 12 km, 141 s at 4 km).
+  **`--write-records` makes a bin PUBLISHABLE**: the same forecasts the cells were scored on
+  (ONE forward pass — the record summary's per-flight `ade_m` IS the curve's) also go through
+  `export.write_batch` into `<out>/records/<label>/<bin>km/`, the shape `predict` writes, so
+  `python -m evaluation` and the comparison-CZML publisher take it unchanged. Each
+  `summary.json` gains an `anytime` block (schema `ts-anytime-records-v1`: campaign, arm, bin,
+  the anchor rule, split/limit, `measured_flights`, `records`, coverage) — a bin is a
+  re-anchored SUBSET of the split, and `publish_ts_experiment_trajectories.py` reads that block
+  to give it its own category key (`…_a12km_val`), its own picker id (`<run>@12km`, because the
+  picker dedupes by experiment id), the record campaign as its picker group, and a label that
+  states the bin and BOTH denominators (`244 of 300 flights, --limit 300 of 1404 in the split`).
+  Under `--write-records` the whole artifact is built inside the `.partial-*` staging directory
+  and renamed on success, so a crash publishes no half-written record set — and the flag is
+  STRICTER than the curve alone (the record contract refuses a non-finite metric that the curve
+  would have printed as a NaN cell). **A bin of a POOLED checkpoint cannot be published per
+  airport**: the runner replays the whole cohort its provenance names and offers no airport
+  narrowing, so the directory holds every airport's flights; the publisher refuses it rather
+  than filing all of them under each airport's category.
 - `run_ts_eta_calibration.py` — **B2**: split-conformal (CQR) calibration of a
   `duration_head=quantile` checkpoint's interval. Reads the DURATION HEAD ALONE
   (`forecast.duration_quantile_predictions` — one forward per flight, no rollout, no CTA),
