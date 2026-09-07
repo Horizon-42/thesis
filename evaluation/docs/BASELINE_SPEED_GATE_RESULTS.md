@@ -399,3 +399,32 @@ genuinely slow GA/bizjet rows (7 of 999 fails); the observed verdict is almost
 entirely a "not too fast" verdict.
 
 Reproduction: `python -m evaluation --input trajectory_data_process/outputs/harvest/<ICAO>/approach --output <folder>/<ICAO>_observed_report.json --metar-root data/metar` from the v9 tree; the per-type and fail-anatomy tallies are two short scripts over the reports' `trajectories` rows (`speed_result`, `speed_margin_ms`, `bounds`, `wind`, `crossing_ground_speed_ms`).
+
+### 10.5 After the airframe-identity fix and the 172-type table (2026-09-08)
+
+Two changes, same gate: the observed writer now names the ICAO type whenever the identity
+resolves (it used to require OpenAP dynamics for a states mass the gate never reads —
+9,056 rows lost their type to that), and the published table grew from 40 to 172 types
+(63 with a published minimum mass; `docs/reference_speeds/README.md`). The rebuild also
+brought the two LNAV/VNAV runways into the observed batch (KRDU 32 +1,604 rows of mostly
+GA traffic, KSMF 35R +259 — see the KSMF 35R threshold item in `docs/open-items.md`:
+those 259 lateral fails are a configured-threshold error, not the flights').
+
+| airport | rows | speed graded | speed pass | speed indeterminate | composite pass / total | of decided | indeterminate share |
+|---|---|---|---|---|---|---|---|
+| KRDU | 16,043 | 13,934 | 94.0 % | 2,109 (13.1 %) | 79.8 % | 90.6 % | 12.0 % |
+| KSJC | 11,157 | 8,707 | 98.3 % | 2,450 (22.0 %) | 76.7 % | 98.3 % | 22.0 % |
+| KSTL | 8,769 | 8,230 | 96.9 % | 539 (6.1 %) | 88.0 % | 93.6 % | 6.0 % |
+| KSMF | 4,490 | 4,282 | 95.9 % | 208 (4.6 %) | 86.1 % | 90.2 % | 4.5 % |
+| KMSY | 4,150 | 3,895 | 96.4 % | 255 (6.1 %) | 84.8 % | 90.1 % | 5.9 % |
+| fleet | 44,609 | 39,048 | **96.0 %** | 5,561 (**12.5 %**, was 24.7 %) | | | |
+
+What is still indeterminate, by cause (fleet): 1,657 rows whose icao24 resolves to no
+identity (followups #24/#25), and ~3,900 rows whose type has a FAA speed but NO published
+minimum operating mass — bizjets almost entirely (E55P 719, CL30 196, E545 180, C680 167,
+C750 157, GLF5 147, G280 127, H25B 126, C25A 119, GLF4 117, C560 105, …): Embraer publishes
+no weights in any public brochure, Textron retired the older Citation cards, Gulfstream and
+Honda refuse robots (the README lists each attempt). KSJC's 22 % is that bizjet share.
+The GA rows now graded (P28A 1,339, C172, SR22, C208, BE36 …) bring the fleet's slow
+fails from 7 to 147 (P28A 98 of them: a 62 kt lower edge on a 70 kt anchor, and the tower
+wind is a quarter of that speed) — quote GA types separately, as §10.3 says.

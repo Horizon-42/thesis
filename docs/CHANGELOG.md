@@ -25,8 +25,11 @@ resolve_airframe` now returns `(mass or None, typecode)` whenever the identity r
 `harvest/observed.py` writes `aircraft_type` for those rows with the nominal mass and says
 so (`source.mass_source`). New harvest mode `--observed-only` rebuilds only `approach/`
 (records, summary, report, publication; no arrivals rebuild, no roster deletion, no CZML).
-The remaining 1,485 untyped rows are identity gaps (followups #24/#25); the published
-speed pack is being extended to the 167 recovered types. Tests: harvest writer (identity
+The remaining 1,485 untyped rows are identity gaps (followups #24/#25). With the table
+extended to 172 types the fleet's speed-indeterminate share fell from 24.7 % to 12.5 %
+(96.0 % of 39,048 graded rows pass); what is left is unresolved identities (1,657) and bizjet
+types with no published minimum mass (~3,900). The rebuild also brought KRDU 32 and KSMF 35R
+into the observed batch — and exposed KSMF 35R's 39.4 m threshold error (its own entry). Tests: harvest writer (identity
 without dynamics, mass_source), `resolve_airframe` unit test.
 ### 2026-09-07 — ts_transformer A0.b: the random-anchor arm was frozen by its own learning-rate schedule, and drew its anchors nearer the runway than its own anchor population
 

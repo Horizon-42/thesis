@@ -152,3 +152,12 @@ B737（221）、A319、E170/E190 都是 FAA 表只给单一（最大襟翼）速
 Eurocontrol Vat 高 6–7 kt——按 A 方案规则保留 FAA 值，列为唯一待补来源项（followups #21）。737 家族
 的"过快"簇与 A21N 的"过慢"残差都消失。详见 `BASELINE_SPEED_GATE_RESULTS.md` §10；逐机型的发布速度、
 速度窗（观测窗与 MALW 处计算窗）和五机场通过率：`2026-09-07_reference_speed_windows_by_type.zh.md`。
+
+### 6.6 机型解析补全后（2026-09-08）
+
+无机型行 10,541 → 1,657（icao24 解析不出身份）；机型表 40 → 172 型（63 型有公布最小质量）。机队速度
+判定行 39,048，通过 96.0 %；速度未判定 5,561 行 = 12.5 %（原 24.7 %），其中约 3,900 行是有 FAA 速度但
+厂商不公布空重的公务机（E55P 719、CL30、E545、C680、C750、GLF5、G280、H25B、C25A、GLF4、C560 …）。
+重建同时把 KRDU 32（+1,604，通航）和 KSMF 35R（+259）纳入观测批次；KSMF 35R 的门槛坐标错 39.4 m，
+修复在 `dev-cifp-runway-thresholds`，等 campaign 结束后重分类（`docs/open-items.md`）。详见
+`BASELINE_SPEED_GATE_RESULTS.md` §10.5、`2026-09-07_reference_speed_windows_by_type.zh.md`。
