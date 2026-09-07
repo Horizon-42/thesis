@@ -15,8 +15,11 @@
 ## 〇、状态表（压缩 context 后从这里继续）
 
 **当前状态（2026-09-07）**：A0 / B0 的**代码已建成**（分支 `dev-a0`，命令见 §〇.1）；B0 已在现有产物上
-跑出读数（§〇.2），A0-fixed 的回放是 GPU 队列里的作业，未跑。其余各项仍为设计稿。A0 / B0 用现有
-checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 之前或并行（B0 是纯 CPU 读数，A0 只推理）。
+跑出读数（§〇.2），A0-fixed 的回放是 GPU 队列里的作业，未跑。**B 线三项（B1 / B2 / B3）的代码也已建成**
+（分支 `dev-b1`，`9f4149a` / `585b0e1` / `ebdb00c`，命令见 §〇.3），臂文件
+`docs/experiments/b1_quantile_arms.json` 已预注册，**尚未训练任何一条**。其余各项仍为设计稿。
+A0 / B0 用现有 checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 之前或并行
+（B0 是纯 CPU 读数，A0 只推理）。
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
@@ -26,9 +29,9 @@ checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
 | A3 学习的递归先验 | 未做，取决于 A2 | `control/latent.py` 先验网络吃上一轮后验 | 仅当 A2 有增益 |
 | B0 时长误差分布（测量） | **完成（2026-09-07，`dev-a0` `fe84e76` + 测试 `5f408df`）**，读数见 §〇.2 | `run_ts_eta_error_readout.py`（新 runner）+ `tests/test_eta_error_readout.py`（7 项）：读现有 `summary.json` 的 `final_time_error_s` 与 `fde_m`，按 `strata_masks` 分层报 \|Δt\| p50/p80/p90 与带号 p10/p50/p90 | 无门，定区间宽度的量级 |
-| B1 分位数时长头 | 未做 | config 轴 `duration_head ∈ point \| quantile`；`prediction_outputs.QuantileFinalTimeHead` | 中位数不劣于点估计头（种子噪声内） |
-| B2 split-conformal 校准 | 未做 | `calibration.py`（新，顶层）；校准表进 `checkpoint_metadata.json` | 校准后 80 % 区间实测覆盖 ∈ [0.76, 0.84] |
-| B3 分位数条件航迹 | 未做 | `predict --cta-from-quantiles`：CTA 来自自身分位数头，不读未来 | 每条分位数航迹可飞率不低于 top-1；真值落在扇面内的份额 ≥ 名义覆盖 |
+| B1 分位数时长头 | **代码完成（2026-09-07，分支 `dev-b1`，`9f4149a`）；臂未跑**，命令见 §〇.3 | config 轴 `duration_head ∈ point \| quantile`（默认 `point`，配方按字面钉住，所以分位数臂必然是 `custom`，名字带 `T=q5`）+ `prediction_outputs.QuantileFinalTimeHead` / `pinball_duration_loss` + `control.heads.ControlFeatureModel.duration()`（时长与分位数的唯一规则，每次前向只读一次头）+ 记录字段 `source.durationQuantilesS` / 行 `duration_quantiles_s`；臂 `docs/experiments/b1_quantile_arms.json`；测试 `tests/test_duration_quantiles.py`（15）。**默认位级等价已证**：control / latent k1 / latent k4 / state / closure / cta=given 六个 2 轮合成训练对 `c2fccda`，1519 个非墙钟叶子全等；168 份在盘配置重算名字，0 处改名 | 中位数不劣于点估计头（种子噪声内） |
+| B2 split-conformal 校准 | **代码完成（2026-09-07，分支 `dev-b1`，`585b0e1`）；臂未跑** | `calibration.py`（新，顶层，被 `forecast` / `predict` / 两个读数共用：CQR 分数、有限样本 δ、区间算术、分层优先级、`checkpoint_metadata.json` 的 `conformal` 边车）+ runner `run_ts_eta_calibration.py --checkpoint PATH --out DIR`（只读时长头，无 rollout 无 CTA，秒级 CPU；val 对半交换，δ 与两半实测覆盖一并写出）；`predict` 读表后写 `source.durationIntervalS` / `durationIntervalStratum` / `calibrated`；测试 `tests/test_eta_calibration.py`（16） | 校准后 80 % 区间实测覆盖 ∈ [0.76, 0.84] |
+| B3 分位数条件航迹 | **代码完成（2026-09-07，分支 `dev-b1`，`ebdb00c`）；臂未跑** | `predict --cta-from-quantiles`：CTA 取自身的 q_τ，不读未来；写 `quantiles/q10…q90/`（有校准表时另加 `a20lo` / `a20hi` 两个端点目录），top-1 记录就是 q50 那一次解码；写出的 config 被改盖为 `cta_conditioning=self-q`，所以每个命名面都说 `cta=self-q`（训练目录仍诚实地写 `cta=given`）；读数 `run_ts_quantile_fan_readout.py --arm <pred_dir>`；测试 `tests/test_cta_from_quantiles.py`（7，走真 CLI） | 每条分位数航迹可飞率不低于 top-1；真值落在扇面内的份额 ≥ 名义覆盖 |
 | B4 区间宽度随剩余时间（A × B） | 未做 | A1 网格 × B2 区间 | 交付物本身：冻结点曲线 |
 | C0 拟合表检索上界（测量） | 未做，前置 = L5.a 拟合表 | `run_ts_schedule_retrieval.py`（新）：按锚点状态取最近 K 条拟合控制序列各自 rollout | minADE_16 < native32 top-1；记忆上界 = 真值航班自己的拟合序列 |
 | C1 控制空间条件扩散 | 未做 | `control/diffusion.py`，config 轴 `control_sampler ∈ none \| diffusion`，run name `control+dif` | minADE_16 < top-1 且 < 同 K 的无条件采样对照；直线进近 top-1 不退 |
@@ -131,6 +134,51 @@ python run_ts_eta_error_readout.py \
    而不是「点估计 ± δ」是对的形态。
 4. **closure 的 FDE p50 = 11 m 不是精度**：它按构造把路径画到跑道头，终点误差因此几乎为零，
    而它的 ADE 仍是 996 m。这条正是「两组指标一起读」的样例，FDE 单独读会得出相反结论。
+
+### 〇.3 B1 / B2 / B3 的运行命令（2026-09-07 建成，KRDU）
+
+**校准这一步在 train 和最终 predict 之间，不是训练的一部分**：第一次 predict 写出的记录标
+`calibrated: false`（不是错，是未校准），校准表写进 checkpoint 自己的 `checkpoint_metadata.json`
+之后重跑 predict，记录才带 `source.durationIntervalS`。
+
+```bash
+conda activate aeroviz
+E=4dTrajectory/outputs/KRDU/experiments
+C=$E/b1_quantile_20260907
+
+# 1) 两臂训练 + 第一次预测（未校准）
+python run_ts_frame_ablation.py \
+    --arms 4dTrajectory/ts_transformer/docs/experiments/b1_quantile_arms.json \
+    --campaign $C --airport KRDU --split val
+
+# 2) 校准：val 对半交换，表写进各自的 checkpoint_metadata.json（--split test / train 被拒绝）
+for ARM in B1_quantile B3_quantile_cta; do
+  python run_ts_eta_calibration.py --checkpoint $C/$ARM/checkpoint.pt --out $C/${ARM}_calibration
+done
+
+# 3) 重跑预测：这一次记录带校准区间；B3 同时画出扇面
+D=trajectory_data_process/outputs/harvest/KRDU/arrivals
+TS=4dTrajectory/ts_transformer/__main__.py
+python $TS predict --checkpoint $C/B1_quantile/checkpoint.pt \
+    --data $D/manifest.json --eligibility-roster $D/lateral_pass_eligibility.json \
+    --airport KRDU --split val --device auto --output-dir $C/B1_quantile_pred_val
+python $TS predict --checkpoint $C/B3_quantile_cta/checkpoint.pt \
+    --data $D/manifest.json --eligibility-roster $D/lateral_pass_eligibility.json \
+    --airport KRDU --split val --device auto --output-dir $C/B3_quantile_cta_pred_val \
+    --cta-from-quantiles
+
+# 4) 读数：门 1 走 B0 的读数（|Δt| 分层分布），门 3 走扇面读数
+python run_ts_eta_error_readout.py \
+    B1_quantile=$C/B1_quantile_pred_val \
+    B3_quantile_cta=$C/B3_quantile_cta_pred_val \
+    --json $C/eta_error.json
+python run_ts_quantile_fan_readout.py --arm $C/B3_quantile_cta_pred_val \
+    --json $C/quantile_fan.json
+```
+
+门 2（校准后的实测覆盖）不需要单独的读数：`run_ts_eta_calibration.py` 的产物
+`eta_calibration.txt` 每个 (α, 分层) 都打印 δ、两半各自的实测覆盖与中位区间宽度，
+**覆盖率永远在没有拟合该 δ 的那一半上量**。
 
 ---
 
@@ -331,6 +379,17 @@ config 轴 `duration_head ∈ point | quantile`（默认 `point`，进 checkpoin
 替换 `final_time` 分量（**同名分量，`loss_component_names` 不变**）。中位数 q_0.5 走现有的 `final_time_s`
 契约，其余四个写入 `source.durationQuantilesS`。control 路径的 rollout 用 q_0.5 作为时长。
 
+> **实现（2026-09-07，`9f4149a`）**：`DURATION_QUANTILES` 只在 `config.py` 定义一次，头、pinball
+> 损失、记录字段、`calibration.py` 与两个读数都从那里读。初始化把 **q_0.5 放在点估计头的起点**
+> （对 `DURATION_MEDIAN_INDEX + 1` 个增量各取一份并反解 softplus），所以只差 `duration_head` 的
+> 两条臂只差“学到了什么”。`ControlFeatureModel.duration()` 是时长与分位数的**唯一**规则——一次
+> 前向只读一次头，因为训练时 dropout 是活的，读两次就是两个答案。`cta_conditioning=given` 下时长
+> 仍是 CTA，**点估计头保持惰性、分位数头照常训练**（B3 要用它自己的分位数解码）。
+> **两条拒绝**：不在 control 输出上（state / closure 没有这个头）；以及 **`latent_dim > 0`**——
+> z 走的是“平移点估计头那一个 logit”，累积 softplus 头有五个；更要命的是训练解的是后验样本，
+> 那五个分位数就成了 p(T | z ~ q(z | 本机自己的未来)) 的分位数，B2 会把一个条件在答案上的区间
+> 当成 p(T | history) 去校准。宁可拒绝，不做近似。命名的 `q5` 取自 `len(DURATION_QUANTILES)`。
+
 ### 3.2 split-conformal 校准（B2）
 
 CQR：在校准集上算 conformity score = max(q_lo − T, T − q_hi)，取 (1−α) 分位数 δ_α，区间 [q_lo − δ, q_hi + δ]。
@@ -340,6 +399,23 @@ CQR：在校准集上算 conformity score = max(q_lo − T, T − q_hi)，取 (1
 按分层分别校准（直线与雷达引导的 δ 差一个量级，合并校准会给直线航班一个荒谬的宽区间）；分层标签
 由 L−1 的真值协变量决定，与读数一致。
 
+> **实现（2026-09-07，`585b0e1`）**：`calibration.py`（顶层，无 torch）+ `run_ts_eta_calibration.py`。
+> 三处本文没写死、代码里写明的决定：
+> (i) δ 取**有限样本**分位数 `⌈(n+1)(1−α)⌉ / n` 而不是朴素的 (1−α) 经验分位数——KRDU 半分 n ≈ 700
+> 时 δ 变化远小于一秒，但保证从“大致成立”变成成立；
+> (ii) `strata_masks` 的分层**互相重叠**（已建立的航班也可能是直线进近），所以记录需要的是**优先级**
+> 而不是划分：`INTERVAL_STRATUM_PRECEDENCE = 直线进近 → 雷达引导 → 全体`，取它所属且**有 δ** 的第一个，
+> 记录写出 `source.durationIntervalStratum`，读的人不必猜；
+> (iii) 某一半不足 `MIN_CALIBRATION_FLIGHTS = 30` 的分层**被拒绝**（连同它的航班数记进 `refused_strata`），
+> 该分层的航班按上面的优先级落到合并 δ；只有**合并分层**也不足时整次校准失败——那时没有可落的地方。
+> 表是 `checkpoint_metadata.json` 的 **边车**（键 `conformal`），**绝不进 `data_provenance`**：
+> `evaluate-fit` / `freeze-test` 按相等比较那个对象，放进去会让此后每次回放都报“manifest 变了”。
+> 表按 `checkpoint_sha256` 绑定 checkpoint，别的权重留下的表**报错**而不是悄悄拿来加宽区间。
+> runner 只读时长头（`forecast.duration_quantile_predictions`：一次前向、无 rollout、无 CTA），
+> 这既是它秒级跑完的原因，也是它可以校准 `cta=given` checkpoint 的原因
+> （`load_arm(..., refuse_cta_given=False)`，唯一被允许的仪器；`intent=truth-…` 仍被拒，那个 oracle
+> 在历史窗口里）。
+
 ### 3.3 分位数条件航迹（B3）
 
 L3 建成的 `cta_conditioning=given` 让给定 CTA 直接成为时长；目前 `forecast._dynamics_batch` 里的 CTA
@@ -348,6 +424,22 @@ q_0.1 … q_0.9（校准后），每个分位数写一个 `quantiles/qNN/` 完�
 记 τ。**这是第一个不读未来的 CTA 臂**，run name 记 `cta=self-q`，与 `cta=given` 严格区分。
 读数：五条航迹的扇面是否覆盖真值路径（真值 chamfer 到扇面的最近一条 ≤ 到 top-1 的份额），
 每条分位数航迹的可飞率不低于 top-1（rollout 按构造保证，这里是核对而不是门）。
+
+> **实现（2026-09-07，`ebdb00c`）**：`predict --cta-from-quantiles` 只接受**同时**满足
+> `cta_conditioning=given` 与 `duration_head=quantile` 的 checkpoint——**训练时时长仍由给定 CTA 驱动，
+> 分位数头是并排训练的一个目标**；预测时驱动 rollout 的是模型自己的 q_τ，这就是“不读未来”的全部含义。
+> 与 `--cta-offset-s`、`--z-from-posterior` 互斥（前者是真值的平移，后者读未来）。
+> 目录是 `quantiles/q10…q90/`，**top-1 记录就是 q50 那一次解码**（不重解一遍）；有校准表时另加
+> `a20lo` / `a20hi` 两个目录，即 α=0.2 区间的两个端点（`source.ctaInterval`）。
+> `cta_conditioning` 因此多了第三个取值 `self-q`：它是**预测期的标签**，
+> `CTA_CONDITIONINGS_AVAILABLE` 不许任何新训练选它，`predict` 把它盖在写出的 config 上，
+> 于是 run name / `summary.mode` / 记录三处都说 `cta=self-q`，而训练目录仍诚实地写 `cta=given`。
+> 扇面里唯一可能不可飞的是**校准端点**（δ 比它加宽的区间还宽时 lo 会到 0），此时整批**报错**，
+> 既不夹紧也不静默跳过：各叶子航班不同的扇面就不是扇面，读数是逐航班配对的。
+> 读数 `run_ts_quantile_fan_readout.py --arm <pred_dir>` 逐分层给：真值时长落在 [q10, q90] 的份额、
+> 落在校准区间的份额、两个中位宽度，以及门 3——真值路径到**五条里最近一条**的 chamfer 对到 q50 的
+> chamfer（在“真值时长落在扇面内”的子集上判门，全体一行并排打印）。**几何那一列是读数不是覆盖保证**
+> （§六 6）。
 
 ### 3.4 B 的门（预注册）
 
