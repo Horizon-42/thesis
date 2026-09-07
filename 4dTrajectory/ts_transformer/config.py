@@ -103,8 +103,35 @@ INTENT_FIELDS = ("intent_conditioning",)
 # identity check, and it is a delivery-form demonstration, never a prediction result.
 CTA_CONDITIONING_OFF = "off"
 CTA_CONDITIONING_GIVEN = "given"
-CTA_CONDITIONINGS = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
+# B3 (`docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §三 3.3): the CTA
+# is the model's OWN duration quantile, so the decoder reads no future. It is a PREDICT-TIME
+# label — `predict --cta-from-quantiles` stamps it on the config written beside the records
+# so every naming surface says `cta=self-q` — and never a value a training run may select
+# (`CTA_CONDITIONINGS_AVAILABLE` below). §六 5: `cta=self-q` and `cta=given` are two ARMS,
+# and only the first is quotable as a prediction.
+CTA_CONDITIONING_SELF_QUANTILE = "self-q"
+CTA_CONDITIONINGS = (
+    CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN, CTA_CONDITIONING_SELF_QUANTILE
+)
+#: What a NEW run may select (`cli.common._NEW_RUN_VOCABULARIES`): `self-q` describes how a
+#: prediction directory was decoded, and there is nothing to train under it.
+CTA_CONDITIONINGS_AVAILABLE = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
 CTA_FIELDS = ("cta_conditioning",)
+
+# The duration head (B1, §三 3.1). ``point`` is the package's original scalar
+# ``FinalTimeHead``; ``quantile`` is ``prediction_outputs.QuantileFinalTimeHead`` — five
+# monotone quantiles of the SAME quantity, trained by the sum of their pinball losses in
+# place of the point head's squared error (the loss component keeps the name ``final_time``).
+DURATION_HEAD_POINT = "point"
+DURATION_HEAD_QUANTILE = "quantile"
+DURATION_HEADS = (DURATION_HEAD_POINT, DURATION_HEAD_QUANTILE)
+#: The quantile levels, in order. ONE definition: the head, the pinball loss, the record
+#: field, `calibration.py` and every readout read this tuple, so "the five quantiles" cannot
+#: become two different sets of five. §六 6: these are quantiles of the DURATION, never of
+#: the trajectory.
+DURATION_QUANTILES: tuple[float, ...] = (0.1, 0.25, 0.5, 0.75, 0.9)
+#: Which of them walks the existing ``final_time_s`` contract (the rollout's duration).
+DURATION_MEDIAN_INDEX = DURATION_QUANTILES.index(0.5)
 # Order is load-bearing like channels.CHANNELS: serialised into every checkpoint
 # (``input_channels``) and ``train.load_checkpoint`` refuses a mismatch.
 INTENT_JOIN_CHANNELS: tuple[str, ...] = ("e_join", "n_join", "u_join")
@@ -660,6 +687,10 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "terminal_loss_weight": 0.0,
         "control_duration_parameterization": CONTROL_DURATION_UNIFORM,
         "control_duration_uniform_floor": 0.0,
+        # A named recipe is a published DETERMINISTIC point-estimate arm: like the seven
+        # `latent_*` fields, the duration head is pinned at its default here, so a QUANTILE
+        # run is `custom` and its name carries `T=q5` instead of hiding behind a recipe.
+        "duration_head": "point",
         "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
         "control_dynamics_model": CONTROL_DYNAMICS_POINT_MASS,
         "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
@@ -965,6 +996,10 @@ class TSConfig:
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
+    # WHAT the duration head emits (DURATION_HEADS, B1): one point estimate, or the five
+    # DURATION_QUANTILES. `quantile` belongs to the control output only, and its median walks
+    # the existing `final_time_s` contract, so every downstream reader is unchanged.
+    duration_head: str = DURATION_HEAD_POINT
     control_velocity_loss_scale_mps: float = 10.0
     # Direct supervision of the control schedule against the one inverted from the flown
     # track by control_inverse_dynamics -- the same registry the forward model dispatches
@@ -1504,6 +1539,31 @@ class TSConfig:
                 "cta_conditioning replaces the control path's duration head; "
                 f"prediction_output={self.prediction_output!r} has none"
             )
+        if self.duration_head not in DURATION_HEADS:
+            raise ValueError(
+                f"unknown duration_head {self.duration_head!r}; expected one of {DURATION_HEADS}"
+            )
+        if self.duration_head == DURATION_HEAD_QUANTILE:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "the quantile duration head is the control path's (B1): its median is the "
+                    "duration the rollout flies and the other four are a record field; "
+                    f"prediction_output={self.prediction_output!r} has no such head"
+                )
+            if self.latent_dim > 0:
+                # Not a plumbing limitation. `control/latent.py` reaches the duration by
+                # SHIFTING the head's single unconstrained logit (`latent_duration`), and a
+                # cumulative-softplus head has five; shifting all five would move the spread
+                # as well as the location. Worse, training decodes a POSTERIOR sample, so the
+                # five would be quantiles of p(T | z ~ q(z | this flight's own future)) — an
+                # interval conditioned on the answer, which B2 would then calibrate as if it
+                # were p(T | history). The combination is refused rather than approximated.
+                raise ValueError(
+                    "duration_head='quantile' and latent_dim > 0 are refused together: z "
+                    "reaches the duration by shifting the point head's single logit, and "
+                    "under a posterior sample the quantiles would be conditioned on the "
+                    "flight's own future — not a predictive interval to calibrate"
+                )
         if self.latent_dim > 0 and self.checkpoint_selection_metric == CHECKPOINT_SELECTION_OBJECTIVE:
             raise ValueError(
                 "a latent control run cannot select its checkpoint on the validation objective: "

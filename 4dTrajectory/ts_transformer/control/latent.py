@@ -44,10 +44,11 @@ from config import TSConfig
 from control.heads import (
     ControlFeatureModel,
     _initialize_control_head,
-    _initialize_final_time_head,
+    _initialize_duration_head,
     control_head_for,
+    duration_head_for,
 )
-from prediction_outputs import ControlPrediction, FinalTimeHead
+from prediction_outputs import ControlPrediction
 
 LATENT_KL_COMPONENT = "latent_kl"
 #: The auxiliary intent target's loss component (L2.f arm 2); registered only when
@@ -319,16 +320,21 @@ class LatentControlModel(ControlFeatureModel):
             nn.GELU(),
             nn.LayerNorm(config.d_model),
         )
-        self.final_time_head = FinalTimeHead(config)
+        # `TSConfig` refuses `duration_head='quantile'` with a latent, so this is the point
+        # head; the builder is shared so the two models cannot diverge on the one head that
+        # is allowed here.
+        self.final_time_head = duration_head_for(config)
         # z's path to the duration: an additive term on the head's unconstrained logit, zero
-        # at initialization so the duration starts exactly where the plain head would.
+        # at initialization so the duration starts exactly where the plain head would. A
+        # cumulative-softplus head has five logits and no single one to shift, which is the
+        # mechanical half of why that combination is refused (`config.py` says the rest).
         self.latent_duration = nn.Linear(config.latent_dim, 1)
         with torch.no_grad():
             self.latent_duration.weight.zero_()
             self.latent_duration.bias.zero_()
         self.control_head = control_head_for(config)
         _initialize_control_head(self.control_head)
-        _initialize_final_time_head(self.final_time_head)
+        _initialize_duration_head(self.final_time_head, config)
         # The auxiliary intent target (L2.f): built only when it is weighted, so a
         # checkpoint trained without it has no such parameters to load. It reads the
         # POSTERIOR SAMPLE and nothing else, and `decode` never calls it — z's path to the

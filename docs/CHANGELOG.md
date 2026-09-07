@@ -136,6 +136,141 @@ the two mechanisms instead of confounding them. The pre-registered reading: the 
 anchor sets must stop degrading after epoch 10, the best epoch must be later than 60, and
 the L−1 veto against native32's 1322 m is read as before — all three random-anchor arms so
 far sit at 2949–2990 m, so this line's base is not established yet.
+### 2026-09-07 — ts_transformer B1–B3: the arrival time becomes a calibrated interval, and a fan of flyable paths
+
+`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`
+§三, branch `dev-b1` (`9f4149a` B1, `585b0e1` B2, `ebdb00c` B3, then the arms and the docs).
+The B line's premise, measured by B0 the day before: the package's duration head is a POINT
+estimate, there is no interval anywhere in it, and the |Δt| p80 a scheduler would have to
+live with is 65.8–72.5 s on vectored flights against 12.0–20.3 s on straight-in ones. Code
+only; **no arm has been trained**.
+
+**B1 — the head.** `duration_head ∈ point | quantile`. `QuantileFinalTimeHead` emits the five
+`config.DURATION_QUANTILES` (0.1/0.25/0.5/0.75/0.9) of the same quantity, **monotone by
+construction** — cumulative softplus, so no input can produce a crossing pair and the loss
+never has to price one. The median walks the existing `final_time_s` contract (it IS the
+duration the rollout flies), so every downstream reader is untouched; the five go out as
+`source.durationQuantilesS`. The loss REPLACES the `final_time` component under the same name
+with the sum of five pinball losses on the same `(T − q)/final_time_scale_s` residual the
+point head squares, so `loss_component_names` is unchanged. The median starts exactly where
+the point head starts, so two arms that differ only in the head differ only in what they
+learn.
+
+Two things it refuses, and the second is the one the design left open. Off
+`prediction_output=control` there is no such head. With `latent_dim > 0` it is refused
+outright: z reaches the duration by SHIFTING the point head's single logit and a
+cumulative-softplus head has five, and — the real reason — training decodes a POSTERIOR
+sample, so the five would be quantiles of p(T | z ~ q(z | the flight's own future)), an
+interval conditioned on the answer, which B2 would then calibrate as if it were
+p(T | history).
+
+**B2 — the calibration.** `calibration.py` (top level, torch-free, shared by `forecast`,
+`predict` and both readouts) + `run_ts_eta_calibration.py --checkpoint PATH --out DIR`.
+Conformalized quantile regression: score `max(q_lo − T, T − q_hi)`, δ_α its (1−α) quantile,
+interval `[q_lo − δ, q_hi + δ]`, for α ∈ {0.2, 0.5} bound to the pairs (q10, q90) and
+(q25, q75). The calibration set is the VALIDATION split and nothing else — the sealed outer
+test would be spent on a number with no gate, and the training split's quantiles are fitted
+to their own targets. It is halved by the checkpoint's own `split_seed`: **half A fits the
+DEPLOYED δ and half B, which it never saw, measures what it covered**. The mirror (fit on B,
+score on A) is printed beside it as a stability check and is never averaged in — a mean of
+two δ is fitted on every flight it is then scored against, and nothing would measure it.
+
+**The coverage is MEASURED, not guaranteed, and the language says so everywhere.** The
+calibration split is also the split the checkpoint was SELECTED on: the LR schedule, the best
+epoch and early stopping all step on a validation metric, and halving val does not repair
+that — both halves fed the selection. So the artifact, the readout, the design doc and this
+package's `CLAUDE.md` all say "empirically measured cross-half coverage", never "guarantee".
+The coupling is worth naming as weak: selection reads a TRAJECTORY metric (common-grid ADE),
+not the duration residual these δ are quantiles of. Pre-registered: the guarantee-bearing
+number is a SINGLE held-out coverage read on the test split at the `freeze-test` ledger
+stage, once every experiment decision is final.
+
+**What flights actually GET is a different number from the per-stratum δ, and it is the one
+the gate reads.** A per-stratum δ is measured on that stratum's own members, but deployment
+takes the first stratum in the precedence a flight is in AND that has a δ — so a flight whose
+stratum refused for thinness is handed the POOLED δ, about which the pooled row says nothing.
+It need not be fine: the pooled δ is a mixture, and the fall-through group is by construction
+the part of the cohort the mixture is least like. On a synthetic check (1 240 flights, 40 of
+them vectored with a far wider truth spread) the pooled row reads 0.794 while the 18
+fallen-through flights are covered **0.167**, and the deployed pooled number is 0.756.
+`calibrate` therefore publishes a `deployed` block — every held-out flight scored under the δ
+it would really get, pooled and broken out by `natural -> assigned` group — and design gate
+3.4-2 reads it.
+
+Three further decisions the design under-specified, written down where they live. δ uses the
+finite-sample level `⌈(n+1)(1−α)⌉ / n`, not the plain (1−α) empirical quantile; when n is so
+small that the level exceeds 1 the conformal answer is +∞ and that is raised, never clamped
+to the largest score. The stratum rule is a PRECEDENCE (straight-in → vectored → pooled)
+because of the FALL-THROUGH, not because of overlap — straight-in and vectored are disjoint
+by construction, but they do not cover the cohort (a vectored flight already established is
+in neither) and a refused stratum has no δ — with the record saying which it took
+(`source.durationIntervalStratum`). And only the three strata the precedence can deploy are
+fitted at all: a δ no record will ever read is a number in the artifact that nothing
+measures.
+
+The table is a SIDECAR in `checkpoint_metadata.json` under `conformal`, deliberately not in
+`data_provenance` — `evaluate-fit` and `freeze-test` compare that object for equality, and a
+calibration run would otherwise make every later replay report "the manifest changed". It is
+bound to `checkpoint_sha256`; a table left behind by other weights RAISES. Without a table
+`predict` writes `calibrated: false` and the raw quantiles, which is a claim, not a missing
+key.
+
+The runner reads the DURATION HEAD ALONE (`forecast.duration_quantile_predictions`: one
+forward per flight, no rollout, no CTA). That is why it is seconds of CPU, and why it is the
+one instrument allowed to load a `cta_conditioning=given` checkpoint
+(`run_ts_anytime_curve.load_arm(..., refuse_cta_given=False)`) — the head reads the history
+only, so its quantiles are the same function a prediction would use. The
+`intent_conditioning` refusal still applies to it: that oracle is IN the history.
+
+**B3 — the fan.** `predict --cta-from-quantiles`, for a checkpoint with BOTH
+`cta_conditioning=given` and `duration_head=quantile`. In training the given (truth) CTA
+drives the rollout exactly as L3 built it, and the quantile head trains as a target beside
+it; at predict the rollout is driven by the model's OWN q_τ, one full prediction directory
+per level under `quantiles/q10…q90/` (plus `a20lo` / `a20hi`, the calibrated α=0.2
+endpoints, when a table exists), with the top-1 records BEING the q50 decode rather than a
+sixth. Refused with `--cta-offset-s` (that shifts the truth) and with `--z-from-posterior`
+(that reads the future).
+
+**This is the first CTA arm that reads no future, and the naming had to be able to say so.**
+`cta_conditioning` gained a third value, `self-q`, which no training run may select
+(`CTA_CONDITIONINGS_AVAILABLE`, refused through `cli.common._refuse_unavailable_selection`,
+the `--config-overrides` door included); `predict` stamps it on the config it writes beside
+the records, so the run name, `summary.mode` and every record say `cta=self-q` while the
+TRAINING directory still honestly wears `cta=given`. The readout is
+`run_ts_quantile_fan_readout.py --arm <pred_dir>`: per stratum the share of flights whose
+truth duration falls in [q10, q90] and in the calibrated interval, the median widths (the
+design's veto reads the vectored one against 120 s), and gate 3.4-3 — the truth path's
+chamfer to the NEAREST of the five decodes against its chamfer to q50, read on the in-fan
+subset with the whole cohort beside it. That geometric column is a READOUT, not a coverage
+guarantee: five trajectories are not a distribution over trajectories, and §六 6 forbids
+writing it as one.
+
+**Bit-exact at the defaults.** 2-epoch synthetic trains for control, latent k=1, latent k=4,
+state, closure and cta=given against `c2fccda`, comparing every history float, a state-dict
+digest and a forecast digest: **1519 non-wall-clock leaves, 0 differ**; the only new leaf is
+`/config/duration_head`. Names recomputed for **168 stored configs on disk: 0 changed**.
+
+**Opus review (2026-09-07), applied on the same branch.** It re-verified the equivalence, the
+recount and the suite, and confirmed nine of the decisions. Four substantive changes came out
+of it, all above: the `deployed` block and gate 3.4-2 pointing at it; the coverage language
+downgraded from guarantee to measurement everywhere, with the test-split read pre-registered;
+the deployed δ becoming half A's rather than the mean of both; and the table carrying its own
+cohort so a `--limit` smoke table is refused at the sidecar unless `--allow-smoke-table` is
+given. Also: the table's `quantiles` mirror is now CHECKED against `DURATION_QUANTILES`; the
+fan readout marks its in-sample `cal.hit` column and looks intervals up by their own α; the
+B1 arm discloses that the five pinball terms are ≈26× the point term at the same weight (from
+B0's measured residual, mu 3.5 s / sigma 31.4 s) and pre-registers a conditional
+`B1_point_matched` arm at `final_time_loss_weight: 26.0`; the calibrated interval ENDPOINTS
+became `predict --interval-endpoints`, off by default, with the non-positive-CTA refusal now
+tested; an inverted interval and an out-of-range conformal level raise instead of being
+repaired; and `_NEW_RUN_VOCABULARIES` finally has a test that every entry on it bites.
+
+Suite 680 → 729 (15 duration-head + 24 calibration + 9 fan tests, plus the `_NEW_RUN_VOCABULARIES` one).
+
+**Arms**: `docs/experiments/b1_quantile_arms.json` — `B1_quantile` (point-vs-quantile
+isolation on L1_native32's content) and `B3_quantile_cta` (+ `cta_conditioning=given`,
+`predict_args: --cta-from-quantiles`), with the gates, the veto and the calibration COMMAND
+between train and predict pre-registered in `_comment`. Nothing is trained yet.
 
 ### 2026-09-07 — ts_transformer A1: the selection metric was blind to what the random-anchor arm improved
 

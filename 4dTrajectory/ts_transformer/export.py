@@ -165,9 +165,28 @@ def build_prediction_record(
         **({"latentShuffled": True} if forecast.latent_shuffled else {}),
         **({"zFromPosterior": True} if forecast.z_from_posterior else {}),
         # CTA-conditioned control output: the arrival time the decoder was GIVEN (truth +
-        # offset) — a record that reads the future says so.
-        **({"ctaS": forecast.cta_s, "ctaOffsetS": forecast.cta_offset_s}
+        # offset) — a record that reads the future says so. Under B3 the arrival time is the
+        # model's OWN duration quantile, `ctaOffsetS` is null (there is no truth to offset)
+        # and `ctaFromQuantiles` is what separates the two arms in any later reading.
+        **({"ctaS": forecast.cta_s, "ctaOffsetS": forecast.cta_offset_s,
+            **({"ctaFromQuantiles": True, "ctaQuantile": forecast.cta_quantile,
+                **({"ctaInterval": forecast.cta_interval}
+                   if forecast.cta_interval is not None else {})}
+               if forecast.cta_from_quantiles else {})}
            if forecast.cta_s is not None else {}),
+        # B1, quantile duration head: all five DURATION_QUANTILES in seconds, in level
+        # order — the median included, so the record is a complete interval and a reader
+        # never has to splice `durationHeadFinalTimeS` back into position 2.
+        **({"durationQuantilesS": [float(value) for value in forecast.duration_quantiles_s],
+            # B2: `calibrated` is written for EVERY quantile record — false is the claim
+            # that this checkpoint has no conformal table, and a reader must not have to
+            # infer it from a missing key (design §六 4).
+            "calibrated": forecast.duration_interval_s is not None,
+            **({"durationIntervalS": forecast.duration_interval_s,
+                "durationIntervalStratum": forecast.duration_interval_stratum,
+                "durationIntervalCohort": forecast.duration_interval_cohort}
+               if forecast.duration_interval_s is not None else {})}
+           if forecast.duration_quantiles_s is not None else {}),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,
@@ -475,6 +494,19 @@ def write_batch(
             # A CTA-conditioned run reads the future; the row it is compared on says so.
             "cta_s": source.get("ctaS"),
             "cta_offset_s": source.get("ctaOffsetS"),
+            # B3: which arm this row belongs to. `cta_from_quantiles` false with a `cta_s`
+            # present IS `cta=given` — the oracle — and the two must never pool.
+            "cta_from_quantiles": bool(source.get("ctaFromQuantiles", False)),
+            "cta_quantile": source.get("ctaQuantile"),
+            # B1: absent (None) on every point-head row, so a readout can tell a quantile
+            # arm from a point one without opening a config.
+            "duration_quantiles_s": source.get("durationQuantilesS"),
+            "duration_interval_s": source.get("durationIntervalS"),
+            "duration_interval_stratum": source.get("durationIntervalStratum"),
+            # Which calibration this interval came from — the split it was fitted on (so a
+            # readout can say IN-SAMPLE), its airports and whether it was a smoke table.
+            "duration_interval_cohort": source.get("durationIntervalCohort"),
+            "calibrated": source.get("calibrated"),
             "z_from_posterior": bool(source.get("zFromPosterior", False)),
             "true_final_time_s": metrics["true_final_time_s"],
             "final_time_error_s": metrics["final_time_error_s"],
@@ -498,8 +530,7 @@ def write_batch(
             f"tsTransformer:{config_dict.get('model')}:"
             f"{config_dict.get('horizon_mode')}:"
             f"{config_dict.get('prediction_output', 'state')}:{split}"
-            + (f":cta{records[0].source.get('ctaOffsetS', 0.0):+g}s"
-               if records and records[0].source.get("ctaS") is not None else "")
+            + _cta_mode_suffix(records[0].source if records else {})
             + (":z-posterior" if records and records[0].source.get("zFromPosterior") else "")
         ),
         "split": split,
@@ -517,6 +548,23 @@ def write_batch(
         json.dumps(summary, indent=2, allow_nan=False), encoding="utf-8"
     )
     return written
+
+
+def _cta_mode_suffix(source: dict[str, Any]) -> str:
+    """How this directory's CTA was chosen, in the summary's ``mode`` string.
+
+    The two arms read differently on purpose (§六 5): ``cta+60s`` is the truth shifted — an
+    oracle — while ``cta-self-q0.1`` is the model's own tenth percentile and reads no future.
+    A directory decoded at a calibrated interval endpoint says which endpoint.
+    """
+    if source.get("ctaS") is None:
+        return ""
+    if not source.get("ctaFromQuantiles"):
+        return f":cta{source.get('ctaOffsetS') or 0.0:+g}s"
+    interval = source.get("ctaInterval")
+    if interval is not None:
+        return f":cta-self-q-a{interval['alpha']:g}{interval['end']}"
+    return f":cta-self-q{source['ctaQuantile']:g}"
 
 
 def observed_series_metrics(

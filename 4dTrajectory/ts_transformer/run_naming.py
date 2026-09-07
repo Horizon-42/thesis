@@ -37,12 +37,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from typing import Any
 
 from config import (
     CONTROL_HOOK_FIELDS,
     CTA_FIELDS,
+    DURATION_HEAD_QUANTILE,
+    DURATION_QUANTILES,
     INTENT_FIELDS,
     PROCEDURE_LOSS_FIELDS,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
@@ -162,6 +164,9 @@ META_FIELDS = (
     *INTENT_FIELDS,
     # The CTA axis reads the future the same way: a given-CTA run must wear it.
     *CTA_FIELDS,
+    # B1: which duration head. The interval a run publishes is part of what it IS, and the
+    # named recipes pin this at `point`, so a quantile run is `custom` and this item shows.
+    "duration_head",
     "d_model",
     "n_heads",
     "d_ff",
@@ -215,7 +220,15 @@ _TAU_FIELDS = (
     ("control_load_time_constant_s", "τ-load"),
 )
 
+#: Values whose display form is not the value itself. One entry, and it exists because the
+#: design names the item ``T=q5``: the 5 is ``len(DURATION_QUANTILES)``, so the name moves
+#: with the tuple instead of restating its length.
+_VALUE_ABBREV: dict[str, dict[Any, str]] = {
+    "duration_head": {DURATION_HEAD_QUANTILE: f"q{len(DURATION_QUANTILES)}"},
+}
+
 _ABBREV = {
+    "duration_head": "T",
     "latent_posterior_init_std": "q-std",
     "latent_beta_warmup_epochs": "beta-warmup",
     "latent_aux_duration_weight": "aux-T",
@@ -349,8 +362,18 @@ def _field_diffs(
 
 
 def _diff_items(diffs: list[tuple[str, Any]]) -> list[str]:
-    return [f"{_abbrev(field)}={_fmt_path(value) if field in _PATH_FIELDS else _fmt(value)}"
-            for field, value in diffs]
+    return [f"{_abbrev(field)}={_display_value(field, value)}" for field, value in diffs]
+
+
+def _display_value(field: str, value: Any) -> str:
+    if field in _PATH_FIELDS:
+        return _fmt_path(value)
+    # A META_FIELDS value can be a list (`channels`-shaped fields), which is unhashable and
+    # would raise on the dict lookup rather than falling through to `_fmt`.
+    spellings = _VALUE_ABBREV.get(field, {})
+    if spellings and isinstance(value, Hashable):
+        return spellings.get(value) or _fmt(value)
+    return _fmt(value)
 
 
 def _fmt_path(value: Any) -> str:

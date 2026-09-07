@@ -367,3 +367,56 @@ def test_the_conditioning_names_and_their_scalings_are_one_source():
     for name, value in named.items():
         if name != "stall_threshold":
             assert value == 1.0, f"{name} does not divide by the unit its name states"
+
+
+def test_every_new_run_vocabulary_is_actually_refused(tmp_path, capsys):
+    """A value a STORED config may carry but a NEW run may not select must be refused at
+    BOTH doors, and `--config-overrides` is the one with no argparse `choices` to stop it.
+    `cli.common._NEW_RUN_VOCABULARIES` is the list; nothing asserted that any entry on it
+    bites, so an axis added to the vocabulary and forgotten here would stay selectable.
+
+    Each entry needs the companion settings its own field validation demands (a hook needs
+    the lag dynamics, a CTA needs the control output). A new entry with no companion row
+    fails here with a KeyError rather than passing vacuously.
+    """
+    import importlib.util
+    import json
+
+    import pytest
+
+    from cli.common import _NEW_RUN_VOCABULARIES
+    from config import CONTROL_HOOKS, CTA_CONDITIONINGS, STATE_POSITION_REFERENCES
+
+    #: field -> (its full stored vocabulary, the other settings that value needs to be legal)
+    VOCABULARY_CONTEXT = {
+        "control_command_hook": (CONTROL_HOOKS, {
+            "prediction_output": "control",
+            "control_dynamics_model": "first-order-lag",
+            "control_dynamics_backend": "scaled-transport-chart-velocity",
+            "control_state_loss_grid": "native-segment-endpoints",
+        }),
+        "cta_conditioning": (CTA_CONDITIONINGS, {"prediction_output": "control"}),
+        "state_position_reference": (STATE_POSITION_REFERENCES, {}),
+    }
+
+    spec = importlib.util.spec_from_file_location("ts_cli_vocabulary", TS_DIR / "__main__.py")
+    main_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(main_module)
+
+    assert _NEW_RUN_VOCABULARIES, "the vocabulary list is empty; this test would pass vacuously"
+    for field, available, _why in _NEW_RUN_VOCABULARIES:
+        full, companions = VOCABULARY_CONTEXT[field]
+        # An entry whose every value is available is a bound that can never bind.
+        refused = [value for value in full if value not in available]
+        assert refused, f"{field}: every value is available, so this entry never binds"
+
+        overrides = tmp_path / f"{field}.json"
+        overrides.write_text(json.dumps({field: refused[0], **companions}))
+        with pytest.raises(SystemExit) as info:
+            main_module.main([
+                "train", "--data", "x.json", "--output-dir", str(tmp_path / "out"),
+                "--config-overrides", str(overrides),
+            ])
+        assert info.value.code == 2, field
+        message = capsys.readouterr().err
+        assert f"{field}={refused[0]!r} cannot be selected for a new run" in message, field

@@ -9,11 +9,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from approach_difficulty import approach_difficulty
 from batch_contract import model_forward
+from calibration import conformal_intervals, interval_stratum
 from channels import IDX, horizontal_distance_m
 from config import (
-    CTA_CONDITIONING_GIVEN,
     CORRIDOR_GATES,
+    CTA_CONDITIONING_GIVEN,
+    CTA_CONDITIONING_OFF,
+    DURATION_HEAD_QUANTILE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -97,6 +101,27 @@ class Forecast:
     # Latent control output only: decoded from the POSTERIOR mean q(z | this flight's own
     # future) — the z-oracle upper bound. Reads the future; never a prediction result.
     z_from_posterior: bool = False
+    # B1, quantile duration head only: the five `DURATION_QUANTILES` in seconds, in level
+    # order. `predicted_final_time_s` above is still the ONE duration this trajectory was
+    # rolled over (the median, or a CTA); these are the interval around it, and §六 6 —
+    # they are quantiles of the DURATION, never of the trajectory.
+    duration_quantiles_s: np.ndarray | None = None
+    # B2: the CALIBRATED interval per alpha, `[{"alpha", "lo", "hi"}]`, and the stratum whose
+    # conformal delta widened it. None = this checkpoint has no calibration table, and the
+    # record then says `calibrated: false` rather than passing raw quantiles off as an
+    # interval (design §六 4).
+    duration_interval_s: list[dict[str, float]] | None = None
+    duration_interval_stratum: str | None = None
+    # WHICH calibration produced that interval: the table's own split, airports and smoke
+    # flag. A delta fitted at one airport and applied at another is a different calibration,
+    # and a --limit table deployed deliberately has to stay visible in the record.
+    duration_interval_cohort: dict[str, object] | None = None
+    # B3: this trajectory was decoded at the model's OWN duration quantile, not at a CTA read
+    # from the future. `cta_quantile` is the level (None at a calibrated interval endpoint,
+    # which `cta_interval` then names). §六 5 — `cta=self-q` and `cta=given` are two arms.
+    cta_from_quantiles: bool = False
+    cta_quantile: float | None = None
+    cta_interval: dict[str, object] | None = None
 
     @property
     def n_steps(self) -> int:
@@ -171,14 +196,26 @@ def _forward(
 
 def _dynamics_batch(
     series: Sequence[FlightSeries], anchor: int, device: torch.device,
-    config: TSConfig, cta_offset_s: float = 0.0,
+    config: TSConfig, cta_offset_s: float = 0.0, cta_s: np.ndarray | None = None,
 ) -> dict[str, torch.Tensor]:
-    """The per-flight context; under ``cta_conditioning=given`` it carries the CTA =
-    the truth duration + ``cta_offset_s`` (the counterfactual a scheduler asks for)."""
+    """The per-flight context, plus the CTA when the decoder takes one.
+
+    Two sources, and which one it is decides whether the run READS THE FUTURE: under
+    ``given`` the CTA is the truth duration + ``cta_offset_s`` (the counterfactual a
+    scheduler asks for), and under B3 the caller supplies ``cta_s`` — the model's own
+    duration quantile — which is the whole point of ``cta=self-q``.
+    """
     rows = [dynamics_arrays(item, anchor) for item in series]
-    if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
-        for item, row in zip(series, rows, strict=True):
-            row["cta_s"] = np.array(truth_duration_s(item, anchor) + cta_offset_s, dtype=np.float64)
+    if config.cta_conditioning != CTA_CONDITIONING_OFF:
+        given = (
+            np.asarray(cta_s, dtype=np.float64) if cta_s is not None
+            else np.array(
+                [truth_duration_s(item, anchor) + cta_offset_s for item in series],
+                dtype=np.float64,
+            )
+        )
+        for row, value in zip(rows, given, strict=True):
+            row["cta_s"] = np.array(value, dtype=np.float64)
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
@@ -232,6 +269,11 @@ def _control_prediction_batch(
             [item.segment_durations for item in predictions], dim=0
         ),
         final_time_s=torch.cat([item.final_time_s for item in predictions], dim=0),
+        # The contract's own discriminator: a point head emits None for every row.
+        duration_quantiles_s=(
+            torch.cat([item.duration_quantiles_s for item in predictions], dim=0)
+            if predictions[0].duration_quantiles_s is not None else None
+        ),
     )
 
 
@@ -250,6 +292,10 @@ def _forecast_control_batch(
     histories: np.ndarray | None = None,
     dynamics: dict[str, torch.Tensor] | None = None,
     cta_offset_s: float = 0.0,
+    conformal: dict | None = None,
+    cta_s: np.ndarray | None = None,
+    cta_quantile: float | None = None,
+    cta_interval: dict[str, object] | None = None,
 ) -> list[Forecast]:
     """Predict and densely roll a heterogeneous batch of bounded control schedules.
 
@@ -261,11 +307,11 @@ def _forecast_control_batch(
     if histories is None:
         histories = _history_batch(series, config, normalizer, anchor)
     if dynamics is None:
-        dynamics = _dynamics_batch(series, anchor, device, config, cta_offset_s)
+        dynamics = _dynamics_batch(series, anchor, device, config, cta_offset_s, cta_s)
     prediction = _control_prediction_batch(model, histories, dynamics, device, latent=latent)
     cta = (
         dynamics["cta_s"].detach().cpu().numpy().astype(np.float64)
-        if config.cta_conditioning == CTA_CONDITIONING_GIVEN else None
+        if config.cta_conditioning != CTA_CONDITIONING_OFF else None
     )
     durations = prediction.segment_durations.detach().cpu().numpy().astype(np.float64)
     offsets, padded_offsets, query_valid = _padded_dense_queries(
@@ -301,6 +347,10 @@ def _forecast_control_batch(
     predicted_final_time = (
         prediction.final_time_s.detach().cpu().numpy().astype(np.float64)
     )
+    duration_quantiles = (
+        prediction.duration_quantiles_s.detach().cpu().numpy().astype(np.float64)
+        if prediction.duration_quantiles_s is not None else None
+    )
     forecasts: list[Forecast] = []
     for row, (item, row_offsets) in enumerate(zip(series, offsets, strict=True)):
         count = len(row_offsets)
@@ -330,9 +380,78 @@ def _forecast_control_batch(
             latent_shuffled=latent_shuffled,
             z_from_posterior=z_from_posterior,
             cta_s=None if cta is None else float(cta[row]),
-            cta_offset_s=None if cta is None else float(cta_offset_s),
+            # There is no OFFSET under `self-q`: the CTA is not the truth plus anything, and
+            # writing 0.0 there would read as "the truth, unshifted".
+            cta_offset_s=None if cta is None or cta_s is not None else float(cta_offset_s),
+            cta_from_quantiles=cta_s is not None,
+            cta_quantile=cta_quantile,
+            cta_interval=cta_interval,
+            duration_quantiles_s=(
+                None if duration_quantiles is None else duration_quantiles[row]
+            ),
+            **_calibrated_interval_fields(
+                item, anchor, None if duration_quantiles is None else duration_quantiles[row],
+                conformal,
+            ),
         ))
     return forecasts
+
+
+def _calibrated_interval_fields(
+    series: FlightSeries, anchor: int, quantiles_s: np.ndarray | None, conformal: dict | None
+) -> dict[str, object]:
+    """The record's calibrated interval, or nothing at all (B2).
+
+    The stratum is decided from the flight's OWN difficulty covariates at THIS anchor,
+    through `calibration.interval_stratum` — the same `strata_masks` cut the table was
+    fitted per, so a record and the delta it was widened by name one population.
+    """
+    if quantiles_s is None or conformal is None:
+        return {}
+    stratum = interval_stratum(conformal, approach_difficulty(series, anchor).to_dict())
+    return {
+        "duration_interval_s": conformal_intervals(quantiles_s, conformal, stratum),
+        "duration_interval_stratum": stratum,
+        "duration_interval_cohort": {
+            "split": conformal["split"],
+            "airports": list(conformal["airports"]),
+            "smokeTest": bool(conformal["smoke_test"]),
+        },
+    }
+
+
+def duration_quantile_predictions(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    *,
+    anchor: int | None = None,
+    device: torch.device | None = None,
+) -> np.ndarray:
+    """The duration head's five quantiles per flight, ``[B, Q]`` seconds — nothing else.
+
+    No rollout, no controls, and NO CTA: the quantile head reads the history alone
+    (`control.heads.ControlFeatureModel.duration_quantiles`), which is what lets B2 calibrate
+    and B3 decode a ``cta_conditioning=given`` checkpoint without first handing it an arrival
+    time it would have had to read from the future. Batched per flight like every other
+    forward here, so the arithmetic is the one `predict` runs.
+    """
+    if config.duration_head != DURATION_HEAD_QUANTILE:
+        raise ValueError(
+            "duration quantiles need a checkpoint trained with duration_head='quantile'; "
+            f"this one has {config.duration_head!r}"
+        )
+    device = device or next(model.parameters()).device
+    anchor = default_anchor(config) if anchor is None else anchor
+    histories = _history_batch(series, config, normalizer, anchor)
+    model.eval()
+    with torch.no_grad():
+        rows = [
+            model.duration_quantiles(torch.from_numpy(history[None]).to(device))
+            for history in histories
+        ]
+    return torch.cat(rows, dim=0).cpu().numpy().astype(np.float64)
 
 
 def _latent_prior_batch(
@@ -908,6 +1027,10 @@ def forecast_approaches(
     truncate: bool = True,
     project_final: str | None = None,
     cta_offset_s: float = 0.0,
+    conformal: dict | None = None,
+    cta_s: np.ndarray | None = None,
+    cta_quantile: float | None = None,
+    cta_interval: dict[str, object] | None = None,
 ) -> list[Forecast]:
     """Predict one inference batch through the same dense path used by fit evaluation.
 
@@ -917,6 +1040,11 @@ def forecast_approaches(
     """
     if cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
         raise ValueError("a CTA offset applies to a checkpoint trained with cta_conditioning=given only")
+    if cta_s is not None and cta_offset_s:
+        raise ValueError(
+            "a self-quantile CTA and a counterfactual offset are two different arms: the "
+            "first reads the model's own duration, the second the truth's"
+        )
     if not series:
         return []
     device = device or next(model.parameters()).device
@@ -925,7 +1053,9 @@ def forecast_approaches(
         if project_final is not None:
             raise ValueError("the final-approach projection applies to state forecasts only")
         return _forecast_control_batch(
-            model, series, config, normalizer, anchor, device, cta_offset_s=cta_offset_s
+            model, series, config, normalizer, anchor, device,
+            cta_offset_s=cta_offset_s, conformal=conformal, cta_s=cta_s,
+            cta_quantile=cta_quantile, cta_interval=cta_interval,
         )
     if config.prediction_output == PREDICTION_CLOSURE:
         if project_final is not None:

@@ -66,6 +66,14 @@ point of the package, not a migration in progress.
   --cta-offset-s` is the scheduler's counterfactual). Both READ THE FUTURE in their oracle
   forms and the run name says so (`control+z8`, `z=posterior`, `cta=given`) — never a
   prediction result.
+- **...and a third axis, the DURATION HEAD** (2026-09-07,
+  `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md` §三):
+  `duration_head=quantile` replaces the scalar `FinalTimeHead` with
+  `QuantileFinalTimeHead`'s five `config.DURATION_QUANTILES`, monotone by cumulative
+  softplus. Its MEDIAN is the duration the rollout flies (`final_time_s` unchanged), all
+  five go to `source.durationQuantilesS`, and `run_ts_eta_calibration.py` turns them into a
+  calibrated interval. `predict --cta-from-quantiles` then decodes each flight at its OWN
+  quantile — the run name says `cta=self-q`, and that one IS a prediction result.
 
 Single-aircraft-only and deterministic point-prediction are scope decisions for all three (README).
 
@@ -142,6 +150,32 @@ flight model.
   `intent_conditioning`), and the control loss refuses a `[B, C + K]` anchor on the first
   batch. Two call sites had the raw slice until 2026-09-05; any control run with conditioning
   died there.
+- **`cta=self-q` and `cta=given` are two ARMS, and only the first is quotable.** `given`
+  hands the decoder the truth duration; `self-q` (`predict --cta-from-quantiles`) hands it
+  the model's OWN `q_τ` and reads no future. The B3 arm TRAINS as `given` — the truth CTA
+  drives the rollout while the quantile head trains as a target beside it — so the run
+  directory honestly wears `cta=given` and only the prediction directory says `self-q`.
+  The fan is `quantiles/qNN/` (plus `a20lo` / `a20hi` when a conformal table exists), the
+  top-1 records ARE the q50 decode, and every record carries `source.ctaFromQuantiles` /
+  `ctaQuantile`. Refused with `--cta-offset-s` and with `--z-from-posterior`.
+- **A quantile record says whether it is CALIBRATED, always.** `source.calibrated` is
+  written on every quantile record — `false` is the claim that this checkpoint has no
+  conformal table, not a missing key — and `durationIntervalS` / `durationIntervalStratum` /
+  `durationIntervalCohort` (the table's split, airports and smoke flag) appear only with one.
+  The table is bound to `checkpoint_sha256` AND to `DURATION_QUANTILES`: one left behind by
+  other weights, or written under other levels, RAISES rather than widening this run's
+  intervals by someone else's δ.
+- **The calibrated coverage is MEASURED, never guaranteed, and the gate reads the DEPLOYED
+  block.** Two separate traps. (i) The calibration split is also the split the checkpoint was
+  SELECTED on, so the finite-sample split-conformal guarantee does not hold as constructed;
+  every surface says "empirically measured cross-half coverage" and the guarantee-bearing
+  read is pre-registered as one test-split measurement at `freeze-test`. (ii) A per-stratum δ
+  is measured on its own stratum's members, but DEPLOYMENT falls through
+  `INTERVAL_STRATUM_PRECEDENCE` — a refused stratum's flights take the pooled δ, and the
+  pooled row says nothing about them (synthetic check: pooled row 0.794, the fallen-through
+  group 0.167, deployed pooled 0.756). `calibration.calibrate` therefore publishes a
+  `deployed` block that scores every held-out flight under the δ it would really get, and
+  **design gate 3.4-2 reads that number**.
 - **`intent_conditioning=truth-…` checkpoints read the FUTURE** (the truth join point, the
   lead's true landing time) — the Phase 0 upper-bound instrument of the scene design, never a
   result to quote as a predictor; the run name carries `intent=truth-…` so it cannot pass as
@@ -198,7 +232,8 @@ flight model.
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
 | `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` / `latent_posterior_init_std` and L2.f's two below mean nothing without it and are refused |
 | `latent_beta_warmup_epochs` / `latent_aux_duration_weight` | 0 / 0.0 | L2.f's two levers on the POSTERIOR MEAN, which is where the information died (see the contract above). The first ramps β linearly from 0 over N epochs (`effective_latent_beta`, the one place the schedule is written; the epoch's objective is `replace(config, latent_beta=…)` and the validation pass is scored under the SAME one); the second adds a train-only `Linear(latent_dim→1)` on the POSTERIOR SAMPLE predicting `truth_duration_s / final_time_scale_s` (component `latent_aux`, registered iff weighted, never called in `decode`, refused under `cta_conditioning=given`). Named `beta-warmup=` / `aux-T=`. Arms: `docs/experiments/l2f_mean_information_arms.json` |
-| `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result |
+| `cta_conditioning` | `off` | `given` = the CTA is the duration (L3); a delivery-form demonstration, never a prediction result. **`self-q` is a PREDICT-TIME label, not a trainable value** (`CTA_CONDITIONINGS_AVAILABLE` keeps it out of a new run): `predict --cta-from-quantiles` stamps it on the config it writes beside the records, so the directory that read no future cannot be named like the one that did |
+| `duration_head` | `point` | `quantile` = B1's five `DURATION_QUANTILES` of the SAME duration (`QuantileFinalTimeHead`, monotone by cumulative softplus; the median IS `final_time_s`). The loss swaps the squared final-time residual for the sum of five pinball losses **under the same component name**, so `loss_component_names` is unchanged. Refused off the control output, and refused with `latent_dim > 0` — z reaches the duration by shifting the point head's ONE logit, and under a posterior sample the quantiles would be conditioned on the flight's own future. The named recipes pin it at `point`, so a quantile run is `custom` and wears `T=q5` |
 | `n_segments` (control) | 64 | **32 is free** (L1: 1322 vs 1333 m, bank skill 0.726 vs 0.728); the deployed head's 257 numbers become 96 |
 | `control_state_loss_grid` | native | `fixed-dt` without the imitation term (it is not registered there) trips the straight-in veto (FDE 703 → 2863) and brings the bank wiggle back — the trajectory-error loss alone is not enough |
 | `control_heading_rate_loss_weight` (+ `_scale_dps` 1.5) | 0 | L1.b arm ②: the teacherless way to name the bank — the rollout's own ψ̇ at the segment endpoints against the flown track's. `_scale_dps` is the UNIT the residual is read in (half a standard-rate turn), not the dose. Doses 1.0 / 8.0 bracket an unknown; **not measured yet** |
@@ -359,6 +394,34 @@ importable. A finished one-off driver belongs there, not beside the live runners
   (≈27 s / 53 s of truth left at approach speed) — stated as `n=0 / partial`, but s_freeze can
   then only be read at ≥ 6 km, and the **~125 s duration-head floor** makes |Δt| p80 RISE
   toward the runway anyway (L1_native32 vectored: 64 s at 12 km, 141 s at 4 km).
+- `run_ts_eta_calibration.py` — **B2**: split-conformal (CQR) calibration of a
+  `duration_head=quantile` checkpoint's interval. Reads the DURATION HEAD ALONE
+  (`forecast.duration_quantile_predictions` — one forward per flight, no rollout, no CTA),
+  which is why it is seconds of CPU and why it may load a `cta=given` checkpoint
+  (`load_arm(..., refuse_cta_given=False)`, the only instrument that may; the
+  `intent_conditioning` refusal still applies — that oracle is IN the history). The VAL
+  split is halved by the checkpoint's own `split_seed`: **half A fits the DEPLOYED δ and
+  half B measures what it covered** — the mirror is a stability check, never averaged in.
+  `--split test` / `train` are refused with the reason; a `--limit` SMOKE table is refused
+  at the sidecar unless `--allow-smoke-table`. Per stratum
+  (`approach_difficulty.strata_masks`), and only the three
+  `calibration.INTERVAL_STRATUM_PRECEDENCE` can deploy are fitted at all; below
+  `calibration.MIN_CALIBRATION_FLIGHTS` = 30 in a half the stratum is REFUSED and a flight
+  in it falls through to the pooled δ. The table lands in the checkpoint's
+  `checkpoint_metadata.json` under `conformal` — a SIDECAR, never in `data_provenance`
+  (which `evaluate-fit` / `freeze-test` compare for equality) — and carries its own cohort
+  (`airports`, `limit`, `smoke_test`) plus the half rule.
+- `run_ts_quantile_fan_readout.py` — **B3**: `--arm <pred_dir>` of a `--cta-from-quantiles`
+  run; it reads the five `qNN` leaves only (the calibrated endpoints are `predict
+  --interval-endpoints`, off by default and not part of any gate). Per stratum: the share of
+  flights whose truth duration falls in `[q10, q90]` and in the calibrated interval, the
+  median widths (the veto reads the vectored one against 120 s), and the truth path's
+  chamfer to the NEAREST of the five decodes against its chamfer to q50 — gate 3.4-3, read
+  on the in-fan subset with the whole cohort beside it. **That geometric column is a
+  readout, not a coverage guarantee** (§六 6): five trajectories are not a distribution over
+  trajectories. **Its `cal.hit` column is IN-SAMPLE on a val arm** — the flights it scores
+  are the ones the δ was fitted on — and is marked `cal.hit*`; the gate's coverage is the
+  calibration readout's DEPLOYED block.
 - `run_ts_eta_error_readout.py` — **B0**: |`final_time_error_s`| p50/p80/p90 and the SIGNED
   p10/p50/p90 (same for `fde_m`) per stratum, straight out of existing `summary.json` files.
   A row is used only if it carries every metric AND every `STRATA_COVARIATES` field — a
