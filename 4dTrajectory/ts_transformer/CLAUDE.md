@@ -160,9 +160,22 @@ flight model.
   `ctaQuantile`. Refused with `--cta-offset-s` and with `--z-from-posterior`.
 - **A quantile record says whether it is CALIBRATED, always.** `source.calibrated` is
   written on every quantile record — `false` is the claim that this checkpoint has no
-  conformal table, not a missing key — and `durationIntervalS` / `durationIntervalStratum`
-  appear only with one. The table is bound to `checkpoint_sha256`: one left behind by other
-  weights RAISES rather than widening this run's intervals by someone else's δ.
+  conformal table, not a missing key — and `durationIntervalS` / `durationIntervalStratum` /
+  `durationIntervalCohort` (the table's split, airports and smoke flag) appear only with one.
+  The table is bound to `checkpoint_sha256` AND to `DURATION_QUANTILES`: one left behind by
+  other weights, or written under other levels, RAISES rather than widening this run's
+  intervals by someone else's δ.
+- **The calibrated coverage is MEASURED, never guaranteed, and the gate reads the DEPLOYED
+  block.** Two separate traps. (i) The calibration split is also the split the checkpoint was
+  SELECTED on, so the finite-sample split-conformal guarantee does not hold as constructed;
+  every surface says "empirically measured cross-half coverage" and the guarantee-bearing
+  read is pre-registered as one test-split measurement at `freeze-test`. (ii) A per-stratum δ
+  is measured on its own stratum's members, but DEPLOYMENT falls through
+  `INTERVAL_STRATUM_PRECEDENCE` — a refused stratum's flights take the pooled δ, and the
+  pooled row says nothing about them (synthetic check: pooled row 0.794, the fallen-through
+  group 0.167, deployed pooled 0.756). `calibration.calibrate` therefore publishes a
+  `deployed` block that scores every held-out flight under the δ it would really get, and
+  **design gate 3.4-2 reads that number**.
 - **`intent_conditioning=truth-…` checkpoints read the FUTURE** (the truth join point, the
   lead's true landing time) — the Phase 0 upper-bound instrument of the scene design, never a
   result to quote as a predictor; the run name carries `intent=truth-…` so it cannot pass as
@@ -374,21 +387,28 @@ importable. A finished one-off driver belongs there, not beside the live runners
   which is why it is seconds of CPU and why it may load a `cta=given` checkpoint
   (`load_arm(..., refuse_cta_given=False)`, the only instrument that may; the
   `intent_conditioning` refusal still applies — that oracle is IN the history). The VAL
-  split is halved by the checkpoint's own `split_seed`, δ is fitted on one half and its
-  coverage measured on the OTHER, then swapped; both coverages are published beside the mean
-  δ. `--split test` / `train` are refused with the reason. Per stratum
-  (`approach_difficulty.strata_masks`); below `calibration.MIN_CALIBRATION_FLIGHTS` = 30 in
-  a half the stratum is REFUSED and a flight in it falls through
-  `calibration.INTERVAL_STRATUM_PRECEDENCE` to the pooled δ. The table lands in the
-  checkpoint's `checkpoint_metadata.json` under `conformal` — a SIDECAR, never in
-  `data_provenance` (which `evaluate-fit` / `freeze-test` compare for equality).
+  split is halved by the checkpoint's own `split_seed`: **half A fits the DEPLOYED δ and
+  half B measures what it covered** — the mirror is a stability check, never averaged in.
+  `--split test` / `train` are refused with the reason; a `--limit` SMOKE table is refused
+  at the sidecar unless `--allow-smoke-table`. Per stratum
+  (`approach_difficulty.strata_masks`), and only the three
+  `calibration.INTERVAL_STRATUM_PRECEDENCE` can deploy are fitted at all; below
+  `calibration.MIN_CALIBRATION_FLIGHTS` = 30 in a half the stratum is REFUSED and a flight
+  in it falls through to the pooled δ. The table lands in the checkpoint's
+  `checkpoint_metadata.json` under `conformal` — a SIDECAR, never in `data_provenance`
+  (which `evaluate-fit` / `freeze-test` compare for equality) — and carries its own cohort
+  (`airports`, `limit`, `smoke_test`) plus the half rule.
 - `run_ts_quantile_fan_readout.py` — **B3**: `--arm <pred_dir>` of a `--cta-from-quantiles`
-  run. Per stratum: the share of flights whose truth duration falls in `[q10, q90]` and in
-  the calibrated interval, the median widths (the veto reads the vectored one against
-  120 s), and the truth path's chamfer to the NEAREST of the five decodes against its
-  chamfer to q50 — gate 3.4-3, read on the in-fan subset with the whole cohort beside it.
-  **That geometric column is a readout, not a coverage guarantee** (§六 6): five
-  trajectories are not a distribution over trajectories.
+  run; it reads the five `qNN` leaves only (the calibrated endpoints are `predict
+  --interval-endpoints`, off by default and not part of any gate). Per stratum: the share of
+  flights whose truth duration falls in `[q10, q90]` and in the calibrated interval, the
+  median widths (the veto reads the vectored one against 120 s), and the truth path's
+  chamfer to the NEAREST of the five decodes against its chamfer to q50 — gate 3.4-3, read
+  on the in-fan subset with the whole cohort beside it. **That geometric column is a
+  readout, not a coverage guarantee** (§六 6): five trajectories are not a distribution over
+  trajectories. **Its `cal.hit` column is IN-SAMPLE on a val arm** — the flights it scores
+  are the ones the δ was fitted on — and is marked `cal.hit*`; the gate's coverage is the
+  calibration readout's DEPLOYED block.
 - `run_ts_eta_error_readout.py` — **B0**: |`final_time_error_s`| p50/p80/p90 and the SIGNED
   p10/p50/p90 (same for `fde_m`) per stratum, straight out of existing `summary.json` files.
   A row is used only if it carries every metric AND every `STRATA_COVARIATES` field — a

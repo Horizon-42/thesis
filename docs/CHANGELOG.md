@@ -38,20 +38,43 @@ Conformalized quantile regression: score `max(q_lo − T, T − q_hi)`, δ_α it
 interval `[q_lo − δ, q_hi + δ]`, for α ∈ {0.2, 0.5} bound to the pairs (q10, q90) and
 (q25, q75). The calibration set is the VALIDATION split and nothing else — the sealed outer
 test would be spent on a number with no gate, and the training split's quantiles are fitted
-to their own targets. It is halved by the checkpoint's own `split_seed`, δ is fitted on one
-half and its coverage MEASURED ON THE OTHER, then the halves swap; both coverages are
-published beside the mean δ, and the readout's columns are labelled `dA->B` / `dB->A` rather
-than "cov A", because the coverage of a δ on its own calibration set is the one number such
-an artifact must never print.
+to their own targets. It is halved by the checkpoint's own `split_seed`: **half A fits the
+DEPLOYED δ and half B, which it never saw, measures what it covered**. The mirror (fit on B,
+score on A) is printed beside it as a stability check and is never averaged in — a mean of
+two δ is fitted on every flight it is then scored against, and nothing would measure it.
 
-Two implementation decisions the design under-specified, both written down where they live.
-δ uses the finite-sample level `⌈(n+1)(1−α)⌉ / n`, not the plain (1−α) empirical quantile;
-at n ≈ 700 per half it moves δ by well under a second and it is what makes the guarantee
-hold. And `strata_masks`' strata OVERLAP — an established flight can be straight-in — so a
-record needs a PRECEDENCE, not a partition: straight-in → vectored → pooled, taking the first
-stratum the flight is in that HAS a δ, with the record saying which
-(`source.durationIntervalStratum`). A stratum with fewer than 30 flights in a half is refused
-and recorded; only the pooled stratum refusing fails the run.
+**The coverage is MEASURED, not guaranteed, and the language says so everywhere.** The
+calibration split is also the split the checkpoint was SELECTED on: the LR schedule, the best
+epoch and early stopping all step on a validation metric, and halving val does not repair
+that — both halves fed the selection. So the artifact, the readout, the design doc and this
+package's `CLAUDE.md` all say "empirically measured cross-half coverage", never "guarantee".
+The coupling is worth naming as weak: selection reads a TRAJECTORY metric (common-grid ADE),
+not the duration residual these δ are quantiles of. Pre-registered: the guarantee-bearing
+number is a SINGLE held-out coverage read on the test split at the `freeze-test` ledger
+stage, once every experiment decision is final.
+
+**What flights actually GET is a different number from the per-stratum δ, and it is the one
+the gate reads.** A per-stratum δ is measured on that stratum's own members, but deployment
+takes the first stratum in the precedence a flight is in AND that has a δ — so a flight whose
+stratum refused for thinness is handed the POOLED δ, about which the pooled row says nothing.
+It need not be fine: the pooled δ is a mixture, and the fall-through group is by construction
+the part of the cohort the mixture is least like. On a synthetic check (1 240 flights, 40 of
+them vectored with a far wider truth spread) the pooled row reads 0.794 while the 18
+fallen-through flights are covered **0.167**, and the deployed pooled number is 0.756.
+`calibrate` therefore publishes a `deployed` block — every held-out flight scored under the δ
+it would really get, pooled and broken out by `natural -> assigned` group — and design gate
+3.4-2 reads it.
+
+Three further decisions the design under-specified, written down where they live. δ uses the
+finite-sample level `⌈(n+1)(1−α)⌉ / n`, not the plain (1−α) empirical quantile; when n is so
+small that the level exceeds 1 the conformal answer is +∞ and that is raised, never clamped
+to the largest score. The stratum rule is a PRECEDENCE (straight-in → vectored → pooled)
+because of the FALL-THROUGH, not because of overlap — straight-in and vectored are disjoint
+by construction, but they do not cover the cohort (a vectored flight already established is
+in neither) and a refused stratum has no δ — with the record saying which it took
+(`source.durationIntervalStratum`). And only the three strata the precedence can deploy are
+fitted at all: a δ no record will ever read is a number in the artifact that nothing
+measures.
 
 The table is a SIDECAR in `checkpoint_metadata.json` under `conformal`, deliberately not in
 `data_provenance` — `evaluate-fit` and `freeze-test` compare that object for equality, and a
@@ -94,7 +117,23 @@ writing it as one.
 state, closure and cta=given against `c2fccda`, comparing every history float, a state-dict
 digest and a forecast digest: **1519 non-wall-clock leaves, 0 differ**; the only new leaf is
 `/config/duration_head`. Names recomputed for **168 stored configs on disk: 0 changed**.
-Suite 680 → 718 (15 + 16 + 7 new tests).
+
+**Opus review (2026-09-07), applied on the same branch.** It re-verified the equivalence, the
+recount and the suite, and confirmed nine of the decisions. Four substantive changes came out
+of it, all above: the `deployed` block and gate 3.4-2 pointing at it; the coverage language
+downgraded from guarantee to measurement everywhere, with the test-split read pre-registered;
+the deployed δ becoming half A's rather than the mean of both; and the table carrying its own
+cohort so a `--limit` smoke table is refused at the sidecar unless `--allow-smoke-table` is
+given. Also: the table's `quantiles` mirror is now CHECKED against `DURATION_QUANTILES`; the
+fan readout marks its in-sample `cal.hit` column and looks intervals up by their own α; the
+B1 arm discloses that the five pinball terms are ≈26× the point term at the same weight (from
+B0's measured residual, mu 3.5 s / sigma 31.4 s) and pre-registers a conditional
+`B1_point_matched` arm at `final_time_loss_weight: 26.0`; the calibrated interval ENDPOINTS
+became `predict --interval-endpoints`, off by default, with the non-positive-CTA refusal now
+tested; an inverted interval and an out-of-range conformal level raise instead of being
+repaired; and `_NEW_RUN_VOCABULARIES` finally has a test that every entry on it bites.
+
+Suite 680 → 729 (15 duration-head + 24 calibration + 9 fan tests, plus the `_NEW_RUN_VOCABULARIES` one).
 
 **Arms**: `docs/experiments/b1_quantile_arms.json` — `B1_quantile` (point-vs-quantile
 isolation on L1_native32's content) and `B3_quantile_cta` (+ `cta_conditioning=given`,

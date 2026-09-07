@@ -29,9 +29,9 @@ A0 / B0 用现有 checkpoint 与现有预测目录即可做，排在 L2.e′ 之
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
 | A3 学习的递归先验 | 未做，取决于 A2 | `control/latent.py` 先验网络吃上一轮后验 | 仅当 A2 有增益 |
 | B0 时长误差分布（测量） | **完成（2026-09-07，`dev-a0` `fe84e76` + 测试 `5f408df`）**，读数见 §〇.2 | `run_ts_eta_error_readout.py`（新 runner）+ `tests/test_eta_error_readout.py`（7 项）：读现有 `summary.json` 的 `final_time_error_s` 与 `fde_m`，按 `strata_masks` 分层报 \|Δt\| p50/p80/p90 与带号 p10/p50/p90 | 无门，定区间宽度的量级 |
-| B1 分位数时长头 | **代码完成（2026-09-07，分支 `dev-b1`，`9f4149a`）；臂未跑**，命令见 §〇.3 | config 轴 `duration_head ∈ point \| quantile`（默认 `point`，配方按字面钉住，所以分位数臂必然是 `custom`，名字带 `T=q5`）+ `prediction_outputs.QuantileFinalTimeHead` / `pinball_duration_loss` + `control.heads.ControlFeatureModel.duration()`（时长与分位数的唯一规则，每次前向只读一次头）+ 记录字段 `source.durationQuantilesS` / 行 `duration_quantiles_s`；臂 `docs/experiments/b1_quantile_arms.json`；测试 `tests/test_duration_quantiles.py`（15）。**默认位级等价已证**：control / latent k1 / latent k4 / state / closure / cta=given 六个 2 轮合成训练对 `c2fccda`，1519 个非墙钟叶子全等；168 份在盘配置重算名字，0 处改名 | 中位数不劣于点估计头（种子噪声内） |
-| B2 split-conformal 校准 | **代码完成（2026-09-07，分支 `dev-b1`，`585b0e1`）；臂未跑** | `calibration.py`（新，顶层，被 `forecast` / `predict` / 两个读数共用：CQR 分数、有限样本 δ、区间算术、分层优先级、`checkpoint_metadata.json` 的 `conformal` 边车）+ runner `run_ts_eta_calibration.py --checkpoint PATH --out DIR`（只读时长头，无 rollout 无 CTA，秒级 CPU；val 对半交换，δ 与两半实测覆盖一并写出）；`predict` 读表后写 `source.durationIntervalS` / `durationIntervalStratum` / `calibrated`；测试 `tests/test_eta_calibration.py`（16） | 校准后 80 % 区间实测覆盖 ∈ [0.76, 0.84] |
-| B3 分位数条件航迹 | **代码完成（2026-09-07，分支 `dev-b1`，`ebdb00c`）；臂未跑** | `predict --cta-from-quantiles`：CTA 取自身的 q_τ，不读未来；写 `quantiles/q10…q90/`（有校准表时另加 `a20lo` / `a20hi` 两个端点目录），top-1 记录就是 q50 那一次解码；写出的 config 被改盖为 `cta_conditioning=self-q`，所以每个命名面都说 `cta=self-q`（训练目录仍诚实地写 `cta=given`）；读数 `run_ts_quantile_fan_readout.py --arm <pred_dir>`；测试 `tests/test_cta_from_quantiles.py`（7，走真 CLI） | 每条分位数航迹可飞率不低于 top-1；真值落在扇面内的份额 ≥ 名义覆盖 |
+| B1 分位数时长头 | **代码完成（2026-09-07，分支 `dev-b1`，`9f4149a`）；臂未跑**，命令见 §〇.3；**臂不是干净的单轴隔离**，pinball 项比点估计项重约 26 倍（数与条件第三臂见臂文件 `_comment`） | config 轴 `duration_head ∈ point \| quantile`（默认 `point`，配方按字面钉住，所以分位数臂必然是 `custom`，名字带 `T=q5`）+ `prediction_outputs.QuantileFinalTimeHead` / `pinball_duration_loss` + `control.heads.ControlFeatureModel.duration()`（时长与分位数的唯一规则，每次前向只读一次头）+ 记录字段 `source.durationQuantilesS` / 行 `duration_quantiles_s`；臂 `docs/experiments/b1_quantile_arms.json`；测试 `tests/test_duration_quantiles.py`（15）。**默认位级等价已证**：control / latent k1 / latent k4 / state / closure / cta=given 六个 2 轮合成训练对 `c2fccda`，1519 个非墙钟叶子全等；168 份在盘配置重算名字，0 处改名 | 中位数不劣于点估计头（种子噪声内） |
+| B2 split-conformal 校准 | **代码完成（2026-09-07，分支 `dev-b1`，`585b0e1` + review 修 §〇.4）；臂未跑** | `calibration.py`（新，顶层，被 `forecast` / `predict` / 两个读数共用：CQR 分数、有限样本 δ、区间算术、分层优先级、`deployed` 块、`checkpoint_metadata.json` 的 `conformal` 边车，schema `ts-conformal-cqr-v2`）+ runner `run_ts_eta_calibration.py --checkpoint PATH --out DIR [--allow-smoke-table]`（只读时长头，无 rollout 无 CTA，秒级 CPU；半 A 拟合**部署的** δ、半 B 量覆盖率，镜像只作稳定性核对）；`predict` 读表后写 `source.durationIntervalS` / `durationIntervalStratum` / `durationIntervalCohort` / `calibrated`；测试 `tests/test_eta_calibration.py`（24） | **部署**覆盖率 80 % 区间 ∈ [0.76, 0.84]（`deployed` 块，非逐分层行） |
+| B3 分位数条件航迹 | **代码完成（2026-09-07，分支 `dev-b1`，`ebdb00c`）；臂未跑** | `predict --cta-from-quantiles`：CTA 取自身的 q_τ，不读未来；写 `quantiles/q10…q90/`（有校准表时另加 `a20lo` / `a20hi` 两个端点目录），top-1 记录就是 q50 那一次解码；写出的 config 被改盖为 `cta_conditioning=self-q`，所以每个命名面都说 `cta=self-q`（训练目录仍诚实地写 `cta=given`）；校准端点目录 `a20lo` / `a20hi` 是 predict 的另一个开关 `--interval-endpoints`（默认关，扇面的门只读五片 qNN）；读数 `run_ts_quantile_fan_readout.py --arm <pred_dir>`（其 `cal.hit` 列在 val 臂上是**样本内**并被标注）；测试 `tests/test_cta_from_quantiles.py`（9，走真 CLI） | 每条分位数航迹可飞率不低于 top-1；真值落在扇面内的份额 ≥ 名义覆盖 |
 | B4 区间宽度随剩余时间（A × B） | 未做 | A1 网格 × B2 区间 | 交付物本身：冻结点曲线 |
 | C0 拟合表检索上界（测量） | 未做，前置 = L5.a 拟合表 | `run_ts_schedule_retrieval.py`（新）：按锚点状态取最近 K 条拟合控制序列各自 rollout | minADE_16 < native32 top-1；记忆上界 = 真值航班自己的拟合序列 |
 | C1 控制空间条件扩散 | 未做 | `control/diffusion.py`，config 轴 `control_sampler ∈ none \| diffusion`，run name `control+dif` | minADE_16 < top-1 且 < 同 K 的无条件采样对照；直线进近 top-1 不退 |
@@ -151,10 +151,12 @@ python run_ts_frame_ablation.py \
     --arms 4dTrajectory/ts_transformer/docs/experiments/b1_quantile_arms.json \
     --campaign $C --airport KRDU --split val
 
-# 2) 校准：val 对半交换，表写进各自的 checkpoint_metadata.json（--split test / train 被拒绝）
+# 2) 校准：半 A 拟合部署的 δ，半 B 量覆盖率；表写进各自的 checkpoint_metadata.json
+#    （--split test / train 被拒绝；--limit 的冒烟表边车会拒，除非 --allow-smoke-table）
 for ARM in B1_quantile B3_quantile_cta; do
   python run_ts_eta_calibration.py --checkpoint $C/$ARM/checkpoint.pt --out $C/${ARM}_calibration
 done
+#    门 2 的数在 $C/<ARM>_calibration/eta_calibration.txt 的 DEPLOYED 块里，不在逐分层行里。
 
 # 3) 重跑预测：这一次记录带校准区间；B3 同时画出扇面
 D=trajectory_data_process/outputs/harvest/KRDU/arrivals
@@ -165,7 +167,7 @@ python $TS predict --checkpoint $C/B1_quantile/checkpoint.pt \
 python $TS predict --checkpoint $C/B3_quantile_cta/checkpoint.pt \
     --data $D/manifest.json --eligibility-roster $D/lateral_pass_eligibility.json \
     --airport KRDU --split val --device auto --output-dir $C/B3_quantile_cta_pred_val \
-    --cta-from-quantiles
+    --cta-from-quantiles          # 加 --interval-endpoints 才另画 a20lo / a20hi 两条
 
 # 4) 读数：门 1 走 B0 的读数（|Δt| 分层分布），门 3 走扇面读数
 python run_ts_eta_error_readout.py \
@@ -176,9 +178,25 @@ python run_ts_quantile_fan_readout.py --arm $C/B3_quantile_cta_pred_val \
     --json $C/quantile_fan.json
 ```
 
-门 2（校准后的实测覆盖）不需要单独的读数：`run_ts_eta_calibration.py` 的产物
-`eta_calibration.txt` 每个 (α, 分层) 都打印 δ、两半各自的实测覆盖与中位区间宽度，
-**覆盖率永远在没有拟合该 δ 的那一半上量**。
+门 2 不需要单独的读数：`run_ts_eta_calibration.py` 的产物 `eta_calibration.txt` 每个 α 先打印
+逐分层的 δ / 覆盖率 / 宽度（外加镜像的稳定性核对），再打印 **`DEPLOYED` 块**——每架保留半航班按
+它真正拿到的 δ 打分，总体一行加按 `自然分层 -> 实得分层` 的分组。**覆盖率永远在没有拟合该 δ 的
+那一半上量**，且**门读的是 DEPLOYED 那一行**。扇面读数里的 `cal.hit` 在 val 臂上是样本内的
+（同一批航班既参与校准又被打分），读数会标 `cal.hit*` 并指回这里。
+
+### 〇.4 opus review 后的修正（2026-09-07）
+
+review 复核了位级等价（26,038 个叶子）、0 改名与全部测试，并提了 15 条。落地的实质改动四条，都写在
+本文对应小节里：**(1)** 加 `deployed` 块并把 §3.4 门 2 改成读它——逐分层 δ 只量自己分层的成员，而部署
+会让被拒分层的航班落到合并 δ 上，合成对照里那一组的实测覆盖是 **0.167** 而合并行是 0.794；
+**(2)** 覆盖率一律降级为“实测的交叉半覆盖率，不是有限样本保证”，因为校准集就是选点集（耦合走的是
+航迹指标，不是时长残差），带保证的读数预注册为 freeze-test 阶段 test split 上的一次读数；
+**(3)** 不再部署两半 δ 的平均，改为教科书式的 split：半 A 拟合 = 部署，半 B 量覆盖，镜像只作稳定性
+核对；**(4)** 表带自己的队列（机场 / `--limit` / `smoke_test`），冒烟表默认被边车拒绝。
+其余为：表核对 `DURATION_QUANTILES` 镜像、扇面读数标注样本内的 `cal.hit`、B1 的 pinball/点估计项
+量级差写进臂文件并预注册条件第三臂 `B1_point_matched`、校准端点改为 `--interval-endpoints` 开关并
+补上非正 CTA 拒绝的测试、只拟合优先级用得到的分层、区间被 δ 翻转时报错、共形层级 > 1 时报错、
+`run_naming` 的不可哈希值、扇面读数按 α 而不是位置取区间、`_NEW_RUN_VOCABULARIES` 的拒绝测试。
 
 ---
 
@@ -399,22 +417,43 @@ CQR：在校准集上算 conformity score = max(q_lo − T, T − q_hi)，取 (1
 按分层分别校准（直线与雷达引导的 δ 差一个量级，合并校准会给直线航班一个荒谬的宽区间）；分层标签
 由 L−1 的真值协变量决定，与读数一致。
 
-> **实现（2026-09-07，`585b0e1`）**：`calibration.py`（顶层，无 torch）+ `run_ts_eta_calibration.py`。
-> 三处本文没写死、代码里写明的决定：
-> (i) δ 取**有限样本**分位数 `⌈(n+1)(1−α)⌉ / n` 而不是朴素的 (1−α) 经验分位数——KRDU 半分 n ≈ 700
-> 时 δ 变化远小于一秒，但保证从“大致成立”变成成立；
-> (ii) `strata_masks` 的分层**互相重叠**（已建立的航班也可能是直线进近），所以记录需要的是**优先级**
-> 而不是划分：`INTERVAL_STRATUM_PRECEDENCE = 直线进近 → 雷达引导 → 全体`，取它所属且**有 δ** 的第一个，
-> 记录写出 `source.durationIntervalStratum`，读的人不必猜；
-> (iii) 某一半不足 `MIN_CALIBRATION_FLIGHTS = 30` 的分层**被拒绝**（连同它的航班数记进 `refused_strata`），
-> 该分层的航班按上面的优先级落到合并 δ；只有**合并分层**也不足时整次校准失败——那时没有可落的地方。
+> **实现（2026-09-07，`585b0e1`，opus review 后改于 §〇.4）**：`calibration.py`（顶层，无 torch）+
+> `run_ts_eta_calibration.py`。本文没写死、代码里写明的决定：
+> (i) δ 取**有限样本**分位数 `⌈(n+1)(1−α)⌉ / n` 而不是朴素的 (1−α) 经验分位数（KRDU 半分 n ≈ 700
+> 时 δ 变化远小于一秒）；n 小到该分位数 > 1 时**共形答案是 +∞**，代码报错而不是悄悄取最大分数；
+> (ii) **δ 不取两半的平均**：半 A 拟合的 δ **就是部署的那个**，半 B 是它没见过的、用来量覆盖率的一半，
+> 公布的覆盖率就是这一次测量；半 B 拟合、半 A 打分的镜像作为**稳定性核对**并排打印，绝不平均进去
+> （平均出来的 δ 拟合用到了它随后被打分的每一架航班，没有任何数字在量它）。半分规则（哈希 + seed）
+> 写进表里；
+> (iii) `INTERVAL_STRATUM_PRECEDENCE = 直线进近 → 雷达引导 → 全体`，取它所属且**有 δ** 的第一个，
+> 记录写出 `source.durationIntervalStratum`。它是**优先级**不是查表，原因是**落空**而不是重叠：
+> 直线进近与雷达引导按构造互斥（`strata_masks` 用同一个曲折度切开），但它们不覆盖全体——已建立的
+> 雷达引导航班两者都不在——而且因过薄被拒的分层没有自己的 δ；两种情况都落到合并分层；
+> (iv) 某一半不足 `MIN_CALIBRATION_FLIGHTS = 30` 的分层**被拒绝**（连同它的航班数记进 `refused_strata`），
+> 只有**合并分层**也不足时整次校准失败——那时没有可落的地方。**只拟合优先级用得到的三个分层**：
+> 给一个记录永远不会读的分层算 δ，是往产物里放一个没人量的数字。
 > 表是 `checkpoint_metadata.json` 的 **边车**（键 `conformal`），**绝不进 `data_provenance`**：
 > `evaluate-fit` / `freeze-test` 按相等比较那个对象，放进去会让此后每次回放都报“manifest 变了”。
 > 表按 `checkpoint_sha256` 绑定 checkpoint，别的权重留下的表**报错**而不是悄悄拿来加宽区间。
 > runner 只读时长头（`forecast.duration_quantile_predictions`：一次前向、无 rollout、无 CTA），
 > 这既是它秒级跑完的原因，也是它可以校准 `cta=given` checkpoint 的原因
 > （`load_arm(..., refuse_cta_given=False)`，唯一被允许的仪器；`intent=truth-…` 仍被拒，那个 oracle
-> 在历史窗口里）。
+> 在历史窗口里）。表还带自己的**队列**（`airports` / `limit` / `smoke_test`）：`--limit` 的冒烟表
+> 会被边车拒绝，除非显式给 `--allow-smoke-table`；`predict` 打印表的机场，记录里写
+> `source.durationIntervalCohort`。
+>
+> **`deployed` 块（HIGH-1，review 后加）**：逐分层的 δ 是在**该分层自己的成员**上量的，但部署不是这样
+> 走的——航班拿的是优先级里第一个它属于且有 δ 的分层，所以一个分层被拒的航班拿到的是**合并 δ**，
+> 而合并那一行完全没说它盖不盖得住这些航班。合成对照复现了这个失败：合并行 0.794，落到合并 δ 的
+> 18 架雷达引导航班实测覆盖 **0.167**，部署总体 0.756。`deployed` 块把每架保留半的航班按它**真正会
+> 拿到**的 δ 打分，总体一行 + 按 `自然分层 -> 实得分层` 分组（落空的那组打 `*fell through`）。
+> **§3.4 的门 2 读的是这个数**。
+>
+> **它不是保证，文档一律这样写**：校准集就是这个 checkpoint 选点用的那个 split（LR 调度、最好轮次、
+> 早停都踩验证指标），把 val 对半分并不能修——两半都参与过选点。所以公布的是**实测的交叉半覆盖率**，
+> 不是有限样本保证。耦合是弱的，也值得点名：选点读的是**航迹**指标（common-grid ADE），不是这些 δ
+> 所属的时长残差。**预注册**：带保证的那次读数，是 `freeze-test` 阶段在 test split 上的**一次**保留
+> 测量，在所有实验决定敲定之后；在那之前本包任何界面都不把覆盖率写成 guaranteed。
 
 ### 3.3 分位数条件航迹（B3）
 
@@ -444,7 +483,12 @@ q_0.1 … q_0.9（校准后），每个分位数写一个 `quantiles/qNN/` 完�
 ### 3.4 B 的门（预注册）
 
 1. B1：q_0.5 的时长误差与点估计头相比在种子噪声内；ADE 不劣（时长变了 rollout 就变）。
-2. B2：校准后 80 % 区间的实测覆盖 ∈ [0.76, 0.84]，50 % 区间 ∈ [0.45, 0.55]，两个分层各自成立。
+2. B2：**部署覆盖率**（`run_ts_eta_calibration.py` 读数里的 `deployed` 块：每架保留半航班按它自己的
+   分层优先级**真正拿到**的 δ 打分，落空的那组也在内）80 % 区间 ∈ [0.76, 0.84]，50 % 区间 ∈ [0.45, 0.55]。
+   **不是**逐分层那几行——那些各自只量自己分层的成员，而因过薄被拒的分层会把航班送到合并 δ 上，
+   合并那一行对这些航班一无所知（合成对照：合并行 0.794，落空组 0.167，部署总体 0.756）。
+   这是**实测的交叉半覆盖率，不是有限样本保证**：校准集也是选点集；带保证的读数在 freeze-test 阶段
+   的 test split 上做一次。
 3. B3：真值时长落在 [q_0.1, q_0.9] 内的航班里，真值路径到分位数扇面的 chamfer 中位数低于到 top-1 的。
 
 **否决**：分位数头让直线进近层 top-1 FDE 退化超过种子噪声（同 L2 的否决）；或校准后区间宽度的中位数
