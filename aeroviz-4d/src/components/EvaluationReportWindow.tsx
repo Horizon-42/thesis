@@ -783,6 +783,11 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
   const hasSpeedGate = !isLegacyEvaluationReport(report);
   const speedCounts = report.speed_result_counts;
   const speedGraded = speedCounts ? speedCounts.pass + speedCounts.fail : 0;
+  // Rows the gates could actually decide. An indeterminate row is not a failed
+  // flight (typically no published speed window for the airframe), so the raw
+  // pass/total headline reads as gate failures it never measured — the card
+  // carries the decided rate and the indeterminate share beside it.
+  const decidedCount = verdictCounts.pass + verdictCounts.fail;
   const cards: { value: string; label: string }[] = [
     {
       value: String(report.total),
@@ -800,6 +805,8 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
     {
       value: `${verdictCounts.pass}/${report.total}`,
       label: `pass rate ${formatPct(report.total > 0 ? verdictCounts.pass / report.total : null)}`
+        + ` · ${formatPct(decidedCount > 0 ? verdictCounts.pass / decidedCount : null)} of decided`
+        + ` · ${formatPct(report.total > 0 ? verdictCounts.indeterminate / report.total : null)} indeterminate`
         + (useThreeGate ? "" : " (two-gate view)"),
     },
     { value: String(verdictCounts.fail), label: "failed" },

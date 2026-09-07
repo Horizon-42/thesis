@@ -414,7 +414,9 @@ describe("EvaluationReportWindow", () => {
     fireEvent.click(
       screen.getByLabelText(/Include the speed gate in verdicts/),
     );
-    expect(screen.getByText("pass rate 33.3%")).toBeTruthy();
+    expect(
+      screen.getByText("pass rate 33.3% · 33.3% of decided · 0.0% indeterminate"),
+    ).toBeTruthy();
     expect(screen.queryByText(/two-gate view/)).toBeNull();
     expect(screen.getByText("FDX1449").closest("tr")!.className).toContain("eval-row-fail");
 
@@ -423,6 +425,57 @@ describe("EvaluationReportWindow", () => {
       screen.getByLabelText(/Include the speed gate in verdicts/),
     );
     expect(screen.getByText(/pass rate 66.7%/)).toBeTruthy();
+  });
+
+  it("the pass-rate card reports the decided rate and the indeterminate share", () => {
+    // A row whose lateral AND vertical passed but whose speed could not be judged
+    // (the airframe's ICAO type resolves to no published window): the composite is
+    // indeterminate, which drags pass/total down without any gate failing a flight.
+    const withIndeterminate: EvaluationReport = {
+      ...REPORT,
+      total: 4,
+      verdict_counts: { pass: 1, fail: 2, indeterminate: 1 },
+      speed_result_counts: { pass: 2, fail: 0, indeterminate: 2 },
+      trajectories: [
+        ...REPORT.trajectories,
+        {
+          ...REPORT.trajectories[0],
+          id: "SWA2201", file: "d_eval.json",
+          verdict: "indeterminate" as const,
+          speed_result: "indeterminate" as const,
+          crossing_speed_ms: null,
+          bounds: {
+            ...REPORT.trajectories[0].bounds,
+            reference_typecode: null, reference_sources: null, mass_basis: null,
+            vref_low_ms: null, vref_high_ms: null,
+            speed_lower_ms: null, speed_upper_ms: null,
+          },
+          speed_reason: "the airframe's ICAO type could not be resolved; no published window",
+        },
+      ],
+    };
+    render(
+      <EvaluationReportWindow
+        report={withIndeterminate}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
+
+    // DEFAULT two-gate view: the speed-indeterminate row is decided (a pass), so
+    // nothing is left undecided — 2 pass / 2 fail of 4.
+    expect(
+      screen.getByText("pass rate 50.0% · 50.0% of decided · 0.0% indeterminate (two-gate view)"),
+    ).toBeTruthy();
+
+    // Toggle ON: the published three-gate verdicts — 1 pass, 2 fail, 1 indeterminate.
+    fireEvent.click(
+      screen.getByLabelText(/Include the speed gate in verdicts/),
+    );
+    expect(
+      screen.getByText("pass rate 25.0% · 33.3% of decided · 25.0% indeterminate"),
+    ).toBeTruthy();
   });
 
   it("closes via the Close button", () => {
