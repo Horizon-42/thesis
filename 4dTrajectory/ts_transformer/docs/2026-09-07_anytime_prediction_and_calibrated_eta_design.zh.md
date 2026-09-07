@@ -187,7 +187,9 @@ CTA 条件放进同一个采样器的方式，只在 L2 的 CVAE 承载不了意
   （逐样本逐轮重算逆动力学），且拟合教师表按锚点绑定、closure 标签拒绝随机锚点。**唯一与随机锚点相容
   且已通过筛选的监督是 L1.b 的无教师组合**（hr=8 + TV=1，bank skill 0.711 vs 教师对照 0.709，ADE 不劣）。
   A0-random 的臂 = native32 + hr8 + tv1 + `random_train_anchor=True`（`random_train_anchor_min_future_s`
-  保持 60 s）。这也是 L1.b 的一个独立用途。
+  = **20 s**，不是 60：60 s 契约下训练集 6851 架里有 3 架没有任何可用锚点——它们 L−1 之后的真值不足 60 s，而固定
+  锚点策略接受任何正的未来——`train()` 拒绝静默丢弃；20 s 让训练队列与所有固定锚点臂完全相同，且正是曲线最需要的
+  近跑道区间。重锚时的 `--min-future-s 60` 是另一个量：哪些 bin 可读，不是哪些锚点被训练）。这也是 L1.b 的一个独立用途。
 
 两臂的差 = 分布外代价；曲线的形状从 A0-random 读，与当前 base 的可比性从 A0-fixed 读。
 臂名由每个 checkpoint 自己的 `random_train_anchor` 决定并写进它自己的块（`A0-fixed` / `A0-random`），
