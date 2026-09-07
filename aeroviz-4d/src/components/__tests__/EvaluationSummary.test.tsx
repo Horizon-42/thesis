@@ -184,6 +184,10 @@ describe("EvaluationSummary", () => {
     ).toBeTruthy();
     expect(await within(metric("Threshold-event availability")).findByText("80.0%")).toBeTruthy();
     expect(within(metric("Terminal-verdict pass rate (3-gate)")).getByText("60.0%")).toBeTruthy();
+    // 6 pass / (6 pass + 2 fail) and 2 indeterminate / 10 -- the headline's two companions.
+    expect(within(metric("Pass rate of decided verdicts")).getByText("75.0%")).toBeTruthy();
+    expect(within(metric("Indeterminate verdicts")).getByText("20.0%")).toBeTruthy();
+    expect(screen.getByText(/indeterminate, not failed/)).toBeTruthy();
     expect(
       within(metric("Mean lateral deviation at threshold")).getByText("12 m"),
     ).toBeTruthy();

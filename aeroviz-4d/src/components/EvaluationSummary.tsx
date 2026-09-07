@@ -151,6 +151,15 @@ function passRateAmongSolved(stats: OptimizationStats | null): number | null {
 
 function observedPresentation(report: ObservedEvaluationSummary | null): Presentation {
   const eventRate = report?.observed?.event_estimated_rate;
+  const counts = report?.verdict_counts;
+  const decided = counts ? counts.pass + counts.fail : 0;
+  // A row whose speed could not be judged (no published window for its airframe, or
+  // no airframe at all) composes to indeterminate: it counts against the headline
+  // rate and must never be read as a failed flight -- hence the two rows beside it.
+  const decidedPassRate = counts && decided > 0 ? counts.pass / decided : null;
+  const indeterminateShare = report && counts && report.total > 0
+    ? counts.indeterminate / report.total
+    : null;
   const crossingPassRate = report && report.total > 0
     ? report.verdict_counts.pass / report.total
     : null;
@@ -165,9 +174,12 @@ function observedPresentation(report: ObservedEvaluationSummary | null): Present
       "bracket interpolation or a censored final-approach fit; evaluation consumes it " +
       "without refitting ADS-B. Vertical uses the published-TCH path and the common " +
       "22 m RNAV/RNP terminal bound; this is not landing certification. The pass " +
-      "rate composes all three gates (lateral, vertical, and the ground-speed " +
-      "proxy); the Details window opens in a two-gate view and can toggle the " +
-      "speed gate back in.",
+      "rate composes all three gates (lateral, vertical, and the published-V_ref " +
+      "speed window on the METAR-corrected airspeed); a flight whose speed could not " +
+      "be judged (no published window for its airframe, or no airframe) is " +
+      "indeterminate, not failed, so the decided rate and the indeterminate share are " +
+      "shown beside it. The Details window opens in a two-gate view and can toggle " +
+      "the speed gate back in.",
     rows: [
       row(
         "Threshold-event availability",
@@ -182,6 +194,16 @@ function observedPresentation(report: ObservedEvaluationSummary | null): Present
         "Terminal-verdict pass rate (3-gate)",
         formatPercent(crossingPassRate),
         crossingPassRate != null,
+      ),
+      row(
+        "Pass rate of decided verdicts",
+        formatPercent(decidedPassRate),
+        decidedPassRate != null,
+      ),
+      row(
+        "Indeterminate verdicts",
+        formatPercent(indeterminateShare),
+        indeterminateShare != null,
       ),
       row(
         "Mean lateral deviation at threshold",
