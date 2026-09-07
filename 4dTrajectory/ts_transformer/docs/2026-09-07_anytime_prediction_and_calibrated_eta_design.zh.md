@@ -20,7 +20,7 @@ checkpoint 与现有预测目录即可做，排在 L2.e′ 之后、L3 campaign 
 
 | 阶段 | 状态 | 产物 / commit | 门 |
 |---|---|---|---|
-| A0 重锚曲线（测量） | **代码完成（2026-09-07，`dev-a0` `3f7a849` + 测试 `5f408df`）；回放未跑（GPU 排队）** | `run_ts_anytime_curve.py`（新 runner）+ `approach_difficulty.remaining_path_profile_m`（逐样本剩余路程，与协变量同一算术）+ `tests/test_anytime_curve.py`（17 项）；产物 `anytime_a0_<date>/anytime_curve.{json,txt}` | 曲线单调（±22 m）；雷达引导 ADE < 1.5 km 的剩余路程点存在且 > 4 km |
+| A0 重锚曲线（测量） | **两臂都回放了（2026-09-07 夜，§2.4b）**：fixed 曲线单调、warm 逐 bin 优于 native32、closure 8→6 km 崩溃；random 臂 L−1 惨败（早停第 10 轮）但 chamfer 六 bin 全优——选择指标只看 L−1 → A1 提前 | `anytime_a0_20260907/`、`anytime_a0_random_20260907/` | 门 1 过、门 2 12–16 km、门 3 被时长地板挡住 |
 | A1 流式评估协议 | 未做 | `evaluation_protocol` 新增按剩余路程分 bin 的锚点网格；`compare_constraint_arms.py` 增列 | 无门，是读数 |
 | A2 候选重加权（预测期滤波） | 未做 | `forecast.py` 新增 `reweighted_mode_forecasts`；`predict --stream-dt` | 同锚点下劣于无状态版即否决 |
 | A3 学习的递归先验 | 未做，取决于 A2 | `control/latent.py` 先验网络吃上一轮后验 | 仅当 A2 有增益 |
@@ -218,6 +218,34 @@ bin 取剩余路程最接近 bin 值的样本为锚点；锚点前不足 120 s �
 
 **否决**：A0-random 在 L−1 处劣于 native32 超过种子噪声，说明随机锚点训练损害了 base，A2 / A3 都在
 一个更差的 base 上做，先停。
+
+### 2.4b A0 结果（2026-09-07 夜，`anytime_a0_20260907` 与 `anytime_a0_random_20260907`）
+
+**A0-fixed**（三个 L−1 训练的 checkpoint 回放，1404 架，bin 20/16/12/8/6/4/2 km，`--min-future-s 60`）：native32 与
+warm β=0.01 的雷达引导 ADE p50 曲线单调（门 1 过），warm 在每个 bin 都优于 native32（20 km 处 −274 m，6 km 处
+差别消失）；门 2 两者都在 16 km（1382 / 1301 m）；closure `C_pred` 远端最准（12 km 处 FDE p50 26 m）但 8 → 6 km
+崩溃（雷达引导 ADE 613 → 3990 m，门 1 败）。**门 3（s_freeze）三臂都读不出**：时长头 ~125 s 地板使 |Δt| 越近跑道越
+大（6 km 处各臂 p50 80–143 s，而剩余只有约 170 s）——近端时序通道无信息，是 B 线的问题不是曲线的问题。
+2 km bin 全空（60 s 地板），4 km 覆盖 0.30 标 partial；20/16 km 覆盖 0.35/0.37，直线进近层远端几乎为空。
+
+**A0-random**（`A0_random_hr8_tv1`：随机锚点 + hr8+TV，20 s 训练契约，队列与固定臂完全一致）：训练 30 轮早停，
+最好 epoch 10；**L−1 否决惨败**（ADE 2949 vs 1322，FDE p50 3784 vs 864，胜率 6.8 %）。但回放时（与 native32
+逐 bin 配对）：
+
+| s km | A0_random 雷达引导 ADE p50 | native32 | chamfer p50 A0_random / native32 |
+|---:|---:|---:|---|
+| 20 | 2622 | 2708 | 2124 / 2584 |
+| 16 | 1847 | 1382 | 1325 / 1439 |
+| 12 | 756 | 585 | 426 / 652 |
+| 8 | 377 | 385 | 326 / 850 |
+| 6 | 298 | 338 | 606 / 1051 |
+
+**chamfer 六个 bin 全优（−114…−524 m）**，8 km 以内 ADE 也优，门 2 从 16 km 推进到 12 km——一个只用了 17 % 预算、
+在 L−1 惨败的 checkpoint，在整段进近上画出的几何比固定臂好。读法：`fixed-anchor-common-grid-ade` 只在 L−1 打分，
+随机锚点模型在那里最不擅长，选择规则把它冻在第 10 轮；它真正改善的量（全程几何）对选择指标不可见。16 km bin
+的退化（+465 m ADE、FDE +1530）是真实的，尚无解释。**决定**：(i) `A0_random_hr8_tv1_p180`（关早停）测停止规则
+的份额；(ii) **A1 提前实现**——按锚点网格的验证指标 `anchor-grid-common-grid-ade`（L−1 + 16/12/8/6 km 五个锚点集
+的 common-grid ADE 等权平均），第三臂 `A0_random_hr8_tv1_grid` 用它选 checkpoint。
 
 ### 2.5 A2 的门
 
