@@ -112,6 +112,10 @@ class Forecast:
     # interval (design §六 4).
     duration_interval_s: list[dict[str, float]] | None = None
     duration_interval_stratum: str | None = None
+    # WHICH calibration produced that interval: the table's own split, airports and smoke
+    # flag. A delta fitted at one airport and applied at another is a different calibration,
+    # and a --limit table deployed deliberately has to stay visible in the record.
+    duration_interval_cohort: dict[str, object] | None = None
     # B3: this trajectory was decoded at the model's OWN duration quantile, not at a CTA read
     # from the future. `cta_quantile` is the level (None at a calibrated interval endpoint,
     # which `cta_interval` then names). §六 5 — `cta=self-q` and `cta=given` are two arms.
@@ -408,6 +412,11 @@ def _calibrated_interval_fields(
     return {
         "duration_interval_s": conformal_intervals(quantiles_s, conformal, stratum),
         "duration_interval_stratum": stratum,
+        "duration_interval_cohort": {
+            "split": conformal["split"],
+            "airports": list(conformal["airports"]),
+            "smokeTest": bool(conformal["smoke_test"]),
+        },
     }
 
 

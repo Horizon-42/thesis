@@ -23,10 +23,24 @@ What it does, and why each part is not negotiable:
   principles). ``--split test`` and ``--split train`` are offered only so the refusal can
   say why: the sealed outer test would be spent on a number that has no gate, and the
   training split's quantiles are fitted to their own targets, so its δ would be ~0.
-- **Two halves, swapped.** The val flights are halved deterministically by the checkpoint's
-  own ``split_seed``; δ is fitted on one half and its coverage measured on the OTHER, then
-  the halves swap. Both coverages are published beside the mean δ — the artifact's own
-  honesty check (design gate 3.4-2 asks for 80 % coverage in [0.76, 0.84]).
+- **Two halves, one deployed.** The val flights are halved deterministically by the
+  checkpoint's own ``split_seed``. **Half A fits the δ that is deployed**; half B, which it
+  was not fitted on, measures what it covered — that measurement is the published number.
+  The mirror (fit on B, score on A) is printed beside it as a STABILITY check and is never
+  averaged in: a mean of the two would be fitted on every flight it is then scored against.
+- **The DEPLOYED coverage is the gate's number.** Per-stratum δ are measured on their own
+  stratum's members, but a flight is handed the first stratum in
+  `calibration.INTERVAL_STRATUM_PRECEDENCE` that it is in AND that has a δ — so a flight
+  whose stratum refused takes the pooled δ, and the pooled row says nothing about whether it
+  covers THOSE flights. The ``deployed`` block assigns every held-out flight the δ it would
+  actually get and measures that, pooled and broken out by fall-through group. Design gate
+  3.4-2 (80 % coverage in [0.76, 0.84], 50 % in [0.45, 0.55]) reads this block.
+- **It is a MEASUREMENT, not a guarantee.** The calibration split is also the split the
+  checkpoint was selected on (LR schedule, best epoch, early stopping), so the finite-sample
+  split-conformal guarantee does not hold as constructed. The coupling is through a
+  trajectory metric (common-grid ADE), not the duration residual these δ are quantiles of.
+  The guarantee-bearing read is pre-registered as a single held-out test-split measurement at
+  the `freeze-test` ledger stage — not now.
 - **Per stratum** (`approach_difficulty.strata_masks`), because the vectored |Δt| p80 is
   3.6–5.5× the straight-in one (B0). A stratum with fewer than
   `calibration.MIN_CALIBRATION_FLIGHTS` in a half is REFUSED, printed and recorded.
@@ -72,7 +86,7 @@ SPLITS = (CALIBRATION_SPLIT, "test", "train")
 JSON_NAME, TEXT_NAME = "eta_calibration.json", "eta_calibration.txt"
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
         allow_abbrev=False,
@@ -87,8 +101,18 @@ def main(argv: list[str] | None = None) -> int:
                              "admissible; the others are refused with the reason)")
     parser.add_argument("--limit", type=int, default=0, metavar="N",
                         help="calibrate on the first N flights of the split — a SMOKE TEST, "
-                             "marked as one in the artifact")
+                             "marked as one in the table and REFUSED at the sidecar unless "
+                             "--allow-smoke-table")
+    parser.add_argument("--allow-smoke-table", action="store_true",
+                        help="write a --limit table into the checkpoint's sidecar anyway; "
+                             "`predict` would then deploy a delta fitted on a prefix of the "
+                             "split. The table says so wherever it travels")
     parser.add_argument("--device", default="auto")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.split != CALIBRATION_SPLIT:
@@ -136,28 +160,24 @@ def main(argv: list[str] | None = None) -> int:
         split_seed=arm.config.resolved_split_seed,
         split=args.split,
         checkpoint_sha256=file_sha256(args.checkpoint),
+        airports=arm.airports,
+        limit=args.limit,
     )
-    write_conformal_table(metadata_path, table)
-
+    # The readout is written and printed BEFORE the sidecar: a --limit run whose table the
+    # sidecar refuses is still a smoke test someone wanted to read.
+    # `render` opens with the smoke-test banner when the table carries one.
     text = render(table)
-    if args.limit:
-        text = (
-            f"SMOKE TEST: --limit {args.limit} calibrated on the first {len(samples)} "
-            f"flights of the {args.split} split, not the split\n" + text
-        )
     print(text, end="")
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     out.mkdir(parents=True, exist_ok=True)
     (out / JSON_NAME).write_text(json.dumps({
         "schema": RESULT_SCHEMA,
         "checkpoint": str(args.checkpoint),
-        "limit": args.limit,
-        "smoke_test": bool(args.limit),
-        "airports": list(arm.airports),
         "conformal": table,
     }, indent=2))
     (out / TEXT_NAME).write_text(text)
-    print(f"wrote {metadata_path} [conformal] and {out / JSON_NAME}")
+    write_conformal_table(metadata_path, table, allow_smoke=args.allow_smoke_table)
+    print(f"wrote {out / JSON_NAME} and {metadata_path} [conformal]")
     return 0
 
 

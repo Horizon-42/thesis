@@ -183,7 +183,8 @@ def build_prediction_record(
             # infer it from a missing key (design §六 4).
             "calibrated": forecast.duration_interval_s is not None,
             **({"durationIntervalS": forecast.duration_interval_s,
-                "durationIntervalStratum": forecast.duration_interval_stratum}
+                "durationIntervalStratum": forecast.duration_interval_stratum,
+                "durationIntervalCohort": forecast.duration_interval_cohort}
                if forecast.duration_interval_s is not None else {})}
            if forecast.duration_quantiles_s is not None else {}),
         "anchorIndex": forecast.anchor,
@@ -502,6 +503,9 @@ def write_batch(
             "duration_quantiles_s": source.get("durationQuantilesS"),
             "duration_interval_s": source.get("durationIntervalS"),
             "duration_interval_stratum": source.get("durationIntervalStratum"),
+            # Which calibration this interval came from — the split it was fitted on (so a
+            # readout can say IN-SAMPLE), its airports and whether it was a smoke table.
+            "duration_interval_cohort": source.get("durationIntervalCohort"),
             "calibrated": source.get("calibrated"),
             "z_from_posterior": bool(source.get("zFromPosterior", False)),
             "true_final_time_s": metrics["true_final_time_s"],

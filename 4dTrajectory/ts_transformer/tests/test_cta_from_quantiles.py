@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 
 from calibration import (
-    CONFORMAL_ALPHAS,
     FAN_INTERVAL_ALPHA,
     QUANTILE_DIR_NAME,
     calibrate,
@@ -152,16 +151,61 @@ def test_the_fan_decodes_every_flight_at_its_own_quantiles(tmp_path: Path, monke
     assert not (out / QUANTILE_DIR_NAME / interval_directory_name(FAN_INTERVAL_ALPHA, "lo")).exists()
 
 
-def test_a_calibrated_fan_also_decodes_the_interval_endpoints(tmp_path: Path, monkeypatch):
-    checkpoint, _series = _trained(tmp_path, monkeypatch)
+def _write_table(checkpoint: Path, *, delta_s: float = 0.0):
+    """A conformal table for THIS checkpoint, with every delta planted at ``delta_s``.
+
+    The synthetic calibration cohort lives on the real duration scale (hundreds of seconds)
+    while this tiny model emits durations of about two, so its own fitted delta would swamp
+    the model's whole interval. δ recovery is measured in `test_eta_calibration`; what these
+    tests need is a VALID table whose deltas are on the model's scale.
+    """
     _model, loaded, _normalizer, _payload = load_checkpoint(checkpoint)
     table = calibrate(
-        _cohort(400, narrow_s=0.02), split_seed=loaded.resolved_split_seed, split="val",
-        checkpoint_sha256=file_sha256(checkpoint),
+        _cohort(400, narrow_s=0.0), split_seed=loaded.resolved_split_seed, split="val",
+        checkpoint_sha256=file_sha256(checkpoint), airports=("KRDU",),
     )
+    for block in table["alphas"].values():
+        for cell in block["strata"].values():
+            cell["delta_s"] = delta_s
     write_conformal_table(checkpoint.parent / "checkpoint_metadata.json", table)
-    out = tmp_path / "fan"
+    return table
+
+
+def test_the_endpoints_are_opt_in(tmp_path: Path, monkeypatch):
+    """The fan readout scores the five quantile leaves; the calibrated endpoints are an
+    extra arm, so a calibrated run without the flag writes exactly the five."""
+    checkpoint, _series = _trained(tmp_path, monkeypatch)
+    _write_table(checkpoint)
+    out = tmp_path / "five"
     assert _predict(checkpoint, out, tmp_path, "--cta-from-quantiles") == 0
+    leaves = sorted(path.name for path in (out / QUANTILE_DIR_NAME).iterdir())
+    assert leaves == sorted(quantile_directory_name(tau) for tau in DURATION_QUANTILES)
+    # ...and the flag needs the fan it is part of.
+    with pytest.raises(SystemExit):
+        _predict(checkpoint, tmp_path / "lonely", tmp_path, "--interval-endpoints")
+
+
+def test_a_fan_cta_that_the_rollout_cannot_fly_is_refused(tmp_path: Path, monkeypatch, capsys):
+    """A delta wider than q10 drives the lo endpoint to zero or below. The batch fails
+    loudly with that diagnosis — never clamped, never skipped, because leaves holding
+    different flights are not a fan."""
+    checkpoint, _series = _trained(tmp_path, monkeypatch)
+    _write_table(checkpoint, delta_s=1_000.0)      # far wider than this model's q10
+    with pytest.raises(SystemExit):
+        _predict(checkpoint, tmp_path / "broken", tmp_path,
+                 "--cta-from-quantiles", "--interval-endpoints")
+    # argparse exits with a status; the diagnosis is on stderr and names the cause.
+    message = capsys.readouterr().err
+    assert "not positive" in message and "conformal delta wider" in message
+
+
+def test_a_calibrated_fan_also_decodes_the_interval_endpoints(tmp_path: Path, monkeypatch):
+    checkpoint, _series = _trained(tmp_path, monkeypatch)
+    table = _write_table(checkpoint)
+    out = tmp_path / "fan"
+    assert _predict(
+        checkpoint, out, tmp_path, "--cta-from-quantiles", "--interval-endpoints"
+    ) == 0
 
     for end in ("lo", "hi"):
         directory = out / QUANTILE_DIR_NAME / interval_directory_name(FAN_INTERVAL_ALPHA, end)
@@ -172,9 +216,20 @@ def test_a_calibrated_fan_also_decodes_the_interval_endpoints(tmp_path: Path, mo
             assert row["cta_from_quantiles"] is True
             states = json.loads((directory / row["states_file"]).read_text())
             assert states["source"]["ctaInterval"] == {"alpha": FAN_INTERVAL_ALPHA, "end": end}
-            # ...and the endpoint IS the calibrated interval the record itself publishes.
-            position = list(CONFORMAL_ALPHAS).index(FAN_INTERVAL_ALPHA)
-            assert row["cta_s"] == pytest.approx(row["duration_interval_s"][position][end])
+            # Every calibrated record names the table it came from, so a narrowed-airport
+            # run deployed on a pooled delta is visible without opening the checkpoint.
+            assert states["source"]["durationIntervalCohort"] == {
+                "split": table["split"],
+                "airports": table["airports"],
+                "smokeTest": table["smoke_test"],
+            }
+            # ...and the endpoint IS the calibrated interval the record itself publishes,
+            # looked up by its own alpha rather than by position in the list.
+            published = next(
+                entry for entry in row["duration_interval_s"]
+                if entry["alpha"] == FAN_INTERVAL_ALPHA
+            )
+            assert row["cta_s"] == pytest.approx(published[end])
 
 
 # ── the readout ─────────────────────────────────────────────────────────────

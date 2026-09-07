@@ -37,7 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from typing import Any
 
 from config import (
@@ -357,7 +357,12 @@ def _diff_items(diffs: list[tuple[str, Any]]) -> list[str]:
 def _display_value(field: str, value: Any) -> str:
     if field in _PATH_FIELDS:
         return _fmt_path(value)
-    return _VALUE_ABBREV.get(field, {}).get(value) or _fmt(value)
+    # A META_FIELDS value can be a list (`channels`-shaped fields), which is unhashable and
+    # would raise on the dict lookup rather than falling through to `_fmt`.
+    spellings = _VALUE_ABBREV.get(field, {})
+    if spellings and isinstance(value, Hashable):
+        return spellings.get(value) or _fmt(value)
+    return _fmt(value)
 
 
 def _fmt_path(value: Any) -> str:

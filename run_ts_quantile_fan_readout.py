@@ -11,13 +11,19 @@ readout::
     python run_ts_quantile_fan_readout.py --arm <pred_dir> --json <out>/quantile_fan.json
 
 ``<pred_dir>`` is the top-1 directory (its own records ARE the q50 decode); the five
-trajectories live under ``<pred_dir>/quantiles/qNN/``.
+trajectories live under ``<pred_dir>/quantiles/qNN/``. **Only those five are read** — the
+calibrated interval-endpoint directories (`predict --interval-endpoints`, off by default)
+are an extra arm to look at, not part of any gate here, so a fan predicted without them is
+complete as far as this readout is concerned.
 
 Three readings, per `approach_difficulty.strata_masks` stratum:
 
 1. **The duration fan**: the share of flights whose truth ``T`` falls in ``[q10, q90]``, and
    in the CALIBRATED interval when the arm was predicted with a conformal table, beside the
-   median widths. §六 6 — these are quantiles of the DURATION.
+   median widths. §六 6 — these are quantiles of the DURATION. **The calibrated-hit column is
+   IN-SAMPLE whenever this arm's split is the split the δ was fitted on** (the usual case:
+   both are `val`); it is marked as such, and the gate number is the DEPLOYED coverage in
+   `run_ts_eta_calibration.py`'s readout, measured on the half the δ was not fitted on.
 2. **The width**: the median ``q90 − q10`` and the median calibrated width per α. The design's
    veto is on this number: a vectored median width above 120 s has no scheduling meaning.
 3. **The geometric coverage (gate 3.4-3)**: the truth path's chamfer to the NEAREST of the
@@ -57,8 +63,8 @@ from flight_scenarios.identity import summary_row_key  # noqa: E402
 RESULT_SCHEMA = "ts-quantile-fan-readout-b3-v1"
 
 
-def _rows(pred_dir: Path) -> tuple[dict[str, dict], dict[str, int]]:
-    """The arm's scored rows by flight key, plus what a missing field dropped."""
+def _rows(pred_dir: Path) -> tuple[dict[str, dict], dict[str, int], str]:
+    """The arm's scored rows by flight key, what a missing field dropped, and the split."""
     summary = json.loads((pred_dir / "summary.json").read_text())
     results = summary["results"]
     required = ("true_final_time_s", *STRATA_COVARIATES)
@@ -71,7 +77,20 @@ def _rows(pred_dir: Path) -> tuple[dict[str, dict], dict[str, int]]:
         "summary_rows": len(results),
         "scored_rows": len(rows),
         "dropped_unscored_rows": len(results) - len(rows),
-    }
+    }, str(summary.get("split"))
+
+
+def _interval_entry(row: dict, alpha: float) -> dict:
+    """That row's calibrated interval for ``alpha``, found by its own key."""
+    entry = next(
+        (item for item in row["duration_interval_s"] if item["alpha"] == alpha), None
+    )
+    if entry is None:
+        raise SystemExit(
+            f"a record carries no calibrated interval for alpha={alpha:g}; it was predicted "
+            "under a different set of conformal levels"
+        )
+    return entry
 
 
 def _chamfer(pred_dir: Path, row: dict, geometry_truth: str) -> float:
@@ -108,7 +127,7 @@ def _median(values: np.ndarray) -> float | None:
 
 
 def readout(arm: Path, *, geometry_truth: str) -> dict:
-    rows, coverage = _rows(arm)
+    rows, coverage, summary_split = _rows(arm)
     keys = sorted(rows)
     if not keys:
         raise SystemExit(f"{arm} has no rows carrying a truth duration and the strata covariates")
@@ -124,12 +143,19 @@ def readout(arm: Path, *, geometry_truth: str) -> dict:
     fan_width = quantiles[:, high_index] - quantiles[:, low_index]
 
     calibrated = all(rows[key].get("duration_interval_s") for key in keys)
+    # MEDIUM-6: when the arm's split IS the split the delta was fitted on, the interval-hit
+    # column is IN-SAMPLE — the flights scored here are the ones the calibration saw. The
+    # held-out number lives in the calibration readout, and the header says so.
+    cohort = rows[keys[0]].get("duration_interval_cohort") if calibrated else None
+    in_sample = bool(cohort) and cohort.get("split") == summary_split
     interval_hit: dict[float, np.ndarray] = {}
     interval_width: dict[float, np.ndarray] = {}
     if calibrated:
-        for position, alpha in enumerate(CONFORMAL_ALPHAS):
+        for alpha in CONFORMAL_ALPHAS:
+            # By the entry's OWN alpha, never by position: the record is a list and a future
+            # alpha inserted anywhere but the end would silently re-label every column.
             bounds = np.array(
-                [[rows[key]["duration_interval_s"][position][end] for end in ("lo", "hi")]
+                [[_interval_entry(rows[key], alpha)[end] for end in ("lo", "hi")]
                  for key in keys],
                 dtype=np.float64,
             )
@@ -178,6 +204,9 @@ def readout(arm: Path, *, geometry_truth: str) -> dict:
         "flights": len(keys),
         "coverage": coverage,
         "calibrated": calibrated,
+        "calibration_cohort": cohort,
+        # The interval-hit columns are in-sample when this arm's split is the calibration's.
+        "interval_hit_in_sample": in_sample,
         "strata": strata,
     }
 
@@ -188,7 +217,7 @@ def _arm_chamfer(pred_dir: Path, keys: list[str], geometry_truth: str) -> np.nda
     The directory's summary is parsed ONCE — each of the five writes its own — and the
     cohort must match the top-1's exactly, or the fan is not a fan of these flights.
     """
-    rows, _coverage = _rows(pred_dir)
+    rows, _coverage, _split = _rows(pred_dir)
     missing = [key for key in keys if key not in rows]
     if missing:
         raise SystemExit(
@@ -211,16 +240,30 @@ def _geometry_cell(median_chamfer: np.ndarray, nearest: np.ndarray) -> dict:
 def render(payload: dict) -> str:
     fan = payload["fan_alpha"]
     low, high = quantile_pair_indices(fan)
+    in_sample = payload.get("interval_hit_in_sample")
+    hit_header = "cal.hit*" if in_sample else "cal.hit"
     lines = [
         f"B3 quantile fan — {payload['arm']} ({payload['flights']} flights, "
         f"{'CALIBRATED' if payload['calibrated'] else 'uncalibrated'})",
         f"the fan is [q{DURATION_QUANTILES[low]:g}, q{DURATION_QUANTILES[high]:g}] "
         f"(nominal {(1 - fan) * 100:.0f}% of the DURATION); the geometry columns are a "
         "readout, not a coverage guarantee",
-        f"   {'stratum':>46s} {'n':>5s} {'in fan':>7s} {'width s':>8s} "
-        f"{'cal.hit':>8s} {'cal.w s':>8s} {'cham q50':>9s} {'cham min':>9s} "
-        f"{'min<q50':>8s} {'n in fan':>9s}",
     ]
+    if in_sample:
+        lines.append(
+            f"   * cal.hit is IN-SAMPLE: this arm's split ({payload['calibration_cohort']['split']}) "
+            "IS the split the conformal delta was fitted on. The gate number is the "
+            "DEPLOYED coverage in run_ts_eta_calibration.py's readout, measured on the "
+            "held-out half."
+        )
+    if payload.get("calibration_cohort", {}) and payload["calibration_cohort"].get("smokeTest"):
+        lines.append("   * the conformal table is a SMOKE table (--limit): its delta was "
+                     "fitted on a prefix of the split")
+    lines.append(
+        f"   {'stratum':>46s} {'n':>5s} {'in fan':>7s} {'width s':>8s} "
+        f"{hit_header:>8s} {'cal.w s':>8s} {'cham q50':>9s} {'cham min':>9s} "
+        f"{'min<q50':>8s} {'n in fan':>9s}"
+    )
     for stratum, block in payload["strata"].items():
         geometry = block["geometry"]["in_fan"]
         interval = block["interval"].get(f"{fan:g}", {})

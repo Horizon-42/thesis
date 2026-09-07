@@ -1,8 +1,11 @@
 """Split-conformal calibration of the ETA interval (anytime design §三 3.2, B2).
 
-CQR on the VALIDATION split, halved: δ from one half, coverage measured on the other, then
-swapped. The table is a sidecar of ``checkpoint_metadata.json`` bound to the checkpoint's
-digest, and `predict` stamps the interval on every record — or says ``calibrated: false``.
+CQR on the VALIDATION split, halved: half A fits the DEPLOYED δ and half B measures what it
+covered; the mirror is a stability check, never averaged in. The ``deployed`` block measures
+what flights actually GET — including the ones whose stratum refused and fell through to the
+pooled δ — and that is the number the design's gate reads. The table is a sidecar of
+``checkpoint_metadata.json`` bound to the checkpoint's digest AND its quantile levels, and
+`predict` stamps the interval on every record — or says ``calibrated: false``.
 """
 
 from __future__ import annotations
@@ -24,8 +27,10 @@ from calibration import (
     CONFORMAL_ALPHAS,
     CONFORMAL_METADATA_KEY,
     CONFORMAL_SCHEMA,
+    MIN_CALIBRATION_FLIGHTS,
     CalibrationSample,
     calibrate,
+    calibrated_interval,
     calibration_halves,
     conformal_delta,
     conformity_scores,
@@ -42,7 +47,7 @@ from tests.test_duration_quantiles import _config  # the tiny quantile-head conf
 CHECKPOINT_SHA = "b" * 64
 
 
-def _covariates(tortuosity: float = 1.0, established: bool = False) -> dict:
+def _covariates(tortuosity: float = 1.0, established: bool = False) -> dict:  # noqa: D401
     return {
         "route_tortuosity": tortuosity,
         "established_at_anchor": established,
@@ -53,27 +58,41 @@ def _covariates(tortuosity: float = 1.0, established: bool = False) -> dict:
 
 
 def _cohort(
-    count: int, *, narrow_s: float, seed: int = 0, tortuosity: float = 1.0
+    count: int, *, narrow_s: float, seed: int = 0, tortuosity: float = 1.0,
+    spread: float = 60.0, key_prefix: str = "flight",
 ) -> list[CalibrationSample]:
-    """Flights whose head emits the TRUE quantiles of the truth, narrowed by ``narrow_s``.
+    """Flights whose head emits the TRUE quantiles of a N(400, 60) truth, narrowed by
+    ``narrow_s``, while their OWN truth is drawn with standard deviation ``spread``.
 
-    The score of a narrowed interval is the true-interval score plus the narrowing, and the
-    true interval's (1 − α) score quantile is 0 by definition — so δ must come back as
-    ``narrow_s``, whatever the distribution. That is the known miscalibration.
+    With ``spread == 60`` the head is right and the score of a narrowed interval is the
+    true-interval score plus the narrowing, whose (1 − α) quantile is 0 by definition — so δ
+    must come back as ``narrow_s``, whatever else changes. A larger ``spread`` makes the
+    same head wrong for those flights, which is how a stratum that needs a much wider
+    interval than the pooled one is built.
     """
     rng = np.random.default_rng(seed)
-    truth = rng.normal(400.0, 60.0, size=count)
+    truth = rng.normal(400.0, spread, size=count)
     exact = np.array([400.0 + 60.0 * _z(tau) for tau in DURATION_QUANTILES])
     narrowing = np.array([+narrow_s, +narrow_s, 0.0, -narrow_s, -narrow_s])
     return [
         CalibrationSample(
-            key=f"KRDU:flight{index:04d}",
+            key=f"KRDU:{key_prefix}{index:04d}",
             quantiles_s=exact + narrowing,
             truth_final_time_s=float(value),
             covariates=_covariates(tortuosity),
         )
         for index, value in enumerate(truth)
     ]
+
+
+def replace_covariates(sample: CalibrationSample, **overrides) -> CalibrationSample:
+    """The same flight in a different stratum."""
+    return CalibrationSample(
+        key=sample.key,
+        quantiles_s=sample.quantiles_s,
+        truth_final_time_s=sample.truth_final_time_s,
+        covariates=_covariates(**overrides),
+    )
 
 
 def _z(tau: float) -> float:
@@ -100,6 +119,26 @@ def test_the_conformal_quantile_uses_the_finite_sample_level():
         conformal_delta(scores, 1.0)
 
 
+def test_a_level_above_one_is_infinite_not_the_largest_score():
+    """Four scores cannot answer alpha=0.2: ceil(5 * 0.8) / 4 = 1.0 is admissible, three
+    cannot (ceil(4 * 0.8) / 3 = 1.33) and the conformal delta is +inf — raised, never
+    silently clamped to the maximum score."""
+    assert conformal_delta(np.arange(4, dtype=np.float64), 0.2) == 3.0
+    with pytest.raises(ValueError, match=r"conformal delta is \+inf"):
+        conformal_delta(np.arange(3, dtype=np.float64), 0.2)
+    # ...and MIN_CALIBRATION_FLIGHTS keeps both alphas well clear of that edge.
+    for alpha in CONFORMAL_ALPHAS:
+        conformal_delta(np.arange(MIN_CALIBRATION_FLIGHTS, dtype=np.float64), alpha)
+
+
+def test_an_inverted_interval_is_refused_not_collapsed():
+    """A delta that crosses the interval is a calibration failure; the midpoint would also
+    disagree with the width and coverage numbers, which use the raw arithmetic."""
+    assert calibrated_interval(100.0, 200.0, -10.0) == (110.0, 190.0)
+    with pytest.raises(ValueError, match="inverts the interval"):
+        calibrated_interval(100.0, 200.0, -60.0)
+
+
 def test_the_halves_are_deterministic_equal_and_disjoint():
     keys = [f"KRDU:f{i}" for i in range(101)]
     first, second = calibration_halves(keys, 7)
@@ -119,11 +158,61 @@ def test_delta_recovers_a_known_miscalibration():
     )
     block = table["alphas"]["0.2"]["strata"][STRATUM_ALL]
     assert block["delta_s"] == pytest.approx(25.0, abs=6.0)
-    # ...and the interval it produces covers what it says it does, on the OTHER half.
-    assert block["coverage"] == pytest.approx(0.8, abs=0.04)
-    assert block["coverage_halves"] == [pytest.approx(0.8, abs=0.06)] * 2
+    # The published coverage is measured on the half the DEPLOYED delta was not fitted on.
+    assert block["coverage"] == pytest.approx(0.8, abs=0.05)
+    # The mirror is a stability check kept beside it, never averaged into the deployed one.
+    assert block["stability_delta_s"] == pytest.approx(25.0, abs=6.0)
+    assert block["stability_coverage"] == pytest.approx(0.8, abs=0.06)
+    assert "delta_halves_s" not in block and "coverage_halves" not in block
     half = table["alphas"]["0.5"]["strata"][STRATUM_ALL]
-    assert half["coverage"] == pytest.approx(0.5, abs=0.05)
+    assert half["coverage"] == pytest.approx(0.5, abs=0.06)
+
+
+def test_the_deployed_block_measures_what_flights_actually_get():
+    """HIGH-1: per-stratum δ are measured on their own members, but deployment falls
+    through — so the deployed block assigns each held-out flight the δ it would really get
+    and measures THAT. With every flight straight-in there is no fall-through, and the
+    deployed coverage equals the straight-in row's."""
+    table = calibrate(
+        _cohort(1600, narrow_s=25.0), split_seed=1, split="val",
+        checkpoint_sha256=CHECKPOINT_SHA,
+    )
+    block = table["alphas"]["0.2"]
+    deployed = block["deployed"]
+    assert deployed["flights"] == table["half_flights"][1]
+    assert deployed["coverage"] == pytest.approx(0.8, abs=0.05)
+    assert list(deployed["groups"]) == [STRATUM_STRAIGHT_IN]
+    assert deployed["groups"][STRATUM_STRAIGHT_IN]["fell_through"] is False
+    assert deployed["coverage"] == pytest.approx(
+        block["strata"][STRATUM_STRAIGHT_IN]["coverage"], abs=1e-9
+    )
+
+
+def test_the_deployed_block_catches_a_fall_through_the_per_stratum_rows_hide():
+    """The failure HIGH-1 was raised for: a thin vectored stratum refuses, its flights take
+    the POOLED δ, and the pooled row's own coverage says nothing about them. Here the
+    vectored flights need a far wider interval than the pooled δ provides, so the pooled row
+    looks fine while the fall-through group is badly under-covered — and the deployed block
+    is what shows it."""
+    straight = _cohort(1200, narrow_s=0.0, seed=11)
+    vectored = [
+        replace_covariates(sample, tortuosity=1.6)
+        for sample in _cohort(40, narrow_s=0.0, seed=12, spread=400.0, key_prefix="v")
+    ]
+    table = calibrate(
+        [*straight, *vectored], split_seed=4, split="val", checkpoint_sha256=CHECKPOINT_SHA,
+    )
+    block = table["alphas"]["0.2"]
+    assert STRATUM_VECTORED in block["refused_strata"]          # 20 per half, below 30
+    fell_through = f"{STRATUM_VECTORED} -> {STRATUM_ALL}"
+    groups = block["deployed"]["groups"]
+    assert groups[fell_through]["fell_through"] is True
+    assert groups[fell_through]["flights"] > 0
+    # The pooled per-stratum row is healthy; the flights that fell through to it are not.
+    assert block["strata"][STRATUM_ALL]["coverage"] > 0.7
+    assert groups[fell_through]["coverage"] < 0.5
+    # ...and the deployed pooled number sits between them, which is the point of publishing it.
+    assert block["deployed"]["coverage"] < block["strata"][STRATUM_ALL]["coverage"]
 
 
 def test_a_head_that_is_already_calibrated_needs_no_widening():
@@ -135,7 +224,7 @@ def test_a_head_that_is_already_calibrated_needs_no_widening():
 
 
 def test_a_thin_stratum_refuses_and_the_flight_falls_through_to_the_pooled_one():
-    # Every flight straight-in: the vectored and established strata are empty.
+    # Every flight straight-in: the vectored stratum is empty.
     table = calibrate(
         _cohort(400, narrow_s=10.0), split_seed=3, split="val",
         checkpoint_sha256=CHECKPOINT_SHA,
@@ -143,7 +232,13 @@ def test_a_thin_stratum_refuses_and_the_flight_falls_through_to_the_pooled_one()
     block = table["alphas"]["0.2"]
     assert STRATUM_STRAIGHT_IN in block["strata"] and STRATUM_ALL in block["strata"]
     assert block["refused_strata"][STRATUM_VECTORED] == [0, 0]
-    assert STRATUM_ESTABLISHED in block["refused_strata"]
+    # Only the strata the precedence can DEPLOY are fitted at all: a delta for `established`
+    # or a remaining-path band is a number in the artifact that nothing would ever read.
+    assert STRATUM_ESTABLISHED not in block["strata"]
+    assert STRATUM_ESTABLISHED not in block["refused_strata"]
+    assert set(block["strata"]) | set(block["refused_strata"]) == set(
+        table["interval_stratum_precedence"]
+    )
     # A vectored flight has no delta of its own, so it reads the pooled one.
     assert interval_stratum(table, _covariates(tortuosity=2.4)) == STRATUM_ALL
     assert interval_stratum(table, _covariates(tortuosity=1.0)) == STRATUM_STRAIGHT_IN
@@ -181,8 +276,12 @@ def test_the_readout_prints_both_halves_coverage():
         checkpoint_sha256=CHECKPOINT_SHA,
     )
     text = render(table)
-    assert "dA->B" in text and "dB->A" in text and "refused" in text
+    assert "coverage" in text and "stab cov" in text and "refused" in text
     assert "alpha 0.2" in text and "alpha 0.5" in text
+    # The deployed block, and the sentence that stops it being read as a guarantee.
+    assert "DEPLOYED" in text and "GATE 3.4-2 READS THIS COVERAGE" in text
+    assert "NOT a finite-sample guarantee" in text
+    assert "half rule:" in text
 
 
 # ── the sidecar ─────────────────────────────────────────────────────────────
@@ -221,6 +320,48 @@ def test_a_table_from_another_checkpoint_is_refused_not_applied(tmp_path: Path):
         write_conformal_table(_metadata(tmp_path / "other", sha="d" * 64), table)
 
 
+def test_a_smoke_table_is_refused_at_the_sidecar_unless_it_is_asked_for(tmp_path: Path):
+    """`--limit` fits a delta on a PREFIX of the split; deploying it silently would widen
+    every record of a full run with nothing at the write site saying so."""
+    smoke = calibrate(
+        _cohort(400, narrow_s=10.0), split_seed=1, split="val",
+        checkpoint_sha256=CHECKPOINT_SHA, airports=("KRDU",), limit=400,
+    )
+    assert smoke["smoke_test"] is True and smoke["limit"] == 400
+    assert smoke["airports"] == ["KRDU"]
+    assert "SMOKE TEST" in render(smoke)
+    metadata_path = _metadata(tmp_path)
+    with pytest.raises(ValueError, match="smoke test"):
+        write_conformal_table(metadata_path, smoke)
+    write_conformal_table(metadata_path, smoke, allow_smoke=True)
+    assert load_conformal_table(tmp_path / "checkpoint.pt", CHECKPOINT_SHA)["smoke_test"]
+
+
+def test_a_full_table_carries_its_cohort_and_needs_no_permission(tmp_path: Path):
+    table = calibrate(
+        _cohort(400, narrow_s=10.0), split_seed=1, split="val",
+        checkpoint_sha256=CHECKPOINT_SHA, airports=("KRDU", "KSJC"),
+    )
+    assert table["smoke_test"] is False and table["limit"] == 0
+    assert table["airports"] == ["KRDU", "KSJC"]
+    assert table["half_rule"] and table["coverage_claim"]
+    write_conformal_table(_metadata(tmp_path), table)
+
+
+def test_a_table_written_under_other_quantile_levels_is_refused(tmp_path: Path):
+    """The levels are a mirror of DURATION_QUANTILES inside the artifact; a mirror that is
+    written and never checked is a version the artifact cannot verify."""
+    table = calibrate(
+        _cohort(400, narrow_s=10.0), split_seed=1, split="val",
+        checkpoint_sha256=CHECKPOINT_SHA,
+    )
+    table["quantiles"] = [0.05, 0.25, 0.5, 0.75, 0.95]
+    metadata_path = _metadata(tmp_path)
+    write_conformal_table(metadata_path, table)
+    with pytest.raises(ValueError, match="index different columns"):
+        load_conformal_table(tmp_path / "checkpoint.pt", CHECKPOINT_SHA)
+
+
 def test_an_unknown_schema_is_refused(tmp_path: Path):
     metadata_path = _metadata(tmp_path)
     metadata_path.write_text(json.dumps({
@@ -256,6 +397,18 @@ def test_the_runner_refuses_every_split_but_val(tmp_path: Path):
         with pytest.raises(SystemExit):
             runner.main(["--checkpoint", str(tmp_path / "checkpoint.pt"),
                          "--out", str(tmp_path / "out"), "--split", split])
+
+
+def test_the_runner_only_deploys_a_smoke_table_when_asked():
+    """`--limit` alone cannot deploy: the escape hatch is a separate, explicit flag."""
+    parser = _runner().build_parser()
+    plain = parser.parse_args(["--checkpoint", "c.pt", "--out", "o", "--limit", "50"])
+    assert plain.limit == 50 and plain.allow_smoke_table is False
+    asked = parser.parse_args(
+        ["--checkpoint", "c.pt", "--out", "o", "--limit", "50", "--allow-smoke-table"]
+    )
+    assert asked.allow_smoke_table is True
+    assert parser.parse_args(["--checkpoint", "c.pt", "--out", "o"]).limit == 0
 
 
 # ── predict reads it ────────────────────────────────────────────────────────

@@ -192,8 +192,17 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
              "flight once per duration quantile, using ITS OWN q_tau as the CTA, into "
              f"{QUANTILE_DIR_NAME}/qNN/ (source.ctaQuantile / ctaFromQuantiles). The top-1 "
              "records are the q50 decode. This reads no future — the run is cta=self-q, not "
-             "cta=given — and with a conformal table it also decodes the calibrated "
-             f"alpha={FAN_INTERVAL_ALPHA:g} interval endpoints",
+             "cta=given. The calibrated interval endpoints are a separate opt-in "
+             "(--interval-endpoints)",
+    )
+    parser.add_argument(
+        "--interval-endpoints", action="store_true",
+        help=f"with --cta-from-quantiles and a conformal table: ALSO decode the calibrated "
+             f"alpha={FAN_INTERVAL_ALPHA:g} interval endpoints into "
+             f"{QUANTILE_DIR_NAME}/{interval_directory_name(FAN_INTERVAL_ALPHA, 'lo')}/ and "
+             f"{interval_directory_name(FAN_INTERVAL_ALPHA, 'hi')}/. Off by default: the fan "
+             "readout scores the five quantile leaves, so these two are an extra arm to look "
+             "at rather than part of the gate",
     )
     parser.add_argument(
         "--z-from-posterior", action="store_true",
@@ -336,6 +345,9 @@ def run_cli(
         print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
     if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
         parser.error("--cta-offset-s needs a checkpoint trained with cta_conditioning=given")
+    if args.interval_endpoints and not args.cta_from_quantiles:
+        parser.error("--interval-endpoints is part of the quantile fan; it needs "
+                     "--cta-from-quantiles")
     if args.cta_from_quantiles:
         # The head trains as a TARGET under `given` even though the given CTA is what drives
         # the rollout in training; at predict the rollout is driven by the model's OWN
@@ -403,9 +415,13 @@ def run_cli(
             print("  quantile duration head, NOT calibrated: records carry the raw "
                   "durationQuantilesS and calibrated=false (run run_ts_eta_calibration.py)")
         else:
+            cohort = "/".join(conformal["airports"]) or "unstated airports"
             print(f"  quantile duration head, calibrated on {conformal['calibration_flights']} "
-                  f"{conformal['split']} flights: records carry durationIntervalS per alpha "
-                  f"{list(conformal['alphas'])}")
+                  f"{conformal['split']} flights at {cohort}: records carry durationIntervalS "
+                  f"per alpha {list(conformal['alphas'])}"
+                  + ("  [SMOKE TABLE: the delta was fitted on a "
+                     f"--limit {conformal['limit']} prefix of that split]"
+                     if conformal["smoke_test"] else ""))
 
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
@@ -495,7 +511,12 @@ def run_cli(
             quantiles = duration_quantile_predictions(
                 model, batch_series, config, normalizer, anchor=anchor, device=device
             )
-            leaves = fan_leaves(quantiles, batch_series, anchor, conformal)
+            # The endpoints are opt-in: without the flag the fan is exactly the five
+            # levels the readout's gate scores.
+            leaves = fan_leaves(
+                quantiles, batch_series, anchor,
+                conformal if args.interval_endpoints else None,
+            )
             # The rollout's own requirement, and the only one that can bite: the five
             # levels are strictly positive by construction, so a non-positive CTA means a
             # conformal delta wider than the interval it widens. Never clamped and never
