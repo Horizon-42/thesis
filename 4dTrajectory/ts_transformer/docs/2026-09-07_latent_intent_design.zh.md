@@ -26,7 +26,7 @@ L2.e'（free bits 当预算：KL 保住了，top-1 反而变差），以及解�
 | L0 操作参数维度 oracle | **完成（2026-09-07）** — 门按字面不过（N=16 为 315–330 m），走"否则"分支：**N\* = 32**（uniform 203 / free 191 m）；N=64 为 91 / 81 m。结果 `2026-09-07_l0_control_basis_results.zh.md` | `control/oracle/basis.py` + `run_ts_control_basis_oracle.py` + 22 项测试；产物 `l0_control_basis_20260907/` | 存在 N\* ≤ 16 使雷达引导 ADE(N\*) ≤ 200 m |
 | L1 低维控制头 + 稠密监督（确定性基线） | **完成（2026-09-07）**：native32 全体 ADE 1322 vs 基线 1333（配对胜率 52.6 %，bank skill 0.726 vs 0.728）——**N=32 免费**；dense/无教师 2515/2603，否决触发，wiggle 回归——**轨迹误差损失单独不够**。结果 `2026-09-07_l1_lowdim_results.zh.md` | `l1_lowdim_20260907/`（readout、readout_bank） | 不差于 simple-v3 ✓；参数 257 → 96 ✓；bank skill ✓（native32） |
 | L1.b 监督替代教师 | **180 轮第一臂分裂（2026-09-07 夜）**：hr8+TV bank skill 0.713（门 0.726），ADE 略劣、FDE 各分层全优（直线 632 vs 671），bank RMS 0.12° 比观测还直（抄近路）；教师线暂不降级，hr16 两臂决定 | `l1b_full_arms.json` | 见 §六 L1.b |
-| L2 CVAE 骨架（隐意图 z） | **L2.e' free-bits 预算：KL 保持住了（2.6 / 6.6 nat）但 top-1 随预算变差（1214 → 1260 → 1387）；探针显示三臂的后验均值都坐在先验均值上（位移 < 0.2 σ）——预算全花在收窄方差，z 是去噪常数 → L2.f 预注册：β 退火 vs z 上的辅助时长目标（见 §六 L2 末）；兜底仍是 warm β=0.01 的 1214 m** | `l2f_mean_information_arms.json`、`latent_beta_warmup_epochs`、`latent_aux_duration_weight`、`run_ts_latent_probe.py` | 见 §六 L2 末 |
+| L2 CVAE 骨架（隐意图 z） | **L2.f 两臂都败（2026-09-08）：退火 1318 / 位移 0.13 σ，辅助头 1365 / 位移 0.18 σ；七个臂后验均值全坐在先验均值上，先验总 σ 0.27–0.58——量纲定案（见 §六 L2 末）。建议：停止加臂，只留 `position_loss_scale_m` 1 km 的量纲测试臂；主线转 B 线；点估计保留 warm β=0.01（1214）** | `l2f_mean_information_20260907/`（含 `probe/`） | 见 §六 L2 末 |
 | L3 CTA 条件化（交付形态） | **跑完（2026-09-07 晚）**：给定真值到达时刻，全体 ADE 1214 → 841，雷达引导 2643 → 1596（胜率 87 %），时长误差 0 按构造；几何只小改（chamfer 165 → 128）；反事实扫描修复后排队列末尾 | `l3_cta_20260907`、`l3_cta_counterfactual_arms.json` | 见 §六 L3 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | **L5.a 拟合教师代码完成（2026-09-07，`dev-l5`）**：拟合器 `--checkpoint` 模式、config 轴、臂文件、29 项测试；拟合本身是 GPU 作业，未跑。其余未开始 | `run_ts_control_basis_oracle.py --checkpoint`、`control_imitation_target` / `control_fitted_teacher_path`、`control/basis_fit.py` 的表加载器、`docs/experiments/l5_fitted_teacher_arms.json`、`tests/test_fitted_teacher.py` | 见 §七 |
@@ -548,6 +548,30 @@ run name 缩写 `hr` / `hr-scale` / `bank-tv`（306 份存档 config 重算命�
 >   二比三变大（种子 11 反而小 0.6 %）。原因是目标的形状——一个标量读出只需要**一个**隐维方向，八维上的
 >   中位数看不见它。`L2f_aux_T` 必须同时读 `component_kl_per_dim` 与 `component_kl_mean_term_nats`，
 >   并在结果里说明判决靠的是哪个。
+
+> **L2.f 结果（2026-09-08 凌晨，campaign `l2f_mean_information_20260907`）：两臂都败，L2 线的病根定案。**
+>
+> | 臂 | top-1 ADE | 后验均值位移（σ） | active_0.05 | raw KL（均值项 / 方差项） | shuffled ΔADE | minADE_6 / N(0,I) 对照 | 先验总 σ |
+> |---|---:|---:|---:|---|---:|---|---:|
+> | L2f_anneal（β 0→0.01，40 轮） | 1318 | 0.131（探针 0.049） | 1.2 | 0.31（0.21 / 0.11） | +8 | 1241 / 1164 | 0.41 |
+> | L2f_aux_T（z→T 辅助头，w=1） | 1365 | 0.176（探针 0.083） | 6.0 | 0.70（0.46 / 0.24） | +21 | 1305 / 1160 | 0.27 |
+> | 兜底 warm β=0.01 | **1214** | 0.079 | 2.8 | 0.17 | +19 | 1004 / 947 | 0.58 |
+>
+> 退火：预热期位移升到 0.23，β 到位后回落——解码器学会用 z 之后惩罚照样把均值信息压掉；辅助头：KL 与活跃维数
+> 都被抬起来（信息"更多"），但均值位移仍 < 0.2 σ、top-1 反而最差、`latent_aux` 0.006 而下游无一项移动——臂文件预
+> 注册的失败形态逐字兑现。探针把七个隐变量臂的共同事实摆在一起：**后验均值永远坐在先验均值上**（位移 0.05–0.18
+> σ），KL 的一半是方差项；**学到的先验总 σ 只有 0.27–0.58**（N(0,I) 是 1.0）——这就是五个 campaign 里"随机 z 打败
+> 训练先验"的全部原因。机制归结为量纲：损失以 (m / 10 km)² 计，位置项与辅助项能买到的增益都在 0.01 个损失单位
+> 量级，而 β=0.01 下一个 nat 就是 0.01；free bits 给出的免费容量被花在收窄方差（永远可得的小增益）而不是让均值依
+> 赖未来（需要编码器学到一个解码器能用的映射）。β、free bits、热启动、退火、辅助目标——五个杠杆都动过，没有一个
+> 让 q(z|future) 真正依赖未来。
+>
+> **建议（待用户决定，2026-09-08 早）**：(1) 隐变量线**停止加臂**，warm β=0.01 保留为点估计模型（+8 % 是真实的）；
+> 只留一个"量纲测试"臂作为最终判决——`position_loss_scale_m` 10 km → 1 km（位置增益放大 100 倍）、β 0.01、其余同
+> 兜底；它若仍不让均值依赖未来，L2 线以负结果收官。(2) 主线转向 B 线（`2026-09-07_anytime_prediction_and_calibrated_eta_design`）：
+> L3 已证明"何时"值 373 m，B1 分位数时长头 + B2 conformal 校准 + B3 `cta=self-q` 逐分位数解码，不读未来地交付到达
+> 时刻区间与每个分位数一条可飞航迹——调度程序要的正是这个，且不依赖 z。(3) A 线（随机锚点 + 网格选点）今夜
+> 出结果，决定多步预测的底座。
 
 ### L3 — CTA 条件化（交付形态；≈2 天）
 
