@@ -97,6 +97,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   NEW categories; `curl -o /dev/null -w '%{content_type}\n' <index url>` says which side you are
   on (`application/json` = served, `text/html` = fallback). Overwriting files that already
   existed at boot needs no restart. Verified 2026-09-07 on the anytime publication.
+  **Restart = kill the `vite` NODE process, not the `npm run dev` wrapper**: under
+  `start_aeroviz_fullstack.sh` killing npm alone leaves the node grandchild holding 5173 and
+  still serving the stale list, the supervisor relaunches npm, and the new vite silently binds
+  5175 — the app looks restarted while the old process still answers on 5173 (2026-09-07,
+  three attempts). `ss -ltnp | grep 517` shows which pid owns which port.
 - **`.flight-ops-panel` has `backdrop-filter`** → it becomes the containing block for
   `position:fixed` descendants AND clips overflow; floating windows must render via React portal
   into `document.body`.
