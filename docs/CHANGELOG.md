@@ -4,6 +4,62 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — ts data identity is the eligible SET, not the eligibility roster's bytes
+
+**The incident (2026-09-07, 08:15 and 08:55 local).** `run_all_evaluations.py --kind observed`
+regenerated the five canonical observed reports (v6 → v9) and the five
+`lateral_pass_eligibility.json` rosters were refreshed against them. The eligible sets came out
+byte-for-byte identical (KRDU 14,378 keys, same order; v6 backup roster
+`observed_v6_backup_2026-09-07/KRDU/…` sha `3e09d3e9…`, refreshed `0a90a923…`), but the roster
+FILES moved, because a roster carries the upstream provenance it was joined against
+(`sources.evaluation_report_sha256`). `data_provenance` compared exactly that: the v3 eligibility
+entry held `roster_sha256` + `evaluation_report_sha256`. Consequence: `require_matching_data_
+provenance` refused EVERY checkpoint trained before 08:55 — `predict`, `evaluate-fit`,
+`run_ts_control_basis_oracle`, `run_ts_anytime_curve`, `run_ts_runway_hypotheses`,
+`evaluation_protocol`, `approach_clustering` — and `publish_ts_experiment_trajectories.py`
+blocked every publication through its OWN copy of the byte comparison. The arm trained at
+08:55 (`l1b_full_20260907/L1b_hr16_tv1_full`, roster `e2b0fa52…`) would have refused at its own
+predict step: that roster generation no longer exists on disk.
+
+**The fix** (branch `dev-provenance`). The compared identity is the SET:
+`ARRIVAL_DATA_PROVENANCE_SCHEMA` = `ts-arrival-data-v4-eligible-set`, whose eligibility entry is
+`{schema_version, policy, counts, eligible_set_sha256}` with
+`eligible_set_sha256 = sha256("\n".join(sorted(keys)))` — one function,
+`data_provenance.eligible_set_digest`, which `splits.data_selection_audit` now hashes its split
+rosters with and which `run_ts_pipeline` and the publisher import instead of re-deriving. The
+byte facts stay auditable and out of every comparison: `eligibility_sources(rosters)` records the
+roster path, its digest and the evaluation report under
+`data_selection.pre_split_eligibility[*].roster_sources`. `checkpoint_metadata.json` /
+`history.json` name the map `eligible_sets`.
+
+**Legacy checkpoints stay usable exactly, with no registry of old bytes and no flag.** A stored
+`ts-arrival-data-v3-eligibility-bound` fingerprint is re-verified against TODAY's rosters through
+the checkpoint's own `data_selection.splits[train|val|test].eligible_identity_sha256`: the three
+digests are recomputed from the current eligible keys via the same `splits.flight_keys_by_split`
+code path, with the run's stored `split_policy.split_seed` and `method` (a different method
+string is refused, not worked around); if they match, the v3 entry is treated as the current
+form and the rest of the comparison runs unchanged; if not, the refusal names the airport and
+the three digest pairs. Pooled checkpoints recompute over all their manifests together. The
+publisher's byte comparison is deleted — it now compares `eligible_set_digest` of the current
+roster against the metadata's `eligible_sets`, and for older metadata loads the checkpoint
+payload and goes through `require_matching_data_provenance(..., allow_subset=True)`.
+`run_ts_pipeline`'s checkpoint reuse check does the same; its CV reuse check can only compare
+bytes for pre-2026-09-08 `cv_results.json` (nothing in that artifact names the set), so a moved
+roster re-runs CV there and only there.
+
+**Verification.** ts suite 688 passed / 1 skipped (679 before, +9 new in
+`tests/test_eligible_set_identity.py`: byte-independence, one swapped key with counts unchanged,
+a v3 payload accepted and refused, the predict CLI on a synthetic v3 checkpoint, both publisher
+preflight paths, and the `pre_split_eligibility` byte facts). A 2-epoch synthetic train before
+and after is bit-identical in model weights, forecast digest, metrics, splits, normalizer and
+config — only the provenance/metadata blocks and wall-clock timings differ. Run-name recount over
+169 stored configs: 0 renamed, 0 errors. On the real KRDU data (read-only):
+`l1b_full_20260907/L1b_hr16_tv1_full` (the 08:55 arm) refused at HEAD and predicted all 1,404
+val flights after; with a re-serialised roster copy (different `evaluation_report_sha256`,
+reversed key order, different indentation, identical 14,378-key set) `L1b_hr8_tv1_full` and
+`l1_lowdim_20260907/L1_native32` both refused at HEAD and both ran after, and the publisher's
+`--dry-run` went from `blocked: eligibility roster SHA-256 mismatch` to `planned`.
+
 ### 2026-09-08 — ts_transformer wind readout: the tower headwind explains a tenth of the straight-in along-track residual
 
 `run_ts_wind_residual_readout.py` (new CPU runner) joins each scored flight of a prediction
