@@ -220,6 +220,159 @@ def test_reused_prediction_dir_skips_predict_and_is_never_archived(monkeypatch, 
     assert publisher._loose_prediction_records(plan.output_dir) == []
 
 
+# ── --category-variant: two prediction dirs, one checkpoint ─────────────────
+
+def _plain_prediction_dir(tmp_path: Path, checkpoint: Path, name: str) -> Path:
+    """A prediction directory with no anytime block — an ordinary predict run."""
+    directory = tmp_path / name
+    _write_json(directory / "summary.json", {
+        "checkpoint": str(checkpoint), "split": "val",
+        "results": [{"id": "AAL1", "arr_airport": "KRDU"}],
+    })
+    return directory
+
+
+def _variant_plan(tmp_path, experiment, directory, variant):
+    return publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=directory,
+        variant=variant,
+    )
+
+
+def test_a_category_variant_separates_two_publications_of_one_checkpoint(
+    monkeypatch, tmp_path,
+):
+    """A predict-time variant (an inference projection, a hook applied only at predict) has
+    no checkpoint of its own — it reuses its baseline's. Everything a category is named from
+    comes from that checkpoint, so without a variant the two would be one category."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    baseline = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=_plain_prediction_dir(tmp_path, checkpoint, "base_pred_val"),
+    )
+    projected = _variant_plan(
+        tmp_path, experiment,
+        _plain_prediction_dir(tmp_path, checkpoint, "project_pred_val"),
+        publisher._parse_category_variant("project-on-final=projection, on-final gate"),
+    )
+
+    assert projected.category == f"{baseline.category[: -len('_val')]}_project-on-final_val"
+    assert projected.category != baseline.category
+    assert projected.output_dir == baseline.output_dir / "project-on-final"
+    metadata = projected.experiment_metadata
+    assert metadata["id"] == f"{experiment.experiment_id}@project-on-final"
+    assert metadata["id"] != baseline.experiment_metadata["id"]
+    # The variant does NOT move the picker heading: this is still the training campaign's arm.
+    assert metadata["group"] == baseline.experiment_metadata["group"] == experiment.campaign
+    assert metadata["label"].endswith("projection, on-final gate")
+    assert projected.category_label.endswith(metadata["label"])
+    publish = dict(projected.commands())["publish-czml"]
+    assert publish[publish.index("--experiment-id") + 1] == metadata["id"]
+
+
+def test_a_variant_slug_defaults_its_own_label_and_rejects_an_unusable_one():
+    plain = publisher._parse_category_variant("barrier-infer-soft")
+    assert plain.key_suffix == plain.id_suffix == plain.label_suffix == "barrier-infer-soft"
+    assert plain.group is None
+    # The slug becomes part of a category key, so a leading digit or a path separator is out.
+    for bad in ("12km", "a/b", "", "with space", "slug="):
+        with pytest.raises(ValueError):
+            publisher._parse_category_variant(bad)
+
+
+def test_a_second_prediction_dir_on_one_category_is_refused_not_overwritten(
+    monkeypatch, tmp_path,
+):
+    """The whole point of the variant: without one, the second publication would silently
+    replace the first's CZML, evaluation report and picker entry."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(publisher, "_sha256", lambda path: (
+        "manifest-sha" if path == manifest else experiment.checkpoint_sha256
+    ))
+    first = _plain_prediction_dir(tmp_path, checkpoint, "base_pred_val")
+    second = _plain_prediction_dir(tmp_path, checkpoint, "project_pred_val")
+    published = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=first,
+    )
+    _write_json(published.publication_manifest, {
+        "schemaVersion": publisher.PUBLICATION_SCHEMA, "status": "completed",
+        "predictionDir": publisher._path_for_manifest(first),
+    })
+
+    # The same directory again is a legitimate republication...
+    assert published.preflight_error() is None
+    # ...a different one under the same name is not.
+    collides = publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        prediction_dir=second,
+    )
+    assert "--category-variant" in (collides.preflight_error() or "")
+    # ...and giving it one clears the collision by giving it its own category.
+    assert _variant_plan(
+        tmp_path, experiment, second,
+        publisher._parse_category_variant("project-on-final"),
+    ).preflight_error() is None
+
+
+def test_a_directory_that_names_its_own_bin_refuses_a_second_identity(monkeypatch, tmp_path):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _variant_plan(
+        tmp_path, experiment, _anytime_records(tmp_path, checkpoint),
+        publisher._parse_category_variant("something-else"),
+    )
+
+    with pytest.raises(ValueError, match="one identity"):
+        _ = plan.category
+
+
+def test_a_variant_publication_refreshes_from_its_manifest(monkeypatch, tmp_path):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _variant_plan(
+        tmp_path, experiment,
+        _plain_prediction_dir(tmp_path, checkpoint, "project_pred_val"),
+        publisher._parse_category_variant("project-faf=projection, FAF gate"),
+    )
+    _write_json(plan.evaluation_report, {"trajectories": [], "summary": {}})
+    _write_json(plan.publication_manifest, publisher._publication_document(
+        plan, status="completed", completed_steps=("evaluate", "publish-czml"),
+    ))
+    categories = plan.comparison_dir.parent / "categories.json"
+    _write_json(categories, {"categories": [{"key": plan.category, "label": "stale"}]})
+
+    seen, patched = publisher.refresh_labels_from_manifests(
+        tmp_path / "published", tmp_path / "frontend"
+    )
+
+    assert (seen, patched) == (1, 1)
+    entry = json.loads(categories.read_text())["categories"][0]
+    assert entry["label"] == plan.category_label
+    assert entry["experiment"] == plan.experiment_metadata
+
+
 # ── anytime bins: one category per re-anchored bin ──────────────────────────
 
 def _anytime_records(tmp_path: Path, checkpoint: Path, *, limit: int = 0,

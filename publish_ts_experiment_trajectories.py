@@ -11,12 +11,18 @@ that directory is read-only here. ``--result-source prediction`` publishes a
 primary result under Prediction; the default ``experiment`` source includes checkpoint metadata
 for the Experiments picker.
 
-A reused directory written by ``run_ts_anytime_curve.py --write-records`` carries an
-``anytime`` block naming the remaining-path bin its forecasts were anchored in. Such a
-directory publishes as its OWN category — key, picker entry and label suffixed with the bin,
-grouped under the anytime campaign — because it holds a re-anchored SUBSET of the split, not
-the split: the label states the bin and how many flights it holds, so a bin's error can never
-be read as the split's.
+**One checkpoint, several prediction directories.** Everything a category is named from —
+the key, the picker's experiment id, the label — is derived from the CHECKPOINT, so two
+directories of one checkpoint collide unless something tells them apart. That something is a
+``CategoryVariant``, and it has exactly two sources: a directory written by
+``run_ts_anytime_curve.py --write-records`` carries an ``anytime`` block naming the
+remaining-path bin its forecasts were anchored in (its label then states the bin and how many
+flights it holds, so a re-anchored SUBSET's error can never be read as the split's, and its
+picker heading is the record campaign); anything else — a predict-time projection or command
+hook published beside the baseline whose checkpoint it reuses — names one with
+``--category-variant SLUG[=LABEL]``. Giving both is refused, and so is publishing a second
+directory onto a category some other directory already holds: they must coexist, never
+overwrite.
 
 Outer-test is not a valid option here.  This command is for development train/validation
 inspection only.
@@ -109,6 +115,55 @@ def _path_for_manifest(path: Path) -> str:
 
 
 @dataclass(frozen=True)
+class CategoryVariant:
+    """What tells two publications of the SAME checkpoint apart.
+
+    A checkpoint is published more than once whenever the prediction directory — not the
+    training — is what differs: one directory per remaining-path bin
+    (``run_ts_anytime_curve.py --write-records``), or one per predict-time variant (an
+    inference projection, a command hook applied at predict time only). Every part of a
+    category's identity is derived from the CHECKPOINT — the key, the picker's experiment id,
+    the label — so without something to tell those publications apart the second silently
+    overwrites the first. This is that something, and a publication has at most one.
+
+    ``id_suffix`` is separate from ``key_suffix`` because the two live in different alphabets:
+    a category key is a filesystem directory name, an experiment id is a display/lookup
+    identity that may carry ``@``.
+    """
+
+    #: Appended to the category key (hence to the frontend directory name).
+    key_suffix: str
+    #: Appended to ``experiment.id`` after ``@``. The picker DEDUPES by that id.
+    id_suffix: str
+    #: Appended to the canonical run display name, in the picker and the category label.
+    label_suffix: str
+    #: Picker heading override, or None to keep the checkpoint's own training campaign.
+    group: str | None = None
+
+
+#: A ``--category-variant`` slug: a directory-name fragment that must not open with a digit
+#: (the category key reads as `<source>_<run>_<token>_<slug>_<split>`) and must not contain a
+#: path separator.
+_VARIANT_SLUG = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+
+def _parse_category_variant(value: str) -> CategoryVariant:
+    """``SLUG`` or ``SLUG=LABEL`` → the variant every derived name is suffixed with."""
+    slug, separator, label = value.partition("=")
+    slug, label = slug.strip(), label.strip()
+    if not _VARIANT_SLUG.match(slug):
+        raise ValueError(
+            f"--category-variant slug {slug!r} must start with a letter and contain only "
+            "letters, digits, '_' and '-' — it becomes part of a category key"
+        )
+    if separator and not label:
+        raise ValueError(f"--category-variant {value!r} has an empty label after '='")
+    return CategoryVariant(
+        key_suffix=slug, id_suffix=slug, label_suffix=label or slug,
+    )
+
+
+@dataclass(frozen=True)
 class AnytimeBin:
     """One re-anchored bin of an anytime record campaign: what a category must SAY about it.
 
@@ -128,9 +183,20 @@ class AnytimeBin:
     limit: int
 
     @property
-    def key_suffix(self) -> str:
-        """``a12km`` — the ``a`` keeps the fragment from opening with a digit."""
-        return f"a{self.bin_label}"
+    def variant(self) -> CategoryVariant:
+        """The bin, as the one thing that tells its publication from the checkpoint's others.
+
+        ``a12km`` for the key — the ``a`` keeps the fragment from opening with a digit — and
+        the bare ``12km`` for the experiment id, which has no such constraint. The group is
+        the RECORD campaign, so a campaign's bins sit under one picker heading instead of
+        scattering across the training campaigns they were replayed from.
+        """
+        return CategoryVariant(
+            key_suffix=f"a{self.bin_label}",
+            id_suffix=self.bin_label,
+            label_suffix=self.label_suffix,
+            group=self.campaign,
+        )
 
     @property
     def label_suffix(self) -> str:
@@ -295,6 +361,9 @@ class PublicationPlan:
     device: str = "auto"
     record_retention: str = "archive"
     prediction_dir: Path | None = None
+    #: ``--category-variant``. The other source is the reused directory's own anytime block;
+    #: a publication takes at most one of the two (see ``category_variant``).
+    variant: CategoryVariant | None = None
 
     def __post_init__(self) -> None:
         if self.split not in DEVELOPMENT_SPLITS:
@@ -324,6 +393,23 @@ class PublicationPlan:
             return None
         return _anytime_bin(self.prediction_dir / "summary.json")
 
+    @cached_property
+    def category_variant(self) -> CategoryVariant | None:
+        """The ONE thing that tells this publication from the checkpoint's others.
+
+        Two sources can supply it and a publication takes at most one: a record directory
+        that describes its own bin, and ``--category-variant`` on the command line. Both at
+        once would be two different answers to "which publication is this", which is exactly
+        the ambiguity the variant exists to remove — so it is refused rather than ranked.
+        """
+        if self.anytime is not None and self.variant is not None:
+            raise ValueError(
+                f"{self.prediction_dir} describes its own anytime bin "
+                f"({self.anytime.bin_label}) and --category-variant "
+                f"{self.variant.key_suffix!r} names another; a publication has one identity"
+            )
+        return self.variant if self.anytime is None else self.anytime.variant
+
     @property
     def data_manifest(self) -> Path:
         return self.harvest_root / self.airport / "arrivals" / "manifest.json"
@@ -341,10 +427,11 @@ class PublicationPlan:
             / self.airport
             / self.split
         )
-        # One checkpoint publishes once per BIN, so each bin owns its evaluation report and
-        # publication manifest — sharing the split's directory would have the bins overwrite
-        # each other's verdicts.
-        return base if self.anytime is None else base / self.anytime.key_suffix
+        # One checkpoint publishes once per VARIANT, so each owns its evaluation report and
+        # publication manifest — sharing the split's directory would have them overwrite each
+        # other's verdicts.
+        variant = self.category_variant
+        return base if variant is None else base / variant.key_suffix
 
     @property
     def records_dir(self) -> Path:
@@ -375,12 +462,13 @@ class PublicationPlan:
     @property
     def category(self) -> str:
         run = _safe_stem(self.experiment.run_id, limit=42).lower()
-        bin_key = "" if self.anytime is None else f"_{self.anytime.key_suffix}"
-        return f"{self.result_source}_{run}_{self.experiment.token}{bin_key}_{self.split}"
+        variant = self.category_variant
+        suffix = "" if variant is None else f"_{variant.key_suffix}"
+        return f"{self.result_source}_{run}_{self.experiment.token}{suffix}_{self.split}"
 
     @property
     def experiment_group(self) -> str | None:
-        return _experiment_group(self.experiment.campaign, self.anytime)
+        return _experiment_group(self.experiment.campaign, self.category_variant)
 
     @property
     def comparison_dir(self) -> Path:
@@ -394,7 +482,7 @@ class PublicationPlan:
     def category_label(self) -> str:
         return _publication_label(
             self.split, self.result_source, self.experiment.config, self.experiment.run_id,
-            anytime=self.anytime,
+            variant=self.category_variant,
         )
 
     @property
@@ -405,7 +493,7 @@ class PublicationPlan:
             checkpoint=self.experiment.checkpoint_relative,
             config=self.experiment.config,
             run_id=self.experiment.run_id,
-            anytime=self.anytime,
+            variant=self.category_variant,
         )
 
     def commands(self) -> list[tuple[str, list[str]]]:
@@ -508,6 +596,25 @@ class PublicationPlan:
                         "checkpoint is one cohort over every airport it was trained on, and "
                         "publishing it per airport would file all of them under each"
                     )
+        # Two prediction directories must never land on ONE category. Everything a category
+        # is named from comes from the checkpoint, so publishing a second directory of the
+        # same checkpoint without a variant would silently replace the first — its CZML, its
+        # evaluation report and its picker entry. Refuse and name the variant flag; the
+        # variant is what makes them coexist.
+        if self.publication_manifest.is_file():
+            existing = _load_object(self.publication_manifest)
+            claimed = existing.get("predictionDir")
+            ours = (
+                None if self.prediction_dir is None
+                else _path_for_manifest(self.prediction_dir)
+            )
+            if claimed != ours:
+                return (
+                    f"category {self.category!r} was already published from "
+                    f"{claimed or 'a predict run'} and this would republish it from "
+                    f"{ours or 'a predict run'}; give one of them a --category-variant so "
+                    "the two can coexist instead of overwriting each other"
+                )
         return None
 
     def is_complete(self) -> bool:
@@ -527,18 +634,40 @@ class PublicationPlan:
         )
 
 
-def _experiment_group(campaign: str | None, anytime: AnytimeBin | None) -> str | None:
+def _variant_from_document(document: dict[str, Any]) -> CategoryVariant | None:
+    """The variant a completed publication was made under, straight from its manifest.
+
+    It travels in the manifest so a label refresh never has to reopen the (read-only, possibly
+    moved) prediction directory to recompute the same name. Manifests written before the
+    variant became a first-class thing carry only the anytime block, which describes exactly
+    one variant — so those are read through the bin.
+    """
+    stored = document.get("variant")
+    if stored:
+        return CategoryVariant(
+            key_suffix=str(stored["key_suffix"]),
+            id_suffix=str(stored["id_suffix"]),
+            label_suffix=str(stored["label_suffix"]),
+            group=stored.get("group"),
+        )
+    block = document.get("anytime")
+    return _anytime_from_block(block).variant if block else None
+
+
+def _experiment_group(campaign: str | None, variant: CategoryVariant | None) -> str | None:
     """The heading the picker files a model under.
 
-    An anytime bin belongs to its RECORD campaign, not to the campaign the checkpoint was
-    trained in: that is what puts all of one campaign's bins under one heading instead of
-    scattering them across the training campaigns they were replayed from.
+    A variant may override it: an anytime bin belongs to its RECORD campaign, not to the
+    campaign its checkpoint was trained in, which is what puts one campaign's bins under one
+    heading instead of scattering them across the training campaigns they were replayed from.
     """
-    return campaign if anytime is None else anytime.campaign
+    if variant is None or variant.group is None:
+        return campaign
+    return variant.group
 
 
 def _run_label(
-    config: dict[str, Any], run_id: str, anytime: AnytimeBin | None
+    config: dict[str, Any], run_id: str, variant: CategoryVariant | None
 ) -> str:
     """The canonical run name, plus which anchor these particular records were taken at.
 
@@ -547,15 +676,15 @@ def _run_label(
     same checkpoint.
     """
     name = run_display_name(config, extra=(run_id,))
-    return name if anytime is None else f"{name} {anytime.label_suffix}"
+    return name if variant is None else f"{name} {variant.label_suffix}"
 
 
 def _publication_label(
     split: str, result_source: str, config: dict[str, Any], run_id: str,
-    anytime: AnytimeBin | None = None,
+    variant: CategoryVariant | None = None,
 ) -> str:
     kind = "Experiment" if result_source == "experiment" else "Predicted"
-    return category_display_label(split, _run_label(config, run_id, anytime), kind=kind)
+    return category_display_label(split, _run_label(config, run_id, variant), kind=kind)
 
 
 def _publication_experiment_metadata(
@@ -565,15 +694,15 @@ def _publication_experiment_metadata(
     checkpoint: str,
     config: dict[str, Any],
     run_id: str,
-    anytime: AnytimeBin | None = None,
+    variant: CategoryVariant | None = None,
 ) -> dict[str, Any]:
     return {
         # The picker DEDUPES by id, so each bin of a checkpoint needs its own — otherwise
         # only the first bin published would ever appear in the Experiments list.
-        "id": experiment_id if anytime is None else f"{experiment_id}@{anytime.bin_label}",
+        "id": experiment_id if variant is None else f"{experiment_id}@{variant.id_suffix}",
         "group": campaign,
         "checkpoint": checkpoint,
-        "label": _run_label(config, run_id, anytime),
+        "label": _run_label(config, run_id, variant),
         "model": config.get("model"),
         "predictionOutput": config.get("prediction_output", "state"),
         "horizonMode": config.get("horizon_mode", "normalized"),
@@ -658,25 +787,21 @@ def refresh_labels_from_manifests(
         run_id = document.get("runId") or ""
         split = document.get("split") or ""
         result_source = document.get("resultSource") or "experiment"
-        # The bin travels in the manifest so a refresh never has to reopen the (read-only,
-        # possibly moved) record directory to recompute the same label.
-        anytime = (
-            _anytime_from_block(document["anytime"]) if document.get("anytime") else None
-        )
+        variant = _variant_from_document(document)
         metadata = None
         if result_source == "experiment":
             metadata = _publication_experiment_metadata(
                 experiment_id=document.get("experimentId") or run_id,
-                campaign=_experiment_group(document.get("campaign"), anytime),
+                campaign=_experiment_group(document.get("campaign"), variant),
                 checkpoint=document.get("checkpoint") or "",
                 config=config,
                 run_id=run_id,
-                anytime=anytime,
+                variant=variant,
             )
         found = _apply_category_refresh(
             frontend_airports_root / document["airport"] / "comparison" / "categories.json",
             document["category"],
-            _publication_label(split, result_source, config, run_id, anytime),
+            _publication_label(split, result_source, config, run_id, variant),
             result_source,
             metadata,
         )
@@ -722,7 +847,11 @@ def _publication_document(
         "config": plan.experiment.config,
         "recordRetention": plan.record_retention,
     }
+    if plan.category_variant is not None:
+        document["variant"] = asdict(plan.category_variant)
     if plan.anytime is not None:
+        # Beside the variant, not instead of it: the bin's counts and coverage are the
+        # domain fact this publication was made from, and the variant is only its rendering.
         document["anytime"] = asdict(plan.anytime)
     if plan.records_archive.is_file():
         document["recordsArchive"] = {
@@ -982,6 +1111,20 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--category-variant",
+        default=None,
+        metavar="SLUG[=LABEL]",
+        help=(
+            "publish this run as a distinct category of the SAME checkpoint: SLUG is "
+            "appended to the category key and to the picker's experiment id, and LABEL (or "
+            "SLUG) to the display label. Needed whenever two prediction directories share a "
+            "checkpoint — a predict-time projection or hook beside its own baseline — "
+            "because everything else in a category's identity comes from the checkpoint. A "
+            "directory written by `run_ts_anytime_curve.py --write-records` names its own "
+            "bin instead, and giving both is refused"
+        ),
+    )
+    parser.add_argument(
         "--split",
         action="append",
         choices=DEVELOPMENT_SPLITS,
@@ -1066,6 +1209,13 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         parser.error(f"--reuse-prediction-dir names an unselected run: {sorted(unknown)[0]}")
 
+    variant = None
+    if args.category_variant is not None:
+        try:
+            variant = _parse_category_variant(args.category_variant)
+        except ValueError as error:
+            parser.error(str(error))
+
     requested_airports = {value.strip().upper() for value in args.airport} if args.airport else None
     splits = tuple(args.split or DEVELOPMENT_SPLITS)
     plans: list[PublicationPlan] = []
@@ -1086,6 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
                     device=args.device,
                     record_retention=args.record_retention,
                     prediction_dir=reused_dirs.get(checkpoint.experiment_id),
+                    variant=variant,
                 ))
     if not plans:
         parser.error("no checkpoint provenance contains the requested airport(s)")
