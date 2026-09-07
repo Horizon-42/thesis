@@ -1,30 +1,44 @@
 """``predict``: forecast a checkpoint's split and write the evaluation records.
 
 One dense rollout batch at a time, so the latent arms (K prior samples, the N(0, I)
-control, the shuffle) decode the same flights the top-1 record set does. The outer-test
-split is sealed: it needs a `freeze-test` ledger and `--test-release`, and the claim is
-written BEFORE the first row is read, so a crash still counts as exposure.
+control, the shuffle) and B3's quantile fan decode the same flights the top-1 record set
+does. The outer-test split is sealed: it needs a `freeze-test` ledger and `--test-release`,
+and the claim is written BEFORE the first row is read, so a crash still counts as exposure.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
+
+import numpy as np
 
 from config import (
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     DURATION_HEAD_QUANTILE,
+    DURATION_MEDIAN_INDEX,
+    DURATION_QUANTILES,
     TSConfig,
     CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_OFF,
     CORRIDOR_GATES,
     CTA_CONDITIONING_GIVEN,
+    CTA_CONDITIONING_SELF_QUANTILE,
     HOOK_SATURATIONS,
     PREDICTION_CLOSURE,
 )
-from calibration import load_conformal_table
+from approach_difficulty import approach_difficulty
+from calibration import (
+    FAN_INTERVAL_ALPHA,
+    QUANTILE_DIR_NAME,
+    conformal_intervals,
+    interval_directory_name,
+    interval_stratum,
+    load_conformal_table,
+    quantile_directory_name,
+)
 from data_provenance import require_matching_data_provenance
 from closure_output import load_labels
 from dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
@@ -39,6 +53,8 @@ from export import (
 from flyability import report_for_records
 from io_utils import file_sha256
 from forecast import (
+    default_anchor,
+    duration_quantile_predictions,
     forecast_approaches,
     forecast_closure_from_labels,
     latent_mode_forecasts,
@@ -73,6 +89,52 @@ if _unknown:  # fail at import, like cli.common's list: a renamed field must ren
 
 #: The N(0, I) control draws from its own stream, never the treatment arm's.
 LATENT_RANDOM_SEED_OFFSET = 1_000_003
+
+
+@dataclass(frozen=True)
+class FanLeaf:
+    """One decode of the whole batch at one arrival time the MODEL chose.
+
+    ``cta_s`` is per flight, in batch order. Exactly one of ``quantile`` / ``interval`` is
+    set: a level of the duration head, or an endpoint of its calibrated interval.
+    """
+
+    directory: str
+    cta_s: np.ndarray
+    quantile: float | None
+    interval: dict[str, object] | None
+
+
+def fan_leaves(
+    quantiles_s: np.ndarray, series, anchor: int, conformal: dict | None
+) -> list[FanLeaf]:
+    """The fan for one batch: the five levels, plus the calibrated endpoints when there is
+    a table. The stratum each flight's interval is read from is decided by the SAME
+    `calibration.interval_stratum` the record's own `durationIntervalStratum` comes from."""
+    leaves = [
+        FanLeaf(quantile_directory_name(tau), quantiles_s[:, column], tau, None)
+        for column, tau in enumerate(DURATION_QUANTILES)
+    ]
+    if conformal is None:
+        return leaves
+    endpoints = []
+    for row, item in zip(quantiles_s, series, strict=True):
+        stratum = interval_stratum(conformal, approach_difficulty(item, anchor).to_dict())
+        entry = next(
+            block for block in conformal_intervals(row, conformal, stratum)
+            if block["alpha"] == FAN_INTERVAL_ALPHA
+        )
+        endpoints.append([entry["lo"], entry["hi"]])
+    bounds = np.array(endpoints, dtype=np.float64)
+    return leaves + [
+        FanLeaf(
+            interval_directory_name(FAN_INTERVAL_ALPHA, end),
+            bounds[:, column],
+            None,
+            {"alpha": FAN_INTERVAL_ALPHA, "end": end},
+        )
+        for column, end in enumerate(("lo", "hi"))
+    ]
 
 
 def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
@@ -125,6 +187,15 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
              "source.ctaS / ctaOffsetS. 0 = the identity demonstration",
     )
     parser.add_argument(
+        "--cta-from-quantiles", action="store_true",
+        help="CTA-conditioned control output with a quantile duration head: decode every "
+             "flight once per duration quantile, using ITS OWN q_tau as the CTA, into "
+             f"{QUANTILE_DIR_NAME}/qNN/ (source.ctaQuantile / ctaFromQuantiles). The top-1 "
+             "records are the q50 decode. This reads no future — the run is cta=self-q, not "
+             "cta=given — and with a conformal table it also decodes the calibrated "
+             f"alpha={FAN_INTERVAL_ALPHA:g} interval endpoints",
+    )
+    parser.add_argument(
         "--z-from-posterior", action="store_true",
         help="latent control output: decode every flight from the MEAN of q(z | its own "
              "future) — the z-oracle upper bound (reads the future; records carry "
@@ -160,6 +231,16 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
                                 "The device is a runtime property, deliberately NOT taken "
                                 "from the checkpoint — a cuda-trained checkpoint must stay "
                                 "predictable on a CPU-only machine")
+
+
+def _fan_forecast(model, series, config, normalizer, device, args, conformal, leaf: FanLeaf):
+    """One leaf's decode — the batch flown to the arrival time this leaf names."""
+    return forecast_approaches(
+        model, series, config, normalizer, device=device,
+        truncate=not args.no_truncate, project_final=args.project_final,
+        conformal=conformal, cta_s=leaf.cta_s,
+        cta_quantile=leaf.quantile, cta_interval=leaf.interval,
+    )
 
 
 def run_cli(
@@ -255,7 +336,33 @@ def run_cli(
         print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
     if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
         parser.error("--cta-offset-s needs a checkpoint trained with cta_conditioning=given")
-    if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
+    if args.cta_from_quantiles:
+        # The head trains as a TARGET under `given` even though the given CTA is what drives
+        # the rollout in training; at predict the rollout is driven by the model's OWN
+        # quantile, which is what makes this the first CTA arm that reads no future.
+        if config.cta_conditioning != CTA_CONDITIONING_GIVEN:
+            parser.error("--cta-from-quantiles needs a checkpoint trained with "
+                         "cta_conditioning=given: without the CTA token the decoder has "
+                         "nowhere to put the quantile")
+        if config.duration_head != DURATION_HEAD_QUANTILE:
+            parser.error("--cta-from-quantiles needs a checkpoint trained with "
+                         f"duration_head={DURATION_HEAD_QUANTILE!r}; a point head has one "
+                         "duration and there is no fan to decode")
+        if args.cta_offset_s:
+            parser.error("--cta-from-quantiles and --cta-offset-s are two different arms: "
+                         "the first reads the model's own duration, the second shifts the "
+                         "truth's")
+        if args.z_from_posterior:
+            parser.error("--cta-from-quantiles and --z-from-posterior cannot combine: the "
+                         "posterior reads the future, which is exactly what the self-quantile "
+                         "CTA exists not to do")
+        # Everything downstream — the run name, the records, the summary mode — must say
+        # `self-q`, never `given`: this directory read no future. The MODEL is unchanged;
+        # only the config that names and describes the run is restamped.
+        config = replace(config, cta_conditioning=CTA_CONDITIONING_SELF_QUANTILE)
+        print("  CTA from the model's OWN duration quantiles (cta=self-q): a fan of "
+              f"{len(DURATION_QUANTILES)} decodes per flight; the top-1 records are q50")
+    elif config.cta_conditioning == CTA_CONDITIONING_GIVEN:
         print(f"  CTA-conditioned: every flight is given its truth arrival time {args.cta_offset_s:+g} s "
               "(reads the future — a delivery-form demonstration, not a prediction result)")
     if args.z_from_posterior:
@@ -312,6 +419,10 @@ def run_cli(
     random_metrics: list[list] = [[] for _ in range(args.latent_random)]
     shuffled_records: list = []
     shuffled_metrics: list = []
+    # B3: one record set per fan leaf, keyed by the directory it will be written to.
+    fan_records: dict[str, list] = {}
+    fan_metrics: dict[str, list] = {}
+    median_directory = quantile_directory_name(DURATION_QUANTILES[DURATION_MEDIAN_INDEX])
     rollout_batch_size = max(1, min(config.batch_size, len(series)))
     if args.latent_shuffle:
         if len(series) < 2:
@@ -379,6 +490,45 @@ def run_cli(
             forecasts = posterior_latent_forecasts(
                 model, batch_series, config, normalizer, device=device, cta_offset_s=args.cta_offset_s,
             )
+        elif args.cta_from_quantiles:
+            anchor = default_anchor(config)
+            quantiles = duration_quantile_predictions(
+                model, batch_series, config, normalizer, anchor=anchor, device=device
+            )
+            leaves = fan_leaves(quantiles, batch_series, anchor, conformal)
+            # The rollout's own requirement, and the only one that can bite: the five
+            # levels are strictly positive by construction, so a non-positive CTA means a
+            # conformal delta wider than the interval it widens. Never clamped and never
+            # silently skipped — a fan whose leaves hold different flights is not a fan, and
+            # the readout compares them per flight.
+            below = sum(int((leaf.cta_s <= 0.0).sum()) for leaf in leaves)
+            if below:
+                parser.error(
+                    f"{below} fan CTA(s) in this batch are not positive, so the rollout "
+                    "cannot fly them; a calibrated interval endpoint reached zero, which "
+                    "means a conformal delta wider than the interval it widens. Recalibrate "
+                    "before decoding the endpoints"
+                )
+            forecasts = _fan_forecast(
+                model, batch_series, config, normalizer, device, args, conformal,
+                next(leaf for leaf in leaves if leaf.directory == median_directory),
+            )
+            for leaf in leaves:
+                leaf_forecasts = forecasts if leaf.directory == median_directory else (
+                    _fan_forecast(
+                        model, batch_series, config, normalizer, device, args, conformal, leaf
+                    )
+                )
+                for offset, (item, forecast) in enumerate(
+                    zip(batch_series, leaf_forecasts, strict=True)
+                ):
+                    fan_records.setdefault(leaf.directory, []).append(build_prediction_record(
+                        item, forecast, index=start + offset, model_name=config.model,
+                        horizon_mode=config.horizon_mode, split=args.split,
+                    ))
+                    fan_metrics.setdefault(leaf.directory, []).append(observed_series_metrics(
+                        item, forecast, points=config.validation_common_grid_points,
+                    ))
         else:
             forecasts = forecast_approaches(
                 model,
@@ -433,6 +583,17 @@ def run_cli(
         )
     if args.latent_random:
         print(f"  wrote {args.latent_random} N(0, I) control mode(s) under {args.output_dir / 'random'}")
+    for directory, rows in fan_records.items():
+        write_batch(
+            rows, output_dir=args.output_dir / QUANTILE_DIR_NAME / directory,
+            config_dict=config.to_dict(), flight_metrics=fan_metrics[directory],
+            checkpoint=str(args.checkpoint), split=args.split,
+        )
+    if fan_records:
+        names = ", ".join(sorted(fan_records))
+        print(f"  wrote the quantile fan under {args.output_dir / QUANTILE_DIR_NAME}: {names} "
+              f"(the top-1 records above are the {median_directory} decode); read it with "
+              f"run_ts_quantile_fan_readout.py --arm {args.output_dir}")
     if shuffled_records:
         write_batch(
             shuffled_records, output_dir=args.output_dir / "shuffled",

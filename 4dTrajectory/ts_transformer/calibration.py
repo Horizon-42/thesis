@@ -64,6 +64,28 @@ CONFORMAL_ALPHAS: tuple[float, ...] = tuple(sorted(ALPHA_QUANTILE_PAIRS))
 #: at which the empirical 0.9 quantile of the scores is not simply "the largest one".
 MIN_CALIBRATION_FLIGHTS = 30
 
+#: The alpha whose CALIBRATED endpoints B3 decodes beside the five levels — the design's
+#: headline 80 % interval. Decoding every alpha's endpoints would multiply the fan for a
+#: reading nothing asks for.
+FAN_INTERVAL_ALPHA = min(CONFORMAL_ALPHAS)
+
+#: Where `predict --cta-from-quantiles` writes the fan, and how one leaf is named. The
+#: directory grammar lives HERE rather than in `cli.predict` so `run_ts_quantile_fan_readout`
+#: can read a fan without importing the CLI (and torch with it); a readout that guessed the
+#: spelling would report an empty fan as a missing one.
+QUANTILE_DIR_NAME = "quantiles"
+
+
+def quantile_directory_name(tau: float) -> str:
+    """``q10`` … ``q90`` for one duration quantile."""
+    return f"q{round(tau * 100):02d}"
+
+
+def interval_directory_name(alpha: float, end: str) -> str:
+    """``a20lo`` / ``a20hi`` for a calibrated interval endpoint."""
+    return f"a{round(alpha * 100):02d}{end}"
+
+
 #: Which stratum's δ a flight's interval comes from: the FIRST of these it belongs to and
 #: which HAS a δ. A precedence, not a partition — `strata_masks`' strata overlap (an
 #: established flight can be straight-in) — and it names the two the design separates,
