@@ -125,6 +125,92 @@ share at +60 s ≥ 88.4 % (the observed tracks' 98.4 % floor minus 10 points) �
 if the floor makes the rollout arrive EARLY instead, the unabsorbed delay is the deliverable X and
 is reported rather than gated; (3) endpoint |xt| p95 at +60 s ≤ 1.5 × the offset-0 arm, as L3.c.
 Not run here.
+### 2026-09-08 — ts_transformer: A2b — `random_train_anchor_l1_share`, a reserved share of the random-anchor draws for L−1
+
+**The question.** A0.b settled the random-anchor line's first half and left the second open.
+`A0b_lr_objective_path_uniform` ran all 180 epochs without early stopping, took the anchor-grid
+selection metric to 710 (L−1 1782 / 12 km 561 / 8 km 283 / 6 km 212 m), and **reached s_freeze at
+8 km** (vectored |Δt| p80 19.8 s) — gate 3 met for the first time in this project, because the
+duration head stopped flooring at ~125 s. What it still fails is the pre-registered L−1 veto: on
+1404 paired KRDU val flights its pooled ADE is **1782 m** against the fixed-anchor native32's
+**1322**, far beyond the 125 m control-path seed line. The reading is mechanical — under a law
+spread uniformly over the flight's own remaining-path span, L−1 is ONE POINT among many draws, so
+the arm never specialises for the anchor the fixed arms train at exclusively. A2b asks whether
+giving L−1 a fixed SHARE of the draws recovers it without losing the curve.
+
+**The change (design §2.4d; branch `dev-a2b`).** `random_train_anchor_l1_share: float = 0.0`. Under
+`random_train_anchor_sampling=remaining-path-uniform`, with that probability a flight's draw for the
+epoch IS `default_anchor(config)` = `seq_len − 1` — exactly the anchor the fixed-anchor arms train
+at — and otherwise the unchanged span draw.
+
+**A mixture, not a reweighting.** The coin is a SECOND 8 bytes of the same per-flight per-epoch
+sha256 the law already reads for its unit draw, and the digest's salt does not move with the share.
+`sampling_version` stays the class's law AND the salt; a new `TrajectoryWindows.reported_sampling_version`
+property is what the epoch record and the checkpoint's `training_anchor_contract` NAME, and the
+path-uniform policy overrides it to `per-flight-hash-v4-remaining-path-uniform-l1-share` when the
+share is non-zero. So the (1 − share) of draws the coin passes over are **literally the anchors the
+share-0 arm drew**, and the A2b arms differ from `A0b_lr_objective_path_uniform` in the replaced
+draws and in nothing else — the contrast the campaign is for, rather than a second silent reshuffle
+of the other 70 %.
+
+**Refused, never ignored.** A non-zero share under `uniform` sampling (that law draws over the
+samples, where L−1 is already one of them, and mixing a reserved share in is a second unmeasured
+axis); a non-zero share with `random_train_anchor=False` (the fixed policy already anchors every
+flight at L−1); and a value outside [0, 1]. The named recipes deliberately do NOT pin the new field
+— with `random_train_anchor` pinned False a non-zero share is already refused, and a bound that
+cannot bind reads as though it had (the same reasoning as `duration_quantile_loss_weight`).
+
+**The flights that have no L−1 to reserve: counted, not refused.** The reserved draw is the
+flight's FIRST admissible anchor (offset 0), which is L−1 unless output eligibility removed it or a
+`minimum_anchor_index` floor moved it — and under a floor it is exactly what
+`FixedAnchorTrajectoryWindows` anchors at anyway. The first draft refused the eligibility case as a
+loud precondition; **measuring it killed that**: on the whole KRDU arrivals roster (14,435 records,
+9,720 in the `openap-direct` cohort under the 20 s future contract) **10 flights store no anchor 59
+at all** — 0.10 %, nine of them runway 23R, first admissible anchor 90–163 — because
+`airborne-1.10-stall-margin-v1` puts their observed state there outside the airborne model domain.
+A refusal would therefore have aborted both A2b arms at dataset construction, and the only remedy
+it named (`--eligibility-roster`) would have changed the split and destroyed the pairing the arms
+exist for. Those flights are now reserved at the earliest anchor they DO have — the nearest thing
+they possess to the start of the approach, and the only one the control rollout can integrate — and
+the count is stated in output, never assumed: `l1_share_flights_without_l1` in every epoch record
+and one line from `train()`. Consequence for readers: `fixed_anchor_fraction` bounds
+`l1_share_drawn` from above only while that count is zero.
+
+**Bookkeeping.** Under a non-zero share only, each epoch's `train_anchor_sampling` block gains
+`l1_share`, `l1_share_drawn` and `l1_share_flights_without_l1` beside the strata histogram. `l1_share_drawn` is the COIN's realised
+share; the long-standing `fixed_anchor_fraction` counts every drawn anchor that IS L−1 — the coin's
+plus the span draws that landed at the far end anyway — so it bounds it from above rather than
+restating it. Reading the coin needs the epoch's seed, so the `_sampling_extras` hook now takes it
+beside the indices (a draw law can have a component its chosen anchors do not reveal).
+
+**`default_anchor` moved to `config.py`.** `dataset` needs the same index and `forecast` imports
+`dataset`, so the one-liner could not stay where it was; `forecast` re-exports it and every call
+site and monkeypatch is unchanged. It also replaces the inline `seq_len - 1` that
+`anchor_statistics` carried.
+
+**Default bit-equivalence (measured against `9b1f130`).** Three 2-epoch synthetic trains — the
+fixed-anchor control path and both random-anchor sampling laws — compared leaf by leaf:
+**4312 shared non-wall-clock leaves (4069 numeric), 6 differing, and all 6 are
+`validation_profile_by_airport.KRDU.wall_s`**. The per-epoch `sample_sha256` digests are identical
+under both random laws, i.e. the draws themselves were not touched. The one added key is
+`config.random_train_anchor_l1_share`. **Name recount**: 1128 stored configs under
+`4dTrajectory/outputs` (348 summary.json, 184 each of history / checkpoint_metadata /
+fit_evaluation, 117 experiment_manifest, 111 campaign config.json) named and slugged at both trees
+— **0 renamed, 0 unloadable**; the A0.b arms' slugs still end `…_8-more_7cfd2b7f` /
+`…_9-more_48f49b41`. Suite 835 → **851** green. (Reviewed by an opus subagent; its HIGH finding is
+the L−1 precondition above, which the cohort measurement then settled, and three test-strength
+findings are folded in — the mixture test now pins WHICH flights the coin fired on, and the range
+refusal pins that it wins over the two cross-field ones.)
+
+**Arms.** `4dTrajectory/ts_transformer/docs/experiments/a2b_l1_share_arms.json`: base = the stored
+`A0b_lr_objective_path_uniform` config (verified field-by-field against
+`outputs/KRDU/experiments/a0_random_20260907/A0b_lr_objective_path_uniform/config.json`), two arms
+`A2b_l1_share_0p3` / `A2b_l1_share_0p5` at 180 epochs, `patience` 180,
+`lr_plateau_metric=objective`. **Pre-registered gate, both must hold**: the L−1 pooled ADE not worse
+than native32's 1322 m beyond the 125 m control-path seed line, AND the anytime curve's gate 3
+(s_freeze) still reached at 8 km with |Δt| p80 < 30 s. **Veto**: the 12 km bin's vectored ADE p50
+worsens by more than 100 m against `A0b_lr_objective_path_uniform`'s 561 m. Dry run clean; slugs
+`…_10-more_fbde423f` / `…_10-more_e5b37c1c`. **Neither arm has been trained.**
 
 ### 2026-09-08 — ts_transformer: B1.b — the two-head duration (`duration_head=two-head`), the point head drives the rollout and the quantile head publishes the ETA
 

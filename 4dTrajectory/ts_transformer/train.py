@@ -40,6 +40,7 @@ from config import (
     LR_PLATEAU_METRIC_SELECTION,
     TSConfig,
     control_recipe,
+    default_anchor,
     uses_control_dynamics,
 )
 from control.basis_fit import FittedTeacherTable, load_fitted_teacher
@@ -579,6 +580,17 @@ def fit_model(
             print(
                 f"  anchor min {config.random_train_anchor_min_future_s:g}s future; "
                 f"eligible {flights_per_epoch}/{len(train_series)} train flights"
+            )
+        if config.random_train_anchor_l1_share:
+            # Bounded coverage is stated, never assumed: the share reserves the anchor the
+            # FIXED-anchor arms train at, and this says how many flights have no such
+            # anchor (output eligibility removed it) and are reserved at their earliest
+            # admissible one instead. The same count is in every epoch's record.
+            print(
+                f"  L-1 share  {config.random_train_anchor_l1_share:g} of the draws "
+                f"reserved for anchor {default_anchor(config)}; "
+                f"{train_set.flights_without_default_anchor}/{flights_per_epoch} flights "
+                "store no such anchor and are reserved at their earliest admissible one"
             )
         print(
             f"  selection  {config.checkpoint_selection_metric} on fixed L-1 validation"

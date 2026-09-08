@@ -626,3 +626,15 @@ has no typecode for the address either. A third identity source with per-address
 `data/AIRCRAFT/aircraftDatabase.csv` is from 2026-07) would settle most of them; add it to
 the builder as a lower-authority source validated against Doc 8643, the way OpenSky is.
 Plus 283 rows unmatched anywhere (mostly foreign registrations: Mexico, Ireland, Canada).
+
+## 26. `config.seq_len - 1` still spelled out at ~12 sites that already have `default_anchor`
+
+**Verified** (2026-09-08, A2b review). `default_anchor(config)` moved from `forecast.py` to
+`config.py` so `dataset` could reserve a share of its random draws for L−1 without an import
+cycle. It is now importable everywhere `config` already is, but the literal `config.seq_len - 1`
+is still the spelled-out L−1 anchor in `train.py:403/449`, `fixed_anchor_validation.py:95/109/161`,
+`cli/predict.py:398`, `anchor_grid.py:154`, `approach_clustering/cli.py:71`,
+`run_ts_anytime_curve.py:743`, `run_ts_predictability_report.py` (×5),
+`run_ts_clock_attribution.py:115` and `run_ts_control_capacity_ceiling.py:233` — every one of
+which already imports `config`. A pure rename, no behaviour: the value is the same either way,
+which is why it was left out of the A2b change rather than folded into it.
