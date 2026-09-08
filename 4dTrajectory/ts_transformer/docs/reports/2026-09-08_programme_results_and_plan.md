@@ -151,7 +151,9 @@ aircraft's own history**.
 
 ### 3.2 Can the model infer the controller's intent from its own history?
 
-**Only partly, and not the timing half. This is the programme's most-revised finding.**
+**It carries a usable distribution over the endpoint and the geometry, but not the point timing.
+This is the programme's most-revised finding, and after L2.g the only one replicated on the control
+path.**
 
 **L2 — latent intent.** (pre-registered; `LID` §六 L2; five campaigns, **seven arms, all single
 seed**: `L2_gauss` β=1, `L2b_beta0p1`, `L2_mix4` K=4, `L2.d` warm posterior at β=0.1 and β=0.01,
@@ -191,14 +193,44 @@ control: the prior had narrowed to a third of the correct width. **(2) The two v
 the reading that z is a constant cannot stand against a 2444 m shuffle cost, and the 1 σ threshold
 was calibrated on arms where both criteria agreed. **(3) It improves the
 endpoint, not the path average**: FDE p50 is 170 m better than native32 pooled and 463 m better
-vectored, while pooled ADE stands still (1249 against `L2d`'s 1214, still the best point estimate).
+vectored, while its pooled ADE stands still (1249 against `L2d`'s 1214).
 So the seven earlier arms failed **for a units reason**, not because a latent cannot carry the
-intent — yet the corrected arm still does not recover the 962 m, its vectored top-1 being 2660 m
-against a 1235 m target. The line is therefore **not closed but re-opened once**, as
-**L2.g** (pre-registered `LID` §六 L2 末, `l2g_latent_distribution_arms.json`, campaign
-`l2g_latent_distribution_20260908`, queued last): the same units recipe at **300 epochs with early
-stopping off and two seeds**, read as a distribution. Its gates and veto are in §5 item 5. It is
-**the only experiment still pending in this programme.**
+intent.
+
+**L2.g — the replication, and the programme's one replicated positive result on the control path.**
+(pre-registered `LID` §六 L2 末, `l2g_latent_distribution_arms.json`; results `LID` §六
+"L2.g 结果"; campaign `E/l2g_latent_distribution_20260908`, artifacts
+`latent_readout_L2g_units_e300{,_s2024}.json`, `probe/`, `readout.json`. Same units recipe,
+**300 epochs, early stopping off, two seeds** 1337 and 2024 on the same split; both converged,
+best epochs 258 and 292; 104 min each.)
+
+| | seed 1337 | seed 2024 | two-seed spread | reference |
+|---|---:|---:|---:|---|
+| top-1 ADE pooled / straight-in / vectored | 1230 / 430 / 2639 | **1194 / 406 / 2579** | 37 / 24 / 60 | native32 1322 / 445 / 2870; L2d 1214 |
+| minADE₆ vs N(0, I) control, pooled | 994 vs 1030 | 959 vs 1035 | 35 | gate 2 |
+| minADE₆ vs control, vectored | 2042 vs 2159 | 1995 vs 2223 | 46 | gate 2 |
+| **FDE p50 pooled / vectored** | **656 / 1449** | **627 / 1225** | 29 / 224 | native32 864 / 1982 |
+| **shuffled-z ΔADE pooled / vectored** | **+1017 / +2702** | **+935 / +2406** | 82 / 296 | gate 1 (> 200 m) |
+| prior total σ | 0.870 | 0.896 | — | L2d 0.583 |
+| posterior-mean displacement median (p90) | 0.336 σ (1.04) | 0.312 σ (1.02) | — | not a gate of this arm |
+
+**All four pre-registered gates pass at both seeds, with margin, and no veto fired.** The pooled
+ADE spread between seeds is **37 m**, under a third of the 125 m control-path seed line, so this is
+a replication, not one favourable seed. Four readings. **(1) The prior no longer narrows** (σ 0.870
+/ 0.896 against L2d's 0.583), and six prior samples beat six standard-normal samples pooled and
+vectored — the five-campaign result is closed. **(2) The 1 σ displacement median is the wrong
+diagnostic here**: it sits at 0.31–0.34 σ with p90 near 1.03 across all three units arms while the
+shuffle cost is close to a kilometre, so the shuffle test is the criterion for this regime and the
+displacement median is recorded, not used. **(3) What the latent delivers is the endpoint and the
+distribution**: FDE p50 627–656 m against native32's 864 (vectored 1225–1449 against 1982), and
+best-of-6 ADE **959–994 m against a top-1 of 1194–1230 m** — the sample fan is 235 m better than
+its own top-1. Top-1 ADE is level with L2d. **(4) Seed 2024 is better almost everywhere and peaked
+at epoch 292**, so the 300-epoch budget still binds slightly; both arms beat the 180-epoch
+`L2z_units`.
+
+With the loss units corrected, **the latent is a working distribution over futures**, replicated.
+It still does not close the 962 m as a point estimate — vectored top-1 is 2579–2639 m against a
+1235 m target — so what it supplies is the shape of the uncertainty, not the missing timing.
 
 **L4 — scene conditioning.** (pre-registered pre-measurement gate; `LID` §六 L4;
 `E/l4_scene_explainability_20260907`, KRDU 14,418 flights, Phase 0 cohort and CV protocol.) It ran
@@ -212,8 +244,9 @@ p10/p90 −90 / +1067 s) — the lead's remaining time is as undetermined as the
 outputs of the same sequencing decision. **The encoder was not built**; a data-plane review found
 no leak or frame error, so the measurement stands.
 
-Together: neighbouring traffic contributes nothing, and the aircraft's own history — once the
-latent can use it — improves the endpoint but not the timing.
+Together: neighbouring traffic contributes nothing, while the aircraft's own history — once the
+loss lets a latent use it — yields a usable distribution over the endpoint and the geometry, but
+not the point timing.
 
 ### 3.3 What happens when the scheduler supplies the arrival time?
 
@@ -639,21 +672,25 @@ whole of a vectored one, and it is scatter, not bias: the true total duration mo
 bias from −191 m to +8 m and the RMS only 333 → 316 m. What varies is *when* the aircraft
 decelerates and *when* it turns.
 
-**The aircraft's own history does not contain enough of that timing.** Neighbouring traffic
-contributes exactly nothing, because the lead aircraft's remaining time is as undetermined as the
-own-ship's — both are outputs of the same sequencing decision. The latent line's seven failures,
-however, were a **loss-scaling failure**: with the position term rescaled 100×, shuffling z costs
-928 m pooled and 2444 m vectored, the trained prior beats an N(0, I) control for the first time,
-and vectored FDE p50 improves 1982 → 1519 m. It still does not recover the 962 m — vectored top-1
-is 2660 m against a 1235 m target. The honest statement is therefore narrower than "the intent is
-unavailable": **what the aircraft carries improves the endpoint; it does not fix the timing.**
+**What the aircraft's own history is missing is the point timing, and only that.** Neighbouring
+traffic contributes exactly nothing, because the lead aircraft's remaining time is as undetermined
+as the own-ship's — both are outputs of the same sequencing decision. The latent line's seven
+failures were, it turns out, a **loss-scaling failure**, and correcting it produced the programme's
+one replicated positive result on the control path: at two seeds and 300 epochs, shuffling z costs
+935–1017 m pooled and 2406–2702 m vectored, the trained prior beats an N(0, I) control pooled and
+vectored, FDE p50 falls to 627–656 m against native32's 864, and best-of-6 ADE reaches 959–994 m
+against a top-1 of 1194–1230 m, with a two-seed spread of 37 m. **So the aircraft's own history
+does carry a usable distribution over where the aircraft will be and what shape the path will
+take.** What it does not carry is *when* — vectored top-1 stays at 2579–2639 m against the 1235 m
+a known intent would allow. The statement to keep is therefore the narrow one: **the history gives
+the endpoint and the distribution; it does not give the timing.**
 
 **Supplying the time resolves most of it.** Given the true arrival time, pooled ADE falls
 1214 → 841 m and vectored 2643 → 1596 m on 87.3 % of flights, and the duration error equals a
 requested offset exactly at seven points with monotone geometry on both sides — a real control
 response, not a fitted output. **The model must not guess the intent; the scheduler must supply it,
-as a time** — and the latent, now that it works, is the right instrument for the *distribution*
-around that time rather than for the point estimate.
+as a time** — and the latent, now that it works and is replicated, is the right instrument for the
+*distribution* around that time rather than for the point estimate.
 
 **The calibrated ETA is deliverable for straight-in traffic and honest for vectored traffic, and
 its form is now settled.** The straight-in 80 % interval is about 28–32 s wide with coverage inside
@@ -702,9 +739,10 @@ leaves its 125 s floor, though the random-anchor arm is still worse at the train
 
 ## 5. Next steps
 
-Items 1–8 are proposals for decision, except item 4, which has been run and decided; item 9 is
-closed. Each is described in one or two sentences, with its gate, veto and cost in the table that
-follows. **Only one experiment in this list is still pending: L2.g, item 5.**
+Items 1–8 are proposals for decision, except items 4 and 5, which have been run and decided;
+item 9 is closed. Each is described in one or two sentences, with its gate, veto and cost in the
+table that follows. **No experiment in this programme is pending any more**; what remains open are
+decisions.
 
 **1. Adopt two recipe changes; the third is now refused.** (a) `final_time_loss_weight` 26 into the
 mainline recipe is **NOT adopted** — the second seed (1373 m against seed 1337's 1248 m, around
@@ -732,17 +770,17 @@ calibration + B3 CTA decoding, with the path model chosen separately.** Nothing 
 this step; what remains is the vectored width veto (§3.4), which is a scheduler-interface decision
 rather than an experiment.
 
-**5. L2.g — the latent line re-opened once, read as a distribution. This is the only experiment
-still pending.** The units test passed three of four gates and was budget-limited at 180/180
-epochs, so its numbers are lower bounds. L2.g (pre-registered `LID` §六 L2 末;
-`l2g_latent_distribution_arms.json`; campaign `l2g_latent_distribution_20260908`; queued last)
-keeps the units recipe — `position_loss_scale_m` 1 km, warm posterior, β 0.01, 8 dimensions — and
-runs **300 epochs with early stopping off at two seeds** (1337 and 2024, same split seed), with the
-units test's prediction settings (6 prior samples, 6 N(0, I) controls, shuffled z). The 26×
-duration weight is **not** carried, having been withdrawn with item 1(a). Every number is reported
-as a two-seed spread, and a difference inside that spread is not a finding. It overlaps the C line
-— reading a sample fan as a trajectory distribution is the same objective — so the two should be
-scoped together.
+**5. L2.g — done, and passed at both seeds; the latent returns as a main-line component.** The
+units recipe at 300 epochs with early stopping off cleared all four gates at seeds 1337 and 2024,
+with a 37 m two-seed spread on pooled ADE (§3.2). **Decision pending on what follows**, three
+candidates: **(a)** read the six-sample fan by the B-line gate 3 protocol — the share of truth
+paths inside the fan and the truth's chamfer to the nearest sample against to top-1 — which makes
+the latent fan and the quantile fan the same deliverable measured the same way; **(b)** CTA
+conditioning on the L2.g base, that is L3 re-run on the corrected units, to measure how much
+information z still holds once the arrival time is supplied; **(c)** test
+`position_loss_scale_m` 1 km on the **no-latent** `native32` base, to separate the units effect
+from the latent effect before any main-recipe change. (c) is the prerequisite for changing the
+mainline recipe, because L2.g moved two things at once.
 
 **6. Replicate the CTA and B results on KSJC before any claim generalises.** Everything in §3.3 and
 §3.4 is KRDU and single-seed, and a per-airport ADE without its route mix is not a comparison:
@@ -763,7 +801,8 @@ the reference.
 | 2 | the L3.c protocol re-run unchanged: duration error still equals the offset exactly (gate 2), threshold \|xt\| p95 within 1.5× the offset-0 hooked arm (gate 1), fully-flyable share at +60 s ≥ 8.3 % (gate 3, the clause that failed) | pooled ADE at offset 0 degrades by more than 100 m against 840 m | dynamics change (code + review) + four predict-only arms, ≈ 20 min GPU |
 | 3 | pooled ADE at L−1 not worse than 1322 m beyond seed noise, anchor-grid selection metric, and no regression of the anytime gates (monotone; gate 2 at 16 km; s_freeze at 8 km) | — | one training arm ≈ 2–3 h GPU for (b); (a) trains nothing but doubles what must be shipped |
 | 4 | **run and decided**: the MAE clause passed (q50 24.2 / 10.4 s within 1 s of 23.9 / 10.3 s); the ADE clause, reframed post hoc against the worse point-matched seed (1373 m) and the ~125 m seed line, **failed** on straight-in (ADE 461, FDE p50 687 against the standing 671 veto, chamfer 232) | — (declined before the veto was reached) | already spent (one training arm + calibration + prediction) |
-| 5 (L2.g) | **all four must hold at BOTH seeds**: (1) shuffled-z ΔADE > 200 m; (2) minADE₆ below the N(0, I) control, pooled and vectored; (3) FDE p50 better than native32's 864 m by more than 100 m; (4) pooled top-1 ADE not worse than native32's 1322 m beyond the ~125 m seed line | either seed fails gate 1 — z is inert again — and the latent line closes permanently | 2 × ≈ 100 min GPU plus prediction |
+| 5 (L2.g) | **run; all four passed at BOTH seeds**: (1) shuffled-z ΔADE +935 / +1017 m against > 200 m; (2) minADE₆ 959 / 994 below the N(0, I) control's 1035 / 1030, and vectored 1995 / 2042 below 2223 / 2159; (3) FDE p50 627 / 656 m, 208–237 m better than native32's 864 against a 100 m bar; (4) pooled top-1 1194 / 1230 m, better than native32's 1322 m | not triggered | already spent (2 × 104 min GPU + prediction) |
+| 5(a)–(c) | follow-ups, gates to be pre-registered when one is chosen: (a) the B-line gate 3 fan geometry; (b) duration error and residual shuffle cost under `cta=given` on the L2.g base; (c) `native32` + `position_loss_scale_m` 1 km read against L2.g and native32, two seeds | — | one training arm each, ≈ 2–3 h GPU |
 | 6 | the sign and rough magnitude of both headline effects reproduce: a CTA gain concentrated in the vectored stratum, and a straight-in 80 % interval under ≈ 40 s with deployed coverage in the band | — | ≈ three training arms + calibration, ≈ 8–10 h GPU |
 | 7 | for a realistic arrival stream the references satisfy the required in-trail separation at the threshold and along final, and every one passes the corridor and flyability checks the single-flight arms are judged by | — | integration only: a multi-aircraft driver and a separation metric |
 | 8 | a control-arm ADE gate is decided by two seeds with early stopping off, or the difference is reported as "not demonstrated" when inside ~125 m | — | one extra training arm per gated comparison, ≈ 2–3 h GPU |
@@ -900,6 +939,7 @@ that the latent is inert is superseded by §3.2 here.
 | `E/b1_quantile_20260907/readout_s2024.{txt,json}` | `B1_point_matched_s2024` (seed 2024, 143/180, best 123) | val 1404 | 2026-09-08 |
 | `E/b1_quantile_20260907/B*_calibration/eta_calibration.{txt,json}` | B1, B3 conformal tables | val halves, ≈700 each | 2026-09-08 |
 | `E/b1b_two_head_20260908/{readout,eta_error}.{txt,json}`, `B1b_two_head_calibration/` | `B1b_two_head` (180/180, best 163, single seed) | val 1404 | 2026-09-08 |
+| `E/l2g_latent_distribution_20260908/{readout.json, latent_readout_L2g_units_e300{,_s2024}.json, probe/}` | `L2g_units_e300` seeds 1337 and 2024 (300/300, best 258 / 292) | val 1404 | 2026-09-08 |
 
 **Two results landed during writing**, and their numbers come from the readouts, not from
 derivation: the L2 units test (`LID` §六 "L2 量纲测试结果", commit `91c0f2f`; artifacts
@@ -922,9 +962,15 @@ control path.
 the L2.g pre-registration (`LID` §六 L2 末; commit `bc3f2f7`;
 `docs/experiments/l2g_latent_distribution_arms.json`).
 
-**One experiment is still pending, and only one**: **L2.g** — two seeds of the units recipe at 300
-epochs with early stopping off, campaign `l2g_latent_distribution_20260908`, queued last. Its gates
-and veto are in §5 item 5. Nothing else in this report is waiting on a run.
+**L2.g then ran and passed at both seeds** (`LID` §六 "L2.g 结果"; commit `647606f`; artifacts
+`E/l2g_latent_distribution_20260908/{latent_readout_L2g_units_e300{,_s2024}.json, probe/,
+readout.json}`), making §3.2 a replicated positive result and narrowing §4's statement about what
+the aircraft's own history contains.
+
+**No experiment in this programme is pending.** Every arm named in this report has run and been
+read out. What remains open are decisions, all marked as such: the vectored interval-width veto
+(§3.4), the A2 anytime delivery choice (§3.5), and which of the three L2.g follow-ups to take
+(§5 item 5).
 
 **Pre-registered arm files** (`4dTrajectory/ts_transformer/docs/experiments/`):
 `l1_lowdim_arms.json`, `l1b_full_arms.json`, `l1c_procedure_arms.json`,
