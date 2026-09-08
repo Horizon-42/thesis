@@ -1,0 +1,12 @@
+{
+  "_comment": "L2.h (pre-registered 2026-09-08 night, after U1). U1 showed that position_loss_scale_m 1 km, the change that makes the latent work, collapses bank fidelity when the teacher dose stays at 64: native32+units bank skill 0.400 (native32 0.726), bank RMS 1.60 deg, common-profile share 31.7 %; the L2.g arms carry the same damage in milder form (0.456 / 0.475, common profile 23-25 %) - their gates never tested bank. Mechanism (the L1 lesson): at 10 km units the imitation term was ~16x the position term (0.55 vs 0.035, weight 64); at 1 km units the position term is 2.3-2.5 and the imitation term 1.1-1.2, a ratio of 0.5 - the teacher no longer names the bank and the shared canned profile returns. L2.h restores the teacher's share under the 1 km units: control_imitation_loss_weight 2000 (= 64 x ~31, putting the imitation/position ratio back near the 10 km plateau's ~14-16x; the dose curve found 11.8x-47x a noise plateau) on the L2.g recipe (units, warm posterior, beta 0.01, latent 8, 300 epochs, patience 300, seed 1337), predict as L2.g. One arm first. GATES: bank skill >= 0.70 (score_control_arms, floor 0.170 / twin 0.699) AND the four L2.g gates (shuffle dADE > 200 m; minADE_6 < N(0,I) control pooled and vectored; FDE p50 better than 864 by > 100 m; pooled ADE not worse than 1322 by > 125 m). VETO: bank skill < 0.60 (the dose does not repair it) or shuffle dADE < 200 m (the heavier teacher kills z again). If it passes, its no-latent twin (native32 + units + 2000) follows to re-attribute; if it fails, the latent line stays a FDE/distribution instrument with a stated bank cost and the main recipe keeps 10 km units.",
+  "base_recipe": "simple-v3",
+  "base": {"control_recipe_name": "custom", "n_segments": 32, "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+           "latent_dim": 8, "latent_free_bits_nats": 0.05, "latent_prior_components": 1, "latent_posterior_init_std": 0.1,
+           "latent_beta": 0.01, "position_loss_scale_m": 1000.0, "epochs": 300, "patience": 300},
+  "arms": [
+    {"key": "L2h_units_imit2000", "label": "L2.g recipe with the teacher dose restored under 1 km units (imitation 2000)",
+     "overrides": {"control_imitation_loss_weight": 2000.0},
+     "predict_args": ["--latent-samples", "6", "--latent-random", "6", "--latent-shuffle"]}
+  ]
+}
