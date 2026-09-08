@@ -81,13 +81,16 @@ import torch
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from config import TSConfig
 from control.constraints.gates import on_final_weight, runway_axes_view
-from control.constraints.saturation import soft_max, soft_min
+from control.constraints.saturation import (
+    ACTIVE_BANK_CHANGE_RAD,
+    SATURATION_SOFTNESS_RAD,
+    soft_max,
+    soft_min,
+)
 from control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
 from final_approach_geometry import K_MARGIN, corridor_halfwidth, corridor_halfwidth_slope
 
-SATURATION_SOFTNESS_RAD = math.radians(2.0)   # width of the soft max/min around a bound
-_ACTIVE_BANK_CHANGE_RAD = math.radians(0.5)   # a step counts as "clamped" past this
 _SATURATED_INTERVAL_RAD = math.radians(0.1)   # a bank interval this narrow is a corner, not a bound
 _DIAGNOSTIC_KEYS = (
     HOOK_STEPS_KEY, "hook_gated_steps", "hook_clamped_steps", "hook_saturated_interval_steps",
@@ -170,7 +173,7 @@ class BarrierFilter:
         counts = torch.stack((
             torch.ones_like(bank, dtype=torch.float64),
             gated.to(torch.float64),
-            (change > _ACTIVE_BANK_CHANGE_RAD).to(torch.float64),
+            (change > ACTIVE_BANK_CHANGE_RAD).to(torch.float64),
             (gated & ((bank_max - bank_min).detach() < _SATURATED_INTERVAL_RAD)).to(torch.float64),
             change.to(torch.float64),
             (coordinated - load).abs().detach().to(torch.float64),

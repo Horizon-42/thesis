@@ -251,14 +251,23 @@ def _lag_hooked_schedule(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Segment-end augmented states and the effective commands under the hook."""
     state_scale = lag_state_scale(chart_scale, inputs.frame_params)
+    # How much of the schedule is left at the START of each segment, this hold included:
+    # the reversed cumulative sum of the durations. The whole schedule is known before the
+    # first segment is integrated, so a hook that reasons about the time still ahead reads
+    # it from the schedule rather than accumulating it and hoping it was called in order.
+    remaining_per_segment = torch.flip(
+        torch.cumsum(torch.flip(inputs.segment_durations_s, dims=(1,)), dim=1), dims=(1,)
+    )
 
     def view_of(
-        state: torch.Tensor, duration_s: torch.Tensor, reference: RolloutStateView | None
+        state: torch.Tensor, duration_s: torch.Tensor, remaining_s: torch.Tensor,
+        reference: RolloutStateView | None,
     ) -> RolloutStateView:
         return RolloutStateView(
             chart=lag_state_to_transport_chart(state, state_scale),
             actuators=lag_actuator_states(state, state_scale),
             duration_s=duration_s,
+            remaining_s=remaining_s,
             reference=reference,
         )
 
@@ -266,8 +275,13 @@ def _lag_hooked_schedule(
         state: torch.Tensor, command: torch.Tensor, duration_s: torch.Tensor, segment: int,
         reference: torch.Tensor | None,
     ) -> torch.Tensor:
-        reference_view = None if reference is None else view_of(reference, duration_s, None)
-        return command_hook(view_of(state, duration_s, reference_view), command, segment)
+        remaining_s = remaining_per_segment[:, segment]
+        reference_view = (
+            None if reference is None else view_of(reference, duration_s, remaining_s, None)
+        )
+        return command_hook(
+            view_of(state, duration_s, remaining_s, reference_view), command, segment
+        )
 
     return lag_hooked_rollout(
         inputs.initial_state,

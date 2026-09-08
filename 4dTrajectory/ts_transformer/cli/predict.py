@@ -25,7 +25,7 @@ from config import (
     CONTROL_HOOK_BARRIER,
     CONTROL_HOOK_MEMBERS,
     CONTROL_HOOK_OFF,
-    CONTROL_HOOK_SPEED_FLOOR,
+    CONTROL_SPEED_FLOOR_MARGIN_READERS,
     CORRIDOR_GATES,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_SELF_QUANTILE,
@@ -56,6 +56,7 @@ from export import (
 from flyability import report_for_records
 from io_utils import file_sha256
 from forecast import (
+    cut_at_threshold_crossing,
     default_anchor,
     duration_quantile_predictions,
     forecast_approaches,
@@ -157,6 +158,16 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
         help="keep full/window forecasts past closest threshold approach",
     )
     parser.add_argument(
+        "--truncate-at-threshold",
+        action="store_true",
+        help="cut every record at its first crossing of the landing threshold plane and "
+             "stamp source.truncatedAtThreshold — so the evaluation, corridor and "
+             "flyability reports see the APPROACH, not the flying a rollout does after it "
+             "arrives (L3.d: a floored, late-CTA rollout arrives early and keeps going, "
+             "endpoint |xt| p95 43-63 km). Applies to every output kind, the control "
+             "rollout included; a forecast that never reaches the threshold is left whole",
+    )
+    parser.add_argument(
         "--command-hook",
         choices=[hook for hook in CONTROL_HOOKS_AVAILABLE if hook != CONTROL_HOOK_OFF],
         default=None, metavar="HOOK",
@@ -179,9 +190,10 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--control-speed-floor-margin", type=float, default=None,
-        help="with a --command-hook containing speed-floor: override the checkpoint's "
-             "stall margin, V_floor = margin x V_stall(n_commanded) (default: the "
-             "checkpoint's, normally 1.1)",
+        help="with a --command-hook containing speed-floor or trombone: override the "
+             "checkpoint's stall margin, V_floor = margin x V_stall(n_commanded) — the "
+             "speed the floor holds and the speed the trombone sizes its detour against "
+             "(default: the checkpoint's, normally 1.1)",
     )
     parser.add_argument(
         "--closure-from-labels", default=None, metavar="JSON",
@@ -259,6 +271,21 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
                                 "predictable on a CPU-only machine")
 
 
+def _cut_at_threshold(forecasts, series, args):
+    """`--truncate-at-threshold` on a list of forecasts the batch produced some other way.
+
+    `forecast_approaches` takes the flag itself; the latent, posterior and label decoders
+    are their own entry points, and a flag that cut the main records but left a run's own
+    diagnostic arms uncut would make the two incomparable inside one output directory.
+    """
+    if not args.truncate_at_threshold:
+        return forecasts
+    return [
+        cut_at_threshold_crossing(forecast, item)
+        for forecast, item in zip(forecasts, series, strict=True)
+    ]
+
+
 def _fan_forecast(model, series, config, normalizer, device, args, conformal, leaf: FanLeaf):
     """One leaf's decode — the batch flown to the arrival time this leaf names."""
     return forecast_approaches(
@@ -266,6 +293,7 @@ def _fan_forecast(model, series, config, normalizer, device, args, conformal, le
         truncate=not args.no_truncate, project_final=args.project_final,
         conformal=conformal, cta_s=leaf.cta_s,
         cta_quantile=leaf.quantile, cta_interval=leaf.interval,
+        truncate_at_threshold=args.truncate_at_threshold,
     )
 
 
@@ -348,7 +376,7 @@ def run_cli(
         if CONTROL_HOOK_BARRIER in modules:
             tunings.append(f"alpha {config.control_barrier_alpha:g}")
             tunings.append(f"heading gain {config.control_barrier_heading_gain:g}")
-        if CONTROL_HOOK_SPEED_FLOOR in modules:
+        if any(name in modules for name in CONTROL_SPEED_FLOOR_MARGIN_READERS):
             tunings.append(f"stall margin {config.control_speed_floor_margin:g}")
         print(f"  command hook at prediction time: {args.command_hook} "
               f"({args.hook_saturation}); " + ", ".join(tunings))
@@ -369,6 +397,14 @@ def run_cli(
             parser.error("--closure-from-labels draws the label as it is; --project-final / --no-truncate do not apply")
         closure_labels = load_labels(args.closure_from_labels)
         print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
+    if args.truncate_at_threshold and args.no_truncate:
+        parser.error(
+            "--no-truncate keeps a fixed-time STATE forecast past its closest threshold "
+            "approach and --truncate-at-threshold cuts every forecast at the crossing: the "
+            "two ask for opposite records. (On a control checkpoint --no-truncate is a "
+            "no-op — the fixed-time postprocessors never run there — so the pair is refused "
+            "on the intent, not on the effect.)"
+        )
     if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
         parser.error("--cta-offset-s needs a checkpoint trained with cta_conditioning=given")
     if args.interval_endpoints and not args.cta_from_quantiles:
@@ -492,7 +528,9 @@ def run_cli(
                 samples=args.latent_samples, seed=args.latent_seed + start, device=device,
                 cta_offset_s=args.cta_offset_s,
             )):
-                for offset, (s, forecast) in enumerate(zip(batch_series, mode_forecasts, strict=True)):
+                for offset, (s, forecast) in enumerate(zip(
+                    batch_series, _cut_at_threshold(mode_forecasts, batch_series, args), strict=True
+                )):
                     mode_records[index].append(build_prediction_record(
                         s, forecast, index=start + offset, model_name=config.model,
                         horizon_mode=config.horizon_mode, split=args.split,
@@ -507,7 +545,9 @@ def run_cli(
                 seed=args.latent_seed + LATENT_RANDOM_SEED_OFFSET + start, device=device,
                 cta_offset_s=args.cta_offset_s,
             )):
-                for offset, (s, forecast) in enumerate(zip(batch_series, random_forecasts, strict=True)):
+                for offset, (s, forecast) in enumerate(zip(
+                    batch_series, _cut_at_threshold(random_forecasts, batch_series, args), strict=True
+                )):
                     random_records[index].append(build_prediction_record(
                         s, forecast, index=start + offset, model_name=config.model,
                         horizon_mode=config.horizon_mode, split=args.split,
@@ -516,9 +556,12 @@ def run_cli(
                         s, forecast, points=config.validation_common_grid_points,
                     ))
         if args.latent_shuffle:
-            for offset, (s, forecast) in enumerate(zip(batch_series, shuffled_latent_forecasts(
-                model, batch_series, config, normalizer, seed=args.latent_seed + start, device=device,
-                cta_offset_s=args.cta_offset_s,
+            for offset, (s, forecast) in enumerate(zip(batch_series, _cut_at_threshold(
+                shuffled_latent_forecasts(
+                    model, batch_series, config, normalizer,
+                    seed=args.latent_seed + start, device=device,
+                    cta_offset_s=args.cta_offset_s,
+                ), batch_series, args,
             ), strict=True)):
                 shuffled_records.append(build_prediction_record(
                     s, forecast, index=start + offset, model_name=config.model,
@@ -528,11 +571,14 @@ def run_cli(
                     s, forecast, points=config.validation_common_grid_points,
                 ))
         if closure_labels is not None:
-            forecasts = forecast_closure_from_labels(batch_series, config, closure_labels)
-        elif args.z_from_posterior:
-            forecasts = posterior_latent_forecasts(
-                model, batch_series, config, normalizer, device=device, cta_offset_s=args.cta_offset_s,
+            forecasts = _cut_at_threshold(
+                forecast_closure_from_labels(batch_series, config, closure_labels),
+                batch_series, args,
             )
+        elif args.z_from_posterior:
+            forecasts = _cut_at_threshold(posterior_latent_forecasts(
+                model, batch_series, config, normalizer, device=device, cta_offset_s=args.cta_offset_s,
+            ), batch_series, args)
         elif args.cta_from_quantiles:
             anchor = default_anchor(config)
             quantiles = duration_quantile_predictions(
@@ -588,6 +634,7 @@ def run_cli(
                 project_final=args.project_final,
                 cta_offset_s=args.cta_offset_s,
                 conformal=conformal,
+                truncate_at_threshold=args.truncate_at_threshold,
             )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)
@@ -652,6 +699,13 @@ def run_cli(
 
     if args.project_final is not None:
         print(f"  projected every state forecast onto the final ({args.project_final} gate)")
+    if args.truncate_at_threshold:
+        cut = sum(record.source.get("truncatedAtThreshold", False) for record in records)
+        print(
+            f"  {cut} of {len(records)} main record(s) end at the threshold crossing; the "
+            f"remaining {len(records) - cut} never reach it and are whole. The run's own "
+            "latent / fan / posterior arms were cut on the same rule and are not in this count"
+        )
     capped = sum(record.source.get("horizonCapped", False) for record in records)
     if capped:
         print(

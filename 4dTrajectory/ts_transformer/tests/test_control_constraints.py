@@ -24,21 +24,23 @@ for path in (TS_DIR, REPO_ROOT):
 import final_approach_geometry as fag  # noqa: E402
 from config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_HOOK_BARRIER,
-    CONTROL_HOOK_BARRIER_SPEED_FLOOR, CONTROL_HOOK_MEMBERS, CONTROL_HOOK_NOMINAL_RESIDUAL,
-    CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOKS, CONTROL_HOOKS_AVAILABLE,
-    CONTROL_SPEED_FLOOR_MARGIN_DEFAULT, HOOK_SATURATION_HARD, PREDICTION_CONTROL, TSConfig,
-    recipe_settings,
+    CONTROL_HOOK_BARRIER_SPEED_FLOOR, CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+    CONTROL_HOOK_BARRIER_TROMBONE, CONTROL_HOOK_MEMBERS, CONTROL_HOOK_NOMINAL_RESIDUAL,
+    CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE, CONTROL_HOOKS, CONTROL_HOOKS_AVAILABLE,
+    CONTROL_SPEED_FLOOR_MARGIN_DEFAULT, HOOK_SATURATION_HARD, HOOK_SATURATION_SOFT,
+    PREDICTION_CONTROL, TSConfig, recipe_settings,
 )
 from control.constraints import (  # noqa: E402
-    BarrierFilter, CompositeHook, SpeedFloor, build_command_hook,
+    BarrierFilter, CompositeHook, SpeedFloor, Trombone, build_command_hook,
 )
+from control.constraints import trombone as trombone_module  # noqa: E402
 from control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION  # noqa: E402
 from flyability import flyability_summary, required_controls  # noqa: E402
 from dataclasses import fields as dataclass_fields  # noqa: E402
 
 from control.constraints.gates import on_final_weight, runway_axes_view  # noqa: E402
 from control.dynamics import rollout as control_rollout  # noqa: E402
-from control.dynamics.hooks import RolloutStateView  # noqa: E402
+from control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView  # noqa: E402
 from control.envelope import MAX_BANK_RAD  # noqa: E402
 from coordinate_frames import ENUFrame  # noqa: E402
 from dataset import Normalizer, build_series, dynamics_arrays  # noqa: E402
@@ -60,9 +62,12 @@ HOLD_S = 5.0   # about the deployed hold: 64 segments over a p50 328 s arrival
 
 
 def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0, psi_rwy=0.0,
-          vertical_speed=None, hold_s=HOLD_S, bank_now_rad=0.0, reference_speed=None) -> RolloutStateView:
+          vertical_speed=None, hold_s=HOLD_S, bank_now_rad=0.0, reference_speed=None,
+          remaining_s=None, load_now=1.0) -> RolloutStateView:
     """A chart state (runway course psi_rwy) at ``d`` back, ``xt`` right, on the final. The
-    reference (the unhooked schedule's state) is the same state, at ``reference_speed`` if given."""
+    reference (the unhooked schedule's state) is the same state, at ``reference_speed`` if given.
+    ``remaining_s`` is the schedule's own clock (this hold included); it defaults to the hold,
+    i.e. "this is the last segment", which is what leaves the trombone nothing to absorb."""
     d, xt = torch.as_tensor(d_m, dtype=torch.float64), torch.as_tensor(xt_m, dtype=torch.float64)
     ue, un = math.cos(psi_rwy), math.sin(psi_rwy)
     e, n = -d * ue + xt * un, -d * un - xt * ue
@@ -73,12 +78,16 @@ def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0
                          torch.full_like(d, speed * math.sin(heading)), vu, torch.full_like(d, 66000.0)], dim=-1)
     # Actuators being flown: trim thrust, the given bank, a level-flight load factor (the
     # barrier reads the lift factor n·cos μ from here — zeros would halve every bound).
-    actuators = torch.tensor([[0.1, bank_now_rad, 1.0]], dtype=torch.float64).expand(len(d), -1).clone()
+    actuators = torch.tensor([[0.1, bank_now_rad, load_now]], dtype=torch.float64).expand(len(d), -1).clone()
+    hold = torch.full_like(d, hold_s)
+    remaining = hold if remaining_s is None else torch.full_like(d, remaining_s)
     reference_chart = chart.clone()
     if reference_speed is not None:
         reference_chart[:, 3:6] *= reference_speed / speed
-    reference = RolloutStateView(chart=reference_chart, actuators=actuators.clone(), duration_s=torch.full_like(d, hold_s))
-    return RolloutStateView(chart=chart, actuators=actuators, duration_s=torch.full_like(d, hold_s), reference=reference)
+    reference = RolloutStateView(chart=reference_chart, actuators=actuators.clone(),
+                                 duration_s=hold, remaining_s=remaining)
+    return RolloutStateView(chart=chart, actuators=actuators, duration_s=hold,
+                            remaining_s=remaining, reference=reference)
 
 
 def _context(batch: int) -> dict[str, torch.Tensor]:
@@ -110,7 +119,7 @@ def _stall_readout(rollout, dynamics, durations, aircraft):
         {"t": float(times[0, step]), "lat": float(row[0]), "lon": float(row[1]),
          "alt": float(row[2]), "V": float(row[3]), "psi": float(row[4]),
          "gamma": float(row[5]), "m": float(row[6])}
-        for step, row in enumerate(rollout.geodetic_states[0])
+        for step, row in enumerate(rollout.geodetic_states[0].detach())
     ]
     summary = flyability_summary(required_controls(states, aircraft), aircraft_code=aircraft.code)
     slack = min(
@@ -423,6 +432,409 @@ def test_speed_floor_keeps_a_decelerating_rollout_off_the_stall(saturation):
     assert torch.all(hooked.controls[:, :, 0] >= decelerating.to(hooked.controls.dtype)[:, :, 0] - 1e-9)
 
 
+# ── trombone ─────────────────────────────────────────────────────────────────
+
+def _trombone_view(*, d_m, xt_m, heading_error_rad, remaining_s, speed=72.0, hold_s=HOLD_S):
+    return _view([d_m], [xt_m], heading_error_rad=heading_error_rad, speed=speed,
+                 hold_s=hold_s, remaining_s=remaining_s)
+
+
+def _view_floor_mps(*, d_m, speed, hold_s=HOLD_S, load=1.0):
+    """`_floor_mps` at the height `_view` puts the command's effect at (u + vu·dt)."""
+    return _floor_mps(d_m * TAN_GPA - speed * TAN_GPA * hold_s,
+                      mass_kg=66_000.0, area_m2=122.6, cl_max=2.7, load=load)
+
+
+def _fixture_pace_mps(*, d_m, speed):
+    """`_final_batch`'s pace at its anchor, in closed form: `max(V_floor, V_horizontal)`. The
+    fixture starts on the 3 deg path, so the horizontal speed is `speed * cos 3 deg`, and on
+    this geometry it is the larger of the two — which is the ordinary case."""
+    return max(_view_floor_mps(d_m=d_m, speed=speed, hold_s=1.0),
+               speed * math.cos(math.radians(3.0)))
+
+
+def _anchor_pace_mps(dynamics, durations):
+    """`_final_batch`'s own PACE at its anchor — `max(V_floor, V_horizontal)`, the speed the
+    hook measures its surplus at. The floor is the flight's airframe row at its geodetic
+    height under the load factor the fixture commands; the horizontal speed is the initial
+    state's, and on this fixture it is the larger of the two."""
+    state, aero = dynamics["initial_state"][0], dynamics["aero_params"][0]
+    hold = float(durations[0, 0])
+    altitude = float(state[2]) + float(state[3]) * math.sin(float(state[5])) * hold
+    floor = _floor_mps(altitude, mass_kg=float(state[6]), area_m2=float(aero[0]),
+                       cl_max=float(aero[1]), load=math.cos(math.radians(3.0)))
+    return max(floor, float(state[3]) * math.cos(float(state[5])))
+
+
+@pytest.mark.parametrize("hard", [True, False])
+def test_the_trombone_is_inert_where_the_path_needs_every_second_it_has(hard):
+    """No surplus, no hook — and "no" means bit-identical, in BOTH saturations.
+
+    The pace over the remaining 60 s covers ~4 km of a 21 km run, so the aircraft is already
+    late and there is nothing to spend on path. A soft form that returned the command
+    "almost" unchanged here would move every flight the hook exists to leave alone.
+
+    The command is swept over a BAND of banks and load factors, not one pair, because the
+    load channel is where inertness is easy to lose: ``(load·cos μ)/cos μ`` is not the
+    identity in IEEE — it differs by an ULP for a large share of operand pairs — so a test on
+    one lucky pair (or on ``μ = 0``, where ``cos μ`` is exactly 1) proves nothing.
+    """
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE)
+    banks = [0.0, -0.3, 0.42, 0.17, -0.61]
+    loads = [1.0, 1.05, 1.11, 0.93]
+    rows = len(banks) * len(loads)
+    hook = Trombone(config, _context(rows), hard=hard)
+    view = _view([20_000.0] * rows, [8_000.0] * rows,
+                 heading_error_rad=math.radians(50.0), remaining_s=60.0)
+    command = torch.stack([
+        torch.full((rows,), 0.4, dtype=torch.float64),
+        torch.tensor([b for b in banks for _ in loads], dtype=torch.float64),
+        torch.tensor([n for _ in banks for n in loads], dtype=torch.float64),
+    ], dim=-1)
+    assert torch.equal(hook(view, command, 0), command)
+    assert hook.diagnostics()["hook_trombone_engaged_steps"] == 0.0
+    # ...and the estimate is still published: this flight had no delay to absorb.
+    assert hook.diagnostics()["hook_trombone_delay_s"] == 0.0
+
+
+def test_the_trombone_offset_is_the_dog_leg_that_spends_exactly_the_surplus():
+    """cos θ = D / (V_floor · T_r), and the excursion is that offset about the BEELINE.
+
+    The identity is the whole design: ``V_floor·T_r`` is how far the floor speed carries the
+    aircraft in the time it has, ``D`` is how far it has to go, and a leg flown at θ off the
+    base spends the difference (``D(sec θ − 1)``). The side is the one it is already on, so
+    the dog-leg stays wide of the centreline instead of cutting across it.
+    """
+    d_m, xt_m, remaining, speed = 12_000.0, 6_000.0, 240.0, 72.0
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE)
+    hook = Trombone(config, _context(1), hard=True)
+    view = _trombone_view(d_m=d_m, xt_m=xt_m, heading_error_rad=math.radians(60.0),
+                          remaining_s=remaining, speed=speed)
+    # The pace: the speed being flown, floored at the stall-margin floor. Here the aircraft
+    # is the faster of the two, which is the ordinary case and the one that used to break the
+    # rejoin when the estimate was sized against the floor alone.
+    pace = max(_view_floor_mps(d_m=d_m, speed=speed), speed)
+    assert pace == speed
+    direct = math.hypot(d_m, xt_m)
+    expected = math.acos(direct / (pace * remaining))
+    assert 0.0 < expected < trombone_module.OFFSET_MAX_RAD          # not the cap's answer
+    hook(view, _command([0.0]), 0)
+    diagnostics = hook.diagnostics()
+    assert diagnostics["hook_trombone_offset_rad"] == pytest.approx(expected, rel=1e-6)
+    assert diagnostics["hook_trombone_engaged_steps"] == 1.0
+    # The delay it stands for, and the extra path this hold's offset commands.
+    assert diagnostics["hook_trombone_delay_s"] == pytest.approx(
+        remaining - direct / pace, rel=1e-6)
+    assert diagnostics["hook_trombone_stretch_m"] == pytest.approx(
+        float(view.chart[0, 3:5].norm()) * HOLD_S * (1.0 - math.cos(expected)), rel=1e-6)
+    assert diagnostics["hook_trombone_saturated_steps"] == 0.0
+
+
+def test_the_trombone_says_when_the_stretch_ran_out_of_room():
+    """A delay past what a 45 deg leg can buy is NOT absorbed silently.
+
+    ``sec 45 deg`` is 1.41, so the cap binds once the delay exceeds ~41 % of the time the
+    remaining path needs at the floor speed. The offset then saturates, the surplus survives
+    the step, and `hook_trombone_saturated_steps` is what says so — the counterpart of the
+    floor's "full thrust is not enough" count.
+    """
+    d_m, xt_m, speed = 12_000.0, 6_000.0, 72.0
+    direct = math.hypot(d_m, xt_m)
+    pace = max(_view_floor_mps(d_m=d_m, speed=speed), speed)
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE)
+    hook = Trombone(config, _context(1), hard=True)
+    remaining = 1.8 * direct / pace           # 80 % more time than the path needs: past 41 %
+    view = _trombone_view(d_m=d_m, xt_m=xt_m, heading_error_rad=math.radians(60.0),
+                          remaining_s=remaining, speed=speed)
+    assert math.acos(direct / (pace * remaining)) > trombone_module.OFFSET_MAX_RAD
+    hook(view, _command([0.0]), 0)
+    diagnostics = hook.diagnostics()
+    assert diagnostics["hook_trombone_saturated_steps"] == 1.0
+    assert diagnostics["hook_trombone_offset_rad"] == pytest.approx(
+        trombone_module.OFFSET_MAX_RAD)
+
+
+def test_the_trombone_turns_away_from_the_centreline_and_mirrors_at_the_half_way_point():
+    """Outbound stays WIDE of the beeline; past half the stretch the offset mirrors.
+
+    ``xt > 0`` means right of the inbound course and ``ẋt = −V sin ψ_err``, so the leg that
+    keeps the aircraft wide is the one BELOW the beeline heading — and the return leg is the
+    same offset on the other side, which converges because the beeline is recomputed from
+    where the aircraft now is.
+    """
+    d_m, xt_m, remaining, speed = 8_000.0, 8_000.0, 260.0, 72.0
+    beeline = math.atan2(xt_m, d_m)      # 45 deg: off the course, so an excursion may open
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE)
+    hook = Trombone(config, _context(1), hard=True)
+    view = _trombone_view(d_m=d_m, xt_m=xt_m, heading_error_rad=beeline,
+                          remaining_s=remaining, speed=speed)
+    # Flying the beeline exactly: the hook's whole demand is the excursion, so the sign of
+    # the bank it asks for is the sign of the offset it wants.
+    outbound = hook(view, _command([0.0]), 0)
+    assert float(outbound[0, 1]) < 0.0                      # a turn wide, not across
+    # Half the stretch spent (the surplus has fallen below half the latched target) and the
+    # same state turns the other way: the mirrored leg back onto the beeline.
+    hook._target_m = hook._target_m * 4.0
+    mirrored = hook(view, _command([0.0]), 1)
+    assert float(mirrored[0, 1]) > 0.0
+
+
+def test_the_trombone_hands_the_final_over_and_never_takes_it_back():
+    """The rule the spec left open, in three parts.
+
+    (1) A path already lined up on the course is left alone even with the gate closed — a
+    dog-leg there is a turn the barrier undoes as soon as the cone is entered. (2) A path
+    inside the gate is left alone, which follows: the gate REQUIRES alignment. (3) Once the
+    gate has opened for a flight the hook is disabled for the rest of the rollout, so a
+    later excursion cannot open behind an aircraft that is already on final.
+    """
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE)
+    command = _command([0.0])
+    lined_up = _trombone_view(d_m=12_000.0, xt_m=6_000.0, heading_error_rad=0.0, remaining_s=260.0)
+    view = runway_axes_view(lined_up, torch.zeros(1, dtype=torch.float64))
+    assert on_final_weight(view, hard=True).tolist() == [0.0]     # wide of the cone: gate shut
+    hook = Trombone(config, _context(1), hard=True)
+    assert torch.equal(hook(lined_up, command, 0), command)       # ...and still left alone
+    assert hook.diagnostics()["hook_trombone_engaged_steps"] == 0.0
+
+    on_final = _trombone_view(d_m=8_000.0, xt_m=0.0, heading_error_rad=0.0, remaining_s=260.0)
+    assert on_final_weight(runway_axes_view(on_final, torch.zeros(1, dtype=torch.float64)),
+                           hard=True).tolist() == [1.0]
+    gated = Trombone(config, _context(1), hard=True)
+    assert torch.equal(gated(on_final, command, 0), command)
+    # The gate opened on segment 0; the state that WOULD have engaged now cannot.
+    off_final = _trombone_view(d_m=12_000.0, xt_m=6_000.0,
+                               heading_error_rad=math.radians(60.0), remaining_s=260.0)
+    fresh = Trombone(config, _context(1), hard=True)
+    assert not torch.equal(fresh(off_final, command, 0), command)  # it would have
+    assert torch.equal(gated(off_final, command, 1), command)      # but this one has seen the gate
+
+
+def test_the_trombone_bank_is_capped_and_keeps_the_vertical_lift():
+    """A demand far past the cap comes back AT the cap, and n·cos μ is preserved."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE)
+    hook = Trombone(config, _context(1), hard=True)
+    # Heading 120° from the beeline: the turn wanted is far more than one hold can give.
+    view = _trombone_view(d_m=12_000.0, xt_m=6_000.0, heading_error_rad=math.radians(150.0),
+                          remaining_s=260.0)
+    command = _command([0.0], load=1.2)
+    out = hook(view, command, 0)
+    assert abs(float(out[0, 1])) == pytest.approx(trombone_module.TURN_BANK_MAX_RAD)
+    assert float(out[0, 2] * torch.cos(out[0, 1])) == pytest.approx(1.2, rel=1e-12)
+    assert trombone_module.TURN_BANK_MAX_RAD < MAX_BANK_RAD
+
+
+def test_the_trombone_shares_the_floors_definition_and_its_cap_leaves_a_margin():
+    """Two contracts, no behaviour: the shared floor definition, and the cap's arithmetic.
+
+    The hook divides by the speed floor, so it must be the FLOOR MODULE's own — checked here
+    by calling `speed_floor.floor_speed` and matching the test's independent formula. And the
+    load factor the hook coordinates raises the stall speed by ``sqrt(1/cos μ)``, which at the
+    adopted cap costs 1.7 % of a margin that is 10 %, leaving room for the induced drag the
+    same turn adds. **The behavioural claim is not here**: what the cap actually leaves is
+    measured by `test_the_trombone_turn_cap_is_where_the_stall_line_is`, on a rollout.
+    """
+    retained = CONTROL_SPEED_FLOOR_MARGIN_DEFAULT / math.sqrt(
+        1.0 / math.cos(trombone_module.TURN_BANK_MAX_RAD)
+    )
+    assert retained > 1.05, retained
+    # The hook's own floor is the floor module's, to the bit — one definition, so a detour
+    # can never be sized against a speed the floor does not hold.
+    from control.constraints.speed_floor import floor_speed
+
+    view = runway_axes_view(_trombone_view(d_m=9_000.0, xt_m=0.0, heading_error_rad=0.0,
+                                           remaining_s=200.0),
+                            torch.zeros(1, dtype=torch.float64))
+    context = _context(1)
+    floor, _rho = floor_speed(view, aero=context["aero_params"],
+                              origin_altitude_m=context["frame_params"][:, 2],
+                              margin=CONTROL_SPEED_FLOOR_MARGIN_DEFAULT,
+                              commanded_load=torch.ones(1, dtype=torch.float64))
+    assert float(floor) == pytest.approx(
+        _view_floor_mps(d_m=9_000.0, speed=72.0), rel=1e-9)
+
+
+@pytest.mark.parametrize("saturation", [HOOK_SATURATION_HARD, HOOK_SATURATION_SOFT])
+def test_the_three_hook_stack_spends_a_late_cta_before_the_final(saturation):
+    """L3.e end to end, against L3.d's own failure, on one fixture.
+
+    A base leg 14.1 km from the threshold, the network commanding idle-minus, and a schedule
+    60 s longer than the floor speed needs for that run. Under `barrier+speed-floor` the
+    floor holds the speed up, the rollout reaches the threshold with a quarter of its
+    schedule still to fly, and then keeps going — L3.d's measured geometry. Adding the
+    trombone spends those 60 s on a dog-leg BEFORE the final: the flown path grows by very
+    nearly ``V x 60 s`` against the same stack flown to the UNDELAYED arrival time, the
+    closest approach moves to the last segment, and the speed stays off the stall.
+    """
+    d_m = xt_m = 10_000.0
+    speed, segments, delay_s = 72.0, 48, 60.0
+    direct = math.hypot(d_m, xt_m)
+    # Sized off the anchor's PACE, so the delayed arm is late by exactly `delay_s` and the
+    # undelayed one has nothing at all to absorb.
+    pace = _fixture_pace_mps(d_m=d_m, speed=speed)
+    arms = {}
+    for key, hook_name, extra_s in (
+        ("floored", CONTROL_HOOK_BARRIER_SPEED_FLOOR, delay_s),
+        ("stacked", CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE, delay_s),
+        ("on-time", CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE, 0.0),
+    ):
+        config = _hook_config(control_command_hook=hook_name, control_hook_saturation=saturation)
+        dynamics, controls, durations = _final_batch(
+            config, xt_m=xt_m, d_m=d_m, segments=segments, speed=speed,
+            heading_error_rad=math.atan2(xt_m, d_m),      # flying straight at the threshold
+            total_s=direct / pace + extra_s, thrust=MIN_THRUST_FRACTION,
+        )
+        hook = build_command_hook(config, dynamics)
+        rollout = control_rollout.rollout_control_endpoints(
+            controls, durations, dynamics, config, command_hook=hook)
+        d, xt = fag.runway_axes(rollout.channels[..., 0], rollout.channels[..., 1],
+                                dynamics["runway_heading_rad"])
+        arms[key] = (rollout, hook, torch.hypot(d[0], xt[0]).detach(), dynamics, durations)
+
+    # Where each arm is when its schedule runs out. Without the stretch the rollout makes its
+    # closest approach with segments to spare and is then flying AWAY from the threshold when
+    # the schedule ends; with it, the closest approach is the end of the schedule.
+    floored = arms["floored"][2]
+    assert int(floored.argmin()) <= segments - 3
+    assert float(floored[-1]) > 20.0 * float(floored.min())
+    assert int(arms["stacked"][2].argmin()) >= segments - 2
+    assert float(arms["stacked"][2].min()) < 0.06 * direct
+    # ...and it got there by going out and coming back, not by cutting the corner: the
+    # cross-track peaks in the middle of the rollout and is nearly nulled at the end.
+    _rollout, _hook, _distance, dynamics, _durations = arms["stacked"]
+    _d, cross = fag.runway_axes(_rollout.channels[..., 0], _rollout.channels[..., 1],
+                                dynamics["runway_heading_rad"])
+    excursion = cross[0].detach().abs()
+    assert int(excursion.argmax()) < segments - 4
+    assert float(excursion[-1]) < 0.3 * float(excursion.max())
+
+    # The path the delay bought, against the SAME stack flown to the undelayed arrival time
+    # (where the hook is inert): 60 s of flying, at the speed actually flown.
+    def _flown(key):
+        channels = arms[key][0].channels[0, :, :2].detach()
+        return float(torch.linalg.norm(torch.diff(channels, dim=0), dim=1).sum())
+
+    on_time_s = float(arms["on-time"][4][0].sum())
+    assert _flown("stacked") - _flown("on-time") == pytest.approx(
+        _flown("on-time") / on_time_s * delay_s, rel=0.1)
+
+    # The floor still holds and the turn does not put a sample over the stall line.
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9)
+    series, _ = build_series(flights, _hook_config(), airport=AIRPORT)
+    rollout, hook, _distance, dynamics, durations = arms["stacked"]
+    summary, slack = _stall_readout(rollout, dynamics, durations, series[0].scenario.aircraft)
+    assert summary["violations"].get("stall", 0) == 0, summary["violations"]
+    assert summary["violations"].get("thrust_over_max", 0) == 0, summary["violations"]
+    assert slack > -2.0, slack
+    # ...and the diagnostics say what it did: engaged on most steps, and the anchor's own
+    # estimate of the delay it was asked to absorb.
+    diagnostics = hook.per_flight_diagnostics()
+    steps = float(diagnostics[HOOK_STEPS_KEY][0])
+    assert float(diagnostics["hook_trombone_engaged_steps"][0]) / steps > 0.8
+    unabsorbed = float(durations[0].sum()) - direct / _anchor_pace_mps(dynamics, durations)
+    assert unabsorbed == pytest.approx(delay_s, rel=1e-3)      # the fixture IS a minute late
+    assert float(diagnostics["hook_trombone_delay_s"][0]) / steps == pytest.approx(
+        unabsorbed, rel=1e-3)
+    # The undelayed arm has nothing to absorb, so the third module never fires there.
+    assert float(arms["on-time"][1].per_flight_diagnostics()["hook_trombone_engaged_steps"][0]) == 0.0
+
+
+def test_the_trombone_turn_cap_is_where_the_stall_line_is(monkeypatch):
+    """The cap's number, measured rather than asserted.
+
+    The floor runs before this module and cannot price its turn, so the cap is the whole
+    defence, and it is set by where the measurement puts the line rather than by comfort.
+    On this fixture the stall slack falls monotonically with the cap — -0.6 m/s at 10 deg,
+    -0.9 at 15, -1.5 at 20, -3.3 at 25 — and at 30 deg ``flyability`` reports its first
+    stall sample. The adopted cap keeps a sample count of zero with room to spare.
+    """
+    d_m = xt_m = 10_000.0
+    speed, segments = 72.0, 48
+    total_s = math.hypot(d_m, xt_m) / _fixture_pace_mps(d_m=d_m, speed=speed) + 60.0
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9)
+    series, _ = build_series(flights, _hook_config(), airport=AIRPORT)
+    measured = {}
+    for cap_rad in (math.radians(30.0), trombone_module.TURN_BANK_MAX_RAD):
+        config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                              control_hook_saturation=HOOK_SATURATION_HARD)
+        dynamics, controls, durations = _final_batch(
+            config, xt_m=xt_m, d_m=d_m, segments=segments, speed=speed,
+            heading_error_rad=math.atan2(xt_m, d_m), total_s=total_s, thrust=MIN_THRUST_FRACTION)
+        with monkeypatch.context() as patch:
+            patch.setattr(trombone_module, "TURN_BANK_MAX_RAD", cap_rad)
+            rollout = control_rollout.rollout_control_endpoints(
+                controls, durations, dynamics, config,
+                command_hook=build_command_hook(config, dynamics))
+        summary, slack = _stall_readout(rollout, dynamics, durations, series[0].scenario.aircraft)
+        measured[float(cap_rad)] = (summary["violations"].get("stall", 0), slack)
+    over, adopted = measured[math.radians(30.0)], measured[float(trombone_module.TURN_BANK_MAX_RAD)]
+    assert over[0] > 0 and adopted[0] == 0            # 30 deg crosses the line, the cap does not
+    assert adopted[1] > over[1] + 1.0                 # ...and by a margin, not by a rounding
+
+
+def test_the_three_hook_stack_is_bit_identical_on_a_flight_already_on_the_final():
+    """The hand-over rule's price, measured: a straight-in cannot be stretched at all.
+
+    The membership cone is generous — an aligned flight on the centreline is inside the gate
+    from tens of kilometres out — so on a straight-in the trombone is never admitted and the
+    stack is `barrier+speed-floor` to the bit. What the record still carries is the delay the
+    hook estimated and could not spend, which is the number to publish next to the arm.
+    """
+    d_m, speed, segments = 14_000.0, 72.0, 24
+    total_s = d_m / _fixture_pace_mps(d_m=d_m, speed=speed) + 60.0
+    rollouts = {}
+    for hook_name in (CONTROL_HOOK_BARRIER_SPEED_FLOOR, CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE):
+        config = _hook_config(control_command_hook=hook_name,
+                              control_hook_saturation=HOOK_SATURATION_SOFT)
+        dynamics, controls, durations = _final_batch(
+            config, xt_m=0.0, d_m=d_m, segments=segments, speed=speed,
+            total_s=total_s, thrust=MIN_THRUST_FRACTION)
+        hook = build_command_hook(config, dynamics)
+        rollouts[hook_name] = (control_rollout.rollout_control_endpoints(
+            controls, durations, dynamics, config, command_hook=hook), hook)
+    plain, _ = rollouts[CONTROL_HOOK_BARRIER_SPEED_FLOOR]
+    stacked, hook = rollouts[CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE]
+    assert torch.equal(plain.channels, stacked.channels)
+    assert torch.equal(plain.controls, stacked.controls)
+    diagnostics = hook.per_flight_diagnostics()
+    steps = float(diagnostics[HOOK_STEPS_KEY][0])
+    assert float(diagnostics["hook_trombone_engaged_steps"][0]) == 0.0
+    unabsorbed = total_s - d_m / _anchor_pace_mps(dynamics, durations)
+    assert unabsorbed == pytest.approx(60.0, rel=1e-3)
+    assert float(diagnostics["hook_trombone_delay_s"][0]) / steps == pytest.approx(
+        unabsorbed, rel=1e-3)
+
+
+def test_the_trombone_stacks_are_registered_and_every_other_order_is_refused():
+    """`+` is a lookup: the two stacks are members, and nothing else that spells the word is."""
+    assert CONTROL_HOOK_MEMBERS[CONTROL_HOOK_BARRIER_TROMBONE] == (
+        CONTROL_HOOK_BARRIER, CONTROL_HOOK_TROMBONE)
+    assert CONTROL_HOOK_MEMBERS[CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE] == (
+        CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE)
+    for value in ("trombone", "trombone+barrier", "barrier+trombone+speed-floor",
+                  "speed-floor+trombone", "trombone+speed-floor+barrier"):
+        with pytest.raises(ValueError, match="unknown control_command_hook"):
+            _hook_config(control_command_hook=value)
+    # A solo trombone is not selectable: it hands the final over and needs the barrier there.
+    assert CONTROL_HOOK_TROMBONE not in CONTROL_HOOKS
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE)
+    stack = build_command_hook(config, _context(1))
+    assert isinstance(stack, CompositeHook) and len(stack.hooks) == 3
+    assert [type(item).__name__ for item in stack.hooks] == ["BarrierFilter", "SpeedFloor", "Trombone"]
+    merged = stack.diagnostics()
+    assert merged[HOOK_STEPS_KEY] == 0.0                    # one shared count, not three
+    assert {"hook_clamped_steps", "hook_floor_bound_steps", "hook_trombone_engaged_steps"} <= set(merged)
+    # The stall margin is a knob TWO modules read, so `barrier+trombone` may set it.
+    assert _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE,
+                        control_speed_floor_margin=1.25).control_speed_floor_margin == 1.25
+    name = run_display_name(TSConfig(**{
+        **recipe_settings("simple-v3", keep_name=True),
+        "control_dynamics_model": CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+        "control_dynamics_backend": "scaled-transport-chart-velocity",
+        "control_command_hook": CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+    }).to_dict())
+    assert "hook=barrier+speed-floor+trombone" in name
+
 # ── composition ──────────────────────────────────────────────────────────────
 
 def test_the_combined_hook_is_the_barrier_then_the_floor_on_disjoint_channels():
@@ -583,8 +995,13 @@ _TRIM_THRUST = 0.1
 
 
 def _final_batch(config: TSConfig, *, xt_m: float, d_m: float, height_above_gp_m: float = 0.0, segments: int = 6,
-                 speed: float = 72.0, heading_error_rad: float = 0.0):
-    """A synthetic batch whose initial state sits on the final at (d, xt, +height)."""
+                 speed: float = 72.0, heading_error_rad: float = 0.0, total_s: float | None = None,
+                 thrust: float = _TRIM_THRUST):
+    """A synthetic batch whose initial state sits on the final at (d, xt, +height).
+
+    ``total_s`` is the schedule's whole duration (default: the along-course run at ``speed``,
+    which is what the existing arms are sized on) — the CTA, in the arms this fixture stands
+    in for; the trombone's question is what happens when it exceeds what the path absorbs."""
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9)
     series, _ = build_series(flights, config, airport=AIRPORT)
     anchor = config.seq_len - 1
@@ -600,11 +1017,12 @@ def _final_batch(config: TSConfig, *, xt_m: float, d_m: float, height_above_gp_m
     alt = frame.alt0 + u
     for row in range(len(series)):
         dynamics["initial_state"][row] = torch.tensor([lat, lon, alt, speed, psi + heading_error_rad, -math.radians(3.0), 66000.0], dtype=torch.float64)
-        dynamics["initial_controls"][row] = torch.tensor([_TRIM_THRUST, 0.0, math.cos(math.radians(3.0))], dtype=torch.float64)
+        dynamics["initial_controls"][row] = torch.tensor([thrust, 0.0, math.cos(math.radians(3.0))], dtype=torch.float64)
     controls = torch.zeros((len(series), segments, 3), dtype=torch.float32)
-    controls[:, :, 0], controls[:, :, 2] = _TRIM_THRUST, math.cos(math.radians(3.0))
+    controls[:, :, 0], controls[:, :, 2] = thrust, math.cos(math.radians(3.0))
     controls.requires_grad_(True)
-    durations = torch.full((len(series), segments), d_m / speed / segments)   # the hold that reaches the threshold
+    total = d_m / speed if total_s is None else total_s
+    durations = torch.full((len(series), segments), total / segments)   # the hold that reaches the threshold
     return dynamics, controls, durations
 
 
@@ -662,7 +1080,10 @@ def test_the_predict_side_gains_are_a_guarded_table_and_need_the_hook():
         option for action in parser._actions if "--command-hook" in action.option_strings
         for option in action.choices
     }
-    assert hook_choices == {CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_BARRIER_SPEED_FLOOR}
+    assert hook_choices == {
+        CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_BARRIER_SPEED_FLOOR,
+        CONTROL_HOOK_BARRIER_TROMBONE, CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+    }
 
     # A gain without --command-hook changes nothing, so it is refused rather than ignored.
     with pytest.raises(SystemExit):

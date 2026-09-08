@@ -6,10 +6,13 @@ per-flight context. A value naming more than one is applied through `CompositeHo
 the order the table lists — the rollout still sees one hook. Nothing here is imported by
 the dynamics.
 
-Two modules are live: the lateral `barrier` (the adopted inference-time safety layer) and
-the `speed-floor` (the stall margin, held through the thrust command). The nominal
-tracking law that shared this directory was never adopted and is archived under
-`archive/nominal_law_hook_2026_09/`.
+Three modules are live: the lateral `barrier` (the adopted inference-time safety layer,
+acting INSIDE the on-final gate), the `speed-floor` (the stall margin held through the
+thrust command, ungated) and the `trombone` (the delay the remaining path cannot absorb,
+spent as a pre-final lateral extension, acting only OUTSIDE the gate). Barrier and trombone
+both write bank and load factor; they compose because their gates are complementary, so no
+step is ever rewritten by both. The nominal tracking law that shared this directory was
+never adopted and is archived under `archive/nominal_law_hook_2026_09/`.
 """
 
 from __future__ import annotations
@@ -22,17 +25,20 @@ from config import (
     CONTROL_HOOK_NOMINAL_RESIDUAL,
     CONTROL_HOOK_OFF,
     CONTROL_HOOK_SPEED_FLOOR,
+    CONTROL_HOOK_TROMBONE,
     HOOK_SATURATION_HARD,
     TSConfig,
 )
 from control.constraints.barrier_filter import BarrierFilter
 from control.constraints.composite import CompositeHook
 from control.constraints.speed_floor import SpeedFloor
+from control.constraints.trombone import Trombone
 from control.dynamics.hooks import CommandHook
 
 _HOOKS = {
     CONTROL_HOOK_BARRIER: BarrierFilter,
     CONTROL_HOOK_SPEED_FLOOR: SpeedFloor,
+    CONTROL_HOOK_TROMBONE: Trombone,
 }
 # Fail at import, the companion of the assertion under `CONTROL_HOOK_MEMBERS`: that one says
 # every selectable hook names its modules, this one that every module named has a class.
@@ -64,4 +70,6 @@ def build_command_hook(
     return members[0] if len(members) == 1 else CompositeHook(members)
 
 
-__all__ = ["BarrierFilter", "CompositeHook", "SpeedFloor", "build_command_hook"]
+__all__ = [
+    "BarrierFilter", "CompositeHook", "SpeedFloor", "Trombone", "build_command_hook",
+]
