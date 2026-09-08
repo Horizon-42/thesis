@@ -1,0 +1,13 @@
+{
+  "_comment": "L2.g (design doc §六 L2 末, pre-registered 2026-09-08, user decision: two seeds, queue end). The units test L2z_units (position_loss_scale_m 1 km) made z used for the first time: shuffled-z dADE +928 m pooled / +2444 m vectored (every earlier arm <= 60 m), minADE_6 1021 < N(0,I) control 1043, prior std 0.848, FDE p50 688 vs native32 864, but best epoch = 180/180 (budget-limited) and single seed. L2.g re-runs that exact recipe at 300 epochs with early stopping OFF (patience 300, as A0.b's p180) at two seeds (1337, 2024; same split seed). It is read as a DISTRIBUTION, not a point estimate: the latent readout's shuffle penalty, minADE_6 vs the N(0,I) control, spread, and FDE/ADE vs native32, at BOTH seeds. Gates, each at both seeds: (1) shuffled-z dADE > 200 m pooled (z used); (2) minADE_6 < the N(0,I) control pooled and vectored; (3) FDE p50 better than native32 (864) by > 100 m pooled; (4) pooled top-1 ADE not worse than native32 (1322) by more than the ~125 m control-path seed line. VETO: gate 1 fails at either seed (z dead again) -> the latent line closes for good. Reading rule: the two-seed spread of every number is reported; a difference inside the spread is not a finding. Predict as the units test (6 posterior-prior samples, 6 N(0,I) samples, shuffle).",
+  "base_recipe": "simple-v3",
+  "base": {"control_recipe_name": "custom", "n_segments": 32, "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+           "latent_dim": 8, "latent_free_bits_nats": 0.05, "latent_prior_components": 1, "latent_posterior_init_std": 0.1,
+           "latent_beta": 0.01, "position_loss_scale_m": 1000.0, "epochs": 300, "patience": 300},
+  "arms": [
+    {"key": "L2g_units_e300", "label": "units recipe, 300 epochs, early stopping off, seed 1337", "overrides": {},
+     "predict_args": ["--latent-samples", "6", "--latent-random", "6", "--latent-shuffle"]},
+    {"key": "L2g_units_e300_s2024", "label": "units recipe, 300 epochs, early stopping off, seed 2024", "overrides": {"seed": 2024},
+     "predict_args": ["--latent-samples", "6", "--latent-random", "6", "--latent-shuffle"]}
+  ]
+}
