@@ -26,6 +26,7 @@ A0 / B0 用现有 checkpoint 与现有预测目录即可做，排在 L2.e′ 之
 | A0 重锚曲线（测量） | **fixed 两臂 + random 三臂都回放了（§2.4b/c）**：random 训练在第 8–10 轮后于每个锚点集退化——机制是 LR 调度器挂在停滞的选择指标上（第 60 轮 lr 9e-7）+ 锚点按时间均匀采样偏向近跑道 | `anytime_a0_20260907/`、`anytime_a0_random*_20260907/`、`a0_random_20260907/` | 门 1 过、门 2 12–16 km、门 3 被时长地板挡住；random 的 L−1 否决三臂皆败 |
 | A0.b 两条机制的修正（§2.4c/§2.4d） | **跑完（2026-09-08，`a0_random_20260907/A0b_*`，回放 `anytime_a0b_20260908`）**：最佳轮 8 → 155/173，选择指标 1100 → 743/710；**s_freeze 首次达到**（8 km，\|Δt\| p80 22.0/19.8 s），时长头不再卡在 ~125 s 地板（6 km 处预测 91–94 s）；V2 16 km（1321/1317 m）；L−1 否决仍未过（全体 1782 vs 1322），但差距是昨天的三分之一；path_uniform 每行更好 | `readout_a0b.{json,txt}`、`anytime_curve.{txt,json}` | 门 1 过、门 2 16 km、门 3 8 km；L−1 否决未过，见 §2.4d |
 | A2a 两模型交付规则 | **定案（2026-09-08 晚，用户决定，只读现有产物）**：L−1 用固定臂、之后每个 bin 用随机臂；随机臂在 20/16/8/6 km 的 ADE 与所有 bin 的时长误差都更好，12 km ADE 持平 | §2.4e | 无门；A2b（混合锚点训练）在建 |
+| A2b 混合锚点训练 | **跑完（2026-09-08 夜）**：份额 0.3 / 0.5 的 L−1 ADE 1504 / 1464（门 1447；0.5 在种子线内），冻结点 8 km 保持（24.6 / 29.5 s），否决干净；0.5 配对处处优于 0.3；两模型规则仍是交付形态 | `a2b_l1_share_20260908/readout.json`、`anytime_a2b_20260908/` | L−1 门按数字未过（0.5 差 17 m）、冻结点过；见 §2.4f 末 |
 | A1.a 网格选点指标（A1 的前置：先让随机锚点臂能被正确选点） | **代码完成（2026-09-07，分支 `dev-a1`）；臂未跑** | `anchor_grid.py`（网格的唯一定义：bin、60 s 地板、逐航班锚点规则、L−1 固定分层规则；runner 改为 import 它）+ `checkpoint_selection_metric=anchor-grid-common-grid-ade`（五个锚点集的 common-grid ADE 均值，`history.json` 每轮记 `validation_anchor_grid` 块）+ 臂 `A0_random_hr8_tv1_grid`；测试 `tests/test_anchor_grid.py`（7）+ `tests/test_anchor_grid_selection.py`（17）+ `tests/test_frame_ablation_runner.py`（3） | 无门，是选点规则；旧指标逐位不变（4 臂 × 2 轮 × 232 个 history 浮点全等） |
 | A0.pub 重锚预测的可视化交付（曲线之外的那一半） | **完成（2026-09-07，分支 `dev-publish2`）**：曲线与记录同一次前向；KRDU val `--limit 300` 三个 checkpoint × 12/8/6 km 共 9 个类别已发布，浏览器核对过（预测从进近中段起画，不在 25 km 切片起点） | `run_ts_anytime_curve.py --write-records` → `<out>/records/<label>/<bin>km/`（`export.write_batch`，`summary.json` 多一个 `anytime` 块，schema `ts-anytime-records-v1`）+ `publish_ts_experiment_trajectories.py` 按 bin 建类别（key `…_a12km_val`、picker id `<run>@12km`、group = 记录 campaign、标签写明 bin 与航班数）；产物 `anytime_records_20260908/`（317 MB，回放 2 min 30 s）；CZML 侧**无需修改**（早已按 `source.anchorTimeS` 平移，§六 7），新增测试钉住晚锚点 | 无门，是交付形态；12 km 覆盖 244/300，8/6 km 300/300 |
 | A1 流式评估协议 | 未做 | `evaluation_protocol` 新增按剩余路程分 bin 的锚点网格；`compare_constraint_arms.py` 增列 | 无门，是读数 |
@@ -525,6 +526,24 @@ checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（ch
   1322 m 超过 125 m 控制路种子噪声线；且曲线的门 3（s_freeze）仍在 8 km 达到（|Δt| p80 < 30 s）。
   **否决**：12 km bin 的雷达引导 ADE p50 比 `A0b_lr_objective_path_uniform` 的 561 m 劣化超过
   100 m。dry-run 通过，两条新 slug 尾部 `…_10-more_fbde423f` / `…_10-more_e5b37c1c`。**未训练。**
+
+**A2b 结果（2026-09-08 夜，`a2b_l1_share_20260908`，回放 `anytime_a2b_20260908`，两臂 180/180 未早停，最佳轮 169 / 160）——冻结点保持，L−1 门差一点，否决干净。**
+
+| | native32 | A0b path_uniform | **A2b 份额 0.3** | **A2b 份额 0.5** |
+|---|---:|---:|---:|---:|
+| L−1 全体 ADE（门 ≤ 1447） | 1322 | 1782 | 1504（差 57） | **1464（差 17，在种子线内）** |
+| L−1 全体 FDE p50 / chamfer | 864 / 224 | 1477 / 229 | 1272 / 212 | **1117 / 199** |
+| L−1 直线 / 雷达引导 ADE | 445 / 2870 | 628 / 3839 | 574 / 3149 | **556 / 3071** |
+| s_freeze（\|Δt\| p80 < 30 s） | 未达到 | 8 km（19.8 s） | **8 km（24.6 s）** | **8 km（29.5 s，压线）** |
+| 12 km 雷达引导 ADE p50（否决 > +100） | — | 561 | 584（+23） | 596（+35） |
+| 门 1 单调 / 门 2 | — | 过 / 16 km | 过 / 16 km（1368） | 过 / 16 km（1360） |
+| 实际 L−1 抽签份额 / 无 L−1 锚点航班 | — | — | 0.302 / 5 | 0.501 / 5 |
+
+读法：(1) 混合锚点做到了它的目的——收回随机锚点化在 L−1 的代价的约三分之二（1782 → 1464），冻结点、单调性与 12 km 否决都保持。
+(2) **0.3 与 0.5 在训练侧网格指标上打平（628.8 / 627.8），配对读数上 0.5 处处更好**（ADE、FDE、chamfer、每个分层）：网格指标对锚点集平均，
+抹掉了 L−1 上的差别——它是选择指标，这点要记住。(3) 0.5 的代价是冻结点余量只剩 0.5 s；再提高份额大概率丢掉 8 km 冻结点。
+(4) **L−1 门按数字两臂都未过**（0.5 差 17 m，在 125 m 种子线内，不可分辨）。**决定（建议）**：A2a 两模型规则仍是交付形态；A2b 0.5 作为
+"单模型近似"记录，不再加份额臂（0.7 会丢冻结点）；若要单模型，下一步是第二种子确认 0.5 的 1464，而不是新的份额。
 
 ### 2.5 A2 的门
 
