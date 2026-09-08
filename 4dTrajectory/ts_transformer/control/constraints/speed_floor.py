@@ -68,7 +68,7 @@ from aerodynamic_model.torch_dynamics import (
     isa_density,
 )
 from config import TSConfig
-from control.constraints.gates import runway_axes_view
+from control.constraints.gates import RunwayAxesView, runway_axes_view
 from control.constraints.saturation import soft_max
 from control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
@@ -91,6 +91,35 @@ _DIAGNOSTIC_KEYS = (
     HOOK_STEPS_KEY, "hook_floor_bound_steps", "hook_floor_saturated_steps",
     "hook_thrust_change",
 )
+
+
+def floor_speed(
+    view: RunwayAxesView,
+    *,
+    aero: torch.Tensor,
+    origin_altitude_m: torch.Tensor,
+    margin: float,
+    commanded_load: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(V_floor, rho)`` for this segment: the floor, and the density it was read at.
+
+    One definition, because a second module now asks the same question. The trombone turns
+    "the delay the remaining path cannot absorb AT THE FLOOR SPEED" into an extra path
+    length, and the speed it divides by has to be the speed THIS module holds on the same
+    segment — a detour sized against a slightly different floor would be one the floor then
+    does not need, or one it still does.
+
+    The height is the one the command's effect is measured at (``u + vu*dt``), the airframe
+    row is the flight's own ``(S, Cl_max)`` and the load factor is the COMMANDED one: this
+    is ``flyability``'s stall criterion read as a speed, at the state it will be graded at.
+    """
+    altitude = origin_altitude_m + view.height + view.vertical_speed * view.hold_s
+    density = isa_density(altitude)
+    stall_speed = torch.sqrt(
+        2.0 * commanded_load * view.mass * GRAVITY_MPS2
+        / (density * aero[:, 0] * aero[:, 1])
+    )
+    return margin * stall_speed, density
 
 
 class SpeedFloor:
@@ -117,15 +146,16 @@ class SpeedFloor:
         hold = view.hold_s
         thrust, bank, load = command[:, 0], command[:, 1], command[:, 2]
         aero = self.aero_params.to(view.d.dtype)
-        area, cl_max = aero[:, 0], aero[:, 1]
-        # The height the command's effect is measured at, and the density there.
-        altitude = self.origin_altitude_m.to(view.d.dtype) + view.height + view.vertical_speed * hold
-        density = isa_density(altitude)
+        area = aero[:, 0]
         commanded_load = load.to(view.d.dtype)
-        stall_speed = torch.sqrt(
-            2.0 * commanded_load * view.mass * GRAVITY_MPS2 / (density * area * cl_max)
+        # The floor at the height the command's effect is measured at, and the density there.
+        floor, density = floor_speed(
+            view,
+            aero=aero,
+            origin_altitude_m=self.origin_altitude_m.to(view.d.dtype),
+            margin=self.margin,
+            commanded_load=commanded_load,
         )
-        floor = self.margin * stall_speed
         # Drag at the segment start, under the commanded load factor: the same coefficient
         # function the RHS integrates, so the hook and the dynamics share one polar.
         _cl, cd, _stalled = aerodynamic_coefficients(

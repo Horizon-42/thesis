@@ -42,6 +42,12 @@ class RolloutStateView:
     actually doing, or None for a backend without actuator states. ``duration_s`` is
     ``[B]``, how long the command returned for this segment will be held — a hook that
     reasons in rates must not ask for one faster than the hold can realise.
+    ``remaining_s`` is ``[B]``: how much of the SCHEDULE is left from this segment's start,
+    this hold included (the sum of this and every later segment's duration). Under a
+    CTA-conditioned decoder the schedule's total IS the CTA, so it reads ``T_cta − t`` —
+    the time the rest of the flight has to be flown in. A hook that must decide whether the
+    path still ahead can absorb the time still ahead cannot get that from one hold, and the
+    rollout knows every duration before the first segment is integrated.
     ``reference`` is the same view of the UNHOOKED schedule — where the network's own
     commands would have the aircraft now — for hooks that declare ``needs_reference``
     (None otherwise). A segment's command alone does not say which path or speed it was
@@ -51,6 +57,7 @@ class RolloutStateView:
     chart: torch.Tensor
     actuators: torch.Tensor | None
     duration_s: torch.Tensor
+    remaining_s: torch.Tensor
     reference: RolloutStateView | None = None
 
 

@@ -638,3 +638,42 @@ is still the spelled-out L−1 anchor in `train.py:403/449`, `fixed_anchor_valid
 `run_ts_clock_attribution.py:115` and `run_ts_control_capacity_ceiling.py:233` — every one of
 which already imports `config`. A pure rename, no behaviour: the value is the same either way,
 which is why it was left out of the A2b change rather than folded into it.
+
+## 27. `cli/predict.py` builds prediction records at six near-identical sites
+
+**Verified** (2026-09-08, L3.e review). The main path, the quantile-fan leaves, the latent
+mode / random / shuffled diagnostics, the posterior arm and the closure-from-labels arm each
+end in the same three lines — `zip(batch_series, forecasts, strict=True)`, then
+`build_prediction_record(...)` and `observed_series_metrics(...)` into their own list. Adding
+`--truncate-at-threshold` had to be threaded through every one of them (`_cut_at_threshold`),
+and the next per-record post-step will have to be threaded through them again; a flag applied
+to five of the six would silently make one output directory incomparable with the rest. One
+`_emit(records, metrics, batch_series, forecasts)` helper would collapse them. Pure
+refactor, no behaviour — left out of the L3.e change rather than folded into it, because the
+change was already touching the forecast contract.
+
+## 28. The lag-compensated bank inversion and the load coordination live in two hook modules
+
+**Verified** (2026-09-08, L3.e review). `control/constraints/barrier_filter.py` and
+`control/constraints/trombone.py` both spell out `tau_eff = tau(1 - e^{-dt/tau})`,
+`committed = tan(mu_actuator)*tau_eff`, `lift = (n cos mu).clamp(min=0.5)`,
+`scale = V_h/(g*lift)`, `atan((scale*dpsi - committed)/(dt - tau_eff))`, and
+`n' = n cos mu / cos mu'` clamped to the envelope — about 25 lines carrying three physical
+assumptions (the 0.5 lift floor, the lag credit, the coordination law). A
+`control/constraints/turning.py` with `lag_effective_s`, `turn_geometry`,
+`bank_for_heading_change` and `coordinate_load` would give them one home. Left out of the
+L3.e change deliberately: the barrier is the ADOPTED delivery layer with published numbers,
+and the L3.e equivalence run rests on it being byte-identical, so the extraction wants its
+own commit with its own equivalence check.
+
+## 29. `barrier_filter`'s load coordination perturbs the load of rows it never gated
+
+**Verified** (2026-09-08, L3.e review). `coordinated = load * cos(bank) / cos(filtered)` is
+evaluated unconditionally, and on a gate-closed row `filtered == bank`, so it computes
+`(load*c)/c` — which is NOT the identity in IEEE (measured: an ULP apart for ~40 % of random
+operand pairs, in both float32 and float64). The barrier therefore moves the load factor of
+every ungated row by up to an ULP. The trombone was given
+`torch.where(filtered == bank, load, ...)` for exactly this reason; the barrier was left
+alone because changing it moves an adopted, measured layer's output and would have to be
+re-measured against the published `control_hooks_v2_20260906` numbers rather than folded
+into L3.e.

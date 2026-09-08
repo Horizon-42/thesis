@@ -162,16 +162,30 @@ def membership_halfwidth(d: torch.Tensor) -> torch.Tensor:
     return (MEMBERSHIP_K * corridor_halfwidth(d)).clamp(min=MEMBERSHIP_FLOOR_M)
 
 
+def soft_aligned(cos_align: torch.Tensor) -> torch.Tensor:
+    """Alignment membership in ``[0, 1]``: is this direction down the final approach course?
+
+    Half of ``on-final`` (the cone is the other half), named because a module can need the
+    alignment WITHOUT the cone: ``control/constraints/trombone.py`` hands the command back
+    as soon as the path is lined up, wide of the cone or not, and has to read the same 30°
+    the gate reads rather than a second copy of it.
+    """
+    return torch.sigmoid((cos_align - _COS_ALIGNMENT) / ALIGNMENT_SOFTNESS)
+
+
+def hard_aligned(cos_align: torch.Tensor) -> torch.Tensor:
+    return cos_align >= _COS_ALIGNMENT
+
+
 def soft_on_final(d: torch.Tensor, xt: torch.Tensor, cos_align: torch.Tensor) -> torch.Tensor:
     """Membership in ``[0, 1]``: inside the membership cone and aligned with the course."""
     halfwidth = membership_halfwidth(d)
     lateral = torch.sigmoid((halfwidth - xt.abs()) / (LATERAL_SOFTNESS * halfwidth))
-    aligned = torch.sigmoid((cos_align - _COS_ALIGNMENT) / ALIGNMENT_SOFTNESS)
-    return lateral * aligned
+    return lateral * soft_aligned(cos_align)
 
 
 def hard_on_final(d: torch.Tensor, xt: torch.Tensor, cos_align: torch.Tensor) -> torch.Tensor:
-    return (xt.abs() <= membership_halfwidth(d)) & (cos_align >= _COS_ALIGNMENT)
+    return (xt.abs() <= membership_halfwidth(d)) & hard_aligned(cos_align)
 
 
 def soft_inside_faf(d: torch.Tensor, d_faf: torch.Tensor) -> torch.Tensor:

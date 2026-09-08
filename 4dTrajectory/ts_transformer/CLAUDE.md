@@ -237,8 +237,9 @@ flight model.
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `closure_output.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
-| command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). Two modules are live and the vocabulary carries ONE combination: `barrier` (lateral, gated on the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08) and `barrier+speed-floor`, which applies them in that order. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier` is not a member and is refused with the vocabulary |
-| `control_speed_floor_margin` | `1.10` | The speed floor's margin: `V_floor = margin × V_stall(n_commanded, mass, rho, Cl_max)`. The COEFFICIENT is the package's existing one — the optimizer's NLP velocity floor (`optimization/scenario_optimization._STALL_MARGIN`) and the control-anchor eligibility gate (`anchor_eligibility.CONTROL_ANCHOR_STALL_MARGIN`) are both 1.10 — but **the SPEED it multiplies is not the same one, so do not quote the three as equal**: those two use the 1-g stall speed at SEA-LEVEL density (the optimizer's also capped at V_ref), the hook uses `V_stall(n_commanded)` at the LOCAL ISA density, uncapped, because it defends `flyability`'s criterion, which is evaluated at each sample's own altitude. At 8000 ft ρ/ρ₀ = 0.79, so the hook's floor is ~12.5 % higher — an effective margin near 1.24, ×√n in a turn — making the hook strictly the TIGHTEST of the three. Not one symbol on purpose: the other two are frozen policy constants (one is spelled into the stored `airborne-1.10-stall-margin-v1`) and this one is a per-run field. **Refused away from its default under a hook that has no speed floor**, and the barrier's two gains are refused the same way under a hook that has no barrier — before L3.d "a hook is on" and "the barrier is on" were the same condition. `predict --control-speed-floor-margin` overrides it; names a run `floor-margin=` |
+| command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). THREE modules are live — `barrier` (lateral, gated ON the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08), `trombone` (the pre-final path stretch, gated OFF the final — L3.e, 2026-09-08) — and the vocabulary carries three combinations: `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`, each applied in the order it spells. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier`, `barrier+trombone+speed-floor` and a SOLO `trombone` are not members and are refused with the vocabulary (the trombone hands the command back at the final approach course and has nothing to hand it to without the barrier) |
+| `--truncate-at-threshold` | off | Predict-side, any output kind: cut every record at its FIRST crossing of the threshold plane (`d ≤ 0`, closest approach within that first run) and stamp `source.truncatedAtThreshold`. **Any flyability/geometry/CTA readout of a hooked, late-CTA arm needs it** — L3.d's floored rollouts arrive EARLY and fly on (endpoint \|xt\| p95 43–63 km, pooled ADE 840 → 3443 m at offset 0), and a report over the whole record is scoring that tail: on the approach proper the same arms read fully-flyable 1.35 % → 48.9 % at +60 s. `final_time_s` moves to the cut, which is the point — an early arrival stops being invisible and becomes the `final_time_error_s` it always was. A forecast that never reaches the threshold is left WHOLE and says `false`; one that crosses on its LAST row is whole with the flag TRUE (the flag means "ends at the threshold", and on a fixed-time STATE forecast the postprocessor's own closest-approach rule sets the same flag). Refused together with `--no-truncate` |
+| `control_speed_floor_margin` | `1.10` | The speed floor's margin: `V_floor = margin × V_stall(n_commanded, mass, rho, Cl_max)`. The COEFFICIENT is the package's existing one — the optimizer's NLP velocity floor (`optimization/scenario_optimization._STALL_MARGIN`) and the control-anchor eligibility gate (`anchor_eligibility.CONTROL_ANCHOR_STALL_MARGIN`) are both 1.10 — but **the SPEED it multiplies is not the same one, so do not quote the three as equal**: those two use the 1-g stall speed at SEA-LEVEL density (the optimizer's also capped at V_ref), the hook uses `V_stall(n_commanded)` at the LOCAL ISA density, uncapped, because it defends `flyability`'s criterion, which is evaluated at each sample's own altitude. At 8000 ft ρ/ρ₀ = 0.79, so the hook's floor is ~12.5 % higher — an effective margin near 1.24, ×√n in a turn — making the hook strictly the TIGHTEST of the three. Not one symbol on purpose: the other two are frozen policy constants (one is spelled into the stored `airborne-1.10-stall-margin-v1`) and this one is a per-run field. **Refused away from its default under a hook that contains neither `speed-floor` nor `trombone`** (`config.CONTROL_SPEED_FLOOR_MARGIN_READERS` — the trombone divides by the same `V_floor` to size its detour), and the barrier's two gains are refused the same way under a hook that has no barrier — before L3.d "a hook is on" and "the barrier is on" were the same condition. `predict --control-speed-floor-margin` overrides it; names a run `floor-margin=` |
 | `--project-final` | off | deployment fallback; FAF-gated wrecks vectored flights |
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
 | `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` / `latent_posterior_init_std` and L2.f's two below mean nothing without it and are refused |
@@ -317,6 +318,62 @@ it, so the realised speed can dip slightly below the floor mid-hold (measured 0.
 synthetic fixtures, at 5–6 s holds) — that dip is against a 10 % margin, not against the stall
 speed, so it does not reach `Cl_max`.
 
+**The trombone is the third module, and it is GEOMETRY, not thrust (L3.e).** With the CTA
+fixing the total time and the path fixed, the mean speed is fixed — so a speed floor alone has
+nowhere to put a late arrival, which is why L3.d traded stall for thrust-over-max and an early
+threshold crossing. The trombone adds the missing degree of freedom. Per segment it reads the
+schedule's own remaining time (`RolloutStateView.remaining_s`, new: the reversed cumsum of the
+segment durations, which under a CTA-conditioned decoder IS `T_cta − t`), the beeline distance
+`D` to the threshold, and the SAME `V_floor` the floor module holds
+(`speed_floor.floor_speed`, one definition), and spends the surplus `ΔL = V_e·T_r − D` as a
+dog-leg about the beeline at `cos θ = D/(V_e·T_r)` — the offset at which flying for the
+remaining time lands exactly on the threshold. **`V_e = max(V_floor, V_h)`, the speed being
+flown floored at the speed floor, and that `max` is what makes the manoeuvre terminate**: the
+floor is a LOWER bound (the module only raises thrust), so `V_h > V_floor` is the ordinary
+case, and sizing against `V_floor` alone leaves `ΔL` not falling — measured, the surplus rose
+from 2981 m and plateaued at commanded thrust 0.12, the half-way switch never fired and the
+excursion pinned outbound until the threshold plane ended it, 2.9 km wide. With `V_e`,
+`dΔL/dt ≤ 0` for any speed flown. Five things to know before touching it:
+
+- **The hand-over rule.** It may only OPEN an excursion where the predicted path is more than
+  `ALIGNMENT_MAX_DEG` off the runway course — strictly inside "the on-final gate is closed",
+  so it can never act on the final and never fights the barrier over a state already lined up.
+  Alignment gates the OPENING only: its own outbound leg can swing the aircraft through the
+  course, and a hook that fell silent there would leave it 40° off with no leg back (measured:
+  four engaged steps, then a parallel track 6.6 km wide of the threshold). Once the gate has
+  opened for a flight it is disabled for the rest of the rollout, and it never acts past `d = 0`.
+- **The price of that rule is ~58 % of the fleet** (KRDU, 2998 arrivals sampled, observed track
+  at the L−1 anchor: 58.9 % aligned within 30° at the anchor, 58.4 % aligned at EVERY row from
+  it, 57.1 % already inside the gate). Those flights cannot be stretched at all; their
+  unabsorbed delay is published as `commandHookDiagnostics.tromboneDelayS` next to
+  `tromboneEngagedSteps = 0`, which is the number to quote, not a reason to loosen the rule.
+- **The 15° turn cap is set by the speed floor, not by comfort.** The value's `+` order is its
+  application order, so under `barrier+speed-floor+trombone` the floor prices the network's load
+  factor and NOT the turn the trombone then adds; the turn costs the margin twice (stall speed
+  ×√(1/cos μ), plus unpriced induced drag ~tan²μ). Measured on the rollout fixture: stall slack
+  −0.6 m/s at 10°, −0.9 at 15, −1.5 at 20, −3.3 at 25, and a first stall sample at 30°. The
+  offset cap (45°), not the bank cap, is what buys path, so lowering the bank costs nothing.
+- **`hook_saturation` softens the bound, not the mode.** The hand-over, the side and the
+  half-way switch are hard under both; `soft` softens the bank saturation, the gate blend, and
+  a ramp on the surplus that is exactly zero (with zero slope) at zero surplus — so a flight
+  with nothing to absorb comes back bit-identical in BOTH forms.
+- **It is GEOMETRY: within one rollout it barely touches the thrust.** The speed comes from
+  the thrust commands, the schedule is open loop, and the floor's demand is a function of speed
+  and height — measured on the fixture the floor's bound/saturated step counts are IDENTICAL
+  with and without it (47/48 and 0/48). What changes is WHERE the aircraft is when the schedule
+  runs out, and (through `--truncate-at-threshold`) which part of the trajectory a report scores.
+  **If `thrust_over_max` falls in the L3.e arms, that is why** — not the hook relieving thrust.
+- **The 45° offset cap BINDS once the delay exceeds ~41 % of the time the remaining path
+  needs** (`sec 45° = 1.41`), and `hook_trombone_saturated_steps` is how you see it — the
+  counterpart of the floor's "full thrust is not enough". Outside the arms' range (a 25 km run
+  at ~70 m/s is 350 s, so +90 s asks for 26 % and lands near 31°), but a short remaining path
+  plus a large delay is simply not absorbable before the final, and the count is what says so
+  rather than a silent shortfall. `hook_trombone_bank_capped_steps` does the same for the 15°
+  turn cap, so the argument the cap rests on is auditable on an arm.
+- **Under `barrier+trombone` the floor is an ASSUMPTION, not an enforced speed.** That stack is
+  the ablation that isolates the stretch; nothing there holds the speed up, so read it as "the
+  stretch alone", never as "the stretch under the floor it was sized against".
+
 **Every hook reports per-FLIGHT counts, and that is what a record carries.**
 `per_flight_diagnostics()` returns `[B]` rows; `diagnostics()` is those summed and is what an
 epoch record reports. `source.commandHookDiagnostics` on a prediction record is the flight's own
@@ -384,10 +441,13 @@ Two edges that a change must not reverse: `evaluation_protocol` reaches
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
 prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
 `dynamics/{backends,rollout,inverse,hooks}`, `loss/{components,fixed_dt}`,
-`training/diagnostics`, `constraints/{barrier_filter,speed_floor,composite,gates,saturation}`.
-`saturation` holds the ONE definition of what `hook_saturation=soft` means (a scaled softplus);
-`composite` is how two modules become the one hook the rollout takes, and it refuses two modules
-that report a diagnostic under the same name.
+`training/diagnostics`,
+`constraints/{barrier_filter,speed_floor,trombone,composite,gates,saturation}`.
+`saturation` holds the ONE definition of what `hook_saturation=soft` means (a scaled softplus)
+AND of the bank softness/active-change thresholds two modules now share; `composite` is how
+several modules become the one hook the rollout takes, and it refuses two modules that report a
+diagnostic under the same name. Barrier and trombone both write bank and load factor and still
+compose, because their gates are COMPLEMENTARY: no step is ever rewritten by both.
 
 **A dynamics backend is a ROW, not a class**: `control/dynamics/backends.py` maps the
 `(control_dynamics_model, control_dynamics_backend)` PAIR to

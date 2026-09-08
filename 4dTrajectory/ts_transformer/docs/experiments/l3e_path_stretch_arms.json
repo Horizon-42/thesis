@@ -1,18 +1,60 @@
 {
-  "_comment": "L3.e delay absorption by upstream path stretch (design item (b); pre-registered 2026-09-08 night, user decision, queue end; the hook is being built). L3.c: a late CTA is absorbed by leaving the corridor (barrier fixes that) and by slowing on the outer segment into the stall line. L3.d: a speed floor through thrust does not fix it -- stall samples rose 94-139 %, thrust_over_max appeared on ~10 % of samples (0 before), fully-flyable at +60 s only 0 -> 2.4 %; the floor bound on 50-70 % of steps and saturated on 22-30 %. With the total time fixed by the CTA and the path fixed, the average speed is fixed: a floor alone has nowhere to put the delay. L3.e adds the missing degree of freedom: a trombone hook (inference-time, composable as barrier+speed-floor+trombone) that converts the delay the remaining path cannot absorb at the floor speed into a lateral extension of the PRE-FINAL segment (where the corridor gate is closed): a bounded-bank heading offset held over a computed distance and returned, coordinated load factor, lag-compensated, soft/hard saturation like the others; nothing inside the on-final gate. Predict-only arms on the L3_cta checkpoint at CTA offsets 0/+30/+60/+90 s with --command-hook barrier+speed-floor+trombone --hook-saturation soft. GATES (pre-registered, vs the L3.c hook arms and L3.d): (1) thrust_over_max samples = 0 at every offset (the stretch absorbs what the floor cannot); (2) stall samples on t <= T_true fall by >= 90 % vs L3.c at every offset; (3) fully-flyable share at +60 s >= 88.4 % (observed floor 98.4 % minus 10); (4) lateral containment on the final as L3.c (endpoint |xt| p95 <= 1.5x offset 0) and the stretch happens outside the on-final gate (lateral RMS inside the gate unchanged); (5) CTA obeyed exactly (final_time_error_s = offset) -- if not, the unabsorbed delay X is the deliverable. VETO: gate 1 or 2 fails at +60 s. Decision rule: all pass -> the delayed CTA reference is deliverable with the three-hook stack; 1-2 pass but 3 fails -> the remaining unflyability is elsewhere, read its breakdown; 1 fails -> the floor and the stretch interfere, redesign.",
+  "_comment": "L3.e delay absorption by upstream path stretch (design item (b); pre-registered 2026-09-08 night, user decision, queue end; the hook is being built). L3.c: a late CTA is absorbed by leaving the corridor (barrier fixes that) and by slowing on the outer segment into the stall line. L3.d: a speed floor through thrust does not fix it -- stall samples rose 94-139 %, thrust_over_max appeared on ~10 % of samples (0 before), fully-flyable at +60 s only 0 -> 2.4 %; the floor bound on 50-70 % of steps and saturated on 22-30 %. With the total time fixed by the CTA and the path fixed, the average speed is fixed: a floor alone has nowhere to put the delay. L3.e adds the missing degree of freedom: a trombone hook (inference-time, composable as barrier+speed-floor+trombone) that converts the delay the remaining path cannot absorb at the floor speed into a lateral extension of the PRE-FINAL segment (where the corridor gate is closed): a bounded-bank heading offset held over a computed distance and returned, coordinated load factor, lag-compensated, soft/hard saturation like the others; nothing inside the on-final gate. Predict-only arms on the L3_cta checkpoint at CTA offsets 0/+30/+60/+90 s with --command-hook barrier+speed-floor+trombone --hook-saturation soft --truncate-at-threshold. The truncation is not cosmetic and is part of the pre-registration: L3.d's geometry readout showed the floored rollout reaching the threshold EARLY and flying on (endpoint |xt| p95 43-63 km, pooled ADE 840 -> 3443 m at offset 0), so every flyability/geometry/CTA number taken over the whole record was scoring post-landing flying; on the approach proper the same floor arms read fully-flyable 1.35 % -> 48.9 % at +60 s. Every gate below is therefore on the TRUNCATED record, and the L3.c/L3.d numbers they are compared against must be re-read the same way before the comparison is made. The hook itself is gated to the pre-final segment (it acts only where the predicted path is more than 30 deg off the runway course, which is strictly inside 'the on-final gate is closed'); a flight already aligned at the anchor cannot be stretched at all and reports its unabsorbed delay in source.commandHookDiagnostics.tromboneDelayS with an engaged share of zero, which is the share to publish next to gate (5). GATES (pre-registered, vs the L3.c hook arms and L3.d): (1) thrust_over_max samples = 0 at every offset (the stretch absorbs what the floor cannot); (2) stall samples on t <= T_true fall by >= 90 % vs L3.c at every offset; (3) fully-flyable share at +60 s >= 88.4 % (observed floor 98.4 % minus 10); (4) lateral containment on the final as L3.c (endpoint |xt| p95 <= 1.5x offset 0) and the stretch happens outside the on-final gate (lateral RMS inside the gate unchanged); (5) CTA obeyed exactly (final_time_error_s = offset) -- if not, the unabsorbed delay X is the deliverable. VETO: gate 1 or 2 fails at +60 s. Decision rule: all pass -> the delayed CTA reference is deliverable with the three-hook stack; 1-2 pass but 3 fails -> the remaining unflyability is elsewhere, read its breakdown; 1 fails -> the floor and the stretch interfere, redesign.",
   "base_recipe": "simple-v3",
   "arms": [
-    {"key": "L3e_stack_p0s", "label": "true CTA + barrier+speed-floor+trombone hook (control)",
-     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
-     "predict_args": ["--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft"]},
-    {"key": "L3e_stack_p30s", "label": "CTA +30 s + three-hook stack",
-     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
-     "predict_args": ["--cta-offset-s", "30", "--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft"]},
-    {"key": "L3e_stack_p60s", "label": "CTA +60 s + three-hook stack",
-     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
-     "predict_args": ["--cta-offset-s", "60", "--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft"]},
-    {"key": "L3e_stack_p90s", "label": "CTA +90 s + three-hook stack",
-     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
-     "predict_args": ["--cta-offset-s", "90", "--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft"]}
+    {
+      "key": "L3e_stack_p0s",
+      "label": "true CTA + barrier+speed-floor+trombone hook (control)",
+      "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+      "predict_args": [
+        "--command-hook",
+        "barrier+speed-floor+trombone",
+        "--hook-saturation",
+        "soft",
+        "--truncate-at-threshold"
+      ]
+    },
+    {
+      "key": "L3e_stack_p30s",
+      "label": "CTA +30 s + three-hook stack",
+      "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+      "predict_args": [
+        "--cta-offset-s",
+        "30",
+        "--command-hook",
+        "barrier+speed-floor+trombone",
+        "--hook-saturation",
+        "soft",
+        "--truncate-at-threshold"
+      ]
+    },
+    {
+      "key": "L3e_stack_p60s",
+      "label": "CTA +60 s + three-hook stack",
+      "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+      "predict_args": [
+        "--cta-offset-s",
+        "60",
+        "--command-hook",
+        "barrier+speed-floor+trombone",
+        "--hook-saturation",
+        "soft",
+        "--truncate-at-threshold"
+      ]
+    },
+    {
+      "key": "L3e_stack_p90s",
+      "label": "CTA +90 s + three-hook stack",
+      "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+      "predict_args": [
+        "--cta-offset-s",
+        "90",
+        "--command-hook",
+        "barrier+speed-floor+trombone",
+        "--hook-saturation",
+        "soft",
+        "--truncate-at-threshold"
+      ]
+    }
   ]
 }

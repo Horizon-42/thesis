@@ -4,6 +4,146 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — ts_transformer: L3.e — the trombone command hook (the delay gets a place to go), and `predict --truncate-at-threshold`
+
+**The question.** L3.d's speed floor failed all three of its gates, and the reason is arithmetic,
+not tuning: the duration head obeys the CTA exactly, so the rollout's TOTAL TIME is fixed; the
+network's path is what it is; a fixed path flown in a fixed time has a fixed mean speed. A floor
+that refuses the infeasibly slow commands therefore has nowhere to put the time it refuses to
+waste — the demand came back as `thrust_over_max` (0 samples before the floor, ~10 % of samples
+after) and stall samples rose 94–139 %. The geometry readout added the other half of the picture:
+with the floor holding the speed up, the rollout reaches the threshold **early** and keeps flying
+— endpoint |xt| p95 43–63 km, pooled ADE 840 → 3443 m at offset 0 — so every flyability, corridor
+and CTA number taken over the whole record was scoring post-landing flying. On the approach proper
+(truncated at the threshold) the same floor arms read fully-flyable **1.35 % → 48.9 %** at +60 s.
+Two changes follow, and they are separate: one gives the delay somewhere to go, the other makes
+the reports read the approach.
+
+**The hook (`control/constraints/trombone.py`, predict-time; nothing retrained).** At each command
+step it reads the schedule's own remaining time, the beeline distance `D` to the threshold in
+runway axes, and the SAME `V_floor` the speed floor holds on that segment
+(`speed_floor.floor_speed`, extracted so the two cannot disagree), and turns the delay the
+remaining path cannot absorb into an extra path length by one identity:
+
+    V_e = max(V_floor, V_h)
+    Δt_unabsorbed = T_r − D / V_e            ΔL = V_e·T_r − D
+
+`V_e·T_r` is how far the aircraft covers in the time it has; the surplus has to be spent on path,
+and the only place a real arrival may buy path is BEFORE the final. It is spent as a dog-leg about
+the beeline at
+
+    cos θ = D / (V_e · T_r)
+
+— the offset at which flying for the remaining time lands exactly on the threshold. **The speed is
+the one being flown, floored at the speed floor, and that `max` is what makes the manoeuvre
+terminate.** The floor is a LOWER bound — the module only ever raises thrust — so `V_h > V_floor`
+is the ordinary case, and the first design, sized against `V_floor` alone, failed exactly there:
+with the aircraft covering ground faster than the estimate assumed, ΔL stopped falling (measured at
+commanded thrust 0.12: the surplus rose from 2981 m and plateaued), the half-way switch never fired
+and the excursion pinned outbound until the threshold plane ended it, 2.9 km wide of the
+centreline. With `V_e`, `dΔL/dt = −V_e + V_h·cos θ ≤ 0` for any speed the aircraft flies. That makes the whole law a function of the state: as the surplus is spent θ shrinks to
+zero on its own, so the roll-out onto the beeline is guaranteed by the identity rather than by a
+timer, and **a flight with nothing to absorb is bit-identical in both saturations**. The excursion
+is held on ONE side (latched at engagement as the side the aircraft is already on, so it stays wide
+of the extended centreline) until the surplus falls below half the value latched at engagement,
+then mirrored — no accumulator, because ΔL burns down at exactly the rate the extra length is
+bought. The bank that turns onto the offset is the barrier's own inversion, lag-compensated
+(`τ_eff = τ_μ(1 − e^{−Δt/τ_μ})`, crediting the bank already rolled into), saturated soft or hard,
+clamped to the envelope, with the load factor re-coordinated to keep `n cos μ`.
+
+**Three design decisions the pre-registration left open, and what settled each.**
+
+1. **The hand-over rule.** The hook may only OPEN an excursion where the predicted path is more
+   than `ALIGNMENT_MAX_DEG` (30°) off the runway course. That is strictly inside "the on-final gate
+   is closed" — the gate REQUIRES alignment — so it can never act inside the gate, and it also
+   declines the one state that is outside the gate yet already lined up (wide of the membership
+   cone but pointed down the final), which is exactly where a dog-leg is a turn the barrier undoes
+   as soon as the cone is entered. Alignment gates the OPENING only: the outbound leg can swing the
+   aircraft through the course, and a hook that fell silent there left it 40° off with no leg back
+   (measured on the fixture: four engaged steps, then a parallel track 6.6 km wide of the
+   threshold). Once the gate has opened for a flight the hook is disabled for the rest of that
+   rollout, and it never acts at or past the threshold.
+   **The price is measured and is not hidden: ~58 % of the fleet cannot be stretched at all.**
+   KRDU, 2998 arrivals sampled, observed track at the L−1 anchor: 58.9 % are aligned within 30° of
+   the course at the anchor, 58.4 % are aligned at EVERY row from it, 57.1 % are already inside the
+   gate. Those are the straight-ins, and under the generous membership cone they are "on final"
+   from tens of kilometres out. Their unabsorbed delay is published as
+   `commandHookDiagnostics.tromboneDelayS` next to `tromboneEngagedSteps = 0` — the number to
+   quote next to gate (5), rather than a reason to let the hook into the corridor.
+2. **The turn cap is 15°, and the speed floor sets it.** The vocabulary's one guarantee is that a
+   value's `+` order is its application order, so under `barrier+speed-floor+trombone` the floor
+   prices the network's load factor and NOT the turn the trombone then adds. The turn costs the
+   margin twice — the coordinated load factor raises the stall speed by √(1/cos μ), and the induced
+   drag it adds (~tan²μ) is drag the floor's thrust was not sized for. Measured on the rollout
+   fixture (48 segments, a base leg flown at the floor, 6 s holds, V_floor 61 m/s over a 55.5 m/s
+   stall): stall slack −0.6 m/s at a 10° cap, −0.9 at 15°, −1.5 at 20°, −3.3 at 25°, and at 30° a
+   first stall sample. The OFFSET cap (45°), not the bank cap, is what buys path — the arrival is
+   indistinguishable down to 10° — so lowering the bank costs nothing and buys ~2× headroom.
+   Reordering the composite would have let the floor price the turn exactly and is the better
+   physics, but it would have made a value's spelling disagree with what it does, which is worse.
+3. **`hook_saturation` softens the bound, not the mode.** The hand-over, the excursion's side and
+   the half-way switch are hard predicates under both forms; `soft` selects the bank saturation,
+   the gate blend and a ramp on the surplus that is exactly zero, with zero slope, at zero surplus
+   — so inertness survives the soft form, which is the one the arms use.
+
+**When it cannot absorb, it says so.** The 45° offset cap binds once the delay exceeds ~41 % of the
+time the remaining path needs at the floor speed (`sec 45° = 1.41`), and
+`hook_trombone_saturated_steps` counts those steps — the counterpart of the floor's "full thrust is
+not enough" — and `hook_trombone_bank_capped_steps` does the same for the 15° turn cap, so the
+argument that cap rests on is auditable on an arm. That is outside the arms' range (a 25 km run at ~70 m/s is 350 s, so the +90 s arm asks
+for 26 % and lands near θ = 31°), but a short remaining path with a large delay is simply not
+absorbable before the final, and the count is what says so rather than a silent shortfall.
+
+**What the hook does NOT do, which matters for reading gate (1).** It is geometry. The rollout's
+speed comes from the thrust commands, the schedule is open loop, and the floor's demand is a
+function of speed and height — so within one rollout the trombone barely touches the thrust.
+Measured on the fixture, the floor's bound and saturated step counts are IDENTICAL with and
+without it (47/48 and 0/48 either way), and the synthetic fixtures do not reproduce L3.d's
+fleet-level `thrust_over_max` at all (the floor's demand saturates once in 48 steps at worst).
+What the stretch changes is WHERE the aircraft is when the schedule runs out, and — through the
+truncation — which part of the trajectory a report scores. If `thrust_over_max` falls in the arms,
+that is why; it is not the hook relieving the thrust demand.
+
+**Vocabulary.** `barrier+trombone` and `barrier+speed-floor+trombone` are members of
+`CONTROL_HOOK_MEMBERS`; `speed-floor+barrier`, `barrier+trombone+speed-floor`, `trombone+barrier`
+and a solo `trombone` are not, and are refused with the vocabulary. There is deliberately no solo
+value: the hook hands the command back at the final approach course and has nothing to hand it to
+without the barrier in the stack. Barrier and trombone both write bank and load factor and still
+compose, because their gates are COMPLEMENTARY — the barrier acts only inside the on-final gate,
+the trombone only outside it, so no step is ever rewritten by both. `control_speed_floor_margin` is
+now read by two modules (`CONTROL_SPEED_FLOOR_MARGIN_READERS`) and is accepted under either.
+
+**`RolloutStateView` gains `remaining_s`** — how much of the schedule is left at a segment's start,
+this hold included; the rollout knows every duration before the first segment is integrated, so it
+is the reversed cumsum rather than something a hook accumulates and hopes it was called in order.
+Under a CTA-conditioned decoder it IS `T_cta − t`.
+
+**The truncation (`forecast.cut_at_threshold_crossing`, `predict --truncate-at-threshold`).** Cuts
+every record at the closest horizontal approach to the target among the rows at or past the
+threshold plane (`d ≤ 0`), scoped to the FIRST such run — "first" so a rollout that wanders off and
+later passes near the threshold again is cut on its real arrival, "closest approach" so a laterally
+displaced crossing is not cut a step early. A forecast whose rows never reach `d ≤ 0` never landed:
+it is returned WHOLE and still says `truncatedAtThreshold: false`, because cutting it would invent
+an arrival. `final_time_s` moves to the cut, which is the point — an early arrival stops being
+invisible in the CTA readout and becomes the `final_time_error_s` it always was. The control
+record's two clocks stay aligned (`export` refuses them otherwise): segments are cut to the one
+holding the new end and its duration shortened to land exactly on it. Applies to every output kind
+and to a run's latent/posterior/label diagnostic arms as well, so one output directory is not half
+cut; refused together with `--no-truncate`. Off by default.
+
+**Measured.** Equivalence vs `617539a`, 8 synthetic 2-epoch cases (no hook; trained through
+barrier / speed-floor / barrier+speed-floor; and the barrier, floor and stack replayed soft AND
+hard on a hook-free checkpoint): **1094 non-timing leaves, 0 differ** — every state-dict digest,
+every loss and metric, every forecast and record digest, every hook diagnostic. Run names recounted
+on disk over all 354 stored configs under `4dTrajectory/outputs/**/summary.json`: **0 renamed, 0
+refusal messages changed**. On the rollout fixture the stack does what it is for: under
+`barrier+speed-floor` the rollout reaches the threshold with a quarter of its schedule left and
+flies on; adding the trombone moves the closest approach to the last segment (within 1.5 % of the
+direct distance) and the flown path grows, against the same stack flown to the UNDELAYED arrival
+time, by 3469 m where `V̄ × 60 s` is 3512 m — 1.2 %. Tests 887 passed, 1 skipped (was 869 + 1).
+`l3e_path_stretch_arms.json` now carries `--truncate-at-threshold` on all four arms and dry-runs
+clean (12/12 steps, KRDU val).
+
 ### 2026-09-08 — ts_transformer: L3.d — the speed floor is a command hook (`speed-floor`, `barrier+speed-floor`), and hook diagnostics become per-flight
 
 **The question.** L3.c settled that the soft barrier hook holds the corridor under a late CTA

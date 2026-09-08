@@ -510,6 +510,26 @@ CONTROL_HOOK_SPEED_FLOOR = "speed-floor"
 # channels are disjoint, so composing them is well defined; no other combination is, and
 # this vocabulary is the only place a combination may be spelled.
 CONTROL_HOOK_BARRIER_SPEED_FLOOR = "barrier+speed-floor"
+# ``trombone`` is the third constraint module (L3.e, 2026-09-08): the delay the remaining
+# path cannot absorb AT THE FLOOR SPEED, spent as a lateral extension of the pre-final path
+# — a bounded, lag-compensated heading offset held on one side and mirrored back, with the
+# load factor coordinated. It is the degree of freedom L3.d found missing: with the CTA
+# fixing the total time and the path fixed, the mean speed is fixed and a floor alone has
+# nowhere to put a late arrival. It acts ONLY where the predicted path is more than 30° off
+# the runway course — strictly inside "the on-final gate is closed", so it can never act on
+# the final and never fights the barrier over a state that is already lined up.
+CONTROL_HOOK_TROMBONE = "trombone"
+# The COMBINATIONS, each in the order it is applied. `barrier+speed-floor`: the barrier sets
+# bank and re-coordinates the load factor, then the floor reads that load factor and sets
+# thrust — disjoint channels. The two trombone stacks add a module that writes bank and load
+# as well, which is well defined for the same reason and one more: the barrier acts only
+# INSIDE the on-final gate and the trombone only outside it, so the two never rewrite the
+# same step. The trombone comes last because that is where the value spells it; its 25° turn
+# cap is what keeps the load factor it coordinates from eating the floor's stall margin
+# (control/constraints/trombone.py). No other combination is registered, and this vocabulary
+# is the only place a combination may be spelled.
+CONTROL_HOOK_BARRIER_TROMBONE = "barrier+trombone"
+CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE = "barrier+speed-floor+trombone"
 # ``nominal-residual`` — a fixed tracking law toward the centreline and glidepath with the
 # command as a bounded residual — was NEVER ADOPTED
 # (docs/2026-09-06_control_hooks_results.zh.md) and its code is archived
@@ -524,30 +544,47 @@ CONTROL_HOOKS = (
     CONTROL_HOOK_NOMINAL_RESIDUAL,
     CONTROL_HOOK_SPEED_FLOOR,
     CONTROL_HOOK_BARRIER_SPEED_FLOOR,
+    CONTROL_HOOK_BARRIER_TROMBONE,
+    CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
 )
 #: What a NEW run may select. ``off`` is in it — the flag's own choices drop that one,
 #: because `--command-hook` exists to turn a hook ON, but a config saying ``off`` is the
 #: default and must pass the boundary check in `cli.common`.
+#: There is deliberately no SOLO ``trombone``: the hook hands the command back at the final
+#: approach course and has nothing to hand it to unless the barrier is in the stack, and a
+#: module that moves the aircraft laterally without the adopted corridor layer under it is
+#: not an arm anyone should be able to spell.
 CONTROL_HOOKS_AVAILABLE = (
     CONTROL_HOOK_OFF,
     CONTROL_HOOK_BARRIER,
     CONTROL_HOOK_SPEED_FLOOR,
     CONTROL_HOOK_BARRIER_SPEED_FLOOR,
+    CONTROL_HOOK_BARRIER_TROMBONE,
+    CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
 )
 #: The modules each vocabulary value composes, in application order. One row per value; the
 #: ``+`` spelling is a LOOKUP, never a split, so ``speed-floor+barrier`` (the same two
-#: modules in the wrong order) and ``barrier+nominal-residual`` are simply not members and
-#: are refused by the vocabulary check like any other unknown value.
+#: modules in the wrong order), ``trombone+barrier``, a bare ``trombone`` and
+#: ``barrier+nominal-residual`` are simply not members and are refused by the vocabulary
+#: check like any other unknown value.
 CONTROL_HOOK_MEMBERS: dict[str, tuple[str, ...]] = {
     CONTROL_HOOK_BARRIER: (CONTROL_HOOK_BARRIER,),
     CONTROL_HOOK_SPEED_FLOOR: (CONTROL_HOOK_SPEED_FLOOR,),
     CONTROL_HOOK_BARRIER_SPEED_FLOOR: (CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR),
+    CONTROL_HOOK_BARRIER_TROMBONE: (CONTROL_HOOK_BARRIER, CONTROL_HOOK_TROMBONE),
+    CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE: (
+        CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE
+    ),
 }
 # Fail at import, like every other table in this package: a value added to the selectable
 # vocabulary without a members row would pass construction and die inside the rollout.
 assert set(CONTROL_HOOK_MEMBERS) == set(CONTROL_HOOKS_AVAILABLE) - {CONTROL_HOOK_OFF}, (
     "CONTROL_HOOK_MEMBERS must name the modules of every selectable hook"
 )
+#: The modules that READ ``control_speed_floor_margin``. The floor holds the margin; the
+#: trombone divides by the same ``V_floor`` to size the detour the delay needs, so the value
+#: changes an answer under either — and a knob that cannot change an answer is refused.
+CONTROL_SPEED_FLOOR_MARGIN_READERS = (CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE)
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
@@ -1821,7 +1858,9 @@ class TSConfig:
                         f"{CONTROL_HOOK_BARRIER!r} (control_command_hook="
                         f"{self.control_command_hook!r})"
                     )
-        if CONTROL_HOOK_SPEED_FLOOR in hook_modules:
+        # The margin is read by TWO modules: the floor holds it, and the trombone divides
+        # by the same V_floor to size its detour, so it changes an answer under either.
+        if any(name in hook_modules for name in CONTROL_SPEED_FLOOR_MARGIN_READERS):
             if not math.isfinite(self.control_speed_floor_margin) or (
                 self.control_speed_floor_margin < 1.0
             ):
@@ -1833,7 +1872,7 @@ class TSConfig:
         elif self.control_speed_floor_margin != CONTROL_SPEED_FLOOR_MARGIN_DEFAULT:
             raise ValueError(
                 f"control_speed_floor_margin={self.control_speed_floor_margin!r} needs a "
-                f"command hook that contains {CONTROL_HOOK_SPEED_FLOOR!r} "
+                f"command hook that contains one of {CONTROL_SPEED_FLOOR_MARGIN_READERS} "
                 f"(control_command_hook={self.control_command_hook!r})"
             )
         if (

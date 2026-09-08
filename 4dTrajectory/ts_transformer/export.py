@@ -159,7 +159,10 @@ def build_prediction_record(
         "commandHook": forecast.command_hook,
         # ...and what it did to THIS flight: the hook's step count, then every other count
         # it reports as a share of it (the barrier's gated / clamped steps and mean bank
-        # change, the speed floor's bound steps and mean thrust delta). Absent when no hook
+        # change, the speed floor's bound steps and mean thrust delta, the trombone's
+        # engaged / bound steps, mean offset and per-step stretch — and `tromboneDelayS`,
+        # which is held at every step so the share IS the anchor's estimate of the delay,
+        # readable even on a flight the hook was never admitted to). Absent when no hook
         # ran — the key would otherwise claim a measurement that was never taken.
         **({"commandHookDiagnostics": forecast.command_hook_diagnostics}
            if forecast.command_hook_diagnostics is not None else {}),

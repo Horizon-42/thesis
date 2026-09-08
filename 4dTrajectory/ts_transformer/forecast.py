@@ -1076,12 +1076,18 @@ def forecast_approaches(
     cta_s: np.ndarray | None = None,
     cta_quantile: float | None = None,
     cta_interval: dict[str, object] | None = None,
+    # `--truncate-at-threshold`. The module-level `truncate_at_threshold` (the fixed-time
+    # postprocessor's closest-approach rule) is deliberately NOT called from this function,
+    # so the shadow costs nothing; `cut_at_threshold_crossing` is the rule this flag runs.
+    truncate_at_threshold: bool = False,
 ) -> list[Forecast]:
     """Predict one inference batch through the same dense path used by fit evaluation.
 
     ``project_final`` names a corridor gate to clamp each state forecast into the
     final-approach corridor after truncation (``project_onto_final``); None = the
-    model's own output.
+    model's own output. ``truncate_at_threshold`` additionally cuts every forecast at its
+    first crossing of the threshold plane (:func:`cut_at_threshold_crossing`) — for any
+    output kind, the control rollout included, which the fixed-time rule never reaches.
     """
     if cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
         raise ValueError("a CTA offset applies to a checkpoint trained with cta_conditioning=given only")
@@ -1097,20 +1103,27 @@ def forecast_approaches(
     if config.prediction_output == PREDICTION_CONTROL:
         if project_final is not None:
             raise ValueError("the final-approach projection applies to state forecasts only")
-        return _forecast_control_batch(
+        forecasts = _forecast_control_batch(
             model, series, config, normalizer, anchor, device,
             cta_offset_s=cta_offset_s, conformal=conformal, cta_s=cta_s,
             cta_quantile=cta_quantile, cta_interval=cta_interval,
         )
-    if config.prediction_output == PREDICTION_CLOSURE:
+    elif config.prediction_output == PREDICTION_CLOSURE:
         if project_final is not None:
             raise ValueError("the final-approach projection applies to state forecasts only")
-        return _forecast_closure_batch(model, series, config, normalizer, anchor, device)
+        forecasts = _forecast_closure_batch(model, series, config, normalizer, anchor, device)
+    else:
+        forecasts = [
+            _forecast_state(
+                model, item, config, normalizer, anchor, device, truncate, project_final
+            )
+            for item in series
+        ]
+    if not truncate_at_threshold:
+        return forecasts
     return [
-        _forecast_state(
-            model, item, config, normalizer, anchor, device, truncate, project_final
-        )
-        for item in series
+        cut_at_threshold_crossing(forecast, flight)
+        for forecast, flight in zip(forecasts, series, strict=True)
     ]
 
 
@@ -1162,4 +1175,97 @@ def truncate_at_threshold(forecast: Forecast, target_chart: np.ndarray) -> Forec
         truncated_at_threshold=True,
         sample_durations_s=forecast.sample_durations_s[: closest + 1],
         segment_durations_s=forecast.segment_durations_s[: closest + 1],
+    )
+
+
+def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forecast:
+    """Cut a forecast at its FIRST crossing of the landing threshold plane.
+
+    L3.d's geometry readout is why this exists. With the speed floor holding the commanded
+    speed up, a rollout that is asked to arrive late reaches the threshold EARLY, flies on
+    and turns: endpoint ``|xt|`` p95 of 43-63 km, pooled ADE 840 -> 3443 m at offset 0. All
+    of that is post-landing flying, and every flyability, corridor and CTA readout taken
+    over the whole record is reading it. Cut there and the same arms are read on the
+    approach proper: at +60 s, fully-flyable 1.35 % -> 48.9 % on the identical rollout.
+
+    The cut point is the closest horizontal approach to the target among the rows AT OR PAST
+    the threshold plane (``d <= 0`` in runway axes), scoped to the FIRST such run — "first"
+    so a rollout that wanders off and later passes near the threshold again is cut on its
+    real arrival, and "closest approach" so a laterally displaced crossing is cut where it
+    was nearest rather than a step early. A forecast whose rows never reach ``d <= 0`` never
+    landed: it is returned WHOLE and still says ``truncatedAtThreshold: false`` — cutting it
+    somewhere would invent an arrival, and the flag is what a reader checks. A forecast that
+    crosses on its LAST row is also returned whole, but with the flag TRUE: nothing needed
+    cutting and the record does end at the crossing, so the flag reads "this record ends at
+    the threshold" and "whole" is not evidence of "never got there".
+
+    ``final_time_s`` moves to the cut, which is the point: an early arrival stops being
+    invisible in the CTA readout and becomes the ``final_time_error_s`` it always was. The
+    two clocks stay aligned (``export`` requires it) — the control SEGMENTS are cut to the
+    one containing the new end and its duration shortened to land exactly on it, so the
+    schedule still ends where the states do and stays 1:1 ZOH-aligned with them. Both clocks
+    are rebuilt by ``np.cumsum`` of the durations, which is what ``export`` does too, so the
+    two agree by construction rather than by luck — ``cumsum(diff(x)) == x`` is NOT an
+    identity in general, and it is the shared reconstruction, not the arithmetic, that makes
+    the ends meet.
+
+    On a fixed-time STATE forecast the postprocessor's own closest-approach truncation has
+    already run and also sets ``truncated_at_threshold``; the flag therefore means "this
+    record ends at the threshold", not "this rule cut it". Both rules mean the same thing
+    about the record, which is what a reader needs; only the whole/never-reached case is
+    exclusive to this one.
+    """
+    # The along-course distance back from the threshold, from the one definition of it, and
+    # the horizontal distance to the target from the one definition of THAT.
+    d = runway_axes(
+        torch.from_numpy(
+            np.ascontiguousarray(forecast.values[:, IDX["e"]] - series.target_chart[0])
+        )[None],
+        torch.from_numpy(
+            np.ascontiguousarray(forecast.values[:, IDX["n"]] - series.target_chart[1])
+        )[None],
+        torch.tensor([float(series.scenario.target.psi)], dtype=torch.float64),
+    )[0][0].numpy()
+    distance = horizontal_distance_m(forecast.values, series.target_chart)
+    past = d <= 0.0
+    if not past.any():
+        return forecast
+    first = int(np.argmax(past))
+    run = past[first:]
+    end = len(past) if run.all() else first + int(np.argmin(run))
+    cut = first + int(np.argmin(distance[first:end]))
+    if cut == len(past) - 1:
+        # It reached the threshold on its last row: there is nothing to cut, but the record
+        # DOES end at the crossing and must not read as one that never got there.
+        return replace(forecast, truncated_at_threshold=True)
+    sample_durations_s = forecast.sample_durations_s[: cut + 1]
+    # The clock `export` reconstructs, so the two agree to the bit rather than to a sum.
+    offsets = np.cumsum(sample_durations_s)
+    final_time_s = float(offsets[-1])
+    if forecast.controls is None:
+        # Every non-control forecast carries one clock: segments ARE samples.
+        segment_durations_s = forecast.segment_durations_s[: cut + 1]
+        controls = None
+    else:
+        boundaries = np.cumsum(forecast.segment_durations_s)
+        # `side="left"` gives the first boundary at or after the new end, so the shortened
+        # duration below is strictly positive. `cut < n-1` puts `final_time_s` strictly under
+        # the last boundary, so the search cannot run off the end.
+        last = int(np.searchsorted(boundaries, final_time_s, side="left"))
+        segment_durations_s = forecast.segment_durations_s[: last + 1].copy()
+        segment_durations_s[-1] = final_time_s - (0.0 if last == 0 else boundaries[last - 1])
+        controls = forecast.controls[: last + 1]
+    return replace(
+        forecast,
+        times=forecast.times[: cut + 1],
+        values=forecast.values[: cut + 1],
+        normalized_progress=offsets / final_time_s,
+        final_time_s=final_time_s,
+        truncated_at_threshold=True,
+        sample_durations_s=sample_durations_s,
+        segment_durations_s=segment_durations_s,
+        controls=controls,
+        geodetic_values=(
+            None if forecast.geodetic_values is None else forecast.geodetic_values[: cut + 1]
+        ),
     )
