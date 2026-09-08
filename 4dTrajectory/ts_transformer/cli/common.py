@@ -460,6 +460,17 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--random-train-anchor-l1-share",
+        type=float,
+        default=None,
+        help=(
+            "share of the per-flight per-epoch draws RESERVED for the L-1 anchor the "
+            "fixed-anchor arms train at, mixed into the remaining-path-uniform law "
+            "(default: 0, the pure law). Refused under --random-train-anchor-sampling "
+            "uniform and without --random-train-anchor"
+        ),
+    )
+    parser.add_argument(
         "--checkpoint-selection-metric",
         choices=CHECKPOINT_SELECTION_METRICS,
         default=None,
@@ -554,6 +565,7 @@ CLI_CONFIG_FIELDS = (
     "training_cohort_min_future_s",
     "random_train_anchor_min_future_s",
     "random_train_anchor_sampling",
+    "random_train_anchor_l1_share",
     "checkpoint_selection_metric",
     "validation_common_grid_points",
 )

@@ -25,6 +25,9 @@ from config import (
     PREDICTION_CONTROL,
     PREDICTION_STATE,
     TSConfig,
+    # `L-1`, defined in `config` because `dataset` reserves a share of its random draws for
+    # it (A2b) and cannot import this module; used here, and re-exported by being imported.
+    default_anchor,
 )
 from closure_output import ClosureLabels, check_airport, decision_from_label, reconstruct
 from control.constraints import build_command_hook
@@ -127,11 +130,6 @@ class Forecast:
     @property
     def n_steps(self) -> int:
         return len(self.times)
-
-
-def default_anchor(config: TSConfig) -> int:
-    """Use the earliest anchor with a complete observed lookback."""
-    return config.seq_len - 1
 
 
 def _history_at_anchor(

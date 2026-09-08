@@ -699,6 +699,10 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "training_cohort_min_future_s": 0.0,
         "random_train_anchor_min_future_s": 60.0,
         "random_train_anchor_sampling": RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
+        # `random_train_anchor_l1_share` is deliberately NOT pinned beside it, for the same
+        # reason as `duration_quantile_loss_weight` below: with `random_train_anchor` pinned
+        # False a non-zero share is already refused outright, and a bound that cannot bind
+        # reads as though it had.
         "checkpoint_selection_metric": CHECKPOINT_SELECTION_COMMON_GRID_ADE,
         "validation_common_grid_points": 64,
         "fitted_tail_position_weight": 0.25,
@@ -932,6 +936,18 @@ class TSConfig:
     # (today's, and uniform over TIME) or uniformly over the remaining-path strata. It
     # cannot change WHICH anchors are admissible, so both policies train the same cohort.
     random_train_anchor_sampling: str = RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM
+    # ...and how much of that draw is RESERVED for the L-1 anchor (A2b, design §2.4d): with
+    # probability `l1_share` the epoch's draw for a flight IS `default_anchor(config)`,
+    # exactly the anchor the fixed-anchor arms train at, and otherwise the unchanged
+    # remaining-path-uniform draw. A MIXTURE, not a reweighting of the span — the draws the
+    # coin does not take are the very anchors the share-0 arm saw, because the digest's
+    # salt does not move with the share. WHY: A0.b's random-anchor arms beat the
+    # fixed-anchor one at every re-anchored bin and still LOSE at L-1
+    # (`A0b_lr_objective_path_uniform` 1782 m pooled ADE against native32's 1322 m),
+    # because under a law spread over the whole approach L-1 is one point among many draws.
+    # 0 is the pure draw; a non-zero share needs `remaining-path-uniform`, so it can never
+    # be the silent difference between two runs of the default policy.
+    random_train_anchor_l1_share: float = 0.0
     # One formal development score: fixed-anchor, common true-physical-time, airport-macro
     # 3D ADE.  It is shared by CV, the LR scheduler, early stopping and checkpointing.
     checkpoint_selection_metric: str = CHECKPOINT_SELECTION_COMMON_GRID_ADE
@@ -1379,6 +1395,11 @@ class TSConfig:
             raise ValueError("random_train_anchor_min_future_s must be non-negative")
         if self.training_cohort_min_future_s < 0.0:
             raise ValueError("training_cohort_min_future_s must be non-negative")
+        if not 0.0 <= self.random_train_anchor_l1_share <= 1.0:
+            raise ValueError(
+                "random_train_anchor_l1_share is a share of the per-flight draws and must "
+                f"be between 0 and 1, got {self.random_train_anchor_l1_share!r}"
+            )
         if not 0.0 < self.lr_plateau_factor < 1.0:
             raise ValueError(
                 "lr_plateau_factor must be between 0 and 1, got "
@@ -1447,6 +1468,27 @@ class TSConfig:
                 "HOW a random train anchor is drawn, and random_train_anchor=False draws "
                 "none — the fixed policy anchors every flight at L-1"
             )
+        # The L-1 share is a coin ON TOP of a draw, so it needs a draw to sit on. Refused
+        # rather than ignored in both directions it can be meaningless: the fixed policy
+        # already anchors every flight at L-1 (the share would be 1 by construction), and
+        # under `uniform` the axis would silently do nothing to a run whose name carries it.
+        if self.random_train_anchor_l1_share:
+            if not self.random_train_anchor:
+                raise ValueError(
+                    f"random_train_anchor_l1_share={self.random_train_anchor_l1_share!r} "
+                    "reserves a share of the RANDOM anchor draws for L-1, and "
+                    "random_train_anchor=False draws none — the fixed policy already "
+                    "anchors every flight at L-1"
+                )
+            if self.random_train_anchor_sampling != RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM:
+                raise ValueError(
+                    f"random_train_anchor_l1_share={self.random_train_anchor_l1_share!r} "
+                    "is defined on top of "
+                    f"random_train_anchor_sampling={RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM!r}"
+                    f", not {self.random_train_anchor_sampling!r}: the `uniform` law draws "
+                    "over the samples, where L-1 is already one of them, and mixing a "
+                    "reserved share into it is a second axis nobody has measured"
+                )
         # A scheduler that watches the objective must watch a COMPARABLE objective. Two
         # things move the number under the model's feet, and under either the plateau
         # scheduler could halve the learning rate straight through a schedule that is still
@@ -1988,6 +2030,18 @@ class TSConfig:
                 )
         data["channels"] = tuple(data["channels"])
         return cls(**data)
+
+
+def default_anchor(config: TSConfig) -> int:
+    """Use the earliest anchor with a complete observed lookback.
+
+    It is `L-1`: the anchor every fixed-anchor arm trains at, the anchor every prediction
+    defaults to, and — since A2b — the anchor a random-anchor run reserves a share of its
+    draws for. It lives HERE rather than in `forecast` because `dataset` needs the same
+    index and `forecast` imports `dataset`; re-exported there so every existing call site
+    is unchanged.
+    """
+    return config.seq_len - 1
 
 
 def control_recipe(config: TSConfig) -> dict[str, Any]:

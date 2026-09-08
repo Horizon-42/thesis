@@ -89,6 +89,7 @@ from config import (
     RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
     STATE_POSITION_CORRIDOR_BOUNDED,
     TSConfig,
+    default_anchor,
     uses_control_dynamics,
 )
 from data_provenance import manifest_paths
@@ -1361,8 +1362,26 @@ class TrajectoryWindows(Dataset, ABC):
     def epoch_indices(self, seed: int) -> np.ndarray:
         """Return the concrete mode's one-flight-per-epoch sample indices."""
 
-    def _sampling_extras(self, _indices: np.ndarray) -> dict[str, Any]:
+    @property
+    def reported_sampling_version(self) -> str:
+        """The law the epoch record and the checkpoint contract NAME for this run.
+
+        `sampling_version` is the class's law AND the salt of its per-flight per-epoch
+        digest; this is what it is CALLED. They are the same string for every policy whose
+        law is fixed by its class. They part only where a config axis mixes something on
+        top of the class's draw — A2b's reserved L-1 share — because the name has to say
+        so while the salt must NOT move: the draws the mixture leaves alone have to stay
+        the anchors the unmixed arm drew, or the two are not one axis apart.
+        """
+        return self.sampling_version
+
+    def _sampling_extras(self, _indices: np.ndarray, _seed: int) -> dict[str, Any]:
         """Per-epoch audit rows only one anchor policy can produce.
+
+        Takes the epoch's SEED beside its indices because a draw law can have a component
+        the chosen anchors do not reveal: the L-1 share's coin lands on the same anchor a
+        path-uniform draw at the far end of the span would have chosen, so "how many draws
+        the coin took" has to be recomputed from the seed, not counted off the result.
 
         Empty here: a policy that stores ONE anchor per flight has no distribution to
         report — where its anchors sit is the definition of the policy.
@@ -1376,11 +1395,11 @@ class TrajectoryWindows(Dataset, ABC):
         series_indices = np.array(
             [self.index[int(index)][0] for index in indices], dtype=np.int64
         )
-        extras = self._sampling_extras(indices)
+        extras = self._sampling_extras(indices, seed)
         if not len(indices):
             return {
                 "policy": self.anchor_policy,
-                "sampling_version": self.sampling_version,
+                "sampling_version": self.reported_sampling_version,
                 "minimum_future_s": self.minimum_future_s,
                 "eligibility_policy": getattr(
                     self, "anchor_eligibility_policy", "temporal-only-v1"
@@ -1417,7 +1436,7 @@ class TrajectoryWindows(Dataset, ABC):
 
         return {
             "policy": self.anchor_policy,
-            "sampling_version": self.sampling_version,
+            "sampling_version": self.reported_sampling_version,
             "minimum_future_s": self.minimum_future_s,
             "eligibility_policy": getattr(
                 self, "anchor_eligibility_policy", "temporal-only-v1"
@@ -1432,7 +1451,12 @@ class TrajectoryWindows(Dataset, ABC):
             "anchor_index": distribution(anchors),
             "anchor_time_s": distribution(anchor_times),
             "remaining_time_s": distribution(remaining_times),
-            "fixed_anchor_fraction": float(np.mean(anchors == self.config.seq_len - 1)),
+            # Every drawn anchor that IS L-1, whatever chose it. Under an L-1 share that is
+            # the coin's draws PLUS the path-uniform draws that landed at the far end of
+            # the span anyway, MINUS the coin's draws on flights that store no L-1
+            # (`l1_share_flights_without_l1`) — so it is neither a restatement of
+            # `l1_share_drawn` nor, once that count is non-zero, an upper bound on it.
+            "fixed_anchor_fraction": float(np.mean(anchors == default_anchor(self.config))),
             **extras,
         }
 
@@ -1801,7 +1825,7 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
             for label, count in zip(REMAINING_PATH_STRATA_LABELS, counts, strict=True)
         }
 
-    def _sampling_extras(self, indices: np.ndarray) -> dict[str, Any]:
+    def _sampling_extras(self, indices: np.ndarray, _seed: int) -> dict[str, Any]:
         """The epoch's REALISED anchors per stratum, beside the POPULATION they came from.
 
         One draw per flight, so the drawn counts sum to the epoch's flights while the
@@ -1862,6 +1886,13 @@ class RemainingPathUniformAnchorTrajectoryWindows(RandomAnchorTrajectoryWindows)
     Admissibility is UNCHANGED (`eligible_random_train_anchors`, the same future contract),
     so this policy trains the same cohort on the same anchor population; only which of them
     each epoch sees changes.
+
+    `config.random_train_anchor_l1_share` (A2b) mixes a RESERVED share of L-1 draws into
+    this law: with that probability the flight's draw for the epoch is its first admissible
+    anchor — `default_anchor`, the anchor the fixed-anchor arms train at, for all but the
+    handful of flights `flights_without_default_anchor` counts — and otherwise it is the
+    span draw above, unchanged and read from the same digest under the same salt. At the
+    default 0 the coin never fires and every draw is byte-for-byte today's.
     """
 
     anchor_description = (
@@ -1869,31 +1900,113 @@ class RemainingPathUniformAnchorTrajectoryWindows(RandomAnchorTrajectoryWindows)
     )
     anchor_policy = "remaining-path-uniform-random"
     sampling_version = "per-flight-hash-v3-remaining-path-uniform"
+    #: What `reported_sampling_version` NAMES a non-zero L-1 share. The mixture is a
+    #: different law and must not wear the pure law's name; `sampling_version` above stays
+    #: the salt, so the (1 - share) of flights the coin passes over draw the anchor they
+    #: would have drawn at share 0 — the arm differs from its base arm only in the draws
+    #: the coin replaced.
+    L1_SHARE_SAMPLING_VERSION = "per-flight-hash-v4-remaining-path-uniform-l1-share"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.l1_share = float(self.config.random_train_anchor_l1_share)
+        # The reserved draw is the flight's FIRST stored anchor — offset 0 — and that is
+        # `default_anchor(config)` for all but a handful of flights: `window_anchors`
+        # starts there and output eligibility only REMOVES anchors. The two ways it can be
+        # a later index are both the right answer rather than a deviation to repair. Under
+        # a `minimum_anchor_index` floor it IS what the fixed-anchor policy anchors at
+        # (`FixedAnchorTrajectoryWindows` takes the same `anchors[0]`). Under output
+        # eligibility it is the earliest anchor whose observed state is inside the airborne
+        # model domain at all — the flight has no valid L-1 window to be trained on, so the
+        # earliest one it does have is the nearest thing to "the start of the approach".
+        #
+        # COUNTED, never silent (`l1_share_flights_without_l1` in the epoch record, and one
+        # line from `train()`): the arm's L-1 gate is read against fixed-anchor arms that
+        # anchor every flight at L-1, so how many flights could not be is part of the
+        # reading. MEASURED on the real KRDU roster (14,435 arrivals, 9,720 of them in the
+        # `openap-direct` cohort under the 20 s future contract): **10**, i.e. 0.10 %, nine
+        # of them runway 23R, first admissible anchor 90-163 against L-1 = 59.
+        self.flights_without_default_anchor = (
+            0 if not self.l1_share else sum(
+                self.index[int(self.range_starts[int(s_idx)])][1]
+                != default_anchor(self.config)
+                for s_idx in self.eligible_series
+            )
+        )
+
+    @property
+    def reported_sampling_version(self) -> str:
+        return (
+            self.L1_SHARE_SAMPLING_VERSION if self.l1_share else self.sampling_version
+        )
+
+    def _epoch_draws(self, seed: int) -> tuple[np.ndarray, np.ndarray]:
+        """Per eligible flight, this epoch's unit draw and whether the coin took L-1.
+
+        One digest per flight, as before: bytes 0-8 are the span draw — the same bytes, from
+        the same salt, that the pure law reads — and bytes 8-16 are the coin, which at the
+        default share is computed and can never fire. Two independent reads of one hash, so
+        the coin cannot correlate with where in the span the draw it replaces would land
+        (measured over 18,000 draws: mean unit draw 0.4977 when the coin fired, 0.5017 when
+        it did not).
+        """
+        digests = [
+            hashlib.sha256(
+                f"{self.sampling_version}:{seed}:"
+                f"{self.series[int(series_index)].dataset_id}".encode()
+            ).digest()
+            for series_index in self.eligible_series
+        ]
+        unit_draws = np.array(
+            [int.from_bytes(digest[:8], "big") / 2 ** 64 for digest in digests]
+        )
+        coins = np.array(
+            [int.from_bytes(digest[8:16], "big") / 2 ** 64 for digest in digests]
+        )
+        return unit_draws, coins < self.l1_share
 
     def epoch_indices(self, seed: int) -> np.ndarray:
+        starts = self.range_starts[self.eligible_series]
+        counts = self.range_counts[self.eligible_series]
+        unit_draws, at_l1 = self._epoch_draws(seed)
         offsets = np.array([
-            remaining_path_uniform_offset(
-                self.anchor_remaining_path_m[start : start + count],
-                # The flight's own draw for this epoch, as a fraction of its span. One
-                # 8-byte digest read, the same construction as the uniform policy's.
-                int.from_bytes(
-                    hashlib.sha256(
-                        f"{self.sampling_version}:{seed}:"
-                        f"{self.series[int(series_index)].dataset_id}".encode()
-                    ).digest()[:8],
-                    "big",
-                ) / 2 ** 64,
+            # The reserved draw is offset 0 — the flight's first stored anchor, which is
+            # L-1 except for the flights counted in `flights_without_default_anchor`.
+            0 if take_l1 else remaining_path_uniform_offset(
+                self.anchor_remaining_path_m[start : start + count], unit_draw
             )
-            for series_index, start, count in zip(
-                self.eligible_series,
-                self.range_starts[self.eligible_series],
-                self.range_counts[self.eligible_series],
+            for start, count, unit_draw, take_l1 in zip(
+                starts, counts, unit_draws, at_l1, strict=True
             )
         ], dtype=np.int64)
-        indices = self.range_starts[self.eligible_series] + offsets
+        indices = starts + offsets
         rng = np.random.default_rng(seed)
         rng.shuffle(indices)
         return indices
+
+    def _sampling_extras(self, indices: np.ndarray, seed: int) -> dict[str, Any]:
+        """The strata histogram, plus — under a share — how many draws the coin took.
+
+        Only under a non-zero share: at 0 the keys would report constants, and the arms
+        trained before this axis existed would gain columns that never move. It is not
+        `fixed_anchor_fraction` (which counts every drawn anchor that IS L-1 — span draws at
+        the far end included, coin draws on the flights that store no L-1 excluded): this
+        one is the share the coin actually realised, the thing binomial noise is read
+        against, and it is exactly the requested share up to that noise whatever anchor each
+        reserved draw landed on.
+        """
+        extras = super()._sampling_extras(indices, seed)
+        if not self.l1_share:
+            return extras
+        _unit_draws, at_l1 = self._epoch_draws(seed)
+        return {
+            **extras,
+            "l1_share": self.l1_share,
+            "l1_share_drawn": float(np.mean(at_l1)) if len(at_l1) else 0.0,
+            # Bounded coverage, stated rather than assumed: the flights whose reserved draw
+            # is their earliest admissible anchor because they store no L-1 at all.
+            "l1_share_flights_without_l1": self.flights_without_default_anchor,
+        }
 
 
 #: The training window class each ``random_train_anchor_sampling`` value names. One table,

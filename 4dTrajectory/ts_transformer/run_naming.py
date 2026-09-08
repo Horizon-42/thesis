@@ -206,6 +206,11 @@ META_FIELDS = (
     # anchor distributions every epoch, so it is as identity-bearing as the flag above it.
     # Every stored config predates it and carries the default (recounted on disk).
     "random_train_anchor_sampling",
+    # A2b: how much of that draw is RESERVED for L-1. A mixture is a third law, not a
+    # tuning knob — two runs that differ only here see a different anchor distribution
+    # every epoch. Every stored config predates it and carries the default 0, so adding
+    # it renames nothing (recounted on disk).
+    "random_train_anchor_l1_share",
     "training_cohort_min_future_s",
     "checkpoint_selection_metric",
     # A0.b: WHICH validation number the LR scheduler measures its plateau on. Two runs that
@@ -287,6 +292,7 @@ _ABBREV = {
     "training_cohort_min_future_s": "min-future",
     "random_train_anchor": "random-anchor",
     "random_train_anchor_sampling": "anchors",
+    "random_train_anchor_l1_share": "l1-share",
     "control_duration_parameterization": "duration",
     "control_duration_uniform_floor": "duration-floor",
     "control_gradient_clip_norm": "grad-clip",
