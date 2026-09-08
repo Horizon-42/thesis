@@ -473,6 +473,40 @@ checkpoint 在重锚网格上**每一个锚点的几何都比固定臂好**（ch
 应当分开——**A2 的设计问题**（待用户决定）：(a) 两模型交付（L−1 用固定锚点臂，之后用随机锚点臂），或 (b) 混合锚点训练
 （L−1 锚点加权 + 剩余路程均匀），门仍是 L−1 不劣于 native32 超过种子噪声。两臂在预算上限仍在下降，180 轮不是收敛值。
 
+### 2.4e A2b：把一部分抽签留给 L−1（2026-09-08 用户决定 (b)，代码已建，未训练）
+
+§2.4d 的两条出路里，用户选了 **(b) 混合锚点训练**。实现（分支 `dev-a2b`）：新 config 轴
+`random_train_anchor_l1_share`（默认 0.0）——在 `remaining-path-uniform` 下，每架飞机每轮以该概率
+把抽签直接定为 `default_anchor(config)` = L−1（正是固定锚点臂训练的那一个锚点），否则仍是原来的
+剩余路程均匀抽签。
+
+- **是混合，不是重新加权**：硬币取自该航班该轮**同一个 sha256 的第二个 8 字节**，而这个摘要的**盐
+  不随 share 变**（盐仍是类的 `sampling_version`，只有新的 `reported_sampling_version` 属性随
+  share 改名），所以硬币没抽中的那 (1 − share) 份**逐位就是 share=0 那条臂抽到的锚点**——A2b 的臂
+  与 `A0b_lr_objective_path_uniform` 只差被替换掉的那些抽签。
+- **拒绝，不忽略**：`uniform` 采样下、`random_train_anchor=False` 下、区间 [0, 1] 之外。
+- **没有 L−1 可留的那些航班：计数，不拒绝**。被留出的抽签是该航班的**第一个可用锚点**（offset 0），
+  除非输出 eligibility 把 L−1 去掉了、或 `minimum_anchor_index` 抬高了下限（后者本来就是固定锚点
+  策略锚的那一个）。初稿把前者写成构造期硬拒绝，**实测把它否了**：KRDU 全量进港（14,435 条、
+  `openap-direct` 队列 9,720 架、20 s 契约）里**有 10 架根本不存 anchor 59**（0.10 %，其中 9 架是
+  23R，首个可用锚点 90–163），因为 `airborne-1.10-stall-margin-v1` 判定它们在 L−1 处的观测状态不在
+  空中模型域内。硬拒绝会让两条 A2b 臂在建数据集时就中止，而它唯一给出的补救（改 roster）会毁掉这
+  两条臂赖以成立的配对。现在它们被留在自己**最早的可用锚点**上，数目**写进产物**：每轮记录的
+  `l1_share_flights_without_l1`，外加 `train()` 的一行。
+- **记账**：非零 share 时每轮的 `train_anchor_sampling` 多三个键 `l1_share` / `l1_share_drawn`
+  （硬币的实测份额）/ `l1_share_flights_without_l1`；久已存在的 `fixed_anchor_fraction` 数的是
+  「抽中的锚点是 L−1」的全部（含远端落在 L−1 的均匀抽签），只有在最后那个计数为 0 时才是它的上界。
+- **默认位级等价**（对 `9b1f130` 实测）：control / 随机锚点 uniform / 随机锚点 path-uniform 三条
+  2 轮合成训练，**4312 个非墙钟叶子（4069 个数值）中 6 个不同，且全部是 `wall_s`**；两条随机律的
+  逐轮 `sample_sha256` 完全相同。**重算命名**：磁盘上 1128 个带 config 的产物 **0 个改名**，
+  A0.b 两条臂的 slug 仍是 `…_8-more_7cfd2b7f` / `…_9-more_48f49b41`。
+- **臂**：`docs/experiments/a2b_l1_share_arms.json`，base = `A0b_lr_objective_path_uniform` 的
+  config（逐字段核对过），`A2b_l1_share_0p3` / `A2b_l1_share_0p5`，180 轮、patience 180、
+  `lr_plateau_metric=objective`。**预注册的门（两条都要过）**：L−1 全体 ADE 不劣于 native32 的
+  1322 m 超过 125 m 控制路种子噪声线；且曲线的门 3（s_freeze）仍在 8 km 达到（|Δt| p80 < 30 s）。
+  **否决**：12 km bin 的雷达引导 ADE p50 比 `A0b_lr_objective_path_uniform` 的 561 m 劣化超过
+  100 m。dry-run 通过，两条新 slug 尾部 `…_10-more_fbde423f` / `…_10-more_e5b37c1c`。**未训练。**
+
 ### 2.5 A2 的门
 
 同一锚点网格上，A2 的雷达引导 ADE(s) 与时长误差不劣于 A1（无状态）；候选权重的熵随 s 单调下降

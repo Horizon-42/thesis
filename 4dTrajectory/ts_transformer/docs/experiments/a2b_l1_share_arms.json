@@ -1,0 +1,36 @@
+{
+ "_comment": "A2b (design doc 2026-09-07 anytime §2.4d, decision of 2026-09-08): does RESERVING a share of the random-anchor draws for L-1 recover L-1 without losing the anytime curve? A0.b answered the first half of the random-anchor line and left the second open: `A0b_lr_objective_path_uniform` ran all 180 epochs without early stopping (best 173, still falling), took the anchor-grid selection metric to 710 (L-1 1782 / 12 km 561 / 8 km 283 / 6 km 212 m), passed monotonicity, reached gate 2 at 16 km (1317 m against native32's 1382), and REACHED s_freeze at 8 km (|dt| p80 19.8 s) — the first time in this project that gate 3 has been met, because the duration head stopped flooring at ~125 s (6 km predicted duration 91 s against native32's 179 s). What it still fails is the pre-registered L-1 veto: 1404 paired val flights give pooled ADE 1782 m against the fixed-anchor native32's 1322 m (FDE p50 1477 vs 864; straight-in chamfer 84 vs 109, i.e. BETTER there; vectored 3839 / 1981 / 1691). The gap is a third of what the first random-anchor arm cost (2949 m) and still far beyond the 125 m control-path seed line. The reading is mechanical: under a law spread uniformly over the flight's own remaining-path span, L-1 is ONE POINT among many draws, so the arm never specialises for the anchor the fixed arms train at exclusively. The user's decision of 2026-09-08 lists two ways out — (a) two-model delivery (fixed arm at L-1, random arm afterwards) and (b) MIXED-ANCHOR training (L-1 weighted + remaining-path uniform). This file is (b). BUILD (2026-09-08, branch dev-a2b): `random_train_anchor_l1_share` — under `remaining-path-uniform`, with that probability a flight's draw for the epoch IS `default_anchor(config)` = L-1, exactly the anchor the fixed-anchor arms train at; otherwise the unchanged span draw. The coin is a SECOND 8 bytes of the same per-flight per-epoch sha256 the law already reads, and the salt of that digest does NOT move with the share (only the REPORTED `sampling_version` does), so the (1 - share) of draws the coin passes over are literally the anchors `A0b_lr_objective_path_uniform` saw — the arms below differ from their base arm in the replaced draws and in nothing else. Refused (never ignored) under `uniform` sampling, with `random_train_anchor=False`, and outside [0, 1]. The reserved draw is each flight's FIRST admissible anchor, which is L-1 except for the 10 of 9,720 eligible KRDU arrivals (0.10 %, nine of them runway 23R) whose L-1 output eligibility removed — those are reserved at their earliest admissible anchor and COUNTED into every epoch record (`l1_share_flights_without_l1`) plus one line from train(), because a refusal would have aborted both arms and changing the roster to avoid it would have destroyed the pairing this file exists for. The epoch record also gains `l1_share_drawn`, the coin's realised share; the run name carries `l1-share=` only when non-zero, and a recount over 1128 stored configs on disk renamed 0. GATE (pre-registered, BOTH must hold to declare A2b a win): (1) the L-1 pooled ADE is NOT worse than native32's 1322 m beyond the 125 m control-path seed line (`B1_point_matched` seeds 1337/2024 = 1248/1373 m, docs/CHANGELOG 2026-09-08), i.e. an arm at or under about 1447 m clears it and one at 1782 m does not; AND (2) the anytime curve's gate 3 still holds — s_freeze reached at 8 km, vectored |dt| p80 < 30 s, the property A0.b bought and the whole delivery form depends on. VETO: the 12 km bin's vectored ADE p50 worsens by more than 100 m against `A0b_lr_objective_path_uniform`'s 561 m (i.e. > 661 m). That is the bin that carries the middle of the curve, and a share large enough to buy L-1 by flattening the curve is the failure mode this axis is most likely to have; the veto fires on the curve, not on the L-1 number. READING: replay both arms with run_ts_anytime_curve.py on the same 20/16/12/8/6/4/2 km grid, --min-future-s 60, paired per flight against `A0b_lr_objective_path_uniform` AND `L1_native32`; read the per-epoch `validation_anchor_grid` block for whether the L-1 anchor set now improves with budget rather than plateauing; and read `train_anchor_sampling.l1_share_drawn` to confirm the coin realised the share it was asked for. TWO shares because the answer is a dose question, not a yes/no: 0.3 is the smallest share that gives L-1 more weight than any single 2-km stratum of the span law, 0.5 makes L-1 half the training signal and is where a flattened curve should be visible if it is going to be. No numbers here yet — neither arm has been trained.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_imitation_loss_weight": 0.0,
+  "control_heading_rate_loss_weight": 8.0,
+  "control_bank_tv_loss_weight": 1.0,
+  "random_train_anchor": true,
+  "random_train_anchor_min_future_s": 20.0,
+  "random_train_anchor_sampling": "remaining-path-uniform",
+  "checkpoint_selection_metric": "anchor-grid-common-grid-ade",
+  "lr_plateau_metric": "objective",
+  "epochs": 180,
+  "patience": 180
+ },
+ "arms": [
+  {
+   "key": "A2b_l1_share_0p3",
+   "label": "path-uniform anchors, 30 % of the draws reserved for L-1, 180 epochs",
+   "overrides": {
+    "random_train_anchor_l1_share": 0.3
+   },
+   "_comment": "The smaller dose. Under the pure span law a flight's draw lands in any given 2-km stratum with roughly a tenth of the probability (KRDU val, 181,906 admissible anchors: <2 km 4.4 %, 2-4 km 13.4 %, 4-6 km 13.2 %, 6-8 km 13.1 %, 8-12 km 24.5 %, 12-16 km 7.3 %, 16-20 km 3.2 %, >=20 km 21.0 %), so 0.3 makes L-1 the single most-trained anchor without taking the majority of the signal. Expected reading if the mechanism is right: the L-1 anchor set in `validation_anchor_grid` improves with budget instead of sitting where the span law left it, while 12/8/6 km move by less than the gate's 100 m."
+  },
+  {
+   "key": "A2b_l1_share_0p5",
+   "label": "the same, 50 % of the draws reserved for L-1",
+   "overrides": {
+    "random_train_anchor_l1_share": 0.5
+   },
+   "_comment": "The larger dose: half the epoch's supervision at L-1, half spread over the approach. It is the arm that tells the two failure modes apart. If 0.3 clears the L-1 gate and 0.5 does not clear the 12 km veto, the axis has a usable window and the dose is the deliverable; if NEITHER clears L-1, mixing does not recover the fixed-anchor base and the user's option (a) — two-model delivery, fixed arm at L-1 and the random arm afterwards — is what A2 delivers; if 0.5 clears L-1 while its curve holds, the share is not a trade-off at all and the next question is whether the pure fixed-anchor arm was ever the right base."
+  }
+ ]
+}
