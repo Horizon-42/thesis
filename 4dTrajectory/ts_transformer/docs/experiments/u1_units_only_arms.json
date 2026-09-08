@@ -1,0 +1,9 @@
+{
+  "_comment": "U1 units-only control (decision 4c, 2026-09-08 evening, pre-registered): L2.g moved TWO things at once relative to native32 -- the latent axis AND position_loss_scale_m 10 km -> 1 km. Before the main recipe adopts the 1 km scale, measure the units change ALONE on the no-latent native32 base (custom, N=32, native segment endpoints, imitation 64), same split, seed 1337, 180 epochs as native32 (early stopping as native32). Reading: pooled ADE / per-stratum ADE / FDE p50 / chamfer / bank skill vs native32 (1322 / 445 / 2870; 864 / 671 / 1982; 224; 0.726) and vs L2.g (1230 / 1194; 656 / 627). Gate: none -- it is an attribution measurement; the ~125 m control-path seed line applies to ADE, so only differences beyond it (or FDE beyond ~60 m, the two-seed FDE spread) count. If U1 alone reproduces most of L2.g's FDE gain, the gain is units, not the latent, and the recipe change goes in on its own; if not, the latent is the carrier and the units are its enabler.",
+  "base_recipe": "simple-v3",
+  "base": {"control_recipe_name": "custom", "n_segments": 32, "checkpoint_selection_metric": "fixed-anchor-common-grid-ade"},
+  "arms": [
+    {"key": "U1_native32_units", "label": "native32 (no latent) with position_loss_scale_m 1 km — the units change alone",
+     "overrides": {"position_loss_scale_m": 1000.0}}
+  ]
+}
