@@ -237,7 +237,8 @@ flight model.
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `closure_output.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
-| command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried) |
+| command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). Two modules are live and the vocabulary carries ONE combination: `barrier` (lateral, gated on the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08) and `barrier+speed-floor`, which applies them in that order. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier` is not a member and is refused with the vocabulary |
+| `control_speed_floor_margin` | `1.10` | The speed floor's margin: `V_floor = margin × V_stall(n_commanded, mass, rho, Cl_max)`. The COEFFICIENT is the package's existing one — the optimizer's NLP velocity floor (`optimization/scenario_optimization._STALL_MARGIN`) and the control-anchor eligibility gate (`anchor_eligibility.CONTROL_ANCHOR_STALL_MARGIN`) are both 1.10 — but **the SPEED it multiplies is not the same one, so do not quote the three as equal**: those two use the 1-g stall speed at SEA-LEVEL density (the optimizer's also capped at V_ref), the hook uses `V_stall(n_commanded)` at the LOCAL ISA density, uncapped, because it defends `flyability`'s criterion, which is evaluated at each sample's own altitude. At 8000 ft ρ/ρ₀ = 0.79, so the hook's floor is ~12.5 % higher — an effective margin near 1.24, ×√n in a turn — making the hook strictly the TIGHTEST of the three. Not one symbol on purpose: the other two are frozen policy constants (one is spelled into the stored `airborne-1.10-stall-margin-v1`) and this one is a per-run field. **Refused away from its default under a hook that has no speed floor**, and the barrier's two gains are refused the same way under a hook that has no barrier — before L3.d "a hook is on" and "the barrier is on" were the same condition. `predict --control-speed-floor-margin` overrides it; names a run `floor-margin=` |
 | `--project-final` | off | deployment fallback; FAF-gated wrecks vectored flights |
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
 | `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` / `latent_posterior_init_std` and L2.f's two below mean nothing without it and are refused |
@@ -299,6 +300,29 @@ Two rules that cost real trajectories when missed: a hook that changes the bank 
 re-coordinate the load factor**, and every rate gain must be `min(gain, 1/Δt)` because the
 command is HELD.
 
+**A hook acts THROUGH the controls, never on the state.** The speed floor (L3.d) is the second
+module and the rule is what makes it one: it raises the commanded THRUST so the speed is still
+on the floor when the hold ends — `V̇ = (T − D)/m − g sin γ` inverted for the command, with the
+thrust already spooled credited over `τ_eff = τ_T(1 − e^{−Δt/τ_T})` exactly as the barrier
+credits a bank already rolled into. Clipping `V` after the rollout would have been three lines
+and would have stopped the record being a trajectory of the dynamics. Three consequences worth
+knowing before touching it: it is **UNGATED** (the barrier's on-final gate is a statement about
+the final approach; a stall is a statement about the airframe, and 77–94 % of the measured stall
+samples sit at ≥ 20 km remaining, where that gate is shut); it **owns one channel** and returns
+bank and load factor bit-identical, which is what makes `barrier+speed-floor` well defined; and
+the floor reads the **COMMANDED** load factor, so under the composite it prices the manoeuvre the
+barrier just coordinated. The floor is imposed at the END of the hold and drag is frozen across
+it, so the realised speed can dip slightly below the floor mid-hold (measured 0.2–0.7 m/s on the
+synthetic fixtures, at 5–6 s holds) — that dip is against a 10 % margin, not against the stall
+speed, so it does not reach `Cl_max`.
+
+**Every hook reports per-FLIGHT counts, and that is what a record carries.**
+`per_flight_diagnostics()` returns `[B]` rows; `diagnostics()` is those summed and is what an
+epoch record reports. `source.commandHookDiagnostics` on a prediction record is the flight's own
+`steps` plus every other count as a share of it — `commandHook` alone cannot separate a flight
+the hook never touched from one it rewrote at every step. The key is ABSENT without a hook,
+never zero.
+
 ## How to read results here (conventions that prevent wrong conclusions)
 
 - **Bank skill is read against the random-flight floor and the same-runway twin ceiling that
@@ -359,7 +383,10 @@ Two edges that a change must not reverse: `evaluation_protocol` reaches
 Control-specific code lives in **`control/`**, by role rather than behind a `control_`
 prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
 `dynamics/{backends,rollout,inverse,hooks}`, `loss/{components,fixed_dt}`,
-`training/diagnostics`, `constraints/{barrier_filter,gates}`.
+`training/diagnostics`, `constraints/{barrier_filter,speed_floor,composite,gates,saturation}`.
+`saturation` holds the ONE definition of what `hook_saturation=soft` means (a scaled softplus);
+`composite` is how two modules become the one hook the rollout takes, and it refuses two modules
+that report a diagnostic under the same name.
 
 **A dynamics backend is a ROW, not a class**: `control/dynamics/backends.py` maps the
 `(control_dynamics_model, control_dynamics_backend)` PAIR to
