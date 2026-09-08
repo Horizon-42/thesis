@@ -4,6 +4,128 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-08 — ts_transformer: L3.d — the speed floor is a command hook (`speed-floor`, `barrier+speed-floor`), and hook diagnostics become per-flight
+
+**The question.** L3.c settled that the soft barrier hook holds the corridor under a late CTA
+(+90 s: `xt@thr` p50 3288 → 5 m, |xt| p95 7694 → 2332 m) and is free at offset 0 (ADE 840 vs 842),
+but that the trajectories are unflyable anyway: the fully-flyable share is 0 % from +60 s,
+**99.9 % of the hard violations are the STALL term, and 77–94 % of the stall samples sit at
+≥ 20 km remaining**. The model commands infeasibly low speeds on the OUTER segment and a late CTA
+pushes more of the delay into exactly that segment. The barrier is lateral-only, so nothing in the
+adopted delivery form touches it. User decision 3(a) of 2026-09-08: a speed floor inside the
+rollout, acting THROUGH the controls, never by clipping V after the fact.
+
+**The change (code on `dev-speed-floor`, predict-time; nothing retrained).**
+`control/constraints/speed_floor.py` is the second constraint module. At each command step it
+computes the stall-margin floor
+
+    V_floor = control_speed_floor_margin × sqrt(2 n_commanded m g / (rho S Cl_max))
+
+— `flyability`'s only hard term (`Cl_required > Cl_max`) read as a speed, at the flight's own
+`(S, Cl_max)` row of the batch `aero_params` (the same numbers the RHS integrates and `flyability`
+grades against) and at the ISA density of the height the command's effect is measured at, not at
+sea level. It then inverts `V̇ = (T − D)/m − g sin γ` over the hold for the THRUST command that
+leaves the speed on the floor when the hold ends, crediting the thrust already spooled for
+`τ_eff = τ_T (1 − e^{−Δt/τ_T})` — the same lag compensation barrier v2 gives a bank already rolled
+into, and the v2 lesson applied to a second channel. The command's thrust is raised to that demand
+(soft: a scaled softplus; hard: a clamp) and clamped to the envelope. **Bank and load factor come
+back bit-identical.**
+
+Three design points, each of which could have been got wrong:
+- **Ungated.** The barrier acts only where its on-final gate opens, because a corridor is a
+  statement about the final approach. A stall is a statement about the airframe, and the
+  measurement says it fires mostly where that gate is shut — a gate here would have left the whole
+  problem untouched.
+- **Through the controls.** Clipping V after the rollout was the three-line alternative and would
+  have stopped the record being a trajectory of the dynamics — the same reason the corridor is a
+  barrier on the bank rather than a projection of the path.
+- **The COMMANDED load factor.** Under `barrier+speed-floor` the barrier runs first and
+  re-coordinates the load, so the floor prices the manoeuvre that will actually be flown.
+
+**Composition.** The rollout takes ONE hook, and that stays right — "the command flown" must be a
+single answer — so composition lives in `control/constraints/composite.py`: each module in turn is
+handed the same segment-start state and the previous module's command. The order is part of the
+vocabulary value (`config.CONTROL_HOOK_MEMBERS`), not a free choice, and the `+` is a LOOKUP, never
+a split: `barrier+speed-floor` is a member, `speed-floor+barrier` and `barrier+nominal-residual`
+are not and are refused by the ordinary vocabulary check. The two modules write disjoint channels
+(bank + load against thrust), which is what makes this combination well defined and every other one
+absent. A composite refuses two modules that report a diagnostic under the same name.
+
+**`control_speed_floor_margin` defaults to 1.10, whose COEFFICIENT is not a new number** — the
+optimizer's NLP velocity floor (`optimization/scenario_optimization._STALL_MARGIN`) and this
+package's control-anchor eligibility gate (`anchor_eligibility.CONTROL_ANCHOR_STALL_MARGIN`) are both
+1.10. **The speed it multiplies is NOT the same one, and a results table must not quote the three as
+equal**: those two take the 1-g stall speed at SEA-LEVEL density (the optimizer's is also capped at
+V_ref), while the hook takes `V_stall(n_commanded)` at the LOCAL ISA density and applies no cap —
+because it exists to defend `flyability`'s criterion, which is evaluated at each sample's own
+altitude and inverted load factor. At 8000 ft ρ/ρ₀ = 0.79, so the hook's floor is ~12.5 % higher, an
+effective margin near 1.24 (×√n in a turn). The direction is the safe one: the hook is strictly the
+TIGHTEST of the three, so what it lets through the optimizer's floor would also have admitted. Not
+one symbol on purpose: the other two are frozen policy constants (one is spelled into the stored
+policy string `airborne-1.10-stall-margin-v1`) and this one is a per-run field a campaign may raise,
+and aliasing them would let a run's knob rewrite a data policy's identity. It is refused away from
+its default under a hook with no speed floor, and refused non-finite or below 1.0, and it is
+deliberately absent from `REQUIRED_SERIALIZED_CONTROL_FIELDS`, like the barrier's gains — a config
+without the hook could not read it, so the default IS what every stored artifact ran under.
+
+**A second module made an old check positional.** Until now `barrier` was the only buildable hook, so
+"a hook is on" and "the barrier is on" were the same condition and the barrier's gains always bound.
+Under `--command-hook speed-floor` they no longer do, so `control_barrier_alpha` /
+`control_barrier_heading_gain` are now refused away from their default on a hook with no barrier in
+it — the same "a value that cannot change an answer" rule the margin gets — while the positivity
+check stays wherever a barrier IS built. The archived `nominal-residual` builds nothing and is
+outside both rules by name, so its six stored 2026-09-06 configs load exactly as they did.
+Two import-time assertions pin the tables against each other: every selectable hook names its
+modules (`CONTROL_HOOK_MEMBERS` vs `CONTROL_HOOKS_AVAILABLE`) and every module named has a class
+(`_HOOKS`) — without them a new vocabulary value would pass construction and die inside the rollout.
+
+**Hook diagnostics became per-FLIGHT.** `CommandHook` gains `per_flight_diagnostics()` returning
+`[B]` rows; `diagnostics()` is those summed and still feeds the epoch record. A prediction record
+now carries `source.commandHookDiagnostics` — the flight's own `steps` plus every other count as a
+share of it — because `commandHook` alone cannot separate a flight the hook never touched from one
+it rewrote at every step. The key is ABSENT without a hook, never zero.
+
+**Also**: `soft_max`/`soft_min` moved out of `barrier_filter` into
+`control/constraints/saturation.py` — one definition of what `hook_saturation=soft` MEANS, now that
+two modules spell it; `RunwayAxesView` gains `vertical_speed` (the height rate the floor carries
+over a hold), so the chart layout still has one reader.
+
+**The soft form had to be made inert where it demands nothing** (found in review before any arm
+ran). `soft_max(x, bound, s)` overshoots its bound by `s·ln 2`, so parking a non-binding demand at
+`MIN_THRUST_FRACTION` added **0.0139 of installed thrust — 2.8 kN on a 66 t fixture, 0.042 m/s², about
+12 m/s over a 300 s remainder** — to every command sitting at the envelope floor, and `[-0.2, -0.1]`
+is the COMMON band on an approach (`control/envelope.py`: a real approach needs net-negative thrust),
+not a corner. `soft` being the adopted delivery form, the L3.d arm would have measured that bias
+rather than the floor, and the diagnostics would have hidden it (the step counted as "not bound"
+while the thrust moved). The demand is now parked twenty softnesses below the box, where `softplus`
+is linear and the soft and hard forms agree bit-for-bit; it is still a FLOOR, because an unclamped
+`-1e6` cancels in `bound + s·softplus(...)` and reintroduces a larger error than it removes
+(measured: 1.5e-8 in float32, 0 in float64, against 1.25e-2 unclamped). `hook_floor_bound_steps` now
+reads the DEMAND against the command rather than a change threshold, so soft and hard count the same
+steps, and `hook_floor_saturated_steps` no longer requires the floor to have changed anything — "full
+thrust is not enough" is exactly the case where the network is already there.
+
+**Equivalence, measured** (`scratchpad/l3d/l3d_equiv_harness.py`, eight 2-epoch synthetic cases on
+`9b1f130` vs this branch; 2041 non-timing leaves compared): every state-dict digest, every forecast
+digest — **including the barrier replayed soft and hard on a hook-free checkpoint** — every loss and
+every metric is identical. **Two leaves differ, both 1 ULP**, and both are
+`command_hook.bank_change_rad` in the epoch record of the arm TRAINED through the barrier: the
+barrier's counters now accumulate per row and are summed at read time instead of being summed per
+call, which reorders one float addition. Nothing reads that number but a readout. The only other
+difference is the new config key itself.
+**Run names recounted on disk**: 177 stored configs under `4dTrajectory/outputs` (from `history.json`
+and `config.json`) rebuild and name identically on both trees — **0 renamed** — and the 149 that this
+build refuses are refused with byte-identical messages on both, i.e. the change adds no refusal.
+
+**Pre-registered**: `4dTrajectory/ts_transformer/docs/experiments/l3d_speed_floor_arms.json` —
+predict-only on the `l3_cta_20260907/L3_cta` checkpoint at CTA offsets 0 / +30 / +60 / +90 s with
+`--command-hook barrier+speed-floor --hook-saturation soft`, paired flight-by-flight with the L3.c
+hook arms. Gates: (1) stall SAMPLES on the approach fall ≥ 90 % at every offset; (2) fully-flyable
+share at +60 s ≥ 88.4 % (the observed tracks' 98.4 % floor minus 10 points) — conditional, because
+if the floor makes the rollout arrive EARLY instead, the unabsorbed delay is the deliverable X and
+is reported rather than gated; (3) endpoint |xt| p95 at +60 s ≤ 1.5 × the offset-0 arm, as L3.c.
+Not run here.
+
 ### 2026-09-08 — ts_transformer: B1.b — the two-head duration (`duration_head=two-head`), the point head drives the rollout and the quantile head publishes the ETA
 
 **The question.** B1 delivered two gains and `B1_point_matched` showed they come from different

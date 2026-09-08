@@ -295,6 +295,7 @@ _ABBREV = {
     "control_hook_saturation": "hook-sat",
     "control_barrier_alpha": "barrier-alpha",
     "control_barrier_heading_gain": "barrier-gain",
+    "control_speed_floor_margin": "floor-margin",
 }
 
 #: Split prefixes shared by every category-label producer (publisher, pipeline,
@@ -541,8 +542,9 @@ def dropped_meta_diffs(config: Mapping[str, Any]) -> list[tuple[str, Any]]:
     The display name may fold them: a human reading a table wants six items, not twenty.
     A DIRECTORY name may not — two runs whose only difference is past the cut would share
     one, and the second would write over the first. `run_slug` therefore hashes these.
-    ``control_barrier_alpha`` / ``_heading_gain`` are last in ``META_FIELDS``, so the two
-    gains of the very campaign the T3 CLI work enabled are the first things to fold.
+    ``CONTROL_HOOK_FIELDS`` are last in ``META_FIELDS``, so the hook's own knobs — the two
+    barrier gains and, since 2026-09-08, ``control_speed_floor_margin`` behind them — are the
+    first things to fold.
     """
     recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
     frozen = frozenset(control_recipe_overrides(recipe))

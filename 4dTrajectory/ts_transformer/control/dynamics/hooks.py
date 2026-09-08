@@ -20,6 +20,18 @@ from typing import Protocol
 import torch
 
 
+#: Every diagnostic a hook reports is namespaced with this, so a reader can pick the hook's
+#: counts out of a diagnostic bag that also carries the objective's; the surfaces that
+#: publish them (an epoch record, a prediction record) drop it.
+HOOK_DIAGNOSTIC_PREFIX = "hook_"
+#: The one count EVERY hook reports, and the denominator every other count it reports is a
+#: share of (`train.fit_model`'s epoch record and `forecast._per_flight_hook_diagnostics`
+#: both divide by it). Both live here because they are part of the protocol below, not of
+#: any one module: a composite merges two modules' counts and has to know which key means
+#: "steps" rather than "something to add up".
+HOOK_STEPS_KEY = f"{HOOK_DIAGNOSTIC_PREFIX}steps"
+
+
 @dataclass(frozen=True)
 class RolloutStateView:
     """The physical state at a segment start, in the chart every module reads.
@@ -55,3 +67,12 @@ class CommandHook(Protocol):
 
     def diagnostics(self) -> dict[str, torch.Tensor]:
         """Counts accumulated over every call since construction (not objectives)."""
+
+    def per_flight_diagnostics(self) -> dict[str, torch.Tensor]:
+        """The same counts, still per ROW: ``[B]`` tensors, one entry per flight.
+
+        :meth:`diagnostics` is these summed over the batch — it is what an epoch record
+        reports. A prediction RECORD is one flight, so the record surface reads this one:
+        a batch share written onto every record would say the same thing about a flight the
+        hook never touched and one it rewrote at every step.
+        """
