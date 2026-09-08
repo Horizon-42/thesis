@@ -480,6 +480,20 @@ importable. A finished one-off driver belongs there, not beside the live runners
   displacement median moved 25 % between 100 and 200 KRDU flights, so a limited table is a
   smoke test and the artifact says so. **The posterior reads the future: never a prediction
   result.**
+- `run_ts_latent_fan_readout.py` — **4(a)**: the sample fan read by the B line's gate 3.4-3
+  protocol, so the latent fan and the quantile fan are one deliverable measured one way. The
+  chamfer-to-nearest-leaf logic has ONE implementation (`run_ts_quantile_fan_readout.leaf_rows`
+  / `leaf_geometry` / `geometry_cell`, imported); this runner supplies the leaves. `--arm
+  <pred_dir>` of a `predict --latent-samples K --latent-random K` run, refused without its
+  `modes/` leaves. Per stratum: the truth's chamfer to the top-1 decode, to the nearest of the
+  `modes/` leaves and to the nearest of the `random/` leaves, each with the share of flights
+  the nearest leaf beats top-1 on; minADE_K and top-1 ADE off the same records (the SAME
+  definition as `run_ts_latent_readout.py`, so the two artifacts cross-check); and the fan's
+  lateral spread (p50 of the widest pairwise endpoint gap). **The random fan is the reading,
+  not a footnote** — a fan always contains something nearer the truth than its own mean, so a
+  nearest-leaf number alone measures nothing; the prior fan is informative only where it beats
+  the N(0, I) control. KRDU val, 1404 flights, both L2.g seeds and L2.z: prior 124 m at
+  0.92–0.93 against random 166–201 m at 0.34 (2026-09-08).
 
 **A replay runner fingerprints through `data_provenance.checkpoint_data_provenance(payload,
 manifests)`, never `arrival_data_provenance(manifests)`** — the helper reads the pre-split
