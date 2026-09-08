@@ -62,12 +62,22 @@ from flight_scenarios.identity import summary_row_key  # noqa: E402
 
 RESULT_SCHEMA = "ts-quantile-fan-readout-b3-v1"
 
+# What a row must carry to be scored by a fan readout: the truth duration the geometry is
+# closed onto, and the covariates every stratum is cut by. A readout that needs more (the
+# latent fan cross-checks ADE) passes its own superset.
+FAN_REQUIRED_FIELDS = ("true_final_time_s", *STRATA_COVARIATES)
+# This readout's fan is read against q50, which IS one of the five leaves.
+QUANTILE_REFERENCE_KEY = "chamfer_q50_p50_m"
 
-def _rows(pred_dir: Path) -> tuple[dict[str, dict], dict[str, int], str]:
-    """The arm's scored rows by flight key, what a missing field dropped, and the split."""
+
+def leaf_rows(
+    pred_dir: Path, *, required: tuple[str, ...] = FAN_REQUIRED_FIELDS
+) -> tuple[dict[str, dict], dict[str, int], str]:
+    """One prediction directory's scored rows by flight key, what a missing field dropped,
+    and the split. Every fan readout reads a leaf through this, so "scored" means the same
+    thing in the top-1 directory and in each leaf of its fan."""
     summary = json.loads((pred_dir / "summary.json").read_text())
     results = summary["results"]
-    required = ("true_final_time_s", *STRATA_COVARIATES)
     rows = {
         summary_row_key(row): row
         for row in results
@@ -93,13 +103,16 @@ def _interval_entry(row: dict, alpha: float) -> dict:
     return entry
 
 
-def _chamfer(pred_dir: Path, row: dict, geometry_truth: str) -> float:
-    """One flight's time-free distance between its decoded path and the observed truth."""
+def _flight_geometry(pred_dir: Path, row: dict, geometry_truth: str) -> tuple[float, np.ndarray]:
+    """One flight's time-free distance between its decoded path and the observed truth, and
+    where that decode ENDS in the flight's threshold-anchored chart — both off one read of
+    the record, because a fan readout wants the spread of the leaves' endpoints as well as
+    each leaf's distance to the truth."""
     eval_record = json.loads((pred_dir / row["eval_file"]).read_text())
     states = json.loads((pred_dir / row["states_file"]).read_text())
-    return float(
-        gm.record_geometry(eval_record, states, row, geometry_truth=geometry_truth)["chamfer_m"]
-    )
+    metrics = gm.record_geometry(eval_record, states, row, geometry_truth=geometry_truth)
+    endpoint = gm.chart_rows(states["predicted_states"][-1:], eval_record["target_state"])[0, :2]
+    return float(metrics["chamfer_m"]), endpoint
 
 
 def _quantile_arms(arm: Path) -> dict[float, Path]:
@@ -118,16 +131,16 @@ def _quantile_arms(arm: Path) -> dict[float, Path]:
     return directories
 
 
-def _share(values: np.ndarray) -> float | None:
+def share(values: np.ndarray) -> float | None:
     return float(np.mean(values)) if len(values) else None
 
 
-def _median(values: np.ndarray) -> float | None:
+def median(values: np.ndarray) -> float | None:
     return float(np.median(values)) if len(values) else None
 
 
 def readout(arm: Path, *, geometry_truth: str) -> dict:
-    rows, coverage, summary_split = _rows(arm)
+    rows, coverage, summary_split = leaf_rows(arm)
     keys = sorted(rows)
     if not keys:
         raise SystemExit(f"{arm} has no rows carrying a truth duration and the strata covariates")
@@ -165,7 +178,8 @@ def readout(arm: Path, *, geometry_truth: str) -> dict:
     # The geometry: chamfer to each of the five, and to q50 (which IS the top-1 directory).
     directories = _quantile_arms(arm)
     fan_chamfer = np.stack([
-        _arm_chamfer(directories[tau], keys, geometry_truth) for tau in DURATION_QUANTILES
+        leaf_geometry(directories[tau], keys, geometry_truth=geometry_truth)["chamfer_m"]
+        for tau in DURATION_QUANTILES
     ])                                                            # [Q, N]
     nearest = fan_chamfer.min(axis=0)
     median_chamfer = fan_chamfer[DURATION_MEDIAN_INDEX]
@@ -179,20 +193,22 @@ def readout(arm: Path, *, geometry_truth: str) -> dict:
         gated = np.flatnonzero(mask & in_fan)
         strata[stratum] = {
             "n": int(len(selected)),
-            "truth_in_fan_share": _share(in_fan[selected]),
-            "fan_width_p50_s": _median(fan_width[selected]),
+            "truth_in_fan_share": share(in_fan[selected]),
+            "fan_width_p50_s": median(fan_width[selected]),
             "calibrated": calibrated,
             "interval": {
                 f"{alpha:g}": {
-                    "truth_in_interval_share": _share(interval_hit[alpha][selected]),
-                    "width_p50_s": _median(interval_width[alpha][selected]),
+                    "truth_in_interval_share": share(interval_hit[alpha][selected]),
+                    "width_p50_s": median(interval_width[alpha][selected]),
                 }
                 for alpha in CONFORMAL_ALPHAS
             } if calibrated else {},
             # Gate 3.4-3 reads the in-fan subset; the whole stratum is beside it.
             "geometry": {
-                "all": _geometry_cell(median_chamfer[selected], nearest[selected]),
-                "in_fan": _geometry_cell(median_chamfer[gated], nearest[gated]),
+                "all": geometry_cell(median_chamfer[selected], nearest[selected],
+                                     reference_key=QUANTILE_REFERENCE_KEY),
+                "in_fan": geometry_cell(median_chamfer[gated], nearest[gated],
+                                        reference_key=QUANTILE_REFERENCE_KEY),
                 "in_fan_flights": int(len(gated)),
             },
         }
@@ -211,29 +227,46 @@ def readout(arm: Path, *, geometry_truth: str) -> dict:
     }
 
 
-def _arm_chamfer(pred_dir: Path, keys: list[str], geometry_truth: str) -> np.ndarray:
-    """One decoded quantile's chamfer per flight, in ``keys`` order.
+def leaf_geometry(
+    pred_dir: Path,
+    keys: list[str],
+    *,
+    geometry_truth: str,
+    required: tuple[str, ...] = FAN_REQUIRED_FIELDS,
+) -> dict:
+    """What one leaf contributes to a fan readout, all of it in ``keys`` order: its scored
+    ``rows``, its ``chamfer_m`` (``[F]``) to the truth, and its decoded ``endpoint_en``
+    (``[F, 2]``) in each flight's threshold-anchored chart.
 
-    The directory's summary is parsed ONCE — each of the five writes its own — and the
-    cohort must match the top-1's exactly, or the fan is not a fan of these flights.
+    The directory's summary is parsed ONCE — each leaf writes its own, and a caller that
+    also wants the leaf's ADE reads it out of ``rows`` rather than parsing it again — and
+    the cohort must match the top-1's exactly, or the fan is not a fan of these flights.
     """
-    rows, _coverage, _split = _rows(pred_dir)
+    rows, _coverage, _split = leaf_rows(pred_dir, required=required)
     missing = [key for key in keys if key not in rows]
     if missing:
         raise SystemExit(
             f"{pred_dir} is missing {len(missing)} of {len(keys)} flights (first "
             f"{missing[0]!r}); the fan is not the same cohort as the top-1"
         )
-    return np.array(
-        [_chamfer(pred_dir, rows[key], geometry_truth) for key in keys], dtype=np.float64
-    )
-
-
-def _geometry_cell(median_chamfer: np.ndarray, nearest: np.ndarray) -> dict:
+    ordered = [rows[key] for key in keys]
+    pairs = [_flight_geometry(pred_dir, row, geometry_truth) for row in ordered]
     return {
-        "chamfer_q50_p50_m": _median(median_chamfer),
-        "chamfer_nearest_p50_m": _median(nearest),
-        "nearest_better_share": _share(nearest < median_chamfer) if len(nearest) else None,
+        "rows": ordered,
+        "chamfer_m": np.array([chamfer for chamfer, _end in pairs], dtype=np.float64),
+        "endpoint_en": np.array([end for _chamfer, end in pairs], dtype=np.float64),
+    }
+
+
+def geometry_cell(reference: np.ndarray, nearest: np.ndarray, *, reference_key: str) -> dict:
+    """The chamfer-to-nearest-leaf reading: the reference decode's chamfer, the nearest
+    leaf's, and the share of flights the fan improves on. ``reference_key`` names what the
+    fan is read against — q50 in the B line, the top-1 decode in the latent line — so the
+    JSON never says "q50" about a number that is not one."""
+    return {
+        reference_key: median(reference),
+        "chamfer_nearest_p50_m": median(nearest),
+        "nearest_better_share": share(nearest < reference) if len(nearest) else None,
     }
 
 
@@ -270,17 +303,17 @@ def render(payload: dict) -> str:
         lines.append(
             f"   {stratum:>46s} {block['n']:>5d} "
             f"{block['truth_in_fan_share']:>7.3f} {block['fan_width_p50_s']:>8.1f} "
-            f"{_cell(interval.get('truth_in_interval_share'), '.3f'):>8s} "
-            f"{_cell(interval.get('width_p50_s'), '.1f'):>8s} "
-            f"{_cell(geometry['chamfer_q50_p50_m'], '.0f'):>9s} "
-            f"{_cell(geometry['chamfer_nearest_p50_m'], '.0f'):>9s} "
-            f"{_cell(geometry['nearest_better_share'], '.3f'):>8s} "
+            f"{cell(interval.get('truth_in_interval_share'), '.3f'):>8s} "
+            f"{cell(interval.get('width_p50_s'), '.1f'):>8s} "
+            f"{cell(geometry[QUANTILE_REFERENCE_KEY], '.0f'):>9s} "
+            f"{cell(geometry['chamfer_nearest_p50_m'], '.0f'):>9s} "
+            f"{cell(geometry['nearest_better_share'], '.3f'):>8s} "
             f"{block['geometry']['in_fan_flights']:>9d}"
         )
     return "\n".join(lines) + "\n"
 
 
-def _cell(value: float | None, spec: str) -> str:
+def cell(value: float | None, spec: str) -> str:
     return "n/a" if value is None else f"{value:{spec}}"
 
 
