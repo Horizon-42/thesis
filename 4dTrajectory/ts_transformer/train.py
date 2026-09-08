@@ -43,6 +43,7 @@ from config import (
     uses_control_dynamics,
 )
 from control.basis_fit import FittedTeacherTable, load_fitted_teacher
+from control.dynamics.hooks import HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY
 from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -737,13 +738,13 @@ def fit_model(
             epoch_multipliers = None
         # The command hook's epoch record: how often it was gated on and how hard it acted
         # (per-step shares over the epoch's rollouts; the step count beside them).
-        hook_steps = train_diagnostic_totals.get("hook_steps", 0.0)
+        hook_steps = train_diagnostic_totals.get(HOOK_STEPS_KEY, 0.0)
         hook_epoch: dict[str, float] = {}
         if hook_steps > 0.0:
             hook_epoch = {
-                name.removeprefix("hook_"): value / hook_steps
+                name.removeprefix(HOOK_DIAGNOSTIC_PREFIX): value / hook_steps
                 for name, value in train_diagnostic_totals.items()
-                if name.startswith("hook_") and name != "hook_steps"
+                if name.startswith(HOOK_DIAGNOSTIC_PREFIX) and name != HOOK_STEPS_KEY
             }
             hook_epoch["steps"] = hook_steps
         latent_epoch: dict[str, Any] = {}

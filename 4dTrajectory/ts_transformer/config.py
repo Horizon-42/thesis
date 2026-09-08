@@ -497,6 +497,19 @@ PROCEDURE_LOSS_FIELDS = (
 # inference-only arms.
 CONTROL_HOOK_OFF = "off"
 CONTROL_HOOK_BARRIER = "barrier"
+# ``speed-floor`` is the second constraint module (L3.d, 2026-09-08): a floor on the speed
+# the rollout may fly, enforced THROUGH the thrust command, never by clipping V after the
+# fact. The floor is the stall-margin speed
+# ``control_speed_floor_margin x V_stall(n_commanded, mass, rho, Cl_max)``, i.e. exactly the
+# ``flyability`` stall criterion read as a speed; it is UNGATED (a stall is a stall
+# anywhere, and 77-94 % of the measured stall samples sit at >= 20 km remaining) and it
+# leaves bank and load factor alone.
+CONTROL_HOOK_SPEED_FLOOR = "speed-floor"
+# The one COMBINATION, in the order it is applied: the barrier sets bank and re-coordinates
+# the load factor, then the speed floor reads that load factor and sets thrust. The two
+# channels are disjoint, so composing them is well defined; no other combination is, and
+# this vocabulary is the only place a combination may be spelled.
+CONTROL_HOOK_BARRIER_SPEED_FLOOR = "barrier+speed-floor"
 # ``nominal-residual`` — a fixed tracking law toward the centreline and glidepath with the
 # command as a bounded residual — was NEVER ADOPTED
 # (docs/2026-09-06_control_hooks_results.zh.md) and its code is archived
@@ -505,11 +518,36 @@ CONTROL_HOOK_BARRIER = "barrier"
 # refuses to construct it, so it cannot be chosen for new work.
 CONTROL_HOOK_NOMINAL_RESIDUAL = "nominal-residual"
 #: What a STORED config may say.
-CONTROL_HOOKS = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL)
+CONTROL_HOOKS = (
+    CONTROL_HOOK_OFF,
+    CONTROL_HOOK_BARRIER,
+    CONTROL_HOOK_NOMINAL_RESIDUAL,
+    CONTROL_HOOK_SPEED_FLOOR,
+    CONTROL_HOOK_BARRIER_SPEED_FLOOR,
+)
 #: What a NEW run may select. ``off`` is in it — the flag's own choices drop that one,
 #: because `--command-hook` exists to turn a hook ON, but a config saying ``off`` is the
 #: default and must pass the boundary check in `cli.common`.
-CONTROL_HOOKS_AVAILABLE = (CONTROL_HOOK_OFF, CONTROL_HOOK_BARRIER)
+CONTROL_HOOKS_AVAILABLE = (
+    CONTROL_HOOK_OFF,
+    CONTROL_HOOK_BARRIER,
+    CONTROL_HOOK_SPEED_FLOOR,
+    CONTROL_HOOK_BARRIER_SPEED_FLOOR,
+)
+#: The modules each vocabulary value composes, in application order. One row per value; the
+#: ``+`` spelling is a LOOKUP, never a split, so ``speed-floor+barrier`` (the same two
+#: modules in the wrong order) and ``barrier+nominal-residual`` are simply not members and
+#: are refused by the vocabulary check like any other unknown value.
+CONTROL_HOOK_MEMBERS: dict[str, tuple[str, ...]] = {
+    CONTROL_HOOK_BARRIER: (CONTROL_HOOK_BARRIER,),
+    CONTROL_HOOK_SPEED_FLOOR: (CONTROL_HOOK_SPEED_FLOOR,),
+    CONTROL_HOOK_BARRIER_SPEED_FLOOR: (CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR),
+}
+# Fail at import, like every other table in this package: a value added to the selectable
+# vocabulary without a members row would pass construction and die inside the rollout.
+assert set(CONTROL_HOOK_MEMBERS) == set(CONTROL_HOOKS_AVAILABLE) - {CONTROL_HOOK_OFF}, (
+    "CONTROL_HOOK_MEMBERS must name the modules of every selectable hook"
+)
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
@@ -605,7 +643,29 @@ CONTROL_HOOK_FIELDS = (
     "control_hook_saturation",
     "control_barrier_alpha",
     "control_barrier_heading_gain",
+    "control_speed_floor_margin",
 )
+
+#: The speed floor's default margin above the stall speed. The COEFFICIENT is the package's
+#: existing one, not a new number: the optimizer's NLP velocity floor
+#: (``optimization/scenario_optimization._STALL_MARGIN``) and this package's control-anchor
+#: eligibility gate (``anchor_eligibility.CONTROL_ANCHOR_STALL_MARGIN``) are both 1.10.
+#: **The SPEED it multiplies is not the same one**, and the difference matters when the
+#: three are quoted together: those two use the 1-g stall speed at SEA-LEVEL density (the
+#: optimizer's also capped at V_ref), while the hook uses ``V_stall(n_commanded)`` at the
+#: LOCAL ISA density and applies no cap — because it exists to defend ``flyability``'s
+#: criterion, which is evaluated at each sample's own altitude and inverted load factor. At
+#: 8000 ft that is rho/rho0 = 0.79, so the hook's floor is ~12.5 % higher, i.e. an effective
+#: margin near 1.24 (times sqrt(n) in a turn). The hook is therefore strictly the TIGHTEST
+#: of the three: what it lets through, the optimizer's floor would also have admitted.
+#: The three are deliberately NOT one symbol: the other two are frozen policy constants
+#: (one of them is spelled into the stored policy string ``airborne-1.10-stall-margin-v1``)
+#: while this one is a per-run field a campaign may raise, and aliasing them would let a
+#: run's knob rewrite a data policy's identity.
+CONTROL_SPEED_FLOOR_MARGIN_DEFAULT = 1.10
+#: Both barrier gains share one default; the validation below reads it to refuse a gain set
+#: on a hook with no barrier in it, so the number lives once.
+CONTROL_BARRIER_GAIN_DEFAULT = 0.1
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
 # coerce them first, through this one function, or ``[] != ()`` refuses a faithful copy.
@@ -1105,8 +1165,15 @@ class TSConfig:
     # Barrier filter: the barrier's decay rate α (1/s; the allowed closing rate toward a
     # corridor edge is α × the remaining margin) and the heading gain that turns a heading
     # error outside the admissible interval into a turn-rate demand (1/s).
-    control_barrier_alpha: float = 0.1
-    control_barrier_heading_gain: float = 0.1
+    control_barrier_alpha: float = CONTROL_BARRIER_GAIN_DEFAULT
+    control_barrier_heading_gain: float = CONTROL_BARRIER_GAIN_DEFAULT
+    # Speed floor: how far above the stall speed of the COMMANDED load factor the rollout
+    # is held (V_floor = margin x V_stall). 1.10 is the package's existing stall margin —
+    # see CONTROL_SPEED_FLOOR_MARGIN_DEFAULT for the two places it already appears.
+    # Deliberately NOT in REQUIRED_SERIALIZED_CONTROL_FIELDS, like the barrier's gains: a
+    # config without a speed-floor hook cannot read it (the validation below refuses a
+    # non-default value there), so the default IS what every stored artifact ran under.
+    control_speed_floor_margin: float = CONTROL_SPEED_FLOOR_MARGIN_DEFAULT
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -1692,9 +1759,41 @@ class TSConfig:
                 raise ValueError("the command hook rides the native segment-endpoint rollout")
             if self.coordinate_frame != COORDINATE_FRAME_ENU:
                 raise ValueError("the command hook reads the threshold-anchored ENU chart")
+        # Each module's own knobs, checked against the modules the hook actually BUILDS.
+        # Until 2026-09-08 `barrier` was the only buildable hook, so "a hook is on" and "the
+        # barrier is on" were the same condition; with a second module they are not, and a
+        # gain that no module reads is a value that cannot change an answer.
+        # `nominal-residual` builds nothing (it is load-only and archived) and is absent from
+        # the members table, so its six stored 2026-09-06 configs are left exactly as they
+        # are — refusing them here would be a contract change in the wrong direction.
+        hook_modules = CONTROL_HOOK_MEMBERS.get(self.control_command_hook, ())
+        if CONTROL_HOOK_BARRIER in hook_modules:
             for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
                 if getattr(self, name) <= 0.0:
                     raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
+        elif hook_modules:
+            for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
+                if getattr(self, name) != CONTROL_BARRIER_GAIN_DEFAULT:
+                    raise ValueError(
+                        f"{name}={getattr(self, name)!r} needs a command hook that contains "
+                        f"{CONTROL_HOOK_BARRIER!r} (control_command_hook="
+                        f"{self.control_command_hook!r})"
+                    )
+        if CONTROL_HOOK_SPEED_FLOOR in hook_modules:
+            if not math.isfinite(self.control_speed_floor_margin) or (
+                self.control_speed_floor_margin < 1.0
+            ):
+                raise ValueError(
+                    "control_speed_floor_margin is a finite multiple of the stall speed and "
+                    "a floor below it is not a floor; got "
+                    f"{self.control_speed_floor_margin!r}"
+                )
+        elif self.control_speed_floor_margin != CONTROL_SPEED_FLOOR_MARGIN_DEFAULT:
+            raise ValueError(
+                f"control_speed_floor_margin={self.control_speed_floor_margin!r} needs a "
+                f"command hook that contains {CONTROL_HOOK_SPEED_FLOOR!r} "
+                f"(control_command_hook={self.control_command_hook!r})"
+            )
         if (
             self.prediction_output == PREDICTION_CONTROL
             and self.procedure_loss_active

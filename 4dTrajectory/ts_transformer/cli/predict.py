@@ -22,7 +22,10 @@ from config import (
     DURATION_QUANTILES,
     TSConfig,
     CONTROL_HOOKS_AVAILABLE,
+    CONTROL_HOOK_BARRIER,
+    CONTROL_HOOK_MEMBERS,
     CONTROL_HOOK_OFF,
+    CONTROL_HOOK_SPEED_FLOOR,
     CORRIDOR_GATES,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_SELF_QUANTILE,
@@ -82,10 +85,18 @@ PREDICT_CONFIG_FLAGS: dict[str, str] = {
     "control_hook_saturation": "--hook-saturation",
     "control_barrier_alpha": "--control-barrier-alpha",
     "control_barrier_heading_gain": "--control-barrier-heading-gain",
+    "control_speed_floor_margin": "--control-speed-floor-margin",
 }
 _unknown = [name for name in PREDICT_CONFIG_FLAGS if name not in {f.name for f in fields(TSConfig)}]
 if _unknown:  # fail at import, like cli.common's list: a renamed field must rename here too
     raise AssertionError(f"predict overrides unknown TSConfig fields: {_unknown}")
+
+#: The hook fields `--command-hook` may override: gains and margins, never the hook itself
+#: or its saturation (those two ARE the selection). A value here without `--command-hook`
+#: would be serialized into nothing and change no trajectory, so it is refused below.
+HOOK_TUNING_FIELDS = frozenset(
+    set(PREDICT_CONFIG_FLAGS) - {"control_command_hook", "control_hook_saturation"}
+)
 
 #: The N(0, I) control draws from its own stream, never the treatment arm's.
 LATENT_RANDOM_SEED_OFFSET = 1_000_003
@@ -165,6 +176,12 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
         "--control-barrier-heading-gain", type=float, default=None,
         help="with --command-hook barrier: override the checkpoint's heading-alignment "
              "barrier gain (default: the checkpoint's, normally 0.1)",
+    )
+    parser.add_argument(
+        "--control-speed-floor-margin", type=float, default=None,
+        help="with a --command-hook containing speed-floor: override the checkpoint's "
+             "stall margin, V_floor = margin x V_stall(n_commanded) (default: the "
+             "checkpoint's, normally 1.1)",
     )
     parser.add_argument(
         "--closure-from-labels", default=None, metavar="JSON",
@@ -313,7 +330,7 @@ def run_cli(
     gains = {
         field: getattr(args, flag[2:].replace("-", "_"))
         for field, flag in PREDICT_CONFIG_FLAGS.items()
-        if field.startswith("control_barrier_")
+        if field in HOOK_TUNING_FIELDS
     }
     if args.command_hook is not None:
         if args.hook_saturation is None:
@@ -324,16 +341,25 @@ def run_cli(
             control_hook_saturation=args.hook_saturation,
             **{field: value for field, value in gains.items() if value is not None},
         )
-        print(f"  command hook at prediction time: {args.command_hook} ({args.hook_saturation}); "
-              f"alpha {config.control_barrier_alpha:g}, heading gain "
-              f"{config.control_barrier_heading_gain:g}")
+        # Only the modules this hook builds have knobs worth printing: a stall margin under
+        # `barrier` is a number nothing reads (and TSConfig refuses it away from its default).
+        modules = CONTROL_HOOK_MEMBERS[args.command_hook]
+        tunings = []
+        if CONTROL_HOOK_BARRIER in modules:
+            tunings.append(f"alpha {config.control_barrier_alpha:g}")
+            tunings.append(f"heading gain {config.control_barrier_heading_gain:g}")
+        if CONTROL_HOOK_SPEED_FLOOR in modules:
+            tunings.append(f"stall margin {config.control_speed_floor_margin:g}")
+        print(f"  command hook at prediction time: {args.command_hook} "
+              f"({args.hook_saturation}); " + ", ".join(tunings))
     elif args.hook_saturation is not None:
         parser.error("--hook-saturation needs --command-hook")
     elif any(value is not None for value in gains.values()):
         # A gain without a hook would be serialized into nothing and change no trajectory.
         parser.error(
-            "--control-barrier-alpha / --control-barrier-heading-gain need --command-hook "
-            "barrier; without it the rollout runs the checkpoint's own hook setting"
+            "--control-barrier-alpha / --control-barrier-heading-gain / "
+            "--control-speed-floor-margin need --command-hook; without it the rollout runs "
+            "the checkpoint's own hook setting"
         )
     closure_labels = None
     if args.closure_from_labels is not None:

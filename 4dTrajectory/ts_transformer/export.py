@@ -157,6 +157,12 @@ def build_prediction_record(
         "projectedOntoFinal": forecast.projected_onto_final,
         # The rollout command hook the states were flown with (``hook/saturation``), or None.
         "commandHook": forecast.command_hook,
+        # ...and what it did to THIS flight: the hook's step count, then every other count
+        # it reports as a share of it (the barrier's gated / clamped steps and mean bank
+        # change, the speed floor's bound steps and mean thrust delta). Absent when no hook
+        # ran — the key would otherwise claim a measurement that was never taken.
+        **({"commandHookDiagnostics": forecast.command_hook_diagnostics}
+           if forecast.command_hook_diagnostics is not None else {}),
         # Closure output: the construction that drew the path (via-Dubins or a fallback)
         # and whether it was drawn from the flight's label (the oracle arm).
         **({"closureConstruction": forecast.closure_construction,

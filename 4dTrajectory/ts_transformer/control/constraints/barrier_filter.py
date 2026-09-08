@@ -81,7 +81,8 @@ import torch
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from config import TSConfig
 from control.constraints.gates import on_final_weight, runway_axes_view
-from control.dynamics.hooks import RolloutStateView
+from control.constraints.saturation import soft_max, soft_min
+from control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
 from final_approach_geometry import K_MARGIN, corridor_halfwidth, corridor_halfwidth_slope
 
@@ -89,18 +90,9 @@ SATURATION_SOFTNESS_RAD = math.radians(2.0)   # width of the soft max/min around
 _ACTIVE_BANK_CHANGE_RAD = math.radians(0.5)   # a step counts as "clamped" past this
 _SATURATED_INTERVAL_RAD = math.radians(0.1)   # a bank interval this narrow is a corner, not a bound
 _DIAGNOSTIC_KEYS = (
-    "hook_steps", "hook_gated_steps", "hook_clamped_steps", "hook_saturated_interval_steps",
+    HOOK_STEPS_KEY, "hook_gated_steps", "hook_clamped_steps", "hook_saturated_interval_steps",
     "hook_bank_change_rad", "hook_load_change",
 )
-
-
-def soft_max(x: torch.Tensor, bound: torch.Tensor, softness: float) -> torch.Tensor:
-    """Smooth ``max(x, bound)``: equals ``bound`` well below it, ``x`` well above."""
-    return bound + softness * torch.nn.functional.softplus((x - bound) / softness)
-
-
-def soft_min(x: torch.Tensor, bound: torch.Tensor, softness: float) -> torch.Tensor:
-    return bound - softness * torch.nn.functional.softplus((bound - x) / softness)
 
 
 class BarrierFilter:
@@ -112,7 +104,9 @@ class BarrierFilter:
         self.heading_gain = config.control_barrier_heading_gain
         self.bank_lag_s = config.control_bank_time_constant_s
         self.hard = hard
-        self._counts: torch.Tensor | None = None   # one entry per _DIAGNOSTIC_KEYS, on the device
+        # ``[len(_DIAGNOSTIC_KEYS), B]``, on the device: the counts are kept PER ROW so a
+        # prediction record can carry its own flight's shares. ``diagnostics`` sums them.
+        self._counts: torch.Tensor | None = None
 
     def __call__(
         self, state: RolloutStateView, command: torch.Tensor, segment_index: int
@@ -174,17 +168,29 @@ class BarrierFilter:
         change = (filtered - bank).abs().detach()
         gated = (weight > 0.5).detach()
         counts = torch.stack((
-            bank.new_full((), float(bank.numel()), dtype=torch.float64),
-            gated.sum().to(torch.float64),
-            (change > _ACTIVE_BANK_CHANGE_RAD).sum().to(torch.float64),
-            (gated & ((bank_max - bank_min).detach() < _SATURATED_INTERVAL_RAD)).sum().to(torch.float64),
-            change.sum().to(torch.float64),
-            (coordinated - load).abs().detach().sum().to(torch.float64),
+            torch.ones_like(bank, dtype=torch.float64),
+            gated.to(torch.float64),
+            (change > _ACTIVE_BANK_CHANGE_RAD).to(torch.float64),
+            (gated & ((bank_max - bank_min).detach() < _SATURATED_INTERVAL_RAD)).to(torch.float64),
+            change.to(torch.float64),
+            (coordinated - load).abs().detach().to(torch.float64),
         ))
         self._counts = counts if self._counts is None else self._counts + counts
+        # One hook per batch: the rows ARE the flights, so a second batch through the same
+        # hook would broadcast into the first one's rows instead of failing.
+        assert self._counts.shape[1] == counts.shape[1], "a hook is built per batch"
         return torch.stack((command[:, 0], filtered, coordinated), dim=-1)
 
     def diagnostics(self) -> dict[str, torch.Tensor]:
         """Step counts (and the summed bank change) over every call; read on the host once."""
-        counts = torch.zeros(len(_DIAGNOSTIC_KEYS), dtype=torch.float64) if self._counts is None else self._counts.cpu()
+        counts = (
+            torch.zeros(len(_DIAGNOSTIC_KEYS), dtype=torch.float64)
+            if self._counts is None else self._counts.sum(dim=1).cpu()
+        )
         return dict(zip(_DIAGNOSTIC_KEYS, counts.unbind()))
+
+    def per_flight_diagnostics(self) -> dict[str, torch.Tensor]:
+        """The same counts, one row per flight (``[B]`` each)."""
+        if self._counts is None:
+            return {name: torch.zeros(0, dtype=torch.float64) for name in _DIAGNOSTIC_KEYS}
+        return dict(zip(_DIAGNOSTIC_KEYS, self._counts.cpu().unbind()))

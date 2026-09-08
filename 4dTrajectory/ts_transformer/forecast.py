@@ -29,6 +29,9 @@ from config import (
 from closure_output import ClosureLabels, check_airport, decision_from_label, reconstruct
 from control.constraints import build_command_hook
 from control.dynamics import rollout as control_rollout
+from control.dynamics.hooks import (
+    HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY, CommandHook,
+)
 from control.envelope import physical_controls
 from dataset import (
     FixedAnchorTrajectoryWindows,
@@ -82,6 +85,11 @@ class Forecast:
     projected_onto_final: str | None = None
     # The rollout command hook that rewrote the schedule (``hook/saturation``), or None.
     command_hook: str | None = None
+    # ...and THIS flight's own hook counts: `steps`, then every other count as a share of
+    # it (`_per_flight_hook_diagnostics`). None when no hook ran. A batch share written
+    # onto every record would say the same thing about a flight the hook never touched and
+    # one it rewrote at every step, so the record carries the per-flight number.
+    command_hook_diagnostics: dict[str, float] | None = None
     # Closure output only: which construction drew the path (via-Dubins, or a fallback),
     # and whether it was drawn from the flight's LABEL rather than a model output.
     closure_construction: str | None = None
@@ -352,6 +360,9 @@ def _forecast_control_batch(
         prediction.duration_quantiles_s.detach().cpu().numpy().astype(np.float64)
         if prediction.duration_quantiles_s is not None else None
     )
+    hook_diagnostics = (
+        None if command_hook is None else _per_flight_hook_diagnostics(command_hook)
+    )
     forecasts: list[Forecast] = []
     for row, (item, row_offsets) in enumerate(zip(series, offsets, strict=True)):
         count = len(row_offsets)
@@ -376,6 +387,9 @@ def _forecast_control_batch(
                 None if command_hook is None
                 else f"{config.control_command_hook}/{config.control_hook_saturation}"
             ),
+            command_hook_diagnostics=(
+                None if hook_diagnostics is None else hook_diagnostics[row]
+            ),
             mode_index=None if mode is None else mode[0],
             mode_probability=None if mode is None else float(mode[1][row]),
             latent_shuffled=latent_shuffled,
@@ -396,6 +410,36 @@ def _forecast_control_batch(
             ),
         ))
     return forecasts
+
+
+def _per_flight_hook_diagnostics(command_hook: CommandHook) -> list[dict[str, float]]:
+    """Each flight's own hook counts: ``steps``, then every other count as a share of it.
+
+    The same normalisation ``train.fit_model`` writes into an epoch record
+    (``value / hook_steps``), one level down — an epoch reports the batch, a prediction
+    record reports the flight. Keys drop the ``hook_`` prefix and arrive camelCased like
+    every other ``source`` field.
+    """
+    counts = {
+        name: value.tolist()
+        for name, value in command_hook.per_flight_diagnostics().items()
+    }
+    steps = counts.pop(HOOK_STEPS_KEY)
+    return [
+        {
+            "steps": row_steps,
+            **{
+                _camel_case(name.removeprefix(HOOK_DIAGNOSTIC_PREFIX)): value[row] / row_steps
+                for name, value in counts.items()
+            },
+        }
+        for row, row_steps in enumerate(steps)
+    ]
+
+
+def _camel_case(name: str) -> str:
+    head, *rest = name.split("_")
+    return head + "".join(word.title() for word in rest)
 
 
 def _calibrated_interval_fields(

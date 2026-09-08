@@ -23,10 +23,17 @@ for path in (TS_DIR, REPO_ROOT):
 
 import final_approach_geometry as fag  # noqa: E402
 from config import (  # noqa: E402
-    CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_HOOK_BARRIER, CONTROL_HOOK_NOMINAL_RESIDUAL,
-    HOOK_SATURATION_HARD, PREDICTION_CONTROL, TSConfig, recipe_settings,
+    CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_HOOK_BARRIER,
+    CONTROL_HOOK_BARRIER_SPEED_FLOOR, CONTROL_HOOK_MEMBERS, CONTROL_HOOK_NOMINAL_RESIDUAL,
+    CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOKS, CONTROL_HOOKS_AVAILABLE,
+    CONTROL_SPEED_FLOOR_MARGIN_DEFAULT, HOOK_SATURATION_HARD, PREDICTION_CONTROL, TSConfig,
+    recipe_settings,
 )
-from control.constraints import BarrierFilter, build_command_hook  # noqa: E402
+from control.constraints import (  # noqa: E402
+    BarrierFilter, CompositeHook, SpeedFloor, build_command_hook,
+)
+from control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION  # noqa: E402
+from flyability import flyability_summary, required_controls  # noqa: E402
 from dataclasses import fields as dataclass_fields  # noqa: E402
 
 from control.constraints.gates import on_final_weight, runway_axes_view  # noqa: E402
@@ -75,9 +82,42 @@ def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0
 
 
 def _context(batch: int) -> dict[str, torch.Tensor]:
+    """The per-flight dynamics rows a hook may read. ``aero_params`` is `dataset`'s own
+    probe row (S, Cl_max, ...) and the frame origin sits at sea level, so the speed floor's
+    ISA density is read straight off the chart height ``_view`` builds."""
     return {"runway_heading_rad": torch.zeros(batch, dtype=torch.float64),
             "glidepath_tan": torch.full((batch,), TAN_GPA, dtype=torch.float64),
-            "max_thrust_n": torch.full((batch,), 2.0e5, dtype=torch.float64)}
+            "max_thrust_n": torch.full((batch,), 2.0e5, dtype=torch.float64),
+            "aero_params": torch.tensor([[122.6, 2.7, 0.02, 0.04, 0.9, 0.1]], dtype=torch.float64).expand(batch, -1).clone(),
+            "frame_params": torch.tensor([[35.9, -78.8, 0.0, 0.0]], dtype=torch.float64).expand(batch, -1).clone()}
+
+
+def _floor_mps(height_m: float, *, mass_kg: float, area_m2: float, cl_max: float,
+               load: float = 1.0, margin: float = CONTROL_SPEED_FLOOR_MARGIN_DEFAULT) -> float:
+    """The hook's own floor, written out independently of it: the stall speed of the
+    project's stall model at the ISA density of ``height_m``, times the margin. The
+    airframe row is passed in — this fleet's Cl_max is per type, and reading a floor
+    against the wrong one is exactly the mis-scoring `flyability_batch` exists to avoid."""
+    density = 1.225 * ((288.15 - 0.0065 * height_m) / 288.15) ** 4.25588
+    return margin * math.sqrt(2.0 * load * mass_kg * 9.81 / (density * area_m2 * cl_max))
+
+
+def _stall_readout(rollout, dynamics, durations, aircraft):
+    """``(flyability summary, the smallest V - V_floor over the samples)`` for row 0."""
+    times = torch.cumsum(durations, dim=1)
+    area, cl_max = (float(value) for value in dynamics["aero_params"][0, :2])
+    states = [
+        {"t": float(times[0, step]), "lat": float(row[0]), "lon": float(row[1]),
+         "alt": float(row[2]), "V": float(row[3]), "psi": float(row[4]),
+         "gamma": float(row[5]), "m": float(row[6])}
+        for step, row in enumerate(rollout.geodetic_states[0])
+    ]
+    summary = flyability_summary(required_controls(states, aircraft), aircraft_code=aircraft.code)
+    slack = min(
+        state["V"] - _floor_mps(state["alt"], mass_kg=state["m"], area_m2=area, cl_max=cl_max)
+        for state in states
+    )
+    return summary, slack
 
 
 def _command(bank_rad, load=1.0, thrust=0.3) -> torch.Tensor:
@@ -249,6 +289,279 @@ def test_barrier_filter_keeps_an_adversarial_rollout_inside_the_corridor():
     assert torch.all(_at(xt_h.abs(), last) < _at(xt_p.abs(), last))
 
 
+# ── speed floor ──────────────────────────────────────────────────────────────
+
+def test_speed_floor_acts_on_the_thrust_alone_and_only_upward():
+    """The floor owns ONE channel. Whatever it does to the thrust, the bank and the load
+    factor it was handed come back bit-identical — that is what lets it compose with the
+    barrier, which owns the other two — and a command already fast enough is not slowed."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR)
+    hook = SpeedFloor(config, _context(2), hard=True)
+    command = _command([0.3, -0.2], load=1.15, thrust=0.05)
+    # 70 m/s at 8 km back is above the floor there (about 63 m/s at n = 1.15); 45 m/s is not.
+    fast = hook(_view([8_000.0] * 2, [0.0] * 2, speed=70.0), command, 0)
+    slow = hook(_view([8_000.0] * 2, [0.0] * 2, speed=45.0), command, 1)
+    for out in (fast, slow):
+        assert torch.equal(out[:, 1], command[:, 1]) and torch.equal(out[:, 2], command[:, 2])
+    assert torch.allclose(fast[:, 0], command[:, 0])          # nothing demanded, nothing changed
+    assert torch.all(slow[:, 0] > command[:, 0])              # below the floor: thrust raised
+    assert torch.all(slow[:, 0] <= MAX_THRUST_FRACTION)
+    diagnostics = hook.diagnostics()
+    assert diagnostics["hook_steps"] == 4.0 and diagnostics["hook_floor_bound_steps"] == 2.0
+    assert diagnostics["hook_thrust_change"] > 0.0
+
+
+def test_speed_floor_reads_the_commanded_load_factor_and_the_thrust_already_spooled():
+    """Two properties the lesson of the barrier's v1/v2 pair demands of any hook here.
+
+    (i) The floor is ``V_stall(n_commanded)``, so a command that pulls more g asks for more
+    speed — this is what makes the composite well ordered (the barrier re-coordinates the
+    load first, the floor then prices what will actually be flown). (ii) The command is
+    HELD and the thrust actuator lags, so an engine already spooled up has committed part
+    of the hold's acceleration and the command has to supply only the rest.
+    """
+    config = _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR)
+    hook = SpeedFloor(config, _context(1), hard=True)
+    view = _view([8_000.0], [0.0], speed=58.0)
+    level = hook(view, _command([0.0], load=1.0, thrust=0.0), 0)
+    pulling = hook(view, _command([0.0], load=1.6, thrust=0.0), 1)
+    assert float(pulling[0, 0]) > float(level[0, 0])
+    # The idle engine has to be commanded harder than the one already at 60 % of installed
+    # thrust, for the same state and the same demanded end-of-hold speed.
+    idle_view = _view([8_000.0], [0.0], speed=58.0)
+    idle_view.actuators[:, 0] = 0.0
+    spooled_view = _view([8_000.0], [0.0], speed=58.0)
+    spooled_view.actuators[:, 0] = 0.6
+    idle = hook(idle_view, _command([0.0], thrust=0.0), 2)
+    spooled = hook(spooled_view, _command([0.0], thrust=0.0), 3)
+    assert float(idle[0, 0]) > float(spooled[0, 0])
+
+
+def test_the_soft_speed_floor_is_inert_where_it_demands_nothing():
+    """The regression the soft form was one clamp away from having.
+
+    `soft_max` overshoots its bound by `softness x ln 2`, so parking a demand that binds
+    NOTHING at `MIN_THRUST_FRACTION` would have added 0.0139 of installed thrust — 2.8 kN on
+    this fixture, 0.042 m/s^2, ~12 m/s over a 300 s remainder — to every idle command, and
+    `[-0.2, -0.1]` is the COMMON band on an approach, not a corner. `soft` is the ADOPTED
+    delivery form, so the arm would have measured the bias rather than the floor. The demand
+    is parked far enough below the box that the soft and the hard forms agree exactly."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR)
+    soft = SpeedFloor(config, _context(3), hard=False)
+    hard = SpeedFloor(config, _context(3), hard=True)
+    # 8 km back, comfortably fast: the floor is ~63 m/s and demands full negative thrust.
+    view = _view([8_000.0] * 3, [0.0] * 3, speed=95.0)
+    command = _command([0.0] * 3, thrust=MIN_THRUST_FRACTION)
+    assert torch.equal(soft(view, command, 0)[:, 0], hard(view, command, 0)[:, 0])
+    assert torch.equal(soft(view, command, 1)[:, 0], command[:, 0])
+    # ...and neither form counts a step it did not act on.
+    assert soft.diagnostics()["hook_floor_bound_steps"] == 0.0
+    assert soft.diagnostics()["hook_thrust_change"] == 0.0
+    # The bound case is unaffected: both forms still lift a command that would stall.
+    slow = _view([8_000.0], [0.0], speed=45.0)
+    lift = _command([0.0], thrust=MIN_THRUST_FRACTION)
+    assert float(SpeedFloor(config, _context(1), hard=False)(slow, lift, 0)[0, 0]) == pytest.approx(MAX_THRUST_FRACTION)
+
+
+def test_the_speed_floor_counts_a_demand_the_engine_cannot_meet():
+    """`hook_floor_saturated_steps` is "full thrust is not enough", so it must fire on the
+    DEMAND, not on the change: a network already commanding full thrust into a floor it
+    cannot reach is the case the counter exists to surface, and gating it on the change
+    would report zero exactly there."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR)
+    hook = SpeedFloor(config, _context(1), hard=True)
+    view = _view([8_000.0], [0.0], speed=40.0)
+    out = hook(view, _command([0.0], thrust=MAX_THRUST_FRACTION), 0)
+    assert float(out[0, 0]) == pytest.approx(MAX_THRUST_FRACTION)   # nothing left to give
+    diagnostics = hook.diagnostics()
+    assert diagnostics["hook_floor_saturated_steps"] == 1.0
+    assert diagnostics["hook_floor_bound_steps"] == 0.0             # it changed nothing
+    assert diagnostics["hook_thrust_change"] == 0.0
+
+
+def test_speed_floor_soft_saturation_is_continuous_and_differentiable():
+    config = _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR)
+    view = _view([8_000.0, 8_000.0], [0.0, 0.0], speed=45.0)
+    thrust = torch.tensor([-0.1, 0.0], dtype=torch.float64, requires_grad=True)
+    command = torch.stack([thrust, torch.zeros_like(thrust), torch.ones_like(thrust)], dim=-1)
+    SpeedFloor(config, _context(2), hard=False)(view, command, 0)[:, 0].sum().backward()
+    assert thrust.grad is not None and torch.all(thrust.grad > 0.0)   # soft: alive when bound
+    hard_thrust = thrust.detach().clone().requires_grad_(True)
+    hard_command = torch.stack(
+        [hard_thrust, torch.zeros_like(hard_thrust), torch.ones_like(hard_thrust)], dim=-1
+    )
+    SpeedFloor(config, _context(2), hard=True)(view, hard_command, 0)[:, 0].sum().backward()
+    assert torch.all(hard_thrust.grad == 0.0)                        # hard: the dead zone
+
+
+@pytest.mark.parametrize("saturation", ["soft", HOOK_SATURATION_HARD])
+def test_speed_floor_keeps_a_decelerating_rollout_off_the_stall(saturation):
+    """L3.d's whole point, end to end. The network commands idle-minus (the envelope's
+    negative floor) for the length of a 14 km approach: the unhooked rollout decelerates
+    through the stall speed and ``flyability`` reports stall samples on it. With the hook —
+    which may only raise the thrust — the same schedule stays above the floor and the same
+    check reports none. The tolerance is the mid-hold dip a per-segment command allows: the
+    floor is imposed where the hold ENDS, and drag and density are frozen across it."""
+    config = TSConfig(**{**_hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR).to_dict(),
+                         "control_hook_saturation": saturation})
+    dynamics, controls, durations = _final_batch(config, xt_m=0.0, d_m=14_000.0, segments=24, speed=95.0)
+    decelerating = controls.detach().clone()
+    decelerating[:, :, 0] = MIN_THRUST_FRACTION
+    hook = build_command_hook(config, dynamics)
+    hooked = control_rollout.rollout_control_endpoints(decelerating, durations, dynamics, config, command_hook=hook)
+    plain = control_rollout.rollout_control_endpoints(decelerating, durations, dynamics, config)
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9)
+    series, _ = build_series(flights, config, airport=AIRPORT)
+    aircraft = series[0].scenario.aircraft
+    plain_summary, plain_slack = _stall_readout(plain, dynamics, durations, aircraft)
+    hooked_summary, hooked_slack = _stall_readout(hooked, dynamics, durations, aircraft)
+    assert plain_summary["violations"]["stall"] > 0 and plain_slack < -5.0
+    assert hooked_summary["violations"].get("stall", 0) == 0 and hooked_summary["fully_flyable"]
+    assert hooked_slack > -1.0, hooked_slack
+    # Only the thrust moved: the bank and load schedules are the network's, unchanged.
+    assert torch.equal(hooked.controls[:, :, 1:], decelerating.to(hooked.controls.dtype)[:, :, 1:])
+    assert torch.all(hooked.controls[:, :, 0] >= decelerating.to(hooked.controls.dtype)[:, :, 0] - 1e-9)
+
+
+# ── composition ──────────────────────────────────────────────────────────────
+
+def test_the_combined_hook_is_the_barrier_then_the_floor_on_disjoint_channels():
+    """One call, both modules: the bank and load are exactly what the barrier alone would
+    have set (the floor never touches them) and the thrust is the floor's, above what the
+    network asked for. The order is the vocabulary's, not a free choice."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR,
+                          control_hook_saturation=HOOK_SATURATION_HARD)
+    context = _context(1)
+    combined = build_command_hook(config, context)
+    assert isinstance(combined, CompositeHook)
+    barrier_only = BarrierFilter(config, context, hard=True)
+    d = torch.tensor([8_000.0], dtype=torch.float64)
+    edge = fag.K_MARGIN * fag.corridor_halfwidth(d) - 20.0
+    view = _view(d.tolist(), edge.tolist(), heading_error_rad=-math.radians(15.0), speed=45.0)
+    command = _command([0.0], thrust=-0.1)
+    both = combined(view, command, 0)
+    barrier = barrier_only(view, command, 0)
+    assert torch.equal(both[:, 1], barrier[:, 1]) and torch.equal(both[:, 2], barrier[:, 2])
+    assert float(both[0, 1]) > 0.0                      # the barrier did act
+    assert float(both[0, 0]) > float(command[0, 0])     # and so did the floor
+    merged = combined.diagnostics()
+    assert merged["hook_steps"] == 1.0                  # one shared step count, not two
+    assert merged["hook_clamped_steps"] == 1.0 and merged["hook_floor_bound_steps"] == 1.0
+    per_flight = combined.per_flight_diagnostics()
+    assert set(per_flight) == set(merged)
+    assert all(value.shape == (1,) for value in per_flight.values())
+
+
+def test_the_combined_hook_still_contains_the_corridor():
+    """The barrier's own containment test, re-run under `barrier+speed-floor`: adding the
+    speed floor must not cost the lateral guarantee the corridor arm was adopted for."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR,
+                          control_hook_saturation=HOOK_SATURATION_HARD)
+    dynamics, controls, durations = _final_batch(config, xt_m=100.0, d_m=9_000.0, segments=24)
+    adversarial = controls.detach().clone()
+    adversarial[:, :, 1] = -math.radians(20.0)                        # right turn every segment
+    adversarial[:, :, 0] = MIN_THRUST_FRACTION                        # ...and decelerating
+    # ...with the load factor coordinated for that bank, so the fixture holds the 3° path
+    # instead of diving (a dive would trade the deceleration back for speed and the floor
+    # would have nothing to do).
+    adversarial[:, :, 2] = math.cos(math.radians(3.0)) / math.cos(math.radians(20.0))
+    hook = build_command_hook(config, dynamics)
+    rollout = control_rollout.rollout_control_endpoints(adversarial, durations, dynamics, config, command_hook=hook)
+    plain = control_rollout.rollout_control_endpoints(adversarial, durations, dynamics, config)
+    psi = dynamics["runway_heading_rad"]
+    d_h, xt_h = fag.runway_axes(rollout.channels[..., 0], rollout.channels[..., 1], psi.to(rollout.channels.dtype))
+    d_p, xt_p = fag.runway_axes(plain.channels[..., 0], plain.channels[..., 1], psi.to(plain.channels.dtype))
+    last = _last_approach_index(d_h)
+    assert torch.all(_at(xt_p.abs(), _last_approach_index(d_p)) > _at(fag.K_MARGIN * fag.corridor_halfwidth(d_p), _last_approach_index(d_p)))
+    approach = d_h > 0.0
+    bound = fag.K_MARGIN * fag.corridor_halfwidth(d_h)
+    assert torch.all((xt_h.abs() <= bound + 60.0)[approach])
+    assert torch.all(_at(xt_h.abs(), last) < _at(xt_p.abs(), last))
+    # ...and the floor did its own job on the same rollout: the unhooked one stalls, the
+    # combined one holds its floor while the barrier is turning it.
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9)
+    series, _ = build_series(flights, config, airport=AIRPORT)
+    aircraft = series[0].scenario.aircraft
+    plain_summary, plain_slack = _stall_readout(plain, dynamics, durations, aircraft)
+    hooked_summary, hooked_slack = _stall_readout(rollout, dynamics, durations, aircraft)
+    assert plain_summary["violations"]["stall"] > 0 and plain_slack < -5.0
+    assert hooked_summary["violations"].get("stall", 0) == 0 and hooked_slack > -1.0
+    diagnostics = hook.diagnostics()
+    assert diagnostics["hook_floor_bound_steps"] > 0.0 and diagnostics["hook_clamped_steps"] > 0.0
+
+
+def test_only_the_registered_hook_combination_can_be_spelled():
+    """`+` in a hook value is a LOOKUP in `CONTROL_HOOK_MEMBERS`, never a split. The one
+    registered combination is the one whose modules write disjoint channels in a defined
+    order; every other spelling — the same two reversed, or a module that is archived — is
+    simply not a member and is refused with the vocabulary."""
+    for value in ("speed-floor+barrier", "barrier+nominal-residual", "barrier+barrier"):
+        with pytest.raises(ValueError, match="unknown control_command_hook"):
+            _hook_config(control_command_hook=value)
+    assert CONTROL_HOOK_BARRIER_SPEED_FLOOR in CONTROL_HOOKS_AVAILABLE
+    assert CONTROL_HOOK_NOMINAL_RESIDUAL not in CONTROL_HOOKS_AVAILABLE
+    assert set(CONTROL_HOOKS_AVAILABLE) < set(CONTROL_HOOKS)
+    with pytest.raises(ValueError, match="at least two"):
+        CompositeHook((BarrierFilter(_hook_config(control_command_hook=CONTROL_HOOK_BARRIER), _context(1), hard=True),))
+
+
+def test_a_hook_knob_is_refused_where_no_module_reads_it():
+    """Until a second module existed, "a hook is on" and "the barrier is on" were the same
+    condition, so the barrier's gains always bound. They no longer do, and a value that
+    cannot change an answer is refused rather than serialized into a run name. The archived
+    `nominal-residual` builds nothing and is deliberately outside the rule — its six stored
+    2026-09-06 configs must keep loading exactly as they are."""
+    with pytest.raises(ValueError, match="control_barrier_alpha=.* needs a command hook"):
+        _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR, control_barrier_alpha=0.5)
+    with pytest.raises(ValueError, match="control_barrier_heading_gain=.* needs a command hook"):
+        _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR, control_barrier_heading_gain=0.5)
+    # The barrier's own positivity check still applies wherever a barrier IS built.
+    for hook in (CONTROL_HOOK_BARRIER, CONTROL_HOOK_BARRIER_SPEED_FLOOR):
+        with pytest.raises(ValueError, match="control_barrier_alpha must be positive"):
+            _hook_config(control_command_hook=hook, control_barrier_alpha=0.0)
+    # The archived value keeps loading whatever it carries.
+    assert _hook_config(control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL,
+                        control_barrier_alpha=0.5).control_barrier_alpha == 0.5
+
+
+def test_the_hook_vocabulary_and_its_module_tables_agree():
+    """Two import-time assertions, asserted here so the contract is readable: every hook a
+    NEW run may select names its modules, and every module named has a class to build."""
+    from control.constraints import _HOOKS
+
+    assert set(CONTROL_HOOK_MEMBERS) == set(CONTROL_HOOKS_AVAILABLE) - {"off"}
+    assert set().union(*CONTROL_HOOK_MEMBERS.values()) <= set(_HOOKS)
+    assert CONTROL_HOOK_MEMBERS[CONTROL_HOOK_BARRIER_SPEED_FLOOR] == (
+        CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR
+    )   # the order IS the value
+
+
+def test_the_speed_floor_margin_is_guarded_and_names_its_run():
+    config = _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR)
+    assert config.control_speed_floor_margin == CONTROL_SPEED_FLOOR_MARGIN_DEFAULT
+    for bad in (0.9, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="not a floor"):
+            _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR,
+                         control_speed_floor_margin=bad)
+    # A margin without a hook that reads it cannot change an answer, so it is refused.
+    with pytest.raises(ValueError, match="needs a command hook"):
+        _hook_config(control_command_hook=CONTROL_HOOK_BARRIER, control_speed_floor_margin=1.2)
+    with pytest.raises(ValueError, match="needs a command hook"):
+        TSConfig(control_speed_floor_margin=1.2)
+    named = TSConfig(**{
+        **recipe_settings("simple-v3", keep_name=True),
+        "control_dynamics_model": CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+        "control_dynamics_backend": "scaled-transport-chart-velocity",
+        "control_command_hook": CONTROL_HOOK_BARRIER_SPEED_FLOOR,
+        "control_speed_floor_margin": 1.25,
+    })
+    name = run_display_name(named.to_dict())
+    assert "hook=barrier+speed-floor" in name and "floor-margin=1.25" in name
+    # The default margin is silent: adding the field renames no stored run.
+    default = TSConfig(**{**named.to_dict(), "control_speed_floor_margin": CONTROL_SPEED_FLOOR_MARGIN_DEFAULT})
+    assert "floor-margin" not in run_display_name(default.to_dict())
+
+
 # ── batch fixture on the final ───────────────────────────────────────────────
 
 def _last_approach_index(d: torch.Tensor) -> torch.Tensor:
@@ -336,9 +649,20 @@ def test_the_predict_side_gains_are_a_guarded_table_and_need_the_hook():
     flags = {option for action in parser._actions for option in action.option_strings}
     assert set(cli_predict.PREDICT_CONFIG_FLAGS.values()) <= flags
 
-    # Two of the four keep a short name on purpose; the other two are named after the field.
+    # Two of the five keep a short name on purpose; the rest are named after the field.
     assert cli_predict.PREDICT_CONFIG_FLAGS["control_barrier_alpha"] == "--control-barrier-alpha"
     assert cli_predict.PREDICT_CONFIG_FLAGS["control_command_hook"] == "--command-hook"
+    assert cli_predict.PREDICT_CONFIG_FLAGS["control_speed_floor_margin"] == "--control-speed-floor-margin"
+    # The tuning fields are the overridable ones; the hook and its saturation ARE the choice.
+    assert cli_predict.HOOK_TUNING_FIELDS == {
+        "control_barrier_alpha", "control_barrier_heading_gain", "control_speed_floor_margin"
+    }
+    # The combined value is selectable at predict time — the delivery form L3.d measures.
+    hook_choices = {
+        option for action in parser._actions if "--command-hook" in action.option_strings
+        for option in action.choices
+    }
+    assert hook_choices == {CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_BARRIER_SPEED_FLOOR}
 
     # A gain without --command-hook changes nothing, so it is refused rather than ignored.
     with pytest.raises(SystemExit):
@@ -383,7 +707,10 @@ def test_prediction_exports_the_effective_schedule_and_names_the_hook(monkeypatc
             return torch.stack((command[:, 0], torch.full_like(command[:, 1], 0.25), command[:, 2]), dim=-1)
 
         def diagnostics(self):
-            return {}
+            return {"hook_steps": torch.zeros((), dtype=torch.float64)}
+
+        def per_flight_diagnostics(self):
+            return {"hook_steps": torch.ones(1, dtype=torch.float64)}
 
     monkeypatch.setattr(forecast_module, "build_command_hook", lambda cfg, dynamics: RewritingHook())
 
@@ -403,6 +730,44 @@ def test_prediction_exports_the_effective_schedule_and_names_the_hook(monkeypatc
     max_thrust_n = series[0].scenario.aircraft.engine.max_thrust_total_n
     assert parsed.controls[0]["thrust"] == pytest.approx(0.20 * max_thrust_n)     # untouched channels pass
     assert parsed.controls[-1]["thrust"] == pytest.approx(0.16 * max_thrust_n)
+
+
+def test_a_prediction_record_carries_the_hooks_own_per_flight_counts():
+    """The record surface of the hook: WHAT it did to THIS flight, not to the batch.
+
+    `commandHook` already said which hook flew the schedule; on its own that cannot
+    separate a flight the floor never touched from one it rewrote at every step. The
+    counts are the flight's own — steps, then every other count as a share of it, the same
+    normalisation an epoch record carries one level up.
+    """
+    config = _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR, n_segments=2)
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=1, seed=9)
+    series, _ = build_series(flights, config, airport=AIRPORT)
+    normalizer = Normalizer.fit(series)
+
+    class IdleControlModel(torch.nn.Module):
+        """Commands the envelope's negative thrust floor: the floor has to bind."""
+
+        def forward(self, history, dynamics):
+            controls = torch.tensor([[[MIN_THRUST_FRACTION, 0.0, 1.0]] * 2], dtype=history.dtype).expand(len(history), -1, -1)
+            durations = torch.tensor([[30.0, 30.0]], dtype=history.dtype).expand(len(history), -1)
+            return ControlPrediction(controls=controls, segment_durations=durations, final_time_s=durations.sum(dim=-1))
+
+    forecast = forecast_approach(IdleControlModel(), series[0], config, normalizer, device=torch.device("cpu"))
+    assert forecast.command_hook == "speed-floor/soft"
+    record = build_prediction_record(series[0], forecast, index=0, model_name=config.model,
+                                     horizon_mode=config.horizon_mode)
+    counts = record.source["commandHookDiagnostics"]
+    assert counts["steps"] == 2.0
+    assert set(counts) == {"steps", "floorBoundSteps", "floorSaturatedSteps", "thrustChange"}
+    assert 0.0 <= counts["floorBoundSteps"] <= 1.0 and counts["thrustChange"] > 0.0
+    # A run without a hook makes no such claim: the key is absent, not zero.
+    plain_config = _hook_config(n_segments=2)
+    plain = forecast_approach(IdleControlModel(), series[0], plain_config, normalizer, device=torch.device("cpu"))
+    plain_record = build_prediction_record(series[0], plain, index=0, model_name=plain_config.model,
+                                           horizon_mode=plain_config.horizon_mode)
+    assert plain_record.source["commandHook"] is None
+    assert "commandHookDiagnostics" not in plain_record.source
 
 
 def test_predicting_a_stored_nominal_law_checkpoint_refuses_instead_of_substituting():
