@@ -194,9 +194,11 @@ endpoint, not the path average**: FDE p50 is 170 m better than native32 pooled a
 vectored, while pooled ADE stands still (1249 against `L2d`'s 1214, still the best point estimate).
 So the seven earlier arms failed **for a units reason**, not because a latent cannot carry the
 intent — yet the corrected arm still does not recover the 962 m, its vectored top-1 being 2660 m
-against a 1235 m target. **Decision pending with the user** (`LID` §六 L2 末): reopen one arm on
-the corrected units with a longer budget and the 26× duration weight, read as a distribution
-(§5 item 5).
+against a 1235 m target. The line is therefore **not closed but re-opened once**, as
+**L2.g** (pre-registered `LID` §六 L2 末, `l2g_latent_distribution_arms.json`, campaign
+`l2g_latent_distribution_20260908`, queued last): the same units recipe at **300 epochs with early
+stopping off and two seeds**, read as a distribution. Its gates and veto are in §5 item 5. It is
+**the only experiment still pending in this programme.**
 
 **L4 — scene conditioning.** (pre-registered pre-measurement gate; `LID` §六 L4;
 `E/l4_scene_explainability_20260907`, KRDU 14,418 flights, Phase 0 cohort and CV protocol.) It ran
@@ -395,11 +397,38 @@ came from two-seed **state**-path arms (5–22 m). On the **control** path these
 about 125 m in this report is therefore **not demonstrated**, and each is marked where it appears
 (§2, §3.4 gate 1, §3.5, §3.6, §3.7). Duration-MAE seed spread is about 1 s.
 
-**Pending.** `B1b_two_head`, which would take both gains at once, is **pre-registered with gates and
-implemented** (`AED` §3.1b; `b859453`, `3833e8e`) and **is training now**. Its gate 1 ADE clause is
-**reframed post hoc, stated as such** (`AED` §3.5): not worse than the worse point-matched seed
-(1373 m) and not worse than native32 beyond the ~125 m seed line, replacing "within 30 m of
-1248 m". The MAE clause is unchanged.
+**`B1b_two_head` — the two heads do not compose, and the B line's deliverable is now fixed.**
+(pre-registered `AED` §3.1b, implemented in `b859453` / `3833e8e`; result `AED` §3.5;
+`E/b1b_two_head_20260908/{readout,eta_error}.{json,txt}` and `B1b_two_head_calibration/`;
+180/180 epochs, best 163, single seed. Its gate 1 ADE clause was **reframed post hoc, stated as
+such**, after the 1248 m it was written against did not replicate: not worse than the worse
+point-matched seed (1373 m) and not worse than native32 beyond the ~125 m seed line.)
+
+| | native32 | `B1_quantile` | `B1_point_matched` (1337 / 2024) | **`B1b_two_head`** |
+|---|---:|---:|---:|---:|
+| ADE pooled / straight-in / vectored | 1322 / 445 / 2870 | 1282 / 420 / 2805 | 1248 / 413 / 2721 · 1373 / 451 / 3004 | 1307 / **461** / 2799 |
+| FDE p50 pooled / straight-in | 864 / 671 | 860 / 595 | 877 / 582 · 937 / 659 | 899 / **687** |
+| chamfer pooled | 224 | 205 | 177 · 211 | **232** |
+| duration MAE (the duration flown) pooled / straight-in | 25.9 / 13.6 s | 23.9 / 10.3 s | 25.1 / 13.1 · 26.2 / 13.9 s | 25.6 / 13.4 s |
+| **q50 MAE** pooled / straight-in | — | **23.9 / 10.3 s** | — | **24.2 / 10.4 s** |
+| deployed coverage α = 0.2 / 0.5 (single cut) | — | 0.745 / 0.450 | — | 0.748 / 0.452 |
+| vectored 80 % width | — | 142 s | — | 143 s |
+
+Loss components at the best epoch are `final_time` 0.164 and `duration_quantile` 0.075, so both
+heads are carrying load. **(1) The MAE clause passes**: the two-head q50 reads 24.2 / 10.4 s
+against `B1_quantile`'s 23.9 / 10.3 s, a difference of 0.3 / 0.1 s — the second head reproduces the
+quantile head's duration accuracy in full. **(2) The reframed ADE clause fails**: pooled 1307 is
+inside the seed line, but straight-in ADE 461 is the worst of the four arms, straight-in FDE p50
+687 trips the standing veto (671), and chamfer 232 is the only value in the B family worse than
+native32's 224. The arm inherited the quantile head's timing and lost the point head's path; the
+two advantages did not add. **(3) Gate 2 and the width veto are unchanged**: α = 0.2 deployed
+coverage 0.748 is the same single-cut near-miss as `B1_quantile`'s 0.745, which the five-cut probe
+already showed to be cut noise, and the vectored width is 143 s against the 120 s veto.
+
+**Decision: `B1b_two_head` is not adopted and gets no second seed. The B line's deliverable is
+fixed as `B1_quantile`'s quantile head (the ETA distribution, calibrated by B2) plus B3's CTA
+conditioned decoding, with the path model chosen separately** — the 26× duration weight that was
+the other candidate is withdrawn (above).
 
 ### 3.5 Can the prediction be re-issued at any time?
 
@@ -626,11 +655,17 @@ response, not a fitted output. **The model must not guess the intent; the schedu
 as a time** — and the latent, now that it works, is the right instrument for the *distribution*
 around that time rather than for the point estimate.
 
-**The calibrated ETA is deliverable for straight-in traffic and honest for vectored traffic.** The
-straight-in 80 % interval is about 28–32 s wide with coverage inside the band and straight-in
-duration MAE falls 13.6 → 10.3 s; vectored reports **±70 s**, tripping the 120 s veto. That width
-is not a calibration defect but the 962 m of controller intent expressed in seconds, and the
-correct response is for the scheduler to assign the time.
+**The calibrated ETA is deliverable for straight-in traffic and honest for vectored traffic, and
+its form is now settled.** The straight-in 80 % interval is about 28–32 s wide with coverage inside
+the band and straight-in duration MAE falls 13.6 → 10.3 s; vectored reports **±70 s**, tripping the
+120 s veto. That width is not a calibration defect but the 962 m of controller intent expressed in
+seconds, and the correct response is for the scheduler to assign the time. **The delivered form is
+`B1_quantile`'s quantile head, calibrated by B2, decoded per quantile by B3, with the path model
+chosen separately.** Both attempts to fold the arrival-time gain into the path model failed: the
+26× duration weight did not survive its second seed, and `B1b_two_head` reproduced the q50 accuracy
+exactly (24.2 / 10.4 s against 23.9 / 10.3 s) while giving up the easy stratum (straight-in ADE
+461, FDE p50 687, chamfer 232 — the only B-family chamfer worse than native32). Timing and path are
+better delivered by two components than by one head.
 
 **The model cannot absorb delay legitimately.** Asked to arrive 60 or 90 s later it produces a
 reference with a 0 % fully-flyable share. The hook fixes the lateral symptom completely
@@ -667,8 +702,9 @@ leaves its 125 s floor, though the random-anchor arm is still worse at the train
 
 ## 5. Next steps
 
-Items 1–8 are proposals for decision; item 9 is closed. Each is described in one or two sentences;
-its gate, veto and cost are in the table that follows.
+Items 1–8 are proposals for decision, except item 4, which has been run and decided; item 9 is
+closed. Each is described in one or two sentences, with its gate, veto and cost in the table that
+follows. **Only one experiment in this list is still pending: L2.g, item 5.**
 
 **1. Adopt two recipe changes; the third is now refused.** (a) `final_time_loss_weight` 26 into the
 mainline recipe is **NOT adopted** — the second seed (1373 m against seed 1337's 1248 m, around
@@ -688,16 +724,23 @@ fixed-anchor arm at L−1 and the random-anchor arm later; option (b) trains one
 (L−1 weighted, remaining-path-uniform elsewhere), the A2 arm. Both A0.b arms were still improving
 at 180 epochs, so a longer budget is a confound to control.
 
-**4. B1.b — the two-head duration — then fix the B line's deliverable.** Code exists, arm
-pre-registered, **training now**; its gate 1 ADE clause is reframed post hoc because the 1248 m it
-was written against did not replicate. If it passes, the B line's deliverable is fixed as **a point-matched path
-plus a quantile ETA**: the point head drives the trajectory, the quantile head publishes the
-interval.
+**4. The B line's deliverable — done, and fixed.** `B1b_two_head` ran and was **declined**: the
+MAE clause passed (q50 24.2 / 10.4 s against 23.9 / 10.3 s) but the post-hoc ADE clause failed
+(straight-in ADE 461, FDE p50 687 against the standing 671 veto, chamfer 232), so the two heads do
+not compose. No second seed. **The deliverable is fixed as `B1_quantile`'s quantile head + B2
+calibration + B3 CTA decoding, with the path model chosen separately.** Nothing remains to run on
+this step; what remains is the vectored width veto (§3.4), which is a scheduler-interface decision
+rather than an experiment.
 
-**5. Reopen the latent line on the corrected units — one arm, read as a distribution.** The units
-test passed three of four gates and was budget-limited at 180/180 epochs, so its numbers are lower
-bounds. The arm keeps `position_loss_scale_m` 1 km and runs a longer budget; the 26× duration
-weight it was to have carried is dropped with item 1(a). **Decision pending with the user** (`LID` §六 L2 末). It overlaps the C line
+**5. L2.g — the latent line re-opened once, read as a distribution. This is the only experiment
+still pending.** The units test passed three of four gates and was budget-limited at 180/180
+epochs, so its numbers are lower bounds. L2.g (pre-registered `LID` §六 L2 末;
+`l2g_latent_distribution_arms.json`; campaign `l2g_latent_distribution_20260908`; queued last)
+keeps the units recipe — `position_loss_scale_m` 1 km, warm posterior, β 0.01, 8 dimensions — and
+runs **300 epochs with early stopping off at two seeds** (1337 and 2024, same split seed), with the
+units test's prediction settings (6 prior samples, 6 N(0, I) controls, shuffled z). The 26×
+duration weight is **not** carried, having been withdrawn with item 1(a). Every number is reported
+as a two-seed spread, and a difference inside that spread is not a finding. It overlaps the C line
 — reading a sample fan as a trajectory distribution is the same objective — so the two should be
 scoped together.
 
@@ -719,8 +762,8 @@ the reference.
 | 1(c) | already met on three independent bases (`simple-v3` in `CHR`, teacher-free `hr8+TV` in L1.c, the CTA base in L3.c) | — | none; a predict-time flag |
 | 2 | the L3.c protocol re-run unchanged: duration error still equals the offset exactly (gate 2), threshold \|xt\| p95 within 1.5× the offset-0 hooked arm (gate 1), fully-flyable share at +60 s ≥ 8.3 % (gate 3, the clause that failed) | pooled ADE at offset 0 degrades by more than 100 m against 840 m | dynamics change (code + review) + four predict-only arms, ≈ 20 min GPU |
 | 3 | pooled ADE at L−1 not worse than 1322 m beyond seed noise, anchor-grid selection metric, and no regression of the anytime gates (monotone; gate 2 at 16 km; s_freeze at 8 km) | — | one training arm ≈ 2–3 h GPU for (b); (a) trains nothing but doubles what must be shipped |
-| 4 | (1) **reframed post hoc** (`AED` §3.5): pooled ADE not worse than the worse point-matched seed (1373 m) and not worse than native32 beyond the ~125 m seed line, **and** pooled duration MAE within 1 s of 23.9 s (straight-in within 1 s of 10.3 s); (2) five-cut deployed coverage inside the gate-2 bands; (3) the B3 fan-geometry gate (`AED` §3.1b) | MAE > 24.9 s — the heads interfere, delivery stays two models | one training arm + calibration + prediction, ≈ 2–3 h GPU; **training now** |
-| 5 | z read as a distribution with the B-line gate 3 protocol (share of truth paths inside the six-sample fan; truth chamfer to the nearest sample against to top-1), with shuffled-z ΔADE still > 200 m and pooled top-1 not worse than 1322 m | shuffle cost falls back under 200 m, or straight-in FDE p50 degrades beyond seed noise | one training arm, ≈ 2–3 h GPU |
+| 4 | **run and decided**: the MAE clause passed (q50 24.2 / 10.4 s within 1 s of 23.9 / 10.3 s); the ADE clause, reframed post hoc against the worse point-matched seed (1373 m) and the ~125 m seed line, **failed** on straight-in (ADE 461, FDE p50 687 against the standing 671 veto, chamfer 232) | — (declined before the veto was reached) | already spent (one training arm + calibration + prediction) |
+| 5 (L2.g) | **all four must hold at BOTH seeds**: (1) shuffled-z ΔADE > 200 m; (2) minADE₆ below the N(0, I) control, pooled and vectored; (3) FDE p50 better than native32's 864 m by more than 100 m; (4) pooled top-1 ADE not worse than native32's 1322 m beyond the ~125 m seed line | either seed fails gate 1 — z is inert again — and the latent line closes permanently | 2 × ≈ 100 min GPU plus prediction |
 | 6 | the sign and rough magnitude of both headline effects reproduce: a CTA gain concentrated in the vectored stratum, and a straight-in 80 % interval under ≈ 40 s with deployed coverage in the band | — | ≈ three training arms + calibration, ≈ 8–10 h GPU |
 | 7 | for a realistic arrival stream the references satisfy the required in-trail separation at the threshold and along final, and every one passes the corridor and flyability checks the single-flight arms are judged by | — | integration only: a multi-aircraft driver and a separation metric |
 | 8 | a control-arm ADE gate is decided by two seeds with early stopping off, or the difference is reported as "not demonstrated" when inside ~125 m | — | one extra training arm per gated comparison, ≈ 2–3 h GPU |
@@ -856,6 +899,7 @@ that the latent is inert is superseded by §3.2 here.
 | `E/b1_quantile_20260907/{readout_vs_native32,eta_error_vs_native32,quantile_fan,readout_point_matched,eta_error_point_matched}.{txt,json}` | `B1_quantile`, `B3_quantile_cta`, `B1_point_matched` (seed 1337) | val 1404 | 2026-09-08 |
 | `E/b1_quantile_20260907/readout_s2024.{txt,json}` | `B1_point_matched_s2024` (seed 2024, 143/180, best 123) | val 1404 | 2026-09-08 |
 | `E/b1_quantile_20260907/B*_calibration/eta_calibration.{txt,json}` | B1, B3 conformal tables | val halves, ≈700 each | 2026-09-08 |
+| `E/b1b_two_head_20260908/{readout,eta_error}.{txt,json}`, `B1b_two_head_calibration/` | `B1b_two_head` (180/180, best 163, single seed) | val 1404 | 2026-09-08 |
 
 **Two results landed during writing**, and their numbers come from the readouts, not from
 derivation: the L2 units test (`LID` §六 "L2 量纲测试结果", commit `91c0f2f`; artifacts
@@ -872,14 +916,22 @@ skill 0.707 recorded rather than missing.
 duration-weight gain and replaced the 30 m seed-noise line with a measured ~125 m one on the
 control path.
 
-**Still pending** (pending, not "no result"): `B1b_two_head` — **training now**, with its gate 1
-ADE clause reframed post hoc against the two point-matched seeds.
+**Two more results landed after the seed-noise revision**: `B1b_two_head` (`AED` §3.5, "B1.b
+结果"; commit `2d33f64`; artifacts `E/b1b_two_head_20260908/{readout,eta_error}.{json,txt}` and
+`B1b_two_head_calibration/`), which fixed the B line's deliverable in §3.4, §4 and §5 item 4; and
+the L2.g pre-registration (`LID` §六 L2 末; commit `bc3f2f7`;
+`docs/experiments/l2g_latent_distribution_arms.json`).
+
+**One experiment is still pending, and only one**: **L2.g** — two seeds of the units recipe at 300
+epochs with early stopping off, campaign `l2g_latent_distribution_20260908`, queued last. Its gates
+and veto are in §5 item 5. Nothing else in this report is waiting on a run.
 
 **Pre-registered arm files** (`4dTrajectory/ts_transformer/docs/experiments/`):
 `l1_lowdim_arms.json`, `l1b_full_arms.json`, `l1c_procedure_arms.json`,
 `l2f_mean_information_arms.json`, `l2_units_test_arms.json`, `l3_cta_arms.json`,
 `l3_cta_counterfactual_arms.json`, `l3c_delay_corridor_arms.json`, `a0_random_arms.json`,
-`b1_quantile_arms.json`, `b1b_two_head_arms.json`, `l5_fitted_teacher_arms.json`.
+`b1_quantile_arms.json`, `b1b_two_head_arms.json`, `l2g_latent_distribution_arms.json`,
+`l5_fitted_teacher_arms.json`.
 
 **Standing rules and hazards.** `4dTrajectory/ts_transformer/CLAUDE.md` — the config-axis table and
 "How to read results here". `docs/CHANGELOG.md` entries 2026-09-03 → 2026-09-08.
