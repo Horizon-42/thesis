@@ -16,7 +16,7 @@ points, and the 2026-09-09 plan-and-guidance design is the next axis.
 |---|---|
 | bug findings | 4 number-changing on live paths, 4 crash paths, ~20 contract holes — §2, all with `file:line` |
 | architecture | diagnosis §3, target §4, retirement candidates with census evidence §5, order §6 |
-| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3) and 4 (§4.2, see their resolution paragraphs) done in the same branch |
+| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3), 4 (§4.2) and 5 (§4.4, see their resolution paragraphs) done in the same branch |
 | decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); the five §7 decisions |
 
 ## 1. Measured
@@ -395,6 +395,20 @@ predict-time overrides (`--command-hook`, gains, `--cta-offset-s`, `--cta-from-q
 `PredictOptions` value the strategy's `forecast` receives and the record stamps, instead of six
 keyword arguments threaded through `forecast_approaches` → `_forecast_control_batch` (14 and 17
 parameters).
+
+**Resolution (2026-09-10, `dev-pkg-review`).** Pure extraction, statement for statement, so
+the epoch record and the RNG order are untouched. `train.fit_model` (506 lines) →
+`prepare_session` (the window sets, the plans, the model, the optimizer, the teacher — into a
+`TrainingSession`), `describe_session` (the header lines), `train_epoch` (→ `TrainEpoch`),
+`validate_epoch` (→ `ValidationEpoch`, the selection metric included), `procedure_update` (the
+dual step), `describe_epoch`, and a `fit_model` of 124 lines that is the loop and the
+selection. `cli/predict.run_cli` (467 lines) → `load_predict_checkpoint`, `load_predict_series`,
+`parse_predict_options` (every flag-combination rule in one function; returns a frozen
+`PredictOptions` — the `ForecastOptions` every forecast is asked, the arms decoded beside the
+top-1 records, the cohort the CTA offset skipped — plus the restamped config), `predict_sets`
+(→ `PredictionSets`), `write_prediction_sets` (the one emitter) and `report_predictions`; the
+`run_cli` left is 22 lines. The predict-time overrides reach the strategy as ONE value:
+`ForecastOptions` from §4.2 (`_fan_forecast` derives a leaf's from it with `replace`). `SplitPredictionReplay.truth` / `.mask` are removed: write-only, a decode and a device→host copy of the batch targets per batch per airport per epoch that no metric read (the metrics compare against the validation plan's common-grid truth); one test asserted their shape and now does not. Acceptance: full suite 972 passed (the 12 known `test_ts_pipeline.py` fixtures red before and after).
 
 ### 4.5 Runners → `ts_transformer/experiments/`
 

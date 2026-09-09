@@ -2373,7 +2373,6 @@ def test_control_validation_replay_uses_dense_dynamics_queries():
     )
 
     assert replay.predicted.shape == (1, 5, config.enc_in)
-    assert replay.truth.shape == replay.predicted.shape
     assert replay.segment_durations_s.shape == (1, 5)
     np.testing.assert_allclose(replay.segment_durations_s, 0.4)
     assert replay.predicted_time_s.tolist() == pytest.approx([2.0])

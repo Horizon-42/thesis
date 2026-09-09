@@ -514,13 +514,13 @@ modules are imported by their qualified names — see the package rule under Con
 |---|---|---|
 | `objective.py` | what is a prediction scored against | 1,079 |
 | `validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 1,162 |
-| `train.py` | the epoch, the cohort, the checkpoint | 1,248 |
+| `train.py` | the epoch, the cohort, the checkpoint — `fit_model` is `prepare_session` (a `TrainingSession`) → per epoch `train_epoch` / `validate_epoch` / `procedure_update` → the selection, with `describe_session` / `describe_epoch` holding every print (2026-09-10, review §4.4) | 1,407 |
 | `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` / `RemainingPathUniformAnchor` = one per flight per epoch, drawn uniformly over samples or over the flight's remaining-path span; `training_window_class` is the one place the two anchor axes pick a class) | 1,941 |
 | `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 159 |
 | `anchor_strata.py` | the remaining-path VALUES both sides of that edge read: the grid's km, the strata they cut, the train-anchor draw law (leaf — no `dataset`, no torch) | 105 |
 | `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 503 |
 | `splits.py` | which split a flight belongs to | 197 |
-| `cli/` | one module per subcommand (`common` 857, `predict` 484, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze` 42, `__init__` 15) | 1,644 |
+| `cli/` | one module per subcommand (`common` 909, `predict` 915 — `run_cli` is `load_predict_checkpoint` → `load_predict_series` → `parse_predict_options` (every flag rule, one frozen `PredictOptions`) → `predict_sets` → `write_prediction_sets` (the one emitter) → `report_predictions`, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze` 42, `__init__` 15) | 2,127 |
 | `__main__.py` | the bootstrap and the `COMMANDS` table it dispatches from | 131 |
 
 Two edges that a change must not reverse: `evaluation_protocol` reaches

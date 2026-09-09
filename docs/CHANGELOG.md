@@ -4,6 +4,32 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: review §4.4 — the training loop and the predict command extracted into named steps
+
+Step 5 of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`
+§4.4, resolution paragraph), on `dev-pkg-review`. A pure extraction, statement for statement,
+so nothing on disk changed: full suite 972 passed (the 12 known `test_ts_pipeline.py` fixtures red before and after); the epoch record, the RNG order and the prediction
+directories are the ones the monoliths produced.
+
+- **`train.fit_model` (506 lines) → six functions and three records.** `prepare_session`
+  builds a `TrainingSession` (the window sets, the validation plans, the model, the optimizer
+  and scheduler, the procedure multipliers, the teacher — in the order the loop always built
+  them); `describe_session` prints the header; `train_epoch` returns a `TrainEpoch`,
+  `validate_epoch` a `ValidationEpoch` (the selection metric included), `procedure_update`
+  the dual step's record, `describe_epoch` the epoch's lines; `fit_model` itself is the loop
+  and the selection, 124 lines.
+- **`cli/predict.run_cli` (467 lines) → `load_predict_checkpoint`, `load_predict_series`,
+  `parse_predict_options`, `predict_sets`, `write_prediction_sets`, `report_predictions`**, and
+  a 22-line `run_cli` that calls them in order. `parse_predict_options` holds every
+  flag-combination rule (the 24 `parser.error` calls) and returns a frozen `PredictOptions`:
+  the `ForecastOptions` every forecast is asked, the arms decoded beside the top-1 records
+  (latent modes, N(0, I) controls, the quantile fan, the shuffled-latent diagnostic, the
+  posterior and label oracles), and the cohort the CTA offset skipped. The decoders take the
+  options, never `args`; a fan leaf's forecast options are `replace(options.forecast, …)`.
+- **`SplitPredictionReplay.truth` / `.mask` removed**: write-only — a decode and a device→host
+  copy of the batch targets per batch per airport per epoch that no metric read (the metrics
+  compare against the validation plan's common-grid truth).
+
 ### 2026-09-10 — ts_transformer: review §4.2 — one strategy per prediction path under `outputs/`; the spine stops branching on `prediction_output`
 
 Step 4 of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`

@@ -57,9 +57,10 @@ were NOT made without the owner:
   selectable; corridor-bounded stays the candidate default). **Still to do, in the review's
   §6 order:** §4.3 config split DONE 2026-09-10 (typed views over the flat dataclass, the
   ownership rule; defaults unchanged; 0 names moved); §4.2 output strategies DONE 2026-09-10
-  (`outputs/`, one strategy per path, the spine no longer branches; 0 names moved); then §4.4
-  loop / predict extraction, §4.5–4.6 runners and tests, the folder grouping — each a commit
-  with the full suite and the stored-run census as the acceptance test. The "name every field against
+  (`outputs/`, one strategy per path, the spine no longer branches; 0 names moved); §4.4 loop /
+  predict extraction DONE 2026-09-10 (`prepare_session` / `train_epoch` / `validate_epoch`;
+  `parse_predict_options` → `PredictOptions`); then §4.5–4.6 runners and tests, the folder
+  grouping — each a commit with the full suite and the stored-run census as the acceptance test. The "name every field against
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 

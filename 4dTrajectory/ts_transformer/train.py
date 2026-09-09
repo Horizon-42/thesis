@@ -49,6 +49,7 @@ from ts_transformer.dataset import (
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
+    TrajectoryWindows,
     fixed_anchor_index,
     iter_batches,
     training_window_class,
@@ -73,10 +74,14 @@ from ts_transformer.objective import (
     prediction_loss_components,
     target_contract,
 )
-from ts_transformer.outputs import strategy
+from ts_transformer.outputs import OutputStrategy, strategy
 from ts_transformer.training_performance import EpochProfiler
 from ts_transformer.validation import (
     VALIDATION_SELECTIONS,
+    AnchorGridPlans,
+    ValidationAirportEvaluation,
+    ValidationBatchPlan,
+    ValidationSelection,
     anchor_grid_coverage,
     build_anchor_grid_validation_plans,
     common_grid_validation_details,
@@ -434,7 +439,67 @@ def filter_training_cohort(
 
 
 
-def fit_model(
+@dataclass
+class TrainingSession:
+    """What `fit_model` prepares once and every epoch reads (review §4.4).
+
+    The window sets and the validation plans, the model with its optimizer and scheduler,
+    the procedure multipliers, the teacher table — built by :func:`prepare_session` in the
+    order `fit_model` always built them (the batch-size probe before the seed, the seed
+    before the normalizer, the teacher before the window sets), and read-only afterwards
+    except for the model, the optimizer and the multipliers the epochs advance.
+    """
+
+    config: TSConfig
+    strategy: OutputStrategy
+    device: torch.device
+    normalizer: Normalizer
+    fitted_teacher: FittedTeacherTable | None
+    train_set: TrajectoryWindows
+    val_sets: dict[str, TrajectoryWindows]
+    val_batch_plans: dict[str, ValidationBatchPlan]
+    val_common_truth_by_airport: dict[str, CommonGridTruth] | None
+    anchor_grid_plans: AnchorGridPlans | None
+    model: nn.Module
+    multipliers: ProcedureMultipliers | None
+    optimizer: torch.optim.Optimizer
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau
+    component_names: tuple[str, ...]
+    minimum_anchor_index: int | None
+    train_flights: int
+    val_flights: int
+    flights_per_epoch: int
+    val_window_count: int
+
+
+@dataclass
+class TrainEpoch:
+    """One epoch's training pass: the objective it optimized, what it summed, and the
+    path's own diagnostics."""
+
+    epoch_config: TSConfig
+    learning_rate: float
+    anchor_sampling: dict[str, Any]
+    components: dict[str, float]
+    loss: float
+    diagnostic_totals: dict[str, float]
+    output_extras: dict[str, Any]
+    optimizer_updates: int
+    profiler: EpochProfiler
+
+
+@dataclass
+class ValidationEpoch:
+    """One epoch's validation pass and the selection metric read off it."""
+
+    evaluations: dict[str, ValidationAirportEvaluation]
+    by_airport: dict[str, float]
+    components: dict[str, float]
+    loss: float
+    selection: ValidationSelection
+
+
+def prepare_session(
     train_series: Sequence[FlightSeries],
     val_series: Sequence[FlightSeries],
     config: TSConfig,
@@ -442,8 +507,8 @@ def fit_model(
     auto_batch_size: bool = False,
     minimum_anchor_index: int | None = None,
     verbose: bool = True,
-) -> FitResult:
-    """Fit one model against explicit train/validation flights, without touching test."""
+) -> TrainingSession:
+    """Everything the epochs read, built once, in the order it has always been built."""
     if not train_series or not val_series:
         raise ValueError("fit_model requires non-empty train and validation flights")
     cohort_floor = config.training_cohort_min_future_s
@@ -541,65 +606,375 @@ def fit_model(
             f"{len(train_series)} train flights; adjust the train roster explicitly "
             "instead of silently changing experiment membership"
         )
+    return TrainingSession(
+        config=config,
+        strategy=output_strategy,
+        device=device,
+        normalizer=normalizer,
+        fitted_teacher=fitted_teacher,
+        train_set=train_set,
+        val_sets=val_sets,
+        val_batch_plans=val_batch_plans,
+        val_common_truth_by_airport=val_common_truth_by_airport,
+        anchor_grid_plans=anchor_grid_plans,
+        model=model,
+        multipliers=multipliers,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        component_names=loss_component_names(config),
+        minimum_anchor_index=minimum_anchor_index,
+        train_flights=len(train_series),
+        val_flights=len(val_series),
+        flights_per_epoch=flights_per_epoch,
+        val_window_count=val_window_count,
+    )
+
+
+def describe_session(session: TrainingSession) -> None:
+    """The run's header, in one place: the model, the grid, the cohort, the selection."""
+    config, model, device, train_set = session.config, session.model, session.device, session.train_set
+    val_window_count, flights_per_epoch = session.val_window_count, session.flights_per_epoch
+    anchor_grid_plans, minimum_anchor_index = session.anchor_grid_plans, session.minimum_anchor_index
+    print(
+        f"  model      {config.model}/{config.prediction_output} "
+        f"({parameter_count(model):,} params) on {device}"
+    )
+    output_grid = {
+        HORIZON_NORMALIZED: f"N={config.n_segments} normalized progress segments",
+        HORIZON_FULL: (
+            f"H={config.full_horizon_steps} physical {config.dt_s:g}s steps, one pass"
+        ),
+        HORIZON_WINDOW: (
+            f"H={config.window_horizon_steps} physical {config.dt_s:g}s steps per pass"
+        ),
+    }[config.horizon_mode]
+    print(
+        f"  prediction L={config.seq_len} ({config.lookback_s:.0f}s history) -> "
+        f"{output_grid} + final_time_s"
+    )
+    print(f"  flights    train {session.train_flights} / val {session.val_flights}")
+    print(f"  windows    train {len(train_set)} / val {val_window_count} "
+          "(validation anchor: fixed L-1)")
+    print(f"  anchors    {train_set.anchor_description}")
+    if config.random_train_anchor:
+        print(
+            f"  anchor min {config.random_train_anchor_min_future_s:g}s future; "
+            f"eligible {flights_per_epoch}/{session.train_flights} train flights"
+        )
+    if config.random_train_anchor_l1_share:
+        # Bounded coverage is stated, never assumed: the share reserves the anchor the
+        # FIXED-anchor arms train at, and this says how many flights have no such
+        # anchor (output eligibility removed it) and are reserved at their earliest
+        # admissible one instead. The same count is in every epoch's record.
+        print(
+            f"  L-1 share  {config.random_train_anchor_l1_share:g} of the draws "
+            f"reserved for anchor {default_anchor(config)}; "
+            f"{train_set.flights_without_default_anchor}/{flights_per_epoch} flights "
+            "store no such anchor and are reserved at their earliest admissible one"
+        )
+    print(
+        f"  selection  {config.checkpoint_selection_metric} on fixed L-1 validation"
+    )
+    if anchor_grid_plans is not None:
+        coverage = anchor_grid_coverage(anchor_grid_plans)
+        print("  grid       L-1 + " + ", ".join(
+            f"{label} ({sum(flights.values())} flights)"
+            for label, flights in coverage.items()
+        ) + (
+            "" if not anchor_grid_plans.dropped else
+            "; dropped " + ", ".join(
+                item["bin"] for item in anchor_grid_plans.dropped
+            ) + f" under {anchor_grid_plans.minimum_coverage:.0%} coverage"
+        ))
+    if minimum_anchor_index is not None:
+        print(f"  anchor     common minimum index {minimum_anchor_index} "
+              f"({minimum_anchor_index * config.dt_s:.0f}s after track entry)")
+    print(
+        f"  sampling   one shuffled sample/flight; {flights_per_epoch} flight(s)/epoch; "
+        "airport-macro loss weights"
+    )
+
+
+def train_epoch(session: TrainingSession, epoch: int, optimizer_updates: int) -> TrainEpoch:
+    """One pass over the training windows under this epoch's objective."""
+    config, model, device, optimizer = session.config, session.model, session.device, session.optimizer
+    train_set, normalizer, multipliers = session.train_set, session.normalizer, session.multipliers
+    output_strategy, component_names = session.strategy, session.component_names
+    profiler = EpochProfiler(device)
+    epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
+    train_anchor_sampling = train_set.anchor_statistics(config.seed + epoch)
+    # The objective THIS epoch optimizes: the run's config carrying the annealed KL
+    # weight (identical to `config` itself once the warm-up is over, and always when
+    # there is none). The training batches and the validation pass below are both
+    # scored under it, so an epoch's train and val `latent_kl` mean the same thing —
+    # the rule the procedure penalty's λ already follows.
+    epoch_config = output_strategy.epoch_config(config, epoch)
+
+    model.train()
+    train_component_totals = {name: 0.0 for name in component_names}
+    train_diagnostic_totals: dict[str, float] = {name: 0.0 for name in PROCEDURE_DIAGNOSTICS}
+    train_weight_total = 0.0
+    control_diagnostics = output_strategy.training_diagnostics(config)
+    train_batches = iter(iter_batches(
+        train_set, config.batch_size, shuffle=True, seed=config.seed + epoch
+    ))
+    while True:
+        data_started = time.perf_counter()
+        try:
+            raw_batch = next(train_batches)
+        except StopIteration:
+            break
+        (
+            x,
+            y,
+            mask,
+            final_time_s,
+            flight_weights,
+            dynamics,
+            dense_supervision,
+        ) = unpack_batch(raw_batch)
+        batch_count = len(flight_weights)
+        batch_weight = float(flight_weights.sum())
+        x, y, mask = x.to(device), y.to(device), mask.to(device)
+        final_time_s = final_time_s.to(device)
+        flight_weights = flight_weights.to(device)
+        dynamics = move_dynamics(dynamics, device)
+        dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
+        profiler.add_cpu_seconds(
+            "train_data_s", time.perf_counter() - data_started
+        )
+        optimizer.zero_grad()
+        with profiler.section("train_forward_s"):
+            prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
+        with profiler.section("train_rollout_loss_s"):
+            if control_diagnostics is not None:
+                control_diagnostics.record_prediction(prediction, dynamics)
+            components = prediction_loss_components(
+                prediction,
+                anchor_state(x, len(config.channels)),
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                epoch_config,
+                normalizer,
+                dynamics,
+                dense_supervision,
+                multipliers=multipliers,
+            )
+        loss = components.total
+        with profiler.section("train_backward_step_s"):
+            loss.backward()
+            if control_diagnostics is not None:
+                control_diagnostics.record_gradients_and_clip(model)
+            optimizer.step()
+        optimizer_updates += 1
+        for name, value in components.tensors().items():
+            train_component_totals[name] += float(value.detach()) * batch_count
+        for name, value in components.diagnostics.items():
+            train_diagnostic_totals[name] = train_diagnostic_totals.get(name, 0.0) + float(value)
+        train_weight_total += batch_weight
+
+    # This path's own blocks of the epoch record (the command hook's per-step shares,
+    # the latent's KL reading, the control gradient diagnostics).
+    output_extras = output_strategy.epoch_record(
+        config, epoch, train_diagnostic_totals, control_diagnostics
+    )
+    train_components = {
+        name: value / max(train_weight_total, 1.0)
+        for name, value in train_component_totals.items()
+    }
+    train_loss = sum(train_components.values())
+    return TrainEpoch(
+        epoch_config=epoch_config,
+        learning_rate=epoch_learning_rate,
+        anchor_sampling=train_anchor_sampling,
+        components=train_components,
+        loss=train_loss,
+        diagnostic_totals=train_diagnostic_totals,
+        output_extras=output_extras,
+        optimizer_updates=optimizer_updates,
+        profiler=profiler,
+    )
+
+
+def validate_epoch(
+    session: TrainingSession, epoch_config: TSConfig, profiler: EpochProfiler
+) -> ValidationEpoch:
+    """The validation pass under the epoch's objective, and the selection metric on it."""
+    config, model, device, normalizer = session.config, session.model, session.device, session.normalizer
+    val_sets, val_batch_plans, multipliers = session.val_sets, session.val_batch_plans, session.multipliers
+    component_names, anchor_grid_plans = session.component_names, session.anchor_grid_plans
+    val_common_truth_by_airport = session.val_common_truth_by_airport
+    model.eval()
+    val_evaluations = {
+        airport: evaluate_validation_airport(
+            model,
+            plan,
+            device,
+            config=epoch_config,
+            profiler=profiler,
+            multipliers=multipliers,
+        )
+        for airport, plan in val_batch_plans.items()
+    }
+    val_components_by_airport = {
+        airport: evaluation.components
+        for airport, evaluation in val_evaluations.items()
+    }
+    val_by_airport = {
+        airport: sum(components.values())
+        for airport, components in val_components_by_airport.items()
+    }
+    val_components = {
+        name: float(np.mean([
+            components[name] for components in val_components_by_airport.values()
+        ]))
+        for name in component_names
+    }
+    # Equal airport weight: a large/long airport cannot control early stopping alone.
+    val_loss = float(np.mean(list(val_by_airport.values())))
+    replay_by_airport = {
+        airport: evaluation.replay
+        for airport, evaluation in val_evaluations.items()
+    }
+    selection_metrics_started = time.perf_counter()
+    common_grid_details = common_grid_validation_details(
+        model=model,
+        val_sets=val_sets,
+        normalizer=normalizer,
+        config=config,
+        device=device,
+        val_by_airport=val_by_airport,
+        replays_by_airport=replay_by_airport,
+        common_truth_by_airport=val_common_truth_by_airport,
+    )
+    validation_selection = VALIDATION_SELECTIONS[
+        config.checkpoint_selection_metric
+    ](
+        model=model,
+        val_sets=val_sets,
+        normalizer=normalizer,
+        config=config,
+        device=device,
+        val_by_airport=val_by_airport,
+        precomputed_details_by_airport=common_grid_details,
+        anchor_grid_plans=anchor_grid_plans,
+    )
+    # Everything the selection metric costs, including the anchor grid's four extra
+    # replays — a metric whose price is not in its own timer is a metric nobody can
+    # budget for.
+    profiler.add_cpu_seconds(
+        "val_checkpoint_selection_s",
+        time.perf_counter() - selection_metrics_started,
+    )
+    return ValidationEpoch(
+        evaluations=val_evaluations,
+        by_airport=val_by_airport,
+        components=val_components,
+        loss=val_loss,
+        selection=validation_selection,
+    )
+
+
+def procedure_update(
+    session: TrainingSession, train_diagnostic_totals: dict[str, float]
+) -> tuple[dict[str, float], dict[str, float] | None]:
+    """The procedure penalty's dual step, and the epoch record of where λ stood."""
+    config, multipliers = session.config, session.multipliers
+    # The dual update, AFTER the validation pass so this epoch's train and val
+    # ``procedure`` components were both scored with the same λ (``lambda_*``); the
+    # updated value (``lambda_*_next``) is what the next epoch trains with.
+    procedure_epoch: dict[str, float] = {}
+    if multipliers is not None:
+        gated = train_diagnostic_totals["procedure_gated_rows"]
+        lateral_rate = train_diagnostic_totals["procedure_lateral_violations"] / max(gated, 1.0)
+        vertical_rate = train_diagnostic_totals["procedure_vertical_violations"] / max(gated, 1.0)
+        procedure_epoch = {
+            "train_gated_rows": gated,
+            "train_lateral_violation_rate": lateral_rate,
+            "train_vertical_violation_rate": vertical_rate,
+            "lambda_lateral": multipliers.lateral,
+            "lambda_vertical": multipliers.vertical,
+        }
+        epoch_multipliers = multipliers.to_dict()
+        multipliers.update(lateral_rate, vertical_rate, config)
+        procedure_epoch["lambda_lateral_next"] = multipliers.lateral
+        procedure_epoch["lambda_vertical_next"] = multipliers.vertical
+    else:
+        epoch_multipliers = None
+    return procedure_epoch, epoch_multipliers
+
+
+def describe_epoch(session: TrainingSession, result: EpochResult, marker: str) -> None:
+    """The epoch's lines: the losses, the selection value, the anchor sets, the parts, and
+    the control gradient reading when there is one."""
+    config, component_names = session.config, session.component_names
+    epoch, train_loss, val_loss = result.epoch, result.train_loss, result.val_loss
+    epoch_learning_rate, optimizer_updates = result.learning_rate, result.optimizer_updates
+    val_components = result.val_components
+    control_training_diagnostics = result.control_training_diagnostics
+    print(f"  epoch {epoch:3d}/{config.epochs}  train {train_loss:.6f}  "
+          f"val-macro {val_loss:.6f}  lr {epoch_learning_rate:.2e}  "
+          f"updates {optimizer_updates:5d}  {result.seconds:5.1f}s"
+          f"{marker}")
+    if result.validation_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
+        print(
+            f"             checkpoint  "
+            f"{result.validation_selection_metric}="
+            f"{result.validation_selection_value:.1f}"
+        )
+    if result.validation_anchor_grid:
+        # The curve's shape, per epoch: the mean is one number and hides which
+        # anchors moved. `n` rides along because bins hold different flights.
+        print("             anchor set  " + "  ".join(
+            f"{name}={block['ade_m']:.0f}(n{block['flights']})"
+            for name, block in
+            result.validation_anchor_grid["anchor_sets"].items()
+        ))
+    print(
+        "             val parts  "
+        + "  ".join(
+            f"{name}={val_components[name]:.4f}" for name in component_names
+        )
+    )
+    if control_training_diagnostics:
+        gradients = control_training_diagnostics["gradient_norm_pre_clip"]
+        clip = control_training_diagnostics["clip"]
+        saturation = control_training_diagnostics["control_saturation"]
+        print(
+            "             gradients  "
+            f"total mean/max={gradients['mean']['total']:.2f}/"
+            f"{gradients['max']['total']:.2f}  "
+            f"backbone={gradients['max']['backbone']:.2f}  "
+            f"control={gradients['max']['control_head']:.2f}  "
+            f"time={gradients['max']['final_time_head']:.2f}"
+        )
+        print(
+            "             stability "
+            f"clip {clip['triggered_batches']}/{clip['batches']}  "
+            f"saturation={saturation['overall_rate']:.3%}"
+        )
+
+
+def fit_model(
+    train_series: Sequence[FlightSeries],
+    val_series: Sequence[FlightSeries],
+    config: TSConfig,
+    *,
+    auto_batch_size: bool = False,
+    minimum_anchor_index: int | None = None,
+    verbose: bool = True,
+) -> FitResult:
+    """Fit one model against explicit train/validation flights, without touching test."""
+    session = prepare_session(
+        train_series, val_series, config,
+        auto_batch_size=auto_batch_size, minimum_anchor_index=minimum_anchor_index,
+        verbose=verbose,
+    )
+    config, model = session.config, session.model
     if verbose:
-        print(
-            f"  model      {config.model}/{config.prediction_output} "
-            f"({parameter_count(model):,} params) on {device}"
-        )
-        output_grid = {
-            HORIZON_NORMALIZED: f"N={config.n_segments} normalized progress segments",
-            HORIZON_FULL: (
-                f"H={config.full_horizon_steps} physical {config.dt_s:g}s steps, one pass"
-            ),
-            HORIZON_WINDOW: (
-                f"H={config.window_horizon_steps} physical {config.dt_s:g}s steps per pass"
-            ),
-        }[config.horizon_mode]
-        print(
-            f"  prediction L={config.seq_len} ({config.lookback_s:.0f}s history) -> "
-            f"{output_grid} + final_time_s"
-        )
-        print(f"  flights    train {len(train_series)} / val {len(val_series)}")
-        print(f"  windows    train {len(train_set)} / val {val_window_count} "
-              "(validation anchor: fixed L-1)")
-        print(f"  anchors    {train_set.anchor_description}")
-        if config.random_train_anchor:
-            print(
-                f"  anchor min {config.random_train_anchor_min_future_s:g}s future; "
-                f"eligible {flights_per_epoch}/{len(train_series)} train flights"
-            )
-        if config.random_train_anchor_l1_share:
-            # Bounded coverage is stated, never assumed: the share reserves the anchor the
-            # FIXED-anchor arms train at, and this says how many flights have no such
-            # anchor (output eligibility removed it) and are reserved at their earliest
-            # admissible one instead. The same count is in every epoch's record.
-            print(
-                f"  L-1 share  {config.random_train_anchor_l1_share:g} of the draws "
-                f"reserved for anchor {default_anchor(config)}; "
-                f"{train_set.flights_without_default_anchor}/{flights_per_epoch} flights "
-                "store no such anchor and are reserved at their earliest admissible one"
-            )
-        print(
-            f"  selection  {config.checkpoint_selection_metric} on fixed L-1 validation"
-        )
-        if anchor_grid_plans is not None:
-            coverage = anchor_grid_coverage(anchor_grid_plans)
-            print("  grid       L-1 + " + ", ".join(
-                f"{label} ({sum(flights.values())} flights)"
-                for label, flights in coverage.items()
-            ) + (
-                "" if not anchor_grid_plans.dropped else
-                "; dropped " + ", ".join(
-                    item["bin"] for item in anchor_grid_plans.dropped
-                ) + f" under {anchor_grid_plans.minimum_coverage:.0%} coverage"
-            ))
-        if minimum_anchor_index is not None:
-            print(f"  anchor     common minimum index {minimum_anchor_index} "
-                  f"({minimum_anchor_index * config.dt_s:.0f}s after track entry)")
-        print(
-            f"  sampling   one shuffled sample/flight; {flights_per_epoch} flight(s)/epoch; "
-            "airport-macro loss weights"
-        )
+        describe_session(session)
 
     history: list[EpochResult] = []
     best_val = math.inf
@@ -608,179 +983,19 @@ def fit_model(
     best_multipliers: dict[str, float] | None = None
     epochs_without_improvement = 0
     optimizer_updates = 0
-    component_names = loss_component_names(config)
 
     for epoch in range(1, config.epochs + 1):
-        profiler = EpochProfiler(device)
-        epoch_start_optimizer_updates = optimizer_updates
-        epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
-        train_anchor_sampling = train_set.anchor_statistics(config.seed + epoch)
-        # The objective THIS epoch optimizes: the run's config carrying the annealed KL
-        # weight (identical to `config` itself once the warm-up is over, and always when
-        # there is none). The training batches and the validation pass below are both
-        # scored under it, so an epoch's train and val `latent_kl` mean the same thing —
-        # the rule the procedure penalty's λ already follows.
-        epoch_config = output_strategy.epoch_config(config, epoch)
-
-        model.train()
-        train_component_totals = {name: 0.0 for name in component_names}
-        train_diagnostic_totals: dict[str, float] = {name: 0.0 for name in PROCEDURE_DIAGNOSTICS}
-        train_weight_total = 0.0
-        control_diagnostics = output_strategy.training_diagnostics(config)
-        train_batches = iter(iter_batches(
-            train_set, config.batch_size, shuffle=True, seed=config.seed + epoch
-        ))
-        while True:
-            data_started = time.perf_counter()
-            try:
-                raw_batch = next(train_batches)
-            except StopIteration:
-                break
-            (
-                x,
-                y,
-                mask,
-                final_time_s,
-                flight_weights,
-                dynamics,
-                dense_supervision,
-            ) = unpack_batch(raw_batch)
-            batch_count = len(flight_weights)
-            batch_weight = float(flight_weights.sum())
-            x, y, mask = x.to(device), y.to(device), mask.to(device)
-            final_time_s = final_time_s.to(device)
-            flight_weights = flight_weights.to(device)
-            dynamics = move_dynamics(dynamics, device)
-            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
-            profiler.add_cpu_seconds(
-                "train_data_s", time.perf_counter() - data_started
-            )
-            optimizer.zero_grad()
-            with profiler.section("train_forward_s"):
-                prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
-            with profiler.section("train_rollout_loss_s"):
-                if control_diagnostics is not None:
-                    control_diagnostics.record_prediction(prediction, dynamics)
-                components = prediction_loss_components(
-                    prediction,
-                    anchor_state(x, len(config.channels)),
-                    y,
-                    mask,
-                    final_time_s,
-                    flight_weights,
-                    epoch_config,
-                    normalizer,
-                    dynamics,
-                    dense_supervision,
-                    multipliers=multipliers,
-                )
-            loss = components.total
-            with profiler.section("train_backward_step_s"):
-                loss.backward()
-                if control_diagnostics is not None:
-                    control_diagnostics.record_gradients_and_clip(model)
-                optimizer.step()
-            optimizer_updates += 1
-            for name, value in components.tensors().items():
-                train_component_totals[name] += float(value.detach()) * batch_count
-            for name, value in components.diagnostics.items():
-                train_diagnostic_totals[name] = train_diagnostic_totals.get(name, 0.0) + float(value)
-            train_weight_total += batch_weight
-
-        model.eval()
-        val_evaluations = {
-            airport: evaluate_validation_airport(
-                model,
-                plan,
-                device,
-                config=epoch_config,
-                profiler=profiler,
-                multipliers=multipliers,
-            )
-            for airport, plan in val_batch_plans.items()
-        }
-        val_components_by_airport = {
-            airport: evaluation.components
-            for airport, evaluation in val_evaluations.items()
-        }
-        # The dual update, AFTER the validation pass so this epoch's train and val
-        # ``procedure`` components were both scored with the same λ (``lambda_*``); the
-        # updated value (``lambda_*_next``) is what the next epoch trains with.
-        procedure_epoch: dict[str, float] = {}
-        if multipliers is not None:
-            gated = train_diagnostic_totals["procedure_gated_rows"]
-            lateral_rate = train_diagnostic_totals["procedure_lateral_violations"] / max(gated, 1.0)
-            vertical_rate = train_diagnostic_totals["procedure_vertical_violations"] / max(gated, 1.0)
-            procedure_epoch = {
-                "train_gated_rows": gated,
-                "train_lateral_violation_rate": lateral_rate,
-                "train_vertical_violation_rate": vertical_rate,
-                "lambda_lateral": multipliers.lateral,
-                "lambda_vertical": multipliers.vertical,
-            }
-            epoch_multipliers = multipliers.to_dict()
-            multipliers.update(lateral_rate, vertical_rate, config)
-            procedure_epoch["lambda_lateral_next"] = multipliers.lateral
-            procedure_epoch["lambda_vertical_next"] = multipliers.vertical
-        else:
-            epoch_multipliers = None
-        # This path's own blocks of the epoch record (the command hook's per-step shares,
-        # the latent's KL reading, the control gradient diagnostics).
-        output_extras = output_strategy.epoch_record(
-            config, epoch, train_diagnostic_totals, control_diagnostics
-        )
-        train_components = {
-            name: value / max(train_weight_total, 1.0)
-            for name, value in train_component_totals.items()
-        }
-        train_loss = sum(train_components.values())
-        val_by_airport = {
-            airport: sum(components.values())
-            for airport, components in val_components_by_airport.items()
-        }
-        val_components = {
-            name: float(np.mean([
-                components[name] for components in val_components_by_airport.values()
-            ]))
-            for name in component_names
-        }
-        # Equal airport weight: a large/long airport cannot control early stopping alone.
-        val_loss = float(np.mean(list(val_by_airport.values())))
-        control_training_diagnostics = output_extras.get("control_training_diagnostics", {})
-        replay_by_airport = {
-            airport: evaluation.replay
-            for airport, evaluation in val_evaluations.items()
-        }
-        selection_metrics_started = time.perf_counter()
-        common_grid_details = common_grid_validation_details(
-            model=model,
-            val_sets=val_sets,
-            normalizer=normalizer,
-            config=config,
-            device=device,
-            val_by_airport=val_by_airport,
-            replays_by_airport=replay_by_airport,
-            common_truth_by_airport=val_common_truth_by_airport,
-        )
-        validation_selection = VALIDATION_SELECTIONS[
-            config.checkpoint_selection_metric
-        ](
-            model=model,
-            val_sets=val_sets,
-            normalizer=normalizer,
-            config=config,
-            device=device,
-            val_by_airport=val_by_airport,
-            precomputed_details_by_airport=common_grid_details,
-            anchor_grid_plans=anchor_grid_plans,
-        )
-        # Everything the selection metric costs, including the anchor grid's four extra
-        # replays — a metric whose price is not in its own timer is a metric nobody can
-        # budget for.
-        profiler.add_cpu_seconds(
-            "val_checkpoint_selection_s",
-            time.perf_counter() - selection_metrics_started,
-        )
+        trained = train_epoch(session, epoch, optimizer_updates)
+        updates_this_epoch = trained.optimizer_updates - optimizer_updates
+        optimizer_updates = trained.optimizer_updates
+        validated = validate_epoch(session, trained.epoch_config, trained.profiler)
+        procedure_epoch, epoch_multipliers = procedure_update(session, trained.diagnostic_totals)
+        train_loss, val_loss = trained.loss, validated.loss
+        validation_selection = validated.selection
+        epoch_learning_rate, train_anchor_sampling = trained.learning_rate, trained.anchor_sampling
+        train_components, val_components = trained.components, validated.components
+        val_by_airport, val_evaluations = validated.by_airport, validated.evaluations
+        output_extras = trained.output_extras
         if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
             raise RuntimeError(
                 f"training diverged at epoch {epoch} (train {train_loss}, val {val_loss}) "
@@ -794,13 +1009,11 @@ def fit_model(
         # never on a third one computed here, so the scheduler and the record cannot
         # disagree about what stalled. Which one is `lr_plateau_metric`; the kept epoch is
         # `validation_selection` either way.
-        scheduler.step({
+        session.scheduler.step({
             LR_PLATEAU_METRIC_SELECTION: validation_selection.value,
             LR_PLATEAU_METRIC_OBJECTIVE: val_loss,
         }[config.lr_plateau_metric])
-        timing = profiler.finish(
-            optimizer_updates=optimizer_updates - epoch_start_optimizer_updates
-        )
+        timing = trained.profiler.finish(optimizer_updates=updates_this_epoch)
         history.append(EpochResult(
             epoch=epoch,
             train_loss=train_loss,
@@ -837,53 +1050,16 @@ def fit_model(
             marker = ""
 
         if verbose:
-            print(f"  epoch {epoch:3d}/{config.epochs}  train {train_loss:.6f}  "
-                  f"val-macro {val_loss:.6f}  lr {epoch_learning_rate:.2e}  "
-                  f"updates {optimizer_updates:5d}  {history[-1].seconds:5.1f}s"
-                  f"{marker}")
-            if validation_selection.metric != CHECKPOINT_SELECTION_OBJECTIVE:
-                print(
-                    f"             checkpoint  "
-                    f"{validation_selection.metric}="
-                    f"{validation_selection.value:.1f}"
-                )
-            if validation_selection.anchor_grid:
-                # The curve's shape, per epoch: the mean is one number and hides which
-                # anchors moved. `n` rides along because bins hold different flights.
-                print("             anchor set  " + "  ".join(
-                    f"{name}={block['ade_m']:.0f}(n{block['flights']})"
-                    for name, block in
-                    validation_selection.anchor_grid["anchor_sets"].items()
-                ))
-            print(
-                "             val parts  "
-                + "  ".join(
-                    f"{name}={val_components[name]:.4f}" for name in component_names
-                )
-            )
-            if control_training_diagnostics:
-                gradients = control_training_diagnostics["gradient_norm_pre_clip"]
-                clip = control_training_diagnostics["clip"]
-                saturation = control_training_diagnostics["control_saturation"]
-                print(
-                    "             gradients  "
-                    f"total mean/max={gradients['mean']['total']:.2f}/"
-                    f"{gradients['max']['total']:.2f}  "
-                    f"backbone={gradients['max']['backbone']:.2f}  "
-                    f"control={gradients['max']['control_head']:.2f}  "
-                    f"time={gradients['max']['final_time_head']:.2f}"
-                )
-                print(
-                    "             stability "
-                    f"clip {clip['triggered_batches']}/{clip['batches']}  "
-                    f"saturation={saturation['overall_rate']:.3%}"
-                )
+            describe_epoch(session, history[-1], marker)
 
         if epochs_without_improvement >= config.patience:
             if verbose:
                 print(f"  early stop: {config.patience} epochs without improvement")
             break
 
+
+    normalizer, device, train_set = session.normalizer, session.device, session.train_set
+    val_window_count, fitted_teacher = session.val_window_count, session.fitted_teacher
     if best_state is None:
         raise RuntimeError("training completed without a checkpoint")
     model.load_state_dict(best_state)

@@ -259,9 +259,12 @@ def test_predict_writes_every_directory_through_one_emitter():
     arm needs a latent AND a quantile checkpoint."""
     import inspect
     import ts_transformer.cli.predict as predict_module
-    source = inspect.getsource(predict_module.run_cli)
+    source = inspect.getsource(predict_module.write_prediction_sets)
     assert source.count("write_batch(") == 1
-    assert "skipped=skipped" in source
+    assert "skipped=options.skipped" in source
+    # ...and nothing else in the module writes a record directory behind the emitter's back.
+    module_source = inspect.getsource(predict_module)
+    assert module_source.count("write_batch(") == 1
 
 
 def test_predict_records_the_aircraft_type_it_built_the_series_under_and_refuses_a_pooled_airport(tmp_path: Path, monkeypatch):

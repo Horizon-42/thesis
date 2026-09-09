@@ -77,8 +77,6 @@ class SplitPredictionReplay:
     """One immutable deployable prediction pass reused by every metric view."""
 
     predicted: np.ndarray
-    truth: np.ndarray
-    mask: np.ndarray
     predicted_time_s: np.ndarray
     truth_time_s: np.ndarray
     anchors: np.ndarray
@@ -98,20 +96,16 @@ def _prediction_batch_replay(
     replay = strategy(dataset.config).replay(output, x, y, mask, final_time_s, dynamics, dataset)
     # Decode in float64 (the normalizer stats' dtype), store float32: a pooled split is
     # tens of thousands of [N,C] windows and metre-scale metrics do not need float64 storage.
-    truth = dataset.normalizer.decode(
-        replay.metric_targets.detach().cpu().numpy().astype(np.float64)
-    ).astype(np.float32)
+    # The truth the metrics compare against is the common-grid truth of the validation plan,
+    # never a decode of this batch's targets — the replay used to carry that decode and its
+    # mask as two write-only fields, a device→host copy per batch per airport per epoch
+    # that nothing read (review §4.4).
     anchors = dataset.normalizer.decode(
         anchor_state(x, len(dataset.config.channels))
         .detach().cpu().numpy().astype(np.float64)
     ).astype(np.float32)
-    raw_mask = replay.metric_weights.detach().cpu().numpy()
-    if raw_mask.ndim == 3:
-        raw_mask = np.all(raw_mask > 0.0, axis=-1).astype(np.float32)
     return SplitPredictionReplay(
         predicted=replay.predicted_physical,
-        truth=truth,
-        mask=raw_mask,
         predicted_time_s=replay.predicted_time_s,
         truth_time_s=final_time_s.detach().cpu().numpy(),
         anchors=anchors,
@@ -139,8 +133,6 @@ def _merge_prediction_replays(
 
     return SplitPredictionReplay(
         predicted=merged("predicted"),
-        truth=merged("truth"),
-        mask=merged("mask"),
         predicted_time_s=merged("predicted_time_s"),
         truth_time_s=merged("truth_time_s"),
         anchors=merged("anchors"),

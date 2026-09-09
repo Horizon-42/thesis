@@ -45,7 +45,7 @@ from ts_transformer.calibration import (
     quantile_directory_name,
 )
 from ts_transformer.data_provenance import require_matching_data_provenance
-from ts_transformer.outputs.closure.model import load_labels
+from ts_transformer.outputs.closure.model import ClosureLabels, load_labels
 from ts_transformer.dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
 from ts_transformer.evaluation_protocol import (
     TestReleaseError,
@@ -300,14 +300,54 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
                                 "predictable on a CPU-only machine")
 
 
-def _cut_at_threshold(forecasts, series, args):
+@dataclass(frozen=True)
+class PredictOptions:
+    """The flag combinations `predict` accepts, checked ONCE by :func:`parse_predict_options`
+    (review §4.4): what every forecast is asked (`forecast`), which oracle and diagnostic arms
+    are decoded beside the top-1 records, and the cohort the CTA offset skipped."""
+
+    forecast: ForecastOptions
+    closure_labels: ClosureLabels | None
+    cta_from_quantiles: bool
+    interval_endpoints: bool
+    z_from_posterior: bool
+    latent_samples: int
+    latent_random: int
+    latent_shuffle: bool
+    latent_seed: int
+    skipped: dict[str, int]
+
+    @property
+    def conformal(self) -> dict | None:
+        return self.forecast.conformal
+
+
+@dataclass
+class PredictionSets:
+    """Every record set one `predict` run assembles: the top-1 records and, beside them, the
+    latent modes, the N(0, I) controls, the quantile fan and the shuffled-latent diagnostic."""
+
+    records: list
+    flight_metrics: list
+    mode_records: list[list]
+    mode_metrics: list[list]
+    random_records: list[list]
+    random_metrics: list[list]
+    fan_records: dict[str, list]
+    fan_metrics: dict[str, list]
+    shuffled_records: list
+    shuffled_metrics: list
+    median_directory: str
+
+
+def _cut_at_threshold(forecasts, series, truncate_at_threshold: bool):
     """`--truncate-at-threshold` on a list of forecasts the batch produced some other way.
 
     `forecast_approaches` takes the flag itself; the latent, posterior and label decoders
     are their own entry points, and a flag that cut the main records but left a run's own
     diagnostic arms uncut would make the two incomparable inside one output directory.
     """
-    if not args.truncate_at_threshold:
+    if not truncate_at_threshold:
         return forecasts
     return [
         cut_at_threshold_crossing(forecast, item)
@@ -315,23 +355,20 @@ def _cut_at_threshold(forecasts, series, args):
     ]
 
 
-def _fan_forecast(model, series, config, normalizer, device, args, conformal, leaf: FanLeaf):
+def _fan_forecast(model, series, config, normalizer, device, options: PredictOptions, leaf: FanLeaf):
     """One leaf's decode — the batch flown to the arrival time this leaf names."""
     return forecast_approaches(
         model, series, config, normalizer, device=device,
-        options=ForecastOptions(
-            truncate=not args.no_truncate, project_final=args.project_final,
-            conformal=conformal, cta_s=leaf.cta_s,
-            cta_quantile=leaf.quantile, cta_interval=leaf.interval,
-            truncate_at_threshold=args.truncate_at_threshold,
+        options=replace(
+            options.forecast,
+            cta_s=leaf.cta_s, cta_quantile=leaf.quantile, cta_interval=leaf.interval,
         ),
     )
 
 
-def run_cli(
-    args: argparse.Namespace, parser: argparse.ArgumentParser, argv: list[str] | None
-) -> int:
-    del argv
+def load_predict_checkpoint(args: argparse.Namespace, parser: argparse.ArgumentParser):
+    """The checkpoint on the device, its config restamped with the run's own aircraft type,
+    and the data provenance the split keys are resolved against."""
     refuse_airport_override_for_pooled_data(args, parser)
     if args.split == "test" and not args.test_release:
         parser.error(
@@ -358,6 +395,12 @@ def run_cli(
         # The series are built under this type below; the config written beside the
         # records (and the run name) must carry it, not the checkpoint's (review C-5).
         config = replace(config, aircraft_type=args.aircraft_type)
+    return model, config, normalizer, payload, current_provenance, device
+
+
+def load_predict_series(args, config, parser, payload, current_provenance):
+    """The split's flights, in the checkpoint's own order, built into series under the
+    run's config; for the test split, the exposure claim is written FIRST."""
     # Resolve the exact identities before reading any trajectory rows. For test this claim
     # is deliberately written first: a crash or partial run still counts as exposure.
     split_keys = split_keys_for_current_data(
@@ -390,6 +433,13 @@ def run_cli(
         )
     flights = [indexed[key] for key in split_keys]
     series, _build_report = build_series_or_exit(args, config, parser, flights)
+    return series, test_claim
+
+
+def parse_predict_options(args, config, parser, series):
+    """Every flag-combination rule of `predict`, in one place; returns the options, the
+    config restamped with what this run overrides (the hook and its gains, `cta=self-q`),
+    and the series the CTA offset keeps."""
     gains = {
         field: getattr(args, flag[2:].replace("-", "_"))
         for field, flag in PREDICT_CONFIG_FLAGS.items()
@@ -478,6 +528,8 @@ def run_cli(
     elif config.cta_conditioning == CTA_CONDITIONING_GIVEN:
         print(f"  CTA-conditioned: every flight is given its truth arrival time {args.cta_offset_s:+g} s "
               "(reads the future — a delivery-form demonstration, not a prediction result)")
+    if args.latent_shuffle and len(series) < 2:
+        parser.error("--latent-shuffle needs at least two flights")
     if args.z_from_posterior:
         if config.latent_dim < 1:
             parser.error("--z-from-posterior needs a latent control checkpoint")
@@ -524,16 +576,42 @@ def run_cli(
                      f"--limit {conformal['limit']} prefix of that split]"
                      if conformal["smoke_test"] else ""))
 
-    print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
+    return (
+        PredictOptions(
+            forecast=ForecastOptions(
+                truncate=not args.no_truncate,
+                project_final=args.project_final,
+                cta_offset_s=args.cta_offset_s,
+                conformal=conformal,
+                truncate_at_threshold=args.truncate_at_threshold,
+            ),
+            closure_labels=closure_labels,
+            cta_from_quantiles=args.cta_from_quantiles,
+            interval_endpoints=args.interval_endpoints,
+            z_from_posterior=args.z_from_posterior,
+            latent_samples=args.latent_samples,
+            latent_random=args.latent_random,
+            latent_shuffle=args.latent_shuffle,
+            latent_seed=args.latent_seed,
+            skipped=skipped,
+        ),
+        config,
+        series,
+    )
+
+
+def predict_sets(model, series, config, normalizer, device, options: PredictOptions, *, split: str) -> PredictionSets:
+    """Every decode of the split: the top-1 records and the arms beside them."""
+    print(f"predicting {len(series)} flight(s) from the {split!r} split")
 
     records, flight_metrics = [], []
     # Extra decodes of the same flights: K prior samples (modes) and the shuffled-latent
     # diagnostic, each collected as its own record set and written as a full prediction
     # directory beside the top-1 one, so every readout reads them like any other arm.
-    mode_records: list[list] = [[] for _ in range(args.latent_samples)]
-    mode_metrics: list[list] = [[] for _ in range(args.latent_samples)]
-    random_records: list[list] = [[] for _ in range(args.latent_random)]
-    random_metrics: list[list] = [[] for _ in range(args.latent_random)]
+    mode_records: list[list] = [[] for _ in range(options.latent_samples)]
+    mode_metrics: list[list] = [[] for _ in range(options.latent_samples)]
+    random_records: list[list] = [[] for _ in range(options.latent_random)]
+    random_metrics: list[list] = [[] for _ in range(options.latent_random)]
     shuffled_records: list = []
     shuffled_metrics: list = []
     # B3: one record set per fan leaf, keyed by the directory it will be written to.
@@ -541,83 +619,81 @@ def run_cli(
     fan_metrics: dict[str, list] = {}
     median_directory = quantile_directory_name(DURATION_QUANTILES[DURATION_MEDIAN_INDEX])
     rollout_batch_size = max(1, min(config.batch_size, len(series)))
-    if args.latent_shuffle:
-        if len(series) < 2:
-            parser.error("--latent-shuffle needs at least two flights")
+    if options.latent_shuffle:
         # Shuffling needs another flight in the batch: never a batch of one.
         rollout_batch_size = max(2, rollout_batch_size)
     print(f"  dense rollout batch size: {rollout_batch_size}")
-    if args.latent_samples or args.latent_random or args.latent_shuffle:
+    if options.latent_samples or options.latent_random or options.latent_shuffle:
         # Latents are drawn per batch from seed + batch start, so a flight's latent is
         # reproducible for a fixed (checkpoint, split, batch size) — say so.
-        print(f"  latent seed {args.latent_seed} (per batch: seed + batch start; the N(0, I) "
+        print(f"  latent seed {options.latent_seed} (per batch: seed + batch start; the N(0, I) "
               f"control adds {LATENT_RANDOM_SEED_OFFSET}); batch size {rollout_batch_size}")
     # A trailing batch of ONE flight cannot be shuffled (no other latent to take), so it
     # is folded into the batch before it rather than silently dropped from the diagnostic.
     starts = list(range(0, len(series), rollout_batch_size))
-    if args.latent_shuffle and len(starts) > 1 and len(series) - starts[-1] == 1:
+    if options.latent_shuffle and len(starts) > 1 and len(series) - starts[-1] == 1:
         starts.pop()
     for index_start, start in enumerate(starts):
         stop = starts[index_start + 1] if index_start + 1 < len(starts) else len(series)
         batch_series = series[start:stop]
-        if args.latent_samples:
+        if options.latent_samples:
             for index, mode_forecasts in enumerate(latent_mode_forecasts(
                 model, batch_series, config, normalizer,
-                samples=args.latent_samples, seed=args.latent_seed + start, device=device,
-                cta_offset_s=args.cta_offset_s,
+                samples=options.latent_samples, seed=options.latent_seed + start, device=device,
+                cta_offset_s=options.forecast.cta_offset_s,
             )):
                 for offset, (s, forecast) in enumerate(zip(
-                    batch_series, _cut_at_threshold(mode_forecasts, batch_series, args), strict=True
+                    batch_series, _cut_at_threshold(mode_forecasts, batch_series, options.forecast.truncate_at_threshold), strict=True
                 )):
                     mode_records[index].append(build_prediction_record(
                         s, forecast, index=start + offset, model_name=config.model,
-                        horizon_mode=config.horizon_mode, split=args.split,
+                        horizon_mode=config.horizon_mode, split=split,
                     ))
                     mode_metrics[index].append(observed_series_metrics(
                         s, forecast, points=config.validation_common_grid_points,
                     ))
-        if args.latent_random:
+        if options.latent_random:
             for index, random_forecasts in enumerate(random_latent_forecasts(
                 model, batch_series, config, normalizer,
-                samples=args.latent_random,
-                seed=args.latent_seed + LATENT_RANDOM_SEED_OFFSET + start, device=device,
-                cta_offset_s=args.cta_offset_s,
+                samples=options.latent_random,
+                seed=options.latent_seed + LATENT_RANDOM_SEED_OFFSET + start, device=device,
+                cta_offset_s=options.forecast.cta_offset_s,
             )):
                 for offset, (s, forecast) in enumerate(zip(
-                    batch_series, _cut_at_threshold(random_forecasts, batch_series, args), strict=True
+                    batch_series, _cut_at_threshold(random_forecasts, batch_series, options.forecast.truncate_at_threshold), strict=True
                 )):
                     random_records[index].append(build_prediction_record(
                         s, forecast, index=start + offset, model_name=config.model,
-                        horizon_mode=config.horizon_mode, split=args.split,
+                        horizon_mode=config.horizon_mode, split=split,
                     ))
                     random_metrics[index].append(observed_series_metrics(
                         s, forecast, points=config.validation_common_grid_points,
                     ))
-        if args.latent_shuffle:
+        if options.latent_shuffle:
             for offset, (s, forecast) in enumerate(zip(batch_series, _cut_at_threshold(
                 shuffled_latent_forecasts(
                     model, batch_series, config, normalizer,
-                    seed=args.latent_seed + start, device=device,
-                    cta_offset_s=args.cta_offset_s,
-                ), batch_series, args,
+                    seed=options.latent_seed + start, device=device,
+                    cta_offset_s=options.forecast.cta_offset_s,
+                ), batch_series, options.forecast.truncate_at_threshold,
             ), strict=True)):
                 shuffled_records.append(build_prediction_record(
                     s, forecast, index=start + offset, model_name=config.model,
-                    horizon_mode=config.horizon_mode, split=args.split,
+                    horizon_mode=config.horizon_mode, split=split,
                 ))
                 shuffled_metrics.append(observed_series_metrics(
                     s, forecast, points=config.validation_common_grid_points,
                 ))
-        if closure_labels is not None:
+        if options.closure_labels is not None:
             forecasts = _cut_at_threshold(
-                forecast_closure_from_labels(batch_series, config, closure_labels),
-                batch_series, args,
+                forecast_closure_from_labels(batch_series, config, options.closure_labels),
+                batch_series, options.forecast.truncate_at_threshold,
             )
-        elif args.z_from_posterior:
+        elif options.z_from_posterior:
             forecasts = _cut_at_threshold(posterior_latent_forecasts(
-                model, batch_series, config, normalizer, device=device, cta_offset_s=args.cta_offset_s,
-            ), batch_series, args)
-        elif args.cta_from_quantiles:
+                model, batch_series, config, normalizer, device=device, cta_offset_s=options.forecast.cta_offset_s,
+            ), batch_series, options.forecast.truncate_at_threshold)
+        elif options.cta_from_quantiles:
             anchor = default_anchor(config)
             quantiles = duration_quantile_predictions(
                 model, batch_series, config, normalizer, anchor=anchor, device=device
@@ -626,7 +702,7 @@ def run_cli(
             # levels the readout's gate scores.
             leaves = fan_leaves(
                 quantiles, batch_series, anchor,
-                conformal if args.interval_endpoints else None,
+                options.conformal if options.interval_endpoints else None,
             )
             # The rollout's own requirement, and the only one that can bite: the five
             # levels are strictly positive by construction, so a non-positive CTA means a
@@ -635,20 +711,20 @@ def run_cli(
             # the readout compares them per flight.
             below = sum(int((leaf.cta_s <= 0.0).sum()) for leaf in leaves)
             if below:
-                parser.error(
+                raise ValueError(
                     f"{below} fan CTA(s) in this batch are not positive, so the rollout "
                     "cannot fly them; a calibrated interval endpoint reached zero, which "
                     "means a conformal delta wider than the interval it widens. Recalibrate "
                     "before decoding the endpoints"
                 )
             forecasts = _fan_forecast(
-                model, batch_series, config, normalizer, device, args, conformal,
+                model, batch_series, config, normalizer, device, options,
                 next(leaf for leaf in leaves if leaf.directory == median_directory),
             )
             for leaf in leaves:
                 leaf_forecasts = forecasts if leaf.directory == median_directory else (
                     _fan_forecast(
-                        model, batch_series, config, normalizer, device, args, conformal, leaf
+                        model, batch_series, config, normalizer, device, options, leaf
                     )
                 )
                 for offset, (item, forecast) in enumerate(
@@ -656,7 +732,7 @@ def run_cli(
                 ):
                     fan_records.setdefault(leaf.directory, []).append(build_prediction_record(
                         item, forecast, index=start + offset, model_name=config.model,
-                        horizon_mode=config.horizon_mode, split=args.split,
+                        horizon_mode=config.horizon_mode, split=split,
                     ))
                     fan_metrics.setdefault(leaf.directory, []).append(observed_series_metrics(
                         item, forecast, points=config.validation_common_grid_points,
@@ -668,13 +744,7 @@ def run_cli(
                 config,
                 normalizer,
                 device=device,
-                options=ForecastOptions(
-                    truncate=not args.no_truncate,
-                    project_final=args.project_final,
-                    cta_offset_s=args.cta_offset_s,
-                    conformal=conformal,
-                    truncate_at_threshold=args.truncate_at_threshold,
-                ),
+                options=options.forecast,
             )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)
@@ -685,7 +755,7 @@ def run_cli(
                 index=start + offset,
                 model_name=config.model,
                 horizon_mode=config.horizon_mode,
-                split=args.split,
+                split=split,
             ))
             flight_metrics.append(observed_series_metrics(
                 s,
@@ -693,6 +763,29 @@ def run_cli(
                 points=config.validation_common_grid_points,
             ))
 
+    return PredictionSets(
+        records=records,
+        flight_metrics=flight_metrics,
+        mode_records=mode_records,
+        mode_metrics=mode_metrics,
+        random_records=random_records,
+        random_metrics=random_metrics,
+        fan_records=fan_records,
+        fan_metrics=fan_metrics,
+        shuffled_records=shuffled_records,
+        shuffled_metrics=shuffled_metrics,
+        median_directory=median_directory,
+    )
+
+
+def write_prediction_sets(sets: PredictionSets, options: PredictOptions, config, *, output_dir: Path, checkpoint, split: str):
+    """One emitter for the main directory and every arm beside it."""
+    records, flight_metrics = sets.records, sets.flight_metrics
+    mode_records, mode_metrics = sets.mode_records, sets.mode_metrics
+    random_records, random_metrics = sets.random_records, sets.random_metrics
+    fan_records, fan_metrics = sets.fan_records, sets.fan_metrics
+    shuffled_records, shuffled_metrics = sets.shuffled_records, sets.shuffled_metrics
+    median_directory = sets.median_directory
     def emit(rows, directory, metrics):
         # ONE emitter for the main directory and every arm beside it (modes, random, the
         # quantile fan, shuffled): each states the same `skipped`, so no directory can
@@ -702,34 +795,41 @@ def run_cli(
             output_dir=directory,
             config_dict=config.to_dict(),
             flight_metrics=metrics,
-            checkpoint=str(args.checkpoint),
-            split=args.split,
-            skipped=skipped,
+            checkpoint=str(checkpoint),
+            split=split,
+            skipped=options.skipped,
         )
 
-    paths = emit(records, args.output_dir, flight_metrics)
+    paths = emit(records, output_dir, flight_metrics)
     for index, (mode_rows, mode_flight_metrics) in enumerate(zip(mode_records, mode_metrics, strict=True)):
-        emit(mode_rows, args.output_dir / "modes" / f"mode{index:02d}", mode_flight_metrics)
-    if args.latent_samples:
-        print(f"  wrote {args.latent_samples} prior-sample mode(s) under {args.output_dir / 'modes'}")
+        emit(mode_rows, output_dir / "modes" / f"mode{index:02d}", mode_flight_metrics)
+    if options.latent_samples:
+        print(f"  wrote {options.latent_samples} prior-sample mode(s) under {output_dir / 'modes'}")
     for index, (random_rows, random_flight_metrics) in enumerate(zip(random_records, random_metrics, strict=True)):
-        emit(random_rows, args.output_dir / "random" / f"mode{index:02d}", random_flight_metrics)
-    if args.latent_random:
-        print(f"  wrote {args.latent_random} N(0, I) control mode(s) under {args.output_dir / 'random'}")
+        emit(random_rows, output_dir / "random" / f"mode{index:02d}", random_flight_metrics)
+    if options.latent_random:
+        print(f"  wrote {options.latent_random} N(0, I) control mode(s) under {output_dir / 'random'}")
     for directory, rows in fan_records.items():
-        emit(rows, args.output_dir / QUANTILE_DIR_NAME / directory, fan_metrics[directory])
+        emit(rows, output_dir / QUANTILE_DIR_NAME / directory, fan_metrics[directory])
     if fan_records:
         names = ", ".join(sorted(fan_records))
-        print(f"  wrote the quantile fan under {args.output_dir / QUANTILE_DIR_NAME}: {names} "
+        print(f"  wrote the quantile fan under {output_dir / QUANTILE_DIR_NAME}: {names} "
               f"(the top-1 records above are the {median_directory} decode); read it with "
-              f"run_ts_quantile_fan_readout.py --arm {args.output_dir}")
+              f"run_ts_quantile_fan_readout.py --arm {output_dir}")
     if shuffled_records:
-        emit(shuffled_records, args.output_dir / "shuffled", shuffled_metrics)
-        print(f"  wrote the shuffled-latent diagnostic under {args.output_dir / 'shuffled'}")
+        emit(shuffled_records, output_dir / "shuffled", shuffled_metrics)
+        print(f"  wrote the shuffled-latent diagnostic under {output_dir / 'shuffled'}")
 
-    if args.project_final is not None:
-        print(f"  projected every state forecast onto the final ({args.project_final} gate)")
-    if args.truncate_at_threshold:
+    return paths
+
+
+def report_predictions(sets: PredictionSets, series, options: PredictOptions, *, output_dir: Path) -> None:
+    """The run's readout: the cuts and caps, the accuracy block just persisted, and the
+    flyability delta against the observed tracks."""
+    records, flight_metrics = sets.records, sets.flight_metrics
+    if options.forecast.project_final is not None:
+        print(f"  projected every state forecast onto the final ({options.forecast.project_final} gate)")
+    if options.forecast.truncate_at_threshold:
         cut = sum(record.source.get("truncatedAtThreshold", False) for record in records)
         print(
             f"  {cut} of {len(records)} main record(s) end at the threshold crossing; the "
@@ -782,13 +882,31 @@ def run_cli(
         [record.reference_record["states"] for record in records],
         [s.scenario.aircraft for s in series],
     )
-    (args.output_dir / "flyability_report.json").write_text(
+    (output_dir / "flyability_report.json").write_text(
         json.dumps(flyability, indent=2), encoding="utf-8")
     predicted, observed = flyability["predicted"], flyability["observed_baseline"]
     print(f"  flyability: {predicted['fully_flyable_rate'] * 100:.1f}% of predictions fully "
           f"flyable vs {observed['fully_flyable_rate'] * 100:.1f}% of the observed tracks "
           f"({flyability['delta']['fully_flyable_rate'] * 100:+.1f} pp)")
 
+
+
+def run_cli(
+    args: argparse.Namespace, parser: argparse.ArgumentParser, argv: list[str] | None
+) -> int:
+    del argv
+    model, config, normalizer, payload, current_provenance, device = load_predict_checkpoint(args, parser)
+    series, test_claim = load_predict_series(args, config, parser, payload, current_provenance)
+    options, config, series = parse_predict_options(args, config, parser, series)
+    try:
+        sets = predict_sets(model, series, config, normalizer, device, options, split=args.split)
+    except ValueError as exc:
+        parser.error(str(exc))
+    paths = write_prediction_sets(
+        sets, options, config, output_dir=args.output_dir, checkpoint=args.checkpoint,
+        split=args.split,
+    )
+    report_predictions(sets, series, options, output_dir=args.output_dir)
     if test_claim is not None:
         complete_test_evaluation(args.checkpoint, test_claim)
 
