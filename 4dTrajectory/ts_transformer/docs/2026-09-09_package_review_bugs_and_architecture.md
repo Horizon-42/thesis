@@ -16,7 +16,7 @@ points, and the 2026-09-09 plan-and-guidance design is the next axis.
 |---|---|
 | bug findings | 4 number-changing on live paths, 4 crash paths, ~20 contract holes — §2, all with `file:line` |
 | architecture | diagnosis §3, target §4, retirement candidates with census evidence §5, order §6 |
-| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor, moves into the §4.3 split), C-7 (directory binding), C-9 stay open. §6 step 1 (the package) and step 2 (§5, see its resolution paragraph) done in the same branch |
+| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5) and 3 (§4.3, see its resolution paragraph) done in the same branch |
 | decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); the five §7 decisions |
 
 ## 1. Measured
@@ -327,6 +327,25 @@ direction is one assertion: `set(flat) − set(named) == KNOWN_UNNAMED`.
 **The defaults have to move too** (§3 cause 3). Either the defaults become the current recipe — a
 change that moves stored names, so it needs the census as the proof — or the grammar names a run
 against its nearest recipe *for every field*, not only the loss fields. This is a user decision.
+
+**Resolution (2026-09-10, `dev-pkg-review`).** Built as views over the flat dataclass rather
+than as nested storage: `TSConfig` stays the flat schema every checkpoint serialises and every
+module reads, and `__post_init__` builds `CohortSpec`, `BackboneSpec`, `TrainingSpec` and one
+`OutputSpec` per path (`StateOutput`, `ClosureOutput`, `ControlOutput` with its `DurationSpec`,
+`DynamicsSpec`, `ControlObjective`, `HookSpec`, `LatentSpec`), exposed as
+`config.cohort/.backbone/.training/.output`; each view validates its own fields, and the six
+rules that read two views sit on `_validate_cross`. The eleven "belongs to output X" checks and
+the twelve "supported only by prediction_output='control'" checks are ONE rule
+(`_validate_ownership`): a field owned by another output's view is refused off its default —
+which also closes the whole class C-1 / C-2 / C-4 came from. `from_dict` normalises a stored
+config's foreign-output fields to their defaults (unread by definition; measured: none moves),
+so the serialized form is unchanged. Sum types (one variant per backend, `Factorized(floor)`)
+were NOT adopted: the flat schema is what `run_naming`, the CLI and 219 stored configs read, and
+the views give the same ownership without a second schema. C-4's floor therefore stays a field
+(the recipes pin `0.0` under `uniform`, so refusing it there would refuse every recipe).
+Defaults unchanged (user decision); the partition is checked at import
+(`_check_view_partition`). Census: 219 stored configs, 112 load, 0 names moved; full suite 970
+passed.
 
 ### 4.4 The training loop and the predict command
 

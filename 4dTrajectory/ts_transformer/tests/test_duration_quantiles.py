@@ -207,9 +207,9 @@ def test_the_loss_component_names_do_not_change():
 # ── refusals ────────────────────────────────────────────────────────────────
 
 def test_the_quantile_head_is_refused_off_the_control_output():
-    with pytest.raises(ValueError, match="control path"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(prediction_output=PREDICTION_STATE, duration_head=DURATION_HEAD_QUANTILE)
-    with pytest.raises(ValueError, match="control path"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(
             prediction_output=PREDICTION_CLOSURE,
             horizon_mode="normalized",

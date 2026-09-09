@@ -1444,7 +1444,7 @@ def test_the_speed_floor_margin_is_guarded_and_names_its_run():
     # A margin without a hook that reads it cannot change an answer, so it is refused.
     with pytest.raises(ValueError, match="needs a command hook"):
         _hook_config(control_command_hook=CONTROL_HOOK_BARRIER, control_speed_floor_margin=1.2)
-    with pytest.raises(ValueError, match="needs a command hook"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(control_speed_floor_margin=1.2)
     named = TSConfig(**{
         **recipe_settings("simple-v3", keep_name=True),

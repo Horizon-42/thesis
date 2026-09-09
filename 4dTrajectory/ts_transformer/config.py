@@ -14,7 +14,7 @@ would break the byte-identical property PROVENANCE.md promises.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, field, fields
 import math
 from typing import Any
 
@@ -923,9 +923,851 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
 )
 
 
+# ── the typed views: who owns which field (package review §4.3, 2026-09-10) ──────────
+#
+# `TSConfig` below stays the FLAT dataclass every checkpoint serialises and every module
+# reads (`config.seq_len`); the dataclasses here are what OWNS each field and its rules.
+# `TSConfig.__post_init__` builds one of each from the flat values and exposes them as
+# `config.cohort / .backbone / .training / .output`, so a rule that used to be one of some
+# forty cross-field `if`s in an 800-line validator now sits inside the object whose fields
+# it reads, and a per-output strategy can take `config.output` (typed) instead of the whole
+# config. Two things fall out by construction:
+#
+# - a field OWNED by another output variant is refused when it is off its default
+#   (`TSConfig._validate_ownership`) — the one rule that thirteen "belongs to output X" /
+#   "supported only by prediction_output='control'" checks used to spell one field at a
+#   time, and the class of hole review C-1 / C-2 / C-4 came from;
+# - the serialized form does not change: `to_dict` is the flat dict and `from_dict` reads
+#   it. A stored non-control run's control fields are unread by definition, so `from_dict`
+#   normalises them to their defaults rather than refusing the artifact (measured
+#   2026-09-10 on the 66 stored state/closure runs: every one already sits at its default).
+#
+# A rule that reads TWO views (the chart an output needs, a selection metric that re-reads
+# the future an oracle input hands over) stays on `TSConfig._validate_cross`, spelled once.
+# The partition is checked at import: every `TSConfig` field belongs to exactly one view
+# (`notes` excepted — free text, read by nobody).
+
+
+def _own(spec: type, config: Any) -> dict[str, Any]:
+    """The flat values of ``spec``'s own fields (a nested view is built separately)."""
+    return {
+        f.name: getattr(config, f.name)
+        for f in fields(spec)
+        if f.name in _FLAT_FIELD_NAMES
+    }
+
+
+def _require_member(name: str, value: Any, vocabulary: tuple[Any, ...]) -> None:
+    if value not in vocabulary:
+        raise ValueError(f"unknown {name} {value!r}; expected one of {vocabulary}")
+
+
+def _require_positive(owner: Any, names: tuple[str, ...]) -> None:
+    for name in names:
+        if getattr(owner, name) <= 0:
+            raise ValueError(f"{name} must be positive, got {getattr(owner, name)!r}")
+
+
+@dataclass(frozen=True)
+class CohortSpec:
+    """The data plane: what a flight series is, and which anchors a window may take."""
+
+    dt_s: float
+    seq_len: int
+    channels: tuple[str, ...]
+    aircraft_type: str
+    aircraft_filter: str
+    coordinate_frame: str
+    target_conditioning: str
+    intent_conditioning: str
+    reference_velocity_source: str
+    val_fraction: float
+    test_fraction: float
+    random_train_anchor: bool
+    training_cohort_min_future_s: float
+    random_train_anchor_min_future_s: float
+    random_train_anchor_sampling: str
+    random_train_anchor_l1_share: float
+
+    def __post_init__(self) -> None:
+        _require_member("coordinate_frame", self.coordinate_frame, COORDINATE_FRAMES)
+        _require_member("target_conditioning", self.target_conditioning, TARGET_CONDITIONINGS)
+        _require_member("intent_conditioning", self.intent_conditioning, INTENT_CONDITIONINGS)
+        _require_member(
+            "reference_velocity_source", self.reference_velocity_source,
+            REFERENCE_VELOCITY_SOURCES,
+        )
+        _require_member("aircraft_filter", self.aircraft_filter, AIRCRAFT_FILTERS)
+        _require_member(
+            "random_train_anchor_sampling", self.random_train_anchor_sampling,
+            RANDOM_TRAIN_ANCHOR_SAMPLINGS,
+        )
+        _require_positive(self, ("seq_len", "dt_s"))
+        if self.random_train_anchor_min_future_s < 0.0:
+            raise ValueError("random_train_anchor_min_future_s must be non-negative")
+        if self.training_cohort_min_future_s < 0.0:
+            raise ValueError("training_cohort_min_future_s must be non-negative")
+        if not 0.0 <= self.random_train_anchor_l1_share <= 1.0:
+            raise ValueError(
+                "random_train_anchor_l1_share is a share of the per-flight draws and must "
+                f"be between 0 and 1, got {self.random_train_anchor_l1_share!r}"
+            )
+        if self.val_fraction + self.test_fraction >= 1.0:
+            raise ValueError(
+                f"val_fraction + test_fraction must leave a training split "
+                f"(got {self.val_fraction} + {self.test_fraction})"
+            )
+        if (
+            self.random_train_anchor_sampling != RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM
+            and not self.random_train_anchor
+        ):
+            raise ValueError(
+                f"random_train_anchor_sampling={self.random_train_anchor_sampling!r} names "
+                "HOW a random train anchor is drawn, and random_train_anchor=False draws "
+                "none — the fixed policy anchors every flight at L-1"
+            )
+        # The L-1 share is a coin ON TOP of a draw, so it needs a draw to sit on. Refused
+        # rather than ignored in both directions it can be meaningless: the fixed policy
+        # already anchors every flight at L-1 (the share would be 1 by construction), and
+        # under `uniform` the axis would silently do nothing to a run whose name carries it.
+        if self.random_train_anchor_l1_share:
+            if not self.random_train_anchor:
+                raise ValueError(
+                    f"random_train_anchor_l1_share={self.random_train_anchor_l1_share!r} "
+                    "reserves a share of the RANDOM anchor draws for L-1, and "
+                    "random_train_anchor=False draws none — the fixed policy already "
+                    "anchors every flight at L-1"
+                )
+            if self.random_train_anchor_sampling != RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM:
+                raise ValueError(
+                    f"random_train_anchor_l1_share={self.random_train_anchor_l1_share!r} "
+                    "is defined on top of "
+                    f"random_train_anchor_sampling={RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM!r}"
+                    f", not {self.random_train_anchor_sampling!r}: the `uniform` law draws "
+                    "over the samples, where L-1 is already one of them, and mixing a "
+                    "reserved share into it is a second axis nobody has measured"
+                )
+        if self.intent_conditioning != INTENT_CONDITIONING_NONE:
+            if self.coordinate_frame == COORDINATE_FRAME_RUNWAY_ALIGNED:
+                raise ValueError(
+                    "the truth join point is gated on chart east/north against the world "
+                    f"runway course; the {COORDINATE_FRAME_RUNWAY_ALIGNED!r} chart is "
+                    "already rotated"
+                )
+            if (
+                self.intent_conditioning in (
+                    INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
+                    INTENT_CONDITIONING_TRUTH_JOIN_DURATION,
+                )
+                and self.random_train_anchor
+            ):
+                raise ValueError(
+                    "the lead ETA and remaining-time channels are measured at the flight's "
+                    "fixed anchor; random_train_anchor=True moves the anchor per sample"
+                )
+
+    @property
+    def input_channels(self) -> tuple[str, ...]:
+        """What the model SEES: the channel contract plus any input-only conditioning."""
+        return (
+            self.channels
+            + conditioning_channel_names(self.target_conditioning)
+            + intent_channel_names(self.intent_conditioning)
+        )
+
+    @property
+    def lookback_s(self) -> float:
+        """Wall-clock seconds of observed track the model is shown."""
+        return self.seq_len * self.dt_s
+
+
+@dataclass(frozen=True)
+class BackboneSpec:
+    """The vendored network and its hyperparameters — what `models.build_model` hands the
+    vendored ``configs`` namespace. One dataclass for both backbones: the flat schema
+    serialises every knob for either, and which ones a backbone reads is its own business
+    (`vendor/*/model.py`)."""
+
+    model: str
+    d_model: int
+    n_heads: int
+    d_ff: int
+    e_layers: int
+    dropout: float
+    activation: str
+    use_norm: bool
+    output_attention: bool
+    embed: str
+    freq: str
+    factor: int
+    class_strategy: str
+    patch_len: int
+    stride: int
+    padding_patch: str
+    revin: bool
+    affine: bool
+    subtract_last: bool
+    decomposition: bool
+    kernel_size: int
+    individual: bool
+    fc_dropout: float
+    head_dropout: float
+
+    def __post_init__(self) -> None:
+        _require_member("model", self.model, MODELS)
+        _require_positive(
+            self, ("d_model", "n_heads", "d_ff", "e_layers", "patch_len", "stride", "kernel_size")
+        )
+        if self.d_model % self.n_heads:
+            raise ValueError(
+                f"d_model={self.d_model} must divide evenly by n_heads={self.n_heads}"
+            )
+
+
+@dataclass(frozen=True)
+class TrainingSpec:
+    """The optimiser, its schedule, the seeds, and which epoch is kept."""
+
+    batch_size: int
+    epochs: int
+    learning_rate: float
+    weight_decay: float
+    lr_plateau_factor: float
+    lr_plateau_patience: int
+    lr_plateau_metric: str
+    patience: int
+    seed: int
+    split_seed: int | None
+    device: str
+    checkpoint_selection_metric: str
+    validation_common_grid_points: int
+
+    def __post_init__(self) -> None:
+        _require_member(
+            "checkpoint_selection_metric", self.checkpoint_selection_metric,
+            CHECKPOINT_SELECTION_METRICS,
+        )
+        _require_member("lr_plateau_metric", self.lr_plateau_metric, LR_PLATEAU_METRICS)
+        _require_positive(
+            self,
+            ("batch_size", "epochs", "lr_plateau_patience", "patience",
+             "validation_common_grid_points", "learning_rate"),
+        )
+        if self.validation_common_grid_points <= 1:
+            raise ValueError("validation_common_grid_points must be greater than one")
+        if not 0.0 < self.lr_plateau_factor < 1.0:
+            raise ValueError(
+                "lr_plateau_factor must be between 0 and 1, got "
+                f"{self.lr_plateau_factor!r}"
+            )
+
+    @property
+    def resolved_split_seed(self) -> int:
+        """Seed used only for the locked outer train/validation/test assignment."""
+        return self.seed if self.split_seed is None else self.split_seed
+
+
+@dataclass(frozen=True)
+class OutputSpec:
+    """What every prediction path shares: the horizon contract and the loss scales that
+    the state objective, the control tracking terms and the procedure penalty all read.
+    One subclass per ``prediction_output`` carries that path's own fields."""
+
+    prediction_output: str
+    horizon_mode: str
+    n_segments: int
+    full_horizon_steps: int
+    window_horizon_steps: int
+    final_time_scale_s: float
+    position_loss_scale_m: float
+    fitted_tail_position_weight: float
+    fitted_terminal_position_weight: float
+    final_time_loss_weight: float
+    state_endpoint_loss_weight: float
+    kinematic_consistency_loss_weight: float
+    terminal_loss_weight: float
+    procedure_loss_lateral_weight: float
+    procedure_loss_vertical_weight: float
+    procedure_loss_dual_step: float
+    procedure_loss_epsilon: float
+
+    def __post_init__(self) -> None:
+        _require_member("horizon_mode", self.horizon_mode, HORIZON_MODES)
+        _require_positive(
+            self,
+            ("n_segments", "full_horizon_steps", "window_horizon_steps",
+             "position_loss_scale_m", "final_time_scale_s"),
+        )
+        for name in (
+            "fitted_tail_position_weight", "fitted_terminal_position_weight",
+            "final_time_loss_weight", "state_endpoint_loss_weight",
+            "kinematic_consistency_loss_weight", "terminal_loss_weight",
+            "procedure_loss_lateral_weight", "procedure_loss_vertical_weight",
+            "procedure_loss_dual_step",
+        ):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
+        if not 0.0 <= self.procedure_loss_epsilon < 1.0:
+            raise ValueError(
+                f"procedure_loss_epsilon is a violation RATE in [0, 1), got "
+                f"{self.procedure_loss_epsilon!r}"
+            )
+
+    @property
+    def procedure_loss_active(self) -> bool:
+        return (
+            self.procedure_loss_lateral_weight > 0.0
+            or self.procedure_loss_vertical_weight > 0.0
+            or self.procedure_loss_dual_step > 0.0
+        )
+
+    @property
+    def pred_len(self) -> int:
+        """Vendored model output length under the selected horizon contract."""
+        return {
+            HORIZON_NORMALIZED: int(self.n_segments),
+            HORIZON_FULL: self.full_horizon_steps,
+            HORIZON_WINDOW: self.window_horizon_steps,
+        }[self.horizon_mode]
+
+
+@dataclass(frozen=True)
+class StateOutput(OutputSpec):
+    """The purely kinematic path: channels in, channels out."""
+
+    state_position_reference: str
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _require_member(
+            "state_position_reference", self.state_position_reference,
+            STATE_POSITION_REFERENCES,
+        )
+
+
+@dataclass(frozen=True)
+class ClosureOutput(OutputSpec):
+    """The closed-form decision vector regressed on per-flight labels (frozen path)."""
+
+    closure_labels_path: str
+    closure_slowness_knots: int
+    closure_height_knots: int
+    closure_geometry_loss_weight: float
+    closure_timing_loss_weight: float
+    closure_height_loss_weight: float
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not self.closure_labels_path:
+            raise ValueError(
+                "the closure output regresses per-flight labels: set closure_labels_path "
+                "to the JSON written by docs/p1_closure_oracle.py labels"
+            )
+        if self.horizon_mode != HORIZON_NORMALIZED:
+            raise ValueError(
+                "the closure output draws its own clock; only the normalized horizon "
+                "contract (n_segments target nodes) fits it"
+            )
+        if (self.closure_slowness_knots not in CLOSURE_LABEL_KNOTS
+                or self.closure_height_knots not in CLOSURE_LABEL_KNOTS):
+            raise ValueError(
+                f"closure labels carry the knot widths {CLOSURE_LABEL_KNOTS}; got "
+                f"slowness {self.closure_slowness_knots}, height {self.closure_height_knots}"
+            )
+
+
+@dataclass(frozen=True)
+class DurationSpec:
+    """How the rollout's total duration is predicted and partitioned into segments."""
+
+    duration_head: str
+    duration_quantile_loss_weight: float
+    control_duration_parameterization: str
+    control_duration_uniform_floor: float
+
+    def __post_init__(self) -> None:
+        _require_member("duration_head", self.duration_head, DURATION_HEADS)
+        _require_member(
+            "control_duration_parameterization", self.control_duration_parameterization,
+            CONTROL_DURATION_PARAMETERIZATIONS,
+        )
+        if self.duration_quantile_loss_weight < 0.0:
+            raise ValueError("duration_quantile_loss_weight must be non-negative")
+        if not 0.0 <= self.control_duration_uniform_floor < 1.0:
+            raise ValueError("control_duration_uniform_floor must be in [0, 1)")
+        # B1.b: `point` has no pinball sum to weigh (`two-head` is where both weights bind).
+        if (self.duration_head == DURATION_HEAD_POINT
+                and self.duration_quantile_loss_weight != DEFAULT_DURATION_QUANTILE_LOSS_WEIGHT):
+            raise ValueError(
+                f"duration_quantile_loss_weight={self.duration_quantile_loss_weight!r} "
+                "weighs the QUANTILE head's pinball losses, and duration_head='point' has "
+                f"no such head; select duration_head={DURATION_HEAD_QUANTILE!r} or "
+                f"{DURATION_HEAD_TWO_HEAD!r}"
+            )
+
+
+@dataclass(frozen=True)
+class DynamicsSpec:
+    """Which flight model the rollout integrates, on which chart, and how finely."""
+
+    control_dynamics_model: str
+    control_dynamics_backend: str
+    control_thrust_time_constant_s: float
+    control_bank_time_constant_s: float
+    control_load_time_constant_s: float
+    control_rollout_integrator_dt_s: float
+
+    def __post_init__(self) -> None:
+        _require_member(
+            "control_dynamics_backend", self.control_dynamics_backend,
+            CONTROL_DYNAMICS_BACKENDS,
+        )
+        _require_member(
+            "control_dynamics_model", self.control_dynamics_model, CONTROL_DYNAMICS_MODELS
+        )
+        for name in sorted(TIME_CONSTANT_FIELDS):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+        _require_positive(self, ("control_rollout_integrator_dt_s",))
+        if self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG:
+            # The lag is one RK4 over the coupled point-mass/actuator ODE, so it needs a
+            # backend that exposes a continuous chart RHS. The re-anchored baseline is a
+            # discrete map (it rebuilds a local ENU frame every substep) and has none.
+            if self.control_dynamics_backend == CONTROL_DYNAMICS_REANCHORED_RK4:
+                raise ValueError(
+                    "the lagged flight model requires a transport-chart dynamics backend"
+                )
+            for name in sorted(TIME_CONSTANT_FIELDS):
+                # The actuator ODE is integrated by the same explicit RK4 as the rest of
+                # the state, and explicit RK4 on y' = -y/tau is stable only for
+                # h/tau <= RK4_REAL_AXIS_STABILITY_LIMIT (the substep h is at most the
+                # integrator step). Past it the rollout does not degrade, it produces NaN,
+                # so a swept time constant that short is refused at construction rather
+                # than discovered as a dead training run (review C-13).
+                value = getattr(self, name)
+                if self.control_rollout_integrator_dt_s > RK4_REAL_AXIS_STABILITY_LIMIT * value:
+                    raise ValueError(
+                        f"{name}={value:g}s puts the {self.control_rollout_integrator_dt_s:g}s "
+                        f"integrator step at h/tau = "
+                        f"{self.control_rollout_integrator_dt_s / value:.2f} > "
+                        f"{RK4_REAL_AXIS_STABILITY_LIMIT}; explicit RK4 is unstable there"
+                    )
+
+    @property
+    def time_constants_s(self) -> tuple[float, float, float]:
+        """The three lag constants in the control contract's order."""
+        return (
+            self.control_thrust_time_constant_s,
+            self.control_bank_time_constant_s,
+            self.control_load_time_constant_s,
+        )
+
+
+@dataclass(frozen=True)
+class ControlObjective:
+    """What a control schedule is scored against, and how its gradients are shaped.
+
+    **`control_state_loss_grid` cannot be derived from `control_state_objective`** —
+    measured on disk 2026-09-07, not assumed. `true-time-position` does pin the native
+    grid, but `normalized-mse` runs on BOTH: of the 233 stored configs that load, 159 are
+    (`true-time-position`, native), 62 + 8 are (`normalized-mse`, native) on the state and
+    closure outputs, and 4 are (`normalized-mse`, `fixed-dt`) on the control output. Two
+    live values under one objective is not a function, so the grid stays a field.
+    """
+
+    control_state_objective: str
+    control_state_loss_grid: str
+    control_state_supervision_clock: str
+    control_velocity_loss_weight: float
+    control_velocity_loss_scale_mps: float
+    control_imitation_loss_weight: float
+    control_imitation_target: str
+    control_fitted_teacher_path: str
+    control_heading_rate_loss_weight: float
+    control_heading_rate_loss_scale_dps: float
+    control_bank_tv_loss_weight: float
+    control_state_duration_gradient: bool
+    control_gradient_clip_norm: float
+
+    def __post_init__(self) -> None:
+        _require_member(
+            "control_state_objective", self.control_state_objective, CONTROL_STATE_OBJECTIVES
+        )
+        _require_member(
+            "control_state_loss_grid", self.control_state_loss_grid, CONTROL_STATE_LOSS_GRIDS
+        )
+        _require_member(
+            "control_state_supervision_clock", self.control_state_supervision_clock,
+            CONTROL_STATE_CLOCKS,
+        )
+        _require_member(
+            "control_imitation_target", self.control_imitation_target,
+            CONTROL_IMITATION_TARGETS,
+        )
+        for name in (
+            "control_velocity_loss_weight", "control_imitation_loss_weight",
+            "control_heading_rate_loss_weight", "control_bank_tv_loss_weight",
+            "control_gradient_clip_norm",
+        ):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
+        for name in ("control_velocity_loss_scale_mps", "control_heading_rate_loss_scale_dps"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+        for name in (
+            "control_velocity_loss_weight",
+            "control_imitation_loss_weight",
+            "control_heading_rate_loss_weight",
+            "control_bank_tv_loss_weight",
+        ):
+            # All four terms are built by the true-time-position objective only
+            # (`objective.loss_component_names`). Elsewhere the weight would be a number
+            # that cannot change an answer — while still NAMING the run and, for the
+            # imitation term, solving an inverse-dynamics teacher per sample that nothing
+            # reads (review C-1).
+            if (
+                getattr(self, name)
+                and self.control_state_objective != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION
+            ):
+                raise ValueError(
+                    f"{name} is only built by the "
+                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION} objective, not "
+                    f"{self.control_state_objective!r}"
+                )
+        if self.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
+            if not self.control_fitted_teacher_path:
+                raise ValueError(
+                    "the fitted teacher imitates a per-flight table: set "
+                    "control_fitted_teacher_path to the basis_fit.json written by "
+                    "run_ts_control_basis_oracle.py --checkpoint"
+                )
+            if not self.control_imitation_loss_weight:
+                raise ValueError(
+                    "control_imitation_target names a teacher for a term this run switches "
+                    "off (control_imitation_loss_weight=0): the table would be loaded and "
+                    "validated against the cohort, and never read"
+                )
+            if self.control_state_objective != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
+                # `objective.loss_component_names` registers `imitation` under the
+                # true-time-position objective ONLY, so under any other objective the term
+                # is not built at all. That objective in turn requires the native grid and
+                # UNIFORM durations, so this one check also closes the factorized-duration
+                # hole: a table of schedules spread uniformly over the total duration
+                # cannot supervise a learned partition.
+                raise ValueError(
+                    "the imitation term is registered under control_state_objective="
+                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION!r} only; this run scores "
+                    f"{self.control_state_objective!r} and would load the fitted teacher "
+                    "and never read it"
+                )
+        elif self.control_fitted_teacher_path:
+            raise ValueError(
+                "control_fitted_teacher_path belongs to "
+                f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r}; this run "
+                f"imitates {self.control_imitation_target!r}"
+            )
+        if (
+            self.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT
+            and self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED
+        ):
+            raise ValueError(
+                "fixed-dt control state loss requires "
+                "control_state_supervision_clock='observed'"
+            )
+        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
+            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
+                raise ValueError(
+                    "true-time-position control objective requires "
+                    "control_state_loss_grid='native-segment-endpoints'"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "true-time-position control objective requires observed state supervision"
+                )
+        if (
+            not self.control_state_duration_gradient
+            and self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED
+        ):
+            raise ValueError(
+                "detached control-state duration gradients require "
+                "control_state_supervision_clock='observed'"
+            )
+
+    @property
+    def uses_fitted_teacher(self) -> bool:
+        return self.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED
+
+
+@dataclass(frozen=True)
+class HookSpec:
+    """The predict-time command hook and the knobs of the modules it builds."""
+
+    control_command_hook: str
+    control_hook_saturation: str
+    control_barrier_alpha: float
+    control_barrier_heading_gain: float
+    control_speed_floor_margin: float
+    trombone_surplus_reference: str
+
+    def __post_init__(self) -> None:
+        _require_member("control_command_hook", self.control_command_hook, CONTROL_HOOKS)
+        _require_member(
+            "control_hook_saturation", self.control_hook_saturation, HOOK_SATURATIONS
+        )
+        _require_member(
+            "trombone_surplus_reference", self.trombone_surplus_reference,
+            TROMBONE_SURPLUS_REFERENCES,
+        )
+        # Each module's own knobs, checked against the modules the hook actually BUILDS.
+        # `nominal-residual` builds nothing (it is load-only and archived) and is absent
+        # from the members table, so its six stored 2026-09-06 configs are left exactly as
+        # they are; `off` builds nothing either and IS held to the rule (review C-2).
+        hook_modules = CONTROL_HOOK_MEMBERS.get(self.control_command_hook, ())
+        builds_nothing = bool(hook_modules) or self.control_command_hook == CONTROL_HOOK_OFF
+        if CONTROL_HOOK_BARRIER in hook_modules:
+            _require_positive(self, ("control_barrier_alpha", "control_barrier_heading_gain"))
+        elif builds_nothing:
+            for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
+                if getattr(self, name) != CONTROL_BARRIER_GAIN_DEFAULT:
+                    raise ValueError(
+                        f"{name}={getattr(self, name)!r} needs a command hook that contains "
+                        f"{CONTROL_HOOK_BARRIER!r} (control_command_hook="
+                        f"{self.control_command_hook!r})"
+                    )
+        if (
+            self.control_command_hook == CONTROL_HOOK_OFF
+            and self.control_hook_saturation != HOOK_SATURATION_SOFT
+        ):
+            raise ValueError(
+                f"control_hook_saturation={self.control_hook_saturation!r} softens a hook's "
+                "bound and there is no hook (control_command_hook='off')"
+            )
+        # The margin is read by TWO modules: the floor holds it, and the trombone divides
+        # by the same V_floor to size its detour, so it changes an answer under either.
+        if any(name in hook_modules for name in CONTROL_SPEED_FLOOR_MARGIN_READERS):
+            if not math.isfinite(self.control_speed_floor_margin) or (
+                self.control_speed_floor_margin < 1.0
+            ):
+                raise ValueError(
+                    "control_speed_floor_margin is a finite multiple of the stall speed and "
+                    "a floor below it is not a floor; got "
+                    f"{self.control_speed_floor_margin!r}"
+                )
+        elif self.control_speed_floor_margin != CONTROL_SPEED_FLOOR_MARGIN_DEFAULT:
+            raise ValueError(
+                f"control_speed_floor_margin={self.control_speed_floor_margin!r} needs a "
+                f"command hook that contains one of {CONTROL_SPEED_FLOOR_MARGIN_READERS} "
+                f"(control_command_hook={self.control_command_hook!r})"
+            )
+        # ...and the estimator axis is the trombone's alone: no other module measures a
+        # surplus, so away from its default the value would change no trajectory.
+        if (
+            CONTROL_HOOK_TROMBONE not in hook_modules
+            and self.trombone_surplus_reference != TROMBONE_SURPLUS_BEELINE
+        ):
+            raise ValueError(
+                f"trombone_surplus_reference={self.trombone_surplus_reference!r} needs a "
+                f"command hook that contains {CONTROL_HOOK_TROMBONE!r} "
+                f"(control_command_hook={self.control_command_hook!r})"
+            )
+
+    @property
+    def active(self) -> bool:
+        return self.control_command_hook != CONTROL_HOOK_OFF
+
+
+@dataclass(frozen=True)
+class LatentSpec:
+    """The latent intent z on the control output (L2). Every other knob means nothing at
+    ``latent_dim == 0`` and is refused there rather than carried into the run name."""
+
+    latent_dim: int
+    latent_prior_components: int
+    latent_beta: float
+    latent_free_bits_nats: float
+    latent_beta_warmup_epochs: int
+    latent_aux_duration_weight: float
+    latent_posterior_init_std: float
+
+    def __post_init__(self) -> None:
+        if self.latent_dim < 0 or self.latent_prior_components < 1:
+            raise ValueError("latent_dim must be >= 0 and latent_prior_components >= 1")
+        if self.latent_beta < 0.0 or self.latent_free_bits_nats < 0.0:
+            raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
+        if self.latent_beta_warmup_epochs < 0:
+            raise ValueError("latent_beta_warmup_epochs must be >= 0 (0 = no warm-up)")
+        if (
+            not math.isfinite(self.latent_aux_duration_weight)
+            or self.latent_aux_duration_weight < 0.0
+        ):
+            raise ValueError("latent_aux_duration_weight must be finite and non-negative")
+        if self.latent_posterior_init_std <= 0.0:
+            raise ValueError("latent_posterior_init_std must be positive")
+        if self.latent_dim == 0 and (
+            self.latent_prior_components != 1
+            or self.latent_beta != 1.0
+            or self.latent_free_bits_nats != 0.0
+            or self.latent_posterior_init_std != 1.0
+            or self.latent_beta_warmup_epochs != 0
+            or self.latent_aux_duration_weight != 0.0
+        ):
+            raise ValueError(
+                "latent_prior_components / latent_beta / latent_free_bits_nats / "
+                "latent_posterior_init_std / latent_beta_warmup_epochs / "
+                "latent_aux_duration_weight mean nothing "
+                "without a latent (latent_dim == 0) and would still rename the run"
+            )
+
+    @property
+    def active(self) -> bool:
+        return self.latent_dim > 0
+
+
+@dataclass(frozen=True)
+class ControlOutput(OutputSpec):
+    """Bounded controls rolled through the point-mass twin, with its five sub-axes.
+
+    The axes are not independent: the objective constrains the duration parameterization,
+    the command hook constrains the flight model and the grid, the latent constrains the
+    duration head. Every rule here names the pair it binds; a rule inside ONE axis lives
+    on that axis's own dataclass."""
+
+    control_recipe_name: str
+    cta_conditioning: str
+    duration: DurationSpec
+    dynamics: DynamicsSpec
+    objective: ControlObjective
+    hook: HookSpec
+    latent: LatentSpec
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _require_member("control_recipe_name", self.control_recipe_name, CONTROL_RECIPE_NAMES)
+        _require_member("cta_conditioning", self.cta_conditioning, CTA_CONDITIONINGS)
+        if self.horizon_mode != HORIZON_NORMALIZED:
+            raise ValueError(
+                "control output uses learned non-uniform segments and currently requires "
+                "horizon_mode='normalized'; state output retains normalized/full/window"
+            )
+        if self.latent.latent_aux_duration_weight and self.cta_conditioning != CTA_CONDITIONING_OFF:
+            raise ValueError(
+                "latent_aux_duration_weight teaches z to carry the remaining duration, and "
+                f"cta_conditioning={self.cta_conditioning!r} already hands that duration to "
+                "the decoder — the auxiliary target would be supervising a known input"
+            )
+        if self.duration.duration_head in DURATION_HEADS_WITH_QUANTILES and self.latent.active:
+            # Not a plumbing limitation. `control/latent.py` reaches the duration by
+            # SHIFTING the head's single unconstrained logit (`latent_duration`), and a
+            # cumulative-softplus head has five; shifting all five would move the spread as
+            # well as the location. Worse, training decodes a POSTERIOR sample, so the five
+            # would be quantiles of p(T | z ~ q(z | this flight's own future)) — an interval
+            # conditioned on the answer, which B2 would then calibrate as if it were
+            # p(T | history). `two-head` is refused for the same reason: its quantile head
+            # is trained under the posterior sample exactly as the single one would be.
+            raise ValueError(
+                f"duration_head={self.duration.duration_head!r} and latent_dim > 0 are refused "
+                "together: z reaches the duration by shifting the point head's single "
+                "logit, and under a posterior sample the quantiles would be conditioned "
+                "on the flight's own future — not a predictive interval to calibrate"
+            )
+        # B1.b: under `quantile` the pinball sum REPLACED the point term, so
+        # `final_time_loss_weight` has nothing to weigh (every stored `quantile` run
+        # carries the default); `two-head` is the one value where both weights bind.
+        if (self.duration.duration_head == DURATION_HEAD_QUANTILE
+                and self.final_time_loss_weight != DEFAULT_FINAL_TIME_LOSS_WEIGHT):
+            raise ValueError(
+                f"final_time_loss_weight={self.final_time_loss_weight!r} weighs the POINT "
+                "head's squared duration residual, and duration_head='quantile' has no "
+                "point term — the pinball sum replaced it under the same component name. "
+                "Weigh the pinball with duration_quantile_loss_weight, or take the point "
+                f"term back with duration_head={DURATION_HEAD_TWO_HEAD!r}"
+            )
+        if self.hook.active:
+            if self.dynamics.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
+                raise ValueError(
+                    "the command hook is implemented on the first-order-lag dynamics (its "
+                    f"state carries the actuators a hook reads); "
+                    f"control_dynamics_model={self.dynamics.control_dynamics_model!r}"
+                )
+            if self.objective.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
+                raise ValueError("the command hook rides the native segment-endpoint rollout")
+        if (
+            self.objective.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION
+            and self.duration.control_duration_parameterization != CONTROL_DURATION_UNIFORM
+        ):
+            raise ValueError(
+                "true-time-position control objective requires uniform control durations"
+            )
+        if (
+            self.procedure_loss_active
+            and self.objective.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
+        ):
+            raise ValueError(
+                "the procedure penalty on the control path is implemented on the native "
+                "segment-endpoint rollout (its aligned targets carry the truth gate); "
+                f"control_state_loss_grid={self.objective.control_state_loss_grid!r} is not supported"
+            )
+
+
+#: The view each ``prediction_output`` builds.
+_OUTPUT_VIEWS: dict[str, type[OutputSpec]] = {
+    PREDICTION_STATE: StateOutput,
+    PREDICTION_CLOSURE: ClosureOutput,
+    PREDICTION_CONTROL: ControlOutput,
+}
+if set(_OUTPUT_VIEWS) != set(PREDICTION_OUTPUTS):
+    raise RuntimeError("every prediction_output needs an OutputSpec view")
+
+#: The nested axes of the control view, in build order.
+_CONTROL_AXES: tuple[tuple[str, type], ...] = (
+    ("duration", DurationSpec),
+    ("dynamics", DynamicsSpec),
+    ("objective", ControlObjective),
+    ("hook", HookSpec),
+    ("latent", LatentSpec),
+)
+
+
+def _view_fields(spec: type) -> tuple[str, ...]:
+    """A view's flat field names, its nested axes expanded (built after ``_FLAT_FIELD_NAMES``
+    exists for `_own`; here the axes are named explicitly so this runs at import)."""
+    nested = dict(_CONTROL_AXES)
+    names: list[str] = []
+    for f in fields(spec):
+        if f.name in nested:
+            names.extend(g.name for g in fields(nested[f.name]))
+        else:
+            names.append(f.name)
+    return tuple(names)
+
+
+#: Which output VARIANT owns each output-specific field. A field owned by one variant is
+#: refused off its default under any other (`TSConfig._validate_ownership`) and normalised
+#: to its default when a stored config of another output is loaded (`TSConfig.from_dict`):
+#: unread by definition, it cannot have changed that run.
+_OUTPUT_OWNED_FIELDS: dict[str, tuple[str, ...]] = {
+    output: tuple(
+        name for name in _view_fields(view)
+        if name not in {f.name for f in fields(OutputSpec)}
+    )
+    for output, view in _OUTPUT_VIEWS.items()
+}
+
+
 @dataclass(frozen=True)
 class TSConfig:
-    """Everything that defines a run. Serialised whole into each checkpoint."""
+    """Everything that defines a run. Serialised whole into each checkpoint.
+
+    FLAT on purpose: the vendored networks read attributes off it, every module reads
+    ``config.<field>``, and the checkpoint stores it as one dict. What owns each field —
+    and validates it — are the views above (`CohortSpec`, `BackboneSpec`, `TrainingSpec`
+    and one `OutputSpec` per prediction path), built in ``__post_init__`` and exposed as
+    ``config.cohort / .backbone / .training / .output``. Rules that read two views live on
+    ``_validate_cross``.
+    """
 
     # ── what to train ────────────────────────────────────────────────────────
     model: str = MODELS[0]
@@ -1287,154 +2129,78 @@ class TSConfig:
     notes: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Normalize the two under-specified fields, then validate in five passes.
+        """Normalize the two under-specified fields, then build the views.
 
-        The order is the only one that works: a value must be a member of its
-        vocabulary, then inside its numeric bounds, before any cross-field rule can
-        read it and mean anything.
+        The order is the only one that works: the output must be a known one before the
+        ownership rule can ask which fields are foreign to it; the backbone must be a known
+        one before ``n_segments`` can be resolved through the per-model table; every view
+        must exist before the recipe freeze and the cross-view rules can read them.
         """
         # Sequence fields arrive as lists from JSON; the contract is tuples (see
         # SEQUENCE_FIELDS / coerce_sequence_fields — the CLI's recipe check uses the same).
         for name in SEQUENCE_FIELDS:
             object.__setattr__(self, name, tuple(getattr(self, name)))
-        self._validate_vocabulary()
-        # After the vocabulary, not before: the table is keyed by the model name.
+        _require_member("prediction_output", self.prediction_output, PREDICTION_OUTPUTS)
+        self._validate_ownership()
+        cohort = CohortSpec(**_own(CohortSpec, self))
+        backbone = BackboneSpec(**_own(BackboneSpec, self))
+        # After the backbone's vocabulary, not before: the table is keyed by the model name.
         if self.n_segments is None:
             object.__setattr__(
                 self, "n_segments", DEFAULT_N_SEGMENTS_BY_MODEL[self.model]
             )
+        training = TrainingSpec(**_own(TrainingSpec, self))
+        view = _OUTPUT_VIEWS[self.prediction_output]
+        axes = (
+            {name: axis(**_own(axis, self)) for name, axis in _CONTROL_AXES}
+            if view is ControlOutput else {}
+        )
+        output = view(**_own(view, self), **axes)
+        object.__setattr__(self, "_views", (cohort, backbone, training, output))
         self._validate_recipe()
-        self._validate_ranges()
-        self._validate_output_contract()
-        self._validate_control_contract()
+        self._validate_cross()
 
-    def _validate_vocabulary(self) -> None:
-        """Every field whose value must be a member of a named tuple.
+    # ── the views ────────────────────────────────────────────────────────────
+    # Not dataclass fields (they would serialise): built once in __post_init__ and read
+    # through these. `dataclasses.replace` rebuilds them with the instance.
 
-        Runs first: the checks below all read these values, and
-        ``control_recipe_overrides`` indexes a recipe table with one of them.
+    @property
+    def cohort(self) -> CohortSpec:
+        return self._views[0]
+
+    @property
+    def backbone(self) -> BackboneSpec:
+        return self._views[1]
+
+    @property
+    def training(self) -> TrainingSpec:
+        return self._views[2]
+
+    @property
+    def output(self) -> OutputSpec:
+        """The typed view of this run's prediction path: `StateOutput`, `ClosureOutput`
+        or `ControlOutput` by ``prediction_output``."""
+        return self._views[3]
+
+    def _validate_ownership(self) -> None:
+        """A field owned by ANOTHER output variant must sit at its default.
+
+        It would be unread under this output and still serialized into the checkpoint and
+        carried into the run name — a value that cannot change an answer while claiming
+        to (review C-1 / C-2 / C-4 were three instances of the hole this closes). One rule
+        for all three variants replaces the per-field "belongs to output X" checks.
         """
-        if self.control_recipe_name not in CONTROL_RECIPE_NAMES:
-            raise ValueError(
-                f"unknown control_recipe_name {self.control_recipe_name!r}; expected one "
-                f"of {CONTROL_RECIPE_NAMES}"
-            )
-        if self.model not in MODELS:
-            raise ValueError(f"unknown model {self.model!r}; expected one of {MODELS}")
-        if self.prediction_output not in PREDICTION_OUTPUTS:
-            raise ValueError(
-                f"unknown prediction_output {self.prediction_output!r}; "
-                f"expected one of {PREDICTION_OUTPUTS}"
-            )
-        if self.horizon_mode not in HORIZON_MODES:
-            raise ValueError(
-                f"unknown horizon_mode {self.horizon_mode!r}; expected one of {HORIZON_MODES}"
-            )
-        if self.coordinate_frame not in COORDINATE_FRAMES:
-            raise ValueError(
-                f"unknown coordinate_frame {self.coordinate_frame!r}; "
-                f"expected one of {COORDINATE_FRAMES}"
-            )
-        if self.state_position_reference not in STATE_POSITION_REFERENCES:
-            raise ValueError(
-                f"unknown state_position_reference {self.state_position_reference!r}; "
-                f"expected one of {STATE_POSITION_REFERENCES}"
-            )
-        if self.control_command_hook not in CONTROL_HOOKS:
-            raise ValueError(
-                f"unknown control_command_hook {self.control_command_hook!r}; expected one "
-                f"of {CONTROL_HOOKS}"
-            )
-        if self.control_hook_saturation not in HOOK_SATURATIONS:
-            raise ValueError(
-                f"unknown control_hook_saturation {self.control_hook_saturation!r}; "
-                f"expected one of {HOOK_SATURATIONS}"
-            )
-        if self.trombone_surplus_reference not in TROMBONE_SURPLUS_REFERENCES:
-            raise ValueError(
-                f"unknown trombone_surplus_reference {self.trombone_surplus_reference!r}; "
-                f"expected one of {TROMBONE_SURPLUS_REFERENCES}"
-            )
-        if self.target_conditioning not in TARGET_CONDITIONINGS:
-            raise ValueError(
-                f"unknown target_conditioning {self.target_conditioning!r}; "
-                f"expected one of {TARGET_CONDITIONINGS}"
-            )
-        if self.intent_conditioning not in INTENT_CONDITIONINGS:
-            raise ValueError(
-                f"unknown intent_conditioning {self.intent_conditioning!r}; "
-                f"expected one of {INTENT_CONDITIONINGS}"
-            )
-        if self.reference_velocity_source not in REFERENCE_VELOCITY_SOURCES:
-            raise ValueError(
-                f"unknown reference_velocity_source {self.reference_velocity_source!r}; "
-                f"expected one of {REFERENCE_VELOCITY_SOURCES}"
-            )
-        if self.aircraft_filter not in AIRCRAFT_FILTERS:
-            raise ValueError(
-                f"unknown aircraft_filter {self.aircraft_filter!r}; "
-                f"expected one of {AIRCRAFT_FILTERS}"
-            )
-        if self.control_dynamics_backend not in CONTROL_DYNAMICS_BACKENDS:
-            raise ValueError(
-                f"unknown control_dynamics_backend {self.control_dynamics_backend!r}; "
-                f"expected one of {CONTROL_DYNAMICS_BACKENDS}"
-            )
-        if self.control_dynamics_model not in CONTROL_DYNAMICS_MODELS:
-            raise ValueError(
-                f"unknown control_dynamics_model {self.control_dynamics_model!r}; "
-                f"expected one of {CONTROL_DYNAMICS_MODELS}"
-            )
-        if self.control_imitation_target not in CONTROL_IMITATION_TARGETS:
-            raise ValueError(
-                f"unknown control_imitation_target {self.control_imitation_target!r}; "
-                f"expected one of {CONTROL_IMITATION_TARGETS}"
-            )
-        if self.control_state_supervision_clock not in CONTROL_STATE_CLOCKS:
-            raise ValueError(
-                "unknown control_state_supervision_clock "
-                f"{self.control_state_supervision_clock!r}; expected one of "
-                f"{CONTROL_STATE_CLOCKS}"
-            )
-        if self.control_state_loss_grid not in CONTROL_STATE_LOSS_GRIDS:
-            raise ValueError(
-                "unknown control_state_loss_grid "
-                f"{self.control_state_loss_grid!r}; expected one of "
-                f"{CONTROL_STATE_LOSS_GRIDS}"
-            )
-        if self.control_state_objective not in CONTROL_STATE_OBJECTIVES:
-            raise ValueError(
-                "unknown control_state_objective "
-                f"{self.control_state_objective!r}; expected one of "
-                f"{CONTROL_STATE_OBJECTIVES}"
-            )
-        if self.control_duration_parameterization not in CONTROL_DURATION_PARAMETERIZATIONS:
-            raise ValueError(
-                "unknown control_duration_parameterization "
-                f"{self.control_duration_parameterization!r}; expected one of "
-                f"{CONTROL_DURATION_PARAMETERIZATIONS}"
-            )
-        if self.checkpoint_selection_metric not in CHECKPOINT_SELECTION_METRICS:
-            raise ValueError(
-                f"unknown checkpoint_selection_metric "
-                f"{self.checkpoint_selection_metric!r}; expected one of "
-                f"{CHECKPOINT_SELECTION_METRICS}"
-            )
-        if self.cta_conditioning not in CTA_CONDITIONINGS:
-            raise ValueError(
-                f"unknown cta_conditioning {self.cta_conditioning!r}; expected one of {CTA_CONDITIONINGS}"
-            )
-        if self.lr_plateau_metric not in LR_PLATEAU_METRICS:
-            raise ValueError(
-                f"unknown lr_plateau_metric {self.lr_plateau_metric!r}; expected one of "
-                f"{LR_PLATEAU_METRICS}"
-            )
-        if self.random_train_anchor_sampling not in RANDOM_TRAIN_ANCHOR_SAMPLINGS:
-            raise ValueError(
-                f"unknown random_train_anchor_sampling "
-                f"{self.random_train_anchor_sampling!r}; expected one of "
-                f"{RANDOM_TRAIN_ANCHOR_SAMPLINGS}"
-            )
+        for owner, names in _OUTPUT_OWNED_FIELDS.items():
+            if owner == self.prediction_output:
+                continue
+            for name in names:
+                value = getattr(self, name)
+                if value != _OWNED_FIELD_DEFAULTS[name]:
+                    raise ValueError(
+                        f"{name}={value!r} belongs to the {owner} output; "
+                        f"prediction_output={self.prediction_output!r} never reads it and "
+                        "would still carry it into the checkpoint and the run name"
+                    )
 
     def _validate_recipe(self) -> None:
         """A named recipe's fields are frozen at the values that define it.
@@ -1458,199 +2224,16 @@ class TSConfig:
                     f"{self.control_recipe_name} recipe fields are frozen: {details}"
                 )
 
-    def _validate_ranges(self) -> None:
-        """Numeric bounds that do not depend on the output path.
-
-        Two of them do read a second field, and they are here rather than in a contract
-        pass because both are arithmetic on the numbers themselves: ``d_model`` must divide
-        by ``n_heads``, and ``val_fraction + test_fraction`` must leave a training split.
-        Runs third, after the vocabulary and the recipe freeze and before the two contract
-        passes — a bound is checked on a value that is already a legal member of its
-        vocabulary, and the contracts then read numbers already known to be in range.
-        """
-        for name in ("procedure_loss_lateral_weight", "procedure_loss_vertical_weight",
-                     "procedure_loss_dual_step"):
-            if getattr(self, name) < 0.0:
-                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
-        if not 0.0 <= self.procedure_loss_epsilon < 1.0:
-            raise ValueError(
-                f"procedure_loss_epsilon is a violation RATE in [0, 1), got "
-                f"{self.procedure_loss_epsilon!r}"
-            )
-        if (
-            not math.isfinite(self.control_velocity_loss_weight)
-            or self.control_velocity_loss_weight < 0.0
-        ):
-            raise ValueError("control_velocity_loss_weight must be finite and non-negative")
-        if (
-            not math.isfinite(self.control_velocity_loss_scale_mps)
-            or self.control_velocity_loss_scale_mps <= 0.0
-        ):
-            raise ValueError("control_velocity_loss_scale_mps must be finite and positive")
-        if (
-            not math.isfinite(self.control_imitation_loss_weight)
-            or self.control_imitation_loss_weight < 0.0
-        ):
-            raise ValueError("control_imitation_loss_weight must be finite and non-negative")
-        for name in ("control_heading_rate_loss_weight", "control_bank_tv_loss_weight"):
-            value = getattr(self, name)
-            if not math.isfinite(value) or value < 0.0:
-                raise ValueError(f"{name} must be finite and non-negative")
-        if (
-            not math.isfinite(self.control_heading_rate_loss_scale_dps)
-            or self.control_heading_rate_loss_scale_dps <= 0.0
-        ):
-            raise ValueError(
-                "control_heading_rate_loss_scale_dps must be finite and positive"
-            )
-        for name in (
-            "control_thrust_time_constant_s",
-            "control_bank_time_constant_s",
-            "control_load_time_constant_s",
-        ):
-            value = getattr(self, name)
-            if not math.isfinite(value) or value <= 0.0:
-                raise ValueError(f"{name} must be finite and positive")
-        if (
-            not math.isfinite(self.control_gradient_clip_norm)
-            or self.control_gradient_clip_norm < 0.0
-        ):
-            raise ValueError("control_gradient_clip_norm must be finite and non-negative")
-        for name in (
-            "seq_len",
-            "n_segments",
-            "full_horizon_steps",
-            "window_horizon_steps",
-            "d_model",
-            "n_heads",
-            "d_ff",
-            "e_layers",
-            "patch_len",
-            "stride",
-            "kernel_size",
-            "batch_size",
-            "epochs",
-            "lr_plateau_patience",
-            "patience",
-            "validation_common_grid_points",
-        ):
-            if getattr(self, name) <= 0:
-                raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
-        if self.validation_common_grid_points <= 1:
-            raise ValueError("validation_common_grid_points must be greater than one")
-        for name in (
-            "dt_s",
-            "learning_rate",
-            "position_loss_scale_m",
-            "final_time_scale_s",
-            "control_rollout_integrator_dt_s",
-        ):
-            if getattr(self, name) <= 0.0:
-                raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
-        if self.random_train_anchor_min_future_s < 0.0:
-            raise ValueError("random_train_anchor_min_future_s must be non-negative")
-        if self.training_cohort_min_future_s < 0.0:
-            raise ValueError("training_cohort_min_future_s must be non-negative")
-        if not 0.0 <= self.random_train_anchor_l1_share <= 1.0:
-            raise ValueError(
-                "random_train_anchor_l1_share is a share of the per-flight draws and must "
-                f"be between 0 and 1, got {self.random_train_anchor_l1_share!r}"
-            )
-        if not 0.0 < self.lr_plateau_factor < 1.0:
-            raise ValueError(
-                "lr_plateau_factor must be between 0 and 1, got "
-                f"{self.lr_plateau_factor!r}"
-            )
-        if self.d_model % self.n_heads:
-            raise ValueError(
-                f"d_model={self.d_model} must divide evenly by n_heads={self.n_heads}"
-            )
-        if self.val_fraction + self.test_fraction >= 1.0:
-            raise ValueError(
-                f"val_fraction + test_fraction must leave a training split "
-                f"(got {self.val_fraction} + {self.test_fraction})"
-            )
-        if self.fitted_tail_position_weight < 0.0:
-            raise ValueError("fitted_tail_position_weight must be non-negative")
-        if self.fitted_terminal_position_weight < 0.0:
-            raise ValueError("fitted_terminal_position_weight must be non-negative")
-        if self.final_time_loss_weight < 0.0:
-            raise ValueError("final_time_loss_weight must be non-negative")
-        if self.duration_quantile_loss_weight < 0.0:
-            raise ValueError("duration_quantile_loss_weight must be non-negative")
-        if self.state_endpoint_loss_weight < 0.0:
-            raise ValueError("state_endpoint_loss_weight must be non-negative")
-        if self.kinematic_consistency_loss_weight < 0.0:
-            raise ValueError("kinematic_consistency_loss_weight must be non-negative")
-        if self.terminal_loss_weight < 0.0:
-            raise ValueError("terminal_loss_weight must be non-negative")
-        if not 0.0 <= self.control_duration_uniform_floor < 1.0:
-            raise ValueError("control_duration_uniform_floor must be in [0, 1)")
-        if self.latent_dim < 0 or self.latent_prior_components < 1:
-            raise ValueError("latent_dim must be >= 0 and latent_prior_components >= 1")
-        if self.latent_beta < 0.0 or self.latent_free_bits_nats < 0.0:
-            raise ValueError("latent_beta and latent_free_bits_nats must be non-negative")
-        if self.latent_beta_warmup_epochs < 0:
-            raise ValueError("latent_beta_warmup_epochs must be >= 0 (0 = no warm-up)")
-        if (
-            not math.isfinite(self.latent_aux_duration_weight)
-            or self.latent_aux_duration_weight < 0.0
-        ):
-            raise ValueError("latent_aux_duration_weight must be finite and non-negative")
-        if self.latent_posterior_init_std <= 0.0:
-            raise ValueError("latent_posterior_init_std must be positive")
-
-    def _validate_output_contract(self) -> None:
-        """Which fields belong to which ``prediction_output``, and the chart each needs.
-
-        A field that means nothing under the configured output is refused rather than
-        ignored, because it would still be serialized into the checkpoint and still rename
-        the run.
-        """
-        if (
-            uses_control_dynamics(self.prediction_output)
-            and self.horizon_mode != HORIZON_NORMALIZED
-        ):
-            raise ValueError(
-                "control output uses learned non-uniform segments and currently requires "
-                "horizon_mode='normalized'; state output retains normalized/full/window"
-            )
-        if (
-            self.random_train_anchor_sampling != RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM
-            and not self.random_train_anchor
-        ):
-            raise ValueError(
-                f"random_train_anchor_sampling={self.random_train_anchor_sampling!r} names "
-                "HOW a random train anchor is drawn, and random_train_anchor=False draws "
-                "none — the fixed policy anchors every flight at L-1"
-            )
-        # The L-1 share is a coin ON TOP of a draw, so it needs a draw to sit on. Refused
-        # rather than ignored in both directions it can be meaningless: the fixed policy
-        # already anchors every flight at L-1 (the share would be 1 by construction), and
-        # under `uniform` the axis would silently do nothing to a run whose name carries it.
-        if self.random_train_anchor_l1_share:
-            if not self.random_train_anchor:
-                raise ValueError(
-                    f"random_train_anchor_l1_share={self.random_train_anchor_l1_share!r} "
-                    "reserves a share of the RANDOM anchor draws for L-1, and "
-                    "random_train_anchor=False draws none — the fixed policy already "
-                    "anchors every flight at L-1"
-                )
-            if self.random_train_anchor_sampling != RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM:
-                raise ValueError(
-                    f"random_train_anchor_l1_share={self.random_train_anchor_l1_share!r} "
-                    "is defined on top of "
-                    f"random_train_anchor_sampling={RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM!r}"
-                    f", not {self.random_train_anchor_sampling!r}: the `uniform` law draws "
-                    "over the samples, where L-1 is already one of them, and mixing a "
-                    "reserved share into it is a second axis nobody has measured"
-                )
-        # A scheduler that watches the objective must watch a COMPARABLE objective. Two
-        # things move the number under the model's feet, and under either the plateau
-        # scheduler could halve the learning rate straight through a schedule that is still
-        # ramping: the KL warm-up (`effective_latent_beta` reweights the objective every
-        # epoch until the ramp ends) and the procedure penalty's dual step (λ is updated
-        # once per epoch, so the same trajectory is priced differently each time).
+    def _validate_cross(self) -> None:
+        """The rules that read TWO views. Each names the pair it binds; a rule inside one
+        view lives on that view's dataclass."""
+        # training × output — a scheduler that watches the objective must watch a
+        # COMPARABLE objective. Two things move the number under the model's feet, and
+        # under either the plateau scheduler could halve the learning rate straight through
+        # a schedule that is still ramping: the KL warm-up (`effective_latent_beta`
+        # reweights the objective every epoch until the ramp ends) and the procedure
+        # penalty's dual step (λ is updated once per epoch, so the same trajectory is priced
+        # differently each time).
         if self.lr_plateau_metric == LR_PLATEAU_METRIC_OBJECTIVE:
             if self.latent_beta_warmup_epochs > 0:
                 raise ValueError(
@@ -1669,6 +2252,7 @@ class TSConfig:
                     "model's. Use fixed multipliers, or step the scheduler on the "
                     "selection metric"
                 )
+        # cohort × output — the charts an output is written in.
         if self.uses_final_approach_context and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(
                 "the final-approach corridor (corridor-bounded output / procedure loss) is "
@@ -1676,30 +2260,11 @@ class TSConfig:
                 f"east/north axes; coordinate_frame={self.coordinate_frame!r} would measure "
                 "it from the wrong point or rotate it twice"
             )
-        if (
-            self.prediction_output != PREDICTION_STATE
-            and self.state_position_reference != STATE_POSITION_ABSOLUTE
-        ):
-            raise ValueError(
-                "state_position_reference belongs to the state output; "
-                f"prediction_output={self.prediction_output!r} rolls its states out of "
-                "controls and has no position channels to reparametrize"
-            )
         if self.prediction_output == PREDICTION_CLOSURE:
-            if not self.closure_labels_path:
-                raise ValueError(
-                    "the closure output regresses per-flight labels: set closure_labels_path "
-                    "to the JSON written by docs/p1_closure_oracle.py labels"
-                )
             if self.coordinate_frame != COORDINATE_FRAME_ENU:
                 raise ValueError(
                     "the closure geometry is written in the threshold-anchored ENU chart; "
                     f"coordinate_frame={self.coordinate_frame!r} would draw it from the wrong origin"
-                )
-            if self.horizon_mode != HORIZON_NORMALIZED:
-                raise ValueError(
-                    "the closure output draws its own clock; only the normalized horizon "
-                    "contract (n_segments target nodes) fits it"
                 )
             if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
                 raise ValueError(
@@ -1709,16 +2274,15 @@ class TSConfig:
                 )
             if self.random_train_anchor:
                 raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
-            if (self.closure_slowness_knots not in CLOSURE_LABEL_KNOTS
-                    or self.closure_height_knots not in CLOSURE_LABEL_KNOTS):
-                raise ValueError(
-                    f"closure labels carry the knot widths {CLOSURE_LABEL_KNOTS}; got "
-                    f"slowness {self.closure_slowness_knots}, height {self.closure_height_knots}"
-                )
-        elif self.closure_labels_path:
+        if self.control_command_hook != CONTROL_HOOK_OFF and self.coordinate_frame != COORDINATE_FRAME_ENU:
+            raise ValueError("the command hook reads the threshold-anchored ENU chart")
+        if self.uses_fitted_teacher and self.random_train_anchor:
             raise ValueError(
-                f"closure_labels_path belongs to the closure output; prediction_output={self.prediction_output!r}"
+                "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
+                "random_train_anchor would supervise other anchors with it"
             )
+        # cohort × backbone — a channel-independent backbone cannot route a conditioning
+        # token anywhere.
         if (
             self.target_conditioning == TARGET_CONDITIONING_CHANNELS
             and self.model != "itransformer"
@@ -1728,117 +2292,18 @@ class TSConfig:
                 f"itransformer backbone: {self.model!r} is channel-independent, so a "
                 "conditioning channel could never reach the state channels"
             )
-        if self.intent_conditioning != INTENT_CONDITIONING_NONE:
-            if self.model != "itransformer":
-                raise ValueError(
-                    f"intent_conditioning={self.intent_conditioning!r} requires the "
-                    f"itransformer backbone: {self.model!r} is channel-independent, so a "
-                    "conditioning channel could never reach the state channels"
-                )
-            if self.coordinate_frame == COORDINATE_FRAME_RUNWAY_ALIGNED:
-                raise ValueError(
-                    "the truth join point is gated on chart east/north against the world "
-                    f"runway course; the {COORDINATE_FRAME_RUNWAY_ALIGNED!r} chart is "
-                    "already rotated"
-                )
-            if (
-                self.intent_conditioning in (
-                    INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
-                    INTENT_CONDITIONING_TRUTH_JOIN_DURATION,
-                )
-                and self.random_train_anchor
-            ):
-                raise ValueError(
-                    "the lead ETA and remaining-time channels are measured at the flight's "
-                    "fixed anchor; random_train_anchor=True moves the anchor per sample"
-                )
-        if self.latent_dim == 0 and (
-            self.latent_prior_components != 1
-            or self.latent_beta != 1.0
-            or self.latent_free_bits_nats != 0.0
-            or self.latent_posterior_init_std != 1.0
-            or self.latent_beta_warmup_epochs != 0
-            or self.latent_aux_duration_weight != 0.0
-        ):
+        if self.intent_conditioning != INTENT_CONDITIONING_NONE and self.model != "itransformer":
             raise ValueError(
-                "latent_prior_components / latent_beta / latent_free_bits_nats / "
-                "latent_posterior_init_std / latent_beta_warmup_epochs / "
-                "latent_aux_duration_weight mean nothing "
-                "without a latent (latent_dim == 0) and would still rename the run"
+                f"intent_conditioning={self.intent_conditioning!r} requires the "
+                f"itransformer backbone: {self.model!r} is channel-independent, so a "
+                "conditioning channel could never reach the state channels"
             )
-        if self.latent_aux_duration_weight and self.cta_conditioning != CTA_CONDITIONING_OFF:
-            raise ValueError(
-                "latent_aux_duration_weight teaches z to carry the remaining duration, and "
-                f"cta_conditioning={self.cta_conditioning!r} already hands that duration to "
-                "the decoder — the auxiliary target would be supervising a known input"
-            )
-        if self.cta_conditioning != CTA_CONDITIONING_OFF and self.prediction_output != PREDICTION_CONTROL:
-            raise ValueError(
-                "cta_conditioning replaces the control path's duration head; "
-                f"prediction_output={self.prediction_output!r} has none"
-            )
-        if self.duration_head not in DURATION_HEADS:
-            raise ValueError(
-                f"unknown duration_head {self.duration_head!r}; expected one of {DURATION_HEADS}"
-            )
-        if self.duration_head in DURATION_HEADS_WITH_QUANTILES:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    f"duration_head={self.duration_head!r} publishes a duration interval "
-                    "beside a rolled-out schedule, and that head is the control path's "
-                    f"(B1 / B1.b); prediction_output={self.prediction_output!r} has no "
-                    "such head"
-                )
-            if self.latent_dim > 0:
-                # Not a plumbing limitation. `control/latent.py` reaches the duration by
-                # SHIFTING the head's single unconstrained logit (`latent_duration`), and a
-                # cumulative-softplus head has five; shifting all five would move the spread
-                # as well as the location. Worse, training decodes a POSTERIOR sample, so the
-                # five would be quantiles of p(T | z ~ q(z | this flight's own future)) — an
-                # interval conditioned on the answer, which B2 would then calibrate as if it
-                # were p(T | history). The combination is refused rather than approximated.
-                # `two-head` is refused for the SAME reason: its quantile head is trained
-                # under the posterior sample exactly as the single one would be, and it is
-                # the head B2 calibrates whichever head drives the rollout.
-                raise ValueError(
-                    f"duration_head={self.duration_head!r} and latent_dim > 0 are refused "
-                    "together: z reaches the duration by shifting the point head's single "
-                    "logit, and under a posterior sample the quantiles would be conditioned "
-                    "on the flight's own future — not a predictive interval to calibrate"
-                )
-        # B1.b: each duration weight is refused where its term does not exist, rather than
-        # being carried into the checkpoint as a number that changed nothing. Under
-        # `quantile` the pinball sum REPLACED the point term, so `final_time_loss_weight`
-        # has nothing to weigh (every stored `quantile` run carries the default);
-        # symmetrically, `point` has no pinball sum. `two-head` is the one value where both
-        # weights bind, which is the whole point of it.
-        if (self.duration_head == DURATION_HEAD_QUANTILE
-                and self.final_time_loss_weight != DEFAULT_FINAL_TIME_LOSS_WEIGHT):
-            raise ValueError(
-                f"final_time_loss_weight={self.final_time_loss_weight!r} weighs the POINT "
-                "head's squared duration residual, and duration_head='quantile' has no "
-                "point term — the pinball sum replaced it under the same component name. "
-                "Weigh the pinball with duration_quantile_loss_weight, or take the point "
-                f"term back with duration_head={DURATION_HEAD_TWO_HEAD!r}"
-            )
-        if (self.duration_head == DURATION_HEAD_POINT
-                and self.duration_quantile_loss_weight != DEFAULT_DURATION_QUANTILE_LOSS_WEIGHT):
-            raise ValueError(
-                f"duration_quantile_loss_weight={self.duration_quantile_loss_weight!r} "
-                "weighs the QUANTILE head's pinball losses, and duration_head='point' has "
-                f"no such head; select duration_head={DURATION_HEAD_QUANTILE!r} or "
-                f"{DURATION_HEAD_TWO_HEAD!r}"
-            )
+        # training × output — which epoch is kept, against what the objective reads.
         if self.latent_dim > 0 and self.checkpoint_selection_metric == CHECKPOINT_SELECTION_OBJECTIVE:
             raise ValueError(
                 "a latent control run cannot select its checkpoint on the validation objective: "
                 "that objective decodes a posterior sample (it reads the future, and is "
                 "stochastic); select on a fixed-anchor replay metric instead"
-            )
-        if self.latent_dim > 0 and self.prediction_output != PREDICTION_CONTROL:
-            raise ValueError(
-                "the latent intent lives on the control output; "
-                f"prediction_output={self.prediction_output!r} has no control head to decode it"
             )
         # The anchor-grid metric re-anchors the validation replay at every bin, so an
         # oracle input is re-read from the future AT EACH ANCHOR — the same reason
@@ -1860,280 +2325,11 @@ class TSConfig:
                     "bin anchor, so the metric would be selecting on the oracle, not the model"
                 )
 
-    def _validate_control_contract(self) -> None:
-        """The control path's internal consistency.
-
-        Its axes are not independent: the objective constrains the grid, the clock and the
-        duration parameterization; the command hook constrains the flight model, the grid
-        and the chart; the fitted teacher constrains the objective and the anchor policy.
-        Every rule here names the pair it binds.
-
-        **`control_state_loss_grid` cannot be derived from `control_state_objective`** —
-        measured on disk 2026-09-07, not assumed. `true-time-position` does pin the native
-        grid, but `normalized-mse` runs on BOTH: of the 233 stored configs that load,
-        159 are (`true-time-position`, native), 62 + 8 are (`normalized-mse`, native) on
-        the state and closure outputs, and 4 are (`normalized-mse`, `fixed-dt`) on the
-        control output — the arms `CLAUDE.md`'s defaults table describes as tripping the
-        straight-in veto. Two live values under one objective is not a function, so the
-        grid stays a field and these rules stay checks.
-        """
-        if self.control_command_hook != CONTROL_HOOK_OFF:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError("a control command hook needs the control output")
-            if self.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
-                raise ValueError(
-                    "the command hook is implemented on the first-order-lag dynamics (its "
-                    f"state carries the actuators a hook reads); "
-                    f"control_dynamics_model={self.control_dynamics_model!r}"
-                )
-            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
-                raise ValueError("the command hook rides the native segment-endpoint rollout")
-            if self.coordinate_frame != COORDINATE_FRAME_ENU:
-                raise ValueError("the command hook reads the threshold-anchored ENU chart")
-        # Each module's own knobs, checked against the modules the hook actually BUILDS.
-        # Until 2026-09-08 `barrier` was the only buildable hook, so "a hook is on" and "the
-        # barrier is on" were the same condition; with a second module they are not, and a
-        # gain that no module reads is a value that cannot change an answer.
-        # `nominal-residual` builds nothing (it is load-only and archived) and is absent from
-        # the members table, so its six stored 2026-09-06 configs are left exactly as they
-        # are — refusing them here would be a contract change in the wrong direction.
-        hook_modules = CONTROL_HOOK_MEMBERS.get(self.control_command_hook, ())
-        # `off` builds nothing either, and must be held to the same rule: until 2026-09-09
-        # this branch was `elif hook_modules:`, so `off` skipped it and a barrier gain or a
-        # hard saturation under no hook trained bit-identically to the arm without them,
-        # under a different name and slug (review C-2). `nominal-residual` stays exempt.
-        builds_nothing = bool(hook_modules) or self.control_command_hook == CONTROL_HOOK_OFF
-        if CONTROL_HOOK_BARRIER in hook_modules:
-            for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
-                if getattr(self, name) <= 0.0:
-                    raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
-        elif builds_nothing:
-            for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
-                if getattr(self, name) != CONTROL_BARRIER_GAIN_DEFAULT:
-                    raise ValueError(
-                        f"{name}={getattr(self, name)!r} needs a command hook that contains "
-                        f"{CONTROL_HOOK_BARRIER!r} (control_command_hook="
-                        f"{self.control_command_hook!r})"
-                    )
-        if (
-            self.control_command_hook == CONTROL_HOOK_OFF
-            and self.control_hook_saturation != HOOK_SATURATION_SOFT
-        ):
-            raise ValueError(
-                f"control_hook_saturation={self.control_hook_saturation!r} softens a hook's "
-                "bound and there is no hook (control_command_hook='off')"
-            )
-        # The margin is read by TWO modules: the floor holds it, and the trombone divides
-        # by the same V_floor to size its detour, so it changes an answer under either.
-        if any(name in hook_modules for name in CONTROL_SPEED_FLOOR_MARGIN_READERS):
-            if not math.isfinite(self.control_speed_floor_margin) or (
-                self.control_speed_floor_margin < 1.0
-            ):
-                raise ValueError(
-                    "control_speed_floor_margin is a finite multiple of the stall speed and "
-                    "a floor below it is not a floor; got "
-                    f"{self.control_speed_floor_margin!r}"
-                )
-        elif self.control_speed_floor_margin != CONTROL_SPEED_FLOOR_MARGIN_DEFAULT:
-            raise ValueError(
-                f"control_speed_floor_margin={self.control_speed_floor_margin!r} needs a "
-                f"command hook that contains one of {CONTROL_SPEED_FLOOR_MARGIN_READERS} "
-                f"(control_command_hook={self.control_command_hook!r})"
-            )
-        # ...and the estimator axis is the trombone's alone: no other module measures a
-        # surplus, so away from its default the value would change no trajectory.
-        if (
-            CONTROL_HOOK_TROMBONE not in hook_modules
-            and self.trombone_surplus_reference != TROMBONE_SURPLUS_BEELINE
-        ):
-            raise ValueError(
-                f"trombone_surplus_reference={self.trombone_surplus_reference!r} needs a "
-                f"command hook that contains {CONTROL_HOOK_TROMBONE!r} "
-                f"(control_command_hook={self.control_command_hook!r})"
-            )
-        if (
-            self.prediction_output == PREDICTION_CONTROL
-            and self.procedure_loss_active
-            and self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
-        ):
-            raise ValueError(
-                "the procedure penalty on the control path is implemented on the native "
-                "segment-endpoint rollout (its aligned targets carry the truth gate); "
-                f"control_state_loss_grid={self.control_state_loss_grid!r} is not supported"
-            )
-        if (
-            not uses_control_dynamics(self.prediction_output)
-            and self.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4
-        ):
-            raise ValueError(
-                "non-default control dynamics backend requires a control prediction output"
-            )
-        for name in (
-            "control_velocity_loss_weight",
-            "control_imitation_loss_weight",
-            "control_heading_rate_loss_weight",
-            "control_bank_tv_loss_weight",
-        ):
-            # All four terms are built by the true-time-position objective only
-            # (`objective.loss_component_names`). Elsewhere the weight would be a number
-            # that cannot change an answer — while still NAMING the run and, for the
-            # imitation term, solving an inverse-dynamics teacher per sample that nothing
-            # reads (review C-1: the first two were accepted until 2026-09-09; no stored
-            # run carries either under another objective).
-            if (
-                getattr(self, name)
-                and self.control_state_objective
-                != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION
-            ):
-                raise ValueError(
-                    f"{name} is only built by the "
-                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION} objective, not "
-                    f"{self.control_state_objective!r}"
-                )
-        if self.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
-            if not self.control_fitted_teacher_path:
-                raise ValueError(
-                    "the fitted teacher imitates a per-flight table: set "
-                    "control_fitted_teacher_path to the basis_fit.json written by "
-                    "run_ts_control_basis_oracle.py --checkpoint"
-                )
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "the imitation term supervises a control schedule; "
-                    f"prediction_output={self.prediction_output!r} emits none"
-                )
-            if self.random_train_anchor:
-                raise ValueError(
-                    "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
-                    "random_train_anchor would supervise other anchors with it"
-                )
-            if not self.control_imitation_loss_weight:
-                raise ValueError(
-                    "control_imitation_target names a teacher for a term this run switches "
-                    "off (control_imitation_loss_weight=0): the table would be loaded and "
-                    "validated against the cohort, and never read"
-                )
-            if self.control_state_objective != CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
-                # `objective.loss_component_names` registers `imitation` under the
-                # true-time-position objective ONLY, so under any other objective the term
-                # is not built at all — the same reason L1's dense arms have no teacher.
-                # That objective in turn requires the native grid and UNIFORM durations, so
-                # this one check also closes the factorized-duration hole: a table of
-                # schedules spread uniformly over the total duration cannot supervise a
-                # learned partition.
-                raise ValueError(
-                    "the imitation term is registered under control_state_objective="
-                    f"{CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION!r} only; this run scores "
-                    f"{self.control_state_objective!r} and would load the fitted teacher "
-                    "and never read it"
-                )
-        elif self.control_fitted_teacher_path:
-            raise ValueError(
-                "control_fitted_teacher_path belongs to "
-                f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r}; this run "
-                f"imitates {self.control_imitation_target!r}"
-            )
-        for name in (
-            "control_thrust_time_constant_s",
-            "control_bank_time_constant_s",
-            "control_load_time_constant_s",
-        ):
-            # The actuator ODE is integrated by the same explicit RK4 as the rest of the
-            # state, and explicit RK4 on y' = -y/tau is stable only for
-            # h/tau <= RK4_REAL_AXIS_STABILITY_LIMIT (the substep h is at most the
-            # integrator step). Past it the rollout does not degrade, it produces NaN, so a
-            # swept time constant that short is refused at construction rather than
-            # discovered as a dead training run. Until 2026-09-09 the rule refused
-            # tau < h outright — 2.8x stricter than the instability it cited (review C-13).
-            value = getattr(self, name)
-            if (
-                self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG
-                and self.control_rollout_integrator_dt_s
-                > RK4_REAL_AXIS_STABILITY_LIMIT * value
-            ):
-                raise ValueError(
-                    f"{name}={value:g}s puts the {self.control_rollout_integrator_dt_s:g}s "
-                    f"integrator step at h/tau = "
-                    f"{self.control_rollout_integrator_dt_s / value:.2f} > "
-                    f"{RK4_REAL_AXIS_STABILITY_LIMIT}; explicit RK4 is unstable there"
-                )
-        if self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG:
-            if not uses_control_dynamics(self.prediction_output):
-                raise ValueError(
-                    "the lagged flight model requires prediction_output='control'"
-                )
-            # The lag is one RK4 over the coupled point-mass/actuator ODE, so it needs a
-            # backend that exposes a continuous chart RHS. The re-anchored baseline is a
-            # discrete map (it rebuilds a local ENU frame every substep) and has no such
-            # RHS to augment.
-            if self.control_dynamics_backend == CONTROL_DYNAMICS_REANCHORED_RK4:
-                raise ValueError(
-                    "the lagged flight model requires a transport-chart dynamics backend"
-                )
-        if self.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "fixed-dt control state loss is supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-                raise ValueError(
-                    "fixed-dt control state loss requires "
-                    "control_state_supervision_clock='observed'"
-                )
-        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "true-time-position control objective is supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE:
-                raise ValueError(
-                    "true-time-position control objective requires "
-                    "control_state_loss_grid='native-segment-endpoints'"
-                )
-            if self.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
-                raise ValueError(
-                    "true-time-position control objective requires uniform control durations"
-                )
-            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-                raise ValueError(
-                    "true-time-position control objective requires observed state supervision"
-                )
-        if not self.control_state_duration_gradient:
-            if self.prediction_output != PREDICTION_CONTROL:
-                raise ValueError(
-                    "detached control-state duration gradients are supported only by "
-                    "prediction_output='control'"
-                )
-            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
-                raise ValueError(
-                    "detached control-state duration gradients require "
-                    "control_state_supervision_clock='observed'"
-                )
-        if (
-            self.control_gradient_clip_norm > 0.0
-            and self.prediction_output != PREDICTION_CONTROL
-        ):
-            raise ValueError(
-                "control gradient clipping is supported only by "
-                "prediction_output='control'"
-            )
-        if (
-            self.control_duration_parameterization == CONTROL_DURATION_UNIFORM
-            and self.prediction_output != PREDICTION_CONTROL
-        ):
-            raise ValueError(
-                "uniform control durations are supported only by prediction_output='control'"
-            )
+    # ── derived values, kept on the flat config for every existing reader ────
 
     @property
     def procedure_loss_active(self) -> bool:
-        return (
-            self.procedure_loss_lateral_weight > 0.0
-            or self.procedure_loss_vertical_weight > 0.0
-            or self.procedure_loss_dual_step > 0.0
-        )
+        return self.output.procedure_loss_active
 
     @property
     def uses_fitted_teacher(self) -> bool:
@@ -2142,7 +2338,7 @@ class TSConfig:
 
     @property
     def uses_final_approach_context(self) -> bool:
-        """Whether batches carry the per-flight runway course / glidepath / FAF row."""
+        """Whether batches carry the per-flight runway course / glidepath row."""
         return (
             self.state_position_reference == STATE_POSITION_CORRIDOR_BOUNDED
             or self.procedure_loss_active
@@ -2155,11 +2351,7 @@ class TSConfig:
         Serialised into every checkpoint beside ``channels``; ``load_checkpoint`` refuses
         a mismatch, the same lock that keeps a renamed state channel from loading.
         """
-        return (
-            self.channels
-            + conditioning_channel_names(self.target_conditioning)
-            + intent_channel_names(self.intent_conditioning)
-        )
+        return self.cohort.input_channels
 
     # The model INPUT width. PatchTST reads configs.enc_in; iTransformer infers the token
     # count from the tensor, but its duration head and the control feature head flatten
@@ -2171,28 +2363,19 @@ class TSConfig:
     @property
     def pred_len(self) -> int:
         """Vendored model output length under the selected horizon contract."""
-        return {
-            HORIZON_NORMALIZED: int(self.n_segments),
-            HORIZON_FULL: self.full_horizon_steps,
-            HORIZON_WINDOW: self.window_horizon_steps,
-        }[self.horizon_mode]
+        return self.output.pred_len
 
     @property
     def horizon_s(self) -> float | None:
         """Physical coverage of fixed-time modes; normalized time has no fixed cap."""
         if self.horizon_mode == HORIZON_NORMALIZED:
             return None
-        steps = (
-            self.full_horizon_steps
-            if self.horizon_mode == HORIZON_FULL
-            else self.window_horizon_steps
-        )
-        return steps * self.dt_s
+        return self.pred_len * self.dt_s
 
     @property
     def lookback_s(self) -> float:
         """Wall-clock seconds of observed track the model is shown."""
-        return self.seq_len * self.dt_s
+        return self.cohort.lookback_s
 
     @property
     def control_time_constants_s(self) -> tuple[float, float, float]:
@@ -2206,7 +2389,7 @@ class TSConfig:
     @property
     def resolved_split_seed(self) -> int:
         """Seed used only for the locked outer train/validation/test assignment."""
-        return self.seed if self.split_seed is None else self.split_seed
+        return self.training.resolved_split_seed
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -2255,8 +2438,62 @@ class TSConfig:
                     f"to the constant {constant!r} because nothing on disk moved it; this "
                     "artifact was produced under a value this build cannot reproduce"
                 )
+        # A field owned by ANOTHER output variant was unread under this run's output, so
+        # its stored value could not have changed the run: it is normalised to the default
+        # the ownership rule requires (`_OUTPUT_OWNED_FIELDS`) rather than refused.
+        # Measured 2026-09-10 across every stored config that loads: none moves.
+        output = data.get("prediction_output", PREDICTION_STATE)
+        for owner, names in _OUTPUT_OWNED_FIELDS.items():
+            if owner != output:
+                for name in names:
+                    if name in data:
+                        data[name] = _OWNED_FIELD_DEFAULTS[name]
         data["channels"] = tuple(data["channels"])
         return cls(**data)
+
+
+#: The flat schema's field names — what `_own` selects a view's slice from.
+_FLAT_FIELD_NAMES: frozenset[str] = frozenset(f.name for f in fields(TSConfig))
+#: The default every output-owned field must sit at under another output.
+_OWNED_FIELD_DEFAULTS: dict[str, Any] = {
+    f.name: f.default
+    for f in fields(TSConfig)
+    if any(f.name in names for names in _OUTPUT_OWNED_FIELDS.values())
+}
+#: Free text read by nobody: the one field outside every view.
+_UNVIEWED_FIELDS: frozenset[str] = frozenset({"notes"})
+
+
+def _check_view_partition() -> None:
+    """Every `TSConfig` field belongs to exactly one view — checked at import so a field
+    added to the flat schema without an owner (or to two) fails the first test run."""
+    groups: dict[str, tuple[str, ...]] = {
+        "CohortSpec": _view_fields(CohortSpec),
+        "BackboneSpec": _view_fields(BackboneSpec),
+        "TrainingSpec": _view_fields(TrainingSpec),
+        "OutputSpec": _view_fields(OutputSpec),
+        **{f"{owner} output": names for owner, names in _OUTPUT_OWNED_FIELDS.items()},
+    }
+    owners: dict[str, list[str]] = {}
+    for group, names in groups.items():
+        for name in names:
+            owners.setdefault(name, []).append(group)
+    twice = {name: who for name, who in owners.items() if len(who) > 1}
+    unknown = sorted(set(owners) - _FLAT_FIELD_NAMES)
+    orphans = sorted(_FLAT_FIELD_NAMES - set(owners) - _UNVIEWED_FIELDS)
+    if twice or unknown or orphans:
+        raise RuntimeError(
+            "TSConfig views do not partition the flat schema: "
+            f"owned twice {twice}, not a TSConfig field {unknown}, no view {orphans}"
+        )
+    missing_default = [name for name, d in _OWNED_FIELD_DEFAULTS.items() if d is MISSING]
+    if missing_default:
+        raise RuntimeError(
+            f"output-owned fields need a plain default to be normalised to: {missing_default}"
+        )
+
+
+_check_view_partition()
 
 
 def default_anchor(config: TSConfig) -> int:

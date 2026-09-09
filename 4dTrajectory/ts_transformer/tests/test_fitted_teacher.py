@@ -158,7 +158,7 @@ def test_the_config_refuses_an_incoherent_teacher(overrides, message):
 
 
 def test_a_state_run_has_no_control_schedule_to_imitate():
-    with pytest.raises(ValueError, match="emits none"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(
             prediction_output=PREDICTION_STATE,
             control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,

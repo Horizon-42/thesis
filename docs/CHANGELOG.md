@@ -4,6 +4,38 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: review §4.3 — `TSConfig` split into typed views; one ownership rule replaces twenty-three per-field checks
+
+Step 3 of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`
+§4.3, resolution paragraph), on `dev-pkg-review`. Nothing on disk changed: full suite 970
+passed (the 12 known `test_ts_pipeline.py` fixtures red before and after), and the 219 stored
+`history.json` configs give byte-identical run names, slugs and loadability.
+
+- **The flat dataclass stays** (the vendored networks, `run_naming`, the CLI and every stored
+  checkpoint read the flat dict). `__post_init__` now builds the views that OWN the fields —
+  `CohortSpec`, `BackboneSpec`, `TrainingSpec`, and one `OutputSpec` per path (`StateOutput`,
+  `ClosureOutput`, `ControlOutput` with `DurationSpec` / `DynamicsSpec` / `ControlObjective` /
+  `HookSpec` / `LatentSpec`) — exposed as `config.cohort/.backbone/.training/.output`. Each
+  view's `__post_init__` carries its own vocabulary, range and intra-view rules (the τ/RK4
+  bound on `DynamicsSpec`, the four hook rules on `HookSpec`, the "mean nothing without a
+  latent" rule on `LatentSpec`); the six rules that read two views sit on
+  `TSConfig._validate_cross`. The five 775-line validators are gone.
+- **One ownership rule** (`_validate_ownership`): a field owned by another output's view is
+  refused off its default — "`control_command_hook='barrier'` belongs to the control output;
+  prediction_output='state' never reads it and would still carry it into the checkpoint and the
+  run name". It replaces the eleven "belongs to output X" and twelve "supported only by
+  prediction_output='control'" checks, and closes the class C-1 / C-2 / C-4 came from by
+  construction. `from_dict` normalises a stored config's foreign-output fields to their defaults
+  (unread under that output by definition; measured on every stored config that loads: none
+  moves). The partition — every field on exactly one view — is checked at import.
+- **Not adopted:** sum types per variant (`Factorized(floor)`, one `DynamicsSpec` per backend).
+  C-4's floor stays a field: every recipe pins `0.0` under `uniform`. Defaults unchanged (user
+  decision). `run_ts_control_basis_oracle.py` no longer hands a control config
+  `closure_labels_path=None` (it goes through `from_dict`, which normalises the seed
+  checkpoint's foreign fields).
+- Tests: eight assertions repointed from the per-field messages to the ownership message; the
+  fixed-dt procedure-penalty test now builds a config whose only violation is the grid.
+
 ### 2026-09-10 — ts_transformer: review §5 — four axes frozen, the FAF gate and dead code deleted, the scene encoder archived
 
 Step 2 of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`

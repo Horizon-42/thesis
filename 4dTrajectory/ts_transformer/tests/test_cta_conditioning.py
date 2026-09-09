@@ -77,7 +77,7 @@ def _dynamics(batch: int, cta_s: torch.Tensor | None = None) -> dict[str, torch.
 
 
 def test_config_refuses_a_cta_off_the_control_path_and_unknown_values():
-    with pytest.raises(ValueError, match="duration head"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(prediction_output=PREDICTION_STATE, cta_conditioning=CTA_CONDITIONING_GIVEN)
     with pytest.raises(ValueError, match="unknown cta_conditioning"):
         _config(cta_conditioning="truth")

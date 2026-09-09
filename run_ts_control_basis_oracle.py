@@ -164,7 +164,6 @@ _RECIPE_OVERRIDES = {
     "procedure_loss_lateral_weight": 0.0,
     "procedure_loss_vertical_weight": 0.0,
     "intent_conditioning": INTENT_CONDITIONING_NONE,
-    "closure_labels_path": None,
     "random_train_anchor": False,
     "dropout": 0.0,
 }
@@ -200,7 +199,10 @@ def basis_config(config_dict: dict, n_segments: int, device: str) -> TSConfig:
     payload.update(_RECIPE_OVERRIDES)
     payload["n_segments"] = int(n_segments)
     payload["device"] = device
-    return TSConfig(**payload)
+    # Through `from_dict` once more: the seed may be a state or closure checkpoint, whose
+    # own output fields are foreign to the control contract built here; the load path
+    # normalises them to their defaults, which the ownership rule would otherwise refuse.
+    return TSConfig.from_dict(payload)
 
 
 def teacher_config(config: TSConfig, device: str) -> TSConfig:

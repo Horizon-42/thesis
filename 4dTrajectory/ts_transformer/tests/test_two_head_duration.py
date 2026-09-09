@@ -314,7 +314,7 @@ def test_two_head_is_refused_with_a_latent():
 
 
 def test_two_head_is_refused_off_the_control_output():
-    with pytest.raises(ValueError, match="control path"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(prediction_output=PREDICTION_STATE, duration_head=DURATION_HEAD_TWO_HEAD)
 
 

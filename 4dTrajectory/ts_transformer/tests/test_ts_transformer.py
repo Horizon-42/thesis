@@ -2662,7 +2662,7 @@ def test_transport_chart_dynamics_is_an_explicit_control_only_contract():
 
     assert control_recipe(config)["dynamics_backend"] == backend
     assert f"+dynamics={backend}-v1" in objective.target_contract(config)
-    with pytest.raises(ValueError, match="requires a control prediction output"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(control_dynamics_backend=backend)
 
 
@@ -2706,7 +2706,7 @@ def test_fixed_dt_control_state_loss_requires_observed_single_control_clock():
             prediction_output=PREDICTION_CONTROL,
             control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
         )
-    with pytest.raises(ValueError, match="only by prediction_output='control'"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(
             prediction_output=PREDICTION_STATE,
             control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
@@ -2715,7 +2715,7 @@ def test_fixed_dt_control_state_loss_requires_observed_single_control_clock():
 
 
 def test_uniform_control_durations_reject_non_control_outputs():
-    with pytest.raises(ValueError, match="only by prediction_output='control'"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(
             prediction_output=PREDICTION_STATE,
             control_duration_parameterization=CONTROL_DURATION_UNIFORM,
@@ -2768,7 +2768,7 @@ def test_control_gradient_clip_is_explicit_and_control_only():
     assert control_recipe(config)["gradient_clip_norm"] == pytest.approx(20.0)
     with pytest.raises(ValueError, match="finite and non-negative"):
         replace(config, control_gradient_clip_norm=-1.0)
-    with pytest.raises(ValueError, match="only by prediction_output='control'"):
+    with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(control_gradient_clip_norm=20.0)
 
 

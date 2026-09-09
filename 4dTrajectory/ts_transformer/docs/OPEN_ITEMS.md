@@ -27,8 +27,9 @@ were NOT made without the owner:
 - **C-4, the duration floor under `uniform`.** `control_duration_uniform_floor` is read by the
   `factorized` head only, but its default is 0.8 and every recipe pins 0.0, so 88 stored
   `uniform` runs carry a non-default inert value and a refusal would stop them loading. It
-  belongs inside `Factorized(floor)` in the §4.3 config split; until then a custom `uniform`
-  run can still wear `duration-floor=`.
+  stays a field on `DurationSpec` after the §4.3 split (2026-09-10): a `Factorized(floor)`
+  variant would refuse the `0.0` every recipe pins under `uniform`, i.e. every recipe. A custom
+  `uniform` run can still wear `duration-floor=`; retiring the pin is a recipe-version change.
 - **C-7, the test-release ledger is bound to the DIRECTORY.** `test_release.json` sits beside
   `checkpoint.pt`; a copy of the checkpoint elsewhere can be frozen and released again. The fix
   is a registry keyed by the checkpoint digest outside the run directory — where it lives and
@@ -54,10 +55,12 @@ were NOT made without the owner:
 - **§5 DONE 2026-09-10** (the review's §5 resolution paragraph has the per-axis outcome and
   the two corrections: the observed clock and scaled-tcv are recipe-pinned and stay
   selectable; corridor-bounded stays the candidate default). **Still to do, in the review's
-  §6 order:** §4.3 config split (decided: the dataclass defaults stay; the grammar names every
-  field against the nearest recipe, then one relabel pass like C-3's), §4.2 output strategies,
-  §4.4 loop / predict extraction, §4.5–4.6 runners and tests — each a commit with the full
-  suite and the stored-run census as the acceptance test.
+  §6 order:** §4.3 config split DONE 2026-09-10 (typed views over the flat dataclass, the
+  ownership rule; defaults unchanged; 0 names moved), then §4.2 output strategies, §4.4 loop /
+  predict extraction, §4.5–4.6 runners and tests, the folder grouping — each a commit with the
+  full suite and the stored-run census as the acceptance test. The "name every field against
+  the nearest recipe" grammar change is deferred to after the folder grouping (it moves
+  stored names and needs its own relabel pass like C-3's).
 
 ## Current state (2026-09-07) — the latent-intent design supersedes everything below it
 

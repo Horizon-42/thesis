@@ -434,7 +434,9 @@ def test_dual_history_records_the_lambda_used_and_the_next_one(tmp_path):
 # ── The penalty on the control path ─────────────────────────────────────────
 
 def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
-    from ts_transformer.config import CONTROL_STATE_LOSS_GRID_FIXED_DT, PREDICTION_CONTROL
+    from ts_transformer.config import (
+        CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_LOSS_GRID_FIXED_DT, PREDICTION_CONTROL,
+    )
     from ts_transformer.objective import loss_component_names
 
     config = TSConfig(prediction_output=PREDICTION_CONTROL, procedure_loss_lateral_weight=1e-3)
@@ -442,7 +444,8 @@ def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
     assert "procedure" not in loss_component_names(TSConfig(prediction_output=PREDICTION_CONTROL))
     with pytest.raises(ValueError, match="native"):
         TSConfig(prediction_output=PREDICTION_CONTROL, procedure_loss_lateral_weight=1e-3,
-                 control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT)
+                 control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+                 control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED)
     with pytest.raises(ValueError, match="state output"):
         TSConfig(prediction_output=PREDICTION_CONTROL, state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED)
 

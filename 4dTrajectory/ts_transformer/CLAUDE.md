@@ -141,7 +141,16 @@ flight model.
   path, not a bug to fix in either number. A guidance layer that COMMANDS the load factor (the
   plan-and-guidance design) reads `flyability`'s envelope, never this box.
 - **`config.py` is the single source** and everything in it is serialised into every checkpoint.
-  `config.input_channels` is what the model sees, `config.channels` what it predicts.
+  `config.input_channels` is what the model sees, `config.channels` what it predicts. `TSConfig`
+  is FLAT on purpose (the vendored networks, `run_naming`, the CLI and every stored checkpoint
+  read the flat dict); what OWNS each field and validates it are the typed views built in
+  `__post_init__` — `config.cohort` / `.backbone` / `.training` / `.output` (`StateOutput`,
+  `ClosureOutput` or `ControlOutput` with its `duration` / `dynamics` / `objective` / `hook` /
+  `latent` axes). **A field owned by another output's view is refused off its default**
+  (`_validate_ownership`: `control_command_hook='barrier'` on a state run is "belongs to the
+  control output"), and `from_dict` normalises such fields to their defaults on load. Rules
+  that read two views live on `_validate_cross`. Adding a field: put it on exactly one view
+  (`_check_view_partition` fails the import otherwise).
 - `dt_s = 2.0`, `seq_len = 60` (120 s), `pred_len` = 30 (window, 60 s) / **300** (full, 600 s).
   The horizon was sized from the MEASURED duration distribution (p50 328 s / p95 651 s), covering
   **97.8 %** of flights — the "an arrival is ~3.5–5 min" straight-line estimate was WRONG (real
