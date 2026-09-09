@@ -41,15 +41,15 @@ from ts_transformer.config import (  # noqa: E402
     TSConfig,
     control_recipe_overrides,
 )
-from ts_transformer.control.dynamics.backends import (  # noqa: E402
+from ts_transformer.outputs.control.dynamics.backends import (  # noqa: E402
     _BACKENDS,
     RolloutInputs,
     control_dynamics_backend,
 )
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
 from geokit import METRES_PER_DEG_LAT  # noqa: E402
-import ts_transformer.control.dynamics.inverse as inverse_module  # noqa: E402
-from ts_transformer.control.dynamics.inverse import (  # noqa: E402
+import ts_transformer.outputs.control.dynamics.inverse as inverse_module  # noqa: E402
+from ts_transformer.outputs.control.dynamics.inverse import (  # noqa: E402
     CONTROL_INVERSES,
     actual_controls,
     reference_controls,
@@ -407,7 +407,7 @@ def test_the_time_constant_axis_is_dropped_from_cv_when_the_lag_is_off():
 
 def test_the_exported_control_record_stays_in_newtons():
     """The evaluation contract is shared with the optimizer and did not change units."""
-    from ts_transformer.control.envelope import fraction_controls, physical_controls
+    from ts_transformer.outputs.control.envelope import fraction_controls, physical_controls
 
     controls = np.array([[[0.5, 0.1, 1.0], [-0.2, -0.1, 1.2]]])
     max_thrust_n = np.array([MAX_THRUST_N])
@@ -432,7 +432,7 @@ def _velocity_term_config(weight: float) -> TSConfig:
 def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
     """The true-time-position objective scored position only; this adds the velocity."""
     import ts_transformer.objective as objective
-    from ts_transformer.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
+    from ts_transformer.outputs.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
     from ts_transformer.dataset import Normalizer
 
     normalizer = Normalizer(mean=np.zeros(6), std=np.ones(6))
@@ -466,16 +466,17 @@ def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
 def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
     """Fitted-tail velocity weights are zero, so placeholders cannot enter the loss."""
     import ts_transformer.objective as objective
+    import ts_transformer.outputs.control.loss.objective as control_objective
     from ts_transformer.dataset import Normalizer
 
     config = _velocity_term_config(1.0)
     channels = len(config.channels)
-    prediction_zero_weights = objective._native_endpoint_control_state_loss
+    prediction_zero_weights = control_objective._native_endpoint_control_state_loss
 
     torch.manual_seed(0)
     controls = torch.zeros(1, config.n_segments, 3, dtype=torch.float64, requires_grad=True)
-    from ts_transformer.prediction_outputs import ControlPrediction
-    from ts_transformer.dataset import probe_dynamics
+    from ts_transformer.outputs.control.heads import ControlPrediction
+    from ts_transformer.outputs.control.supervision import probe_dynamics
 
     durations = torch.full((1, config.n_segments), 20.0, dtype=torch.float64)
     prediction = ControlPrediction(
@@ -548,9 +549,9 @@ def test_the_imitation_term_scores_the_schedule_and_masks_the_fitted_tail():
     same in every channel, and segments past the last measured velocity must not enter --
     the fitted tail has no kinematics to invert.
     """
-    from ts_transformer.control.envelope import CONTROL_HALF_WIDTH
-    from ts_transformer.prediction_outputs import ControlPrediction
-    from ts_transformer.objective import control_imitation_mse
+    from ts_transformer.outputs.control.envelope import CONTROL_HALF_WIDTH
+    from ts_transformer.outputs.control.heads import ControlPrediction
+    from ts_transformer.outputs.control.loss.objective import control_imitation_mse
 
     config = _imitation_config(0.05)
     target = torch.zeros(2, 8, 3, dtype=torch.float64)
@@ -592,10 +593,10 @@ def test_the_imitation_target_is_inverted_through_the_configured_flight_model():
     by the registry entry the forward rollout dispatches through, so the two can never be
     solutions of different equations.
     """
-    import ts_transformer.dataset as dataset_module
+    import ts_transformer.outputs.control.supervision as supervision_module
 
     seen: dict[str, str] = {}
-    real = dataset_module.segment_controls
+    real = supervision_module.segment_controls
 
     def spy(*args, **kwargs):
         seen["model"] = kwargs["config"].control_dynamics_model
@@ -607,19 +608,19 @@ def test_the_imitation_target_is_inverted_through_the_configured_flight_model():
         config = TSConfig(control_recipe_name="custom", **overrides)
         assert config.control_dynamics_model in CONTROL_INVERSES
         seen.clear()
-        dataset_module.segment_controls = spy
+        supervision_module.segment_controls = spy
         try:
             from ts_transformer.dataset import build_series
             from ts_transformer.synthetic import synthetic_arrivals
 
             flights = synthetic_arrivals("KRDU", "05L", n_flights=1, seed=3)
             series, _report = build_series(flights, config, airport="KRDU")
-            dataset_module.reference_control_supervision(
+            supervision_module.reference_control_supervision(
                 series[0], config.seq_len - 1, config,
                 total_duration_s=120.0, last_measured_time_s=120.0,
             )
         finally:
-            dataset_module.segment_controls = real
+            supervision_module.segment_controls = real
         assert seen["model"] == model
 
 

@@ -1,12 +1,15 @@
-"""The control package's membership rule, enforced rather than described.
+"""The package's layout rules, enforced rather than described.
 
-`control/` exists because twelve `control_*.py` files at the top level named their subject
-but not their role. Two things keep that from coming back, and both are checkable:
+`outputs/<path>/` holds each prediction path's own code behind one strategy (review §4.2);
+`outputs/control/` exists because twelve `control_*.py` files at the top level once named
+their subject but not their role. What keeps that from coming back is checkable:
 
 1. no new `control_*.py` may appear at the top level;
-2. a module belongs in `control/` only if EVERY consumer of it is control-specific — which
-   is why `prediction_outputs`, `terminal_state_loss`, `arc_length_geometry`,
-   `fixed_dt_supervision` and `flyability` stay outside it.
+2. a module belongs under `outputs/control/` only if EVERY consumer of it is
+   control-specific — which is why `terminal_state_loss`, `arc_length_geometry`,
+   `fixed_dt_supervision` and `flyability` stay outside it;
+3. the direction: only a path's strategy seam reaches the spine, nothing under `outputs/`
+   imports the loop, and `dataset` reaches only the lazy registry.
 
 The second rule is the one worth testing: without it the package slowly absorbs shared
 modules and starts claiming ownership it does not have, which is worse than the flat
@@ -23,19 +26,28 @@ REPO_ROOT = TS_DIR.parents[1]
 if str(TS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(TS_DIR.parent))
 
-CONTROL = TS_DIR / "control"
+OUTPUTS = TS_DIR / "outputs"
+CONTROL = OUTPUTS / "control"
 #: Completed campaigns kept in the repository as the record behind published numbers. They
 #: are NOT part of the package: no live module may import them, and the module walk below
 #: must not count them as consumers of anything.
 ARCHIVE = TS_DIR / "archive"
-# Shared with the state path through `fixed_anchor_validation`, `dataset` or `batching`.
+# Shared with the state path through `fixed_anchor_validation`, `dataset` or `batching`:
+# each has a consumer outside outputs/control, so it stays at the top level.
 SHARED_BY_DESIGN = {
-    "prediction_outputs",
     "terminal_state_loss",
     "arc_length_geometry",
     "fixed_dt_supervision",
     "flyability",
 }
+#: A path's strategy-facing modules (review §4.2): the seam between the spine and the path's
+#: own code. They may import the spine's shared modules (`objective`, `forecast`, `models`);
+#: the path's INNER modules — heads, dynamics, constraints, the loss terms — may not.
+STRATEGY_SEAM = {"strategy.py", "forecast.py", "supervision.py", "loss.py", "loss/objective.py"}
+#: What nothing under outputs/ may import: the loop, the replay, the export and the CLI are
+#: what CALL a strategy.
+LOOP_MODULES = {"train", "validation", "batching", "cross_validation", "export", "cli", "__main__"}
+SPINE_MODULES = {"objective", "forecast", "models"}
 
 
 def _module_files() -> list[Path]:
@@ -92,7 +104,7 @@ def _imported_names(path: Path) -> set[str]:
         elif isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
     # The layering rules below are written in package-relative names (`control.envelope`,
-    # `dataset`); every live import is qualified (`ts_transformer.control.envelope`).
+    # `dataset`); every live import is qualified (`ts_transformer.outputs.control.envelope`).
     return {_package_relative(name) for name in names}
 
 
@@ -160,11 +172,13 @@ def test_the_package_directory_itself_is_never_put_on_sys_path():
 def test_no_control_prefixed_module_returns_to_the_top_level():
     stragglers = sorted(p.name for p in TS_DIR.glob("control_*.py"))
     assert not stragglers, (
-        f"{stragglers} belong under control/ by role, not at the top level behind a prefix"
+        f"{stragglers} belong under outputs/control/ by role, not at the top level behind a prefix"
     )
     assert (CONTROL / "__init__.py").is_file()
-    for sub in ("dynamics", "loss", "training"):
-        assert (CONTROL / sub / "__init__.py").is_file(), f"control/{sub} is not a package"
+    for sub in ("constraints", "dynamics", "loss", "training"):
+        assert (CONTROL / sub / "__init__.py").is_file(), f"outputs/control/{sub} is not a package"
+    for path in ("state", "closure", "control"):
+        assert (OUTPUTS / path / "strategy.py").is_file(), f"outputs/{path} has no strategy"
 
 
 def test_nothing_live_imports_the_archive():
@@ -194,11 +208,11 @@ def test_nothing_live_imports_the_archive():
             )
 
 
-def test_shared_modules_stay_outside_the_control_package():
+def test_shared_modules_stay_outside_the_control_path():
     """Each name here has at least one consumer that is NOT control-specific."""
     for name in SHARED_BY_DESIGN:
         assert (TS_DIR / f"{name}.py").is_file(), (
-            f"{name} moved into control/, but the state path reaches it — check its "
+            f"{name} moved into outputs/control/, but the state path reaches it — check its "
             f"consumers before claiming it as control-only"
         )
         consumers = {
@@ -206,69 +220,108 @@ def test_shared_modules_stay_outside_the_control_package():
             for path in _module_files()
             if name in _imported_names(path)
         }
-        outside = {c for c in consumers if not c.startswith("control/")}
+        outside = {c for c in consumers if not c.startswith("outputs/control/")}
         assert outside, (
-            f"{name} is now imported only from control/ — it may have become genuinely "
-            f"control-specific, in which case move it in and drop it from SHARED_BY_DESIGN"
+            f"{name} is now imported only from outputs/control/ — it may have become "
+            f"genuinely control-specific, in which case move it in and drop it from "
+            f"SHARED_BY_DESIGN"
         )
 
 
-def test_the_control_package_does_not_import_the_training_loop():
-    """control/ is imported BY the training loop; it must never reach back up into it.
+def _output_modules() -> list[Path]:
+    return [path for path in _module_files() if path.is_relative_to(OUTPUTS)]
 
-    `dataset` is deliberately NOT on this list. `Normalizer` and the window types are
-    data-plane value types the loss modules genuinely consume, and `Normalizer.fit`
-    balances over `FlightSeries`, so it belongs with the data plane rather than under
-    `control`. `objective` and `validation` ARE on it: both import `control/`, so one
-    importing either back would be a cycle as well as a layering inversion. The direction
-    that matters is this one: a loss module that imported `train`, `objective` or
-    `validation` would make the package unusable outside the loop it was extracted from.
-    """
-    consumers = {
-        "train", "objective", "validation", "forecast", "__main__", "models", "batching",
-    }
-    for path in CONTROL.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        offending = _imported_names(path) & consumers
+
+def _roots(names: set[str]) -> set[str]:
+    return {name.split(".")[0] for name in names}
+
+
+def test_nothing_under_outputs_imports_the_training_loop():
+    """outputs/ is imported BY the loop, the replay, the export and the CLI — never the
+    other way round. A strategy that imported `train` would make its path unusable outside
+    the loop it was extracted from, and close a cycle (`train` imports `outputs`)."""
+    for path in _output_modules():
+        offending = _roots(_imported_names(path)) & LOOP_MODULES
         assert not offending, (
-            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; control/ is imported "
-            f"BY the training loop, never the other way round"
+            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; outputs/ is imported "
+            f"BY the loop, never the other way round"
         )
 
 
-#: `dataset` imports these four `control/` modules — the data plane genuinely needs the
-#: control envelope, the conditioning names, the inverse dynamics and the teacher table to
-#: BUILD a batch. That is the one edge that runs downward into `control/`, and it only
-#: stays acyclic while these four stay `dataset`-free.
-CONTROL_MODULES_DATASET_IMPORTS = (
-    "control/basis_fit.py",
-    "control/conditioning.py",
-    "control/dynamics/inverse.py",
-    "control/envelope.py",
-)
-
-
-def test_the_dataset_control_edge_runs_one_way_only():
-    """`dataset` imports four `control/` modules; none of them may import `dataset` back.
-
-    The general rule is the other way round — `control/` MAY import `dataset` (`Normalizer`
-    and the window types are data-plane values a loss genuinely consumes), which is why the
-    layering test above does not ban it. These four are the exception inside the exception:
-    `dataset` needs them to build a batch at all, so a `dataset` import in any of them
-    closes a cycle that only fails at import time, in whichever order a caller happens to
-    hit first.
-    """
-    dataset_imports = _imported_names(TS_DIR / "dataset.py")
-    for name in CONTROL_MODULES_DATASET_IMPORTS:
-        module = name[: -len(".py")].replace("/", ".")
-        assert module in dataset_imports, (
-            f"{module} is no longer imported by dataset — drop it from "
-            f"CONTROL_MODULES_DATASET_IMPORTS rather than leaving a rule about nothing"
+def test_a_paths_inner_modules_do_not_reach_the_spine():
+    """Only the strategy seam talks to `objective` / `forecast` / `models`: it is what the
+    spine calls, and it hands the path's inner modules what they need. An inner module
+    importing the spine would put the control loss back inside `objective`'s import graph —
+    the cycle the strategies exist to remove."""
+    for path in _output_modules():
+        rel = path.relative_to(OUTPUTS).as_posix()
+        if "/" not in rel:
+            continue  # the registry, the base contract, the shared duration heads
+        inner = rel.split("/", 1)[1]
+        if inner in STRATEGY_SEAM:
+            continue
+        offending = _roots(_imported_names(path)) & SPINE_MODULES
+        assert not offending, (
+            f"outputs/{rel} imports {sorted(offending)}; only a path's strategy seam "
+            f"({sorted(STRATEGY_SEAM)}) reaches the spine"
         )
-        assert "dataset" not in _imported_names(TS_DIR / name), (
-            f"{name} imports dataset, which imports it: the one downward edge into "
-            f"control/ has become a cycle"
+
+
+def _runtime_imported_names(path: Path) -> set[str]:
+    """`_imported_names` without the `if TYPE_CHECKING:` blocks — what runs at import."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names: set[str] = set()
+
+    def visit(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if (
+                isinstance(child, ast.If)
+                and isinstance(child.test, ast.Name)
+                and child.test.id == "TYPE_CHECKING"
+            ):
+                for other in child.orelse:
+                    visit(other)
+                continue
+            if isinstance(child, ast.ImportFrom) and child.module and not child.level:
+                names.add(child.module)
+            elif isinstance(child, ast.Import):
+                names.update(alias.name for alias in child.names)
+            visit(child)
+
+    visit(tree)
+    return {_package_relative(name) for name in names}
+
+
+def test_the_registry_is_lazy_and_the_data_plane_reaches_only_it():
+    """`dataset` imports the registry (`outputs`) and nothing under it, and the registry and
+    the base contract import no spine module at RUNTIME — which is what lets `dataset`,
+    `forecast` and `objective` import `outputs` while the strategies import them back. A
+    path's data-side code (the batch context) belongs in its strategy, not in `dataset`."""
+    for name in ("__init__.py", "base.py"):
+        offending = _roots(_runtime_imported_names(OUTPUTS / name)) & (
+            SPINE_MODULES | LOOP_MODULES | {"dataset"}
+        )
+        assert not offending, (
+            f"outputs/{name} imports {sorted(offending)} at runtime; the registry must stay lazy"
+        )
+    dataset_imports = _runtime_imported_names(TS_DIR / "dataset.py")
+    assert "outputs" in dataset_imports
+    under = {name for name in dataset_imports if name.startswith("outputs.")}
+    assert not under, (
+        f"dataset reaches {sorted(under)}; a path's data-side code belongs in its strategy's "
+        f"window context"
+    )
+
+
+def test_every_prediction_output_has_a_registered_strategy():
+    from ts_transformer.config import PREDICTION_OUTPUTS, _OUTPUT_VIEWS
+    from ts_transformer.outputs import OutputStrategy, strategy_for
+
+    for name in PREDICTION_OUTPUTS:
+        strategy = strategy_for(name)
+        assert isinstance(strategy, OutputStrategy) and strategy.name == name
+        assert strategy.view is _OUTPUT_VIEWS[name], (
+            f"{name}: the strategy's view is not the one the config builds"
         )
 
 
@@ -411,7 +464,7 @@ def test_the_conditioning_names_and_their_scalings_are_one_source():
     """
     from types import SimpleNamespace
 
-    from ts_transformer.control.conditioning import (
+    from ts_transformer.outputs.control.conditioning import (
         CONDITION_CHANNELS,
         DYNAMICS_CONDITION_NAMES,
         condition_vector,

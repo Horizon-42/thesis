@@ -31,15 +31,15 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import Normalizer, build_series
 from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.forecast import forecast_approaches
 from ts_transformer.models import build_model
 from ts_transformer.objective import loss_component_names
-from ts_transformer.prediction_outputs import QuantileFinalTimeHead, pinball_duration_loss
+from ts_transformer.outputs.duration_heads import QuantileFinalTimeHead, pinball_duration_loss
 from ts_transformer.run_naming import run_display_name, run_slug
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import load_checkpoint, train

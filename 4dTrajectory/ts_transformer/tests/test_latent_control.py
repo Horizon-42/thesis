@@ -27,9 +27,9 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.control.latent import (
+from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.control.latent import (
     ACTIVE_UNIT_KL_NATS,
     LATENT_AUX_COMPONENT,
     LATENT_COMPONENT_KL_PER_DIM_PREFIX,
@@ -49,7 +49,7 @@ from ts_transformer.control.latent import (
 )
 from ts_transformer.batch_contract import LossComponents
 from ts_transformer.models import build_model
-from ts_transformer.prediction_outputs import ControlPrediction
+from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.run_naming import output_name, run_display_name
 from ts_transformer.objective import loss_component_names
 from ts_transformer.train import load_checkpoint, train
@@ -64,15 +64,15 @@ from ts_transformer.config import CONTROL_DURATION_UNIFORM
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
 from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
-from ts_transformer.forecast import (
-    forecast_approach,
+from ts_transformer.forecast import forecast_approach
+from ts_transformer.outputs.control.forecast import (
     latent_derangement,
     latent_mode_forecasts,
     posterior_latent_forecasts,
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
-from ts_transformer.control.latent import displacement_verdict
+from ts_transformer.outputs.control.latent import displacement_verdict
 from run_ts_latent_readout import kept_epoch_latent, readout, render_latent
 from run_ts_latent_readout import main as readout_main
 from ts_transformer.synthetic import synthetic_arrivals

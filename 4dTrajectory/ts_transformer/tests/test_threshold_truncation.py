@@ -51,7 +51,8 @@ from ts_transformer.final_approach_geometry import chart_from_axes, runway_axes 
 from ts_transformer.forecast import (  # noqa: E402
     Forecast, cut_at_threshold_crossing, forecast_approach, forecast_approaches,
 )
-from ts_transformer.prediction_outputs import ControlPrediction  # noqa: E402
+from ts_transformer.outputs import ForecastOptions  # noqa: E402
+from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -358,12 +359,12 @@ def test_predict_is_bit_identical_without_the_flag_and_cuts_with_it():
     model, device = _StraightControlModel(), torch.device("cpu")
     default = forecast_approach(model, series, config, normalizer, device=device)
     off = forecast_approaches(model, [series], config, normalizer, device=device,
-                              truncate_at_threshold=False)[0]
+                              options=ForecastOptions(truncate_at_threshold=False))[0]
     assert np.array_equal(default.values, off.values)
     assert default.final_time_s == off.final_time_s
     assert not default.truncated_at_threshold
     cut = forecast_approaches(model, [series], config, normalizer, device=device,
-                              truncate_at_threshold=True)[0]
+                              options=ForecastOptions(truncate_at_threshold=True))[0]
     # The fixture is only worth anything if the rollout DOES cross; assert that it does.
     assert cut.truncated_at_threshold
     assert np.array_equal(cut.values, cut_at_threshold_crossing(default, series).values)
@@ -391,7 +392,7 @@ def test_a_rollout_that_passes_the_plane_ABEAM_is_not_an_arrival():
     model, device = _StraightControlModel(), torch.device("cpu")
     forecast = forecast_approaches(
         model, [series], config, Normalizer.fit([series]), device=device,
-        truncate_at_threshold=True,
+        options=ForecastOptions(truncate_at_threshold=True),
     )[0]
     assert not forecast.truncated_at_threshold
     assert forecast.n_steps == forecast_approach(

@@ -10,62 +10,23 @@ matter.
 
 from __future__ import annotations
 
-from dataclasses import replace
 import gc
 
 import numpy as np
 import torch
 
 from ts_transformer.batch_contract import anchor_state, model_forward
-from ts_transformer.closure_output import probe_closure_context
-from ts_transformer.config import (
-    CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    TSConfig,
-    uses_closure_labels,
-    uses_control_dynamics,
-)
-from ts_transformer.control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
-from ts_transformer.dataset import Normalizer, probe_dynamics, probe_final_approach
-from ts_transformer.fixed_dt_supervision import FixedDTControlSupervision
+from ts_transformer.config import TSConfig
+from ts_transformer.outputs import strategy
+from ts_transformer.dataset import Normalizer
 from ts_transformer.models import build_model
 from ts_transformer.objective import prediction_loss
-from ts_transformer.prediction_outputs import ControlPrediction
 
 _CANDIDATES = (8, 16, 32, 64, 128, 256, 512, 1024, 2048)
 
 
 def is_cuda_oom(exc: BaseException) -> bool:
     return isinstance(exc, torch.cuda.OutOfMemoryError) or "out of memory" in str(exc).lower()
-
-
-def _heterogeneous_control_probe_prediction(
-    prediction: ControlPrediction,
-) -> ControlPrediction:
-    """Replace identical probe partitions with deterministic heterogeneous schedules.
-
-    Batched rollout graph length is governed by the maximum duration in each segment, not
-    by one row's total duration. Zero histories otherwise make every probe row identical and
-    systematically understate that graph. A phase-shifted circular profile exercises about
-    three times the uniform graph depth while remaining smooth, positive, and connected to
-    the model's duration output for backward-memory fidelity.
-    """
-    batch, segments = prediction.segment_durations.shape
-    dtype, device = prediction.segment_durations.dtype, prediction.segment_durations.device
-    learned_fractions = prediction.segment_durations / prediction.final_time_s.unsqueeze(1)
-    segment_phase = (
-        torch.arange(segments, dtype=dtype, device=device) * (2.0 * torch.pi / segments)
-    ).unsqueeze(0)
-    row_phase = (
-        torch.arange(batch, dtype=dtype, device=device) * (2.0 * torch.pi / batch)
-    ).unsqueeze(1)
-    probe_profile = torch.softmax(2.0 * torch.cos(segment_phase - row_phase), dim=-1)
-    fractions = learned_fractions * probe_profile
-    fractions = fractions / fractions.sum(dim=-1, keepdim=True)
-    durations = fractions * prediction.final_time_s.unsqueeze(1)
-    # `replace`, not a rebuilt ControlPrediction: the quantile head's `duration_quantiles_s`
-    # (and a latent prediction's extra fields) must survive the probe, or the objective
-    # reads None where the real epoch reads a tensor (review B-2).
-    return replace(prediction, segment_durations=durations)
 
 
 def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device) -> None:
@@ -78,6 +39,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
     """
     model = optimizer = x = target = state_weights = control_diagnostics = None
     target_final_time_s = flight_weights = prediction = loss = normalizer = None
+    output_strategy = strategy(config)
     try:
         torch.manual_seed(config.seed)
         model = build_model(config).to(device)
@@ -106,42 +68,13 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             mean=np.zeros(len(config.channels), dtype=np.float64),
             std=np.ones(len(config.channels), dtype=np.float64),
         )
-        dynamics = None
-        dense_supervision = None
-        if config.uses_final_approach_context:
-            dynamics = probe_final_approach(batch_size, device)
-        if uses_closure_labels(config.prediction_output):
-            dynamics = probe_closure_context(batch_size, device, config)
-        if uses_control_dynamics(config.prediction_output):
-            dynamics = probe_dynamics(batch_size, device, config)
-            if config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
-                points = int(config.final_time_scale_s // config.dt_s)
-                offsets = (
-                    torch.arange(1, points + 1, dtype=torch.float64, device=device)
-                    * config.dt_s
-                ).unsqueeze(0).expand(batch_size, -1)
-                dense_states = torch.zeros(
-                    (batch_size, points, len(config.channels)),
-                    dtype=torch.float32,
-                    device=device,
-                )
-                dense_supervision = FixedDTControlSupervision(
-                    query_offsets_s=offsets,
-                    states=dense_states,
-                    weights=torch.ones_like(dense_states),
-                    valid=torch.ones(
-                        (batch_size, points), dtype=torch.bool, device=device
-                    ),
-                )
+        context = output_strategy.probe_context(batch_size, device, config)
+        dense_supervision = output_strategy.probe_dense_supervision(batch_size, device, config)
         optimizer.zero_grad()
-        prediction = model_forward(model, x, dynamics)
-        if uses_control_dynamics(config.prediction_output):
-            prediction = _heterogeneous_control_probe_prediction(prediction)
-            if config.control_gradient_clip_norm > 0.0:
-                control_diagnostics = ControlTrainingDiagnosticsAccumulator(
-                    config.control_gradient_clip_norm
-                )
-                control_diagnostics.record_prediction(prediction, dynamics)
+        prediction = output_strategy.probe_prediction(model_forward(model, x, context))
+        control_diagnostics = output_strategy.training_diagnostics(config)
+        if control_diagnostics is not None:
+            control_diagnostics.record_prediction(prediction, context)
         loss = prediction_loss(
             prediction,
             anchor_state(x, len(config.channels)),
@@ -151,7 +84,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             flight_weights,
             config,
             normalizer,
-            dynamics,
+            context,
             dense_supervision,
         )
         loss.backward()
@@ -212,7 +145,7 @@ def resolve_batch_size(
     # keeps its historical largest-successful behavior.
     selected = (
         successful[-2]
-        if uses_control_dynamics(config.prediction_output) and len(successful) > 1
+        if strategy(config).keeps_batch_margin and len(successful) > 1
         else largest
     )
     props = torch.cuda.get_device_properties(device)

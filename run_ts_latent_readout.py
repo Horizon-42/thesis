@@ -49,8 +49,8 @@ for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
 
 from ts_transformer.approach_difficulty import strata_masks  # noqa: E402
 # One ruler for the displacement gate and one for an active unit, both defined beside the
-# KL they are read against (`control/latent.py`) rather than restated here.
-from ts_transformer.control.latent import ACTIVE_UNIT_KL_NATS, displacement_verdict  # noqa: E402
+# KL they are read against (`outputs/control/latent.py`) rather than restated here.
+from ts_transformer.outputs.control.latent import ACTIVE_UNIT_KL_NATS, displacement_verdict  # noqa: E402
 from flight_scenarios.identity import summary_row_key  # noqa: E402
 
 MISS_FDE_M = 2_000.0

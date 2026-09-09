@@ -40,7 +40,7 @@ if str(_OPT_DIR) not in sys.path:
 # The filename suffixes are single-sourced there too — shared with the optimizer batch's
 # writers and globs, so the two record families keep the same directory shape by import,
 # not by mirror comment.
-from evaluation_export import (  # noqa: E402
+from evaluation_export import (
     EVAL_SUFFIX as _EVAL_SUFFIX,
     REFERENCE_EVAL_SUFFIX as _REFERENCE_EVAL_SUFFIX,
     REFERENCES_DIR,
@@ -48,15 +48,14 @@ from evaluation_export import (  # noqa: E402
     evaluation_record,
     observed_track_states,
     reference_evaluation_record,
-    state_dict,
     summary_row,
 )
 
-from ts_transformer.config import PREDICTION_CLOSURE  # noqa: E402
 from ts_transformer.approach_difficulty import (  # noqa: E402
     approach_difficulty, difficulty_block,
 )
 from ts_transformer.channels import states_from_channels  # noqa: E402
+from ts_transformer.outputs import strategy_for
 from ts_transformer.dataset import FlightSeries, flight_key  # noqa: E402
 from ts_transformer.forecast import Forecast  # noqa: E402
 from ts_transformer.metrics import (  # noqa: E402
@@ -166,44 +165,9 @@ def build_prediction_record(
         # ran — the key would otherwise claim a measurement that was never taken.
         **({"commandHookDiagnostics": forecast.command_hook_diagnostics}
            if forecast.command_hook_diagnostics is not None else {}),
-        # Closure output: the construction that drew the path (via-Dubins or a fallback)
-        # and whether it was drawn from the flight's label (the oracle arm).
-        **({"closureConstruction": forecast.closure_construction,
-            "closureFromLabels": forecast.closure_from_labels}
-           if forecast.prediction_output == PREDICTION_CLOSURE else {}),
-        # Latent control output: which prior sample this is (None = the top-1 the contract
-        # carries) and its probability; whether it was decoded from another flight's
-        # latent (the collapse diagnostic). z itself is never written.
-        **({"modeIndex": forecast.mode_index, "modeProbability": forecast.mode_probability}
-           if forecast.mode_index is not None else {}),
-        **({"latentShuffled": True} if forecast.latent_shuffled else {}),
-        **({"zFromPosterior": True} if forecast.z_from_posterior else {}),
-        # CTA-conditioned control output: the arrival time the decoder was GIVEN (truth +
-        # offset) — a record that reads the future says so. Under B3 the arrival time is the
-        # model's OWN duration quantile, `ctaOffsetS` is null (there is no truth to offset)
-        # and `ctaFromQuantiles` is what separates the two arms in any later reading.
-        **({"ctaS": forecast.cta_s, "ctaOffsetS": forecast.cta_offset_s,
-            **({"ctaFromQuantiles": True, "ctaQuantile": forecast.cta_quantile,
-                **({"ctaInterval": forecast.cta_interval}
-                   if forecast.cta_interval is not None else {})}
-               if forecast.cta_from_quantiles else {})}
-           if forecast.cta_s is not None else {}),
-        # B1, quantile duration head: all five DURATION_QUANTILES in seconds, in level
-        # order — the median included, so the record is a complete interval and a reader
-        # never has to splice `durationHeadFinalTimeS` back into position 2. Under B1.b's
-        # `two-head` those are two DIFFERENT numbers on purpose: `durationHeadFinalTimeS` is
-        # the POINT head's duration (the one the states above were rolled over) and this is
-        # the quantile head's distribution (the one B2 calibrates and B3 decodes).
-        **({"durationQuantilesS": [float(value) for value in forecast.duration_quantiles_s],
-            # B2: `calibrated` is written for EVERY quantile record — false is the claim
-            # that this checkpoint has no conformal table, and a reader must not have to
-            # infer it from a missing key (design §六 4).
-            "calibrated": forecast.duration_interval_s is not None,
-            **({"durationIntervalS": forecast.duration_interval_s,
-                "durationIntervalStratum": forecast.duration_interval_stratum,
-                "durationIntervalCohort": forecast.duration_interval_cohort}
-               if forecast.duration_interval_s is not None else {})}
-           if forecast.duration_quantiles_s is not None else {}),
+        # This path's own entries (the closure's construction, the latent's mode, the CTA
+        # and the quantile head's interval), in the order the path defines them.
+        **strategy_for(prediction_output).record_fields(forecast),
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,

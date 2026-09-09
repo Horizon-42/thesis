@@ -22,18 +22,8 @@ from typing import TYPE_CHECKING
 import torch
 import torch.nn as nn
 
-from ts_transformer.config import (
-    CONTROL_DURATION_FACTORIZED,
-    CONTROL_DURATION_UNIFORM,
-    PREDICTION_CLOSURE,
-    PREDICTION_CONTROL,
-    PREDICTION_STATE,
-    TSConfig,
-)
-from ts_transformer.closure_output import ClosureOutputModel
-from ts_transformer.control.heads import ControlOutputModel
-from ts_transformer.control.latent import LatentControlModel
-from ts_transformer.prediction_outputs import StateOutputLayer
+from ts_transformer.config import TSConfig
+from ts_transformer.outputs import strategy
 from ts_transformer.vendor.itransformer import Model as VendoredITransformer
 from ts_transformer.vendor.patchtst import Model as VendoredPatchTST
 
@@ -152,47 +142,14 @@ def build_state_forecaster(config: TSConfig) -> nn.Module:
     return BUILDERS[config.model](config)
 
 
-def _build_state_output(config: TSConfig, normalizer: Normalizer | None) -> nn.Module:
-    return StateOutputLayer(build_state_forecaster(config), config, normalizer)
-
-
-# One model class: the duration parameterization is decided inside the head
-# (`control.heads.control_head_for`), not by a second model type.
-CONTROL_OUTPUT_MODELS = {
-    CONTROL_DURATION_FACTORIZED: ControlOutputModel,
-    CONTROL_DURATION_UNIFORM: ControlOutputModel,
-}
-
-
-def _build_control_output(config: TSConfig, normalizer: Normalizer | None) -> nn.Module:
-    del normalizer  # controls are rolled out in physical units already
-    if config.latent_dim > 0:
-        return LatentControlModel(config, build_state_forecaster(config))
-    return CONTROL_OUTPUT_MODELS[config.control_duration_parameterization](
-        config, build_state_forecaster(config)
-    )
-
-
-def _build_closure_output(config: TSConfig, normalizer: Normalizer | None) -> nn.Module:
-    del normalizer  # the decision vector is regressed in physical units
-    return ClosureOutputModel(config, build_state_forecaster(config))
-
-
-OUTPUT_MODEL_BUILDERS = {
-    PREDICTION_STATE: _build_state_output,
-    PREDICTION_CONTROL: _build_control_output,
-    PREDICTION_CLOSURE: _build_closure_output,
-}
-
-
 def build_model(config: TSConfig, normalizer: Normalizer | None = None) -> nn.Module:
-    """Build an explicitly registered output strategy.
+    """Build the configured output path's model on the vendored backbone.
 
     ``normalizer`` gives an output layer that works in physical units (the
     corridor-bounded state output) its scale; a checkpoint restores it with the weights,
     so loading passes none.
     """
-    return OUTPUT_MODEL_BUILDERS[config.prediction_output](config, normalizer)
+    return strategy(config).build_model(config, normalizer)
 
 
 def resolve_device(spec: str) -> torch.device:

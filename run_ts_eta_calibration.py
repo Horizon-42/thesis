@@ -80,7 +80,8 @@ from ts_transformer.calibration import (  # noqa: E402
 )
 from ts_transformer.config import DURATION_HEADS_WITH_QUANTILES  # noqa: E402
 from ts_transformer.dataset import truth_duration_s  # noqa: E402
-from ts_transformer.forecast import default_anchor, duration_quantile_predictions  # noqa: E402
+from ts_transformer.forecast import default_anchor  # noqa: E402
+from ts_transformer.outputs.control.forecast import duration_quantile_predictions  # noqa: E402
 from ts_transformer.io_utils import file_sha256  # noqa: E402
 from ts_transformer.models import resolve_device  # noqa: E402
 from run_ts_anytime_curve import Grid, cohort_series, load_arm  # noqa: E402

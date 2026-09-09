@@ -3,7 +3,7 @@
 The closure decoder does not draw the path with a network: it predicts a few DECISION
 quantities and the path follows from geometry — anchor pose → (turns and straights) →
 the localizer at the join distance ``d_join`` → the final leg to the threshold — with a
-speed profile giving the time (``closure_profile``). This module is the geometry half:
+speed profile giving the time (``outputs.closure.profile``). This module is the geometry half:
 the path families, the vertical profile, the two timings the oracle studies use, and the
 per-flight fits that turn a truth path into that family's parameters (the closure
 decoder's labels).
@@ -62,7 +62,7 @@ import math
 import numpy as np
 from scipy.optimize import minimize
 
-from ts_transformer.anchor_eligibility import GRAVITY_MPS2
+from ts_transformer.flyability import G as GRAVITY_MPS2
 from ts_transformer.geometric_metrics import arc_aligned_ade_m, cumulative_arc_m
 
 BANK_RAD = math.radians(25.0)       # a standard-rate-ish approach bank; not an envelope limit
@@ -376,7 +376,7 @@ def strictly_increasing(t: np.ndarray) -> np.ndarray:
 
     The running maximum is taken FIRST and the ramp added after: on a locally decreasing
     input the other order yields equal neighbours (the maximum absorbs the ramp) and
-    `closure_output.reconstruct` then divides by a zero spacing (review C-20). On a
+    `outputs.closure.model.reconstruct` then divides by a zero spacing (review C-20). On a
     non-decreasing input the two orders agree exactly, so no stored label moves.
     """
     return np.maximum.accumulate(t) + np.arange(len(t)) * 1e-6

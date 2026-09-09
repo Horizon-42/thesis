@@ -85,8 +85,8 @@ from ts_transformer.config import (  # noqa: E402
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.control.loss.fixed_dt import fixed_dt_control_state_loss  # noqa: E402
-from ts_transformer.control.basis_fit import (  # noqa: E402
+from ts_transformer.outputs.control.loss.fixed_dt import fixed_dt_control_state_loss  # noqa: E402
+from ts_transformer.outputs.control.basis_fit import (  # noqa: E402
     DEFAULT_LEARNING_RATE_FLOOR,
     DURATION_MODES,
     DURATION_UNIFORM,
@@ -115,7 +115,7 @@ from ts_transformer.io_utils import file_sha256  # noqa: E402
 from ts_transformer.metrics import common_physical_time_flight_metrics  # noqa: E402
 from ts_transformer.models import resolve_device  # noqa: E402
 from ts_transformer.physical_criteria import fixed_dt_position_ade_m  # noqa: E402
-from ts_transformer.prediction_outputs import ControlPrediction  # noqa: E402
+from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
 from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 
@@ -793,7 +793,7 @@ def run_teacher_fit(
         # The cohort's airports: flight keys are unique WITHIN an airport only, so the
         # dataset checks its own airports against these before anything else.
         "airports": list(airports),
-        # The three stamps a consumer is checked against (control.basis_fit.require_cover):
+        # The three stamps a consumer is checked against (outputs.control.basis_fit.require_cover):
         # a schedule reproduces its truth only at the width, anchor and uniform partition it
         # was fitted under.
         "n_segments": int(config.n_segments),
@@ -885,7 +885,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"default: {DEFAULT_TEACHER_BATCH_SIZE} with --checkpoint, "
                              f"{DEFAULT_WIDTH_BATCH_SIZE} with --reference")
     # Rates are per SEGMENT: the arm at width N starts from this over N (see
-    # control.basis_fit.width_scaled_learning_rate). 0.08 is 0.01 at the measured N=8 optimum.
+    # outputs.control.basis_fit.width_scaled_learning_rate). 0.08 is 0.01 at the measured N=8 optimum.
     parser.add_argument("--control-learning-rate", type=float, default=0.08,
                         help="starting rate at N=1 segment; each arm uses it divided by its N")
     parser.add_argument("--duration-learning-rate", type=float, default=0.08,

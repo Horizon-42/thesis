@@ -28,7 +28,7 @@ from ts_transformer.config import (  # noqa: E402
 )
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
-from ts_transformer.forecast import _history_at_anchor, forecast_approach  # noqa: E402
+from ts_transformer.forecast import history_at_anchor, forecast_approach  # noqa: E402
 from ts_transformer.models import build_model  # noqa: E402
 from ts_transformer.run_naming import run_display_name  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
@@ -223,7 +223,7 @@ def test_intent_windows_carry_one_constant_row_and_the_model_predicts_six_channe
     normalizer = Normalizer.fit(series)
     windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
     extra = len(INTENT_JOIN_CHANNELS) + len(INTENT_LEAD_CHANNELS)
-    x, y, _weights, _final_time_s, _flight_weight = windows[0]
+    x, y, _weights, _final_time_s, _flight_weight = (t[0] for t in windows.batch([0])[:5])
     assert x.shape == (config.seq_len, len(ch.CHANNELS) + extra)
     assert y.shape == (config.pred_len, len(ch.CHANNELS))
     row = windows.conditioning[0]
@@ -243,7 +243,7 @@ def test_intent_windows_carry_one_constant_row_and_the_model_predicts_six_channe
     prediction = build_model(config)(batch[0])
     assert prediction.states.shape == (len(windows), config.pred_len, len(ch.CHANNELS))
     # Inference builds the SAME augmented history the training windows carried.
-    history = _history_at_anchor(series[0], config, normalizer, anchor)
+    history = history_at_anchor(series[0], config, normalizer, anchor)
     assert np.allclose(history, x.numpy())
     # Off: no row at all.
     assert dataset_module.series_conditioning(
@@ -275,7 +275,7 @@ def test_duration_mode_hands_the_duration_head_its_own_target():
     assert config.input_channels == ch.CHANNELS + INTENT_JOIN_CHANNELS + INTENT_DURATION_CHANNELS
     normalizer = Normalizer.fit(series)
     windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
-    _x, _y, _w, final_time_s, _fw = windows[0]
+    _x, _y, _w, final_time_s, _fw = (t[0] for t in windows.batch([0])[:5])
     s_idx, anchor = windows.index[0]
     row = windows.conditioning[s_idx]
     # The channel is the duration head's own target, on the loss's own time scale.

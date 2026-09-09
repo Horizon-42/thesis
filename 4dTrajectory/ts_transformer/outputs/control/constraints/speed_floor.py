@@ -68,10 +68,10 @@ from aerodynamic_model.torch_dynamics import (
     isa_density,
 )
 from ts_transformer.config import TSConfig
-from ts_transformer.control.constraints.gates import RunwayAxesView, runway_axes_view
-from ts_transformer.control.constraints.saturation import soft_max
-from ts_transformer.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from ts_transformer.control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
+from ts_transformer.outputs.control.constraints.gates import RunwayAxesView, runway_axes_view
+from ts_transformer.outputs.control.constraints.saturation import soft_max
+from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
+from ts_transformer.outputs.control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
 
 #: Width of the soft max around the thrust demand, in fractions of installed thrust. The
 #: barrier's soft bank saturation is 2 deg of a +/-45 deg box, i.e. ~4 % of that box's half

@@ -60,7 +60,7 @@ import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 
 from ts_transformer.batch_contract import model_forward, unpack_batch  # noqa: E402
-from ts_transformer.control.latent import (  # noqa: E402
+from ts_transformer.outputs.control.latent import (  # noqa: E402
     LatentControlPrediction,
     displacement_verdict,
     latent_kl,

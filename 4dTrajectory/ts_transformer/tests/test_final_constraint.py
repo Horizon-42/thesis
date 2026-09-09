@@ -24,23 +24,21 @@ from ts_transformer.config import (  # noqa: E402
     CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
-from ts_transformer.dataset import (  # noqa: E402
-    FixedAnchorTrajectoryWindows,
-    Normalizer,
-    build_series,
-    final_approach_arrays,
-    probe_dynamics,
-    probe_final_approach,
-)
+from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.final_approach_geometry import final_approach_arrays, probe_final_approach
+from ts_transformer.outputs.control.supervision import probe_dynamics
 from ts_transformer.export import build_prediction_record  # noqa: E402
-from ts_transformer.forecast import Forecast, forecast_approach, project_onto_final  # noqa: E402
+from ts_transformer.forecast import Forecast, forecast_approach  # noqa: E402
+from ts_transformer.outputs import ForecastOptions  # noqa: E402
+from ts_transformer.outputs.state.forecast import project_onto_final  # noqa: E402
 from ts_transformer.models import build_model  # noqa: E402
-from ts_transformer.prediction_outputs import StateOutputLayer, StatePrediction  # noqa: E402
+from ts_transformer.outputs.state.model import StateOutputLayer, StatePrediction  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
-from ts_transformer.objective import (  # noqa: E402
-    STATE_LOSS_COMPONENT_NAMES, ProcedureMultipliers, procedure_loss,
+from ts_transformer.outputs.state.loss import (
+    STATE_LOSS_COMPONENT_NAMES,
     state_prediction_loss_components,
 )
+from ts_transformer.objective import ProcedureMultipliers, procedure_loss
 from ts_transformer.train import load_checkpoint, train  # noqa: E402
 from trajectory_data_process.harvest.arrivals import SCHEMA_VERSION as ARRIVAL_SCHEMA  # noqa: E402
 
@@ -260,7 +258,7 @@ def test_corridor_bounded_checkpoint_round_trips_and_projection_marks_records(tm
     forecast = forecast_approach(model, series[0], loaded, normalizer, device=torch.device("cpu"))
     assert np.isfinite(forecast.values).all() and forecast.projected_onto_final is None
     projected = forecast_approach(model, series[0], loaded, normalizer, device=torch.device("cpu"),
-                                  project_final=CORRIDOR_GATE_ON_FINAL)
+                                  options=ForecastOptions(project_final=CORRIDOR_GATE_ON_FINAL))
     assert projected.projected_onto_final == CORRIDOR_GATE_ON_FINAL
     record = build_prediction_record(series[0], projected, index=0, model_name="itransformer", horizon_mode=loaded.horizon_mode)
     assert record.source["projectedOntoFinal"] == CORRIDOR_GATE_ON_FINAL
@@ -451,7 +449,7 @@ def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
 
 
 def test_control_dynamics_carry_the_glidepath_for_the_rollout_penalty():
-    from ts_transformer.dataset import dynamics_arrays
+    from ts_transformer.outputs.control.supervision import dynamics_arrays
 
     series, config = _series(n_flights=1)
     rows = dynamics_arrays(series[0], config.seq_len - 1)

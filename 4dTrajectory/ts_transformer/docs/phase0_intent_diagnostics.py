@@ -73,7 +73,7 @@ for path in (HERE, TS_DIR.parent, REPO_ROOT):
 import compare_frame_arms as cfa  # noqa: E402
 import ts_transformer.final_approach_geometry as fag  # noqa: E402
 import ts_transformer.intent_conditioning as ic  # noqa: E402
-import ts_transformer.closure_geometry as cg  # noqa: E402
+import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
 import ts_transformer.geometric_metrics as gm  # noqa: E402
 from ts_transformer.config import DEFAULT_DT_S, DEFAULT_SEQ_LEN, TSConfig  # noqa: E402
 from ts_transformer.coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
@@ -277,7 +277,7 @@ def cmd_sensitivity(args: argparse.Namespace) -> None:
 # ── template ─────────────────────────────────────────────────────────────────
 
 def template_path(series, anchor: int) -> cg.ClosurePath:
-    """The Phase 0 template (``closure_geometry.rule_template`` at the truth join):
+    """The Phase 0 template (``outputs.closure.geometry.rule_template`` at the truth join):
     ``straight`` / ``trombone`` / ``trombone-past-join`` / ``dubins``."""
     psi = float(series.scenario.target.psi)
     join = ic.truth_join_point(series)

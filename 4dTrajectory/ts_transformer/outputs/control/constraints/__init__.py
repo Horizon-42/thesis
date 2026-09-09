@@ -31,11 +31,11 @@ from ts_transformer.config import (
     HOOK_SATURATION_HARD,
     TSConfig,
 )
-from ts_transformer.control.constraints.barrier_filter import BarrierFilter
-from ts_transformer.control.constraints.composite import CompositeHook
-from ts_transformer.control.constraints.speed_floor import SpeedFloor
-from ts_transformer.control.constraints.trombone import Trombone
-from ts_transformer.control.dynamics.hooks import CommandHook
+from ts_transformer.outputs.control.constraints.barrier_filter import BarrierFilter
+from ts_transformer.outputs.control.constraints.composite import CompositeHook
+from ts_transformer.outputs.control.constraints.speed_floor import SpeedFloor
+from ts_transformer.outputs.control.constraints.trombone import Trombone
+from ts_transformer.outputs.control.dynamics.hooks import CommandHook
 
 _HOOKS = {
     CONTROL_HOOK_BARRIER: BarrierFilter,

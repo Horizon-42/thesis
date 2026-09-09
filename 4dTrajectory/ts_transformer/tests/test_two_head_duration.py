@@ -40,15 +40,18 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import build_series
-from ts_transformer.forecast import duration_quantile_predictions
+from ts_transformer.outputs.control.forecast import duration_quantile_predictions
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.models import build_model
 import ts_transformer.objective as objective
-from ts_transformer.objective import DURATION_QUANTILE_COMPONENT, loss_component_names
-from ts_transformer.prediction_outputs import ControlPrediction, QuantileFinalTimeHead, pinball_duration_loss
+import ts_transformer.outputs.control.loss.objective as control_objective
+from ts_transformer.outputs.control.loss.objective import DURATION_QUANTILE_COMPONENT
+from ts_transformer.objective import loss_component_names
+from ts_transformer.outputs.control.heads import ControlPrediction
+from ts_transformer.outputs.duration_heads import QuantileFinalTimeHead, pinball_duration_loss
 from ts_transformer.run_naming import run_display_name, run_slug
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import load_checkpoint, train
@@ -188,7 +191,7 @@ def _loss_components(config: TSConfig, monkeypatch, *, predicted_s: float, truth
     Only the duration terms are under test, so the rollout is replaced by a perfect one and
     every position/terminal contribution is zero by construction.
     """
-    import ts_transformer.control.dynamics.rollout as control_rollout_module
+    import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module
 
     monkeypatch.setattr(
         control_rollout_module, "rollout_control_endpoints",
@@ -208,7 +211,7 @@ def _loss_components(config: TSConfig, monkeypatch, *, predicted_s: float, truth
                               else torch.tensor([quantiles_s], dtype=torch.float32)),
     )
     target = torch.zeros(1, config.n_segments, config.enc_in)
-    return objective.control_prediction_loss_components(
+    return control_objective.control_prediction_loss_components(
         prediction,
         torch.zeros(1, config.enc_in),
         target,

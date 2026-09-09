@@ -1,7 +1,7 @@
 """The shape of a training batch, and how a model is called with one.
 
 `dataset` produces these tuples and `objective` consumes them. Keeping the helpers here
-rather than beside the objective is what lets a module under `control/` read a batch
+rather than beside the objective is what lets a module under `outputs/control/` read a batch
 without importing the objective it is called from — an import that would put a cycle in
 the layering, since `objective` imports those loss modules. `LossComponents`, the
 objective's return contract, lives here for the same reason: a loss module (the closure

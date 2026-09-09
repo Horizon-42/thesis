@@ -1,0 +1,144 @@
+"""The state path's prediction contract and its output layer on the vendored backbone.
+
+The layer attaches the duration head to the state forecast and, under the corridor-bounded
+reference, saturates the rows the output itself places on the final into the corridor.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import torch
+import torch.nn as nn
+
+from ts_transformer.batch_contract import anchor_state
+from ts_transformer.outputs.duration_heads import FinalTimeHead
+from ts_transformer.channels import IDX, POSITION_IDX
+from ts_transformer.config import (
+    STATE_POSITION_ANCHOR_RELATIVE,
+    STATE_POSITION_CORRIDOR_BOUNDED,
+    TSConfig,
+)
+from ts_transformer.final_approach_geometry import (
+    FINAL_APPROACH_KEYS,
+    alignment_cosine,
+    bound_to_final,
+    chart_from_axes,
+    membership,
+    position_direction,
+    runway_axes,
+)
+
+if TYPE_CHECKING:  # the data-plane value type; importing it at runtime would be a cycle
+    from ts_transformer.dataset import Normalizer
+
+@dataclass(frozen=True)
+class StatePrediction:
+    states: torch.Tensor             # [B, N, C], normalized channel space
+    final_time_s: torch.Tensor       # [B], physical seconds from anchor to endpoint
+
+
+class StateOutputLayer(nn.Module):
+    """Attach the state forecast and duration prediction to one structured contract.
+
+    Under ``state_position_reference="anchor-relative"`` the forecaster's position
+    channels are read as displacements from the anchor (the history's last observed row)
+    and the anchor's normalized position is added back here, so ``states`` keeps the same
+    contract downstream — absolute normalized chart coordinates — while the network's
+    zero output means "the aircraft stays where it is" instead of "the chart origin".
+
+    Under ``"corridor-bounded"`` the absolute output is kept and, on the rows the output
+    itself places on the runway's final (the `on-final` gate), its cross-track is
+    saturated inside the LPV corridor and its height inside the glidepath window
+    (``final_approach_geometry``): the constraint holds by construction, continuously, with
+    no weight to calibrate. The layer then needs physical units, so it carries the
+    normalizer statistics as buffers (bound at construction by ``models.build_model``,
+    restored from the state dict on load) and the per-flight ``context`` in ``forward``.
+    """
+
+    def __init__(
+        self,
+        state_forecaster: nn.Module,
+        config: TSConfig,
+        normalizer: Normalizer | None = None,
+    ):
+        super().__init__()
+        self.state_forecaster = state_forecaster
+        self.final_time_head = FinalTimeHead(config)
+        self.anchor_relative = (
+            config.state_position_reference == STATE_POSITION_ANCHOR_RELATIVE
+        )
+        self.corridor_bounded = (
+            config.state_position_reference == STATE_POSITION_CORRIDOR_BOUNDED
+        )
+        self.channel_count = len(config.channels)
+        offset_mask = torch.zeros(self.channel_count)
+        offset_mask[list(POSITION_IDX)] = 1.0
+        # A pure function of the channel contract, so NOT persisted: checkpoints written
+        # before it existed (the 2026-09-03 arm-A checkpoints) must keep loading.
+        self.register_buffer("offset_mask", offset_mask, persistent=False)
+        if self.corridor_bounded:
+            # Identity statistics until bound: an unbound layer (the batch-size probe)
+            # runs finite; a trained checkpoint restores the real ones with its weights.
+            self.register_buffer("channel_mean", torch.zeros(self.channel_count))
+            self.register_buffer("channel_std", torch.ones(self.channel_count))
+            if normalizer is not None:
+                self.bind_normalizer(normalizer)
+
+    def bind_normalizer(self, normalizer: Normalizer) -> None:
+        """Give the bounded output the chart's physical scale (metres, metres/second)."""
+        if not self.corridor_bounded:
+            raise ValueError("only the corridor-bounded state output decodes to physical units")
+        self.channel_mean.copy_(torch.as_tensor(normalizer.mean, dtype=torch.float32))
+        self.channel_std.copy_(torch.as_tensor(normalizer.std, dtype=torch.float32))
+
+    def forward(
+        self, history: torch.Tensor, context: dict[str, torch.Tensor] | None = None
+    ) -> StatePrediction:
+        states = self.state_forecaster(history)
+        if self.anchor_relative:
+            anchor = anchor_state(history, self.channel_count)
+            states = states + (anchor * self.offset_mask).unsqueeze(1)
+        if self.corridor_bounded:
+            if context is None or any(key not in context for key in FINAL_APPROACH_KEYS):
+                raise ValueError(
+                    "the corridor-bounded state output needs the per-flight final-approach "
+                    f"context {FINAL_APPROACH_KEYS} in the batch's context slot"
+                )
+            states = self._bound_to_final(states, history, context)
+        return StatePrediction(
+            states=states,
+            final_time_s=self.final_time_head(history),
+        )
+
+    def _bound_to_final(
+        self, states: torch.Tensor, history: torch.Tensor, context: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        mean = self.channel_mean.to(states.dtype)
+        std = self.channel_std.to(states.dtype)
+        physical = states * std + mean
+        anchor = anchor_state(history, self.channel_count) * std + mean
+        psi = context["runway_heading_rad"].to(states.dtype)
+        d, xt = runway_axes(physical[..., IDX["e"]], physical[..., IDX["n"]], psi)
+        # Direction from the predicted POSITIONS (the velocity channels are unsupervised).
+        step_e, step_n = position_direction(
+            physical[..., IDX["e"]], physical[..., IDX["n"]],
+            anchor[:, IDX["e"]], anchor[:, IDX["n"]],
+        )
+        cos_align = alignment_cosine(step_e, step_n, psi)
+        weight = membership(d=d, xt=xt, cos_align=cos_align, hard=False)
+        xt_bounded, u_bounded = bound_to_final(
+            d=d,
+            xt=xt,
+            u=physical[..., IDX["u"]],
+            weight=weight,
+            tan_gpa=context["glidepath_tan"].to(states.dtype),
+            hard=False,
+        )
+        e_bounded, n_bounded = chart_from_axes(d, xt_bounded, psi)
+        columns = list(physical.unbind(dim=-1))
+        columns[IDX["e"]], columns[IDX["n"]], columns[IDX["u"]] = e_bounded, n_bounded, u_bounded
+        return (torch.stack(columns, dim=-1) - mean) / std
+
+

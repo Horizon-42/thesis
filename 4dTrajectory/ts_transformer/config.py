@@ -122,7 +122,7 @@ CTA_CONDITIONINGS_AVAILABLE = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
 CTA_FIELDS = ("cta_conditioning",)
 
 # The duration head (B1, §三 3.1; B1.b, §三 3.1b). ``point`` is the package's original
-# scalar ``FinalTimeHead``; ``quantile`` is ``prediction_outputs.QuantileFinalTimeHead`` —
+# scalar ``FinalTimeHead``; ``quantile`` is ``outputs.duration_heads.QuantileFinalTimeHead`` —
 # five monotone quantiles of the SAME quantity, trained by the sum of their pinball losses
 # in place of the point head's squared error (the loss component keeps the name
 # ``final_time``); ``two-head`` carries BOTH — the point head drives the rollout duration
@@ -206,7 +206,7 @@ CLOSURE_FIELDS = (
 )
 # There is no pre-closure behaviour to reproduce, so every closure field is required.
 REQUIRED_SERIALIZED_CLOSURE_FIELDS = CLOSURE_FIELDS
-# The profile knot widths a closure labels file carries (closure_output.fit_labels writes
+# The profile knot widths a closure labels file carries (outputs.closure.model.fit_labels writes
 # both); a config may only ask for one of them.
 CLOSURE_LABEL_KNOTS = (4, 8)
 CONTROL_STATE_CLOCK_PREDICTED = "predicted"
@@ -232,7 +232,7 @@ CONTROL_STATE_OBJECTIVES = (
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
 )
 # What the imitation term imitates (latent-intent design §六 L5.a). ``inverse-dynamics`` is
-# the schedule `dataset.reference_control_supervision` inverts out of the flown track, and
+# the schedule `outputs.control.supervision.reference_control_supervision` inverts out of the flown track, and
 # L0 measured what it is worth: flown open-loop it lands 2.5-7.8 km from the truth it was
 # read off (N=4 7850 m, N=8 6381, N=16 4095, N=32 2537), so "imitating the teacher
 # perfectly" is NOT "flying the truth track". ``fitted`` reads a per-flight control table
@@ -508,7 +508,7 @@ PROCEDURE_LOSS_FIELDS = (
     "procedure_loss_epsilon",
 )
 # The rollout command hook: a constraint module that rewrites each control segment's
-# command from the state at the segment's start (control/dynamics/hooks.py). ``barrier``
+# command from the state at the segment's start (outputs/control/dynamics/hooks.py). ``barrier``
 # is the per-step safety layer (a barrier on the corridor gives a bank interval the command
 # is saturated into). It acts only where the corridor gate says the aircraft is on the
 # final; ``soft`` saturation keeps gradients in the training loop, ``hard`` is for
@@ -543,10 +543,10 @@ CONTROL_HOOK_TROMBONE = "trombone"
 # as well, which is well defined for the same reason and one more: the builder confines the
 # barrier to the HARD on-final gate whenever a trombone is a member, and the trombone acts
 # only where that gate has not opened, so the two never rewrite the same step
-# (control/constraints/__init__.py; the soft gate alone was not that complement). The
+# (outputs/control/constraints/__init__.py; the soft gate alone was not that complement). The
 # trombone comes last because that is where the value spells it; its 15° turn cap is what
 # keeps the load factor it coordinates from eating the floor's stall margin
-# (control/constraints/trombone.py). No other combination is registered, and this vocabulary
+# (outputs/control/constraints/trombone.py). No other combination is registered, and this vocabulary
 # is the only place a combination may be spelled.
 CONTROL_HOOK_BARRIER_TROMBONE = "barrier+trombone"
 CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE = "barrier+speed-floor+trombone"
@@ -692,7 +692,7 @@ PROCEDURE_VERTICAL_SCALE_M = 30.0
 #: The closure timing group's seconds-to-loss scale. Measured at initialisation on synthetic
 #: arrivals with the three weights at 1.0: geometry ~ 1.7, timing ~ 1.5 at 60 s, height
 #: ~ 0.9 — a minute puts the groups within a factor of two (at `final_time_scale_s`'s 600 s
-#: the timing group was 20x under the geometry). Read by `closure_output`.
+#: the timing group was 20x under the geometry). Read by `outputs.closure.model`.
 CLOSURE_TIMING_SCALE_S = 60.0
 
 # The MEASURED-CONSTANT kind of retirement (T3-21, 2026-09-07). These three were live loss
@@ -723,7 +723,7 @@ CONTROL_HOOK_FIELDS = (
 #: The speed floor's default margin above the stall speed. The COEFFICIENT is the package's
 #: existing one, not a new number: the optimizer's NLP velocity floor
 #: (``optimization/scenario_optimization._STALL_MARGIN``) and this package's control-anchor
-#: eligibility gate (``anchor_eligibility.CONTROL_ANCHOR_STALL_MARGIN``) are both 1.10.
+#: eligibility gate (``outputs.control.strategy.CONTROL_ANCHOR_STALL_MARGIN``) are both 1.10.
 #: **The SPEED it multiplies is not the same one**, and the difference matters when the
 #: three are quoted together: those two use the 1-g stall speed at SEA-LEVEL density (the
 #: optimizer's also capped at V_ref), while the hook uses ``V_stall(n_commanded)`` at the
@@ -1659,7 +1659,7 @@ class ControlOutput(OutputSpec):
                 "the decoder — the auxiliary target would be supervising a known input"
             )
         if self.duration.duration_head in DURATION_HEADS_WITH_QUANTILES and self.latent.active:
-            # Not a plumbing limitation. `control/latent.py` reaches the duration by
+            # Not a plumbing limitation. `outputs/control/latent.py` reaches the duration by
             # SHIFTING the head's single unconstrained logit (`latent_duration`), and a
             # cumulative-softplus head has five; shifting all five would move the spread as
             # well as the location. Worse, training decodes a POSTERIOR sample, so the five
@@ -1999,7 +1999,7 @@ class TSConfig:
     # supervision weights are already zero on fitted-tail velocities, so the placeholder
     # rows cannot enter. Zero keeps the frozen simple-v1 behaviour.
     control_velocity_loss_weight: float = 0.0
-    # A latent intent on the control output (latent-intent design §六 L2; control/latent.py).
+    # A latent intent on the control output (latent-intent design §六 L2; outputs/control/latent.py).
     # latent_dim = 0 is the plain deterministic head. z is drawn from q(z | future) in
     # training and from the prior's top-1 component at inference; it is never an output.
     latent_dim: int = 0

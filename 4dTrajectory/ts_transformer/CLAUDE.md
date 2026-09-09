@@ -47,8 +47,8 @@ point of the package, not a migration in progress.
   latent-intent design demoted it, and its P1.d tracker was DELETED 2026-09-07 with its BLOCKER
   unfixed: a nearest-node search that jumps legs on 0.6 % of flights) regresses 14 DECISION numbers — the join
   distance, a via pose in runway axes, K=4 slowness knots (the duration is their integral),
-  K=4 height knots — and `closure_output.reconstruct` draws the trajectory in closed form
-  (`closure_geometry.via_dubins` + `closure_profile`; velocities = tangent × ground speed).
+  K=4 height knots — and `outputs.closure.model.reconstruct` draws the trajectory in closed form
+  (`outputs.closure.geometry.via_dubins` + `outputs.closure.profile`; velocities = tangent × ground speed).
   Training is L1 regression on per-flight LABELS fitted from the truth
   (`docs/p1_closure_oracle.py labels` → `closure_labels_path`), carried as the batch context
   and never an input; `predict --closure-from-labels` draws every flight from its label (the
@@ -57,11 +57,11 @@ point of the package, not a migration in progress.
   random anchors; a labels file must be the airport's own and cover the cohort (a run refuses
   one that covers no flight, prints the covered share otherwise). The drawn path has no
   dynamics of its own (22 % fully flyable); the P1.d tracker that flew it with the point-mass
-  rollout (`control/constraints/closure_tracking.py`, `predict --closure-track`) is RETIRED —
+  rollout (`outputs/control/constraints/closure_tracking.py`, `predict --closure-track`) is RETIRED —
   code DELETED 2026-09-07, its numbers (+10.5 m of ADE, 92 % fully flyable) kept as history in
   `docs/2026-09-06_closure_p1d_tracking_results.zh.md`. Do not rebuild it.
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
-  `latent_dim > 0` puts a latent intent z on the control output (`control/latent.py`:
+  `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches
   the controls AND the duration; inference decodes the prior's top-1; `predict
   --latent-samples K / --latent-random K / --latent-shuffle / --z-from-posterior` write
@@ -95,7 +95,7 @@ Two orthogonal dynamics axes underneath the control path: `control_dynamics_mode
 unscaled `transport-chart-velocity` was RETIRED 2026-09-07 — a measured regression that the
 nondimensional variant replaced on 2026-08-02; `run_naming` still abbreviates it so the 13
 stored 2026-07/08 configs keep their `_tcv` names). **The registry in
-`control/dynamics/backends.py` is keyed by the PAIR.**
+`outputs/control/dynamics/backends.py` is keyed by the PAIR.**
 The lagged model *wraps* `transport_chart_rhs` — same force equations, stall handling, transport
 term and chart projection — so it is the point-mass model plus three actuators, not a second
 flight model.
@@ -129,7 +129,7 @@ flight model.
   rule: the caller's alignment is a central difference over POSITIONS, so the flying just after a
   row is in its direction; and `MEMBERSHIP_FLOOR_M` (500 m) is what decides whether a record is
   cut at all.
-- **Controls are DIMENSIONLESS in this package** (`control/envelope.py` is the single source):
+- **Controls are DIMENSIONLESS in this package** (`outputs/control/envelope.py` is the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, same box on every
   airframe. Newtons appear in exactly two places — `physical_controls()` into the dynamics, and
   `forecast.py` out to the evaluation record. **The thrust floor is negative on purpose** (an
@@ -156,7 +156,7 @@ flight model.
   **97.8 %** of flights — the "an arrival is ~3.5–5 min" straight-line estimate was WRONG (real
   arrivals are vectored), **do not resize from it**. The ~2 % over the horizon are cut at H and
   flagged `horizonCapped`; their gate verdicts are cap artifacts, not model error.
-- **A new loss term must be added to `objective.loss_component_names`**, not only to the
+- **A new loss term must be added to the path strategy's `loss_component_names`**, not only to the
   objective's `extras` — otherwise `KeyError` on the first batch, *after* the slow dataset
   build.
 - **A latent run's total KL says nothing about WHERE it is spent, and that is the whole
@@ -172,7 +172,7 @@ flight model.
   the mixture estimator separate the two). Read them with `run_ts_latent_readout.py
   --history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
   a checkpoint with `run_ts_latent_probe.py`; the gate sentence is
-  `control.latent.displacement_verdict` and its ruler `DEAD_MEAN_DISPLACEMENT_SIGMA`, so no
+  `outputs.control.latent.displacement_verdict` and its ruler `DEAD_MEAN_DISPLACEMENT_SIGMA`, so no
   surface restates either. A scalar auxiliary target concentrates the information in ONE
   dimension, so on such an arm the median displacement can miss what `component_kl_per_dim`
   shows — and that target is an INPUT of the posterior encoder, so a small `latent_aux`
@@ -246,7 +246,7 @@ flight model.
   `(max L − L)·dt` earlier than their anchor (review A-2; every number that runner published
   before then is stale).
 - **`probe_dynamics(batch_size, device, config)` carries every key a real training batch carries**
-  — the supervision targets are added under the same conditions `_dynamics_arrays` adds them,
+  — the supervision targets are added under the same conditions `ControlContext._build_row` adds them,
   and `tests/test_supervision_terms.py` pins the two key sets equal. A key added to the real
   batch without the probe is a bare `KeyError` under `--batch-size auto`, after the dataset
   build (review B-1).
@@ -260,10 +260,10 @@ flight model.
   `source.anchorTimeS` back.** `observed_states` is REQUIRED in the schema and is the only source
   for the `look-` lookback entity.
 - **Prediction is the anchor's own past only**: the anchor's control state is inverted from the
-  observed lookback (`dataset.anchor_controls`), never from the first command.
+  observed lookback (`outputs.control.supervision.anchor_controls`), never from the first command.
 - **The teacher inverse must be the inverse OF THE CONFIGURED FORWARD MODEL.** A schedule solved
   against the wrong equations is finite, bounded, the right shape, and its own optimizer reports
-  a falling loss — it simply reproduces nothing. `control/dynamics/inverse.py` registers each
+  a falling loss — it simply reproduces nothing. `outputs/control/dynamics/inverse.py` registers each
   inverse under the SAME config key as its forward model; a model added without one fails at
   registry lookup. The transport term (ω×v) is UNCONDITIONAL and there is no correct "off".
 - **A fitted teacher table belongs to ONE width, anchor and cohort** — `control_imitation_target=
@@ -288,10 +288,10 @@ flight model.
 | `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `cli.common._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected. In `run_ts_pipeline.py` the model is an axis of the cell: a lag cell's `train_dir` / `pred_dir` / category carry `_lag`, and the ONE override dict (`TrainingPlan._plan_overrides`) feeds the label, `--skip-train` and CV reuse — before 2026-09-09 two hand-written copies both lacked the field, so a lag cell was rebuilt as point-mass everywhere but the training command and shared its directory with the point-mass cell (review A-1) |
-| procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `closure_output.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
+| procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `outputs.closure.model.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). THREE modules are live — `barrier` (lateral, gated ON the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08), `trombone` (the pre-final path stretch, gated OFF the final — L3.e, 2026-09-08) — and the vocabulary carries three combinations: `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`, each applied in the order it spells. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier`, `barrier+trombone+speed-floor` and a SOLO `trombone` are not members and are refused with the vocabulary (the trombone hands the command back at the final approach course and has nothing to hand it to without the barrier) |
 | `--truncate-at-threshold` | off | Predict-side, any output kind: cut every record where it FIRST crosses the threshold ON THE FINAL (`final_approach_geometry.threshold_crossing_index` — `d ≤ 0` and inside the on-final gate there; closest approach within that first run) and stamp `source.truncatedAtThreshold`. **Any flyability/geometry/CTA readout of a hooked, late-CTA arm needs it** — L3.d's floored rollouts arrive EARLY and fly on (endpoint \|xt\| p95 43–63 km, pooled ADE 840 → 3443 m at offset 0), and a report over the whole record is scoring that tail: on the approach proper the same arms read fully-flyable 1.35 % → 48.9 % at +60 s. `final_time_s` moves to the cut, which is the point — an early arrival stops being invisible and becomes the `final_time_error_s` it always was. A forecast that never crosses ON THE FINAL is left WHOLE and says `false`, and a vectored rollout that flies past abeam is exactly that case — until 2026-09-09 the rule read the PLANE alone and cut those on their downwind, 8.7 km out; one that crosses on its LAST row is whole with the flag TRUE (the flag means "ends at the threshold", and on a fixed-time STATE forecast the postprocessor's own closest-approach rule sets the same flag). Refused together with `--no-truncate` |
-| `control_speed_floor_margin` | `1.10` | The speed floor's margin: `V_floor = margin × V_stall(n_commanded, mass, rho, Cl_max)`. The COEFFICIENT is the package's existing one — the optimizer's NLP velocity floor (`optimization/scenario_optimization._STALL_MARGIN`) and the control-anchor eligibility gate (`anchor_eligibility.CONTROL_ANCHOR_STALL_MARGIN`) are both 1.10 — but **the SPEED it multiplies is not the same one, so do not quote the three as equal**: those two use the 1-g stall speed at SEA-LEVEL density (the optimizer's also capped at V_ref), the hook uses `V_stall(n_commanded)` at the LOCAL ISA density, uncapped, because it defends `flyability`'s criterion, which is evaluated at each sample's own altitude. At 8000 ft ρ/ρ₀ = 0.79, so the hook's floor is ~12.5 % higher — an effective margin near 1.24, ×√n in a turn — making the hook strictly the TIGHTEST of the three. Not one symbol on purpose: the other two are frozen policy constants (one is spelled into the stored `airborne-1.10-stall-margin-v1`) and this one is a per-run field. **Refused away from its default under a hook that contains neither `speed-floor` nor `trombone`** (`config.CONTROL_SPEED_FLOOR_MARGIN_READERS` — the trombone divides by the same `V_floor` to size its detour), and the barrier's two gains are refused the same way under a hook that has no barrier — before L3.d "a hook is on" and "the barrier is on" were the same condition. `predict --control-speed-floor-margin` overrides it; names a run `floor-margin=` |
+| `control_speed_floor_margin` | `1.10` | The speed floor's margin: `V_floor = margin × V_stall(n_commanded, mass, rho, Cl_max)`. The COEFFICIENT is the package's existing one — the optimizer's NLP velocity floor (`optimization/scenario_optimization._STALL_MARGIN`) and the control-anchor eligibility gate (`outputs.control.strategy.CONTROL_ANCHOR_STALL_MARGIN`) are both 1.10 — but **the SPEED it multiplies is not the same one, so do not quote the three as equal**: those two use the 1-g stall speed at SEA-LEVEL density (the optimizer's also capped at V_ref), the hook uses `V_stall(n_commanded)` at the LOCAL ISA density, uncapped, because it defends `flyability`'s criterion, which is evaluated at each sample's own altitude. At 8000 ft ρ/ρ₀ = 0.79, so the hook's floor is ~12.5 % higher — an effective margin near 1.24, ×√n in a turn — making the hook strictly the TIGHTEST of the three. Not one symbol on purpose: the other two are frozen policy constants (one is spelled into the stored `airborne-1.10-stall-margin-v1`) and this one is a per-run field. **Refused away from its default under a hook that contains neither `speed-floor` nor `trombone`** (`config.CONTROL_SPEED_FLOOR_MARGIN_READERS` — the trombone divides by the same `V_floor` to size its detour), and the barrier's two gains are refused the same way under a hook that has no barrier — before L3.d "a hook is on" and "the barrier is on" were the same condition. `predict --control-speed-floor-margin` overrides it; names a run `floor-margin=` |
 | `--project-final` | off | deployment fallback: the post-hoc projection under the ONE gate, `on-final`. The FAF-distance gate and the `corridor_gate` field were DELETED 2026-09-09 (review §5): never set in any stored run (the field is a retired constant on load, 0 names moved), and FAF-gating wrecked vectored flights |
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
 | `latent_dim` | 0 | the latent intent (L2); `latent_prior_components` / `latent_beta` / `latent_free_bits_nats` / `latent_posterior_init_std` and L2.f's two below mean nothing without it and are refused |
@@ -525,14 +525,38 @@ modules are imported by their qualified names — see the package rule under Con
 
 Two edges that a change must not reverse: `evaluation_protocol` reaches
 `data_provenance`, never `dataset` (a boundary test bans torch from that path), and
-`batch_contract` sits BELOW `objective` — `closure_output` and `control/latent` return
-`LossComponents`, so it cannot move up.
+`batch_contract` sits BELOW `objective` — the closure model and `outputs/control/latent`
+return `LossComponents`, so it cannot move up.
 
-Control-specific code lives in **`control/`**, by role rather than behind a `control_`
-prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
-`dynamics/{backends,rollout,inverse,hooks}`, `loss/{components,fixed_dt}`,
-`training/diagnostics`,
-`constraints/{barrier_filter,speed_floor,trombone,composite,gates,saturation}`.
+**Each prediction path is a package under `outputs/` behind ONE strategy** (2026-09-10,
+review §4.2): `outputs/state/`, `outputs/closure/`, `outputs/control/`, each with a
+`strategy.py` whose class answers the spine — `build_model`, the anchor policy,
+`bind_windows` (the batch context), `target_contract` / `loss_component_names` / `loss`,
+the batch-size probe, `check_trainable` / `training_teacher` / `epoch_config` /
+`training_diagnostics` / `epoch_record` / `checkpoint_metadata`, `forecast` with one
+`ForecastOptions` value, `replay`, `record_fields` — and the spine (`dataset`, `batching`,
+`objective`, `forecast`, `validation`, `export`, `train`, `models`) calls
+`outputs.strategy(config).<method>` where it used to branch on `prediction_output`. The
+registry is LAZY (`outputs/__init__.py` imports a strategy module on first use), which is
+what lets `dataset`/`forecast`/`objective` import `outputs` while the strategies import
+them back. `outputs/duration_heads.py` holds the point and quantile heads both paths build.
+A fourth path (the plan-and-guidance design) is one package here and no edit in the spine.
+`dataset` no longer carries any path's data-side code: a window set holds
+`self.context = strategy.bind_windows(self)` and `batch()` asks it for the context row and
+the dense supervision (the control path's `ControlContext` is where `dynamics_arrays`, the
+imitation and heading-rate references and the fixed-dt rows are built, cached on a
+fixed-anchor set); `__getitem__` is gone — `batch([i])` is the one door.
+
+The control path's own code lives in **`outputs/control/`**, by role rather than behind a
+`control_` prefix: `strategy`, `supervision` (the per-flight physical context and the two
+supervision references), `forecast` (the dense rollout under the hook, the CTA and interval
+plumbing, the latent decodes), `envelope`, `heads` (the prediction contract and the heads),
+`conditioning`, `latent`, `basis_fit`, `dynamics/{backends,rollout,inverse,hooks}`,
+`loss/{objective,components,fixed_dt}`, `training/diagnostics`,
+`constraints/{barrier_filter,speed_floor,trombone,composite,gates,saturation}`. The closure
+path is `outputs/closure/{strategy,model,geometry,profile,forecast}`; the state path is
+`outputs/state/{strategy,model,loss,forecast}` (the fixed-time postprocessors and the
+corridor projection live in its `forecast`).
 `saturation` holds the ONE definition of what `hook_saturation=soft` means (a scaled softplus)
 AND of the bank softness/active-change thresholds two modules now share; `composite` is how
 several modules become the one hook the rollout takes, and it refuses two modules that report a
@@ -548,7 +572,7 @@ segment boundary, the anchor first) — not a lock-step state, because the quest
 it are look-ahead ones; it is the same tensor at every call, so a hook derives its table from
 it once at `segment_index == 0`. It exists only where a member declares `needs_reference`.
 
-**A dynamics backend is a ROW, not a class**: `control/dynamics/backends.py` maps the
+**A dynamics backend is a ROW, not a class**: `outputs/control/dynamics/backends.py` maps the
 `(control_dynamics_model, control_dynamics_backend)` PAIR to
 `(endpoint_fn, dense_fn, post_fn, runs_hooks)`. `post_fn` turns whatever state the
 integrator carries into the one public `(channels, geodetic)` pair; `runs_hooks` is why the
@@ -615,7 +639,7 @@ importable. A finished one-off driver belongs there, not beside the live runners
   than filing all of them under each airport's category.
 - `run_ts_eta_calibration.py` — **B2**: split-conformal (CQR) calibration of a
   quantile-bearing checkpoint's interval (`duration_head` ∈ `quantile`, `two-head`). Reads the DURATION HEAD ALONE
-  (`forecast.duration_quantile_predictions` — one forward per flight, no rollout, no CTA),
+  (`outputs.control.forecast.duration_quantile_predictions` — one forward per flight, no rollout, no CTA),
   which is why it is seconds of CPU and why it may load a `cta=given` checkpoint
   (`load_arm(..., refuse_cta_given=False)`, the only instrument that may; the
   `intent_conditioning` refusal still applies — that oracle is IN the history). The VAL
@@ -733,7 +757,7 @@ trajectories.py` (which held a second copy of the comparison). So:
   search from candidate 0; a finished `cv_results.json` is read, not refused.
 
 **Measurement code is CODE.** Reusable logic goes in the package with tests
-(`control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
+(`outputs/control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
 a runnable experiment goes in a top-level `run_ts_*.py` runner beside the others;
 **`docs/` holds documents**. The `docs/*.py` scripts predate this rule and are a layout
 defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add to them, and
@@ -750,25 +774,28 @@ of every module beside the qualified one — its own `TSConfig`, its own registr
 every identity check between the two fails silently. `tests/test_architecture.py` refuses
 both a flat import and a bootstrap that inserts the package directory.
 
-**Membership rule**: a module belongs in `control/` only if EVERY consumer of it is
-control-specific. `prediction_outputs` (holds `StatePrediction`), `terminal_state_loss`,
-`arc_length_geometry`, `fixed_dt_supervision` and `flyability` therefore stay at the top
-level — `fixed_anchor_validation` and `dataset` share them with the state path, and filing
-them under `control` would claim an ownership that does not exist.
+**Membership rule**: a module belongs under `outputs/control/` only if EVERY consumer of it
+is control-specific. `terminal_state_loss`, `arc_length_geometry`, `fixed_dt_supervision` and
+`flyability` therefore stay at the top level — `fixed_anchor_validation` and `dataset` share
+them with the state path, and filing them under the control path would claim an ownership
+that does not exist.
 
-**Direction**: the objective and the training loop import `control/`, never the reverse.
-`control/` may import `dataset` (`Normalizer` and the window types are data-plane values it
-genuinely consumes) but not `train`/`objective`/`validation`/`forecast`/`models`/`batching`.
-**That `dataset` edge runs BOTH ways and only one direction is safe**: `dataset` imports
-`control.{basis_fit, conditioning, dynamics.inverse, envelope}` to build a batch at all, so
-those four must stay `dataset`-free or the cycle closes and fails at import in whichever
-order a caller hits first. `tests/test_architecture.py` names the four and pins it.
-`batch_contract.py` holds `unpack_batch`/`model_forward`/`anchor_state` and the
-`LossComponents` contract so a loss module can read a batch and return an objective without
-importing `objective`, which imports it. `tests/test_architecture.py` enforces all of it.
+**Direction**: the loop, the replay, the export and the CLI import `outputs/`, never the
+reverse. Only a path's STRATEGY SEAM (`strategy`, `forecast`, `supervision`, `loss` /
+`loss/objective`) reaches the spine's shared modules (`objective`, `forecast`, `models`,
+`dataset`); the path's inner modules (heads, dynamics, constraints, the loss terms) may
+import `dataset` (`Normalizer` and the window types are data-plane values they genuinely
+consume) but not `objective`/`forecast`/`models`, and nothing under `outputs/` imports
+`train`/`validation`/`batching`/`export`/`cli`. `dataset` imports the registry (`outputs`)
+and nothing under it, and the registry and `outputs/base.py` import no spine module at
+runtime — that is the whole reason the strategies can import `dataset`, `forecast` and
+`objective` back without a cycle. `batch_contract.py` holds
+`unpack_batch`/`model_forward`/`anchor_state` and the `LossComponents` contract so a loss
+module can read a batch and return an objective without importing `objective`, which imports
+it. `tests/test_architecture.py` enforces all of it.
 
-`control/__init__.py` re-exports nothing on purpose — flattening forty names into one
-namespace would restore the undifferentiated listing the package exists to remove.
+`outputs/control/__init__.py` re-exports nothing on purpose — flattening forty names into
+one namespace would restore the undifferentiated listing the package exists to remove.
 
 **Every CLI flag is named after the `TSConfig` field it sets** (`--dt-s`,
 `--control-rollout-integrator-dt-s`, `--control-state-supervision-clock`, …; fifteen were

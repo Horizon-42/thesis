@@ -15,7 +15,7 @@ states or controls:
                           threshold, pinned to 0
 
 ``reconstruct`` turns a decision vector and the anchor state into the dense trajectory
-(``closure_geometry.via_dubins`` for the path, ``closure_profile`` for the clock and the
+(``outputs.closure.geometry.via_dubins`` for the path, ``outputs.closure.profile`` for the clock and the
 heights, velocities from the tangent and the ground speed), and the export writes it
 through the record contract's reference-shaped branch (no controls). A via inside one
 turn radius of the anchor is not a decision — the label puts a straight-in flight's via
@@ -42,8 +42,8 @@ import numpy as np
 import torch
 from torch import nn
 
-import ts_transformer.closure_geometry as cg
-import ts_transformer.closure_profile as cp
+import ts_transformer.outputs.closure.geometry as cg
+import ts_transformer.outputs.closure.profile as cp
 from ts_transformer.approach_difficulty import approach_difficulty
 from ts_transformer.batch_contract import LossComponents
 from ts_transformer.config import CLOSURE_LABEL_KNOTS, CLOSURE_TIMING_SCALE_S, TSConfig
@@ -423,3 +423,6 @@ def replay_batch(prediction: ClosurePrediction, anchors_physical: np.ndarray, co
         predicted[row], durations[row] = sample_at_progress(rec, points)
         final[row] = rec.final_time_s
     return predicted, durations, final
+
+CLOSURE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
+

@@ -46,12 +46,13 @@ from ts_transformer.config import (  # noqa: E402
     default_anchor, uses_control_dynamics,
 )
 
-from ts_transformer.control.dynamics.rollout import rollout_control_dense  # noqa: E402
+from ts_transformer.outputs.control.dynamics.rollout import rollout_control_dense  # noqa: E402
 from ts_transformer.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,
 )
-from ts_transformer.dataset import FlightSeries, build_series, dynamics_arrays, load_flight_dicts  # noqa: E402
+from ts_transformer.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.outputs.control.supervision import dynamics_arrays  # noqa: E402
 from ts_transformer.fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_common_truth,
     resample_prediction_to_physical_time,

@@ -16,7 +16,7 @@ points, and the 2026-09-09 plan-and-guidance design is the next axis.
 |---|---|
 | bug findings | 4 number-changing on live paths, 4 crash paths, ~20 contract holes — §2, all with `file:line` |
 | architecture | diagnosis §3, target §4, retirement candidates with census evidence §5, order §6 |
-| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5) and 3 (§4.3, see its resolution paragraph) done in the same branch |
+| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3) and 4 (§4.2, see their resolution paragraphs) done in the same branch |
 | decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); the five §7 decisions |
 
 ## 1. Measured
@@ -297,6 +297,37 @@ What this removes, concretely:
 The plan-and-guidance design then becomes `outputs/plan/` with the eight methods and its own
 sub-config — no edit in `dataset`, `objective`, `forecast`, `export`, `train`, `validation` or
 `batching`.
+
+**Resolution (2026-09-10, `dev-pkg-review`).** Built as `outputs/`: the lazy registry
+(`outputs.strategy(config)` / `strategy_for(name)`), the `OutputStrategy` base
+(`outputs/base.py` — the methods the branch sites asked for, one per site, tabulated in its
+docstring), and one package per path — `outputs/state/{strategy,model,loss,forecast}`,
+`outputs/closure/{strategy,model,geometry,profile,forecast}`,
+`outputs/control/{strategy,supervision,forecast,loss/objective,…}` (the `control/` package
+moved whole). The spine's branch sites are gone: `models.build_model`; `dataset`
+(`bind_windows` → one `WindowContext` per window set, `batch()` asks it for the context row
+and the dense supervision; `__getitem__` deleted; `anchor_eligibility.py` deleted — the policy
+is `eligible_anchors`); `batching` (the probe's context / dense / prediction hooks and the
+margin flag); `objective` (`target_contract`, `loss_component_names`,
+`prediction_loss_components` dispatch by config, not by prediction type);
+`forecast.forecast_approaches` (one `ForecastOptions` value instead of seven keyword
+arguments — §4.4's `PredictOptions`, forecast half); `validation._prediction_batch_replay`
+(→ `Replay`); `export.build_prediction_record` (`record_fields`); `train.fit_model`
+(`check_trainable`, `training_teacher`, `epoch_config`, `training_diagnostics`,
+`epoch_record`, `checkpoint_metadata`). Out of the spine: ≈ 380 lines of `dataset` (the
+control supervision and dynamics context — `dataset` imports nothing under `outputs/` any
+more and both import cycles are gone), ≈ 700 of `forecast`, ≈ 850 of `objective`;
+`prediction_outputs.py` split into `outputs/state/model`, `outputs/control/heads` and the
+shared `outputs/duration_heads`. **Not adopted from the sketch:** `Forecast.extras` /
+`EpochResult.extras` — both records keep their fields (the prediction record and
+`history.json` schemas are unchanged; the strategy fills them through `record_fields` /
+`epoch_record`); `dataset.build_series` and `TrajectoryWindows.__init__` are not split (§4.7,
+later). B-1 is unrepresentable in the sketch's sense: `ControlStrategy.probe_context` and
+`ControlContext._build_row` are two methods of one path, pinned equal by
+`tests/test_supervision_terms.py`. `tests/test_architecture.py` now enforces the layering:
+nothing under `outputs/` imports the loop, only the strategy seam reaches the spine, the
+registry is lazy, `dataset` reaches only the registry. Acceptance: full suite 972 passed (the 12 known `test_ts_pipeline.py` fixtures red before and after); 219 stored
+configs, 112 load, 0 names moved.
 
 ### 4.3 Split `TSConfig` by owner — sum types where the validators say "belongs to X"
 

@@ -4,6 +4,39 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: review §4.2 — one strategy per prediction path under `outputs/`; the spine stops branching on `prediction_output`
+
+Step 4 of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`
+§4.2, resolution paragraph), on `dev-pkg-review`. Nothing on disk changed: full suite 972 passed (the 12 known `test_ts_pipeline.py` fixtures red before and after), and
+the 219 stored `history.json` configs give byte-identical run names, slugs and loadability;
+the prediction-record and `history.json` schemas are unchanged.
+
+- **`outputs/`**: a lazy registry (`outputs.strategy(config)`), the `OutputStrategy` interface
+  (`outputs/base.py`, one method per former branch site) and one package per path —
+  `outputs/state/{strategy,model,loss,forecast}`, `outputs/closure/{strategy,model,geometry,
+  profile,forecast}` (the former `closure_output` / `closure_geometry` / `closure_profile`),
+  `outputs/control/{strategy,supervision,forecast,loss/objective,…}` (the former `control/`
+  package, plus what `dataset`, `forecast` and `objective` carried for it). The point and
+  quantile duration heads both paths build are `outputs/duration_heads.py`;
+  `prediction_outputs.py` and `anchor_eligibility.py` are gone.
+- **The spine calls the strategy** where it branched: `models.build_model`; `dataset`
+  (`self.context = strategy.bind_windows(self)`, `batch()` asks it for the context row and the
+  dense supervision, `__getitem__` deleted — `batch([i])` is the one door); `batching`'s probe;
+  `objective`'s `target_contract` / `loss_component_names` / `prediction_loss_components`;
+  `forecast.forecast_approaches` with ONE `ForecastOptions` value in place of seven keyword
+  arguments; `validation`'s replay; `export`'s record fields; `train.fit_model`'s
+  `check_trainable` / `training_teacher` / `epoch_config` / `training_diagnostics` /
+  `epoch_record` / `checkpoint_metadata`. `dataset` imports nothing under `outputs/` any more
+  (both import cycles are gone), and a fourth path is one package with no spine edit.
+- **Layering, enforced** (`tests/test_architecture.py`): nothing under `outputs/` imports the
+  loop / replay / export / CLI; only a path's strategy seam (`strategy`, `forecast`,
+  `supervision`, `loss`) reaches `objective` / `forecast` / `models`; the registry and the base
+  import no spine module at runtime; `dataset` reaches only the registry.
+- Every import of a moved name was rewritten across the package, the tests, the docs scripts
+  and the root runners; the now-shared helpers lost their underscore (`forecast.history_at_anchor`
+  / `history_batch`, `outputs.state.forecast.forecast_state`, `outputs.control.forecast.forecast_control_batch`,
+  `outputs.closure.forecast.forecast_closure_batch`).
+
 ### 2026-09-10 — ts_transformer: review §4.3 — `TSConfig` split into typed views; one ownership rule replaces twenty-three per-field checks
 
 Step 3 of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`

@@ -49,7 +49,7 @@ from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import ExplicitAnchorTrajectoryWindows, Normalizer, build_series
 from ts_transformer.fixed_anchor_validation import FIXED_ANCHOR_LABEL, fixed_anchor_common_grid_ade_metrics
 from ts_transformer.models import build_model
-from ts_transformer.prediction_outputs import StatePrediction
+from ts_transformer.outputs.state.model import StatePrediction
 from ts_transformer.splits import split_by_flight
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import fit_model, train

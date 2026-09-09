@@ -15,7 +15,7 @@ for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.closure_geometry as cg  # noqa: E402
+import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
 import ts_transformer.final_approach_geometry as fag  # noqa: E402
 
 PSI = math.radians(50.0)      # an inbound course, math-ENU

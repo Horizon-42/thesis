@@ -28,6 +28,7 @@ import pytest
 import torch
 
 import ts_transformer.objective as objective
+import ts_transformer.outputs.control.loss.objective as control_objective
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, heading_rate_rad_s
 from ts_transformer.channels import CHANNELS, channels_from_states
 from ts_transformer.config import (
@@ -44,15 +45,14 @@ from ts_transformer.config import (
     control_simple_v1_overrides,
     recipe_settings,
 )
-from ts_transformer.control.dynamics import rollout as control_rollout
-from ts_transformer.control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
-from ts_transformer.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
+from ts_transformer.outputs.control.dynamics import rollout as control_rollout
+from ts_transformer.outputs.control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
+from ts_transformer.outputs.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
 from ts_transformer.coordinate_frames import ENUFrame
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import (
-    HEADING_RATE_SMOOTHING_WINDOW_S,
-    Normalizer,
-    build_series,
+from ts_transformer.outputs.control.supervision import HEADING_RATE_SMOOTHING_WINDOW_S
+from ts_transformer.dataset import Normalizer, build_series
+from ts_transformer.outputs.control.supervision import (
     probe_dynamics,
     reference_heading_rate_supervision,
 )
@@ -426,7 +426,7 @@ def _endpoint_result(config: TSConfig, bank_schedule: list[float], target_dps: l
         dtype=torch.float64, requires_grad=True,
     )
     durations = torch.full((1, len(bank_schedule)), 10.0, dtype=torch.float64)
-    from ts_transformer.prediction_outputs import ControlPrediction
+    from ts_transformer.outputs.control.heads import ControlPrediction
 
     prediction = ControlPrediction(
         controls=controls, segment_durations=durations,
@@ -440,7 +440,7 @@ def _endpoint_result(config: TSConfig, bank_schedule: list[float], target_dps: l
     }
     targets = torch.zeros(1, len(bank_schedule), channels, dtype=torch.float64)
     weights = torch.full_like(targets, 1.0 / channels)
-    result = objective._native_endpoint_control_state_loss(
+    result = control_objective._native_endpoint_control_state_loss(
         prediction, torch.zeros(1, channels, dtype=torch.float64), targets, weights,
         durations.sum(dim=1), config,
         Normalizer(mean=np.zeros(channels), std=np.ones(channels)),

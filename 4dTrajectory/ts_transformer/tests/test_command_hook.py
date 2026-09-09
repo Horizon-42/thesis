@@ -20,10 +20,11 @@ from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_BACKENDS, CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS, PREDICTION_CONTROL, TSConfig,
 )
-from ts_transformer.control.dynamics import rollout as control_rollout  # noqa: E402
-from ts_transformer.control.dynamics.hooks import RolloutStateView  # noqa: E402
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
-from ts_transformer.dataset import build_series, dynamics_arrays  # noqa: E402
+from ts_transformer.outputs.control.dynamics import rollout as control_rollout  # noqa: E402
+from ts_transformer.outputs.control.dynamics.hooks import RolloutStateView  # noqa: E402
+from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from ts_transformer.dataset import build_series  # noqa: E402
+from ts_transformer.outputs.control.supervision import dynamics_arrays  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"

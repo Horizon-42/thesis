@@ -27,13 +27,18 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
 from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
 import ts_transformer.batching as batching
-from ts_transformer.forecast import forecast_approaches, latent_mode_forecasts, shuffled_latent_forecasts
+from ts_transformer.forecast import forecast_approaches
+from ts_transformer.outputs import ForecastOptions  # noqa: E402
+from ts_transformer.outputs.control.forecast import (
+    latent_mode_forecasts,
+    shuffled_latent_forecasts,
+)
 from ts_transformer.models import build_model
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.synthetic import synthetic_arrivals
@@ -137,7 +142,7 @@ def test_train_then_forecast_at_the_truth_cta_and_at_a_counterfactual(tmp_path: 
 
     anchor = loaded.seq_len - 1
     identity = forecast_approaches(model, series[:3], loaded, normalizer, device=torch.device("cpu"))
-    shifted = forecast_approaches(model, series[:3], loaded, normalizer, device=torch.device("cpu"), cta_offset_s=60.0)
+    shifted = forecast_approaches(model, series[:3], loaded, normalizer, device=torch.device("cpu"), options=ForecastOptions(cta_offset_s=60.0))
     for item, same, later in zip(series[:3], identity, shifted):
         truth = truth_duration_s(item, anchor)
         assert same.cta_s == pytest.approx(truth) and same.cta_offset_s == 0.0
@@ -165,7 +170,7 @@ def test_the_offset_is_refused_off_the_cta_path():
     model = build_model(config).eval()
     series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3), config, airport=AIRPORT)
     with pytest.raises(ValueError, match="cta_conditioning=given only"):
-        forecast_approaches(model, series, config, Normalizer.fit(series), device=torch.device("cpu"), cta_offset_s=30.0)
+        forecast_approaches(model, series, config, Normalizer.fit(series), device=torch.device("cpu"), options=ForecastOptions(cta_offset_s=30.0))
 
 
 def test_the_latent_decodes_carry_the_same_offset_as_the_top1():

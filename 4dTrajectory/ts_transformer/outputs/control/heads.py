@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import torch
 import torch.nn as nn
 
 from ts_transformer.config import TSConfig
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
@@ -23,12 +23,164 @@ from ts_transformer.config import (
     DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
 )
-from ts_transformer.prediction_outputs import (
-    ControlOutputHead,
-    FinalTimeHead,
-    QuantileFinalTimeHead,
-    UniformDurationControlHead,
-)
+from ts_transformer.outputs.duration_heads import FinalTimeHead, QuantileFinalTimeHead
+
+
+CONTROL_NAMES = ("thrust_N", "bank_rad", "load_factor")
+
+
+@dataclass(frozen=True)
+class ControlPrediction:
+    controls: torch.Tensor           # [B, N, 3], physical control units
+    segment_durations: torch.Tensor  # [B, N], physical seconds
+    final_time_s: torch.Tensor       # [B], segment_durations.sum(dim=-1)
+    # B1: the five `DURATION_QUANTILES` in seconds, `[B, Q]`, or None under the point head.
+    # `final_time_s` above stays the ONE duration the schedule is rolled over (the median,
+    # or the given CTA), so nothing downstream changes; these are the interval the ETA
+    # calibration is built on. `kw_only` because `LatentControlPrediction` extends this
+    # dataclass with required fields, and a defaulted one before them would not compile.
+    duration_quantiles_s: torch.Tensor | None = field(default=None, kw_only=True)
+
+
+@dataclass(frozen=True)
+class ControlBounds:
+    """Aircraft-specific bounds in ``(thrust_N, bank_rad, load_factor)`` order."""
+
+    lower: tuple[float, float, float]
+    upper: tuple[float, float, float]
+
+    def __post_init__(self) -> None:
+        expected = len(CONTROL_NAMES)
+        if len(self.lower) != expected or len(self.upper) != expected:
+            raise ValueError(f"control bounds must contain exactly {expected} values")
+        if any(lo >= hi for lo, hi in zip(self.lower, self.upper)):
+            raise ValueError("every control lower bound must be smaller than its upper bound")
+
+
+class ControlOutputHead(nn.Module):
+    """Decode generic features into bounded controls and a non-uniform time partition.
+
+    ``final_time_s`` is predicted by the model's duration head.  Duration logits only
+    decide how that time is distributed over the N piecewise-constant control segments.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        n_segments: int,
+        bounds: ControlBounds | None = None,
+        duration_uniform_floor: float = 0.0,
+    ):
+        super().__init__()
+        if not 0.0 <= duration_uniform_floor < 1.0:
+            raise ValueError("duration_uniform_floor must be in [0, 1)")
+        self.n_segments = n_segments
+        self.duration_uniform_floor = float(duration_uniform_floor)
+        self.control_projection = nn.Linear(input_dim, n_segments * len(CONTROL_NAMES))
+        self.duration_projection = nn.Linear(input_dim, n_segments)
+        if bounds is None:
+            self.register_buffer("lower", None)
+            self.register_buffer("upper", None)
+        else:
+            self.register_buffer("lower", torch.tensor(bounds.lower, dtype=torch.float32))
+            self.register_buffer("upper", torch.tensor(bounds.upper, dtype=torch.float32))
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        final_time_s: torch.Tensor,
+        *,
+        lower: torch.Tensor | None = None,
+        upper: torch.Tensor | None = None,
+    ) -> ControlPrediction:
+        controls = self.bounded_controls(features, lower=lower, upper=upper)
+        fractions = stabilized_duration_fractions(
+            self.duration_projection(features), self.duration_uniform_floor
+        )
+        segment_durations = fractions * final_time_s.unsqueeze(-1)
+        return ControlPrediction(
+            controls=controls,
+            segment_durations=segment_durations,
+            final_time_s=final_time_s,
+        )
+
+    def bounded_controls(
+        self,
+        features: torch.Tensor,
+        *,
+        lower: torch.Tensor | None = None,
+        upper: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Map logits to per-flight physical bounds for reusable control heads."""
+        batch = features.shape[0]
+        lower = self.lower if lower is None else lower
+        upper = self.upper if upper is None else upper
+        if lower is None or upper is None:
+            raise ValueError("per-sample lower and upper bounds are required")
+        if lower.shape[-1] != len(CONTROL_NAMES) or upper.shape != lower.shape:
+            raise ValueError("control bounds must end in 3 aligned values")
+        if lower.ndim == 1:
+            lower = lower.unsqueeze(0).expand(batch, -1)
+            upper = upper.unsqueeze(0).expand(batch, -1)
+        if lower.shape != (batch, len(CONTROL_NAMES)):
+            raise ValueError(
+                f"per-sample bounds must be [B,3], got {tuple(lower.shape)} for B={batch}"
+            )
+        unit_controls = torch.sigmoid(self.control_projection(features)).view(
+            batch, self.n_segments, len(CONTROL_NAMES)
+        )
+        return lower.unsqueeze(1) + unit_controls * (
+            upper - lower
+        ).unsqueeze(1)
+
+
+
+class UniformDurationControlHead(ControlOutputHead):
+    """Decode controls while fixing every segment duration to ``final_time / N``."""
+
+    def __init__(self, input_dim: int, n_segments: int):
+        super().__init__(input_dim, n_segments)
+        # The base class owns the established bounded-control projection. Removing this
+        # module makes the simplified contract structural: no unused duration logits are
+        # serialized, optimized, or accidentally revived by another loss.
+        self.duration_projection = None
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        final_time_s: torch.Tensor,
+        *,
+        lower: torch.Tensor,
+        upper: torch.Tensor,
+    ) -> ControlPrediction:
+        controls = self.bounded_controls(features, lower=lower, upper=upper)
+        segment_durations = final_time_s.unsqueeze(-1).expand(
+            -1, self.n_segments
+        ) / self.n_segments
+        return ControlPrediction(
+            controls=controls,
+            segment_durations=segment_durations,
+            final_time_s=final_time_s,
+        )
+
+
+def stabilized_duration_fractions(
+    logits: torch.Tensor, uniform_floor: float
+) -> torch.Tensor:
+    """Keep a learnable partition while reserving duration mass uniformly.
+
+    A raw softmax permits one segment to approach 100% of the trajectory. Reserving a
+    fixed share of total time uniformly gives every segment a hard positive floor and
+    bounds the largest possible segment without clipping gradients.
+    """
+    if logits.ndim < 1 or logits.shape[-1] < 1:
+        raise ValueError("duration logits must end in at least one segment")
+    if not 0.0 <= uniform_floor < 1.0:
+        raise ValueError("duration uniform floor must be in [0, 1)")
+    learned = torch.softmax(logits, dim=-1)
+    return learned * (1.0 - uniform_floor) + uniform_floor / logits.shape[-1]
+
+
 
 
 class ControlFeatureModel(nn.Module):

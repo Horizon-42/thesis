@@ -24,12 +24,11 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-import math
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -59,13 +58,9 @@ from ts_transformer.channels import (
     VELOCITY_IDX,
     channels_from_states,
     resample_uniform,
-    states_from_channels,
     target_chart_position,
 )
-from ts_transformer.anchor_eligibility import (
-    eligible_random_train_anchors,
-    random_train_anchor_eligibility_policy,
-)
+from ts_transformer.outputs import strategy as output_strategy
 # The remaining-path axis, from the LEAF that owns its values. `anchor_grid` re-exports the
 # same objects for every reading consumer; it imports this module, so the training sampler
 # reads them from underneath rather than through it.
@@ -76,42 +71,24 @@ from ts_transformer.anchor_strata import (
 )
 from ts_transformer.approach_difficulty import remaining_path_profile_m
 from ts_transformer.config import (
-    CTA_CONDITIONING_GIVEN,
-    CTA_CONDITIONING_OFF,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
-    uses_closure_labels,
-    CONTROL_STATE_LOSS_GRID_FIXED_DT,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM,
     RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
-    STATE_POSITION_CORRIDOR_BOUNDED,
     TSConfig,
     default_anchor,
-    uses_control_dynamics,
 )
 from ts_transformer.data_provenance import manifest_paths
-from ts_transformer.control.basis_fit import FittedTeacherTable
-from ts_transformer.control.conditioning import condition_vector
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.control.dynamics.inverse import actual_controls, segment_controls
 from ts_transformer.coordinate_frames import (
     COORDINATE_FRAME_AIRPORT_ENU,
     AirportReference,
     CoordinateFrame,
     frame_for_state,
 )
-from ts_transformer.final_approach_geometry import FINAL_APPROACH_KEYS
 from flight_scenarios.runway_target import airport_reference_point
-from ts_transformer.fixed_dt_supervision import (
-    FixedDTControlSupervision,
-    FixedDTSupervisionRow,
-    build_fixed_dt_supervision,
-    cache_fixed_dt_supervision_rows,
-    pack_fixed_dt_supervision_rows,
-)
 from ts_transformer.intent_conditioning import LeadLanding, intent_vector, lead_landings
 from ts_transformer.target_conditioning import (
     TARGET_CONDITIONING_NONE,
@@ -121,6 +98,10 @@ from ts_transformer.target_conditioning import (
 from ts_transformer.time_grids import output_time_grid
 from ts_transformer.reference_velocity import rebuild_reference_velocities
 
+
+
+if TYPE_CHECKING:  # the control path's training-time input; the context it feeds owns it
+    from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 
 
 def dataset_flight_key(source: dict[str, Any], index: int) -> str:
@@ -202,392 +183,9 @@ class FlightSeries:
 
 
 
-# How much observed lookback the anchor-state control inversion differentiates. It needs
-# at least three samples for a second-order gradient; a few more absorb ADS-B jitter
-# without reaching back into a different phase of flight (11 x 2 s = 20 s).
-ANCHOR_CONTROL_SAMPLES = 11
-
-
-def anchor_controls(series: FlightSeries, anchor: int, mass_kg: float) -> np.ndarray:
-    """Return the controls the observed lookback implies are in effect at ``anchor``.
-
-    This is the lagged model's actuator initial condition. It reads only samples at or
-    before the anchor, so it is as deployable as the history window itself, and it is the
-    ACTUAL control (never a command) for every flight model — the commands that produced
-    it are a separate inversion in ``control_inverse_dynamics``.
-    """
-    start = max(0, anchor + 1 - ANCHOR_CONTROL_SAMPLES)
-    window = slice(start, anchor + 1)
-    times = series.times[window]
-    samples = states_from_channels(
-        times, series.values[window], series.frame, mass_kg=mass_kg
-    )
-    states = np.asarray(
-        [
-            [s.latitude, s.longitude, s.altitude, s.V, s.psi, s.gamma, s.m]
-            for _t, s in samples
-        ],
-        dtype=np.float64,
-    )
-    aero = series.scenario.aero
-    return actual_controls(
-        states,
-        times,
-        aero_params=np.array(
-            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
-            dtype=np.float64,
-        ),
-        max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
-    )[-1]
-
-
-def reference_control_supervision(
-    series: FlightSeries,
-    anchor: int,
-    config: TSConfig,
-    total_duration_s: float,
-    last_measured_time_s: float,
-) -> dict[str, np.ndarray]:
-    """Return the control schedule the flown track implies, as a TRAINING TARGET.
-
-    This is supervision, not dynamics: it reads the future, so it is deliberately built
-    here and not in :func:`dynamics_arrays`, which forecast and predict also call and which
-    must stay deployable from the lookback alone.
-
-    The schedule comes from the SAME inverse registry the forward rollout dispatches
-    through, keyed on ``config.control_dynamics_model``, so the lagged model is supervised
-    on COMMANDS and the point-mass model on actual controls -- a target can never be the
-    solution of equations the training rollout does not integrate.
-
-    ``total_duration_s`` is the full supervised horizon (fitted tail included) because the
-    model's segments span it, but the fitted tail has no measured velocity to differentiate.
-    Segments whose midpoint falls past ``last_measured_time_s`` therefore get weight zero —
-    the same cut the velocity term already makes, not the same numbers (this is a hard 0/1
-    step, that one an interpolated per-channel weight).
-
-    Those midpoints sit at the UNIFORM ``(k+0.5)·T/N``, which pairs index-for-index with the
-    predicted schedule only through one chain: this target is built for the
-    ``true-time-position`` objective, which ``TSConfig`` admits only with
-    ``control_duration_parameterization="uniform"``. Under a non-uniform partition segment k
-    of the two sides would cover different physical times.
-
-    The weight vector can be ALL ZERO: an anchor at or after the last measured velocity
-    with a fitted tail behind it supervises no segment. Such a flight contributes exactly
-    zero to :func:`objective.control_imitation_mse` (its denominator is clamped at one) —
-    no gradient, and a zero that DILUTES the reported per-flight mean, never a "perfect
-    imitation" (review C-17). Under the default 60 s future floor no training anchor
-    reaches it.
-    """
-    mass_kg = float(series.scenario.initial.m)
-    anchor_time = float(series.times[anchor])
-    times = series.times[anchor:] - anchor_time
-    samples = states_from_channels(
-        times, series.values[anchor:], series.frame, mass_kg=mass_kg
-    )
-    states = np.asarray(
-        [[s.latitude, s.longitude, s.altitude, s.V, s.psi, s.gamma, s.m]
-         for _t, s in samples],
-        dtype=np.float64,
-    )
-    aero = series.scenario.aero
-    n_segments = int(config.n_segments)
-    inverted = segment_controls(
-        states,
-        times,
-        config=config,
-        aero_params=np.array(
-            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
-            dtype=np.float64,
-        ),
-        max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
-        control_lower=CONTROL_LOWER,
-        control_upper=CONTROL_UPPER,
-        n_segments=n_segments,
-        total_duration_s=total_duration_s,
-    )
-    midpoints = (np.arange(n_segments, dtype=np.float64) + 0.5) * (
-        total_duration_s / n_segments
-    )
-    return {
-        "reference_controls": inverted.controls.astype(np.float64),
-        "reference_control_weight": (
-            midpoints <= last_measured_time_s
-        ).astype(np.float64),
-    }
-
-
-# The observed heading is differentiated over a WINDOW, never between neighbouring
-# samples: ADS-B reports a quantised track angle, this package's psi comes from a
-# least-squares velocity fit of it, and a single dt_s step of heading difference is
-# therefore dominated by that quantisation rather than by the turn. A central difference
-# over this window IS the boxcar average of the one-step slopes inside it — long enough to
-# bury the quantisation, short enough that a roll-in (~5 s) is not smeared across the
-# straight legs either side. Stated as a constant because it is a smoothing choice the
-# target depends on, not a free parameter.
-#
-# The constant is NOMINAL: the difference is taken between samples, so the half-width is
-# `int(round(W / 2 / dt_s))` samples and the REALIZED span is `2 * half * dt_s`. At the
-# package default dt_s = 2 s that is half = round(2.5) = 2 (Python rounds a .5 tie to even)
-# and a span of 8 s, not 10. Quote the realized span, never the constant, when reading how
-# much a target was smoothed. Rounding goes both ways: at a coarse dt_s the realized span
-# can also EXCEED the constant (dt_s = 3 s -> half 2 -> 12 s; dt_s = 5.05 s -> half 1 ->
-# 10.1 s). That widening is stated rather than guarded — only a dt_s too coarse for even
-# one sample of half-width is refused below.
-HEADING_RATE_SMOOTHING_WINDOW_S = 10.0
-
-
-def _smoothed_heading_rate_dps(
-    times_s: np.ndarray, heading_rad: np.ndarray, dt_s: float
-) -> np.ndarray:
-    """Central difference of an UNWRAPPED heading over the smoothing window, deg/s.
-
-    A sample step too coarse for even one sample of half-width is REFUSED with its numbers
-    rather than silently floored to one: a ``max(1, ...)`` would keep running with a window
-    of ``2 * dt_s``, arbitrarily wider than the constant that names it, and nothing
-    downstream would say so. The narrower rounding wobble either side of the nominal width
-    is stated at the constant.
-    """
-    half = int(round(HEADING_RATE_SMOOTHING_WINDOW_S / (2.0 * dt_s)))
-    if half < 1:
-        raise ValueError(
-            f"dt_s={dt_s:g}s cannot realize the {HEADING_RATE_SMOOTHING_WINDOW_S:g}s "
-            f"heading-rate smoothing window: its half-width rounds to {half} samples "
-            f"({HEADING_RATE_SMOOTHING_WINDOW_S / (2.0 * dt_s):.3g} before rounding), so "
-            f"the term needs dt_s < {HEADING_RATE_SMOOTHING_WINDOW_S:g}s"
-        )
-    rows = np.arange(len(heading_rad))
-    right = np.minimum(rows + half, len(heading_rad) - 1)
-    left = np.maximum(rows - half, 0)
-    return np.degrees(
-        (heading_rad[right] - heading_rad[left]) / (times_s[right] - times_s[left])
-    )
-
-
-def reference_heading_rate_supervision(
-    series: FlightSeries,
-    anchor: int,
-    config: TSConfig,
-    total_duration_s: float,
-    last_measured_time_s: float,
-) -> dict[str, np.ndarray]:
-    """The flown track's turn rate at the N segment ENDPOINTS, as a TRAINING TARGET.
-
-    Supervision, not dynamics: it reads the future, so it is built here rather than in
-    :func:`dynamics_arrays`, which predict also calls and which must stay deployable from
-    the lookback alone. The same shape as :func:`reference_control_supervision`, with two
-    deliberate differences — no inverse dynamics is solved (the observed track's own
-    heading IS the target, and the rollout supplies the model side, so the two can never
-    be solutions of different equations), and the mask is read at segment ENDPOINTS rather
-    than midpoints, because a turn rate is a quantity at an instant while a
-    piecewise-constant control is a quantity over a segment. That is the same cut the
-    velocity term makes past the last measured velocity — not the same numbers: this is a
-    hard 0/1 step, the velocity term's is an interpolated per-channel weight.
-
-    The endpoints are placed at the UNIFORM ``(k+1)·T/N``, which is the rollout's own
-    ``cumsum(segment_durations)`` only through one chain: this target is built for the
-    ``true-time-position`` objective, which ``TSConfig`` admits only with
-    ``control_duration_parameterization="uniform"``. Under a non-uniform partition row k of
-    the two sides would be different physical instants.
-
-    ``psi`` comes from :func:`channels.states_from_channels`, i.e. the modeling layer's
-    math-ENU heading, unwrapped before differencing so the +/-pi branch cut cannot read as
-    a turn. The sign convention is therefore the rollout's own: counter-clockwise is
-    positive, which is what a positive bank produces under the shared RHS.
-    """
-    anchor_time = float(series.times[anchor])
-    times = series.times[anchor:] - anchor_time
-    if len(times) < 2:
-        # The central difference below would be 0/0: a NaN target at weight one, not an
-        # error (review B-4). Reachable under `random_train_anchor_min_future_s=0` when the
-        # remainder past the anchor is the fitted tail alone; the imitation target's
-        # inverse refuses the same anchor, so this term refuses it too.
-        raise ValueError(
-            f"flight {series.flight_id}: the heading-rate target needs at least two "
-            f"observed samples from the anchor on, and anchor {anchor} leaves {len(times)} "
-            "(the remainder is the fitted tail alone, which has no measured turn rate)"
-        )
-    samples = states_from_channels(
-        times,
-        series.values[anchor:],
-        series.frame,
-        mass_kg=float(series.scenario.initial.m),
-    )
-    heading_rad = np.unwrap(np.asarray([s.psi for _t, s in samples], dtype=np.float64))
-    n_segments = int(config.n_segments)
-    endpoints = (np.arange(n_segments, dtype=np.float64) + 1.0) * (
-        total_duration_s / n_segments
-    )
-    return {
-        "reference_heading_rate_dps": np.interp(
-            endpoints,
-            times,
-            _smoothed_heading_rate_dps(times, heading_rad, config.dt_s),
-        ),
-        "reference_heading_rate_weight": (
-            endpoints <= last_measured_time_s
-        ).astype(np.float64),
-    }
-
-
-# The per-flight final-approach context (final_approach_geometry.FINAL_APPROACH_KEYS):
-# what the corridor-bounded state output and the procedure penalty need to place a chart
-# row on the runway's final. One row per flight, NEVER a model input (it rides in the
-# batch's context slot beside the control dynamics).
-
-
-def final_approach_arrays(series: FlightSeries) -> dict[str, np.ndarray]:
-    """``FINAL_APPROACH_KEYS`` for one flight: the runway course (math-ENU, the direction
-    of travel on final) and tan of the coded glidepath. Needs no procedure document — the
-    one gate (`on-final`) is geometry about the threshold."""
-    target = series.scenario.target
-    rows = {
-        # The rollout frame rotation and the runway heading coincide only for the
-        # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
-        # so ENU rollouts are decomposed along/across the actual runway, not east/north.
-        "runway_heading_rad": np.array(float(target.psi), dtype=np.float64),
-        # The target's gamma is the coded glidepath DESCENT (negative); the chart height of
-        # the glidepath at distance d back from the threshold is d · tan(GPA).
-        "glidepath_tan": np.array(math.tan(-float(target.gamma)), dtype=np.float64),
-    }
-    assert tuple(rows) == FINAL_APPROACH_KEYS
-    return rows
-
-
-def probe_final_approach(batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
-    """One representative final-approach context for shape/throughput probes."""
-    rows = {
-        "runway_heading_rad": 0.0,
-        "glidepath_tan": math.tan(math.radians(3.0)),
-    }
-    return {
-        name: torch.full((batch_size,), value, dtype=torch.float32, device=device)
-        for name, value in rows.items()
-    }
-
-
 def truth_duration_s(series: FlightSeries, anchor: int) -> float:
     """Seconds from the anchor to the truth's end — the value the CTA is given as."""
     return float(series.supervision_times[-1] - series.times[anchor])
-
-
-def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
-    """Physical per-flight tensors required by a control model and its rollout."""
-    scenario = series.scenario
-    mass_kg = float(scenario.initial.m)
-    initial = states_from_channels(
-        np.array([0.0], dtype=np.float64),
-        series.values[anchor : anchor + 1],
-        series.frame,
-        mass_kg=mass_kg,
-    )[0][1]
-    aero = scenario.aero
-    max_thrust = float(scenario.aircraft.engine.max_thrust_total_n)
-    condition = condition_vector(mass_kg, max_thrust, aero)
-    heading = float(getattr(series.frame, "heading_rad", 0.0))
-    return {
-        "condition": condition,
-        "initial_state": np.array(
-            [
-                initial.latitude,
-                initial.longitude,
-                initial.altitude,
-                initial.V,
-                initial.psi,
-                initial.gamma,
-                initial.m,
-            ],
-            dtype=np.float64,
-        ),
-        "aero_params": np.array(
-            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
-            dtype=np.float64,
-        ),
-        "max_thrust_n": np.array(max_thrust, dtype=np.float64),
-        # The dimensionless envelope is the same box on every airframe (see
-        # control_envelope); the flight's installed thrust enters through max_thrust_n.
-        "control_lower": CONTROL_LOWER.astype(np.float32),
-        "control_upper": CONTROL_UPPER.astype(np.float32),
-        # The lagged model's actuator initial condition. Emitted unconditionally so the
-        # batch contract does not depend on the flight model, and clipped to the same box
-        # the head predicts in — an anchor whose implied thrust is outside the envelope is
-        # a starting point the model could not have commanded.
-        "initial_controls": np.clip(
-            anchor_controls(series, anchor, mass_kg), CONTROL_LOWER, CONTROL_UPPER
-        ).astype(np.float64),
-        "frame_params": np.array(
-            [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
-            dtype=np.float64,
-        ),
-        # The rollout frame rotation and the runway heading coincide only for the
-        # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
-        # so ENU rollouts are decomposed along/across the actual runway, not east/north.
-        # Runway course and glidepath: one definition with the state path's
-        # final-approach context (the procedure penalty on the rollout reads both). The
-        # FAF distance is not carried: no control recipe gates at the FAF.
-        **{
-            key: value
-            for key, value in final_approach_arrays(series).items()
-            if key in ("runway_heading_rad", "glidepath_tan")
-        },
-    }
-
-
-def probe_dynamics(
-    batch_size: int, device: torch.device, config: TSConfig
-) -> dict[str, torch.Tensor]:
-    """One representative dynamics batch for shape/throughput probes.
-
-    Kept beside :func:`dynamics_arrays`, and its SUPERVISION keys are added under the same
-    conditions ``TrajectoryWindows._dynamics_arrays`` adds them, so the batch-size probe
-    and the gradient diagnostics cannot carry a stale copy of the contract —
-    ``tests/test_supervision_terms.py`` pins the probe's key set equal to a real training
-    batch's. Until 2026-09-09 the probe omitted the imitation and heading-rate targets
-    (review B-1): ``--batch-size auto`` then died with a bare ``KeyError`` inside the
-    objective, after the dataset build, on every custom arm that weighted either term.
-    """
-    rows = {
-        "condition": [0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5],
-        "initial_state": [35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, 66_000.0],
-        "aero_params": [122.6, 2.7, 0.02, 0.04, 0.9, 0.1],
-        "control_lower": CONTROL_LOWER.tolist(),
-        "control_upper": CONTROL_UPPER.tolist(),
-        "initial_controls": [0.2, 0.0, 1.0],
-        "frame_params": [35.9, -78.8, 100.0, 0.0],
-    }
-    dynamics = {
-        name: torch.tensor([value], dtype=torch.float32, device=device).expand(
-            batch_size, -1
-        )
-        for name, value in rows.items()
-    }
-    dynamics["max_thrust_n"] = torch.full(
-        (batch_size,), 240_000.0, dtype=torch.float32, device=device
-    )
-    probe = probe_final_approach(batch_size, device)
-    dynamics["runway_heading_rad"] = probe["runway_heading_rad"]
-    dynamics["glidepath_tan"] = probe["glidepath_tan"]
-    n_segments = int(config.n_segments)
-    if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
-        # The probe's target duration is the scale, so the given CTA matches it and the
-        # probe's final_time term stays zero, as in a real given run.
-        dynamics["cta_s"] = torch.full(
-            (batch_size,), config.final_time_scale_s, dtype=torch.float64, device=device
-        )
-    if config.control_imitation_loss_weight:
-        dynamics["reference_controls"] = torch.tensor(
-            [[[0.2, 0.0, 1.0]]], dtype=torch.float64, device=device
-        ).expand(batch_size, n_segments, -1)
-        dynamics["reference_control_weight"] = torch.ones(
-            (batch_size, n_segments), dtype=torch.float64, device=device
-        )
-    if config.control_heading_rate_loss_weight:
-        dynamics["reference_heading_rate_dps"] = torch.zeros(
-            (batch_size, n_segments), dtype=torch.float64, device=device
-        )
-        dynamics["reference_heading_rate_weight"] = torch.ones(
-            (batch_size, n_segments), dtype=torch.float64, device=device
-        )
-    return dynamics
 
 
 @dataclass(frozen=True)
@@ -1212,6 +810,9 @@ class TrajectoryWindows(Dataset, ABC):
     #: replay-only set (`ExplicitAnchorTrajectoryWindows(supervision=False)`) does not,
     #: because nothing reads them there and the imitation target is anchor-bound.
     control_supervision: bool = True
+    #: Whether the output strategy may build every context row up front: true for a set
+    #: whose rows are reused on every epoch (one deterministic anchor per flight).
+    cache_context_rows: bool = False
 
     def __init__(
         self,
@@ -1272,67 +873,6 @@ class TrajectoryWindows(Dataset, ABC):
             else None
             for s_idx, item in enumerate(self.series)
         ]
-        # The per-flight final-approach context (never a model input), when the recipe
-        # bounds or penalises the corridor. Resolved once.
-        self.final_approach = (
-            [final_approach_arrays(s) for s in self.series]
-            if config.uses_final_approach_context
-            else None
-        )
-        # The closure output's per-flight labels (never a model input): the decision
-        # vector, its validity, the label's path length and the runway course, from the
-        # config's labels file. Imported here because closure_output reaches this module
-        # through the arc-length geometry.
-        self.closure = None
-        self.closure_coverage: tuple[int, int, int] | None = None
-        if uses_closure_labels(config.prediction_output):
-            from ts_transformer.closure_output import CONTEXT_VALID, label_context, load_labels
-            labels = load_labels(config.closure_labels_path)
-            self.closure = [label_context(s, labels, config) for s in self.series]
-            present = sum(s.flight_id in labels.flights for s in self.series)
-            valid = sum(int(row[CONTEXT_VALID]) for row in self.closure)
-            # Stated by the caller under its own verbosity; refused here when nothing
-            # could train (the two zeros mean different things).
-            self.closure_coverage = (present, valid, len(self.series))
-            if self.series and present == 0:
-                raise ValueError(
-                    f"{config.closure_labels_path} carries none of these {len(self.series)} "
-                    "flights — another cohort's labels?"
-                )
-            if self.series and valid == 0:
-                raise ValueError(
-                    f"{config.closure_labels_path} carries these {len(self.series)} flights but "
-                    "marks every label non-canonical or above the residual cap: nothing to regress"
-                )
-        # The imitation term's per-flight teacher table (control_imitation_target=
-        # "fitted"). It is a TRAINING-TIME INPUT, handed in by `train.fit_model` for the
-        # train and validation window sets it supervises — never opened here. Every other
-        # consumer of this class replays a checkpoint (evaluate-fit, the z-oracle forecast,
-        # the approach-cohort comparison) and needs no teacher at all; loading it here
-        # would make those paths depend on a training artifact that may be gone, and on it
-        # covering a cohort it was never fitted for.
-        #
-        # What IS checked here is coverage, because this is where the flights are known: a
-        # fitted schedule reproduces its truth only at the width, the anchor and the total
-        # duration it was fitted under, and a flight the table does not carry has no
-        # teacher at all. A table that does not cover this cohort refuses the build — there
-        # is no partial mode, which would train part of every batch on nothing while the
-        # loss still reported an imitation number.
-        self.fitted_teacher = fitted_teacher
-        if fitted_teacher is not None:
-            covered = [
-                (self.series[int(index)], self.index[int(self.range_starts[int(index)])][1])
-                for index in self.eligible_series
-            ]
-            fitted_teacher.require_cover(
-                [
-                    (item.flight_id, truth_duration_s(item, anchor))
-                    for item, anchor in covered
-                ],
-                airports={item.airport for item, _anchor in covered},
-                anchor_indices={int(anchor) for _item, anchor in covered},
-                n_segments=int(config.n_segments),
-            )
         # Public diagnostic for normalized-time experiments. Actual query times come from
         # the shared clock below, which also defines fixed-time loss and inference timing.
         self.progress = (
@@ -1372,6 +912,10 @@ class TrajectoryWindows(Dataset, ABC):
             else 0.0
             for series_index, item in enumerate(self.series)
         ], dtype=np.float32)
+
+        # What this path adds to every batch — the context slot and, under the fixed-dt
+        # grid, the dense supervision — built once per window set by its strategy.
+        self.context = output_strategy(config).bind_windows(self, fitted_teacher=fitted_teacher)
 
     def __len__(self) -> int:
         return len(self.index)
@@ -1538,105 +1082,18 @@ class TrajectoryWindows(Dataset, ABC):
             self.flight_weights[s_idx],
         )
 
-    def _dynamics_arrays(self, i: int) -> dict[str, np.ndarray]:
-        s_idx, anchor = self.index[i]
-        series = self.series[s_idx]
-        arrays = dynamics_arrays(series, anchor)
-        if self.config.cta_conditioning == CTA_CONDITIONING_GIVEN:
-            # Training feeds the truth as the controlled time of arrival.
-            arrays["cta_s"] = np.array(truth_duration_s(series, anchor), dtype=np.float64)
-        elif self.config.cta_conditioning != CTA_CONDITIONING_OFF:
-            # The head builds its CTA token for every mode but `off` (control/heads.py), so
-            # a mode this branch does not fill would reach the decoder with no `cta_s`.
-            # `self-q` is a predict-time label (`CTA_CONDITIONINGS_AVAILABLE` keeps it out
-            # of a new run); if it ever reaches a window set, say so here, not in the head.
-            raise ValueError(
-                f"cta_conditioning={self.config.cta_conditioning!r} names no training-time "
-                "source for the CTA token; only 'given' (the truth duration) is defined"
-            )
-        if self.config.control_imitation_loss_weight and self.control_supervision:
-            anchor_time = float(series.times[anchor])
-            # The fitted teacher replaces the inversion outright — its schedule was fitted
-            # over the WHOLE supervised horizon through the rollout, so every segment
-            # carries weight one, where the inversion has to mask the fitted tail it has no
-            # measured velocity to differentiate.
-            arrays.update(
-                self.fitted_teacher.supervision(series.flight_id)
-                if self.fitted_teacher is not None
-                else reference_control_supervision(
-                    series,
-                    anchor,
-                    self.config,
-                    total_duration_s=float(
-                        series.supervision_times[-1] - anchor_time
-                    ),
-                    last_measured_time_s=float(
-                        self.last_supervised_times[s_idx][
-                            self.kinematic_channels
-                        ].min()
-                        - anchor_time
-                    ),
-                )
-            )
-        if self.config.control_heading_rate_loss_weight and self.control_supervision:
-            # Same supervised horizon and same last-measured instant as the imitation
-            # target above; the heading-rate target only masks at the endpoints instead of
-            # the midpoints, and costs no inverse-dynamics solve.
-            anchor_time = float(series.times[anchor])
-            arrays.update(
-                reference_heading_rate_supervision(
-                    series,
-                    anchor,
-                    self.config,
-                    total_duration_s=float(
-                        series.supervision_times[-1] - anchor_time
-                    ),
-                    last_measured_time_s=float(
-                        self.last_supervised_times[s_idx][
-                            self.kinematic_channels
-                        ].min()
-                        - anchor_time
-                    ),
-                )
-            )
-        return arrays
+    def __getitem__(self, i: int) -> tuple:
+        """One sample, as `torch.utils.data.Dataset` spells it: the batch of one, unbatched.
 
-    def _fixed_dt_supervision(
-        self, indices: Sequence[int] | np.ndarray
-    ) -> FixedDTControlSupervision:
-        return build_fixed_dt_supervision(
-            self.series,
-            self.encoded,
-            [self.index[int(index)] for index in indices],
-            dt_s=self.config.dt_s,
+        Defined THROUGH `batch` so the two cannot disagree about what a sample carries
+        (until 2026-09-10 they did, about the final-approach context).
+        """
+        return tuple(
+            {key: value[0] for key, value in field.items()} if isinstance(field, dict)
+            else field[0] if isinstance(field, torch.Tensor)
+            else field
+            for field in self.batch([i])
         )
-
-    def __getitem__(
-        self, i: int
-    ) -> tuple:
-        x, y, weights, final_time_s, flight_weight = self._sample_arrays(i)
-        result = (
-            torch.from_numpy(x.copy()),
-            torch.from_numpy(y),
-            torch.from_numpy(weights),
-            torch.from_numpy(np.asarray(final_time_s)),
-            torch.from_numpy(np.asarray(flight_weight)),
-        )
-        if self.closure is not None:
-            return (*result, {
-                key: torch.from_numpy(np.asarray(value))
-                for key, value in self.closure[self.index[i][0]].items()
-            })
-        if not uses_control_dynamics(self.config.prediction_output):
-            return result
-        dynamics = {
-            key: torch.from_numpy(value)
-            for key, value in self._dynamics_arrays(i).items()
-        }
-        if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
-            return (*result, dynamics)
-        dense = self._fixed_dt_supervision([i])
-        return (*result, dynamics, dense)
 
     def batch(
         self, indices: Sequence[int] | np.ndarray
@@ -1669,23 +1126,18 @@ class TrajectoryWindows(Dataset, ABC):
             torch.from_numpy(array)
             for array in (x, y, weights, final_time_s, flight_weights)
         )
-        # The context slot: the control dynamics (which already carry the final-approach
-        # keys), or the final-approach keys alone for a state recipe that needs them.
-        if uses_control_dynamics(self.config.prediction_output):
-            context_rows = [self._dynamics_arrays(int(index)) for index in indices]
-        elif self.closure is not None:
-            context_rows = [self.closure[self.index[int(index)][0]] for index in indices]
-        elif self.final_approach is not None:
-            context_rows = [self.final_approach[self.index[int(index)][0]] for index in indices]
-        else:
+        # The context slot: whatever this path adds per sample (the control dynamics, the
+        # closure labels, the final-approach rows), and the dense supervision beside it.
+        context_rows = [self.context.row(int(index)) for index in indices]
+        if context_rows[0] is None:
             return result
         context = {
             key: torch.from_numpy(np.stack([row[key] for row in context_rows]))
             for key in context_rows[0]
         }
-        if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
+        dense = self.context.dense(indices)
+        if dense is None:
             return (*result, context)
-        dense = self._fixed_dt_supervision(indices)
         return (*result, context, dense)
 
 
@@ -1695,6 +1147,7 @@ class FixedAnchorTrajectoryWindows(TrajectoryWindows):
     anchor_description = "fixed train anchor L-1"
     anchor_policy = "fixed"
     sampling_version = "fixed-anchor-v1"
+    cache_context_rows = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1705,38 +1158,8 @@ class FixedAnchorTrajectoryWindows(TrajectoryWindows):
             TrajectoryWindows._sample_arrays(self, index)
             for index in range(len(self.index))
         ]
-        self._dynamics_cache: list[dict[str, np.ndarray]] | None = None
-        self._fixed_dt_cache: tuple[FixedDTSupervisionRow, ...] | None = None
-        if uses_control_dynamics(self.config.prediction_output):
-            self._dynamics_cache = [
-                TrajectoryWindows._dynamics_arrays(self, index)
-                for index in range(len(self.index))
-            ]
-            if self.config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
-                self._fixed_dt_cache = cache_fixed_dt_supervision_rows(
-                    self.series,
-                    self.encoded,
-                    self.index,
-                    dt_s=self.config.dt_s,
-                )
-
     def _sample_arrays(self, i: int):
         return self._sample_cache[i]
-
-    def _dynamics_arrays(self, i: int) -> dict[str, np.ndarray]:
-        if self._dynamics_cache is None:
-            return super()._dynamics_arrays(i)
-        return self._dynamics_cache[i]
-
-    def _fixed_dt_supervision(
-        self, indices: Sequence[int] | np.ndarray
-    ) -> FixedDTControlSupervision:
-        if self._fixed_dt_cache is None:
-            return super()._fixed_dt_supervision(indices)
-        return pack_fixed_dt_supervision_rows(
-            [self._fixed_dt_cache[int(index)] for index in indices],
-            channels=len(self.config.channels),
-        )
 
     def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         return [anchors[0]] if len(anchors) else []
@@ -1847,7 +1270,7 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
         minimum_anchor_index: int | None = None,
         fitted_teacher: FittedTeacherTable | None = None,
     ):
-        self.anchor_eligibility_policy = random_train_anchor_eligibility_policy(config)
+        self.anchor_eligibility_policy = output_strategy(config).anchor_policy
         # The config refuses a fitted teacher with random anchors (the table is fitted AT the
         # fixed anchor), so this is always None here; it is forwarded, not special-cased, so
         # the two window classes keep one constructor contract — train() passes it to both.
@@ -1882,7 +1305,7 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
     def _eligible_anchors(
         self, series: FlightSeries, anchors: Sequence[int]
     ) -> Sequence[int]:
-        return eligible_random_train_anchors(series, anchors, self.config)
+        return output_strategy(self.config).eligible_anchors(series, anchors)
 
     def _strata_histogram(self, strata: np.ndarray) -> dict[str, int]:
         counts = np.bincount(strata, minlength=len(REMAINING_PATH_STRATA_LABELS))
@@ -1949,7 +1372,7 @@ class RemainingPathUniformAnchorTrajectoryWindows(RandomAnchorTrajectoryWindows)
     because the grid cuts the near end into four 2-km strata and leaves the far end ONE open
     stratum spanning 20–123 km.
 
-    Admissibility is UNCHANGED (`eligible_random_train_anchors`, the same future contract),
+    Admissibility is UNCHANGED (`OutputStrategy.eligible_anchors`, the same future contract),
     so this policy trains the same cohort on the same anchor population; only which of them
     each epoch sees changes.
 

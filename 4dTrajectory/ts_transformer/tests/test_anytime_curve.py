@@ -24,6 +24,7 @@ import pytest
 import torch
 
 import ts_transformer.forecast as forecast_module
+import ts_transformer.outputs.state.forecast as state_forecast_module
 import run_ts_anytime_curve as runner
 from ts_transformer.approach_difficulty import (
     STRATUM_ALL,
@@ -53,7 +54,7 @@ from ts_transformer.dataset import (
     truth_duration_s,
 )
 from ts_transformer.export import observed_series_metrics
-from ts_transformer.forecast import Forecast, _history_at_anchor, forecast_approaches
+from ts_transformer.forecast import Forecast, history_at_anchor, forecast_approaches
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import load_checkpoint, train
 
@@ -250,14 +251,15 @@ def test_the_forecast_at_a_late_anchor_reads_the_history_ending_there(
     keys = [item.dataset_id for item in series]
 
     seen: list[tuple[int, np.ndarray]] = []
-    original = forecast_module._history_at_anchor
+    original = forecast_module.history_at_anchor
 
     def spy(item, config, normalizer, anchor):
         history = original(item, config, normalizer, anchor)
         seen.append((anchor, history))
         return history
 
-    monkeypatch.setattr(forecast_module, "_history_at_anchor", spy)
+    monkeypatch.setattr(forecast_module, "history_at_anchor", spy)
+    monkeypatch.setattr(state_forecast_module, "history_at_anchor", spy)
     rows, records = runner.measure_bin(
         arm.model, series, profiles, keys, 4_000.0, config=arm.config,
         normalizer=arm.normalizer, device=torch.device("cpu"), batch_size=8,
@@ -276,12 +278,12 @@ def test_the_forecast_at_a_late_anchor_reads_the_history_ending_there(
         history = next(row for row in seen if row[0] == anchor)[1]
         # Independently: this recipe carries no conditioning column, so the history the
         # model is shown IS the encoded lookback ENDING at the anchor. (Comparing against
-        # `_history_at_anchor` again would only prove the spy delegates.)
+        # `history_at_anchor` again would only prove the spy delegates.)
         expected = arm.normalizer.encode(item.values)[anchor - arm.config.seq_len + 1 : anchor + 1]
         assert history.shape == expected.shape
         assert history == pytest.approx(expected)
         assert history == pytest.approx(
-            _history_at_anchor(item, arm.config, arm.normalizer, anchor)
+            history_at_anchor(item, arm.config, arm.normalizer, anchor)
         )
         forecast = forecast_approaches(
             arm.model, [item], arm.config, arm.normalizer, anchor=anchor,

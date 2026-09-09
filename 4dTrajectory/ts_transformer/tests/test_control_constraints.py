@@ -31,26 +31,28 @@ from ts_transformer.config import (  # noqa: E402
     PREDICTION_CONTROL, TROMBONE_SURPLUS_BEELINE, TROMBONE_SURPLUS_REFERENCE_ROLLOUT,
     TSConfig, recipe_settings,
 )
-from ts_transformer.control.constraints import (  # noqa: E402
+from ts_transformer.outputs.control.constraints import (  # noqa: E402
     BarrierFilter, CompositeHook, SpeedFloor, Trombone, build_command_hook,
 )
-from ts_transformer.control.constraints import trombone as trombone_module  # noqa: E402
-from ts_transformer.control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION  # noqa: E402
+from ts_transformer.outputs.control.constraints import trombone as trombone_module  # noqa: E402
+from ts_transformer.outputs.control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION  # noqa: E402
 from ts_transformer.flyability import flyability_summary, required_controls  # noqa: E402
 from dataclasses import fields as dataclass_fields  # noqa: E402
 
-from ts_transformer.control.constraints.gates import on_final_weight, runway_axes_view  # noqa: E402
-from ts_transformer.control.dynamics import rollout as control_rollout  # noqa: E402
-from ts_transformer.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView  # noqa: E402
-from ts_transformer.control.envelope import MAX_BANK_RAD  # noqa: E402
+from ts_transformer.outputs.control.constraints.gates import on_final_weight, runway_axes_view  # noqa: E402
+from ts_transformer.outputs.control.dynamics import rollout as control_rollout  # noqa: E402
+from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView  # noqa: E402
+from ts_transformer.outputs.control.envelope import MAX_BANK_RAD  # noqa: E402
 from ts_transformer.coordinate_frames import ENUFrame  # noqa: E402
-from ts_transformer.dataset import Normalizer, build_series, dynamics_arrays  # noqa: E402
+from ts_transformer.dataset import Normalizer, build_series  # noqa: E402
+from ts_transformer.outputs.control.supervision import dynamics_arrays  # noqa: E402
 from evaluation.records import record_from_dict  # noqa: E402
 from ts_transformer.export import build_prediction_record  # noqa: E402
 from flight_scenarios.runway_target import find_threshold  # noqa: E402
 import ts_transformer.forecast as forecast_module  # noqa: E402
+import ts_transformer.outputs.control.forecast as control_forecast_module  # noqa: E402
 from ts_transformer.forecast import forecast_approach  # noqa: E402
-from ts_transformer.prediction_outputs import ControlPrediction  # noqa: E402
+from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
 from ts_transformer.run_naming import run_display_name  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 from ts_transformer.train import fit_model  # noqa: E402
@@ -672,7 +674,7 @@ def test_the_trombone_shares_the_floors_definition_and_its_cap_leaves_a_margin()
     assert retained > 1.05, retained
     # The hook's own floor is the floor module's, to the bit — one definition, so a detour
     # can never be sized against a speed the floor does not hold.
-    from ts_transformer.control.constraints.speed_floor import floor_speed
+    from ts_transformer.outputs.control.constraints.speed_floor import floor_speed
 
     view = runway_axes_view(_trombone_view(d_m=9_000.0, xt_m=0.0, heading_error_rad=0.0,
                                            remaining_s=200.0),
@@ -1425,7 +1427,7 @@ def test_a_hook_knob_is_refused_where_no_module_reads_it():
 def test_the_hook_vocabulary_and_its_module_tables_agree():
     """Two import-time assertions, asserted here so the contract is readable: every hook a
     NEW run may select names its modules, and every module named has a class to build."""
-    from ts_transformer.control.constraints import _HOOKS
+    from ts_transformer.outputs.control.constraints import _HOOKS
 
     assert set(CONTROL_HOOK_MEMBERS) == set(CONTROL_HOOKS_AVAILABLE) - {"off"}
     assert set().union(*CONTROL_HOOK_MEMBERS.values()) <= set(_HOOKS)
@@ -1642,7 +1644,7 @@ def test_prediction_exports_the_effective_schedule_and_names_the_hook(monkeypatc
         def diagnostic_labels(self):
             return {}
 
-    monkeypatch.setattr(forecast_module, "build_command_hook", lambda cfg, dynamics: RewritingHook())
+    monkeypatch.setattr(control_forecast_module, "build_command_hook", lambda cfg, dynamics: RewritingHook())
 
     class FixedControlModel(torch.nn.Module):
         def forward(self, history, dynamics):

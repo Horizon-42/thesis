@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """P1 oracle studies for the closure decoder (scene design §五 P1.a / P1.b).
 
-``geometry`` (P1.a) — how well each closed-form path FAMILY (``closure_geometry``) can
+``geometry`` (P1.a) — how well each closed-form path FAMILY (``outputs.closure.geometry``) can
 reproduce the truth path when its parameters are fitted to that truth, scored with the
 geometry-only timing (the truth's time at the same arc fraction). Per stratum and
 family: chamfer / Fréchet against the truth, ADE on the package's common-true-time grid,
@@ -10,7 +10,7 @@ fallback residual. F0 (the rule template at the truth join) reproduces Phase 0's
 "template + truth timing" 1688 m; the fitted families say how much of that is the join
 distance (F1), a downwind decision (F2) or a free via pose (F3). F3 is seeded with F1's
 and F2's solutions, so its FITTED residual never exceeds theirs beyond re-expressing them;
-the labels are then canonicalised (``closure_geometry``: join at the localizer entry,
+the labels are then canonicalised (``outputs.closure.geometry``: join at the localizer entry,
 F3's via the earliest reproducing pose), which costs residual on a looping fit — the
 readout prints the share of flights on which each nesting fails, and how identifiable
 F3's via is (the distance between the canonical vias of its two best starts when both are
@@ -27,7 +27,7 @@ residual cap — the flights the regression loss should use), and the difficulty
 covariates. One JSON file, keyed by the compact flight key ``FlightSeries.flight_id``.
 
 ``speed`` (P1.b) — on the TRUTH path (geometry error zero), the ADE each speed / height
-profile parametrisation (``closure_profile``) can reach: the naive profile (Phase 0's
+profile parametrisation (``outputs.closure.profile``) can reach: the naive profile (Phase 0's
 1308 m), the naive shape stretched onto the truth duration, slowness knots fitted by
 least squares (K = 2 / 4 / 8 / 16), the geometry's closure height profile against
 height knots, and the two fitted together. Labels at ``LABEL_KNOTS`` go to
@@ -65,13 +65,13 @@ for path in (HERE, TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.closure_geometry as cg  # noqa: E402
-import ts_transformer.closure_profile as cp  # noqa: E402
+import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
+import ts_transformer.outputs.closure.profile as cp  # noqa: E402
 import compare_frame_arms as cfa  # noqa: E402
 import ts_transformer.geometric_metrics as gm  # noqa: E402
 import ts_transformer.intent_conditioning as ic  # noqa: E402
 import phase0_intent_diagnostics as pid  # noqa: E402
-from ts_transformer.closure_output import LABEL_KNOTS, LABEL_RESIDUAL_MAX_M, LABEL_SCHEMA, fit_labels  # noqa: E402
+from ts_transformer.outputs.closure.model import LABEL_KNOTS, LABEL_RESIDUAL_MAX_M, LABEL_SCHEMA, fit_labels  # noqa: E402
 from ts_transformer.config import TSConfig  # noqa: E402
 from ts_transformer.coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
 from ts_transformer.dataset import build_series, load_flight_dicts  # noqa: E402

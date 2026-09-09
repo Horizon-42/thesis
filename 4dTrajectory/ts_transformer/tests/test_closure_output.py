@@ -19,9 +19,9 @@ for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
         sys.path.insert(0, str(path))
 
 import ts_transformer.channels as ch  # noqa: E402
-import ts_transformer.closure_geometry as cg  # noqa: E402
-import ts_transformer.closure_output as co  # noqa: E402
-import ts_transformer.closure_profile as cp  # noqa: E402
+import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
+import ts_transformer.outputs.closure.model as co  # noqa: E402
+import ts_transformer.outputs.closure.profile as cp  # noqa: E402
 from ts_transformer.config import CHECKPOINT_SELECTION_OBJECTIVE, PREDICTION_CLOSURE, TSConfig  # noqa: E402
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
 from ts_transformer.dataset import Normalizer, build_series  # noqa: E402
@@ -29,7 +29,8 @@ from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records  # noqa: E402
 from evaluation.thresholds import AssessmentContext  # noqa: E402
 from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch  # noqa: E402
-from ts_transformer.forecast import forecast_approach, forecast_closure_from_labels  # noqa: E402
+from ts_transformer.forecast import forecast_approach  # noqa: E402
+from ts_transformer.outputs.closure.forecast import forecast_closure_from_labels  # noqa: E402
 from ts_transformer.models import build_model  # noqa: E402
 from ts_transformer.run_naming import run_display_name  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402

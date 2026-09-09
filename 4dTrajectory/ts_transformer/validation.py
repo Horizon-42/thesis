@@ -36,19 +36,14 @@ from ts_transformer.anchor_grid import (
     remaining_path_profiles,
 )
 from ts_transformer.batch_contract import anchor_state, model_forward, unpack_batch
-from ts_transformer.closure_output import ClosurePrediction, replay_batch as closure_replay_batch
 from ts_transformer.config import (
     CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
-    PREDICTION_STATE,
     TSConfig,
-    uses_control_dynamics,
 )
-from ts_transformer.control.basis_fit import FittedTeacherTable
-from ts_transformer.control.constraints import build_command_hook
-from ts_transformer.control.dynamics import rollout as control_rollout
+from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 from ts_transformer.dataset import (
     ExplicitAnchorTrajectoryWindows,
     FixedAnchorTrajectoryWindows,
@@ -65,17 +60,15 @@ from ts_transformer.fixed_anchor_validation import (
     fixed_anchor_common_grid_metrics,
     fixed_anchor_common_grid_report_metrics,
 )
-from ts_transformer.metrics import raw_kinematic_metrics, states_with_derived_velocity
+from ts_transformer.metrics import raw_kinematic_metrics
 from ts_transformer.objective import (
     ProcedureMultipliers,
-    align_control_targets_to_query_clock,
     loss_component_names,
     move_dynamics,
     move_fixed_dt_supervision,
     prediction_loss_components,
 )
-from ts_transformer.prediction_outputs import ControlPrediction, StatePrediction
-from ts_transformer.time_grids import numpy_inference_time_grid
+from ts_transformer.outputs import strategy
 from ts_transformer.training_performance import EpochProfiler
 
 
@@ -93,7 +86,7 @@ class SplitPredictionReplay:
 
 
 def _prediction_batch_replay(
-    output: StatePrediction | ControlPrediction,
+    output: Any,
     x: torch.Tensor,
     y: torch.Tensor,
     mask: torch.Tensor,
@@ -102,101 +95,27 @@ def _prediction_batch_replay(
     dataset: TrajectoryWindows,
 ) -> SplitPredictionReplay:
     """Materialize deployable physical arrays from an already-computed model output."""
-    metric_targets = y
-    metric_weights = mask
-    if uses_control_dynamics(dataset.config.prediction_output):
-        deployable = output
-        if dynamics is None:
-            raise ValueError("control replay requires per-flight dynamics")
-        points = dataset.config.validation_common_grid_points
-        progress = torch.arange(
-            1,
-            points + 1,
-            dtype=torch.float64,
-            device=deployable.segment_durations.device,
-        ) / points
-        predicted_total_s = deployable.segment_durations.to(torch.float64).sum(dim=1)
-        query_offsets_s = predicted_total_s.unsqueeze(1) * progress.unsqueeze(0)
-        query_valid = torch.ones_like(query_offsets_s, dtype=torch.bool)
-        rollout = control_rollout.rollout_control_dense(
-            deployable.controls,
-            deployable.segment_durations,
-            dynamics,
-            query_offsets_s,
-            query_valid,
-            dataset.config,
-            command_hook=build_command_hook(dataset.config, dynamics),
-        )
-        predicted_physical = (
-            rollout.query_channels.detach().cpu().numpy().astype(np.float32)
-        )
-        metric_targets, metric_weights = align_control_targets_to_query_clock(
-            anchor_state(x, len(dataset.config.channels)),
-            y,
-            mask,
-            query_offsets_s,
-            final_time_s,
-        )
-        segment_durations_s = np.broadcast_to(
-            (
-                predicted_total_s.detach().cpu().numpy().astype(np.float64)
-                / points
-            )[:, None],
-            (len(x), points),
-        ).copy()
-        predicted_time_s = deployable.final_time_s.detach().cpu().numpy()
-    elif isinstance(output, ClosurePrediction):
-        # Drawn, not rolled out: every decision reconstructed in numpy and sampled on the
-        # target grid's fractions of its own duration (the context carries the course).
-        if dynamics is None:
-            raise ValueError("closure replay requires the per-flight label context")
-        anchors_physical = dataset.normalizer.decode(
-            anchor_state(x, len(dataset.config.channels))
-            .detach().cpu().numpy().astype(np.float64)
-        )
-        predicted_physical, segment_durations_s, predicted_time_s = closure_replay_batch(
-            output, anchors_physical, dynamics, dataset.config, dataset.config.pred_len
-        )
-    else:
-        if not isinstance(output, StatePrediction):
-            raise TypeError("state replay requires StatePrediction")
-        out = output.states.detach().cpu().numpy()
-        predicted_physical = dataset.normalizer.decode(
-            out.astype(np.float64)
-        ).astype(np.float32)
-        segment_durations_s = numpy_inference_time_grid(
-            output.final_time_s.detach().cpu().numpy(), dataset.config
-        )[0]
-        predicted_time_s = output.final_time_s.detach().cpu().numpy()
-
+    replay = strategy(dataset.config).replay(output, x, y, mask, final_time_s, dynamics, dataset)
     # Decode in float64 (the normalizer stats' dtype), store float32: a pooled split is
     # tens of thousands of [N,C] windows and metre-scale metrics do not need float64 storage.
     truth = dataset.normalizer.decode(
-        metric_targets.detach().cpu().numpy().astype(np.float64)
+        replay.metric_targets.detach().cpu().numpy().astype(np.float64)
     ).astype(np.float32)
     anchors = dataset.normalizer.decode(
         anchor_state(x, len(dataset.config.channels))
         .detach().cpu().numpy().astype(np.float64)
     ).astype(np.float32)
-    if dataset.config.prediction_output == PREDICTION_STATE:
-        # The state output predicts positions + duration only; the control rollout and
-        # the closure reconstruction both carry exact velocities.
-        predicted_physical = states_with_derived_velocity(
-            anchors,
-            predicted_physical,
-            segment_durations_s,
-        ).astype(np.float32)
-    raw_mask = metric_weights.detach().cpu().numpy()
+    raw_mask = replay.metric_weights.detach().cpu().numpy()
     if raw_mask.ndim == 3:
         raw_mask = np.all(raw_mask > 0.0, axis=-1).astype(np.float32)
     return SplitPredictionReplay(
-        predicted=predicted_physical,
+        predicted=replay.predicted_physical,
         truth=truth,
         mask=raw_mask,
-        predicted_time_s=predicted_time_s,
+        predicted_time_s=replay.predicted_time_s,
         truth_time_s=final_time_s.detach().cpu().numpy(),
         anchors=anchors,
-        segment_durations_s=segment_durations_s,
+        segment_durations_s=replay.segment_durations_s,
     )
 
 

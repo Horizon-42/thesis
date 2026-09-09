@@ -15,7 +15,7 @@ is the LTP + TCH aim point (``flight_scenarios.runway_target``):
     hw(d)      =   cw · (d + d_GARP) / d_GARP   flight_scenarios.fas_geometry, one source with the optimizer
 
 Everything here is torch so one implementation serves the bounded output layer
-(``prediction_outputs.StateOutputLayer``), the training-time penalty
+(``outputs.state.model.StateOutputLayer``), the training-time penalty
 (``objective.procedure_loss``) and the inference-time projection (``forecast``); NumPy callers wrap their arrays.
 
 **Which rows are "on the final".**  The measured data (docs/2026-09-04_procedure_constraints_design.zh.md)
@@ -41,17 +41,22 @@ threshold, beyond ``NEAR_THRESHOLD_M``.
 **Where a trajectory LANDS** is one rule as well (:func:`threshold_crossing_index`): the
 first row that is at or past the threshold plane AND on the final there.  Both consumers
 that need an arrival point read it — ``forecast.cut_at_threshold_crossing`` (which row a
-record ends on) and ``control/constraints/trombone.py`` (how much path the reference rollout
+record ends on) and ``outputs/control/constraints/trombone.py`` (how much path the reference rollout
 still intends to fly) — because the plane alone is crossed on a downwind, abeam.
 """
 
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 
 from flight_scenarios.fas_geometry import course_halfwidth_m, fas_course_geometry
+
+if TYPE_CHECKING:
+    from ts_transformer.dataset import FlightSeries
 
 # Mirrors of the optimizer's constraint defaults. ``4dTrajectory/optimization`` is not on
 # this package's import path, so they cannot be imported here;
@@ -170,7 +175,7 @@ def soft_aligned(cos_align: torch.Tensor) -> torch.Tensor:
     """Alignment membership in ``[0, 1]``: is this direction down the final approach course?
 
     Half of ``on-final`` (the cone is the other half), named because a module can need the
-    alignment WITHOUT the cone: ``control/constraints/trombone.py`` hands the command back
+    alignment WITHOUT the cone: ``outputs/control/constraints/trombone.py`` hands the command back
     as soon as the path is lined up, wide of the cone or not, and has to read the same 30°
     the gate reads rather than a second copy of it.
     """
@@ -230,7 +235,7 @@ def threshold_crossing_index(
     "First" so a trajectory that overshoots, wanders and comes back is read on its real
     arrival rather than on a later pass; the run is what a caller refines INSIDE
     (``forecast.cut_at_threshold_crossing`` takes the closest horizontal approach within it,
-    ``control/constraints/trombone.py`` interpolates ``d = 0`` inside the crossing segment).
+    ``outputs/control/constraints/trombone.py`` interpolates ``d = 0`` inside the crossing segment).
 
     Where ``crossed`` is false the trajectory never reached the final at all, and ``first``
     and ``end`` mean nothing: the caller must say so rather than cut somewhere, which would
@@ -315,3 +320,34 @@ def bound_to_final(
         xt + weight * (xt_bounded - xt),
         u + weight * (glidepath + residual_bounded - u),
     )
+
+
+def final_approach_arrays(series: FlightSeries) -> dict[str, np.ndarray]:
+    """``FINAL_APPROACH_KEYS`` for one flight: the runway course (math-ENU, the direction
+    of travel on final) and tan of the coded glidepath. Needs no procedure document — the
+    one gate (`on-final`) is geometry about the threshold."""
+    target = series.scenario.target
+    rows = {
+        # The rollout frame rotation and the runway heading coincide only for the
+        # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
+        # so ENU rollouts are decomposed along/across the actual runway, not east/north.
+        "runway_heading_rad": np.array(float(target.psi), dtype=np.float64),
+        # The target's gamma is the coded glidepath DESCENT (negative); the chart height of
+        # the glidepath at distance d back from the threshold is d · tan(GPA).
+        "glidepath_tan": np.array(math.tan(-float(target.gamma)), dtype=np.float64),
+    }
+    assert tuple(rows) == FINAL_APPROACH_KEYS
+    return rows
+
+
+def probe_final_approach(batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
+    """One representative final-approach context for shape/throughput probes."""
+    rows = {
+        "runway_heading_rad": 0.0,
+        "glidepath_tan": math.tan(math.radians(3.0)),
+    }
+    return {
+        name: torch.full((batch_size,), value, dtype=torch.float32, device=device)
+        for name, value in rows.items()
+    }
+

@@ -42,24 +42,27 @@ _CLI_SPEC.loader.exec_module(ts_cli)
 
 import ts_transformer.channels as ch  # noqa: E402
 import ts_transformer.cli.common as cli_common  # noqa: E402
-from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES  # noqa: E402
+from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES  # noqa: E402
 import ts_transformer.cli.evaluate_fit as cli_evaluate_fit  # noqa: E402
 import ts_transformer.cli.train as cli_train  # noqa: E402
-from ts_transformer.control import heads as control_models  # noqa: E402
+from ts_transformer.outputs.control import heads as control_models  # noqa: E402
 import ts_transformer.batching as batching  # noqa: E402
 import ts_transformer.build_multiflight_capacity_report as capacity_report  # noqa: E402
 import ts_transformer.coordinate_frames as frames  # noqa: E402
 import ts_transformer.cross_validation as cv  # noqa: E402
-import ts_transformer.control.dynamics.rollout as control_rollout_module  # noqa: E402
+import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module  # noqa: E402
 import ts_transformer.batch_contract as batch_contract  # noqa: E402
 from ts_transformer.batch_contract import anchor_state, model_forward, unpack_batch  # noqa: E402
 import ts_transformer.dataset as dataset_module  # noqa: E402
+import ts_transformer.outputs.control.supervision as supervision_module  # noqa: E402
 import ts_transformer.splits as splits  # noqa: E402
 import ts_transformer.batch_benchmark as batch_probe  # noqa: E402
 import ts_transformer.evaluation_protocol as evaluation_protocol  # noqa: E402
 import ts_transformer.experiment_index as experiment_index  # noqa: E402
-import ts_transformer.control.loss.fixed_dt as fixed_dt_loss_module  # noqa: E402
+import ts_transformer.outputs.control.loss.fixed_dt as fixed_dt_loss_module  # noqa: E402
 import ts_transformer.objective as objective  # noqa: E402
+import ts_transformer.outputs.control.loss.objective as control_objective  # noqa: E402
+import ts_transformer.outputs.control.strategy as control_strategy  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
@@ -70,9 +73,8 @@ from ts_transformer.arc_length_geometry import (  # noqa: E402
     arc_length_velocity_metrics,
     resample_horizontal_arc_length_numpy,
 )
-from ts_transformer.anchor_eligibility import (  # noqa: E402
-    CONTROL_ANCHOR_STALL_MARGIN, eligible_random_train_anchors,
-)
+from ts_transformer.outputs.control.strategy import CONTROL_ANCHOR_STALL_MARGIN
+from ts_transformer.outputs import ForecastOptions, strategy as output_strategy  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from ts_transformer.batching import resolve_batch_size  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
@@ -96,8 +98,8 @@ from ts_transformer.config import (  # noqa: E402
     PREDICTION_STATE,
     TSConfig, control_recipe, control_simple_v1_overrides,
 )
-from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
-from ts_transformer.control.loss.components import (  # noqa: E402
+from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from ts_transformer.outputs.control.loss.components import (  # noqa: E402
     ControlStateLossResult,
     control_tracking_loss_terms,
 )
@@ -105,7 +107,7 @@ from ts_transformer.terminal_state_loss import (  # noqa: E402
     last_reliable_terminal_velocity_target,
     terminal_state_metrics_numpy,
 )
-from ts_transformer.control.training.diagnostics import (  # noqa: E402
+from ts_transformer.outputs.control.training.diagnostics import (  # noqa: E402
     ControlTrainingDiagnosticsAccumulator,
     clip_gradients_by_global_norm,
     gradient_norms,
@@ -156,10 +158,13 @@ from ts_transformer.metrics import (  # noqa: E402
     raw_kinematic_metrics, states_with_derived_velocity,
 )
 from ts_transformer.models import build_model, parameter_count  # noqa: E402
-from ts_transformer.prediction_outputs import (  # noqa: E402
-    ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
+from ts_transformer.outputs.control.heads import (
+    ControlBounds,
+    ControlOutputHead,
+    ControlPrediction,
 )
-from ts_transformer.prediction_outputs import UniformDurationControlHead  # noqa: E402
+from ts_transformer.outputs.state.model import StatePrediction
+from ts_transformer.outputs.control.heads import UniformDurationControlHead  # noqa: E402
 from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
@@ -167,11 +172,19 @@ from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     SCHEMA_VERSION as ARRIVAL_MANIFEST_SCHEMA,
 )
-from ts_transformer.objective import (  # noqa: E402
-    STATE_LOSS_COMPONENT_NAMES, loss_component_names, masked_mse,
-    move_dynamics, move_fixed_dt_supervision, position_velocity_consistency_loss,
-    prediction_loss, prediction_loss_components, state_prediction_loss_components,
+from ts_transformer.outputs.state.loss import (
+    STATE_LOSS_COMPONENT_NAMES,
+    state_prediction_loss_components,
 )
+from ts_transformer.objective import (
+    loss_component_names,
+    masked_mse,
+    move_dynamics,
+    move_fixed_dt_supervision,
+    prediction_loss,
+    prediction_loss_components,
+)
+from ts_transformer.outputs.control.loss.objective import position_velocity_consistency_loss
 from ts_transformer.train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
     evaluate_fit_splits, load_checkpoint, train,
@@ -729,9 +742,9 @@ def test_coordinate_frame_setting_selects_a_concrete_implementation():
 
     # Any anchor the pipeline builds has the whole lookback behind it; the anchor-state
     # control inversion differentiates that window, so it needs a real anchor, not 0.
-    anchor = dataset_module.ANCHOR_CONTROL_SAMPLES
-    enu_dynamics = dataset_module.dynamics_arrays(enu_series[0], anchor)
-    aligned_dynamics = dataset_module.dynamics_arrays(aligned_series[0], anchor)
+    anchor = supervision_module.ANCHOR_CONTROL_SAMPLES
+    enu_dynamics = supervision_module.dynamics_arrays(enu_series[0], anchor)
+    aligned_dynamics = supervision_module.dynamics_arrays(aligned_series[0], anchor)
     runway_heading = enu_series[0].scenario.target.psi
     assert enu_dynamics["frame_params"][3] == pytest.approx(0.0)
     assert aligned_dynamics["frame_params"][3] == pytest.approx(runway_heading)
@@ -785,8 +798,8 @@ def test_airport_enu_series_differ_from_threshold_enu_only_by_the_anchor():
         assert apt.n_samples == enu.n_samples
         assert apt.supervision_times[-1] == pytest.approx(enu.supervision_times[-1], abs=1e-3)
         assert np.allclose(apt.supervision_weights, enu.supervision_weights)
-        anchor = dataset_module.ANCHOR_CONTROL_SAMPLES
-        dynamics = dataset_module.dynamics_arrays(apt, anchor)
+        anchor = supervision_module.ANCHOR_CONTROL_SAMPLES
+        dynamics = supervision_module.dynamics_arrays(apt, anchor)
         assert dynamics["frame_params"][:3] == pytest.approx(
             [apt.frame.lat0, apt.frame.lon0, apt.frame.alt0]
         )
@@ -820,7 +833,7 @@ def test_target_conditioning_appends_input_only_channels():
 
 
 def test_conditioned_windows_carry_the_target_and_the_model_still_predicts_six_channels():
-    from ts_transformer.forecast import _history_at_anchor
+    from ts_transformer.forecast import history_at_anchor
 
     series, config = _series(
         n_flights=3, seq_len=20, n_segments=4, coordinate_frame="airport-enu",
@@ -829,7 +842,7 @@ def test_conditioned_windows_carry_the_target_and_the_model_still_predicts_six_c
     normalizer = Normalizer.fit(series)
     windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
     extra = len(config.input_channels) - len(ch.CHANNELS)
-    x, y, _weights, _final_time_s, _flight_weight = windows[0]
+    x, y, _weights, _final_time_s, _flight_weight = (t[0] for t in windows.batch([0])[:5])
     assert x.shape == (config.seq_len, len(ch.CHANNELS) + extra)
     assert y.shape == (config.pred_len, len(ch.CHANNELS))
     # Constant over the history, and exactly the flight's normalized target + course.
@@ -848,7 +861,7 @@ def test_conditioned_windows_carry_the_target_and_the_model_still_predicts_six_c
     assert prediction.states.shape == (len(windows), config.pred_len, len(ch.CHANNELS))
     assert prediction.final_time_s.shape == (len(windows),)
     # Inference builds the SAME augmented history the training windows carried.
-    history = _history_at_anchor(series[0], config, normalizer, config.seq_len - 1)
+    history = history_at_anchor(series[0], config, normalizer, config.seq_len - 1)
     assert np.allclose(history, x.numpy())
 
 
@@ -895,7 +908,7 @@ def test_conditioned_checkpoint_round_trips_and_refuses_a_different_input_contra
 
 
 def test_anchor_relative_state_output_starts_where_the_aircraft_is():
-    from ts_transformer.prediction_outputs import StateOutputLayer
+    from ts_transformer.outputs.state.model import StateOutputLayer
 
     config = TSConfig(state_position_reference="anchor-relative", seq_len=4, n_segments=3)
 
@@ -1961,7 +1974,7 @@ def test_common_anchor_is_independent_of_history_length():
     ]
 
     assert all(dataset.index[0] == (0, common_anchor) for dataset in datasets)
-    samples = [dataset[0] for dataset in datasets]
+    samples = [tuple(t[0] for t in dataset.batch([0])[:5]) for dataset in datasets]
     assert [sample[0].shape[0] for sample in samples] == [30, 60, 90]
     assert all(torch.equal(samples[0][1], sample[1]) for sample in samples[1:])
     assert all(float(samples[0][3]) == pytest.approx(float(sample[3])) for sample in samples[1:])
@@ -2099,10 +2112,10 @@ def test_control_random_anchor_candidates_require_airborne_stall_margin():
     )
 
     assert CONTROL_ANCHOR_STALL_MARGIN == pytest.approx(1.10)
-    assert eligible_random_train_anchors(series, range(4), config) == [2, 3]
-    assert eligible_random_train_anchors(
-        series, range(4), replace(config, prediction_output="state")
-    ) == [0, 1, 2, 3]
+    assert output_strategy(config).eligible_anchors(series, range(4)) == [2, 3]
+    assert output_strategy(
+        replace(config, prediction_output="state")
+    ).eligible_anchors(series, range(4)) == [0, 1, 2, 3]
 
 
 def test_training_cohort_floor_filters_only_the_supplied_train_roster():
@@ -2382,15 +2395,13 @@ def test_fixed_anchor_cache_is_bitwise_identical_to_uncached_builders():
         uncached = dataset_module.TrajectoryWindows._sample_arrays(dataset, index)
         for cached_array, uncached_array in zip(cached, uncached):
             assert np.array_equal(cached_array, uncached_array)
-        cached_dynamics = dataset._dynamics_arrays(index)
-        uncached_dynamics = dataset_module.TrajectoryWindows._dynamics_arrays(
-            dataset, index
-        )
+        cached_dynamics = dataset.context.row(index)
+        uncached_dynamics = dataset.context._build_row(index)
         for key in cached_dynamics:
             assert np.array_equal(cached_dynamics[key], uncached_dynamics[key])
 
     indices = np.arange(len(dataset), dtype=np.int64)
-    cached_dense = dataset._fixed_dt_supervision(indices)
+    cached_dense = dataset.context.dense(indices)
     uncached_dense = build_fixed_dt_supervision(
         dataset.series,
         dataset.encoded,
@@ -2945,7 +2956,7 @@ def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
     )
 
-    supervised = objective.control_state_supervision_prediction(
+    supervised = control_objective.control_state_supervision_prediction(
         prediction, torch.tensor([8.0, 10.0]), config
     )
 
@@ -2970,7 +2981,7 @@ def test_predicted_control_state_clock_preserves_original_training_behavior():
     )
     config = TSConfig(prediction_output=PREDICTION_CONTROL)
 
-    assert objective.control_state_supervision_prediction(
+    assert control_objective.control_state_supervision_prediction(
         prediction, torch.tensor([8.0]), config
     ) is prediction
 
@@ -3142,7 +3153,7 @@ def test_true_time_control_loss_is_physical_position_endpoint_and_time_only(monk
         "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }
 
-    components = objective.control_prediction_loss_components(
+    components = control_objective.control_prediction_loss_components(
         prediction,
         torch.zeros(1, config.enc_in),
         target,
@@ -3919,7 +3930,7 @@ def test_control_auto_batch_probe_uses_heterogeneous_duration_partitions():
         final_time_s=final_time,
     )
 
-    probed = batching._heterogeneous_control_probe_prediction(prediction)
+    probed = control_strategy.heterogeneous_control_probe_prediction(prediction)
     fractions = probed.segment_durations / probed.final_time_s[:, None]
     baseline_steps = int(torch.ceil(
         prediction.segment_durations.max(dim=0).values / 0.5
@@ -3959,14 +3970,14 @@ def test_control_auto_batch_training_probe_applies_heterogeneous_partition(monke
         final_time_scale_s=2.0,
         control_rollout_integrator_dt_s=0.5,
     )
-    original = batching._heterogeneous_control_probe_prediction
+    original = control_strategy.heterogeneous_control_probe_prediction
     calls: list[torch.Size] = []
 
     def tracked(prediction):
         calls.append(prediction.segment_durations.shape)
         return original(prediction)
 
-    monkeypatch.setattr(batching, "_heterogeneous_control_probe_prediction", tracked)
+    monkeypatch.setattr(control_strategy, "heterogeneous_control_probe_prediction", tracked)
     monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
 
     batching._probe_training_step(config, 2, torch.device("cpu"))
@@ -4001,7 +4012,7 @@ def test_control_auto_batch_training_probe_executes_clip_diagnostics(monkeypatch
             return super().record_gradients_and_clip(model)
 
     monkeypatch.setattr(
-        batching,
+        control_strategy,
         "ControlTrainingDiagnosticsAccumulator",
         TrackedDiagnostics,
         raising=False,
@@ -4874,7 +4885,8 @@ def test_window_forecast_recurses_to_the_full_horizon():
 
     model = FixedPrediction()
     forecast = forecast_approach(
-        model, series[0], config, normalizer, device=torch.device("cpu"), truncate=False
+        model, series[0], config, normalizer, device=torch.device("cpu"),
+        options=ForecastOptions(truncate=False),
     )
 
     assert forecast.horizon_mode == HORIZON_WINDOW
@@ -5460,7 +5472,7 @@ def test_fixed_time_modes_train_checkpoint_and_forecast(
         loaded_config,
         normalizer,
         device=torch.device("cpu"),
-        truncate=False,
+        options=ForecastOptions(truncate=False),
     )
 
     assert payload["target_contract"] == contract
@@ -5783,7 +5795,7 @@ def test_the_l1_native32_checkpoint_written_with_the_retired_fields_still_loads(
     retired (the synthetic test above pins the rule, not an artifact) — its class, its
     strict state dict, and a config that round-trips without the retired keys."""
     from ts_transformer.config import RETIRED_SERIALIZED_FIELDS
-    from ts_transformer.control.heads import ControlOutputModel
+    from ts_transformer.outputs.control.heads import ControlOutputModel
     model, config, _normalizer, payload = load_checkpoint(L1_NATIVE32_CHECKPOINT)
     assert isinstance(model, ControlOutputModel) and config.n_segments == 32
     assert set(RETIRED_SERIALIZED_FIELDS) <= set(payload["config"]), "the canary lost its point: pick an older artifact"
@@ -5804,7 +5816,7 @@ def test_the_heterogeneous_probe_keeps_every_field_of_the_prediction():
         final_time_s=torch.full((batch_size,), 80.0),
         duration_quantiles_s=quantiles,
     )
-    probed = batching._heterogeneous_control_probe_prediction(prediction)
+    probed = control_strategy.heterogeneous_control_probe_prediction(prediction)
     assert probed.duration_quantiles_s is quantiles
     assert not torch.equal(probed.segment_durations, prediction.segment_durations)
 

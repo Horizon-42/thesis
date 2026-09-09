@@ -209,16 +209,16 @@ import torch
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from ts_transformer.config import TROMBONE_SURPLUS_REFERENCE_ROLLOUT, TSConfig
-from ts_transformer.control.constraints.gates import on_final_weight, runway_axes_view
-from ts_transformer.control.constraints.saturation import (
+from ts_transformer.outputs.control.constraints.gates import on_final_weight, runway_axes_view
+from ts_transformer.outputs.control.constraints.saturation import (
     ACTIVE_BANK_CHANGE_RAD,
     SATURATION_SOFTNESS_RAD,
     soft_max,
     soft_min,
 )
-from ts_transformer.control.constraints.speed_floor import floor_speed
-from ts_transformer.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from ts_transformer.control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
+from ts_transformer.outputs.control.constraints.speed_floor import floor_speed
+from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
+from ts_transformer.outputs.control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
 from ts_transformer.final_approach_geometry import (
     alignment_cosine,
     hard_aligned,

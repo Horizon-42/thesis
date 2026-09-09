@@ -10,8 +10,8 @@ from __future__ import annotations
 import torch
 
 from ts_transformer.config import TSConfig
-from ts_transformer.control.dynamics.hooks import CommandHook
-from ts_transformer.control.dynamics.backends import (
+from ts_transformer.outputs.control.dynamics.hooks import CommandHook
+from ts_transformer.outputs.control.dynamics.backends import (
     DenseControlRolloutChannels,
     EndpointControlRollout,
     RolloutInputs,

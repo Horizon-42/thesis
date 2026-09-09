@@ -35,7 +35,7 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.control.latent import displacement_verdict
+from ts_transformer.outputs.control.latent import displacement_verdict
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import build_series, dataset_flight_key
 from ts_transformer.synthetic import synthetic_arrivals

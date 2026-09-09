@@ -35,14 +35,15 @@ from ts_transformer.config import (
     TSConfig,
     control_recipe_overrides,
 )
-from ts_transformer.control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM, load_fitted_teacher
+from ts_transformer.outputs.control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM, load_fitted_teacher
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
-from ts_transformer.forecast import forecast_approaches, posterior_latent_forecasts
+from ts_transformer.forecast import forecast_approaches
+from ts_transformer.outputs.control.forecast import posterior_latent_forecasts
 from ts_transformer.models import build_model
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.objective import control_imitation_mse
+from ts_transformer.outputs.control.loss.objective import control_imitation_mse
 from ts_transformer.train import evaluate_fixed_anchor_series, load_checkpoint, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -218,7 +219,7 @@ def test_the_dataset_serves_the_table_with_unit_weights_and_the_loss_consumes_th
         inverse_dynamics["reference_controls"], dynamics["reference_controls"]
     )
 
-    from ts_transformer.prediction_outputs import ControlPrediction
+    from ts_transformer.outputs.control.heads import ControlPrediction
     prediction = ControlPrediction(
         controls=torch.zeros(len(series), N_SEGMENTS, 3),
         segment_durations=torch.ones(len(series), N_SEGMENTS),

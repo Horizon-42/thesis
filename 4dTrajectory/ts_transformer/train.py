@@ -28,8 +28,6 @@ import torch.nn as nn
 from ts_transformer.channels import CHANNELS
 from ts_transformer.batching import resolve_batch_size
 from ts_transformer.config import (
-    CONTROL_HOOK_OFF,
-    HOOK_SATURATION_HARD,
     CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
@@ -39,13 +37,9 @@ from ts_transformer.config import (
     LR_PLATEAU_METRIC_OBJECTIVE,
     LR_PLATEAU_METRIC_SELECTION,
     TSConfig,
-    control_recipe,
     default_anchor,
-    uses_control_dynamics,
 )
-from ts_transformer.control.basis_fit import FittedTeacherTable, load_fitted_teacher
-from ts_transformer.control.dynamics.hooks import HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY
-from ts_transformer.control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
+from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 from ts_transformer.data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     provenance_eligible_set_digests,
@@ -66,7 +60,6 @@ from ts_transformer.evaluation_protocol import (
     TEST_RELEASE_PROTOCOL_FIELD,
     TEST_RELEASE_SCHEMA,
 )
-from ts_transformer.control.latent import effective_latent_beta, latent_epoch_record
 from ts_transformer.fixed_anchor_validation import CommonGridTruth
 from ts_transformer.models import build_model, parameter_count, resolve_device
 from ts_transformer.batch_contract import anchor_state, model_forward, unpack_batch
@@ -80,7 +73,7 @@ from ts_transformer.objective import (
     prediction_loss_components,
     target_contract,
 )
-from ts_transformer.prediction_outputs import ControlPrediction
+from ts_transformer.outputs import strategy
 from ts_transformer.training_performance import EpochProfiler
 from ts_transformer.validation import (
     VALIDATION_SELECTIONS,
@@ -144,7 +137,7 @@ class EpochResult:
     # the step count (per-step shares and per-step means, whatever the hook counts), plus
     # ``steps`` itself.
     command_hook: dict[str, float] = field(default_factory=dict)
-    # The latent intent's epoch record (control/latent.latent_epoch_record): the KL charged
+    # The latent intent's epoch record (outputs/control/latent.latent_epoch_record): the KL charged
     # and its analytic per-dimension form, the KL's mean/variance split, the posterior mean's
     # displacement from the prior mean in prior sigmas, and the active-unit counts — the
     # posterior-collapse reading, which looks exactly like "converged" on every other number.
@@ -465,14 +458,8 @@ def fit_model(
             f"predeclared {cohort_floor:g} s cohort floor; filter the train cohort before fit"
         )
 
-    if (
-        config.control_command_hook != CONTROL_HOOK_OFF
-        and config.control_hook_saturation == HOOK_SATURATION_HARD
-    ):
-        raise ValueError(
-            "hard hook saturation is for inference-only arms: a clamped command has no "
-            "gradient, so training would learn nothing on the clamped steps"
-        )
+    output_strategy = strategy(config)
+    output_strategy.check_trainable(config)
     device = resolve_device(config.device)
     batch_size = resolve_batch_size(config, device, auto=auto_batch_size, verbose=verbose)
     config = replace(config, batch_size=batch_size)
@@ -485,11 +472,7 @@ def fit_model(
     # the one place that builds supervised window sets. Every replay path (evaluate-fit,
     # the z-oracle forecast, the approach-cohort comparison) builds its own window set
     # without one and must keep working when the table is gone.
-    fitted_teacher = (
-        load_fitted_teacher(config.control_fitted_teacher_path)
-        if config.uses_fitted_teacher
-        else None
-    )
+    fitted_teacher = output_strategy.training_teacher(config)
     train_set = training_window_class(config)(
         train_series,
         config,
@@ -497,10 +480,8 @@ def fit_model(
         minimum_anchor_index=minimum_anchor_index,
         fitted_teacher=fitted_teacher,
     )
-    if verbose and train_set.closure_coverage is not None:
-        present, valid, total = train_set.closure_coverage
-        print(f"  closure labels: {present} of {total} training flights in the file, {valid} valid "
-              f"({valid / max(total, 1):.1%} regress; the rest are in the batch, out of the loss)")
+    if verbose and train_set.context.summary is not None:
+        print(f"  {train_set.context.summary}")
     val_sets = validation_datasets(
         val_series,
         config,
@@ -639,20 +620,13 @@ def fit_model(
         # there is none). The training batches and the validation pass below are both
         # scored under it, so an epoch's train and val `latent_kl` mean the same thing —
         # the rule the procedure penalty's λ already follows.
-        beta_effective = effective_latent_beta(config, epoch)
-        epoch_config = replace(config, latent_beta=beta_effective)
+        epoch_config = output_strategy.epoch_config(config, epoch)
 
         model.train()
         train_component_totals = {name: 0.0 for name in component_names}
         train_diagnostic_totals: dict[str, float] = {name: 0.0 for name in PROCEDURE_DIAGNOSTICS}
         train_weight_total = 0.0
-        control_diagnostics = (
-            ControlTrainingDiagnosticsAccumulator(
-                config.control_gradient_clip_norm
-            )
-            if config.control_gradient_clip_norm > 0.0
-            else None
-        )
+        control_diagnostics = output_strategy.training_diagnostics(config)
         train_batches = iter(iter_batches(
             train_set, config.batch_size, shuffle=True, seed=config.seed + epoch
         ))
@@ -686,10 +660,6 @@ def fit_model(
                 prediction = model_forward(model, x, dynamics, future=(y, final_time_s))
             with profiler.section("train_rollout_loss_s"):
                 if control_diagnostics is not None:
-                    if not isinstance(prediction, ControlPrediction) or dynamics is None:
-                        raise RuntimeError(
-                            "control gradient diagnostics require deterministic control output"
-                        )
                     control_diagnostics.record_prediction(prediction, dynamics)
                 components = prediction_loss_components(
                     prediction,
@@ -754,22 +724,11 @@ def fit_model(
             procedure_epoch["lambda_vertical_next"] = multipliers.vertical
         else:
             epoch_multipliers = None
-        # The command hook's epoch record: how often it was gated on and how hard it acted
-        # (per-step shares over the epoch's rollouts; the step count beside them).
-        hook_steps = train_diagnostic_totals.get(HOOK_STEPS_KEY, 0.0)
-        hook_epoch: dict[str, float] = {}
-        if hook_steps > 0.0:
-            hook_epoch = {
-                name.removeprefix(HOOK_DIAGNOSTIC_PREFIX): value / hook_steps
-                for name, value in train_diagnostic_totals.items()
-                if name.startswith(HOOK_DIAGNOSTIC_PREFIX) and name != HOOK_STEPS_KEY
-            }
-            hook_epoch["steps"] = hook_steps
-        latent_epoch: dict[str, Any] = {}
-        if config.latent_dim > 0:
-            latent_epoch = latent_epoch_record(
-                train_diagnostic_totals, config, beta_effective=beta_effective
-            )
+        # This path's own blocks of the epoch record (the command hook's per-step shares,
+        # the latent's KL reading, the control gradient diagnostics).
+        output_extras = output_strategy.epoch_record(
+            config, epoch, train_diagnostic_totals, control_diagnostics
+        )
         train_components = {
             name: value / max(train_weight_total, 1.0)
             for name, value in train_component_totals.items()
@@ -787,9 +746,7 @@ def fit_model(
         }
         # Equal airport weight: a large/long airport cannot control early stopping alone.
         val_loss = float(np.mean(list(val_by_airport.values())))
-        control_training_diagnostics = (
-            control_diagnostics.summary() if control_diagnostics is not None else {}
-        )
+        control_training_diagnostics = output_extras.get("control_training_diagnostics", {})
         replay_by_airport = {
             airport: evaluation.replay
             for airport, evaluation in val_evaluations.items()
@@ -859,15 +816,13 @@ def fit_model(
             validation_selection_by_airport=validation_selection.by_airport,
             validation_anchor_grid=validation_selection.anchor_grid,
             train_anchor_sampling=train_anchor_sampling,
-            control_training_diagnostics=control_training_diagnostics,
             timing=timing,
             validation_profile_by_airport={
                 airport: evaluation.profile
                 for airport, evaluation in val_evaluations.items()
             },
             procedure=procedure_epoch,
-            command_hook=hook_epoch,
-            latent=latent_epoch,
+            **output_extras,
         ))
 
         if validation_selection.value < best_val - 1e-9:
@@ -1144,8 +1099,7 @@ def train(
         selection_tmp.write_text(json.dumps(data_selection, indent=2), encoding="utf-8")
         selection_tmp.replace(selection_path)
         checkpoint_metadata["data_selection_sha256"] = file_sha256(selection_path)
-    if uses_control_dynamics(config.prediction_output):
-        checkpoint_metadata["control_recipe"] = control_recipe(config)
+    checkpoint_metadata.update(strategy(config).checkpoint_metadata(config))
     metadata_path = out / CHECKPOINT_METADATA_NAME
     metadata_tmp = out / f"{CHECKPOINT_METADATA_NAME}.tmp"
     metadata_tmp.write_text(json.dumps(checkpoint_metadata, indent=2), encoding="utf-8")

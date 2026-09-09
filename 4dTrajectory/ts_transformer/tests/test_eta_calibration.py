@@ -649,7 +649,7 @@ def test_predict_stamps_the_calibrated_interval_on_every_record(tmp_path: Path, 
 def test_neither_half_of_the_pair_alone_produces_an_interval():
     """The interval needs BOTH a quantile forecast and a table: a point-head forecast has
     nothing to widen, and an uncalibrated quantile forecast has nothing to widen it by."""
-    from ts_transformer.forecast import _calibrated_interval_fields
+    from ts_transformer.outputs.control.forecast import _calibrated_interval_fields
 
     table = calibrate(
         _cohort(400, narrow_s=10.0), split_seed=1, split="val",

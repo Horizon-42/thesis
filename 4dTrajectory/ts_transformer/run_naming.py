@@ -117,7 +117,7 @@ CONTROL_LOSS_FIELDS = (
     # The final-approach penalty is an objective on BOTH paths (it acts on the control
     # rollout's segment endpoints too): a control run that carries it is a recipe edit.
     *PROCEDURE_LOSS_FIELDS,
-    # The latent intent's objective knobs (control/latent.py); last, so tests that slice
+    # The latent intent's objective knobs (outputs/control/latent.py); last, so tests that slice
     # the recipe fields off the front keep reading recipe fields.
     "latent_beta",
     "latent_free_bits_nats",

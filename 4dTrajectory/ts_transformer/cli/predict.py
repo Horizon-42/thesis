@@ -45,7 +45,7 @@ from ts_transformer.calibration import (
     quantile_directory_name,
 )
 from ts_transformer.data_provenance import require_matching_data_provenance
-from ts_transformer.closure_output import load_labels
+from ts_transformer.outputs.closure.model import load_labels
 from ts_transformer.dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
 from ts_transformer.evaluation_protocol import (
     TestReleaseError,
@@ -57,17 +57,16 @@ from ts_transformer.export import (
 )
 from ts_transformer.flyability import report_for_records
 from ts_transformer.io_utils import file_sha256
-from ts_transformer.forecast import (
-    cut_at_threshold_crossing,
-    default_anchor,
+from ts_transformer.forecast import cut_at_threshold_crossing, default_anchor, forecast_approaches
+from ts_transformer.outputs.control.forecast import (
     duration_quantile_predictions,
-    forecast_approaches,
-    forecast_closure_from_labels,
     latent_mode_forecasts,
     posterior_latent_forecasts,
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
+from ts_transformer.outputs.closure.forecast import forecast_closure_from_labels
+from ts_transformer.outputs import ForecastOptions
 from ts_transformer.models import resolve_device
 from ts_transformer.train import load_checkpoint
 
@@ -320,10 +319,12 @@ def _fan_forecast(model, series, config, normalizer, device, args, conformal, le
     """One leaf's decode — the batch flown to the arrival time this leaf names."""
     return forecast_approaches(
         model, series, config, normalizer, device=device,
-        truncate=not args.no_truncate, project_final=args.project_final,
-        conformal=conformal, cta_s=leaf.cta_s,
-        cta_quantile=leaf.quantile, cta_interval=leaf.interval,
-        truncate_at_threshold=args.truncate_at_threshold,
+        options=ForecastOptions(
+            truncate=not args.no_truncate, project_final=args.project_final,
+            conformal=conformal, cta_s=leaf.cta_s,
+            cta_quantile=leaf.quantile, cta_interval=leaf.interval,
+            truncate_at_threshold=args.truncate_at_threshold,
+        ),
     )
 
 
@@ -667,11 +668,13 @@ def run_cli(
                 config,
                 normalizer,
                 device=device,
-                truncate=not args.no_truncate,
-                project_final=args.project_final,
-                cta_offset_s=args.cta_offset_s,
-                conformal=conformal,
-                truncate_at_threshold=args.truncate_at_threshold,
+                options=ForecastOptions(
+                    truncate=not args.no_truncate,
+                    project_final=args.project_final,
+                    cta_offset_s=args.cta_offset_s,
+                    conformal=conformal,
+                    truncate_at_threshold=args.truncate_at_threshold,
+                ),
             )
         for offset, (s, forecast) in enumerate(
             zip(batch_series, forecasts, strict=True)
