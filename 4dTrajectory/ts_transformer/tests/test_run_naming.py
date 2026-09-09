@@ -277,4 +277,26 @@ def test_every_tsconfig_field_is_named_or_excused_by_name():
         assert field in TSConfig().to_dict(), field
         assert reason
     assert "device" in KNOWN_UNNAMED_FIELDS
-    assert "validation_common_grid_points" not in KNOWN_UNNAMED_FIELDS
+    for named in ("validation_common_grid_points", "lr_plateau_patience", "lr_plateau_factor",
+                  "random_train_anchor_min_future_s"):
+        assert named not in KNOWN_UNNAMED_FIELDS, named
+
+
+def test_the_scheduler_patience_factor_and_anchor_floor_name_a_custom_run():
+    """Review C-3, decided 2026-09-09: the three identity-bearing fields name the run. A
+    named recipe pins the scheduler pair, so a recipe run is unchanged; a custom run off the
+    defaults spells them, and the slug moves with them."""
+    from ts_transformer.config import CONTROL_RECIPE_SIMPLE_V3, recipe_settings
+    from ts_transformer.run_naming import run_slug
+    base = _state_defaults()
+    custom = {**base, "lr_plateau_patience": 8, "lr_plateau_factor": 0.3,
+              "random_train_anchor": True, "random_train_anchor_min_future_s": 20.0}
+    name = run_display_name(custom)
+    for token in ("lr-patience=8", "lr-factor=0.3", "anchor-min-future=20"):
+        assert token in name, (token, name)
+    assert run_slug(custom) != run_slug({**custom, "lr_plateau_patience": 12})
+    assert "lr-patience" not in run_display_name(base)
+    # simple-v3 pins lr_plateau_patience=8: frozen by the recipe, so it is not a deviation.
+    recipe = recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=True)
+    recipe_name = run_display_name({**TSConfig().to_dict(), **recipe})
+    assert recipe["lr_plateau_patience"] == 8 and "lr-patience" not in recipe_name

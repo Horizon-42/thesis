@@ -12,11 +12,18 @@ The review's bugs are fixed (its §7 is the ledger; changelog entry of the same 
 are the items that change a stored artifact's name, reuse or number, or a protocol, and so
 were NOT made without the owner:
 
-- **C-3, two identity-bearing fields stay unnamed.** `lr_plateau_patience` (8 or 12, never
-  the default 3, in 170 of 219 stored runs) and `random_train_anchor_min_future_s` (20 s in 7)
-  are in `run_naming.KNOWN_UNNAMED_FIELDS` with that reason; naming them moves those runs'
-  display names and slugs. Two custom arms differing only there share a name until then
-  (their `checkpoint_metadata.json` differs).
+- **C-3 — DECIDED and DONE 2026-09-09: the three identity-bearing fields name the run.**
+  `lr_plateau_patience` / `lr_plateau_factor` (`lr-patience=` / `lr-factor=`) and
+  `random_train_anchor_min_future_s` (`anchor-min-future=`) are in `META_FIELDS`; only `device`
+  and the never-set backbone knobs stay in `KNOWN_UNNAMED_FIELDS`. Measured over the 219 stored
+  `history.json` configs: 146 display names / slugs moved (75 gain a spelled token, 71 only
+  their folded `+N more` count and slug hash — the named recipes pin the scheduler pair, so
+  recipe runs are untouched), 0 loadability changes, no directory or category key moves. 132
+  published frontend categories carry the old label until relabelled — 109 publisher-managed
+  (`publish_ts_experiment_trajectories.py --refresh-labels-only`, once per publication root:
+  `KRDU/`, `KSJC/`, `POOLED/experiment_predictions`, `POOLED/checkpoint_publications`) and 23
+  hand-published `ts_*` keys (`docs/relabel_published_categories.py`); labels only, no CZML,
+  records, keys or directories. Owner-run, one pass.
 - **C-4, the duration floor under `uniform`.** `control_duration_uniform_floor` is read by the
   `factorized` head only, but its default is 0.8 and every recipe pins 0.0, so 88 stored
   `uniform` runs carry a non-default inert value and a refusal would stop them loading. It

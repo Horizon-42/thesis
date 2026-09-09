@@ -780,10 +780,16 @@ every surface that names a trained run. A default change deliberately shifts old
 `run_naming.KNOWN_UNNAMED_FIELDS`**, asserted at import in both directions (review C-3: five
 CLI-settable fields named nothing, so two runs differing only in `--validation-common-grid-points`
 shared a name and a slug; it names the run now, `grid-points=`, and no stored run moves).
-Two excused fields are IDENTITY-BEARING and stay unnamed by decision, not oversight —
-`lr_plateau_patience` (8 or 12 in 170 of the 219 stored runs) and
-`random_train_anchor_min_future_s` (20 s in 7) — because naming them renames those runs;
-the checkpoint metadata still tells such runs apart.
+**The three identity-bearing fields that were unnamed are named since 2026-09-09 (decided):**
+`lr_plateau_patience` / `lr_plateau_factor` (`lr-patience=` / `lr-factor=`; the named recipes
+pin both, so a recipe run is unchanged) and `random_train_anchor_min_future_s`
+(`anchor-min-future=`). Measured before landing it: 146 of the 219 stored runs' display names
+and slugs moved (75 gain a spelled token, 71 only move their folded `+N more` count and slug
+hash), 0 changed loadability, and 132 published frontend categories carried the old label:
+109 publisher-managed ones (`publish_ts_experiment_trajectories.py --refresh-labels-only`,
+run once per publication root) and 23 hand-published `ts_*` ones
+(`docs/relabel_published_categories.py`) — labels only; no CZML, records, keys or directories
+move. Only `device` and the never-set backbone knobs stay excused.
 **On-disk run/category directories are historical record — never rename them.** Grammar,
 fallbacks and the relabel tooling: `docs/ENGINEERING_NOTES.md`.
 

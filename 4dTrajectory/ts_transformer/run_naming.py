@@ -211,6 +211,10 @@ META_FIELDS = (
     # every epoch. Every stored config predates it and carries the default 0, so adding
     # it renames nothing (recounted on disk).
     "random_train_anchor_l1_share",
+    # The future floor a random train anchor must leave: it decides WHICH anchors are
+    # admissible, so two runs differing only here train on different anchor populations.
+    # Named 2026-09-09 (review C-3, decided): 7 stored runs at 20 s gain `anchor-min-future=20`.
+    "random_train_anchor_min_future_s",
     "training_cohort_min_future_s",
     "checkpoint_selection_metric",
     # The common-grid resolution the selection metric is SCORED on: two runs differing
@@ -222,6 +226,14 @@ META_FIELDS = (
     # numbers part, so it is an identity field. Every stored config predates it and carries
     # the default, so adding it renames nothing (recounted on disk).
     "lr_plateau_metric",
+    # ...and how long it waits and how hard it cuts: two runs differing only here train under
+    # different learning-rate schedules. Named 2026-09-09 (review C-3, decided): the named
+    # recipes pin both, so recipe runs are unchanged; custom runs off the defaults (3 / 0.5)
+    # gain `lr-patience=` / `lr-factor=`. Measured before landing it, together with the anchor
+    # floor below: 146 of the 219 stored runs' names / slugs moved (75 spelled, 71 only the
+    # folded `+N more` count and hash), 0 loadability changes.
+    "lr_plateau_patience",
+    "lr_plateau_factor",
     "control_duration_parameterization",
     "control_duration_uniform_floor",
     "control_gradient_clip_norm",
@@ -294,7 +306,10 @@ _ABBREV = {
     "checkpoint_selection_metric": "select",
     "validation_common_grid_points": "grid-points",
     "lr_plateau_metric": "lr-metric",
+    "lr_plateau_patience": "lr-patience",
+    "lr_plateau_factor": "lr-factor",
     "training_cohort_min_future_s": "min-future",
+    "random_train_anchor_min_future_s": "anchor-min-future",
     "random_train_anchor": "random-anchor",
     "random_train_anchor_sampling": "anchors",
     "random_train_anchor_l1_share": "l1-share",
@@ -366,15 +381,6 @@ KNOWN_UNNAMED_FIELDS: dict[str, str] = {
     "output_attention": "backbone knob, never set",
     "padding_patch": "backbone knob, never set",
     "subtract_last": "backbone knob, never set",
-    # IDENTITY-BEARING BUT UNNAMED — a user decision, not an oversight (review C-3): naming
-    # them would move stored names. Recounted on disk 2026-09-09 over 219 runs:
-    # `lr_plateau_patience` is 8 or 12 (not the default 3) in 170 runs, and
-    # `random_train_anchor_min_future_s` is 20 s (not 60) in 7. Until they are named, two
-    # custom runs differing only here share a name; the checkpoint metadata still tells
-    # them apart (`lr_scheduler`, `random_train_anchor_min_future_s`).
-    "lr_plateau_patience": "identity-bearing; naming it renames 170 stored runs",
-    "lr_plateau_factor": "identity-bearing; paired with lr_plateau_patience",
-    "random_train_anchor_min_future_s": "identity-bearing; naming it renames 7 stored runs",
 }
 _named = (
     set(CONTROL_LOSS_FIELDS) | set(STATE_LOSS_FIELDS) | set(CLOSURE_LOSS_FIELDS)

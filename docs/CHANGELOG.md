@@ -78,14 +78,23 @@ small items (present-null `input_channels`, the inert offsets line, the zero-gro
 `gamma` fallback, `strictly_increasing` on a decreasing clock, the CTA mode the dataset could
 not fill, the `anchor_state` rename, `generated_at`, the `overlap` claim in `CLAUDE.md`).
 
-**Left as user decisions, recorded in `4dTrajectory/ts_transformer/docs/OPEN_ITEMS.md`:** naming
-`lr_plateau_patience` / `lr_plateau_factor` / `random_train_anchor_min_future_s` (renames
-170 / 170 / 7 stored runs); refusing `control_duration_uniform_floor` under `uniform` (the
+**C-3 finished the same evening (decided): the three identity-bearing fields name the run**
+(`lr-patience=`, `lr-factor=`, `anchor-min-future=`); the named recipes pin the scheduler pair,
+so recipe runs are untouched. Measured over the 219 stored `history.json` configs before
+landing it: 146 display names / slugs moved (75 gain a spelled token, 71 only their folded
+`+N more` count and slug hash), 0 loadability changes, no directory or category key moves;
+132 published frontend categories carry the old label until relabelled (109 publisher-managed
+via `publish_ts_experiment_trajectories.py --refresh-labels-only`, 23 hand-published `ts_*`
+via `docs/relabel_published_categories.py`; labels only). C-12 was decided too: the
+grader's load-factor floor stays 0.5 and the head's box 0.2; the plan-and-guidance guidance
+layer reads the grader's envelope.
+
+**Left as user decisions, recorded in `4dTrajectory/ts_transformer/docs/OPEN_ITEMS.md`:**
+refusing `control_duration_uniform_floor` under `uniform` (the
 recipes pin 0.0 against a default of 0.8, 88 stored runs); binding the test-release ledger to the
 checkpoint digest rather than its directory (needs a registry outside the run directory);
 renaming `cv_results.json`'s `mean_/std_val_macro_loss` (a schema bump; two stored files);
-the head's load-factor floor 0.2 against the grader's 0.5 (C-12); and the review's §5
-retirements and §4.2–4.5 restructuring.
+and the review's §5 retirements and §4.2–4.5 restructuring.
 
 ### 2026-09-09 — ts_transformer: review A-3 and A-4 fixed — one terminal supervision contract; the barrier is confined to the hard gate under a trombone
 
