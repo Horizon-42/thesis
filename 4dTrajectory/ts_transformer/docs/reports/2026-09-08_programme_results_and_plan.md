@@ -723,15 +723,18 @@ reference with a 0 % fully-flyable share. The hook fixes the lateral symptom com
 violations are stall violations, 77–94 % of them at remaining path ≥ 20 km: the model is already
 too slow in the outer segment at zero offset and the delay is placed in the same segment. Two things are
 missing, neither a training trick — a **speed floor inside the rollout dynamics**
-(V ≥ V_stall(n) × margin) and an **upstream path-stretch degree of freedom** so that the delay can be converted into extra track. **Both were built and measured the same evening (§7.6, §7.7), and the diagnosis
-holds.** The floor alone fails: it raises stall rather than removing it, produces thrust saturation
-on about 10 % of samples, and has nowhere to put the delay, because the CTA fixes the time and the
-path fixes the distance. Adding the path stretch fixes the envelope — thrust over maximum −85 %,
-stall −84 %, load factor low −99 %, fully flyable 45 → 78 % at offset 0 and 2.4 → 52.4 % at +60 s —
-and converts the delay exactly, 30 s of track per 30 s requested. What is still wrong is the
-*sizing*: the stretch is measured against the straight-line distance to the threshold, so vectored
-flights are stretched by their whole vectoring pattern. That is a bounded, identified defect with a
-named fix (L3.f, §7.7), not an open question.
+(V ≥ V_stall(n) × margin) and an **upstream path-stretch degree of freedom** so that the delay can be converted into extra track. **Both were built and measured (§7.6, §7.7), and the diagnosis holds in part.** The floor alone
+fails: it raises stall rather than removing it, produces thrust saturation on about 10 % of
+samples, and has nowhere to put the delay, because the CTA fixes the time and the path fixes the
+distance. Adding the path stretch converts the delay exactly, 30 s of track per 30 s requested,
+and removes part of the envelope damage. The first readout of it (78 % fully flyable at offset 0,
+52 % at +60 s) was wrong, though: the threshold-crossing rule cut vectored flights abeam on the
+downwind, so the hard half of every vectored approach was never graded. Re-read under the
+corrected cut (§7.7b), the stack makes 46 % of flights fully flyable at offset 0 and 20 % at
++60 s, about 30 % of flights never become established on the final, and the median flight receives
+no stretch at all. Sizing the stretch against the reference rollout (L3.f) helps measurably and is
+adopted, but does not change that reading. Delay absorption is therefore not a hook defect with a
+named fix; it is the route decision that §8 hands to the plan-and-guidance design.
 
 **The inference-time hook is the safety layer; the training-time penalty is settled.** The penalty
 has been vetoed twice on the control path, with and without the teacher, so the explanation is the
@@ -766,8 +769,9 @@ keeps the freeze point, but does not yet replace the two-model rule (§7.5).
 Items 1–8 are proposals for decision; item 9 is closed. Items 3, 4 and 5 have been run and
 decided, and item 2 has been half-run — §7 carries all of that. Each item below is described in one
 or two sentences, with its gate, veto and cost in the table that follows. **No experiment is
-running.** Three arms are named and unqueued: **L3.f** (item 2), the **CTA-on-L2.g** arm (item 5b)
-and the **KSJC replication** (item 6).
+running.** Two arms are named and unqueued: the **CTA-on-L2.g** arm (item 5b) and the **KSJC
+replication** (item 6); the L3.f arms have run (§7.7b), and one A-4 check arm is pre-registered
+there.
 
 **1. Adopt two recipe changes; the third is now refused.** (a) `final_time_loss_weight` 26 into the
 mainline recipe is **NOT adopted** — the second seed (1373 m against seed 1337's 1248 m, around
@@ -776,14 +780,17 @@ native32's 1322 m) did not reproduce the 74 m, so the change has no measured ben
 (c) `predict --command-hook barrier --hook-saturation soft` as the default inference layer for
 every delivered control reference, with its bank-skill cost published alongside.
 
-**2. Delay absorption — both halves built and measured; one defect left, with a named fix.** The
-speed floor alone (L3.d, §7.6) fails all three gates: stall rises, thrust saturates on about 10 %
-of samples, and a floor has nowhere to put the delay. Adding the trombone path stretch (L3.e,
-§7.7) fixes the envelope and converts the delay exactly, but sizes the stretch against the
-straight-line distance and therefore over-stretches vectored flights. **The next arm is L3.f**:
-size the surplus against the hook-free reference rollout's remaining path length, everything else
-unchanged, the same four arms and the same five gates. This remains **the highest-value open
-item**: a scheduler requests delay far more often than an early arrival.
+**2. Delay absorption — both halves built, measured, and re-measured; the hook line is closed.**
+The speed floor alone (L3.d, §7.6) fails all three gates: stall rises, thrust saturates on about
+10 % of samples, and a floor has nowhere to put the delay. Adding the trombone path stretch
+(L3.e, §7.7) converts the delay exactly. Its first readout was flattered by the abeam cut; under
+the corrected cut (§7.7b) the stack reaches 46 % fully flyable at offset 0 and 20 % at +60 s, and
+sizing the stretch against the reference rollout (L3.f, §7.7b) improves every criterion it touches
+without passing a gate. What is left is not a sizing defect: about 30 % of flights never become
+established on the final and the median flight gets no stretch, because a hook admitted only where
+the path is already 30° off course cannot choose a route. This remains **the highest-value open
+item** — a scheduler requests delay far more often than an early arrival — and it now belongs to
+the route builder of the plan-and-guidance design (§8), not to another hook arm.
 
 **3. Anytime delivery — decided.** The two-model rule is fixed (A2a, §7.4): the fixed-anchor model
 at L−1, the random-anchor model at every re-anchored bin. The single mixed-anchor alternative was
@@ -827,8 +834,8 @@ the reference.
 | 1(b) | already met (A0.b, both arms, every anchor set better than the 09-07 arm) | — | none; a default change |
 | 1(c) | already met on three independent bases (`simple-v3` in `CHR`, teacher-free `hr8+TV` in L1.c, the CTA base in L3.c) | — | none; a predict-time flag |
 | 2 (L3.d) | **run; all three failed** (§7.6): fully flyable +60 s 2.4 % untruncated / 48.9 % truncated against 88.4 %; stall rose 94–139 %; `thrust_over_max` appeared on ~10 % of samples | not triggered | already spent (four predict-only arms) |
-| 2 (L3.e) | **run; two of five passed** (§7.7): CTA obeyed exactly with X = 0, thrust over max −85 %, lateral p95 within 1.5× of offset 0; stall −84 % just misses −90 %; fully flyable +60 s 52.4 % against 88.4 % | not triggered | already spent (four predict-only arms) |
-| 2 (L3.f, next) | the same five gates, with the surplus sized against the hook-free reference rollout's remaining path instead of the straight line; expect `tromboneDelayS` ≈ 0 at offset 0 and lateral p95 near 1.6 km | — | four predict-only arms, ≈ 20 min GPU, after the estimator change |
+| 2 (L3.e) | **run twice**; the first readout (two of five passed) is withdrawn — abeam cut. Corrected (L3.e-r, §7.7b): **one of five passed** (X = 0, duration MAE exactly 60.00 s); fully flyable +60 s **20.0 %** against 88.4 %; stall −13 % against L3.d, not −90 % | not triggered | already spent (four predict-only arms, twice) |
+| 2 (L3.f) | **run** (L3.f-r, §7.7b): **both new gates fail** — `tromboneDelayS` p50 135.5 s against 30 s (was 386 s), endpoint \|xt\| p95 12.5 km against 3.2 km — but better than L3.e-r on every criterion it touches (7–10 points more flights on the final, 9–13 % fewer stall / thrust samples); adopted as the trombone's sizing. One A-4 check arm pre-registered | not triggered | already spent (four predict-only arms); the check ≈ 20 min GPU |
 | 3 | **decided** (§7.4, §7.5): the two-model rule is adopted from existing artifacts; A2b's mixed model reached L−1 1464 m against the 1447 m gate — a 17 m miss, inside the seed line — while keeping s_freeze at 8 km and leaving the 12 km veto clean | not triggered | already spent (two training arms) |
 | 4 | **run and decided**: the MAE clause passed (q50 24.2 / 10.4 s within 1 s of 23.9 / 10.3 s); the ADE clause, reframed post hoc against the worse point-matched seed (1373 m) and the ~125 m seed line, **failed** on straight-in (ADE 461, FDE p50 687 against the standing 671 veto, chamfer 232) | — (declined before the veto was reached) | already spent (one training arm + calibration + prediction) |
 | 5 (L2.g) | **run; all four passed at BOTH seeds**: (1) shuffled-z ΔADE +935 / +1017 m against > 200 m; (2) minADE₆ 959 / 994 below the N(0, I) control's 1035 / 1030, and vectored 1995 / 2042 below 2223 / 2159; (3) FDE p50 627 / 656 m, 208–237 m better than native32's 864 against a 100 m bar; (4) pooled top-1 1194 / 1230 m, better than native32's 1322 m | not triggered | already spent (2 × 104 min GPU + prediction) |
@@ -1090,6 +1097,16 @@ onward, with L3.d re-read under it.
 `barrier+speed-floor+trombone`, four predict-only arms, records truncated at the threshold.
 `LID` §六 L3.e. This is §5 item 2's second half.)
 
+**Correction (2026-09-09 evening).** Everything from the table below to the end of this section
+was read with a threshold-crossing rule that fired abeam on the downwind: 96.5 % of the vectored
+cuts at +60 s lay more than 1 km from the threshold (median 8.7 km), so the vectored half of every
+number here was graded on a window that ended before the hard part of the approach. The rule is
+fixed (a crossing is now the first row inside the on-final gate with d ≤ 0), both campaigns were
+rerun, and the flawed directories are deleted — the numbers below cannot be reproduced and must
+not be quoted. They are kept as the record of what was read that morning. The corrected reruns are
+§7.7b; the mechanism paragraph ("the delay is converted into path length exactly") survives, the
+"remaining damage is lateral, from over-stretching" reading does not — the 10 km was the abeam cut.
+
 | arm | fully flyable | stall samples | thrust over max | load factor low | flyable sample rate | ADE | chamfer | \|xt\| p95 | lateral viol. | reached threshold |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | L3.d +0 (control, untruncated) | 45.4 % | 119,705 | 97,929 | 628 | 0.78 | 3443 | 77 | 43,420 | 43.8 % | — |
@@ -1121,6 +1138,64 @@ against the **hook-free reference rollout's remaining path length** instead of t
 everything else unchanged, the same four arms and the same gates. The expectation is
 `tromboneDelayS` near zero at offset 0, lateral p95 back to the 1.6 km of the L3.c hook, and gate 2
 well above 52 %.
+
+### 7.7b L3.e-r and L3.f-r — the reruns under the corrected threshold cut
+
+(`E/l3e_path_stretch_20260909r` and `E/l3f_path_stretch_ref_20260909r`; the same four offsets
+each, L3.f-r adds `--trombone-surplus reference-rollout`. Numbers from
+`<arm>_pred_val/flyability_report.json`, `<arm>_pred_val/*_states.json` and
+`E/l3f_path_stretch_ref_20260909r/readout_ef.txt`; the full tables are in `LID` §六 L3.e-r /
+L3.f-r.)
+
+**The cut is fixed.** On L3.e-r +60 s, 0.0 % of the 984 truncated records end more than 1 km from
+the threshold (the flawed run: 96.5 % of vectored cuts); straight-in |xt| at the cut p95 47 m,
+vectored 494 m.
+
+**The corrected numbers are much worse, and that is the correction.** The old cut discarded the
+second half of every vectored approach: the +0 sample count doubles (389,909 → 780,672).
+
+| arm | fully flyable | stall samples | thrust over max | load factor low | not on the final at the assigned time |
+|---|---:|---:|---:|---:|---:|
+| L3.e-r +0 | 46.15 % | 111,414 | 88,782 | 597 | 69.6 % † |
+| L3.e-r +60 | 20.01 % | 116,962 | 90,118 | 814 | 29.9 % |
+| L3.f-r +0 | 46.15 % | 101,183 | 77,941 | 438 | 62.9 % † |
+| L3.f-r +60 | 20.01 % | 105,123 | 77,886 | 627 | 22.6 % |
+
+† at offset 0 this share includes rollouts whose schedule ends before the crossing; the +60 s rows
+are the cleaner reading of "never established", and inside the vectored stratum it is about 80 %.
+The fully-flyable share is identical between the two arms because every fully flyable flight is a
+straight-in, where the trombone never engages and the arms are bit-identical; no vectored flight is
+fully flyable under either.
+
+**Geometry** (paired, 1404): straight-in at +0, ADE 415 m, chamfer 42 m, |xt| p95 58 m, lateral
+violation 12.7 % — the same for both arms (the CTA base without hooks: 392 / 66 / 1066 m / 75.9 %).
+Vectored ADE is about 10 km for both arms; that row is computed over all 497 vectored flights, about
+80 % of which never reach the final and keep flying, so it is not comparable to L3.d's vectored row.
+
+**Trombone**: `tromboneDelayS` p50 falls from 386 s to 136 s at +0 and from 439 s to 136 s at
++60 s under the reference-rollout sizing, and no longer grows with the offset; `tromboneStretchM`
+p50 is 0 in every arm, i.e. the median flight receives no stretch; `tromboneRefNoCrossing` reads
+64 % (+0) and 87 % (+60 s) — the reference rollout itself never reaches the final for those flights.
+
+**Gates.** L3.e's five, on L3.e-r +60 s: (1) stall −90 % against L3.d — fails (−13 %); (2) fully
+flyable ≥ 88.4 % — fails (20.0 %); (3) lateral p95 within 1.5× of offset 0 — fails; (4)
+`thrust_over_max` — flat against its own +0, fails; (5) X = 0, duration MAE exactly 60.00 s —
+passes. L3.f's two, on L3.f-r +0: (6) `tromboneDelayS` p50 ≤ 30 s — fails (135.5 s); (7)
+endpoint |xt| p95 ≤ 3,222 m — fails (12,492 m).
+
+**Reading.** (1) The reference-rollout estimate is the better one — 7–10 points more flights on
+the final, 9–13 % fewer stall and thrust samples, 23–29 % lower vectored |xt| p95, the delay
+estimate down 65 % — and is adopted as the trombone's sizing. (2) Both arms fail nearly every gate,
+and what is left is not the estimator: about 30 % of flights (about 80 % of vectored ones) never
+become established on the final, their rollouts run on for tens of kilometres, and the median
+flight gets no stretch. A hook that is admitted only where the predicted path is already more than
+30° off the course cannot decide a route for a flight whose predicted path never turns onto the
+final. That decision belongs to the route builder of the plan-and-guidance design
+(`2026-09-09_plan_and_guidance_design.md` §4.2), which is where §8's bigger step now stands.
+(3) One caveat, one check: both reruns were flown before the review's A-4 fix (under soft
+saturation the barrier's alignment shoulder overlapped the trombone's admission band), so part of
+the L3.f-r − L3.e-r difference could come from the barrier gate; one L3.f-r arm is re-flown under
+the fix as a pre-registered check (`LID` §六, "A-4 修复与预注册核查").
 
 ### 7.8 Process facts worth carrying forward
 
@@ -1199,7 +1274,8 @@ that the latent is inert is superseded by §3.2 here.
 | `E/l2h_units_teacher_dose_20260908/L2h_units_imit2000` | `L2h_units_imit2000` (units + teacher 2000, 300/300, best 195) | val 1404 | 2026-09-09 |
 | `E/a2b_l1_share_20260908/readout.json`, `E/anytime_a2b_20260908/` | `A2b_l1_share_0p3`, `A2b_l1_share_0p5` (180/180, best 169 / 160) | val 1404 × 7 bins | 2026-09-08 |
 | `E/l3d_speed_floor_20260908/` | four `barrier+speed-floor` predict-only arms | val 1402 paired | 2026-09-08 |
-| `E/l3e_path_stretch_20260908/readout.json` | four `barrier+speed-floor+trombone` predict-only arms, truncated at the threshold | val 1402 paired | 2026-09-09 |
+| `E/l3e_path_stretch_20260908/` (deleted; abeam cut — §7.7 correction) | four `barrier+speed-floor+trombone` predict-only arms, truncated at the threshold | val 1402 paired | 2026-09-09 |
+| `E/l3e_path_stretch_20260909r/`, `E/l3f_path_stretch_ref_20260909r/` (`readout_ef.txt`) | the same four arms each under the corrected cut; L3.f-r with the reference-rollout surplus | val 1404 paired | 2026-09-09 |
 | `aeroviz-4d/public/data/airports/{KRDU,KSJC}/comparison/categories.json` | published prediction categories (135 / 46) | — | 2026-09-09 |
 
 **Two results landed during writing**, and their numbers come from the readouts, not from
@@ -1234,9 +1310,10 @@ them changed a conclusion above and say so where they do — U1 and L2.h narrow 
 reading of the latent, and L3.d/L3.e turn §5 item 2 from a proposal into a measured result with one
 named defect left.
 
-**No experiment is running.** Three arms are named and unqueued: **L3.f** (§7.7), the
-**CTA-on-L2.g** arm (§5 item 5b) and the **KSJC replication** (§5 item 6). The decisions still open
-are the vectored interval-width veto (§3.4) and whether to accept the L3.f estimator change.
+**No experiment is running.** Two arms are named and unqueued: the **CTA-on-L2.g** arm (§5 item
+5b) and the **KSJC replication** (§5 item 6); L3.f has run twice and its estimator change is
+adopted (§7.7b), with one A-4 check arm pre-registered. The decision still open is the vectored
+interval-width veto (§3.4), read as (b) on 2026-09-09.
 
 **Pre-registered arm files** (`4dTrajectory/ts_transformer/docs/experiments/`):
 `l1_lowdim_arms.json`, `l1b_full_arms.json`, `l1c_procedure_arms.json`,

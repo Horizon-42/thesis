@@ -4,6 +4,62 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-09 — ts_transformer: review A-3 and A-4 fixed — one terminal supervision contract; the barrier is confined to the hard gate under a trombone
+
+Two of the four number-changing findings of the 2026-09-09 package review
+(`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md` §2 A),
+on `dev-pg` (`c544db0`), each with the review's own measurement as a test; 909 ts tests pass.
+
+**A-3 — `dataset._build_supervision`.** The observed threshold crossing returned early at a
+flat `1/6` on all six channels, while a fitted crossing carried
+`fitted_terminal_position_weight/3` on its position channels and nothing on velocity — two
+contracts chosen by ADS-B coverage, 2.5× apart on the terminal position weight (1 of the first
+60 KRDU arrivals). Now the contract is one: a measured row keeps `1/6` on all six channels, an
+extrapolated row is position-only at the tail weight, and the TERMINAL row adds the terminal
+emphasis on position whichever way it was obtained (so an observed crossing reads
+`1/6 + 1/3` on position, `1/6` on velocity). Any state/control run trained from here on carries
+it; stored checkpoints are unaffected (a data-side contract, not a config field). The
+seed-pinned `test_the_loop_keeps_the_epoch_with_the_lowest_grid_mean` moved to data seed 4: under
+the new weights seed 3's run improves on both metrics through epoch 10 and can no longer show
+the disagreement it exists to show; seed 4 separates them (grid epoch 7, L−1 epoch 9) for every
+torch seed 0–5 (measured, scratch script).
+
+**A-4 — `control/constraints`.** `composite.py` claimed the barrier and the trombone have
+complementary gates; under `hook_saturation=soft` that was false — the barrier's soft
+alignment shoulder (non-zero for 30–40° of misalignment) is exactly the trombone's admission
+band (> 30°), and there the barrier blended a correction the trombone then overwrote
+(re-measured: 12 km back, 500 m right, 33° off course, 6 s hold — soft weight 0.148, barrier
+bank +0.112 rad, the trombone's own answer moved 0.7° from reading the barrier's coordinated
+load). `build_command_hook` now builds the barrier `confine_to_hard_gate=True` whenever a
+trombone is a member: its blend is multiplied by the HARD on-final gate, so inside the gate it
+is the standalone soft barrier to the bit, outside it is silent, and the trombone may engage
+only where that gate has not opened — complementary by construction, the order cannot change
+the answer, and under `hard` it is the identity. `barrier` alone and `barrier+speed-floor` are
+untouched. The "25 deg turn cap" cited in `composite.py` / `config.py` was 15° in the code;
+fixed. **The L3.e-r / L3.f-r reruns on disk were flown before this fix** (soft, the adopted
+form); the magnitude on their readouts is a pre-registered one-arm check
+(`2026-09-07_latent_intent_design.zh.md` §六), not a re-run of the campaigns.
+
+### 2026-09-09 — ts_transformer: L3.e-r / L3.f-r reruns read; the hook line is closed, the route decision moves to plan-and-guidance
+
+Under the corrected cut (the entry below) both path-stretch campaigns were rerun
+(`4dTrajectory/outputs/KRDU/experiments/l3e_path_stretch_20260909r`,
+`l3f_path_stretch_ref_20260909r`; the flawed directories and, with the user's approval, the
+unpublished latent sample subtrees are deleted — 39 GB freed). The corrected numbers are much
+worse than the withdrawn ones, which is the point: the old cut had discarded the second half of
+every vectored approach (+0 samples 389,909 → 780,672). Three-hook stack, fully flyable **46 %**
+at offset 0 and **20 %** at +60 s (was 78 / 52 %); at +60 s **30 % of flights (≈ 80 % of vectored)
+never become established on the final** and their rollouts run on for tens of kilometres;
+`tromboneStretchM` p50 = 0 — the median flight gets no stretch. The reference-rollout surplus
+(L3.f-r) is adopted as the trombone's sizing — 7–10 points more flights on the final, 9–13 %
+fewer stall / thrust samples, vectored |xt| p95 −23–29 %, `tromboneDelayS` p50 386 → 136 s —
+but both arms fail nearly every pre-registered gate (L3.e: 1 of 5; L3.f: 0 of 2). Reading: a
+hook admitted only where the path is already 30° off course cannot choose a route for a flight
+whose predicted path never turns onto the final; that is the route builder of
+`2026-09-09_plan_and_guidance_design.md` (v3 today, with §11 placing it inside the package
+review's `OutputStrategy` target). Final report §7.7 carries a correction notice and §7.7b the
+reruns; the eight corrected arms are published to the KRDU picker (`stack-r*`, `ref-r*`).
+
 ### 2026-09-09 — ts_transformer: "it crossed the threshold" is the plane AND the final — the plane-only rule fired ABEAM, on the downwind
 
 **The defect, measured on real records.** Two consumers ask a trajectory where it lands:
