@@ -71,7 +71,13 @@ from forecast import (
 from models import resolve_device
 from train import load_checkpoint
 
-from .common import add_data_args, build_series_or_exit, provenance_from_args, split_keys_for_current_data
+from .common import (
+    add_data_args,
+    build_series_or_exit,
+    provenance_from_args,
+    refuse_airport_override_for_pooled_data,
+    split_keys_for_current_data,
+)
 
 HELP = "forecast approaches with a checkpoint; write evaluation records"
 
@@ -92,6 +98,11 @@ PREDICT_CONFIG_FLAGS: dict[str, str] = {
     # ...and the third deliberate short name: the arm files spell `--trombone-surplus`, and
     # the field is `trombone_surplus_reference` because "reference" is what it names.
     "trombone_surplus_reference": "--trombone-surplus",
+    # The shared data flag (`common.add_data_args`): predicting under another airframe
+    # builds the series under IT (target Vref, crossing height), so the config the run
+    # writes beside its records must say so too (review C-5: until 2026-09-09 the summary
+    # and the run name recorded the checkpoint's type).
+    "aircraft_type": "--aircraft-type",
 }
 _unknown = [name for name in PREDICT_CONFIG_FLAGS if name not in {f.name for f in fields(TSConfig)}]
 if _unknown:  # fail at import, like cli.common's list: a renamed field must rename here too
@@ -100,9 +111,13 @@ if _unknown:  # fail at import, like cli.common's list: a renamed field must ren
 #: The hook fields `--command-hook` may override: gains and margins, never the hook itself
 #: or its saturation (those two ARE the selection). A value here without `--command-hook`
 #: would be serialized into nothing and change no trajectory, so it is refused below.
-HOOK_TUNING_FIELDS = frozenset(
-    set(PREDICT_CONFIG_FLAGS) - {"control_command_hook", "control_hook_saturation"}
-)
+HOOK_TUNING_FIELDS = frozenset({
+    "control_barrier_alpha",
+    "control_barrier_heading_gain",
+    "control_speed_floor_margin",
+    "trombone_surplus_reference",
+})
+assert HOOK_TUNING_FIELDS < set(PREDICT_CONFIG_FLAGS)
 
 #: The N(0, I) control draws from its own stream, never the treatment arm's.
 LATENT_RANDOM_SEED_OFFSET = 1_000_003
@@ -316,6 +331,7 @@ def run_cli(
     args: argparse.Namespace, parser: argparse.ArgumentParser, argv: list[str] | None
 ) -> int:
     del argv
+    refuse_airport_override_for_pooled_data(args, parser)
     if args.split == "test" and not args.test_release:
         parser.error(
             "--split test is sealed; first run freeze-test after all experiment decisions "
@@ -338,6 +354,9 @@ def run_cli(
         print(f"  WARNING: predicting with --aircraft-type {args.aircraft_type}, but the "
               f"checkpoint was trained with {config.aircraft_type} — the ENU frames and "
               f"gate targets will differ from the ones the normalizer was fit under")
+        # The series are built under this type below; the config written beside the
+        # records (and the run name) must carry it, not the checkpoint's (review C-5).
+        config = replace(config, aircraft_type=args.aircraft_type)
     # Resolve the exact identities before reading any trajectory rows. For test this claim
     # is deliberately written first: a crash or partial run still counts as exposure.
     split_keys = split_keys_for_current_data(
@@ -475,7 +494,7 @@ def run_cli(
         # is not a plausible arrival time (truth durations start at ~21 s, so −90 s would ask
         # for a landing in the past): those flights are SKIPPED and counted, never clamped —
         # a clamp would silently change the offset the scan is read against.
-        anchor = config.seq_len - 1
+        anchor = default_anchor(config)
         kept = [item for item in series
                 if truth_duration_s(item, anchor) + args.cta_offset_s >= DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S]
         skipped["cta_below_min_future"] = len(series) - len(kept)
@@ -671,48 +690,38 @@ def run_cli(
                 points=config.validation_common_grid_points,
             ))
 
-    paths = write_batch(
-        records,
-        output_dir=args.output_dir,
-        config_dict=config.to_dict(),
-        flight_metrics=flight_metrics,
-        checkpoint=str(args.checkpoint),
-        split=args.split,
-        skipped=skipped,
-    )
-    for index, (mode_rows, mode_flight_metrics) in enumerate(zip(mode_records, mode_metrics, strict=True)):
-        write_batch(
-            mode_rows, output_dir=args.output_dir / "modes" / f"mode{index:02d}",
-            config_dict=config.to_dict(), flight_metrics=mode_flight_metrics,
-            checkpoint=str(args.checkpoint), split=args.split,
+    def emit(rows, directory, metrics):
+        # ONE emitter for the main directory and every arm beside it (modes, random, the
+        # quantile fan, shuffled): each states the same `skipped`, so no directory can
+        # publish a subset as the split (review C-6 — the four arm calls omitted it).
+        return write_batch(
+            rows,
+            output_dir=directory,
+            config_dict=config.to_dict(),
+            flight_metrics=metrics,
+            checkpoint=str(args.checkpoint),
+            split=args.split,
+            skipped=skipped,
         )
+
+    paths = emit(records, args.output_dir, flight_metrics)
+    for index, (mode_rows, mode_flight_metrics) in enumerate(zip(mode_records, mode_metrics, strict=True)):
+        emit(mode_rows, args.output_dir / "modes" / f"mode{index:02d}", mode_flight_metrics)
     if args.latent_samples:
         print(f"  wrote {args.latent_samples} prior-sample mode(s) under {args.output_dir / 'modes'}")
     for index, (random_rows, random_flight_metrics) in enumerate(zip(random_records, random_metrics, strict=True)):
-        write_batch(
-            random_rows, output_dir=args.output_dir / "random" / f"mode{index:02d}",
-            config_dict=config.to_dict(), flight_metrics=random_flight_metrics,
-            checkpoint=str(args.checkpoint), split=args.split,
-        )
+        emit(random_rows, args.output_dir / "random" / f"mode{index:02d}", random_flight_metrics)
     if args.latent_random:
         print(f"  wrote {args.latent_random} N(0, I) control mode(s) under {args.output_dir / 'random'}")
     for directory, rows in fan_records.items():
-        write_batch(
-            rows, output_dir=args.output_dir / QUANTILE_DIR_NAME / directory,
-            config_dict=config.to_dict(), flight_metrics=fan_metrics[directory],
-            checkpoint=str(args.checkpoint), split=args.split,
-        )
+        emit(rows, args.output_dir / QUANTILE_DIR_NAME / directory, fan_metrics[directory])
     if fan_records:
         names = ", ".join(sorted(fan_records))
         print(f"  wrote the quantile fan under {args.output_dir / QUANTILE_DIR_NAME}: {names} "
               f"(the top-1 records above are the {median_directory} decode); read it with "
               f"run_ts_quantile_fan_readout.py --arm {args.output_dir}")
     if shuffled_records:
-        write_batch(
-            shuffled_records, output_dir=args.output_dir / "shuffled",
-            config_dict=config.to_dict(), flight_metrics=shuffled_metrics,
-            checkpoint=str(args.checkpoint), split=args.split,
-        )
+        emit(shuffled_records, args.output_dir / "shuffled", shuffled_metrics)
         print(f"  wrote the shuffled-latent diagnostic under {args.output_dir / 'shuffled'}")
 
     if args.project_final is not None:

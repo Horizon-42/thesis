@@ -77,6 +77,15 @@ def strata_masks(rows: dict[str, dict[str, Any]], keys: list[str]) -> dict[str, 
     ``rows`` maps a key to a scored row (a ``summary.json`` result, say); ``keys`` fixes
     the order the masks are aligned to. Every row must carry ``STRATA_COVARIATES``.
     """
+    for name in STRATA_COVARIATES:
+        missing = [key for key in keys if rows[key].get(name) is None]
+        if missing:
+            # A present-null `established_at_anchor` would cast to False and move the
+            # flight into `vectored` (review C-15); a row without the covariate is
+            # refused, never guessed.
+            raise ValueError(
+                f"{len(missing)} row(s) carry no {name!r} covariate (first: {missing[0]!r})"
+            )
     tortuosity, established, remaining = (
         np.array([rows[key][name] for key in keys]) for name in STRATA_COVARIATES
     )

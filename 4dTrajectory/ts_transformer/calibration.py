@@ -474,11 +474,13 @@ def interval_stratum(table: dict[str, Any], covariates: dict[str, Any]) -> str:
     record's stratum and the calibration table's are decided by the same code.
     """
     masks = strata_masks({"flight": covariates}, ["flight"])
-    calibrated = {
-        stratum
-        for block in table["alphas"].values()
-        for stratum in block["strata"]
-    }
+    # Calibrated at EVERY alpha, not at any: `conformal_intervals` reads the stratum's δ
+    # under each alpha in turn, and a stratum that calibrated at one level only would
+    # raise there (review C-15). Today `_stratum_block` refuses on counts alone, so the
+    # union and the intersection coincide; the intersection is the one that stays right.
+    calibrated = set.intersection(*(
+        set(block["strata"]) for block in table["alphas"].values()
+    ))
     for stratum in table["interval_stratum_precedence"]:
         if masks[stratum][0] and stratum in calibrated:
             return stratum

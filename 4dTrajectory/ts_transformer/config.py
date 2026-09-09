@@ -719,6 +719,11 @@ CONTROL_SPEED_FLOOR_MARGIN_DEFAULT = 1.10
 #: Both barrier gains share one default; the validation below reads it to refuse a gain set
 #: on a hook with no barrier in it, so the number lives once.
 CONTROL_BARRIER_GAIN_DEFAULT = 0.1
+
+#: Explicit RK4's stability limit on the negative real axis: on y' = -y/tau the step is
+#: stable iff h/tau <= this. The actuator-tau rule in `_validate_control_contract` is
+#: exactly this bound, spelled once.
+RK4_REAL_AXIS_STABILITY_LIMIT = 2.785
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
 # coerce them first, through this one function, or ``[] != ()`` refuses a faithful copy.
@@ -886,6 +891,10 @@ REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     "control_thrust_time_constant_s",
     "control_bank_time_constant_s",
     "control_load_time_constant_s",
+    # `objective.target_contract` keys the stored contract on the clock: a checkpoint
+    # missing only this key must fail with the curated message, not as an opaque
+    # "target contract does not match" (review C-14).
+    "control_state_supervision_clock",
     # control_velocity_loss_weight / _scale_mps and control_imitation_loss_weight are
     # deliberately NOT here: their defaults (0.0 / 10.0 / 0.0) reproduce the behaviour of
     # every checkpoint trained before those terms existed, which is exactly the "safe
@@ -1314,6 +1323,17 @@ class TSConfig:
         if self.corridor_gate not in CORRIDOR_GATES:
             raise ValueError(
                 f"unknown corridor_gate {self.corridor_gate!r}; expected one of {CORRIDOR_GATES}"
+            )
+        if (
+            self.corridor_gate != CORRIDOR_GATE_ON_FINAL
+            and self.state_position_reference != STATE_POSITION_CORRIDOR_BOUNDED
+        ):
+            # Only the corridor-bounded output layer reads the gate (`dataset.
+            # bounded_output_gate`); anywhere else the value would rename the run
+            # (`gate=faf`) and change no trajectory (review C-4).
+            raise ValueError(
+                f"corridor_gate={self.corridor_gate!r} is read only by state_position_reference="
+                f"{STATE_POSITION_CORRIDOR_BOUNDED!r}, not {self.state_position_reference!r}"
             )
         if self.control_command_hook not in CONTROL_HOOKS:
             raise ValueError(
@@ -1873,11 +1893,16 @@ class TSConfig:
         # the members table, so its six stored 2026-09-06 configs are left exactly as they
         # are — refusing them here would be a contract change in the wrong direction.
         hook_modules = CONTROL_HOOK_MEMBERS.get(self.control_command_hook, ())
+        # `off` builds nothing either, and must be held to the same rule: until 2026-09-09
+        # this branch was `elif hook_modules:`, so `off` skipped it and a barrier gain or a
+        # hard saturation under no hook trained bit-identically to the arm without them,
+        # under a different name and slug (review C-2). `nominal-residual` stays exempt.
+        builds_nothing = bool(hook_modules) or self.control_command_hook == CONTROL_HOOK_OFF
         if CONTROL_HOOK_BARRIER in hook_modules:
             for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
                 if getattr(self, name) <= 0.0:
                     raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
-        elif hook_modules:
+        elif builds_nothing:
             for name in ("control_barrier_alpha", "control_barrier_heading_gain"):
                 if getattr(self, name) != CONTROL_BARRIER_GAIN_DEFAULT:
                     raise ValueError(
@@ -1885,6 +1910,14 @@ class TSConfig:
                         f"{CONTROL_HOOK_BARRIER!r} (control_command_hook="
                         f"{self.control_command_hook!r})"
                     )
+        if (
+            self.control_command_hook == CONTROL_HOOK_OFF
+            and self.control_hook_saturation != HOOK_SATURATION_SOFT
+        ):
+            raise ValueError(
+                f"control_hook_saturation={self.control_hook_saturation!r} softens a hook's "
+                "bound and there is no hook (control_command_hook='off')"
+            )
         # The margin is read by TWO modules: the floor holds it, and the trombone divides
         # by the same V_floor to size its detour, so it changes an answer under either.
         if any(name in hook_modules for name in CONTROL_SPEED_FLOOR_MARGIN_READERS):
@@ -1930,9 +1963,18 @@ class TSConfig:
             raise ValueError(
                 "non-default control dynamics backend requires a control prediction output"
             )
-        for name in ("control_heading_rate_loss_weight", "control_bank_tv_loss_weight"):
-            # Both terms are built by the true-time-position objective only. Elsewhere the
-            # weight would be a number that cannot change an answer.
+        for name in (
+            "control_velocity_loss_weight",
+            "control_imitation_loss_weight",
+            "control_heading_rate_loss_weight",
+            "control_bank_tv_loss_weight",
+        ):
+            # All four terms are built by the true-time-position objective only
+            # (`objective.loss_component_names`). Elsewhere the weight would be a number
+            # that cannot change an answer — while still NAMING the run and, for the
+            # imitation term, solving an inverse-dynamics teacher per sample that nothing
+            # reads (review C-1: the first two were accepted until 2026-09-09; no stored
+            # run carries either under another objective).
             if (
                 getattr(self, name)
                 and self.control_state_objective
@@ -1992,19 +2034,23 @@ class TSConfig:
             "control_load_time_constant_s",
         ):
             # The actuator ODE is integrated by the same explicit RK4 as the rest of the
-            # state, and explicit RK4 on y' = -y/tau is only stable for h/tau < 2.785.
-            # Below that the rollout does not degrade, it produces NaN, so a swept time
-            # constant shorter than the integrator step is refused at construction
-            # rather than discovered as a dead training run.
+            # state, and explicit RK4 on y' = -y/tau is stable only for
+            # h/tau <= RK4_REAL_AXIS_STABILITY_LIMIT (the substep h is at most the
+            # integrator step). Past it the rollout does not degrade, it produces NaN, so a
+            # swept time constant that short is refused at construction rather than
+            # discovered as a dead training run. Until 2026-09-09 the rule refused
+            # tau < h outright — 2.8x stricter than the instability it cited (review C-13).
             value = getattr(self, name)
             if (
                 self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG
-                and value < self.control_rollout_integrator_dt_s
+                and self.control_rollout_integrator_dt_s
+                > RK4_REAL_AXIS_STABILITY_LIMIT * value
             ):
                 raise ValueError(
-                    f"{name}={value:g}s is shorter than the "
-                    f"{self.control_rollout_integrator_dt_s:g}s integrator step; explicit "
-                    "RK4 is unstable there"
+                    f"{name}={value:g}s puts the {self.control_rollout_integrator_dt_s:g}s "
+                    f"integrator step at h/tau = "
+                    f"{self.control_rollout_integrator_dt_s / value:.2f} > "
+                    f"{RK4_REAL_AXIS_STABILITY_LIMIT}; explicit RK4 is unstable there"
                 )
         if self.control_dynamics_model == CONTROL_DYNAMICS_FIRST_ORDER_LAG:
             if not uses_control_dynamics(self.prediction_output):

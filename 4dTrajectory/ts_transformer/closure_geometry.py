@@ -372,8 +372,14 @@ def vertical_profile(path: ClosurePath, anchor_u: float, tan_gpa: float) -> np.n
 
 def strictly_increasing(t: np.ndarray) -> np.ndarray:
     """The record contract wants a strictly increasing clock; a repeated node (zero-length
-    step) would otherwise repeat a time."""
-    return np.maximum.accumulate(t + np.arange(len(t)) * 1e-6)
+    step) would otherwise repeat a time.
+
+    The running maximum is taken FIRST and the ramp added after: on a locally decreasing
+    input the other order yields equal neighbours (the maximum absorbs the ramp) and
+    `closure_output.reconstruct` then divides by a zero spacing (review C-20). On a
+    non-decreasing input the two orders agree exactly, so no stored label moves.
+    """
+    return np.maximum.accumulate(t) + np.arange(len(t)) * 1e-6
 
 
 def truth_timed(path: ClosurePath, truth_xy: np.ndarray, truth_t: np.ndarray) -> np.ndarray:

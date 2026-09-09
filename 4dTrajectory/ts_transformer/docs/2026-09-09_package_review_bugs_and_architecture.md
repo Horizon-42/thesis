@@ -16,8 +16,8 @@ points, and the 2026-09-09 plan-and-guidance design is the next axis.
 |---|---|
 | bug findings | 4 number-changing on live paths, 4 crash paths, ~20 contract holes — §2, all with `file:line` |
 | architecture | diagnosis §3, target §4, retirement candidates with census evidence §5, order §6 |
-| decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); whether A-4 blocks L3.f |
-| nothing changed | this document only; no code, no OPEN_ITEMS / code-health-followups entries, no commit |
+| **resolution (2026-09-09, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3(part) C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-3 (two fields), C-4 (floor), C-7 (directory binding), C-9, C-12 are USER DECISIONS and stay open; §6 step 1 (the package) done in the same branch |
+| decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); the five §7 decisions |
 
 ## 1. Measured
 
@@ -455,3 +455,46 @@ Expected size after 1–6: ≈ 19k source lines from 27.6k (the §5 deletions an
 account for most of it), `config.py` ≈ 900 lines across seven small dataclasses, no function
 over 150 lines, no signature over eight parameters, no import cycle, and a fourth output
 strategy that touches three files.
+
+
+## 7. Resolution (2026-09-09, branch `dev-pkg-review`)
+
+Every §2 finding was re-verified on the tree before it was touched (A-3 and A-4 were already
+fixed at `c544db0`). The rule for the rest: a fix that could refuse a stored artifact was
+first counted against the 219 stored `history.json` configs, and a fix that would move a
+stored run's name or directory was not made without saying so. Tests: one per finding, in
+the module's own test file.
+
+| finding | state | where |
+|---|---|---|
+| A-1 | **fixed** — `TrainingPlan._plan_overrides` is the ONE dict both reuse checks and the label read; `control_dynamics_model` in it; `_lag` tag on `train_dir` / `pred_dir` / category (point-mass tag empty, and no pipeline-shaped directory on disk held a lag run, so nothing is orphaned); the never-emitted `control_bank_time_constant_s` plan field deleted | `run_ts_pipeline.py`, `trajectory_data_process/tests/test_ts_pipeline.py` |
+| A-2 | **fixed** — `dataset.fixed_anchor_index` + `FixedAnchorTrajectoryWindows.anchor` / `.anchor_indices`; every `fixed_anchor_*` metric takes `anchor=` (required), the validation plan's truth is built at `dataset.anchor_indices`, the cohort floor and `fit_model`'s check read the floor. **Every number `run_ts_history_ablation.py` published before this is stale** (the runner itself is unchanged: it already passed the floor) | `dataset.py`, `fixed_anchor_validation.py`, `validation.py`, `train.py`; `tests/test_anchor_grid_selection.py` |
+| A-3, A-4 | fixed at `c544db0` | — |
+| B-1 | **fixed** — `probe_dynamics(batch_size, device, config)` adds the imitation / heading-rate / CTA keys under the dataset's conditions; a test pins the key set equal to a real batch's | `dataset.py`, `batching.py`; `tests/test_supervision_terms.py` |
+| B-2 | **fixed** — `replace(prediction, segment_durations=…)` keeps `duration_quantiles_s` (and a latent prediction's fields) | `batching.py`; `tests/test_ts_transformer.py` |
+| B-3 | **fixed** — the accuracy block is built before the first record is written; the dead null branch for ADE/FDE/endpoint rows removed | `export.py`; `tests/test_ts_transformer.py` |
+| B-4 | **fixed** — a one-sample remainder is refused with its numbers, like the imitation sibling | `dataset.py`; `tests/test_supervision_terms.py` |
+| C-1 | **fixed** — `control_velocity_loss_weight` / `control_imitation_loss_weight` join the two later siblings under the "built by `true-time-position` only" rule (census: no stored run carries either under another objective) | `config.py`; `tests/test_supervision_terms.py` |
+| C-2 | **fixed** — `off` is held to the barrier-gain rule, and `control_hook_saturation≠soft` under `off` is refused; `nominal-residual` (stored-only) stays exempt (census: 45 stored `off` runs all at the defaults) | `config.py`; `tests/test_command_hook.py` |
+| C-3 | **part fixed, part DECISION** — `validation_common_grid_points` names the run (`grid-points=`; stored runs all at 64, 0 renamed); the reverse guard (`KNOWN_UNNAMED_FIELDS`, asserted at import) lists every unnamed field with its reason. `lr_plateau_patience` / `lr_plateau_factor` / `random_train_anchor_min_future_s` are identity-bearing and STAY unnamed because naming them renames 170 / 170 / 7 stored runs — **user decision**; `device` is excused | `run_naming.py`; `tests/test_run_naming.py` |
+| C-4 | **gate fixed, floor DECISION** — `corridor_gate≠on-final` is refused off `corridor-bounded` (0 stored affected). `control_duration_uniform_floor` cannot be refused under `uniform`: its default is 0.8 and the recipes pin 0.0, so 88 stored uniform runs carry a non-default inert value — it moves into `Factorized(floor)` in the §4.3 split | `config.py`; `tests/test_final_constraint.py` |
+| C-5 | **fixed** — `--aircraft-type` is replaced into the config predict writes; it joins `PREDICT_CONFIG_FLAGS`, and `HOOK_TUNING_FIELDS` is spelled rather than derived | `cli/predict.py`; `tests/test_cta_conditioning.py` |
+| C-6 | **fixed** — one `emit` closure writes every directory with the same `skipped` (pinned on the source: one `write_batch(` call in `run_cli`) | `cli/predict.py`; `tests/test_cta_conditioning.py` |
+| C-7 | **dead checks removed; directory binding is a DECISION** — the split and provenance digests stay in the ledger as audit fields but are no longer re-checked (they cannot fire once the file digest matched). Binding the ledger to the checkpoint DIGEST rather than its directory needs a registry outside the run directory (where; how tests isolate it) — no `test_release.json` exists on disk today, so the change is free of artifact impact whenever it is made | `evaluation_protocol.py` |
+| C-8 | **fixed** — resume = `history.json` exists AND every DECLARED field agrees with the trained config; a checkpoint without a history is refused by name (move it aside as `<key>.aborted-<UTC>`), and the override file is written only after that check | `run_ts_frame_ablation.py`; `tests/test_frame_ablation_runner.py` |
+| C-9 | **DECISION** — renaming `mean_/std_val_macro_loss` to what they hold (the selection metric) means a `cv_results.json` schema bump; the two stored files (2026-08-16 POOLED PatchTST, 2026-08-18 KSJC τ-bank CV) would then no longer be reusable by `--skip-cv`. The writer is documented in place; nothing renamed |
+| C-10 | **fixed** — `invalid_flights: 0` and the `valid_segments` mask that could never be False are gone; `prediction_horizon_cap_rate` stays (it is legitimately 0 on those outputs) | `fixed_anchor_validation.py`, `validation.py`, `metrics.py` |
+| C-11 | **fixed** — `project_onto_final` translates by `series.target_chart` in and out, like `cut_at_threshold_crossing`; a test shows the two frames agree to the metre | `forecast.py`; `tests/test_final_constraint.py` |
+| C-12 | **DECISION** — the head's box floor (0.2) and the grader's (0.5) disagree; moving either changes every control checkpoint's decoded controls or every published flyability number. Not measured how often a head emits n < 0.5 (`control/training/diagnostics.py` saturation counts would say) |
+| C-13 | **fixed** — the rule is the bound it cites (`RK4_REAL_AXIS_STABILITY_LIMIT = 2.785`); loosening refuses nothing stored | `config.py`; `tests/test_control_inverse_dynamics.py` |
+| C-14 | **fixed** — `control_state_supervision_clock` in `REQUIRED_SERIALIZED_CONTROL_FIELDS` | `config.py` |
+| C-15 | **fixed** — `interval_stratum` picks from the INTERSECTION of calibrated strata across α; `strata_masks` refuses a present-null covariate | `calibration.py`, `approach_difficulty.py`; `tests/test_eta_calibration.py` |
+| C-16 | **fixed** — every candidate row carries `silhouette_rows` beside `rows` (`SILHOUETTE_MAX_ROWS = 2000`) | `approach_clustering/model.py` |
+| C-17 | **documented** — what an all-zero imitation mask means, on both sides | `dataset.py`, `objective.py` |
+| C-18 | **fixed** — `fixed_anchor_fraction` compares to `fixed_anchor_index`, not `seq_len − 1` | `dataset.py` |
+| C-19 | **fixed** — one `refuse_airport_override_for_pooled_data` for train, cross-validate and predict | `cli/common.py`, `cli/predict.py` |
+| C-20 | **fixed** — `input_channels` present-null; the inert `offsets[~active]` line; the zero-ground-speed `gamma` fallback (`atan2` handles it, and V·sin γ = udot again); `strictly_increasing` accumulates first and ramps after; the dataset refuses a CTA mode it cannot fill instead of letting the head build an empty token; `anchor_state` renamed; `generated_at` is `utc_now()`; the plan's dead τ field deleted; the `CLAUDE.md` `overlap` claim corrected. Left: `intent_explainability`'s clip fallback (the scene half is a §5 archive candidate) | various |
+
+**§6 step 1 (the package)** was done on the same branch after the fixes — see the changelog
+entry. Steps 2–6 (§5 deletions, the config split, the strategies, the loop/predict extraction,
+the runners) are the user decisions this document already names, unchanged.

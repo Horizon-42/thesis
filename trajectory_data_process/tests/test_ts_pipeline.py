@@ -799,3 +799,37 @@ def test_coordinate_ablation_refuses_repeated_or_partial_test(tmp_path):
 
     with pytest.raises(ablation.AblationContractError, match="already started"):
         ablation.refuse_repeated_test(result_path)
+
+
+
+def test_the_lag_and_point_mass_cells_are_distinct_and_resolve_their_model(tmp_path, monkeypatch):
+    """Review A-1. `control_dynamics_model` was emitted to the training subprocess but
+    missing from both rebuilt override dicts (so a lag cell was rebuilt as point-mass:
+    label, `--skip-train` and CV reuse all read the wrong model), and no directory or
+    category tag read it (so a lag cell overwrote its point-mass twin)."""
+    from config import CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_DYNAMICS_POINT_MASS
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    monkeypatch.setattr(pipeline, "COMPARISON_AIRPORTS_ROOT", tmp_path / "frontend")
+    common = dict(
+        training_mode="per-airport", prediction_output=pipeline.PREDICTION_CONTROL,
+        control_dynamics_backend=pipeline.CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    )
+    point_mass = pipeline.TrainingPlan(("KRDU",), "itransformer", control_dynamics_model=CONTROL_DYNAMICS_POINT_MASS, **common)
+    lag = pipeline.TrainingPlan(("KRDU",), "itransformer", control_dynamics_model=CONTROL_DYNAMICS_FIRST_ORDER_LAG, **common)
+
+    assert point_mass.train_dir != lag.train_dir
+    assert lag.train_dir.name.endswith("_lag") and not point_mass.train_dir.name.endswith("_lag")
+    for plan, model in ((point_mass, CONTROL_DYNAMICS_POINT_MASS), (lag, CONTROL_DYNAMICS_FIRST_ORDER_LAG)):
+        assert plan._expected_cv_base_config()["control_dynamics_model"] == model
+        assert plan.resolved_train_config(use_best_config=False)[0].control_dynamics_model == model
+        args = plan._recipe_args()
+        assert args[args.index("--control-dynamics-model") + 1] == model
+        # The dict the reuse checks read is the one the command line says.
+        assert plan._expected_cv_base_config() == pipeline.TSConfig(
+            **plan._plan_overrides(include_n_segments=True)
+        ).to_dict()
+    pm_pred = pipeline.PredictionPlan(point_mass, "KRDU", ("czml",))
+    lag_pred = pipeline.PredictionPlan(lag, "KRDU", ("czml",))
+    assert pm_pred.pred_dir != lag_pred.pred_dir
+    assert pm_pred.category != lag_pred.category
+    assert "first-order-lag" in lag_pred.label and "first-order-lag" not in pm_pred.label

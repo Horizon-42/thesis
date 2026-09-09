@@ -177,8 +177,11 @@ def states_from_channels(
             V=math.sqrt(v_east * v_east + v_north * v_north + udot * udot),
             # math-ENU: 0 = East, CCW toward North. atan2(V_north, V_east), NOT the compass
             # atan2(V_east, V_north) — see the module docstring.
-            psi=math.atan2(v_north, v_east) if ground_speed > 0.0 else 0.0,
-            gamma=math.atan2(udot, ground_speed) if ground_speed > 0.0 else 0.0,
+            # atan2 handles a zero ground speed itself: psi reads 0 and gamma ±π/2, so
+            # V·sin γ is still udot. The old `else 0.0` on gamma returned V·sin 0 = 0 ≠
+            # udot for a vertical-only velocity (review C-20).
+            psi=math.atan2(v_north, v_east),
+            gamma=math.atan2(udot, ground_speed),
             m=float(mass_kg),
         )))
     return states

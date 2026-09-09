@@ -16,7 +16,7 @@ import torch
 
 from arc_length_geometry import arc_length_geometry_metrics, arc_length_velocity_metrics
 from channels import POSITION_IDX, VELOCITY_IDX
-from config import HORIZON_NORMALIZED, TSConfig
+from config import HORIZON_NORMALIZED, TSConfig, default_anchor
 from dataset import FlightSeries, Normalizer
 from metrics import signed_spread
 from fixed_dt_supervision import build_fixed_dt_supervision
@@ -89,11 +89,17 @@ def fixed_anchor_common_truth(
     series: Sequence[FlightSeries],
     config: TSConfig,
     points: int,
+    *,
+    anchor: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The deployment contract's truth: one fixed ``L-1`` anchor for every flight."""
-    return common_truth_at_anchors(
-        series, config, points, [config.seq_len - 1] * len(series)
-    )
+    """The deployment contract's truth: ONE common anchor for every flight.
+
+    ``anchor`` is the index the window set anchored at — ``FixedAnchorTrajectoryWindows.
+    anchor``, i.e. ``L-1`` or the experiment's common floor — and is REQUIRED so no caller
+    can restate ``seq_len - 1`` (review A-2: the truth used to be taken there whatever
+    floor the windows were built with).
+    """
+    return common_truth_at_anchors(series, config, points, [anchor] * len(series))
 
 
 def fixed_anchor_common_weights_and_terminal_velocity(
@@ -101,12 +107,13 @@ def fixed_anchor_common_weights_and_terminal_velocity(
     config: TSConfig,
     progress: np.ndarray,
     durations: np.ndarray,
+    *,
+    anchor: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return reliable common-grid weights and last observed terminal velocities."""
 
     points = len(progress)
     weights = np.empty((len(series), points, len(config.channels)), dtype=np.float32)
-    anchor = config.seq_len - 1
     for row, item in enumerate(series):
         anchor_time = float(item.times[anchor])
         query_times = anchor_time + progress * durations[row]
@@ -150,6 +157,7 @@ def fixed_anchor_arc_length_geometry_metrics(
     normalizer: Normalizer,
     *,
     points: int,
+    anchor: int,
 ) -> dict[str, Any]:
     """Compare deployable ordered curves after horizontal arc-length alignment."""
 
@@ -158,7 +166,7 @@ def fixed_anchor_arc_length_geometry_metrics(
     per_flight_velocity: list[dict[str, float]] = []
     per_flight_terminal: list[dict[str, float]] = []
     terminal_velocity_error = np.empty(count, dtype=np.float64)
-    anchor_index = config.seq_len - 1
+    anchor_index = anchor
     for row, item in enumerate(series):
         anchor_time = float(item.times[anchor_index])
         future = item.supervision_times > anchor_time
@@ -407,9 +415,16 @@ def _fixed_anchor_common_position_arrays(
     *,
     points: int,
     common_truth: CommonGridTruth | None = None,
+    anchor: int | None = None,
 ):
-    """Validate and materialize only the arrays required by formal 3D ADE."""
+    """Validate and materialize only the arrays required by formal 3D ADE.
+
+    Exactly one of ``common_truth`` (a cached truth, built at whatever anchors the caller
+    scored) and ``anchor`` (the common index to build it at now) must be given.
+    """
     count = len(series)
+    if (common_truth is None) == (anchor is None):
+        raise ValueError("pass either a cached common_truth or the common anchor, not both")
     anchor_values = np.asarray(anchor_values)
     predicted_values = np.asarray(predicted_values)
     predicted_final_time_s = np.asarray(predicted_final_time_s, dtype=np.float64)
@@ -436,7 +451,7 @@ def _fixed_anchor_common_position_arrays(
 
     if common_truth is None:
         truth, true_duration_s, progress = fixed_anchor_common_truth(
-            series, config, points
+            series, config, points, anchor=anchor
         )
     else:
         truth, true_duration_s, progress = common_truth
@@ -473,10 +488,13 @@ def fixed_anchor_common_grid_ade_metrics(
     *,
     points: int,
     common_truth: CommonGridTruth | None = None,
+    anchor: int | None = None,
     anchor_label: str = FIXED_ANCHOR_LABEL,
 ) -> dict[str, Any]:
     """Lean formal selector: common true-time per-flight 3D ADE and FDE only.
 
+    Scored against ``common_truth`` when the caller has one cached (the validation plans),
+    else against the truth built at ``anchor`` — one of the two is required.
     ``anchor_label`` says WHERE the reading was taken. It defaults to the deployment
     contract's ``L-1``; a caller that supplies its own ``common_truth`` at other anchors
     (the anchor-grid selection metric) names them, so the published block never claims an
@@ -498,6 +516,7 @@ def fixed_anchor_common_grid_ade_metrics(
         segment_durations_s,
         points=points,
         common_truth=common_truth,
+        anchor=anchor,
     )
     return _common_grid_ade_result(
         len(series),
@@ -559,8 +578,13 @@ def fixed_anchor_common_grid_report_metrics(
     segment_durations_s: np.ndarray,
     *,
     points: int,
+    anchor: int,
 ) -> dict[str, Any]:
-    """Formal post-fit metrics: one common true-time grid and interpretable components."""
+    """Formal post-fit metrics: one common true-time grid and interpretable components.
+
+    ``anchor`` is the common index the replay was anchored at (the window set's
+    ``anchor``); the truth is built there.
+    """
     truth, common, true_duration_s, progress, capped, error = (
         _fixed_anchor_common_position_arrays(
             series,
@@ -570,6 +594,7 @@ def fixed_anchor_common_grid_report_metrics(
             predicted_final_time_s,
             segment_durations_s,
             points=points,
+            anchor=anchor,
         )
     )
     delta = common[..., list(POSITION_IDX)] - truth[..., list(POSITION_IDX)]
@@ -610,8 +635,7 @@ def fixed_anchor_common_grid_report_metrics(
         predicted_arrival - truth[:, -1, list(POSITION_IDX)], axis=-1
     )
     return {
-        # This report path always builds its own truth at L-1 (no `common_truth` hook).
-        "anchor": FIXED_ANCHOR_LABEL,
+        "anchor": FIXED_ANCHOR_LABEL if anchor == default_anchor(config) else f"fixed index {anchor}",
         "metric_grid": "common true physical-time grid",
         "points": points,
         "flights": len(series),
@@ -631,7 +655,6 @@ def fixed_anchor_common_grid_report_metrics(
             "mean_signed": float(time_error.mean()),
         },
         "prediction_horizon_cap_rate": float(capped.mean()),
-        "invalid_flights": 0,
         "by_progress": [
             {
                 "progress": float(progress[index]),
@@ -652,6 +675,7 @@ def fixed_anchor_common_grid_metrics(
     segment_durations_s: np.ndarray,
     *,
     points: int,
+    anchor: int,
     normalizer: Normalizer | None = None,
 ) -> dict[str, Any]:
     """Full post-fit diagnostics on the formal common physical-time grid."""
@@ -664,6 +688,7 @@ def fixed_anchor_common_grid_metrics(
             predicted_final_time_s,
             segment_durations_s,
             points=points,
+            anchor=anchor,
         )
     )
     result = _common_grid_ade_result(
@@ -676,7 +701,7 @@ def fixed_anchor_common_grid_metrics(
     )
     weights, terminal_velocity_target = (
         fixed_anchor_common_weights_and_terminal_velocity(
-            series, config, progress, true_duration_s
+            series, config, progress, true_duration_s, anchor=anchor
         )
     )
     terminal_velocity_error = np.linalg.norm(
@@ -697,6 +722,7 @@ def fixed_anchor_common_grid_metrics(
                 terminal_velocity_target,
                 normalizer,
                 points=points,
+                anchor=anchor,
             )
         )
     if normalizer is not None:

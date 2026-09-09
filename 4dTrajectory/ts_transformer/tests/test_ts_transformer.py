@@ -3582,6 +3582,7 @@ def test_fixed_anchor_arc_geometry_filters_the_same_sparse_reference_rows():
         np.zeros((1, len(ch.VELOCITY_IDX)), dtype=np.float32),
         _identity_normalizer(),
         points=3,
+        anchor=0,
     )
 
     assert metrics["arc_length_geometry_loss"] == pytest.approx(0.0, abs=1e-12)
@@ -3661,7 +3662,7 @@ def test_validation_terminal_velocity_matches_fixed_dt_training_before_off_grid_
         torch.from_numpy(item.values[-1:]), dense
     )
     _weights, validation_target = fixed_anchor_common_weights_and_terminal_velocity(
-        [item], config, np.array([1.0]), np.array([3.0])
+        [item], config, np.array([1.0]), np.array([3.0]), anchor=config.seq_len - 1
     )
 
     np.testing.assert_allclose(
@@ -3690,6 +3691,7 @@ def test_formal_common_grid_selector_returns_only_lean_position_time_metrics():
         np.array([duration]),
         np.diff(np.concatenate(([0.0], offsets)))[None, :],
         points=2,
+        anchor=anchor,
     )
 
     assert metrics["ade_m"] == pytest.approx(0.0, abs=1e-7)
@@ -3718,11 +3720,13 @@ def test_formal_common_grid_selector_reuses_identical_precomputed_truth():
         replay.predicted_time_s,
         replay.segment_durations_s,
     )
-    baseline = fixed_anchor_common_grid_ade_metrics(*arguments, points=7)
+    baseline = fixed_anchor_common_grid_ade_metrics(
+        *arguments, points=7, anchor=config.seq_len - 1
+    )
     cached = fixed_anchor_common_grid_ade_metrics(
         *arguments,
         points=7,
-        common_truth=fixed_anchor_common_truth(series, config, 7),
+        common_truth=fixed_anchor_common_truth(series, config, 7, anchor=config.seq_len - 1),
     )
 
     assert baseline.keys() == cached.keys()
@@ -5785,3 +5789,55 @@ def test_the_l1_native32_checkpoint_written_with_the_retired_fields_still_loads(
     assert set(RETIRED_SERIALIZED_FIELDS) <= set(payload["config"]), "the canary lost its point: pick an older artifact"
     assert not set(RETIRED_SERIALIZED_FIELDS) & set(config.to_dict())
     assert TSConfig.from_dict(config.to_dict()) == config
+
+
+# ── review 2026-09-09 ────────────────────────────────────────────────────────
+
+def test_the_heterogeneous_probe_keeps_every_field_of_the_prediction():
+    """Review B-2: the probe rebuilt `ControlPrediction` from three fields, so a quantile
+    head's `duration_quantiles_s` arrived at the pinball loss as None."""
+    batch_size, n_segments = 4, 8
+    quantiles = torch.ones(batch_size, 5)
+    prediction = ControlPrediction(
+        controls=torch.zeros(batch_size, n_segments, 3),
+        segment_durations=torch.full((batch_size, n_segments), 10.0),
+        final_time_s=torch.full((batch_size,), 80.0),
+        duration_quantiles_s=quantiles,
+    )
+    probed = batching._heterogeneous_control_probe_prediction(prediction)
+    assert probed.duration_quantiles_s is quantiles
+    assert not torch.equal(probed.segment_durations, prediction.segment_durations)
+
+
+def test_write_batch_refuses_a_non_finite_ade_before_writing_any_record(tmp_path):
+    """Review B-3: the accuracy block's refusal used to come AFTER every record file was
+    written, leaving a record directory with no summary.json."""
+    series, config = _series(n_flights=3)
+    normalizer = Normalizer.fit(series)
+    model = build_model(config).eval()
+    forecast = forecast_approach(
+        model, series[0], config, normalizer, device=torch.device("cpu")
+    )
+    record = build_prediction_record(
+        series[0], forecast, index=0,
+        model_name=config.model, horizon_mode=config.horizon_mode,
+    )
+    metrics = [observed_series_metrics(series[0], forecast)]
+    metrics[0]["ade_m"] = float("nan")
+    out = tmp_path / "records"
+    with pytest.raises(ValueError, match="finite"):
+        write_batch(
+            [record], output_dir=out, config_dict=config.to_dict(), flight_metrics=metrics,
+        )
+    assert not out.exists()
+
+
+def test_a_vertical_only_velocity_survives_the_channel_round_trip():
+    """Review C-20: with zero ground speed the old fallback set gamma to 0, so the state's
+    V·sin(gamma) was 0 while the channel said udot."""
+    frame = frames.ENUFrame(lat0=35.9, lon0=-78.8, alt0=100.0)
+    values = np.zeros((1, len(ch.CHANNELS)))
+    values[0, ch.IDX["u"]] = 500.0
+    values[0, ch.IDX["udot"]] = -4.0
+    (_t, state), = ch.states_from_channels(np.array([0.0]), values, frame, mass_kg=60_000.0)
+    assert state.V * math.sin(state.gamma) == pytest.approx(-4.0)

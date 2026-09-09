@@ -4,6 +4,74 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-09 — ts_transformer: the package review's remaining bugs fixed (A-1, A-2, B-1–B-4, C-1…C-20), and the package became a package
+
+The 2026-09-09 review (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`;
+its new §7 is the finding-by-finding ledger) had 4 number-changing, 4 crash and ~20 contract
+findings. A-3/A-4 were fixed at `c544db0`; this entry is the rest, on `dev-pkg-review`. Rule
+applied throughout: a fix that could refuse a stored artifact was first counted against the 219
+stored `history.json` configs (none refused), and no stored run's name or directory moved.
+971 ts tests pass (`4dTrajectory/ts_transformer/tests` + the four `trajectory_data_process` ts test files); the 12 failures left are the pre-existing red fixtures of `trajectory_data_process/tests/test_ts_pipeline.py` (audit T4-23), verified to fail identically on the untouched tree.
+
+**Numbers that were wrong on a live path.**
+- **A-1** `run_ts_pipeline.py`: `control_dynamics_model` was emitted to the training subprocess
+  but missing from BOTH rebuilt override dicts, so a first-order-lag cell was rebuilt as
+  point-mass for its label, its `--skip-train` reuse check (never reused, always retrained) and
+  its CV reuse; and no directory/category tag read the model, so a lag cell overwrote its
+  point-mass twin. One `TrainingPlan._plan_overrides` now feeds all three; a lag cell wears
+  `_lag` (the point-mass tag is empty and no pipeline-shaped directory on disk held a lag run,
+  so nothing is orphaned). The plan's never-emitted `control_bank_time_constant_s` is gone.
+- **A-2** the fixed anchor: `fixed_anchor_common_truth`, the terminal-velocity weights, the
+  arc-length diagnostics, `filter_training_cohort` and `fit_model`'s cohort check all restated
+  `seq_len − 1` and ignored `minimum_anchor_index`, while the windows anchored at the floor.
+  Under `run_ts_history_ablation.py` (whose point is identical anchors across candidate
+  `seq_len`) the selection metric therefore scored predictions against a truth taken
+  `(max L − L)·dt` earlier than their anchor. Now `dataset.fixed_anchor_index` is the one
+  definition, `FixedAnchorTrajectoryWindows.anchor` / `.anchor_indices` expose it, every
+  `fixed_anchor_*` function takes `anchor=` as a REQUIRED argument, and the validation plan's
+  truth is built at the dataset's own anchors. **Every number that runner published before this
+  is stale.** Code-health #26 (a pure rename to `default_anchor`) would have preserved the defect
+  and is superseded.
+
+**Crashes on reachable paths.** B-1 `probe_dynamics` now takes the config and carries the
+imitation / heading-rate / CTA keys under the dataset's own conditions (a test pins its key set
+equal to a real batch's — `--batch-size auto` died with a bare `KeyError` on every custom arm
+that weighted either term). B-2 the heterogeneous probe uses `dataclasses.replace`, so a
+quantile head's `duration_quantiles_s` survives. B-3 `write_batch` builds the accuracy block
+BEFORE the first record file, so a non-finite ADE refuses the batch instead of leaving a record
+directory with no `summary.json`. B-4 the heading-rate target refuses a one-sample remainder
+(it was a NaN at weight one).
+
+**Contract holes** (§7 of the review has the file for each): the velocity and imitation weights
+are refused off `true-time-position` like their siblings (C-1); `off` is held to the barrier-gain
+rule and a hard saturation under no hook is refused (C-2); `validation_common_grid_points` names
+the run (`grid-points=`) and `run_naming.KNOWN_UNNAMED_FIELDS` guards the reverse direction at
+import (C-3); a `corridor_gate` nothing reads is refused (C-4); predict's `--aircraft-type` is
+written into the config beside the records and every predict directory states the same
+`skipped` through one emitter (C-5, C-6); the test-release ledger's two checks that could never
+fire are gone (C-7); a frame-ablation arm resumes only when `history.json` exists AND its
+declared fields agree with the trained config — a checkpoint without a history is refused by
+name, nothing deleted (C-8); the literal `invalid_flights: 0` and the segment mask that could
+never be False are gone (C-10); `project_onto_final` is threshold-relative under `airport-enu`
+(C-11); the actuator-τ rule is the RK4 bound it cites, `h/τ ≤ 2.785`, not `τ ≥ h` (C-13);
+`control_state_supervision_clock` is a required serialized field (C-14); a calibration stratum
+is deployable only if calibrated at EVERY α, and a present-null covariate is refused rather than
+read as False (C-15); the clustering silhouette states its subsample (C-16); an all-zero
+imitation mask is documented on both sides (C-17); `fixed_anchor_fraction` reads the floor
+(C-18); predict refuses repeated `--data` with `--airport` like train (C-19); and the C-20
+small items (present-null `input_channels`, the inert offsets line, the zero-ground-speed
+`gamma` fallback, `strictly_increasing` on a decreasing clock, the CTA mode the dataset could
+not fill, the `anchor_state` rename, `generated_at`, the `overlap` claim in `CLAUDE.md`).
+
+**Left as user decisions, recorded in `4dTrajectory/ts_transformer/docs/OPEN_ITEMS.md`:** naming
+`lr_plateau_patience` / `lr_plateau_factor` / `random_train_anchor_min_future_s` (renames
+170 / 170 / 7 stored runs); refusing `control_duration_uniform_floor` under `uniform` (the
+recipes pin 0.0 against a default of 0.8, 88 stored runs); binding the test-release ledger to the
+checkpoint digest rather than its directory (needs a registry outside the run directory);
+renaming `cv_results.json`'s `mean_/std_val_macro_loss` (a schema bump; two stored files);
+the head's load-factor floor 0.2 against the grader's 0.5 (C-12); and the review's §5
+retirements and §4.2–4.5 restructuring.
+
 ### 2026-09-09 — ts_transformer: review A-3 and A-4 fixed — one terminal supervision contract; the barrier is confined to the hard gate under a trombone
 
 Two of the four number-changing findings of the 2026-09-09 package review

@@ -43,8 +43,9 @@ def _fixed_time_grid(final_time_s: float, config: TSConfig) -> TimeGrid:
     step_ends = np.arange(1, config.pred_len + 1, dtype=np.float64) * config.dt_s
     active = (step_ends - config.dt_s) < duration
     capped_duration = min(duration, config.pred_len * config.dt_s)
+    # An inactive step's end already exceeds the capped duration, so the minimum IS the
+    # cap there — no second assignment needed (review C-20).
     offsets = np.minimum(step_ends, capped_duration)
-    offsets[~active] = capped_duration
     segment_durations = np.zeros(config.pred_len, dtype=np.float64)
     segment_durations[active] = np.diff(
         np.concatenate(([0.0], offsets[active]))

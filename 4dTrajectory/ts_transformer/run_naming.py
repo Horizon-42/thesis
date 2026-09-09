@@ -213,6 +213,10 @@ META_FIELDS = (
     "random_train_anchor_l1_share",
     "training_cohort_min_future_s",
     "checkpoint_selection_metric",
+    # The common-grid resolution the selection metric is SCORED on: two runs differing
+    # only here keep different epochs. Every stored config carries the default 64, so
+    # adding it renames nothing (recounted on disk 2026-09-09; review C-3).
+    "validation_common_grid_points",
     # A0.b: WHICH validation number the LR scheduler measures its plateau on. Two runs that
     # differ only here train under different learning-rate schedules from the epoch the two
     # numbers part, so it is an identity field. Every stored config predates it and carries
@@ -288,6 +292,7 @@ _ABBREV = {
     "procedure_loss_epsilon": "proc-eps",
     "reference_velocity_source": "ref-vel",
     "checkpoint_selection_metric": "select",
+    "validation_common_grid_points": "grid-points",
     "lr_plateau_metric": "lr-metric",
     "training_cohort_min_future_s": "min-future",
     "random_train_anchor": "random-anchor",
@@ -326,6 +331,64 @@ _unknown = [
 ]
 if _unknown:  # fail at import: a renamed TSConfig field must rename here too
     raise AssertionError(f"run_naming references unknown TSConfig fields: {_unknown}")
+
+#: Fields the grammar reads WITHOUT a naming list: the output and dynamics words, the
+#: recipe, the horizon and the seed are spelled by their own functions below.
+_DIRECTLY_NAMED_FIELDS = frozenset({
+    "model", "prediction_output", "control_recipe_name", "horizon_mode", "seed",
+    "control_dynamics_model", "control_dynamics_backend",
+    "latent_dim", "latent_prior_components",
+})
+
+#: TSConfig fields that deliberately NAME NOTHING, each with its reason. The reverse of the
+#: guard above: a CLI-settable field that no list carries lets two runs differing only in
+#: it share a name and a slug (review C-3 — five such fields on 2026-09-09). A new field
+#: goes into a naming list or, with its reason, here; never silently into neither.
+KNOWN_UNNAMED_FIELDS: dict[str, str] = {
+    # execution, not identity
+    "device": "where a run executes changes no number",
+    "notes": "free text, never identity",
+    # the channel contract is fixed (channels.CHANNELS; load_checkpoint refuses a mismatch)
+    "channels": "one contract, refused on mismatch at load",
+    # backbone knobs no run has ever set off their default (recounted on disk 2026-09-09:
+    # 219 stored runs); a first run that moves one must add it to META_FIELDS.
+    "activation": "backbone knob, never set",
+    "affine": "backbone knob, never set",
+    "class_strategy": "backbone knob, never set",
+    "decomposition": "backbone knob, never set",
+    "embed": "backbone knob, never set",
+    "factor": "backbone knob, never set",
+    "fc_dropout": "backbone knob, never set",
+    "freq": "backbone knob, never set",
+    "head_dropout": "backbone knob, never set",
+    "individual": "backbone knob, never set",
+    "kernel_size": "backbone knob, never set",
+    "output_attention": "backbone knob, never set",
+    "padding_patch": "backbone knob, never set",
+    "subtract_last": "backbone knob, never set",
+    # IDENTITY-BEARING BUT UNNAMED — a user decision, not an oversight (review C-3): naming
+    # them would move stored names. Recounted on disk 2026-09-09 over 219 runs:
+    # `lr_plateau_patience` is 8 or 12 (not the default 3) in 170 runs, and
+    # `random_train_anchor_min_future_s` is 20 s (not 60) in 7. Until they are named, two
+    # custom runs differing only here share a name; the checkpoint metadata still tells
+    # them apart (`lr_scheduler`, `random_train_anchor_min_future_s`).
+    "lr_plateau_patience": "identity-bearing; naming it renames 170 stored runs",
+    "lr_plateau_factor": "identity-bearing; paired with lr_plateau_patience",
+    "random_train_anchor_min_future_s": "identity-bearing; naming it renames 7 stored runs",
+}
+_named = (
+    set(CONTROL_LOSS_FIELDS) | set(STATE_LOSS_FIELDS) | set(CLOSURE_LOSS_FIELDS)
+    | set(META_FIELDS) | {field for field, _ in _TAU_FIELDS} | set(LATENT_OUTPUT_FIELDS)
+    | _DIRECTLY_NAMED_FIELDS
+)
+_unlisted = sorted(set(_DEFAULTS) - _named - set(KNOWN_UNNAMED_FIELDS))
+if _unlisted:  # fail at import: a new field must be named, or excused here by name
+    raise AssertionError(
+        f"TSConfig fields in no naming list and not in KNOWN_UNNAMED_FIELDS: {_unlisted}"
+    )
+_both = sorted(_named & set(KNOWN_UNNAMED_FIELDS))
+if _both:
+    raise AssertionError(f"fields both named and excused from naming: {_both}")
 
 
 def _norm(value: Any) -> Any:

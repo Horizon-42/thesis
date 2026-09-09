@@ -72,24 +72,66 @@ ESTIMATED_BYTES_PER_ARM = 400 * 1024**2
 MINIMUM_FREE_BYTES = 2 * 1024**3
 
 
-def arm_config(base: dict, overrides: dict, destination: Path, *,
-               write: bool = True) -> tuple[Path, TSConfig, dict]:
-    """Resolve the arm's complete override set; write it only when the campaign will run.
+def arm_config(base: dict, overrides: dict) -> tuple[TSConfig, dict]:
+    """Resolve the arm's complete override set: ``(config, settings)``.
 
-    The config is CONSTRUCTED either way — an unrunnable arm must fail here, before
-    training, and finding that out is most of what a dry run is for. Only the FILE is
-    conditional: a dry run that creates directories is not a dry run, and one pointed at a
-    read-only or shared outputs tree used to leave a campaign directory behind.
+    The config is CONSTRUCTED on every run, dry or not — an unrunnable arm must fail here,
+    before training, and finding that out is most of what a dry run is for. Writing the
+    file is a separate step (`write_arm_config`) so that a dry run creates no directory,
+    and so that the resume rule below can compare a stored arm with THIS config before
+    anything on disk is touched.
     """
     settings = dict(base)
     settings.update(overrides)
     config = TSConfig(**settings)  # validates: an unrunnable arm fails here, before training
-    if write:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(settings, indent=1), encoding="utf-8")
-    # The settings are RETURNED rather than read back off disk: the file is conditional,
-    # and a step builder that reads it would work only on a run that already wrote it.
-    return destination, config, settings
+    return config, settings
+
+
+def write_arm_config(destination: Path, settings: dict) -> Path:
+    """Write the override file the training subprocess reads."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(settings, indent=1), encoding="utf-8")
+    return destination
+
+
+#: Written LAST by `train` (after checkpoint.pt and checkpoint_metadata.json): its presence
+#: is what "this arm trained" means.
+TRAIN_COMPLETE_ARTIFACT = "history.json"
+
+
+def stale_arm_error(key: str, train_dir: Path, declared: dict) -> str | None:
+    """Why a stored arm may NOT be resumed under ``declared``, or ``None`` if it may.
+
+    Resume used to mean "checkpoint.pt exists", and the override file was rewritten before
+    that test (review C-8): editing an arm's overrides and re-running kept the old
+    checkpoint beside the new config and reported the campaign complete, and a train step
+    that died after the checkpoint write left an arm that was skipped forever, with no
+    metadata and no history. Two rules instead — the arm is resumed only when its
+    ``history.json`` exists AND the config it trained under agrees with every field the
+    arm declares today. An arm that fails either is refused by name; nothing is deleted.
+    """
+    history = train_dir / TRAIN_COMPLETE_ARTIFACT
+    checkpoint = train_dir / "checkpoint.pt"
+    if checkpoint.exists() and not history.exists():
+        return (
+            f"arm {key}: {train_dir} holds checkpoint.pt without {TRAIN_COMPLETE_ARTIFACT} — the "
+            "train step died after the checkpoint write. Move the directory aside as "
+            f"{key}.aborted-<UTC> (evidence, never deleted) and rerun the same command"
+        )
+    if not history.exists():
+        return None
+    stored = json.loads(history.read_text(encoding="utf-8")).get("config") or {}
+    # JSON round trip on both sides: the stored config went through json, the declared
+    # settings may hold tuples where it holds lists.
+    declared = json.loads(json.dumps(declared))
+    differing = sorted(field for field, value in declared.items() if stored.get(field) != value)
+    if differing:
+        return (
+            f"arm {key}: {train_dir} was trained under a different config — "
+            f"{', '.join(differing)} differ(s) from the arm's overrides today. A changed arm "
+            "is a new arm: give it a new key, or move the directory aside"
+        )
+    return None
 
 
 def _evaluation_steps(key: str, pred_dir: Path) -> list[tuple[str, list[str], Path]]:
@@ -165,7 +207,7 @@ def arm_steps(
             "--airport", airport, "--config-overrides", str(config_path),
             *identity, "--device", device, "--output-dir", str(train_dir),
             *formal_identity,
-        ], train_dir / "checkpoint.pt"),
+        ], train_dir / TRAIN_COMPLETE_ARTIFACT),
         (f"{key}: predict ({split})", [
             py, str(TS_SCRIPT), "predict",
             "--checkpoint", str(train_dir / "checkpoint.pt"),
@@ -239,10 +281,13 @@ def main(argv: list[str] | None = None) -> int:
             continue
         trained_arms += 1
         produced[(campaign / key / "checkpoint.pt").resolve()] = key
-        config_path, config, declared = arm_config(
-            base, arm.get("overrides", {}), campaign / key / "config.json",
-            write=not args.dry_run,
-        )
+        config, declared = arm_config(base, arm.get("overrides", {}))
+        stale = stale_arm_error(key, campaign / key, declared)
+        if stale:
+            parser.error(stale)
+        config_path = campaign / key / "config.json"
+        if not args.dry_run:
+            write_arm_config(config_path, declared)
         predict_args = [str(a).format(airport=airport) for a in arm.get("predict_args", [])]
         print(f"  arm {key:<26s} {run_display_name(config.to_dict(), extra=(key,))} {' '.join(predict_args)}")
         print(f"      slug {run_slug(config.to_dict())}")

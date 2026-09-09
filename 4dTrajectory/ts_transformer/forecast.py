@@ -1016,6 +1016,13 @@ def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> F
     positions so the record stays one trajectory.  Nothing is learned here: it is what the
     constraint recovers after the fact, and the deployment fallback — it satisfies the rows
     and pays for it in kinks.
+
+    The corridor geometry (`final_approach_geometry`) is written about the THRESHOLD as the
+    origin, so the positions are translated by ``series.target_chart`` on the way in and
+    back on the way out — the same translation `cut_at_threshold_crossing` makes. Under
+    ``enu`` / ``runway-aligned`` the target IS the origin and this is the identity; under
+    ``airport-enu`` it is 1.3–1.9 km, and until 2026-09-09 the projection clamped about the
+    airport reference point instead (review C-11).
     """
     if forecast.prediction_output != PREDICTION_STATE:
         raise ValueError("project_onto_final applies to state forecasts only")
@@ -1024,27 +1031,31 @@ def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> F
     rows = final_approach_arrays(
         series, fix_distance_m=final_approach_fix_distance(series, gate=gate)
     )
+    target = np.asarray(series.target_chart, dtype=np.float64)
     values = torch.as_tensor(forecast.values, dtype=torch.float64)[None]
+    e = values[..., IDX["e"]] - float(target[0])
+    n = values[..., IDX["n"]] - float(target[1])
+    u = values[..., IDX["u"]] - float(target[2])
     psi = torch.as_tensor(rows["runway_heading_rad"], dtype=torch.float64)[None]
     tan_gpa = torch.as_tensor(rows["glidepath_tan"], dtype=torch.float64)[None]
     d_faf = torch.as_tensor(rows["final_approach_fix_m"], dtype=torch.float64)[None]
-    d, xt = runway_axes(values[..., IDX["e"]], values[..., IDX["n"]], psi)
+    d, xt = runway_axes(e, n, psi)
     anchor = torch.as_tensor(series.values[forecast.anchor], dtype=torch.float64)
     step_e, step_n = position_direction(
-        values[..., IDX["e"]], values[..., IDX["n"]],
-        anchor[IDX["e"]][None], anchor[IDX["n"]][None],
+        e, n,
+        (anchor[IDX["e"]] - float(target[0]))[None],
+        (anchor[IDX["n"]] - float(target[1]))[None],
     )
     cos_align = alignment_cosine(step_e, step_n, psi)
     on_final = membership(gate, d=d, xt=xt, cos_align=cos_align, d_faf=d_faf, hard=True)
     xt_bounded, u_bounded = bound_to_final(
-        d=d, xt=xt, u=values[..., IDX["u"]], weight=on_final.to(torch.float64),
-        tan_gpa=tan_gpa, hard=True,
+        d=d, xt=xt, u=u, weight=on_final.to(torch.float64), tan_gpa=tan_gpa, hard=True,
     )
     e_bounded, n_bounded = chart_from_axes(d, xt_bounded, psi)
     projected = np.array(forecast.values, dtype=np.float64, copy=True)
-    projected[:, IDX["e"]] = e_bounded[0].numpy()
-    projected[:, IDX["n"]] = n_bounded[0].numpy()
-    projected[:, IDX["u"]] = u_bounded[0].numpy()
+    projected[:, IDX["e"]] = e_bounded[0].numpy() + target[0]
+    projected[:, IDX["n"]] = n_bounded[0].numpy() + target[1]
+    projected[:, IDX["u"]] = u_bounded[0].numpy() + target[2]
     projected = states_with_derived_velocity(
         series.values[forecast.anchor], projected, forecast.sample_durations_s
     )

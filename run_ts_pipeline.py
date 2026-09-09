@@ -44,6 +44,7 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DYNAMICS_BACKENDS,
+    CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_MODELS,
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
@@ -231,6 +232,24 @@ def _control_dynamics_filesystem_tag(prediction_output: str, backend: str) -> st
     return _CONTROL_DYNAMICS_FILESYSTEM_TAGS[backend]
 
 
+# The flight MODEL is an axis of its own beside the backend (`control_dynamics_model`):
+# until 2026-09-09 no directory or category tag read it, so a point-mass cell and a lag
+# cell with otherwise equal flags shared `train_dir`, `pred_dir` and `category` and the
+# second overwrote the first (review A-1b). The point-mass tag is empty so every stored
+# directory keeps its name; no pipeline-shaped directory on disk held a lag run
+# (recounted 2026-09-09).
+_CONTROL_DYNAMICS_MODEL_TAGS = {
+    CONTROL_DYNAMICS_POINT_MASS: "",
+    CONTROL_DYNAMICS_FIRST_ORDER_LAG: "_lag",
+}
+
+
+def _control_dynamics_model_tag(prediction_output: str, model: str) -> str:
+    if not uses_control_dynamics(prediction_output):
+        return ""
+    return _CONTROL_DYNAMICS_MODEL_TAGS[model]
+
+
 def _control_objective_tag(prediction_output: str, objective: str) -> str:
     if (
         not uses_control_dynamics(prediction_output)
@@ -321,7 +340,6 @@ class TrainingPlan:
         control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
         control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4,
         control_dynamics_model: str = CONTROL_DYNAMICS_POINT_MASS,
-        control_bank_time_constant_s: float | None = None,
         control_state_clock: str = CONTROL_STATE_CLOCK_PREDICTED,
         control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE,
         control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
@@ -362,7 +380,6 @@ class TrainingPlan:
         self.control_duration_parameterization = control_duration_parameterization
         self.control_dynamics_backend = control_dynamics_backend
         self.control_dynamics_model = control_dynamics_model
-        self.control_bank_time_constant_s = control_bank_time_constant_s
         self.control_state_clock = control_state_clock
         self.control_state_loss_grid = control_state_loss_grid
         self.control_state_objective = control_state_objective
@@ -383,6 +400,7 @@ class TrainingPlan:
             + _control_dynamics_filesystem_tag(
                 prediction_output, control_dynamics_backend
             )
+            + _control_dynamics_model_tag(prediction_output, control_dynamics_model)
             + _control_clock_tag(prediction_output, control_state_clock)
             + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
             + _control_objective_tag(prediction_output, control_state_objective)
@@ -660,8 +678,15 @@ class TrainingPlan:
                 )
         return None
 
-    def _expected_cv_base_config(self) -> dict[str, object]:
-        """Rebuild the exact base TSConfig produced by this plan's CV command."""
+    def _plan_overrides(self, *, include_n_segments: bool) -> dict[str, object]:
+        """The TSConfig fields this plan pins — what `_recipe_args` emits, as a dict.
+
+        The ONE source both `_expected_cv_base_config` and `resolved_train_config` read.
+        Until 2026-09-09 each held its own hand-written copy of this dict and BOTH lacked
+        `control_dynamics_model` (review A-1): a first-order-lag cell was rebuilt as
+        point-mass, so its published label read `point-mass`, `--skip-train` never reused
+        its checkpoint and retrained it, and its CV artifact was never reused either.
+        """
         overrides: dict[str, object] = {
             "model": self.model,
             "prediction_output": self.prediction_output,
@@ -680,12 +705,13 @@ class TrainingPlan:
             "control_gradient_clip_norm": self.control_gradient_clip_norm,
             "control_duration_parameterization": self.control_duration_parameterization,
             "control_dynamics_backend": self.control_dynamics_backend,
+            "control_dynamics_model": self.control_dynamics_model,
         }
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
         if self.window_horizon_steps is not None:
             overrides["window_horizon_steps"] = self.window_horizon_steps
-        if self.n_segments is not None:
+        if include_n_segments and self.n_segments is not None:
             overrides["n_segments"] = self.n_segments
         if self.seed is not None:
             overrides["seed"] = self.seed
@@ -699,7 +725,11 @@ class TrainingPlan:
             overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
             overrides["batch_size"] = int(self.batch_size)
-        return TSConfig(**overrides).to_dict()
+        return overrides
+
+    def _expected_cv_base_config(self) -> dict[str, object]:
+        """Rebuild the exact base TSConfig produced by this plan's CV command."""
+        return TSConfig(**self._plan_overrides(include_n_segments=True)).to_dict()
 
     def cv_step(self) -> tuple[str, list[str]]:
         """The isolated outer-train CV command for this training cell."""
@@ -741,48 +771,11 @@ class TrainingPlan:
         if use_best_config:
             overrides.update(json.loads(self.best_config.read_text(encoding="utf-8")))
             source = str(self.best_config)
-
-        overrides.update({
-            "model": self.model,
-            "prediction_output": self.prediction_output,
-            "coordinate_frame": self.coordinate_frame,
-            "random_train_anchor": self.random_train_anchor,
-            "training_cohort_min_future_s": self.training_cohort_min_future_s,
-            "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
-            "checkpoint_selection_metric": self.checkpoint_selection_metric,
-            "validation_common_grid_points": self.validation_common_grid_points,
-            "horizon_mode": self.horizon_mode,
-            "aircraft_filter": self.aircraft_filter,
-            "control_state_supervision_clock": self.control_state_clock,
-            "control_state_loss_grid": self.control_state_loss_grid,
-            "control_state_objective": self.control_state_objective,
-            "control_state_duration_gradient": self.control_state_duration_gradient,
-            "control_gradient_clip_norm": self.control_gradient_clip_norm,
-            "control_duration_parameterization": self.control_duration_parameterization,
-            "control_dynamics_backend": self.control_dynamics_backend,
-        })
-        if self.full_horizon_steps is not None:
-            overrides["full_horizon_steps"] = self.full_horizon_steps
-        if self.window_horizon_steps is not None:
-            overrides["window_horizon_steps"] = self.window_horizon_steps
-        if self.n_segments is not None and (
-            not use_best_config or "n_segments" not in self.cv_parameters
-        ):
-            overrides["n_segments"] = self.n_segments
+        overrides.update(self._plan_overrides(
+            include_n_segments=not use_best_config or "n_segments" not in self.cv_parameters
+        ))
         if self.epochs is not None:
             overrides["epochs"] = self.epochs
-        if self.seed is not None:
-            overrides["seed"] = self.seed
-        if self.split_seed is not None:
-            overrides["split_seed"] = self.split_seed
-        if self.device is not None:
-            overrides["device"] = self.device
-        if self.aircraft_type is not None:
-            overrides["aircraft_type"] = self.aircraft_type
-        if self.control_rollout_dt is not None:
-            overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
-        if self.batch_size != "auto":
-            overrides["batch_size"] = int(self.batch_size)
         return TSConfig(**overrides), source
 
     def steps(self, *, skip_cv: bool, reuse_checkpoint: bool) -> list[tuple[str, list[str]]]:
@@ -836,6 +829,9 @@ class PredictionPlan:
         control_dynamics = _control_dynamics_tag(
             training.prediction_output, training.control_dynamics_backend
         )
+        control_dynamics_model = _control_dynamics_model_tag(
+            training.prediction_output, training.control_dynamics_model
+        )
         control_clock = _control_clock_tag(
             training.prediction_output, training.control_state_clock
         )
@@ -856,7 +852,7 @@ class PredictionPlan:
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
             f"{scope}{training.model}{prediction_output}{control_duration}"
-            f"{control_dynamics_filesystem}"
+            f"{control_dynamics_filesystem}{control_dynamics_model}"
             f"{control_clock}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
@@ -871,7 +867,7 @@ class PredictionPlan:
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
-            f"{control_duration}{control_dynamics}"
+            f"{control_duration}{control_dynamics}{control_dynamics_model}"
             f"_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"

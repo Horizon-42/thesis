@@ -9,6 +9,8 @@ import math
 from pathlib import Path
 from typing import Any, Iterable
 
+from io_utils import utc_now
+
 
 RESULT_SCHEMA = "ts-control-fixed-dt-single-flight-overfit-v3-clock-aligned-diagnostics"
 NON_RECIPE_CONFIG_FIELDS = frozenset({"notes"})
@@ -376,7 +378,7 @@ renderGlobal();flights.forEach((f,i)=>{const b=document.createElement('button');
 def build_report(result_paths: list[Path], output: Path) -> None:
     flights, recipe = _load_results(result_paths)
     payload = {
-        "generated_at": "2026-08-01",
+        "generated_at": utc_now(),
         "isolation": "outer-train values only; validation and outer-test values unopened",
         "recipe": recipe,
         "flights": flights,

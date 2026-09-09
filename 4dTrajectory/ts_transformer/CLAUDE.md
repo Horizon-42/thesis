@@ -211,10 +211,27 @@ flight model.
   consulted" and raises, `LeadLanding(None)` means "no earlier landing" and reads as a
   clear runway. A `truth-join-duration` arm's `final_time_error_s` is an identity check
   (its input IS the duration target), never a duration result.
-- **`overlap` is a REQUIRED arg to `write_batch`** — an optional metric is one that silently goes
-  missing.
-- **τ shorter than the integrator step produces NaN, not a worse answer** (explicit RK4 on
-  `y' = -y/τ` is unstable above `h/τ = 2.785`); `TSConfig` refuses it at construction.
+- **`flight_metrics` is a REQUIRED arg to `write_batch`** — an optional metric is one that silently
+  goes missing. Its accuracy block is built BEFORE any record file is written, so a non-finite
+  ADE refuses the batch instead of leaving a record directory with no `summary.json` (review B-3).
+- **τ past RK4's stability limit produces NaN, not a worse answer** (explicit RK4 on
+  `y' = -y/τ` is unstable above `h/τ = 2.785`, `config.RK4_REAL_AXIS_STABILITY_LIMIT`);
+  `TSConfig` refuses exactly that bound at construction — until 2026-09-09 it refused `τ < h`,
+  2.8× stricter than the instability it cited (review C-13).
+- **The fixed anchor is ONE definition: `dataset.fixed_anchor_index(config, minimum_anchor_index)`,
+  read off a window set as `FixedAnchorTrajectoryWindows.anchor` / `.anchor_indices`.** It is
+  `L-1` unless an experiment supplies a common floor (`run_ts_history_ablation.py` trains every
+  candidate `seq_len` at `max(L) - 1`). Every fixed-anchor consumer — the common-grid truth, the
+  cohort floor, the terminal-velocity weights, the report metrics — takes the anchor as a REQUIRED
+  argument from the window set; none may restate `seq_len - 1`. Until 2026-09-09 three of them
+  did, so under the ablation the selection metric scored predictions against a truth taken
+  `(max L − L)·dt` earlier than their anchor (review A-2; every number that runner published
+  before then is stale).
+- **`probe_dynamics(batch_size, device, config)` carries every key a real training batch carries**
+  — the supervision targets are added under the same conditions `_dynamics_arrays` adds them,
+  and `tests/test_supervision_terms.py` pins the two key sets equal. A key added to the real
+  batch without the probe is a bare `KeyError` under `--batch-size auto`, after the dataset
+  build (review B-1).
 - **Instance normalisation is OFF and must stay off** (iTransformer `use_norm`, PatchTST
   `revin`). In a threshold-anchored frame absolute position IS the signal. Signature of ON:
   lateral p95 pins at 14.3–14.5 km in all cells — a model that cannot place the endpoint.
@@ -252,7 +269,7 @@ flight model.
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs |
 | `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `cli.common._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
-| `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
+| `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected. In `run_ts_pipeline.py` the model is an axis of the cell: a lag cell's `train_dir` / `pred_dir` / category carry `_lag`, and the ONE override dict (`TrainingPlan._plan_overrides`) feeds the label, `--skip-train` and CV reuse — before 2026-09-09 two hand-written copies both lacked the field, so a lag cell was rebuilt as point-mass everywhere but the training command and shared its directory with the point-mass cell (review A-1) |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `closure_output.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). THREE modules are live — `barrier` (lateral, gated ON the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08), `trombone` (the pre-final path stretch, gated OFF the final — L3.e, 2026-09-08) — and the vocabulary carries three combinations: `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`, each applied in the order it spells. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier`, `barrier+trombone+speed-floor` and a SOLO `trombone` are not members and are refused with the vocabulary (the trombone hands the command back at the final approach course and has nothing to hand it to without the barrier) |
 | `--truncate-at-threshold` | off | Predict-side, any output kind: cut every record where it FIRST crosses the threshold ON THE FINAL (`final_approach_geometry.threshold_crossing_index` — `d ≤ 0` and inside the on-final gate there; closest approach within that first run) and stamp `source.truncatedAtThreshold`. **Any flyability/geometry/CTA readout of a hooked, late-CTA arm needs it** — L3.d's floored rollouts arrive EARLY and fly on (endpoint \|xt\| p95 43–63 km, pooled ADE 840 → 3443 m at offset 0), and a report over the whole record is scoring that tail: on the approach proper the same arms read fully-flyable 1.35 % → 48.9 % at +60 s. `final_time_s` moves to the cut, which is the point — an early arrival stops being invisible and becomes the `final_time_error_s` it always was. A forecast that never crosses ON THE FINAL is left WHOLE and says `false`, and a vectored rollout that flies past abeam is exactly that case — until 2026-09-09 the rule read the PLANE alone and cut those on their downwind, 8.7 km out; one that crosses on its LAST row is whole with the flag TRUE (the flag means "ends at the threshold", and on a fixed-time STATE forecast the postprocessor's own closest-approach rule sets the same flag). Refused together with `--no-truncate` |
@@ -729,14 +746,26 @@ the list fails instead of leaving its flag silently ignored). **Every parser pas
 renamed flags kept working under their old spellings. Exceptions, all recorded where they
 occur — on train: `batch_size` (its flag also takes `"auto"`), `use_norm`/`revin` (one
 `--instance-norm`), `control_recipe_name` (resolved against `--config-overrides` first); on
-predict, whose config comes from the CHECKPOINT so its four flags are overrides rather than
+predict, whose config comes from the CHECKPOINT so its flags are overrides rather than
 settings (`cli/predict.PREDICT_CONFIG_FLAGS`, asserted the same way):
 `--command-hook` / `--hook-saturation` keep their short names because `CLAUDE.md` names them
 as the adopted delivery form and two arm files spell them in re-runnable `predict_args`.
+`--aircraft-type` is in that table too: predicting under another airframe builds the series
+under it, and the config written beside the records carries it (review C-5). Predict refuses
+repeated `--data` with `--airport` exactly as train does
+(`cli/common.refuse_airport_override_for_pooled_data`, review C-19).
 
 **Run and category naming**: `run_naming.py` is the single source for one grammar —
 `output · backbone · dynamics · loss · meta` — rendered from the run's serialized config by
 every surface that names a trained run. A default change deliberately shifts old runs' names.
+**Every `TSConfig` field is in a naming list or excused by name in
+`run_naming.KNOWN_UNNAMED_FIELDS`**, asserted at import in both directions (review C-3: five
+CLI-settable fields named nothing, so two runs differing only in `--validation-common-grid-points`
+shared a name and a slug; it names the run now, `grid-points=`, and no stored run moves).
+Two excused fields are IDENTITY-BEARING and stay unnamed by decision, not oversight —
+`lr_plateau_patience` (8 or 12 in 170 of the 219 stored runs) and
+`random_train_anchor_min_future_s` (20 s in 7) — because naming them renames those runs;
+the checkpoint metadata still tells such runs apart.
 **On-disk run/category directories are historical record — never rename them.** Grammar,
 fallbacks and the relabel tooling: `docs/ENGINEERING_NOTES.md`.
 

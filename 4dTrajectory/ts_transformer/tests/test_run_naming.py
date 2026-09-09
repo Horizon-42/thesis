@@ -253,3 +253,28 @@ def test_the_recipe_definitions_are_literals_and_match_the_defaults_today():
     for field in ("dt_s", "seq_len", "channels", "aircraft_type", "random_train_anchor_min_future_s",
                   "validation_common_grid_points", "position_loss_scale_m", "final_time_scale_s"):
         assert recipe[field] == getattr(defaults, field), field
+
+
+# ── review 2026-09-09 C-3 ────────────────────────────────────────────────────
+
+def test_the_common_grid_resolution_names_the_run():
+    """Two custom arms differing only in `--validation-common-grid-points 64|128` keep
+    different epochs; they used to share a name and a slug."""
+    from run_naming import run_slug
+    base = _state_defaults()
+    finer = {**base, "validation_common_grid_points": 128}
+    assert "grid-points=128" in run_display_name(finer)
+    assert "grid-points" not in run_display_name(base)
+    assert run_slug(finer) != run_slug(base)
+
+
+def test_every_tsconfig_field_is_named_or_excused_by_name():
+    """The reverse of the import-time guard: a CLI-settable field in no naming list lets
+    two runs differing only in it share a name. `KNOWN_UNNAMED_FIELDS` holds the ones
+    that deliberately name nothing, each with its reason."""
+    from run_naming import KNOWN_UNNAMED_FIELDS
+    for field, reason in KNOWN_UNNAMED_FIELDS.items():
+        assert field in TSConfig().to_dict(), field
+        assert reason
+    assert "device" in KNOWN_UNNAMED_FIELDS
+    assert "validation_common_grid_points" not in KNOWN_UNNAMED_FIELDS

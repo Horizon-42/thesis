@@ -223,8 +223,6 @@ def raw_kinematic_metrics(
     anchor_values: np.ndarray,
     predicted_values: np.ndarray,
     segment_durations_s: np.ndarray,
-    *,
-    valid_segments: np.ndarray | None = None,
 ) -> dict[str, float | int]:
     """Physical smoothness of unfiltered model output on its own time grid.
 
@@ -237,6 +235,11 @@ def raw_kinematic_metrics(
     nodes, because those are the points exported to CZML. The velocity channels are used
     only for the position/velocity RMSE and heading-consistency checks; a model cannot earn
     a smoothness score by predicting smooth velocities beside a jagged position path.
+
+    Every segment is scored: a replay's durations are positive by construction (the
+    output layers emit them so), and the padded-suffix mask this function used to accept
+    could never be False on a live path (review C-10) — so it is gone rather than kept as
+    a bound that cannot bind.
     """
     anchor = np.asarray(anchor_values, dtype=np.float64)
     predicted = np.asarray(predicted_values, dtype=np.float64)
@@ -245,19 +248,10 @@ def raw_kinematic_metrics(
         raise ValueError("raw kinematic metrics require [B,C], [B,N,C], [B,N]")
     if predicted.shape[:2] != durations.shape or anchor.shape != predicted[:, 0].shape:
         raise ValueError("raw kinematic metric shapes do not share B, N and C")
-    if valid_segments is None:
-        valid = np.ones_like(durations, dtype=bool)
-    else:
-        valid = np.asarray(valid_segments, dtype=bool)
-        if valid.shape != durations.shape:
-            raise ValueError("valid segment mask must match [B,N] durations")
-        # A padded suffix is the only supported ragged representation. Accepting holes
-        # would make acceleration/jerk adjacency ambiguous.
-        if np.any(valid[:, 1:] & ~valid[:, :-1]):
-            raise ValueError("valid segments must form a contiguous prefix")
-    if np.any(durations[valid] <= 0.0):
-        raise ValueError("valid segment durations must be positive")
-    safe_durations = np.where(valid, durations, 1.0)
+    if np.any(durations <= 0.0):
+        raise ValueError("segment durations must be positive")
+    valid = np.ones_like(durations, dtype=bool)
+    safe_durations = durations
 
     nodes = np.concatenate((anchor[:, None, :], predicted), axis=1)
     positions = nodes[..., list(POSITION_IDX)]

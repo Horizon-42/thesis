@@ -43,7 +43,7 @@ import run_ts_pipeline as pipeline  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
     HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
-    uses_control_dynamics,
+    default_anchor, uses_control_dynamics,
 )
 
 from control.dynamics.rollout import rollout_control_dense  # noqa: E402
@@ -121,7 +121,9 @@ def classify_trajectory(future_positions: np.ndarray) -> str:
 def common_truth(
     series: Sequence[FlightSeries], config: TSConfig, points: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    truth, durations, progress = fixed_anchor_common_truth(series, config, points)
+    truth, durations, progress = fixed_anchor_common_truth(
+        series, config, points, anchor=default_anchor(config)
+    )
     route_types = [
         classify_trajectory(row[:, list(POSITION_IDX)]) for row in truth
     ]

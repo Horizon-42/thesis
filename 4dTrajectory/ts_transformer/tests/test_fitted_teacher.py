@@ -143,12 +143,14 @@ def test_the_default_and_every_named_recipe_imitate_the_inverse_dynamics():
       "control_fitted_teacher_path": "teacher.json",
       "control_imitation_loss_weight": 0.0}, "switches off"),
     # `imitation` is registered under true-time-position only; that objective in turn
-    # requires the native grid and uniform durations, so this closes those holes too.
+    # requires the native grid and uniform durations, so this closes those holes too. The
+    # general rule (review C-1: any of the four extras is refused off that objective) fires
+    # first; the fitted-teacher rule behind it says the same thing for the table.
     ({"control_imitation_target": CONTROL_IMITATION_TARGET_FITTED,
       "control_fitted_teacher_path": "teacher.json",
       "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_FIXED_DT,
       "control_state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE},
-     "registered under"),
+     "only built by"),
 ])
 def test_the_config_refuses_an_incoherent_teacher(overrides, message):
     with pytest.raises(ValueError, match=message):

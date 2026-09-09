@@ -454,6 +454,11 @@ def write_batch(
             f"flight_metrics has {len(flight_metrics)} entries for {len(records)} records — "
             "observed_series_metrics must be collected once per record, in order"
         )
+    # The accuracy block refuses a non-finite ADE/FDE/endpoint error. It is built FIRST so
+    # that refusal happens before a single record file is written: until 2026-09-09 it ran
+    # after the loop and left a record directory with no summary.json (review B-3).
+    accuracy = accuracy_block(flight_metrics)
+    accuracy["raw_kinematics"] = _json_optional_metrics(accuracy["raw_kinematics"])
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / REFERENCES_DIR).mkdir(exist_ok=True)
@@ -534,19 +539,16 @@ def write_batch(
             "true_final_time_s": metrics["true_final_time_s"],
             "final_time_error_s": metrics["final_time_error_s"],
             "split": split,
-            "ade_m": _json_optional_metrics(metrics["ade_m"]),
-            "fde_m": _json_optional_metrics(metrics["fde_m"]),
-            "arrival_endpoint_error_m": _json_optional_metrics(
-                metrics["arrival_endpoint_error_m"]
-            ),
+            # Finite by the accuracy block's check above; never null.
+            "ade_m": metrics["ade_m"],
+            "fde_m": metrics["fde_m"],
+            "arrival_endpoint_error_m": metrics["arrival_endpoint_error_m"],
             "metric_steps": metrics["n_steps"],
             "raw_kinematics": _json_optional_metrics(metrics["raw_kinematics"]),
             **metrics["difficulty"],
         })
         rows.append(row)
 
-    accuracy = accuracy_block(flight_metrics)
-    accuracy["raw_kinematics"] = _json_optional_metrics(accuracy["raw_kinematics"])
     summary = {
         "scenarios": None,
         "mode": (

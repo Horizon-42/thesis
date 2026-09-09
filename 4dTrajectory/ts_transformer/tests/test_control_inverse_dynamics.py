@@ -365,13 +365,18 @@ def test_the_lagged_recipe_is_simple_v1_with_one_field_changed():
         replace(frozen, control_dynamics_model=CONTROL_DYNAMICS_POINT_MASS)
 
 
-def test_a_time_constant_below_the_integrator_step_is_refused_not_integrated():
-    """Explicit RK4 on y' = -y/tau produces NaN there, not a worse answer."""
+def test_a_time_constant_past_the_rk4_stability_limit_is_refused_not_integrated():
+    """Explicit RK4 on y' = -y/tau produces NaN past h/tau = 2.785, not a worse answer.
+
+    Review C-13: the rule used to refuse tau < h outright, 2.8x stricter than the
+    instability it cited (tau 0.45 / 0.3 / 0.2 s at h = 0.5 s are all stable)."""
+    from config import RK4_REAL_AXIS_STABILITY_LIMIT
     config = _config(CONTROL_DYNAMICS_FIRST_ORDER_LAG)
     assert config.control_rollout_integrator_dt_s == 0.1
-    replace(config, control_bank_time_constant_s=0.1)  # exactly at the step: allowed
-    with pytest.raises(ValueError, match="shorter than the .* integrator step"):
-        replace(config, control_bank_time_constant_s=0.05)
+    replace(config, control_bank_time_constant_s=0.1)   # h/tau = 1: allowed
+    replace(config, control_bank_time_constant_s=0.05)  # h/tau = 2: stable, allowed
+    with pytest.raises(ValueError, match="explicit RK4 is unstable"):
+        replace(config, control_bank_time_constant_s=0.1 / RK4_REAL_AXIS_STABILITY_LIMIT * 0.99)
     # The guard is specific to the lagged model; the constants are inert without it.
     replace(
         config,
@@ -483,7 +488,7 @@ def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
     result = prediction_zero_weights(
         prediction, torch.zeros(1, channels, dtype=torch.float64), targets, weights,
         durations.sum(dim=1), config, Normalizer(mean=np.zeros(channels), std=np.ones(channels)),
-        probe_dynamics(1, torch.device("cpu")), None,
+        probe_dynamics(1, torch.device("cpu"), config), None,
     )
     # With every velocity weight zero the term is exactly zero, not a division blow-up.
     assert float(result.physical_velocity_mse[0]) == 0.0

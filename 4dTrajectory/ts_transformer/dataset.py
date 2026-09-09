@@ -77,6 +77,7 @@ from anchor_strata import (
 from approach_difficulty import remaining_path_profile_m
 from config import (
     CTA_CONDITIONING_GIVEN,
+    CTA_CONDITIONING_OFF,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     uses_closure_labels,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -271,6 +272,13 @@ def reference_control_supervision(
     ``true-time-position`` objective, which ``TSConfig`` admits only with
     ``control_duration_parameterization="uniform"``. Under a non-uniform partition segment k
     of the two sides would cover different physical times.
+
+    The weight vector can be ALL ZERO: an anchor at or after the last measured velocity
+    with a fitted tail behind it supervises no segment. Such a flight contributes exactly
+    zero to :func:`objective.control_imitation_mse` (its denominator is clamped at one) —
+    no gradient, and a zero that DILUTES the reported per-flight mean, never a "perfect
+    imitation" (review C-17). Under the default 60 s future floor no training anchor
+    reaches it.
     """
     mass_kg = float(series.scenario.initial.m)
     anchor_time = float(series.times[anchor])
@@ -390,6 +398,16 @@ def reference_heading_rate_supervision(
     """
     anchor_time = float(series.times[anchor])
     times = series.times[anchor:] - anchor_time
+    if len(times) < 2:
+        # The central difference below would be 0/0: a NaN target at weight one, not an
+        # error (review B-4). Reachable under `random_train_anchor_min_future_s=0` when the
+        # remainder past the anchor is the fitted tail alone; the imitation target's
+        # inverse refuses the same anchor, so this term refuses it too.
+        raise ValueError(
+            f"flight {series.flight_id}: the heading-rate target needs at least two "
+            f"observed samples from the anchor on, and anchor {anchor} leaves {len(times)} "
+            "(the remainder is the fitted tail alone, which has no measured turn rate)"
+        )
     samples = states_from_channels(
         times,
         series.values[anchor:],
@@ -548,12 +566,18 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
     }
 
 
-def probe_dynamics(batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
+def probe_dynamics(
+    batch_size: int, device: torch.device, config: TSConfig
+) -> dict[str, torch.Tensor]:
     """One representative dynamics batch for shape/throughput probes.
 
-    Kept beside :func:`dynamics_arrays` so the batch-size probe and the gradient
-    diagnostics cannot carry a stale copy of the contract: a key added to the real batch
-    appears here in the same commit or the probe fails immediately.
+    Kept beside :func:`dynamics_arrays`, and its SUPERVISION keys are added under the same
+    conditions ``TrajectoryWindows._dynamics_arrays`` adds them, so the batch-size probe
+    and the gradient diagnostics cannot carry a stale copy of the contract —
+    ``tests/test_supervision_terms.py`` pins the probe's key set equal to a real training
+    batch's. Until 2026-09-09 the probe omitted the imitation and heading-rate targets
+    (review B-1): ``--batch-size auto`` then died with a bare ``KeyError`` inside the
+    objective, after the dataset build, on every custom arm that weighted either term.
     """
     rows = {
         "condition": [0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5],
@@ -576,6 +600,27 @@ def probe_dynamics(batch_size: int, device: torch.device) -> dict[str, torch.Ten
     probe = probe_final_approach(batch_size, device)
     dynamics["runway_heading_rad"] = probe["runway_heading_rad"]
     dynamics["glidepath_tan"] = probe["glidepath_tan"]
+    n_segments = int(config.n_segments)
+    if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
+        # The probe's target duration is the scale, so the given CTA matches it and the
+        # probe's final_time term stays zero, as in a real given run.
+        dynamics["cta_s"] = torch.full(
+            (batch_size,), config.final_time_scale_s, dtype=torch.float64, device=device
+        )
+    if config.control_imitation_loss_weight:
+        dynamics["reference_controls"] = torch.tensor(
+            [[[0.2, 0.0, 1.0]]], dtype=torch.float64, device=device
+        ).expand(batch_size, n_segments, -1)
+        dynamics["reference_control_weight"] = torch.ones(
+            (batch_size, n_segments), dtype=torch.float64, device=device
+        )
+    if config.control_heading_rate_loss_weight:
+        dynamics["reference_heading_rate_dps"] = torch.zeros(
+            (batch_size, n_segments), dtype=torch.float64, device=device
+        )
+        dynamics["reference_heading_rate_weight"] = torch.ones(
+            (batch_size, n_segments), dtype=torch.float64, device=device
+        )
     return dynamics
 
 
@@ -1119,6 +1164,23 @@ def series_conditioning(
     return np.concatenate(parts).astype(np.float32)
 
 
+def fixed_anchor_index(config: TSConfig, minimum_anchor_index: int | None = None) -> int:
+    """The one anchor a fixed-anchor window set places EVERY flight at.
+
+    ``L-1`` (:func:`config.default_anchor`) unless an experiment supplies a common floor,
+    in which case it is the floor: ``run_ts_history_ablation.py`` trains every candidate
+    ``seq_len`` at ``max(L) - 1`` so their anchor populations are identical. This is the
+    ONE definition. Until 2026-09-09 the common-grid truth, the cohort floor and the
+    fixed-anchor fraction each restated ``seq_len - 1`` and ignored the floor (review A-2):
+    under the ablation the selection metric scored every prediction against a truth taken
+    ``(max L - L) * dt_s`` EARLIER than the anchor it was made from, which corrupted the
+    kept epoch, the LR-plateau signal and every metric that runner published.
+    """
+    if minimum_anchor_index is not None and minimum_anchor_index < 0:
+        raise ValueError("minimum_anchor_index must be non-negative")
+    return max(default_anchor(config), minimum_anchor_index or 0)
+
+
 def window_anchors(
     series: FlightSeries,
     config: TSConfig,
@@ -1135,11 +1197,9 @@ def window_anchors(
     complete remainder and full masks a short padded suffix. Window mode requires a complete
     fixed-dt short horizon because those targets train one recursive forecasting pass.
     """
-    if minimum_anchor_index is not None and minimum_anchor_index < 0:
-        raise ValueError("minimum_anchor_index must be non-negative")
     if minimum_future_s < 0.0:
         raise ValueError("minimum_future_s must be non-negative")
-    first = max(config.seq_len - 1, minimum_anchor_index or 0)
+    first = fixed_anchor_index(config, minimum_anchor_index)
     # An anchor is always observed; fitted rows can be targets but never model inputs.
     last_with_remainder = series.n_supervision_samples - 2
     required_window_s = config.pred_len * config.dt_s
@@ -1466,7 +1526,9 @@ class TrajectoryWindows(Dataset, ABC):
             # the span anyway, MINUS the coin's draws on flights that store no L-1
             # (`l1_share_flights_without_l1`) — so it is neither a restatement of
             # `l1_share_drawn` nor, once that count is non-zero, an upper bound on it.
-            "fixed_anchor_fraction": float(np.mean(anchors == default_anchor(self.config))),
+            "fixed_anchor_fraction": float(np.mean(
+                anchors == fixed_anchor_index(self.config, self.minimum_anchor_index)
+            )),
             **extras,
         }
 
@@ -1525,6 +1587,15 @@ class TrajectoryWindows(Dataset, ABC):
         if self.config.cta_conditioning == CTA_CONDITIONING_GIVEN:
             # Training feeds the truth as the controlled time of arrival.
             arrays["cta_s"] = np.array(truth_duration_s(series, anchor), dtype=np.float64)
+        elif self.config.cta_conditioning != CTA_CONDITIONING_OFF:
+            # The head builds its CTA token for every mode but `off` (control/heads.py), so
+            # a mode this branch does not fill would reach the decoder with no `cta_s`.
+            # `self-q` is a predict-time label (`CTA_CONDITIONINGS_AVAILABLE` keeps it out
+            # of a new run); if it ever reaches a window set, say so here, not in the head.
+            raise ValueError(
+                f"cta_conditioning={self.config.cta_conditioning!r} names no training-time "
+                "source for the CTA token; only 'given' (the truth duration) is defined"
+            )
         if self.config.control_imitation_loss_weight and self.control_supervision:
             anchor_time = float(series.times[anchor])
             # The fitted teacher replaces the inversion outright — its schedule was fitted
@@ -1712,6 +1783,22 @@ class FixedAnchorTrajectoryWindows(TrajectoryWindows):
     def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         return [anchors[0]] if len(anchors) else []
 
+    @property
+    def anchor(self) -> int:
+        """The one index every flight here is anchored at (:func:`fixed_anchor_index`).
+
+        Every fixed-anchor consumer — the common-grid truth, the cohort floor, the
+        terminal-velocity weights — must read the anchor from HERE rather than restate
+        ``seq_len - 1``, or it silently disagrees with the windows under a common floor.
+        """
+        return fixed_anchor_index(self.config, self.minimum_anchor_index)
+
+    @property
+    def anchor_indices(self) -> list[int]:
+        """One anchor per flight, aligned with ``series`` — the argument
+        :func:`fixed_anchor_validation.common_truth_at_anchors` wants."""
+        return [self.anchor] * len(self.series)
+
     def epoch_indices(self, seed: int) -> np.ndarray:
         indices = self.range_starts[self.eligible_series].copy()
         np.random.default_rng(seed).shuffle(indices)
@@ -1773,6 +1860,17 @@ class ExplicitAnchorTrajectoryWindows(FixedAnchorTrajectoryWindows):
                 f"(admissible anchors: {anchors})"
             )
         return [wanted]
+
+    @property
+    def anchor(self) -> int:
+        raise AttributeError(
+            "an explicit-anchor window set anchors each flight at its own index; read "
+            "`anchor_indices`, there is no common anchor to name"
+        )
+
+    @property
+    def anchor_indices(self) -> list[int]:
+        return [self._anchor_by_flight[item.dataset_id] for item in self.series]
 
 
 class RandomAnchorTrajectoryWindows(TrajectoryWindows):

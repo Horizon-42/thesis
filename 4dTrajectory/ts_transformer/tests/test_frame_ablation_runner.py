@@ -75,20 +75,46 @@ def test_a_dry_run_still_constructs_every_arm_config(tmp_path, monkeypatch):
 def test_a_real_run_writes_the_config_it_will_train_from(tmp_path):
     """The file is what the training subprocess reads, so a non-dry run must write it."""
     destination = tmp_path / "arm" / "config.json"
-    path, config, declared = runner.arm_config(
-        ARMS["base"], {"coordinate_frame": "airport-enu"}, destination
-    )
-    assert path == destination and destination.is_file()
-    assert json.loads(destination.read_text())["coordinate_frame"] == "airport-enu"
+    config, declared = runner.arm_config(ARMS["base"], {"coordinate_frame": "airport-enu"})
     assert config.coordinate_frame == "airport-enu"
     # The settings come back rather than being read off disk: `arm_steps` needs them on a
     # dry run too, when there is no file.
     assert declared["coordinate_frame"] == "airport-enu"
-    _path, _config, dry = runner.arm_config(
-        ARMS["base"], {}, tmp_path / "other" / "config.json", write=False
+    assert not destination.exists()
+    assert runner.write_arm_config(destination, declared) == destination
+    assert json.loads(destination.read_text())["coordinate_frame"] == "airport-enu"
+
+
+def test_a_stored_arm_is_resumed_only_when_complete_and_unchanged(tmp_path):
+    """Review C-8. Resume is `history.json` exists AND the trained config agrees with the
+    arm's overrides today; a checkpoint without a history (a tail crash) and a changed arm
+    are both refused by name, and nothing is deleted."""
+    _config, declared = runner.arm_config(ARMS["base"], {"coordinate_frame": "airport-enu"})
+    arm = tmp_path / "A"
+    assert runner.stale_arm_error("A", arm, declared) is None          # never trained: runs
+    arm.mkdir()
+    (arm / "checkpoint.pt").write_bytes(b"x")
+    error = runner.stale_arm_error("A", arm, declared)
+    assert error and "without history.json" in error and "aborted" in error
+    # The trained config carries fields the arm never declared (the CLI's seed, say);
+    # only the DECLARED fields are compared.
+    (arm / "history.json").write_text(json.dumps({"config": {**declared, "seed": 4711}}))
+    assert runner.stale_arm_error("A", arm, declared) is None
+    changed = {**declared, "coordinate_frame": "enu"}
+    error = runner.stale_arm_error("A", arm, changed)
+    assert error and "coordinate_frame" in error and "new arm" in error
+    assert (arm / "checkpoint.pt").exists() and (arm / "history.json").exists()
+
+
+def test_the_train_step_is_done_when_history_json_exists(tmp_path):
+    """`train` writes checkpoint.pt first and history.json last, so the step's artifact is
+    the history — a checkpoint alone is a crash, not a finished arm."""
+    config, declared = runner.arm_config(ARMS["base"], {})
+    steps = runner.arm_steps(
+        "A", "A", tmp_path / "A" / "config.json", config, declared, airport="KRDU",
+        campaign=tmp_path, split="val", device="cpu", seed=1, split_seed=1, formal=False,
     )
-    assert not (tmp_path / "other").exists()
-    assert dry["prediction_output"] == "state"
+    assert steps[0][2] == tmp_path / "A" / "history.json"
 
 
 def _harvest(tmp_path, monkeypatch):

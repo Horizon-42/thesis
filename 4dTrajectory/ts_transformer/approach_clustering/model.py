@@ -103,9 +103,16 @@ def _fit_kmeans(
     return best
 
 
+#: The silhouette is O(n²) in memory, so K is selected on an evenly spaced subsample of
+#: at most this many rows. Stated in every candidate row (`silhouette_rows`) rather than
+#: applied silently (review C-16).
+SILHOUETTE_MAX_ROWS = 2000
+
+
 def _silhouette_score(
-    values: np.ndarray, labels: np.ndarray, *, max_samples: int = 2000
-) -> float:
+    values: np.ndarray, labels: np.ndarray, *, max_samples: int = SILHOUETTE_MAX_ROWS
+) -> tuple[float, int]:
+    """``(score, rows scored)`` — the second says how many rows the first was read on."""
     if len(values) > max_samples:
         indices = np.linspace(0, len(values) - 1, max_samples, dtype=np.int64)
         values = values[indices]
@@ -130,7 +137,7 @@ def _silhouette_score(
             for other in cluster_ids if other != label
         )
         scores[index] = (nearest - within) / max(within, nearest)
-    return float(scores.mean())
+    return float(scores.mean()), int(len(values))
 
 
 def fit_cluster_candidates(
@@ -147,10 +154,14 @@ def fit_cluster_candidates(
         centers, labels, inertia = _fit_kmeans(
             projected, clusters, seed=seed
         )
-        score = _silhouette_score(projected, labels)
+        score, silhouette_rows = _silhouette_score(projected, labels)
         candidates.append({
             "clusters": clusters,
             "silhouette": score,
+            # How many of the rows the silhouette was read on (an evenly spaced subsample
+            # above SILHOUETTE_MAX_ROWS); `rows` is the full fit.
+            "silhouette_rows": silhouette_rows,
+            "rows": int(len(projected)),
             "inertia": inertia,
             "counts": np.bincount(labels, minlength=clusters).tolist(),
         })

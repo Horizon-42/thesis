@@ -55,6 +55,7 @@ from dataset import (
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
+    fixed_anchor_index,
     iter_batches,
     training_window_class,
     window_anchors,
@@ -398,11 +399,16 @@ def filter_training_cohort(
     series: Sequence[FlightSeries],
     config: TSConfig,
     *,
+    minimum_anchor_index: int | None = None,
     verbose: bool = True,
 ) -> tuple[list[FlightSeries], dict[str, Any]]:
-    """Apply a predeclared future-duration floor to train flights only."""
+    """Apply a predeclared future-duration floor to train flights only.
+
+    The floor is measured from the anchor the fixed-anchor windows will be built at
+    (:func:`dataset.fixed_anchor_index`): ``L-1``, or the experiment's common floor.
+    """
     minimum = float(config.training_cohort_min_future_s)
-    anchor = config.seq_len - 1
+    anchor = fixed_anchor_index(config, minimum_anchor_index)
     retained: list[FlightSeries] = []
     excluded: list[dict[str, Any]] = []
     for item in series:
@@ -416,7 +422,7 @@ def filter_training_cohort(
             })
     audit = {
         "scope": "train only after by-flight split",
-        "anchor": "fixed L-1",
+        "anchor": "fixed L-1" if anchor == default_anchor(config) else f"fixed index {anchor}",
         "minimum_future_s": minimum,
         "input_flights": len(series),
         "retained_flights": len(retained),
@@ -426,7 +432,7 @@ def filter_training_cohort(
     if verbose and excluded:
         print(
             f"  cohort     retained {len(retained)}/{len(series)} train flights with "
-            f">= {minimum:g}s after fixed L-1 anchor; excluded {len(excluded)}"
+            f">= {minimum:g}s after the fixed anchor (index {anchor}); excluded {len(excluded)}"
         )
     if not retained:
         raise ValueError("training cohort future-duration floor removed every train flight")
@@ -448,7 +454,7 @@ def fit_model(
     if not train_series or not val_series:
         raise ValueError("fit_model requires non-empty train and validation flights")
     cohort_floor = config.training_cohort_min_future_s
-    cohort_anchor = config.seq_len - 1
+    cohort_anchor = fixed_anchor_index(config, minimum_anchor_index)
     cohort_ineligible = [
         item for item in train_series
         if item.supervision_times[-1] - item.times[cohort_anchor] < cohort_floor - 1e-9
@@ -1248,7 +1254,7 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
         )
     # Checkpoints written before target conditioning existed carry no input_channels
     # key; they were trained with none, so their input contract IS the channel contract.
-    stored_inputs = payload.get("input_channels", list(config.channels))
+    stored_inputs = payload.get("input_channels") or list(config.channels)
     if list(stored_inputs) != list(config.input_channels):
         raise ValueError(
             f"checkpoint input channel contract {list(stored_inputs)} != this build's "

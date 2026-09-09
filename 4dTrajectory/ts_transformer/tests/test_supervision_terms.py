@@ -75,6 +75,7 @@ def _series_from_states(states: list[tuple[float, GeodeticState]]) -> SimpleName
     """The two attributes :func:`reference_heading_rate_supervision` reads off a series."""
     times, values = channels_from_states(states, FRAME)
     return SimpleNamespace(
+        flight_id="synthetic-turn",
         times=times,
         values=values,
         frame=FRAME,
@@ -263,7 +264,7 @@ def test_the_anchor_slice_is_the_only_past_the_target_reads():
 def _rollout_dynamics(bank_rad: float, *, config: TSConfig, thrust_fraction: float = 0.24,
                       segment_s: float = 10.0):
     """A one-flight batch flying a CONSTANT bank, and the rollout it produces."""
-    dynamics = probe_dynamics(1, torch.device("cpu"))
+    dynamics = probe_dynamics(1, torch.device("cpu"), config)
     # A level, coordinated turn: the load factor that holds altitude at this bank.
     controls = torch.tensor(
         [[[thrust_fraction, bank_rad, 1.0 / math.cos(bank_rad)]]],
@@ -419,7 +420,7 @@ def test_a_positive_bank_turns_the_way_the_channel_heading_says_it_does():
 def _endpoint_result(config: TSConfig, bank_schedule: list[float], target_dps: list[float],
                      weight: list[float]):
     """Run the native-endpoint loss on a hand-built schedule and target."""
-    dynamics = probe_dynamics(1, torch.device("cpu"))
+    dynamics = probe_dynamics(1, torch.device("cpu"), config)
     controls = torch.tensor(
         [[[0.24, bank, 1.0 / math.cos(bank)] for bank in bank_schedule]],
         dtype=torch.float64, requires_grad=True,
@@ -731,3 +732,68 @@ def test_the_teacherless_supervision_trains_under_random_anchors(tmp_path: Path)
     history = json.loads((run_dir / "history.json").read_text())
     assert history["config"]["random_train_anchor"] is True
     assert all(math.isfinite(epoch["train_components"]["heading_rate"]) for epoch in history["history"])
+
+
+# ── review 2026-09-09: the probe batch and the objective's registrations ──────
+
+def _real_dynamics_batch(config: TSConfig) -> dict:
+    """The context slot of a REAL one-window training batch under ``config``."""
+    from batch_contract import unpack_batch
+    from dataset import FixedAnchorTrajectoryWindows
+
+    series, report = build_series(
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3), config, airport=AIRPORT
+    )
+    assert report.built == 2, report.format()
+    normalizer = Normalizer.fit(series)
+    return unpack_batch(FixedAnchorTrajectoryWindows(series, config, normalizer).batch([0]))[5]
+
+
+@pytest.mark.parametrize("overrides", [
+    {},
+    {"control_imitation_loss_weight": 64.0},
+    {"control_heading_rate_loss_weight": 8.0},
+    {"control_imitation_loss_weight": 64.0, "control_heading_rate_loss_weight": 8.0},
+])
+def test_the_probe_batch_carries_every_key_the_real_batch_carries(overrides):
+    """Review B-1. `--batch-size auto` runs the real training step on `probe_dynamics`;
+    the objective indexes the imitation and heading-rate targets unconditionally once
+    weighted, so a key the real batch carries and the probe does not is a bare KeyError
+    after the dataset build. The probe is built from the SAME config conditions as the
+    dataset, and this pins the two key sets equal, with equal shapes."""
+    config = _config(**overrides)
+    real = _real_dynamics_batch(config)
+    probe = probe_dynamics(1, torch.device("cpu"), config)
+    assert set(probe) == set(real), overrides
+    for key, value in probe.items():
+        assert tuple(value.shape) == tuple(real[key].shape), key
+
+
+def test_the_heading_rate_target_refuses_a_remainder_of_one_observed_sample():
+    """Review B-4: with one sample past the anchor the central difference is 0/0 — a NaN
+    target riding into the loss at weight one. It is refused, like the imitation term's
+    inverse on the same anchor."""
+    duration_s = 60.0
+    series = _series_from_states(_constant_turn(3.0, psi0_rad=0.4, duration_s=duration_s))
+    last = len(series.times) - 1
+    with pytest.raises(ValueError, match="at least two observed samples"):
+        reference_heading_rate_supervision(
+            series, last, _config(n_segments=4),
+            total_duration_s=30.0, last_measured_time_s=0.0,
+        )
+
+
+@pytest.mark.parametrize("field", [
+    "control_velocity_loss_weight",
+    "control_imitation_loss_weight",
+    "control_heading_rate_loss_weight",
+    "control_bank_tv_loss_weight",
+])
+def test_a_term_the_objective_does_not_build_is_refused_not_ignored(field):
+    """Review C-1: all four extras are registered under `true-time-position` only
+    (`objective.loss_component_names`). Under `normalized-mse` a non-zero weight named the
+    run and, for the imitation term, solved a teacher per sample that nothing read."""
+    from config import CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+    with pytest.raises(ValueError, match="only built by"):
+        _config(control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE, **{field: 1.0})
+    _config(control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE)   # zero is fine

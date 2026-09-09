@@ -101,6 +101,16 @@ def add_data_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-dir", required=True, type=Path)
 
 
+def refuse_airport_override_for_pooled_data(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> None:
+    """``--airport`` re-homes every flight that carries no ``arr_airport``; over several
+    manifests it would put another airport's flights on this one's thresholds. Train and
+    cross-validate always refused it; predict did not (review C-19)."""
+    if len(args.data) > 1 and args.airport:
+        parser.error("--airport cannot override flights when multiple --data manifests are used")
+
+
 def provenance_from_args(args: argparse.Namespace) -> dict[str, object]:
     rosters = getattr(args, "eligibility_roster", None)
     if rosters is None:
@@ -786,8 +796,7 @@ def prepare_training_run(
     argv: list[str] | None,
 ) -> TrainingRun:
     """Resolve the config, load the development cohort and open the experiment manifest."""
-    if len(args.data) > 1 and args.airport:
-        parser.error("--airport cannot override flights when multiple --data manifests are used")
+    refuse_airport_override_for_pooled_data(args, parser)
     config, batch_auto = config_from_args(args, parser)
     if bool(args.campaign_id) != bool(args.experiment_id):
         parser.error("--campaign-id and --experiment-id must be supplied together")

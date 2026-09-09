@@ -421,6 +421,11 @@ def control_imitation_mse(
     under ``"fitted"`` every segment carries weight one, because that schedule was fitted
     over the whole supervised horizon. This function reads whichever pair the dataset put
     in the batch and cannot tell them apart — which is the point of the axis.
+
+    A flight whose weight vector is all zero (see
+    :func:`dataset.reference_control_supervision`) scores exactly 0: the clamped
+    denominator makes it a zero contribution and a zero gradient, and it DILUTES the
+    per-flight mean this term reports — it is not a perfect imitation (review C-17).
     """
     if not config.control_imitation_loss_weight:
         return None

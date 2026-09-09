@@ -560,7 +560,11 @@ def test_a_flight_that_stores_no_l1_is_reserved_at_its_earliest_anchor_and_COUNT
     assert windows.anchor_statistics(3)["l1_share_flights_without_l1"] == flights
     # Every reserved draw is the flight's FIRST admissible anchor, which the floor moved.
     assert set(_drawn_anchor_by_flight(windows, 3).values()) == {floor}
-    assert windows.anchor_statistics(3)["fixed_anchor_fraction"] == 0.0
+    # ...and `fixed_anchor_fraction` counts draws AT the fixed anchor the floor defines
+    # (`dataset.fixed_anchor_index`), so it stays the upper bound of `l1_share_drawn` the
+    # docs read it as. Until 2026-09-09 it compared to `seq_len - 1` and was identically 0
+    # under any floor (review C-18).
+    assert windows.anchor_statistics(3)["fixed_anchor_fraction"] == 1.0
 
 
 def test_an_unfloored_cohort_reserves_l1_and_counts_no_exceptions():

@@ -79,7 +79,7 @@ def test_singleton_cluster_has_zero_silhouette() -> None:
     values = np.array([[0.0], [1.0], [10.0]])
     labels = np.array([0, 0, 1])
 
-    score = _silhouette_score(values, labels)
+    score, _rows = _silhouette_score(values, labels)
 
     assert score == pytest.approx((0.9 + (8.0 / 9.0) + 0.0) / 3.0)
 

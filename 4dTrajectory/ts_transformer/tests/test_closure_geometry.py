@@ -282,3 +282,19 @@ def test_fits_on_a_truth_outside_every_family_still_nest():
     e0, e1, e2 = (cg.path_error_m(p.horizontal, truth) for p in (f0, f1, f2))
     assert e1 <= e0 + 1e-6 and e2 <= e1 + 1e-6 and f3.params["fit_error_m"] <= e2 + 1e-6
     assert e1 > 50.0                                  # genuinely outside the family
+
+
+# ── review 2026-09-09 C-20 ───────────────────────────────────────────────────
+
+def test_strictly_increasing_holds_on_a_locally_decreasing_clock():
+    """Running maximum FIRST, ramp after: the other order left equal neighbours on a
+    decreasing input, and `closure_output.reconstruct` then divided by a zero spacing.
+    On a non-decreasing input the two orders agree exactly, so no stored label moves."""
+    decreasing = np.array([0.0, 1.0, 0.5, 2.0, 2.0])
+    out = cg.strictly_increasing(decreasing)
+    assert np.all(np.diff(out) > 0.0)
+    monotone = np.array([0.0, 1.0, 1.0, 2.0])
+    assert np.array_equal(
+        cg.strictly_increasing(monotone),
+        np.maximum.accumulate(monotone + np.arange(len(monotone)) * 1e-6),
+    )

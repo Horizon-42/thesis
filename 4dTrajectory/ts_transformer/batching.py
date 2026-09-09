@@ -10,6 +10,7 @@ matter.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import gc
 
 import numpy as np
@@ -19,7 +20,6 @@ from batch_contract import anchor_state, model_forward
 from closure_output import probe_closure_context
 from config import (
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    CTA_CONDITIONING_GIVEN,
     TSConfig,
     uses_closure_labels,
     uses_control_dynamics,
@@ -62,11 +62,10 @@ def _heterogeneous_control_probe_prediction(
     fractions = learned_fractions * probe_profile
     fractions = fractions / fractions.sum(dim=-1, keepdim=True)
     durations = fractions * prediction.final_time_s.unsqueeze(1)
-    return ControlPrediction(
-        controls=prediction.controls,
-        segment_durations=durations,
-        final_time_s=prediction.final_time_s,
-    )
+    # `replace`, not a rebuilt ControlPrediction: the quantile head's `duration_quantiles_s`
+    # (and a latent prediction's extra fields) must survive the probe, or the objective
+    # reads None where the real epoch reads a tensor (review B-2).
+    return replace(prediction, segment_durations=durations)
 
 
 def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device) -> None:
@@ -114,13 +113,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
         if uses_closure_labels(config.prediction_output):
             dynamics = probe_closure_context(batch_size, device, config)
         if uses_control_dynamics(config.prediction_output):
-            dynamics = probe_dynamics(batch_size, device)
-            if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
-                # The probe's target duration is the scale, so the given CTA matches it and
-                # the probe's final_time term stays zero, as in a real given run.
-                dynamics["cta_s"] = torch.full(
-                    (batch_size,), config.final_time_scale_s, dtype=torch.float64, device=device
-                )
+            dynamics = probe_dynamics(batch_size, device, config)
             if config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
                 points = int(config.final_time_scale_s // config.dt_s)
                 offsets = (

@@ -662,3 +662,32 @@ def test_neither_half_of_the_pair_alone_produces_an_interval():
 
 #: Neither branch above reaches the series, and building one would hide that.
 _UNUSED_SERIES = object()
+
+
+# ── review 2026-09-09 C-15 ───────────────────────────────────────────────────
+
+def test_a_stratum_calibrated_at_one_alpha_only_is_not_deployed():
+    """`interval_stratum` used to pick from the UNION of calibrated strata across α while
+    `conformal_intervals` reads the stratum under EVERY α — a KeyError the day a stratum
+    calibrates at one level only. The intersection is what can be deployed."""
+    table = calibrate(
+        _cohort(400, narrow_s=10.0), split_seed=3, split="val",
+        checkpoint_sha256=CHECKPOINT_SHA,
+    )
+    alphas = list(table["alphas"])
+    assert len(alphas) >= 2
+    assert interval_stratum(table, _covariates(tortuosity=1.0)) == STRATUM_STRAIGHT_IN
+    # Drop the straight-in stratum from ONE alpha: it is no longer deployable anywhere.
+    del table["alphas"][alphas[-1]]["strata"][STRATUM_STRAIGHT_IN]
+    stratum = interval_stratum(table, _covariates(tortuosity=1.0))
+    assert stratum == STRATUM_ALL
+    calibration.conformal_intervals([380.0, 390.0, 400.0, 410.0, 420.0], table, stratum)   # every α present
+
+
+def test_a_null_covariate_is_refused_rather_than_read_as_false():
+    """A present-null `established_at_anchor` cast to False and moved the flight into the
+    vectored stratum."""
+    from approach_difficulty import strata_masks
+    rows = {"a": _covariates(established=True), "b": {**_covariates(), "established_at_anchor": None}}
+    with pytest.raises(ValueError, match="established_at_anchor"):
+        strata_masks(rows, ["a", "b"])

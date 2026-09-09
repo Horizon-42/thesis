@@ -315,6 +315,7 @@ def evaluate_split(
         replay.predicted_time_s,
         replay.segment_durations_s,
         points=config.validation_common_grid_points,
+        anchor=dataset.anchor,
     )
     indices_by_airport: dict[str, list[int]] = {}
     for index, item in enumerate(dataset.series):
@@ -330,6 +331,7 @@ def evaluate_split(
             replay.predicted_time_s[selected],
             replay.segment_durations_s[selected],
             points=config.validation_common_grid_points,
+            anchor=dataset.anchor,
         )
         by_airport[airport] = {
             key: airport_block[key]
@@ -344,7 +346,6 @@ def evaluate_split(
                 "vertical_m",
                 "final_time_s",
                 "prediction_horizon_cap_rate",
-                "invalid_flights",
             )
         }
     block["flight_micro_ade_m"] = block["ade_m"]
@@ -367,15 +368,13 @@ def evaluate_split(
     # Raw model nodes on their own predicted clock: no measured-track interpolation,
     # spline, filtering or CZML resampling. Durations are explicit [B,N] so this call site
     # remains valid when the output layer moves from uniform to nonuniform segments.
-    active_segments = replay.segment_durations_s > 0.0
     block["raw_kinematics"] = raw_kinematic_metrics(
         replay.anchors,
         replay.predicted,
         replay.segment_durations_s,
-        valid_segments=active_segments,
     )
     observed_nodes, observed_duration_s, _ = fixed_anchor_common_truth(
-        dataset.series, config, replay.predicted.shape[1]
+        dataset.series, config, replay.predicted.shape[1], anchor=dataset.anchor
     )
     observed_segment_durations_s = np.broadcast_to(
         (observed_duration_s / replay.predicted.shape[1])[:, None],
@@ -410,6 +409,7 @@ def evaluate_fixed_anchor_common_grid(
         replay.predicted_time_s,
         replay.segment_durations_s,
         points=config.validation_common_grid_points,
+        anchor=dataset.anchor,
         normalizer=normalizer,
     )
     return {
@@ -545,10 +545,13 @@ def build_validation_batch_plan(
         dataset.config.checkpoint_selection_metric
         in CHECKPOINT_SELECTION_COMMON_GRID_METRICS
     ):
-        common_truth = fixed_anchor_common_truth(
+        # At the anchors the windows were actually built at — under a common floor that
+        # is the floor, not L-1 (review A-2).
+        common_truth = common_truth_at_anchors(
             dataset.series,
             dataset.config,
             dataset.config.validation_common_grid_points,
+            dataset.anchor_indices,
         )
     return ValidationBatchPlan(
         dataset=dataset,
@@ -904,10 +907,12 @@ def common_grid_validation_details(
                 replay.predicted_time_s,
                 replay.segment_durations_s,
                 points=config.validation_common_grid_points,
-                common_truth=(
-                    common_truth_by_airport[airport]
+                # The plan's cached truth when the loop has one; else built here at the
+                # window set's own anchor.
+                **(
+                    {"common_truth": common_truth_by_airport[airport]}
                     if common_truth_by_airport is not None
-                    else None
+                    else {"anchor": dataset.anchor}
                 ),
             )
             details[airport] = {

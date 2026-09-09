@@ -11,14 +11,19 @@ from fixed_dt_supervision import FixedDTControlSupervision
 
 
 def last_reliable_terminal_velocity_target(
-    normalized_anchor_state: torch.Tensor,
+    anchor_state: torch.Tensor,
     supervision: FixedDTControlSupervision,
 ) -> torch.Tensor:
-    """Return the last measured velocity target, never a fitted-tail placeholder."""
+    """Return the last measured velocity target, never a fitted-tail placeholder.
+
+    ``anchor_state`` is a PHYSICAL ``[B, C]`` state (its values are the fallback where a
+    flight has no reliable velocity row); it was named ``normalized_anchor_state`` until
+    2026-09-09 while every caller passed physical units (review C-20).
+    """
 
     indices = list(VELOCITY_IDX)
     weights = supervision.weights[..., indices].to(
-        device=normalized_anchor_state.device
+        device=anchor_state.device
     )
     row_valid = supervision.valid.to(device=weights.device) & torch.all(
         weights > 0.0, dim=-1
@@ -29,12 +34,12 @@ def last_reliable_terminal_velocity_target(
     last = torch.where(row_valid, row_numbers, -torch.ones_like(row_numbers)).amax(dim=1)
     safe_last = last.clamp(min=0)
     states = supervision.states.to(
-        dtype=normalized_anchor_state.dtype,
-        device=normalized_anchor_state.device,
+        dtype=anchor_state.dtype,
+        device=anchor_state.device,
     )
     rows = torch.arange(len(states), device=states.device)
     future_target = states[rows, safe_last][:, indices]
-    anchor_target = normalized_anchor_state[:, indices]
+    anchor_target = anchor_state[:, indices]
     return torch.where((last >= 0).unsqueeze(1), future_target, anchor_target)
 
 

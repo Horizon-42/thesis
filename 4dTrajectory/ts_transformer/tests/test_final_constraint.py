@@ -180,8 +180,8 @@ def test_batches_carry_the_final_approach_context_only_when_the_recipe_needs_it(
     # The probe carries the same keys as the real rows; the control dynamics share only
     # the runway heading (a control recipe cannot bound or penalise the corridor).
     assert tuple(probe_final_approach(2, torch.device("cpu"))) == fag.FINAL_APPROACH_KEYS
-    assert "runway_heading_rad" in probe_dynamics(2, torch.device("cpu"))
-    assert "final_approach_fix_m" not in probe_dynamics(2, torch.device("cpu"))
+    assert "runway_heading_rad" in probe_dynamics(2, torch.device("cpu"), plain)
+    assert "final_approach_fix_m" not in probe_dynamics(2, torch.device("cpu"), plain)
 
 
 def test_procedure_loss_charges_predicted_rows_where_the_truth_is_established():
@@ -471,7 +471,7 @@ def test_control_dynamics_carry_the_glidepath_for_the_rollout_penalty():
     rows = dynamics_arrays(series[0], config.seq_len - 1)
     assert rows["glidepath_tan"] == pytest.approx(math.tan(-series[0].scenario.target.gamma))
     assert "final_approach_fix_m" not in rows
-    assert "glidepath_tan" in probe_dynamics(2, torch.device("cpu"))
+    assert "glidepath_tan" in probe_dynamics(2, torch.device("cpu"), config)
 
 
 def test_control_training_with_the_penalty_charges_the_rollout_and_logs_the_counts(tmp_path):
@@ -531,3 +531,55 @@ def test_recipe_content_survives_a_json_round_trip_under_its_frozen_check(tmp_pa
     assert completed.returncode != 0
     assert "frozen" not in completed.stderr and "unsupported override" not in completed.stderr, completed.stderr
     assert "nonexistent" in completed.stderr, completed.stderr
+
+
+# ── review 2026-09-09 ────────────────────────────────────────────────────────
+
+def test_a_corridor_gate_nothing_reads_is_refused():
+    """Review C-4: only the corridor-bounded output layer reads `corridor_gate`; elsewhere
+    the value renamed the run (`gate=faf`) and changed no trajectory."""
+    with pytest.raises(ValueError, match="read only by state_position_reference"):
+        TSConfig(corridor_gate=CORRIDOR_GATE_FAF)
+    TSConfig(state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED, corridor_gate=CORRIDOR_GATE_FAF)
+
+
+def test_project_onto_final_is_threshold_relative_under_the_airport_frame():
+    """Review C-11: the corridor geometry is written about the threshold, and under
+    `airport-enu` the chart origin is the airport reference point, 1-2 km away. The
+    projection must clamp about the threshold: the same physical path, expressed in the
+    two frames, projects to the same physical result."""
+    enu_series, _c = _series(n_flights=1)
+    apt_series, _c = _series(n_flights=1, coordinate_frame="airport-enu")
+    enu, apt = enu_series[0], apt_series[0]
+    assert np.allclose(enu.target_chart, 0.0)
+    shift = np.asarray(apt.target_chart, dtype=np.float64)
+    assert np.linalg.norm(shift[:2]) > 500.0
+    psi = float(enu.scenario.target.psi)
+    ue, un = math.cos(psi), math.sin(psi)
+    d = np.array([12_000.0, 10_000.0, 8_000.0, 6_000.0, 4_000.0, 2_000.0])
+    xt = -450.0
+    rows = np.zeros((len(d), C))
+    rows[:, ch.IDX["e"]] = -d * ue + xt * un
+    rows[:, ch.IDX["n"]] = -d * un - xt * ue
+    rows[:, ch.IDX["u"]] = d * math.tan(math.radians(3.0)) - 100.0
+    rows[:, ch.IDX["edot"]], rows[:, ch.IDX["ndot"]] = 70.0 * ue, 70.0 * un
+    durations = np.full(len(rows), 2.0)
+
+    def forecast_for(item, positions):
+        return Forecast(
+            times=np.arange(1, len(rows) + 1) * 2.0, values=positions,
+            normalized_progress=np.linspace(0, 1, len(rows)),
+            anchor=item.n_samples - 1, final_time_s=2.0 * len(rows),
+            predicted_final_time_s=2.0 * len(rows), horizon_mode="full", passes=1,
+            truncated_at_threshold=True, horizon_capped=False,
+            sample_durations_s=durations, segment_durations_s=durations,
+        )
+
+    shifted = rows.copy()
+    shifted[:, :3] += shift[:3]
+    projected_enu = project_onto_final(forecast_for(enu, rows), enu, CORRIDOR_GATE_ON_FINAL)
+    projected_apt = project_onto_final(forecast_for(apt, shifted), apt, CORRIDOR_GATE_ON_FINAL)
+    # Something was clamped (the rows sit 450 m left and 100 m low of the corridor)...
+    assert not np.allclose(projected_enu.values[1:, :3], rows[1:, :3])
+    # ...and the two frames agree on the physical result to the metre.
+    assert np.allclose(projected_apt.values[:, :3] - shift[:3], projected_enu.values[:, :3], atol=1e-6)

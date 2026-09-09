@@ -243,3 +243,48 @@ def test_a_counterfactual_cta_skips_the_flights_it_cannot_be_asked_of(tmp_path: 
     assert all(row["final_time_error_s"] == pytest.approx(offset, abs=1e-3) for row in summary["results"])
     with pytest.raises(SystemExit):
         run(tmp_path / "none", -(durations[-1] + 1.0))
+
+
+# ── review 2026-09-09: predict's contract holes ──────────────────────────────
+
+def test_predict_writes_every_directory_through_one_emitter():
+    """Review C-6: the `modes/`, `random/`, `quantiles/` and `shuffled/` write_batch calls
+    omitted `skipped`, so under `--cta-offset-s` they published a subset as the split. One
+    emitter carries it to every directory — pinned on the source, since exercising every
+    arm needs a latent AND a quantile checkpoint."""
+    import inspect
+    import cli.predict as predict_module
+    source = inspect.getsource(predict_module.run_cli)
+    assert source.count("write_batch(") == 1
+    assert "skipped=skipped" in source
+
+
+def test_predict_records_the_aircraft_type_it_built_the_series_under_and_refuses_a_pooled_airport(tmp_path: Path, monkeypatch):
+    """Review C-5: `--aircraft-type X` built the series under X but the config written
+    beside the records (and the run name) recorded the checkpoint's type. Review C-19:
+    repeated `--data` with `--airport` re-homes another airport's flights; train refused
+    it, predict did not."""
+    import cli.predict as predict_module
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=8, seed=3)
+    config = _config()
+    series, _report = build_series(flights, config, airport=AIRPORT)
+    provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                  "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
+    train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
+    monkeypatch.setattr(predict_module, "provenance_from_args", lambda _args: provenance)
+    monkeypatch.setattr(predict_module, "load_flight_dicts", lambda _path, include_flight_keys=None: flights)
+    assert config.aircraft_type != "B738"
+    assert ts_cli.main([
+        "predict", "--checkpoint", str(tmp_path / "run" / "checkpoint.pt"),
+        "--data", str(tmp_path / "manifest.json"), "--airport", AIRPORT,
+        "--output-dir", str(tmp_path / "pred"), "--split", "val", "--device", "cpu",
+        "--aircraft-type", "B738",
+    ]) == 0
+    summary = json.loads((tmp_path / "pred" / "summary.json").read_text())
+    assert summary["config"]["aircraft_type"] == "B738"
+    with pytest.raises(SystemExit):
+        ts_cli.main([
+            "predict", "--checkpoint", str(tmp_path / "run" / "checkpoint.pt"),
+            "--data", str(tmp_path / "a.json"), "--data", str(tmp_path / "b.json"),
+            "--airport", AIRPORT, "--output-dir", str(tmp_path / "pooled"), "--split", "val",
+        ])

@@ -145,3 +145,25 @@ def test_point_mass_backends_refuse_a_hook(backend, roll):
     assert repr(backend) in str(info.value) and repr(CONTROL_DYNAMICS_POINT_MASS) in str(info.value)
     plain = control_rollout.rollout_control_endpoints(controls, durations, dynamics, config)
     assert torch.equal(plain.controls, controls.to(plain.controls.dtype))
+
+
+# ── review 2026-09-09 C-2: `off` is held to the same rule as a built hook ─────
+
+def test_barrier_gains_and_hard_saturation_are_refused_under_no_hook():
+    """The refusal sat under `elif hook_modules:`, so `off` skipped it: a barrier gain or
+    a hard saturation under no hook trained bit-identically to the arm without them, under
+    a different name and slug. `nominal-residual` (stored-only, builds nothing) is exempt."""
+    from config import (
+        CONTROL_HOOK_NOMINAL_RESIDUAL, CONTROL_HOOK_OFF, HOOK_SATURATION_HARD,
+    )
+    base = dict(prediction_output=PREDICTION_CONTROL, control_command_hook=CONTROL_HOOK_OFF)
+    with pytest.raises(ValueError, match="needs a command hook that contains 'barrier'"):
+        TSConfig(**base, control_barrier_alpha=0.3)
+    with pytest.raises(ValueError, match="there is no hook"):
+        TSConfig(**base, control_hook_saturation=HOOK_SATURATION_HARD)
+    TSConfig(**base)   # the defaults are fine
+    # The six stored 2026-09-06 nominal-residual configs (one with heading gain 0.3) load.
+    TSConfig(prediction_output=PREDICTION_CONTROL, control_command_hook=CONTROL_HOOK_NOMINAL_RESIDUAL,
+             control_dynamics_model=CONTROL_DYNAMICS_FIRST_ORDER_LAG,
+             control_dynamics_backend="scaled-transport-chart-velocity",
+             control_barrier_heading_gain=0.3)

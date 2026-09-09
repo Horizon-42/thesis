@@ -100,16 +100,17 @@ def _read_bound_release(
         release = json.loads(release_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise TestReleaseError(f"cannot audit test release {release_path}: {exc}") from exc
-    test_keys = _flight_keys(checkpoint_payload)
-    stored_provenance = checkpoint_payload.get("data_provenance")
+    _flight_keys(checkpoint_payload)
     if not isinstance(release, dict) or release.get("schema_version") != TEST_RELEASE_SCHEMA:
         raise TestReleaseError("test release has an unsupported schema")
+    # The ONE binding: the checkpoint file's digest. The ledger also records the split's
+    # and the provenance's digests as audit information, but they are not re-checked
+    # here — both are functions of the payload this digest just proved identical, so a
+    # check on them could never fire (review C-7). What the digest does NOT bind is the
+    # DIRECTORY: a checkpoint copied elsewhere has no ledger beside it and `create_test_release`
+    # would freeze it afresh — an open protocol decision, recorded in docs/OPEN_ITEMS.md.
     if release.get("checkpoint_sha256") != file_sha256(checkpoint):
         raise TestReleaseError("test release is bound to a different checkpoint")
-    if release.get("test_split_sha256") != _json_sha256(sorted(test_keys)):
-        raise TestReleaseError("test release is bound to a different outer-test split")
-    if release.get("data_provenance_sha256") != _json_sha256(stored_provenance):
-        raise TestReleaseError("test release is bound to different arrival data")
     if not isinstance(release.get("claims"), list):
         raise TestReleaseError("test release has no auditable claims list")
     return release_path, release

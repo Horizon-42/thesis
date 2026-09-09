@@ -582,3 +582,25 @@ def test_the_metric_names_the_run() -> None:
         or dict(rn.dropped_meta_diffs(grid)).get("checkpoint_selection_metric")
         == CHECKPOINT_SELECTION_ANCHOR_GRID_ADE
     )
+
+
+# ── review 2026-09-09 A-2: the truth is taken where the windows were anchored ──
+
+def test_the_l1_plan_truth_follows_a_common_anchor_floor(cohort) -> None:
+    """`run_ts_history_ablation.py` trains every candidate seq_len at `max(L) - 1`; the
+    L-1 plan's truth used to be built at `seq_len - 1` regardless, i.e. `(max L - L) * dt`
+    EARLIER than the anchor the prediction was made from, which corrupted the kept epoch
+    and every metric that runner published."""
+    config, series, normalizer, _model, _val_sets = cohort
+    floor = config.seq_len - 1 + 3
+    floored = validation_datasets(series, config, normalizer, minimum_anchor_index=floor)[AIRPORT]
+    assert floored.anchor == floor
+    assert floored.anchor_indices == [floor] * len(floored.series)
+    assert all(anchor == floor for _s, anchor in floored.index)
+    plan = val.build_validation_batch_plan(floored, 8)
+    _truth, durations, _progress = plan.common_truth
+    expected = [item.supervision_times[-1] - item.times[floor] for item in floored.series]
+    assert np.allclose(durations, expected)
+    # ...and the unfloored set anchors at L-1, where it always did.
+    plain = validation_datasets(series, config, normalizer)[AIRPORT]
+    assert plain.anchor == config.seq_len - 1

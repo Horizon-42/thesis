@@ -632,12 +632,17 @@ Plus 283 rows unmatched anywhere (mostly foreign registrations: Mexico, Ireland,
 **Verified** (2026-09-08, A2b review). `default_anchor(config)` moved from `forecast.py` to
 `config.py` so `dataset` could reserve a share of its random draws for L−1 without an import
 cycle. It is now importable everywhere `config` already is, but the literal `config.seq_len - 1`
-is still the spelled-out L−1 anchor in `train.py:403/449`, `fixed_anchor_validation.py:95/109/161`,
-`cli/predict.py:398`, `anchor_grid.py:154`, `approach_clustering/cli.py:71`,
-`run_ts_anytime_curve.py:743`, `run_ts_predictability_report.py` (×5),
+is still the spelled-out L−1 anchor in `anchor_grid.py:154`, `approach_clustering/cli.py:71`,
+`run_ts_anytime_curve.py:743`, `run_ts_predictability_report.py` (×4),
 `run_ts_clock_attribution.py:115` and `run_ts_control_capacity_ceiling.py:233` — every one of
-which already imports `config`. A pure rename, no behaviour: the value is the same either way,
-which is why it was left out of the A2b change rather than folded into it.
+which already imports `config`. A pure rename, no behaviour, at THOSE sites.
+
+**Corrected 2026-09-09 (package review A-2)**: the `train.py`, `fixed_anchor_validation.py` and
+`cli/predict.py` sites this entry listed were NOT pure renames — under a common anchor floor
+(`minimum_anchor_index`, the history ablation) they had to read the floor, and renaming them to
+`default_anchor` would have preserved the defect. They now read `dataset.fixed_anchor_index` /
+`FixedAnchorTrajectoryWindows.anchor`. The runner-side sites above are replay paths with no
+floor and stay a rename for the §4.5 runner move.
 
 ## 27. `cli/predict.py` builds prediction records at six near-identical sites
 

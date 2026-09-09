@@ -6,6 +6,48 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
+## Decisions left open by the 2026-09-09 package review (branch `dev-pkg-review`)
+
+The review's bugs are fixed (its §7 is the ledger; changelog entry of the same date). These
+are the items that change a stored artifact's name, reuse or number, or a protocol, and so
+were NOT made without the owner:
+
+- **C-3, two identity-bearing fields stay unnamed.** `lr_plateau_patience` (8 or 12, never
+  the default 3, in 170 of 219 stored runs) and `random_train_anchor_min_future_s` (20 s in 7)
+  are in `run_naming.KNOWN_UNNAMED_FIELDS` with that reason; naming them moves those runs'
+  display names and slugs. Two custom arms differing only there share a name until then
+  (their `checkpoint_metadata.json` differs).
+- **C-4, the duration floor under `uniform`.** `control_duration_uniform_floor` is read by the
+  `factorized` head only, but its default is 0.8 and every recipe pins 0.0, so 88 stored
+  `uniform` runs carry a non-default inert value and a refusal would stop them loading. It
+  belongs inside `Factorized(floor)` in the §4.3 config split; until then a custom `uniform`
+  run can still wear `duration-floor=`.
+- **C-7, the test-release ledger is bound to the DIRECTORY.** `test_release.json` sits beside
+  `checkpoint.pt`; a copy of the checkpoint elsewhere can be frozen and released again. The fix
+  is a registry keyed by the checkpoint digest outside the run directory — where it lives and
+  how tests isolate it is the decision. No ledger exists on disk today, so it costs nothing
+  whenever it is made.
+- **C-9, `cv_results.json` misnames the selection metric as a loss.** `mean_/std_val_macro_loss`
+  at the candidate level hold the SELECTION value (ADE, metres); the fold rows' `best_val_macro_loss`
+  is the loss. Renaming means a schema bump, after which the two stored files (2026-08-16
+  `POOLED/ts_patchtst_normalized_time`, 2026-08-18 `KSJC/experiments/cv_tau_bank_20260818`)
+  are no longer reusable by `--skip-cv`. The writer says so in a comment; nothing renamed.
+- **C-12, the load-factor floor.** The learned head's box floor is 0.2 (`control/envelope.py`)
+  and `flyability`'s hard floor is 0.5, so a segment at n ∈ [0.2, 0.5) is unflyable by
+  construction on the metric every control arm publishes. Moving the head's floor changes every
+  control checkpoint's decoded controls; moving the grader's changes every published flyability
+  number. Not measured how often a trained head emits n < 0.5
+  (`control/training/diagnostics.py` saturation counts would say) — measure first.
+- **A-2's consequence.** Every number `run_ts_history_ablation.py` published before 2026-09-09
+  was scored against a truth taken `(max L − L)·dt` before its anchor; the runner is unchanged
+  and correct now, its stored outputs are not.
+- **§5 retirements and §4.2–4.5.** The review's freeze/delete list (closure, corridor-bounded,
+  intent truth-join, fixed-dt, the observed clock, scaled-tcv, airport-enu / runway-aligned to
+  FREEZE; `corridor_gate=faf`, the scene half, `train_only_diagnostics`, the dead parameters to
+  delete or archive), whether the dataclass defaults move to the current recipe, and the
+  config split / output strategies / loop extraction / runner move — each a worktree, a review
+  and a commit between campaigns, in the review's §6 order. Step 1 (the package) is done.
+
 ## Current state (2026-09-07) — the latent-intent design supersedes everything below it
 
 The control path was redesigned on 2026-09-07 (`docs/2026-09-07_latent_intent_design.zh.md`,
