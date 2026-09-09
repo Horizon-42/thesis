@@ -32,6 +32,7 @@ L2.e'（free bits 当预算：KL 保住了，top-1 反而变差），以及解�
 | L3.c 推迟吸收进走廊（只预测） | **跑完（2026-09-08，`l3c_delay_corridor_20260908`）**：hook 把横向偏出压回中线（+90 s：xt@thr p50 3288 → 5 m），偏移 0 处白拿（横向违反率 84 → 43 %、FDE 746 → 582）；时长精确服从（门 2 过）；但完全可飞 0 %（门 3 未过）、任意点违反率 86 %（门 1 分裂）；不可飞 99.9 % 是失速项、77–94 % 在剩余 ≥ 20 km 的外段（不是尾巴、不是蜿蜒）——模型在外段减速过头，延时再往那里压。下一个设计项待定：rollout 速度下限 + 汇入前路径拉长自由度 | `l3c_delay_corridor_20260908/readout.{json,txt}` | 门 2 过，门 1 分裂，门 3 未过；见 §六 L3.c 结果 |
 | L3.d 速度下限 hook（只预测） | **跑完（2026-09-08 夜）——三门全未过**：偏移 0 可飞 8 → 45 %，+60 s 只到 2.4 %；失速样本反增，新增推力越界（约 10 % 采样点）；下限单独没地方放延时 | `l3d_speed_floor_20260908/` | 见 §六 L3.d 结果 |
 | L3.e 路径拉长 hook（只预测） | **跑完（2026-09-09 凌晨）**：机制成立——推力越界 −85 %、失速 −84 %、载荷过低 −99 %，+0 完全可飞 45 → 78 %、+60 s 2.4 → 52 %，CTA 精确服从；但估计量用直线距离，雷达引导航班被过度拉长（偏移 0 就估出 391 s 多余，横向 p95 10 km），门 2 未过。L3.f 候选：surplus 改按参考 rollout 的剩余路径估计 | `l3e_path_stretch_20260908/readout.json` | 门 1 擦线、门 2 未过、门 3–5 过；见 §六 L3.e 结果 |
+| L3.f 参考 rollout 估计 surplus（只预测） | **预注册（2026-09-09，用户决定；hook 改动在建）**：只改 trombone 的 surplus 估计量，同四臂同协议 | `l3f_path_stretch_ref_arms.json` | L3.e 五门 + 偏移 0 tromboneDelayS ≤ 30 s + 偏移 0 \|xt\| p95 ≤ 3.2 km；见 §六 L3.e 末 |
 | 直线进近残差分解（测量） | **完成（2026-09-08）**：沿航迹占水平误差² 89–95 %，集中在最后 5 km（p10..p90 ±700 m）；给定真值时长只去偏置（−191 → +8 m）不去散布（RMS 333 → 316）；减速点偏移 p10/p90 ±1.4 km、解释末段方差 22 %（风 10 %）。是速度指令意图，不是动力学。L3.b 减速点 oracle 臂待用户决定 | `run_ts_straight_in_residual_readout.py`、`2026-09-08_straight_in_residual_readout.zh.md` | 无门 |
 | L4 场景条件（先验吃邻机） | **前置测量完成，门不过（2026-09-07）**：场景实体特征对 d_join / 剩余时长**零增量**（R² 0.37 vs Phase 0 粗上下文 0.38；34.7 vs 35.1 s）；可观测的前机 ETA 与其真实落地时刻相关仅 0.11。场景编码器**不建**（数据平面 review 未发现泄漏或帧/基准错误；HIGH/MEDIUM 项已修，测量成立） | `intent_explainability.py`、`run_ts_scene_explainability.py`；产物 `l4_scene_explainability_20260907/` | KL(q‖p) 下降 ∧ 雷达引导 top-1 改善 |
 | L5 先验三臂 / 合并机场 / 多机 | **L5.a 拟合跑完（2026-09-08，`l5_fitted_teacher_20260907/basis_fit.json`，49 min，train+val 8255 架全覆盖，N=32、网络初值、400 步 × batch 1024）**：val fitADE p50 **106 m**（p90 737、p99 1320），train 108 m；种子（native32 自身输出）542 → 106 m，5 倍；**best step p50 = 400 两个 split 都顶在预算上限，仍在下降**——上界不紧，L5.a 臂读数弱先怀疑步数。L5.a 臂按 2026-09-08 重排降为队列末尾（教师只做上界）；其余未开始 | `run_ts_control_basis_oracle.py --checkpoint`、`control_imitation_target` / `control_fitted_teacher_path`、`control/basis_fit.py` 的表加载器、`docs/experiments/l5_fitted_teacher_arms.json`、`tests/test_fitted_teacher.py` | 见 §七 |
@@ -987,8 +988,11 @@ runway 轴里到跑道口的直线距离 `D`、以及速度下限模块在同一
 就有 391 s——真值 CTA 下本不该有"吸收不了的延时"。原因是估计量用**到阈值的直线距离**算路径所需时间，而雷达引导航班的真实/预测路径（三边、
 四边）远长于直线，于是把整段引导都当成"多余时间"去拉长：终点横偏 p95 10 km，偏移 0 有 46 % 的航班在 CTA 时刻没飞到阈值，ADE 4.4 km。
 (3) 修法明确：拉长量应对**模型自己预测的剩余路径长度**（无 hook 的参考 rollout，名义律 hook 已有并行参考 rollout 的机制）而不是直线距离——
-**L3.f 候选（待用户决定）**：`trombone` 改用参考 rollout 的剩余路径时间估计 surplus，其余不变，同一协议重跑四臂；预期偏移 0 的
-`tromboneDelayS` 归零、横向 p95 回到 L3.c hook 的 1.6 km 量级，门 2 的 52 % 有望大幅上移。
+**L3.f（用户决定 2026-09-09，预注册，`l3f_path_stretch_ref_arms.json`，campaign `l3f_path_stretch_ref_20260909`）**：只改估计量——surplus = 剩余时间 −
+无 hook 参考 rollout 的剩余路径在 V_e 下所需时间（复用名义律 hook 的并行参考 rollout），config 轴 `trombone_surplus_reference ∈ {beeline, reference-rollout}`，
+默认 beeline 使 L3.e 可复现；同四臂、同协议。**门**：L3.e 的五道 + (6) 偏移 0 的 `tromboneDelayS` p50 ≤ 30 s（估计量不再凭空造出多余）+ (7) 偏移 0 的
+终点 \|xt\| p95 ≤ 2× L3.c hook 臂的 1611 m。决定性数字：+60 s 完全可飞（L3.e 52.4 %，门 88.4 %）、偏移 0 到达阈值的份额（L3.e 54 %）、
+`tromboneDelayS` 是否仍每 30 s 偏移增 30 s。
 
 ### L4 — 场景条件（先验吃邻机；≈2 周）
 

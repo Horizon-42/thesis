@@ -1,0 +1,18 @@
+{
+  "_comment": "L3.f (pre-registered 2026-09-09, user decision): L3.e's trombone sizes the stretch against the BEELINE distance to the threshold, so a vectored flight whose intended path is far longer than the beeline is read as having a huge surplus (tromboneDelayS p50 391 s at offset 0) and is over-stretched (endpoint |xt| p95 10 km, 46 % of flights not reaching the threshold by T_cta at offset 0). L3.f changes only the estimator: surplus = remaining time minus the time the HOOK-FREE REFERENCE ROLLOUT's remaining path needs at V_e (the nominal-law hook already integrates such a parallel reference; reuse it), config axis trombone_surplus_reference in {beeline, reference-rollout}, default beeline so L3.e stays reproducible. Same four predict-only arms on L3_cta, barrier+speed-floor+trombone, soft, --truncate-at-threshold. GATES: L3.e's five, plus (6) tromboneDelayS p50 at offset 0 <= 30 s (the estimator no longer invents surplus) and (7) endpoint |xt| p95 at offset 0 <= 2x the L3.c hook arm's 1611 m. The decisive numbers: fully-flyable at +60 (L3.e 52.4 %, gate 88.4 %), the share of flights reaching the threshold at offset 0 (L3.e 54 %), and whether tromboneDelayS still rises exactly 30 s per 30 s of offset.",
+  "base_recipe": "simple-v3",
+  "arms": [
+    {"key": "L3f_ref_p0s", "label": "true CTA + barrier+speed-floor+trombone (surplus vs reference rollout)",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft", "--trombone-surplus", "reference-rollout", "--truncate-at-threshold"]},
+    {"key": "L3f_ref_p30s", "label": "CTA +30 s + three-hook stack, reference-rollout surplus",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--cta-offset-s", "30", "--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft", "--trombone-surplus", "reference-rollout", "--truncate-at-threshold"]},
+    {"key": "L3f_ref_p60s", "label": "CTA +60 s + three-hook stack, reference-rollout surplus",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--cta-offset-s", "60", "--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft", "--trombone-surplus", "reference-rollout", "--truncate-at-threshold"]},
+    {"key": "L3f_ref_p90s", "label": "CTA +90 s + three-hook stack, reference-rollout surplus",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--cta-offset-s", "90", "--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft", "--trombone-surplus", "reference-rollout", "--truncate-at-threshold"]}
+  ]
+}
