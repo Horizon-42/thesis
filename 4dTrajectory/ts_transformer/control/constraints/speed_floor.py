@@ -214,3 +214,7 @@ class SpeedFloor:
         if self._counts is None:
             return {name: torch.zeros(0, dtype=torch.float64) for name in _DIAGNOSTIC_KEYS}
         return dict(zip(_DIAGNOSTIC_KEYS, self._counts.cpu().unbind()))
+
+    def diagnostic_labels(self) -> dict[str, str]:
+        """No named variants: this module computes one thing one way."""
+        return {}

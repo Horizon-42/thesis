@@ -23,17 +23,38 @@ them cannot change it. The trombone last is then a free choice made by the value
 and it pays for it with a 25 deg turn cap, so the load factor it coordinates cannot raise the
 stall speed past the margin the floor just held (``control/constraints/trombone.py``).
 
+**The hook-free reference rollout is a member of the composite, not a private trick of one
+module.** ``needs_reference`` is the OR of the members', so under
+``trombone_surplus_reference="reference-rollout"`` the value ``barrier+speed-floor+trombone``
+gains a fourth thing the rollout does: the network's own schedule is integrated UNHOOKED as
+well (``control/dynamics/hooks.py``), once, before the first hooked segment, and every
+member sees it as ``RolloutStateView.reference``. **Cost**: one more integration of the same
+schedule, paid ONCE and not per step — about 2x the SEGMENTED rollout's wall time and memory
+(at predict the dense re-integration runs on top of that and is untouched, so the whole
+predict step grows by less than that). The trombone then derives its own per-segment table
+from it at ``segment_index == 0`` and indexes that table thereafter, so the per-step cost of
+the axis is an index. Under the default ``beeline`` no member asks for it and nothing extra
+is integrated.
+
 Diagnostics are merged rather than nested, so a hook record keeps one flat shape however
 many modules ran. ``hook_steps`` is the one key they all report and it means the same thing
 in each (every module is called on every segment of every row), so it is taken once; any
-other collision is a genuine ambiguity and is refused at construction.
+other collision is a genuine ambiguity and is refused at construction. The labels
+(``diagnostic_labels`` — which named variant a module ran) merge the same way and under the
+same refusal: they are strings and share the counts' namespace, so a collision there is the
+same ambiguity.
 """
 
 from __future__ import annotations
 
+from typing import Iterable, TypeVar
+
 import torch
 
 from control.dynamics.hooks import HOOK_STEPS_KEY, CommandHook, RolloutStateView
+
+#: Counts (tensors) and labels (strings) merge by the same rule, under the same refusal.
+_Reported = TypeVar("_Reported", torch.Tensor, str)
 
 
 class CompositeHook:
@@ -46,7 +67,7 @@ class CompositeHook:
         self.needs_reference = any(hook.needs_reference for hook in hooks)
         seen: set[str] = set()
         for hook in hooks:
-            keys = set(hook.diagnostics()) - {HOOK_STEPS_KEY}
+            keys = (set(hook.diagnostics()) | set(hook.diagnostic_labels())) - {HOOK_STEPS_KEY}
             clash = keys & seen
             if clash:
                 raise ValueError(
@@ -69,10 +90,13 @@ class CompositeHook:
     def per_flight_diagnostics(self) -> dict[str, torch.Tensor]:
         return _merge(hook.per_flight_diagnostics() for hook in self.hooks)
 
+    def diagnostic_labels(self) -> dict[str, str]:
+        return _merge(hook.diagnostic_labels() for hook in self.hooks)
 
-def _merge(blocks) -> dict[str, torch.Tensor]:
-    """Union the modules' counts; ``hook_steps`` is one shared count, not a sum."""
-    merged: dict[str, torch.Tensor] = {}
+
+def _merge(blocks: Iterable[dict[str, _Reported]]) -> dict[str, _Reported]:
+    """Union the modules' counts (or labels); ``hook_steps`` is one shared count, not a sum."""
+    merged: dict[str, _Reported] = {}
     for block in blocks:
         for key, value in block.items():
             if key == HOOK_STEPS_KEY and key in merged:

@@ -25,12 +25,14 @@ from config import (
     CONTROL_HOOK_BARRIER,
     CONTROL_HOOK_MEMBERS,
     CONTROL_HOOK_OFF,
+    CONTROL_HOOK_TROMBONE,
     CONTROL_SPEED_FLOOR_MARGIN_READERS,
     CORRIDOR_GATES,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_SELF_QUANTILE,
     HOOK_SATURATIONS,
     PREDICTION_CLOSURE,
+    TROMBONE_SURPLUS_REFERENCES,
 )
 from approach_difficulty import approach_difficulty
 from calibration import (
@@ -87,6 +89,9 @@ PREDICT_CONFIG_FLAGS: dict[str, str] = {
     "control_barrier_alpha": "--control-barrier-alpha",
     "control_barrier_heading_gain": "--control-barrier-heading-gain",
     "control_speed_floor_margin": "--control-speed-floor-margin",
+    # ...and the third deliberate short name: the arm files spell `--trombone-surplus`, and
+    # the field is `trombone_surplus_reference` because "reference" is what it names.
+    "trombone_surplus_reference": "--trombone-surplus",
 }
 _unknown = [name for name in PREDICT_CONFIG_FLAGS if name not in {f.name for f in fields(TSConfig)}]
 if _unknown:  # fail at import, like cli.common's list: a renamed field must rename here too
@@ -194,6 +199,14 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
              "checkpoint's stall margin, V_floor = margin x V_stall(n_commanded) — the "
              "speed the floor holds and the speed the trombone sizes its detour against "
              "(default: the checkpoint's, normally 1.1)",
+    )
+    parser.add_argument(
+        "--trombone-surplus", choices=TROMBONE_SURPLUS_REFERENCES, default=None,
+        help="with a --command-hook containing trombone: what the stretch is sized "
+             "against — 'beeline' (the default and what L3.e ran: the straight-line "
+             "distance to the threshold, which reads a vectored flight's intended downwind "
+             "and base as surplus time) or 'reference-rollout' (the remaining path of the "
+             "hook-free reference rollout, i.e. what the network itself intends to fly)",
     )
     parser.add_argument(
         "--closure-from-labels", default=None, metavar="JSON",
@@ -378,16 +391,19 @@ def run_cli(
             tunings.append(f"heading gain {config.control_barrier_heading_gain:g}")
         if any(name in modules for name in CONTROL_SPEED_FLOOR_MARGIN_READERS):
             tunings.append(f"stall margin {config.control_speed_floor_margin:g}")
+        if CONTROL_HOOK_TROMBONE in modules:
+            tunings.append(f"surplus vs {config.trombone_surplus_reference}")
         print(f"  command hook at prediction time: {args.command_hook} "
               f"({args.hook_saturation}); " + ", ".join(tunings))
     elif args.hook_saturation is not None:
         parser.error("--hook-saturation needs --command-hook")
     elif any(value is not None for value in gains.values()):
         # A gain without a hook would be serialized into nothing and change no trajectory.
+        # The list is the table's own, so a flag added there cannot go missing here.
+        named = " / ".join(sorted(PREDICT_CONFIG_FLAGS[name] for name in HOOK_TUNING_FIELDS))
         parser.error(
-            "--control-barrier-alpha / --control-barrier-heading-gain / "
-            "--control-speed-floor-margin need --command-hook; without it the rollout runs "
-            "the checkpoint's own hook setting"
+            f"{named} need --command-hook; without it the rollout runs the checkpoint's "
+            "own hook setting"
         )
     closure_labels = None
     if args.closure_from_labels is not None:

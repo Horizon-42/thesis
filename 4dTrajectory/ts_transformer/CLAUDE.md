@@ -373,6 +373,36 @@ excursion pinned outbound until the threshold plane ended it, 2.9 km wide. With 
 - **Under `barrier+trombone` the floor is an ASSUMPTION, not an enforced speed.** That stack is
   the ablation that isolates the stretch; nothing there holds the speed up, so read it as "the
   stretch alone", never as "the stretch under the floor it was sized against".
+- **What the surplus is measured against is an AXIS, and the default is the one L3.e failed on
+  (`trombone_surplus_reference`, L3.f, 2026-09-09).** `beeline` is the `D` above, and it reads a
+  vectored flight's own downwind and base as surplus time: at the TRUE CTA, `tromboneDelayS`
+  p50 391 s, endpoint `|xt|` p95 10 km, 46 % not reaching the threshold by `T_cta` — while the
+  mechanism itself was clean (30 s absorbed per 30 s of offset, thrust/stall/load −85/−84/−99 %).
+  `reference-rollout` (`predict --trombone-surplus reference-rollout`) adds to `D` the DETOUR
+  the HOOK-FREE reference rollout still intends: `detour = L_ref − S_ref`, its remaining path
+  to its first threshold crossing less the straight line to that same cut. So
+  `ΔL = V_e·T_r − D − detour`, positive part, then the same dog-leg `cos θ = D/(D + ΔL)`.
+  **Sizing against `L_ref` itself — the tempting reading — breaks it**, and that is the trap
+  to know: `L_ref` is indexed by the SCHEDULE and cannot see the excursion the hook is
+  flying, so the surplus never burns down, and past the reference's own crossing it
+  degenerates to the whole remaining reach. Measured on the 48-segment fixture: a clean 60 s
+  absorption became 19 steps pinned at the 45° offset cap ending 1.7 km wide (beeline: 0
+  saturated steps, 159 m), and a reference that decelerates and stops SHORT had its missing
+  metres read as surplus (9.4 s of delay invented on a flight with nothing to absorb). The
+  detour form has neither problem: `D` is the AIRCRAFT's own, and `detour` is non-negative
+  and non-increasing by the triangle inequality, so `dΔL/dt ≤ 0` survives as the identity it
+  is under `beeline`.
+  **The default stays `beeline` so every L3.e artifact reproduces to the bit** — records
+  included, which is why `tromboneRefPathM`, `tromboneRefNoCrossing` and the
+  `tromboneSurplusReference` label are ABSENT rather than zero under it (measured 2026-09-09:
+  1972 harness leaves over both stacks, trained and replayed, soft and hard — 0 differ; 333
+  stored runs recounted, 0 renamed). Under the axis the composite gains the hook-free rollout
+  (`needs_reference` — one extra integration of the schedule, once, ~2× the SEGMENTED
+  rollout; the per-step cost is an index into a table built at segment 0), and both lengths
+  are CHORD sums between segment boundaries (short by `sinc(Δψ/2)`: 0.15 % at 15° over a 5 s
+  hold, 2.8 % at 45°, and the two errors partly cancel in the difference). Refused away from
+  its default under a hook with no `trombone` in it, like the barrier's gains and the stall
+  margin.
 
 **Every hook reports per-FLIGHT counts, and that is what a record carries.**
 `per_flight_diagnostics()` returns `[B]` rows; `diagnostics()` is those summed and is what an
@@ -448,6 +478,10 @@ AND of the bank softness/active-change thresholds two modules now share; `compos
 several modules become the one hook the rollout takes, and it refuses two modules that report a
 diagnostic under the same name. Barrier and trombone both write bank and load factor and still
 compose, because their gates are COMPLEMENTARY: no step is ever rewritten by both.
+**`RolloutStateView.reference` is the hook-free schedule WHOLE** (`[B,N+1,7]`, one row per
+segment boundary, the anchor first) — not a lock-step state, because the questions that need
+it are look-ahead ones; it is the same tensor at every call, so a hook derives its table from
+it once at `segment_index == 0`. It exists only where a member declares `needs_reference`.
 
 **A dynamics backend is a ROW, not a class**: `control/dynamics/backends.py` maps the
 `(control_dynamics_model, control_dynamics_backend)` PAIR to
