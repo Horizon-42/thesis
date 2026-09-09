@@ -52,14 +52,14 @@ from evaluation_export import (  # noqa: E402
     summary_row,
 )
 
-from config import PREDICTION_CLOSURE  # noqa: E402
-from approach_difficulty import (  # noqa: E402
+from ts_transformer.config import PREDICTION_CLOSURE  # noqa: E402
+from ts_transformer.approach_difficulty import (  # noqa: E402
     approach_difficulty, difficulty_block,
 )
-from channels import states_from_channels  # noqa: E402
-from dataset import FlightSeries, flight_key  # noqa: E402
-from forecast import Forecast  # noqa: E402
-from metrics import (  # noqa: E402
+from ts_transformer.channels import states_from_channels  # noqa: E402
+from ts_transformer.dataset import FlightSeries, flight_key  # noqa: E402
+from ts_transformer.forecast import Forecast  # noqa: E402
+from ts_transformer.metrics import (  # noqa: E402
     RAW_KINEMATIC_METRIC_KEYS, common_physical_time_flight_metrics,
     raw_kinematic_metrics,
 )

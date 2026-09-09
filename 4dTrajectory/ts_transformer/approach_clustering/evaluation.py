@@ -7,11 +7,11 @@ import json
 from pathlib import Path
 from typing import Sequence
 
-from data_provenance import checkpoint_data_provenance, require_matching_data_provenance
-from dataset import build_series, load_flight_dicts
-from development_cohorts import load_development_cohort
-from models import resolve_device
-from train import evaluate_fixed_anchor_series, load_checkpoint
+from ts_transformer.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
+from ts_transformer.dataset import build_series, load_flight_dicts
+from ts_transformer.development_cohorts import load_development_cohort
+from ts_transformer.models import resolve_device
+from ts_transformer.train import evaluate_fixed_anchor_series, load_checkpoint
 
 
 def compare_checkpoints(

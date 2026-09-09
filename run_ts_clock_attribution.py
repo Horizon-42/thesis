@@ -18,23 +18,23 @@ from typing import Any, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
 import run_ts_predictability_report as common_report  # noqa: E402
-from config import PREDICTION_CONTROL  # noqa: E402
-from control.dynamics.rollout import rollout_control_endpoints  # noqa: E402
-from data_provenance import (  # noqa: E402
+from ts_transformer.config import PREDICTION_CONTROL  # noqa: E402
+from ts_transformer.control.dynamics.rollout import rollout_control_endpoints  # noqa: E402
+from ts_transformer.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,
 )
-from dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
-from models import resolve_device  # noqa: E402
-from train import load_checkpoint, usable_series  # noqa: E402
+from ts_transformer.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
 
 
 SCHEMA_VERSION = "ts-control-clock-attribution-v1-validation-only"

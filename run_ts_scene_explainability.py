@@ -39,13 +39,13 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 from flight_scenarios.scene_context import scene_context  # noqa: E402
-from intent_explainability import CONTEXT_NAMES, cv_r2, population  # noqa: E402
-from scene.features import SCALAR_NAMES, STATIC_NAMES, scene_arrays  # noqa: E402
+from ts_transformer.intent_explainability import CONTEXT_NAMES, cv_r2, population  # noqa: E402
+from ts_transformer.scene.features import SCALAR_NAMES, STATIC_NAMES, scene_arrays  # noqa: E402
 from trajectory_data_process.harvest.store import HarvestPaths  # noqa: E402
 from trajectory_data_process.scene_index import load_scene_index  # noqa: E402
 

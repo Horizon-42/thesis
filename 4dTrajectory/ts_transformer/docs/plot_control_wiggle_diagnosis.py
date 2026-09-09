@@ -20,8 +20,8 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
-sys.path.insert(0, str(REPO / "4dTrajectory" / "ts_transformer"))
-from control.dynamics.inverse import actual_controls  # noqa: E402
+sys.path.insert(0, str(REPO / "4dTrajectory"))
+from ts_transformer.control.dynamics.inverse import actual_controls  # noqa: E402
 
 EXPERIMENTS = REPO / "4dTrajectory" / "outputs" / "KSJC" / "experiments"
 BEFORE = "flight_model_paired"                 # zeroed control-head weights

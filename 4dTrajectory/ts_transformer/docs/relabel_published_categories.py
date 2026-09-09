@@ -25,11 +25,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT):  # repo root: config -> channels -> aerodynamic_model
+for path in (TS_DIR.parent, REPO_ROOT):  # repo root: config -> channels -> aerodynamic_model
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from run_naming import category_display_label, run_display_name  # noqa: E402
+from ts_transformer.run_naming import category_display_label, run_display_name  # noqa: E402
 
 AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
 OUTPUTS_ROOT = REPO_ROOT / "4dTrajectory" / "outputs"

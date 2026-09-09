@@ -23,24 +23,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_DIR = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
-from batching import is_cuda_oom  # noqa: E402
-from io_utils import sha256_bytes, write_json_atomic  # noqa: E402
+from ts_transformer.batching import is_cuda_oom  # noqa: E402
+from ts_transformer.io_utils import sha256_bytes, write_json_atomic  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
-from config import (  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
     MODELS,
     TSConfig,
 )
-from cross_validation import CV_OVERRIDE_FIELDS  # noqa: E402
-from dataset import (  # noqa: E402
+from ts_transformer.cross_validation import CV_OVERRIDE_FIELDS  # noqa: E402
+from ts_transformer.dataset import (  # noqa: E402
     Normalizer,
     TrajectoryWindows,
     build_series,
@@ -48,11 +48,11 @@ from dataset import (  # noqa: E402
     iter_batches,
     training_window_class,
 )
-from splits import split_name_for_dataset_id  # noqa: E402
-from batch_contract import anchor_state  # noqa: E402
-from models import build_model, parameter_count, resolve_device  # noqa: E402
-from objective import prediction_loss  # noqa: E402
-from train import usable_series  # noqa: E402
+from ts_transformer.splits import split_name_for_dataset_id  # noqa: E402
+from ts_transformer.batch_contract import anchor_state  # noqa: E402
+from ts_transformer.models import build_model, parameter_count, resolve_device  # noqa: E402
+from ts_transformer.objective import prediction_loss  # noqa: E402
+from ts_transformer.train import usable_series  # noqa: E402
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     load_arrival_flights,
     resolve_arrival_manifest,

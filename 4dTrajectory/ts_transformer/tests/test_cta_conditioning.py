@@ -16,8 +16,8 @@ import numpy as np
 import pytest
 import torch
 
-from batch_contract import model_forward
-from config import (
+from ts_transformer.batch_contract import model_forward
+from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -27,17 +27,17 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from control.conditioning import DYNAMICS_CONDITION_NAMES
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
-from export import build_prediction_record, observed_series_metrics, write_batch
-import batching
-from forecast import forecast_approaches, latent_mode_forecasts, shuffled_latent_forecasts
-from models import build_model
-from run_naming import run_display_name
-from synthetic import synthetic_arrivals
-from train import load_checkpoint, train
+from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
+from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
+import ts_transformer.batching as batching
+from ts_transformer.forecast import forecast_approaches, latent_mode_forecasts, shuffled_latent_forecasts
+from ts_transformer.models import build_model
+from ts_transformer.run_naming import run_display_name
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.train import load_checkpoint, train
 
 _CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_cta_test", Path(__file__).resolve().parents[1] / "__main__.py")
 assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
@@ -208,8 +208,8 @@ def test_a_counterfactual_cta_skips_the_flights_it_cannot_be_asked_of(tmp_path: 
     package's minimum remaining future are skipped and COUNTED in summary.json — never
     clamped, which would silently change the offset the scan is read against — and an
     offset that leaves no flight is refused."""
-    from config import DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S
-    import cli.predict as predict_module
+    from ts_transformer.config import DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S
+    import ts_transformer.cli.predict as predict_module
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)
     config = _config()
     series, _report = build_series(flights, config, airport=AIRPORT)
@@ -253,7 +253,7 @@ def test_predict_writes_every_directory_through_one_emitter():
     emitter carries it to every directory — pinned on the source, since exercising every
     arm needs a latent AND a quantile checkpoint."""
     import inspect
-    import cli.predict as predict_module
+    import ts_transformer.cli.predict as predict_module
     source = inspect.getsource(predict_module.run_cli)
     assert source.count("write_batch(") == 1
     assert "skipped=skipped" in source
@@ -264,7 +264,7 @@ def test_predict_records_the_aircraft_type_it_built_the_series_under_and_refuses
     beside the records (and the run name) recorded the checkpoint's type. Review C-19:
     repeated `--data` with `--airport` re-homes another airport's flights; train refused
     it, predict did not."""
-    import cli.predict as predict_module
+    import ts_transformer.cli.predict as predict_module
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=8, seed=3)
     config = _config()
     series, _report = build_series(flights, config, airport=AIRPORT)

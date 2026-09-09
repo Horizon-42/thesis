@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ts_transformer"
+version = "0.1.0"
+description = "AeroViz-4D learned 4D trajectory prediction (vendored iTransformer / PatchTST)"
+requires-python = ">=3.12"
+# Runtime dependencies are the conda `aeroviz` env's (torch, numpy, scipy, geokit …); this
+# file exists so `pip install -e 4dTrajectory` puts the package on the path the way geokit
+# is, instead of every runner inserting `4dTrajectory/` into sys.path by hand.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ts_transformer", "ts_transformer.*"]
+# `tests/`, `docs/` and `archive/` carry no __init__.py and are not packages; the archive
+# must stay off the import path (tests/test_architecture.py).
+exclude = ["ts_transformer.archive*"]

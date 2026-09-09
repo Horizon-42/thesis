@@ -11,13 +11,13 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (REPO_ROOT, TS_DIR):
+for path in (REPO_ROOT, TS_DIR.parent):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import run_ts_predictability_report as report  # noqa: E402
-from config import HORIZON_FULL, HORIZON_WINDOW, TSConfig  # noqa: E402
-from time_grids import output_time_grid  # noqa: E402
+from ts_transformer.config import HORIZON_FULL, HORIZON_WINDOW, TSConfig  # noqa: E402
+from ts_transformer.time_grids import output_time_grid  # noqa: E402
 
 
 def test_full_grid_shortens_the_last_segment_and_masks_padding():

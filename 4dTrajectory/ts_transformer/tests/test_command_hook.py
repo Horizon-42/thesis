@@ -12,19 +12,19 @@ import torch
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR, REPO_ROOT):
+for path in (TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from config import (  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_BACKENDS, CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS, PREDICTION_CONTROL, TSConfig,
 )
-from control.dynamics import rollout as control_rollout  # noqa: E402
-from control.dynamics.hooks import RolloutStateView  # noqa: E402
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
-from dataset import build_series, dynamics_arrays  # noqa: E402
-from synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.control.dynamics import rollout as control_rollout  # noqa: E402
+from ts_transformer.control.dynamics.hooks import RolloutStateView  # noqa: E402
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from ts_transformer.dataset import build_series, dynamics_arrays  # noqa: E402
+from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -153,7 +153,7 @@ def test_barrier_gains_and_hard_saturation_are_refused_under_no_hook():
     """The refusal sat under `elif hook_modules:`, so `off` skipped it: a barrier gain or
     a hard saturation under no hook trained bit-identically to the arm without them, under
     a different name and slug. `nominal-residual` (stored-only, builds nothing) is exempt."""
-    from config import (
+    from ts_transformer.config import (
         CONTROL_HOOK_NOMINAL_RESIDUAL, CONTROL_HOOK_OFF, HOOK_SATURATION_HARD,
     )
     base = dict(prediction_output=PREDICTION_CONTROL, control_command_hook=CONTROL_HOOK_OFF)

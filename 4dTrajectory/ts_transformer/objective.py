@@ -20,10 +20,10 @@ from typing import Callable
 import torch
 
 from aerodynamic_model.torch_dynamics import heading_rate_rad_s
-from batch_contract import LossComponents
-from channels import IDX, POSITION_IDX, VELOCITY_IDX
-from closure_output import ClosurePrediction, closure_loss_components
-from config import (
+from ts_transformer.batch_contract import LossComponents
+from ts_transformer.channels import IDX, POSITION_IDX, VELOCITY_IDX
+from ts_transformer.closure_output import ClosurePrediction, closure_loss_components
+from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
@@ -44,24 +44,24 @@ from config import (
     PROCEDURE_VERTICAL_SCALE_M,
     TSConfig,
 )
-from control.constraints import build_command_hook
-from control.dynamics import rollout as control_rollout
-from control.dynamics.backends import EndpointControlRollout
-from control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
-from control.latent import (
+from ts_transformer.control.constraints import build_command_hook
+from ts_transformer.control.dynamics import rollout as control_rollout
+from ts_transformer.control.dynamics.backends import EndpointControlRollout
+from ts_transformer.control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
+from ts_transformer.control.latent import (
     LATENT_AUX_COMPONENT,
     LATENT_KL_COMPONENT,
     LatentControlPrediction,
     with_latent_aux_duration,
     with_latent_kl,
 )
-from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
-from control.loss.fixed_dt import fixed_dt_control_state_loss
-from dataset import Normalizer
-from final_approach_geometry import corridor_violations, runway_axes, truth_final_gate
-from fixed_dt_supervision import FixedDTControlSupervision
-from prediction_outputs import ControlPrediction, StatePrediction, pinball_duration_loss
-from time_grids import batch_time_grid
+from ts_transformer.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
+from ts_transformer.control.loss.fixed_dt import fixed_dt_control_state_loss
+from ts_transformer.dataset import Normalizer
+from ts_transformer.final_approach_geometry import corridor_violations, runway_axes, truth_final_gate
+from ts_transformer.fixed_dt_supervision import FixedDTControlSupervision
+from ts_transformer.prediction_outputs import ControlPrediction, StatePrediction, pinball_duration_loss
+from ts_transformer.time_grids import batch_time_grid
 
 
 STATE_TARGET_CONTRACTS = {

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from config import (
+from ts_transformer.config import (
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
@@ -34,8 +34,8 @@ from config import (
     PREDICTION_CLOSURE,
     TROMBONE_SURPLUS_REFERENCES,
 )
-from approach_difficulty import approach_difficulty
-from calibration import (
+from ts_transformer.approach_difficulty import approach_difficulty
+from ts_transformer.calibration import (
     FAN_INTERVAL_ALPHA,
     QUANTILE_DIR_NAME,
     conformal_intervals,
@@ -44,20 +44,20 @@ from calibration import (
     load_conformal_table,
     quantile_directory_name,
 )
-from data_provenance import require_matching_data_provenance
-from closure_output import load_labels
-from dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
-from evaluation_protocol import (
+from ts_transformer.data_provenance import require_matching_data_provenance
+from ts_transformer.closure_output import load_labels
+from ts_transformer.dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
+from ts_transformer.evaluation_protocol import (
     TestReleaseError,
     begin_test_evaluation,
     complete_test_evaluation,
 )
-from export import (
+from ts_transformer.export import (
     accuracy_block, build_prediction_record, observed_series_metrics, write_batch,
 )
-from flyability import report_for_records
-from io_utils import file_sha256
-from forecast import (
+from ts_transformer.flyability import report_for_records
+from ts_transformer.io_utils import file_sha256
+from ts_transformer.forecast import (
     cut_at_threshold_crossing,
     default_anchor,
     duration_quantile_predictions,
@@ -68,8 +68,8 @@ from forecast import (
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
-from models import resolve_device
-from train import load_checkpoint
+from ts_transformer.models import resolve_device
+from ts_transformer.train import load_checkpoint
 
 from .common import (
     add_data_args,

@@ -25,10 +25,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from approach_difficulty import remaining_path_profile_m
+from ts_transformer.approach_difficulty import remaining_path_profile_m
 
 if TYPE_CHECKING:  # `dataset` imports this module; the type is an annotation only
-    from dataset import FlightSeries
+    from ts_transformer.dataset import FlightSeries
 
 #: The full measurement grid, in km of remaining path (design §2.3). The A0 runner's
 #: default; a whole curve, read from far to near. Re-exported by :mod:`anchor_grid`, which

@@ -85,7 +85,7 @@ import numpy as np
 from geokit import METRES_PER_DEG_LAT
 
 from aerodynamic_model.common import GeodeticState
-from coordinate_frames import CoordinateFrame
+from ts_transformer.coordinate_frames import CoordinateFrame
 
 # The channel contract. Order AND names are load-bearing — the tuple indexes every tensor,
 # the normalizer's per-channel statistics, and the checkpoint; load_checkpoint refuses a

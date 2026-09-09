@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 from typing import Any, Iterable
 
-from io_utils import utc_now
+from ts_transformer.io_utils import utc_now
 
 
 RESULT_SCHEMA = "ts-control-fixed-dt-single-flight-overfit-v3-clock-aligned-diagnostics"

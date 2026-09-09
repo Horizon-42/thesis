@@ -16,20 +16,20 @@ import gc
 import numpy as np
 import torch
 
-from batch_contract import anchor_state, model_forward
-from closure_output import probe_closure_context
-from config import (
+from ts_transformer.batch_contract import anchor_state, model_forward
+from ts_transformer.closure_output import probe_closure_context
+from ts_transformer.config import (
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     TSConfig,
     uses_closure_labels,
     uses_control_dynamics,
 )
-from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
-from dataset import Normalizer, probe_dynamics, probe_final_approach
-from fixed_dt_supervision import FixedDTControlSupervision
-from models import build_model
-from objective import prediction_loss
-from prediction_outputs import ControlPrediction
+from ts_transformer.control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
+from ts_transformer.dataset import Normalizer, probe_dynamics, probe_final_approach
+from ts_transformer.fixed_dt_supervision import FixedDTControlSupervision
+from ts_transformer.models import build_model
+from ts_transformer.objective import prediction_loss
+from ts_transformer.prediction_outputs import ControlPrediction
 
 _CANDIDATES = (8, 16, 32, 64, 128, 256, 512, 1024, 2048)
 

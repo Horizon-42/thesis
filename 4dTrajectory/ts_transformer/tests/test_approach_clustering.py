@@ -12,17 +12,17 @@ import pytest
 
 TS_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(TS_ROOT), str(REPO_ROOT)]
+sys.path[:0] = [str(TS_ROOT.parent), str(REPO_ROOT)]
 
-from approach_clustering import evaluation as clustering_evaluation
-from approach_clustering.artifacts import write_clustering_artifacts
-from approach_clustering.features import horizontal_arc_feature
-from approach_clustering.model import (
+from ts_transformer.approach_clustering import evaluation as clustering_evaluation
+from ts_transformer.approach_clustering.artifacts import write_clustering_artifacts
+from ts_transformer.approach_clustering.features import horizontal_arc_feature
+from ts_transformer.approach_clustering.model import (
     ApproachClusterModel,
     _silhouette_score,
     fit_cluster_candidates,
 )
-from development_cohorts import DevelopmentCohort
+from ts_transformer.development_cohorts import DevelopmentCohort
 
 
 def test_module_cli_bootstraps_repository_dependencies() -> None:

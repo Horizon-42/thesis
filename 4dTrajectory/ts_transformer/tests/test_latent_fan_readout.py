@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from approach_difficulty import (
+from ts_transformer.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
     STRATUM_FAR,

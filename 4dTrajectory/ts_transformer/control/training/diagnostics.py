@@ -14,7 +14,7 @@ import math
 import torch
 import torch.nn as nn
 
-from prediction_outputs import CONTROL_NAMES, ControlPrediction
+from ts_transformer.prediction_outputs import CONTROL_NAMES, ControlPrediction
 
 
 GRADIENT_GROUPS = ("backbone", "control_head", "final_time_head")

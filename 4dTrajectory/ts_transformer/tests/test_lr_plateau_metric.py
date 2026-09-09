@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from config import (
+from ts_transformer.config import (
     CONTROL_RECIPE_SIMPLE_V3,
     LR_PLATEAU_METRIC_OBJECTIVE,
     LR_PLATEAU_METRIC_SELECTION,
@@ -36,11 +36,11 @@ from config import (
     control_simple_v1_overrides,
     recipe_settings,
 )
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import build_series
-from run_naming import run_display_name, run_slug
-from synthetic import synthetic_arrivals
-from train import train
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.dataset import build_series
+from ts_transformer.run_naming import run_display_name, run_slug
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.train import train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 SELECTION_METRIC = "fixed-anchor-common-grid-ade"
@@ -149,7 +149,7 @@ _STALLED_SELECTION = (100.0, 99.0, 99.0, 99.0, 99.0, 99.0)
 
 def _stall_the_selection_metric(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the real metric's machinery, replace only the NUMBER it reports."""
-    import train as train_module
+    import ts_transformer.train as train_module
 
     real = train_module.VALIDATION_SELECTIONS[SELECTION_METRIC]
     staged = iter(_STALLED_SELECTION)

@@ -46,10 +46,10 @@ from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parent
 _TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(_TS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TS_DIR))
+if str(_TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(_TS_DIR.parent))
 
-from run_naming import category_display_label, run_display_name  # noqa: E402
+from ts_transformer.run_naming import category_display_label, run_display_name  # noqa: E402
 
 EXPERIMENT_ROOT = REPO_ROOT / "4dTrajectory" / "outputs" / "POOLED" / "experiments"
 EXPERIMENT_INDEX = EXPERIMENT_ROOT / "index.json"
@@ -622,7 +622,7 @@ class PublicationPlan:
             return None
         if not self.eligibility_roster.is_file():
             return f"missing eligibility roster {self.eligibility_roster}"
-        from data_provenance import (   # the package's rule, imported where it is needed
+        from ts_transformer.data_provenance import (   # the package's rule, imported where it is needed
             checkpoint_data_provenance,
             require_matching_data_provenance,
             roster_eligible_set_digest,
@@ -638,7 +638,7 @@ class PublicationPlan:
             return None
         # Metadata that predates `eligible_sets` names only the roster's bytes, so the
         # answer comes from the checkpoint payload — one path, torch load included.
-        from train import load_checkpoint_payload
+        from ts_transformer.train import load_checkpoint_payload
         try:
             payload = load_checkpoint_payload(self.experiment.checkpoint)
             require_matching_data_provenance(

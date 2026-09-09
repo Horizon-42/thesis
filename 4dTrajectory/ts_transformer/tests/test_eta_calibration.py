@@ -18,14 +18,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import calibration
-from approach_difficulty import (
+import ts_transformer.calibration as calibration
+from ts_transformer.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
     STRATUM_STRAIGHT_IN,
     STRATUM_VECTORED,
 )
-from calibration import (
+from ts_transformer.calibration import (
     CALIBRATION_HALF_RULE,
     CONFORMAL_ALPHAS,
     CONFORMAL_METADATA_KEY,
@@ -43,9 +43,9 @@ from calibration import (
     render,
     write_conformal_table,
 )
-from config import DURATION_HEAD_POINT, DURATION_HEAD_QUANTILE, DURATION_QUANTILES
+from ts_transformer.config import DURATION_HEAD_POINT, DURATION_HEAD_QUANTILE, DURATION_QUANTILES
 
-from tests.test_duration_quantiles import _config  # the tiny quantile-head config
+from ts_transformer.tests.test_duration_quantiles import _config  # the tiny quantile-head config
 
 CHECKPOINT_SHA = "b" * 64
 
@@ -537,7 +537,7 @@ def test_readout_only_writes_the_table_and_leaves_the_sidecar_byte_for_byte(
     """The probe may read a checkpoint the campaign is deploying, so `--readout-only` must
     not write one byte of its metadata — and the deployed run below is what proves that
     assertion could have failed."""
-    from io_utils import file_sha256
+    from ts_transformer.io_utils import file_sha256
 
     samples = _cohort(400, narrow_s=10.0)
     runner = _stubbed_runner(monkeypatch, samples, split_seed=1)
@@ -577,11 +577,11 @@ def test_predict_stamps_the_calibrated_interval_on_every_record(tmp_path: Path, 
     written beside the checkpoint the same command writes an interval per alpha."""
     import importlib.util
 
-    import cli.predict as predict_module
-    from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-    from dataset import build_series
-    from synthetic import synthetic_arrivals
-    from train import load_checkpoint, train
+    import ts_transformer.cli.predict as predict_module
+    from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+    from ts_transformer.dataset import build_series
+    from ts_transformer.synthetic import synthetic_arrivals
+    from ts_transformer.train import load_checkpoint, train
 
     cli_path = Path(__file__).resolve().parents[1] / "__main__.py"
     spec = importlib.util.spec_from_file_location("ts_cli_calibration_test", cli_path)
@@ -616,7 +616,7 @@ def test_predict_stamps_the_calibrated_interval_on_every_record(tmp_path: Path, 
     # A table for THIS checkpoint, fitted on a synthetic cohort (the runner's own path
     # needs the real arrival manifests; the table it writes is this object).
     _model, loaded, _normalizer, _payload = load_checkpoint(run / "checkpoint.pt")
-    from io_utils import file_sha256
+    from ts_transformer.io_utils import file_sha256
 
     table = calibrate(
         _cohort(400, narrow_s=12.0), split_seed=loaded.resolved_split_seed, split="val",
@@ -649,7 +649,7 @@ def test_predict_stamps_the_calibrated_interval_on_every_record(tmp_path: Path, 
 def test_neither_half_of_the_pair_alone_produces_an_interval():
     """The interval needs BOTH a quantile forecast and a table: a point-head forecast has
     nothing to widen, and an uncalibrated quantile forecast has nothing to widen it by."""
-    from forecast import _calibrated_interval_fields
+    from ts_transformer.forecast import _calibrated_interval_fields
 
     table = calibrate(
         _cohort(400, narrow_s=10.0), split_seed=1, split="val",
@@ -687,7 +687,7 @@ def test_a_stratum_calibrated_at_one_alpha_only_is_not_deployed():
 def test_a_null_covariate_is_refused_rather_than_read_as_false():
     """A present-null `established_at_anchor` cast to False and moved the flight into the
     vectored stratum."""
-    from approach_difficulty import strata_masks
+    from ts_transformer.approach_difficulty import strata_masks
     rows = {"a": _covariates(established=True), "b": {**_covariates(), "established_at_anchor": None}}
     with pytest.raises(ValueError, match="established_at_anchor"):
         strata_masks(rows, ["a", "b"])

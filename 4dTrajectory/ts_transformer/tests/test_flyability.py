@@ -18,15 +18,15 @@ from pathlib import Path
 import pytest
 
 _TS_DIR = Path(__file__).resolve().parents[1]
-if str(_TS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TS_DIR))
+if str(_TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(_TS_DIR.parent))
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS  # noqa: E402
-from flyability import (  # noqa: E402
+from ts_transformer.flyability import (  # noqa: E402
     G, HARD_VIOLATIONS, SOFT_VIOLATIONS, Envelope, calibrated_report, flyability_batch,
     flyability_summary, isa_density, report_for_records, required_controls,
 )

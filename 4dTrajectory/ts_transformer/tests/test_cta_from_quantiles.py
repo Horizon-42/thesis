@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from calibration import (
+from ts_transformer.calibration import (
     FAN_INTERVAL_ALPHA,
     QUANTILE_DIR_NAME,
     calibrate,
@@ -23,23 +23,23 @@ from calibration import (
     quantile_directory_name,
     write_conformal_table,
 )
-from config import (
+from ts_transformer.config import (
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_SELF_QUANTILE,
     DURATION_HEAD_POINT,
     DURATION_MEDIAN_INDEX,
     DURATION_QUANTILES,
 )
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from flight_scenarios.identity import summary_row_key
-from dataset import build_series
-from io_utils import file_sha256
-from run_naming import run_display_name
-from synthetic import synthetic_arrivals
-from train import load_checkpoint, train
+from ts_transformer.dataset import build_series
+from ts_transformer.io_utils import file_sha256
+from ts_transformer.run_naming import run_display_name
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.train import load_checkpoint, train
 
-from tests.test_duration_quantiles import _config
-from tests.test_eta_calibration import _cohort
+from ts_transformer.tests.test_duration_quantiles import _config
+from ts_transformer.tests.test_eta_calibration import _cohort
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -58,7 +58,7 @@ PROVENANCE = {
 
 def _trained(tmp_path: Path, monkeypatch, **overrides) -> tuple[Path, list]:
     """A tiny checkpoint plus the flights `predict` will be handed for it."""
-    import cli.predict as predict_module
+    import ts_transformer.cli.predict as predict_module
 
     config = _config(**{"cta_conditioning": CTA_CONDITIONING_GIVEN, **overrides})
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)

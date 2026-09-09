@@ -9,11 +9,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from approach_difficulty import approach_difficulty
-from batch_contract import model_forward
-from calibration import conformal_intervals, interval_stratum
-from channels import IDX, horizontal_distance_m
-from config import (
+from ts_transformer.approach_difficulty import approach_difficulty
+from ts_transformer.batch_contract import model_forward
+from ts_transformer.calibration import conformal_intervals, interval_stratum
+from ts_transformer.channels import IDX, horizontal_distance_m
+from ts_transformer.config import (
     CORRIDOR_GATES,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_OFF,
@@ -29,14 +29,14 @@ from config import (
     # it (A2b) and cannot import this module; used here, and re-exported by being imported.
     default_anchor,
 )
-from closure_output import ClosureLabels, check_airport, decision_from_label, reconstruct
-from control.constraints import build_command_hook
-from control.dynamics import rollout as control_rollout
-from control.dynamics.hooks import (
+from ts_transformer.closure_output import ClosureLabels, check_airport, decision_from_label, reconstruct
+from ts_transformer.control.constraints import build_command_hook
+from ts_transformer.control.dynamics import rollout as control_rollout
+from ts_transformer.control.dynamics.hooks import (
     HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY, CommandHook,
 )
-from control.envelope import physical_controls
-from dataset import (
+from ts_transformer.control.envelope import physical_controls
+from ts_transformer.dataset import (
     FixedAnchorTrajectoryWindows,
     truth_duration_s,
     FlightSeries,
@@ -47,7 +47,7 @@ from dataset import (
     final_approach_fix_distance,
     series_conditioning,
 )
-from final_approach_geometry import (
+from ts_transformer.final_approach_geometry import (
     alignment_cosine,
     bound_to_final,
     chart_from_axes,
@@ -56,10 +56,10 @@ from final_approach_geometry import (
     runway_axes,
     threshold_crossing_index,
 )
-from metrics import states_with_derived_velocity
-from prediction_outputs import ControlPrediction
-from target_conditioning import conditioned_history
-from time_grids import output_time_grid
+from ts_transformer.metrics import states_with_derived_velocity
+from ts_transformer.prediction_outputs import ControlPrediction
+from ts_transformer.target_conditioning import conditioned_history
+from ts_transformer.time_grids import output_time_grid
 
 
 @dataclass(frozen=True)

@@ -10,11 +10,11 @@ import pytest
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import closure_profile as cp  # noqa: E402
+import ts_transformer.closure_profile as cp  # noqa: E402
 
 
 def test_hat_basis_partitions_unity_and_its_integral_is_exact():

@@ -64,17 +64,17 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import torch  # noqa: E402
 
-import geometric_metrics as gm  # noqa: E402
-from approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks  # noqa: E402
-from batch_contract import model_forward  # noqa: E402
-from channels import POSITION_IDX  # noqa: E402
-from config import (  # noqa: E402
+import ts_transformer.geometric_metrics as gm  # noqa: E402
+from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks  # noqa: E402
+from ts_transformer.batch_contract import model_forward  # noqa: E402
+from ts_transformer.channels import POSITION_IDX  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     CONTROL_HOOK_OFF,
     CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
     CONTROL_RECIPE_CUSTOM,
@@ -85,8 +85,8 @@ from config import (  # noqa: E402
     PREDICTION_CONTROL,
     TSConfig,
 )
-from control.loss.fixed_dt import fixed_dt_control_state_loss  # noqa: E402
-from control.basis_fit import (  # noqa: E402
+from ts_transformer.control.loss.fixed_dt import fixed_dt_control_state_loss  # noqa: E402
+from ts_transformer.control.basis_fit import (  # noqa: E402
     DEFAULT_LEARNING_RATE_FLOOR,
     DURATION_MODES,
     DURATION_UNIFORM,
@@ -97,13 +97,13 @@ from control.basis_fit import (  # noqa: E402
     inverse_dynamics_seed,
     width_scaled_learning_rate,
 )
-from data_provenance import (  # noqa: E402
+from ts_transformer.data_provenance import (  # noqa: E402
     arrival_data_provenance,
     checkpoint_data_provenance,
     provenance_manifest_digests,
     require_matching_data_provenance,
 )
-from dataset import (  # noqa: E402
+from ts_transformer.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
@@ -111,12 +111,12 @@ from dataset import (  # noqa: E402
     truth_duration_s,
 )
 from flight_scenarios.identity import flight_key, summary_row_key  # noqa: E402
-from io_utils import file_sha256  # noqa: E402
-from metrics import common_physical_time_flight_metrics  # noqa: E402
-from models import resolve_device  # noqa: E402
-from physical_criteria import fixed_dt_position_ade_m  # noqa: E402
-from prediction_outputs import ControlPrediction  # noqa: E402
-from train import load_checkpoint, usable_series  # noqa: E402
+from ts_transformer.io_utils import file_sha256  # noqa: E402
+from ts_transformer.metrics import common_physical_time_flight_metrics  # noqa: E402
+from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.physical_criteria import fixed_dt_position_ade_m  # noqa: E402
+from ts_transformer.prediction_outputs import ControlPrediction  # noqa: E402
+from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 
 RESULT_SCHEMA = "l0-control-basis-oracle-v1"

@@ -15,11 +15,11 @@ import pytest
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import geometric_metrics as gm  # noqa: E402
+import ts_transformer.geometric_metrics as gm  # noqa: E402
 
 
 def _line(length_m: float, *, offset_n: float = 0.0, speed_mps: float = 100.0, alt: float = 0.0, n: int = 51):

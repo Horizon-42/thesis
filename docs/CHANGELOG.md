@@ -13,6 +13,21 @@ applied throughout: a fix that could refuse a stored artifact was first counted 
 stored `history.json` configs (none refused), and no stored run's name or directory moved.
 971 ts tests pass (`4dTrajectory/ts_transformer/tests` + the four `trajectory_data_process` ts test files); the 12 failures left are the pre-existing red fixtures of `trajectory_data_process/tests/test_ts_pipeline.py` (audit T4-23), verified to fail identically on the untouched tree.
 
+**Package review §4.1 — `ts_transformer` is a package (same branch, second commit).** No
+`__init__.py`, 63 files inserting `ts_transformer/` itself into `sys.path`, and module names
+that were global (`config`, `dataset`, `train`, `models`, `metrics`, `validation`, `export`,
+`calibration` — shadowed silently by any same-named module earlier on the path). Now
+`ts_transformer/__init__.py` + `4dTrajectory/pyproject.toml` (editable install like `geokit`,
+optional: the bootstraps insert `4dTrajectory/` instead), and every import in the package,
+its tests, its `docs/*.py`, the 23 root runners, the publisher and the
+`trajectory_data_process` ts tests is qualified (`from ts_transformer.config import …`).
+Mechanical and behaviour-free: 973 ts tests pass (the same 12 pre-existing `test_ts_pipeline.py` fixtures fail before and after), and the 219 stored
+`history.json` configs give byte-identical run names, slugs and loadability before and
+after. Two new architecture tests refuse a flat import of a package module and a bootstrap
+that puts `ts_transformer/` on the path — because with the directory on the path the flat
+names would resolve to a SECOND copy of every module beside the qualified one. Checkpoints
+are unaffected (`weights_only=True` payloads hold no module paths).
+
 **Numbers that were wrong on a live path.**
 - **A-1** `run_ts_pipeline.py`: `control_dynamics_model` was emitted to the training subprocess
   but missing from BOTH rebuilt override dicts, so a first-order-lag cell was rebuilt as

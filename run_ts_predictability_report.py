@@ -26,8 +26,8 @@ from typing import Any, Iterable, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/aeroviz-ts-report-matplotlib")
 
@@ -40,25 +40,25 @@ import torch  # noqa: E402
 from sklearn.neighbors import NearestNeighbors  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
-from channels import POSITION_IDX  # noqa: E402
-from config import (  # noqa: E402
+from ts_transformer.channels import POSITION_IDX  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
     default_anchor, uses_control_dynamics,
 )
 
-from control.dynamics.rollout import rollout_control_dense  # noqa: E402
-from data_provenance import (  # noqa: E402
+from ts_transformer.control.dynamics.rollout import rollout_control_dense  # noqa: E402
+from ts_transformer.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,
 )
-from dataset import FlightSeries, build_series, dynamics_arrays, load_flight_dicts  # noqa: E402
-from fixed_anchor_validation import (  # noqa: E402
+from ts_transformer.dataset import FlightSeries, build_series, dynamics_arrays, load_flight_dicts  # noqa: E402
+from ts_transformer.fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_common_truth,
     resample_prediction_to_physical_time,
 )
-from metrics import raw_kinematic_metrics  # noqa: E402
-from models import resolve_device  # noqa: E402
-from train import (  # noqa: E402
+from ts_transformer.metrics import raw_kinematic_metrics  # noqa: E402
+from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.train import (  # noqa: E402
     FIT_EVALUATION_NAME,
     FIT_EVALUATION_SCHEMA,
     load_checkpoint,

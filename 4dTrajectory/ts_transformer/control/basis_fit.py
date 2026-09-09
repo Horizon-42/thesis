@@ -38,10 +38,10 @@ import numpy as np
 import torch
 from torch import nn
 
-from channels import states_from_channels
-from config import TSConfig
-from control.dynamics.inverse import segment_controls
-from prediction_outputs import ControlPrediction
+from ts_transformer.channels import states_from_channels
+from ts_transformer.config import TSConfig
+from ts_transformer.control.dynamics.inverse import segment_controls
+from ts_transformer.prediction_outputs import ControlPrediction
 
 DURATION_UNIFORM = "uniform"
 DURATION_FREE = "free"

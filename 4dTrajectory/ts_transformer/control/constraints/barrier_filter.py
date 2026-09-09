@@ -92,17 +92,17 @@ import math
 import torch
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
-from config import TSConfig
-from control.constraints.gates import on_final_weight, runway_axes_view
-from control.constraints.saturation import (
+from ts_transformer.config import TSConfig
+from ts_transformer.control.constraints.gates import on_final_weight, runway_axes_view
+from ts_transformer.control.constraints.saturation import (
     ACTIVE_BANK_CHANGE_RAD,
     SATURATION_SOFTNESS_RAD,
     soft_max,
     soft_min,
 )
-from control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
-from final_approach_geometry import K_MARGIN, corridor_halfwidth, corridor_halfwidth_slope
+from ts_transformer.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
+from ts_transformer.control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
+from ts_transformer.final_approach_geometry import K_MARGIN, corridor_halfwidth, corridor_halfwidth_slope
 
 _SATURATED_INTERVAL_RAD = math.radians(0.1)   # a bank interval this narrow is a corner, not a bound
 _DIAGNOSTIC_KEYS = (

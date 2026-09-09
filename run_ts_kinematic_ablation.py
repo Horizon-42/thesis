@@ -25,21 +25,21 @@ from typing import Any, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
-from config import DEFAULT_AIRCRAFT_TYPE, MODELS, TSConfig  # noqa: E402
-from data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
-from dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
-from splits import flight_keys_by_split, split_by_flight  # noqa: E402
-from export import accuracy_block, observed_series_metrics  # noqa: E402
-from forecast import forecast_approach  # noqa: E402
-from metrics import RAW_KINEMATIC_METRIC_KEYS  # noqa: E402
-from train import fit_model, usable_series  # noqa: E402
+from ts_transformer.config import DEFAULT_AIRCRAFT_TYPE, MODELS, TSConfig  # noqa: E402
+from ts_transformer.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
+from ts_transformer.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.splits import flight_keys_by_split, split_by_flight  # noqa: E402
+from ts_transformer.export import accuracy_block, observed_series_metrics  # noqa: E402
+from ts_transformer.forecast import forecast_approach  # noqa: E402
+from ts_transformer.metrics import RAW_KINEMATIC_METRIC_KEYS  # noqa: E402
+from ts_transformer.train import fit_model, usable_series  # noqa: E402
 
 RESULT_SCHEMA = "ts-kinematic-weight-ablation-v3-robust-physics-capacity-grid"
 DEFAULT_WEIGHTS = (0.0, 0.1, 0.3, 1.0, 3.0, 10.0)

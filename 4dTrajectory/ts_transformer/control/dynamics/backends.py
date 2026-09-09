@@ -33,7 +33,7 @@ from typing import Callable
 
 import torch
 
-from control.dynamics.hooks import CommandHook, RolloutStateView
+from ts_transformer.control.dynamics.hooks import CommandHook, RolloutStateView
 
 from aerodynamic_model.torch_dense_rollout import (
     rollout_piecewise_constant_at_times as reanchored_dense_rollout,
@@ -60,14 +60,14 @@ from aerodynamic_model.torch_scaled_transport_chart_dynamics import (
     rollout_piecewise_constant_at_times as scaled_transport_dense_rollout,
     scaled_to_physical_transport_chart_state,
 )
-from config import (
+from ts_transformer.config import (
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     TSConfig,
 )
-from control.envelope import physical_controls
+from ts_transformer.control.envelope import physical_controls
 
 
 @dataclass(frozen=True)

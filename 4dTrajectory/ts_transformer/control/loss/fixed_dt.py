@@ -6,11 +6,11 @@ from dataclasses import dataclass
 
 import torch
 
-from config import TSConfig
-from control.dynamics import rollout as control_rollout
-from dataset import Normalizer
-from fixed_dt_supervision import FixedDTControlSupervision
-from prediction_outputs import ControlPrediction
+from ts_transformer.config import TSConfig
+from ts_transformer.control.dynamics import rollout as control_rollout
+from ts_transformer.dataset import Normalizer
+from ts_transformer.fixed_dt_supervision import FixedDTControlSupervision
+from ts_transformer.prediction_outputs import ControlPrediction
 
 
 @dataclass(frozen=True)

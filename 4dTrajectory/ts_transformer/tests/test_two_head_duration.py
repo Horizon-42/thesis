@@ -24,8 +24,8 @@ import numpy as np
 import pytest
 import torch
 
-from batch_contract import model_forward
-from config import (
+from ts_transformer.batch_contract import model_forward
+from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -40,20 +40,20 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import build_series
-from forecast import duration_quantile_predictions
-from io_utils import file_sha256
-from models import build_model
-import objective
-from objective import DURATION_QUANTILE_COMPONENT, loss_component_names
-from prediction_outputs import ControlPrediction, QuantileFinalTimeHead, pinball_duration_loss
-from run_naming import run_display_name, run_slug
-from synthetic import synthetic_arrivals
-from train import load_checkpoint, train
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.dataset import build_series
+from ts_transformer.forecast import duration_quantile_predictions
+from ts_transformer.io_utils import file_sha256
+from ts_transformer.models import build_model
+import ts_transformer.objective as objective
+from ts_transformer.objective import DURATION_QUANTILE_COMPONENT, loss_component_names
+from ts_transformer.prediction_outputs import ControlPrediction, QuantileFinalTimeHead, pinball_duration_loss
+from ts_transformer.run_naming import run_display_name, run_slug
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.train import load_checkpoint, train
 
-from tests.test_duration_quantiles import _config, _dynamics
+from ts_transformer.tests.test_duration_quantiles import _config, _dynamics
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -188,7 +188,7 @@ def _loss_components(config: TSConfig, monkeypatch, *, predicted_s: float, truth
     Only the duration terms are under test, so the rollout is replaced by a perfect one and
     every position/terminal contribution is zero by construction.
     """
-    import control.dynamics.rollout as control_rollout_module
+    import ts_transformer.control.dynamics.rollout as control_rollout_module
 
     monkeypatch.setattr(
         control_rollout_module, "rollout_control_endpoints",
@@ -197,7 +197,7 @@ def _loss_components(config: TSConfig, monkeypatch, *, predicted_s: float, truth
             geodetic_states=torch.zeros(1, config.n_segments, 7, dtype=torch.float64),
         ),
     )
-    from dataset import Normalizer
+    from ts_transformer.dataset import Normalizer
 
     normalizer = Normalizer(mean=np.zeros(config.enc_in), std=np.ones(config.enc_in))
     prediction = ControlPrediction(
@@ -375,7 +375,7 @@ def test_a_config_that_predates_the_new_weight_is_named_as_it_was():
 # ── the record, end to end ──────────────────────────────────────────────────
 
 def _trained_two_head(tmp_path: Path, monkeypatch, **overrides):
-    import cli.predict as predict_module
+    import ts_transformer.cli.predict as predict_module
 
     config = _two_head(final_time_loss_weight=26.0, **overrides)
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)
@@ -463,7 +463,7 @@ def test_the_calibration_runner_takes_a_two_head_checkpoint(tmp_path: Path, monk
     `test_the_record_carries_the_point_duration_and_the_quantile_interval`, which runs
     `duration_quantile_predictions` against a trained one.
     """
-    from tests.test_eta_calibration import _cohort, _metadata, _stubbed_runner
+    from ts_transformer.tests.test_eta_calibration import _cohort, _metadata, _stubbed_runner
 
     samples = _cohort(400, narrow_s=10.0)
     runner = _stubbed_runner(monkeypatch, samples, split_seed=1,
@@ -486,7 +486,7 @@ def test_the_calibration_runner_takes_a_two_head_checkpoint(tmp_path: Path, monk
 def test_the_quantile_fan_decodes_a_two_head_checkpoint(tmp_path: Path, monkeypatch):
     """B3 on a B1.b arm: training's rollout was CTA-driven and the point head inert, and the
     fan is decoded at the QUANTILE head's five levels."""
-    from calibration import QUANTILE_DIR_NAME, quantile_directory_name
+    from ts_transformer.calibration import QUANTILE_DIR_NAME, quantile_directory_name
 
     checkpoint, _series = _trained_two_head(
         tmp_path, monkeypatch, cta_conditioning=CTA_CONDITIONING_GIVEN
@@ -545,7 +545,7 @@ def test_a_point_head_directory_has_no_q50_block(tmp_path: Path, monkeypatch):
     readout is the one B0 published."""
     import importlib.util
 
-    import cli.predict as predict_module
+    import ts_transformer.cli.predict as predict_module
 
     config = _config(duration_head=DURATION_HEAD_POINT)
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)

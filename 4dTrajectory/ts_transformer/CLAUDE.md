@@ -486,6 +486,9 @@ never zero.
 
 ## Layout
 
+A regular package under `4dTrajectory/` (`ts_transformer/__init__.py`, `4dTrajectory/pyproject.toml`);
+modules are imported by their qualified names — see the package rule under Conventions.
+
 **Five modules carry the training plane, and each answers one question** (T3, 2026-09-07 —
 `train.py` was 3,027 lines and `__main__.main` 714):
 
@@ -712,8 +715,18 @@ trajectories.py` (which held a second copy of the comparison). So:
 a runnable experiment goes in a top-level `run_ts_*.py` runner beside the others;
 **`docs/` holds documents**. The `docs/*.py` scripts predate this rule and are a layout
 defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add to them, and
-move what you touch. `tests/conftest.py` already puts the package on `sys.path`, so a new
-test file needs no path preamble.
+move what you touch. `tests/conftest.py` already puts the package's PARENT on `sys.path`,
+so a new test file needs no path preamble.
+
+**`ts_transformer` is a PACKAGE (2026-09-09, review §4.1), and every import is qualified:**
+`from ts_transformer.config import TSConfig`, `import ts_transformer.channels as ch`,
+`from ts_transformer.control.envelope import …`. What goes on `sys.path` is `4dTrajectory/`
+(the package's parent — `__main__.py`, `tests/conftest.py` and every runner do it; `pip
+install -e 4dTrajectory` makes it unnecessary, like `geokit`), NEVER `ts_transformer/`
+itself: with the directory on the path the flat names resolve again and load a SECOND copy
+of every module beside the qualified one — its own `TSConfig`, its own registries — and
+every identity check between the two fails silently. `tests/test_architecture.py` refuses
+both a flat import and a bootstrap that inserts the package directory.
 
 **Membership rule**: a module belongs in `control/` only if EVERY consumer of it is
 control-specific. `prediction_outputs` (holds `StatePrediction`), `terminal_state_loss`,

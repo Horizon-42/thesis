@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 import torch
 
-from config import (
+from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_IMITATION_TARGET_FITTED,
     CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
@@ -35,15 +35,15 @@ from config import (
     TSConfig,
     control_recipe_overrides,
 )
-from control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM, load_fitted_teacher
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
-from forecast import forecast_approaches, posterior_latent_forecasts
-from models import build_model
-from run_naming import run_display_name
-from synthetic import synthetic_arrivals
-from objective import control_imitation_mse
-from train import evaluate_fixed_anchor_series, load_checkpoint, train
+from ts_transformer.control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM, load_fitted_teacher
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
+from ts_transformer.forecast import forecast_approaches, posterior_latent_forecasts
+from ts_transformer.models import build_model
+from ts_transformer.run_naming import run_display_name
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.objective import control_imitation_mse
+from ts_transformer.train import evaluate_fixed_anchor_series, load_checkpoint, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 N_SEGMENTS, SEQ_LEN = 4, 8
@@ -218,7 +218,7 @@ def test_the_dataset_serves_the_table_with_unit_weights_and_the_loss_consumes_th
         inverse_dynamics["reference_controls"], dynamics["reference_controls"]
     )
 
-    from prediction_outputs import ControlPrediction
+    from ts_transformer.prediction_outputs import ControlPrediction
     prediction = ControlPrediction(
         controls=torch.zeros(len(series), N_SEGMENTS, 3),
         segment_durations=torch.ones(len(series), N_SEGMENTS),

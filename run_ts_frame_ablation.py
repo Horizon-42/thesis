@@ -58,13 +58,13 @@ TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 TS_SCRIPT = TS_DIR / "__main__.py"
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from config import TSConfig, recipe_settings  # noqa: E402
-from run_naming import run_display_name, run_slug  # noqa: E402
+from ts_transformer.config import TSConfig, recipe_settings  # noqa: E402
+from ts_transformer.run_naming import run_display_name, run_slug  # noqa: E402
 
 # A state arm on one airport: ~50 MB of checkpoint/history + ~0.3 GB of validation records.
 # Refuse to start a campaign the disk cannot hold rather than die mid-arm.

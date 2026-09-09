@@ -25,9 +25,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from channels import CHANNELS
-from batching import resolve_batch_size
-from config import (
+from ts_transformer.channels import CHANNELS
+from ts_transformer.batching import resolve_batch_size
+from ts_transformer.config import (
     CONTROL_HOOK_OFF,
     HOOK_SATURATION_HARD,
     CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
@@ -43,15 +43,15 @@ from config import (
     default_anchor,
     uses_control_dynamics,
 )
-from control.basis_fit import FittedTeacherTable, load_fitted_teacher
-from control.dynamics.hooks import HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY
-from control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
-from data_provenance import (
+from ts_transformer.control.basis_fit import FittedTeacherTable, load_fitted_teacher
+from ts_transformer.control.dynamics.hooks import HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY
+from ts_transformer.control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
+from ts_transformer.data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     provenance_eligible_set_digests,
     provenance_manifest_digests,
 )
-from dataset import (
+from ts_transformer.dataset import (
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
@@ -60,18 +60,18 @@ from dataset import (
     training_window_class,
     window_anchors,
 )
-from splits import split_by_flight
-from evaluation_protocol import (
+from ts_transformer.splits import split_by_flight
+from ts_transformer.evaluation_protocol import (
     TEST_RELEASE_NAME,
     TEST_RELEASE_PROTOCOL_FIELD,
     TEST_RELEASE_SCHEMA,
 )
-from control.latent import effective_latent_beta, latent_epoch_record
-from fixed_anchor_validation import CommonGridTruth
-from models import build_model, parameter_count, resolve_device
-from batch_contract import anchor_state, model_forward, unpack_batch
-from io_utils import file_sha256
-from objective import (
+from ts_transformer.control.latent import effective_latent_beta, latent_epoch_record
+from ts_transformer.fixed_anchor_validation import CommonGridTruth
+from ts_transformer.models import build_model, parameter_count, resolve_device
+from ts_transformer.batch_contract import anchor_state, model_forward, unpack_batch
+from ts_transformer.io_utils import file_sha256
+from ts_transformer.objective import (
     PROCEDURE_DIAGNOSTICS,
     ProcedureMultipliers,
     loss_component_names,
@@ -80,9 +80,9 @@ from objective import (
     prediction_loss_components,
     target_contract,
 )
-from prediction_outputs import ControlPrediction
-from training_performance import EpochProfiler
-from validation import (
+from ts_transformer.prediction_outputs import ControlPrediction
+from ts_transformer.training_performance import EpochProfiler
+from ts_transformer.validation import (
     VALIDATION_SELECTIONS,
     anchor_grid_coverage,
     build_anchor_grid_validation_plans,

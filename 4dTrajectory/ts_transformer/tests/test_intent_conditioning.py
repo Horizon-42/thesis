@@ -14,26 +14,26 @@ import torch
 
 _TS_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _TS_DIR.parents[1]
-for path in (_TS_DIR, _REPO_ROOT):
+for path in (_TS_DIR.parent, _REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import channels as ch  # noqa: E402
-import dataset as dataset_module  # noqa: E402
-import final_approach_geometry as fag  # noqa: E402
-import intent_conditioning as ic  # noqa: E402
-from config import (  # noqa: E402
+import ts_transformer.channels as ch  # noqa: E402
+import ts_transformer.dataset as dataset_module  # noqa: E402
+import ts_transformer.final_approach_geometry as fag  # noqa: E402
+import ts_transformer.intent_conditioning as ic  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     INTENT_JOIN_CHANNELS, INTENT_LEAD_CHANNELS, PREDICTION_CONTROL, TSConfig,
     intent_channel_names,
 )
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
-from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
-from forecast import _history_at_anchor, forecast_approach  # noqa: E402
-from models import build_model  # noqa: E402
-from run_naming import run_display_name  # noqa: E402
-from synthetic import synthetic_arrivals  # noqa: E402
-from target_conditioning import CONDITIONING_CHANNELS  # noqa: E402
-from train import load_checkpoint, train  # noqa: E402
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
+from ts_transformer.forecast import _history_at_anchor, forecast_approach  # noqa: E402
+from ts_transformer.models import build_model  # noqa: E402
+from ts_transformer.run_naming import run_display_name  # noqa: E402
+from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.target_conditioning import CONDITIONING_CHANNELS  # noqa: E402
+from ts_transformer.train import load_checkpoint, train  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 ENTRY_UTC = "2026-07-01T00:00:00Z"
@@ -269,7 +269,7 @@ def test_the_row_is_built_at_the_windows_actual_anchor():
 
 
 def test_duration_mode_hands_the_duration_head_its_own_target():
-    from config import INTENT_DURATION_CHANNELS
+    from ts_transformer.config import INTENT_DURATION_CHANNELS
 
     series, config = _series(n_flights=2, seq_len=20, intent_conditioning="truth-join-duration")
     assert config.input_channels == ch.CHANNELS + INTENT_JOIN_CHANNELS + INTENT_DURATION_CHANNELS

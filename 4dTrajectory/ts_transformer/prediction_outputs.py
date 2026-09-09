@@ -14,15 +14,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from batch_contract import anchor_state
-from channels import IDX, POSITION_IDX
-from config import (
+from ts_transformer.batch_contract import anchor_state
+from ts_transformer.channels import IDX, POSITION_IDX
+from ts_transformer.config import (
     DURATION_QUANTILES,
     STATE_POSITION_ANCHOR_RELATIVE,
     STATE_POSITION_CORRIDOR_BOUNDED,
     TSConfig,
 )
-from final_approach_geometry import (
+from ts_transformer.final_approach_geometry import (
     FINAL_APPROACH_KEYS,
     alignment_cosine,
     bound_to_final,
@@ -33,7 +33,7 @@ from final_approach_geometry import (
 )
 
 if TYPE_CHECKING:  # the data-plane value type; importing it at runtime would be a cycle
-    from dataset import Normalizer
+    from ts_transformer.dataset import Normalizer
 
 CONTROL_NAMES = ("thrust_N", "bank_rad", "load_factor")
 

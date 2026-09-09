@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from channels import IDX, POSITION_IDX, VELOCITY_IDX
+from ts_transformer.channels import IDX, POSITION_IDX, VELOCITY_IDX
 
 # Reported percentiles. p95 mirrors evaluation/stats.magnitude_spread so the ML-side and
 # gate-side summaries can be read against each other.

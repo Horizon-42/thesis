@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 import torch
 import torch.nn as nn
 
-from config import (
+from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
     PREDICTION_CLOSURE,
@@ -30,15 +30,15 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from closure_output import ClosureOutputModel
-from control.heads import ControlOutputModel
-from control.latent import LatentControlModel
-from prediction_outputs import StateOutputLayer
-from vendor.itransformer import Model as VendoredITransformer
-from vendor.patchtst import Model as VendoredPatchTST
+from ts_transformer.closure_output import ClosureOutputModel
+from ts_transformer.control.heads import ControlOutputModel
+from ts_transformer.control.latent import LatentControlModel
+from ts_transformer.prediction_outputs import StateOutputLayer
+from ts_transformer.vendor.itransformer import Model as VendoredITransformer
+from ts_transformer.vendor.patchtst import Model as VendoredPatchTST
 
 if TYPE_CHECKING:  # a data-plane value type; the builders only pass it through
-    from dataset import Normalizer
+    from ts_transformer.dataset import Normalizer
 
 
 class ITransformerAdapter(nn.Module):

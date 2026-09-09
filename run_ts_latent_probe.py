@@ -52,23 +52,23 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 
-from batch_contract import model_forward, unpack_batch  # noqa: E402
-from control.latent import (  # noqa: E402
+from ts_transformer.batch_contract import model_forward, unpack_batch  # noqa: E402
+from ts_transformer.control.latent import (  # noqa: E402
     LatentControlPrediction,
     displacement_verdict,
     latent_kl,
     sigma_from_logvar,
 )
-from dataset import FixedAnchorTrajectoryWindows  # noqa: E402
-from models import resolve_device  # noqa: E402
-from objective import move_dynamics  # noqa: E402
+from ts_transformer.dataset import FixedAnchorTrajectoryWindows  # noqa: E402
+from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.objective import move_dynamics  # noqa: E402
 from run_ts_anytime_curve import Arm, Grid, cohort_series, load_arm, parse_arms  # noqa: E402
 
 RESULT_SCHEMA = "ts-latent-probe-v1"

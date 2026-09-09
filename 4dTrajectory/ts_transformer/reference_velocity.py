@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from channels import POSITION_IDX, VELOCITY_IDX
+from ts_transformer.channels import POSITION_IDX, VELOCITY_IDX
 
 
 REFERENCE_VELOCITY_TRACK_FIT = "track-fit"

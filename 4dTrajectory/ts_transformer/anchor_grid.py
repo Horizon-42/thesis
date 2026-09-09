@@ -41,7 +41,7 @@ from typing import Sequence
 
 import numpy as np
 
-from approach_difficulty import (
+from ts_transformer.approach_difficulty import (
     approach_difficulty,
     remaining_path_profile_m,
     strata_masks,
@@ -49,7 +49,7 @@ from approach_difficulty import (
 # Re-exported, not restated: `anchor_strata` is the leaf both this module and `dataset` read
 # the remaining-path values from, so these names are the SAME objects on both sides of the
 # edge (`tests/test_anchor_grid.py` asserts identity, not equality).
-from anchor_strata import (  # noqa: F401 — the grid's public surface lives here
+from ts_transformer.anchor_strata import (  # noqa: F401 — the grid's public surface lives here
     DEFAULT_ANCHOR_GRID_KM,
     REMAINING_PATH_STRATA_EDGES_M,
     REMAINING_PATH_STRATA_LABELS,
@@ -57,7 +57,7 @@ from anchor_strata import (  # noqa: F401 — the grid's public surface lives he
     remaining_path_strata,
     remaining_path_uniform_offset,
 )
-from dataset import FlightSeries, truth_duration_s
+from ts_transformer.dataset import FlightSeries, truth_duration_s
 
 #: Truth required after an anchor for the bin to hold a reading. A bin nearer than this
 #: many seconds of flight is empty BY CONSTRUCTION, not by accident: at approach speed

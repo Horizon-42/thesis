@@ -90,7 +90,7 @@ def _roster_document(raw_roster: str | Path) -> tuple[Path, bytes, dict[str, Any
 
 def _roster_eligible_keys(roster_path: Path, roster: dict[str, Any]) -> list[str]:
     """Validate one lateral-pass roster's policy and identities; return its eligible keys."""
-    from lateral_eligibility import (  # local import keeps the loader policy-agnostic
+    from ts_transformer.lateral_eligibility import (  # local import keeps the loader policy-agnostic
         LATERAL_PASS_POLICY,
         LATERAL_PASS_ROSTER_SCHEMA,
     )
@@ -338,7 +338,7 @@ def checkpoint_data_provenance(
     replays a checkpoint fingerprints through here; the L5.a fitter did not, and died at
     startup on every v5 checkpoint (2026-09-07).
     """
-    from lateral_eligibility import default_lateral_pass_roster_path  # policy module; kept off this module's import graph
+    from ts_transformer.lateral_eligibility import default_lateral_pass_roster_path  # policy module; kept off this module's import graph
 
     rosters = (
         [default_lateral_pass_roster_path(path) for path in manifests]

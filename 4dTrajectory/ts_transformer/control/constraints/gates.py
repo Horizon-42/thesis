@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import torch
 
-from control.dynamics.hooks import RolloutStateView
-from final_approach_geometry import alignment_cosine, hard_on_final, runway_axes, soft_on_final
+from ts_transformer.control.dynamics.hooks import RolloutStateView
+from ts_transformer.final_approach_geometry import alignment_cosine, hard_on_final, runway_axes, soft_on_final
 
 _SPEED_FLOOR_MPS = 1.0
 _HOLD_FLOOR_S = 0.5      # the rollout's own integrator step; a shorter hold is not a hold

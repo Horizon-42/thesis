@@ -46,14 +46,14 @@ import torch
 HERE = Path(__file__).resolve().parent
 TS_DIR = HERE.parent
 REPO_ROOT = TS_DIR.parents[1]
-for path in (HERE, TS_DIR, REPO_ROOT):
+for path in (HERE, TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import compare_frame_arms as cfa  # noqa: E402
-import final_approach_geometry as fag  # noqa: E402
-import geometric_metrics as gm  # noqa: E402
-from config import PROCEDURE_LATERAL_SCALE_M, PROCEDURE_VERTICAL_SCALE_M  # noqa: E402
+import ts_transformer.final_approach_geometry as fag  # noqa: E402
+import ts_transformer.geometric_metrics as gm  # noqa: E402
+from ts_transformer.config import PROCEDURE_LATERAL_SCALE_M, PROCEDURE_VERTICAL_SCALE_M  # noqa: E402
 
 # The hinge scales the penalty arm trains with (one source: config's constants).
 LATERAL_SCALE_M = PROCEDURE_LATERAL_SCALE_M

@@ -20,8 +20,8 @@ import sys
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 
 CONTROL = TS_DIR / "control"
 #: Completed campaigns kept in the repository as the record behind published numbers. They
@@ -91,7 +91,70 @@ def _imported_names(path: Path) -> set[str]:
                 names.add(node.module)
         elif isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
+    # The layering rules below are written in package-relative names (`control.envelope`,
+    # `dataset`); every live import is qualified (`ts_transformer.control.envelope`).
+    return {_package_relative(name) for name in names}
+
+
+PACKAGE = "ts_transformer"
+
+
+def _package_relative(name: str) -> str:
+    return name[len(PACKAGE) + 1:] if name.startswith(PACKAGE + ".") else name
+
+
+def _package_module_names() -> set[str]:
+    """The flat names the modules used to be importable under, from the directory itself."""
+    names = {p.stem for p in TS_DIR.glob("*.py")} - {"__init__", "__main__"}
+    names |= {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()}
     return names
+
+
+def _flat_import_candidates() -> list[Path]:
+    """Everything that imports the package and is RUN: the modules, the tests, the docs
+    scripts, the root runners and the trajectory_data_process tests that drive them."""
+    return [
+        *_archive_import_candidates(),
+        *sorted((TS_DIR / "docs").glob("*.py")),
+        REPO_ROOT / "publish_ts_experiment_trajectories.py",
+        *sorted((REPO_ROOT / "trajectory_data_process" / "tests").glob("test_ts_*.py")),
+    ]
+
+
+def test_no_module_is_imported_by_its_flat_name():
+    """`ts_transformer` is a package (2026-09-09, review §4.1): every import of one of its
+    modules is qualified. A flat `from config import TSConfig` would only resolve while
+    `ts_transformer/` itself sat on `sys.path` — and then it would load a SECOND copy of
+    the module beside `ts_transformer.config`, with its own dataclass, registries and
+    module constants, and every `isinstance` and identity check between the two would
+    silently fail. So the flat names are refused outright."""
+    flat = _package_module_names()
+    offending: dict[str, set[str]] = {}
+    for path in _flat_import_candidates():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        found = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                if node.module.split(".")[0] in flat:
+                    found.add(node.module)
+            elif isinstance(node, ast.Import):
+                found.update(a.name for a in node.names if a.name.split(".")[0] in flat)
+        if found:
+            offending[path.relative_to(REPO_ROOT).as_posix()] = found
+    assert not offending, f"flat imports of package modules: {offending}"
+
+
+def test_the_package_directory_itself_is_never_put_on_sys_path():
+    """The companion rule: no bootstrap may insert `ts_transformer/` into `sys.path` — the
+    package's PARENT, `4dTrajectory/`, is what resolves the qualified names."""
+    offending = []
+    for path in _flat_import_candidates():
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "sys.path" not in line:
+                continue
+            if '"4dTrajectory" / "ts_transformer")' in line:
+                offending.append(f"{path.relative_to(REPO_ROOT)}:{number}")
+    assert not offending, offending
 
 
 def test_no_control_prefixed_module_returns_to_the_top_level():
@@ -253,7 +316,7 @@ NON_CONFIG_DESTS = {
 def _training_parser():
     import argparse
 
-    from cli.common import add_data_args, add_training_args
+    from ts_transformer.cli.common import add_data_args, add_training_args
 
     parser = argparse.ArgumentParser()
     add_data_args(parser)          # --aircraft-type / --aircraft-filter live here
@@ -270,7 +333,7 @@ def test_every_training_flag_is_named_after_the_field_it_sets():
     the parser defines is either a listed field or a frozen non-config dest. Without the
     second, dropping `"patience"` from the list leaves `--patience 99` parsed and ignored.
     """
-    from cli.common import CLI_CONFIG_FIELDS
+    from ts_transformer.cli.common import CLI_CONFIG_FIELDS
 
     parser = _training_parser()
     flags = {option for action in parser._actions for option in action.option_strings}
@@ -348,7 +411,7 @@ def test_the_conditioning_names_and_their_scalings_are_one_source():
     """
     from types import SimpleNamespace
 
-    from control.conditioning import (
+    from ts_transformer.control.conditioning import (
         CONDITION_CHANNELS,
         DYNAMICS_CONDITION_NAMES,
         condition_vector,
@@ -384,8 +447,8 @@ def test_every_new_run_vocabulary_is_actually_refused(tmp_path, capsys):
 
     import pytest
 
-    from cli.common import _NEW_RUN_VOCABULARIES
-    from config import CONTROL_HOOKS, CTA_CONDITIONINGS, STATE_POSITION_REFERENCES
+    from ts_transformer.cli.common import _NEW_RUN_VOCABULARIES
+    from ts_transformer.config import CONTROL_HOOKS, CTA_CONDITIONINGS, STATE_POSITION_REFERENCES
 
     #: field -> (its full stored vocabulary, the other settings that value needs to be legal)
     VOCABULARY_CONTEXT = {

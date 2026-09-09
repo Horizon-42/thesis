@@ -47,25 +47,25 @@ import torch
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
-for path in (TS_DIR, REPO_ROOT):
+for path in (TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from approach_difficulty import STRAIGHT_TORTUOSITY, STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED  # noqa: E402
-from approach_difficulty import approach_difficulty  # noqa: E402
-from channels import IDX, channels_from_states, states_from_channels  # noqa: E402
-from coordinate_frames import COORDINATE_FRAME_AIRPORT_ENU  # noqa: E402
-from data_provenance import (  # noqa: E402
+from ts_transformer.approach_difficulty import STRAIGHT_TORTUOSITY, STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED  # noqa: E402
+from ts_transformer.approach_difficulty import approach_difficulty  # noqa: E402
+from ts_transformer.channels import IDX, channels_from_states, states_from_channels  # noqa: E402
+from ts_transformer.coordinate_frames import COORDINATE_FRAME_AIRPORT_ENU  # noqa: E402
+from ts_transformer.data_provenance import (  # noqa: E402
     arrival_data_provenance,
     require_matching_data_provenance,
 )
-from dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
-from export import observed_series_metrics  # noqa: E402
-from forecast import Forecast, default_anchor, forecast_approaches  # noqa: E402
+from ts_transformer.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.export import observed_series_metrics  # noqa: E402
+from ts_transformer.forecast import Forecast, default_anchor, forecast_approaches  # noqa: E402
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402
-from lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
-from models import resolve_device  # noqa: E402
-from train import load_checkpoint  # noqa: E402
+from ts_transformer.lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
+from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.train import load_checkpoint  # noqa: E402
 
 SCHEMA = "ts-runway-hypotheses-v3-stratum-labels"   # v2 keyed the strata "straight-in"/"vectored"
 # A pseudo-candidate per flight: the assigned threshold mirrored to the far side of its

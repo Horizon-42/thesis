@@ -41,8 +41,9 @@ adopted delivery form and two arm files spell them.
 One module per subcommand under ``cli/``; this file is the parser table and the bootstrap.
 
 Invoked by script path, like ``4dTrajectory/optimization/scenario_optimization.py`` — the
-bootstrap below makes it work from any working directory. (``python -m ts_transformer``
-also works, but only from inside ``4dTrajectory/``, so the path form is what the docs use.)
+bootstrap below makes it work from any working directory. ``python -m ts_transformer`` works
+wherever ``4dTrajectory/`` is on ``sys.path`` (``pip install -e 4dTrajectory``, or from inside
+that directory); the path form is what the docs use.
 """
 
 from __future__ import annotations
@@ -53,18 +54,18 @@ from pathlib import Path
 from typing import Callable
 
 # Same bootstrap as 4dTrajectory/optimization/*.py: the repo root for the shared packages
-# (flight_scenarios, aerodynamic_model, geokit, evaluation), and this directory so sibling
-# modules import flat.
+# (flight_scenarios, aerodynamic_model, geokit, evaluation), and the package's PARENT so
+# `ts_transformer.<module>` resolves — never this directory itself, which would make the
+# flat module names importable beside the qualified ones (two copies of every module).
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-_TS_DIR = Path(__file__).resolve().parent
-if str(_TS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TS_DIR))
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+for _path in (_REPO_ROOT, _PACKAGE_ROOT):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
-import approach_clustering.cli as approach_cohorts_cli  # noqa: E402
-import batch_benchmark  # noqa: E402
-from cli import (  # noqa: E402
+import ts_transformer.approach_clustering.cli as approach_cohorts_cli  # noqa: E402
+import ts_transformer.batch_benchmark as batch_benchmark  # noqa: E402
+from ts_transformer.cli import (  # noqa: E402
     cross_validate as cross_validate_cli,
     evaluate_fit as evaluate_fit_cli,
     freeze as freeze_test_cli,

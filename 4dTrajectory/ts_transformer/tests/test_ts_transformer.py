@@ -27,8 +27,8 @@ import pytest
 import torch
 
 _TS_DIR = Path(__file__).resolve().parents[1]
-if str(_TS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TS_DIR))
+if str(_TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(_TS_DIR.parent))
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -40,42 +40,42 @@ assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
 ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
-import channels as ch  # noqa: E402
-import cli.common as cli_common  # noqa: E402
-from control.conditioning import DYNAMICS_CONDITION_NAMES  # noqa: E402
-import cli.evaluate_fit as cli_evaluate_fit  # noqa: E402
-import cli.train as cli_train  # noqa: E402
-from control import heads as control_models  # noqa: E402
-import batching  # noqa: E402
-import build_multiflight_capacity_report as capacity_report  # noqa: E402
-import coordinate_frames as frames  # noqa: E402
-import cross_validation as cv  # noqa: E402
-import control.dynamics.rollout as control_rollout_module  # noqa: E402
-import batch_contract  # noqa: E402
-from batch_contract import anchor_state, model_forward, unpack_batch  # noqa: E402
-import dataset as dataset_module  # noqa: E402
-import splits  # noqa: E402
-import batch_benchmark as batch_probe  # noqa: E402
-import evaluation_protocol  # noqa: E402
-import experiment_index  # noqa: E402
-import control.loss.fixed_dt as fixed_dt_loss_module  # noqa: E402
-import objective  # noqa: E402
+import ts_transformer.channels as ch  # noqa: E402
+import ts_transformer.cli.common as cli_common  # noqa: E402
+from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES  # noqa: E402
+import ts_transformer.cli.evaluate_fit as cli_evaluate_fit  # noqa: E402
+import ts_transformer.cli.train as cli_train  # noqa: E402
+from ts_transformer.control import heads as control_models  # noqa: E402
+import ts_transformer.batching as batching  # noqa: E402
+import ts_transformer.build_multiflight_capacity_report as capacity_report  # noqa: E402
+import ts_transformer.coordinate_frames as frames  # noqa: E402
+import ts_transformer.cross_validation as cv  # noqa: E402
+import ts_transformer.control.dynamics.rollout as control_rollout_module  # noqa: E402
+import ts_transformer.batch_contract as batch_contract  # noqa: E402
+from ts_transformer.batch_contract import anchor_state, model_forward, unpack_batch  # noqa: E402
+import ts_transformer.dataset as dataset_module  # noqa: E402
+import ts_transformer.splits as splits  # noqa: E402
+import ts_transformer.batch_benchmark as batch_probe  # noqa: E402
+import ts_transformer.evaluation_protocol as evaluation_protocol  # noqa: E402
+import ts_transformer.experiment_index as experiment_index  # noqa: E402
+import ts_transformer.control.loss.fixed_dt as fixed_dt_loss_module  # noqa: E402
+import ts_transformer.objective as objective  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
-import train as train_module  # noqa: E402
-import validation  # noqa: E402
-from arc_length_geometry import (  # noqa: E402
+import ts_transformer.train as train_module  # noqa: E402
+import ts_transformer.validation as validation  # noqa: E402
+from ts_transformer.arc_length_geometry import (  # noqa: E402
     arc_length_geometry_metrics,
     arc_length_velocity_metrics,
     resample_horizontal_arc_length_numpy,
 )
-from anchor_eligibility import (  # noqa: E402
+from ts_transformer.anchor_eligibility import (  # noqa: E402
     CONTROL_ANCHOR_STALL_MARGIN, eligible_random_train_anchors,
 )
 from aerodynamic_model.common import GeodeticState  # noqa: E402
-from batching import resolve_batch_size  # noqa: E402
-from config import (  # noqa: E402
+from ts_transformer.batching import resolve_batch_size  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, COORDINATE_FRAMES, HORIZON_FULL, HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
@@ -96,27 +96,27 @@ from config import (  # noqa: E402
     PREDICTION_STATE,
     TSConfig, control_recipe, control_simple_v1_overrides,
 )
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
-from control.loss.components import (  # noqa: E402
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from ts_transformer.control.loss.components import (  # noqa: E402
     ControlStateLossResult,
     control_tracking_loss_terms,
 )
-from terminal_state_loss import (  # noqa: E402
+from ts_transformer.terminal_state_loss import (  # noqa: E402
     last_reliable_terminal_velocity_target,
     terminal_state_metrics_numpy,
 )
-from control.training.diagnostics import (  # noqa: E402
+from ts_transformer.control.training.diagnostics import (  # noqa: E402
     ControlTrainingDiagnosticsAccumulator,
     clip_gradients_by_global_norm,
     gradient_norms,
 )
-from data_provenance import (  # noqa: E402
+from ts_transformer.data_provenance import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     arrival_data_provenance,
     require_matching_data_provenance,
 )
-from dataset import iter_batches  # noqa: E402
-from dataset import (  # noqa: E402
+from ts_transformer.dataset import iter_batches  # noqa: E402
+from ts_transformer.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightEpochSampler,
     Normalizer,
@@ -124,23 +124,23 @@ from dataset import (  # noqa: E402
     build_series,
     window_anchors,
 )
-from splits import (  # noqa: E402
+from ts_transformer.splits import (  # noqa: E402
     cross_validation_folds,
     split_by_flight,
     split_name_for_dataset_id,
 )
-from development_cohorts import DEVELOPMENT_COHORT_SCHEMA, DevelopmentCohort  # noqa: E402
+from ts_transformer.development_cohorts import DEVELOPMENT_COHORT_SCHEMA, DevelopmentCohort  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
 from evaluation.thresholds import AssessmentContext  # noqa: E402
-from export import (  # noqa: E402
+from ts_transformer.export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, record_stem, write_batch,
 )
-from fixed_dt_supervision import (  # noqa: E402
+from ts_transformer.fixed_dt_supervision import (  # noqa: E402
     FixedDTControlSupervision,
     build_fixed_dt_supervision,
 )
-from fixed_anchor_validation import (  # noqa: E402
+from ts_transformer.fixed_anchor_validation import (  # noqa: E402
     ARC_LENGTH_POSITION_END_WEIGHT,
     TERMINAL_CROSS_TRACK_EMPHASIS,
     TERMINAL_VERTICAL_EMPHASIS,
@@ -150,29 +150,29 @@ from fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_common_truth,
     fixed_anchor_common_weights_and_terminal_velocity,
 )
-from forecast import Forecast, forecast_approach, forecast_approaches  # noqa: E402
-from metrics import (  # noqa: E402
+from ts_transformer.forecast import Forecast, forecast_approach, forecast_approaches  # noqa: E402
+from ts_transformer.metrics import (  # noqa: E402
     RAW_KINEMATIC_METRIC_KEYS, common_physical_time_flight_metrics,
     raw_kinematic_metrics, states_with_derived_velocity,
 )
-from models import build_model, parameter_count  # noqa: E402
-from prediction_outputs import (  # noqa: E402
+from ts_transformer.models import build_model, parameter_count  # noqa: E402
+from ts_transformer.prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
-from prediction_outputs import UniformDurationControlHead  # noqa: E402
+from ts_transformer.prediction_outputs import UniformDurationControlHead  # noqa: E402
 from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
-from synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     SCHEMA_VERSION as ARRIVAL_MANIFEST_SCHEMA,
 )
-from objective import (  # noqa: E402
+from ts_transformer.objective import (  # noqa: E402
     STATE_LOSS_COMPONENT_NAMES, loss_component_names, masked_mse,
     move_dynamics, move_fixed_dt_supervision, position_velocity_consistency_loss,
     prediction_loss, prediction_loss_components, state_prediction_loss_components,
 )
-from train import (  # noqa: E402
+from ts_transformer.train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
     evaluate_fit_splits, load_checkpoint, train,
 )
@@ -806,7 +806,7 @@ def test_airport_enu_needs_the_arrival_airport():
 
 
 def test_target_conditioning_appends_input_only_channels():
-    from target_conditioning import CONDITIONING_CHANNELS
+    from ts_transformer.target_conditioning import CONDITIONING_CHANNELS
 
     config = TSConfig(target_conditioning="channels")
     assert config.input_channels == ch.CHANNELS + CONDITIONING_CHANNELS
@@ -820,7 +820,7 @@ def test_target_conditioning_appends_input_only_channels():
 
 
 def test_conditioned_windows_carry_the_target_and_the_model_still_predicts_six_channels():
-    from forecast import _history_at_anchor
+    from ts_transformer.forecast import _history_at_anchor
 
     series, config = _series(
         n_flights=3, seq_len=20, n_segments=4, coordinate_frame="airport-enu",
@@ -895,7 +895,7 @@ def test_conditioned_checkpoint_round_trips_and_refuses_a_different_input_contra
 
 
 def test_anchor_relative_state_output_starts_where_the_aircraft_is():
-    from prediction_outputs import StateOutputLayer
+    from ts_transformer.prediction_outputs import StateOutputLayer
 
     config = TSConfig(state_position_reference="anchor-relative", seq_len=4, n_segments=3)
 
@@ -1687,7 +1687,7 @@ def test_windows_never_straddle_two_flights():
 
 
 def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU") -> Path:
-    from dataset import flight_key
+    from ts_transformer.dataset import flight_key
 
     arrivals = root / "arrivals"
     tracks = root / "tracks"
@@ -1769,7 +1769,7 @@ def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU"
 def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
     # An orphan beside the roster is deliberately ignored: no glob can leak rejected or
     # stale flights into the train/validation/test split.
-    from dataset import load_flight_dicts
+    from ts_transformer.dataset import load_flight_dicts
 
     _write_arrival_manifest(tmp_path, ["A", "B", "C"])
     (tmp_path / "tracks" / "assigned" / "05L" / "orphan.json").write_text(
@@ -1780,7 +1780,7 @@ def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
     assert [f["id"] for f in flights] == ["A", "B", "C"]
     # Scene context rides along from the same roster: each flight's previous same-runway
     # landing (the fixture lands one per second on 05L).
-    from intent_conditioning import LeadLanding
+    from ts_transformer.intent_conditioning import LeadLanding
 
     assert [f["lead_landing"] for f in flights] == [
         LeadLanding(None), LeadLanding("2026-01-01T00:00:00Z"),
@@ -1789,7 +1789,7 @@ def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
 
 
 def test_ts_load_aggregates_multiple_airport_manifests(tmp_path):
-    from dataset import load_flight_dicts
+    from ts_transformer.dataset import load_flight_dicts
 
     first = _write_arrival_manifest(tmp_path / "first", ["A"], airport="KAAA")
     second = _write_arrival_manifest(tmp_path / "second", ["B"], airport="KBBB")
@@ -1865,7 +1865,7 @@ def test_batch_probe_opens_outer_train_track_files_only(tmp_path):
 
 
 def test_ts_load_rejects_duplicate_manifest_identity(tmp_path):
-    from dataset import load_flight_dicts
+    from ts_transformer.dataset import load_flight_dicts
 
     manifest_path = _write_arrival_manifest(tmp_path, ["A"])
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1877,7 +1877,7 @@ def test_ts_load_rejects_duplicate_manifest_identity(tmp_path):
 
 
 def test_ts_load_rejects_legacy_json_input(tmp_path):
-    from dataset import load_flight_dicts
+    from ts_transformer.dataset import load_flight_dicts
 
     legacy = tmp_path / "KRDU_05L_landings.json"
     legacy.write_text(json.dumps([{"id": "OLD"}]), encoding="utf-8")
@@ -1891,7 +1891,7 @@ def test_flight_identity_separates_the_same_callsign_on_different_runways():
     # `predict --split test` returning 48 flights for an 18-flight split — because every
     # namesake on every runway matched. It also leaks the split: three copies of one id
     # land in train, val and test at once.
-    from dataset import flight_key
+    from ts_transformer.dataset import flight_key
 
     series, _ = _series(n_flights=6)
     ids = [s.flight_id for s in series]
@@ -3538,7 +3538,7 @@ def test_terminal_state_metrics_numpy_applies_the_frozen_emphasis():
     """The shape constants used to be config fields (retired with the arc-length objective,
     T1-11); they are frozen so the ``arc_length_*`` diagnostic keys stay comparable across
     the artifact history. A non-zero error pins the arithmetic — and the numbers."""
-    from config import COORDINATE_FRAME_RUNWAY_ALIGNED
+    from ts_transformer.config import COORDINATE_FRAME_RUNWAY_ALIGNED
     predicted = np.zeros(len(ch.CHANNELS))
     predicted[list(ch.POSITION_IDX)] = 1.0          # 1 m along, 1 m cross, 1 m vertical
     reference = np.zeros(len(ch.CHANNELS))
@@ -4633,7 +4633,7 @@ def test_spread_matches_the_gate_side_signed_spread():
     # test is what makes "same statistic" a checked property instead of a mirror comment:
     # if either side changes its percentile method or keys, this fails.
     from evaluation.stats import signed_spread
-    from metrics import signed_spread as vectorised_spread
+    from ts_transformer.metrics import signed_spread as vectorised_spread
 
     values = np.array([3.0, -1.5, 0.25, -7.0, 4.0, 2.5, -0.75])
     ours, theirs = vectorised_spread(values), signed_spread(values.tolist())
@@ -5738,7 +5738,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
 def test_a_stored_config_carrying_a_retired_field_still_loads_and_an_unknown_one_does_not():
     """Checkpoints written before a field was retired keep loading; a genuinely unknown key
     is still refused, so the retired list stays honest."""
-    from config import RETIRED_CONSTANT_FIELDS, RETIRED_SERIALIZED_FIELDS
+    from ts_transformer.config import RETIRED_CONSTANT_FIELDS, RETIRED_SERIALIZED_FIELDS
     from dataclasses import fields as dataclass_fields
     live = {field.name for field in dataclass_fields(TSConfig)}
     retired = set(RETIRED_SERIALIZED_FIELDS) | set(RETIRED_CONSTANT_FIELDS)
@@ -5762,7 +5762,7 @@ def test_a_measured_constant_field_is_dropped_at_its_constant_and_refused_anywhe
     nothing read them — so dropping a non-default value by name would silently reinterpret
     an artifact produced under a scale this build no longer has.
     """
-    from config import RETIRED_CONSTANT_FIELDS
+    from ts_transformer.config import RETIRED_CONSTANT_FIELDS
 
     base = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
     at_constant = {**base, **RETIRED_CONSTANT_FIELDS}
@@ -5782,8 +5782,8 @@ def test_the_l1_native32_checkpoint_written_with_the_retired_fields_still_loads(
     """The canary against the serialized contract: a REAL artifact from before a field was
     retired (the synthetic test above pins the rule, not an artifact) — its class, its
     strict state dict, and a config that round-trips without the retired keys."""
-    from config import RETIRED_SERIALIZED_FIELDS
-    from control.heads import ControlOutputModel
+    from ts_transformer.config import RETIRED_SERIALIZED_FIELDS
+    from ts_transformer.control.heads import ControlOutputModel
     model, config, _normalizer, payload = load_checkpoint(L1_NATIVE32_CHECKPOINT)
     assert isinstance(model, ControlOutputModel) and config.n_segments == 32
     assert set(RETIRED_SERIALIZED_FIELDS) <= set(payload["config"]), "the canary lost its point: pick an older artifact"

@@ -47,13 +47,13 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (REPO_ROOT, REPO_ROOT / "geokit" / "src", TS_DIR, TS_DIR / "docs"):
+for path in (REPO_ROOT, REPO_ROOT / "geokit" / "src", TS_DIR.parent, TS_DIR / "docs"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 from evaluation.cli import DEFAULT_METAR_ROOT  # noqa: E402
 from evaluation.wind import load_wind_tables, wind_at_landing  # noqa: E402
 import compare_frame_arms as cfa  # noqa: E402
-from approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
+from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
 
 FINAL_WINDOW_S = 120.0
 # Headwind bins (m/s): a tailwind, calm, an ordinary headwind, a strong one.

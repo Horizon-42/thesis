@@ -53,7 +53,7 @@ import torch
 
 from flight_scenarios.fas_geometry import course_halfwidth_m, fas_course_geometry
 
-from config import CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL
+from ts_transformer.config import CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL
 
 # Mirrors of the optimizer's constraint defaults. ``4dTrajectory/optimization`` is not on
 # this package's import path, so they cannot be imported here;

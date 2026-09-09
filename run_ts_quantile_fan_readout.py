@@ -45,19 +45,19 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import geometric_metrics as gm  # noqa: E402
-from approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
-from calibration import (  # noqa: E402
+import ts_transformer.geometric_metrics as gm  # noqa: E402
+from ts_transformer.approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
+from ts_transformer.calibration import (  # noqa: E402
     CONFORMAL_ALPHAS,
     QUANTILE_DIR_NAME,
     quantile_directory_name,
     quantile_pair_indices,
 )
-from config import DURATION_MEDIAN_INDEX, DURATION_QUANTILES  # noqa: E402
+from ts_transformer.config import DURATION_MEDIAN_INDEX, DURATION_QUANTILES  # noqa: E402
 from flight_scenarios.identity import summary_row_key  # noqa: E402
 
 RESULT_SCHEMA = "ts-quantile-fan-readout-b3-v1"

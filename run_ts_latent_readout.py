@@ -43,14 +43,14 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from approach_difficulty import strata_masks  # noqa: E402
+from ts_transformer.approach_difficulty import strata_masks  # noqa: E402
 # One ruler for the displacement gate and one for an active unit, both defined beside the
 # KL they are read against (`control/latent.py`) rather than restated here.
-from control.latent import ACTIVE_UNIT_KL_NATS, displacement_verdict  # noqa: E402
+from ts_transformer.control.latent import ACTIVE_UNIT_KL_NATS, displacement_verdict  # noqa: E402
 from flight_scenarios.identity import summary_row_key  # noqa: E402
 
 MISS_FDE_M = 2_000.0

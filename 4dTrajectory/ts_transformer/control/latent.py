@@ -39,16 +39,16 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from batch_contract import LossComponents
-from config import TSConfig
-from control.heads import (
+from ts_transformer.batch_contract import LossComponents
+from ts_transformer.config import TSConfig
+from ts_transformer.control.heads import (
     ControlFeatureModel,
     _initialize_control_head,
     _initialize_duration_head,
     control_head_for,
     duration_head_for,
 )
-from prediction_outputs import ControlPrediction
+from ts_transformer.prediction_outputs import ControlPrediction
 
 LATENT_KL_COMPONENT = "latent_kl"
 #: The auxiliary intent target's loss component (L2.f arm 2); registered only when

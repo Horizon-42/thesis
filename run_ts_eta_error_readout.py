@@ -49,12 +49,12 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
-from config import DURATION_HEAD_QUANTILE, DURATION_MEDIAN_INDEX  # noqa: E402
+from ts_transformer.approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
+from ts_transformer.config import DURATION_HEAD_QUANTILE, DURATION_MEDIAN_INDEX  # noqa: E402
 from flight_scenarios.identity import summary_row_key  # noqa: E402
 
 RESULT_SCHEMA = "ts-eta-error-readout-b0-v3"

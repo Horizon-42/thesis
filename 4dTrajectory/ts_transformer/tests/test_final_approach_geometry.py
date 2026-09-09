@@ -13,17 +13,17 @@ import torch
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
 OPTIMIZATION_DIR = REPO_ROOT / "4dTrajectory" / "optimization"
-for path in (TS_DIR, REPO_ROOT, OPTIMIZATION_DIR):
+for path in (TS_DIR.parent, REPO_ROOT, OPTIMIZATION_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import final_approach_geometry as fag  # noqa: E402
-from config import (  # noqa: E402
+import ts_transformer.final_approach_geometry as fag  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
 from approach_constraints import lateral, segments, vertical  # noqa: E402
 from approach_constraints.segments import LpvFinalSpec  # noqa: E402
-from run_naming import run_display_name  # noqa: E402
+from ts_transformer.run_naming import run_display_name  # noqa: E402
 
 
 def _lpv(psi: float) -> LpvFinalSpec:

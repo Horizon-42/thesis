@@ -14,13 +14,13 @@ import torch
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR, REPO_ROOT, REPO_ROOT / "geokit" / "src", REPO_ROOT / "flight_scenarios" / "tests"):
+for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src", REPO_ROOT / "flight_scenarios" / "tests"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import final_approach_geometry as fag  # noqa: E402
+import ts_transformer.final_approach_geometry as fag  # noqa: E402
 import flight_scenarios.scene_context as sc  # noqa: E402
-from scene.features import SCALAR_NAMES, STATIC_NAMES, NO_LEAD_SENTINEL_S, scene_arrays  # noqa: E402
+from ts_transformer.scene.features import SCALAR_NAMES, STATIC_NAMES, NO_LEAD_SENTINEL_S, scene_arrays  # noqa: E402
 from scene_fixture import RUNWAY, T0, TARGET, axes_to_chart, chart_to_latlon, standard_scene  # noqa: E402
 from trajectory_data_process.scene_index import build_scene_index  # noqa: E402
 

@@ -6,10 +6,10 @@ import argparse
 import json
 from pathlib import Path
 
-from config import TSConfig
-from data_provenance import arrival_data_provenance
-from dataset import build_series, load_flight_dicts
-from splits import flight_keys_by_split, split_by_flight
+from ts_transformer.config import TSConfig
+from ts_transformer.data_provenance import arrival_data_provenance
+from ts_transformer.dataset import build_series, load_flight_dicts
+from ts_transformer.splits import flight_keys_by_split, split_by_flight
 
 from .artifacts import write_clustering_artifacts
 from .evaluation import compare_checkpoints

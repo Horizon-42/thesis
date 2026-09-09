@@ -71,15 +71,15 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 
-import geometric_metrics as gm  # noqa: E402
-from anchor_grid import (  # noqa: E402
+import ts_transformer.geometric_metrics as gm  # noqa: E402
+from ts_transformer.anchor_grid import (  # noqa: E402
     DEFAULT_ANCHOR_GRID_KM,
     DEFAULT_GRID_MIN_FUTURE_S,
     PARTIAL_COVERAGE,
@@ -89,9 +89,9 @@ from anchor_grid import (  # noqa: E402
     remaining_path_profiles,
     strata_fixed_at_l1,
 )
-from approach_difficulty import STRATUM_ALL, STRATUM_VECTORED  # noqa: E402
-from channels import POSITION_IDX  # noqa: E402
-from config import (  # noqa: E402
+from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED  # noqa: E402
+from ts_transformer.channels import POSITION_IDX  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_OFF,
     CTA_CONDITIONING_GIVEN,
@@ -100,26 +100,26 @@ from config import (  # noqa: E402
     PREDICTION_CONTROL,
     TSConfig,
 )
-from data_provenance import (  # noqa: E402
+from ts_transformer.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     provenance_manifest_digests,
     require_matching_data_provenance,
 )
-from dataset import (  # noqa: E402
+from ts_transformer.dataset import (  # noqa: E402
     Normalizer,
     build_series,
     load_flight_dicts,
 )
-from export import (  # noqa: E402
+from ts_transformer.export import (  # noqa: E402
     PredictionRecord,
     build_prediction_record,
     observed_series_metrics,
     write_batch,
 )
-from forecast import forecast_approaches  # noqa: E402
-from io_utils import file_sha256  # noqa: E402
-from models import resolve_device  # noqa: E402
-from train import load_checkpoint, usable_series  # noqa: E402
+from ts_transformer.forecast import forecast_approaches  # noqa: E402
+from ts_transformer.io_utils import file_sha256  # noqa: E402
+from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 
 RESULT_SCHEMA = "ts-anytime-curve-a0-v2"

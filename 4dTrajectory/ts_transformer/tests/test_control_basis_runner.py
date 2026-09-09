@@ -15,8 +15,8 @@ import numpy as np
 import pytest
 import torch
 
-from approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks
-from control.basis_fit import inverse_dynamics_seed
+from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks
+from ts_transformer.control.basis_fit import inverse_dynamics_seed
 from flight_scenarios.identity import summary_row_key
 from run_ts_control_basis_oracle import summarise
 
@@ -104,8 +104,8 @@ def test_the_seed_refuses_a_batch_that_does_not_cover_the_same_flights():
 import json                                                        # noqa: E402
 
 import run_ts_control_basis_oracle as runner                       # noqa: E402
-from forecast import _control_prediction_batch                     # noqa: E402
-from config import (                                               # noqa: E402
+from ts_transformer.forecast import _control_prediction_batch                     # noqa: E402
+from ts_transformer.config import (                                               # noqa: E402
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -114,24 +114,24 @@ from config import (                                               # noqa: E402
     PREDICTION_STATE,
     TSConfig,
 )
-from control.basis_fit import (                                    # noqa: E402
+from ts_transformer.control.basis_fit import (                                    # noqa: E402
     DURATION_UNIFORM,
     FITTED_TEACHER_SCHEMA,
     BasisSchedule,
     load_fitted_teacher,
 )
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
-from dataset import (  # noqa: E402
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from ts_transformer.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
     dataset_flight_key,
     truth_duration_s,
 )
-from io_utils import file_sha256                                   # noqa: E402
-from models import build_model                                     # noqa: E402
-from synthetic import synthetic_arrivals                           # noqa: E402
-from train import load_checkpoint, train                           # noqa: E402
+from ts_transformer.io_utils import file_sha256                                   # noqa: E402
+from ts_transformer.models import build_model                                     # noqa: E402
+from ts_transformer.synthetic import synthetic_arrivals                           # noqa: E402
+from ts_transformer.train import load_checkpoint, train                           # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -455,7 +455,7 @@ def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoin
     """The blocker of 2026-09-07: every v5 checkpoint's provenance is eligibility-bound, and
     a fingerprint taken without the roster reads as "the manifest changed" — the fitter died
     at startup on every real checkpoint. The roster is read iff the checkpoint recorded one."""
-    import data_provenance as provenance_module
+    import ts_transformer.data_provenance as provenance_module
     seen = {}
 
     def spy(paths, *, eligibility_rosters=None):

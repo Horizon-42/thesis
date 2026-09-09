@@ -53,7 +53,7 @@ from flight_scenarios import (
 from flight_scenarios.datum import flight_to_msl
 from trajectory_data_process.harvest.arrivals import load_arrival_flights
 
-from channels import (
+from ts_transformer.channels import (
     CHANNELS,
     POSITION_IDX,
     VELOCITY_IDX,
@@ -62,20 +62,20 @@ from channels import (
     states_from_channels,
     target_chart_position,
 )
-from anchor_eligibility import (
+from ts_transformer.anchor_eligibility import (
     eligible_random_train_anchors,
     random_train_anchor_eligibility_policy,
 )
 # The remaining-path axis, from the LEAF that owns its values. `anchor_grid` re-exports the
 # same objects for every reading consumer; it imports this module, so the training sampler
 # reads them from underneath rather than through it.
-from anchor_strata import (
+from ts_transformer.anchor_strata import (
     REMAINING_PATH_STRATA_LABELS,
     remaining_path_strata,
     remaining_path_uniform_offset,
 )
-from approach_difficulty import remaining_path_profile_m
-from config import (
+from ts_transformer.approach_difficulty import remaining_path_profile_m
+from ts_transformer.config import (
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_OFF,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
@@ -93,35 +93,35 @@ from config import (
     default_anchor,
     uses_control_dynamics,
 )
-from data_provenance import manifest_paths
-from control.basis_fit import FittedTeacherTable
-from control.conditioning import condition_vector
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from control.dynamics.inverse import actual_controls, segment_controls
-from coordinate_frames import (
+from ts_transformer.data_provenance import manifest_paths
+from ts_transformer.control.basis_fit import FittedTeacherTable
+from ts_transformer.control.conditioning import condition_vector
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.control.dynamics.inverse import actual_controls, segment_controls
+from ts_transformer.coordinate_frames import (
     COORDINATE_FRAME_AIRPORT_ENU,
     AirportReference,
     CoordinateFrame,
     frame_for_state,
 )
-from final_approach_geometry import FINAL_APPROACH_KEYS
+from ts_transformer.final_approach_geometry import FINAL_APPROACH_KEYS
 from flight_scenarios.procedure_final import final_approach_fix
 from flight_scenarios.runway_target import airport_reference_point
-from fixed_dt_supervision import (
+from ts_transformer.fixed_dt_supervision import (
     FixedDTControlSupervision,
     FixedDTSupervisionRow,
     build_fixed_dt_supervision,
     cache_fixed_dt_supervision_rows,
     pack_fixed_dt_supervision_rows,
 )
-from intent_conditioning import LeadLanding, intent_vector, lead_landings
-from target_conditioning import (
+from ts_transformer.intent_conditioning import LeadLanding, intent_vector, lead_landings
+from ts_transformer.target_conditioning import (
     TARGET_CONDITIONING_NONE,
     conditioned_history,
     conditioning_vector,
 )
-from time_grids import output_time_grid
-from reference_velocity import rebuild_reference_velocities
+from ts_transformer.time_grids import output_time_grid
+from ts_transformer.reference_velocity import rebuild_reference_velocities
 
 
 
@@ -1328,7 +1328,7 @@ class TrajectoryWindows(Dataset, ABC):
         self.closure = None
         self.closure_coverage: tuple[int, int, int] | None = None
         if uses_closure_labels(config.prediction_output):
-            from closure_output import CONTEXT_VALID, label_context, load_labels
+            from ts_transformer.closure_output import CONTEXT_VALID, label_context, load_labels
             labels = load_labels(config.closure_labels_path)
             self.closure = [label_context(s, labels, config) for s in self.series]
             present = sum(s.flight_id in labels.flights for s in self.series)

@@ -20,9 +20,9 @@ from typing import Any, Sequence
 
 import torch
 
-from anchor_grid import VALIDATION_ANCHOR_GRID_KM
-from batching import resolve_batch_size
-from config import (
+from ts_transformer.anchor_grid import VALIDATION_ANCHOR_GRID_KM
+from ts_transformer.batching import resolve_batch_size
+from ts_transformer.config import (
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_DYNAMICS_POINT_MASS,
@@ -32,12 +32,12 @@ from config import (
     HORIZON_NORMALIZED,
     TSConfig,
 )
-from io_utils import write_json_atomic
-from data_provenance import provenance_eligible_set_digests, provenance_manifest_digests
-from dataset import FlightSeries
-from splits import cross_validation_folds, split_by_flight
-from models import resolve_device
-from train import filter_training_cohort, fit_model, usable_series
+from ts_transformer.io_utils import write_json_atomic
+from ts_transformer.data_provenance import provenance_eligible_set_digests, provenance_manifest_digests
+from ts_transformer.dataset import FlightSeries
+from ts_transformer.splits import cross_validation_folds, split_by_flight
+from ts_transformer.models import resolve_device
+from ts_transformer.train import filter_training_cohort, fit_model, usable_series
 
 RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"

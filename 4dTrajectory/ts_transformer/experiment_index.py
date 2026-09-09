@@ -15,13 +15,13 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from io_utils import sha256_bytes, utc_now, write_json_atomic
+from ts_transformer.io_utils import sha256_bytes, utc_now, write_json_atomic
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:  # run_naming -> config -> aerodynamic_model
     sys.path.insert(0, str(_REPO_ROOT))
 
-from run_naming import run_display_name  # noqa: E402
+from ts_transformer.run_naming import run_display_name  # noqa: E402
 
 
 RUN_MANIFEST_NAME = "experiment_manifest.json"

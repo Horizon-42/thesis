@@ -27,10 +27,10 @@ import numpy as np
 import pytest
 import torch
 
-import objective
+import ts_transformer.objective as objective
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, heading_rate_rad_s
-from channels import CHANNELS, channels_from_states
-from config import (
+from ts_transformer.channels import CHANNELS, channels_from_states
+from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_RECIPE_SIMPLE_V3,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -44,22 +44,22 @@ from config import (
     control_simple_v1_overrides,
     recipe_settings,
 )
-from control.dynamics import rollout as control_rollout
-from control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
-from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
-from coordinate_frames import ENUFrame
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import (
+from ts_transformer.control.dynamics import rollout as control_rollout
+from ts_transformer.control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
+from ts_transformer.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
+from ts_transformer.coordinate_frames import ENUFrame
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.dataset import (
     HEADING_RATE_SMOOTHING_WINDOW_S,
     Normalizer,
     build_series,
     probe_dynamics,
     reference_heading_rate_supervision,
 )
-from forecast import forecast_approach
-from run_naming import run_display_name
-from synthetic import synthetic_arrivals
-from train import load_checkpoint, train
+from ts_transformer.forecast import forecast_approach
+from ts_transformer.run_naming import run_display_name
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.train import load_checkpoint, train
 
 from aerodynamic_model.common import GeodeticState
 
@@ -157,7 +157,7 @@ def test_the_heading_is_unwrapped_before_it_is_differentiated():
         _constant_turn(3.0, psi0_rad=math.pi - math.radians(30.0), duration_s=duration_s)
     )
     # The channels carry velocity, not psi; the branch cut appears when psi is recovered.
-    from channels import states_from_channels
+    from ts_transformer.channels import states_from_channels
 
     recovered = np.asarray([
         state.psi for _t, state in states_from_channels(
@@ -319,7 +319,7 @@ def test_the_model_side_is_the_rhs_relation_on_the_rollout_endpoint_states():
 def test_the_lagged_model_prices_the_bank_the_actuator_reached_not_the_command():
     """Under the first-order lag the commanded bank is not what the aircraft is doing;
     a term that read the command would price a turn the rollout never flew."""
-    from config import CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY
+    from ts_transformer.config import CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY
 
     config = _config(
         n_segments=4,
@@ -426,7 +426,7 @@ def _endpoint_result(config: TSConfig, bank_schedule: list[float], target_dps: l
         dtype=torch.float64, requires_grad=True,
     )
     durations = torch.full((1, len(bank_schedule)), 10.0, dtype=torch.float64)
-    from prediction_outputs import ControlPrediction
+    from ts_transformer.prediction_outputs import ControlPrediction
 
     prediction = ControlPrediction(
         controls=controls, segment_durations=durations,
@@ -738,8 +738,8 @@ def test_the_teacherless_supervision_trains_under_random_anchors(tmp_path: Path)
 
 def _real_dynamics_batch(config: TSConfig) -> dict:
     """The context slot of a REAL one-window training batch under ``config``."""
-    from batch_contract import unpack_batch
-    from dataset import FixedAnchorTrajectoryWindows
+    from ts_transformer.batch_contract import unpack_batch
+    from ts_transformer.dataset import FixedAnchorTrajectoryWindows
 
     series, report = build_series(
         synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3), config, airport=AIRPORT
@@ -793,7 +793,7 @@ def test_a_term_the_objective_does_not_build_is_refused_not_ignored(field):
     """Review C-1: all four extras are registered under `true-time-position` only
     (`objective.loss_component_names`). Under `normalized-mse` a non-zero weight named the
     run and, for the imitation term, solved a teacher per sample that nothing read."""
-    from config import CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+    from ts_transformer.config import CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
     with pytest.raises(ValueError, match="only built by"):
         _config(control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE, **{field: 1.0})
     _config(control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE)   # zero is fine

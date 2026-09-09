@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
-from channels import IDX
-from config import (
+from ts_transformer.channels import IDX
+from ts_transformer.config import (
     PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     PREDICTION_STATE,
@@ -17,7 +17,7 @@ from config import (
 )
 
 if TYPE_CHECKING:
-    from dataset import FlightSeries
+    from ts_transformer.dataset import FlightSeries
 
 SEA_LEVEL_DENSITY_KG_M3 = 1.225
 GRAVITY_MPS2 = 9.81

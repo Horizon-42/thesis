@@ -27,7 +27,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from anchor_grid import (
+from ts_transformer.anchor_grid import (
     DEFAULT_GRID_MIN_FUTURE_S,
     PARTIAL_COVERAGE,
     VALIDATION_ANCHOR_GRID_M,
@@ -35,9 +35,9 @@ from anchor_grid import (
     bin_label,
     remaining_path_profiles,
 )
-from batch_contract import anchor_state, model_forward, unpack_batch
-from closure_output import ClosurePrediction, replay_batch as closure_replay_batch
-from config import (
+from ts_transformer.batch_contract import anchor_state, model_forward, unpack_batch
+from ts_transformer.closure_output import ClosurePrediction, replay_batch as closure_replay_batch
+from ts_transformer.config import (
     CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_METRICS,
@@ -46,10 +46,10 @@ from config import (
     TSConfig,
     uses_control_dynamics,
 )
-from control.basis_fit import FittedTeacherTable
-from control.constraints import build_command_hook
-from control.dynamics import rollout as control_rollout
-from dataset import (
+from ts_transformer.control.basis_fit import FittedTeacherTable
+from ts_transformer.control.constraints import build_command_hook
+from ts_transformer.control.dynamics import rollout as control_rollout
+from ts_transformer.dataset import (
     ExplicitAnchorTrajectoryWindows,
     FixedAnchorTrajectoryWindows,
     FlightSeries,
@@ -57,7 +57,7 @@ from dataset import (
     TrajectoryWindows,
     iter_batches,
 )
-from fixed_anchor_validation import (
+from ts_transformer.fixed_anchor_validation import (
     CommonGridTruth,
     common_truth_at_anchors,
     fixed_anchor_common_truth,
@@ -65,8 +65,8 @@ from fixed_anchor_validation import (
     fixed_anchor_common_grid_metrics,
     fixed_anchor_common_grid_report_metrics,
 )
-from metrics import raw_kinematic_metrics, states_with_derived_velocity
-from objective import (
+from ts_transformer.metrics import raw_kinematic_metrics, states_with_derived_velocity
+from ts_transformer.objective import (
     ProcedureMultipliers,
     align_control_targets_to_query_clock,
     loss_component_names,
@@ -74,9 +74,9 @@ from objective import (
     move_fixed_dt_supervision,
     prediction_loss_components,
 )
-from prediction_outputs import ControlPrediction, StatePrediction
-from time_grids import numpy_inference_time_grid
-from training_performance import EpochProfiler
+from ts_transformer.prediction_outputs import ControlPrediction, StatePrediction
+from ts_transformer.time_grids import numpy_inference_time_grid
+from ts_transformer.training_performance import EpochProfiler
 
 
 @dataclass(frozen=True)

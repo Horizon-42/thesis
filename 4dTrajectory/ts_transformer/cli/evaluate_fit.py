@@ -10,10 +10,10 @@ import argparse
 import json
 from pathlib import Path
 
-from data_provenance import require_matching_data_provenance
-from dataset import build_series, dataset_flight_key, load_flight_dicts
-from models import resolve_device
-from train import (
+from ts_transformer.data_provenance import require_matching_data_provenance
+from ts_transformer.dataset import build_series, dataset_flight_key, load_flight_dicts
+from ts_transformer.models import resolve_device
+from ts_transformer.train import (
     HISTORY_NAME, evaluate_fit_splits, load_checkpoint, write_fit_evaluation,
 )
 

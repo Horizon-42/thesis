@@ -24,25 +24,25 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 
 import torch  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
-from channels import POSITION_IDX  # noqa: E402
-from config import DEFAULT_AIRCRAFT_TYPE, TSConfig  # noqa: E402
-from data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
-from dataset import (  # noqa: E402
+from ts_transformer.channels import POSITION_IDX  # noqa: E402
+from ts_transformer.config import DEFAULT_AIRCRAFT_TYPE, TSConfig  # noqa: E402
+from ts_transformer.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
+from ts_transformer.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     build_series,
     iter_batches,
     load_flight_dicts,
 )
-from splits import flight_keys_by_split, split_name_for_dataset_id  # noqa: E402
-from models import parameter_count  # noqa: E402
-from train import evaluate_split, fit_model, usable_series  # noqa: E402
+from ts_transformer.splits import flight_keys_by_split, split_name_for_dataset_id  # noqa: E402
+from ts_transformer.models import parameter_count  # noqa: E402
+from ts_transformer.train import evaluate_split, fit_model, usable_series  # noqa: E402
 
 RESULT_SCHEMA = "ts-small-sample-overfit-diagnostic-v1"
 DEFAULT_WEIGHTS = (10.0, 0.0)

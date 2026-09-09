@@ -56,7 +56,7 @@ from typing import Iterable, TypeVar
 
 import torch
 
-from control.dynamics.hooks import HOOK_STEPS_KEY, CommandHook, RolloutStateView
+from ts_transformer.control.dynamics.hooks import HOOK_STEPS_KEY, CommandHook, RolloutStateView
 
 #: Counts (tensors) and labels (strings) merge by the same rule, under the same refusal.
 _Reported = TypeVar("_Reported", torch.Tensor, str)

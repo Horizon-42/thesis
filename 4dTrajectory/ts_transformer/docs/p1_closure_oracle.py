@@ -61,22 +61,22 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 TS_DIR = HERE.parent
 REPO_ROOT = TS_DIR.parents[1]
-for path in (HERE, TS_DIR, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
+for path in (HERE, TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import closure_geometry as cg  # noqa: E402
-import closure_profile as cp  # noqa: E402
+import ts_transformer.closure_geometry as cg  # noqa: E402
+import ts_transformer.closure_profile as cp  # noqa: E402
 import compare_frame_arms as cfa  # noqa: E402
-import geometric_metrics as gm  # noqa: E402
-import intent_conditioning as ic  # noqa: E402
+import ts_transformer.geometric_metrics as gm  # noqa: E402
+import ts_transformer.intent_conditioning as ic  # noqa: E402
 import phase0_intent_diagnostics as pid  # noqa: E402
-from closure_output import LABEL_KNOTS, LABEL_RESIDUAL_MAX_M, LABEL_SCHEMA, fit_labels  # noqa: E402
-from config import TSConfig  # noqa: E402
-from coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
-from dataset import build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.closure_output import LABEL_KNOTS, LABEL_RESIDUAL_MAX_M, LABEL_SCHEMA, fit_labels  # noqa: E402
+from ts_transformer.config import TSConfig  # noqa: E402
+from ts_transformer.coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
+from ts_transformer.dataset import build_series, load_flight_dicts  # noqa: E402
 from flight_scenarios.identity import flight_key  # noqa: E402
-from metrics import common_physical_time_flight_metrics  # noqa: E402
+from ts_transformer.metrics import common_physical_time_flight_metrics  # noqa: E402
 
 FAMILIES = ("F0 rule@truth join", "F1 rule, d_join fitted", "F2 downwind+Dubins fitted", "F3 via-pose Dubins fitted")
 FALLBACK_CHAMFER_M = 1_000.0     # placeholder for P1.d's criterion; flags 0.6 % of F3 fits at KRDU

@@ -28,10 +28,10 @@ from typing import Any
 import numpy as np
 import torch
 
-import final_approach_geometry as fag
-import geometric_metrics as gm
-import intent_conditioning as ic
-from config import DEFAULT_DT_S, DEFAULT_SEQ_LEN
+import ts_transformer.final_approach_geometry as fag
+import ts_transformer.geometric_metrics as gm
+import ts_transformer.intent_conditioning as ic
+from ts_transformer.config import DEFAULT_DT_S, DEFAULT_SEQ_LEN
 from flight_scenarios.identity import flight_key
 from geokit import compass_bearing_to_math_enu_rad
 from trajectory_data_process.harvest.arrivals import load_arrival_flights

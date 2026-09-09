@@ -26,7 +26,7 @@ import torch
 
 import run_ts_anytime_curve as replay
 import run_ts_latent_probe as probe
-from config import (
+from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -35,11 +35,11 @@ from config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from control.latent import displacement_verdict
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import build_series, dataset_flight_key
-from synthetic import synthetic_arrivals
-from train import train
+from ts_transformer.control.latent import displacement_verdict
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.dataset import build_series, dataset_flight_key
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.train import train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 LATENT_DIM = 3

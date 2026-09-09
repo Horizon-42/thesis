@@ -5,9 +5,9 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from channels import POSITION_IDX, VELOCITY_IDX
-from coordinate_frames import COORDINATE_FRAME_RUNWAY_ALIGNED
-from fixed_dt_supervision import FixedDTControlSupervision
+from ts_transformer.channels import POSITION_IDX, VELOCITY_IDX
+from ts_transformer.coordinate_frames import COORDINATE_FRAME_RUNWAY_ALIGNED
+from ts_transformer.fixed_dt_supervision import FixedDTControlSupervision
 
 
 def last_reliable_terminal_velocity_target(

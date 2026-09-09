@@ -11,13 +11,13 @@ import torch
 
 TS_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(TS_ROOT), str(REPO_ROOT)]
+sys.path[:0] = [str(TS_ROOT.parent), str(REPO_ROOT)]
 
-import batch_benchmark  # noqa: E402
-import channels  # noqa: E402
-from config import TSConfig  # noqa: E402
-from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
-from synthetic import synthetic_arrivals  # noqa: E402
+import ts_transformer.batch_benchmark as batch_benchmark  # noqa: E402
+import ts_transformer.channels as channels  # noqa: E402
+from ts_transformer.config import TSConfig  # noqa: E402
+from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
+from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 
 
 def test_candidate_grid_and_throughput_selection() -> None:

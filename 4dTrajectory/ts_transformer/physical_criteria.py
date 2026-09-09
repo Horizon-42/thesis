@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import torch
 
-from channels import POSITION_IDX
-from dataset import Normalizer
-from fixed_dt_supervision import FixedDTControlSupervision
+from ts_transformer.channels import POSITION_IDX
+from ts_transformer.dataset import Normalizer
+from ts_transformer.fixed_dt_supervision import FixedDTControlSupervision
 
 
 def fixed_dt_position_ade_m(

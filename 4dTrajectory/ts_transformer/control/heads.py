@@ -9,10 +9,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from config import TSConfig
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from control.conditioning import DYNAMICS_CONDITION_NAMES
-from config import (
+from ts_transformer.config import TSConfig
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
     CTA_CONDITIONING_OFF,
@@ -23,7 +23,7 @@ from config import (
     DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
 )
-from prediction_outputs import (
+from ts_transformer.prediction_outputs import (
     ControlOutputHead,
     FinalTimeHead,
     QuantileFinalTimeHead,

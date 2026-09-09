@@ -807,7 +807,7 @@ def test_the_lag_and_point_mass_cells_are_distinct_and_resolve_their_model(tmp_p
     missing from both rebuilt override dicts (so a lag cell was rebuilt as point-mass:
     label, `--skip-train` and CV reuse all read the wrong model), and no directory or
     category tag read it (so a lag cell overwrote its point-mass twin)."""
-    from config import CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_DYNAMICS_POINT_MASS
+    from ts_transformer.config import CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_DYNAMICS_POINT_MASS
     monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
     monkeypatch.setattr(pipeline, "COMPARISON_AIRPORTS_ROOT", tmp_path / "frontend")
     common = dict(

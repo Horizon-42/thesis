@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 
-from train import train as run_training
+from ts_transformer.train import train as run_training
 
 from .common import add_training_run_arguments, prepare_training_run
 

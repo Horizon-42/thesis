@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import torch
 
-from config import (
+from ts_transformer.config import (
     CONTROL_HOOK_BARRIER,
     CONTROL_HOOK_MEMBERS,
     CONTROL_HOOK_NOMINAL_RESIDUAL,
@@ -31,11 +31,11 @@ from config import (
     HOOK_SATURATION_HARD,
     TSConfig,
 )
-from control.constraints.barrier_filter import BarrierFilter
-from control.constraints.composite import CompositeHook
-from control.constraints.speed_floor import SpeedFloor
-from control.constraints.trombone import Trombone
-from control.dynamics.hooks import CommandHook
+from ts_transformer.control.constraints.barrier_filter import BarrierFilter
+from ts_transformer.control.constraints.composite import CompositeHook
+from ts_transformer.control.constraints.speed_floor import SpeedFloor
+from ts_transformer.control.constraints.trombone import Trombone
+from ts_transformer.control.dynamics.hooks import CommandHook
 
 _HOOKS = {
     CONTROL_HOOK_BARRIER: BarrierFilter,

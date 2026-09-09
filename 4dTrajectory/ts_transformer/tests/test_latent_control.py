@@ -18,8 +18,8 @@ import numpy as np
 import pytest
 import torch
 
-from batch_contract import model_forward
-from config import (
+from ts_transformer.batch_contract import model_forward
+from ts_transformer.config import (
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
@@ -27,9 +27,9 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from control.conditioning import DYNAMICS_CONDITION_NAMES
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from control.latent import (
+from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.control.latent import (
     ACTIVE_UNIT_KL_NATS,
     LATENT_AUX_COMPONENT,
     LATENT_COMPONENT_KL_PER_DIM_PREFIX,
@@ -47,24 +47,24 @@ from control.latent import (
     with_latent_aux_duration,
     with_latent_kl,
 )
-from batch_contract import LossComponents
-from models import build_model
-from prediction_outputs import ControlPrediction
-from run_naming import output_name, run_display_name
-from objective import loss_component_names
-from train import load_checkpoint, train
+from ts_transformer.batch_contract import LossComponents
+from ts_transformer.models import build_model
+from ts_transformer.prediction_outputs import ControlPrediction
+from ts_transformer.run_naming import output_name, run_display_name
+from ts_transformer.objective import loss_component_names
+from ts_transformer.train import load_checkpoint, train
 
 _CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_latent_test", Path(__file__).resolve().parents[1] / "__main__.py")
 assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
 ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
-import cli.predict as cli_predict
-from config import CONTROL_DURATION_UNIFORM
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from export import build_prediction_record, observed_series_metrics, write_batch
-from forecast import (
+import ts_transformer.cli.predict as cli_predict
+from ts_transformer.config import CONTROL_DURATION_UNIFORM
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
+from ts_transformer.forecast import (
     forecast_approach,
     latent_derangement,
     latent_mode_forecasts,
@@ -72,10 +72,10 @@ from forecast import (
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
-from control.latent import displacement_verdict
+from ts_transformer.control.latent import displacement_verdict
 from run_ts_latent_readout import kept_epoch_latent, readout, render_latent
 from run_ts_latent_readout import main as readout_main
-from synthetic import synthetic_arrivals
+from ts_transformer.synthetic import synthetic_arrivals
 
 
 def _config(**overrides) -> TSConfig:
@@ -555,7 +555,7 @@ def test_the_deployable_replay_is_decoded_from_the_prior_not_the_posterior(tmp_p
     prior decode (no posterior) — counting forwards would pass even if the replay still
     reused the posterior object, because the end-of-training cohort evaluation also runs
     prior-only forwards."""
-    import validation
+    import ts_transformer.validation as validation
 
     replayed: list[object] = []
     original_replay = validation._prediction_batch_replay
@@ -587,7 +587,7 @@ def test_the_deployable_replay_is_decoded_from_the_prior_not_the_posterior(tmp_p
 
 
 def test_config_refuses_objective_checkpoint_selection_with_a_latent():
-    from config import CHECKPOINT_SELECTION_OBJECTIVE
+    from ts_transformer.config import CHECKPOINT_SELECTION_OBJECTIVE
     with pytest.raises(ValueError, match="cannot select its checkpoint on the validation objective"):
         _config(checkpoint_selection_metric=CHECKPOINT_SELECTION_OBJECTIVE)
 
@@ -690,7 +690,7 @@ def test_the_warmup_names_the_run_only_when_it_is_set():
 def test_the_named_recipes_are_non_latent_by_definition():
     """A named recipe is a published DETERMINISTIC comparison arm: the whole latent axis is
     pinned at its default, so a latent run is `custom` (which every latent arm file says)."""
-    from config import CONTROL_RECIPE_NAMES, CONTROL_RECIPE_CUSTOM, control_recipe_overrides
+    from ts_transformer.config import CONTROL_RECIPE_NAMES, CONTROL_RECIPE_CUSTOM, control_recipe_overrides
     defaults = TSConfig().to_dict()
     latent_fields = [name for name in defaults if name.startswith("latent_")]
     assert len(latent_fields) == 7
@@ -799,7 +799,7 @@ def test_the_latent_model_trains_under_simple_v3_s_own_supervision(tmp_path: Pat
     """The likely L2 base is the native endpoint grid + true-time-position + the imitation
     teacher (simple-v3's objective). The latent's KL must ride beside those terms, and the
     imitation teacher's per-flight inverse must be built for a latent run too."""
-    from config import (
+    from ts_transformer.config import (
         CONTROL_STATE_LOSS_GRID_NATIVE,
         CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     )

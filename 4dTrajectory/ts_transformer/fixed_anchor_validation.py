@@ -14,14 +14,14 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 
-from arc_length_geometry import arc_length_geometry_metrics, arc_length_velocity_metrics
-from channels import POSITION_IDX, VELOCITY_IDX
-from config import HORIZON_NORMALIZED, TSConfig, default_anchor
-from dataset import FlightSeries, Normalizer
-from metrics import signed_spread
-from fixed_dt_supervision import build_fixed_dt_supervision
-from terminal_state_loss import last_reliable_terminal_velocity_target, terminal_state_metrics_numpy
-from time_grids import output_time_grid
+from ts_transformer.arc_length_geometry import arc_length_geometry_metrics, arc_length_velocity_metrics
+from ts_transformer.channels import POSITION_IDX, VELOCITY_IDX
+from ts_transformer.config import HORIZON_NORMALIZED, TSConfig, default_anchor
+from ts_transformer.dataset import FlightSeries, Normalizer
+from ts_transformer.metrics import signed_spread
+from ts_transformer.fixed_dt_supervision import build_fixed_dt_supervision
+from ts_transformer.terminal_state_loss import last_reliable_terminal_velocity_target, terminal_state_metrics_numpy
+from ts_transformer.time_grids import output_time_grid
 
 
 CommonGridTruth = tuple[np.ndarray, np.ndarray, np.ndarray]

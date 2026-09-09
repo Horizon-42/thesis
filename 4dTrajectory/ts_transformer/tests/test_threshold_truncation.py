@@ -36,23 +36,23 @@ import torch
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR, REPO_ROOT):
+for path in (TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from channels import IDX  # noqa: E402
-from config import (  # noqa: E402
+from ts_transformer.channels import IDX  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG, PREDICTION_CONTROL, TSConfig,
 )
-from dataset import Normalizer, build_series  # noqa: E402
+from ts_transformer.dataset import Normalizer, build_series  # noqa: E402
 from evaluation.records import record_from_dict  # noqa: E402
-from export import build_prediction_record  # noqa: E402
-from final_approach_geometry import chart_from_axes, runway_axes  # noqa: E402
-from forecast import (  # noqa: E402
+from ts_transformer.export import build_prediction_record  # noqa: E402
+from ts_transformer.final_approach_geometry import chart_from_axes, runway_axes  # noqa: E402
+from ts_transformer.forecast import (  # noqa: E402
     Forecast, cut_at_threshold_crossing, forecast_approach, forecast_approaches,
 )
-from prediction_outputs import ControlPrediction  # noqa: E402
-from synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.prediction_outputs import ControlPrediction  # noqa: E402
+from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 STEP_S = 5.0

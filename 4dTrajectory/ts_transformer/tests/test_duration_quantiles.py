@@ -16,8 +16,8 @@ import numpy as np
 import pytest
 import torch
 
-from batch_contract import model_forward
-from config import (
+from ts_transformer.batch_contract import model_forward
+from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -31,18 +31,18 @@ from config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from control.conditioning import DYNAMICS_CONDITION_NAMES
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from dataset import Normalizer, build_series
-from export import build_prediction_record, observed_series_metrics, write_batch
-from forecast import forecast_approaches
-from models import build_model
-from objective import loss_component_names
-from prediction_outputs import QuantileFinalTimeHead, pinball_duration_loss
-from run_naming import run_display_name, run_slug
-from synthetic import synthetic_arrivals
-from train import load_checkpoint, train
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.dataset import Normalizer, build_series
+from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
+from ts_transformer.forecast import forecast_approaches
+from ts_transformer.models import build_model
+from ts_transformer.objective import loss_component_names
+from ts_transformer.prediction_outputs import QuantileFinalTimeHead, pinball_duration_loss
+from ts_transformer.run_naming import run_display_name, run_slug
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.train import load_checkpoint, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

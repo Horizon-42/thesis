@@ -59,18 +59,18 @@ from typing import TYPE_CHECKING, Any, Iterable
 import numpy as np
 import torch
 
-from channels import POSITION_IDX
+from ts_transformer.channels import POSITION_IDX
 # The mode and channel names live in config (beside ``input_channels``) because
 # final_approach_geometry imports config: defining them here would close a cycle.
-from config import (
+from ts_transformer.config import (
     INTENT_CONDITIONING_TRUTH_JOIN_DURATION,
     INTENT_CONDITIONING_TRUTH_JOIN_LEAD,
     intent_channel_names,
 )
-from final_approach_geometry import runway_axes, truth_final_gate
+from ts_transformer.final_approach_geometry import runway_axes, truth_final_gate
 
 if TYPE_CHECKING:  # a data-plane value type; avoids a dataset <-> intent import cycle
-    from dataset import FlightSeries
+    from ts_transformer.dataset import FlightSeries
 
 # One input scale for the lead ETA: the horizon's own order of magnitude (the full
 # horizon is 600 s), so a lead landing one horizon away reads as ±1. The clip is where

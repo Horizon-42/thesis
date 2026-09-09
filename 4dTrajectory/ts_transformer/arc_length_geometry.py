@@ -11,8 +11,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from channels import POSITION_IDX
-from dataset import Normalizer
+from ts_transformer.channels import POSITION_IDX
+from ts_transformer.dataset import Normalizer
 
 
 @dataclass(frozen=True)

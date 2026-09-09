@@ -24,11 +24,11 @@ import torch
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (REPO_ROOT, TS_DIR):
+for path in (REPO_ROOT, TS_DIR.parent):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from config import (  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_MODELS,
     CONTROL_DYNAMICS_POINT_MASS,
@@ -41,15 +41,15 @@ from config import (  # noqa: E402
     TSConfig,
     control_recipe_overrides,
 )
-from control.dynamics.backends import (  # noqa: E402
+from ts_transformer.control.dynamics.backends import (  # noqa: E402
     _BACKENDS,
     RolloutInputs,
     control_dynamics_backend,
 )
-from control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from ts_transformer.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
 from geokit import METRES_PER_DEG_LAT  # noqa: E402
-import control.dynamics.inverse as inverse_module  # noqa: E402
-from control.dynamics.inverse import (  # noqa: E402
+import ts_transformer.control.dynamics.inverse as inverse_module  # noqa: E402
+from ts_transformer.control.dynamics.inverse import (  # noqa: E402
     CONTROL_INVERSES,
     actual_controls,
     reference_controls,
@@ -341,7 +341,7 @@ def test_inverted_controls_stay_inside_the_envelope_on_a_benign_trajectory():
 
 def test_the_lagged_recipe_is_simple_v1_with_one_field_changed():
     """A paired comparison is only about the flight model if nothing else moved."""
-    from config import CONTROL_RECIPE_SIMPLE_V1_LAG
+    from ts_transformer.config import CONTROL_RECIPE_SIMPLE_V1_LAG
 
     base = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
     lagged = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1_LAG)
@@ -370,7 +370,7 @@ def test_a_time_constant_past_the_rk4_stability_limit_is_refused_not_integrated(
 
     Review C-13: the rule used to refuse tau < h outright, 2.8x stricter than the
     instability it cited (tau 0.45 / 0.3 / 0.2 s at h = 0.5 s are all stable)."""
-    from config import RK4_REAL_AXIS_STABILITY_LIMIT
+    from ts_transformer.config import RK4_REAL_AXIS_STABILITY_LIMIT
     config = _config(CONTROL_DYNAMICS_FIRST_ORDER_LAG)
     assert config.control_rollout_integrator_dt_s == 0.1
     replace(config, control_bank_time_constant_s=0.1)   # h/tau = 1: allowed
@@ -387,7 +387,7 @@ def test_a_time_constant_past_the_rk4_stability_limit_is_refused_not_integrated(
 
 def test_the_time_constant_axis_is_dropped_from_cv_when_the_lag_is_off():
     """An inert axis multiplies the candidate grid and returns identical folds."""
-    from cross_validation import applicable_cv_parameters
+    from ts_transformer.cross_validation import applicable_cv_parameters
 
     requested = ("d_model", "control_bank_time_constant_s")
 
@@ -407,7 +407,7 @@ def test_the_time_constant_axis_is_dropped_from_cv_when_the_lag_is_off():
 
 def test_the_exported_control_record_stays_in_newtons():
     """The evaluation contract is shared with the optimizer and did not change units."""
-    from control.envelope import fraction_controls, physical_controls
+    from ts_transformer.control.envelope import fraction_controls, physical_controls
 
     controls = np.array([[[0.5, 0.1, 1.0], [-0.2, -0.1, 1.2]]])
     max_thrust_n = np.array([MAX_THRUST_N])
@@ -431,9 +431,9 @@ def _velocity_term_config(weight: float) -> TSConfig:
 
 def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
     """The true-time-position objective scored position only; this adds the velocity."""
-    import objective
-    from control.loss.components import ControlStateLossResult, control_tracking_loss_terms
-    from dataset import Normalizer
+    import ts_transformer.objective as objective
+    from ts_transformer.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
+    from ts_transformer.dataset import Normalizer
 
     normalizer = Normalizer(mean=np.zeros(6), std=np.ones(6))
     result = ControlStateLossResult(
@@ -465,8 +465,8 @@ def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
 
 def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
     """Fitted-tail velocity weights are zero, so placeholders cannot enter the loss."""
-    import objective
-    from dataset import Normalizer
+    import ts_transformer.objective as objective
+    from ts_transformer.dataset import Normalizer
 
     config = _velocity_term_config(1.0)
     channels = len(config.channels)
@@ -474,8 +474,8 @@ def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
 
     torch.manual_seed(0)
     controls = torch.zeros(1, config.n_segments, 3, dtype=torch.float64, requires_grad=True)
-    from prediction_outputs import ControlPrediction
-    from dataset import probe_dynamics
+    from ts_transformer.prediction_outputs import ControlPrediction
+    from ts_transformer.dataset import probe_dynamics
 
     durations = torch.full((1, config.n_segments), 20.0, dtype=torch.float64)
     prediction = ControlPrediction(
@@ -499,13 +499,13 @@ def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
 
 
 def ch_velocity():
-    from channels import VELOCITY_IDX
+    from ts_transformer.channels import VELOCITY_IDX
     return VELOCITY_IDX
 
 
 def test_simple_v2_is_the_settled_production_recipe():
     """simple-v2 = simple-v1-lag + the velocity term, with nothing else left open."""
-    from config import (
+    from ts_transformer.config import (
         CONTROL_RECIPE_SIMPLE_V1_LAG,
         CONTROL_RECIPE_SIMPLE_V2,
         SIMPLE_V2_VELOCITY_LOSS_WEIGHT,
@@ -548,9 +548,9 @@ def test_the_imitation_term_scores_the_schedule_and_masks_the_fitted_tail():
     same in every channel, and segments past the last measured velocity must not enter --
     the fitted tail has no kinematics to invert.
     """
-    from control.envelope import CONTROL_HALF_WIDTH
-    from prediction_outputs import ControlPrediction
-    from objective import control_imitation_mse
+    from ts_transformer.control.envelope import CONTROL_HALF_WIDTH
+    from ts_transformer.prediction_outputs import ControlPrediction
+    from ts_transformer.objective import control_imitation_mse
 
     config = _imitation_config(0.05)
     target = torch.zeros(2, 8, 3, dtype=torch.float64)
@@ -592,7 +592,7 @@ def test_the_imitation_target_is_inverted_through_the_configured_flight_model():
     by the registry entry the forward rollout dispatches through, so the two can never be
     solutions of different equations.
     """
-    import dataset as dataset_module
+    import ts_transformer.dataset as dataset_module
 
     seen: dict[str, str] = {}
     real = dataset_module.segment_controls
@@ -609,8 +609,8 @@ def test_the_imitation_target_is_inverted_through_the_configured_flight_model():
         seen.clear()
         dataset_module.segment_controls = spy
         try:
-            from dataset import build_series
-            from synthetic import synthetic_arrivals
+            from ts_transformer.dataset import build_series
+            from ts_transformer.synthetic import synthetic_arrivals
 
             flights = synthetic_arrivals("KRDU", "05L", n_flights=1, seed=3)
             series, _report = build_series(flights, config, airport="KRDU")
@@ -625,7 +625,7 @@ def test_the_imitation_target_is_inverted_through_the_configured_flight_model():
 
 def test_the_imitation_weight_is_not_a_required_serialized_field():
     """Its default reproduces every checkpoint trained before the term existed."""
-    from config import REQUIRED_SERIALIZED_CONTROL_FIELDS
+    from ts_transformer.config import REQUIRED_SERIALIZED_CONTROL_FIELDS
 
     assert "control_imitation_loss_weight" not in REQUIRED_SERIALIZED_CONTROL_FIELDS
     assert TSConfig(prediction_output=PREDICTION_CONTROL).control_imitation_loss_weight == 0.0
@@ -638,7 +638,7 @@ def test_an_enabled_loss_term_is_reported_as_its_own_component():
     whatever keys the objective actually returned, so an extra term with no name raises
     KeyError on the first batch -- after dataset build, which is the slow part.
     """
-    from objective import loss_component_names
+    from ts_transformer.objective import loss_component_names
 
     off = loss_component_names(_imitation_config(0.0))
     on = loss_component_names(_imitation_config(0.05))
@@ -657,7 +657,7 @@ def test_simple_v3_is_the_settled_production_recipe():
     0.170). The weight is 47x the position term, chosen off an eight-point ladder where
     the region below 11.8x is a noisy plateau and 188x overshoots the flown data.
     """
-    from config import (
+    from ts_transformer.config import (
         CONTROL_RECIPE_SIMPLE_V2,
         CONTROL_RECIPE_SIMPLE_V3,
         SIMPLE_V3_IMITATION_LOSS_WEIGHT,
@@ -680,7 +680,7 @@ def test_simple_v3_is_the_settled_production_recipe():
     config = TSConfig(control_recipe_name=CONTROL_RECIPE_SIMPLE_V3, **v3)
     assert TSConfig.from_dict(config.to_dict()) == config
     # The term must actually be wired into training, not merely stored.
-    from objective import loss_component_names
+    from ts_transformer.objective import loss_component_names
 
     assert "imitation" in loss_component_names(config)
     with pytest.raises(ValueError, match="recipe fields are frozen"):

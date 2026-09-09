@@ -67,22 +67,22 @@ import sys
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR, REPO_ROOT / "geokit" / "src"):
+for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from approach_difficulty import approach_difficulty  # noqa: E402
-from calibration import (  # noqa: E402
+from ts_transformer.approach_difficulty import approach_difficulty  # noqa: E402
+from ts_transformer.calibration import (  # noqa: E402
     CalibrationSample,
     calibrate,
     render,
     write_conformal_table,
 )
-from config import DURATION_HEADS_WITH_QUANTILES  # noqa: E402
-from dataset import truth_duration_s  # noqa: E402
-from forecast import default_anchor, duration_quantile_predictions  # noqa: E402
-from io_utils import file_sha256  # noqa: E402
-from models import resolve_device  # noqa: E402
+from ts_transformer.config import DURATION_HEADS_WITH_QUANTILES  # noqa: E402
+from ts_transformer.dataset import truth_duration_s  # noqa: E402
+from ts_transformer.forecast import default_anchor, duration_quantile_predictions  # noqa: E402
+from ts_transformer.io_utils import file_sha256  # noqa: E402
+from ts_transformer.models import resolve_device  # noqa: E402
 from run_ts_anytime_curve import Grid, cohort_series, load_arm  # noqa: E402
 
 RESULT_SCHEMA = "ts-eta-calibration-b2-v1"

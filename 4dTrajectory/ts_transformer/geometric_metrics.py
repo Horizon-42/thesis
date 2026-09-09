@@ -55,7 +55,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.spatial import cKDTree
 
-from arc_length_geometry import resample_horizontal_arc_length_numpy
+from ts_transformer.arc_length_geometry import resample_horizontal_arc_length_numpy
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 
 RESAMPLE_STEP_M = 100.0

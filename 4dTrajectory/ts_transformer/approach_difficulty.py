@@ -32,10 +32,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from channels import POSITION_IDX, VELOCITY_IDX
+from ts_transformer.channels import POSITION_IDX, VELOCITY_IDX
 
 if TYPE_CHECKING:  # avoid a dataset <-> difficulty import cycle at runtime
-    from dataset import FlightSeries
+    from ts_transformer.dataset import FlightSeries
 
 DIFFICULTY_SCHEMA = "ts-approach-difficulty-v1"
 

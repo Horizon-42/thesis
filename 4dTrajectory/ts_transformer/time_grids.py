@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from config import HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig
+from ts_transformer.config import HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig
 
 
 @dataclass(frozen=True)

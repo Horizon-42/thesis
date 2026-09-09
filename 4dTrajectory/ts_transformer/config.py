@@ -20,17 +20,17 @@ from typing import Any
 
 # Channel order is a hard contract between the data build, the model, and the export.
 # It lives in channels.py; imported here so the default cannot drift from it.
-from channels import CHANNELS
-from coordinate_frames import (
+from ts_transformer.channels import CHANNELS
+from ts_transformer.coordinate_frames import (
     COORDINATE_FRAME_ENU, COORDINATE_FRAME_RUNWAY_ALIGNED, COORDINATE_FRAMES,
 )
-from target_conditioning import (
+from ts_transformer.target_conditioning import (
     TARGET_CONDITIONING_CHANNELS,
     TARGET_CONDITIONING_NONE,
     TARGET_CONDITIONINGS,
     conditioning_channel_names,
 )
-from reference_velocity import (
+from ts_transformer.reference_velocity import (
     REFERENCE_VELOCITY_SOURCES,
     REFERENCE_VELOCITY_TRACK_FIT,
 )

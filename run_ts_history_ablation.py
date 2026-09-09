@@ -17,35 +17,35 @@ from typing import Any, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 
 import torch  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
-from batching import resolve_batch_size  # noqa: E402
-from config import (  # noqa: E402
+from ts_transformer.batching import resolve_batch_size  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
     MODELS,
     TSConfig,
 )
-from data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
-from dataset import (  # noqa: E402
+from ts_transformer.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
+from ts_transformer.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     build_series,
     load_flight_dicts,
     window_anchors,
 )
-from splits import (  # noqa: E402
+from ts_transformer.splits import (  # noqa: E402
     cross_validation_folds,
     flight_keys_by_split,
     split_by_flight,
     split_name_for_dataset_id,
 )
-from models import build_model, parameter_count, resolve_device  # noqa: E402
-from train import evaluate_split, fit_model, usable_series  # noqa: E402
+from ts_transformer.models import build_model, parameter_count, resolve_device  # noqa: E402
+from ts_transformer.train import evaluate_split, fit_model, usable_series  # noqa: E402
 
 RESULT_SCHEMA = "ts-history-length-ablation-v2-flight-epoch-airport-macro"
 RESULT_NAME = "history_length_ablation.json"

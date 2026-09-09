@@ -4,10 +4,10 @@ import sys
 from pathlib import Path
 
 _TS_DIR = Path(__file__).resolve().parents[1]
-if str(_TS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TS_DIR))
+if str(_TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(_TS_DIR.parent))
 
-from config import (  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_RECIPE_SIMPLE_V1,
     CONTROL_RECIPE_SIMPLE_V1_LAG,
@@ -17,7 +17,7 @@ from config import (  # noqa: E402
     TSConfig,
     control_recipe_overrides,
 )
-from run_naming import (  # noqa: E402
+from ts_transformer.run_naming import (  # noqa: E402
     CLOSURE_LOSS_FIELDS,
     CONTROL_LOSS_FIELDS,
     META_FIELDS,
@@ -117,7 +117,7 @@ def test_the_l1b_supervision_terms_are_loss_fields_with_short_names():
     """A run trained THROUGH the heading-rate or bank-TV term is a different objective and
     must not share a name with one that was not. Every stored config predates both and
     carries their defaults, so adding them renames nothing that exists."""
-    from run_naming import _ABBREV
+    from ts_transformer.run_naming import _ABBREV
 
     for field, abbreviation in (
         ("control_heading_rate_loss_weight", "hr"),
@@ -224,7 +224,7 @@ def test_slug_is_filesystem_safe():
 def test_a_named_recipe_with_an_open_field_edit_is_named_recipe_plus_edits():
     """The final-approach penalty is open under every recipe; a run that sets it must not
     wear the bare recipe name (two different objectives would share one name)."""
-    from config import TSConfig, recipe_settings
+    from ts_transformer.config import TSConfig, recipe_settings
 
     plain = TSConfig(**recipe_settings("simple-v3", keep_name=True))
     assert run_display_name(plain.to_dict()).split(" · ")[3] == "simple-v3"
@@ -243,7 +243,7 @@ def test_the_recipe_definitions_are_literals_and_match_the_defaults_today():
     deliberate, visible act."""
     import inspect
     import re
-    from config import TSConfig, control_recipe_overrides, control_simple_v1_overrides, CONTROL_RECIPE_SIMPLE_V1
+    from ts_transformer.config import TSConfig, control_recipe_overrides, control_simple_v1_overrides, CONTROL_RECIPE_SIMPLE_V1
     for function in (control_simple_v1_overrides, control_recipe_overrides):
         source = inspect.getsource(function)
         leaked = re.findall(r"\bDEFAULT_[A-Z0-9_]+\b", source) + re.findall(r"\bCHANNELS\b", source)
@@ -260,7 +260,7 @@ def test_the_recipe_definitions_are_literals_and_match_the_defaults_today():
 def test_the_common_grid_resolution_names_the_run():
     """Two custom arms differing only in `--validation-common-grid-points 64|128` keep
     different epochs; they used to share a name and a slug."""
-    from run_naming import run_slug
+    from ts_transformer.run_naming import run_slug
     base = _state_defaults()
     finer = {**base, "validation_common_grid_points": 128}
     assert "grid-points=128" in run_display_name(finer)
@@ -272,7 +272,7 @@ def test_every_tsconfig_field_is_named_or_excused_by_name():
     """The reverse of the import-time guard: a CLI-settable field in no naming list lets
     two runs differing only in it share a name. `KNOWN_UNNAMED_FIELDS` holds the ones
     that deliberately name nothing, each with its reason."""
-    from run_naming import KNOWN_UNNAMED_FIELDS
+    from ts_transformer.run_naming import KNOWN_UNNAMED_FIELDS
     for field, reason in KNOWN_UNNAMED_FIELDS.items():
         assert field in TSConfig().to_dict(), field
         assert reason

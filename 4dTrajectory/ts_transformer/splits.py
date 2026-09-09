@@ -18,11 +18,11 @@ from aircraft.query_aircraft_parameters import (
     openap_direct_typecodes,
     openap_source_label,
 )
-from config import TSConfig
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA, eligible_set_digest
+from ts_transformer.config import TSConfig
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA, eligible_set_digest
 
 if TYPE_CHECKING:   # annotations only: importing `dataset` here would drag torch in
-    from dataset import BuildReport, FlightSeries
+    from ts_transformer.dataset import BuildReport, FlightSeries
 
 
 DATA_SELECTION_SCHEMA = "ts-data-selection-v2-pre-split-eligibility"

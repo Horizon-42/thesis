@@ -33,10 +33,10 @@ COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airpo
 TS_SCRIPT = REPO_ROOT / "4dTrajectory" / "ts_transformer" / "__main__.py"
 CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR) not in sys.path:
-    sys.path.insert(0, str(TS_DIR))
+if str(TS_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(TS_DIR.parent))
 
-from config import (  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     AIRCRAFT_FILTER_ALL,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
@@ -70,7 +70,7 @@ from config import (  # noqa: E402
     control_recipe,
     uses_control_dynamics,
 )
-from cross_validation import (  # noqa: E402
+from ts_transformer.cross_validation import (  # noqa: E402
     BEST_CONFIG_NAME,
     CV_PARAMETER_GRIDS,
     DEFAULT_CV_EPOCHS,
@@ -81,21 +81,21 @@ from cross_validation import (  # noqa: E402
     applicable_cv_parameters,
     parameter_grid,
 )
-from data_provenance import (  # noqa: E402
+from ts_transformer.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,
     roster_eligible_set_digest,
 )
-from evaluation_protocol import TEST_RELEASE_NAME  # noqa: E402
-from lateral_eligibility import (  # noqa: E402
+from ts_transformer.evaluation_protocol import TEST_RELEASE_NAME  # noqa: E402
+from ts_transformer.lateral_eligibility import (  # noqa: E402
     default_lateral_pass_roster_path,
     ensure_lateral_pass_roster,
 )
-from run_naming import (  # noqa: E402
+from ts_transformer.run_naming import (  # noqa: E402
     category_display_label,
     run_display_name,
 )
-from train import (  # noqa: E402
+from ts_transformer.train import (  # noqa: E402
     CHECKPOINT_METADATA_NAME,
     CHECKPOINT_METADATA_SCHEMA,
     CHECKPOINT_NAME,

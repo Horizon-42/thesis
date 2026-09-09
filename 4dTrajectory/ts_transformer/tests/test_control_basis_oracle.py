@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from control.basis_fit import (
+from ts_transformer.control.basis_fit import (
     DURATION_FREE,
     DURATION_MODES,
     DURATION_UNIFORM,

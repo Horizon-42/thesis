@@ -9,12 +9,12 @@ import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (REPO_ROOT, TS_DIR):
+for path in (REPO_ROOT, TS_DIR.parent):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import run_ts_control_capacity_ceiling as ceiling  # noqa: E402
-from config import TSConfig  # noqa: E402
+from ts_transformer.config import TSConfig  # noqa: E402
 
 
 def test_balanced_key_sample_is_deterministic_and_airport_balanced() -> None:

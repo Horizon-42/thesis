@@ -19,19 +19,19 @@ import pytest
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (REPO_ROOT, TS_DIR):
+for path in (REPO_ROOT, TS_DIR.parent):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 from aerodynamic_model.common import GeodeticState  # noqa: E402
-from approach_difficulty import (  # noqa: E402
+from ts_transformer.approach_difficulty import (  # noqa: E402
     ESTABLISHED_CROSS_TRACK_M,
     approach_difficulty,
     difficulty_block,
 )
-from channels import target_chart_position  # noqa: E402
-from coordinate_frames import AirportENUFrame, ENUFrame, RunwayAlignedFrame  # noqa: E402
-from dataset import FlightSeries  # noqa: E402
+from ts_transformer.channels import target_chart_position  # noqa: E402
+from ts_transformer.coordinate_frames import AirportENUFrame, ENUFrame, RunwayAlignedFrame  # noqa: E402
+from ts_transformer.dataset import FlightSeries  # noqa: E402
 
 THRESHOLD_LAT, THRESHOLD_LON, THRESHOLD_ALT = 35.8745, -78.802, 132.0
 APPROACH_COURSE_RAD = math.radians(30.0)   # math-ENU, deliberately not axis-aligned

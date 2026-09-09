@@ -40,7 +40,7 @@ import re
 from collections.abc import Hashable, Mapping, Sequence
 from typing import Any
 
-from config import (
+from ts_transformer.config import (
     CONTROL_HOOK_FIELDS,
     CTA_FIELDS,
     DURATION_HEAD_QUANTILE,

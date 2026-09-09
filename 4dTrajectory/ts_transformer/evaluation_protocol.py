@@ -15,8 +15,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
-from data_provenance import require_matching_data_provenance
-from io_utils import file_sha256, utc_now
+from ts_transformer.data_provenance import require_matching_data_provenance
+from ts_transformer.io_utils import file_sha256, utc_now
 
 TEST_RELEASE_NAME = "test_release.json"
 TEST_RELEASE_SCHEMA = "ts-test-release-v1-checkpoint-bound-one-shot"

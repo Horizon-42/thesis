@@ -13,18 +13,18 @@ import torch
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR, REPO_ROOT):
+for path in (TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import channels as ch  # noqa: E402
-import final_approach_geometry as fag  # noqa: E402
-from batch_contract import unpack_batch  # noqa: E402
-from config import (  # noqa: E402
+import ts_transformer.channels as ch  # noqa: E402
+import ts_transformer.final_approach_geometry as fag  # noqa: E402
+from ts_transformer.batch_contract import unpack_batch  # noqa: E402
+from ts_transformer.config import (  # noqa: E402
     CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
-from data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
-from dataset import (  # noqa: E402
+from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from ts_transformer.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
@@ -32,16 +32,16 @@ from dataset import (  # noqa: E402
     probe_dynamics,
     probe_final_approach,
 )
-from export import build_prediction_record  # noqa: E402
-from forecast import Forecast, forecast_approach, project_onto_final  # noqa: E402
-from models import build_model  # noqa: E402
-from prediction_outputs import StateOutputLayer, StatePrediction  # noqa: E402
-from synthetic import synthetic_arrivals  # noqa: E402
-from objective import (  # noqa: E402
+from ts_transformer.export import build_prediction_record  # noqa: E402
+from ts_transformer.forecast import Forecast, forecast_approach, project_onto_final  # noqa: E402
+from ts_transformer.models import build_model  # noqa: E402
+from ts_transformer.prediction_outputs import StateOutputLayer, StatePrediction  # noqa: E402
+from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.objective import (  # noqa: E402
     STATE_LOSS_COMPONENT_NAMES, ProcedureMultipliers, procedure_loss,
     state_prediction_loss_components,
 )
-from train import load_checkpoint, train  # noqa: E402
+from ts_transformer.train import load_checkpoint, train  # noqa: E402
 from trajectory_data_process.harvest.arrivals import SCHEMA_VERSION as ARRIVAL_SCHEMA  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -451,8 +451,8 @@ def test_dual_history_records_the_lambda_used_and_the_next_one(tmp_path):
 # ── The penalty on the control path ─────────────────────────────────────────
 
 def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
-    from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, PREDICTION_CONTROL
-    from objective import loss_component_names
+    from ts_transformer.config import CONTROL_STATE_LOSS_GRID_FIXED_DT, PREDICTION_CONTROL
+    from ts_transformer.objective import loss_component_names
 
     config = TSConfig(prediction_output=PREDICTION_CONTROL, procedure_loss_lateral_weight=1e-3)
     assert config.procedure_loss_active and "procedure" in loss_component_names(config)
@@ -465,7 +465,7 @@ def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
 
 
 def test_control_dynamics_carry_the_glidepath_for_the_rollout_penalty():
-    from dataset import dynamics_arrays
+    from ts_transformer.dataset import dynamics_arrays
 
     series, config = _series(n_flights=1)
     rows = dynamics_arrays(series[0], config.seq_len - 1)
@@ -475,7 +475,7 @@ def test_control_dynamics_carry_the_glidepath_for_the_rollout_penalty():
 
 
 def test_control_training_with_the_penalty_charges_the_rollout_and_logs_the_counts(tmp_path):
-    from config import PREDICTION_CONTROL
+    from ts_transformer.config import PREDICTION_CONTROL
 
     _small_train(tmp_path, prediction_output=PREDICTION_CONTROL, n_segments=4,
                  procedure_loss_lateral_weight=0.5, procedure_loss_vertical_weight=0.5)
@@ -511,7 +511,7 @@ def test_recipe_content_survives_a_json_round_trip_under_its_frozen_check(tmp_pa
     content plus the open penalty fields."""
     import json
     import subprocess
-    from config import recipe_settings
+    from ts_transformer.config import recipe_settings
 
     settings = recipe_settings("simple-v3", keep_name=True)
     settings.update({"procedure_loss_lateral_weight": 0.001, "procedure_loss_vertical_weight": 0.001})

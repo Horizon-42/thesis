@@ -66,28 +66,28 @@ import torch
 HERE = Path(__file__).resolve().parent
 TS_DIR = HERE.parent
 REPO_ROOT = TS_DIR.parents[1]
-for path in (HERE, TS_DIR, REPO_ROOT):
+for path in (HERE, TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import compare_frame_arms as cfa  # noqa: E402
-import final_approach_geometry as fag  # noqa: E402
-import intent_conditioning as ic  # noqa: E402
-import closure_geometry as cg  # noqa: E402
-import geometric_metrics as gm  # noqa: E402
-from config import DEFAULT_DT_S, DEFAULT_SEQ_LEN, TSConfig  # noqa: E402
-from coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
-from dataset import build_series, load_flight_dicts  # noqa: E402
+import ts_transformer.final_approach_geometry as fag  # noqa: E402
+import ts_transformer.intent_conditioning as ic  # noqa: E402
+import ts_transformer.closure_geometry as cg  # noqa: E402
+import ts_transformer.geometric_metrics as gm  # noqa: E402
+from ts_transformer.config import DEFAULT_DT_S, DEFAULT_SEQ_LEN, TSConfig  # noqa: E402
+from ts_transformer.coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
+from ts_transformer.dataset import build_series, load_flight_dicts  # noqa: E402
 from flight_scenarios.identity import flight_key  # noqa: E402
 from geokit import compass_bearing_to_math_enu_rad  # noqa: E402
-from intent_explainability import (  # noqa: E402
+from ts_transformer.intent_explainability import (  # noqa: E402
     ANCHOR_S,
     CONTEXT_NAMES,
     cv_r2 as _cv_r2,
     population,
     utc_s as _utc,
 )
-from metrics import common_physical_time_flight_metrics  # noqa: E402
+from ts_transformer.metrics import common_physical_time_flight_metrics  # noqa: E402
 from trajectory_data_process.harvest.arrivals import load_arrival_flights  # noqa: E402
 
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
@@ -219,8 +219,8 @@ def cmd_residual(args: argparse.Namespace) -> None:
 # ── sensitivity ──────────────────────────────────────────────────────────────
 
 def cmd_sensitivity(args: argparse.Namespace) -> None:
-    from forecast import forecast_approach
-    from train import load_checkpoint
+    from ts_transformer.forecast import forecast_approach
+    from ts_transformer.train import load_checkpoint
 
     model, config, normalizer, _payload = load_checkpoint(args.checkpoint)
     model = model.to("cpu").eval()

@@ -64,14 +64,14 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from approach_difficulty import (
+from ts_transformer.approach_difficulty import (
     STRATA_COVARIATES,
     STRATUM_ALL,
     STRATUM_STRAIGHT_IN,
     STRATUM_VECTORED,
     strata_masks,
 )
-from config import DURATION_QUANTILES
+from ts_transformer.config import DURATION_QUANTILES
 
 #: The table's own version. Bump it when the meaning of a stored δ changes; `predict`
 #: refuses a table it does not recognise rather than applying it under new rules. v2: δ is

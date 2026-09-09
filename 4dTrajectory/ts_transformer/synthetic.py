@@ -25,7 +25,7 @@ import numpy as np
 
 from flight_scenarios.runway_target import find_threshold
 
-from coordinate_frames import ENUFrame
+from ts_transformer.coordinate_frames import ENUFrame
 
 ENTRY_RADIUS_M = 25_000.0     # matches trajectory_data_process ENTRY_RADIUS_KM
 FAF_DISTANCE_M = 5.0 * 1852.0  # 5 NM

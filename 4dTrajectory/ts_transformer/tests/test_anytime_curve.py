@@ -23,9 +23,9 @@ import numpy as np
 import pytest
 import torch
 
-import forecast as forecast_module
+import ts_transformer.forecast as forecast_module
 import run_ts_anytime_curve as runner
-from approach_difficulty import (
+from ts_transformer.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
     STRATUM_STRAIGHT_IN,
@@ -33,7 +33,7 @@ from approach_difficulty import (
     approach_difficulty,
     remaining_path_profile_m,
 )
-from config import (
+from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -42,20 +42,20 @@ from config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from data_provenance import (
+from ts_transformer.data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     provenance_manifest_digests,
 )
-from dataset import (
+from ts_transformer.dataset import (
     FlightSeries,
     build_series,
     dataset_flight_key,
     truth_duration_s,
 )
-from export import observed_series_metrics
-from forecast import Forecast, _history_at_anchor, forecast_approaches
-from synthetic import synthetic_arrivals
-from train import load_checkpoint, train
+from ts_transformer.export import observed_series_metrics
+from ts_transformer.forecast import Forecast, _history_at_anchor, forecast_approaches
+from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.train import load_checkpoint, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
