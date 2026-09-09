@@ -232,6 +232,14 @@ With the loss units corrected, **the latent is a working distribution over futur
 It still does not close the 962 m as a point estimate — vectored top-1 is 2579–2639 m against a
 1235 m target — so what it supplies is the shape of the uncertainty, not the missing timing.
 
+**Narrowed the same evening, and §7.2 carries the correction.** The 1 km position scale that made
+the latent work also **destroys bank fidelity** (skill 0.726 → 0.400 on the no-latent U1 arm;
+0.456 / 0.475 on L2.g's own arms), and none of L2.g's four gates measured bank. A heavier teacher
+repairs the bank *shape* but not the per-flight skill, and costs the latent (§7.3). So the latent
+line is **an instrument for the endpoint and the distribution with a stated bank cost, not a
+main-line component**, and the main recipe keeps the 10 km scale. The sample fan itself is real:
+read by the B-line gate 3 protocol it beats a random fan in every stratum (§7.1).
+
 **L4 — scene conditioning.** (pre-registered pre-measurement gate; `LID` §六 L4;
 `E/l4_scene_explainability_20260907`, KRDU 14,418 flights, Phase 0 cohort and CV protocol.) It ran
 **before** any encoder was built, reproduced Phase 0 exactly, then measured the increment:
@@ -681,9 +689,14 @@ one replicated positive result on the control path: at two seeds and 300 epochs,
 vectored, FDE p50 falls to 627–656 m against native32's 864, and best-of-6 ADE reaches 959–994 m
 against a top-1 of 1194–1230 m, with a two-seed spread of 37 m. **So the aircraft's own history
 does carry a usable distribution over where the aircraft will be and what shape the path will
-take.** What it does not carry is *when* — vectored top-1 stays at 2579–2639 m against the 1235 m
-a known intent would allow. The statement to keep is therefore the narrow one: **the history gives
-the endpoint and the distribution; it does not give the timing.**
+take** — and the sample fan beats a random fan in every stratum, on 92 % of flights against 35 %
+(§7.1). What it does not carry is *when*: vectored top-1 stays at 2579–2639 m against the 1235 m a
+known intent would allow. **The statement to keep is the narrow one: the history gives the endpoint
+and the distribution; it does not give the timing.** One price is attached to it and must be
+quoted: the 1 km position scale that makes the latent work costs bank fidelity (skill 0.726 →
+0.400–0.475), which none of L2.g's gates measured, and a heavier teacher does not buy it back
+(§7.2, §7.3). The latent is therefore a second model beside the main recipe, not a replacement for
+it.
 
 **Supplying the time resolves most of it.** Given the true arrival time, pooled ADE falls
 1214 → 841 m and vectored 2643 → 1596 m on 87.3 % of flights, and the duration error equals a
@@ -710,8 +723,15 @@ reference with a 0 % fully-flyable share. The hook fixes the lateral symptom com
 violations are stall violations, 77–94 % of them at remaining path ≥ 20 km: the model is already
 too slow in the outer segment at zero offset and the delay is placed in the same segment. Two things are
 missing, neither a training trick — a **speed floor inside the rollout dynamics**
-(V ≥ V_stall(n) × margin, in the equations rather than only in the metric) and an **upstream
-path-stretch degree of freedom** so that delay can be absorbed by a modelled degree of freedom.
+(V ≥ V_stall(n) × margin) and an **upstream path-stretch degree of freedom** so that the delay can be converted into extra track. **Both were built and measured the same evening (§7.6, §7.7), and the diagnosis
+holds.** The floor alone fails: it raises stall rather than removing it, produces thrust saturation
+on about 10 % of samples, and has nowhere to put the delay, because the CTA fixes the time and the
+path fixes the distance. Adding the path stretch fixes the envelope — thrust over maximum −85 %,
+stall −84 %, load factor low −99 %, fully flyable 45 → 78 % at offset 0 and 2.4 → 52.4 % at +60 s —
+and converts the delay exactly, 30 s of track per 30 s requested. What is still wrong is the
+*sizing*: the stretch is measured against the straight-line distance to the threshold, so vectored
+flights are stretched by their whole vectoring pattern. That is a bounded, identified defect with a
+named fix (L3.f, §7.7), not an open question.
 
 **The inference-time hook is the safety layer; the training-time penalty is settled.** The penalty
 has been vetoed twice on the control path, with and without the teacher, so the explanation is the
@@ -730,19 +750,24 @@ came from state-path arms, while the control path's measured two-seed spread is 
 ADE**, so several single-seed differences in §3 are now labelled "not demonstrated", and every
 future ADE gate on a control arm needs a second seed.
 
-**Anytime prediction reaches its freeze point:** after the scheduler fix and the remaining-path-uniform anchor law the
-arrival-time error first drops below 30 s at **8 km** (|Δt| p80 22.0 / 19.8 s) and the duration head
-leaves its 125 s floor, though the random-anchor arm is still worse at the training anchor
-(1782 vs 1322), so the two are different delivery forms rather than substitutes.
+**Anytime prediction reaches its freeze point and its delivery form is settled.** After the
+scheduler fix and the remaining-path-uniform anchor law the arrival-time error first drops below
+30 s at **8 km** (|Δt| p80 22.0 / 19.8 s) and the duration head leaves its 125 s floor, while the
+random-anchor arm is still worse at the training anchor (1782 vs 1322). The two are therefore
+different delivery forms, and the rule is now fixed (§7.4): **the fixed-anchor model at L−1, the
+random-anchor model at every re-anchored bin.** A single mixed-anchor model recovers about two
+thirds of the L−1 penalty (1464 m at share 0.5, missing the gate by 17 m, inside the seed line) and
+keeps the freeze point, but does not yet replace the two-model rule (§7.5).
 
 ---
 
 ## 5. Next steps
 
-Items 1–8 are proposals for decision, except items 4 and 5, which have been run and decided;
-item 9 is closed. Each is described in one or two sentences, with its gate, veto and cost in the
-table that follows. **No experiment in this programme is pending any more**; what remains open are
-decisions.
+Items 1–8 are proposals for decision; item 9 is closed. Items 3, 4 and 5 have been run and
+decided, and item 2 has been half-run — §7 carries all of that. Each item below is described in one
+or two sentences, with its gate, veto and cost in the table that follows. **No experiment is
+running.** Three arms are named and unqueued: **L3.f** (item 2), the **CTA-on-L2.g** arm (item 5b)
+and the **KSJC replication** (item 6).
 
 **1. Adopt two recipe changes; the third is now refused.** (a) `final_time_loss_weight` 26 into the
 mainline recipe is **NOT adopted** — the second seed (1373 m against seed 1337's 1248 m, around
@@ -751,16 +776,20 @@ native32's 1322 m) did not reproduce the 74 m, so the change has no measured ben
 (c) `predict --command-hook barrier --hook-saturation soft` as the default inference layer for
 every delivered control reference, with its bank-skill cost published alongside.
 
-**2. Delay absorption: a stall-margin speed floor in the rollout, plus an upstream path-stretch
-degree of freedom.** The rollout would enforce V ≥ V_stall(n) × margin inside the dynamics rather
-than reporting the violation afterwards, and the reference would gain a way to lengthen the path
-before joining final. **This is the highest-value open item**: a scheduler requests delay far more
-often than an early arrival.
+**2. Delay absorption — both halves built and measured; one defect left, with a named fix.** The
+speed floor alone (L3.d, §7.6) fails all three gates: stall rises, thrust saturates on about 10 %
+of samples, and a floor has nowhere to put the delay. Adding the trombone path stretch (L3.e,
+§7.7) fixes the envelope and converts the delay exactly, but sizes the stretch against the
+straight-line distance and therefore over-stretches vectored flights. **The next arm is L3.f**:
+size the surplus against the hook-free reference rollout's remaining path length, everything else
+unchanged, the same four arms and the same five gates. This remains **the highest-value open
+item**: a scheduler requests delay far more often than an early arrival.
 
-**3. Anytime delivery: two models versus mixed-anchor training.** Option (a) delivers the
-fixed-anchor arm at L−1 and the random-anchor arm later; option (b) trains one mixed-anchor model
-(L−1 weighted, remaining-path-uniform elsewhere), the A2 arm. Both A0.b arms were still improving
-at 180 epochs, so a longer budget is a confound to control.
+**3. Anytime delivery — decided.** The two-model rule is fixed (A2a, §7.4): the fixed-anchor model
+at L−1, the random-anchor model at every re-anchored bin. The single mixed-anchor alternative was
+then trained (A2b, §7.5) and does not replace it: it recovers about two thirds of the L−1 penalty
+and keeps the freeze point, but misses the L−1 gate by 17 m at share 0.5 — inside the seed line, so
+neither a pass nor a demonstrated failure. Nothing further is queued on this line.
 
 **4. The B line's deliverable — done, and fixed.** `B1b_two_head` ran and was **declined**: the
 MAE clause passed (q50 24.2 / 10.4 s against 23.9 / 10.3 s) but the post-hoc ADE clause failed
@@ -770,17 +799,16 @@ calibration + B3 CTA decoding, with the path model chosen separately.** Nothing 
 this step; what remains is the vectored width veto (§3.4), which is a scheduler-interface decision
 rather than an experiment.
 
-**5. L2.g — done, and passed at both seeds; the latent returns as a main-line component.** The
+**5. L2.g — passed at both seeds, then narrowed by its own follow-ups.** The
 units recipe at 300 epochs with early stopping off cleared all four gates at seeds 1337 and 2024,
-with a 37 m two-seed spread on pooled ADE (§3.2). **Decision pending on what follows**, three
-candidates: **(a)** read the six-sample fan by the B-line gate 3 protocol — the share of truth
-paths inside the fan and the truth's chamfer to the nearest sample against to top-1 — which makes
-the latent fan and the quantile fan the same deliverable measured the same way; **(b)** CTA
-conditioning on the L2.g base, that is L3 re-run on the corrected units, to measure how much
-information z still holds once the arrival time is supplied; **(c)** test
-`position_loss_scale_m` 1 km on the **no-latent** `native32` base, to separate the units effect
-from the latent effect before any main-recipe change. (c) is the prerequisite for changing the
-mainline recipe, because L2.g moved two things at once.
+with a 37 m two-seed spread on pooled ADE (§3.2). Two of the three follow-ups then ran the
+same evening. **(a) The fan readout is done** (§7.1): the prior fan beats a random fan in every
+stratum, so the latent fan and the quantile fan are the same deliverable measured the same way.
+**(c) The units-only arm is done** (§7.2) and it is the one that changed the conclusion: the 1 km
+scale gives about 35 % of the FDE gain and destroys bank fidelity, a cost none of L2.g's gates
+measured. A heavier teacher was then tried and refused (L2.h, §7.3), so **the main recipe keeps the
+10 km scale and the teacher-dose axis is closed**. **(b) CTA conditioning on the L2.g base is the
+one follow-up still unrun** — how much information z retains once the arrival time is supplied.
 
 **6. Replicate the CTA and B results on KSJC before any claim generalises.** Everything in §3.3 and
 §3.4 is KRDU and single-seed, and a per-airport ADE without its route mix is not a comparison:
@@ -798,11 +826,15 @@ the reference.
 | 1(a) | **failed**: `B1_point_matched_s2024` read 1373 m against seed 1337's 1248 m, straddling native32's 1322 m — not adopted | — | already spent (one training arm) |
 | 1(b) | already met (A0.b, both arms, every anchor set better than the 09-07 arm) | — | none; a default change |
 | 1(c) | already met on three independent bases (`simple-v3` in `CHR`, teacher-free `hr8+TV` in L1.c, the CTA base in L3.c) | — | none; a predict-time flag |
-| 2 | the L3.c protocol re-run unchanged: duration error still equals the offset exactly (gate 2), threshold \|xt\| p95 within 1.5× the offset-0 hooked arm (gate 1), fully-flyable share at +60 s ≥ 8.3 % (gate 3, the clause that failed) | pooled ADE at offset 0 degrades by more than 100 m against 840 m | dynamics change (code + review) + four predict-only arms, ≈ 20 min GPU |
-| 3 | pooled ADE at L−1 not worse than 1322 m beyond seed noise, anchor-grid selection metric, and no regression of the anytime gates (monotone; gate 2 at 16 km; s_freeze at 8 km) | — | one training arm ≈ 2–3 h GPU for (b); (a) trains nothing but doubles what must be shipped |
+| 2 (L3.d) | **run; all three failed** (§7.6): fully flyable +60 s 2.4 % untruncated / 48.9 % truncated against 88.4 %; stall rose 94–139 %; `thrust_over_max` appeared on ~10 % of samples | not triggered | already spent (four predict-only arms) |
+| 2 (L3.e) | **run; two of five passed** (§7.7): CTA obeyed exactly with X = 0, thrust over max −85 %, lateral p95 within 1.5× of offset 0; stall −84 % just misses −90 %; fully flyable +60 s 52.4 % against 88.4 % | not triggered | already spent (four predict-only arms) |
+| 2 (L3.f, next) | the same five gates, with the surplus sized against the hook-free reference rollout's remaining path instead of the straight line; expect `tromboneDelayS` ≈ 0 at offset 0 and lateral p95 near 1.6 km | — | four predict-only arms, ≈ 20 min GPU, after the estimator change |
+| 3 | **decided** (§7.4, §7.5): the two-model rule is adopted from existing artifacts; A2b's mixed model reached L−1 1464 m against the 1447 m gate — a 17 m miss, inside the seed line — while keeping s_freeze at 8 km and leaving the 12 km veto clean | not triggered | already spent (two training arms) |
 | 4 | **run and decided**: the MAE clause passed (q50 24.2 / 10.4 s within 1 s of 23.9 / 10.3 s); the ADE clause, reframed post hoc against the worse point-matched seed (1373 m) and the ~125 m seed line, **failed** on straight-in (ADE 461, FDE p50 687 against the standing 671 veto, chamfer 232) | — (declined before the veto was reached) | already spent (one training arm + calibration + prediction) |
 | 5 (L2.g) | **run; all four passed at BOTH seeds**: (1) shuffled-z ΔADE +935 / +1017 m against > 200 m; (2) minADE₆ 959 / 994 below the N(0, I) control's 1035 / 1030, and vectored 1995 / 2042 below 2223 / 2159; (3) FDE p50 627 / 656 m, 208–237 m better than native32's 864 against a 100 m bar; (4) pooled top-1 1194 / 1230 m, better than native32's 1322 m | not triggered | already spent (2 × 104 min GPU + prediction) |
-| 5(a)–(c) | follow-ups, gates to be pre-registered when one is chosen: (a) the B-line gate 3 fan geometry; (b) duration error and residual shuffle cost under `cta=given` on the L2.g base; (c) `native32` + `position_loss_scale_m` 1 km read against L2.g and native32, two seeds | — | one training arm each, ≈ 2–3 h GPU |
+| 5(a) | **run** (§7.1): the nearest prior sample beats top-1 on 92 % of flights against 35 % for random z; 124 vs 201 m pooled | — | already spent (read-only) |
+| 5(c) + L2.h | **run; L2.h's gate failed and its veto fired** (§7.2, §7.3): bank skill 0.400 (units only) and 0.494 (units + teacher 2000) against a 0.70 gate and a 0.60 veto, with the latent degrading (shuffle 1017 → 283 m) | bank < 0.60 or shuffle < 200 m — the veto fired on the first | already spent (two training arms) |
+| 5(b), next | duration error and residual shuffle cost under `cta=given` on the L2.g base, gates to be pre-registered | — | one training arm, ≈ 2–3 h GPU |
 | 6 | the sign and rough magnitude of both headline effects reproduce: a CTA gain concentrated in the vectored stratum, and a straight-in 80 % interval under ≈ 40 s with deployed coverage in the band | — | ≈ three training arms + calibration, ≈ 8–10 h GPU |
 | 7 | for a realistic arrival stream the references satisfy the required in-trail separation at the threshold and along final, and every one passes the corridor and flyability checks the single-flight arms are judged by | — | integration only: a multi-aircraft driver and a separation metric |
 | 8 | a control-arm ADE gate is decided by two seeds with early stopping off, or the difference is reported as "not demonstrated" when inside ~125 m | — | one extra training arm per gated comparison, ≈ 2–3 h GPU |
@@ -884,7 +916,229 @@ as much as a GPU one.
 
 ---
 
-## 7. Sources
+## 7. Follow-ups run on 2026-09-08 evening
+
+Seven items ran after §3–§5 were written. Two of them change a conclusion above and say so; the
+rest extend one. All are KRDU validation, and single seed unless stated.
+
+### 7.1 The latent sample fan, read by the B-line protocol
+
+(User decision 4(a); `run_ts_latent_fan_readout.py`, the same protocol as B-line gate 3;
+`latent_fan_<arm>.{json,txt}`. Read-only, no training. `LID` §六 L2, "扇形读数".) Columns: the
+truth's chamfer to top-1; to the nearest of six prior samples, and the share of flights on which
+that beats top-1; the same for six N(0, I) samples; and the fan's own spread.
+
+| arm / stratum | chamfer to top-1 | nearest prior | share better | nearest random | share better | fan spread p50 |
+|---|---:|---:|---:|---:|---:|---:|
+| L2.g seed 1337, pooled | 162 | **124** | **0.915** | 201 | 0.348 | 794 |
+| L2.g seed 1337, vectored | 822 | **669** | 0.903 | 1101 | 0.330 | 1228 |
+| L2.g seed 2024, pooled | 158 | **124** | **0.928** | 166 | 0.343 | 821 |
+| L2.g seed 2024, vectored | 804 | **650** | 0.913 | 1324 | 0.197 | 1110 |
+| `L2z_units`, pooled | 178 | 131 | 0.926 | 210 | 0.380 | 765 |
+
+**The prior fan beats the random fan in every arm and every stratum.** The nearest prior sample
+beats top-1 on about **92 %** of flights against **35 %** for random z, which is the level six
+arbitrary paths reach by chance; vectored 669 against 1101 m. The samples carry information about
+the specific aircraft. Two reservations are recorded with it: the control is N(0, I) rather than an
+in-distribution shuffle, so part of the margin may be random z falling outside the decoder's
+training region — the `shuffled/` control at +935…+1017 m is the complementary reading and agrees;
+and the fan is a readout, not a coverage guarantee. The fan's spread is about 800 m pooled and
+1.1–1.3 km vectored, which is the ±70 s of §3.4 expressed in metres.
+
+### 7.2 U1 — the units change without a latent, and the cost it exposed
+
+(User decision 4(c); `E/u1_units_only_20260908/U1_native32_units` — `native32` plus the 1 km
+position scale, no latent, 180/180, best epoch 174. `LID` §六 L2, "U1 量纲单测".)
+
+| | native32 | **U1 (units only)** | L2.g 1337 | L2.g 2024 |
+|---|---:|---:|---:|---:|
+| ADE pooled / straight-in / vectored | 1322 / 445 / 2870 | 1270 / **497** / 2631 | 1230 / 430 / 2639 | 1194 / 406 / 2579 |
+| FDE p50 pooled / straight-in / vectored | 864 / 671 / 1982 | **786** / 561 / 1671 | 656 / 494 / 1449 | 627 / 497 / 1225 |
+| chamfer pooled | 224 | 227 | 162 | 158 |
+| **bank skill** (gate 0.70) | **0.726** | **0.400** | **0.456** | **0.475** |
+| straight-in reference bank RMS (observed 0.41°) | 0.34° | **1.60°** | 0.65° | 0.71° |
+| common-profile share (observed 1.8 %) | 2.6 % | **31.7 %** | 25.0 % | 22.9 % |
+| duration MAE | 25.9 s | 24.9 s | 24.7 s | 24.3 s |
+
+**(1) The FDE gain splits.** Of L2.g's 208–237 m, the units change alone gives **78 m (about
+35 %)** and the latent adds 130–159 m (about 65 %); both parts exceed the ~60 m FDE seed line.
+**(2) Units alone are a tail effect on ADE**: the mean improves 52 m but the paired win rate is
+40.6 % and straight-in gets worse (497 against 445).
+
+**(3) The finding that changes §3.2, and which the pre-registration did not anticipate: the 1 km
+position scale destroys bank fidelity.** Bank skill falls 0.726 → 0.400, straight-in reference RMS
+0.34° → 1.60° (worse than L1's teacher-free dense arms), common-profile share 2.6 → 31.7 %.
+**L2.g's two arms carry the same damage** (0.456 / 0.475, common profile 23–25 %) — and **L2.g's
+four gates did not test bank**, so the cost only became visible when U1 was scored with
+`score_control_arms`. The mechanism is L1's lesson repeated: at the 10 km scale the imitation term
+is about 16× the position term (0.55 against 0.035); at 1 km the position term is 2.3–2.5 and the
+imitation term 1.1–1.2, a ratio of 0.5, so the teacher no longer names the bank and the shared
+profile returns. The latent repairs part of the damage (0.400 → 0.456 / 0.475; RMS 1.60 → 0.65 /
+0.71) and all three units arms have better duration MAE (24.3–24.9 against 25.9).
+
+**Correction to §3.2 and §4.** The latent line does not clear the 0.70 bank gate that every other
+line in this programme is held to. Until that is repaired it is **an instrument for the endpoint
+and the distribution, with a stated bank cost — not a main-line component.**
+
+### 7.3 L2.h — a heavier teacher under the new units
+
+(`l2h_units_teacher_dose_arms.json`; `E/l2h_units_teacher_dose_20260908/L2h_units_imit2000`;
+L2.g recipe plus `control_imitation_loss_weight` 2000, chosen as 64 × ~31 to restore the
+imitation-to-position ratio the 10 km scale had; 300/300, best epoch 195, seed 1337. Gate: bank
+skill ≥ 0.70 **and** all four L2.g gates hold. Veto: bank < 0.60, or shuffled ΔADE < 200 m.
+`LID` §六 L2, "L2.h 结果".)
+
+| | native32 | U1 (units, no z) | L2.g 1337 / 2024 | **L2.h (units + teacher 2000)** |
+|---|---:|---:|---:|---:|
+| bank skill (gate 0.70, veto < 0.60) | 0.726 | 0.400 | 0.456 / 0.475 | **0.494** |
+| straight-in reference bank RMS (observed 0.41°) | 0.34° | 1.60° | 0.65° / 0.71° | **0.29°** |
+| common-profile share (observed 1.8 %) | 2.6 % | 31.7 % | 25.0 / 22.9 % | **11.5 %** |
+| shuffled-z ΔADE pooled / vectored | — | — | +1017 / +2702 · +935 / +2406 | +283 / +513 |
+| minADE₆ vs N(0, I) control | — | — | 994 < 1030 · 959 < 1035 | 1159 > 1132 (**fails**) |
+| FDE p50 pooled | 864 | 786 | 656 / 627 | 817 |
+| top-1 ADE pooled | 1322 | 1270 | 1230 / 1194 | 1327 |
+
+**The gate is missed and the veto fires.** The heavier teacher does repair bank *shape* — RMS 0.29°
+is better than native32's 0.34° and the common-profile share halves from 23–32 % to 11.5 % — but
+bank skill stops at **0.494**: the schedule is smooth and correctly shaped without being the bank
+each aircraft actually flew, so the per-flight correlation still fails. Meanwhile the latent
+degrades: the shuffle cost falls 1017 → 283 m, the prior samples lose to N(0, I) again, FDE p50
+goes 656 → 817 and the prior σ falls to 0.66. The dose traded bank fidelity for latent quality and
+endpoint accuracy, and cleared neither gate. The fan is still better than random (100 against
+318 m), so z is alive but weaker.
+
+**Decision, following the arm file's rule: the main recipe keeps the 10 km position scale and the
+teacher-dose axis is closed.** No no-latent twin arm. In delivery terms this is again two models:
+path shape and bank from the 10 km recipe (`native32` / L2.d), endpoint distribution and sample fan
+from L2.g.
+
+### 7.4 A2a — the two-model delivery rule, fixed
+
+(User decision; read from existing artifacts, no new training. `AED` §2.4e;
+`anytime_a0b_20260908/anytime_curve.json` and `a0_random_20260907/readout_a0b.json`. Vectored,
+ADE p50 / |Δt| p80.) The rule: **the first prediction, at L−1, uses the fixed-anchor model;
+every re-anchored prediction at 20 km or less uses the random-anchor model.**
+
+| anchor | fixed `native32` | random `path_uniform` | taken |
+|---|---|---|---|
+| L−1 (paired 1404; pooled / vectored ADE mean) | **1322 / 2870** | 1782 / 3839 | fixed |
+| 20 km | 2708 m / 148 s | **1635 m / 79 s** | random |
+| 16 km | 1382 / 112 | **1317 / 72** | random |
+| 12 km | **585** / 85 | 610 / **38** | random (the 25 m of ADE is inside noise; the duration error halves) |
+| 8 km | 385 / 95 | **265 / 20** | random |
+| 6 km | 338 / 113 | **234 / 15** | random |
+
+The fixed arm's |Δt| p80 never falls below 85 s at any bin, held up by the ~125 s duration-head
+floor, while the random arm reaches the freeze point at 8 km. The rule takes each model where it is
+better and is deliverable today.
+
+### 7.5 A2b — reserving part of the anchor draw for L−1
+
+(`random_train_anchor_l1_share`, a new config axis; `a2b_l1_share_arms.json`;
+`E/a2b_l1_share_20260908`, replay `E/anytime_a2b_20260908`; two arms, 180/180 with early stopping
+off, best epochs 169 and 160. Gates pre-registered: L−1 pooled ADE not worse than native32's
+1322 m beyond the 125 m seed line, i.e. ≤ 1447 m, **and** s_freeze still reached at 8 km. Veto:
+the 12 km vectored ADE p50 worse than `path_uniform`'s 561 m by more than 100 m. `AED` §2.4f.)
+
+| | native32 | A0b `path_uniform` | **share 0.3** | **share 0.5** |
+|---|---:|---:|---:|---:|
+| L−1 pooled ADE (gate ≤ 1447) | 1322 | 1782 | 1504 (miss by 57) | **1464 (miss by 17, inside the seed line)** |
+| L−1 pooled FDE p50 / chamfer | 864 / 224 | 1477 / 229 | 1272 / 212 | **1117 / 199** |
+| L−1 straight-in / vectored ADE | 445 / 2870 | 628 / 3839 | 574 / 3149 | **556 / 3071** |
+| s_freeze (\|Δt\| p80 < 30 s) | not reached | 8 km (19.8 s) | **8 km (24.6 s)** | **8 km (29.5 s)** |
+| 12 km vectored ADE p50 (veto > +100) | — | 561 | 584 (+23) | 596 (+35) |
+| drawn L−1 share / flights with no L−1 anchor | — | — | 0.302 / 5 | 0.501 / 5 |
+
+Mixing anchors recovers about two thirds of the L−1 penalty (1782 → 1464 at share 0.5) and keeps
+the freeze point at 8 km; the veto is clean. **The L−1 gate is missed on the number** — by 57 m at
+share 0.3 and by 17 m at share 0.5 — and 17 m is inside the 125 m seed line, so share 0.5 is
+neither a pass nor a demonstrated failure. Share 0.5 is better than 0.3 in every row of the paired
+readout while the grid selection metric ranked them level. **Decision: the two-model rule of §7.4
+stays the delivery form**; one mixed model does not yet replace it.
+
+### 7.6 L3.d — the speed floor as a command hook
+
+(`l3d_speed_floor_arms.json`; `E/l3d_speed_floor_20260908`; hook `barrier+speed-floor`, four
+predict-only arms on the `L3_cta` checkpoint. `LID` §六 L3.d. This is §5 item 2's first half.)
+**All three gates fail.**
+
+On the untruncated records: fully flyable goes 8.3 → **45.4 %** at offset 0, 21.2 % at +30 s,
+**2.4 %** at +60 s and 0.1 % at +90 s; stall samples *rise* by 94–139 % (+60 s: 66,980 → 134,977);
+and `thrust_over_max`, previously zero, appears at 97,929 samples at offset 0 and 113,254 at +60 s,
+about **10 % of all samples**. The floor engages on 50–70 % of steps and saturates on 22–30 %. The
+CTA is still obeyed exactly.
+
+The endpoint geometry looks far worse — offset-0 ADE 840 → 3443 m and endpoint |xt| p95
+1611 → **43,420 m** (+60 s: 61,375 m) — while chamfer barely moves (70 → 77). That is a tail past
+the threshold, not an approach error: the rollout reaches the threshold early and keeps flying,
+because the duration head pins the total time to the CTA while the floor forbids slowing down.
+**Read truncated at the threshold, the approach itself improves**: stall samples in the ≥ 20 km
+band fall from about 53,500 to about 36,200 (−32 %, exactly the band §3.3 diagnosed), post-threshold
+stall rises from about 14,800 to about 103,700, and fully flyable reaches 62.8 % at offset 0 and
+**48.9 % at +60 s** against L3.c's 1.35 %. Gate 2's 88.4 % is still missed, but by 40 points instead
+of 86.
+
+Two conclusions. **The floor is effective on the approach segment**; its price is thrust saturation
+and an early-arrival tail, and a floor alone has nowhere to put the delay, because the CTA fixes
+the total time and the path fixes the distance, so the mean speed is fixed. **And every hooked arm
+must be read truncated**: `predict --truncate-at-threshold` was added for this, used from L3.e
+onward, with L3.d re-read under it.
+
+### 7.7 L3.e — the trombone: converting delay into path length
+
+(`l3e_path_stretch_arms.json`; `E/l3e_path_stretch_20260908`; hook
+`barrier+speed-floor+trombone`, four predict-only arms, records truncated at the threshold.
+`LID` §六 L3.e. This is §5 item 2's second half.)
+
+| arm | fully flyable | stall samples | thrust over max | load factor low | flyable sample rate | ADE | chamfer | \|xt\| p95 | lateral viol. | reached threshold |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| L3.d +0 (control, untruncated) | 45.4 % | 119,705 | 97,929 | 628 | 0.78 | 3443 | 77 | 43,420 | 43.8 % | — |
+| **L3.e +0** | **78.0 %** | 10,058 | 8,032 | 0 | 0.96 | 4329 | **75** | 10,162 | **16.4 %** | 54 % |
+| L3.e +30 | 64.0 % | 16,460 | 13,313 | 0 | 0.94 | 4367 | 56 | 10,213 | 23.2 % | 96 % |
+| **L3.e +60** | **52.4 %** | 22,184 | 17,337 | 18 | 0.93 | 4407 | 65 | 10,232 | 77.6 % | 99 % |
+| L3.e +90 | 45.9 % | 25,800 | 18,067 | 17 | 0.92 | — | — | — | — | 100 % |
+
+Gates: (1) stall down ≥ 90 % — offset 0 gives −92 % and passes, +60 s gives −84 % and just misses;
+(2) +60 s fully flyable ≥ 88.4 % — **52.4 %, fails**; (3) final lateral p95 within 1.5× of offset 0
+— passes, though offset 0 is itself 10 km; (4) `thrust_over_max` −85 %; (5) the CTA is obeyed
+exactly, with unabsorbed delay X = 0 at every offset and every quantile.
+
+**The mechanism works.** Once the delay is converted into path length the floor stops running into
+the thrust limit: thrust over maximum −85 %, stall −84 %, load factor low −99 %, fully flyable
+45 → 78 % at offset 0 and 2.4 → 52.4 % at +60 s, and chamfer is the best in the L3 family
+(56–75 m). The hook acts on **38.5 % of flights**; the other 61.5 % need no action, consistent with
+the measured 58 % of the fleet already aligned within 30° at L−1. On the acting flights
+`tromboneDelayS` reads p50 **391 / 421 / 451 / 480 s** across the four offsets — exactly 30 s more
+per 30 s requested, so the delay is converted into path length exactly.
+
+**The remaining damage is lateral and comes from over-stretching.** At offset 0 there should be no
+unabsorbed delay at all, yet the estimator reports 391 s. The cause is identified: it sizes the
+stretch against the **straight-line distance to the threshold**, while a vectored flight's real
+path — downwind and base — is far longer, so the whole vectoring pattern is counted as surplus time
+to be spent on extra track. Endpoint |xt| p95 reaches 10 km, 46 % of flights are not at the
+threshold at the CTA, and ADE is 4.4 km. **L3.f candidate, decision pending**: size the surplus
+against the **hook-free reference rollout's remaining path length** instead of the straight line,
+everything else unchanged, the same four arms and the same gates. The expectation is
+`tromboneDelayS` near zero at offset 0, lateral p95 back to the 1.6 km of the L3.c hook, and gate 2
+well above 52 %.
+
+### 7.8 Process facts worth carrying forward
+
+- **The 125 m control-path seed line (§2) is now in use as a gate-reading rule**, not just a
+  caveat: A2b's L−1 miss of 17 m is reported as neither a pass nor a demonstrated failure.
+- **Worktree hygiene.** A nested worktree under `.claude/worktrees/` appears as untracked in the
+  main tree, and a formal campaign refuses to start on a dirty tree, so a worktree created beside a
+  running campaign would abort the next arm; `.git/info/exclude` carries that path on this machine.
+  This report's own worktree was removed after its branch merged and was re-created from `901897e`
+  as `dev-final-report2` to write this section.
+- **Publication is current.** All 58 new prediction categories are in the frontend;
+  `aeroviz-4d/public/data/airports/KRDU/comparison/categories.json` lists **135** categories and
+  KSJC's lists 46 (counted on disk, 2026-09-09). Restart the frontend after publishing new
+  categories — `categories.json` updates before the picker reloads it.
+
+---
+
+## 8. Sources
 
 **Design documents** (`4dTrajectory/ts_transformer/docs/`; status table is §〇 of each).
 **`LID`** = `2026-09-07_latent_intent_design.zh.md`: §〇 status and error budget; §一–§三
@@ -940,6 +1194,13 @@ that the latent is inert is superseded by §3.2 here.
 | `E/b1_quantile_20260907/B*_calibration/eta_calibration.{txt,json}` | B1, B3 conformal tables | val halves, ≈700 each | 2026-09-08 |
 | `E/b1b_two_head_20260908/{readout,eta_error}.{txt,json}`, `B1b_two_head_calibration/` | `B1b_two_head` (180/180, best 163, single seed) | val 1404 | 2026-09-08 |
 | `E/l2g_latent_distribution_20260908/{readout.json, latent_readout_L2g_units_e300{,_s2024}.json, probe/}` | `L2g_units_e300` seeds 1337 and 2024 (300/300, best 258 / 292) | val 1404 | 2026-09-08 |
+| `E/l2g_latent_distribution_20260908/latent_fan_<arm>.{txt,json}` | latent fan readout, L2.g both seeds + `L2z_units` | val 1404 | 2026-09-08 |
+| `E/u1_units_only_20260908/U1_native32_units` | `U1_native32_units` (units only, no latent, 180/180, best 174) | val 1404 | 2026-09-08 |
+| `E/l2h_units_teacher_dose_20260908/L2h_units_imit2000` | `L2h_units_imit2000` (units + teacher 2000, 300/300, best 195) | val 1404 | 2026-09-09 |
+| `E/a2b_l1_share_20260908/readout.json`, `E/anytime_a2b_20260908/` | `A2b_l1_share_0p3`, `A2b_l1_share_0p5` (180/180, best 169 / 160) | val 1404 × 7 bins | 2026-09-08 |
+| `E/l3d_speed_floor_20260908/` | four `barrier+speed-floor` predict-only arms | val 1402 paired | 2026-09-08 |
+| `E/l3e_path_stretch_20260908/readout.json` | four `barrier+speed-floor+trombone` predict-only arms, truncated at the threshold | val 1402 paired | 2026-09-09 |
+| `aeroviz-4d/public/data/airports/{KRDU,KSJC}/comparison/categories.json` | published prediction categories (135 / 46) | — | 2026-09-09 |
 
 **Two results landed during writing**, and their numbers come from the readouts, not from
 derivation: the L2 units test (`LID` §六 "L2 量纲测试结果", commit `91c0f2f`; artifacts
@@ -967,10 +1228,15 @@ the L2.g pre-registration (`LID` §六 L2 末; commit `bc3f2f7`;
 readout.json}`), making §3.2 a replicated positive result and narrowing §4's statement about what
 the aircraft's own history contains.
 
-**No experiment in this programme is pending.** Every arm named in this report has run and been
-read out. What remains open are decisions, all marked as such: the vectored interval-width veto
-(§3.4), the A2 anytime delivery choice (§3.5), and which of the three L2.g follow-ups to take
-(§5 item 5).
+**Seven follow-ups then ran on the evening of 2026-09-08 and are carried in §7** (main-tree commit
+`901897e` and its predecessors): the latent fan readout, U1, L2.h, A2a, A2b, L3.d and L3.e. Two of
+them changed a conclusion above and say so where they do — U1 and L2.h narrow §3.2's and §4's
+reading of the latent, and L3.d/L3.e turn §5 item 2 from a proposal into a measured result with one
+named defect left.
+
+**No experiment is running.** Three arms are named and unqueued: **L3.f** (§7.7), the
+**CTA-on-L2.g** arm (§5 item 5b) and the **KSJC replication** (§5 item 6). The decisions still open
+are the vectored interval-width veto (§3.4) and whether to accept the L3.f estimator change.
 
 **Pre-registered arm files** (`4dTrajectory/ts_transformer/docs/experiments/`):
 `l1_lowdim_arms.json`, `l1b_full_arms.json`, `l1c_procedure_arms.json`,
