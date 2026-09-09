@@ -1010,21 +1010,33 @@ def _build_supervision(
     fitted: FittedApproach | None,
     observed_crossing: tuple[float, np.ndarray] | None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Observed six-channel labels plus low-weight, position-only fitted tail labels."""
+    """Observed six-channel labels plus low-weight, position-only fitted tail labels.
+
+    One weight contract, whichever way the track ends. A measured row (the resampled
+    samples, and the threshold crossing interpolated between two measured samples) is
+    supervised on all six channels at ``1/C``; an extrapolated row (the fitted tail) on the
+    position channels only, at ``fitted_tail_position_weight`` spread over them; and the
+    TERMINAL row — the crossing, observed or fitted — adds ``fitted_terminal_position_weight``
+    spread over the position channels on top of its own. Before 2026-09-09 the observed
+    crossing returned at a flat ``1/C`` with no terminal emphasis, so a flight whose ADS-B
+    reached the threshold had its terminal position weighted 2.5x less than one whose tail
+    had to be fitted (review A-3: 1 of the first 60 KRDU arrivals) — the population every
+    FDE is read on, supervised under a contract chosen by coverage.
+    """
     channel_count = len(CHANNELS)
     # Row weights sum to one, preserving the previous all-channel mean-MSE scale.
     measured_weights = np.full(
         measured_values.shape, 1.0 / channel_count, dtype=np.float64
     )
+    terminal_position_weight = config.fitted_terminal_position_weight / len(POSITION_IDX)
     if observed_crossing is not None:
         crossing_time, crossing_values = observed_crossing
+        crossing_weights = np.full((1, channel_count), 1.0 / channel_count, dtype=np.float64)
+        crossing_weights[0, list(POSITION_IDX)] += terminal_position_weight
         return (
             np.concatenate([grid, np.asarray([crossing_time])]),
             np.concatenate([measured_values, crossing_values[None, :]], axis=0),
-            np.concatenate([
-                measured_weights,
-                np.full((1, channel_count), 1.0 / channel_count, dtype=np.float64),
-            ], axis=0),
+            np.concatenate([measured_weights, crossing_weights], axis=0),
         )
     if (
         config.fitted_tail_position_weight == 0.0
@@ -1060,9 +1072,7 @@ def _build_supervision(
     tail_weights = np.zeros_like(tail_values)
     for index in POSITION_IDX:
         tail_weights[:, index] = config.fitted_tail_position_weight / len(POSITION_IDX)
-        tail_weights[-1, index] += (
-            config.fitted_terminal_position_weight / len(POSITION_IDX)
-        )
+        tail_weights[-1, index] += terminal_position_weight
 
     return (
         np.concatenate([grid, tail_times]),

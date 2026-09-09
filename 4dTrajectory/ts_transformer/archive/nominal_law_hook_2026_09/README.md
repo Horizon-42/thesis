@@ -12,8 +12,16 @@ open, the network's command was read as a bounded residual around a fixed tracki
   glidepath, and a speed hold that pulls the thrust toward the network's own unhooked
   rollout (`T' = T + k m (V_ref − V)`, the v2 energy fix);
 - `nominal_residual.py`: `u' = w · (u_nominal(x) + sat(u − u_nominal(x); ±r_max)) + (1 − w) · u`,
-  the planner/tracker split applied per control segment. The only hook that ever declared
+  the planner/tracker split applied per control segment. The first hook to declare
   `needs_reference = True`.
+
+**The reference contract it reads has since changed (L3.f, 2026-09-09).** `nominal_residual.py`
+here calls `runway_axes_view(state.reference, ...)`, i.e. `reference` as a lock-step
+`RolloutStateView` — one unhooked state per segment. It is now the hook-free schedule WHOLE
+(`[B,N+1,7]`, one chart row per segment boundary, the anchor first), because the trombone's
+surplus estimator needs the path still AHEAD of the reference and no per-segment state can
+give it that. Reviving this law means reading `state.reference[:, segment_index]` and wrapping
+it in a view; the file is left exactly as it was taken, not silently ported.
 
 ## Why it is archived
 

@@ -460,8 +460,11 @@ def test_the_loop_keeps_the_epoch_with_the_lowest_grid_mean() -> None:
     every other anchor.
     """
     config = _config(epochs=10, patience=10, learning_rate=1e-2, batch_size=16, seed=1)
+    # Data seed 4: under the one-contract terminal supervision (2026-09-09, review A-3) seed
+    # 3's run improves on both metrics through epoch 10, so it can no longer show the
+    # disagreement; seed 4 separates them for every torch seed 0-5 (grid 7, L-1 9).
     series, _report = build_series(
-        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=24, seed=3), config, airport=AIRPORT
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=24, seed=4), config, airport=AIRPORT
     )
     train_series, val_series, _test = split_by_flight(series, config)
     torch.manual_seed(0)
@@ -471,8 +474,8 @@ def test_the_loop_keeps_the_epoch_with_the_lowest_grid_mean() -> None:
     l1 = [row.validation_anchor_grid["fixed_anchor_common_grid_ade_m"]
           for row in fit.history]
     assert len(grid) == 10
-    # Deterministic under this seed: the grid bottoms out at epoch 6, L-1 at epoch 9.
-    assert (int(np.argmin(grid)) + 1, int(np.argmin(l1)) + 1) == (6, 9)
+    # Deterministic under this seed: the grid bottoms out at epoch 7, L-1 at epoch 9.
+    assert (int(np.argmin(grid)) + 1, int(np.argmin(l1)) + 1) == (7, 9)
     assert fit.best_validation_selection == pytest.approx(min(grid))
     assert fit.best_validation_selection != pytest.approx(grid[int(np.argmin(l1))])
     # Each epoch's value really is the mean of its own recorded sets.

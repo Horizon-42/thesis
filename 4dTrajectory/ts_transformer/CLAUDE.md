@@ -110,6 +110,23 @@ flight model.
   airport reference point. Every consumer that judges distance-to-go must measure from
   `target_chart`; **a new one that reads `hypot(e, n)` is silently wrong under the airport frame
   and only there.**
+- **"It crossed the threshold" is `d ≤ 0` AND on the final — never the plane alone**
+  (`final_approach_geometry.threshold_crossing_index`, the one rule both consumers of an arrival
+  point read; the closest-approach / in-segment refinement is the caller's). A vectored flight's
+  DOWNWIND is parallel to the course and opposite it, several km abeam, and passes `d = 0` out
+  there, so the plane-only rule fired ABEAM (2026-09-09: 96.5 % of the vectored
+  `--truncate-at-threshold` cuts > 1 km from the threshold, median |xt| 8.7 km at a median
+  1.75 km above it; the trombone's `tromboneRefNoCrossing` 31.6 % and ~12 km of reference path
+  on a 25 km approach). Straight-in records are unaffected — there the two rules answer the same
+  row. A trajectory that never satisfies it has NO crossing, and the caller must say so rather
+  than cut somewhere — so `tromboneRefNoCrossing` now means "never got ONTO the final" and reads
+  HIGHER, not lower, than the 31.6 % above, and under `--truncate-at-threshold` the crossing rule
+  OWNS `truncatedAtThreshold`: a record with no crossing is whole with the flag CLEARED, even
+  where the fixed-time postprocessor's closest-approach rule had set it (`horizonCapped` marks
+  the records that rule never reached, so whether it cut one stays recoverable). Two things a reader must know are true of the answer, not the
+  rule: the caller's alignment is a central difference over POSITIONS, so the flying just after a
+  row is in its direction; and `MEMBERSHIP_FLOOR_M` (500 m) is what decides whether a record is
+  cut at all.
 - **Controls are DIMENSIONLESS in this package** (`control/envelope.py` is the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, same box on every
   airframe. Newtons appear in exactly two places — `physical_controls()` into the dynamics, and
@@ -238,7 +255,7 @@ flight model.
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `closure_output.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). THREE modules are live — `barrier` (lateral, gated ON the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08), `trombone` (the pre-final path stretch, gated OFF the final — L3.e, 2026-09-08) — and the vocabulary carries three combinations: `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`, each applied in the order it spells. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier`, `barrier+trombone+speed-floor` and a SOLO `trombone` are not members and are refused with the vocabulary (the trombone hands the command back at the final approach course and has nothing to hand it to without the barrier) |
-| `--truncate-at-threshold` | off | Predict-side, any output kind: cut every record at its FIRST crossing of the threshold plane (`d ≤ 0`, closest approach within that first run) and stamp `source.truncatedAtThreshold`. **Any flyability/geometry/CTA readout of a hooked, late-CTA arm needs it** — L3.d's floored rollouts arrive EARLY and fly on (endpoint \|xt\| p95 43–63 km, pooled ADE 840 → 3443 m at offset 0), and a report over the whole record is scoring that tail: on the approach proper the same arms read fully-flyable 1.35 % → 48.9 % at +60 s. `final_time_s` moves to the cut, which is the point — an early arrival stops being invisible and becomes the `final_time_error_s` it always was. A forecast that never reaches the threshold is left WHOLE and says `false`; one that crosses on its LAST row is whole with the flag TRUE (the flag means "ends at the threshold", and on a fixed-time STATE forecast the postprocessor's own closest-approach rule sets the same flag). Refused together with `--no-truncate` |
+| `--truncate-at-threshold` | off | Predict-side, any output kind: cut every record where it FIRST crosses the threshold ON THE FINAL (`final_approach_geometry.threshold_crossing_index` — `d ≤ 0` and inside the on-final gate there; closest approach within that first run) and stamp `source.truncatedAtThreshold`. **Any flyability/geometry/CTA readout of a hooked, late-CTA arm needs it** — L3.d's floored rollouts arrive EARLY and fly on (endpoint \|xt\| p95 43–63 km, pooled ADE 840 → 3443 m at offset 0), and a report over the whole record is scoring that tail: on the approach proper the same arms read fully-flyable 1.35 % → 48.9 % at +60 s. `final_time_s` moves to the cut, which is the point — an early arrival stops being invisible and becomes the `final_time_error_s` it always was. A forecast that never crosses ON THE FINAL is left WHOLE and says `false`, and a vectored rollout that flies past abeam is exactly that case — until 2026-09-09 the rule read the PLANE alone and cut those on their downwind, 8.7 km out; one that crosses on its LAST row is whole with the flag TRUE (the flag means "ends at the threshold", and on a fixed-time STATE forecast the postprocessor's own closest-approach rule sets the same flag). Refused together with `--no-truncate` |
 | `control_speed_floor_margin` | `1.10` | The speed floor's margin: `V_floor = margin × V_stall(n_commanded, mass, rho, Cl_max)`. The COEFFICIENT is the package's existing one — the optimizer's NLP velocity floor (`optimization/scenario_optimization._STALL_MARGIN`) and the control-anchor eligibility gate (`anchor_eligibility.CONTROL_ANCHOR_STALL_MARGIN`) are both 1.10 — but **the SPEED it multiplies is not the same one, so do not quote the three as equal**: those two use the 1-g stall speed at SEA-LEVEL density (the optimizer's also capped at V_ref), the hook uses `V_stall(n_commanded)` at the LOCAL ISA density, uncapped, because it defends `flyability`'s criterion, which is evaluated at each sample's own altitude. At 8000 ft ρ/ρ₀ = 0.79, so the hook's floor is ~12.5 % higher — an effective margin near 1.24, ×√n in a turn — making the hook strictly the TIGHTEST of the three. Not one symbol on purpose: the other two are frozen policy constants (one is spelled into the stored `airborne-1.10-stall-margin-v1`) and this one is a per-run field. **Refused away from its default under a hook that contains neither `speed-floor` nor `trombone`** (`config.CONTROL_SPEED_FLOOR_MARGIN_READERS` — the trombone divides by the same `V_floor` to size its detour), and the barrier's two gains are refused the same way under a hook that has no barrier — before L3.d "a hook is on" and "the barrier is on" were the same condition. `predict --control-speed-floor-margin` overrides it; names a run `floor-margin=` |
 | `--project-final` | off | deployment fallback; FAF-gated wrecks vectored flights |
 | `target_conditioning` | off | `channels` helps only the duration head; PatchTST refuses it |
@@ -373,6 +390,41 @@ excursion pinned outbound until the threshold plane ended it, 2.9 km wide. With 
 - **Under `barrier+trombone` the floor is an ASSUMPTION, not an enforced speed.** That stack is
   the ablation that isolates the stretch; nothing there holds the speed up, so read it as "the
   stretch alone", never as "the stretch under the floor it was sized against".
+- **What the surplus is measured against is an AXIS, and the default is the one L3.e failed on
+  (`trombone_surplus_reference`, L3.f, 2026-09-09).** `beeline` is the `D` above, and it reads a
+  vectored flight's own downwind and base as surplus time: at the TRUE CTA, `tromboneDelayS`
+  p50 391 s, endpoint `|xt|` p95 10 km, 46 % not reaching the threshold by `T_cta` — while the
+  mechanism itself was clean (30 s absorbed per 30 s of offset, thrust/stall/load −85/−84/−99 %).
+  `reference-rollout` (`predict --trombone-surplus reference-rollout`) adds to `D` the DETOUR
+  the HOOK-FREE reference rollout still intends: `detour = L_ref − S_ref`, its remaining path
+  to its first threshold crossing ON THE FINAL (the shared
+  `final_approach_geometry.threshold_crossing_index`; the plane alone is crossed abeam, and
+  reading it that way measured `L_ref` to a downwind — see the crossing contract above) less
+  the straight line to that same cut. So
+  `ΔL = V_e·T_r − D − detour`, positive part, then the same dog-leg `cos θ = D/(D + ΔL)`.
+  **Sizing against `L_ref` itself — the tempting reading — breaks it**, and that is the trap
+  to know: `L_ref` is indexed by the SCHEDULE and cannot see the excursion the hook is
+  flying, so the surplus never burns down, and past the reference's own crossing it
+  degenerates to the whole remaining reach. Measured on the 48-segment fixture: a clean 60 s
+  absorption became 19 steps pinned at the 45° offset cap ending 1.7 km wide (beeline: 0
+  saturated steps, 159 m), and a reference that decelerates and stops SHORT had its missing
+  metres read as surplus (9.4 s of delay invented on a flight with nothing to absorb). The
+  detour form has neither problem: `D` is the AIRCRAFT's own, and `detour` is non-negative
+  and non-increasing by the triangle inequality, so `dΔL/dt ≤ 0` survives as the identity it
+  is under `beeline`.
+  **The default stays `beeline` so every L3.e artifact reproduces to the bit** — records
+  included, which is why `tromboneRefPathM`, `tromboneRefNoCrossing` and the
+  `tromboneSurplusReference` label are ABSENT rather than zero under it (measured 2026-09-09:
+  1972 harness leaves over both stacks, trained and replayed, soft and hard — 0 differ; 333
+  stored runs recounted, 0 renamed; re-measured the same day over 2344 leaves for the crossing
+  rule — 24 differ, every one a reference-only diagnostic under `reference-rollout`). Under the
+  axis the composite gains the hook-free rollout
+  (`needs_reference` — one extra integration of the schedule, once, ~2× the SEGMENTED
+  rollout; the per-step cost is an index into a table built at segment 0), and both lengths
+  are CHORD sums between segment boundaries (short by `sinc(Δψ/2)`: 0.15 % at 15° over a 5 s
+  hold, 2.8 % at 45°, and the two errors partly cancel in the difference). Refused away from
+  its default under a hook with no `trombone` in it, like the barrier's gains and the stall
+  margin.
 
 **Every hook reports per-FLIGHT counts, and that is what a record carries.**
 `per_flight_diagnostics()` returns `[B]` rows; `diagnostics()` is those summed and is what an
@@ -447,7 +499,16 @@ prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
 AND of the bank softness/active-change thresholds two modules now share; `composite` is how
 several modules become the one hook the rollout takes, and it refuses two modules that report a
 diagnostic under the same name. Barrier and trombone both write bank and load factor and still
-compose, because their gates are COMPLEMENTARY: no step is ever rewritten by both.
+compose, because their gates are MADE complementary by the builder: with a trombone in the
+value the barrier is built `confine_to_hard_gate=True` (its soft blend times the hard gate —
+inside the gate unchanged, outside it silent), and the trombone engages only where the hard
+gate has not opened, so no step is ever rewritten by both. The soft gate alone was NOT the
+complement: its 30–40° alignment shoulder is the trombone's admission band (2026-09-09
+review A-4, measured 0.112 rad of discarded barrier bank there).
+**`RolloutStateView.reference` is the hook-free schedule WHOLE** (`[B,N+1,7]`, one row per
+segment boundary, the anchor first) — not a lock-step state, because the questions that need
+it are look-ahead ones; it is the same tensor at every call, so a hook derives its table from
+it once at `segment_index == 0`. It exists only where a member declares `needs_reference`.
 
 **A dynamics backend is a ROW, not a class**: `control/dynamics/backends.py` maps the
 `(control_dynamics_model, control_dynamics_backend)` PAIR to

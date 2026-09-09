@@ -1,10 +1,16 @@
-# Plan-and-guidance: the next model (design v2, 2026-09-09)
+# Plan-and-guidance: the next model (design v3, 2026-09-09)
 
 Status: design only; nothing built. v1 (same day) split the plan into operating and route parameters
-(decision (A)). v2 makes the published approach procedure the backbone of the whole design: the
+(decision (A)). v2 made the published approach procedure the backbone of the whole design: the
 learned plan lives inside the procedure, the guidance layer enforces the procedure by construction,
 and the result is judged twice — as a prediction of what aircraft do, and as a reference that
-conforms to the procedure. Source of the programme's numbers: `docs/reports/2026-09-08_programme_results_and_plan.md`.
+conforms to the procedure. v3 (evening) replaces the hook numbers with the corrected L3.e-r / L3.f-r
+reruns (the earlier campaigns used a threshold-crossing rule that cut vectored flights abeam on the
+downwind; their directories are deleted) and adds §11, which places this design inside the package
+review's target architecture (`2026-09-09_package_review_bugs_and_architecture.md`) so it lands as
+one output strategy rather than ten touch points. Source of the programme's numbers:
+`docs/reports/2026-09-08_programme_results_and_plan.md`; the corrected hook numbers:
+`2026-09-07_latent_intent_design.zh.md` §六, L3.e-r / L3.f-r.
 
 ## 1. Why change the architecture
 
@@ -19,10 +25,12 @@ hooks correct it afterwards. Six days of experiments say this is the wrong divis
   nothing learned from the aircraft's own history moved it.
 - The network does not know the constraints. Training-time corridor penalties were rejected twice.
   Feasibility comes only from hooks added after the fact, and each fixed one thing and broke another
-  (the speed floor removed stall and created thrust-over-max; the trombone removed both and
-  over-stretched by 10 km because it measured the wrong distance). Stacked, the hooks take the
-  flyable share from 8 % to 78 % — they already do the work, but as corrections of something that
-  was never planned.
+  (the speed floor removed stall and created thrust-over-max; the trombone removed part of both, but
+  the median flight receives no stretch at all). With the corrected threshold cut, the three-hook
+  stack makes 46 % of flights fully flyable at the true arrival time and 20 % at +60 s; about 30 %
+  of flights (about 80 % of vectored ones) never become established on the final and their rollouts
+  run on for tens of kilometres. The hooks do part of the work, as corrections of something that was
+  never planned; the stretch the delay needs is a route decision, which a hook cannot make.
 - The loss is a hand-balanced mixture of seven terms, and the balance is fragile: one unit change
   made the latent work and destroyed bank fidelity (skill 0.726 → 0.400); restoring the teacher's
   share repaired the bank shape and destroyed the latent.
@@ -187,9 +195,10 @@ Gates for the first prototype, KRDU val 1404, paired, two seeds:
 | prediction, assigned time (vectored ADE) | 1596 m | ≤ 1596 m |
 | prediction, assigned time and join (vectored ADE) | 2356 m (join only, Phase 0) | ≤ 1400 m |
 | arrival-time MAE, straight-in / pooled | 10.3 / 23.9 s | within 1 s |
-| reference: fully flyable, true time (truncated at threshold) | 78 % (L3.e stack) | ≥ 95 % |
-| reference: fully flyable, +60 s; X reported | 52 % | ≥ 90 % |
-| reference: corridor / glidepath / fix-limit violations on the final | 16 % lateral (L3.e) | 0 % by construction |
+| reference: fully flyable, true time (truncated at threshold) | 46 % (L3.e-r / L3.f-r stack, corrected cut) | ≥ 95 % |
+| reference: fully flyable, +60 s; X reported | 20 % | ≥ 90 % |
+| reference: established on the final by the assigned time | 70 % of all, ~20 % of vectored (L3.f-r +60) | 100 % by construction, or X reported |
+| reference: corridor / glidepath / fix-limit violations on the final | 12.7 % lateral, straight-in, true time (L3.e-r +0) | 0 % by construction |
 | bank | skill 0.726 (native32) | not a target; bank RMS ≤ 0.5° on straight-in |
 
 Vetoes: the plan head's parameters worse than trivial baselines (airport medians) — the learned
@@ -231,5 +240,56 @@ parametrisation is too coarse.
 ## 10. What stops
 
 No more arms on the latent dose axis, teacher replacement, position units, hook doses or the
-duration weight. L3.f runs because it is the route builder's specification test; nothing else from
-the current line is queued.
+duration weight. L3.e-r and L3.f-r have run (the route builder's specification test: the
+reference-rollout surplus estimate is the better one — 7–10 points more flights on the final,
+9–13 % fewer stall and thrust samples, `tromboneDelayS` 386 → 136 s — but both arms fail nearly
+every gate, and the median flight gets no stretch). One pre-registered check remains on that line:
+one L3.f-r arm re-flown under the A-4 fix (§11). Nothing else from the current line is queued.
+
+## 11. Where this lands in the package (the 2026-09-09 review)
+
+The package review of the same day measured why the package is heavy: every new prediction path has
+cost edits in ten places (`TSConfig` + validators, the CLI, the run grammar, the dataset, the
+objective, the forecast, the export, the training loop, a runner, a test file). Its target is one
+`OutputStrategy` per prediction path with its own sub-config and test file — three touch points — and
+this design is exactly the fourth path. So the two documents fit together as follows.
+
+**Plan-and-guidance is `outputs/plan/`** in the review's §4.2 layout, and its sub-config is a
+fourth `OutputSpec` variant (`PlanOutput`) in the review's §4.3 split. The eight methods of the
+protocol map onto the sections above one to one:
+
+| `OutputStrategy` method | what it holds here | section |
+|---|---|---|
+| `config_type` | `PlanOutput`: the five operating-parameter ranges, the route-parameter policy (assigned / distribution), the guidance gains, the two loss weights | §3, §4, §6 |
+| `batch_context` | the procedure skeleton for the assigned runway (fix distances, altitude and speed limits, LPV width) and the eight plan labels from the extractors | §2 (1), §3 |
+| `anchor_eligibility` | remaining-path-uniform with the scheduler fix (A0.b) | §6 |
+| `build_model` | the plan head: five point + quantile outputs, the route distribution head | §3a, §3b |
+| `loss` | direct regression in the parameters' own units; pinball for the quantiles; the route distribution's likelihood | §6 |
+| `forecast` | the guidance layer (route builder → lateral / vertical / speed → time closure) driving the point-mass rollout; the scheduler's assignments arrive as `PredictOptions` | §4, §5 |
+| `record_fields` | the plan (with every clamp), the route actually flown, the unabsorbable delay X, the fan | §5, §7 |
+| `epoch_record` | plan-parameter errors against the airport medians (the veto of §7) | §7 |
+
+What the design reuses from `control/` (rollout, actuator model, dynamics backends, the barrier /
+speed-floor / trombone modules, the corridor geometry, CTA conditioning, the quantile head and
+calibration) is exactly what the review keeps under `outputs/control/` and `outputs/base`; the
+guidance layer imports those modules as parts of one controller instead of composing them as
+post-hoc hooks. Nothing in this design touches `dataset`, `objective`, `forecast`, `export`,
+`train` or `validation` once the review's §4.2 has landed — and would touch all six before it.
+
+**Order, and what is already done.** The review's step 0 (the number-changing bugs) comes first.
+Two of its four A-items are fixed on `dev-pg` (`c544db0`): A-3 (the observed threshold crossing now
+carries the same terminal supervision contract as a fitted one) and A-4 (a barrier composed with a
+trombone is confined to the hard gate, so the two lateral modules are complementary by construction;
+the L3.e-r / L3.f-r readouts were flown before this fix, and one arm is re-flown as a check — see
+`2026-09-07_latent_intent_design.zh.md` §六). A-1, A-2, B-1, B-2 are open. Of this design's own
+steps (§9), steps 1 and 2 (the procedure reader, the extractors, the oracle ceiling) are CPU-only
+readouts on the current tree and do not touch the spine, so they can run before or beside the
+review's steps 1–4; step 3 (the plan head) should wait for the review's §4.2, or it will be the
+eleventh copy of the ten-touch-point pattern. Decisions this leaves with the user: the review's
+§5 freeze/delete list and §4.3 defaults question, and whether steps 1–2 start now on the current tree.
+
+**Two review findings this design must not inherit.** C-12 (the head's load-factor floor 0.2
+against the grader's 0.5) becomes moot because the guidance layer commands the load factor inside
+the grader's envelope by construction; C-11 (the corridor geometry's origin) is the one geometry the
+procedure reader and the corridor gate must agree on, so the reader is written against the
+threshold frame, never the airport reference point.

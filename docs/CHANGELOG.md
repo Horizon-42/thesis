@@ -4,6 +4,220 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-09 — ts_transformer: review A-3 and A-4 fixed — one terminal supervision contract; the barrier is confined to the hard gate under a trombone
+
+Two of the four number-changing findings of the 2026-09-09 package review
+(`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md` §2 A),
+on `dev-pg` (`c544db0`), each with the review's own measurement as a test; 909 ts tests pass.
+
+**A-3 — `dataset._build_supervision`.** The observed threshold crossing returned early at a
+flat `1/6` on all six channels, while a fitted crossing carried
+`fitted_terminal_position_weight/3` on its position channels and nothing on velocity — two
+contracts chosen by ADS-B coverage, 2.5× apart on the terminal position weight (1 of the first
+60 KRDU arrivals). Now the contract is one: a measured row keeps `1/6` on all six channels, an
+extrapolated row is position-only at the tail weight, and the TERMINAL row adds the terminal
+emphasis on position whichever way it was obtained (so an observed crossing reads
+`1/6 + 1/3` on position, `1/6` on velocity). Any state/control run trained from here on carries
+it; stored checkpoints are unaffected (a data-side contract, not a config field). The
+seed-pinned `test_the_loop_keeps_the_epoch_with_the_lowest_grid_mean` moved to data seed 4: under
+the new weights seed 3's run improves on both metrics through epoch 10 and can no longer show
+the disagreement it exists to show; seed 4 separates them (grid epoch 7, L−1 epoch 9) for every
+torch seed 0–5 (measured, scratch script).
+
+**A-4 — `control/constraints`.** `composite.py` claimed the barrier and the trombone have
+complementary gates; under `hook_saturation=soft` that was false — the barrier's soft
+alignment shoulder (non-zero for 30–40° of misalignment) is exactly the trombone's admission
+band (> 30°), and there the barrier blended a correction the trombone then overwrote
+(re-measured: 12 km back, 500 m right, 33° off course, 6 s hold — soft weight 0.148, barrier
+bank +0.112 rad, the trombone's own answer moved 0.7° from reading the barrier's coordinated
+load). `build_command_hook` now builds the barrier `confine_to_hard_gate=True` whenever a
+trombone is a member: its blend is multiplied by the HARD on-final gate, so inside the gate it
+is the standalone soft barrier to the bit, outside it is silent, and the trombone may engage
+only where that gate has not opened — complementary by construction, the order cannot change
+the answer, and under `hard` it is the identity. `barrier` alone and `barrier+speed-floor` are
+untouched. The "25 deg turn cap" cited in `composite.py` / `config.py` was 15° in the code;
+fixed. **The L3.e-r / L3.f-r reruns on disk were flown before this fix** (soft, the adopted
+form); the magnitude on their readouts was measured by a pre-registered one-arm check the same
+evening (`4dTrajectory/outputs/KRDU/experiments/l3f_a4_check_20260909`, the +60 s L3.f arm on the
+fixed tree, paired): every aggregate within 1 % (fully flyable 20.01 % both, `tromboneDelayS`
+p50 134.9 s both), the 842 flights established at the anchor byte-identical, 395 of 497 vectored
+records changed, and L3.f-r's advantage over L3.e-r unchanged — the overlap was not its source.
+Confining the barrier costs slightly (12 fewer flights on the final, ~1 % more stall/thrust
+samples): the price of a correct composite, recorded, not reverted.
+
+### 2026-09-09 — ts_transformer: L3.e-r / L3.f-r reruns read; the hook line is closed, the route decision moves to plan-and-guidance
+
+Under the corrected cut (the entry below) both path-stretch campaigns were rerun
+(`4dTrajectory/outputs/KRDU/experiments/l3e_path_stretch_20260909r`,
+`l3f_path_stretch_ref_20260909r`; the flawed directories and, with the user's approval, the
+unpublished latent sample subtrees are deleted — 39 GB freed). The corrected numbers are much
+worse than the withdrawn ones, which is the point: the old cut had discarded the second half of
+every vectored approach (+0 samples 389,909 → 780,672). Three-hook stack, fully flyable **46 %**
+at offset 0 and **20 %** at +60 s (was 78 / 52 %); at +60 s **30 % of flights (≈ 80 % of vectored)
+never become established on the final** and their rollouts run on for tens of kilometres;
+`tromboneStretchM` p50 = 0 — the median flight gets no stretch. The reference-rollout surplus
+(L3.f-r) is adopted as the trombone's sizing — 7–10 points more flights on the final, 9–13 %
+fewer stall / thrust samples, vectored |xt| p95 −23–29 %, `tromboneDelayS` p50 386 → 136 s —
+but both arms fail nearly every pre-registered gate (L3.e: 1 of 5; L3.f: 0 of 2). Reading: a
+hook admitted only where the path is already 30° off course cannot choose a route for a flight
+whose predicted path never turns onto the final; that is the route builder of
+`2026-09-09_plan_and_guidance_design.md` (v3 today, with §11 placing it inside the package
+review's `OutputStrategy` target). Final report §7.7 carries a correction notice and §7.7b the
+reruns; the eight corrected arms are published to the KRDU picker (`stack-r*`, `ref-r*`).
+
+### 2026-09-09 — ts_transformer: "it crossed the threshold" is the plane AND the final — the plane-only rule fired ABEAM, on the downwind
+
+**The defect, measured on real records.** Two consumers ask a trajectory where it lands:
+`forecast.cut_at_threshold_crossing` (`predict --truncate-at-threshold`, built 2026-09-08) and
+the trombone's reference-rollout path length (`control/constraints/trombone.py`,
+`trombone_surplus_reference=reference-rollout`, built 2026-09-09, the entry below). Both asked
+the same wrong question: "the closest horizontal approach among the rows with along-course
+distance `d ≤ 0`, within the first such run" — the threshold PLANE and nothing else. A vectored
+flight's downwind runs parallel to the runway course and opposite it, several kilometres abeam,
+and passes `d = 0` out there. On `l3e_path_stretch_20260908/L3e_stack_p60s_pred_val`, **96.5 %
+of the vectored cuts lay more than 1 km from the threshold — median `|xt|` 8.7 km, a median
+1.75 km above it** — while the straight-in cuts were clean (`|xt|` p95 **50 m**). So the L3.e /
+L3.f vectored flyability and geometry were read on a window that ended on the downwind, and the
+reference path length `L_ref` was measured to an abeam point: **~12 km on a 25 km approach**,
+with `tromboneRefNoCrossing` at **31.6 %**.
+
+**The fix: one rule, one function.** `final_approach_geometry.threshold_crossing_index(d, xt,
+cos_align)` returns the first crossing row, the end of its run, and whether there is a crossing
+at all. A crossing is `d ≤ 0` **AND** inside the `on-final` gate there — the membership cone
+(`MEMBERSHIP_K`, floored at `MEMBERSHIP_FLOOR_M`) and `ALIGNMENT_MAX_DEG`, read from the gate
+rather than restated beside it. The cone is what rejects the abeam pass; the alignment rejects
+a plane crossed on a heading that is not the final's. The refinement inside that run stays the
+caller's: closest horizontal approach for the record cut, `d = 0` interpolated inside the
+crossing segment for the reference path. A trajectory that never satisfies it has NO crossing —
+the existing "never reaches" semantics: the record is left WHOLE with `truncatedAtThreshold:
+false`, the reference is cut at the end of its own schedule and flagged.
+
+**What moves and what does not.** Straight-in records are bit-identical: there the first row
+past the plane is inside the cone and aligned, so both rules answer the same row (checked
+end-to-end on a straight-in synthetic rollout — cut row 303 either way, 287 m off the
+centreline). Vectored records that never turn onto the final now read as what they are — no
+crossing, no cut — instead of being cut 8.7 km abeam. `hook_trombone_ref_no_crossing` now means
+"the reference never got ONTO the final", which is a stronger claim than "it never passed the
+plane" and will read HIGHER, not lower, on arms whose rollouts reach the threshold across the
+course: measured on the package's 48-segment fixture (a flight flown straight at the threshold
+at 45° to the runway) it is 0 → 1, while the estimate itself does not move, because a straight
+reference has no detour either way. Every path that does not use the crossing is untouched to
+the bit: the L3.f equivalence harness, extended with the two `reference-rollout` replays the
+crossing actually reaches (15 cases, both trombone stacks trained and replayed, soft and hard),
+reports **24 of 2344 leaves moved — every one of them `tromboneRefPathM` /
+`tromboneRefNoCrossing` / `tromboneDelayS` inside those two cases**, and nothing at all
+elsewhere: no trajectory, control, record or state digest anywhere. Those synthetic references
+overshoot the threshold wide of the final rather than flying a downwind, so what moves on them
+is the FLAG (0 → 1) and 8–58 m of path (0.1–0.3 %, the cut moving to the end of the schedule);
+the kilometres are on the vectored cohort the defect was measured on. **333 stored runs
+recounted, 0 renamed.**
+
+**Two consequences the pre-commit review found, both fixed here.** (1) The trombone's
+no-crossing branch cut the reference one segment early: under the plane-only rule "no crossing"
+implied no boundary was past the plane, so the in-segment fraction saturated to 1 on its own and
+the cut landed on the last boundary — where the path length already counted to. The on-final rule
+broke that (an overshoot IS past the plane and still never on the final), the fraction clamped to
+0 instead, and `L_ref` and `S_ref` stopped ending at the same point: **340 m of invented detour
+on a perfectly straight reference**, at every step, so it never burned down. The fraction is now
+FORCED to 1 where there is no crossing, and a straight reference that overshoots wide of the cone
+is a test case. (2) `truncatedAtThreshold` was shared with the fixed-time postprocessor's
+closest-approach truncation, which has no plane in it at all — so a vectored state record could
+end 8 km abeam and still claim to end at the threshold, and `predict`'s cut/whole count was wrong
+for exactly that population. Where the crossing rule runs it now OWNS the flag: no crossing
+clears it, and `horizonCapped` — which marks the records the fixed-time rule never reached —
+still recovers whether that cut happened.
+
+**One fixture changed with the rule, and the change is the point.** `_VECTORED_LEGS` in
+`test_control_constraints` reached the threshold POINT at 45° to the course, which under the new
+rule is not a landing; it gains a 5 km final (42.0 km of path against a 21.5 km beeline). The
+same test file gains the downwind case the defect is about: a reference that starts 3 km past
+the threshold and 8 km right of it, flies the reciprocal out to 12 km back, then a base and a
+final — where the plane-only cut measured 8.5 km of path against the 30.6 km the network
+intends, and reported **307 s** of surplus on a flight with none.
+
+The `L_ref` phrasing in the entry below ("its first crossing of the threshold plane") is
+superseded by this one.
+
+### 2026-09-09 — ts_transformer: L3.f — the trombone's surplus is sized against the reference rollout's remaining path, not the beeline
+
+**The defect, measured (L3.e).** The mechanism worked and the estimator did not. At the TRUE CTA
+— where by construction there is nothing to absorb — `tromboneDelayS` came out at p50 **391 s**,
+the endpoint `|xt|` p95 at **10 km**, and **46 %** of flights did not reach the threshold by
+`T_cta`; meanwhile the delay was absorbed exactly 30 s per 30 s of offset and the envelope
+violations fell 85 / 84 / 99 % (thrust / stall / load). The cause is the length the time is
+compared against: `ΔL = V_e·T_r − D` with `D` the BEELINE, which is not what a vectored flight
+intends to fly. Its downwind and base — 40 km of path under a 21 km beeline on the fixture —
+read as time to burn, and the hook stretched a flight that was on schedule.
+
+**The change (one axis, `trombone_surplus_reference ∈ {beeline, reference-rollout}`;
+`predict --trombone-surplus`).** Under `reference-rollout` the length is the aircraft's own
+beeline plus **the detour the network still intends on top of it**: `detour = L_ref − S_ref`,
+where `L_ref` is the HOOK-FREE reference rollout's remaining horizontal path from this command
+step to its first crossing of the threshold plane and `S_ref` is the straight line to that same
+cut. `ΔL = V_e·T_r − D − detour`, positive part — exactly the beeline surplus less what the
+model was already going to spend on vectoring — and the dog-leg realisation is untouched
+(`cos θ = D/(D + ΔL)` about the same base). A reference that never crosses is cut at the end of
+its own schedule and says so (`hook_trombone_ref_no_crossing`): that is a different claim.
+
+**Why the detour and not `L_ref` itself** — the obvious reading, and it is wrong twice; both
+were found by the pre-commit review, on the package's own fixtures. `L_ref` is indexed by the
+SCHEDULE: it knows the step number and nothing about where the hooked aircraft has got to, so
+the moment the excursion opens the estimate stops responding to it and the surplus never burns
+down; past the reference's own crossing `L_ref` is zero and `ΔL` degenerates to the whole
+remaining reach, its largest possible value. Measured on the 48-segment rollout fixture (60 s
+late, a flight whose own plan IS the beeline, where the axis should be a no-op): **19 of 48
+steps pinned at the 45° offset cap, ending 1.7 km wide** of the threshold, where `beeline`
+rolls out with zero saturated steps and ends 159 m out. Second, a reference that decelerates
+and stops SHORT of the threshold had its missing metres counted as surplus — on the on-time
+fixture, **9.4 s of delay invented and 15 engaged steps** against `beeline`'s 0 and 0, i.e. the
+hook stretching a flight that could not cover the path it already had, sign inverted. The
+detour form has neither problem: `D` is the AIRCRAFT's own, and `detour` is non-negative and
+non-increasing along the schedule by the triangle inequality (removing a leading chord takes at
+least as much off the polyline as off the straight line). A rollout-level test over all 48
+segments now pins both — it is the only place the estimate is read at `segment_index > 0`, and
+it fails on the naive form at both offsets.
+
+**The reference rollout is now a documented member of the composite.** `needs_reference` becomes
+a per-INSTANCE flag on the trombone, so `barrier+speed-floor+trombone` gains the hook-free
+rollout under this axis and nothing extra under the default. The engine's reference (the
+mechanism the archived nominal law introduced — reused, not duplicated) changed from lock-step to
+LOOK-AHEAD: `rollout_piecewise_constant_hooked_with_step` now integrates the unhooked schedule
+once, before the first hooked segment, and hands the hook `RolloutStateView.reference` WHOLE
+(`[B,N+1,7]`, one chart row per segment boundary, the anchor first). A remaining path is a future
+quantity and no per-segment state can answer it. Cost: one extra integration of the same schedule
+(~2× the SEGMENTED rollout; the dense re-integration at predict is untouched), paid once — the
+trombone derives its `[B,N]` detour table at `segment_index == 0` and the per-step cost after
+that is an index. The archived law's README now says the contract moved, rather than leaving
+stale code that looks portable.
+
+**Two approximations, stated rather than silent.** Both lengths are CHORD sums between segment
+boundaries — the command is constant within a hold, so the segment is a circular arc and the
+chord is short by `sinc(Δψ/2)`: 0.15 % at a 15° bank over the deployed ~5 s hold, 2.8 % at 45°
+(and the two errors partly cancel in the difference). And the crossing is interpolated linearly
+inside the one segment that contains it, because a segment is a kilometre of flying either way.
+
+**The default is `beeline`, and it is bit-exact.** Measured with the L3.e equivalence harness
+extended to both trombone stacks, trained and replayed, in both saturations (`off`, `barrier`,
+`speed-floor`, `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`):
+**1972 leaves compared, 0 differing** — trajectories, controls, records, diagnostics and run
+names alike. That is also why the two reference-only counts (`tromboneRefPathM`,
+`tromboneRefNoCrossing`) and the `tromboneSurplusReference` label are ABSENT rather than zero
+under the default: a key added there would change the bytes of every L3.e record on disk. Run
+names: **333 stored runs recounted, 0 renamed** (`run_naming._field_diffs` skips a META field a
+stored config does not carry). The axis is refused away from its default under a hook that
+contains no `trombone`, like the barrier's gains and the stall margin.
+
+**New: `CommandHook.diagnostic_labels()`** — per-run STRINGS reported next to the counts and
+never divided by `hook_steps`, merged by the composite under the same collision refusal. A
+module with more than one way of computing the same quantity says which one it ran, so a record
+carries the law that produced its numbers.
+
+Tests: +9 (`tests/test_control_constraints.py`) — the vectored dog-leg fixture at offset 0 and
++60 s (beeline asks for 260 s + offset, the reference for the offset alone), the two-arm
+rollout-level no-op test above, the crossing interpolation / never-crosses flag / zero-length
+segment gradient, the three refusals, the composite's OR, the engine handing over the whole
+schedule, and the record's keys under both settings. 899 pass, 1 skipped.
+`docs/experiments/l3f_path_stretch_ref_arms.json` dry-runs 12/12; the arms are NOT run.
 ### 2026-09-09 — ts_transformer: package review — bugs and why it is still heavy after the audit
 
 Docs only: `4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`.

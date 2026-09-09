@@ -10,9 +10,11 @@ Three modules are live: the lateral `barrier` (the adopted inference-time safety
 acting INSIDE the on-final gate), the `speed-floor` (the stall margin held through the
 thrust command, ungated) and the `trombone` (the delay the remaining path cannot absorb,
 spent as a pre-final lateral extension, acting only OUTSIDE the gate). Barrier and trombone
-both write bank and load factor; they compose because their gates are complementary, so no
-step is ever rewritten by both. The nominal tracking law that shared this directory was
-never adopted and is archived under `archive/nominal_law_hook_2026_09/`.
+both write bank and load factor; they compose because their gates are made complementary
+HERE: under a trombone the barrier is built confined to the hard gate, which is the
+complement of where the trombone may engage, so no step is ever rewritten by both
+(`barrier_filter.py`, last docstring paragraph). The nominal tracking law that shared this
+directory was never adopted and is archived under `archive/nominal_law_hook_2026_09/`.
 """
 
 from __future__ import annotations
@@ -63,9 +65,15 @@ def build_command_hook(
             "hook is 'barrier'"
         )
     hard = config.control_hook_saturation == HOOK_SATURATION_HARD
+    names = CONTROL_HOOK_MEMBERS[config.control_command_hook]
+    # The complementarity the composite rests on is BUILT, not assumed: with a trombone in
+    # the value, the barrier acts only inside the hard gate (its soft shoulders would
+    # otherwise overlap the trombone's admission band — 2026-09-09 review, A-4).
+    with_trombone = CONTROL_HOOK_TROMBONE in names
     members = tuple(
-        _HOOKS[name](config, dynamics, hard=hard)
-        for name in CONTROL_HOOK_MEMBERS[config.control_command_hook]
+        BarrierFilter(config, dynamics, hard=hard, confine_to_hard_gate=with_trombone)
+        if name == CONTROL_HOOK_BARRIER else _HOOKS[name](config, dynamics, hard=hard)
+        for name in names
     )
     return members[0] if len(members) == 1 else CompositeHook(members)
 

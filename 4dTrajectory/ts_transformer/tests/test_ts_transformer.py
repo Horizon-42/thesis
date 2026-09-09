@@ -1182,7 +1182,12 @@ def test_normalized_target_interpolates_and_stops_at_observed_threshold_crossing
     assert s.supervision_times[-1] == pytest.approx(50.0)
     assert s.supervision_values[-1, ch.IDX["e"]] == pytest.approx(25.0, abs=1e-6)
     assert s.supervision_values[-1, ch.IDX["n"]] == pytest.approx(0.0, abs=1e-6)
-    assert np.all(s.supervision_weights[-1] == pytest.approx(1.0 / len(ch.CHANNELS)))
+    # The crossing is a measured row (1/C on all six channels) AND the terminal row (the
+    # terminal emphasis on its position channels) — the same contract a fitted crossing gets.
+    measured = 1.0 / len(ch.CHANNELS)
+    terminal = config.fitted_terminal_position_weight / len(ch.POSITION_IDX)
+    assert s.supervision_weights[-1, :3] == pytest.approx(measured + terminal)
+    assert s.supervision_weights[-1, 3:] == pytest.approx(measured)
 
     dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
     _, target, _, final_time_s, _flight_weight = dataset[len(dataset) - 1]
@@ -1200,6 +1205,43 @@ def test_observed_threshold_crossing_does_not_depend_on_a_fitted_tail(monkeypatc
     assert series[0].times[-1] == pytest.approx(48.0)
     assert series[0].supervision_times[-1] == pytest.approx(50.0)
     assert series[0].supervision_values[-1, ch.IDX["n"]] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_observed_and_fitted_threshold_crossings_share_the_terminal_weight_contract():
+    """Review 2026-09-09 A-3: the crossing used to be supervised under two contracts chosen
+    by ADS-B coverage — an observed one flat at 1/C with no terminal emphasis, a fitted one
+    with the terminal emphasis on position and nothing on velocity. Now the terminal emphasis
+    is a property of the terminal ROW, whichever way it was obtained, and the rest of the row
+    keeps its origin's own weights (measured: all six channels; extrapolated: position only).
+    """
+    config = TSConfig(
+        seq_len=3, n_segments=3, dt_s=2.0, random_train_anchor_min_future_s=0.0,
+        fitted_tail_position_weight=0.25, fitted_terminal_position_weight=1.0,
+    )
+    measured = 1.0 / len(ch.CHANNELS)
+    n_position = len(ch.POSITION_IDX)
+
+    observed, _ = build_series([_post_threshold_flight()], config, airport="KFIT")
+    observed_terminal = observed[0].supervision_weights[-1]
+    fitted, _ = build_series([_fitted_tail_flight()], config, airport="KFIT")
+    fitted_terminal = fitted[0].supervision_weights[-1]
+
+    # Position: each origin's own weight plus the SAME terminal emphasis.
+    assert observed_terminal[:3] - measured == pytest.approx(
+        config.fitted_terminal_position_weight / n_position)
+    assert fitted_terminal[:3] - config.fitted_tail_position_weight / n_position == pytest.approx(
+        config.fitted_terminal_position_weight / n_position)
+    # Velocity: real (interpolated between two measured samples) on the observed crossing,
+    # a placeholder on the fitted one.
+    assert observed_terminal[3:] == pytest.approx(measured)
+    assert np.all(fitted_terminal[3:] == 0.0)
+    # Every other measured row is untouched by the emphasis.
+    assert np.all(observed[0].supervision_weights[:-1] == pytest.approx(measured))
+
+    # No terminal emphasis asked for: the observed crossing is a plain measured row again.
+    plain = replace(config, fitted_terminal_position_weight=0.0)
+    observed, _ = build_series([_post_threshold_flight()], plain, airport="KFIT")
+    assert np.all(observed[0].supervision_weights[-1] == pytest.approx(measured))
 
 
 def test_channel_weighted_mse_ignores_fitted_velocity_placeholders():

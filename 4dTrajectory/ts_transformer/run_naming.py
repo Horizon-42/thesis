@@ -302,6 +302,7 @@ _ABBREV = {
     "control_barrier_alpha": "barrier-alpha",
     "control_barrier_heading_gain": "barrier-gain",
     "control_speed_floor_margin": "floor-margin",
+    "trombone_surplus_reference": "trombone-surplus",
 }
 
 #: Split prefixes shared by every category-label producer (publisher, pipeline,

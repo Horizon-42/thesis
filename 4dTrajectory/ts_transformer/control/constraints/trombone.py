@@ -140,6 +140,65 @@ zero at zero surplus, so inertness survives), and the gate weight the command is
 It does NOT soften the hand-over rule, the side, or the half-way switch: those are a MODE —
 which module owns the command, and which way the dog-leg goes — and a mode that is half
 taken is not a manoeuvre.
+
+**What the surplus is measured against (``trombone_surplus_reference``, L3.f).** Everything
+above sizes ``ΔL`` against the BEELINE ``D``, and L3.e measured what that costs: the beeline
+is not the path a vectored flight intends to fly, so the whole of a downwind and a base reads
+as time the aircraft does not need. At the TRUE CTA — where by construction there is nothing
+to absorb — ``tromboneDelayS`` came out at p50 391 s, the endpoint ``|xt|`` p95 at 10 km, and
+46 % of flights did not reach the threshold by ``T_cta``; the mechanism itself was clean
+(delay absorbed exactly 30 s per 30 s of offset, thrust/stall/load violations −85/−84/−99 %).
+The estimator, not the manoeuvre, was wrong.
+
+Under ``reference-rollout`` the length the time is compared against is still the aircraft's
+own beeline ``D``, plus **the detour the NETWORK ITSELF still intends to fly** on top of it::
+
+    detour = L_ref − S_ref                     the reference's remaining path, less the
+                                               straight line to the same endpoint
+    Δt_unabsorbed = T_r − (D + detour) / V_e   ΔL = V_e·T_r − D − detour   (positive part)
+
+— i.e. exactly the beeline surplus, less what the model was already going to spend on
+vectoring. ``L_ref`` is the hook-free reference rollout's remaining horizontal path from this
+segment's boundary, cut where it FIRST crosses the threshold ON THE FINAL (the shared
+``final_approach_geometry.threshold_crossing_index`` — the plane ALONE is crossed abeam, on
+a downwind, which is what this rule was until 2026-09-09 and why it measured ~12 km of
+reference path on a 25 km approach; when the reference never crosses, the cut is the end of
+its schedule and ``hook_trombone_ref_no_crossing`` says so), and
+``S_ref`` is the straight line from that same boundary to that same cut. The dog-leg that
+spends ``ΔL`` is unchanged, about the same base: ``cos θ = D / (D + ΔL)``. Under ``beeline``
+that base IS ``V_e·T_r`` and the code keeps that spelling exactly, so the default reproduces
+L3.e to the bit — records included, which is why the reference-only diagnostics are ABSENT
+rather than zero under it.
+
+**Why the DETOUR and not ``L_ref`` itself**, which is the more obvious reading of "size it
+against the reference's remaining path". ``L_ref`` is indexed by the SCHEDULE: it knows the
+step number and nothing about where the hooked aircraft has actually got to. The moment the
+excursion opens, the aircraft leaves the reference's path — that is the point of the
+manoeuvre — and the estimate stops responding to it, so the surplus never burns down; past
+the reference's own threshold crossing ``L_ref`` is zero and ``ΔL`` degenerates to the whole
+remaining reach, its largest possible value. Measured on the rollout fixture (48 segments,
+60 s late, a flight whose own plan IS the beeline, where the axis should be a no-op): sizing
+against ``L_ref`` pinned the offset at the 45° cap for 19 steps and ended 1.7 km wide of the
+threshold, where ``beeline`` rolls out with zero saturated steps and ends 159 m out. The
+detour form has neither problem, because ``D`` is the aircraft's own and ``detour`` is
+non-increasing along the schedule by the triangle inequality (removing a leading chord takes
+at least as much off the polyline as off the straight line) — so ``dΔL/dt ≤ 0`` survives as
+the identity it is under ``beeline``, and the roll-out is guaranteed rather than hoped for.
+It is also what makes the SHORTFALL case right: a reference that decelerates and stops short
+of the threshold has a detour near zero, so the estimator falls back to the aircraft's own
+beeline and the shortfall reads as the delay it is — sizing against ``L_ref`` would have read
+those missing metres as surplus and stretched a flight that could not cover the path it
+already had (measured on the on-time fixture: 9.4 s of invented delay, 15 of 48 steps
+engaged, where ``beeline`` reports 0 and 0).
+
+The reference comes from ``RolloutStateView.reference``, the hook-free schedule integrated
+alongside (``needs_reference``; the composite carries it, and it costs one extra integration
+of the schedule, once — ``control/constraints/composite.py``). One approximation, stated: the
+path is summed as the CHORD between consecutive segment boundaries, not the arc. The command
+is constant within a hold, so the segment is a circular arc and the chord is short by
+``sinc(Δψ/2)`` — 0.15 % at a 15° bank over the deployed ~5 s hold, 2.8 % at 45°. Both terms
+of ``detour`` are chords, so the two errors partly cancel; the alternative is a second dense
+rollout for a sub-percent correction.
 """
 
 from __future__ import annotations
@@ -149,7 +208,7 @@ import math
 import torch
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
-from config import TSConfig
+from config import TROMBONE_SURPLUS_REFERENCE_ROLLOUT, TSConfig
 from control.constraints.gates import on_final_weight, runway_axes_view
 from control.constraints.saturation import (
     ACTIVE_BANK_CHANGE_RAD,
@@ -160,7 +219,12 @@ from control.constraints.saturation import (
 from control.constraints.speed_floor import floor_speed
 from control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
-from final_approach_geometry import hard_aligned
+from final_approach_geometry import (
+    alignment_cosine,
+    hard_aligned,
+    runway_axes,
+    threshold_crossing_index,
+)
 
 #: The largest heading offset from the beeline the hook will hold. ``sec 45° = 1.41``, so it
 #: buys 41 % of extra path per metre of base — i.e. it BINDS once the delay to absorb exceeds
@@ -197,10 +261,22 @@ _DIAGNOSTIC_KEYS = (
     "hook_trombone_saturated_steps", "hook_trombone_bank_capped_steps",
     "hook_trombone_offset_rad", "hook_trombone_stretch_m", "hook_trombone_delay_s",
 )
+#: Reported ONLY under ``reference-rollout``, and that is deliberate: a key written on every
+#: record distinguishes nothing, and adding one under the default would change the bytes of
+#: every L3.e record on disk. Both are held at every step, so the published share (value /
+#: ``hook_steps``) IS the anchor's value — the LENGTH the surplus was sized against there
+#: (``D + detour``, which is the reference's own remaining path whenever it crosses at the
+#: threshold point, so ``tromboneDelayS = T_r − tromboneRefPathM / V_e`` reconstructs), and
+#: whether that reference ever reaches the threshold on the final at all.
+_REFERENCE_DIAGNOSTIC_KEYS = (
+    "hook_trombone_ref_path_m", "hook_trombone_ref_no_crossing",
+)
+#: The label that says which estimator produced the counts above. Same rule: present only
+#: under ``reference-rollout``, so a record without it was sized against the beeline.
+_SURPLUS_REFERENCE_LABEL_KEY = "hook_trombone_surplus_reference"
 
 
 class Trombone:
-    needs_reference = False   # reads the hooked state and the schedule's own clock
 
     def __init__(self, config: TSConfig, dynamics: dict[str, torch.Tensor], *, hard: bool):
         self.runway_heading = dynamics["runway_heading_rad"]
@@ -211,7 +287,20 @@ class Trombone:
         self.margin = config.control_speed_floor_margin
         self.bank_lag_s = config.control_bank_time_constant_s
         self.hard = hard
-        # ``[len(_DIAGNOSTIC_KEYS), B]`` — per row, so a prediction record carries its own.
+        # WHAT the surplus is measured against, and the one thing that follows from it: the
+        # `reference-rollout` estimator reads the hook-free schedule's own rollout, so this
+        # instance asks the engine for it. `beeline` asks for nothing and is what every
+        # stored artifact ran under.
+        self.surplus_reference = config.trombone_surplus_reference
+        self.needs_reference = (
+            self.surplus_reference == TROMBONE_SURPLUS_REFERENCE_ROLLOUT
+        )
+        # The keys this instance reports; the reference pair only exists where a reference
+        # was read, so a `beeline` record is byte-identical to L3.e's.
+        self._keys = _DIAGNOSTIC_KEYS + (
+            _REFERENCE_DIAGNOSTIC_KEYS if self.needs_reference else ()
+        )
+        # ``[len(self._keys), B]`` — per row, so a prediction record carries its own.
         self._counts: torch.Tensor | None = None
         # Per-row MODE, latched across segments (never a gradient path): the side the
         # excursion is flown on, the stretch latched at engagement (0 = not engaged), the
@@ -220,6 +309,12 @@ class Trombone:
         self._target_m: torch.Tensor | None = None
         self._anchor_delay_s: torch.Tensor | None = None
         self._gate_seen: torch.Tensor | None = None
+        # The detour the reference still intends at every segment start ``[B,N]`` and
+        # whether it ever crossed on the final ``[B]``, derived once per rollout from
+        # the hook-free trajectory; None under `beeline`, where nothing reads them.
+        self._ref_detour_m: torch.Tensor | None = None
+        self._ref_no_crossing: torch.Tensor | None = None
+        self._anchor_ref_path_m: torch.Tensor | None = None
 
     def __call__(
         self, state: RolloutStateView, command: torch.Tensor, segment_index: int
@@ -250,10 +345,21 @@ class Trombone:
         # ...and floored again as a DENOMINATOR: `torch.where` evaluates both branches, so a
         # zero-length schedule would put a NaN gradient through the masked-out one.
         reach = (pace * state.remaining_s.to(real)).clamp(min=_DISTANCE_FLOOR_M)
-        surplus = reach - direct                       # DL: the path length the delay needs
+        # DL: the path length the delay needs — the reach, less the length the aircraft
+        # still has to cover. WHICH length is the axis: the beeline alone, or the beeline
+        # plus the detour the hook-free rollout still intends to fly on top of it. Both
+        # are anchored on the AIRCRAFT's own `direct`, which is what burns the surplus down.
+        if self.needs_reference:
+            if self._ref_detour_m is None or segment_index == 0:
+                self._read_reference(state, view)
+            path = direct + self._ref_detour_m[:, segment_index]
+            surplus = reach - path
+        else:
+            path = None
+            surplus = reach - direct
         delay_s = (surplus / pace).clamp(min=0.0)      # ...as the seconds it stands for
         if self._side is None or segment_index == 0:
-            self._reset(view, delay_s)
+            self._reset(view, delay_s, path)
 
         # ── who owns the command here ────────────────────────────────────────────────
         # A hand-over, so it is the HARD predicate under both saturations. "Not aligned
@@ -275,10 +381,18 @@ class Trombone:
 
         # ── the dog-leg ──────────────────────────────────────────────────────────────
         zero = torch.zeros_like(direct)
-        # cos(theta) = D / (V_floor T_r): the offset that spends exactly the surplus. Where
-        # nothing is engaged the ratio is parked at 0 rather than 1 — acos' is infinite at 1
-        # and would put a NaN through a branch that is multiplied out anyway.
-        ratio = torch.where(engaged, direct / reach, zero)
+        # cos(theta) = D / (D + DL): the offset that spends exactly the surplus over the
+        # beeline base. Under `beeline` that denominator IS the reach, and the spelling stays
+        # the one L3.e ran — `direct + (reach - direct)` is not `reach` in IEEE, and this
+        # division is what the offset, the stretch and every downstream count come from.
+        # Under `reference-rollout` the surplus was measured against the beeline PLUS a
+        # detour, so the base has to be spelled out; `surplus` is clamped because
+        # `torch.where` evaluates both branches and a spent surplus makes it negative, and
+        # `direct` is already at least a metre, so nothing further is needed to keep the
+        # division finite. Where nothing is engaged the ratio is parked at 0 rather than 1 —
+        # acos' is infinite at 1 and would put a NaN through a branch multiplied out anyway.
+        base = reach if not self.needs_reference else direct + surplus.clamp(min=0.0)
+        ratio = torch.where(engaged, direct / base, zero)
         demanded = torch.acos(ratio.clamp(0.0, 1.0))
         offset = torch.where(engaged, demanded.clamp(max=OFFSET_MAX_RAD), zero)
         # The heading error that points straight at the threshold (xt_dot = −V sin psi_err,
@@ -353,6 +467,13 @@ class Trombone:
             # estimate — a flight the hand-over rule never admits still reports the delay it
             # was carrying, next to an engaged share of zero.
             self._anchor_delay_s.to(torch.float64),
+            # ...and, where the surplus was sized against the reference rollout, the length
+            # it was sized against and whether that reference ever reached the threshold
+            # plane at all. Held at every step for the same reason as the line above.
+            *((
+                self._anchor_ref_path_m.to(torch.float64),
+                self._ref_no_crossing.to(torch.float64),
+            ) if self.needs_reference else ()),
         ))
         self._counts = counts if self._counts is None else self._counts + counts
         # One hook per batch: the rows ARE the flights, so a second batch through the same
@@ -360,12 +481,111 @@ class Trombone:
         assert self._counts.shape[1] == counts.shape[1], "a hook is built per batch"
         return torch.stack((command[:, 0], filtered, coordinated), dim=-1)
 
-    def _reset(self, view, delay_s: torch.Tensor) -> None:
-        """A fresh rollout: no excursion, no gate seen, and the anchor's own estimate."""
+    def _reset(self, view, delay_s: torch.Tensor, path: torch.Tensor | None) -> None:
+        """A fresh rollout: no excursion, no gate seen, and the anchor's own estimate.
+
+        ``path`` is the length that estimate was sized against, or None under ``beeline``
+        where there is no second length to publish.
+        """
         self._side = torch.zeros_like(view.d)
         self._target_m = torch.zeros_like(view.d)
         self._gate_seen = torch.zeros_like(view.d, dtype=torch.bool)
         self._anchor_delay_s = delay_s.detach()
+        self._anchor_ref_path_m = None if path is None else path.detach()
+
+    def _read_reference(self, state: RolloutStateView, view) -> None:
+        """Derive, once per rollout, the DETOUR the HOOK-FREE schedule still means to fly.
+
+        ``state.reference`` is that schedule's chart at every segment BOUNDARY ``[B,N+1,7]``.
+        Cut it where it FIRST crosses the threshold ON THE FINAL
+        (``final_approach_geometry.threshold_crossing_index``, shared with
+        ``forecast.cut_at_threshold_crossing``) — interpolated inside the segment that
+        crosses, because a segment is tens of seconds and counting or dropping a whole one is
+        a kilometre either way — or, where it never crosses, at its last boundary, and say
+        which (``hook_trombone_ref_no_crossing``): the two are not the same claim.
+
+        The remaining path from boundary ``i`` to that cut is ``L_ref(i)``, the sum of the
+        chords from ``i`` on; the straight line from the same boundary to the same cut is
+        ``S_ref(i)``; and what the estimator uses is the difference. See the module
+        docstring for why it is the difference and not ``L_ref`` itself — in one line,
+        ``L_ref`` is indexed by the schedule and cannot see the excursion the hook is
+        flying, so the surplus never burns down.
+
+        ``detour`` is non-negative by the triangle inequality (both terms end at the same
+        point) and the ``clamp`` only absorbs the metre floors above; it is non-increasing
+        along the schedule by the same inequality, which is what makes the roll-out an
+        identity rather than a hope.
+        """
+        if state.reference is None:
+            raise ValueError(
+                "the trombone sizes its surplus against the hook-free reference rollout "
+                "(trombone_surplus_reference='reference-rollout', needs_reference); the "
+                "backend passed none"
+            )
+        reference = state.reference.to(view.d.dtype)
+        position = reference[..., :2]                       # [B, N+1, 2] chart (e, n)
+        psi = self.runway_heading.to(view.d.dtype)
+        d_ref, xt_ref = runway_axes(position[..., 0], position[..., 1], psi)
+        step = position[:, 1:] - position[:, :-1]
+        # The chord flown in each segment. Clamped BEFORE the root for the same reason
+        # `direct` is: sqrt' is infinite at zero and one NaN gradient poisons the batch. A
+        # segment shorter than a metre contributes nothing either way — at the deployed
+        # ~5 s hold a segment is ~350 m — so the floor cannot change an answer.
+        chord = torch.sqrt(step.square().sum(-1).clamp(min=_DISTANCE_FLOOR_M**2))
+        segments = chord.shape[1]
+        # WHERE the reference lands, from the one definition of it. The threshold PLANE
+        # alone is not a landing: a vectored downwind runs parallel to the course several
+        # kilometres abeam and passes ``d = 0`` out there, and cutting the path at that
+        # abeam point measured ``L_ref`` to the wrong end of it (2026-09-09: on L3.e's
+        # arms, ``tromboneRefNoCrossing`` 31.6 % and ~12 km of reference path on a 25 km
+        # approach). The direction the gate reads is the chord flown INTO each boundary —
+        # the path the reference means to fly, which is what this estimate is about.
+        first, _run_end, crossed = threshold_crossing_index(
+            d_ref[:, 1:], xt_ref[:, 1:],
+            alignment_cosine(step[..., 0], step[..., 1], psi),
+        )
+        no_crossing = ~crossed
+        # The segment the crossing happens in, or `segments` (past the last) for a reference
+        # that never gets there — which makes the whole schedule count, below.
+        first = torch.where(no_crossing, torch.full_like(first, segments), first)
+        index = first.clamp(max=segments - 1).unsqueeze(1)
+        before = d_ref[:, :-1].gather(1, index)
+        after = d_ref[:, 1:].gather(1, index)
+        # Where in that segment ``d`` reaches zero. The denominator is floored for a segment
+        # that barely moves; the ordinary crossing has ``before > 0 >= after``, so it never
+        # binds there. A reference that crossed the PLANE earlier, off the final, arrives at
+        # its real crossing segment with ``before <= 0``: the ratio goes negative and clamps
+        # to 0, i.e. the cut is that segment's start, which is the earliest the on-final rule
+        # allows. A reference that never crosses is FORCED to 1 — its cut is the last
+        # boundary, which is where ``weight`` below already counts the schedule to, and the
+        # two must end at the same point or ``remaining − straight`` is a detour that is not
+        # there. (Under the plane-only rule this line was a saturation: no crossing meant no
+        # boundary past the plane, so ``before > 0`` and the ratio exceeded 1 on its own. The
+        # on-final rule broke that — an overshoot IS past the plane and still never on the
+        # final — and left a straight reference reporting ~one chord of invented detour at
+        # every step, which never burns down. Measured on the 48-segment fixture before the
+        # fix: 340 m of detour on a perfectly straight path.)
+        fraction = torch.where(
+            no_crossing.unsqueeze(1),
+            torch.ones_like(before),
+            (before / (before - after).clamp(min=_DISTANCE_FLOOR_M)).clamp(0.0, 1.0),
+        )
+        pair = index.unsqueeze(-1).expand(-1, -1, 2)
+        start = position[:, :-1].gather(1, pair)
+        end = position[:, 1:].gather(1, pair)
+        cut = start + fraction.unsqueeze(-1) * (end - start)          # [B, 1, 2]
+        column = torch.arange(segments, device=chord.device).unsqueeze(0)
+        weight = (column < first.unsqueeze(1)).to(chord.dtype) + (
+            (column == first.unsqueeze(1)).to(chord.dtype) * fraction
+        )
+        remaining = torch.flip(
+            torch.cumsum(torch.flip(chord * weight, dims=(1,)), dim=1), dims=(1,)
+        )
+        straight = torch.sqrt(
+            (position[:, :-1] - cut).square().sum(-1).clamp(min=_DISTANCE_FLOOR_M**2)
+        )
+        self._ref_detour_m = (remaining - straight).clamp(min=0.0)
+        self._ref_no_crossing = no_crossing.to(chord.dtype).detach()
 
     def _latch(
         self, engaged: torch.Tensor, opened: torch.Tensor, view, surplus: torch.Tensor
@@ -390,13 +610,23 @@ class Trombone:
     def diagnostics(self) -> dict[str, torch.Tensor]:
         """Step counts (and the summed offset/stretch) over every call, summed over the batch."""
         counts = (
-            torch.zeros(len(_DIAGNOSTIC_KEYS), dtype=torch.float64)
+            torch.zeros(len(self._keys), dtype=torch.float64)
             if self._counts is None else self._counts.sum(dim=1).cpu()
         )
-        return dict(zip(_DIAGNOSTIC_KEYS, counts.unbind()))
+        return dict(zip(self._keys, counts.unbind()))
 
     def per_flight_diagnostics(self) -> dict[str, torch.Tensor]:
         """The same counts, one row per flight (``[B]`` each)."""
         if self._counts is None:
-            return {name: torch.zeros(0, dtype=torch.float64) for name in _DIAGNOSTIC_KEYS}
-        return dict(zip(_DIAGNOSTIC_KEYS, self._counts.cpu().unbind()))
+            return {name: torch.zeros(0, dtype=torch.float64) for name in self._keys}
+        return dict(zip(self._keys, self._counts.cpu().unbind()))
+
+    def diagnostic_labels(self) -> dict[str, str]:
+        """Which estimator sized the surplus — reported only where it is not the default.
+
+        A record carrying no such key was sized against the beeline, which is what the whole
+        L3.e campaign ran under and what the default still is.
+        """
+        if not self.needs_reference:
+            return {}
+        return {_SURPLUS_REFERENCE_LABEL_KEY: self.surplus_reference}

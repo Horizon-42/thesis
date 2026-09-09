@@ -1,0 +1,9 @@
+{
+  "_comment": "A-4 check (pre-registered 2026-09-09 evening, latent design doc §六 'A-4 修复与预注册核查'). The 2026-09-09 package review's A-4: under hook_saturation=soft the barrier's alignment shoulder (30-40° off course) overlapped the trombone's admission band (> 30°), so on those steps the barrier blended a correction the trombone then overwrote, and the trombone's own answer moved from reading the barrier's coordinated load. Fixed on dev-pg (c544db0): a barrier composed with a trombone is confined to the hard gate. Both L3.e-r and L3.f-r (l3e_path_stretch_20260909r, l3f_path_stretch_ref_20260909r) were flown BEFORE the fix. This is ONE arm, identical to L3f_ref_p60s in l3f_path_stretch_ref_arms.json, flown on the fixed tree, to be compared PAIRED against l3f_path_stretch_ref_20260909r/L3f_ref_p60s_pred_val: fully-flyable share, stall / thrust_over_max samples, share on the final at the assigned time, vectored |xt| p95, tromboneDelayS p50. EXPECTED: straight-in bit-identical (inside the gate nothing changed), vectored differs only through the 30-40° shoulder. READING: if L3.f-r's advantage over L3.e-r vanishes here, it belonged to the barrier gate, not the estimator; if it stays, the estimator reading stands. Not a campaign: no new gate, the result is written back to the doc section that pre-registers it.",
+  "base_recipe": "simple-v3",
+  "arms": [
+    {"key": "L3f_ref_p60s", "label": "CTA +60 s + three-hook stack, reference-rollout surplus, barrier confined to the hard gate (A-4 fix)",
+     "checkpoint": "4dTrajectory/outputs/{airport}/experiments/l3_cta_20260907/L3_cta/checkpoint.pt",
+     "predict_args": ["--cta-offset-s", "60", "--command-hook", "barrier+speed-floor+trombone", "--hook-saturation", "soft", "--trombone-surplus", "reference-rollout", "--truncate-at-threshold"]}
+  ]
+}
