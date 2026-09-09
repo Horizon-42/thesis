@@ -4,6 +4,87 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-09 — ts_transformer: L3.f — the trombone's surplus is sized against the reference rollout's remaining path, not the beeline
+
+**The defect, measured (L3.e).** The mechanism worked and the estimator did not. At the TRUE CTA
+— where by construction there is nothing to absorb — `tromboneDelayS` came out at p50 **391 s**,
+the endpoint `|xt|` p95 at **10 km**, and **46 %** of flights did not reach the threshold by
+`T_cta`; meanwhile the delay was absorbed exactly 30 s per 30 s of offset and the envelope
+violations fell 85 / 84 / 99 % (thrust / stall / load). The cause is the length the time is
+compared against: `ΔL = V_e·T_r − D` with `D` the BEELINE, which is not what a vectored flight
+intends to fly. Its downwind and base — 40 km of path under a 21 km beeline on the fixture —
+read as time to burn, and the hook stretched a flight that was on schedule.
+
+**The change (one axis, `trombone_surplus_reference ∈ {beeline, reference-rollout}`;
+`predict --trombone-surplus`).** Under `reference-rollout` the length is the aircraft's own
+beeline plus **the detour the network still intends on top of it**: `detour = L_ref − S_ref`,
+where `L_ref` is the HOOK-FREE reference rollout's remaining horizontal path from this command
+step to its first crossing of the threshold plane and `S_ref` is the straight line to that same
+cut. `ΔL = V_e·T_r − D − detour`, positive part — exactly the beeline surplus less what the
+model was already going to spend on vectoring — and the dog-leg realisation is untouched
+(`cos θ = D/(D + ΔL)` about the same base). A reference that never crosses is cut at the end of
+its own schedule and says so (`hook_trombone_ref_no_crossing`): that is a different claim.
+
+**Why the detour and not `L_ref` itself** — the obvious reading, and it is wrong twice; both
+were found by the pre-commit review, on the package's own fixtures. `L_ref` is indexed by the
+SCHEDULE: it knows the step number and nothing about where the hooked aircraft has got to, so
+the moment the excursion opens the estimate stops responding to it and the surplus never burns
+down; past the reference's own crossing `L_ref` is zero and `ΔL` degenerates to the whole
+remaining reach, its largest possible value. Measured on the 48-segment rollout fixture (60 s
+late, a flight whose own plan IS the beeline, where the axis should be a no-op): **19 of 48
+steps pinned at the 45° offset cap, ending 1.7 km wide** of the threshold, where `beeline`
+rolls out with zero saturated steps and ends 159 m out. Second, a reference that decelerates
+and stops SHORT of the threshold had its missing metres counted as surplus — on the on-time
+fixture, **9.4 s of delay invented and 15 engaged steps** against `beeline`'s 0 and 0, i.e. the
+hook stretching a flight that could not cover the path it already had, sign inverted. The
+detour form has neither problem: `D` is the AIRCRAFT's own, and `detour` is non-negative and
+non-increasing along the schedule by the triangle inequality (removing a leading chord takes at
+least as much off the polyline as off the straight line). A rollout-level test over all 48
+segments now pins both — it is the only place the estimate is read at `segment_index > 0`, and
+it fails on the naive form at both offsets.
+
+**The reference rollout is now a documented member of the composite.** `needs_reference` becomes
+a per-INSTANCE flag on the trombone, so `barrier+speed-floor+trombone` gains the hook-free
+rollout under this axis and nothing extra under the default. The engine's reference (the
+mechanism the archived nominal law introduced — reused, not duplicated) changed from lock-step to
+LOOK-AHEAD: `rollout_piecewise_constant_hooked_with_step` now integrates the unhooked schedule
+once, before the first hooked segment, and hands the hook `RolloutStateView.reference` WHOLE
+(`[B,N+1,7]`, one chart row per segment boundary, the anchor first). A remaining path is a future
+quantity and no per-segment state can answer it. Cost: one extra integration of the same schedule
+(~2× the SEGMENTED rollout; the dense re-integration at predict is untouched), paid once — the
+trombone derives its `[B,N]` detour table at `segment_index == 0` and the per-step cost after
+that is an index. The archived law's README now says the contract moved, rather than leaving
+stale code that looks portable.
+
+**Two approximations, stated rather than silent.** Both lengths are CHORD sums between segment
+boundaries — the command is constant within a hold, so the segment is a circular arc and the
+chord is short by `sinc(Δψ/2)`: 0.15 % at a 15° bank over the deployed ~5 s hold, 2.8 % at 45°
+(and the two errors partly cancel in the difference). And the crossing is interpolated linearly
+inside the one segment that contains it, because a segment is a kilometre of flying either way.
+
+**The default is `beeline`, and it is bit-exact.** Measured with the L3.e equivalence harness
+extended to both trombone stacks, trained and replayed, in both saturations (`off`, `barrier`,
+`speed-floor`, `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`):
+**1972 leaves compared, 0 differing** — trajectories, controls, records, diagnostics and run
+names alike. That is also why the two reference-only counts (`tromboneRefPathM`,
+`tromboneRefNoCrossing`) and the `tromboneSurplusReference` label are ABSENT rather than zero
+under the default: a key added there would change the bytes of every L3.e record on disk. Run
+names: **333 stored runs recounted, 0 renamed** (`run_naming._field_diffs` skips a META field a
+stored config does not carry). The axis is refused away from its default under a hook that
+contains no `trombone`, like the barrier's gains and the stall margin.
+
+**New: `CommandHook.diagnostic_labels()`** — per-run STRINGS reported next to the counts and
+never divided by `hook_steps`, merged by the composite under the same collision refusal. A
+module with more than one way of computing the same quantity says which one it ran, so a record
+carries the law that produced its numbers.
+
+Tests: +9 (`tests/test_control_constraints.py`) — the vectored dog-leg fixture at offset 0 and
++60 s (beeline asks for 260 s + offset, the reference for the offset alone), the two-arm
+rollout-level no-op test above, the crossing interpolation / never-crosses flag / zero-length
+segment gradient, the three refusals, the composite's OR, the engine handing over the whole
+schedule, and the record's keys under both settings. 899 pass, 1 skipped.
+`docs/experiments/l3f_path_stretch_ref_arms.json` dry-runs 12/12; the arms are NOT run.
+
 ### 2026-09-08 — ts_transformer: L3.e — the trombone command hook (the delay gets a place to go), and `predict --truncate-at-threshold`
 
 **The question.** L3.d's speed floor failed all three of its gates, and the reason is arithmetic,

@@ -259,29 +259,26 @@ def _lag_hooked_schedule(
         torch.cumsum(torch.flip(inputs.segment_durations_s, dims=(1,)), dim=1), dims=(1,)
     )
 
-    def view_of(
-        state: torch.Tensor, duration_s: torch.Tensor, remaining_s: torch.Tensor,
-        reference: RolloutStateView | None,
-    ) -> RolloutStateView:
-        return RolloutStateView(
-            chart=lag_state_to_transport_chart(state, state_scale),
-            actuators=lag_actuator_states(state, state_scale),
-            duration_s=duration_s,
-            remaining_s=remaining_s,
-            reference=reference,
-        )
+    # The hook-free reference is the SAME ``[B,N+1,S]`` tensor at every segment (the engine
+    # integrates the unhooked schedule once, before the first hooked one), so its chart is
+    # built once here rather than rebuilt on every call.
+    reference_chart: torch.Tensor | None = None
 
     def raw_hook(
         state: torch.Tensor, command: torch.Tensor, duration_s: torch.Tensor, segment: int,
         reference: torch.Tensor | None,
     ) -> torch.Tensor:
-        remaining_s = remaining_per_segment[:, segment]
-        reference_view = (
-            None if reference is None else view_of(reference, duration_s, remaining_s, None)
+        nonlocal reference_chart
+        if reference is not None and reference_chart is None:
+            reference_chart = lag_state_to_transport_chart(reference, state_scale)
+        view = RolloutStateView(
+            chart=lag_state_to_transport_chart(state, state_scale),
+            actuators=lag_actuator_states(state, state_scale),
+            duration_s=duration_s,
+            remaining_s=remaining_per_segment[:, segment],
+            reference=reference_chart,
         )
-        return command_hook(
-            view_of(state, duration_s, remaining_s, reference_view), command, segment
-        )
+        return command_hook(view, command, segment)
 
     return lag_hooked_rollout(
         inputs.initial_state,

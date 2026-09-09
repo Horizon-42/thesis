@@ -91,8 +91,10 @@ class Forecast:
     # ...and THIS flight's own hook counts: `steps`, then every other count as a share of
     # it (`_per_flight_hook_diagnostics`). None when no hook ran. A batch share written
     # onto every record would say the same thing about a flight the hook never touched and
-    # one it rewrote at every step, so the record carries the per-flight number.
-    command_hook_diagnostics: dict[str, float] | None = None
+    # one it rewrote at every step, so the record carries the per-flight number. Strings
+    # appear where a module ran a NAMED variant of itself (`CommandHook.diagnostic_labels`);
+    # those are the same for every row and are never divided by `steps`.
+    command_hook_diagnostics: dict[str, float | str] | None = None
     # Closure output only: which construction drew the path (via-Dubins, or a fallback),
     # and whether it was drawn from the flight's LABEL rather than a model output.
     closure_construction: str | None = None
@@ -410,17 +412,23 @@ def _forecast_control_batch(
     return forecasts
 
 
-def _per_flight_hook_diagnostics(command_hook: CommandHook) -> list[dict[str, float]]:
+def _per_flight_hook_diagnostics(command_hook: CommandHook) -> list[dict[str, float | str]]:
     """Each flight's own hook counts: ``steps``, then every other count as a share of it.
 
     The same normalisation ``train.fit_model`` writes into an epoch record
     (``value / hook_steps``), one level down — an epoch reports the batch, a prediction
     record reports the flight. Keys drop the ``hook_`` prefix and arrive camelCased like
-    every other ``source`` field.
+    every other ``source`` field. A module's LABELS (which named variant of itself it ran)
+    join the same bag under the same naming, undivided: they are strings, and a share of a
+    name means nothing.
     """
     counts = {
         name: value.tolist()
         for name, value in command_hook.per_flight_diagnostics().items()
+    }
+    labels = {
+        _camel_case(name.removeprefix(HOOK_DIAGNOSTIC_PREFIX)): value
+        for name, value in command_hook.diagnostic_labels().items()
     }
     steps = counts.pop(HOOK_STEPS_KEY)
     return [
@@ -430,6 +438,7 @@ def _per_flight_hook_diagnostics(command_hook: CommandHook) -> list[dict[str, fl
                 _camel_case(name.removeprefix(HOOK_DIAGNOSTIC_PREFIX)): value[row] / row_steps
                 for name, value in counts.items()
             },
+            **labels,
         }
         for row, row_steps in enumerate(steps)
     ]

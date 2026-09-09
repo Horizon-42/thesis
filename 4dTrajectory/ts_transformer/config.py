@@ -585,6 +585,19 @@ assert set(CONTROL_HOOK_MEMBERS) == set(CONTROL_HOOKS_AVAILABLE) - {CONTROL_HOOK
 #: trombone divides by the same ``V_floor`` to size the detour the delay needs, so the value
 #: changes an answer under either — and a knob that cannot change an answer is refused.
 CONTROL_SPEED_FLOOR_MARGIN_READERS = (CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE)
+# WHAT the trombone measures its surplus against (L3.f, 2026-09-09). ``beeline`` is L3.e's
+# estimator — the straight-line distance from here to the threshold — and it reads a
+# VECTORED flight's long intended path (downwind, base) as surplus time: measured at the
+# TRUE CTA, `tromboneDelayS` p50 391 s, endpoint |xt| p95 10 km, 46 % of flights not
+# reaching the threshold by T_cta. ``reference-rollout`` measures against the remaining
+# path of the HOOK-FREE reference rollout — what the network itself intends to fly — so a
+# flight already planning a long detour has nothing to absorb. The default is ``beeline``
+# so every L3.e artifact stays reproducible to the bit, records included.
+TROMBONE_SURPLUS_BEELINE = "beeline"
+TROMBONE_SURPLUS_REFERENCE_ROLLOUT = "reference-rollout"
+TROMBONE_SURPLUS_REFERENCES = (
+    TROMBONE_SURPLUS_BEELINE, TROMBONE_SURPLUS_REFERENCE_ROLLOUT
+)
 HOOK_SATURATION_SOFT = "soft"
 HOOK_SATURATION_HARD = "hard"
 HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
@@ -681,6 +694,7 @@ CONTROL_HOOK_FIELDS = (
     "control_barrier_alpha",
     "control_barrier_heading_gain",
     "control_speed_floor_margin",
+    "trombone_surplus_reference",
 )
 
 #: The speed floor's default margin above the stall speed. The COEFFICIENT is the package's
@@ -1227,6 +1241,12 @@ class TSConfig:
     # config without a speed-floor hook cannot read it (the validation below refuses a
     # non-default value there), so the default IS what every stored artifact ran under.
     control_speed_floor_margin: float = CONTROL_SPEED_FLOOR_MARGIN_DEFAULT
+    # Trombone: WHAT the surplus is measured against (see TROMBONE_SURPLUS_REFERENCES).
+    # Same reasoning as the two fields above for staying out of
+    # REQUIRED_SERIALIZED_CONTROL_FIELDS: a config without a trombone cannot read it (the
+    # validation below refuses a non-default value there), and the default is what every
+    # stored artifact — the whole L3.e campaign included — ran under.
+    trombone_surplus_reference: str = TROMBONE_SURPLUS_BEELINE
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -1302,6 +1322,11 @@ class TSConfig:
             raise ValueError(
                 f"unknown control_hook_saturation {self.control_hook_saturation!r}; "
                 f"expected one of {HOOK_SATURATIONS}"
+            )
+        if self.trombone_surplus_reference not in TROMBONE_SURPLUS_REFERENCES:
+            raise ValueError(
+                f"unknown trombone_surplus_reference {self.trombone_surplus_reference!r}; "
+                f"expected one of {TROMBONE_SURPLUS_REFERENCES}"
             )
         if self.target_conditioning not in TARGET_CONDITIONINGS:
             raise ValueError(
@@ -1873,6 +1898,17 @@ class TSConfig:
             raise ValueError(
                 f"control_speed_floor_margin={self.control_speed_floor_margin!r} needs a "
                 f"command hook that contains one of {CONTROL_SPEED_FLOOR_MARGIN_READERS} "
+                f"(control_command_hook={self.control_command_hook!r})"
+            )
+        # ...and the estimator axis is the trombone's alone: no other module measures a
+        # surplus, so away from its default the value would change no trajectory.
+        if (
+            CONTROL_HOOK_TROMBONE not in hook_modules
+            and self.trombone_surplus_reference != TROMBONE_SURPLUS_BEELINE
+        ):
+            raise ValueError(
+                f"trombone_surplus_reference={self.trombone_surplus_reference!r} needs a "
+                f"command hook that contains {CONTROL_HOOK_TROMBONE!r} "
                 f"(control_command_hook={self.control_command_hook!r})"
             )
         if (

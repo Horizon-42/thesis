@@ -28,7 +28,8 @@ from config import (  # noqa: E402
     CONTROL_HOOK_BARRIER_TROMBONE, CONTROL_HOOK_MEMBERS, CONTROL_HOOK_NOMINAL_RESIDUAL,
     CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE, CONTROL_HOOKS, CONTROL_HOOKS_AVAILABLE,
     CONTROL_SPEED_FLOOR_MARGIN_DEFAULT, HOOK_SATURATION_HARD, HOOK_SATURATION_SOFT,
-    PREDICTION_CONTROL, TSConfig, recipe_settings,
+    PREDICTION_CONTROL, TROMBONE_SURPLUS_BEELINE, TROMBONE_SURPLUS_REFERENCE_ROLLOUT,
+    TSConfig, recipe_settings,
 )
 from control.constraints import (  # noqa: E402
     BarrierFilter, CompositeHook, SpeedFloor, Trombone, build_command_hook,
@@ -62,10 +63,11 @@ HOLD_S = 5.0   # about the deployed hold: 64 segments over a p50 328 s arrival
 
 
 def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0, psi_rwy=0.0,
-          vertical_speed=None, hold_s=HOLD_S, bank_now_rad=0.0, reference_speed=None,
+          vertical_speed=None, hold_s=HOLD_S, bank_now_rad=0.0, reference_path=None,
           remaining_s=None, load_now=1.0) -> RolloutStateView:
-    """A chart state (runway course psi_rwy) at ``d`` back, ``xt`` right, on the final. The
-    reference (the unhooked schedule's state) is the same state, at ``reference_speed`` if given.
+    """A chart state (runway course psi_rwy) at ``d`` back, ``xt`` right, on the final.
+    ``reference_path`` is the hook-free schedule's chart at every segment boundary
+    (``[B,N+1,7]``, `_reference_chart` builds one); None means no reference was tracked.
     ``remaining_s`` is the schedule's own clock (this hold included); it defaults to the hold,
     i.e. "this is the last segment", which is what leaves the trombone nothing to absorb."""
     d, xt = torch.as_tensor(d_m, dtype=torch.float64), torch.as_tensor(xt_m, dtype=torch.float64)
@@ -81,13 +83,8 @@ def _view(d_m, xt_m, *, heading_error_rad=0.0, height_above_gp_m=0.0, speed=70.0
     actuators = torch.tensor([[0.1, bank_now_rad, load_now]], dtype=torch.float64).expand(len(d), -1).clone()
     hold = torch.full_like(d, hold_s)
     remaining = hold if remaining_s is None else torch.full_like(d, remaining_s)
-    reference_chart = chart.clone()
-    if reference_speed is not None:
-        reference_chart[:, 3:6] *= reference_speed / speed
-    reference = RolloutStateView(chart=reference_chart, actuators=actuators.clone(),
-                                 duration_s=hold, remaining_s=remaining)
     return RolloutStateView(chart=chart, actuators=actuators, duration_s=hold,
-                            remaining_s=remaining, reference=reference)
+                            remaining_s=remaining, reference=reference_path)
 
 
 def _context(batch: int) -> dict[str, torch.Tensor]:
@@ -434,9 +431,44 @@ def test_speed_floor_keeps_a_decelerating_rollout_off_the_stall(saturation):
 
 # ── trombone ─────────────────────────────────────────────────────────────────
 
-def _trombone_view(*, d_m, xt_m, heading_error_rad, remaining_s, speed=72.0, hold_s=HOLD_S):
+def _trombone_view(*, d_m, xt_m, heading_error_rad, remaining_s, speed=72.0, hold_s=HOLD_S,
+                   reference_path=None):
     return _view([d_m], [xt_m], heading_error_rad=heading_error_rad, speed=speed,
-                 hold_s=hold_s, remaining_s=remaining_s)
+                 hold_s=hold_s, remaining_s=remaining_s, reference_path=reference_path)
+
+
+def _polyline(*corners, per_leg: int):
+    """A (d, xt) polyline through ``corners``, ``per_leg`` equal sub-segments per leg."""
+    points = [corners[0]]
+    for start, end in zip(corners, corners[1:]):
+        points += [
+            (start[0] + (end[0] - start[0]) * step / per_leg,
+             start[1] + (end[1] - start[1]) * step / per_leg)
+            for step in range(1, per_leg + 1)
+        ]
+    return points
+
+
+def _polyline_length_m(points) -> float:
+    return sum(math.dist(a, b) for a, b in zip(points, points[1:]))
+
+
+def _reference_chart(points, *, rows: int = 1, psi_rwy: float = 0.0, speed: float = 72.0):
+    """The hook-free schedule's chart at every segment BOUNDARY, from a (d, xt) polyline.
+
+    ``RolloutStateView.reference`` is ``[B, N+1, 7]`` in the same chart as ``chart``; the
+    trombone reads the POSITIONS out of it (the path the network means to fly), so the rest
+    of the row carries the fixture's nominal speed and mass rather than being left at zero.
+    """
+    psi = torch.tensor([psi_rwy], dtype=torch.float64)
+    d = torch.tensor([[point[0] for point in points]], dtype=torch.float64)
+    xt = torch.tensor([[point[1] for point in points]], dtype=torch.float64)
+    e, n = fag.chart_from_axes(d, xt, psi)
+    u = d.clamp(min=0.0) * TAN_GPA
+    ve, vn = torch.full_like(e, speed * math.cos(psi_rwy)), torch.full_like(e, speed * math.sin(psi_rwy))
+    vu = torch.full_like(e, -speed * TAN_GPA)
+    chart = torch.stack([e, n, u, ve, vn, vu, torch.full_like(e, 66_000.0)], dim=-1)
+    return chart.expand(rows, -1, -1).clone()
 
 
 def _view_floor_mps(*, d_m, speed, hold_s=HOLD_S, load=1.0):
@@ -805,6 +837,306 @@ def test_the_three_hook_stack_is_bit_identical_on_a_flight_already_on_the_final(
         unabsorbed, rel=1e-3)
 
 
+# ── trombone: what the surplus is measured against (L3.f) ────────────────────
+
+#: A vectored arrival's intended path: 20 km back and 8 km right, out to a downwind abeam
+#: 20 km wide, then a base leg diagonally in to the threshold. 40.3 km of path against a
+#: 21.5 km beeline — the shape L3.e's estimator read as 260 s of surplus that is not there.
+_VECTORED_LEGS = ((20_000.0, 8_000.0), (20_000.0, 20_000.0), (0.0, 0.0))
+
+
+@pytest.mark.parametrize("offset_s", [0.0, 60.0])
+def test_the_trombone_sizes_the_surplus_against_the_path_the_network_intends_to_fly(offset_s):
+    """L3.f, the whole of it: a vectored flight's own downwind is not surplus time.
+
+    The reference rollout is a dog-leg 40.3 km long; the beeline under it is 21.5 km. Given
+    exactly the time that path needs, the aircraft is on schedule and there is nothing to
+    absorb — but `beeline` reads the 18.7 km the vectoring costs as time to spend, and asks
+    for 260 s of stretch on a flight that is not late by a second. That is L3.e's measured
+    failure (`tromboneDelayS` p50 391 s at the TRUE CTA, endpoint |xt| p95 10 km, 46 % of
+    flights not reaching the threshold by T_cta) reproduced on one fixture, and
+    `reference-rollout` is the estimator that does not have it: ~0 s at the true CTA, and
+    exactly the offset when the CTA is moved.
+    """
+    points = _polyline(*_VECTORED_LEGS, per_leg=4)
+    path_m = _polyline_length_m(points)
+    d_m, xt_m = _VECTORED_LEGS[0]
+    speed = 72.0
+    direct = math.hypot(d_m, xt_m)
+    pace = max(_view_floor_mps(d_m=d_m, speed=speed), speed)
+    assert path_m > 1.8 * direct                    # the beeline is nothing like the path
+    remaining = path_m / pace + offset_s
+    delays = {}
+    for reference in (TROMBONE_SURPLUS_BEELINE, TROMBONE_SURPLUS_REFERENCE_ROLLOUT):
+        config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                              trombone_surplus_reference=reference)
+        hook = Trombone(config, _context(1), hard=True)
+        view = _trombone_view(d_m=d_m, xt_m=xt_m, heading_error_rad=math.radians(60.0),
+                              remaining_s=remaining, speed=speed,
+                              reference_path=_reference_chart(points, speed=speed))
+        hook(view, _command([0.0]), 0)
+        delays[reference] = hook.diagnostics()
+    # The beeline asks for the whole of the vectoring, plus the offset: a flight on schedule
+    # is told it has four minutes to burn.
+    assert float(delays[TROMBONE_SURPLUS_BEELINE]["hook_trombone_delay_s"]) == pytest.approx(
+        (path_m - direct) / pace + offset_s, rel=1e-6)
+    # The reference rollout asks for the offset and nothing else.
+    reference_delay = float(
+        delays[TROMBONE_SURPLUS_REFERENCE_ROLLOUT]["hook_trombone_delay_s"])
+    assert reference_delay == pytest.approx(offset_s, abs=1e-6)
+    # ...and it publishes what it measured against, so the number can be read back.
+    diagnostics = delays[TROMBONE_SURPLUS_REFERENCE_ROLLOUT]
+    if offset_s:
+        assert float(diagnostics["hook_trombone_engaged_steps"]) == 1.0
+    else:
+        # On schedule: whether the last bit is engaged is a rounding away either side, and
+        # what matters is that nothing is asked for — the offset commanded is zero.
+        assert float(diagnostics["hook_trombone_offset_rad"]) == pytest.approx(0.0, abs=1e-6)
+    assert float(diagnostics["hook_trombone_ref_path_m"]) == pytest.approx(path_m, rel=1e-9)
+    assert float(diagnostics["hook_trombone_ref_no_crossing"]) == 0.0
+    if offset_s:
+        # The dog-leg is the same one, about the same beeline base: cos θ = D / (D + ΔL).
+        expected = math.acos(direct / (direct + offset_s * pace))
+        assert float(diagnostics["hook_trombone_offset_rad"]) == pytest.approx(expected, rel=1e-6)
+
+
+def test_the_trombone_counts_the_reference_path_to_the_threshold_and_says_when_there_is_none():
+    """The remaining path is cut at the reference's FIRST crossing, and a reference that
+    never crosses is cut at its own end and flagged — the two are not the same claim.
+
+    The crossing is interpolated inside the segment that contains it, because a segment is
+    tens of seconds of flying and counting or dropping a whole one is a kilometre either way.
+    Every reference here flies STRAIGHT, so every detour is zero and the length the surplus
+    is sized against is the aircraft's own beeline — which is the point: only the part of
+    the reference's path that is longer than a straight line is a reason to stretch.
+    """
+    speed = 72.0
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                          trombone_surplus_reference=TROMBONE_SURPLUS_REFERENCE_ROLLOUT)
+    # A straight run in that overshoots: half a segment past the threshold, then 4 km beyond.
+    overshoot = [(20_000.0, 0.0), (10_000.0, 0.0), (-2_000.0, 0.0), (-4_000.0, 0.0)]
+    hook = Trombone(config, _context(1), hard=True)
+    view = _trombone_view(d_m=20_000.0, xt_m=0.0, heading_error_rad=math.radians(60.0),
+                          remaining_s=20_000.0 / speed, speed=speed,
+                          reference_path=_reference_chart(overshoot, speed=speed))
+    hook(view, _command([0.0]), 0)
+    counted = hook.diagnostics()
+    # 10 km, then the 10/12 of the 12 km segment that is still before the threshold.
+    assert float(counted["hook_trombone_ref_path_m"]) == pytest.approx(20_000.0, rel=1e-9)
+    assert float(counted["hook_trombone_ref_no_crossing"]) == 0.0
+    # ...and a reference that gives up 5 km short is flagged AND read as a speed problem,
+    # not a path one: it flew straight, so its detour is zero and the estimator falls back
+    # to the aircraft's own beeline. Counting the 15 km it managed as the whole requirement
+    # would have read the 5 km it did NOT fly as surplus and stretched a flight that could
+    # not cover the path it already had — the sign inverted.
+    short = [(20_000.0, 0.0), (12_000.0, 0.0), (5_000.0, 0.0)]
+    hook = Trombone(config, _context(1), hard=True)
+    view = _trombone_view(d_m=20_000.0, xt_m=0.0, heading_error_rad=math.radians(60.0),
+                          remaining_s=20_000.0 / speed, speed=speed,
+                          reference_path=_reference_chart(short, speed=speed))
+    hook(view, _command([0.0]), 0)
+    counted = hook.diagnostics()
+    assert float(counted["hook_trombone_ref_path_m"]) == pytest.approx(20_000.0, rel=1e-9)
+    assert float(counted["hook_trombone_ref_no_crossing"]) == 1.0
+    assert float(counted["hook_trombone_delay_s"]) == pytest.approx(0.0, abs=1e-6)
+    # ...and a reference that stands still for a segment does not poison the batch: the
+    # chord is a square root, whose gradient is infinite at zero, and the soft form
+    # differentiates through the surplus this table feeds.
+    stalled = [(20_000.0, 0.0), (12_000.0, 0.0), (12_000.0, 0.0), (0.0, 0.0)]
+    reference = _reference_chart(stalled, speed=speed).requires_grad_(True)
+    soft = Trombone(config, _context(1), hard=False)
+    view = _trombone_view(d_m=20_000.0, xt_m=0.0, heading_error_rad=math.radians(60.0),
+                          remaining_s=600.0, speed=speed, reference_path=reference)
+    soft(view, _command([0.0]), 0)[:, 1].sum().backward()
+    assert torch.isfinite(reference.grad).all()
+    # The whole of what the floor under the root costs, stated: one metre on the segment
+    # that did not move, and nothing on the 8 km and 12 km ones either side of it.
+    assert float(soft.diagnostics()["hook_trombone_ref_path_m"]) == pytest.approx(
+        20_000.0 + trombone_module._DISTANCE_FLOOR_M, rel=1e-9)
+
+
+@pytest.mark.parametrize("late", [True, False])
+def test_the_estimators_agree_over_a_whole_rollout_on_a_flight_that_flies_its_beeline(late):
+    """The axis must be a NO-OP where the network's own plan already IS the beeline.
+
+    Both estimators are run over all 48 segments of the L3.e fixture — the only place the
+    surplus is read at ``segment_index > 0``, and the only place the two failure modes this
+    test exists for are visible at all. Sizing against the reference's remaining path
+    ``L_ref`` instead of its DETOUR fails here twice: the estimate is indexed by the schedule
+    and cannot see the excursion, so the surplus stops burning down (measured: the offset
+    pinned at the 45° cap for 19 of 48 steps, ending 1.7 km wide where the beeline arm ends
+    159 m out); and where the reference falls SHORT of the threshold, the metres it did not
+    fly are read as surplus (measured on the on-time arm: 9.4 s of delay invented and 15
+    engaged steps, against 0 and 0).
+    """
+    d_m = xt_m = 10_000.0
+    speed, segments = 72.0, 48
+    direct = math.hypot(d_m, xt_m)
+    pace = _fixture_pace_mps(d_m=d_m, speed=speed)
+    for reference in (TROMBONE_SURPLUS_BEELINE, TROMBONE_SURPLUS_REFERENCE_ROLLOUT):
+        config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                              control_hook_saturation=HOOK_SATURATION_SOFT,
+                              trombone_surplus_reference=reference)
+        dynamics, controls, durations = _final_batch(
+            config, xt_m=xt_m, d_m=d_m, segments=segments, speed=speed,
+            heading_error_rad=math.atan2(xt_m, d_m),      # flying straight at the threshold
+            total_s=direct / pace + (60.0 if late else 0.0), thrust=MIN_THRUST_FRACTION)
+        hook = build_command_hook(config, dynamics)
+        rollout = control_rollout.rollout_control_endpoints(
+            controls, durations, dynamics, config, command_hook=hook)
+        along, cross = fag.runway_axes(rollout.channels[..., 0], rollout.channels[..., 1],
+                                       dynamics["runway_heading_rad"])
+        distance = torch.hypot(along[0], cross[0]).detach()
+        counts = hook.per_flight_diagnostics()
+        steps = float(counts[HOOK_STEPS_KEY][0])
+        engaged = float(counts["hook_trombone_engaged_steps"][0])
+        # This fixture's delay is 17 % of what its path needs, far inside the 41 % the 45°
+        # offset cap allows — so a saturated step means the surplus stopped burning down.
+        assert float(counts["hook_trombone_saturated_steps"][0]) == 0.0, reference
+        if late:
+            assert engaged / steps > 0.8, reference
+            assert int(distance.argmin()) >= segments - 2, reference   # arrives, not pinned
+            assert float(distance.min()) < 0.06 * direct, reference
+        else:
+            # Nothing to absorb, and a reference that decelerates and falls short of the
+            # threshold is not something to absorb either.
+            assert engaged == 0.0, reference
+            assert float(counts["hook_trombone_delay_s"][0]) / steps == pytest.approx(
+                0.0, abs=1e-6), reference
+
+
+def test_the_reference_estimator_is_refused_where_no_module_and_no_rollout_can_serve_it():
+    """Three refusals, because three things can be missing.
+
+    The axis is the trombone's alone (no other module measures a surplus, so away from its
+    default it would change no trajectory); the vocabulary is closed; and a module that
+    declares `needs_reference` and is handed none must say so rather than size its detour
+    against a zero.
+    """
+    with pytest.raises(ValueError, match="needs a command hook that contains 'trombone'"):
+        _hook_config(control_command_hook=CONTROL_HOOK_BARRIER,
+                     control_hook_saturation=HOOK_SATURATION_SOFT,
+                     trombone_surplus_reference=TROMBONE_SURPLUS_REFERENCE_ROLLOUT)
+    with pytest.raises(ValueError, match="needs a command hook that contains 'trombone'"):
+        _hook_config(trombone_surplus_reference=TROMBONE_SURPLUS_REFERENCE_ROLLOUT)
+    with pytest.raises(ValueError, match="unknown trombone_surplus_reference"):
+        _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE,
+                     trombone_surplus_reference="the-observed-track")
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                          trombone_surplus_reference=TROMBONE_SURPLUS_REFERENCE_ROLLOUT)
+    hook = Trombone(config, _context(1), hard=True)
+    assert hook.needs_reference is True
+    with pytest.raises(ValueError, match="the backend passed none"):
+        hook(_trombone_view(d_m=20_000.0, xt_m=8_000.0, heading_error_rad=math.radians(60.0),
+                            remaining_s=600.0), _command([0.0]), 0)
+    # ...and the default asks the rollout for nothing at all.
+    beeline = Trombone(_hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE),
+                       _context(1), hard=True)
+    assert beeline.needs_reference is False
+    # The axis names the run, and only where it is not the default.
+    named = TSConfig(**recipe_settings("simple-v3", keep_name=True),
+                     control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                     trombone_surplus_reference=TROMBONE_SURPLUS_REFERENCE_ROLLOUT)
+    assert "trombone-surplus=reference-rollout" in run_display_name(named.to_dict())
+    default = TSConfig(**recipe_settings("simple-v3", keep_name=True),
+                       control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE)
+    assert "trombone-surplus" not in run_display_name(default.to_dict())
+
+
+def test_the_composite_carries_the_reference_only_where_a_member_asks_for_it():
+    """`needs_reference` is the composite's OR, so the value gains the hook-free rollout
+    under `reference-rollout` and nothing extra under the default — which is what makes the
+    axis free for every arm that does not select it."""
+    for reference, expected in (
+        (TROMBONE_SURPLUS_BEELINE, False), (TROMBONE_SURPLUS_REFERENCE_ROLLOUT, True)
+    ):
+        config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                              trombone_surplus_reference=reference)
+        stack = build_command_hook(config, _context(2))
+        assert isinstance(stack, CompositeHook)
+        assert stack.needs_reference is expected
+        # The label rides the same merge as the counts, and only the non-default one exists.
+        labels = stack.diagnostic_labels()
+        assert labels == ({"hook_trombone_surplus_reference": reference} if expected else {})
+        keys = set(stack.diagnostics())
+        assert ("hook_trombone_ref_path_m" in keys) is expected
+        assert ("hook_trombone_ref_no_crossing" in keys) is expected
+
+
+def test_the_rollout_hands_the_hook_the_whole_hook_free_schedule():
+    """The engine's end of it: with `needs_reference` the unhooked schedule is integrated as
+    well and arrives WHOLE — one row per segment boundary, the anchor first, the same tensor
+    at every call — because "how much path is still intended" is a look-ahead question."""
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                          trombone_surplus_reference=TROMBONE_SURPLUS_REFERENCE_ROLLOUT,
+                          control_hook_saturation=HOOK_SATURATION_SOFT)
+    segments = 6
+    dynamics, controls, durations = _final_batch(
+        config, xt_m=8_000.0, d_m=20_000.0, segments=segments, speed=72.0,
+        heading_error_rad=math.radians(60.0), thrust=MIN_THRUST_FRACTION)
+    seen: list[torch.Tensor] = []
+
+    class Recording:
+        needs_reference = True
+
+        def __call__(self, state, command, segment_index):
+            seen.append(state.reference)
+            return command
+
+        def diagnostics(self):
+            return {HOOK_STEPS_KEY: torch.zeros((), dtype=torch.float64)}
+
+        def per_flight_diagnostics(self):
+            return {HOOK_STEPS_KEY: torch.ones(len(controls), dtype=torch.float64)}
+
+        def diagnostic_labels(self):
+            return {}
+
+    plain = control_rollout.rollout_control_endpoints(controls, durations, dynamics, config)
+    control_rollout.rollout_control_endpoints(
+        controls, durations, dynamics, config, command_hook=Recording())
+    assert len(seen) == segments
+    assert all(reference is seen[0] for reference in seen)     # built once, not per step
+    assert seen[0].shape == (len(controls), segments + 1, 7)
+    # A hook that changes nothing flies the reference: boundary i+1 IS segment i's endpoint.
+    assert torch.allclose(seen[0][:, 1:, :3], plain.channels[..., :3], atol=1e-6)
+    # ...and the anchor row is the state the schedule starts from, not the first endpoint.
+    assert not torch.allclose(seen[0][:, 0, :3], seen[0][:, 1, :3])
+
+
+def test_a_prediction_record_says_which_estimator_sized_its_stretch():
+    """The record surface of the axis: the two reference-only counts and the label that
+    names the estimator, absent under the default so an L3.e record keeps its exact keys."""
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=1, seed=9)
+
+    class IdleControlModel(torch.nn.Module):
+        def forward(self, history, dynamics):
+            controls = torch.tensor([[[MIN_THRUST_FRACTION, 0.0, 1.0]] * 3], dtype=history.dtype).expand(len(history), -1, -1)
+            durations = torch.tensor([[40.0, 40.0, 40.0]], dtype=history.dtype).expand(len(history), -1)
+            return ControlPrediction(controls=controls, segment_durations=durations,
+                                     final_time_s=durations.sum(dim=-1))
+
+    sources = {}
+    for reference in (TROMBONE_SURPLUS_BEELINE, TROMBONE_SURPLUS_REFERENCE_ROLLOUT):
+        config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                              trombone_surplus_reference=reference, n_segments=3)
+        series, _ = build_series(flights, config, airport=AIRPORT)
+        forecast = forecast_approach(IdleControlModel(), series[0], config,
+                                     Normalizer.fit(series), device=torch.device("cpu"))
+        record = build_prediction_record(series[0], forecast, index=0, model_name=config.model,
+                                         horizon_mode=config.horizon_mode)
+        sources[reference] = record.source["commandHookDiagnostics"]
+    extra = {"tromboneRefPathM", "tromboneRefNoCrossing", "tromboneSurplusReference"}
+    assert extra & set(sources[TROMBONE_SURPLUS_BEELINE]) == set()
+    assert extra <= set(sources[TROMBONE_SURPLUS_REFERENCE_ROLLOUT])
+    reported = sources[TROMBONE_SURPLUS_REFERENCE_ROLLOUT]
+    assert reported["tromboneSurplusReference"] == TROMBONE_SURPLUS_REFERENCE_ROLLOUT
+    assert reported["tromboneRefPathM"] > 0.0
+    assert reported["tromboneRefNoCrossing"] in (0.0, 1.0)
+    # Every other key means the same thing under both, so the two records stay comparable.
+    assert set(sources[TROMBONE_SURPLUS_BEELINE]) | extra == set(reported)
+
+
 def test_the_trombone_stacks_are_registered_and_every_other_order_is_refused():
     """`+` is a lookup: the two stacks are members, and nothing else that spells the word is."""
     assert CONTROL_HOOK_MEMBERS[CONTROL_HOOK_BARRIER_TROMBONE] == (
@@ -1067,13 +1399,15 @@ def test_the_predict_side_gains_are_a_guarded_table_and_need_the_hook():
     flags = {option for action in parser._actions for option in action.option_strings}
     assert set(cli_predict.PREDICT_CONFIG_FLAGS.values()) <= flags
 
-    # Two of the five keep a short name on purpose; the rest are named after the field.
+    # Three of the six keep a short name on purpose; the rest are named after the field.
     assert cli_predict.PREDICT_CONFIG_FLAGS["control_barrier_alpha"] == "--control-barrier-alpha"
     assert cli_predict.PREDICT_CONFIG_FLAGS["control_command_hook"] == "--command-hook"
     assert cli_predict.PREDICT_CONFIG_FLAGS["control_speed_floor_margin"] == "--control-speed-floor-margin"
+    assert cli_predict.PREDICT_CONFIG_FLAGS["trombone_surplus_reference"] == "--trombone-surplus"
     # The tuning fields are the overridable ones; the hook and its saturation ARE the choice.
     assert cli_predict.HOOK_TUNING_FIELDS == {
-        "control_barrier_alpha", "control_barrier_heading_gain", "control_speed_floor_margin"
+        "control_barrier_alpha", "control_barrier_heading_gain",
+        "control_speed_floor_margin", "trombone_surplus_reference",
     }
     # The combined value is selectable at predict time — the delivery form L3.d measures.
     hook_choices = {
@@ -1091,6 +1425,24 @@ def test_the_predict_side_gains_are_a_guarded_table_and_need_the_hook():
             "--data", "x.json", "--output-dir", "out", "--checkpoint", "c.pt",
             "--control-barrier-alpha",
         ])
+
+    # The flags are shorter than their fields, so the override table's own mapping — flag
+    # name -> argparse dest -> TSConfig field — is what `predict` applies; a flag whose dest
+    # does not exist would be read as None and silently override nothing.
+    parsed = parser.parse_args([
+        "--data", "x.json", "--output-dir", "out", "--checkpoint", "c.pt",
+        "--command-hook", CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+        "--hook-saturation", HOOK_SATURATION_SOFT,
+        "--trombone-surplus", TROMBONE_SURPLUS_REFERENCE_ROLLOUT,
+    ])
+    gains = {
+        field: getattr(parsed, flag[2:].replace("-", "_"))
+        for field, flag in cli_predict.PREDICT_CONFIG_FLAGS.items()
+        if field in cli_predict.HOOK_TUNING_FIELDS
+    }
+    assert gains["trombone_surplus_reference"] == TROMBONE_SURPLUS_REFERENCE_ROLLOUT
+    assert all(value is None for field, value in gains.items()
+               if field != "trombone_surplus_reference")
 
 
 def test_training_refuses_hard_saturation_and_logs_the_hook(tmp_path):
@@ -1132,6 +1484,9 @@ def test_prediction_exports_the_effective_schedule_and_names_the_hook(monkeypatc
 
         def per_flight_diagnostics(self):
             return {"hook_steps": torch.ones(1, dtype=torch.float64)}
+
+        def diagnostic_labels(self):
+            return {}
 
     monkeypatch.setattr(forecast_module, "build_command_hook", lambda cfg, dynamics: RewritingHook())
 

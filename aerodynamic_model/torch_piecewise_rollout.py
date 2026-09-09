@@ -320,21 +320,43 @@ def rollout_piecewise_constant_hooked_with_step(
 
     ``command_hook(state, command, duration_s, segment_index, reference)`` sees the
     backend state ``[B,S]`` at the start of the segment, the segment's command and its
-    hold ``[B]`` (seconds), and returns the command ``[B,C]`` actually flown. With
-    ``track_reference`` the schedule is also integrated UNHOOKED alongside and that state
-    is passed as ``reference`` (None otherwise): it is where the network's own commands
-    would have the aircraft now — the only place its intent (speed, energy) is readable,
-    since a segment's command alone does not say which path it was trimmed for. Each
+    hold ``[B]`` (seconds), and returns the command ``[B,C]`` actually flown. Each
     segment is integrated by :func:`rollout_piecewise_constant_with_step` on its own, so
     the per-segment discrete adjoint stays exact while the hook's dependence on the state
     is ordinary autograd across segments. The control contract is unchanged — piecewise
     constant per segment — and the second return value is the effective schedule
     ``[B,N,C]`` a record must carry instead of the network's commands.
+
+    With ``track_reference`` the network's own schedule is ALSO integrated UNHOOKED —
+    once, before the first hooked segment — and the whole thing is passed as ``reference``
+    ``[B,N+1,S]``: the hook-free state at every segment BOUNDARY, index 0 the anchor and
+    index ``i`` the start of segment ``i``. ``None`` otherwise. A segment's command alone
+    does not say which path or speed it was trimmed for, and the schedule's own rollout is
+    the only place that intent is readable. It is handed over WHOLE rather than in
+    lock-step because the questions that need it are look-ahead ones — how much path the
+    network still intends to fly (``control/constraints/trombone.py`` under
+    ``trombone_surplus_reference="reference-rollout"``) — which no per-segment state can
+    answer. Cost: one more integration of the same schedule, i.e. about 2x this function's
+    wall time and memory, paid once rather than per step.
     """
     if controls.ndim != 3 or segment_durations_s.shape != controls.shape[:2]:
         raise ValueError("controls must be [B,N,C] and durations must be [B,N]")
     state = initial_states
-    reference = initial_states if track_reference else None
+    reference = None
+    if track_reference:
+        reference = torch.cat((
+            initial_states.unsqueeze(1),
+            rollout_piecewise_constant_with_step(
+                initial_states,
+                controls,
+                segment_durations_s,
+                aero_params,
+                step_context,
+                step_function,
+                integrator_dt_s=integrator_dt_s,
+                max_steps_per_segment=max_steps_per_segment,
+            ),
+        ), dim=1)
     endpoints: list[torch.Tensor] = []
     effective: list[torch.Tensor] = []
     for segment in range(controls.shape[1]):
@@ -354,17 +376,6 @@ def rollout_piecewise_constant_hooked_with_step(
             max_steps_per_segment=max_steps_per_segment,
         )
         state = endpoint[:, 0]
-        if reference is not None:
-            reference = rollout_piecewise_constant_with_step(
-                reference,
-                controls[:, segment : segment + 1],
-                segment_durations_s[:, segment : segment + 1],
-                aero_params,
-                step_context,
-                step_function,
-                integrator_dt_s=integrator_dt_s,
-                max_steps_per_segment=max_steps_per_segment,
-            )[:, 0]
         endpoints.append(state)
         effective.append(command)
     return torch.stack(endpoints, dim=1), torch.stack(effective, dim=1)

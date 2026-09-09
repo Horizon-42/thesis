@@ -119,8 +119,12 @@ Everything below is serialised into every checkpoint.
   path angle, so a hook that steers the glidepath cannot recover the schedule's intended
   speed from the segment's command (v1 measured: pulled up to the glidepath, 58 vs 88 m/s,
   584 m short). A hook declaring `needs_reference = True` gets `RolloutStateView.reference`,
-  the unhooked schedule's state integrated alongside (an endpoint rollout per segment
-  more: ~2× the hooked rollout's wall time and adjoint memory), and the nominal law holds
+  the unhooked schedule integrated alongside (~2× the hooked rollout's wall time and adjoint
+  memory) — **since L3.f (2026-09-09) it arrives WHOLE**: `[B,N+1,7]`, one chart row per
+  segment boundary with the anchor first, integrated ONCE before the first hooked segment
+  instead of in lock-step, because the trombone's surplus estimator needs the reference's
+  path still AHEAD (`trombone_surplus_reference="reference-rollout"`) and no per-segment
+  state can give that; the lock-step reading is `reference[:, segment_index]`. The nominal law held
   thrust to that rollout's speed (`control_nominal_speed_gain`, 0.1/s, capped at `1/Δt`
   like every other rate gain — uncapped it bangs between the envelope corners at 8
   segments).

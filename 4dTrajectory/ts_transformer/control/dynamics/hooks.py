@@ -48,23 +48,31 @@ class RolloutStateView:
     the time the rest of the flight has to be flown in. A hook that must decide whether the
     path still ahead can absorb the time still ahead cannot get that from one hold, and the
     rollout knows every duration before the first segment is integrated.
-    ``reference`` is the same view of the UNHOOKED schedule — where the network's own
-    commands would have the aircraft now — for hooks that declare ``needs_reference``
-    (None otherwise). A segment's command alone does not say which path or speed it was
-    trimmed for; the schedule's own rollout does.
+    ``reference`` is the UNHOOKED schedule's own rollout, WHOLE: ``[B,N+1,7]`` in the same
+    chart, one row per segment BOUNDARY — index 0 the anchor, index ``i`` the start of
+    segment ``i``, index ``N`` the schedule's end. It is there for hooks that declare
+    ``needs_reference`` (None otherwise). A segment's command alone does not say which path
+    or speed it was trimmed for; the schedule's own rollout does. It arrives whole rather
+    than one state at a time because the questions that need it are LOOK-AHEAD ones — how
+    much path the network still intends to fly — and no per-segment state can answer those;
+    a hook that only wants "where the network's commands would have the aircraft now" reads
+    column ``segment_index``. It is the same tensor at every call, so a hook may derive its
+    own table from it once (at ``segment_index == 0``) and index that thereafter.
     """
 
     chart: torch.Tensor
     actuators: torch.Tensor | None
     duration_s: torch.Tensor
     remaining_s: torch.Tensor
-    reference: RolloutStateView | None = None
+    reference: torch.Tensor | None = None
 
 
 class CommandHook(Protocol):
     # Every hook declares it: True on a hook that reads ``RolloutStateView.reference``; the
-    # rollout then integrates the network's schedule unhooked alongside (an endpoint
-    # rollout per segment more — about 2× the hooked rollout's wall time and memory).
+    # rollout then integrates the network's schedule unhooked as well, once, before the
+    # first segment — about 2× the hooked rollout's wall time and memory. It may be a
+    # per-INSTANCE value where a module reads the reference only under one of its settings
+    # (the trombone's ``trombone_surplus_reference``), so read it off the object.
     needs_reference: bool
 
     def __call__(
@@ -82,4 +90,15 @@ class CommandHook(Protocol):
         reports. A prediction RECORD is one flight, so the record surface reads this one:
         a batch share written onto every record would say the same thing about a flight the
         hook never touched and one it rewrote at every step.
+        """
+
+    def diagnostic_labels(self) -> dict[str, str]:
+        """Named settings reported NEXT TO the counts: strings, never divided by steps.
+
+        A module with more than one way of computing the same quantity says which one it
+        ran, so a record carries the law that produced its numbers instead of leaving a
+        reader to infer it from which counts happen to be present. Empty for a module with
+        no such choice, and empty for a module sitting on its historical default — a key
+        that appears on every record is a key that distinguishes nothing, and adding one to
+        the default would rewrite the records of every campaign already on disk.
         """
