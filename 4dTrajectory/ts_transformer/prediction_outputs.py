@@ -158,7 +158,7 @@ class StateOutputLayer(nn.Module):
     zero output means "the aircraft stays where it is" instead of "the chart origin".
 
     Under ``"corridor-bounded"`` the absolute output is kept and, on the rows the output
-    itself places on the runway's final (``config.corridor_gate``), its cross-track is
+    itself places on the runway's final (the `on-final` gate), its cross-track is
     saturated inside the LPV corridor and its height inside the glidepath window
     (``final_approach_geometry``): the constraint holds by construction, continuously, with
     no weight to calibrate. The layer then needs physical units, so it carries the
@@ -181,7 +181,6 @@ class StateOutputLayer(nn.Module):
         self.corridor_bounded = (
             config.state_position_reference == STATE_POSITION_CORRIDOR_BOUNDED
         )
-        self.corridor_gate = config.corridor_gate
         self.channel_count = len(config.channels)
         offset_mask = torch.zeros(self.channel_count)
         offset_mask[list(POSITION_IDX)] = 1.0
@@ -237,14 +236,7 @@ class StateOutputLayer(nn.Module):
             anchor[:, IDX["e"]], anchor[:, IDX["n"]],
         )
         cos_align = alignment_cosine(step_e, step_n, psi)
-        weight = membership(
-            self.corridor_gate,
-            d=d,
-            xt=xt,
-            cos_align=cos_align,
-            d_faf=context["final_approach_fix_m"].to(states.dtype),
-            hard=False,
-        )
+        weight = membership(d=d, xt=xt, cos_align=cos_align, hard=False)
         xt_bounded, u_bounded = bound_to_final(
             d=d,
             xt=xt,

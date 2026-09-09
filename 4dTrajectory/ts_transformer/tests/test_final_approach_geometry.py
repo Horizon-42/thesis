@@ -19,7 +19,7 @@ for path in (TS_DIR.parent, REPO_ROOT, OPTIMIZATION_DIR):
 
 import ts_transformer.final_approach_geometry as fag  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
-    CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
+    STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
 from approach_constraints import lateral, segments, vertical  # noqa: E402
 from approach_constraints.segments import LpvFinalSpec  # noqa: E402
@@ -148,13 +148,9 @@ def test_on_final_membership_wants_the_cone_and_the_heading():
     soft = fag.soft_on_final(d, xt, cos_align)
     assert soft[0, 0] > 0.98 and soft[0, 1] < 0.01 and soft[0, 2] < 0.01 and soft[0, 3] < 0.01
     assert torch.equal(
-        fag.membership(CORRIDOR_GATE_ON_FINAL, d=d, xt=xt, cos_align=cos_align, d_faf=torch.tensor([float("nan")]), hard=True),
+        fag.membership(d=d, xt=xt, cos_align=cos_align, hard=True),
         hard,
     )
-    with pytest.raises(ValueError, match="FAF distance"):
-        fag.membership(CORRIDOR_GATE_FAF, d=d, xt=xt, cos_align=cos_align, d_faf=torch.tensor([float("nan")]), hard=True)
-    faf = fag.membership(CORRIDOR_GATE_FAF, d=torch.tensor([[12_000.0, 8_000.0]]), xt=xt[:, :2], cos_align=cos_align[:, :2], d_faf=torch.tensor([10_000.0]), hard=True)
-    assert faf.tolist() == [[False, True]]
 
 
 def test_the_threshold_crossing_is_the_plane_AND_the_final_scoped_to_the_first_run():
@@ -227,8 +223,10 @@ def test_config_guards_and_naming():
     penalised = TSConfig(procedure_loss_lateral_weight=4.0, seq_len=4, n_segments=3)
     assert penalised.procedure_loss_active and penalised.uses_final_approach_context
     assert not TSConfig(seq_len=4, n_segments=3).uses_final_approach_context
-    with pytest.raises(ValueError, match="unknown corridor_gate"):
-        TSConfig(corridor_gate="never")
+    # The gate field is retired: a stored `on-final` is dropped on load, nothing else loads.
+    assert "corridor_gate" not in TSConfig.from_dict({**TSConfig().to_dict(), "corridor_gate": "on-final"}).to_dict()
+    with pytest.raises(ValueError, match="cannot reproduce"):
+        TSConfig.from_dict({**TSConfig().to_dict(), "corridor_gate": "faf"})
     with pytest.raises(ValueError, match="violation RATE"):
         TSConfig(procedure_loss_epsilon=1.5)
     with pytest.raises(ValueError, match="state output"):
@@ -236,7 +234,7 @@ def test_config_guards_and_naming():
     # The penalty is allowed on the control path (it acts on the rollout), native grid only.
     assert TSConfig(prediction_output="control", procedure_loss_dual_step=0.1).procedure_loss_active
     name = run_display_name(
-        TSConfig(state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED, corridor_gate=CORRIDOR_GATE_FAF).to_dict()
+        TSConfig(state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED).to_dict()
     )
-    assert "pos-ref=corridor-bounded" in name and "gate=faf" in name
+    assert "pos-ref=corridor-bounded" in name and "gate=" not in name
     assert "proc-lat" in run_display_name(penalised.to_dict())

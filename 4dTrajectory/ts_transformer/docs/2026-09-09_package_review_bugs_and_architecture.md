@@ -16,7 +16,7 @@ points, and the 2026-09-09 plan-and-guidance design is the next axis.
 |---|---|
 | bug findings | 4 number-changing on live paths, 4 crash paths, ~20 contract holes — §2, all with `file:line` |
 | architecture | diagnosis §3, target §4, retirement candidates with census evidence §5, order §6 |
-| **resolution (2026-09-09, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3(part) C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-3 (two fields), C-4 (floor), C-7 (directory binding), C-9, C-12 are USER DECISIONS and stay open; §6 step 1 (the package) done in the same branch |
+| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor, moves into the §4.3 split), C-7 (directory binding), C-9 stay open. §6 step 1 (the package) and step 2 (§5, see its resolution paragraph) done in the same branch |
 | decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); the five §7 decisions |
 
 ## 1. Measured
@@ -427,6 +427,26 @@ validators carry for nothing. Two consequences the user decides, not this review
   `intent_explainability.py` (L4 gate failed, encoder not built — archive as one campaign, the
   way the oracle teacher was), `train_only_diagnostics.py` (one unreferenced helper, already in
   code-health-followups), the dead parameters listed in 4.7.
+
+**Resolution (2026-09-10, `dev-pkg-review`).** Frozen — a stored checkpoint loads, predicts
+and publishes, a new run cannot select the value (`*_AVAILABLE` tuples in `config.py`,
+refused at both CLI doors through `cli.common._NEW_RUN_VOCABULARIES`): `closure`,
+`intent_conditioning=truth-*`, `control_state_loss_grid=fixed-dt`, `coordinate_frame` ∈
+{`airport-enu`, `runway-aligned`}. **NOT frozen, correcting the table above:**
+`control_state_supervision_clock=observed` and
+`control_dynamics_backend=scaled-transport-chart-velocity` are what `control_simple_v1_overrides`
+PINS — every simple-v1/v1-lag/v2/v3 recipe trains under them (the lag model needs the
+transport-chart backend), so freezing either would refuse the recipes; and `corridor-bounded`
+is the adopted candidate default of the state path (`CLAUDE.md`). Deleted: the `faf` gate
+with its whole read path (`final_approach_fix_distance`, the `final_approach_fix_m` context
+key, `soft/hard_inside_faf`, the `d_faf` argument) and the `corridor_gate` field itself
+(`RETIRED_CONSTANT_FIELDS`: 67 stored configs carry `on-final` and drop it on load; 0 run
+names moved); `train_only_diagnostics.py`; the `_initialize_control_head(bank_rad=,
+feature_std=)` and `arm_steps(label, config)` dead parameters. Archived:
+`archive/scene_encoder_2026_09/` (`scene/features.py`, `run_ts_scene_explainability.py`, its
+test; `intent_explainability.py` stays live for the Phase 0 diagnostics). Kept, correcting
+§4.7: `RolloutStateView.reference` has a live producer since L3.f (the trombone's
+reference-rollout estimator declares `needs_reference`), so it is not dead.
 
 ## 6. Order and proof
 

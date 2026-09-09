@@ -53,8 +53,6 @@ import torch
 
 from flight_scenarios.fas_geometry import course_halfwidth_m, fas_course_geometry
 
-from ts_transformer.config import CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL
-
 # Mirrors of the optimizer's constraint defaults. ``4dTrajectory/optimization`` is not on
 # this package's import path, so they cannot be imported here;
 # tests/test_final_approach_geometry.py imports both sides and asserts they are equal.
@@ -70,16 +68,16 @@ MEMBERSHIP_FLOOR_M = 500.0    # … or within 500 m of the centreline: the cone'
 NEAR_THRESHOLD_M = 300.0      # the truth gate ignores the last 300 m (ground-effect ADS-B rows)
 LATERAL_SOFTNESS = 0.05       # soft-gate width across the cone edge, as a fraction of the half-width:
                               # a row inside the k=0.5 design corridor is fully bound (σ(10) ≈ 1)
-FAF_SOFTNESS_M = 100.0        # soft-gate width across the FAF distance
 ALIGNMENT_SOFTNESS = 0.02     # soft-gate width, in cos(heading error) (≈ ±2° about 30°)
 _STEP_FLOOR_M = 1.0           # a shorter position step has no direction to align
 
 FAS = fas_course_geometry()   # runway length unknown → the 9023 ft floor, as the optimizer
 
 # The per-flight context every consumer reads: the runway course (math-ENU, the direction
-# of travel on final), tan of the coded glidepath, the FAF distance (NaN = unresolved).
-# Built by ``dataset.final_approach_arrays``; never a model input.
-FINAL_APPROACH_KEYS = ("runway_heading_rad", "glidepath_tan", "final_approach_fix_m")
+# of travel on final) and tan of the coded glidepath. Built by
+# ``dataset.final_approach_arrays``; never a model input. (A third key, the FAF distance,
+# served the deleted `faf` gate — review §5, 2026-09-09.)
+FINAL_APPROACH_KEYS = ("runway_heading_rad", "glidepath_tan")
 _COS_ALIGNMENT = math.cos(math.radians(ALIGNMENT_MAX_DEG))
 
 
@@ -251,34 +249,16 @@ def threshold_crossing_index(
     return first, end, crossed
 
 
-def soft_inside_faf(d: torch.Tensor, d_faf: torch.Tensor) -> torch.Tensor:
-    return torch.sigmoid((d_faf.unsqueeze(-1) - d) / FAF_SOFTNESS_M)
-
-
-def hard_inside_faf(d: torch.Tensor, d_faf: torch.Tensor) -> torch.Tensor:
-    return d <= d_faf.unsqueeze(-1)
-
-
 def membership(
-    gate: str,
     *,
     d: torch.Tensor,
     xt: torch.Tensor,
     cos_align: torch.Tensor,
-    d_faf: torch.Tensor,
     hard: bool,
 ) -> torch.Tensor:
-    """The configured gate, soft (``[0, 1]`` floats) or hard (bools)."""
-    if gate == CORRIDOR_GATE_ON_FINAL:
-        return hard_on_final(d, xt, cos_align) if hard else soft_on_final(d, xt, cos_align)
-    if gate == CORRIDOR_GATE_FAF:
-        if not torch.isfinite(d_faf).all():
-            raise ValueError(
-                f"corridor_gate={gate!r} needs every flight's FAF distance; a flight "
-                "without a coded RNAV(GPS) FAF cannot be gated at the FAF"
-            )
-        return hard_inside_faf(d, d_faf) if hard else soft_inside_faf(d, d_faf)
-    raise ValueError(f"unknown corridor gate {gate!r}")
+    """The `on-final` gate, soft (``[0, 1]`` floats) or hard (bools) — the one gate the
+    corridor-bounded output layer and the post-hoc projection apply."""
+    return hard_on_final(d, xt, cos_align) if hard else soft_on_final(d, xt, cos_align)
 
 
 def stays_mask(inside: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:

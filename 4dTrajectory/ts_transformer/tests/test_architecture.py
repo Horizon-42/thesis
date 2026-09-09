@@ -448,7 +448,11 @@ def test_every_new_run_vocabulary_is_actually_refused(tmp_path, capsys):
     import pytest
 
     from ts_transformer.cli.common import _NEW_RUN_VOCABULARIES
-    from ts_transformer.config import CONTROL_HOOKS, CTA_CONDITIONINGS, STATE_POSITION_REFERENCES
+    from ts_transformer.config import (
+        CONTROL_HOOKS, CONTROL_STATE_LOSS_GRIDS, CTA_CONDITIONINGS, INTENT_CONDITIONINGS,
+        PREDICTION_OUTPUTS, STATE_POSITION_REFERENCES,
+    )
+    from ts_transformer.coordinate_frames import COORDINATE_FRAMES
 
     #: field -> (its full stored vocabulary, the other settings that value needs to be legal)
     VOCABULARY_CONTEXT = {
@@ -460,6 +464,17 @@ def test_every_new_run_vocabulary_is_actually_refused(tmp_path, capsys):
         }),
         "cta_conditioning": (CTA_CONDITIONINGS, {"prediction_output": "control"}),
         "state_position_reference": (STATE_POSITION_REFERENCES, {}),
+        # Frozen 2026-09-09 (package review §5).
+        "prediction_output": (PREDICTION_OUTPUTS, {
+            "closure_labels_path": "labels.json",
+            "checkpoint_selection_metric": "fixed-anchor-objective",
+        }),
+        "intent_conditioning": (INTENT_CONDITIONINGS, {}),
+        "control_state_loss_grid": (CONTROL_STATE_LOSS_GRIDS, {
+            "prediction_output": "control",
+            "control_state_supervision_clock": "observed",
+        }),
+        "coordinate_frame": (COORDINATE_FRAMES, {}),
     }
 
     spec = importlib.util.spec_from_file_location("ts_cli_vocabulary", TS_DIR / "__main__.py")

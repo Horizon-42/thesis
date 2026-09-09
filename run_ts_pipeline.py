@@ -39,7 +39,7 @@ if str(TS_DIR.parent) not in sys.path:
 from ts_transformer.config import (  # noqa: E402
     AIRCRAFT_FILTER_ALL,
     AIRCRAFT_FILTERS,
-    COORDINATE_FRAMES,
+    COORDINATE_FRAMES_AVAILABLE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
@@ -53,7 +53,7 @@ from ts_transformer.config import (  # noqa: E402
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_CLOCK_PREDICTED,
-    CONTROL_STATE_LOSS_GRIDS,
+    CONTROL_STATE_LOSS_GRIDS_AVAILABLE,
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVES,
@@ -64,7 +64,7 @@ from ts_transformer.config import (  # noqa: E402
     HORIZON_WINDOW,
     MODELS,
     PREDICTION_CONTROL,
-    PREDICTION_OUTPUTS,
+    PREDICTION_OUTPUTS_AVAILABLE,
     PREDICTION_STATE,
     TSConfig,
     control_recipe,
@@ -1090,7 +1090,7 @@ def main() -> None:
                         help="models to train (default: itransformer,patchtst)")
     parser.add_argument(
         "--prediction-output",
-        choices=PREDICTION_OUTPUTS,
+        choices=PREDICTION_OUTPUTS_AVAILABLE,
         default=PREDICTION_STATE,
         help="state baseline or bounded controls with differentiable rollout",
     )
@@ -1136,7 +1136,7 @@ def main() -> None:
         default=AIRCRAFT_FILTER_ALL,
         help="fleet contract (openap-direct excludes synonyms, presets and fallbacks)",
     )
-    parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
+    parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES_AVAILABLE, default="enu")
     parser.add_argument("--batch-size", default="2048",
                         help="positive integer or auto (default: 2048)")
     parser.add_argument(
@@ -1161,7 +1161,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--control-state-loss-grid",
-        choices=CONTROL_STATE_LOSS_GRIDS,
+        choices=CONTROL_STATE_LOSS_GRIDS_AVAILABLE,
         default=CONTROL_STATE_LOSS_GRID_NATIVE,
     )
     parser.add_argument(

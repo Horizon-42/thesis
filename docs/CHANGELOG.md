@@ -4,6 +4,37 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: review §5 — four axes frozen, the FAF gate and dead code deleted, the scene encoder archived
+
+Step 2 of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`
+§5, whose new resolution paragraph is the per-axis record), on `dev-pkg-review`. Nothing on
+disk changed: full ts suite 970 passed, the 12 known trajectory_data_process/tests/test_ts_pipeline.py fixture failures red before and after (run_ts_cv.py --frame now offers COORDINATE_FRAMES_AVAILABLE), and the 219 stored `history.json` configs give
+byte-identical run names, slugs and loadability before and after.
+
+- **Frozen** (stored checkpoints load, predict and publish; a NEW run cannot select the value —
+  `PREDICTION_OUTPUTS_AVAILABLE`, `INTENT_CONDITIONINGS_AVAILABLE`,
+  `CONTROL_STATE_LOSS_GRIDS_AVAILABLE`, `COORDINATE_FRAMES_AVAILABLE`, all wired through
+  `cli.common._NEW_RUN_VOCABULARIES`, so both CLI doors refuse them): the `closure` output,
+  the `intent_conditioning=truth-*` oracles, `control_state_loss_grid=fixed-dt`, and the
+  `airport-enu` / `runway-aligned` frames. `run_ts_pipeline.py` and `run_ts_history_ablation.py`
+  offer the same vocabularies.
+- **Not frozen, correcting the review's table:** `control_state_supervision_clock=observed` and
+  `control_dynamics_backend=scaled-transport-chart-velocity` are pinned by every simple-v*
+  recipe (the lag model needs the transport-chart backend); `corridor-bounded` is the state
+  path's adopted candidate default.
+- **Deleted:** the FAF-distance corridor gate end to end (`corridor_gate=faf` was never set in
+  any stored run and FAF-gating wrecked vectored flights) — `final_approach_geometry.membership`
+  has one gate and no `gate`/`d_faf` arguments, `FINAL_APPROACH_KEYS` lost `final_approach_fix_m`,
+  `dataset` no longer reads the CIFP FAF, and the `corridor_gate` field is gone from `TSConfig`
+  (a retired constant on load: the 67 stored configs carrying `on-final` drop it; a `faf` would
+  be refused); `train_only_diagnostics.py` (no caller); the `_initialize_control_head(bank_rad=,
+  feature_std=)` and `arm_steps(label, config)` parameters nobody passed.
+- **Archived:** `archive/scene_encoder_2026_09/` — `scene/features.py`,
+  `run_ts_scene_explainability.py` and its test (the L4 gate failed, the encoder was never
+  built); `intent_explainability.py` stays live for `docs/phase0_intent_diagnostics.py`.
+- **Kept, correcting §4.7:** `RolloutStateView.reference` has a live producer (the trombone's
+  reference-rollout estimator, L3.f).
+
 ### 2026-09-09 — ts_transformer: the package review's remaining bugs fixed (A-1, A-2, B-1–B-4, C-1…C-20), and the package became a package
 
 The 2026-09-09 review (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`;

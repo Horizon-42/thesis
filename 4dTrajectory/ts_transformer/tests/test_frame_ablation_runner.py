@@ -109,9 +109,9 @@ def test_a_stored_arm_is_resumed_only_when_complete_and_unchanged(tmp_path):
 def test_the_train_step_is_done_when_history_json_exists(tmp_path):
     """`train` writes checkpoint.pt first and history.json last, so the step's artifact is
     the history — a checkpoint alone is a crash, not a finished arm."""
-    config, declared = runner.arm_config(ARMS["base"], {})
+    _config, declared = runner.arm_config(ARMS["base"], {})
     steps = runner.arm_steps(
-        "A", "A", tmp_path / "A" / "config.json", config, declared, airport="KRDU",
+        "A", tmp_path / "A" / "config.json", declared, airport="KRDU",
         campaign=tmp_path, split="val", device="cpu", seed=1, split_seed=1, formal=False,
     )
     assert steps[0][2] == tmp_path / "A" / "history.json"

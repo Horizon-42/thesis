@@ -25,7 +25,7 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from ts_transformer.batching import resolve_batch_size  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
-    COORDINATE_FRAMES,
+    COORDINATE_FRAMES_AVAILABLE,
     DEFAULT_AIRCRAFT_TYPE,
     MODELS,
     TSConfig,
@@ -488,7 +488,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seq-lens", type=_parse_seq_lens, default=DEFAULT_SEQ_LENS,
                         help="history candidates; default: 30,60,90")
     parser.add_argument("--model", choices=MODELS, default="itransformer")
-    parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
+    parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES_AVAILABLE, default="enu")
     parser.add_argument("--n-segments", type=int, default=None)
     parser.add_argument("--config-overrides", type=Path, default=None,
                         help="optional fixed TSConfig overrides, such as best_config.json")

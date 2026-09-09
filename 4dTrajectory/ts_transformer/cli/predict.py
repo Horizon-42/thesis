@@ -27,7 +27,7 @@ from ts_transformer.config import (
     CONTROL_HOOK_OFF,
     CONTROL_HOOK_TROMBONE,
     CONTROL_SPEED_FLOOR_MARGIN_READERS,
-    CORRIDOR_GATES,
+    CORRIDOR_GATE_ON_FINAL,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_SELF_QUANTILE,
     HOOK_SATURATIONS,
@@ -282,7 +282,7 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
              "latent into shuffled/ (source.latentShuffled) — the posterior-collapse reading",
     )
     parser.add_argument(
-        "--project-final", choices=CORRIDOR_GATES, default=None, metavar="GATE",
+        "--project-final", choices=(CORRIDOR_GATE_ON_FINAL,), default=None, metavar="GATE",
         help="after truncation, clamp each state forecast's established tail (under this "
              "corridor gate) into the LPV corridor and glidepath window — the post-hoc "
              "projection arm; records carry source.projectedOntoFinal",

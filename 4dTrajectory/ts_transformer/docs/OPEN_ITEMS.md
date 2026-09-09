@@ -51,12 +51,13 @@ were NOT made without the owner:
 - **A-2's consequence.** Every number `run_ts_history_ablation.py` published before 2026-09-09
   was scored against a truth taken `(max L − L)·dt` before its anchor; the runner is unchanged
   and correct now, its stored outputs are not.
-- **§5 retirements and §4.2–4.5.** The review's freeze/delete list (closure, corridor-bounded,
-  intent truth-join, fixed-dt, the observed clock, scaled-tcv, airport-enu / runway-aligned to
-  FREEZE; `corridor_gate=faf`, the scene half, `train_only_diagnostics`, the dead parameters to
-  delete or archive), whether the dataclass defaults move to the current recipe, and the
-  config split / output strategies / loop extraction / runner move — each a worktree, a review
-  and a commit between campaigns, in the review's §6 order. Step 1 (the package) is done.
+- **§5 DONE 2026-09-10** (the review's §5 resolution paragraph has the per-axis outcome and
+  the two corrections: the observed clock and scaled-tcv are recipe-pinned and stay
+  selectable; corridor-bounded stays the candidate default). **Still to do, in the review's
+  §6 order:** §4.3 config split (decided: the dataclass defaults stay; the grammar names every
+  field against the nearest recipe, then one relabel pass like C-3's), §4.2 output strategies,
+  §4.4 loop / predict extraction, §4.5–4.6 runners and tests — each a commit with the full
+  suite and the stored-run census as the acceptance test.
 
 ## Current state (2026-09-07) — the latent-intent design supersedes everything below it
 

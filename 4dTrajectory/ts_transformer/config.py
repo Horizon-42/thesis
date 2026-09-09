@@ -69,9 +69,12 @@ STATE_POSITION_REFERENCES_AVAILABLE = (
 # with the course, read from the prediction itself (deployable). ``faf``: every row inside
 # the coded FAF distance — the optimizer's convention and the ablation the measured join
 # distances argue against (docs/2026-09-04_procedure_constraints_design.zh.md).
+# The ONE corridor gate (`final_approach_geometry.membership`): inside the membership cone
+# AND aligned with the course. The FAF-distance gate (`faf`) was DELETED 2026-09-09 (review
+# §5): never set in any stored run, and a FAF-gated projection wrecked vectored flights. The
+# `corridor_gate` field went with it (`RETIRED_CONSTANT_FIELDS` below); the name survives as
+# the label `predict --project-final` takes and `run_display_name` never spelled it.
 CORRIDOR_GATE_ON_FINAL = "on-final"
-CORRIDOR_GATE_FAF = "faf"
-CORRIDOR_GATES = (CORRIDOR_GATE_ON_FINAL, CORRIDOR_GATE_FAF)
 # The scene / join-anchor design's Phase 0 upper bound (intent_conditioning.py): the
 # TRUTH join point (``truth-join``) and, with it, the lead aircraft's TRUE landing time
 # (``truth-join-lead``) as input-only constant channels after the target conditioning.
@@ -181,6 +184,17 @@ PREDICTION_STATE = "state"
 PREDICTION_CONTROL = "control"
 PREDICTION_CLOSURE = "closure"
 PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_CLOSURE)
+# What a NEW run may select (review §5, 2026-09-09). A value in the stored vocabulary above
+# but not here is FROZEN: its checkpoints load, predict and publish exactly as before, and
+# `cli.common._refuse_unavailable_selection` refuses it for training. Closure is a comparison
+# arm with published numbers and a DELETED tracker (2026-09-07); it is not trained anew.
+PREDICTION_OUTPUTS_AVAILABLE = (PREDICTION_STATE, PREDICTION_CONTROL)
+# The truth-join oracles were the scene design's Phase 0 instrument; the L4 gate failed and
+# the scene encoder is archived (archive/scene_encoder_2026_09/), so no new oracle arm.
+INTENT_CONDITIONINGS_AVAILABLE = (INTENT_CONDITIONING_NONE,)
+# The threshold-anchored chart is the model's runway knowledge (2026-09-03 frame ablation:
+# the airport frame averages across parallel pairs); the two alternatives keep loading.
+COORDINATE_FRAMES_AVAILABLE = (COORDINATE_FRAME_ENU,)
 # The closure output's own fields (scene design P1.c): a recipe leaves them open.
 CLOSURE_FIELDS = (
     "closure_labels_path",
@@ -207,6 +221,10 @@ CONTROL_STATE_LOSS_GRIDS = (
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
 )
+# `fixed-dt` is a 2026-08 arm family (26 stored runs): without the imitation term, which is
+# not registered on it, it trips the straight-in veto and brings the bank wiggle back. Frozen
+# (review §5, 2026-09-09) — the named recipes pin the native grid.
+CONTROL_STATE_LOSS_GRIDS_AVAILABLE = (CONTROL_STATE_LOSS_GRID_NATIVE,)
 CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE = "normalized-mse"
 CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION = "true-time-position"
 CONTROL_STATE_OBJECTIVES = (
@@ -684,7 +702,10 @@ CLOSURE_TIMING_SCALE_S = 60.0
 # 143, 143 and 81 artifacts carry them, none at anything but the constant above.
 # `from_dict` therefore drops each only when it EQUALS the constant, and refuses the config
 # otherwise, naming the key and the value.
-RETIRED_CONSTANT_FIELDS: dict[str, float] = {
+RETIRED_CONSTANT_FIELDS: dict[str, Any] = {
+    # The corridor gate: 67 stored configs carry `on-final`, none ever carried `faf`, and the
+    # FAF gate is deleted (2026-09-09) — so the field is a constant and is dropped on load.
+    "corridor_gate": CORRIDOR_GATE_ON_FINAL,
     "procedure_loss_lateral_scale_m": PROCEDURE_LATERAL_SCALE_M,
     "procedure_loss_vertical_scale_m": PROCEDURE_VERTICAL_SCALE_M,
     "closure_timing_scale_s": CLOSURE_TIMING_SCALE_S,
@@ -965,7 +986,6 @@ class TSConfig:
     # bounded to the final-approach corridor (see the constants). ``anchor-relative`` is
     # VETOED for new arms — kept only so the 2026-09-03 artifact stored under it loads.
     state_position_reference: str = STATE_POSITION_ABSOLUTE
-    corridor_gate: str = CORRIDOR_GATE_ON_FINAL
     # State output only: the final-approach penalty (objective.procedure_loss). Hinge² on the
     # metres outside the k-cone / glidepath window, on rows where the OBSERVED track is
     # established (final_approach_geometry.truth_final_gate), each family divided by its
@@ -1319,21 +1339,6 @@ class TSConfig:
             raise ValueError(
                 f"unknown state_position_reference {self.state_position_reference!r}; "
                 f"expected one of {STATE_POSITION_REFERENCES}"
-            )
-        if self.corridor_gate not in CORRIDOR_GATES:
-            raise ValueError(
-                f"unknown corridor_gate {self.corridor_gate!r}; expected one of {CORRIDOR_GATES}"
-            )
-        if (
-            self.corridor_gate != CORRIDOR_GATE_ON_FINAL
-            and self.state_position_reference != STATE_POSITION_CORRIDOR_BOUNDED
-        ):
-            # Only the corridor-bounded output layer reads the gate (`dataset.
-            # bounded_output_gate`); anywhere else the value would rename the run
-            # (`gate=faf`) and change no trajectory (review C-4).
-            raise ValueError(
-                f"corridor_gate={self.corridor_gate!r} is read only by state_position_reference="
-                f"{STATE_POSITION_CORRIDOR_BOUNDED!r}, not {self.state_position_reference!r}"
             )
         if self.control_command_hook not in CONTROL_HOOKS:
             raise ValueError(

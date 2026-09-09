@@ -21,7 +21,7 @@ import ts_transformer.channels as ch  # noqa: E402
 import ts_transformer.final_approach_geometry as fag  # noqa: E402
 from ts_transformer.batch_contract import unpack_batch  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
-    CORRIDOR_GATE_FAF, CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
+    CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
 from ts_transformer.dataset import (  # noqa: E402
@@ -90,11 +90,10 @@ class _Fixed(torch.nn.Module):
         return self.normalized.expand(len(history), -1, -1)
 
 
-def _context(batch: int, *, d_faf=float("nan")) -> dict[str, torch.Tensor]:
+def _context(batch: int) -> dict[str, torch.Tensor]:
     return {
         "runway_heading_rad": torch.zeros(batch),
         "glidepath_tan": torch.full((batch,), math.tan(math.radians(3.0))),
-        "final_approach_fix_m": torch.full((batch,), d_faf),
     }
 
 
@@ -141,19 +140,6 @@ def test_corridor_bounded_output_binds_the_rows_on_the_final_and_leaves_the_rest
     assert np.allclose(above[~on_final], 200.0, atol=1e-2)
     # Velocity channels pass through the layer unchanged.
     assert np.allclose(decoded[:, list(ch.VELOCITY_IDX)], physical[:, list(ch.VELOCITY_IDX)], atol=1e-3)
-    # The FAF gate binds by distance alone: the 800 m rows inside the FAF are bound too,
-    # the rows beyond it are free.
-    faf_layer = StateOutputLayer(
-        _Fixed(normalized),
-        TSConfig(state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED, corridor_gate=CORRIDOR_GATE_FAF,
-                 seq_len=4, n_segments=len(physical)),
-        normalizer,
-    )
-    with pytest.raises(ValueError, match="FAF distance"):
-        faf_layer(history, _context(3))
-    faf_out = normalizer.decode(faf_layer(history, _context(3, d_faf=10_000.0)).states[0].detach().numpy().astype(np.float64))
-    assert np.all(np.abs(faf_out[3:, ch.IDX["n"]]) <= fag.K_MARGIN * halfwidth[3:] + 1e-3)
-    assert np.allclose(faf_out[:2], physical[:2], atol=1e-2)
 
 
 def test_batches_carry_the_final_approach_context_only_when_the_recipe_needs_it():
@@ -174,9 +160,6 @@ def test_batches_carry_the_final_approach_context_only_when_the_recipe_needs_it(
         target = series[0].scenario.target
         assert context["runway_heading_rad"][0] == pytest.approx(target.psi)
         assert context["glidepath_tan"][0] == pytest.approx(math.tan(-target.gamma))
-        assert math.isnan(float(context["final_approach_fix_m"][0]))   # on-final: no FAF read
-    rows = final_approach_arrays(plain_series[0], fix_distance_m=9_500.0)
-    assert rows["final_approach_fix_m"] == 9_500.0
     # The probe carries the same keys as the real rows; the control dynamics share only
     # the runway heading (a control recipe cannot bound or penalise the corridor).
     assert tuple(probe_final_approach(2, torch.device("cpu"))) == fag.FINAL_APPROACH_KEYS
@@ -534,14 +517,6 @@ def test_recipe_content_survives_a_json_round_trip_under_its_frozen_check(tmp_pa
 
 
 # ── review 2026-09-09 ────────────────────────────────────────────────────────
-
-def test_a_corridor_gate_nothing_reads_is_refused():
-    """Review C-4: only the corridor-bounded output layer reads `corridor_gate`; elsewhere
-    the value renamed the run (`gate=faf`) and changed no trajectory."""
-    with pytest.raises(ValueError, match="read only by state_position_reference"):
-        TSConfig(corridor_gate=CORRIDOR_GATE_FAF)
-    TSConfig(state_position_reference=STATE_POSITION_CORRIDOR_BOUNDED, corridor_gate=CORRIDOR_GATE_FAF)
-
 
 def test_project_onto_final_is_threshold_relative_under_the_airport_frame():
     """Review C-11: the corridor geometry is written about the threshold, and under

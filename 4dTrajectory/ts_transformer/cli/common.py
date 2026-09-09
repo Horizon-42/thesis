@@ -31,18 +31,18 @@ from ts_transformer.config import (
     CONTROL_RECIPE_NAMES,
     CONTROL_RECIPE_SIMPLE_V1_LAG,
     CONTROL_STATE_CLOCKS,
-    CONTROL_STATE_LOSS_GRIDS,
+    CONTROL_STATE_LOSS_GRIDS_AVAILABLE,
     CONTROL_STATE_OBJECTIVES,
-    COORDINATE_FRAMES,
+    COORDINATE_FRAMES_AVAILABLE,
     RETIRED_CONSTANT_FIELDS,
     RETIRED_SERIALIZED_FIELDS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
-    INTENT_CONDITIONINGS,
+    INTENT_CONDITIONINGS_AVAILABLE,
     INTENT_FIELDS,
     LR_PLATEAU_METRICS,
     MODELS,
-    PREDICTION_OUTPUTS,
+    PREDICTION_OUTPUTS_AVAILABLE,
     PROCEDURE_LOSS_FIELDS,
     RANDOM_TRAIN_ANCHOR_SAMPLINGS,
     STATE_POSITION_REFERENCES_AVAILABLE,
@@ -154,10 +154,10 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", choices=MODELS, default=MODELS[0])
     parser.add_argument(
         "--prediction-output",
-        choices=PREDICTION_OUTPUTS,
+        choices=PREDICTION_OUTPUTS_AVAILABLE,
         default=None,
-        help="predict state endpoints (default), bounded controls with dynamics rollout, "
-             "or the closure decision vector drawn in closed form",
+        help="predict state endpoints (default) or bounded controls with dynamics rollout "
+             "(the closure output is frozen: its checkpoints load, no new run trains it)",
     )
     parser.add_argument(
         "--closure-labels-path", default=None, metavar="JSON",
@@ -280,7 +280,7 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--control-state-loss-grid",
-        choices=CONTROL_STATE_LOSS_GRIDS,
+        choices=CONTROL_STATE_LOSS_GRIDS_AVAILABLE,
         default=None,
         help=(
             "control state-loss queries: learned segment endpoints (default) or every "
@@ -404,7 +404,7 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         help="lock outer train/validation/test identities independently of --seed",
     )
     parser.add_argument("--device", default=None, help='"auto" (default), "cpu", "cuda"')
-    parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default=None)
+    parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES_AVAILABLE, default=None)
     parser.add_argument(
         "--state-position-reference",
         choices=STATE_POSITION_REFERENCES_AVAILABLE,
@@ -427,7 +427,7 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--intent-conditioning",
-        choices=INTENT_CONDITIONINGS,
+        choices=INTENT_CONDITIONINGS_AVAILABLE,
         default=None,
         help=(
             "Phase 0 intent upper bound: feed the TRUTH join point ('truth-join'), or that "
@@ -601,6 +601,20 @@ _NEW_RUN_VOCABULARIES = (
     ("state_position_reference", STATE_POSITION_REFERENCES_AVAILABLE,
      "anchor-relative was VETOED by the 2026-09-03 state-v2 campaign's own pre-registered "
      "rule; the value exists so that campaign's artifact still loads"),
+    # Frozen 2026-09-09 (package review §5): axes with published numbers whose checkpoints
+    # keep loading, predicting and publishing, and which no new run trains.
+    ("prediction_output", PREDICTION_OUTPUTS_AVAILABLE,
+     "the closure output is a comparison arm (2026-09-05/06) whose tracker was deleted; "
+     "its two stored runs load and predict"),
+    ("intent_conditioning", INTENT_CONDITIONINGS_AVAILABLE,
+     "the truth-join oracles were the scene design's Phase 0 instrument; the L4 gate failed "
+     "and the scene encoder is archived (archive/scene_encoder_2026_09/)"),
+    ("control_state_loss_grid", CONTROL_STATE_LOSS_GRIDS_AVAILABLE,
+     "fixed-dt is the 2026-08 arm family that trips the straight-in veto without the "
+     "imitation term (which is not registered on it); the named recipes pin the native grid"),
+    ("coordinate_frame", COORDINATE_FRAMES_AVAILABLE,
+     "the 2026-09-03 frame ablation kept the threshold-anchored ENU chart (the airport frame "
+     "averages across parallel pairs); its arms load"),
 )
 
 

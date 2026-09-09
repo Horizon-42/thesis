@@ -148,10 +148,9 @@ class ControlFeatureModel(nn.Module):
 NEUTRAL_CONTROLS = (0.2, 0.0, 1.0)
 
 
-def _neutral_control_bias(head: ControlOutputHead, bank_rad: float = 0.0) -> torch.Tensor:
+def _neutral_control_bias(head: ControlOutputHead) -> torch.Tensor:
     """Sigmoid logits whose bounded output is :data:`NEUTRAL_CONTROLS`."""
     neutral = np.array(NEUTRAL_CONTROLS, dtype=np.float64)
-    neutral[1] = bank_rad
     unit = np.clip(
         (neutral - CONTROL_LOWER) / (CONTROL_UPPER - CONTROL_LOWER), 1e-6, 1.0 - 1e-6
     )
@@ -162,20 +161,18 @@ def _neutral_control_bias(head: ControlOutputHead, bank_rad: float = 0.0) -> tor
     ).repeat(head.n_segments)
 
 
-def _initialize_control_head(
-    head: ControlOutputHead, *, bank_rad: float = 0.0, feature_std: float = 0.0
-) -> None:
+def _initialize_control_head(head: ControlOutputHead) -> None:
+    """Zero the last layer so every flight starts at the neutral controls.
+
+    Every caller wants exactly this; the ``bank_rad`` / ``feature_std`` variants the
+    function used to offer had no caller (review §4.7, deleted 2026-09-09).
+    """
     with torch.no_grad():
         duration_projection = getattr(head, "duration_projection", None)
-        if feature_std:
-            nn.init.normal_(head.control_projection.weight, std=feature_std)
-            if duration_projection is not None:
-                nn.init.normal_(duration_projection.weight, std=feature_std)
-        else:
-            head.control_projection.weight.zero_()
-            if duration_projection is not None:
-                duration_projection.weight.zero_()
-        head.control_projection.bias.copy_(_neutral_control_bias(head, bank_rad))
+        head.control_projection.weight.zero_()
+        if duration_projection is not None:
+            duration_projection.weight.zero_()
+        head.control_projection.bias.copy_(_neutral_control_bias(head))
         if duration_projection is not None:
             duration_projection.bias.zero_()
 

@@ -180,7 +180,7 @@ def predict_only_steps(
 
 
 def arm_steps(
-    key: str, label: str, config_path: Path, config: TSConfig, declared: dict, *,
+    key: str, config_path: Path, declared: dict, *,
     airport: str, campaign: Path, split: str, device: str, seed: int | None,
     split_seed: int | None, formal: bool = True, predict_args: list[str] = (),
 ) -> list[tuple[str, list[str], Path]]:
@@ -292,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  arm {key:<26s} {run_display_name(config.to_dict(), extra=(key,))} {' '.join(predict_args)}")
         print(f"      slug {run_slug(config.to_dict())}")
         steps += arm_steps(
-            key, arm.get("label", key), config_path, config, declared, airport=airport,
+            key, config_path, declared, airport=airport,
             campaign=campaign, split=args.split, device=args.device,
             seed=args.seed, split_seed=args.split_seed, formal=not args.informal,
             predict_args=predict_args,

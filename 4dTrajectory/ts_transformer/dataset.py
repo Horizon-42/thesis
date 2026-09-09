@@ -81,7 +81,6 @@ from ts_transformer.config import (
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     uses_closure_labels,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
-    CORRIDOR_GATE_FAF,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
@@ -105,7 +104,6 @@ from ts_transformer.coordinate_frames import (
     frame_for_state,
 )
 from ts_transformer.final_approach_geometry import FINAL_APPROACH_KEYS
-from flight_scenarios.procedure_final import final_approach_fix
 from flight_scenarios.runway_target import airport_reference_point
 from ts_transformer.fixed_dt_supervision import (
     FixedDTControlSupervision,
@@ -437,38 +435,10 @@ def reference_heading_rate_supervision(
 # batch's context slot beside the control dynamics).
 
 
-def bounded_output_gate(config: TSConfig) -> str | None:
-    """The gate the trained output layer applies, or ``None`` when it bounds nothing."""
-    if config.state_position_reference == STATE_POSITION_CORRIDOR_BOUNDED:
-        return config.corridor_gate
-    return None
-
-
-def final_approach_fix_distance(series: FlightSeries, *, gate: str | None) -> float | None:
-    """The coded FAF distance when ``gate`` is the FAF gate, else ``None``.
-
-    Only ``corridor_gate="faf"`` reads it (the bounded output layer, or the inference-time
-    projection); the deployable ``on-final`` gate and the penalty's truth gate need no
-    procedure document at all. Raises when the flight cannot name its runway's RNAV(GPS)
-    FAF — a FAF gate on a guessed distance would be silently wrong.
-    """
-    if gate != CORRIDOR_GATE_FAF:
-        return None
-    runway = str(series.scenario.source.get("runway") or "").strip().upper()
-    if not series.airport or not runway:
-        raise ValueError(
-            f"flight {series.flight_id}: corridor_gate={CORRIDOR_GATE_FAF!r} needs the "
-            "arrival airport and runway to read the coded FAF, and the flight carries "
-            f"arr_airport={series.airport!r} runway={runway!r}"
-        )
-    return final_approach_fix(series.airport, runway).distance_to_threshold_m
-
-
-def final_approach_arrays(
-    series: FlightSeries, *, fix_distance_m: float | None
-) -> dict[str, np.ndarray]:
+def final_approach_arrays(series: FlightSeries) -> dict[str, np.ndarray]:
     """``FINAL_APPROACH_KEYS`` for one flight: the runway course (math-ENU, the direction
-    of travel on final), tan of the coded glidepath, and the FAF distance (NaN = unresolved)."""
+    of travel on final) and tan of the coded glidepath. Needs no procedure document — the
+    one gate (`on-final`) is geometry about the threshold."""
     target = series.scenario.target
     rows = {
         # The rollout frame rotation and the runway heading coincide only for the
@@ -478,9 +448,6 @@ def final_approach_arrays(
         # The target's gamma is the coded glidepath DESCENT (negative); the chart height of
         # the glidepath at distance d back from the threshold is d · tan(GPA).
         "glidepath_tan": np.array(math.tan(-float(target.gamma)), dtype=np.float64),
-        "final_approach_fix_m": np.array(
-            math.nan if fix_distance_m is None else float(fix_distance_m), dtype=np.float64
-        ),
     }
     assert tuple(rows) == FINAL_APPROACH_KEYS
     return rows
@@ -491,7 +458,6 @@ def probe_final_approach(batch_size: int, device: torch.device) -> dict[str, tor
     rows = {
         "runway_heading_rad": 0.0,
         "glidepath_tan": math.tan(math.radians(3.0)),
-        "final_approach_fix_m": 10_000.0,
     }
     return {
         name: torch.full((batch_size,), value, dtype=torch.float32, device=device)
@@ -560,7 +526,7 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
         # FAF distance is not carried: no control recipe gates at the FAF.
         **{
             key: value
-            for key, value in final_approach_arrays(series, fix_distance_m=None).items()
+            for key, value in final_approach_arrays(series).items()
             if key in ("runway_heading_rad", "glidepath_tan")
         },
     }
@@ -1307,17 +1273,9 @@ class TrajectoryWindows(Dataset, ABC):
             for s_idx, item in enumerate(self.series)
         ]
         # The per-flight final-approach context (never a model input), when the recipe
-        # bounds or penalises the corridor. Resolved once: the FAF read is a document load.
+        # bounds or penalises the corridor. Resolved once.
         self.final_approach = (
-            [
-                final_approach_arrays(
-                    s,
-                    fix_distance_m=final_approach_fix_distance(
-                        s, gate=bounded_output_gate(config)
-                    ),
-                )
-                for s in self.series
-            ]
+            [final_approach_arrays(s) for s in self.series]
             if config.uses_final_approach_context
             else None
         )

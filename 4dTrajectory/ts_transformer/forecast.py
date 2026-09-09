@@ -14,7 +14,7 @@ from ts_transformer.batch_contract import model_forward
 from ts_transformer.calibration import conformal_intervals, interval_stratum
 from ts_transformer.channels import IDX, horizontal_distance_m
 from ts_transformer.config import (
-    CORRIDOR_GATES,
+    CORRIDOR_GATE_ON_FINAL,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_OFF,
     DURATION_HEADS_WITH_QUANTILES,
@@ -41,10 +41,8 @@ from ts_transformer.dataset import (
     truth_duration_s,
     FlightSeries,
     Normalizer,
-    bounded_output_gate,
     dynamics_arrays,
     final_approach_arrays,
-    final_approach_fix_distance,
     series_conditioning,
 )
 from ts_transformer.final_approach_geometry import (
@@ -177,10 +175,7 @@ def _final_approach_context(
     """The one-flight context a corridor-bounded output needs; None for every other recipe."""
     if not config.uses_final_approach_context:
         return None
-    rows = final_approach_arrays(
-        series,
-        fix_distance_m=final_approach_fix_distance(series, gate=bounded_output_gate(config)),
-    )
+    rows = final_approach_arrays(series)
     return {
         name: torch.from_numpy(np.asarray(value)[None]).to(device)
         for name, value in rows.items()
@@ -1004,11 +999,11 @@ _POSTPROCESSORS = {
 def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> Forecast:
     """Clamp a state forecast into the final-approach corridor and glidepath window.
 
-    Every row the forecast itself places on the final under ``gate`` is bound
-    (``on-final``: inside the membership cone and the predicted path aligned with the
-    course; ``faf``: inside the coded FAF distance) — row by row, the same gate the
-    corridor-bounded output layer applies softly, so the post-hoc projection is the hard
-    counterpart of that layer.  (An earlier version bound only the suffix from which every
+    Every row the forecast itself places on the final is bound (``on-final``: inside the
+    membership cone and the predicted path aligned with the course) — row by row, the same
+    gate the corridor-bounded output layer applies softly, so the post-hoc projection is
+    the hard counterpart of that layer. ``gate`` is the label ``predict --project-final``
+    takes; the FAF-distance gate it used to name beside this one is deleted (2026-09-09).  (An earlier version bound only the suffix from which every
     later row was on the final; on arm A that moved 1.35 % of the rows, because one off-final
     row near the end cancelled the whole tail, and was not comparable to the layer.)
     Along-track distance is untouched, cross-track is clamped into ``±k·hw(d)``, height
@@ -1026,11 +1021,9 @@ def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> F
     """
     if forecast.prediction_output != PREDICTION_STATE:
         raise ValueError("project_onto_final applies to state forecasts only")
-    if gate not in CORRIDOR_GATES:
-        raise ValueError(f"unknown corridor gate {gate!r}; expected one of {CORRIDOR_GATES}")
-    rows = final_approach_arrays(
-        series, fix_distance_m=final_approach_fix_distance(series, gate=gate)
-    )
+    if gate != CORRIDOR_GATE_ON_FINAL:
+        raise ValueError(f"unknown corridor gate {gate!r}; the one gate is {CORRIDOR_GATE_ON_FINAL!r}")
+    rows = final_approach_arrays(series)
     target = np.asarray(series.target_chart, dtype=np.float64)
     values = torch.as_tensor(forecast.values, dtype=torch.float64)[None]
     e = values[..., IDX["e"]] - float(target[0])
@@ -1038,7 +1031,6 @@ def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> F
     u = values[..., IDX["u"]] - float(target[2])
     psi = torch.as_tensor(rows["runway_heading_rad"], dtype=torch.float64)[None]
     tan_gpa = torch.as_tensor(rows["glidepath_tan"], dtype=torch.float64)[None]
-    d_faf = torch.as_tensor(rows["final_approach_fix_m"], dtype=torch.float64)[None]
     d, xt = runway_axes(e, n, psi)
     anchor = torch.as_tensor(series.values[forecast.anchor], dtype=torch.float64)
     step_e, step_n = position_direction(
@@ -1047,7 +1039,7 @@ def project_onto_final(forecast: Forecast, series: FlightSeries, gate: str) -> F
         (anchor[IDX["n"]] - float(target[1]))[None],
     )
     cos_align = alignment_cosine(step_e, step_n, psi)
-    on_final = membership(gate, d=d, xt=xt, cos_align=cos_align, d_faf=d_faf, hard=True)
+    on_final = membership(d=d, xt=xt, cos_align=cos_align, hard=True)
     xt_bounded, u_bounded = bound_to_final(
         d=d, xt=xt, u=u, weight=on_final.to(torch.float64), tan_gpa=tan_gpa, hard=True,
     )
