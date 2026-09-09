@@ -4,6 +4,25 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-09 — ts_transformer: package review — bugs and why it is still heavy after the audit
+
+Docs only: `4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`.
+Five parallel code reviews (data plane / training / control / inference+CLI / config), each
+finding re-verified. Four number-changing bugs on live paths: `run_ts_pipeline` drops
+`control_dynamics_model` from both rebuilt override dicts (lag runs labelled point-mass, never
+reused, and colliding on `train_dir` with point-mass cells); the fixed-anchor common-grid truth
+and cohort floor ignore `minimum_anchor_index` (the history ablation's selection metric is
+measured from an anchor up to 120 s early); an observed threshold crossing gets 2.5× less
+terminal-position weight than a fitted one; under soft saturation the barrier and the trombone
+rewrite the same step in the 30–40° band (the composite's invariant is false). Four crash paths
+(`--batch-size auto` on every custom control arm; `predict` leaving a record directory without
+`summary.json`). ~20 contract holes (silently ignored loss weights, run-name collisions on
+selection-changing fields, a test-release ledger bound to a directory). Diagnosis: one experiment
+axis costs ten touch points; target architecture = a real package, one `OutputStrategy`
+sub-package per prediction path, `TSConfig` split into owner sub-configs with sum types and a
+flat-dict adapter, runners under the package. Census of 219 stored runs backs the freeze/delete
+list. Nothing changed in code; decisions listed in the doc's §〇.
+
 ### 2026-09-08 — ts_transformer: L3.e — the trombone command hook (the delay gets a place to go), and `predict --truncate-at-threshold`
 
 **The question.** L3.d's speed floor failed all three of its gates, and the reason is arithmetic,
