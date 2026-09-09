@@ -37,8 +37,13 @@ only where that gate has not opened — complementary by construction, the order
 the answer, and under `hard` it is the identity. `barrier` alone and `barrier+speed-floor` are
 untouched. The "25 deg turn cap" cited in `composite.py` / `config.py` was 15° in the code;
 fixed. **The L3.e-r / L3.f-r reruns on disk were flown before this fix** (soft, the adopted
-form); the magnitude on their readouts is a pre-registered one-arm check
-(`2026-09-07_latent_intent_design.zh.md` §六), not a re-run of the campaigns.
+form); the magnitude on their readouts was measured by a pre-registered one-arm check the same
+evening (`4dTrajectory/outputs/KRDU/experiments/l3f_a4_check_20260909`, the +60 s L3.f arm on the
+fixed tree, paired): every aggregate within 1 % (fully flyable 20.01 % both, `tromboneDelayS`
+p50 134.9 s both), the 842 flights established at the anchor byte-identical, 395 of 497 vectored
+records changed, and L3.f-r's advantage over L3.e-r unchanged — the overlap was not its source.
+Confining the barrier costs slightly (12 fewer flights on the final, ~1 % more stall/thrust
+samples): the price of a correct composite, recorded, not reverted.
 
 ### 2026-09-09 — ts_transformer: L3.e-r / L3.f-r reruns read; the hook line is closed, the route decision moves to plan-and-guidance
 

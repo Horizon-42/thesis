@@ -786,9 +786,10 @@ The speed floor alone (L3.d, §7.6) fails all three gates: stall rises, thrust s
 (L3.e, §7.7) converts the delay exactly. Its first readout was flattered by the abeam cut; under
 the corrected cut (§7.7b) the stack reaches 46 % fully flyable at offset 0 and 20 % at +60 s, and
 sizing the stretch against the reference rollout (L3.f, §7.7b) improves every criterion it touches
-without passing a gate. What is left is not a sizing defect: about 30 % of flights never become
-established on the final and the median flight gets no stretch, because a hook admitted only where
-the path is already 30° off course cannot choose a route. This remains **the highest-value open
+without passing a gate; the A-4 check shows that advantage is the estimator's, not the barrier
+gate's. What is left is not a sizing defect: about 30 % of flights never become established on
+the final and the median flight gets no stretch, because a hook admitted only where the path is
+already 30° off course cannot choose a route. This remains **the highest-value open
 item** — a scheduler requests delay far more often than an early arrival — and it now belongs to
 the route builder of the plan-and-guidance design (§8), not to another hook arm.
 
@@ -1192,10 +1193,14 @@ flight gets no stretch. A hook that is admitted only where the predicted path is
 30° off the course cannot decide a route for a flight whose predicted path never turns onto the
 final. That decision belongs to the route builder of the plan-and-guidance design
 (`2026-09-09_plan_and_guidance_design.md` §4.2), which is where §8's bigger step now stands.
-(3) One caveat, one check: both reruns were flown before the review's A-4 fix (under soft
-saturation the barrier's alignment shoulder overlapped the trombone's admission band), so part of
-the L3.f-r − L3.e-r difference could come from the barrier gate; one L3.f-r arm is re-flown under
-the fix as a pre-registered check (`LID` §六, "A-4 修复与预注册核查").
+(3) The A-4 check ran the same evening (`E/l3f_a4_check_20260909/L3f_ref_p60s_pred_val`, the
++60 s arm re-flown on the fixed tree, paired against L3.f-r's): every aggregate moves by less
+than 1 % (fully flyable 20.01 % both; stall +0.7 %; on the final 1,075 against 1,087;
+`tromboneDelayS` p50 134.9 s both), the 842 flights established at the anchor are byte-identical,
+and L3.f-r's advantage over L3.e-r stands (+6.5 points on the final, −9.5 % stall, −12.7 % thrust
+over max). The barrier-gate overlap was not the source of the advantage; the caveat is lifted.
+Confining the barrier costs a little rather than gaining (12 fewer flights on the final, about 1 %
+more stall and thrust samples) — the price of a correct composite, not a reason to revert.
 
 ### 7.8 Process facts worth carrying forward
 
@@ -1312,7 +1317,7 @@ named defect left.
 
 **No experiment is running.** Two arms are named and unqueued: the **CTA-on-L2.g** arm (§5 item
 5b) and the **KSJC replication** (§5 item 6); L3.f has run twice and its estimator change is
-adopted (§7.7b), with one A-4 check arm pre-registered. The decision still open is the vectored
+adopted (§7.7b), and the A-4 check confirms the estimator reading. The decision still open is the vectored
 interval-width veto (§3.4), read as (b) on 2026-09-09.
 
 **Pre-registered arm files** (`4dTrajectory/ts_transformer/docs/experiments/`):
