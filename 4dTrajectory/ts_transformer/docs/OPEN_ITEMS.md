@@ -32,12 +32,15 @@ were NOT made without the owner:
   is the loss. Renaming means a schema bump, after which the two stored files (2026-08-16
   `POOLED/ts_patchtst_normalized_time`, 2026-08-18 `KSJC/experiments/cv_tau_bank_20260818`)
   are no longer reusable by `--skip-cv`. The writer says so in a comment; nothing renamed.
-- **C-12, the load-factor floor.** The learned head's box floor is 0.2 (`control/envelope.py`)
-  and `flyability`'s hard floor is 0.5, so a segment at n ∈ [0.2, 0.5) is unflyable by
-  construction on the metric every control arm publishes. Moving the head's floor changes every
-  control checkpoint's decoded controls; moving the grader's changes every published flyability
-  number. Not measured how often a trained head emits n < 0.5
-  (`control/training/diagnostics.py` saturation counts would say) — measure first.
+- **C-12, the load-factor floor — DECIDED 2026-09-09: the grader stays at 0.5.** The learned
+  head's box floor is 0.2 (`control/envelope.py`) and `flyability`'s hard floor is 0.5, so a
+  control-path segment at n ∈ [0.2, 0.5) is unflyable by construction on the published metric.
+  Neither number moves: the grader's floor is the flyability CLAIM every published number was
+  read against, and the head's box is the old path's search space (moving it would change every
+  control checkpoint's decoded controls). The plan-and-guidance design's guidance layer commands
+  the load factor inside `flyability`'s envelope, so the new path cannot inherit the gap. Still
+  unmeasured, and only of interest for reading the old arms: how often a trained head emits
+  n < 0.5 (`control/training/diagnostics.py` saturation counts would say).
 - **A-2's consequence.** Every number `run_ts_history_ablation.py` published before 2026-09-09
   was scored against a truth taken `(max L − L)·dt` before its anchor; the runner is unchanged
   and correct now, its stored outputs are not.

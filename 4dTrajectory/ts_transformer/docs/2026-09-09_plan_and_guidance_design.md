@@ -276,20 +276,27 @@ guidance layer imports those modules as parts of one controller instead of compo
 post-hoc hooks. Nothing in this design touches `dataset`, `objective`, `forecast`, `export`,
 `train` or `validation` once the review's §4.2 has landed — and would touch all six before it.
 
-**Order, and what is already done.** The review's step 0 (the number-changing bugs) comes first.
-Two of its four A-items are fixed on `dev-pg` (`c544db0`): A-3 (the observed threshold crossing now
-carries the same terminal supervision contract as a fitted one) and A-4 (a barrier composed with a
-trombone is confined to the hard gate, so the two lateral modules are complementary by construction;
-the L3.e-r / L3.f-r readouts were flown before this fix, and one arm is re-flown as a check — see
-`2026-09-07_latent_intent_design.zh.md` §六). A-1, A-2, B-1, B-2 are open. Of this design's own
-steps (§9), steps 1 and 2 (the procedure reader, the extractors, the oracle ceiling) are CPU-only
-readouts on the current tree and do not touch the spine, so they can run before or beside the
-review's steps 1–4; step 3 (the plan head) should wait for the review's §4.2, or it will be the
-eleventh copy of the ten-touch-point pattern. Decisions this leaves with the user: the review's
-§5 freeze/delete list and §4.3 defaults question, and whether steps 1–2 start now on the current tree.
+**Order, and what is already done (updated 2026-09-09 evening, `dev-pkg-review`).** The
+review's step 0 is DONE: all four A-items and all four B-items are fixed — A-3 / A-4 at `c544db0`
+(the A-4 check re-flew one L3.f-r arm: aggregates move < 1 %, `a2aa8c4`), A-1 / A-2 / B-1 / B-2
+(and B-3 / B-4 and the C holes) at `e2e1c84`; the review's §7 is the ledger. The review's step 1
+(the package) is done at `f08d196`: every module is imported as `ts_transformer.<module>`. What
+remains before step 3 of this design is the review's step 2 (the §5 freeze/delete list, a user
+decision) and steps 3–4 (the §4.3 config split with the flat-dict adapter, then the §4.2
+strategies). Of this design's own steps (§9), steps 1 and 2 (the procedure reader, the extractors,
+the oracle ceiling) are CPU-only readouts that do not touch the spine, so they can run now on the
+package as it stands; step 3 (the plan head) waits for the review's §4.2, or it will be the
+eleventh copy of the ten-touch-point pattern. Decisions this leaves with the user: the §5
+freeze/delete list, the §4.3 defaults question, and whether steps 1–2 start now.
 
 **Two review findings this design must not inherit.** C-12 (the head's load-factor floor 0.2
-against the grader's 0.5) becomes moot because the guidance layer commands the load factor inside
-the grader's envelope by construction; C-11 (the corridor geometry's origin) is the one geometry the
-procedure reader and the corridor gate must agree on, so the reader is written against the
-threshold frame, never the airport reference point.
+against the grader's 0.5) — DECIDED 2026-09-09: the grader stays at 0.5, and the guidance layer
+commands the load factor inside `flyability`'s envelope (floor 0.5), never inside the learned
+head's box in `control/envelope.py` (floor 0.2, a search-space fact of the old path); the §7
+"today's best" flyability baselines therefore stay as measured. C-11 (the corridor geometry's
+origin) is fixed in `project_onto_final` (threshold-relative under every frame), and remains the
+one geometry the procedure reader and the corridor gate must agree on, so the reader is written
+against the threshold frame, never the airport reference point. One naming note for the plan
+campaign: `random_train_anchor_min_future_s` (§6's sampler floor) is still an UNNAMED field
+(review C-3, a decision), so two plan arms differing only in it would share a name under the
+current grammar; the §4.2/§4.3 split gives the plan strategy its own naming and removes that.

@@ -132,7 +132,12 @@ flight model.
   airframe. Newtons appear in exactly two places — `physical_controls()` into the dynamics, and
   `forecast.py` out to the evaluation record. **The thrust floor is negative on purpose** (an
   approach needs net-negative force this clean polar does not model). This is NOT the optimizer's
-  envelope, which is a flyability claim; this one is a learned head's search space.
+  envelope, which is a flyability claim; this one is a learned head's search space. **The two
+  load-factor floors differ on purpose and neither moves (decided 2026-09-09, review C-12)**:
+  the head's box floor is 0.2, `flyability`'s hard floor is 0.5, so a control-path segment at
+  n ∈ [0.2, 0.5) is unflyable by construction on the published metric — a fact about the old
+  path, not a bug to fix in either number. A guidance layer that COMMANDS the load factor (the
+  plan-and-guidance design) reads `flyability`'s envelope, never this box.
 - **`config.py` is the single source** and everything in it is serialised into every checkpoint.
   `config.input_channels` is what the model sees, `config.channels` what it predicts.
 - `dt_s = 2.0`, `seq_len = 60` (120 s), `pred_len` = 30 (window, 60 s) / **300** (full, 600 s).

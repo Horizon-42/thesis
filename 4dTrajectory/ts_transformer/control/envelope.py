@@ -52,6 +52,13 @@ MAX_BANK_RAD = math.pi / 4.0
 # above-2 g are both very rare. Measured on real inverted KSJC tracks the required load
 # factor spans only [0.92, 1.18], so this box never binds on observed data — it binds on
 # what the LEARNED head may emit, which is the point.
+#
+# This floor is NOT the grader's: `flyability.Envelope.min_load_factor` is 0.5, so a segment the
+# head emits at n in [0.2, 0.5) is unflyable by construction on the published metric. Decided
+# 2026-09-09 (package review C-12) that neither number moves — the grader's floor is the
+# flyability claim every published number was read against, this box is the old path's search
+# space. A layer that COMMANDS the load factor (the plan-and-guidance design's guidance layer)
+# reads the grader's envelope, never this one.
 MIN_LOAD_FACTOR = 0.2
 MAX_LOAD_FACTOR = 2.0
 
