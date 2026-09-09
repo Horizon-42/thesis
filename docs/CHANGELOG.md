@@ -4,6 +4,79 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-09 — ts_transformer: "it crossed the threshold" is the plane AND the final — the plane-only rule fired ABEAM, on the downwind
+
+**The defect, measured on real records.** Two consumers ask a trajectory where it lands:
+`forecast.cut_at_threshold_crossing` (`predict --truncate-at-threshold`, built 2026-09-08) and
+the trombone's reference-rollout path length (`control/constraints/trombone.py`,
+`trombone_surplus_reference=reference-rollout`, built 2026-09-09, the entry below). Both asked
+the same wrong question: "the closest horizontal approach among the rows with along-course
+distance `d ≤ 0`, within the first such run" — the threshold PLANE and nothing else. A vectored
+flight's downwind runs parallel to the runway course and opposite it, several kilometres abeam,
+and passes `d = 0` out there. On `l3e_path_stretch_20260908/L3e_stack_p60s_pred_val`, **96.5 %
+of the vectored cuts lay more than 1 km from the threshold — median `|xt|` 8.7 km, a median
+1.75 km above it** — while the straight-in cuts were clean (`|xt|` p95 **50 m**). So the L3.e /
+L3.f vectored flyability and geometry were read on a window that ended on the downwind, and the
+reference path length `L_ref` was measured to an abeam point: **~12 km on a 25 km approach**,
+with `tromboneRefNoCrossing` at **31.6 %**.
+
+**The fix: one rule, one function.** `final_approach_geometry.threshold_crossing_index(d, xt,
+cos_align)` returns the first crossing row, the end of its run, and whether there is a crossing
+at all. A crossing is `d ≤ 0` **AND** inside the `on-final` gate there — the membership cone
+(`MEMBERSHIP_K`, floored at `MEMBERSHIP_FLOOR_M`) and `ALIGNMENT_MAX_DEG`, read from the gate
+rather than restated beside it. The cone is what rejects the abeam pass; the alignment rejects
+a plane crossed on a heading that is not the final's. The refinement inside that run stays the
+caller's: closest horizontal approach for the record cut, `d = 0` interpolated inside the
+crossing segment for the reference path. A trajectory that never satisfies it has NO crossing —
+the existing "never reaches" semantics: the record is left WHOLE with `truncatedAtThreshold:
+false`, the reference is cut at the end of its own schedule and flagged.
+
+**What moves and what does not.** Straight-in records are bit-identical: there the first row
+past the plane is inside the cone and aligned, so both rules answer the same row (checked
+end-to-end on a straight-in synthetic rollout — cut row 303 either way, 287 m off the
+centreline). Vectored records that never turn onto the final now read as what they are — no
+crossing, no cut — instead of being cut 8.7 km abeam. `hook_trombone_ref_no_crossing` now means
+"the reference never got ONTO the final", which is a stronger claim than "it never passed the
+plane" and will read HIGHER, not lower, on arms whose rollouts reach the threshold across the
+course: measured on the package's 48-segment fixture (a flight flown straight at the threshold
+at 45° to the runway) it is 0 → 1, while the estimate itself does not move, because a straight
+reference has no detour either way. Every path that does not use the crossing is untouched to
+the bit: the L3.f equivalence harness, extended with the two `reference-rollout` replays the
+crossing actually reaches (15 cases, both trombone stacks trained and replayed, soft and hard),
+reports **24 of 2344 leaves moved — every one of them `tromboneRefPathM` /
+`tromboneRefNoCrossing` / `tromboneDelayS` inside those two cases**, and nothing at all
+elsewhere: no trajectory, control, record or state digest anywhere. Those synthetic references
+overshoot the threshold wide of the final rather than flying a downwind, so what moves on them
+is the FLAG (0 → 1) and 8–58 m of path (0.1–0.3 %, the cut moving to the end of the schedule);
+the kilometres are on the vectored cohort the defect was measured on. **333 stored runs
+recounted, 0 renamed.**
+
+**Two consequences the pre-commit review found, both fixed here.** (1) The trombone's
+no-crossing branch cut the reference one segment early: under the plane-only rule "no crossing"
+implied no boundary was past the plane, so the in-segment fraction saturated to 1 on its own and
+the cut landed on the last boundary — where the path length already counted to. The on-final rule
+broke that (an overshoot IS past the plane and still never on the final), the fraction clamped to
+0 instead, and `L_ref` and `S_ref` stopped ending at the same point: **340 m of invented detour
+on a perfectly straight reference**, at every step, so it never burned down. The fraction is now
+FORCED to 1 where there is no crossing, and a straight reference that overshoots wide of the cone
+is a test case. (2) `truncatedAtThreshold` was shared with the fixed-time postprocessor's
+closest-approach truncation, which has no plane in it at all — so a vectored state record could
+end 8 km abeam and still claim to end at the threshold, and `predict`'s cut/whole count was wrong
+for exactly that population. Where the crossing rule runs it now OWNS the flag: no crossing
+clears it, and `horizonCapped` — which marks the records the fixed-time rule never reached —
+still recovers whether that cut happened.
+
+**One fixture changed with the rule, and the change is the point.** `_VECTORED_LEGS` in
+`test_control_constraints` reached the threshold POINT at 45° to the course, which under the new
+rule is not a landing; it gains a 5 km final (42.0 km of path against a 21.5 km beeline). The
+same test file gains the downwind case the defect is about: a reference that starts 3 km past
+the threshold and 8 km right of it, flies the reciprocal out to 12 km back, then a base and a
+final — where the plane-only cut measured 8.5 km of path against the 30.6 km the network
+intends, and reported **307 s** of surplus on a flight with none.
+
+The `L_ref` phrasing in the entry below ("its first crossing of the threshold plane") is
+superseded by this one.
+
 ### 2026-09-09 — ts_transformer: L3.f — the trombone's surplus is sized against the reference rollout's remaining path, not the beeline
 
 **The defect, measured (L3.e).** The mechanism worked and the estimator did not. At the TRUE CTA
