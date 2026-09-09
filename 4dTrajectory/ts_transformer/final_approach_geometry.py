@@ -37,6 +37,12 @@ gate.  Two gates exist:
 The TRUTH gate used by the penalty and the readouts is the measurement's definition:
 the rows from which the observed track stays inside the ``K_MARGIN`` cone to the
 threshold, beyond ``NEAR_THRESHOLD_M``.
+
+**Where a trajectory LANDS** is one rule as well (:func:`threshold_crossing_index`): the
+first row that is at or past the threshold plane AND on the final there.  Both consumers
+that need an arrival point read it — ``forecast.cut_at_threshold_crossing`` (which row a
+record ends on) and ``control/constraints/trombone.py`` (how much path the reference rollout
+still intends to fly) — because the plane alone is crossed on a downwind, abeam.
 """
 
 from __future__ import annotations
@@ -186,6 +192,63 @@ def soft_on_final(d: torch.Tensor, xt: torch.Tensor, cos_align: torch.Tensor) ->
 
 def hard_on_final(d: torch.Tensor, xt: torch.Tensor, cos_align: torch.Tensor) -> torch.Tensor:
     return (xt.abs() <= membership_halfwidth(d)) & hard_aligned(cos_align)
+
+
+def threshold_crossing_mask(
+    d: torch.Tensor, xt: torch.Tensor, cos_align: torch.Tensor
+) -> torch.Tensor:
+    """Rows ``[B, N]`` that cross the landing threshold ON THE FINAL.
+
+    At or past the threshold plane (``d ≤ 0``) AND on the final there — the ``on-final``
+    gate itself, so the cone, its floor and the 30° alignment are read from the gate rather
+    than restated beside it.
+
+    ``d ≤ 0`` ALONE is not the crossing, and the difference is not academic (2026-09-09). A
+    vectored flight's downwind runs parallel to the runway course and opposite it, several
+    kilometres abeam, and passes ``d = 0`` out there — so the plane-only rule fired ABEAM.
+    Measured on ``l3e_path_stretch_20260908/L3e_stack_p60s_pred_val``, 96.5 % of the vectored
+    cuts it made lay more than 1 km from the threshold (median ``|xt|`` 8.7 km, a median
+    1.75 km above it), while the straight-in cuts were clean (``|xt|`` p95 50 m). The cone is
+    what rejects the abeam pass; the alignment is what rejects a plane crossed on a heading
+    that is not the final's.
+
+    ``cos_align`` is the caller's: ``forecast`` takes the central difference of the predicted
+    POSITIONS (:func:`position_direction`, the gate's own rule — the velocity channels are
+    free outputs), the trombone the chord flown INTO each boundary. Two costs, both visible
+    rather than silent (the ``truncatedAtThreshold`` flag, and ``predict``'s cut/whole
+    count). The central difference folds the flying just AFTER a row into its direction, so a
+    rollout that turns hard at the threshold can fail the 30° on the very row that crossed
+    it; and ``MEMBERSHIP_FLOOR_M`` is now what decides whether a record is cut at all, so a
+    straight-in carrying a lateral bias wider than 500 m reads as never having landed.
+    """
+    return (d <= 0.0) & hard_on_final(d, xt, cos_align)
+
+
+def threshold_crossing_index(
+    d: torch.Tensor, xt: torch.Tensor, cos_align: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """The FIRST crossing run: ``(first row, one past its last row, crossed at all)``, ``[B]``.
+
+    "First" so a trajectory that overshoots, wanders and comes back is read on its real
+    arrival rather than on a later pass; the run is what a caller refines INSIDE
+    (``forecast.cut_at_threshold_crossing`` takes the closest horizontal approach within it,
+    ``control/constraints/trombone.py`` interpolates ``d = 0`` inside the crossing segment).
+
+    Where ``crossed`` is false the trajectory never reached the final at all, and ``first``
+    and ``end`` mean nothing: the caller must say so rather than cut somewhere, which would
+    invent an arrival that never happened.
+    """
+    crossing = threshold_crossing_mask(d, xt, cos_align)
+    crossed = crossing.any(dim=-1)
+    first = crossing.to(torch.int64).argmax(dim=-1)
+    rows = torch.arange(crossing.shape[-1], device=crossing.device)
+    after = ~crossing & (rows >= first.unsqueeze(-1))
+    end = torch.where(
+        after.any(dim=-1),
+        after.to(torch.int64).argmax(dim=-1),
+        torch.full_like(first, crossing.shape[-1]),
+    )
+    return first, end, crossed
 
 
 def soft_inside_faf(d: torch.Tensor, d_faf: torch.Tensor) -> torch.Tensor:

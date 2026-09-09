@@ -165,12 +165,14 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--truncate-at-threshold",
         action="store_true",
-        help="cut every record at its first crossing of the landing threshold plane and "
-             "stamp source.truncatedAtThreshold — so the evaluation, corridor and "
+        help="cut every record where it first crosses the landing threshold ON THE FINAL "
+             "(past the plane AND inside the on-final gate there) and stamp "
+             "source.truncatedAtThreshold — so the evaluation, corridor and "
              "flyability reports see the APPROACH, not the flying a rollout does after it "
              "arrives (L3.d: a floored, late-CTA rollout arrives early and keeps going, "
              "endpoint |xt| p95 43-63 km). Applies to every output kind, the control "
-             "rollout included; a forecast that never reaches the threshold is left whole",
+             "rollout included; a forecast that never gets onto the final is left whole — "
+             "the plane alone is crossed abeam, on a downwind",
     )
     parser.add_argument(
         "--command-hook",
@@ -719,8 +721,9 @@ def run_cli(
         cut = sum(record.source.get("truncatedAtThreshold", False) for record in records)
         print(
             f"  {cut} of {len(records)} main record(s) end at the threshold crossing; the "
-            f"remaining {len(records) - cut} never reach it and are whole. The run's own "
-            "latent / fan / posterior arms were cut on the same rule and are not in this count"
+            f"remaining {len(records) - cut} never cross it on the final and are whole. "
+            "The run's own latent / fan / posterior arms were cut on the same rule and are "
+            "not in this count"
         )
     capped = sum(record.source.get("horizonCapped", False) for record in records)
     if capped:

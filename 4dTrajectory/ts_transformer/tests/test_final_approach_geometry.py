@@ -157,6 +157,55 @@ def test_on_final_membership_wants_the_cone_and_the_heading():
     assert faf.tolist() == [[False, True]]
 
 
+def test_the_threshold_crossing_is_the_plane_AND_the_final_scoped_to_the_first_run():
+    """Where a trajectory LANDS, the rule both callers share.
+
+    Four flights, hand-placed, with the alignment passed in directly (the two callers derive
+    it differently — positions in ``forecast``, chords in the trombone — and the rule is
+    what they share, not how they got the direction):
+
+    * a straight-in that overshoots: the crossing is the first row past the plane;
+    * a DOWNWIND — parallel to the course, opposite it, 8 km abeam — that passes ``d = 0``
+      out there. The plane-only rule cut every one of those; the cone rejects it;
+    * one that crosses the plane WIDE of the cone and only then comes inside — its four
+      rows straddle ``MEMBERSHIP_FLOOR_M`` (900 and 700 m out, then 400 and 200 m in), which
+      past the plane IS the cone: the crossing is where it is on the final, not where it
+      passed the plane;
+    * one aligned across the plane and briefly off course after it: the run ends at the row
+      that leaves the final, not at the end of the record.
+    """
+    d = torch.tensor([
+        [3_000.0, 1_000.0, -200.0, -900.0],       # straight in, over the threshold
+        [-2_000.0, -1_000.0, 0.0, 1_000.0],       # downwind: d RISES through zero, abeam
+        [-100.0, -300.0, -600.0, -900.0],         # past the plane, wide, then inside
+        [500.0, -100.0, -200.0, -800.0],          # crosses, wanders off course, comes back
+    ])
+    xt = torch.tensor([
+        [0.0, 0.0, 0.0, 0.0],
+        [8_000.0, 8_000.0, 8_000.0, 8_000.0],
+        [900.0, 700.0, 400.0, 200.0],
+        [0.0, 0.0, 0.0, 0.0],
+    ])
+    cos_align = torch.tensor([
+        [1.0, 1.0, 1.0, 1.0],
+        [-1.0, -1.0, -1.0, -1.0],                 # flying the reciprocal
+        [1.0, 1.0, 1.0, 1.0],
+        [1.0, 1.0, 0.5, 1.0],                     # 60° off on the third row
+    ])
+    crossing = fag.threshold_crossing_mask(d, xt, cos_align)
+    assert crossing.tolist() == [
+        [False, False, True, True],
+        [False, False, False, False],
+        [False, False, True, True],
+        [False, True, False, True],
+    ]
+    first, end, crossed = fag.threshold_crossing_index(d, xt, cos_align)
+    assert crossed.tolist() == [True, False, True, True]
+    assert first.tolist() == [2, 0, 2, 1]
+    # The downwind's 0/0 is not an answer — `crossed` is what a caller reads first.
+    assert end.tolist() == [4, 0, 4, 2]
+
+
 def test_truth_gate_is_the_established_tail_beyond_the_last_300_m():
     d = torch.tensor([[20_000.0, 15_000.0, 12_000.0, 8_000.0, 4_000.0, 200.0, 0.0]])
     hw = fag.corridor_halfwidth(d)
