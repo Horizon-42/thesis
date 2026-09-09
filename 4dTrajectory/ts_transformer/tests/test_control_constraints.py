@@ -837,6 +837,75 @@ def test_the_three_hook_stack_is_bit_identical_on_a_flight_already_on_the_final(
         unabsorbed, rel=1e-3)
 
 
+def test_the_barrier_is_silent_wherever_the_trombone_may_engage():
+    """Review 2026-09-09 A-4, on its own measurement: 12 km back, 500 m right, 33° off the
+    course, a 6 s hold. That is the soft gate's alignment shoulder — the standalone soft
+    barrier still blends a correction there (weight 0.148, +0.112 rad) — and it is inside
+    the trombone's admission band (> 30°), so under ``barrier+trombone`` the same step used
+    to be rewritten by both. The composite now builds its barrier confined to the hard gate:
+    on this step it returns the command untouched, and the stack's answer IS the trombone's
+    answer from the network's own command.
+    """
+    view = _view([12_000.0], [500.0], heading_error_rad=-math.radians(33.0),
+                 hold_s=6.0, remaining_s=260.0)
+    command = _command([0.0])
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE,
+                          control_hook_saturation=HOOK_SATURATION_SOFT)
+    dynamics = _context(1)
+
+    alone = BarrierFilter(config, dynamics, hard=False)
+    assert float((alone(view, command, 0) - command)[0, 1].abs()) > 0.05      # measured 0.112
+
+    stack = build_command_hook(config, dynamics)
+    barrier, trombone = stack.hooks
+    assert isinstance(barrier, BarrierFilter) and barrier.confine_to_hard_gate
+    assert isinstance(trombone, Trombone)
+    assert torch.equal(barrier(view, command, 0), command)
+    solo = Trombone(config, dynamics, hard=False)
+    assert torch.equal(stack(view, command, 0), solo(view, command, 0))
+    assert float(solo.per_flight_diagnostics()["hook_trombone_engaged_steps"][0]) == 1.0
+    assert float(barrier.per_flight_diagnostics()["hook_bank_change_rad"][0]) == 0.0
+
+
+@pytest.mark.parametrize("saturation", [HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD])
+def test_the_confined_barrier_is_the_standalone_one_inside_the_gate_and_nothing_outside(saturation):
+    """The confinement changes nothing INSIDE the hard gate (the standalone barrier of the
+    same saturation, to the bit) and everything outside it (the command passes through), so
+    on no state can both lateral modules act; under ``hard`` it is the identity."""
+    rows = [_view([12_000.0], [500.0], heading_error_rad=-math.radians(deg), hold_s=6.0,
+                  remaining_s=260.0) for deg in range(0, 61)]
+    batch = len(rows)
+    view = RolloutStateView(
+        chart=torch.cat([row.chart for row in rows]),
+        actuators=torch.cat([row.actuators for row in rows]),
+        duration_s=torch.cat([row.duration_s for row in rows]),
+        remaining_s=torch.cat([row.remaining_s for row in rows]),
+        reference=None,
+    )
+    command = _command(torch.full((batch,), 0.05, dtype=torch.float64))
+    hard = saturation == HOOK_SATURATION_HARD
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_TROMBONE,
+                          control_hook_saturation=saturation)
+    dynamics = _context(batch)
+
+    plain = BarrierFilter(config, dynamics, hard=hard)(view, command, 0)
+    confined = BarrierFilter(config, dynamics, hard=hard, confine_to_hard_gate=True)(view, command, 0)
+    inside = on_final_weight(runway_axes_view(view, dynamics["runway_heading_rad"]), hard=True) > 0.5
+    assert bool(inside.any()) and bool((~inside).any())          # the sweep crosses the edge
+    assert torch.equal(confined[inside], plain[inside])
+    assert torch.equal(confined[~inside], command[~inside])
+    if hard:
+        assert torch.equal(confined, plain)
+    else:
+        assert bool((plain[~inside] != command[~inside]).any())   # the shoulder the review measured
+
+    engaged = Trombone(config, dynamics, hard=hard)
+    engaged(view, command, 0)
+    engaged_rows = engaged.per_flight_diagnostics()["hook_trombone_engaged_steps"] > 0.0
+    assert bool(engaged_rows.any())
+    assert not bool((engaged_rows & inside.cpu()).any())          # complementary, by construction
+
+
 # ── trombone: what the surplus is measured against (L3.f) ────────────────────
 
 #: A vectored arrival's intended path: 20 km back and 8 km right, out to a downwind abeam

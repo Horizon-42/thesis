@@ -522,10 +522,12 @@ CONTROL_HOOK_TROMBONE = "trombone"
 # The COMBINATIONS, each in the order it is applied. `barrier+speed-floor`: the barrier sets
 # bank and re-coordinates the load factor, then the floor reads that load factor and sets
 # thrust — disjoint channels. The two trombone stacks add a module that writes bank and load
-# as well, which is well defined for the same reason and one more: the barrier acts only
-# INSIDE the on-final gate and the trombone only outside it, so the two never rewrite the
-# same step. The trombone comes last because that is where the value spells it; its 25° turn
-# cap is what keeps the load factor it coordinates from eating the floor's stall margin
+# as well, which is well defined for the same reason and one more: the builder confines the
+# barrier to the HARD on-final gate whenever a trombone is a member, and the trombone acts
+# only where that gate has not opened, so the two never rewrite the same step
+# (control/constraints/__init__.py; the soft gate alone was not that complement). The
+# trombone comes last because that is where the value spells it; its 15° turn cap is what
+# keeps the load factor it coordinates from eating the floor's stall margin
 # (control/constraints/trombone.py). No other combination is registered, and this vocabulary
 # is the only place a combination may be spelled.
 CONTROL_HOOK_BARRIER_TROMBONE = "barrier+trombone"

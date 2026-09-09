@@ -64,6 +64,19 @@ from γ = −1° to −10°, 93 to 200 m/s, and 16 km past the threshold. ``hard
 hard saturation AND the hard gate: a deployed filter has no partially-gated rows, and the
 soft pair is the C¹ training form of the same rule.
 
+``confine_to_hard_gate`` is what the composite sets when the trombone is a member. The two
+lateral modules must be COMPLEMENTARY — no step rewritten by both — and the trombone may
+engage anywhere the HARD gate has not yet opened on the flight
+(``control/constraints/trombone.py``, the hand-over rule). The soft gate is not that
+complement: its alignment shoulder is non-zero for 30–40° of misalignment and its lateral
+shoulder for a band outside the cone, so under ``soft`` the barrier used to blend a
+correction into steps the trombone then rewrote (measured, 2026-09-09 review A-4: 12 km
+back, 500 m right, 33° off course, 6 s hold — soft weight 0.148, barrier bank +0.112 rad,
+the trombone's own answer moved 0.7° because it read the barrier's coordinated load). With
+the flag the soft weight is multiplied by the hard gate: INSIDE the gate nothing changes
+(the standalone soft barrier to the bit), outside it the barrier is silent, and the flown
+command on every step is one module's answer.
+
 Closed-form single-constraint action projection (Dalal et al. 2018); α is the class-K
 rate of a control barrier function (Ames et al. 2019), in its discrete-time form
 (Agrawal & Sreenath 2017). Lateral: the glidepath window itself is left to the penalty (the
@@ -101,12 +114,17 @@ _DIAGNOSTIC_KEYS = (
 class BarrierFilter:
     needs_reference = False   # reads the hooked state only
 
-    def __init__(self, config: TSConfig, dynamics: dict[str, torch.Tensor], *, hard: bool):
+    def __init__(
+        self, config: TSConfig, dynamics: dict[str, torch.Tensor], *,
+        hard: bool, confine_to_hard_gate: bool = False,
+    ):
         self.runway_heading = dynamics["runway_heading_rad"]
         self.alpha = config.control_barrier_alpha
         self.heading_gain = config.control_barrier_heading_gain
         self.bank_lag_s = config.control_bank_time_constant_s
         self.hard = hard
+        # Set by the composite when a trombone is a member (module docstring, last paragraph).
+        self.confine_to_hard_gate = confine_to_hard_gate
         # ``[len(_DIAGNOSTIC_KEYS), B]``, on the device: the counts are kept PER ROW so a
         # prediction record can carry its own flight's shares. ``diagnostics`` sums them.
         self._counts: torch.Tensor | None = None
@@ -165,6 +183,10 @@ class BarrierFilter:
         else:
             bounded = soft_min(soft_max(bank, bank_min, SATURATION_SOFTNESS_RAD), bank_max, SATURATION_SOFTNESS_RAD)
         weight = on_final_weight(view, hard=self.hard).to(dtype)
+        if self.confine_to_hard_gate:
+            # Silent wherever the trombone may engage: the soft shoulders are outside the
+            # hard gate, and the hard gate is the trombone's complement.
+            weight = weight * on_final_weight(view, hard=True).to(dtype)
         filtered = (bank + weight * (bounded - bank)).clamp(min=-MAX_BANK_RAD, max=MAX_BANK_RAD)
         # Keep the vertical lift component the network paired with its load factor.
         coordinated = (load * torch.cos(bank) / torch.cos(filtered)).clamp(min=MIN_LOAD_FACTOR, max=MAX_LOAD_FACTOR)

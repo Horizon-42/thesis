@@ -499,7 +499,12 @@ prefix: `envelope`, `heads`, `conditioning`, `latent`, `basis_fit`,
 AND of the bank softness/active-change thresholds two modules now share; `composite` is how
 several modules become the one hook the rollout takes, and it refuses two modules that report a
 diagnostic under the same name. Barrier and trombone both write bank and load factor and still
-compose, because their gates are COMPLEMENTARY: no step is ever rewritten by both.
+compose, because their gates are MADE complementary by the builder: with a trombone in the
+value the barrier is built `confine_to_hard_gate=True` (its soft blend times the hard gate —
+inside the gate unchanged, outside it silent), and the trombone engages only where the hard
+gate has not opened, so no step is ever rewritten by both. The soft gate alone was NOT the
+complement: its 30–40° alignment shoulder is the trombone's admission band (2026-09-09
+review A-4, measured 0.112 rad of discarded barrier bank there).
 **`RolloutStateView.reference` is the hook-free schedule WHOLE** (`[B,N+1,7]`, one row per
 segment boundary, the anchor first) — not a lock-step state, because the questions that need
 it are look-ahead ones; it is the same tensor at every call, so a hook derives its table from

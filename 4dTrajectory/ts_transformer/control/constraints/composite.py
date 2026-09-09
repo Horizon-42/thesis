@@ -15,13 +15,18 @@ from the vocabulary.
 
 ``barrier+trombone`` and ``barrier+speed-floor+trombone`` add a module that writes bank and
 load as well, so the disjoint-channel argument alone does not cover them. What does is that
-the two lateral modules have COMPLEMENTARY GATES: the barrier acts only where the on-final
-gate says the aircraft is on the final, the trombone only where the predicted path is more
-than 30 deg off the runway course (strictly inside "the gate is closed"). No step is ever
-rewritten by both, so "the command flown" is still one module's answer and the order between
-them cannot change it. The trombone last is then a free choice made by the value's spelling,
-and it pays for it with a 25 deg turn cap, so the load factor it coordinates cannot raise the
-stall speed past the margin the floor just held (``control/constraints/trombone.py``).
+the two lateral modules have COMPLEMENTARY GATES, and the builder makes them so: the
+trombone may engage only where the HARD on-final gate has not opened on the flight, and a
+barrier composed with a trombone is built ``confine_to_hard_gate=True``, i.e. it acts only
+INSIDE that hard gate (under ``soft`` its blend is multiplied by the hard gate; inside the
+gate it is the standalone soft barrier to the bit). The soft gate alone was NOT the
+complement — its 30–40° alignment shoulder is exactly the band where the trombone is
+admitted, and there the barrier used to blend a correction the trombone then overwrote
+(2026-09-09 review, A-4). No step is now rewritten by both, so "the command flown" is one
+module's answer and the order between them cannot change it. The trombone last is then a
+free choice made by the value's spelling, and it pays for it with a 15 deg turn cap, so the
+load factor it coordinates cannot raise the stall speed past the margin the floor just held
+(``control/constraints/trombone.py``).
 
 **The hook-free reference rollout is a member of the composite, not a private trick of one
 module.** ``needs_reference`` is the OR of the members', so under
