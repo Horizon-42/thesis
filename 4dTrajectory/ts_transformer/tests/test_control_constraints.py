@@ -840,19 +840,22 @@ def test_the_three_hook_stack_is_bit_identical_on_a_flight_already_on_the_final(
 # ── trombone: what the surplus is measured against (L3.f) ────────────────────
 
 #: A vectored arrival's intended path: 20 km back and 8 km right, out to a downwind abeam
-#: 20 km wide, then a base leg diagonally in to the threshold. 40.3 km of path against a
-#: 21.5 km beeline — the shape L3.e's estimator read as 260 s of surplus that is not there.
-_VECTORED_LEGS = ((20_000.0, 8_000.0), (20_000.0, 20_000.0), (0.0, 0.0))
+#: 20 km wide, a base leg diagonally in to the extended centreline, then a 5 km final. 42.0 km
+#: of path against a 21.5 km beeline — the shape L3.e's estimator read as 284 s of surplus
+#: that is not there. The final leg is not decoration: a reference has to arrive ON the final
+#: to have crossed at all (`final_approach_geometry.threshold_crossing_index`), and reaching
+#: the threshold POINT at 45° to the course, as this fixture used to, is not a landing.
+_VECTORED_LEGS = ((20_000.0, 8_000.0), (20_000.0, 20_000.0), (5_000.0, 0.0), (0.0, 0.0))
 
 
 @pytest.mark.parametrize("offset_s", [0.0, 60.0])
 def test_the_trombone_sizes_the_surplus_against_the_path_the_network_intends_to_fly(offset_s):
     """L3.f, the whole of it: a vectored flight's own downwind is not surplus time.
 
-    The reference rollout is a dog-leg 40.3 km long; the beeline under it is 21.5 km. Given
+    The reference rollout is a dog-leg 42.0 km long; the beeline under it is 21.5 km. Given
     exactly the time that path needs, the aircraft is on schedule and there is nothing to
-    absorb — but `beeline` reads the 18.7 km the vectoring costs as time to spend, and asks
-    for 260 s of stretch on a flight that is not late by a second. That is L3.e's measured
+    absorb — but `beeline` reads the 20.5 km the vectoring costs as time to spend, and asks
+    for 284 s of stretch on a flight that is not late by a second. That is L3.e's measured
     failure (`tromboneDelayS` p50 391 s at the TRUE CTA, endpoint |xt| p95 10 km, 46 % of
     flights not reaching the threshold by T_cta) reproduced on one fixture, and
     `reference-rollout` is the estimator that does not have it: ~0 s at the true CTA, and
@@ -939,6 +942,22 @@ def test_the_trombone_counts_the_reference_path_to_the_threshold_and_says_when_t
     assert float(counted["hook_trombone_ref_path_m"]) == pytest.approx(20_000.0, rel=1e-9)
     assert float(counted["hook_trombone_ref_no_crossing"]) == 1.0
     assert float(counted["hook_trombone_delay_s"]) == pytest.approx(0.0, abs=1e-6)
+    # ...and a reference that flies PAST the plane without ever being on the final — 2 km
+    # wide of the centreline the whole way — is the same claim: no crossing, and a straight
+    # path has no detour. It is the case the plane-only rule could not produce (past the
+    # plane WAS a crossing to it), and the one that catches a cut and a path length ending
+    # at different points: the length runs to the last boundary, so the cut must too, or a
+    # straight line reports metres of detour that are not there.
+    wide = [(20_000.0, 2_000.0), (8_000.0, 2_000.0), (-2_000.0, 2_000.0), (-6_000.0, 2_000.0)]
+    hook = Trombone(config, _context(1), hard=True)
+    view = _trombone_view(d_m=20_000.0, xt_m=2_000.0, heading_error_rad=math.radians(60.0),
+                          remaining_s=20_000.0 / speed, speed=speed,
+                          reference_path=_reference_chart(wide, speed=speed))
+    hook(view, _command([0.0]), 0)
+    counted = hook.diagnostics()
+    assert float(counted["hook_trombone_ref_no_crossing"]) == 1.0
+    assert float(counted["hook_trombone_ref_path_m"]) == pytest.approx(
+        math.hypot(20_000.0, 2_000.0), rel=1e-9)
     # ...and a reference that stands still for a segment does not poison the batch: the
     # chord is a square root, whose gradient is infinite at zero, and the soft form
     # differentiates through the surplus this table feeds.
@@ -955,6 +974,55 @@ def test_the_trombone_counts_the_reference_path_to_the_threshold_and_says_when_t
         20_000.0 + trombone_module._DISTANCE_FLOOR_M, rel=1e-9)
 
 
+#: The downwind, which is where the plane-only cut went wrong (2026-09-09): the reference
+#: starts 3 km PAST the threshold and 8 km right of it, flies the reciprocal of the course
+#: out to 12 km back — passing ``d = 0`` abeam at its second boundary — then a base leg to the
+#: extended centreline and a 5 km final. 30.6 km of intended path against an 8.5 km beeline.
+_DOWNWIND_LEGS = ((-3_000.0, 8_000.0), (12_000.0, 8_000.0), (5_000.0, 0.0), (0.0, 0.0))
+
+
+def test_the_reference_path_runs_to_the_real_crossing_and_not_to_the_abeam_pass():
+    """A downwind passes the threshold PLANE 8 km abeam, and that is not where it lands.
+
+    The rule that read the plane alone took the first boundary past the plane — the second
+    one, 2.5 km into the downwind — and, since the anchor is ALREADY past it, cut on the
+    anchor itself: ``L_ref`` came out as zero, the detour with it, and the estimate fell back
+    to the aircraft's own 8.5 km beeline on a flight whose network intends 30.6 km. Given
+    exactly the time that intended path needs, a flight with nothing to absorb was told it
+    had 307 s to burn, which is the whole of L3.f's failure mode reappearing through the cut. With the crossing on the FINAL, ``L_ref`` is
+    the path the network means to fly and the surplus is zero.
+    """
+    points = _polyline(*_DOWNWIND_LEGS, per_leg=6)
+    path_m = _polyline_length_m(points)
+    d_m, xt_m = _DOWNWIND_LEGS[0]
+    speed = 72.0
+    direct = math.hypot(d_m, xt_m)
+    pace = max(_view_floor_mps(d_m=d_m, speed=speed), speed)
+    # The fixture is only worth anything if the downwind DOES pass the plane at a segment
+    # boundary — that is the row the plane-only rule cut on — and does it 8 km wide.
+    assert points[1][0] <= 0.0 < points[2][0] and points[1][1] == 8_000.0
+    assert path_m > 3.5 * direct
+    delays = {}
+    for reference in (TROMBONE_SURPLUS_BEELINE, TROMBONE_SURPLUS_REFERENCE_ROLLOUT):
+        config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
+                              trombone_surplus_reference=reference)
+        hook = Trombone(config, _context(1), hard=True)
+        view = _trombone_view(d_m=d_m, xt_m=xt_m, heading_error_rad=math.radians(180.0),
+                              remaining_s=path_m / pace, speed=speed,
+                              reference_path=_reference_chart(points, speed=speed))
+        hook(view, _command([0.0]), 0)
+        delays[reference] = hook.diagnostics()
+    counted = delays[TROMBONE_SURPLUS_REFERENCE_ROLLOUT]
+    assert float(counted["hook_trombone_ref_path_m"]) == pytest.approx(path_m, rel=1e-9)
+    assert float(counted["hook_trombone_ref_no_crossing"]) == 0.0
+    assert float(counted["hook_trombone_delay_s"]) == pytest.approx(0.0, abs=1e-6)
+    # The counterfactual, in code: a reference cut at the abeam pass is a straight leg, so
+    # its detour is zero and the estimate IS the beeline's — 307 s that are not there.
+    beeline_delay = float(delays[TROMBONE_SURPLUS_BEELINE]["hook_trombone_delay_s"])
+    assert beeline_delay == pytest.approx((path_m - direct) / pace, rel=1e-6)
+    assert beeline_delay > 300.0
+
+
 @pytest.mark.parametrize("late", [True, False])
 def test_the_estimators_agree_over_a_whole_rollout_on_a_flight_that_flies_its_beeline(late):
     """The axis must be a NO-OP where the network's own plan already IS the beeline.
@@ -968,11 +1036,19 @@ def test_the_estimators_agree_over_a_whole_rollout_on_a_flight_that_flies_its_be
     159 m out); and where the reference falls SHORT of the threshold, the metres it did not
     fly are read as surplus (measured on the on-time arm: 9.4 s of delay invented and 15
     engaged steps, against 0 and 0).
+
+    "Agree" is then asserted as agreement, key by key over the shared diagnostics, and not
+    only as each arm passing the same coarse conditions: this flight's reference is a
+    straight line, so every metre of detour the estimator claims here is a metre that is not
+    there. That is what caught the 2026-09-09 no-crossing cut — with the reference cut one
+    segment short of where its length was counted to, this arm reported 340 m of detour on a
+    straight path, and 340 m is invisible to every other assertion in this file.
     """
     d_m = xt_m = 10_000.0
     speed, segments = 72.0, 48
     direct = math.hypot(d_m, xt_m)
     pace = _fixture_pace_mps(d_m=d_m, speed=speed)
+    per_reference = {}
     for reference in (TROMBONE_SURPLUS_BEELINE, TROMBONE_SURPLUS_REFERENCE_ROLLOUT):
         config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
                               control_hook_saturation=HOOK_SATURATION_SOFT,
@@ -988,6 +1064,7 @@ def test_the_estimators_agree_over_a_whole_rollout_on_a_flight_that_flies_its_be
                                        dynamics["runway_heading_rad"])
         distance = torch.hypot(along[0], cross[0]).detach()
         counts = hook.per_flight_diagnostics()
+        per_reference[reference] = counts
         steps = float(counts[HOOK_STEPS_KEY][0])
         engaged = float(counts["hook_trombone_engaged_steps"][0])
         # This fixture's delay is 17 % of what its path needs, far inside the 41 % the 45°
@@ -1003,6 +1080,14 @@ def test_the_estimators_agree_over_a_whole_rollout_on_a_flight_that_flies_its_be
             assert engaged == 0.0, reference
             assert float(counts["hook_trombone_delay_s"][0]) / steps == pytest.approx(
                 0.0, abs=1e-6), reference
+    # ...and the two arms agree on every count they both report. The reference-only pair is
+    # the difference between them and is excluded by construction, not by exception.
+    beeline = per_reference[TROMBONE_SURPLUS_BEELINE]
+    rollout_ref = per_reference[TROMBONE_SURPLUS_REFERENCE_ROLLOUT]
+    assert set(rollout_ref) - set(beeline) == {
+        "hook_trombone_ref_path_m", "hook_trombone_ref_no_crossing"}
+    for key, value in beeline.items():
+        assert float(rollout_ref[key][0]) == pytest.approx(float(value[0]), abs=1e-9), key
 
 
 def test_the_reference_estimator_is_refused_where_no_module_and_no_rollout_can_serve_it():

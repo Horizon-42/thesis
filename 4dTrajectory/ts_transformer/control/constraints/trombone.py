@@ -159,8 +159,11 @@ own beeline ``D``, plus **the detour the NETWORK ITSELF still intends to fly** o
 
 — i.e. exactly the beeline surplus, less what the model was already going to spend on
 vectoring. ``L_ref`` is the hook-free reference rollout's remaining horizontal path from this
-segment's boundary, cut at its FIRST crossing of the threshold plane (or, when it never
-crosses, at the end of its schedule — ``hook_trombone_ref_no_crossing`` says which), and
+segment's boundary, cut where it FIRST crosses the threshold ON THE FINAL (the shared
+``final_approach_geometry.threshold_crossing_index`` — the plane ALONE is crossed abeam, on
+a downwind, which is what this rule was until 2026-09-09 and why it measured ~12 km of
+reference path on a 25 km approach; when the reference never crosses, the cut is the end of
+its schedule and ``hook_trombone_ref_no_crossing`` says so), and
 ``S_ref`` is the straight line from that same boundary to that same cut. The dog-leg that
 spends ``ΔL`` is unchanged, about the same base: ``cos θ = D / (D + ΔL)``. Under ``beeline``
 that base IS ``V_e·T_r`` and the code keeps that spelling exactly, so the default reproduces
@@ -216,7 +219,12 @@ from control.constraints.saturation import (
 from control.constraints.speed_floor import floor_speed
 from control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
-from final_approach_geometry import hard_aligned, runway_axes
+from final_approach_geometry import (
+    alignment_cosine,
+    hard_aligned,
+    runway_axes,
+    threshold_crossing_index,
+)
 
 #: The largest heading offset from the beeline the hook will hold. ``sec 45° = 1.41``, so it
 #: buys 41 % of extra path per metre of base — i.e. it BINDS once the delay to absorb exceeds
@@ -259,7 +267,7 @@ _DIAGNOSTIC_KEYS = (
 #: ``hook_steps``) IS the anchor's value — the LENGTH the surplus was sized against there
 #: (``D + detour``, which is the reference's own remaining path whenever it crosses at the
 #: threshold point, so ``tromboneDelayS = T_r − tromboneRefPathM / V_e`` reconstructs), and
-#: whether that reference ever reaches the threshold plane at all.
+#: whether that reference ever reaches the threshold on the final at all.
 _REFERENCE_DIAGNOSTIC_KEYS = (
     "hook_trombone_ref_path_m", "hook_trombone_ref_no_crossing",
 )
@@ -302,7 +310,7 @@ class Trombone:
         self._anchor_delay_s: torch.Tensor | None = None
         self._gate_seen: torch.Tensor | None = None
         # The detour the reference still intends at every segment start ``[B,N]`` and
-        # whether it ever crossed the threshold plane ``[B]``, derived once per rollout from
+        # whether it ever crossed on the final ``[B]``, derived once per rollout from
         # the hook-free trajectory; None under `beeline`, where nothing reads them.
         self._ref_detour_m: torch.Tensor | None = None
         self._ref_no_crossing: torch.Tensor | None = None
@@ -489,10 +497,12 @@ class Trombone:
         """Derive, once per rollout, the DETOUR the HOOK-FREE schedule still means to fly.
 
         ``state.reference`` is that schedule's chart at every segment BOUNDARY ``[B,N+1,7]``.
-        Cut it at its FIRST crossing of the threshold plane — interpolated inside the segment
-        that crosses, because a segment is tens of seconds and counting or dropping a whole
-        one is a kilometre either way — or, where it never crosses, at its last boundary, and
-        say which (``hook_trombone_ref_no_crossing``): the two are not the same claim.
+        Cut it where it FIRST crosses the threshold ON THE FINAL
+        (``final_approach_geometry.threshold_crossing_index``, shared with
+        ``forecast.cut_at_threshold_crossing``) — interpolated inside the segment that
+        crosses, because a segment is tens of seconds and counting or dropping a whole one is
+        a kilometre either way — or, where it never crosses, at its last boundary, and say
+        which (``hook_trombone_ref_no_crossing``): the two are not the same claim.
 
         The remaining path from boundary ``i`` to that cut is ``L_ref(i)``, the sum of the
         chords from ``i`` on; the straight line from the same boundary to the same cut is
@@ -514,38 +524,52 @@ class Trombone:
             )
         reference = state.reference.to(view.d.dtype)
         position = reference[..., :2]                       # [B, N+1, 2] chart (e, n)
-        d_ref, _cross_track = runway_axes(
-            position[..., 0], position[..., 1], self.runway_heading.to(view.d.dtype)
-        )
+        psi = self.runway_heading.to(view.d.dtype)
+        d_ref, xt_ref = runway_axes(position[..., 0], position[..., 1], psi)
+        step = position[:, 1:] - position[:, :-1]
         # The chord flown in each segment. Clamped BEFORE the root for the same reason
         # `direct` is: sqrt' is infinite at zero and one NaN gradient poisons the batch. A
         # segment shorter than a metre contributes nothing either way — at the deployed
         # ~5 s hold a segment is ~350 m — so the floor cannot change an answer.
-        chord = torch.sqrt(
-            (position[:, 1:] - position[:, :-1]).square().sum(-1)
-            .clamp(min=_DISTANCE_FLOOR_M**2)
-        )
+        chord = torch.sqrt(step.square().sum(-1).clamp(min=_DISTANCE_FLOOR_M**2))
         segments = chord.shape[1]
-        crossed = d_ref[:, 1:] <= 0.0
-        no_crossing = ~crossed.any(dim=1)
+        # WHERE the reference lands, from the one definition of it. The threshold PLANE
+        # alone is not a landing: a vectored downwind runs parallel to the course several
+        # kilometres abeam and passes ``d = 0`` out there, and cutting the path at that
+        # abeam point measured ``L_ref`` to the wrong end of it (2026-09-09: on L3.e's
+        # arms, ``tromboneRefNoCrossing`` 31.6 % and ~12 km of reference path on a 25 km
+        # approach). The direction the gate reads is the chord flown INTO each boundary —
+        # the path the reference means to fly, which is what this estimate is about.
+        first, _run_end, crossed = threshold_crossing_index(
+            d_ref[:, 1:], xt_ref[:, 1:],
+            alignment_cosine(step[..., 0], step[..., 1], psi),
+        )
+        no_crossing = ~crossed
         # The segment the crossing happens in, or `segments` (past the last) for a reference
         # that never gets there — which makes the whole schedule count, below.
-        first = torch.where(
-            no_crossing,
-            torch.full_like(d_ref[:, 0], segments, dtype=torch.int64),
-            crossed.to(torch.int64).argmax(dim=1),
-        )
+        first = torch.where(no_crossing, torch.full_like(first, segments), first)
         index = first.clamp(max=segments - 1).unsqueeze(1)
         before = d_ref[:, :-1].gather(1, index)
         after = d_ref[:, 1:].gather(1, index)
-        # Where in that segment ``d`` reaches zero. The denominator is floored for the rows
-        # this fraction is multiplied out of anyway (no crossing, or a segment that barely
-        # moves); a genuine crossing has ``before > 0 >= after``, so it never binds there.
-        # For a reference that never crosses, the ratio exceeds 1 and saturates, which puts
-        # the cut on its LAST boundary — the answer that case wants.
-        fraction = (
-            before / (before - after).clamp(min=_DISTANCE_FLOOR_M)
-        ).clamp(0.0, 1.0)
+        # Where in that segment ``d`` reaches zero. The denominator is floored for a segment
+        # that barely moves; the ordinary crossing has ``before > 0 >= after``, so it never
+        # binds there. A reference that crossed the PLANE earlier, off the final, arrives at
+        # its real crossing segment with ``before <= 0``: the ratio goes negative and clamps
+        # to 0, i.e. the cut is that segment's start, which is the earliest the on-final rule
+        # allows. A reference that never crosses is FORCED to 1 — its cut is the last
+        # boundary, which is where ``weight`` below already counts the schedule to, and the
+        # two must end at the same point or ``remaining − straight`` is a detour that is not
+        # there. (Under the plane-only rule this line was a saturation: no crossing meant no
+        # boundary past the plane, so ``before > 0`` and the ratio exceeded 1 on its own. The
+        # on-final rule broke that — an overshoot IS past the plane and still never on the
+        # final — and left a straight reference reporting ~one chord of invented detour at
+        # every step, which never burns down. Measured on the 48-segment fixture before the
+        # fix: 340 m of detour on a perfectly straight path.)
+        fraction = torch.where(
+            no_crossing.unsqueeze(1),
+            torch.ones_like(before),
+            (before / (before - after).clamp(min=_DISTANCE_FLOOR_M)).clamp(0.0, 1.0),
+        )
         pair = index.unsqueeze(-1).expand(-1, -1, 2)
         start = position[:, :-1].gather(1, pair)
         end = position[:, 1:].gather(1, pair)

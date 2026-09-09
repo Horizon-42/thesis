@@ -54,6 +54,7 @@ from final_approach_geometry import (
     membership,
     position_direction,
     runway_axes,
+    threshold_crossing_index,
 )
 from metrics import states_with_derived_velocity
 from prediction_outputs import ControlPrediction
@@ -1094,8 +1095,8 @@ def forecast_approaches(
 
     ``project_final`` names a corridor gate to clamp each state forecast into the
     final-approach corridor after truncation (``project_onto_final``); None = the
-    model's own output. ``truncate_at_threshold`` additionally cuts every forecast at its
-    first crossing of the threshold plane (:func:`cut_at_threshold_crossing`) — for any
+    model's own output. ``truncate_at_threshold`` additionally cuts every forecast where it
+    first crosses the threshold ON THE FINAL (:func:`cut_at_threshold_crossing`) — for any
     output kind, the control rollout included, which the fixed-time rule never reaches.
     """
     if cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
@@ -1188,7 +1189,7 @@ def truncate_at_threshold(forecast: Forecast, target_chart: np.ndarray) -> Forec
 
 
 def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forecast:
-    """Cut a forecast at its FIRST crossing of the landing threshold plane.
+    """Cut a forecast where it FIRST crosses the landing threshold on the final.
 
     L3.d's geometry readout is why this exists. With the speed floor holding the commanded
     speed up, a rollout that is asked to arrive late reaches the threshold EARLY, flies on
@@ -1197,16 +1198,24 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
     over the whole record is reading it. Cut there and the same arms are read on the
     approach proper: at +60 s, fully-flyable 1.35 % -> 48.9 % on the identical rollout.
 
-    The cut point is the closest horizontal approach to the target among the rows AT OR PAST
-    the threshold plane (``d <= 0`` in runway axes), scoped to the FIRST such run — "first"
-    so a rollout that wanders off and later passes near the threshold again is cut on its
-    real arrival, and "closest approach" so a laterally displaced crossing is cut where it
-    was nearest rather than a step early. A forecast whose rows never reach ``d <= 0`` never
-    landed: it is returned WHOLE and still says ``truncatedAtThreshold: false`` — cutting it
-    somewhere would invent an arrival, and the flag is what a reader checks. A forecast that
-    crosses on its LAST row is also returned whole, but with the flag TRUE: nothing needed
-    cutting and the record does end at the crossing, so the flag reads "this record ends at
-    the threshold" and "whole" is not evidence of "never got there".
+    WHERE it crosses is ``final_approach_geometry.threshold_crossing_index``, shared with the
+    trombone's reference path: the first row at or past the threshold plane (``d <= 0`` in
+    runway axes) that is also ON the final there — inside the ``on-final`` gate's membership
+    cone and aligned with the course. The plane alone is not the crossing: a vectored flight
+    passes ``d = 0`` on its DOWNWIND, several kilometres abeam, and this rule used to cut it
+    there (2026-09-09: 96.5 % of the vectored cuts more than 1 km from the threshold, median
+    ``|xt|`` 8.7 km at a median 1.75 km above it, against a straight-in ``|xt|`` p95 of 50 m).
+
+    The cut point is then the closest horizontal approach to the target within that first
+    crossing run — "first" so a rollout that wanders off and later passes near the threshold
+    again is cut on its real arrival, and "closest approach" so a laterally displaced
+    crossing is cut where it was nearest rather than a step early. A forecast that never
+    crosses on the final never landed: it is returned WHOLE and still says
+    ``truncatedAtThreshold: false`` — cutting it somewhere would invent an arrival, and the
+    flag is what a reader checks. A forecast that crosses on its LAST row is also returned
+    whole, but with the flag TRUE: nothing needed cutting and the record does end at the
+    crossing, so the flag reads "this record ends at the threshold" and "whole" is not
+    evidence of "never got there".
 
     ``final_time_s`` moves to the cut, which is the point: an early arrival stops being
     invisible in the CTA readout and becomes the ``final_time_error_s`` it always was. The
@@ -1218,32 +1227,52 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
     identity in general, and it is the shared reconstruction, not the arithmetic, that makes
     the ends meet.
 
-    On a fixed-time STATE forecast the postprocessor's own closest-approach truncation has
-    already run and also sets ``truncated_at_threshold``; the flag therefore means "this
-    record ends at the threshold", not "this rule cut it". Both rules mean the same thing
-    about the record, which is what a reader needs; only the whole/never-reached case is
-    exclusive to this one.
+    On a fixed-time STATE forecast the postprocessor's own closest-approach truncation
+    (:func:`truncate_at_threshold`) has already run and also sets ``truncated_at_threshold``.
+    That rule has no plane in it at all — it is the closest approach anywhere — so on a
+    vectored flight it stamps the flag on a record that ends kilometres abeam. Where this one
+    runs, IT owns the flag: the flag then answers "does this record end at the threshold
+    crossing", and a record with no crossing is returned whole with the flag CLEARED. Whether
+    the fixed-time cut happened stays recoverable — ``horizon_capped`` marks the records it
+    never reached — but only on a full/window STATE record, which is the only kind that rule
+    runs on; everywhere else both fields are false and the run's output kind is what tells
+    "control record left whole" from "state record cut at a closest approach that was not a
+    crossing".
     """
-    # The along-course distance back from the threshold, from the one definition of it, and
-    # the horizontal distance to the target from the one definition of THAT.
-    d = runway_axes(
-        torch.from_numpy(
-            np.ascontiguousarray(forecast.values[:, IDX["e"]] - series.target_chart[0])
-        )[None],
-        torch.from_numpy(
-            np.ascontiguousarray(forecast.values[:, IDX["n"]] - series.target_chart[1])
-        )[None],
-        torch.tensor([float(series.scenario.target.psi)], dtype=torch.float64),
-    )[0][0].numpy()
+    # The runway axes, from the one definition of them, about the target as the origin.
+    psi = torch.tensor([float(series.scenario.target.psi)], dtype=torch.float64)
+    e = torch.from_numpy(
+        np.ascontiguousarray(forecast.values[:, IDX["e"]] - series.target_chart[0])
+    )[None]
+    n = torch.from_numpy(
+        np.ascontiguousarray(forecast.values[:, IDX["n"]] - series.target_chart[1])
+    )[None]
+    d, xt = runway_axes(e, n, psi)
+    # The path's own direction at every row, from the POSITIONS and with the anchor standing
+    # in before the first — the gate's rule and `project_onto_final`'s call, because the
+    # velocity channels are free outputs a state model could steer the gate with.
+    anchor = torch.as_tensor(series.values[forecast.anchor], dtype=torch.float64)
+    step_e, step_n = position_direction(
+        e, n,
+        (anchor[IDX["e"]] - float(series.target_chart[0]))[None],
+        (anchor[IDX["n"]] - float(series.target_chart[1]))[None],
+    )
+    first_row, run_end, crossed = threshold_crossing_index(
+        d, xt, alignment_cosine(step_e, step_n, psi)
+    )
+    if not bool(crossed[0]):
+        # It never got onto the final. On a fixed-time STATE forecast the postprocessor's
+        # own closest-approach truncation has already run and set the flag; clearing it here
+        # is the point of the flag — under this switch it answers "does this record end at
+        # the threshold crossing", and a record that ends at a closest approach eight
+        # kilometres abeam does not. Nothing is lost: `horizon_capped` marks the fixed-time
+        # records that rule never reached, so whether it cut this one is still recoverable.
+        return replace(forecast, truncated_at_threshold=False)
+    first, end = int(first_row[0]), int(run_end[0])
+    # The horizontal distance to the target, from the one definition of THAT.
     distance = horizontal_distance_m(forecast.values, series.target_chart)
-    past = d <= 0.0
-    if not past.any():
-        return forecast
-    first = int(np.argmax(past))
-    run = past[first:]
-    end = len(past) if run.all() else first + int(np.argmin(run))
     cut = first + int(np.argmin(distance[first:end]))
-    if cut == len(past) - 1:
+    if cut == len(distance) - 1:
         # It reached the threshold on its last row: there is nothing to cut, but the record
         # DOES end at the crossing and must not read as one that never got there.
         return replace(forecast, truncated_at_threshold=True)
