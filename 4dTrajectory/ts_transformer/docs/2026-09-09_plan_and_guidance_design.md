@@ -31,43 +31,71 @@ experiments say this is the wrong division of labour:
 The pattern is clear: we are tuning a model that has to rediscover feasibility from data, and
 patching it where it fails. The alternative is to give the model only the part that needs learning.
 
+Relation to the current control-prediction model (decision (A), 2026-09-09): the same point-mass
+dynamics, bounded controls, rollout, actuator model, CTA conditioning, random anchors, quantile
+head and calibration are all kept. What changes is who chooses the controls: the guidance layer
+emits them from the plan, so the controls become an inspectable intermediate rather than the
+learning target. The thesis rule that intent is never an output is kept by construction (§3b).
+
 ## 2. The idea in one paragraph
 
 Split the problem in two. A learned **plan predictor** reads the aircraft's history (and the
-scheduler's inputs) and outputs a small set of **plan parameters**: where the flight joins the
-final, how much path it flies before that, where and to what speed it decelerates, and when it
-arrives. A deterministic **guidance layer** turns a plan into a trajectory that is feasible by
+scheduler's inputs) and outputs the **operating parameters** of the plan — when it arrives, how fast it flies, where and to
+what speed it decelerates, how high it captures the glidepath — and a distribution over the
+**route** (where it joins the final and how much path it flies before that), which is the
+controller's intent and is either assigned by the scheduler or kept as a distribution, never a
+point output. A deterministic **guidance layer** turns a plan into a trajectory that is feasible by
 construction: it stays in the LPV corridor, respects the stall margin and the thrust limit, absorbs
 extra time by lengthening the path before the final (never by slowing below the floor), and meets
 the assigned arrival time exactly. The network never touches bank or thrust directly. The
 scheduler is part of the loop: it assigns the arrival time (and, if it wants, the join point), and
 gets back a flyable reference and a calibrated arrival-time distribution.
 
-## 3. What the network predicts: the plan
+## 3. What the network predicts, and what it does not
 
-Each plan parameter has a definition, a range, and an extractor that reads it off an observed
-track (that extractor is the supervision). All of these extractors exist in the package or in the
-readouts written this week.
+A plan has two kinds of numbers, and the thesis rule "intent is never an output" decides where each
+kind lives. **Operating parameters** describe how the aircraft is flown; the network predicts them.
+**Route parameters** describe where the controller sends the aircraft; they are the controller's
+intent, so the network never commits to them as a point output: they are either assigned by the
+scheduler or represented only as a distribution (the latent fan or quantiles). The point reference
+the scheduler receives is always "the reference for the route the scheduler decided".
+
+Every parameter has a definition, a range, and an extractor that reads it off an observed track;
+the extractor is the supervision. All extractors exist in the package or in this week's readouts.
+
+### 3a. Operating parameters — predicted by the network (point + distribution)
 
 | parameter | meaning | range / units | extractor (supervision) |
 |---|---|---|---|
 | `T` | time from the anchor to the threshold | seconds, > 0 | the track's duration (as today) |
-| `d_join` | remaining path at which the track becomes established on the final | metres | `final_approach_geometry.truth_final_gate` (the on-final gate, used by every readout) |
-| `xt_join`, `side` | cross-track offset and side at the join, i.e. from which side the base leg comes | metres, {left, right} | the track's position at the gate opening |
-| `L_pre` | path length flown before the join | metres | arc length of the track up to `d_join` |
-| `d_decel`, `V_final` | remaining distance where the speed first drops below `V_target + 10 m/s`, and the final approach speed | metres, m/s | `run_ts_straight_in_residual_readout.decel_distance_km`; the crossing speed |
 | `V_mid` | the speed held on the segment before deceleration | m/s | median ground speed over 20–10 km remaining |
-| `h_profile` | the vertical intercept: the height at which the glidepath is captured | metres | the track's altitude at the gate opening |
+| `d_decel` | remaining distance where the speed first drops below `V_target + 10 m/s` | metres | `run_ts_straight_in_residual_readout.decel_distance_km` |
+| `V_final` | the final approach speed | m/s | the threshold-crossing speed (the observed speed gate's quantity) |
+| `h_capture` | the height at which the glidepath is captured | metres | the track's altitude when the on-final gate opens |
 
-Seven numbers per flight, all observable, all physically meaningful. The 32 × 3 control segments
-are replaced by these; the control-basis oracle of 2026-09-07 already showed that a 32-segment
-basis reproduces the truth to ~100–200 m, so a lower-dimensional parametrisation is not a loss of
-representational power as long as the guidance layer can fly it.
+Five numbers, all aircraft operating parameters in the thesis sense: how fast, where to slow, how
+high, how long. The network predicts each as a point and as a distribution (quantiles, the B-line
+head; or the latent fan of L2.g). `T` keeps its calibrated interval (B2).
 
-The network predicts a **distribution** over the plan, not a point: quantiles per parameter (the
-B-line head, which proved to be the one thing that improves arrival-time accuracy), or the latent
-sampler (the L2.g fan, whose nearest sample beats the point prediction on 92 % of flights). The
-median plan is the reference; the spread is the uncertainty the scheduler sees.
+### 3b. Route parameters — assigned by the scheduler, or a distribution; never a point output
+
+| parameter | meaning | range / units | extractor (for the distribution's supervision and for the oracle test) |
+|---|---|---|---|
+| `d_join` | remaining path at which the flight becomes established on the final | metres | `final_approach_geometry.truth_final_gate` (the on-final gate every readout uses) |
+| `side` | which side the base leg comes from | {left, right} | the sign of the cross-track offset at the gate opening |
+| `L_pre` | path length flown before the join | metres | arc length of the track up to `d_join` |
+
+Three numbers. In delivery they come from the scheduler (it decides the sequence, so it decides
+the join). When the scheduler has not decided, the model offers a **distribution** over them — the
+latent sampler (whose nearest-of-6 sample beats the point prediction on 92 % of flights) or
+quantiles — and the guidance layer flies each sample into a member of a fan. There is no committed
+point estimate of the route: that is the rule, and it is also what the data support (the
+programme found no way to predict the join from the aircraft's own history beyond a distribution).
+
+Together, 5 + 3 numbers per flight replace the 32 × 3 control segments. The control-basis oracle
+of 2026-09-07 showed that a 32-segment basis reproduces the truth to ~100–200 m, so a lower
+parametrisation is not a loss as long as the guidance layer can fly it (§9 step 2 measures that
+ceiling before anything is trained).
 
 ## 4. What the guidance layer does
 
@@ -96,13 +124,14 @@ things to verify, not things to hope for.
 
 ## 5. What the scheduler supplies and gets back
 
-- Supplies: the assigned arrival time (CTA), and optionally the join point (which side, which
-  distance) — both are decisions the scheduler makes anyway. The counterfactual scan showed the
+- Supplies: the assigned arrival time (CTA) and the route (`d_join`, `side`, and the pre-final length
+  it wants, or a delay to absorb) — decisions the scheduler makes anyway. If it assigns nothing, the
+  model returns the fan over routes and the arrival-time distribution, not a single guess. The counterfactual scan showed the
   model obeys an assigned time exactly and responds gradually to it; the plan-and-guidance layer
   keeps that property and adds feasibility.
-- Gets back: a flyable reference trajectory for the assigned time, the plan behind it (so the
-  scheduler can read where the aircraft will join and when it will slow down), and the arrival-time
-  distribution when no time is assigned (the B-line interval: ~30 s wide for straight-in traffic,
+- Gets back: a flyable reference trajectory for the assigned time and route, the operating
+  parameters behind it (when it will slow down, how fast, how high), and — when nothing is assigned —
+  the arrival-time distribution and the fan over routes (the B-line interval: ~30 s wide for straight-in traffic,
   ±70 s for vectored traffic until the join is decided).
 - The multi-aircraft demonstration in the plan (assign times to several arrivals, build references,
   check separation) becomes straightforward, because every reference is a plan the scheduler can
@@ -110,8 +139,9 @@ things to verify, not things to hope for.
 
 ## 6. Training
 
-- **Supervision**: the plan parameters extracted from each observed track. Direct regression (or
-  quantile / latent) on seven numbers, in their own units. No inverse-dynamics teacher, no imitation
+- **Supervision**: the operating parameters extracted from each observed track — direct regression
+  and quantiles on five numbers in their own units; the route parameters supervise only the
+  distribution head (latent or quantile), never a point head. No inverse-dynamics teacher, no imitation
   weight, no position-unit balancing. Bank fidelity is not a training target any more; it is a
   property of the guidance layer.
 - **Through the guidance layer or not**: not, at first. This week's evidence (L1.c, the hook
