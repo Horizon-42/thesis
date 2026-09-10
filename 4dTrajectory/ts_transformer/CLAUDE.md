@@ -909,6 +909,12 @@ fallbacks and the relabel tooling: `docs/ENGINEERING_NOTES.md`.
   go through `batch_contract.model_forward` with the context row.
 - **`StateOutputLayer.offset_mask` is a non-persistent buffer**; `load_checkpoint` drops the key
   if a checkpoint stored it. A buffer that IS learned scale stays persistent.
+- **Two bare ignore rules match package directories**: the root `.gitignore`'s `data` and
+  `4dTrajectory/.gitignore`'s `outputs` (meant for artifact directories) also matched the
+  package's `data/` and `outputs/`; both are re-included by name, and the §4.2 `outputs/`
+  modules went uncommitted for a day before anyone noticed (2026-09-10). A new group whose
+  name is also an artifact directory needs the same negation; `git status --ignored` is the
+  check, and a green suite in the worktree proves nothing about the commit.
 
 ## Where to go next
 
