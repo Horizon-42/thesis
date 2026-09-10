@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """4(a): read the latent model's SAMPLE fan as a distribution, by the B line's protocol.
 
-`run_ts_quantile_fan_readout.py` asks of a quantile fan: does the truth path lie closer to
+`run_ts.py quantile_fan_readout` asks of a quantile fan: does the truth path lie closer to
 the NEAREST leaf than to the single decode the arm would deliver? This runner asks exactly
 that of a latent arm's samples, so the latent fan and the quantile fan become the same
 deliverable measured the same way (programme report 2026-09-08, decision 4(a)). The
@@ -16,7 +16,7 @@ quantile fan::
     <arm>/modes/modeNN/    K draws from the same context-conditioned prior: the fan under test
     <arm>/random/modeNN/   K N(0, I) draws — latents the prior did NOT choose — decoded by
                            the same checkpoint: the CONTROL
-    <arm>/shuffled/        the shuffled-z diagnostic (read by run_ts_latent_readout.py)
+    <arm>/shuffled/        the shuffled-z diagnostic (read by run_ts.py latent_readout)
 
 Per `approach_difficulty.strata_masks` stratum this prints, for the prior fan and for the
 random fan alike:
@@ -39,7 +39,7 @@ This is a readout, not a coverage guarantee: K trajectories are not a distributi
 trajectories.
 
     conda activate aeroviz
-    python run_ts_latent_fan_readout.py --arm <pred_dir> --json <out>/latent_fan.json
+    python run_ts.py latent_fan_readout --arm <pred_dir> --json <out>/latent_fan.json
 """
 
 from __future__ import annotations
@@ -47,21 +47,16 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+from ts_transformer.experiments.support import REPO_ROOT
 
 import ts_transformer.geometric_metrics as gm  # noqa: E402
 from ts_transformer.approach_difficulty import strata_masks  # noqa: E402
 # One implementation of "what a leaf contributes to a fan readout" and of the
 # chamfer-to-nearest-leaf cell, shared with the B line's quantile fan.
-from run_ts_quantile_fan_readout import (  # noqa: E402
+from ts_transformer.experiments.quantile_fan_readout import (  # noqa: E402
     FAN_REQUIRED_FIELDS,
     cell,
     geometry_cell,
@@ -71,7 +66,7 @@ from run_ts_quantile_fan_readout import (  # noqa: E402
 )
 # ...and one definition of where the samples live, shared with the latent readout whose
 # minADE_K this cross-checks.
-from run_ts_latent_readout import mode_dirs  # noqa: E402
+from ts_transformer.experiments.latent_readout import mode_dirs  # noqa: E402
 
 RESULT_SCHEMA = "ts-latent-fan-readout-v1"
 
@@ -143,7 +138,7 @@ def readout(arm: Path, *, geometry_truth: str) -> dict:
         if control_leaves else None
     )
     spread = endpoint_spread_m(prior["endpoint_en"])
-    # minADE_K over {top-1, modes} — the definition run_ts_latent_readout.py reports, so the
+    # minADE_K over {top-1, modes} — the definition run_ts.py latent_readout reports, so the
     # two artifacts are comparable row for row.
     min_ade = np.minimum(top1_ade, prior["ade_m"].min(axis=0))
     prior_nearest = prior["chamfer_m"].min(axis=0)
@@ -242,7 +237,7 @@ def render(payload: dict) -> str:
         f"chamfer to the NEAREST of the {modes} leaves; p<top1 / r<top1 = share of flights "
         "the nearest leaf beats top-1 on; spread = p50 of the largest pairwise distance "
         "between two prior endpoints; ADE columns are means, minADE over {top-1, modes} — "
-        "the same definition as run_ts_latent_readout.py, and a cross-check against it.",
+        "the same definition as run_ts.py latent_readout, and a cross-check against it.",
         verdict(payload),
     ]
     return "\n".join(lines) + "\n"

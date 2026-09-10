@@ -25,7 +25,7 @@ Development scope: the checkpoint's validation split only; the co-temporal conte
 is the development roster (train + validation) and only landings BEFORE the ego flight's
 terminal-ring entry time.
 
-    python run_ts_runway_hypotheses.py --checkpoint <ckpt> --airport KRDU \
+    python run_ts.py runway_hypotheses --checkpoint <ckpt> --airport KRDU \
         --output-dir 4dTrajectory/outputs/KRDU/experiments/runway_hypotheses_20260903/A_seed1337
 """
 
@@ -34,7 +34,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from collections import Counter
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -42,14 +41,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import torch
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
+from ts_transformer.experiments.support import REPO_ROOT
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
-for path in (TS_DIR.parent, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 from ts_transformer.approach_difficulty import STRAIGHT_TORTUOSITY, STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED  # noqa: E402
 from ts_transformer.approach_difficulty import approach_difficulty  # noqa: E402

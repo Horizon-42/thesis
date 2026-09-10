@@ -8,7 +8,7 @@ runner turns them into an interval with a MEASURED coverage, per difficulty stra
 stores the result beside the checkpoint so `predict` can stamp it on every record::
 
     conda activate aeroviz
-    python run_ts_eta_calibration.py \\
+    python run_ts.py eta_calibration \\
         --checkpoint 4dTrajectory/outputs/KRDU/experiments/<campaign>/<arm>/checkpoint.pt \\
         --out 4dTrajectory/outputs/KRDU/experiments/<campaign>/<arm>_calibration
 
@@ -63,13 +63,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+from ts_transformer.experiments.support import REPO_ROOT
 
 from ts_transformer.approach_difficulty import approach_difficulty  # noqa: E402
 from ts_transformer.calibration import (  # noqa: E402
@@ -84,7 +79,7 @@ from ts_transformer.forecast import default_anchor  # noqa: E402
 from ts_transformer.outputs.control.forecast import duration_quantile_predictions  # noqa: E402
 from ts_transformer.io_utils import file_sha256  # noqa: E402
 from ts_transformer.models import resolve_device  # noqa: E402
-from run_ts_anytime_curve import Grid, cohort_series, load_arm  # noqa: E402
+from ts_transformer.experiments.anytime_curve import Grid, cohort_series, load_arm  # noqa: E402
 
 RESULT_SCHEMA = "ts-eta-calibration-b2-v1"
 CALIBRATION_INSTRUMENT = "the ETA calibration"

@@ -23,7 +23,7 @@ horizontal RMS and the decel offsets are systematically signed, the residual is 
 deceleration SCHEDULE (where and how fast), a supervision problem, not an intent problem;
 if vertical_m dominates, it is the height profile; if neither, it is scatter.
 
-    python run_ts_straight_in_residual_readout.py \
+    python run_ts.py straight_in_residual_readout \
         native32=4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32_pred_val \
         L3_cta=4dTrajectory/outputs/KRDU/experiments/l3_cta_20260907/L3_cta_pred_val --json out.json
 """
@@ -32,18 +32,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
-import sys
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (REPO_ROOT, REPO_ROOT / "geokit" / "src", TS_DIR.parent, TS_DIR / "docs"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-import compare_frame_arms as cfa  # noqa: E402
+import ts_transformer.docs.compare_frame_arms as cfa  # noqa: E402
 import ts_transformer.geometric_metrics as gm  # noqa: E402
 from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
 

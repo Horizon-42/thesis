@@ -63,9 +63,9 @@ import ts_transformer.outputs.control.loss.fixed_dt as fixed_dt_loss_module  # n
 import ts_transformer.objective as objective  # noqa: E402
 import ts_transformer.outputs.control.loss.objective as control_objective  # noqa: E402
 import ts_transformer.outputs.control.strategy as control_strategy  # noqa: E402
-import run_ts_history_ablation as history_ablation  # noqa: E402
-import run_ts_pipeline as pipeline_module  # noqa: E402
-import run_ts_predictability_report as predictability_report  # noqa: E402
+import ts_transformer.experiments.history_ablation as history_ablation  # noqa: E402
+import ts_transformer.experiments.pipeline as pipeline_module  # noqa: E402
+import ts_transformer.experiments.predictability_report as predictability_report  # noqa: E402
 import ts_transformer.train as train_module  # noqa: E402
 import ts_transformer.validation as validation  # noqa: E402
 from ts_transformer.arc_length_geometry import (  # noqa: E402

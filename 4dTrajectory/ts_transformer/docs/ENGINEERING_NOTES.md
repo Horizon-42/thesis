@@ -66,7 +66,7 @@ Everything below is serialised into every checkpoint.
   runway course, tan GPA, FAF distance) — `dataset.batch()` puts it in the context slot for
   state recipes, `forecast` builds it per series, and the `enu` chart is REQUIRED
   (`TSConfig` refuses the others). Diagnostic scripts that call `model(x)` directly
-  (`batch_benchmark`, `run_ts_overfit_diagnostic`, `run_ts_predictability_report`) cannot run a
+  (`batch_benchmark`, `experiments.overfit_diagnostic`, `experiments.predictability_report`) cannot run a
   corridor-bounded checkpoint; go through `batch_contract.model_forward` with the context.
 - **The procedure penalty on the CONTROL rollout (2026-09-05, `control_procedure_20260905`,
   simple-v3, one seed, KRDU + KSJC, openap-direct cohort — NOT the state campaign's flight

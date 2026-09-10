@@ -36,10 +36,10 @@ to `archive/oracle_teacher_2026_08/` in T2. What is left in the module is
 file is cheap, but the split-discipline it documents ("open exactly one outer-train flight,
 never val/test") is worth keeping in view while the capacity diagnostics are being reworked.
 
-## ts_transformer: run_ts_pipeline's flags no longer match the ones it emits (2026-09-07)
+## ts_transformer: experiments.pipeline's flags no longer match the ones it emits (2026-09-07)
 
 **Verified**: T3-19 renamed fifteen `ts_transformer` flags to the `TSConfig` field each sets.
-`run_ts_pipeline.py` emits two of them (`--control-state-supervision-clock`,
+`run_ts.py pipeline` emits two of them (`--control-state-supervision-clock`,
 `--control-rollout-integrator-dt-s`) but keeps its own older names
 (`--control-state-clock`, `--control-rollout-dt`) on its own CLI, with a comment at the
 emission site saying so.
@@ -128,7 +128,7 @@ change.
 - `test_ts_pipeline.py` — 11 failures, all downstream of the same cause:
   `TrainingPlan.cv_reuse_error()` returns `"one or more lateral-pass eligibility rosters are
   missing"` where the tests expect `None`. The fixtures do not create the eligibility
-  rosters that `run_ts_pipeline` now requires.
+  rosters that `experiments.pipeline` now requires.
 - `test_download_landings.py::test_download_reuses_interrupted_checkpoint_start_for_cache_keys` — 1.
 
 Separately, `4dTrajectory/optimization/collocation/tests/test_optimizer.py::
@@ -289,7 +289,7 @@ future variable-N resample does not silently change the metric's meaning.
 ## 13. Eleven `test_ts_pipeline.py` reuse-guard tests fail at HEAD: fixtures predate the roster requirement
 
 **Verified** (2026-08-24, while running the fleet reclassify). `TrainingPlan.cv_reuse_error`
-and `checkpoint_reuse_error` in `run_ts_pipeline.py` require every airport's
+and `checkpoint_reuse_error` in `run_ts.py pipeline` require every airport's
 `lateral_pass_eligibility.json` beside its arrival manifest, but the hermetic tests
 (`monkeypatch HARVEST_ROOT` → tmp dir) build their harvest fixture with `_manifest(...)`
 only — no roster — so 11 tests fail with "one or more lateral-pass eligibility rosters
@@ -346,7 +346,7 @@ the pre-2026-08-24 label grammar (`'ENU' in label`, `'loss      : final_time=1, 
 `lateral_pass_eligibility.json` (the roster check was added later and fires first).
 `test_download_landings.py::test_download_reuses_interrupted_checkpoint_start_for_cache_keys`
 (1): expects a checkpoint start time that comes back `None`. None of these is exercised by
-`run_ts_frame_ablation.py`, which calls `__main__.py` directly.
+`run_ts.py frame_ablation`, which calls `__main__.py` directly.
 
 **Suggested:** rewrite the label assertions against `run_naming.run_display_name`, give the
 reuse-check fixtures a roster (or assert the roster message first), and re-check the
@@ -364,7 +364,7 @@ cite a `docs/` script as their data producer (`closure_output.py`, `config.py`,
 
 Done so far: `strata_masks` + `STRAIGHT_TORTUOSITY` moved into `approach_difficulty.py`
 (one source, `compare_frame_arms` imports them); `tests/conftest.py` added; the L0 basis
-fit went in as `control/basis_fit.py` (`control/oracle/basis.py` until T2) + `run_ts_control_basis_oracle.py` with tests.
+fit went in as `control/basis_fit.py` (`control/oracle/basis.py` until T2) + `run_ts.py control_basis_oracle` with tests.
 
 Remaining: the migration table in `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md`
 §七 (hubs first: `p1_closure_oracle`, `compare_frame_arms`, `score_control_arms`), and the
@@ -540,9 +540,9 @@ solve of one fails v9 by 30–70 kt. Feed the floor's reference and the target V
 `aircraft.reference_speeds` (the same table the gate reads) when the optimizer is next
 re-solved; do not widen the gate (`THRESHOLD_SPEED_GATE.md` §7).
 
-## 19. ~~`run_ts_control_basis_oracle.py --checkpoint` fingerprints the data without the eligibility roster~~ FIXED (`e8df12f`)
+## 19. ~~`run_ts.py control_basis_oracle --checkpoint` fingerprints the data without the eligibility roster~~ FIXED (`e8df12f`)
 
-**Verified** (2026-09-07, hit while building `run_ts_anytime_curve.py`): the teacher-table mode
+**Verified** (2026-09-07, hit while building `run_ts.py anytime_curve`): the teacher-table mode
 called `require_matching_data_provenance(payload, arrival_data_provenance(manifests))` with no
 `eligibility_rosters`, while every current checkpoint's `data_provenance` is
 `ts-arrival-data-v3-eligibility-bound` and carries the pre-split lateral-pass roster. The
@@ -556,7 +556,7 @@ blocker for **L5.a**, whose documented fit died at the check before fitting anyt
 **Fixed 2026-09-07 by `e8df12f`**: the rule has one owner,
 `data_provenance.checkpoint_data_provenance(payload, manifests)` — the roster is read iff the
 checkpoint recorded one, so a checkpoint trained before the sidecar existed is not handed one.
-The fitter uses it for both the check and the table's stamp; `run_ts_anytime_curve.py` calls the
+The fitter uses it for both the check and the table's stamp; `run_ts.py anytime_curve` calls the
 same helper (its own copy of the rule was deleted when `dev-l2` merged). Kept here as the record
 of why the helper exists: **a new replaying runner that calls `arrival_data_provenance` directly
 reintroduces this**, and a test that patches that function is what hid it the first time.
@@ -594,7 +594,7 @@ in the frontend legend. That is exact at the L−1 anchor — the record's serie
 arrival window and the anchor is `seq_len − 1`, so "everything before the anchor" IS the
 `seq_len`-sample input window — and it is what every batch published before 2026-09-07 was.
 
-A re-anchored anytime record (`run_ts_anytime_curve.py --write-records`) breaks the
+A re-anchored anytime record (`run_ts.py anytime_curve --write-records`) breaks the
 coincidence: at the 12 km bin the anchor is sample ~207–216 of a 60-sample lookback, so the
 faded line draws ~430 s of approach under a name that claims the model was conditioned on all
 of it. Nothing is mis-PLACED (the anchor, the forecast and the reference are all on the right
@@ -633,8 +633,8 @@ Plus 283 rows unmatched anywhere (mostly foreign registrations: Mexico, Ireland,
 `config.py` so `dataset` could reserve a share of its random draws for L−1 without an import
 cycle. It is now importable everywhere `config` already is, but the literal `config.seq_len - 1`
 is still the spelled-out L−1 anchor in `anchor_grid.py:154`, `approach_clustering/cli.py:71`,
-`run_ts_anytime_curve.py:743`, `run_ts_predictability_report.py` (×4),
-`run_ts_clock_attribution.py:115` and `run_ts_control_capacity_ceiling.py:233` — every one of
+`run_ts.py anytime_curve:743`, `run_ts.py predictability_report` (×4),
+`run_ts.py clock_attribution:115` and `run_ts.py control_capacity_ceiling:233` — every one of
 which already imports `config`. A pure rename, no behaviour, at THOSE sites.
 
 **Corrected 2026-09-09 (package review A-2)**: the `train.py`, `fixed_anchor_validation.py` and

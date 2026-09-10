@@ -19,7 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import run_ts_pipeline as pipeline
+import ts_transformer.experiments.pipeline as pipeline
+from ts_transformer.experiments.support import parse_airports
+from ts_transformer.io_utils import write_json_atomic
 
 FRAMES = ("enu", "runway-aligned")
 RESULT_SCHEMA = "ts-coordinate-frame-ablation-v5-flight-epoch-airport-macro"
@@ -41,12 +43,6 @@ def _sha256(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
-
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temporary.replace(path)
 
 
 def refuse_repeated_test(result_path: Path) -> None:
@@ -255,12 +251,6 @@ def _run(label: str, command: list[str], *, dry_run: bool) -> None:
         subprocess.run(command, cwd=pipeline.REPO_ROOT, check=True)
 
 
-def _parse_airports(raw: str) -> tuple[str, ...]:
-    airports = tuple(sorted({token.strip().upper() for token in raw.split(",") if token.strip()}))
-    if not airports:
-        raise argparse.ArgumentTypeError("--airports requires at least one ICAO code")
-    return airports
-
 
 def _parse_outputs(raw: str) -> tuple[str, ...]:
     outputs = tuple(token.strip() for token in raw.split(",") if token.strip())
@@ -273,7 +263,7 @@ def _parse_outputs(raw: str) -> tuple[str, ...]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--airports", type=_parse_airports, default=None,
+    parser.add_argument("--airports", type=parse_airports, default=None,
                         help="comma-separated fixed airport roster; default: all discovered K-airports")
     parser.add_argument("--model", choices=pipeline.MODELS, default="itransformer")
     parser.add_argument("--n-segments", type=int, default=None,
@@ -434,7 +424,7 @@ def main() -> int:
             "outer_test_evaluated": False,
         },
     }
-    _write_json_atomic(result_path, decision)
+    write_json_atomic(result_path, decision)
     print(f"\n✓ selected {winner} from outer-train CV only: {scores}")
 
     label, command = selected.train_step(use_best_config=True)
@@ -447,7 +437,7 @@ def main() -> int:
         "sha256": _sha256(selected.checkpoint),
         "split_sha256": checkpoint_metadata["split_sha256"],
     }
-    _write_json_atomic(result_path, decision)
+    write_json_atomic(result_path, decision)
 
     if not args.release_test:
         print(f"✓ final model trained; outer-test remains untouched. Decision: {result_path}")
@@ -459,7 +449,7 @@ def main() -> int:
     decision["status"] = "testing"
     decision["test_started_at"] = _utc_now()
     decision["leakage_guard"]["outer_test_evaluation_started"] = True
-    _write_json_atomic(result_path, decision)
+    write_json_atomic(result_path, decision)
     test_outputs: dict[str, Any] = {}
     for airport in airports:
         prediction = pipeline.PredictionPlan(
@@ -478,7 +468,7 @@ def main() -> int:
     decision["tested_at"] = _utc_now()
     decision["test_outputs"] = test_outputs
     decision["leakage_guard"]["outer_test_evaluated"] = True
-    _write_json_atomic(result_path, decision)
+    write_json_atomic(result_path, decision)
     print(f"\n✓ ablation complete; test was exposed only after selection: {result_path}")
     return 0
 

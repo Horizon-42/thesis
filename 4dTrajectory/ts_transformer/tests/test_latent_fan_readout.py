@@ -24,7 +24,7 @@ from ts_transformer.approach_difficulty import (
     STRATUM_VECTORED,
 )
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
-from run_ts_latent_fan_readout import TOP1_REFERENCE_KEY, main, readout
+from ts_transformer.experiments.latent_fan_readout import TOP1_REFERENCE_KEY, main, readout
 
 TARGET = {"lat": 35.0, "lon": -78.0, "alt": 100.0,
           "V": 75.0, "psi": 0.0, "gamma": 0.0, "m": 66_300.0}
@@ -197,7 +197,7 @@ def test_a_directory_without_modes_is_refused(tmp_path: Path):
 def test_the_endpoint_spread_is_the_widest_pair():
     """The three pairs are 5, 10 and 9.85 m apart: the spread is the widest of them, not
     the distance from the first leaf to the furthest."""
-    from run_ts_latent_fan_readout import endpoint_spread_m
+    from ts_transformer.experiments.latent_fan_readout import endpoint_spread_m
 
     endpoints = np.array([[[0.0, 0.0]], [[3.0, 4.0]], [[-6.0, 8.0]]])   # [K=3, F=1, 2]
     assert endpoint_spread_m(endpoints)[0] == pytest.approx(10.0)

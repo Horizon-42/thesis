@@ -19,15 +19,10 @@ import hashlib
 import html
 import json
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/aeroviz-ts-report-matplotlib")
 
@@ -39,7 +34,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from sklearn.neighbors import NearestNeighbors  # noqa: E402
 
-import run_ts_pipeline as pipeline  # noqa: E402
+import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
@@ -59,12 +54,14 @@ from ts_transformer.fixed_anchor_validation import (  # noqa: E402
 )
 from ts_transformer.metrics import raw_kinematic_metrics  # noqa: E402
 from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.io_utils import file_sha256  # noqa: E402
 from ts_transformer.train import (  # noqa: E402
     FIT_EVALUATION_NAME,
     FIT_EVALUATION_SCHEMA,
     load_checkpoint,
     usable_series,
 )
+from typing import Iterable  # noqa: F401  (read off this module by its tests / sibling runners)
 
 REPORT_SCHEMA = "ts-pooled-predictability-report-v5-dense-control-validation-only"
 DEFAULT_REMAINING_TIME_EDGES_S = (0.0, 30.0, 60.0, 120.0, 180.0, 300.0, 450.0, 600.0)
@@ -87,13 +84,6 @@ def parse_checkpoint(value: str) -> tuple[str, Path]:
         raise argparse.ArgumentTypeError("--checkpoint requires LABEL=/path/to/checkpoint.pt")
     return label.strip(), Path(raw_path).expanduser().resolve()
 
-
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def classify_trajectory(future_positions: np.ndarray) -> str:

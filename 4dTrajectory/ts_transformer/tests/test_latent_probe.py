@@ -1,4 +1,4 @@
-"""`run_ts_latent_probe.py`: the direct measurement of a checkpoint's two densities.
+"""`experiments/latent_probe.py`: the direct measurement of a checkpoint's two densities.
 
 What must not drift, because each would make the table read like a working latent:
 
@@ -24,8 +24,8 @@ from pathlib import Path
 import pytest
 import torch
 
-import run_ts_anytime_curve as replay
-import run_ts_latent_probe as probe
+import ts_transformer.experiments.anytime_curve as replay
+import ts_transformer.experiments.latent_probe as probe
 from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -88,7 +88,7 @@ def latent_checkpoint(tmp_path_factory):
 def _patch_data_plane(monkeypatch, flights, tmp_path):
     """The shared replay loader's three data-plane seams, on the synthetic flights.
 
-    Patched on `run_ts_anytime_curve` because that is where `load_arm` / `cohort_series`
+    Patched on `experiments.anytime_curve` because that is where `load_arm` / `cohort_series`
     resolve them — the probe reuses those rather than owning a second rebuild.
     """
     manifest = tmp_path / "manifest.json"

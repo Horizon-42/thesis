@@ -105,7 +105,7 @@ MIN_CALIBRATION_FLIGHTS = 30
 FAN_INTERVAL_ALPHA = min(CONFORMAL_ALPHAS)
 
 #: Where `predict --cta-from-quantiles` writes the fan, and how one leaf is named. The
-#: directory grammar lives HERE rather than in `cli.predict` so `run_ts_quantile_fan_readout`
+#: directory grammar lives HERE rather than in `cli.predict` so `experiments.quantile_fan_readout`
 #: can read a fan without importing the CLI (and torch with it); a readout that guessed the
 #: spelling would report an empty fan as a missing one.
 QUANTILE_DIR_NAME = "quantiles"
@@ -222,7 +222,7 @@ CALIBRATION_HALF_RULE = (
 #: The SAME cut under a probe seed. A deployed coverage that sits well below its own mirror
 #: is either a real property of the cohort or an artefact of the one half rule that was ever
 #: tried, and the two cannot be told apart without re-cutting the halves — so
-#: `run_ts_eta_calibration.py --half-seed` exists, refuses to run without ``--readout-only``,
+#: `run_ts.py eta_calibration --half-seed` exists, refuses to run without ``--readout-only``,
 #: and the table it produces says here, in its own bytes, that it is not deployable.
 PROBE_HALF_RULE = (
     "PROBE, NOT THE DEPLOYED RULE: sort flights by "

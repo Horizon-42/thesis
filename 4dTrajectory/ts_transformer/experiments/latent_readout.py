@@ -27,8 +27,8 @@ the L2.e' arms died on (0.05–0.2 σ against a gate of one — z was the prior'
 noise) and it is readable at epoch 1, so `--history` works ALONE, before the arm has
 predicted anything. A run trained before those diagnostics existed prints the keys it has.
 
-    python run_ts_latent_readout.py --history <run>/history.json          # training side
-    python run_ts_latent_readout.py --arm <pred_dir> [--control <pred_dir>]
+    python run_ts.py latent_readout --history <run>/history.json          # training side
+    python run_ts.py latent_readout --arm <pred_dir> [--control <pred_dir>]
                                     [--history <run>/history.json] [--json out.json]
 """
 
@@ -37,15 +37,10 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+from ts_transformer.experiments.support import REPO_ROOT
 
 from ts_transformer.approach_difficulty import strata_masks  # noqa: E402
 # One ruler for the displacement gate and one for an active unit, both defined beside the

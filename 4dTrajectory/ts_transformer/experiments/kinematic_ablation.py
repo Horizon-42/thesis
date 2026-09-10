@@ -15,23 +15,18 @@ import argparse
 import csv
 import gc
 import hashlib
-import json
 import math
 import os
-import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
+from ts_transformer.experiments.support import REPO_ROOT
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
-import run_ts_pipeline as pipeline  # noqa: E402
+import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.config import DEFAULT_AIRCRAFT_TYPE, MODELS, TSConfig  # noqa: E402
 from ts_transformer.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
 from ts_transformer.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
@@ -40,16 +35,13 @@ from ts_transformer.export import accuracy_block, observed_series_metrics  # noq
 from ts_transformer.forecast import forecast_approach  # noqa: E402
 from ts_transformer.metrics import RAW_KINEMATIC_METRIC_KEYS  # noqa: E402
 from ts_transformer.train import fit_model, usable_series  # noqa: E402
+from ts_transformer.experiments.support import parse_airports
+from ts_transformer.experiments.support import series_digest
+from ts_transformer.io_utils import write_json_atomic
 
 RESULT_SCHEMA = "ts-kinematic-weight-ablation-v3-robust-physics-capacity-grid"
 DEFAULT_WEIGHTS = (0.0, 0.1, 0.3, 1.0, 3.0, 10.0)
 
-
-def _parse_airports(raw: str) -> tuple[str, ...]:
-    airports = tuple(sorted({token.strip().upper() for token in raw.split(",") if token.strip()}))
-    if not airports:
-        raise argparse.ArgumentTypeError("--airports requires at least one ICAO code")
-    return airports
 
 
 def _parse_weights(raw: str) -> tuple[float, ...]:
@@ -89,10 +81,6 @@ def _parse_d_models(raw: str) -> tuple[int, ...]:
         raise argparse.ArgumentTypeError("--d-model-candidates must be positive")
     return tuple(dict.fromkeys(values))
 
-
-def _series_digest(series: Sequence[FlightSeries]) -> str:
-    payload = "\n".join(sorted(item.dataset_id for item in series)).encode()
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _key_digest(keys: Sequence[str]) -> str:
@@ -188,12 +176,6 @@ def _validation_accuracy(
         overlap.append(observed_series_metrics(item, forecast))
     return accuracy_block(overlap)
 
-
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temporary.replace(path)
 
 
 def write_reports(output_dir: Path, result: dict[str, Any]) -> None:
@@ -441,8 +423,8 @@ def run_ablation(
             "validation_per_airport": None if full_outer_split else val_per_airport,
             "train_flights": len(train_sample),
             "validation_flights": len(val_sample),
-            "train_sha256": _series_digest(train_sample),
-            "validation_sha256": _series_digest(val_sample),
+            "train_sha256": series_digest(train_sample),
+            "validation_sha256": series_digest(val_sample),
         },
         "outer_split": {
             "train": len(outer_split_keys["train"]),
@@ -458,8 +440,8 @@ def run_ablation(
         "candidates": candidates,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
-    _write_json_atomic(output_dir / "kinematic_weight_ablation.json", result)
-    _write_json_atomic(output_dir / "best_kinematic_config.json", {
+    write_json_atomic(output_dir / "kinematic_weight_ablation.json", result)
+    write_json_atomic(output_dir / "best_kinematic_config.json", {
         "n_segments": selected["n_segments"],
         "d_model": selected["d_model"],
         "d_ff": selected["d_model"] * 2,
@@ -480,7 +462,7 @@ def run_ablation(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", choices=MODELS, default="itransformer")
-    parser.add_argument("--airports", type=_parse_airports, default=None)
+    parser.add_argument("--airports", type=parse_airports, default=None)
     parser.add_argument("--kinematic-weights", type=_parse_weights, default=DEFAULT_WEIGHTS)
     parser.add_argument("--train-per-airport", type=int, default=64)
     parser.add_argument("--val-per-airport", type=int, default=16)

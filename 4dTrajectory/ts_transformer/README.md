@@ -119,6 +119,8 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | `reference_velocity.py` | reference chart-velocity construction, isolated from trajectory loading |
 | `coordinate_frames.py` | threshold-centred horizontal coordinate-frame implementations (ENU / runway-aligned) |
 | `lateral_eligibility.py` | the evaluation-owned lateral-pass roster consumed by data loading (the train-anchor policy is each path strategy's `eligible_anchors`) |
+| `repo_layout.py` | where this repository keeps things (`REPO_ROOT`, `HARVEST_ROOT`, `OPT_OUTPUTS_ROOT`, `TS_SCRIPT`, `discover_k_airports`) — the one definition the CLI, the benchmark and the runners read |
+| `experiments/` | the re-runnable experiment runners, one module each, behind `python run_ts.py <name>` (`--list` names them); `support.py` re-exports the paths and holds the runners' shared helpers |
 | `cross_validation.py` / `development_cohorts.py` / `experiment_index.py` | leak-free hyperparameter search, explicit dev rosters, and the run manifest index |
 | `fixed_anchor_validation.py` / `evaluation_protocol.py` | deterministic fixed-anchor metrics and the one-way outer-test release gate |
 | `approach_clustering/` | train-only approach geometry clustering and shared-cohort comparison CLI |
@@ -204,7 +206,7 @@ both outer-train and outer-validation: the retained best checkpoint runs under
 and no shuffle is involved. `evaluate-fit` exposes that exact operation independently for an
 existing checkpoint; it never evaluates outer-test.
 
-`run_ts_pipeline.py` namespaces prediction output and frontend categories by split
+`run_ts.py pipeline` namespaces prediction output and frontend categories by split
 (`..._<horizon-mode>_<split>`). It defaults to `--split development`, which publishes separate
 train and validation artifacts. `--split test` is rejected unless the same command also carries
 `--release-test`. That release creates `test_release.json` beside the checkpoint before loading
@@ -220,13 +222,13 @@ that checkpoint to publish each airport separately:
 
 ```bash
 # All discovered K-airports -> one checkpoint per model, then train/validation outputs.
-conda run -n aeroviz python run_ts_pipeline.py \
+conda run -n aeroviz python run_ts.py pipeline \
   --training-mode pooled \
   --models itransformer \
   --coordinate-frame runway-aligned
 
 # Inspect every resolved command without training.
-conda run -n aeroviz python run_ts_pipeline.py \
+conda run -n aeroviz python run_ts.py pipeline \
   --training-mode pooled --models itransformer --dry-run
 ```
 
@@ -241,7 +243,7 @@ The split boundary is deliberately nested:
 4. after every analysis and model decision is permanently frozen, explicitly release test once:
 
    ```bash
-   conda run -n aeroviz python run_ts_pipeline.py \
+   conda run -n aeroviz python run_ts.py pipeline \
      --skip-train --models itransformer --split test --release-test
    ```
 
@@ -285,7 +287,7 @@ The default CV budget is 36 epochs with patience 6.
 Run pooled CV only, followed by automatic result plotting, with:
 
 ```bash
-conda run -n aeroviz python run_ts_cv.py
+conda run -n aeroviz python run_ts.py cv
 ```
 
 Use `--batch-size 2048` to force a larger batch, or leave the default
@@ -313,12 +315,12 @@ ts_<model>_normalized_time/
 ```
 
 After final training, refresh the same directory with
-`conda run -n aeroviz python plot_ts_results.py <run-directory>`.
+`conda run -n aeroviz python run_ts.py plot_results <run-directory>`.
 
 Run the controlled history-length ablation with:
 
 ```bash
-conda run -n aeroviz python run_ts_history_ablation.py
+conda run -n aeroviz python run_ts.py history_ablation
 ```
 
 The default candidates are `L=30,60,90`. All candidates use the same flight roster, outer-
@@ -357,7 +359,7 @@ trajectory values being read. The default result is written under
 `4dTrajectory/outputs/POOLED/batch_benchmarks/`; the final terminal line is
 `BEST_BATCH_SIZE=<integer>`. Pass a CV `best_config.json` through `--config-overrides` to
 benchmark an already selected architecture, and use the resulting integer with
-`run_ts_coordinate_ablation.py --batch-size <integer>`.
+`run_ts.py coordinate_ablation --batch-size <integer>`.
 
 `--coordinate-frame enu` is the unchanged baseline. `runway-aligned` rotates horizontal
 position and chart-velocity channels into along-runway/cross-runway axes while retaining the
@@ -367,7 +369,7 @@ vendored architectures.
 Run the paired pooled coordinate-frame ablation with:
 
 ```bash
-conda run -n aeroviz python run_ts_coordinate_ablation.py \
+conda run -n aeroviz python run_ts.py coordinate_ablation \
   --model itransformer \
   --outputs eval
 ```
@@ -388,7 +390,7 @@ partially failed test stage.
 
 The four `run_ts_*.py` scripts above (repo root, alongside this package) are the general
 ones. The rest — kinematic-loss/overfit diagnostics for the state path, and the control
-path's own drivers (`run_ts_control_basis_oracle.py`, `run_ts_control_capacity_ceiling.py`,
+path's own drivers (`run_ts.py control_basis_oracle`, `run_ts.py control_capacity_ceiling`,
 …) — are indexed with dates and one-line purposes in
 [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) (§7)
 rather than duplicated here.
@@ -407,7 +409,7 @@ then opens only the selected split identities, so excluded trajectories and seal
 trajectory values are not read during development. Checkpoints and CV results bind the
 eligibility-sidecar digest in addition to the arrival-manifest digest, preventing reuse after
 either evaluation or the arrival roster changes. This is a data-plane contract only: model,
-loss, and optimizer code do not import evaluation policy. `run_ts_pipeline.py` creates or
+loss, and optimizer code do not import evaluation policy. `run_ts.py pipeline` creates or
 refreshes all required sidecars and supplies them automatically; direct CLI calls must pass
 one `--eligibility-roster` per `--data` manifest.
 
@@ -484,14 +486,14 @@ separate dataset choice.
 
 ```bash
 # normalized complete remainder
-conda run -n aeroviz python run_ts_pipeline.py --horizon-mode normalized
+conda run -n aeroviz python run_ts.py pipeline --horizon-mode normalized
 
 # one-pass 600 s full horizon
-conda run -n aeroviz python run_ts_pipeline.py \
+conda run -n aeroviz python run_ts.py pipeline \
   --horizon-mode full --full-horizon-steps 300
 
 # recursive 60 s windows, chained to the same 600 s cap
-conda run -n aeroviz python run_ts_pipeline.py \
+conda run -n aeroviz python run_ts.py pipeline \
   --horizon-mode window --window-horizon-steps 30 --full-horizon-steps 300
 ```
 
@@ -540,7 +542,7 @@ kinematics, FDE, endpoint error, ETA and runway-threshold pass rate never replac
 common-time ADE checkpoint selector.
 
 The validation-only comparison, future-dispersion analysis and deterministic/multi-candidate
-coverage report are generated by `run_ts_predictability_report.py`; the current illustrated
+coverage report are generated by `run_ts.py predictability_report`; the current illustrated
 HTML is at
 `4dTrajectory/outputs/POOLED/ts_time_parameterization_predictability_report/report.html`.
 

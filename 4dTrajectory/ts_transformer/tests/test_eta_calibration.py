@@ -456,11 +456,7 @@ def test_no_metadata_and_no_table_both_read_as_uncalibrated(tmp_path: Path):
 def _runner():
     import importlib.util
 
-    path = Path(__file__).resolve().parents[3] / "run_ts_eta_calibration.py"
-    spec = importlib.util.spec_from_file_location("run_ts_eta_calibration_test", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("ts_transformer.experiments.eta_calibration")
 
 
 def test_the_runner_refuses_every_split_but_val(tmp_path: Path):

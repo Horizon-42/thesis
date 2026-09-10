@@ -57,7 +57,7 @@ python run_scenario_optimization.py --resume --max-groups-per-czml 500
 
 # ts_transformer full chain (2 models × 2 horizon modes: train → predict → eval → CZML;
 # dataset build + split happen inside train, split persisted in the checkpoint)
-python run_ts_pipeline.py --airport KRDU
+python run_ts.py pipeline --airport KRDU
 
 # Preview the allow-listed regenerable outputs for one airport, then clean them.
 # Training/experiment artifacts, final-test ledgers, downloaded tracks, unknown/manual
@@ -141,7 +141,7 @@ Modeling pipeline: `arrivals/manifest.json` → `flight_scenarios` (`FlightScena
   refuse the arm directory as occupied** (`begin_run` writes the manifest before training
   starts). Recovery: if the directory holds only `config.json` + the manifest, move it aside
   as `<arm>.aborted-<UTC>` (evidence, never deleted) and rerun the SAME campaign command —
-  `run_ts_frame_ablation.py` has no `--resume`; it skips every step whose artifact exists.
+  `run_ts.py frame_ablation` has no `--resume`; it skips every step whose artifact exists.
 - Env spec backups (regenerate `aeroviz` if ever needed): `.env-backup/aeroviz-pip-freeze.txt`,
   `aeroviz-conda-explicit.txt`, `aeroviz-environment.yml`.
 - GPU: RTX 4060, 8 GB (compute capability 8.9), cu128 wheels.

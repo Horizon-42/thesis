@@ -639,7 +639,7 @@ def build_anchor_grid_validation_plans(
     """One cached validation plan per (bin, airport), at each flight's own bin anchor.
 
     The bins, the future floor, the per-flight anchor rule and the coverage threshold are
-    `anchor_grid`'s — the same ones `run_ts_anytime_curve.py` draws the curve on. A flight
+    `anchor_grid`'s — the same ones `experiments/anytime_curve.py` draws the curve on. A flight
     with no admissible anchor at a bin is simply absent from that bin's plan (it has no
     reading there, and a reading taken elsewhere on its track would not be one).
 

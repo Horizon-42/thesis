@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import run_ts_kinematic_ablation as ablation
+import ts_transformer.experiments.kinematic_ablation as ablation
 
 
 def _candidate(weight, ade, smoothness):

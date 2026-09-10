@@ -15,7 +15,7 @@ for the Experiments picker.
 the key, the picker's experiment id, the label — is derived from the CHECKPOINT, so two
 directories of one checkpoint collide unless something tells them apart. That something is a
 ``CategoryVariant``, and it has exactly two sources: a directory written by
-``run_ts_anytime_curve.py --write-records`` carries an ``anytime`` block naming the
+``run_ts.py anytime_curve --write-records`` carries an ``anytime`` block naming the
 remaining-path bin its forecasts were anchored in (its label then states the bin and how many
 flights it holds, so a re-anchored SUBSET's error can never be read as the split's, and its
 picker heading is the record campaign); anything else — a predict-time projection or command
@@ -71,7 +71,7 @@ PUBLICATION_INDEX_SCHEMA = "ts-experiment-publication-index-v1"
 PUBLICATION_MANIFEST = "publication.json"
 DEVELOPMENT_SPLITS = ("train", "val")
 
-#: A MIRROR of ``run_ts_anytime_curve.RECORDS_SCHEMA`` — the block that runner writes into
+#: A MIRROR of ``experiments.anytime_curve.RECORDS_SCHEMA`` — the block that runner writes into
 #: each record directory's ``summary.json``. Not imported: that module pulls in torch and the
 #: whole ts package, and this script is a subprocess orchestrator that must stay importable
 #: without them. Change the two together.
@@ -152,7 +152,7 @@ class CategoryVariant:
 
     A checkpoint is published more than once whenever the prediction directory — not the
     training — is what differs: one directory per remaining-path bin
-    (``run_ts_anytime_curve.py --write-records``), or one per predict-time variant (an
+    (``run_ts.py anytime_curve --write-records``), or one per predict-time variant (an
     inference projection, a command hook applied at predict time only). Every part of a
     category's identity is derived from the CHECKPOINT — the key, the picker's experiment id,
     the label — so without something to tell those publications apart the second silently
@@ -1263,7 +1263,7 @@ def main(argv: list[str] | None = None) -> int:
             "SLUG) to the display label. Needed whenever two prediction directories share a "
             "checkpoint — a predict-time projection or hook beside its own baseline — "
             "because everything else in a category's identity comes from the checkpoint. A "
-            "directory written by `run_ts_anytime_curve.py --write-records` names its own "
+            "directory written by `run_ts.py anytime_curve --write-records` names its own "
             "bin instead, and giving both is refused"
         ),
     )

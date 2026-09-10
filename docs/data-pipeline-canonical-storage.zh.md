@@ -209,7 +209,7 @@ comparison 文件。`runway` 与 `runway_cons` 在源签名相同时复用同一
 TS 流程：
 
 ```bash
-conda run -n aeroviz python run_ts_pipeline.py --airport KRDU
+conda run -n aeroviz python run_ts.py pipeline --airport KRDU
 ```
 
 已有 checkpoint 可继续复用；要把旧 prediction 输出迁移为 states-ref 格式，至少

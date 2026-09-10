@@ -479,8 +479,8 @@ def test_the_publisher_preflight_reads_a_legacy_checkpoint_through_the_package(
 def test_the_pipeline_reuses_a_legacy_checkpoint_whose_roster_bytes_moved(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """`run_ts_pipeline` must not retrain a checkpoint because a roster was rewritten."""
-    import run_ts_pipeline as pipeline
+    """`experiments.pipeline` must not retrain a checkpoint because a roster was rewritten."""
+    import ts_transformer.experiments.pipeline as pipeline
 
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
     harvest = tmp_path / "harvest"
@@ -515,7 +515,7 @@ def test_the_pipeline_reuses_cross_validation_by_its_eligible_set(
     tmp_path: Path, monkeypatch
 ) -> None:
     """The CV twin: today's artifact names the set, an older one only the roster bytes."""
-    import run_ts_pipeline as pipeline
+    import ts_transformer.experiments.pipeline as pipeline
 
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
     harvest = tmp_path / "harvest"
@@ -570,7 +570,7 @@ def test_the_pipeline_refuses_artifacts_produced_without_the_rosters(
 ) -> None:
     """This runner always trains and searches WITH the rosters, so a rosterless artifact
     describes a different cohort — for the checkpoint AND for cross-validation."""
-    import run_ts_pipeline as pipeline
+    import ts_transformer.experiments.pipeline as pipeline
 
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=6, seed=3)
     harvest = tmp_path / "harvest"

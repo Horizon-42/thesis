@@ -26,17 +26,17 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
-HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
-OPT_OUTPUTS_ROOT = REPO_ROOT / "4dTrajectory" / "outputs"
-COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
-TS_SCRIPT = REPO_ROOT / "4dTrajectory" / "ts_transformer" / "__main__.py"
-CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
+import ts_transformer.repo_layout as repo_layout
+from ts_transformer.repo_layout import (
+    COMPARISON_AIRPORTS_ROOT,
+    CZML_SCRIPT,
+    HARVEST_ROOT,
+    OPT_OUTPUTS_ROOT,
+    REPO_ROOT,
+    TS_SCRIPT,
+)
 
-from ts_transformer.config import (  # noqa: E402
+from ts_transformer.config import (
     AIRCRAFT_FILTER_ALL,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES_AVAILABLE,
@@ -63,7 +63,6 @@ from ts_transformer.config import (  # noqa: E402
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     MODELS,
-    PREDICTION_CONTROL,
     PREDICTION_OUTPUTS_AVAILABLE,
     PREDICTION_STATE,
     TSConfig,
@@ -95,12 +94,14 @@ from ts_transformer.run_naming import (  # noqa: E402
     category_display_label,
     run_display_name,
 )
+from ts_transformer.io_utils import file_sha256  # noqa: E402
 from ts_transformer.train import (  # noqa: E402
     CHECKPOINT_METADATA_NAME,
     CHECKPOINT_METADATA_SCHEMA,
     CHECKPOINT_NAME,
     load_checkpoint_payload,
 )
+from ts_transformer.config import PREDICTION_CONTROL  # noqa: F401  (read off this module by its tests / sibling runners)
 
 TRAINING_MODES = ("per-airport", "pooled")
 MODEL_SHORT = {"itransformer": "itr", "patchtst": "ptst"}
@@ -108,32 +109,18 @@ OUTPUT_KINDS = ("czml", "eval")
 PREDICTION_SPLITS = ("train", "val", "test")
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
 
 def arrival_manifest_path(airport: str) -> Path:
-    return HARVEST_ROOT / airport.upper() / "arrivals" / "manifest.json"
+    return repo_layout.arrival_manifest_path(airport, HARVEST_ROOT)
 
 
 def discover_k_airports() -> list[str]:
-    if not HARVEST_ROOT.exists():
-        return []
-    return sorted(
-        child.name.upper()
-        for child in HARVEST_ROOT.iterdir()
-        if child.is_dir()
-        and child.name.upper().startswith("K")
-        and arrival_manifest_path(child.name).exists()
-    )
+    # Reads THIS module's HARVEST_ROOT, which the tests point at a fixture harvest.
+    return repo_layout.discover_k_airports(HARVEST_ROOT)
 
 
 def _manifest_digests(airports: tuple[str, ...]) -> dict[str, str]:
-    return {airport: _file_sha256(arrival_manifest_path(airport)) for airport in airports}
+    return {airport: file_sha256(arrival_manifest_path(airport)) for airport in airports}
 
 
 def _eligible_set_digests(airports: tuple[str, ...]) -> dict[str, str]:
@@ -153,7 +140,7 @@ def _roster_byte_digests(airports: tuple[str, ...]) -> dict[str, str]:
     A difference proves nothing either way, which is why nothing NEW is compared this way.
     """
     return {
-        airport: _file_sha256(default_lateral_pass_roster_path(arrival_manifest_path(airport)))
+        airport: file_sha256(default_lateral_pass_roster_path(arrival_manifest_path(airport)))
         for airport in airports
     }
 
@@ -561,7 +548,7 @@ class TrainingPlan:
             or metadata.get("schema_version") != CHECKPOINT_METADATA_SCHEMA
         ):
             return "checkpoint metadata has the wrong schema"
-        if metadata.get("checkpoint_sha256") != _file_sha256(self.checkpoint):
+        if metadata.get("checkpoint_sha256") != file_sha256(self.checkpoint):
             return "checkpoint failed SHA-256 validation"
         if metadata.get("arrival_manifests") != _manifest_digests(self.airports):
             return "checkpoint was trained against different arrival manifests"

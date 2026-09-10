@@ -517,10 +517,7 @@ def test_the_eta_error_readout_reports_the_quantile_head_beside_the_rollout(
     out = tmp_path / "pred"
     assert _predict(checkpoint, out, tmp_path) == 0
 
-    path = Path(__file__).resolve().parents[3] / "run_ts_eta_error_readout.py"
-    spec = importlib.util.spec_from_file_location("run_ts_eta_error_readout_test", path)
-    readout = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(readout)
+    readout = importlib.import_module("ts_transformer.experiments.eta_error_readout")
 
     payload = readout.readout("B1b", out)
     assert payload["duration_head"] == DURATION_HEAD_TWO_HEAD
@@ -562,10 +559,7 @@ def test_a_point_head_directory_has_no_q50_block(tmp_path: Path, monkeypatch):
     out = tmp_path / "pred"
     assert _predict(run / "checkpoint.pt", out, tmp_path) == 0
 
-    path = Path(__file__).resolve().parents[3] / "run_ts_eta_error_readout.py"
-    spec = importlib.util.spec_from_file_location("run_ts_eta_error_readout_point", path)
-    readout = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(readout)
+    readout = importlib.import_module("ts_transformer.experiments.eta_error_readout")
     payload = readout.readout("point", out)
     assert readout.Q50_METRIC not in payload["metrics"]
     assert "GATE 1" not in readout.render(

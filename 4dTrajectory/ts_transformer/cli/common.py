@@ -61,7 +61,15 @@ from ts_transformer.reference_velocity import REFERENCE_VELOCITY_SOURCES
 from ts_transformer.splits import data_selection_audit, flight_keys_by_split
 
 #: The repo root, for the experiment manifest's provenance.
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from ts_transformer.repo_layout import REPO_ROOT  # noqa: E402
+
+
+def parse_airports(raw: str) -> tuple[str, ...]:
+    """``--airports KRDU,ksjc`` → ``("KRDU", "KSJC")``: upper-cased, deduplicated, sorted."""
+    airports = tuple(sorted({token.strip().upper() for token in raw.split(",") if token.strip()}))
+    if not airports:
+        raise argparse.ArgumentTypeError("--airports requires at least one ICAO code")
+    return airports
 
 
 def add_eligibility_arg(parser: argparse.ArgumentParser) -> None:
@@ -313,7 +321,7 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         "--control-fitted-teacher-path", default=None, metavar="JSON",
         help=(
             "--control-imitation-target fitted: the basis_fit.json written by "
-            "run_ts_control_basis_oracle.py --checkpoint. The dataset build refuses a "
+            "run_ts.py control_basis_oracle --checkpoint. The dataset build refuses a "
             "table whose width, anchor or per-flight duration is not this run's"
         ),
     )

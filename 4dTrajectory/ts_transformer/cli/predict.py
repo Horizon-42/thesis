@@ -566,7 +566,7 @@ def parse_predict_options(args, config, parser, series):
         conformal = load_conformal_table(args.checkpoint, file_sha256(Path(args.checkpoint)))
         if conformal is None:
             print("  quantile duration head, NOT calibrated: records carry the raw "
-                  "durationQuantilesS and calibrated=false (run run_ts_eta_calibration.py)")
+                  "durationQuantilesS and calibrated=false (run `run_ts.py eta_calibration`)")
         else:
             cohort = "/".join(conformal["airports"]) or "unstated airports"
             print(f"  quantile duration head, calibrated on {conformal['calibration_flights']} "
@@ -815,7 +815,7 @@ def write_prediction_sets(sets: PredictionSets, options: PredictOptions, config,
         names = ", ".join(sorted(fan_records))
         print(f"  wrote the quantile fan under {output_dir / QUANTILE_DIR_NAME}: {names} "
               f"(the top-1 records above are the {median_directory} decode); read it with "
-              f"run_ts_quantile_fan_readout.py --arm {output_dir}")
+              f"run_ts.py quantile_fan_readout --arm {output_dir}")
     if shuffled_records:
         emit(shuffled_records, output_dir / "shuffled", shuffled_metrics)
         print(f"  wrote the shuffled-latent diagnostic under {output_dir / 'shuffled'}")

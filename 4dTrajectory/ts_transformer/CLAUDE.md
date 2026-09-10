@@ -25,7 +25,7 @@ python -m pytest 4dTrajectory/ts_transformer/tests -q --import-mode=importlib
 
 # whole chain, 2 models × 2 horizon modes (train → predict → eval → CZML; dataset build and
 # split happen inside train, split persisted in the checkpoint)
-python run_ts_pipeline.py --airport KRDU
+python run_ts.py pipeline --airport KRDU
 ```
 
 ## The three prediction paths — this is the experiment
@@ -75,7 +75,7 @@ point of the package, not a migration in progress.
   `duration_head=quantile` replaces the scalar `FinalTimeHead` with
   `QuantileFinalTimeHead`'s five `config.DURATION_QUANTILES`, monotone by cumulative
   softplus. Its MEDIAN is the duration the rollout flies (`final_time_s` unchanged), all
-  five go to `source.durationQuantilesS`, and `run_ts_eta_calibration.py` turns them into a
+  five go to `source.durationQuantilesS`, and `run_ts.py eta_calibration` turns them into a
   calibrated interval. `predict --cta-from-quantiles` then decodes each flight at its OWN
   quantile — the run name says `cta=self-q`, and that one IS a prediction result.
   **`duration_head=two-head` (B1.b, 2026-09-08) carries BOTH heads**: the point head drives
@@ -169,9 +169,9 @@ flight model.
   FIXED 0.05-nat ruler, because `active_units` moves with the free-bits budget and made that
   gate unreadable across arms. **The three `component_*` numbers sum to
   `component_kl_nats_per_flight`, NOT to the charged `kl_nats_per_flight`** (free bits and
-  the mixture estimator separate the two). Read them with `run_ts_latent_readout.py
+  the mixture estimator separate the two). Read them with `run_ts.py latent_readout
   --history <run>/history.json` (which needs no `--arm`: this is the epoch-1 reading), or off
-  a checkpoint with `run_ts_latent_probe.py`; the gate sentence is
+  a checkpoint with `run_ts.py latent_probe`; the gate sentence is
   `outputs.control.latent.displacement_verdict` and its ruler `DEAD_MEAN_DISPLACEMENT_SIGMA`, so no
   surface restates either. A scalar auxiliary target concentrates the information in ONE
   dimension, so on such an arm the median displacement can miss what `component_kl_per_dim`
@@ -238,7 +238,7 @@ flight model.
   2.8× stricter than the instability it cited (review C-13).
 - **The fixed anchor is ONE definition: `dataset.fixed_anchor_index(config, minimum_anchor_index)`,
   read off a window set as `FixedAnchorTrajectoryWindows.anchor` / `.anchor_indices`.** It is
-  `L-1` unless an experiment supplies a common floor (`run_ts_history_ablation.py` trains every
+  `L-1` unless an experiment supplies a common floor (`run_ts.py history_ablation` trains every
   candidate `seq_len` at `max(L) - 1`). Every fixed-anchor consumer — the common-grid truth, the
   cohort floor, the terminal-velocity weights, the report metrics — takes the anchor as a REQUIRED
   argument from the window set; none may restate `seq_len - 1`. Until 2026-09-09 three of them
@@ -287,7 +287,7 @@ flight model.
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs. `airport-enu` / `runway-aligned` are FROZEN (2026-09-09, `COORDINATE_FRAMES_AVAILABLE`): the 2026-09-03 arms load, no new run selects them |
 | `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `cli.common._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
-| `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected. In `run_ts_pipeline.py` the model is an axis of the cell: a lag cell's `train_dir` / `pred_dir` / category carry `_lag`, and the ONE override dict (`TrainingPlan._plan_overrides`) feeds the label, `--skip-train` and CV reuse — before 2026-09-09 two hand-written copies both lacked the field, so a lag cell was rebuilt as point-mass everywhere but the training command and shared its directory with the point-mass cell (review A-1) |
+| `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected. In `run_ts.py pipeline` the model is an axis of the cell: a lag cell's `train_dir` / `pred_dir` / category carry `_lag`, and the ONE override dict (`TrainingPlan._plan_overrides`) feeds the label, `--skip-train` and CV reuse — before 2026-09-09 two hand-written copies both lacked the field, so a lag cell was rebuilt as point-mass everywhere but the training command and shared its directory with the point-mass cell (review A-1) |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `outputs.closure.model.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). THREE modules are live — `barrier` (lateral, gated ON the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08), `trombone` (the pre-final path stretch, gated OFF the final — L3.e, 2026-09-08) — and the vocabulary carries three combinations: `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`, each applied in the order it spells. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier`, `barrier+trombone+speed-floor` and a SOLO `trombone` are not members and are refused with the vocabulary (the trombone hands the command back at the final approach course and has nothing to hand it to without the barrier) |
 | `--truncate-at-threshold` | off | Predict-side, any output kind: cut every record where it FIRST crosses the threshold ON THE FINAL (`final_approach_geometry.threshold_crossing_index` — `d ≤ 0` and inside the on-final gate there; closest approach within that first run) and stamp `source.truncatedAtThreshold`. **Any flyability/geometry/CTA readout of a hooked, late-CTA arm needs it** — L3.d's floored rollouts arrive EARLY and fly on (endpoint \|xt\| p95 43–63 km, pooled ADE 840 → 3443 m at offset 0), and a report over the whole record is scoring that tail: on the approach proper the same arms read fully-flyable 1.35 % → 48.9 % at +60 s. `final_time_s` moves to the cut, which is the point — an early arrival stops being invisible and becomes the `final_time_error_s` it always was. A forecast that never crosses ON THE FINAL is left WHOLE and says `false`, and a vectored rollout that flies past abeam is exactly that case — until 2026-09-09 the rule read the PLANE alone and cut those on their downwind, 8.7 km out; one that crosses on its LAST row is whole with the flag TRUE (the flag means "ends at the threshold", and on a fixed-time STATE forecast the postprocessor's own closest-approach rule sets the same flag). Refused together with `--no-truncate` |
@@ -307,7 +307,7 @@ flight model.
 | `lr_plateau_metric` | `selection` | WHICH number `ReduceLROnPlateau` measures its plateau on — never which epoch is KEPT. `objective` steps it with the macro validation objective (the SAME `val_loss` the epoch record writes, not a third number), `selection` with the checkpoint-selection value. It matters exactly when the two PART, which a fixed-anchor arm never does: on A0-random's `_grid` arm the objective improved to epoch 60 (1.147 → 0.707) while the grid ADE stalled after epoch 8, so the scheduler halved the LR from epoch 20 and reached **9.4e-7 by 60** — the model stopped training at the epoch the READOUT stalled. `checkpoint_metadata.json`'s `lr_scheduler.metric` says which it stepped on; names the run `lr-metric=objective`. **`objective` is REFUSED while the objective itself moves under the model's feet**: a `latent_beta_warmup_epochs` ramp reweights it every epoch and a `procedure_loss_dual_step` reprices the same trajectory every epoch, and under either the plateau scheduler would cut the rate straight through a schedule that is still ramping. A0.b (i) |
 | `random_train_anchor_sampling` | `uniform` | HOW a random train anchor is drawn — refused without `random_train_anchor`. It cannot change WHICH anchors are admissible (`eligible_random_train_anchors` + the future contract), so both policies train the identical cohort on the identical anchor population. `uniform` draws over the flight's admissible SAMPLES, i.e. uniformly in TIME; **pooled over flights that over-weights the near end relative to the stored population**, because every flight gets one draw whatever its length and a kilometre near the runway holds more samples than one at 25 km (whole KRDU val split, 1404 flights / 181,906 anchors / 200 epochs: draws **34.3 %** under 6 km against **25.1 %** of the population, **17.9 %** beyond 20 km against **32.9 %**). `remaining-path-uniform` places the draw uniformly across the flight's OWN admissible remaining-path span and takes the nearest anchor — equal weight per km — moving those to 31.0 % and 21.0 %. **A stratum draw was tried first and REJECTED**: it moved training toward the runway (≥ 20 km 16.9 → 4.1 %) because the grid cuts the near end into four 2-km strata and leaves one open stratum spanning 20–123 km. Every epoch records the drawn counts per stratum BESIDE the population they came from (`history.json`'s `train_anchor_sampling.remaining_path_strata{,_population}`), under both policies — neither number means anything alone. Names the run `anchors=remaining-path-uniform`; `sampling_version` distinguishes the two in `training_anchor_contract`. A0.b (ii) |
 | `random_train_anchor_l1_share` | `0` | How much of that draw is RESERVED for **L-1**, the anchor the fixed-anchor arms train at (A2b, 2026-09-08). With probability `l1_share` a flight's draw for the epoch IS `default_anchor(config)`; otherwise the unchanged remaining-path-uniform draw. **A mixture, not a reweighting**: the coin is a SECOND 8 bytes of the same per-flight per-epoch sha256, and the digest's salt (`sampling_version`) does NOT move with the share — only `reported_sampling_version` does — so the draws the coin passes over are literally the anchors the share-0 arm drew, and an arm differs from its base arm only in the replaced draws. WHY: A0.b's `A0b_lr_objective_path_uniform` wins at every re-anchored bin and still loses at L-1 (**1782 m** pooled ADE against fixed-anchor native32's **1322**), because under a law spread over the whole approach L-1 is one point among many. **Refused (never ignored)** under `uniform` sampling, with `random_train_anchor=False`, and outside [0, 1]. **The reserved draw is the flight's FIRST admissible anchor**, which is L-1 unless output eligibility removed it (`airborne-1.10-stall-margin-v1`: the observed state there is outside the airborne model domain, so there is no valid L-1 window to train) or a `minimum_anchor_index` floor moved it (where it is exactly what `FixedAnchorTrajectoryWindows` anchors at anyway). **That is NOT rare enough to assume away and NOT a refusal**: measured on the real KRDU roster, **10 of the 9,720 eligible arrivals** store no L-1 (0.10 %, nine of them runway 23R, first admissible anchor 90–163 against L-1 = 59) — a refusal would have aborted both A2b arms, and changing the roster to avoid it would have destroyed the pairing. It is COUNTED instead: `l1_share_flights_without_l1` in every epoch record, and one line from `train()`. Every epoch records `train_anchor_sampling.l1_share_drawn` beside the strata histogram — the coin's REALISED share, which `fixed_anchor_fraction` bounds from above (a span draw can land on L-1 too). Names the run `l1-share=0.3` when non-zero; a non-zero share reports `sampling_version=per-flight-hash-v4-remaining-path-uniform-l1-share`. Default 0 draws BYTE-IDENTICALLY to before the axis (digests pinned in `tests/test_random_anchor_sampling.py`). A2b |
-| `control_imitation_target` | `inverse-dynamics` | WHAT the imitation term imitates. The default's schedule, flown open-loop, lands **2.5–7.8 km** from the truth it was read off (L0), so "imitating it perfectly" is not "flying the truth". `fitted` reads the per-flight table `run_ts_control_basis_oracle.py --checkpoint` fits through the same rollout (88–433 m) and needs `control_fitted_teacher_path` (which names the run: `teacher=<dir>/<file>`); refused with `random_train_anchor`, with `control_imitation_loss_weight=0`, and off `control_state_objective=true-time-position` (the only objective the term is registered under). L5.a, **not yet measured** — the arms are `docs/experiments/l5_fitted_teacher_arms.json` |
+| `control_imitation_target` | `inverse-dynamics` | WHAT the imitation term imitates. The default's schedule, flown open-loop, lands **2.5–7.8 km** from the truth it was read off (L0), so "imitating it perfectly" is not "flying the truth". `fitted` reads the per-flight table `run_ts.py control_basis_oracle --checkpoint` fits through the same rollout (88–433 m) and needs `control_fitted_teacher_path` (which names the run: `teacher=<dir>/<file>`); refused with `random_train_anchor`, with `control_imitation_loss_weight=0`, and off `control_state_objective=true-time-position` (the only objective the term is registered under). L5.a, **not yet measured** — the arms are `docs/experiments/l5_fitted_teacher_arms.json` |
 
 **The three checkpoint-selection metrics** (`config.CHECKPOINT_SELECTION_METRICS`, dispatched
 through `validation.VALIDATION_SELECTIONS`; the LR scheduler, early stopping and the kept
@@ -322,7 +322,7 @@ weights all read the one number):
 **`anchor_grid.py` is the one definition of the grid** — bins (`DEFAULT_ANCHOR_GRID_KM`
 20/16/12/8/6/4/2 km, `VALIDATION_ANCHOR_GRID_KM` the four the metric may select on), the
 60 s future floor, `PARTIAL_COVERAGE` = 0.5, the per-flight `bin_anchor` rule and the
-fixed-at-L−1 `strata_fixed_at_l1` rule. `run_ts_anytime_curve.py` and the selection metric
+fixed-at-L−1 `strata_fixed_at_l1` rule. `run_ts.py anytime_curve` and the selection metric
 import the SAME objects (`tests/test_anchor_grid.py` asserts identity, not equality): two
 grids that merely agreed today would make "the curve improved" and "this epoch was selected
 on the curve" claims about different anchors.
@@ -507,6 +507,20 @@ never zero.
 A regular package under `4dTrajectory/` (`ts_transformer/__init__.py`, `4dTrajectory/pyproject.toml`);
 modules are imported by their qualified names — see the package rule under Conventions.
 
+**The experiment runners are `experiments/<name>.py` behind ONE door** (2026-09-10, review §4.5):
+`python run_ts.py <name> [args]` at the repository root (`--list` prints the names with their
+first docstring line), or `python -m ts_transformer.experiments <name>` with `4dTrajectory/` on
+the path. They used to be 22 `run_ts_*.py` files at the root, each inserting `4dTrajectory/`
+into `sys.path` by hand. A runner is a CONSUMER of the package — it may import anything in it,
+and nothing in the package imports a runner (`tests/test_architecture.py`; `batch_benchmark`
+used to import the pipeline runner for the harvest paths). **`repo_layout.py` is the one
+definition of where this repository keeps things** — `REPO_ROOT`, `HARVEST_ROOT`,
+`OPT_OUTPUTS_ROOT`, `COMPARISON_AIRPORTS_ROOT`, `TS_SCRIPT`, `discover_k_airports` /
+`arrival_manifest_path` — read by the CLI, the benchmark and the runners (`experiments/support.py`
+re-exports them and holds the runners' own `series_digest`; `parse_airports` is `cli.common`'s).
+The pipeline's `HARVEST_ROOT` / `OPT_OUTPUTS_ROOT` are module globals on purpose: the tests
+point them at a fixture harvest with `monkeypatch`.
+
 **Five modules carry the training plane, and each answers one question** (T3, 2026-09-07 —
 `train.py` was 3,027 lines and `__main__.main` 714):
 
@@ -594,13 +608,13 @@ in to keep them self-contained) and are OFF the import path:
   diagnostics.
 
 `tests/test_architecture.py` asserts nothing live imports the archive — package modules,
-`tests/` and the root `run_ts_*.py` runners alike — and that no `__init__.py` makes it
-importable. A finished one-off driver belongs there, not beside the live runners.
+`tests/`, the runners and `run_ts.py` alike — and that no `__init__.py` makes it importable.
+A finished one-off driver belongs there, not beside the live runners.
 
 **Runners for the anytime / calibrated-ETA line** (2026-09-07,
 `docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`):
 
-- `run_ts_anytime_curve.py` — **A0**: replays `--checkpoint LABEL=PATH` (repeatable) from the
+- `run_ts.py anytime_curve` — **A0**: replays `--checkpoint LABEL=PATH` (repeatable) from the
   `anchor_grid` REMAINING-PATH grid (which it imports, and which the `anchor-grid-common-grid-ade`
   selection metric selects four bins of) and reports, per bin per stratum, ADE (mean / p50 / p95) and
   FDE beside the time-free chamfer and Fréchet, |Δt| p50/p80 and the predicted duration p50.
@@ -637,7 +651,7 @@ importable. A finished one-off driver belongs there, not beside the live runners
   airport**: the runner replays the whole cohort its provenance names and offers no airport
   narrowing, so the directory holds every airport's flights; the publisher refuses it rather
   than filing all of them under each airport's category.
-- `run_ts_eta_calibration.py` — **B2**: split-conformal (CQR) calibration of a
+- `run_ts.py eta_calibration` — **B2**: split-conformal (CQR) calibration of a
   quantile-bearing checkpoint's interval (`duration_head` ∈ `quantile`, `two-head`). Reads the DURATION HEAD ALONE
   (`outputs.control.forecast.duration_quantile_predictions` — one forward per flight, no rollout, no CTA),
   which is why it is seconds of CPU and why it may load a `cta=given` checkpoint
@@ -664,7 +678,7 @@ importable. A finished one-off driver belongs there, not beside the live runners
   `checkpoint_metadata.json` under `conformal` — a SIDECAR, never in `data_provenance`
   (which `evaluate-fit` / `freeze-test` compare for equality) — and carries its own cohort
   (`airports`, `limit`, `smoke_test`) plus the half rule.
-- `run_ts_quantile_fan_readout.py` — **B3**: `--arm <pred_dir>` of a `--cta-from-quantiles`
+- `run_ts.py quantile_fan_readout` — **B3**: `--arm <pred_dir>` of a `--cta-from-quantiles`
   run; it reads the five `qNN` leaves only (the calibrated endpoints are `predict
   --interval-endpoints`, off by default and not part of any gate). Per stratum: the share of
   flights whose truth duration falls in `[q10, q90]` and in the calibrated interval, the
@@ -675,7 +689,7 @@ importable. A finished one-off driver belongs there, not beside the live runners
   trajectories. **Its `cal.hit` column is IN-SAMPLE on a val arm** — the flights it scores
   are the ones the δ was fitted on — and is marked `cal.hit*`; the gate's coverage is the
   calibration readout's DEPLOYED block.
-- `run_ts_eta_error_readout.py` — **B0**: |`final_time_error_s`| p50/p80/p90 and the SIGNED
+- `run_ts.py eta_error_readout` — **B0**: |`final_time_error_s`| p50/p80/p90 and the SIGNED
   p10/p50/p90 (same for `fde_m`) per stratum, straight out of existing `summary.json` files.
   A row is used only if it carries every metric AND every `STRATA_COVARIATES` field — a
   present-but-null `established_at_anchor` would otherwise read as False and change stratum.
@@ -684,7 +698,7 @@ importable. A finished one-off driver belongs there, not beside the live runners
 
 **The latent line's own runner** (`docs/2026-09-07_latent_intent_design.zh.md` §六 L2.f):
 
-- `run_ts_latent_probe.py` — **L2.f**: the training-side densities of one or more latent
+- `run_ts.py latent_probe` — **L2.f**: the training-side densities of one or more latent
   checkpoints on a split (`--checkpoint LABEL=PATH`, repeatable), through the SAME cohort
   rebuild as A0 (`load_arm` / `cohort_series`, so the roster rule has one owner): prior and
   posterior per-dimension spread, the posterior mean's displacement in prior sigmas, the
@@ -695,15 +709,15 @@ importable. A finished one-off driver belongs there, not beside the live runners
   displacement median moved 25 % between 100 and 200 KRDU flights, so a limited table is a
   smoke test and the artifact says so. **The posterior reads the future: never a prediction
   result.**
-- `run_ts_latent_fan_readout.py` — **4(a)**: the sample fan read by the B line's gate 3.4-3
+- `run_ts.py latent_fan_readout` — **4(a)**: the sample fan read by the B line's gate 3.4-3
   protocol, so the latent fan and the quantile fan are one deliverable measured one way. The
-  chamfer-to-nearest-leaf logic has ONE implementation (`run_ts_quantile_fan_readout.leaf_rows`
+  chamfer-to-nearest-leaf logic has ONE implementation (`experiments.quantile_fan_readout.leaf_rows`
   / `leaf_geometry` / `geometry_cell`, imported); this runner supplies the leaves. `--arm
   <pred_dir>` of a `predict --latent-samples K --latent-random K` run, refused without its
   `modes/` leaves. Per stratum: the truth's chamfer to the top-1 decode, to the nearest of the
   `modes/` leaves and to the nearest of the `random/` leaves, each with the share of flights
   the nearest leaf beats top-1 on; minADE_K and top-1 ADE off the same records (the SAME
-  definition as `run_ts_latent_readout.py`, so the two artifacts cross-check); and the fan's
+  definition as `run_ts.py latent_readout`, so the two artifacts cross-check); and the fan's
   lateral spread (p50 of the widest pairwise endpoint gap). **The random fan is the reading,
   not a footnote** — a fan always contains something nearer the truth than its own mean, so a
   nearest-leaf number alone measures nothing; the prior fan is informative only where it beats
@@ -728,7 +742,7 @@ before it — `predict`, `evaluate-fit`, `run_ts_*` replay runners and `publish_
 trajectories.py` (which held a second copy of the comparison). So:
 - the compared eligibility entry is `{schema_version, policy, eligible_set_sha256}`, hashed by
   `eligible_set_digest(keys)` — THE one definition, which `splits.data_selection_audit` also
-  hashes its split rosters with, and which the publisher and `run_ts_pipeline` import rather
+  hashes its split rosters with, and which the publisher and `experiments.pipeline` import rather
   than re-deriving. **The roster's `counts` are NOT in it**: three of the five are reject
   tallies read off the observed evaluation (`excluded_lateral_indeterminate`,
   `evaluation_only`), so a re-graded flight that never was eligible would move them and refuse
@@ -749,7 +763,7 @@ trajectories.py` (which held a second copy of the comparison). So:
 - `checkpoint_metadata.json` / `history.json` name the map `eligible_sets`; artifacts written
   before 2026-09-08 name `eligibility_rosters` (roster bytes) and are read through the
   checkpoint payload instead — a CV `cv_results.json` of that generation can only be checked by
-  bytes, so `run_ts_pipeline` re-runs CV when they moved (and prints which reason it was);
+  bytes, so `experiments.pipeline` re-runs CV when they moved (and prints which reason it was);
 - **an IN-FLIGHT `cross_validation/cv_candidate_progress.json` from before 2026-09-08 is refused
   on resume**: the run contract it is bound to now names `eligible_sets` where it named the
   roster files, so `_load_candidate_progress` raises — naming the file and saying to delete it —
@@ -758,7 +772,7 @@ trajectories.py` (which held a second copy of the comparison). So:
 
 **Measurement code is CODE.** Reusable logic goes in the package with tests
 (`outputs/control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
-a runnable experiment goes in a top-level `run_ts_*.py` runner beside the others;
+a runnable experiment goes in `experiments/<name>.py` behind `python run_ts.py <name>`;
 **`docs/` holds documents**. The `docs/*.py` scripts predate this rule and are a layout
 defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add to them, and
 move what you touch. `tests/conftest.py` already puts the package's PARENT on `sys.path`,

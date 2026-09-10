@@ -9,20 +9,15 @@ import gc
 import hashlib
 import json
 import os
-import sys
 from dataclasses import fields, replace
 from pathlib import Path
 from statistics import fmean, pstdev
 from typing import Any, Sequence
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
 
 import torch  # noqa: E402
 
-import run_ts_pipeline as pipeline  # noqa: E402
+import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.batching import resolve_batch_size  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     COORDINATE_FRAMES_AVAILABLE,
@@ -46,6 +41,9 @@ from ts_transformer.splits import (  # noqa: E402
 )
 from ts_transformer.models import build_model, parameter_count, resolve_device  # noqa: E402
 from ts_transformer.train import evaluate_split, fit_model, usable_series  # noqa: E402
+from ts_transformer.experiments.support import parse_airports
+from ts_transformer.experiments.support import series_digest
+from ts_transformer.io_utils import write_json_atomic
 
 RESULT_SCHEMA = "ts-history-length-ablation-v2-flight-epoch-airport-macro"
 RESULT_NAME = "history_length_ablation.json"
@@ -62,12 +60,6 @@ def _parse_seq_lens(raw: str) -> tuple[int, ...]:
         raise argparse.ArgumentTypeError("--seq-lens requires at least two positive values")
     return values
 
-
-def _parse_airports(raw: str) -> tuple[str, ...]:
-    airports = tuple(sorted({token.strip().upper() for token in raw.split(",") if token.strip()}))
-    if not airports:
-        raise argparse.ArgumentTypeError("--airports requires at least one ICAO code")
-    return airports
 
 
 def _batch_size(raw: str) -> int | str:
@@ -102,16 +94,6 @@ def _config_overrides(path: Path | None) -> dict[str, Any]:
     return payload
 
 
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temporary.replace(path)
-
-
-def _series_digest(series: Sequence[FlightSeries]) -> str:
-    payload = "\n".join(sorted(item.dataset_id for item in series)).encode()
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _airport_counts(series: Sequence[FlightSeries]) -> dict[str, int]:
@@ -292,7 +274,7 @@ def run_history_ablation(
                 "train_flights": len(fold_train),
                 "validation_flights": len(fold_val),
                 "validation_by_airport": _airport_counts(fold_val),
-                "validation_split_sha256": _series_digest(fold_val),
+                "validation_split_sha256": series_digest(fold_val),
                 "best_val_macro_loss": fit.best_val_loss,
                 "best_epoch": best_epoch.epoch,
                 "val_by_airport": best_epoch.val_by_airport,
@@ -368,8 +350,8 @@ def run_history_ablation(
         "candidates": candidate_results,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
-    _write_json_atomic(output_dir / RESULT_NAME, result)
-    _write_json_atomic(output_dir / BEST_CONFIG_NAME, {"seq_len": selected_l})
+    write_json_atomic(output_dir / RESULT_NAME, result)
+    write_json_atomic(output_dir / BEST_CONFIG_NAME, {"seq_len": selected_l})
     write_reports(output_dir, result)
     if verbose:
         print(f"\n✓ selected L={selected_l}; wrote {output_dir / RESULT_NAME}")
@@ -483,7 +465,7 @@ def write_reports(output_dir: Path, result: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--airports", type=_parse_airports, default=None,
+    parser.add_argument("--airports", type=parse_airports, default=None,
                         help="comma-separated airports; default: all discovered K-airports")
     parser.add_argument("--seq-lens", type=_parse_seq_lens, default=DEFAULT_SEQ_LENS,
                         help="history candidates; default: 30,60,90")

@@ -9,7 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import run_ts_pipeline as pipeline
+import ts_transformer.experiments.pipeline as pipeline
+from ts_transformer.experiments.support import EXPERIMENTS_MAIN
 
 
 def _airports(value: str) -> tuple[str, ...]:
@@ -76,7 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     label, command = plan.cv_step()
     plot_command = [
         sys.executable,
-        str(pipeline.REPO_ROOT / "plot_ts_results.py"),
+        str(EXPERIMENTS_MAIN),
+        "plot_results",
         str(plan.train_dir),
     ]
     candidate_count = math.prod(

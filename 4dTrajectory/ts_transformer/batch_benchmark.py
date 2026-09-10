@@ -12,19 +12,11 @@ import argparse
 import gc
 import json
 import statistics
-import sys
 import time
 from dataclasses import fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TS_DIR = Path(__file__).resolve().parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
@@ -32,7 +24,8 @@ import torch  # noqa: E402
 from ts_transformer.batching import is_cuda_oom  # noqa: E402
 from ts_transformer.io_utils import sha256_bytes, write_json_atomic  # noqa: E402
 
-import run_ts_pipeline as pipeline  # noqa: E402
+import ts_transformer.repo_layout as repo_layout  # noqa: E402
+from ts_transformer.cli.common import parse_airports  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
@@ -63,13 +56,6 @@ RESULT_SCHEMA = "ts-batch-throughput-benchmark-v4-flight-epochs"
 
 def _identity_digest(identities: Sequence[str]) -> str:
     return sha256_bytes("\n".join(sorted(identities)).encode())
-
-
-def _parse_airports(raw: str) -> tuple[str, ...]:
-    airports = tuple(sorted({token.strip().upper() for token in raw.split(",") if token.strip()}))
-    if not airports:
-        raise argparse.ArgumentTypeError("--airports requires at least one ICAO code")
-    return airports
 
 
 def _power_of_two(value: int, flag: str) -> int:
@@ -299,7 +285,7 @@ def select_best_batch(results: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     """Add throughput-benchmark options to a CLI parser."""
-    parser.add_argument("--airports", type=_parse_airports, default=None,
+    parser.add_argument("--airports", type=parse_airports, default=None,
                         help="comma-separated airport roster; default: all discovered K-airports")
     parser.add_argument("--model", choices=MODELS, default="itransformer")
     parser.add_argument("--n-segments", type=int, default=None)
@@ -353,16 +339,16 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if device.type != "cuda" or not torch.cuda.is_available():
         parser.error("this benchmark requires an available CUDA GPU")
 
-    airports = args.airports or tuple(pipeline.discover_k_airports())
+    airports = args.airports or tuple(repo_layout.discover_k_airports())
     if not airports:
-        parser.error(f"no K-airport arrivals manifests found under {pipeline.HARVEST_ROOT}")
-    manifests = [pipeline.arrival_manifest_path(airport) for airport in airports]
+        parser.error(f"no K-airport arrivals manifests found under {repo_layout.HARVEST_ROOT}")
+    manifests = [repo_layout.arrival_manifest_path(airport) for airport in airports]
     missing = [path for path in manifests if not path.is_file()]
     if missing:
         parser.error(f"missing arrival manifest {missing[0]}")
 
     output_path = (args.output or (
-        pipeline.OPT_OUTPUTS_ROOT / "POOLED" / "batch_benchmarks" /
+        repo_layout.OPT_OUTPUTS_ROOT / "POOLED" / "batch_benchmarks" /
         f"{args.model}_normalized_time_{args.coordinate_frame.replace('-', '_')}.json"
     )).resolve()
     properties = torch.cuda.get_device_properties(device)

@@ -16,13 +16,13 @@ Every posterior mean sat ON the prior mean — under 0.2 prior sigma per flight 
 whole budget went into narrowing the posterior. z was a denoised constant. This runner is
 that measurement, as code beside the other replay runners::
 
-    python run_ts_latent_probe.py \\
+    python run_ts.py latent_probe \\
         --checkpoint L2d_warm=4dTrajectory/outputs/KRDU/experiments/l2_warm_posterior_20260907/L2d_warm_beta0p01/checkpoint.pt \\
         --checkpoint L2e_fb0p5=.../L2e_fb0p5/checkpoint.pt \\
         --out 4dTrajectory/outputs/KRDU/experiments/latent_probe_20260907
 
 Training now records the same quantities per epoch (`history.json`'s `latent` block, read by
-`run_ts_latent_readout.py --history`), so this runner is for a checkpoint whose history
+`run_ts.py latent_readout --history`), so this runner is for a checkpoint whose history
 predates them, for the exact per-dimension medians a summable epoch diagnostic cannot carry,
 and for reading two arms side by side.
 
@@ -32,7 +32,7 @@ This is a diagnostic of the TRAINING-side densities and its numbers must never b
 model accuracy.
 
 The cohort is rebuilt the way every replay runner rebuilds one — the checkpoint's own
-provenance and split, through `run_ts_anytime_curve.load_arm` / `cohort_series`, so the
+provenance and split, through `experiments.anytime_curve.load_arm` / `cohort_series`, so the
 roster rule (`data_provenance.checkpoint_data_provenance`) has one owner. That shared loader
 also refuses a `cta_conditioning=given` or `intent_conditioning=truth-…` checkpoint (both
 read the future in a second way); the refusal this runner adds is its own: a checkpoint
@@ -45,16 +45,11 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 import tempfile
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+from ts_transformer.experiments.support import REPO_ROOT
 
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
@@ -69,7 +64,7 @@ from ts_transformer.outputs.control.latent import (  # noqa: E402
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows  # noqa: E402
 from ts_transformer.models import resolve_device  # noqa: E402
 from ts_transformer.objective import move_dynamics  # noqa: E402
-from run_ts_anytime_curve import Arm, Grid, cohort_series, load_arm, parse_arms  # noqa: E402
+from ts_transformer.experiments.anytime_curve import Arm, Grid, cohort_series, load_arm, parse_arms  # noqa: E402
 
 RESULT_SCHEMA = "ts-latent-probe-v1"
 #: How the shared replay loader names this measurement in its refusals.

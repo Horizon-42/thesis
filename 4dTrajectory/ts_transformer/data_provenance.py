@@ -44,7 +44,7 @@ def eligible_set_digest(keys: Iterable[str]) -> str:
 
     THE one definition: the provenance's ``eligible_set_sha256`` is it, the legacy check
     reports both sides of a changed set with it, `splits.data_selection_audit` hashes its
-    split rosters with it, and the publisher and `run_ts_pipeline` compare stored artifacts
+    split rosters with it, and the publisher and `experiments.pipeline` compare stored artifacts
     through it. A second implementation would be a second answer to "same data?".
     """
     return hashlib.sha256("\n".join(sorted(keys)).encode()).hexdigest()

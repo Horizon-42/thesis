@@ -6,13 +6,8 @@ from pathlib import Path
 import pytest
 import torch
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (REPO_ROOT, TS_DIR.parent):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
-import run_ts_clock_attribution as attribution  # noqa: E402
+import ts_transformer.experiments.clock_attribution as attribution  # noqa: E402
 
 
 def test_duration_variants_separate_total_time_and_partition() -> None:

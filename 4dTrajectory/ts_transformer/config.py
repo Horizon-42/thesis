@@ -236,7 +236,7 @@ CONTROL_STATE_OBJECTIVES = (
 # L0 measured what it is worth: flown open-loop it lands 2.5-7.8 km from the truth it was
 # read off (N=4 7850 m, N=8 6381, N=16 4095, N=32 2537), so "imitating the teacher
 # perfectly" is NOT "flying the truth track". ``fitted`` reads a per-flight control table
-# fitted THROUGH the same differentiable rollout (`run_ts_control_basis_oracle.py
+# fitted THROUGH the same differentiable rollout (`experiments/control_basis_oracle.py
 # --checkpoint`), which reproduces the truth to 88-433 m at the same width — a strictly
 # better teacher. The table is width-, anchor- and duration-specific, and it is the DATASET
 # that checks all three: this config only carries the path.
@@ -1442,7 +1442,7 @@ class ControlObjective:
                 raise ValueError(
                     "the fitted teacher imitates a per-flight table: set "
                     "control_fitted_teacher_path to the basis_fit.json written by "
-                    "run_ts_control_basis_oracle.py --checkpoint"
+                    "run_ts.py control_basis_oracle --checkpoint"
                 )
             if not self.control_imitation_loss_weight:
                 raise ValueError(
@@ -2307,7 +2307,7 @@ class TSConfig:
             )
         # The anchor-grid metric re-anchors the validation replay at every bin, so an
         # oracle input is re-read from the future AT EACH ANCHOR — the same reason
-        # `run_ts_anytime_curve.py` refuses these two checkpoints outright. Selecting an
+        # `experiments/anytime_curve.py` refuses these two checkpoints outright. Selecting an
         # epoch on that is selecting on how fast the oracle converges.
         if self.checkpoint_selection_metric == CHECKPOINT_SELECTION_ANCHOR_GRID_ADE:
             if self.cta_conditioning == CTA_CONDITIONING_GIVEN:

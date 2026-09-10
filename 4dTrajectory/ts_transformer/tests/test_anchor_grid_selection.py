@@ -587,7 +587,7 @@ def test_the_metric_names_the_run() -> None:
 # ── review 2026-09-09 A-2: the truth is taken where the windows were anchored ──
 
 def test_the_l1_plan_truth_follows_a_common_anchor_floor(cohort) -> None:
-    """`run_ts_history_ablation.py` trains every candidate seq_len at `max(L) - 1`; the
+    """`experiments/history_ablation.py` trains every candidate seq_len at `max(L) - 1`; the
     L-1 plan's truth used to be built at `seq_len - 1` regardless, i.e. `(max L - L) * dt`
     EARLIER than the anchor the prediction was made from, which corrupted the kept epoch
     and every metric that runner published."""

@@ -11,7 +11,7 @@ the thing they would have to cover has to be known — and it is already on disk
 This is a pure readout: it opens summaries, it never predicts, and it writes nothing unless
 asked for `--json`::
 
-    python run_ts_eta_error_readout.py \\
+    python run_ts.py eta_error_readout \\
         L1_native32=4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32_pred_val
 
 Per stratum (`approach_difficulty.strata_masks` — the same cut every other readout uses) it
@@ -43,15 +43,10 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+from ts_transformer.experiments.support import REPO_ROOT
 
 from ts_transformer.approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
 from ts_transformer.config import DURATION_HEAD_QUANTILE, DURATION_MEDIAN_INDEX  # noqa: E402

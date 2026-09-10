@@ -17,7 +17,7 @@ for path in (TS_DIR.parent, REPO_ROOT):
         sys.path.insert(0, str(path))
 
 import ts_transformer.data_provenance as data_provenance  # noqa: E402
-import run_ts_pipeline  # noqa: E402
+import ts_transformer.experiments.pipeline as run_ts_pipeline  # noqa: E402
 import ts_transformer.splits as splits  # noqa: E402
 from ts_transformer.config import TSConfig  # noqa: E402
 from ts_transformer.lateral_eligibility import (  # noqa: E402

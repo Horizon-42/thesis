@@ -53,15 +53,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-TS_SCRIPT = TS_DIR / "__main__.py"
+from ts_transformer.experiments.support import REPO_ROOT, TS_SCRIPT
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from ts_transformer.config import TSConfig, recipe_settings  # noqa: E402
 from ts_transformer.run_naming import run_display_name, run_slug  # noqa: E402

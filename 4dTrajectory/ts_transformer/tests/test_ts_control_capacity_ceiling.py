@@ -7,13 +7,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (REPO_ROOT, TS_DIR.parent):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
-import run_ts_control_capacity_ceiling as ceiling  # noqa: E402
+import ts_transformer.experiments.control_capacity_ceiling as ceiling  # noqa: E402
 from ts_transformer.config import TSConfig  # noqa: E402
 
 

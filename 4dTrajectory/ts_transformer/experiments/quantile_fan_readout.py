@@ -8,7 +8,7 @@ quantile — a `cta=self-q` arm, the first CTA arm that reads no future — and 
 readout::
 
     conda activate aeroviz
-    python run_ts_quantile_fan_readout.py --arm <pred_dir> --json <out>/quantile_fan.json
+    python run_ts.py quantile_fan_readout --arm <pred_dir> --json <out>/quantile_fan.json
 
 ``<pred_dir>`` is the top-1 directory (its own records ARE the q50 decode); the five
 trajectories live under ``<pred_dir>/quantiles/qNN/``. **Only those five are read** — the
@@ -23,7 +23,7 @@ Three readings, per `approach_difficulty.strata_masks` stratum:
    median widths. §六 6 — these are quantiles of the DURATION. **The calibrated-hit column is
    IN-SAMPLE whenever this arm's split is the split the δ was fitted on** (the usual case:
    both are `val`); it is marked as such, and the gate number is the DEPLOYED coverage in
-   `run_ts_eta_calibration.py`'s readout, measured on the half the δ was not fitted on.
+   `run_ts.py eta_calibration`'s readout, measured on the half the δ was not fitted on.
 2. **The width**: the median ``q90 − q10`` and the median calibrated width per α. The design's
    veto is on this number: a vectored median width above 120 s has no scheduling meaning.
 3. **The geometric coverage (gate 3.4-3)**: the truth path's chamfer to the NEAREST of the
@@ -39,15 +39,10 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+from ts_transformer.experiments.support import REPO_ROOT
 
 import ts_transformer.geometric_metrics as gm  # noqa: E402
 from ts_transformer.approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
@@ -286,7 +281,7 @@ def render(payload: dict) -> str:
         lines.append(
             f"   * cal.hit is IN-SAMPLE: this arm's split ({payload['calibration_cohort']['split']}) "
             "IS the split the conformal delta was fitted on. The gate number is the "
-            "DEPLOYED coverage in run_ts_eta_calibration.py's readout, measured on the "
+            "DEPLOYED coverage in run_ts.py eta_calibration's readout, measured on the "
             "held-out half."
         )
     if payload.get("calibration_cohort", {}) and payload["calibration_cohort"].get("smokeTest"):

@@ -1,6 +1,6 @@
 """The anchor grid has ONE definition, and the A0 runner uses it.
 
-`run_ts_anytime_curve.py` draws the curve; the `anchor-grid-common-grid-ade` selection
+`experiments/anytime_curve.py` draws the curve; the `anchor-grid-common-grid-ade` selection
 metric picks the epoch on four of the same bins. Two grids that merely agreed today would
 make "the curve improved" and "the epoch was selected on the curve" statements about
 different anchors, so these tests pin that they are literally the same objects, and that
@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 import ts_transformer.anchor_grid as anchor_grid
-import run_ts_anytime_curve as runner
+import ts_transformer.experiments.anytime_curve as runner
 from ts_transformer.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,

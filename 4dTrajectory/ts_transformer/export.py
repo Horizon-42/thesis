@@ -404,7 +404,7 @@ def write_batch(
     ``summary["skipped"]`` so a readout never mistakes a subset for the split.
 
     ``extra_summary`` adds top-level summary keys the CALLER owns and no reader of the
-    record contract may assume (today: ``run_ts_anytime_curve.py``'s ``anytime`` block,
+    record contract may assume (today: ``experiments/anytime_curve.py``'s ``anytime`` block,
     which states which remaining-path bin these records were anchored in). A key that
     collides with the contract's own is refused rather than silently overwriting it.
 

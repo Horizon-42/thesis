@@ -18,7 +18,7 @@ import torch
 from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks
 from ts_transformer.outputs.control.basis_fit import inverse_dynamics_seed
 from flight_scenarios.identity import summary_row_key
-from run_ts_control_basis_oracle import summarise
+from ts_transformer.experiments.control_basis_oracle import summarise
 
 
 def _reference() -> dict[str, dict]:
@@ -103,7 +103,7 @@ def test_the_seed_refuses_a_batch_that_does_not_cover_the_same_flights():
 
 import json                                                        # noqa: E402
 
-import run_ts_control_basis_oracle as runner                       # noqa: E402
+import ts_transformer.experiments.control_basis_oracle as runner                       # noqa: E402
 from ts_transformer.outputs.control.forecast import _control_prediction_batch  # noqa: E402
 from ts_transformer.config import (                                               # noqa: E402
     CONTROL_DURATION_UNIFORM,

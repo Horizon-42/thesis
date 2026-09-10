@@ -1,7 +1,7 @@
 """The campaign runner's dry run is a DRY run.
 
-`run_ts_frame_ablation.py` is the one arm-campaign driver (its predecessor
-`run_ts_control_arms.py` was archived on 2026-09-07). A dry run exists to answer two
+`experiments/frame_ablation.py` is the one arm-campaign driver (its predecessor
+`run_ts_control_arms.py` was archived on 2026-09-07 (`archive/control_arms_runner_2026_08/`)). A dry run exists to answer two
 questions before anything is spent: does every arm's config construct, and what will be
 run? Neither needs a file — and one aimed at `4dTrajectory/outputs`, a read-only symlink in
 a development worktree, used to leave a campaign directory behind in the shared tree.
@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-import run_ts_frame_ablation as runner
+import ts_transformer.experiments.frame_ablation as runner
 
 ARMS = {
     "base": {"prediction_output": "state", "model": "itransformer",

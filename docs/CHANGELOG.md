@@ -4,6 +4,43 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: review §4.5 — the runners are `ts_transformer/experiments/` behind `run_ts.py <name>`
+
+Step 6a of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`
+§4.5, resolution paragraph), on `dev-pkg-review`. Nothing on disk changed: full suite 992 passed, 1 skipped (the two `test_cta_from_quantiles` tests that loaded the fan readout by its old root path now import `experiments.quantile_fan_readout`), and the
+219 stored `history.json` configs give byte-identical run names, slugs and loadability.
+
+- **The 21 live `run_ts_*.py` runners are `experiments/<name>.py`** (`pipeline`, `cv`,
+  `frame_ablation`, `anytime_curve`, `eta_calibration`, …; `plot_ts_results.py` is
+  `experiments/plot_results.py`) behind ONE entry point: `python run_ts.py <name> [args]` at the
+  repository root, or `python -m ts_transformer.experiments <name>` with `4dTrajectory/` on the
+  path; `run_ts.py --list` prints the names with their first docstring line. The 22 hand-written
+  `sys.path` bootstraps are gone. **`ts_transformer/repo_layout.py` is the one definition of the
+  repository's paths** (`REPO_ROOT`, `HARVEST_ROOT`, `OPT_OUTPUTS_ROOT`, …, `discover_k_airports`)
+  — `batch_benchmark` used to import the pipeline RUNNER for them, the one package-into-runner
+  edge, now banned by `tests/test_architecture.py`. `experiments/support.py` re-exports them and
+  holds `series_digest`; `parse_airports` (five byte-identical copies) is `cli.common`'s; the
+  three private `file_sha256` and four `_write_json_atomic` copies read `io_utils`'s.
+  `write_reports` (×3) stays per runner — three CSV schemas under one name.
+- **Archived:** `archive/flight_model_paired_2026_09/` (the one-shot paired flight-model
+  comparison, T4-27; its result is `CLAUDE.md`'s `control_dynamics_model` row).
+- **Tests beside the runners:** the six `trajectory_data_process/tests/test_ts_*.py` moved into
+  `ts_transformer/tests/` (their own path preambles dropped — `conftest.py` covers them); the
+  three tests that loaded a runner by file path import it by name.
+- **The twelve red `test_ts_pipeline.py` fixtures are fixed** (T4-23 — fixture rot, not bugs): the
+  fixture harvest writes the lateral-pass roster beside the manifest and stamps the eligible-set
+  digests the runner has required since 2026-09-08; the printed loss line is the state path's;
+  the default grid is 45 candidates; the directory test uses a non-default selection metric;
+  the label assertion no longer expects the default frame spelled. **The suite's exit code carries
+  information again.**
+- Live documents (`CLAUDE.md`, the package `CLAUDE.md` / `README.md` / `OPEN_ITEMS.md` /
+  `ENGINEERING_NOTES.md`, `docs/code-health-followups.md`, the arm files' comments, the publisher's
+  docstrings) name the new door; dated reports, the changelog and the archive keep the commands
+  they were written under.
+- **Not done:** `TrainingPlan` keeps its keyword constructor, and the pipeline's `_*_tag`
+  directory grammar stays — recomputing it from `run_naming.run_slug` would move every pipeline
+  output directory `--skip-train` / CV reuse reads (a decision for the pipeline's owner).
+
 ### 2026-09-10 — ts_transformer: review §4.4 — the training loop and the predict command extracted into named steps
 
 Step 5 of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`

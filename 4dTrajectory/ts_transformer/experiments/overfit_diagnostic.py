@@ -13,23 +13,18 @@ import argparse
 import csv
 import gc
 import hashlib
-import json
 import os
-import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
+from ts_transformer.experiments.support import REPO_ROOT
 
 import torch  # noqa: E402
 
-import run_ts_pipeline as pipeline  # noqa: E402
+import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import DEFAULT_AIRCRAFT_TYPE, TSConfig  # noqa: E402
 from ts_transformer.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
@@ -43,16 +38,13 @@ from ts_transformer.dataset import (  # noqa: E402
 from ts_transformer.splits import flight_keys_by_split, split_name_for_dataset_id  # noqa: E402
 from ts_transformer.models import parameter_count  # noqa: E402
 from ts_transformer.train import evaluate_split, fit_model, usable_series  # noqa: E402
+from ts_transformer.experiments.support import parse_airports
+from ts_transformer.experiments.support import series_digest
+from ts_transformer.io_utils import write_json_atomic
 
 RESULT_SCHEMA = "ts-small-sample-overfit-diagnostic-v1"
 DEFAULT_WEIGHTS = (10.0, 0.0)
 
-
-def _parse_airports(raw: str) -> tuple[str, ...]:
-    airports = tuple(sorted({token.strip().upper() for token in raw.split(",") if token.strip()}))
-    if not airports:
-        raise argparse.ArgumentTypeError("--airports requires at least one ICAO code")
-    return airports
 
 
 def _parse_weights(raw: str) -> tuple[float, ...]:
@@ -66,10 +58,6 @@ def _parse_weights(raw: str) -> tuple[float, ...]:
         raise argparse.ArgumentTypeError("--kinematic-weights must be non-negative")
     return tuple(dict.fromkeys(values))
 
-
-def _series_digest(series: Sequence[FlightSeries]) -> str:
-    payload = "\n".join(sorted(item.dataset_id for item in series)).encode()
-    return hashlib.sha256(payload).hexdigest()
 
 
 def select_balanced_subset(
@@ -128,12 +116,6 @@ def _terminal_target_metrics(
         "distance_p95_m": float(np.percentile(distance, 95)),
     }
 
-
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temporary.replace(path)
 
 
 def write_reports(output_dir: Path, result: dict[str, Any]) -> None:
@@ -269,7 +251,7 @@ def run_diagnostic(
     )
     print(
         f"memorization population: {len(sample)} flights "
-        f"({samples_per_airport} per airport), sha256={_series_digest(sample)}"
+        f"({samples_per_airport} per airport), sha256={series_digest(sample)}"
     )
 
     candidates = []
@@ -317,7 +299,7 @@ def run_diagnostic(
             "airports": list(airports),
             "samples_per_airport": samples_per_airport,
             "flights": len(sample),
-            "dataset_ids_sha256": _series_digest(sample),
+            "dataset_ids_sha256": series_digest(sample),
             "dataset_ids": [item.dataset_id for item in sample],
             "source": "locked outer-train only",
         },
@@ -334,7 +316,7 @@ def run_diagnostic(
         "arrival_manifests": manifest_digests,
         "candidates": candidates,
     }
-    _write_json_atomic(output_dir / "overfit_diagnostic.json", result)
+    write_json_atomic(output_dir / "overfit_diagnostic.json", result)
     write_reports(output_dir, result)
     print(f"\n✓ wrote {output_dir / 'overfit_diagnostic.json'}")
     print(f"  report: {output_dir / 'plots' / 'index.md'}")
@@ -343,7 +325,7 @@ def run_diagnostic(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--airports", type=_parse_airports, default=None,
+    parser.add_argument("--airports", type=parse_airports, default=None,
                         help="comma-separated airports; default: all discovered K-airports")
     parser.add_argument("--samples-per-airport", type=int, default=32)
     parser.add_argument("--kinematic-weights", type=_parse_weights, default=DEFAULT_WEIGHTS)

@@ -8,18 +8,43 @@ import math
 
 import pytest
 
-import plot_ts_results as result_plots
-import run_ts_coordinate_ablation as ablation
-import run_ts_cv as cv_runner
-import run_ts_pipeline as pipeline
+import ts_transformer.experiments.plot_results as result_plots
+import ts_transformer.experiments.coordinate_ablation as ablation
+import ts_transformer.experiments.cv as cv_runner
+import ts_transformer.experiments.pipeline as pipeline
+from ts_transformer.lateral_eligibility import (
+    LATERAL_PASS_POLICY,
+    LATERAL_PASS_ROSTER_SCHEMA,
+    default_lateral_pass_roster_path,
+)
 
 
 def _manifest(root, airport: str, generation: int = 1):
+    """A fixture harvest for one airport: the arrivals manifest AND the lateral-pass roster
+    beside it — the runner refuses to reuse a checkpoint or a CV result without the roster
+    (2026-09-08), which is what left twelve of these tests red until 2026-09-10."""
     path = root / airport / "arrivals" / "manifest.json"
     path.parent.mkdir(parents=True)
     path.write_text(
         json.dumps({"airport": airport, "generation": generation}), encoding="utf-8"
     )
+    default_lateral_pass_roster_path(path).write_text(json.dumps({
+        "schema_version": LATERAL_PASS_ROSTER_SCHEMA,
+        "airport": airport,
+        "policy": LATERAL_PASS_POLICY,
+        "sources": {
+            "arrival_manifest": str(path),
+            "arrival_manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "evaluation_report": str(path.parent.parent / "approach" / "evaluation_report.json"),
+            "evaluation_report_sha256": "0" * 64,
+            "evaluation_report_schema": "fixture",
+        },
+        "counts": {
+            "arrival_candidates": 0, "eligible_lateral_pass": 0, "excluded_lateral_fail": 0,
+            "excluded_lateral_indeterminate": 0, "evaluation_only": 0,
+        },
+        "eligible_flight_keys": [],
+    }), encoding="utf-8")
     return path
 
 
@@ -66,7 +91,10 @@ def test_final_training_prints_the_resolved_config_before_the_command(
     ) in output
     assert "network   : d_model=256, d_ff=512, heads=8, layers=3" in output
     assert "optimizer : lr=0.0005" in output
-    assert "loss      : final_time=1, kinematic=3, terminal=0.02" in output
+    assert (
+        "loss      : true-time 3D position/10000m + 0.25× output-endpoint position "
+        "+ final_time/600s; future velocity derived from position"
+    ) in output
     assert (
         "runtime   : batch=2048, device=auto, seed=29, aircraft=A320, "
         "aircraft_filter=all"
@@ -88,9 +116,10 @@ def test_simple_cv_runner_uses_the_fixed_default_grid(tmp_path, monkeypatch, cap
     assert f"--cv-epochs {pipeline.DEFAULT_CV_EPOCHS}" in output
     assert "--cv-patience 6" in output
     assert "--batch-size 2048" in output
-    assert "(27 candidates)" in output
+    # The default grid: n_segments (5) × learning_rate (3) × d_model (3).
+    assert "(45 candidates)" in output
     assert "--trials" not in output
-    assert "after CV:" in output and "plot_ts_results.py" in output
+    assert "after CV:" in output and "plot_results" in output
 
 
 def test_pipeline_defaults_to_both_pooled_models_with_batch_2048(
@@ -330,9 +359,11 @@ def test_fixed_and_random_anchor_modes_use_distinct_artifact_paths(tmp_path, mon
         ("KRDU",), "itransformer", training_mode="pooled",
         random_train_anchor=True,
     )
+    # A NON-default selection metric (the common-grid ADE has been the default since
+    # 2026-09-07, so it names no directory); the objective is the one that does.
     common_grid = pipeline.TrainingPlan(
         ("KRDU",), "itransformer", training_mode="pooled",
-        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
+        checkpoint_selection_metric="fixed-anchor-objective",
     )
     fixed_prediction = pipeline.PredictionPlan(fixed, "KRDU", ("eval",))
     random_prediction = pipeline.PredictionPlan(random, "KRDU", ("eval",))
@@ -412,8 +443,9 @@ def test_prediction_labels_distinguish_coordinate_frames(tmp_path, monkeypatch):
         ("czml",),
     )
 
+    # The default frame names nothing (run_naming: special = differs from the default);
+    # the non-default one is spelled.
     assert enu.label != aligned.label
-    assert "ENU" in enu.label
     assert "runway-aligned" in aligned.label
 
 
@@ -462,6 +494,7 @@ def test_skip_train_rejects_checkpoint_from_opposite_anchor_policy(
     trained.checkpoint_metadata.write_text(json.dumps({
         "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
+        "eligible_sets": pipeline._eligible_set_digests(trained.airports),
         "arrival_manifests": {
             "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
         },
@@ -506,6 +539,7 @@ def test_skip_train_rejects_checkpoint_from_opposite_horizon_mode(
     trained.checkpoint_metadata.write_text(json.dumps({
         "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
+        "eligible_sets": pipeline._eligible_set_digests(trained.airports),
         "arrival_manifests": {
             "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
         },
@@ -551,6 +585,7 @@ def test_skip_train_rejects_window_checkpoint_with_different_rollout_cap(
     trained.checkpoint_metadata.write_text(json.dumps({
         "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
+        "eligible_sets": pipeline._eligible_set_digests(trained.airports),
         "arrival_manifests": {
             "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
         },
@@ -621,6 +656,7 @@ def _ablation_cv_result(plan, manifest_digest, *, score):
         "cv_patience": plan.cv_patience,
         "auto_batch_size": plan.batch_size == "auto",
         "base_config": plan._expected_cv_base_config(),
+        "eligible_sets": pipeline._eligible_set_digests(plan.airports),
         "arrival_manifests": {"KRDU": manifest_digest},
         "candidates": [{
             "candidate": 0,
@@ -776,6 +812,7 @@ def test_coordinate_ablation_verifies_final_split_before_test(tmp_path, monkeypa
     plan.checkpoint_metadata.write_text(json.dumps({
         "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(plan.checkpoint.read_bytes()).hexdigest(),
+        "eligible_sets": result["eligible_sets"],
         "arrival_manifests": result["arrival_manifests"],
         "random_train_anchor": False,
         "split_sha256": split_sha256,

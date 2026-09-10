@@ -1,7 +1,7 @@
 """Small file/hash helpers shared across the package's writers and runners.
 
 They were copied byte-for-byte into five modules (2026-09-07 package audit); one
-definition each. Deliberately torch-free: `run_ts_pipeline.py` is import-light and
+definition each. Deliberately torch-free: `experiments/pipeline.py` is import-light and
 `experiment_index` runs before any model is built.
 """
 

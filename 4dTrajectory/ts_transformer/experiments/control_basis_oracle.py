@@ -13,7 +13,7 @@ segment count N and each duration mode, report the error that remains. The resul
 curve ADE(N): the decoder's width is the smallest N whose representation error is
 negligible against the 962 m of intent the ego history cannot see::
 
-    python run_ts_control_basis_oracle.py --airport KRDU \\
+    python run_ts.py control_basis_oracle --airport KRDU \\
         --reference 4dTrajectory/outputs/KRDU/experiments/control_procedure_20260905/A_control_v3_pred_val \\
         --out 4dTrajectory/outputs/KRDU/experiments/l0_control_basis_20260907 \\
         --segments 4,8,16,32,64 --duration-modes uniform,free --limit 400 --steps 1200 --batch-size 256
@@ -35,7 +35,7 @@ truth, while the fitted schedule at the same width lands 88–433 m from it. The
 mode writes is that strictly better teacher, consumed by
 `control_imitation_target="fitted"`::
 
-    python run_ts_control_basis_oracle.py \\
+    python run_ts.py control_basis_oracle \\
         --checkpoint 4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32/checkpoint.pt \\
         --out 4dTrajectory/outputs/KRDU/experiments/l5_fitted_teacher_20260907 \\
         --splits train,val --init network --steps 400 --batch-size 1024
@@ -52,21 +52,16 @@ artifact and must not exist.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, fields, replace
+from dataclasses import asdict, replace
 import hashlib
 import json
 import math
 from pathlib import Path
-import sys
 import time
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+from ts_transformer.experiments.support import REPO_ROOT
 
 import torch  # noqa: E402
 
@@ -117,7 +112,8 @@ from ts_transformer.models import resolve_device  # noqa: E402
 from ts_transformer.physical_criteria import fixed_dt_position_ade_m  # noqa: E402
 from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
 from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
-import run_ts_pipeline as pipeline  # noqa: E402
+import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
+from dataclasses import fields  # noqa: F401  (read off this module by its tests / sibling runners)
 
 RESULT_SCHEMA = "l0-control-basis-oracle-v1"
 # §六 L0's gate: the representation error must be negligible against the 962 m of intent the

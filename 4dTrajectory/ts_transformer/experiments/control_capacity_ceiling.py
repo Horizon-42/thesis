@@ -17,23 +17,18 @@ import argparse
 import hashlib
 import json
 import math
-import sys
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
-import run_ts_pipeline as pipeline  # noqa: E402
-import run_ts_predictability_report as common_report  # noqa: E402
+import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
+import ts_transformer.experiments.predictability_report as common_report  # noqa: E402
 from ts_transformer.config import PREDICTION_CONTROL  # noqa: E402
 from ts_transformer.outputs.control.dynamics.rollout import rollout_control_endpoints  # noqa: E402
 from ts_transformer.data_provenance import (  # noqa: E402
@@ -55,18 +50,12 @@ from ts_transformer.objective import (  # noqa: E402
     prediction_loss_components,
 )
 from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
+from ts_transformer.io_utils import file_sha256
 
 
 SCHEMA_VERSION = "ts-control-capacity-ceiling-v1-development-only"
 ORACLE_MODES = ("optimized_partition", "uniform_partition")
 
-
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def keys_sha256(keys: Sequence[str]) -> str:

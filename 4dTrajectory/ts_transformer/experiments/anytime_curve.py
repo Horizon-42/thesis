@@ -10,7 +10,7 @@ property of the flight, it is a property of that instant: it gets exposed as the
 proceeds. This runner measures how much, by replaying the SAME checkpoint from a grid of
 later anchors::
 
-    python run_ts_anytime_curve.py \\
+    python run_ts.py anytime_curve \\
         --checkpoint L1_native32=4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32/checkpoint.pt \\
         --out 4dTrajectory/outputs/KRDU/experiments/anytime_a0_20260907
 
@@ -69,22 +69,17 @@ from typing import Callable
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
-for path in (TS_DIR.parent, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+from ts_transformer.experiments.support import REPO_ROOT
 
 import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 
 import ts_transformer.geometric_metrics as gm  # noqa: E402
-from ts_transformer.anchor_grid import (  # noqa: E402
+from ts_transformer.anchor_grid import (
     DEFAULT_ANCHOR_GRID_KM,
     DEFAULT_GRID_MIN_FUTURE_S,
     PARTIAL_COVERAGE,
     anchors_for_bin,
-    bin_anchor,
     bin_label,
     remaining_path_profiles,
     strata_fixed_at_l1,
@@ -120,7 +115,8 @@ from ts_transformer.forecast import forecast_approaches  # noqa: E402
 from ts_transformer.io_utils import file_sha256  # noqa: E402
 from ts_transformer.models import resolve_device  # noqa: E402
 from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
-import run_ts_pipeline as pipeline  # noqa: E402
+import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
+from ts_transformer.anchor_grid import bin_anchor  # noqa: F401  (read off this module by its tests / sibling runners)
 
 RESULT_SCHEMA = "ts-anytime-curve-a0-v2"
 #: The ``anytime`` block ``--write-records`` adds to each record directory's summary. It is
@@ -256,7 +252,7 @@ class Arm:
 
 
 #: What `load_arm` calls the measurement in its refusals. A second runner reusing this
-#: loader (`run_ts_latent_probe.py`) must speak in its own voice, or a probe user is told
+#: loader (`run_ts.py latent_probe`) must speak in its own voice, or a probe user is told
 #: their checkpoint was rejected for the sake of a curve they did not ask for.
 ANYTIME_INSTRUMENT = "the anytime curve"
 

@@ -16,7 +16,7 @@ points, and the 2026-09-09 plan-and-guidance design is the next axis.
 |---|---|
 | bug findings | 4 number-changing on live paths, 4 crash paths, ~20 contract holes — §2, all with `file:line` |
 | architecture | diagnosis §3, target §4, retirement candidates with census evidence §5, order §6 |
-| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3), 4 (§4.2) and 5 (§4.4, see their resolution paragraphs) done in the same branch |
+| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3), 4 (§4.2), 5 (§4.4) and 6a (§4.5, see their resolution paragraphs) done in the same branch |
 | decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); the five §7 decisions |
 
 ## 1. Measured
@@ -424,6 +424,36 @@ audit already classified (T4-27) go to `archive/`. `run_ts_pipeline.TrainingPlan
 two grammars, and the directory one cannot be recomputed from a stored config). The resume rule
 in `run_ts_frame_ablation` (C-8) becomes "the arm's serialized config equals the checkpoint's"
 plus "history.json exists", not "checkpoint.pt exists".
+
+**Resolution (2026-09-10, `dev-pkg-review`).** The 21 live runners are
+`ts_transformer/experiments/<name>.py` (the `run_ts_` prefix dropped: `pipeline`, `cv`,
+`frame_ablation`, `anytime_curve`, …; `plot_ts_results.py` is `experiments/plot_results.py`),
+behind one entry point — `python run_ts.py <name> [args]` at the repository root (the door
+that puts `4dTrajectory/` on the path, as the package CLI does) or
+`python -m ts_transformer.experiments <name>`; `--list` prints the names with their first
+docstring line. The repository's paths — `REPO_ROOT`, `TS_DIR`, `TS_SCRIPT`, `HARVEST_ROOT`,
+`OPT_OUTPUTS_ROOT`, `COMPARISON_AIRPORTS_ROOT`, `CZML_SCRIPT`, with `discover_k_airports` /
+`arrival_manifest_path` — are `ts_transformer/repo_layout.py`, the one definition the CLI, the
+benchmark and the runners read (`batch_benchmark` used to import the pipeline RUNNER for them,
+the one package-into-runner edge; `tests/test_architecture.py` now bans that direction).
+`experiments/support.py` re-exports them for the runners and holds `series_digest`;
+`parse_airports` (five byte-identical copies) is `cli.common`'s; the three private
+`file_sha256` and four `_write_json_atomic` copies read `io_utils`'s. `write_reports`
+(×3) was NOT one function — three CSV schemas under one name — and stays per runner.
+`run_ts_flight_model_paired.py` (one-shot, T4-27) is `archive/flight_model_paired_2026_09/`.
+The six `trajectory_data_process/tests/test_ts_*.py` moved beside the runners into
+`ts_transformer/tests/`, and the twelve red `test_ts_pipeline.py` fixtures (T4-23) are fixed in
+the same commit — fixture rot, not bugs: the fixture harvest now writes the lateral-pass roster
+beside the manifest and stamps the eligible-set digests the runner has required since
+2026-09-08, the printed loss line is the state path's, the default grid is 45 candidates, the
+directory test uses a non-default selection metric, and the label assertion no longer expects
+the default frame to be spelled. The suite's exit code carries information again. Live documents name the new door;
+dated reports and the changelog keep the commands they were written under. **Not done:**
+`TrainingPlan` still takes its 37 keyword arguments (the two override copies A-1 came from are
+already one `_plan_overrides`), and the `_*_tag` directory grammar stays — turning it into
+`run_naming.run_slug` would move every pipeline output directory on disk, which the runner's
+`--skip-train` / CV reuse reads (user principle 1; a change for the pipeline's owner to
+decide). Acceptance: full suite 992 passed, 1 skipped (the two `test_cta_from_quantiles` tests that loaded the fan readout by its old root path now import `experiments.quantile_fan_readout`); 219 stored configs, 112 load, 0 names moved.
 
 ### 4.6 Tests
 

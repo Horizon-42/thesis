@@ -1,6 +1,6 @@
 """The remaining-path anchor grid — ONE definition, three consumers.
 
-The A0 curve (``run_ts_anytime_curve.py``) replays a trained checkpoint from a grid of
+The A0 curve (``experiments/anytime_curve.py``) replays a trained checkpoint from a grid of
 later anchors; the ``anchor-grid-common-grid-ade`` checkpoint-selection metric
 (:mod:`validation`) scores the validation split at a subset of the SAME grid. If the two
 ever drifted apart, "the anytime curve improved" and "this epoch was selected on the

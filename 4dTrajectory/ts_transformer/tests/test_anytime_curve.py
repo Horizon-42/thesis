@@ -25,7 +25,7 @@ import torch
 
 import ts_transformer.forecast as forecast_module
 import ts_transformer.outputs.state.forecast as state_forecast_module
-import run_ts_anytime_curve as runner
+import ts_transformer.experiments.anytime_curve as runner
 from ts_transformer.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,

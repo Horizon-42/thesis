@@ -73,8 +73,8 @@ from ts_transformer.outputs.control.forecast import (
     shuffled_latent_forecasts,
 )
 from ts_transformer.outputs.control.latent import displacement_verdict
-from run_ts_latent_readout import kept_epoch_latent, readout, render_latent
-from run_ts_latent_readout import main as readout_main
+from ts_transformer.experiments.latent_readout import kept_epoch_latent, readout, render_latent
+from ts_transformer.experiments.latent_readout import main as readout_main
 from ts_transformer.synthetic import synthetic_arrivals
 
 

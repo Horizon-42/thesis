@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import run_ts_overfit_diagnostic as diagnostic
+import ts_transformer.experiments.overfit_diagnostic as diagnostic
 
 
 def _series(airport: str, count: int):

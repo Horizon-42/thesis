@@ -385,7 +385,7 @@ def fit_basis_schedules(
 #
 # The width study above answers "how wide"; the SAME fit, run at one width over a
 # checkpoint's own training cohort, answers "what should the imitation term imitate".
-# ``run_ts_control_basis_oracle.py --checkpoint`` writes the table, `dataset` reads it
+# ``run_ts.py control_basis_oracle --checkpoint`` writes the table, `dataset` reads it
 # (latent-intent design §六 L5.a).
 
 #: The teacher table's schema. The one source: the runner stamps it, the dataset loader

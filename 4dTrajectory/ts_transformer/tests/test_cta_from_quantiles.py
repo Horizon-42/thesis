@@ -33,6 +33,7 @@ from ts_transformer.config import (
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from flight_scenarios.identity import summary_row_key
 from ts_transformer.dataset import build_series
+from ts_transformer.experiments import quantile_fan_readout
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.synthetic import synthetic_arrivals
@@ -239,13 +240,7 @@ def test_the_fan_readout_runs_on_a_predicted_directory(tmp_path: Path, monkeypat
     out = tmp_path / "fan"
     assert _predict(checkpoint, out, tmp_path, "--cta-from-quantiles") == 0
 
-    spec = importlib.util.spec_from_file_location(
-        "run_ts_quantile_fan_readout_test",
-        Path(__file__).resolve().parents[3] / "run_ts_quantile_fan_readout.py",
-    )
-    readout = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(readout)
-    assert readout.main(["--arm", str(out), "--json", str(tmp_path / "fan.json")]) == 0
+    assert quantile_fan_readout.main(["--arm", str(out), "--json", str(tmp_path / "fan.json")]) == 0
     payload = json.loads((tmp_path / "fan.json").read_text())
     assert payload["calibrated"] is False
     assert payload["quantiles"] == list(DURATION_QUANTILES)
@@ -263,11 +258,5 @@ def test_the_readout_refuses_a_directory_without_a_fan(tmp_path: Path, monkeypat
     checkpoint, _series = _trained(tmp_path, monkeypatch)
     out = tmp_path / "plain"
     assert _predict(checkpoint, out, tmp_path) == 0          # cta=given, no fan
-    spec = importlib.util.spec_from_file_location(
-        "run_ts_quantile_fan_readout_missing",
-        Path(__file__).resolve().parents[3] / "run_ts_quantile_fan_readout.py",
-    )
-    readout = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(readout)
     with pytest.raises(SystemExit, match="no complete quantile fan"):
-        readout.main(["--arm", str(out)])
+        quantile_fan_readout.main(["--arm", str(out)])

@@ -129,7 +129,7 @@ def _flat_import_candidates() -> list[Path]:
         *_archive_import_candidates(),
         *sorted((TS_DIR / "docs").glob("*.py")),
         REPO_ROOT / "publish_ts_experiment_trajectories.py",
-        *sorted((REPO_ROOT / "trajectory_data_process" / "tests").glob("test_ts_*.py")),
+        REPO_ROOT / "run_ts.py",
     ]
 
 
@@ -310,6 +310,24 @@ def test_the_registry_is_lazy_and_the_data_plane_reaches_only_it():
     assert not under, (
         f"dataset reaches {sorted(under)}; a path's data-side code belongs in its strategy's "
         f"window context"
+    )
+
+
+def test_the_runners_are_consumers_of_the_package_never_the_reverse():
+    """`experiments/` holds the re-runnable runners (review §4.5). A runner may import
+    anything in the package; nothing in the package may import a runner — a module that
+    did would make a library function depend on a campaign driver's argparse and paths."""
+    for path in _module_files():
+        if path.is_relative_to(TS_DIR / "experiments"):
+            continue
+        offending = {n for n in _imported_names(path) if n.split(".")[0] == "experiments"}
+        assert not offending, (
+            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; runners are consumers "
+            f"of the package, never dependencies of it"
+        )
+    assert not list(REPO_ROOT.glob("run_ts_*.py")), (
+        "a run_ts_*.py runner returned to the repository root; it belongs under "
+        "ts_transformer/experiments/ behind run_ts.py <name>"
     )
 
 

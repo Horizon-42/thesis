@@ -570,7 +570,7 @@ def test_a_stored_variant_group_must_be_a_string(tmp_path):
 
 def _anytime_records(tmp_path: Path, checkpoint: Path, *, limit: int = 0,
                      records: int = 236, schema: str | None = None) -> Path:
-    """A record directory as `run_ts_anytime_curve.py --write-records` writes one."""
+    """A record directory as `run_ts.py anytime_curve --write-records` writes one."""
     directory = tmp_path / "anytime_records_20260908" / "records" / "L1_native32" / "12km"
     _write_json(directory / "summary.json", {
         "checkpoint": str(checkpoint), "split": "val",
