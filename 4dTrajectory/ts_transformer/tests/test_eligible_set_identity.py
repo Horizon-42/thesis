@@ -24,7 +24,6 @@ import ts_transformer.cli.common as cli_common
 import ts_transformer.cli.train as cli_train
 from ts_transformer.config import TSConfig
 from ts_transformer.data_provenance import (
-    ARRIVAL_DATA_PROVENANCE_SCHEMA,
     LEGACY_ELIGIBILITY_BOUND_SCHEMA,
     arrival_data_provenance,
     eligible_set_digest,

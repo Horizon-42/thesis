@@ -54,9 +54,6 @@ from ts_transformer.outputs.control.dynamics.inverse import (  # noqa: E402
     actual_controls,
     reference_controls,
 )
-from aerodynamic_model.torch_transport_chart_dynamics import (  # noqa: E402
-    transport_chart_state_to_geodetic,
-)
 
 
 MAX_THRUST_N = 240_000.0
@@ -465,7 +462,6 @@ def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
 
 def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
     """Fitted-tail velocity weights are zero, so placeholders cannot enter the loss."""
-    import ts_transformer.objective as objective
     import ts_transformer.outputs.control.loss.objective as control_objective
     from ts_transformer.dataset import Normalizer
 

@@ -49,7 +49,6 @@ from ts_transformer.outputs.control.supervision import dynamics_arrays  # noqa: 
 from evaluation.records import record_from_dict  # noqa: E402
 from ts_transformer.export import build_prediction_record  # noqa: E402
 from flight_scenarios.runway_target import find_threshold  # noqa: E402
-import ts_transformer.forecast as forecast_module  # noqa: E402
 import ts_transformer.outputs.control.forecast as control_forecast_module  # noqa: E402
 from ts_transformer.forecast import forecast_approach  # noqa: E402
 from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402

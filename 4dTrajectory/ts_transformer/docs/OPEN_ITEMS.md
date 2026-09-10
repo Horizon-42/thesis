@@ -61,9 +61,9 @@ were NOT made without the owner:
   predict extraction DONE 2026-09-10 (`prepare_session` / `train_epoch` / `validate_epoch`;
   `parse_predict_options` → `PredictOptions`); §4.5 runners DONE 2026-09-10
   (`experiments/<name>.py` behind `run_ts.py <name>`, `repo_layout.py`, the twelve red pipeline
-  fixtures fixed — the suite is green); then §4.6 tests (support module, the split of
-  `test_ts_transformer.py`), the folder grouping — each a commit with the full suite and the
-  stored-run census as the acceptance test. The "name every field against
+  fixtures fixed — the suite is green); §4.6 tests DONE 2026-09-10 (`tests/support.py`, the
+  5,855-line `test_ts_transformer.py` split into 23 single-topic files); then the folder
+  grouping — a commit with the full suite and the stored-run census as the acceptance test. The "name every field against
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 

@@ -46,7 +46,6 @@ from ts_transformer.dataset import build_series
 from ts_transformer.outputs.control.forecast import duration_quantile_predictions
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.models import build_model
-import ts_transformer.objective as objective
 import ts_transformer.outputs.control.loss.objective as control_objective
 from ts_transformer.outputs.control.loss.objective import DURATION_QUANTILE_COMPONENT
 from ts_transformer.objective import loss_component_names
@@ -56,7 +55,8 @@ from ts_transformer.run_naming import run_display_name, run_slug
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import load_checkpoint, train
 
-from ts_transformer.tests.test_duration_quantiles import _config, _dynamics
+from ts_transformer.tests.support import dynamics_context
+from ts_transformer.tests.test_duration_quantiles import _config
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -112,7 +112,7 @@ def test_the_rollout_flies_the_point_head_and_never_the_median():
         model.final_time_head.network[-1].weight.normal_(std=0.5)
         model.duration_quantile_head.network[-1].bias.add_(0.7)
     history = _history(config)
-    prediction = model_forward(model, history, _dynamics(len(history)))
+    prediction = model_forward(model, history, dynamics_context(len(history)))
 
     with torch.no_grad():
         point = model.final_time_head(history)
@@ -177,7 +177,7 @@ def test_a_given_cta_leaves_the_point_head_inert_and_still_trains_the_quantiles(
     config = _two_head(cta_conditioning=CTA_CONDITIONING_GIVEN)
     model = build_model(config).eval()
     cta = torch.tensor([200.0, 250.0])
-    prediction = model_forward(model, _history(config, batch=2), _dynamics(2, cta))
+    prediction = model_forward(model, _history(config, batch=2), dynamics_context(2, cta))
     assert torch.allclose(prediction.final_time_s, cta)
     assert prediction.duration_quantiles_s.shape == (2, len(DURATION_QUANTILES))
 

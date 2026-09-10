@@ -26,7 +26,6 @@ from ts_transformer.config import (  # noqa: E402
     INTENT_JOIN_CHANNELS, INTENT_LEAD_CHANNELS, PREDICTION_CONTROL, TSConfig,
     intent_channel_names,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
 from ts_transformer.forecast import history_at_anchor, forecast_approach  # noqa: E402
 from ts_transformer.models import build_model  # noqa: E402
@@ -34,6 +33,7 @@ from ts_transformer.run_naming import run_display_name  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 from ts_transformer.target_conditioning import CONDITIONING_CHANNELS  # noqa: E402
 from ts_transformer.train import load_checkpoint, train  # noqa: E402
+from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 ENTRY_UTC = "2026-07-01T00:00:00Z"
@@ -50,17 +50,6 @@ def _series(n_flights=3, **config_overrides):
     for item in series:
         item.scenario.source["entry_time_utc"] = ENTRY_UTC
     return series, config
-
-
-def _fake_data_provenance(airport: str = AIRPORT):
-    return {
-        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "manifests": [{
-            "airport": airport,
-            "arrival_manifest_sha256": "a" * 64,
-            "source_records": [],
-        }],
-    }
 
 
 # ── Config contract ──────────────────────────────────────────────────────────
@@ -316,7 +305,7 @@ def test_control_training_step_and_checkpoint_round_trip_at_the_intent_width(tmp
     )
     train(
         series, config, output_dir=tmp_path,
-        data_provenance=_fake_data_provenance(), verbose=False,
+        data_provenance=fake_data_provenance(), verbose=False,
     )
     model, loaded, normalizer, payload = load_checkpoint(tmp_path / "checkpoint.pt")
     assert loaded.intent_conditioning == "truth-join-lead"

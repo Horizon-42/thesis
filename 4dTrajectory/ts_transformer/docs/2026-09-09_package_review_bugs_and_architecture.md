@@ -16,7 +16,7 @@ points, and the 2026-09-09 plan-and-guidance design is the next axis.
 |---|---|
 | bug findings | 4 number-changing on live paths, 4 crash paths, ~20 contract holes — §2, all with `file:line` |
 | architecture | diagnosis §3, target §4, retirement candidates with census evidence §5, order §6 |
-| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3), 4 (§4.2), 5 (§4.4) and 6a (§4.5, see their resolution paragraphs) done in the same branch |
+| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3), 4 (§4.2), 5 (§4.4), 6a (§4.5) and 6b (§4.6, see their resolution paragraphs) done in the same branch |
 | decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); the five §7 decisions |
 
 ## 1. Measured
@@ -461,6 +461,24 @@ decide). Acceptance: full suite 992 passed, 1 skipped (the two `test_cta_from_qu
 (T4-26), the six `test_ts_*.py` files that live in `trajectory_data_process/tests/` moved here
 and their 13 red fixtures fixed (T4-23 — the suite's exit code carries no information until
 then). After 4.2, each strategy's tests live beside it and build only its sub-config.
+
+**Resolution (2026-09-10, `dev-pkg-review`).** `tests/support.py` (T4-24) holds the three
+fixtures that were carried as byte-identical copies — `fake_data_provenance` (nine copies,
+taking the airports the one general copy took), `dynamics_context` (three), `terminal_contexts`
+(two) — imported as `ts_transformer.tests.support` (a namespace package, the way
+`test_two_head_duration` already borrowed a sibling's config); the eleven `_config` and six
+`_series` helpers are per-file recipes with different defaults and stay where they are.
+`test_ts_transformer.py` (5,855 lines, 203 tests) is split into 23 single-topic files (T4-26)
+by the file's own section headers and the test order — `test_evaluation_protocol`,
+`test_channel_contract`, `test_windows`, `test_state_objective`, `test_data_loading`,
+`test_anchor_policies`, `test_validation_replay`, `test_control_heads_and_config`,
+`test_capacity_report`, `test_control_objective`, `test_arc_geometry`,
+`test_common_grid_selector`, `test_config_contract`, `test_auto_batch`,
+`test_pipeline_recipes`, `test_experiment_index`, `test_common_grid_control`,
+`test_cross_validation`, `test_metrics_spread`, `test_forecast_paths`, `test_export_seam`,
+`test_end_to_end`, `test_review_2026_09_09` — every test verbatim, each file carrying only the
+helpers it references. The twelve red `test_ts_pipeline.py` fixtures (T4-23) were fixed in the §4.5
+commit that moved the file. Acceptance: full suite 992 passed, 1 skipped — the same count as before the split, 993 collected.
 
 ### 4.7 Per-slice structure findings from the five reviews (the rest, one line each)
 

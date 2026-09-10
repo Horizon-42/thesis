@@ -43,10 +43,7 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.data_provenance import (
-    ARRIVAL_DATA_PROVENANCE_SCHEMA,
-    provenance_manifest_digests,
-)
+from ts_transformer.data_provenance import provenance_manifest_digests
 from ts_transformer.dataset import (
     FlightSeries,
     build_series,
@@ -57,6 +54,7 @@ from ts_transformer.export import observed_series_metrics
 from ts_transformer.forecast import Forecast, history_at_anchor, forecast_approaches
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import load_checkpoint, train
+from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -81,17 +79,6 @@ def _config(**overrides) -> TSConfig:
     return TSConfig(**settings)
 
 
-def _provenance() -> dict:
-    return {
-        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "manifests": [{
-            "airport": AIRPORT,
-            "arrival_manifest_sha256": "a" * 64,
-            "source_records": [],
-        }],
-    }
-
-
 @pytest.fixture(scope="module")
 def trained_checkpoint(tmp_path_factory):
     """One tiny control checkpoint on synthetic arrivals, plus the flights behind it."""
@@ -100,7 +87,7 @@ def trained_checkpoint(tmp_path_factory):
     config = _config()
     series, _report = build_series(flights, config, airport=AIRPORT)
     out = tmp_path_factory.mktemp("anytime_run")
-    train(series, config, output_dir=out, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=out, data_provenance=fake_data_provenance(), verbose=False)
     return flights, out / "checkpoint.pt"
 
 
@@ -123,7 +110,7 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
                for index, flight in enumerate(flights)}
     monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
     monkeypatch.setattr(
-        runner, "checkpoint_data_provenance", lambda _payload, _manifests: _provenance()
+        runner, "checkpoint_data_provenance", lambda _payload, _manifests: fake_data_provenance()
     )
     monkeypatch.setattr(
         runner, "load_flight_dicts",
@@ -215,7 +202,7 @@ def test_the_fingerprint_goes_through_the_package_helper(monkeypatch, tmp_path,
 
     def spy(payload, manifests):
         seen["payload"], seen["manifests"] = payload, list(manifests)
-        return _provenance()
+        return fake_data_provenance()
 
     monkeypatch.setattr(runner, "checkpoint_data_provenance", spy)
     grid = runner.Grid(split="val", bins_m=(10_000.0,), min_future_s=10.0,
@@ -223,7 +210,7 @@ def test_the_fingerprint_goes_through_the_package_helper(monkeypatch, tmp_path,
     arm = runner.load_arm("tiny", checkpoint, grid, torch.device("cpu"))
 
     assert seen["manifests"] == [manifest]
-    assert seen["payload"]["data_provenance"] == _provenance()
+    assert seen["payload"]["data_provenance"] == fake_data_provenance()
     # ...and the digests published are the checkpoint's own, never a fresh hash that would
     # have to repeat the roster rule to stay comparable.
     assert provenance_manifest_digests(arm.payload["data_provenance"]) == {AIRPORT: "a" * 64}
@@ -396,7 +383,7 @@ def test_a_cta_conditioned_checkpoint_is_refused(monkeypatch, tmp_path) -> None:
     config = _config(cta_conditioning=CTA_CONDITIONING_GIVEN)
     series, _report = build_series(flights, config, airport=AIRPORT)
     run = tmp_path / "cta_run"
-    train(series, config, output_dir=run, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=run, data_provenance=fake_data_provenance(), verbose=False)
     _patch_data_plane(monkeypatch, flights, tmp_path)
 
     out = tmp_path / "never"
@@ -751,7 +738,7 @@ def test_the_command_hook_is_passed_through_like_predict(
     manifest = tmp_path / "manifest.json"
     monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
     monkeypatch.setattr(
-        runner, "checkpoint_data_provenance", lambda _payload, _manifests: _provenance()
+        runner, "checkpoint_data_provenance", lambda _payload, _manifests: fake_data_provenance()
     )
 
     plain = runner.load_arm("plain", checkpoint, grid, torch.device("cpu"))

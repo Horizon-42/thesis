@@ -27,8 +27,6 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
 from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
@@ -43,6 +41,7 @@ from ts_transformer.models import build_model
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import load_checkpoint, train
+from ts_transformer.tests.support import dynamics_context
 
 _CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_cta_test", Path(__file__).resolve().parents[1] / "__main__.py")
 assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
@@ -70,17 +69,6 @@ def _config(**overrides) -> TSConfig:
     return TSConfig(**settings)
 
 
-def _dynamics(batch: int, cta_s: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
-    rows = {
-        "condition": torch.randn(batch, len(DYNAMICS_CONDITION_NAMES)),
-        "control_lower": torch.tensor(CONTROL_LOWER, dtype=torch.float32).expand(batch, -1).clone(),
-        "control_upper": torch.tensor(CONTROL_UPPER, dtype=torch.float32).expand(batch, -1).clone(),
-    }
-    if cta_s is not None:
-        rows["cta_s"] = cta_s
-    return rows
-
-
 def test_config_refuses_a_cta_off_the_control_path_and_unknown_values():
     with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(prediction_output=PREDICTION_STATE, cta_conditioning=CTA_CONDITIONING_GIVEN)
@@ -96,8 +84,8 @@ def test_the_given_cta_is_the_duration_and_reaches_the_controls(latent_dim):
     with torch.no_grad():   # the control projection starts at zero: give it something to carry
         model.control_head.control_projection.weight.normal_(std=0.1)
     history = torch.randn(2, config.seq_len, config.enc_in)
-    early = model_forward(model, history, _dynamics(2, torch.tensor([200.0, 250.0])))
-    late = model_forward(model, history, _dynamics(2, torch.tensor([260.0, 310.0])))
+    early = model_forward(model, history, dynamics_context(2, torch.tensor([200.0, 250.0])))
+    late = model_forward(model, history, dynamics_context(2, torch.tensor([260.0, 310.0])))
     assert torch.allclose(early.final_time_s, torch.tensor([200.0, 250.0]))
     assert torch.allclose(late.final_time_s, torch.tensor([260.0, 310.0]))
     assert torch.allclose(early.segment_durations.sum(dim=1), early.final_time_s)
@@ -110,8 +98,8 @@ def test_a_plain_run_has_no_cta_token_and_ignores_a_cta_in_the_context():
     model = build_model(config).eval()
     assert model.cta_encoder is None
     history = torch.randn(2, config.seq_len, config.enc_in)
-    without = model_forward(model, history, _dynamics(2))
-    with_cta = model_forward(model, history, _dynamics(2, torch.tensor([200.0, 250.0])))
+    without = model_forward(model, history, dynamics_context(2))
+    with_cta = model_forward(model, history, dynamics_context(2, torch.tensor([200.0, 250.0])))
     assert torch.equal(without.final_time_s, with_cta.final_time_s)
 
 

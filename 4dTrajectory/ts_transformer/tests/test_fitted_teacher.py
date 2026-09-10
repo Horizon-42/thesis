@@ -36,7 +36,6 @@ from ts_transformer.config import (
     control_recipe_overrides,
 )
 from ts_transformer.outputs.control.basis_fit import FITTED_TEACHER_SCHEMA, DURATION_UNIFORM, load_fitted_teacher
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
 from ts_transformer.forecast import forecast_approaches
 from ts_transformer.outputs.control.forecast import posterior_latent_forecasts
@@ -45,6 +44,7 @@ from ts_transformer.run_naming import run_display_name
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.outputs.control.loss.objective import control_imitation_mse
 from ts_transformer.train import evaluate_fixed_anchor_series, load_checkpoint, train
+from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 N_SEGMENTS, SEQ_LEN = 4, 8
@@ -68,17 +68,6 @@ def _config(**overrides) -> TSConfig:
     )
     settings.update(overrides)
     return TSConfig(**settings)
-
-
-def _provenance() -> dict:
-    return {
-        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "manifests": [{
-            "airport": AIRPORT,
-            "arrival_manifest_sha256": "a" * 64,
-            "source_records": [],
-        }],
-    }
 
 
 def _series(config: TSConfig, n_flights: int = 12):
@@ -276,7 +265,7 @@ def test_training_from_the_table_stamps_it_and_replays_without_it(tmp_path):
     config = _config(control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
                      control_fitted_teacher_path=str(table))
     out = tmp_path / "fitted_run"
-    train(series, config, output_dir=out, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=out, data_provenance=fake_data_provenance(), verbose=False)
 
     digest = json.loads((out / "checkpoint_metadata.json").read_text())["fitted_teacher"]
     import hashlib
@@ -339,7 +328,7 @@ def test_the_two_teachers_train_to_different_imitation_numbers(tmp_path):
         torch.manual_seed(0)
         config = _config(**overrides)
         train(series, config, output_dir=tmp_path / label,
-              data_provenance=_provenance(), verbose=False)
+              data_provenance=fake_data_provenance(), verbose=False)
         history = json.loads((tmp_path / label / "history.json").read_text())["history"]
         components[label] = [row["train_components"]["imitation"] for row in history]
     assert all(np.isfinite(values).all() and (np.asarray(values) > 0.0).all()

@@ -23,11 +23,9 @@ import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
 import ts_transformer.outputs.closure.model as co  # noqa: E402
 import ts_transformer.outputs.closure.profile as cp  # noqa: E402
 from ts_transformer.config import CHECKPOINT_SELECTION_OBJECTIVE, PREDICTION_CLOSURE, TSConfig  # noqa: E402
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
 from ts_transformer.dataset import Normalizer, build_series  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records  # noqa: E402
-from evaluation.thresholds import AssessmentContext  # noqa: E402
 from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch  # noqa: E402
 from ts_transformer.forecast import forecast_approach  # noqa: E402
 from ts_transformer.outputs.closure.forecast import forecast_closure_from_labels  # noqa: E402
@@ -36,6 +34,7 @@ from ts_transformer.run_naming import run_display_name  # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
 from ts_transformer.objective import loss_component_names, prediction_loss_components, target_contract  # noqa: E402
 from ts_transformer.train import load_checkpoint, train  # noqa: E402
+from ts_transformer.tests.support import fake_data_provenance, terminal_contexts
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 TINY = dict(seq_len=8, n_segments=4, d_model=16, n_heads=4, d_ff=32, e_layers=1, final_time_scale_s=2.0,
@@ -57,20 +56,6 @@ def _closure_series(tmp_path: Path, n_flights: int = 4, **overrides):
     flights = {item.flight_id: co.fit_labels(item, anchor) for item in series}
     labels_path.write_text(json.dumps({"schema": co.LABEL_SCHEMA, "airport": AIRPORT, "flights": flights}))
     return series, config, co.ClosureLabels(AIRPORT, flights)
-
-
-def _terminal_contexts():
-    return {(AIRPORT, RUNWAY): AssessmentContext(
-        benchmark="lpv", airport=AIRPORT, runway=RUNWAY, threshold_lat=35.8745003, threshold_lon=-78.802002,
-        runway_course_deg=45.0, runway_width_m=45.72, runway_source="faa_nasr_apt_rwy",
-        runway_source_cycle="2026-08-06", procedure_source="faa_cifp_path_point",
-        procedure_source_cycle="2026-08-06", threshold_elevation_hae_m=141.86, threshold_elevation_msl_m=111.86,
-        threshold_crossing_height_m=15.0, lpv_course_width_m=106.75)}
-
-
-def _provenance():
-    return {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-            "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
 
 
 def test_closure_config_contract(tmp_path):
@@ -244,7 +229,7 @@ def test_the_loss_regresses_the_labels_and_skips_invalid_flights(tmp_path):
 
 def test_train_checkpoint_predict_export_and_evaluate_one_closure_run(tmp_path):
     series, config, labels = _closure_series(tmp_path, n_flights=8)
-    result = train(series, config, output_dir=tmp_path / "run", data_provenance=_provenance(), verbose=False)
+    result = train(series, config, output_dir=tmp_path / "run", data_provenance=fake_data_provenance(), verbose=False)
     assert (tmp_path / "run" / "checkpoint.pt").is_file()
     model, loaded, normalizer, payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert loaded.prediction_output == PREDICTION_CLOSURE and loaded.closure_labels_path == config.closure_labels_path
@@ -266,16 +251,16 @@ def test_train_checkpoint_predict_export_and_evaluate_one_closure_run(tmp_path):
                        [records[0].eval_record["target_state"]["lat"], records[0].eval_record["target_state"]["lon"]], atol=1e-5)
     assert states["source"]["closureFromLabels"] is False and states["source"]["closureConstruction"] in (cg.KIND_VIA_DUBINS, co.KIND_VIA_AT_ANCHOR)
     loaded_records = load_records(out)
-    report = evaluate_batch(loaded_records, contexts=_terminal_contexts())
+    report = evaluate_batch(loaded_records, contexts=terminal_contexts())
     assert report["total"] == 4 and report["solved"] == 4
     assert (tmp_path / "run" / "history.json").is_file() and isinstance(result, dict)
     # A labels file for none of the flights is refused before a single batch is built.
     (tmp_path / "other.json").write_text(json.dumps({"schema": co.LABEL_SCHEMA, "airport": AIRPORT, "flights": {}}))
     with pytest.raises(ValueError, match="carries none of these"):
         train(series, _closure_config(tmp_path / "other.json"), output_dir=tmp_path / "run2",
-              data_provenance=_provenance(), verbose=False)
+              data_provenance=fake_data_provenance(), verbose=False)
     invalid = {k: {**v, "valid": False} for k, v in labels.flights.items()}
     (tmp_path / "invalid.json").write_text(json.dumps({"schema": co.LABEL_SCHEMA, "airport": AIRPORT, "flights": invalid}))
     with pytest.raises(ValueError, match="nothing to regress"):
         train(series, _closure_config(tmp_path / "invalid.json"), output_dir=tmp_path / "run3",
-              data_provenance=_provenance(), verbose=False)
+              data_provenance=fake_data_provenance(), verbose=False)

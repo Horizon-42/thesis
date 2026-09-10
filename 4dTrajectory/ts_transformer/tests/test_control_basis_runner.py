@@ -132,6 +132,7 @@ from ts_transformer.io_utils import file_sha256                                 
 from ts_transformer.models import build_model                                     # noqa: E402
 from ts_transformer.synthetic import synthetic_arrivals                           # noqa: E402
 from ts_transformer.train import load_checkpoint, train                           # noqa: E402
+from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -155,17 +156,6 @@ def _teacher_config(**overrides) -> TSConfig:
     return TSConfig(**settings)
 
 
-def _provenance() -> dict:
-    return {
-        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "manifests": [{
-            "airport": AIRPORT,
-            "arrival_manifest_sha256": "a" * 64,
-            "source_records": [],
-        }],
-    }
-
-
 @pytest.fixture(scope="module")
 def trained_checkpoint(tmp_path_factory):
     """One tiny control checkpoint on synthetic arrivals, plus the flights behind it."""
@@ -174,7 +164,7 @@ def trained_checkpoint(tmp_path_factory):
     config = _teacher_config()
     series, _report = build_series(flights, config, airport=AIRPORT)
     out = tmp_path_factory.mktemp("teacher_run")
-    train(series, config, output_dir=out, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=out, data_provenance=fake_data_provenance(), verbose=False)
     checkpoint = out / "checkpoint.pt"
     _model, _config, _normalizer, payload = load_checkpoint(checkpoint)
     assert payload["split"]["train"] and payload["split"]["val"]
@@ -189,8 +179,8 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
     monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
     # the width study fingerprints the manifest alone; the teacher fit fingerprints the
     # checkpoint's own data (roster included) — both seams point at the synthetic plane
-    monkeypatch.setattr(runner, "arrival_data_provenance", lambda _paths, eligibility_rosters=None: _provenance())
-    monkeypatch.setattr(runner, "checkpoint_data_provenance", lambda _payload, _manifests: _provenance())
+    monkeypatch.setattr(runner, "arrival_data_provenance", lambda _paths, eligibility_rosters=None: fake_data_provenance())
+    monkeypatch.setattr(runner, "checkpoint_data_provenance", lambda _payload, _manifests: fake_data_provenance())
     monkeypatch.setattr(
         runner, "load_flight_dicts",
         lambda _paths, include_flight_keys, verbose=True: [
@@ -363,7 +353,7 @@ def test_a_state_checkpoint_has_no_control_schedule_to_fit(monkeypatch, tmp_path
                       val_fraction=0.25, test_fraction=0.25)
     series, _report = build_series(flights, config, airport=AIRPORT)
     out = tmp_path / "state_run"
-    train(series, config, output_dir=out, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=out, data_provenance=fake_data_provenance(), verbose=False)
     _patch_data_plane(monkeypatch, flights, tmp_path)
     with pytest.raises(SystemExit):
         runner.main(["--checkpoint", str(out / "checkpoint.pt"), "--out", str(tmp_path / "no"),
@@ -460,7 +450,7 @@ def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoin
 
     def spy(paths, *, eligibility_rosters=None):
         seen["paths"], seen["rosters"] = list(paths), eligibility_rosters
-        return _provenance()
+        return fake_data_provenance()
 
     monkeypatch.setattr(provenance_module, "arrival_data_provenance", spy)
     manifests = [tmp_path / "KRDU" / "arrivals" / "manifest.json"]

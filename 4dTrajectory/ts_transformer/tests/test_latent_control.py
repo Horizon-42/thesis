@@ -27,8 +27,6 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.outputs.control.latent import (
     ACTIVE_UNIT_KL_NATS,
     LATENT_AUX_COMPONENT,
@@ -76,6 +74,7 @@ from ts_transformer.outputs.control.latent import displacement_verdict
 from ts_transformer.experiments.latent_readout import kept_epoch_latent, readout, render_latent
 from ts_transformer.experiments.latent_readout import main as readout_main
 from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.tests.support import dynamics_context
 
 
 def _config(**overrides) -> TSConfig:
@@ -94,14 +93,6 @@ def _config(**overrides) -> TSConfig:
     )
     settings.update(overrides)
     return TSConfig(**settings)
-
-
-def _dynamics(batch: int) -> dict[str, torch.Tensor]:
-    return {
-        "condition": torch.randn(batch, len(DYNAMICS_CONDITION_NAMES)),
-        "control_lower": torch.tensor(CONTROL_LOWER, dtype=torch.float32).expand(batch, -1).clone(),
-        "control_upper": torch.tensor(CONTROL_UPPER, dtype=torch.float32).expand(batch, -1).clone(),
-    }
 
 
 def _history(config: TSConfig, batch: int) -> torch.Tensor:
@@ -130,7 +121,7 @@ def test_inference_is_prior_only_and_deterministic():
     torch.manual_seed(0)
     config = _config()
     model = build_model(config).eval()
-    history, dynamics = _history(config, 3), _dynamics(3)
+    history, dynamics = _history(config, 3), dynamics_context(3)
     first = model_forward(model, history, dynamics)
     second = model_forward(model, history, dynamics)
     assert isinstance(first, LatentControlPrediction)
@@ -149,7 +140,7 @@ def test_training_decodes_a_posterior_sample_from_the_future():
     torch.manual_seed(0)
     config = _config()
     model = build_model(config).train()
-    history, dynamics, future = _history(config, 3), _dynamics(3), _future(config, 3)
+    history, dynamics, future = _history(config, 3), dynamics_context(3), _future(config, 3)
     prediction = model_forward(model, history, dynamics, future=future)
     assert prediction.posterior_mean is not None and prediction.posterior_mean.shape == (3, 4)
     # A posterior sample, not the prior's top-1.
@@ -160,7 +151,7 @@ def test_training_decodes_a_posterior_sample_from_the_future():
 def test_model_forward_never_hands_the_future_to_a_plain_control_model():
     config = _config(latent_dim=0)
     model = build_model(config).eval()
-    history, dynamics, future = _history(config, 2), _dynamics(2), _future(config, 2)
+    history, dynamics, future = _history(config, 2), dynamics_context(2), _future(config, 2)
     prediction = model_forward(model, history, dynamics, future=future)
     assert type(prediction) is ControlPrediction
 
@@ -174,7 +165,7 @@ def test_the_latent_reaches_the_duration():
         # The control head starts at the neutral schedule with ZERO projection weights (its
         # deliberate initialization), so give the projection something to carry.
         model.control_head.control_projection.weight.normal_(std=0.1)
-    history, dynamics = _history(config, 2), _dynamics(2)
+    history, dynamics = _history(config, 2), dynamics_context(2)
     base = model(history, dynamics, latent=torch.zeros(2, 4))
     moved = model(history, dynamics, latent=torch.full((2, 4), 0.5))
     assert torch.all(moved.final_time_s > base.final_time_s)
@@ -352,7 +343,7 @@ def test_state_dict_round_trips_into_a_fresh_build():
     torch.manual_seed(0)
     config = _config()
     model = build_model(config)
-    history, dynamics = _history(config, 2), _dynamics(2)
+    history, dynamics = _history(config, 2), dynamics_context(2)
     expected = model.eval()(history, dynamics)
     rebuilt = build_model(config)
     rebuilt.load_state_dict(model.state_dict())
@@ -726,7 +717,7 @@ def test_the_aux_head_exists_only_when_weighted_and_reads_only_a_posterior_sampl
     model = build_model(config)
     assert isinstance(model.aux_duration, torch.nn.Linear)
     assert model.aux_duration.in_features == config.latent_dim
-    history, dynamics, future = _history(config, 3), _dynamics(3), _future(config, 3)
+    history, dynamics, future = _history(config, 3), dynamics_context(3), _future(config, 3)
     trained = model_forward(model, history, dynamics, future=future)
     assert trained.aux_normalized_duration is not None
     assert trained.aux_normalized_duration.shape == (3,)
@@ -967,7 +958,7 @@ def test_an_aux_trained_checkpoint_forecasts_and_writes_no_aux_output(tmp_path: 
     # state dict round trip into a fresh build of the same config
     rebuilt = build_model(loaded)
     rebuilt.load_state_dict(model.state_dict())
-    history, dynamics = _history(loaded, 2), _dynamics(2)
+    history, dynamics = _history(loaded, 2), dynamics_context(2)
     assert torch.allclose(
         model.eval()(history, dynamics).controls, rebuilt.eval()(history, dynamics).controls
     )

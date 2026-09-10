@@ -36,10 +36,10 @@ from ts_transformer.config import (
     TSConfig,
 )
 from ts_transformer.outputs.control.latent import displacement_verdict
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import build_series, dataset_flight_key
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import train
+from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 LATENT_DIM = 3
@@ -64,18 +64,10 @@ def _config(**overrides) -> TSConfig:
     return TSConfig(**settings)
 
 
-def _provenance() -> dict:
-    return {
-        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64,
-                       "source_records": []}],
-    }
-
-
 def _train(config: TSConfig, out: Path, flights) -> Path:
     torch.manual_seed(0)
     series, _report = build_series(flights, config, airport=AIRPORT)
-    train(series, config, output_dir=out, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=out, data_provenance=fake_data_provenance(), verbose=False)
     return out / "checkpoint.pt"
 
 
@@ -96,7 +88,7 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
                for index, flight in enumerate(flights)}
     monkeypatch.setattr(replay.pipeline, "arrival_manifest_path", lambda _airport: manifest)
     monkeypatch.setattr(
-        replay, "checkpoint_data_provenance", lambda _payload, _manifests: _provenance()
+        replay, "checkpoint_data_provenance", lambda _payload, _manifests: fake_data_provenance()
     )
     monkeypatch.setattr(
         replay, "load_flight_dicts",

@@ -10,7 +10,7 @@ tell how much re-checking it needs. Delete an entry when it is fixed or dismisse
 
 **Verified** by AST walk over the module, on `dev-t3`: `objective.masked_mse` and
 `objective.position_velocity_consistency_loss` have no live caller — only
-`tests/test_ts_transformer.py`. They moved with the rest of the objective in T3-15 rather
+`tests/test_state_objective.py` and `tests/test_windows.py` (one file, `test_ts_transformer.py`, until 2026-09-10). They moved with the rest of the objective in T3-15 rather
 than being deleted there, because T3 is a structural pass and a deletion is a T1-shaped
 change with its own evidence to state (the `kinematic` component is weighted zero on every
 path today, which is why they went quiet). Deleting both would also remove four tests that

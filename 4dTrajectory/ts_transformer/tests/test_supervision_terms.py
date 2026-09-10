@@ -30,7 +30,7 @@ import torch
 import ts_transformer.objective as objective
 import ts_transformer.outputs.control.loss.objective as control_objective
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, heading_rate_rad_s
-from ts_transformer.channels import CHANNELS, channels_from_states
+from ts_transformer.channels import channels_from_states
 from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_RECIPE_SIMPLE_V3,

@@ -778,6 +778,17 @@ defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add t
 move what you touch. `tests/conftest.py` already puts the package's PARENT on `sys.path`,
 so a new test file needs no path preamble.
 
+**`tests/` is one file per topic, and `tests/support.py` holds what more than one file
+shares** (2026-09-10, review §4.6): `test_ts_transformer.py` — 5,855 lines, 203 tests — is 23
+single-topic files (`test_windows`, `test_anchor_policies`, `test_validation_replay`,
+`test_control_objective`, `test_end_to_end`, …), each carrying only the helpers it uses.
+`support.py` has the fixtures that were copied byte for byte across files —
+`fake_data_provenance(*airports)`, `dynamics_context(batch, cta_s=None)`,
+`terminal_contexts()` — imported as `from ts_transformer.tests.support import …` (`tests/`
+is a namespace package under the package). A `_config` / `_series` recipe with its own
+defaults stays in its file: two helpers with the same name and different defaults are two
+helpers, not one copied.
+
 **`ts_transformer` is a PACKAGE (2026-09-09, review §4.1), and every import is qualified:**
 `from ts_transformer.config import TSConfig`, `import ts_transformer.channels as ch`,
 `from ts_transformer.control.envelope import …`. What goes on `sys.path` is `4dTrajectory/`

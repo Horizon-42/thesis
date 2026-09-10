@@ -31,8 +31,6 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
 from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import Normalizer, build_series
 from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
@@ -43,6 +41,7 @@ from ts_transformer.outputs.duration_heads import QuantileFinalTimeHead, pinball
 from ts_transformer.run_naming import run_display_name, run_slug
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import load_checkpoint, train
+from ts_transformer.tests.support import dynamics_context
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -63,17 +62,6 @@ def _config(**overrides) -> TSConfig:
     )
     settings.update(overrides)
     return TSConfig(**settings)
-
-
-def _dynamics(batch: int, cta_s: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
-    rows = {
-        "condition": torch.randn(batch, len(DYNAMICS_CONDITION_NAMES)),
-        "control_lower": torch.tensor(CONTROL_LOWER, dtype=torch.float32).expand(batch, -1).clone(),
-        "control_upper": torch.tensor(CONTROL_UPPER, dtype=torch.float32).expand(batch, -1).clone(),
-    }
-    if cta_s is not None:
-        rows["cta_s"] = cta_s
-    return rows
 
 
 # ── the head ────────────────────────────────────────────────────────────────
@@ -124,7 +112,7 @@ def test_the_median_is_the_duration_the_rollout_flies():
     with torch.no_grad():
         model.final_time_head.network[-1].weight.normal_(std=0.5)
     history = torch.randn(4, config.seq_len, config.enc_in)
-    prediction = model_forward(model, history, _dynamics(4))
+    prediction = model_forward(model, history, dynamics_context(4))
     assert prediction.duration_quantiles_s.shape == (4, len(DURATION_QUANTILES))
     assert torch.allclose(
         prediction.final_time_s,
@@ -137,7 +125,7 @@ def test_the_point_head_carries_no_quantiles():
     torch.manual_seed(0)
     config = _config(duration_head=DURATION_HEAD_POINT)
     model = build_model(config).eval()
-    prediction = model_forward(model, torch.randn(2, config.seq_len, config.enc_in), _dynamics(2))
+    prediction = model_forward(model, torch.randn(2, config.seq_len, config.enc_in), dynamics_context(2))
     assert prediction.duration_quantiles_s is None
 
 
@@ -149,7 +137,7 @@ def test_a_given_cta_still_trains_the_quantile_head_but_not_the_point_head():
     quantile = build_model(_config(cta_conditioning=CTA_CONDITIONING_GIVEN)).eval()
     prediction = model_forward(
         quantile, torch.randn(2, 8, quantile.final_time_head.network[1].in_features // 8),
-        _dynamics(2, cta),
+        dynamics_context(2, cta),
     )
     assert torch.allclose(prediction.final_time_s, cta)             # the CTA is the duration
     assert prediction.duration_quantiles_s is not None              # ...and the head is read
@@ -158,7 +146,7 @@ def test_a_given_cta_still_trains_the_quantile_head_but_not_the_point_head():
     ).eval()
     inert = model_forward(
         point, torch.randn(2, 8, point.final_time_head.network[1].in_features // 8),
-        _dynamics(2, cta),
+        dynamics_context(2, cta),
     )
     assert inert.duration_quantiles_s is None
 

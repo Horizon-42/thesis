@@ -4,6 +4,22 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: review §4.6 — `tests/support.py`, the 5,855-line test file split by topic, the suite green
+
+Step 6b of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`
+§4.6, resolution paragraph), on `dev-pkg-review`. Tests only: full suite 992 passed, 1 skipped — the same count as before the split, 993 collected.
+
+- **`tests/support.py`** (T4-24): `fake_data_provenance` (nine byte-identical copies, now taking
+  the airports the one general copy took), `dynamics_context` (three), `terminal_contexts` (two),
+  imported as `ts_transformer.tests.support`. The per-file `_config` / `_series` recipes stay.
+- **`test_ts_transformer.py` → 23 single-topic files** (T4-26), by its own section headers and
+  the test order, every test verbatim and each file carrying only the helpers it references:
+  evaluation protocol, channel contract, windows, state objective, data loading, anchor policies,
+  validation replay, control heads and config, capacity report, control objective, arc geometry,
+  common-grid selector, config contract, auto batch, pipeline recipes, experiment index,
+  common-grid control, cross-validation, metrics spread, forecast paths, export seam, end to end,
+  and the 2026-09-09 review's pins.
+
 ### 2026-09-10 — ts_transformer: review §4.5 — the runners are `ts_transformer/experiments/` behind `run_ts.py <name>`
 
 Step 6a of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`

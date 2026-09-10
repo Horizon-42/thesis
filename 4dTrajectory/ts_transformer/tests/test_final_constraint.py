@@ -23,9 +23,8 @@ from ts_transformer.batch_contract import unpack_batch  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
 from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.final_approach_geometry import final_approach_arrays, probe_final_approach
+from ts_transformer.final_approach_geometry import probe_final_approach
 from ts_transformer.outputs.control.supervision import probe_dynamics
 from ts_transformer.export import build_prediction_record  # noqa: E402
 from ts_transformer.forecast import Forecast, forecast_approach  # noqa: E402
@@ -40,6 +39,7 @@ from ts_transformer.outputs.state.loss import (
 )
 from ts_transformer.objective import ProcedureMultipliers, procedure_loss
 from ts_transformer.train import load_checkpoint, train  # noqa: E402
+from ts_transformer.tests.support import fake_data_provenance
 from trajectory_data_process.harvest.arrivals import SCHEMA_VERSION as ARRIVAL_SCHEMA  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -51,13 +51,6 @@ def _series(n_flights=8, **overrides):
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
     series, _report = build_series(flights, config, airport=AIRPORT)
     return series, config
-
-
-def _provenance():
-    return {
-        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}],
-    }
 
 
 def _physical_normalizer() -> Normalizer:
@@ -233,7 +226,7 @@ def _small_train(tmp_path, **overrides):
         n_flights=12, epochs=2, patience=1, batch_size=32, d_model=16, n_heads=4, d_ff=32,
         e_layers=1, **overrides,
     )
-    train(series, config, output_dir=tmp_path, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=tmp_path, data_provenance=fake_data_provenance(), verbose=False)
     return series
 
 

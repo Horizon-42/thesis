@@ -45,7 +45,6 @@ from ts_transformer.config import (
     CHECKPOINT_SELECTION_METRICS,
     TSConfig,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.dataset import ExplicitAnchorTrajectoryWindows, Normalizer, build_series
 from ts_transformer.fixed_anchor_validation import FIXED_ANCHOR_LABEL, fixed_anchor_common_grid_ade_metrics
 from ts_transformer.models import build_model
@@ -53,6 +52,7 @@ from ts_transformer.outputs.state.model import StatePrediction
 from ts_transformer.splits import split_by_flight
 from ts_transformer.synthetic import synthetic_arrivals
 from ts_transformer.train import fit_model, train
+from ts_transformer.tests.support import fake_data_provenance
 from ts_transformer.validation import (
     ANCHOR_GRID_L1_KEY,
     MINIMUM_ANCHOR_GRID_BINS,
@@ -84,16 +84,6 @@ def _config(**overrides) -> TSConfig:
     )
     settings.update(overrides)
     return TSConfig(**settings)
-
-
-def _provenance(*airports: str) -> dict:
-    return {
-        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "manifests": [
-            {"airport": airport, "arrival_manifest_sha256": "a" * 64, "source_records": []}
-            for airport in (airports or (AIRPORT,))
-        ],
-    }
 
 
 @pytest.fixture(scope="module")
@@ -491,7 +481,7 @@ def test_a_two_epoch_train_writes_the_block(tmp_path) -> None:
         synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3), config, airport=AIRPORT
     )
     torch.manual_seed(0)
-    train(series, config, output_dir=tmp_path, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=tmp_path, data_provenance=fake_data_provenance(), verbose=False)
     history = json.loads((tmp_path / "history.json").read_text())["history"]
     assert len(history) == 2
     for row in history:
@@ -513,7 +503,7 @@ def test_the_fixed_anchor_metric_records_no_grid_block(tmp_path) -> None:
         synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3), config, airport=AIRPORT
     )
     torch.manual_seed(0)
-    train(series, config, output_dir=tmp_path, data_provenance=_provenance(), verbose=False)
+    train(series, config, output_dir=tmp_path, data_provenance=fake_data_provenance(), verbose=False)
     history = json.loads((tmp_path / "history.json").read_text())["history"]
     assert all(row["validation_anchor_grid"] == {} for row in history)
 
