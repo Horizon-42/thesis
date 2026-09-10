@@ -45,8 +45,8 @@ from ts_transformer.config import (
     control_simple_v1_overrides,
     recipe_settings,
 )
-from ts_transformer.outputs.control.dynamics import rollout as control_rollout
-from ts_transformer.outputs.control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
+from ts_transformer.outputs.dynamics import rollout as control_rollout
+from ts_transformer.outputs.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
 from ts_transformer.outputs.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
 from ts_transformer.data.coordinate_frames import ENUFrame
 from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA

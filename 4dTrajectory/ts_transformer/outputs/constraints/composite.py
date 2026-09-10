@@ -1,6 +1,6 @@
 """Several constraint modules on one rollout, applied in a fixed order.
 
-``control/dynamics/hooks.py`` gives the rollout ONE hook per segment, and that is right:
+``outputs/dynamics/hooks.py`` gives the rollout ONE hook per segment, and that is right:
 "the command flown" has to be a single answer. Composition therefore happens here, not in
 the rollout — each module in turn is handed the SAME state (the segment's start) and the
 command the previous one returned, and the last answer is what the rollout integrates.
@@ -26,13 +26,13 @@ admitted, and there the barrier used to blend a correction the trombone then ove
 module's answer and the order between them cannot change it. The trombone last is then a
 free choice made by the value's spelling, and it pays for it with a 15 deg turn cap, so the
 load factor it coordinates cannot raise the stall speed past the margin the floor just held
-(``control/constraints/trombone.py``).
+(``outputs/constraints/trombone.py``).
 
 **The hook-free reference rollout is a member of the composite, not a private trick of one
 module.** ``needs_reference`` is the OR of the members', so under
 ``trombone_surplus_reference="reference-rollout"`` the value ``barrier+speed-floor+trombone``
 gains a fourth thing the rollout does: the network's own schedule is integrated UNHOOKED as
-well (``control/dynamics/hooks.py``), once, before the first hooked segment, and every
+well (``outputs/dynamics/hooks.py``), once, before the first hooked segment, and every
 member sees it as ``RolloutStateView.reference``. **Cost**: one more integration of the same
 schedule, paid ONCE and not per step — about 2x the SEGMENTED rollout's wall time and memory
 (at predict the dense re-integration runs on top of that and is untouched, so the whole
@@ -56,7 +56,7 @@ from typing import Iterable, TypeVar
 
 import torch
 
-from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, CommandHook, RolloutStateView
+from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, CommandHook, RolloutStateView
 
 #: Counts (tensors) and labels (strings) merge by the same rule, under the same refusal.
 _Reported = TypeVar("_Reported", torch.Tensor, str)

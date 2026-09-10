@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 
 from ts_transformer.config import TSConfig
-from ts_transformer.outputs.control.dynamics import rollout as control_rollout
+from ts_transformer.outputs.dynamics import rollout as control_rollout
 from ts_transformer.data.dataset import Normalizer
 from ts_transformer.data.fixed_dt_supervision import FixedDTControlSupervision
 from ts_transformer.outputs.control.heads import ControlPrediction

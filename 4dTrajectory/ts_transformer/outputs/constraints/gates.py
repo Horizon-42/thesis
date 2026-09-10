@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import torch
 
-from ts_transformer.outputs.control.dynamics.hooks import RolloutStateView
+from ts_transformer.outputs.dynamics.hooks import RolloutStateView
 from ts_transformer.geometry.final_approach_geometry import alignment_cosine, hard_on_final, runway_axes, soft_on_final
 
 _SPEED_FLOOR_MPS = 1.0

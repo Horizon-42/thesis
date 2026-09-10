@@ -8,16 +8,10 @@ is the submodule:
     supervision            the per-flight physical context and the two supervision references
     forecast               the schedule rolled densely under the command hook; the CTA and
                            calibrated-interval plumbing; the latent decodes
-    envelope               the dimensionless box the head predicts in
     heads                  the prediction contract and the output heads that emit a schedule
     latent                 the latent intent z on the control output (L2)
     basis_fit              batched shooting fit of a schedule to a known future (the fitted
                            teacher table)
-    dynamics.backends      the flight models a schedule can be rolled through
-    dynamics.rollout       the one rollout API training/forecast/evaluation share
-    dynamics.inverse       the same models solved backwards, for targets
-    dynamics.hooks         the command-hook contract the rollout calls per segment
-    constraints.*          the command hooks (barrier, speed floor, trombone, their composite)
     loss.objective         the control objective assembled into `LossComponents`
     loss.components/fixed_dt   the tracking terms on the two supervision grids
     training.diagnostics   gradient diagnostics
@@ -25,6 +19,13 @@ is the submodule:
 The 2026-08 future-aware teachers that used to be ``control.oracle`` are a completed
 campaign, archived under ``archive/oracle_teacher_2026_08/`` (off the import path) and
 superseded by ``simple-v3``'s in-training imitation term.
+
+What the ROLLOUT needs is not this path's (2026-09-10, the plan-and-guidance path's first
+commit): the flight models and the one rollout API (``outputs.dynamics``), the command hooks
+(``outputs.constraints``), the dimensionless command box and its newton conversion
+(``outputs.envelope``) and the condition vector (``outputs.conditioning``) sit beside
+``outputs.base`` and ``outputs.duration_heads``, imported from there by this strategy and by
+the plan guidance alike.
 
 **Membership rule**: a module belongs here only if EVERY consumer of it is control-specific.
 ``terminal_state_loss``, ``arc_length_geometry``, ``fixed_dt_supervision`` and ``flyability``

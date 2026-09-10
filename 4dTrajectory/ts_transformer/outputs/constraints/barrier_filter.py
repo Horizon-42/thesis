@@ -67,7 +67,7 @@ soft pair is the C¹ training form of the same rule.
 ``confine_to_hard_gate`` is what the composite sets when the trombone is a member. The two
 lateral modules must be COMPLEMENTARY — no step rewritten by both — and the trombone may
 engage anywhere the HARD gate has not yet opened on the flight
-(``control/constraints/trombone.py``, the hand-over rule). The soft gate is not that
+(``outputs/constraints/trombone.py``, the hand-over rule). The soft gate is not that
 complement: its alignment shoulder is non-zero for 30–40° of misalignment and its lateral
 shoulder for a band outside the cone, so under ``soft`` the barrier used to blend a
 correction into steps the trombone then rewrote (measured, 2026-09-09 review A-4: 12 km
@@ -93,15 +93,15 @@ import torch
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from ts_transformer.config import TSConfig
-from ts_transformer.outputs.control.constraints.gates import on_final_weight, runway_axes_view
-from ts_transformer.outputs.control.constraints.saturation import (
+from ts_transformer.outputs.constraints.gates import on_final_weight, runway_axes_view
+from ts_transformer.outputs.constraints.saturation import (
     ACTIVE_BANK_CHANGE_RAD,
     SATURATION_SOFTNESS_RAD,
     soft_max,
     soft_min,
 )
-from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from ts_transformer.outputs.control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
+from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
+from ts_transformer.outputs.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
 from ts_transformer.geometry.final_approach_geometry import K_MARGIN, corridor_halfwidth, corridor_halfwidth_slope
 
 _SATURATED_INTERVAL_RAD = math.radians(0.1)   # a bank interval this narrow is a corner, not a bound

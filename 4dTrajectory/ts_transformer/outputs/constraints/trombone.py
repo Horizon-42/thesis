@@ -193,7 +193,7 @@ engaged, where ``beeline`` reports 0 and 0).
 
 The reference comes from ``RolloutStateView.reference``, the hook-free schedule integrated
 alongside (``needs_reference``; the composite carries it, and it costs one extra integration
-of the schedule, once — ``control/constraints/composite.py``). One approximation, stated: the
+of the schedule, once — ``outputs/constraints/composite.py``). One approximation, stated: the
 path is summed as the CHORD between consecutive segment boundaries, not the arc. The command
 is constant within a hold, so the segment is a circular arc and the chord is short by
 ``sinc(Δψ/2)`` — 0.15 % at a 15° bank over the deployed ~5 s hold, 2.8 % at 45°. Both terms
@@ -209,16 +209,16 @@ import torch
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from ts_transformer.config import TROMBONE_SURPLUS_REFERENCE_ROLLOUT, TSConfig
-from ts_transformer.outputs.control.constraints.gates import on_final_weight, runway_axes_view
-from ts_transformer.outputs.control.constraints.saturation import (
+from ts_transformer.outputs.constraints.gates import on_final_weight, runway_axes_view
+from ts_transformer.outputs.constraints.saturation import (
     ACTIVE_BANK_CHANGE_RAD,
     SATURATION_SOFTNESS_RAD,
     soft_max,
     soft_min,
 )
-from ts_transformer.outputs.control.constraints.speed_floor import floor_speed
-from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from ts_transformer.outputs.control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
+from ts_transformer.outputs.constraints.speed_floor import floor_speed
+from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
+from ts_transformer.outputs.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
 from ts_transformer.geometry.final_approach_geometry import (
     alignment_cosine,
     hard_aligned,

@@ -13,7 +13,7 @@ import torch
 
 import ts_transformer.data.channels as ch
 import ts_transformer.cli.common as cli_common
-import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module
+import ts_transformer.outputs.dynamics.rollout as control_rollout_module
 import ts_transformer.outputs.control.loss.fixed_dt as fixed_dt_loss_module
 import ts_transformer.training.objective as objective
 import ts_transformer.experiments.pipeline as pipeline_module

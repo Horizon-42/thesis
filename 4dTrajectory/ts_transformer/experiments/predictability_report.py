@@ -41,7 +41,7 @@ from ts_transformer.config import (  # noqa: E402
     default_anchor, uses_control_dynamics,
 )
 
-from ts_transformer.outputs.control.dynamics.rollout import rollout_control_dense  # noqa: E402
+from ts_transformer.outputs.dynamics.rollout import rollout_control_dense  # noqa: E402
 from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,

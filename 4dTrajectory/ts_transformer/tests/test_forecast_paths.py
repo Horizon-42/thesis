@@ -9,7 +9,7 @@ import pytest
 import torch
 
 import ts_transformer.data.channels as ch
-import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module
+import ts_transformer.outputs.dynamics.rollout as control_rollout_module
 from ts_transformer.outputs import ForecastOptions
 from ts_transformer.config import (
     HORIZON_FULL,

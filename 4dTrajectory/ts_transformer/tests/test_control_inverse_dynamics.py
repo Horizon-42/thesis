@@ -41,15 +41,15 @@ from ts_transformer.config import (  # noqa: E402
     TSConfig,
     control_recipe_overrides,
 )
-from ts_transformer.outputs.control.dynamics.backends import (  # noqa: E402
+from ts_transformer.outputs.dynamics.backends import (  # noqa: E402
     _BACKENDS,
     RolloutInputs,
     control_dynamics_backend,
 )
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
+from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER  # noqa: E402
 from geokit import METRES_PER_DEG_LAT  # noqa: E402
-import ts_transformer.outputs.control.dynamics.inverse as inverse_module  # noqa: E402
-from ts_transformer.outputs.control.dynamics.inverse import (  # noqa: E402
+import ts_transformer.outputs.dynamics.inverse as inverse_module  # noqa: E402
+from ts_transformer.outputs.dynamics.inverse import (  # noqa: E402
     CONTROL_INVERSES,
     actual_controls,
     reference_controls,
@@ -404,7 +404,7 @@ def test_the_time_constant_axis_is_dropped_from_cv_when_the_lag_is_off():
 
 def test_the_exported_control_record_stays_in_newtons():
     """The evaluation contract is shared with the optimizer and did not change units."""
-    from ts_transformer.outputs.control.envelope import fraction_controls, physical_controls
+    from ts_transformer.outputs.envelope import fraction_controls, physical_controls
 
     controls = np.array([[[0.5, 0.1, 1.0], [-0.2, -0.1, 1.2]]])
     max_thrust_n = np.array([MAX_THRUST_N])
@@ -545,7 +545,7 @@ def test_the_imitation_term_scores_the_schedule_and_masks_the_fitted_tail():
     same in every channel, and segments past the last measured velocity must not enter --
     the fitted tail has no kinematics to invert.
     """
-    from ts_transformer.outputs.control.envelope import CONTROL_HALF_WIDTH
+    from ts_transformer.outputs.envelope import CONTROL_HALF_WIDTH
     from ts_transformer.outputs.control.heads import ControlPrediction
     from ts_transformer.outputs.control.loss.objective import control_imitation_mse
 

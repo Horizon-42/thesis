@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 
-from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
 from ts_transformer.config import (
     HORIZON_NORMALIZED,
     CONTROL_DYNAMICS_POINT_MASS,
@@ -23,7 +23,7 @@ from ts_transformer.config import (
     TSConfig,
     control_recipe,
 )
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.data.dataset import Normalizer, build_series
 from evaluation.metrics import evaluate_batch

@@ -12,9 +12,9 @@ from ts_transformer.data.channels import states_from_channels
 from ts_transformer.config import CTA_CONDITIONING_GIVEN, TSConfig
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays, probe_final_approach
-from ts_transformer.outputs.control.conditioning import condition_vector
-from ts_transformer.outputs.control.dynamics.inverse import actual_controls, segment_controls
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.conditioning import condition_vector
+from ts_transformer.outputs.dynamics.inverse import actual_controls, segment_controls
+from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 
 
 # How much observed lookback the anchor-state control inversion differentiates. It needs

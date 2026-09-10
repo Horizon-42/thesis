@@ -68,10 +68,10 @@ from aerodynamic_model.torch_dynamics import (
     isa_density,
 )
 from ts_transformer.config import TSConfig
-from ts_transformer.outputs.control.constraints.gates import RunwayAxesView, runway_axes_view
-from ts_transformer.outputs.control.constraints.saturation import soft_max
-from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from ts_transformer.outputs.control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
+from ts_transformer.outputs.constraints.gates import RunwayAxesView, runway_axes_view
+from ts_transformer.outputs.constraints.saturation import soft_max
+from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
+from ts_transformer.outputs.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
 
 #: Width of the soft max around the thrust demand, in fractions of installed thrust. The
 #: barrier's soft bank saturation is 2 deg of a +/-45 deg box, i.e. ~4 % of that box's half
@@ -82,7 +82,7 @@ SATURATION_SOFTNESS_FRACTION = 0.02
 #: by ``softness x ln 2``, so a demand clamped to ``MIN_THRUST_FRACTION`` would add 2.8 kN to
 #: every idle command the floor never touched (measured on the fixture: 0.0139 of installed
 #: thrust, 0.042 m/s^2, ~12 m/s over a 300 s remainder — and the whole ``[-0.2, -0.1]`` band
-#: is the COMMON case on an approach, see ``control/envelope.py``). ``softplus`` is linear
+#: is the COMMON case on an approach, see ``outputs/envelope.py``). ``softplus`` is linear
 #: past ~20, so twenty softnesses below the box is inert to 1e-8 in float32. It must still be
 #: a FLOOR: an unclamped demand of -1e6 cancels in ``bound + softness * softplus(...)`` and
 #: reintroduces a larger error than the one this avoids.

@@ -409,10 +409,10 @@ that change.
 
 - **No live `CommandHook` declares `needs_reference = True` any more (verified).** The
   nominal law was the only one, and it is archived. The protocol field survives in
-  `control/dynamics/hooks.py`, and so does the machinery it drives — `track_reference` in
+  `outputs/dynamics/hooks.py`, and so does the machinery it drives — `track_reference` in
   `aerodynamic_model/torch_piecewise_rollout.py` (an extra unhooked endpoint rollout per
   segment) and its pass-through in `torch_lag_dynamics.py` and
-  `control/dynamics/backends.py:FirstOrderLagBackend._hooked_schedule`. It is not dead
+  `outputs/dynamics/backends.py:FirstOrderLagBackend._hooked_schedule`. It is not dead
   (the barrier reads `state.actuators`, and the combined lateral/vertical hook that
   `OPEN_ITEMS` still lists would need the reference back), but nothing exercises the
   `True` branch outside `aerodynamic_model`'s own tests. Decide before T3-20 folds the
@@ -427,7 +427,7 @@ that change.
   `rollout_piecewise_constant_at_times` were reached only through the deleted
   `TransportChartVelocityBackend`; the chart's other exports
   (`transport_chart_state_to_channels` / `_to_geodetic`) are still read by
-  `control/dynamics/backends.py`, and the lag and scaled kernels have their own rollouts. The
+  `outputs/dynamics/backends.py`, and the lag and scaled kernels have their own rollouts. The
   module's own tests still exercise both, so the suite does not notice. Same cross-package
   call as the `chart_scale=None` entry above.
 - **`docs/open-items.md` line 79 and `README.md`'s "Known gaps" still narrate the
@@ -659,13 +659,13 @@ change was already touching the forecast contract.
 
 ## 28. The lag-compensated bank inversion and the load coordination live in two hook modules
 
-**Verified** (2026-09-08, L3.e review). `control/constraints/barrier_filter.py` and
-`control/constraints/trombone.py` both spell out `tau_eff = tau(1 - e^{-dt/tau})`,
+**Verified** (2026-09-08, L3.e review). `outputs/constraints/barrier_filter.py` and
+`outputs/constraints/trombone.py` both spell out `tau_eff = tau(1 - e^{-dt/tau})`,
 `committed = tan(mu_actuator)*tau_eff`, `lift = (n cos mu).clamp(min=0.5)`,
 `scale = V_h/(g*lift)`, `atan((scale*dpsi - committed)/(dt - tau_eff))`, and
 `n' = n cos mu / cos mu'` clamped to the envelope — about 25 lines carrying three physical
 assumptions (the 0.5 lift floor, the lag credit, the coordination law). A
-`control/constraints/turning.py` with `lag_effective_s`, `turn_geometry`,
+`outputs/constraints/turning.py` with `lag_effective_s`, `turn_geometry`,
 `bank_for_heading_change` and `coordinate_load` would give them one home. Left out of the
 L3.e change deliberately: the barrier is the ADOPTED delivery layer with published numbers,
 and the L3.e equivalence run rests on it being byte-identical, so the extraction wants its

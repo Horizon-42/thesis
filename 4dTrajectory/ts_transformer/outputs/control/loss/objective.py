@@ -25,10 +25,10 @@ from ts_transformer.config import (
 from ts_transformer.data.dataset import Normalizer
 from ts_transformer.data.fixed_dt_supervision import FixedDTControlSupervision
 from ts_transformer.training.objective import ProcedureMultipliers, procedure_loss
-from ts_transformer.outputs.control.constraints import build_command_hook
-from ts_transformer.outputs.control.dynamics import rollout as control_rollout
-from ts_transformer.outputs.control.dynamics.backends import EndpointControlRollout
-from ts_transformer.outputs.control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
+from ts_transformer.outputs.constraints import build_command_hook
+from ts_transformer.outputs.dynamics import rollout as control_rollout
+from ts_transformer.outputs.dynamics.backends import EndpointControlRollout
+from ts_transformer.outputs.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
 from ts_transformer.outputs.control.loss.fixed_dt import fixed_dt_control_state_loss

@@ -95,7 +95,7 @@ Two orthogonal dynamics axes underneath the control path: `control_dynamics_mode
 unscaled `transport-chart-velocity` was RETIRED 2026-09-07 — a measured regression that the
 nondimensional variant replaced on 2026-08-02; `run_naming` still abbreviates it so the 13
 stored 2026-07/08 configs keep their `_tcv` names). **The registry in
-`outputs/control/dynamics/backends.py` is keyed by the PAIR.**
+`outputs/dynamics/backends.py` is keyed by the PAIR.**
 The lagged model *wraps* `transport_chart_rhs` — same force equations, stall handling, transport
 term and chart projection — so it is the point-mass model plus three actuators, not a second
 flight model.
@@ -129,7 +129,7 @@ flight model.
   rule: the caller's alignment is a central difference over POSITIONS, so the flying just after a
   row is in its direction; and `MEMBERSHIP_FLOOR_M` (500 m) is what decides whether a record is
   cut at all.
-- **Controls are DIMENSIONLESS in this package** (`outputs/control/envelope.py` is the single source):
+- **Controls are DIMENSIONLESS in this package** (`outputs/envelope.py` is the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, same box on every
   airframe. Newtons appear in exactly two places — `physical_controls()` into the dynamics, and
   `inference/forecast.py` out to the evaluation record. **The thrust floor is negative on purpose** (an
@@ -263,7 +263,7 @@ flight model.
   observed lookback (`outputs.control.supervision.anchor_controls`), never from the first command.
 - **The teacher inverse must be the inverse OF THE CONFIGURED FORWARD MODEL.** A schedule solved
   against the wrong equations is finite, bounded, the right shape, and its own optimizer reports
-  a falling loss — it simply reproduces nothing. `outputs/control/dynamics/inverse.py` registers each
+  a falling loss — it simply reproduces nothing. `outputs/dynamics/inverse.py` registers each
   inverse under the SAME config key as its forward model; a model added without one fails at
   registry lookup. The transport term (ω×v) is UNCONDITIONAL and there is no correct "off".
 - **A fitted teacher table belongs to ONE width, anchor and cohort** — `control_imitation_target=
@@ -584,10 +584,15 @@ fixed-anchor set); `__getitem__` is gone — `batch([i])` is the one door.
 The control path's own code lives in **`outputs/control/`**, by role rather than behind a
 `control_` prefix: `strategy`, `supervision` (the per-flight physical context and the two
 supervision references), `forecast` (the dense rollout under the hook, the CTA and interval
-plumbing, the latent decodes), `envelope`, `heads` (the prediction contract and the heads),
-`conditioning`, `latent`, `basis_fit`, `dynamics/{backends,rollout,inverse,hooks}`,
-`loss/{objective,components,fixed_dt}`, `training/diagnostics`,
-`constraints/{barrier_filter,speed_floor,trombone,composite,gates,saturation}`. The closure
+plumbing, the latent decodes), `heads` (the prediction contract and the heads), `latent`,
+`basis_fit`, `loss/{objective,components,fixed_dt}`, `training/diagnostics`. **What the
+rollout needs is not one path's** (2026-09-10, the plan-and-guidance path's first commit):
+`outputs/dynamics/{backends,rollout,inverse,hooks}`,
+`outputs/constraints/{barrier_filter,speed_floor,trombone,composite,gates,saturation}`,
+`outputs/envelope` (the dimensionless command box and its newton conversion) and
+`outputs/conditioning` (the condition vector) sit beside `outputs/base` and
+`outputs/duration_heads`, imported by the control strategy and by the plan guidance alike;
+`tests/test_architecture.py` refuses a shared part that imports any path. The closure
 path is `outputs/closure/{strategy,model,geometry,profile,forecast}`; the state path is
 `outputs/state/{strategy,model,loss,forecast}` (the fixed-time postprocessors and the
 corridor projection live in its `forecast`).
@@ -606,7 +611,7 @@ segment boundary, the anchor first) — not a lock-step state, because the quest
 it are look-ahead ones; it is the same tensor at every call, so a hook derives its table from
 it once at `segment_index == 0`. It exists only where a member declares `needs_reference`.
 
-**A dynamics backend is a ROW, not a class**: `outputs/control/dynamics/backends.py` maps the
+**A dynamics backend is a ROW, not a class**: `outputs/dynamics/backends.py` maps the
 `(control_dynamics_model, control_dynamics_backend)` PAIR to
 `(endpoint_fn, dense_fn, post_fn, runs_hooks)`. `post_fn` turns whatever state the
 integrator carries into the one public `(channels, geodetic)` pair; `runs_hooks` is why the

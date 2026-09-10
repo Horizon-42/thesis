@@ -11,9 +11,9 @@ import pytest
 import torch
 
 import ts_transformer.data.channels as ch
-from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
 from ts_transformer.outputs.control import heads as control_models
-import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module
+import ts_transformer.outputs.dynamics.rollout as control_rollout_module
 import ts_transformer.training.objective as objective
 import ts_transformer.outputs.control.loss.objective as control_objective
 import ts_transformer.experiments.pipeline as pipeline_module
@@ -29,7 +29,7 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
 from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
 from ts_transformer.backbone.adapters import build_model

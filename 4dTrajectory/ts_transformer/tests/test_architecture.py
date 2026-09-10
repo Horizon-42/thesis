@@ -42,8 +42,14 @@ SHARED_BY_DESIGN = {
 }
 #: A path's strategy-facing modules (review §4.2): the seam between the spine and the path's
 #: own code. They may import the spine's shared modules (`objective`, `forecast`, `models`);
-#: the path's INNER modules — heads, dynamics, constraints, the loss terms — may not.
+#: the path's INNER modules — heads, the loss terms — may not, and neither may what the paths
+#: SHARE under outputs/ (the rollout, the hooks, the envelope, the conditioning).
 STRATEGY_SEAM = {"strategy.py", "forecast.py", "supervision.py", "loss.py", "loss/objective.py"}
+#: What more than one path consumes, and therefore no path owns (the membership rule):
+#: the flight models and their hooks, the dimensionless command box, the condition vector.
+#: Moved up from outputs/control/ on 2026-09-10 for the plan-and-guidance path; nothing
+#: here may import a path, or the move was cosmetic.
+SHARED_OUTPUT_PARTS = ("dynamics", "constraints", "conditioning.py", "envelope.py")
 #: What nothing under outputs/ may import: the loop, the replay, the export and the CLI are
 #: what CALL a strategy.
 LOOP_MODULES = {
@@ -110,7 +116,7 @@ def _imported_names(path: Path) -> set[str]:
         elif isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
     # The layering rules below are written in package-relative names (`control.envelope`,
-    # `dataset`); every live import is qualified (`ts_transformer.outputs.control.envelope`).
+    # `dataset`); every live import is qualified (`ts_transformer.outputs.envelope`).
     return {_package_relative(name) for name in names}
 
 
@@ -181,8 +187,11 @@ def test_no_control_prefixed_module_returns_to_the_top_level():
         f"{stragglers} belong under outputs/control/ by role, not at the top level behind a prefix"
     )
     assert (CONTROL / "__init__.py").is_file()
-    for sub in ("constraints", "dynamics", "loss", "training"):
+    for sub in ("loss", "training"):
         assert (CONTROL / sub / "__init__.py").is_file(), f"outputs/control/{sub} is not a package"
+    for part in SHARED_OUTPUT_PARTS:
+        target = OUTPUTS / part if part.endswith(".py") else OUTPUTS / part / "__init__.py"
+        assert target.is_file(), f"outputs/{part} is shared by the paths and lives under outputs/"
     for path in ("state", "closure", "control"):
         assert (OUTPUTS / path / "strategy.py").is_file(), f"outputs/{path} has no strategy"
 
@@ -248,6 +257,24 @@ def _roots(names: set[str]) -> set[str]:
         if len(parts) > 1:
             roots.add(".".join(parts[:2]))
     return roots
+
+
+def test_the_shared_output_parts_import_no_path():
+    """The rollout, the hooks, the envelope and the conditioning are consumed by the control
+    strategy and by the plan guidance alike. One of them importing `outputs.control` (or any
+    other path) would make the plan path depend on the control path through the back door."""
+    paths = {p.name for p in OUTPUTS.iterdir() if (p / "strategy.py").is_file()}
+    for part in SHARED_OUTPUT_PARTS:
+        files = [OUTPUTS / part] if part.endswith(".py") else list((OUTPUTS / part).rglob("*.py"))
+        for path in files:
+            offending = {
+                name for name in _imported_names(path)
+                if name.split(".")[:2] in [["outputs", p] for p in paths]
+            }
+            assert not offending, (
+                f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; a shared part of "
+                f"outputs/ belongs to no path"
+            )
 
 
 def test_nothing_under_outputs_imports_the_training_loop():
@@ -496,7 +523,7 @@ def test_the_conditioning_names_and_their_scalings_are_one_source():
     """
     from types import SimpleNamespace
 
-    from ts_transformer.outputs.control.conditioning import (
+    from ts_transformer.outputs.conditioning import (
         CONDITION_CHANNELS,
         DYNAMICS_CONDITION_NAMES,
         condition_vector,

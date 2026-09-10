@@ -41,7 +41,7 @@ threshold, beyond ``NEAR_THRESHOLD_M``.
 **Where a trajectory LANDS** is one rule as well (:func:`threshold_crossing_index`): the
 first row that is at or past the threshold plane AND on the final there.  Both consumers
 that need an arrival point read it — ``forecast.cut_at_threshold_crossing`` (which row a
-record ends on) and ``outputs/control/constraints/trombone.py`` (how much path the reference rollout
+record ends on) and ``outputs/constraints/trombone.py`` (how much path the reference rollout
 still intends to fly) — because the plane alone is crossed on a downwind, abeam.
 """
 
@@ -175,7 +175,7 @@ def soft_aligned(cos_align: torch.Tensor) -> torch.Tensor:
     """Alignment membership in ``[0, 1]``: is this direction down the final approach course?
 
     Half of ``on-final`` (the cone is the other half), named because a module can need the
-    alignment WITHOUT the cone: ``outputs/control/constraints/trombone.py`` hands the command back
+    alignment WITHOUT the cone: ``outputs/constraints/trombone.py`` hands the command back
     as soon as the path is lined up, wide of the cone or not, and has to read the same 30°
     the gate reads rather than a second copy of it.
     """
@@ -235,7 +235,7 @@ def threshold_crossing_index(
     "First" so a trajectory that overshoots, wanders and comes back is read on its real
     arrival rather than on a later pass; the run is what a caller refines INSIDE
     (``forecast.cut_at_threshold_crossing`` takes the closest horizontal approach within it,
-    ``outputs/control/constraints/trombone.py`` interpolates ``d = 0`` inside the crossing segment).
+    ``outputs/constraints/trombone.py`` interpolates ``d = 0`` inside the crossing segment).
 
     Where ``crossed`` is false the trajectory never reached the final at all, and ``first``
     and ``end`` mean nothing: the caller must say so rather than cut somewhere, which would

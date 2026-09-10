@@ -298,20 +298,22 @@ The strategy's members (`outputs/base.py`, the interface as built) map onto the 
 | `replay(...)` → `Replay` | the validation replay on the plan's own clock (the control path's rollout-clock replay is the precedent) | §7 |
 | `record_fields(forecast)` | the plan (with every clamp), the route actually flown, the unabsorbable delay X, the fan — the record's `source` block | §5, §7 |
 
-**What it reuses, and the one move that reuse forces.** The point-mass rollout and actuator
-model (`outputs/control/dynamics/{backends,rollout}`), the barrier / speed-floor / trombone
-modules with their gates and saturation (`outputs/control/constraints/`), CTA conditioning
-(`outputs/control/conditioning`), the quantile head (`outputs/duration_heads`), split-conformal
-calibration (`inference/calibration`), the corridor geometry, on-final gate and crossing rule
+**What it reuses (the move that reuse forced is DONE — the first commit of
+`dev-plan-guidance`, 2026-09-10).** The point-mass rollout and actuator model
+(`outputs/dynamics/{backends,rollout}`), the barrier / speed-floor / trombone modules with
+their gates and saturation (`outputs/constraints/`), the dimensionless command box and its
+newton conversion (`outputs/envelope`), CTA conditioning (`outputs/conditioning`), the
+quantile head (`outputs/duration_heads`), split-conformal calibration
+(`inference/calibration`), the corridor geometry, on-final gate and crossing rule
 (`geometry/final_approach_geometry`), the anytime grid and replay (`data/anchor_grid`,
-`experiments/anytime_curve`), the CIFP reader (`flight_scenarios.fas_geometry`,
-`approach_constraints`). The membership rule (`CLAUDE.md`: a module belongs under
-`outputs/control/` only if EVERY consumer is control-specific) means the plan path's first commit
-moves what it consumes up one level — `outputs/control/dynamics/` → `outputs/dynamics/`,
-`outputs/control/constraints/` → `outputs/constraints/`, `outputs/control/conditioning.py` →
-`outputs/conditioning.py` — a pure move like the one that put `duration_heads.py` there; the
-control strategy imports them from the new place. The guidance layer imports those modules as
-parts of ONE controller (`outputs/plan/guidance/`), never as post-hoc hooks. The nominal-law hook
+`experiments/anytime_curve`), the procedure documents through the seam's reader
+(`flight_scenarios.procedure_final`, `flight_scenarios.fas_geometry` — the optimizer's
+`approach_constraints` is not on the package's import path). The membership rule
+(`CLAUDE.md`: a module belongs under `outputs/control/` only if EVERY consumer is
+control-specific) is why the first four moved up from `outputs/control/` — pure moves, the
+control strategy imports them from the new place, and `tests/test_architecture.py` refuses a
+shared part that imports any path. The guidance layer imports those modules as parts of ONE
+controller (`outputs/plan/guidance/`), never as post-hoc hooks. The nominal-law hook
 (`guidance_laws.py`, `nominal_residual.py`) is ARCHIVED under `archive/nominal_law_hook_2026_09/`
 and the archive is off the import path (`tests/test_architecture.py` refuses an import of it),
 so the lateral and vertical laws come back as the guidance layer's own modules
@@ -354,7 +356,7 @@ CPU-only readouts and never were blocked. What is left is the user's go on §9 s
 **Two review findings this design must not inherit.** C-12 (the head's load-factor floor 0.2
 against the grader's 0.5) — DECIDED 2026-09-09: the grader stays at 0.5, and the guidance layer
 commands the load factor inside `flyability`'s envelope (`geometry/flyability.py`, floor 0.5),
-never inside the learned head's box in `outputs/control/envelope.py` (floor 0.2, a search-space
+never inside the learned head's box in `outputs/envelope.py` (floor 0.2, a search-space
 fact of the old path); the §7 "today's best" flyability baselines therefore stay as measured.
 C-11 (the corridor geometry's origin) is fixed in `project_onto_final` (threshold-relative under
 every frame), and remains the one geometry the procedure reader and the corridor gate must agree

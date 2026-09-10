@@ -40,7 +40,7 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.data.dataset import build_series
 from ts_transformer.outputs.control.forecast import duration_quantile_predictions
@@ -191,7 +191,7 @@ def _loss_components(config: TSConfig, monkeypatch, *, predicted_s: float, truth
     Only the duration terms are under test, so the rollout is replaced by a perfect one and
     every position/terminal contribution is zero by construction.
     """
-    import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module
+    import ts_transformer.outputs.dynamics.rollout as control_rollout_module
 
     monkeypatch.setattr(
         control_rollout_module, "rollout_control_endpoints",

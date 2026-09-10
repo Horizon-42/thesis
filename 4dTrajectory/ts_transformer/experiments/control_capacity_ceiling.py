@@ -30,7 +30,7 @@ import torch  # noqa: E402
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 import ts_transformer.experiments.predictability_report as common_report  # noqa: E402
 from ts_transformer.config import PREDICTION_CONTROL  # noqa: E402
-from ts_transformer.outputs.control.dynamics.rollout import rollout_control_endpoints  # noqa: E402
+from ts_transformer.outputs.dynamics.rollout import rollout_control_endpoints  # noqa: E402
 from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,

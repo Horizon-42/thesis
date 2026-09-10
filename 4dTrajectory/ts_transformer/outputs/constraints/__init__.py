@@ -1,4 +1,4 @@
-"""Constraint modules that ride the rollout's command hook (control/dynamics/hooks.py).
+"""Constraint modules that ride the rollout's command hook (outputs/dynamics/hooks.py).
 
 Each module is one `CommandHook`; `build_command_hook` picks the modules the config's
 vocabulary value names (`config.CONTROL_HOOK_MEMBERS`) and gives them the batch's
@@ -31,11 +31,11 @@ from ts_transformer.config import (
     HOOK_SATURATION_HARD,
     TSConfig,
 )
-from ts_transformer.outputs.control.constraints.barrier_filter import BarrierFilter
-from ts_transformer.outputs.control.constraints.composite import CompositeHook
-from ts_transformer.outputs.control.constraints.speed_floor import SpeedFloor
-from ts_transformer.outputs.control.constraints.trombone import Trombone
-from ts_transformer.outputs.control.dynamics.hooks import CommandHook
+from ts_transformer.outputs.constraints.barrier_filter import BarrierFilter
+from ts_transformer.outputs.constraints.composite import CompositeHook
+from ts_transformer.outputs.constraints.speed_floor import SpeedFloor
+from ts_transformer.outputs.constraints.trombone import Trombone
+from ts_transformer.outputs.dynamics.hooks import CommandHook
 
 _HOOKS = {
     CONTROL_HOOK_BARRIER: BarrierFilter,

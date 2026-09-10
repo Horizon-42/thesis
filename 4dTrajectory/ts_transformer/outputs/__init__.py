@@ -8,6 +8,12 @@ path's code sits in its own package here, and the spine calls
 ``strategy(config).<method>``. A fourth path (the plan-and-guidance design) is one
 package under ``outputs/`` with one strategy class, and no edit in the spine.
 
+What more than one path consumes lives here rather than under a path (the membership
+rule, 2026-09-10): ``dynamics/`` (the flight models, the rollout API, the inverses, the
+command-hook contract), ``constraints/`` (the command hooks), ``envelope`` (the
+dimensionless command box and its newton conversion), ``conditioning`` (the condition
+vector) and ``duration_heads``.
+
 The registry is lazy on purpose: the strategies import the spine's shared value types
 (`Forecast`, `FlightSeries`, `LossComponents`), and the spine imports this module, so a
 strategy module is loaded on first use — after every spine module is initialised.

@@ -45,9 +45,9 @@ from ts_transformer.geometry.flyability import G as GRAVITY_MPS2
 from ts_transformer.backbone.adapters import build_state_forecaster
 from ts_transformer.outputs.base import ForecastOptions, OutputStrategy, Replay, WindowContext
 from ts_transformer.outputs.control.basis_fit import FittedTeacherTable, load_fitted_teacher
-from ts_transformer.outputs.control.constraints import build_command_hook
-from ts_transformer.outputs.control.dynamics import rollout as control_rollout
-from ts_transformer.outputs.control.dynamics.hooks import HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY
+from ts_transformer.outputs.constraints import build_command_hook
+from ts_transformer.outputs.dynamics import rollout as control_rollout
+from ts_transformer.outputs.dynamics.hooks import HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY
 from ts_transformer.outputs.control.forecast import forecast_control_batch
 from ts_transformer.outputs.control.heads import ControlOutputModel, ControlPrediction
 from ts_transformer.outputs.control.latent import (

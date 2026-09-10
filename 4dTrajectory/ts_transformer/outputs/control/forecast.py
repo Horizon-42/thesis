@@ -25,12 +25,12 @@ from ts_transformer.data.dataset import (
     truth_duration_s,
 )
 from ts_transformer.inference.forecast import Forecast, history_batch
-from ts_transformer.outputs.control.constraints import build_command_hook
-from ts_transformer.outputs.control.dynamics import rollout as control_rollout
-from ts_transformer.outputs.control.dynamics.hooks import (
+from ts_transformer.outputs.constraints import build_command_hook
+from ts_transformer.outputs.dynamics import rollout as control_rollout
+from ts_transformer.outputs.dynamics.hooks import (
     HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY, CommandHook,
 )
-from ts_transformer.outputs.control.envelope import physical_controls
+from ts_transformer.outputs.envelope import physical_controls
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.control.supervision import dynamics_arrays
 

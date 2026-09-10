@@ -40,7 +40,7 @@ from torch import nn
 
 from ts_transformer.data.channels import states_from_channels
 from ts_transformer.config import TSConfig
-from ts_transformer.outputs.control.dynamics.inverse import segment_controls
+from ts_transformer.outputs.dynamics.inverse import segment_controls
 from ts_transformer.outputs.control.heads import ControlPrediction
 
 DURATION_UNIFORM = "uniform"

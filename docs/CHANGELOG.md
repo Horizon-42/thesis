@@ -4,6 +4,21 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: what the rollout needs moves out of `outputs/control/` (plan-and-guidance, step 0)
+
+The first commit of the plan-and-guidance path (`4dTrajectory/ts_transformer/docs/2026-09-09_plan_and_guidance_design.md`
+§11), on `dev-plan-guidance`. The design's guidance layer consumes the point-mass rollout, the
+command hooks, the dimensionless command box and the condition vector, so under the membership
+rule (a module belongs under `outputs/control/` only if EVERY consumer is control-specific) they
+are no path's: `outputs/control/dynamics/` → `outputs/dynamics/`, `outputs/control/constraints/`
+→ `outputs/constraints/`, `outputs/control/conditioning.py` → `outputs/conditioning.py`,
+`outputs/control/envelope.py` → `outputs/envelope.py` (the envelope goes with them because the
+backends' newton conversion and the speed floor read it). Pure moves — every qualified import
+rewritten, the live documents with them; the control strategy imports from the new place.
+`tests/test_architecture.py` gains the rule that a shared part of `outputs/` imports no path.
+Acceptance: full suite 994 passed; 219 stored `history.json` configs give byte-identical run names,
+slugs and loadability.
+
 ### 2026-09-10 — ts_transformer: `outputs/` was git-ignored — fourteen §4.2 modules had never reached the branch
 
 Found by the review of the §4.5–§4.7 commits on `dev-pkg-review`. `4dTrajectory/.gitignore`'s

@@ -93,7 +93,7 @@ Everything below is serialised into every checkpoint.
   dense rollout settles the effective schedule first and re-integrates it; **the record
   carries the schedule FLOWN**, not the network's (`forecast` exports
   `rollout.controls`, `source.commandHook` = `hook/saturation`). Two modules in
-  `control/constraints/`: `barrier` (corridor barriers → heading interval → bank interval,
+  `outputs/constraints/`: `barrier` (corridor barriers → heading interval → bank interval,
   lateral only) and `nominal-residual` (L1 + glidepath law, tanh-bounded residual, both axes),
   sharing `gates.py` (on-final on the rollout's velocity). **`nominal-residual`'s code was
   ARCHIVED 2026-09-07** (`archive/nominal_law_hook_2026_09/`, package audit T2): it was never
@@ -192,7 +192,7 @@ Everything below is serialised into every checkpoint.
   → `docs/2026-08-21_ksjc_route_mix_and_ade.md`
 - Aircraft-type resolution (`_resolve_aircraft`, `--aircraft-type`, why `"type": "UNK"` does not
   mean single-type): see `flight_scenarios/CLAUDE.md`.
-- **Controls are DIMENSIONLESS in this package** (`control/envelope.py`, the single source):
+- **Controls are DIMENSIONLESS in this package** (`outputs/envelope.py`, the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, the same box on
   every airframe. Newtons appear in exactly two places — `physical_controls()` on the way into
   the dynamics, and `inference/forecast.py` on the way out to the evaluation record, whose contract stays
@@ -205,7 +205,7 @@ Everything below is serialised into every checkpoint.
 - **Two orthogonal dynamics axes.** `control_dynamics_model` ∈ `point-mass` |
   `first-order-lag` is the physics; `control_dynamics_backend` ∈ `reanchored-rk4` |
   `transport-chart-velocity` | `scaled-transport-chart-velocity` is the state representation the
-  long rollout carries. The registry in `control/dynamics/backends.py` is keyed by the PAIR.
+  long rollout carries. The registry in `outputs/dynamics/backends.py` is keyed by the PAIR.
 
 ## Run & category naming — `run_naming.py` is the single source
 
@@ -268,7 +268,7 @@ meaning and codebase pointers: `docs/2026-08-24_ksjc_result_labels_explained.md`
 - **The teacher inverse must be the inverse OF THE CONFIGURED FORWARD MODEL, and nothing else
   can catch it if it is not.** A schedule solved against the wrong equations is finite, bounded,
   the right shape, and its own optimizer reports a falling loss — it simply reproduces nothing.
-  So `control/dynamics/inverse.py` registers each inverse under the SAME config key as its
+  So `outputs/dynamics/inverse.py` registers each inverse under the SAME config key as its
   forward model, and `tests/test_control_inverse_dynamics.py` closes the loop numerically for
   every registered model (roll a known schedule → invert the dense result → require the schedule
   back: 5e-3 in thrust fraction and load factor, 0.5° in bank). A model added without an inverse
@@ -422,7 +422,7 @@ meaning and codebase pointers: `docs/2026-08-24_ksjc_result_labels_explained.md`
   magnitudes, never p: seed noise moves bank skill 0.019 and ADE 1.7 m, the dose effects 3-8×
   and 13-52× that.
 - **`control_imitation_loss_weight` supervises the schedule directly**, against
-  `control/dynamics/inverse.py` — the same registry the forward model dispatches on, so target and
+  `outputs/dynamics/inverse.py` — the same registry the forward model dispatches on, so target and
   rollout can never be different equations. The target is built in
   `dataset.reference_control_supervision` on the training-only `_dynamics_arrays` path;
   **`dynamics_arrays()` itself must stay free of it** because forecast/predict call it and there

@@ -334,7 +334,7 @@ def rollout_piecewise_constant_hooked_with_step(
     does not say which path or speed it was trimmed for, and the schedule's own rollout is
     the only place that intent is readable. It is handed over WHOLE rather than in
     lock-step because the questions that need it are look-ahead ones — how much path the
-    network still intends to fly (``control/constraints/trombone.py`` under
+    network still intends to fly (``outputs/constraints/trombone.py`` under
     ``trombone_surplus_reference="reference-rollout"``) — which no per-segment state can
     answer. Cost: one more integration of the same schedule, i.e. about 2x this function's
     wall time and memory, paid once rather than per step.

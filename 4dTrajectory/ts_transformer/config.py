@@ -508,7 +508,7 @@ PROCEDURE_LOSS_FIELDS = (
     "procedure_loss_epsilon",
 )
 # The rollout command hook: a constraint module that rewrites each control segment's
-# command from the state at the segment's start (outputs/control/dynamics/hooks.py). ``barrier``
+# command from the state at the segment's start (outputs/dynamics/hooks.py). ``barrier``
 # is the per-step safety layer (a barrier on the corridor gives a bank interval the command
 # is saturated into). It acts only where the corridor gate says the aircraft is on the
 # final; ``soft`` saturation keeps gradients in the training loop, ``hard`` is for
@@ -543,10 +543,10 @@ CONTROL_HOOK_TROMBONE = "trombone"
 # as well, which is well defined for the same reason and one more: the builder confines the
 # barrier to the HARD on-final gate whenever a trombone is a member, and the trombone acts
 # only where that gate has not opened, so the two never rewrite the same step
-# (outputs/control/constraints/__init__.py; the soft gate alone was not that complement). The
+# (outputs/constraints/__init__.py; the soft gate alone was not that complement). The
 # trombone comes last because that is where the value spells it; its 15° turn cap is what
 # keeps the load factor it coordinates from eating the floor's stall margin
-# (outputs/control/constraints/trombone.py). No other combination is registered, and this vocabulary
+# (outputs/constraints/trombone.py). No other combination is registered, and this vocabulary
 # is the only place a combination may be spelled.
 CONTROL_HOOK_BARRIER_TROMBONE = "barrier+trombone"
 CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE = "barrier+speed-floor+trombone"

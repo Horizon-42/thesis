@@ -10,8 +10,8 @@ import torch
 import torch.nn as nn
 
 from ts_transformer.config import TSConfig
-from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
