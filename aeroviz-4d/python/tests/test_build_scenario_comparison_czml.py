@@ -1059,7 +1059,7 @@ def test_prediction_is_shifted_onto_the_references_timeline(tmp_path):
 
 
 # An "anytime" prediction: the SAME record contract, re-anchored MID-APPROACH. The anytime
-# runner (`run_ts_anytime_curve.py --write-records`) forecasts each flight from where it still
+# runner (`run_ts.py anytime_curve --write-records`) forecasts each flight from where it still
 # had ~12 km of path left to fly, which on a real arrival is a few hundred seconds into the
 # 25 km slice — not the 120 s L−1 anchor every other prediction batch shares. Nothing here is
 # a second schema: t=0 is still the anchor and the anchor is still `source.anchorTimeS`, which

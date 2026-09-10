@@ -103,7 +103,10 @@ def _imported_names(path: Path) -> set[str]:
                 names.add(base)
                 names.update(f"{base}.{alias.name}" for alias in node.names)
             elif node.module:
+                # `from ts_transformer.training import train` names the loop module as
+                # surely as `from ts_transformer.training.train import …` does.
                 names.add(node.module)
+                names.update(f"{node.module}.{alias.name}" for alias in node.names)
         elif isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
     # The layering rules below are written in package-relative names (`control.envelope`,
@@ -127,7 +130,7 @@ def _package_module_names() -> set[str]:
 
 def _flat_import_candidates() -> list[Path]:
     """Everything that imports the package and is RUN: the modules, the tests, the docs
-    scripts, the root runners and the trajectory_data_process tests that drive them."""
+    scripts, the experiment runners and the `run_ts.py` door."""
     return [
         *_archive_import_candidates(),
         *sorted((TS_DIR / "docs").glob("*.py")),

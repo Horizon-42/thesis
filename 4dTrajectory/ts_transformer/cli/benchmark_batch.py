@@ -458,13 +458,3 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     }, indent=2), flush=True)
     print(f"BEST_BATCH_SIZE={best['batch_size']}", flush=True)
     return 0
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    add_cli_arguments(parser)
-    return run_cli(parser.parse_args(argv), parser)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

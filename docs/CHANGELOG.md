@@ -4,6 +4,27 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: `outputs/` was git-ignored — fourteen §4.2 modules had never reached the branch
+
+Found by the review of the §4.5–§4.7 commits on `dev-pkg-review`. `4dTrajectory/.gitignore`'s
+bare `outputs` rule (meant for `4dTrajectory/outputs/`, the optimizer's artifacts) also
+matched `ts_transformer/outputs/`, so every file the §4.2 strategies commit (`947c907`)
+CREATED there — `outputs/__init__.py`, `base.py`, `duration_heads.py`, the three `strategy.py`,
+the `state/` and `closure/` `forecast.py`/`loss.py`/`__init__.py`, `control/supervision.py`,
+`control/forecast.py`, `control/loss/objective.py` — was silently left out of the commit; only
+the files `git mv`ed in stayed tracked. The suite passed because the worktree had them. A
+fresh clone of the branch could not import the package. Now re-included (`!ts_transformer/outputs/`,
+the same fix the grouping commit made for the bare `data` rule) and committed: full suite 992 passed, 1 skipped; the modeling suites collect 1,370 tests with no error.
+
+- `tests/test_architecture.py`: an absolute `from ts_transformer.training import train` now
+  registers `training.train` (only `from ts_transformer.training.train import …` did), so the
+  grouped layout's natural import form cannot slip a loop module under `outputs/`.
+- `cli/benchmark_batch.py` loses its dead `__main__` guard (its `sys.path` bootstrap went with
+  the §4.5 move; the door is `python -m ts_transformer benchmark-batch`).
+- Root `pyproject.toml`: `norecursedirs` adds `archive`, so `./run_all_tests.sh` (which
+  collects `4dTrajectory` whole) no longer aborts on the archived scene-encoder test's frozen
+  imports — archived code stays off the import path, as `test_architecture.py` requires.
+
 ### 2026-09-10 — ts_transformer: the package grouped by plane — `data/`, `geometry/`, `backbone/`, `training/`, `inference/`
 
 The last step of the package review (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`

@@ -189,7 +189,7 @@ def _lookback_states(observed_states: list[dict[str, Any]]) -> list[dict[str, An
     **It is the model's input window only at the L−1 anchor.** There the two coincide exactly
     (the record's series starts at the arrival window and the anchor is ``seq_len − 1``), which
     is why every batch but one can read this line as "what the model was shown". A re-anchored
-    anytime record (`run_ts_anytime_curve.py --write-records`) anchors hundreds of seconds
+    anytime record (`run_ts.py anytime_curve --write-records`) anchors hundreds of seconds
     later, so this segment is the whole approach flown so far while the model saw only its last
     ``seq_len`` samples. The record carries no ``seq_len``, so narrowing it here is not possible
     without a record-contract field — see `docs/code-health-followups.md`.

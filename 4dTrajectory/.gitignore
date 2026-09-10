@@ -1,1 +1,3 @@
 outputs
+# `ts_transformer/outputs/` is the learned-prediction package's output STRATEGIES (code), not an outputs directory
+!ts_transformer/outputs/
