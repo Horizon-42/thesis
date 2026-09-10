@@ -12,7 +12,7 @@ import torch
 import ts_transformer.data.channels as ch
 import ts_transformer.data.coordinate_frames as frames
 import ts_transformer.data.dataset as dataset_module
-import ts_transformer.outputs.control.supervision as supervision_module
+import ts_transformer.outputs.dynamics.context as supervision_module
 from aerodynamic_model.common import GeodeticState
 from ts_transformer.config import COORDINATE_FRAMES, TSConfig
 from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series

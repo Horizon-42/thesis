@@ -15,6 +15,7 @@ for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import ts_transformer.geometry.dubins as dubins  # noqa: E402
 import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
 import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402
 
@@ -59,8 +60,8 @@ def test_anchor_pose_reads_the_state_channels():
     anchor = _anchor(12_000.0, -3_000.0, PSI + math.pi, speed=80.0)
     assert anchor.d == pytest.approx(12_000.0) and anchor.xt == pytest.approx(-3_000.0)
     assert anchor.speed_mps == pytest.approx(80.0) and _wrap(anchor.heading - (PSI + math.pi)) == pytest.approx(0.0)
-    assert anchor.radius == pytest.approx(80.0 ** 2 / (cg.GRAVITY_MPS2 * math.tan(cg.BANK_RAD)))
-    assert cg.turn_radius_m(150.0) == cg.turn_radius_m(cg.TURN_SPEED_CAP_MPS)
+    assert anchor.radius == pytest.approx(80.0 ** 2 / (dubins.GRAVITY_MPS2 * math.tan(dubins.BANK_RAD)))
+    assert cg.turn_radius_m(150.0) == cg.turn_radius_m(dubins.TURN_SPEED_CAP_MPS)
     assert anchor.pose == (anchor.position[0], anchor.position[1], anchor.heading)
 
 
@@ -140,8 +141,8 @@ def test_dubins_join_holds_the_heading_first_and_via_dubins_passes_the_via_pose(
     # The first 3 km of the extended path is the anchor heading, straight; the via is its end.
     head = extended.horizontal[extended.arc <= 3_000.0]
     assert np.allclose(np.diff(head, axis=0) / np.linalg.norm(np.diff(head, axis=0), axis=1)[:, None],
-                       cg._unit(anchor.heading))
-    assert np.allclose(extended.via[:2], anchor.position + 3_000.0 * cg._unit(anchor.heading))
+                       cg.unit_vector(anchor.heading))
+    assert np.allclose(extended.via[:2], anchor.position + 3_000.0 * cg.unit_vector(anchor.heading))
     for path in (plain, extended):
         d, xt, heading_error = _at_join(path)
         assert d == pytest.approx(6_000.0, abs=1.0) and xt == pytest.approx(0.0, abs=1.0) and heading_error < math.radians(1.5)

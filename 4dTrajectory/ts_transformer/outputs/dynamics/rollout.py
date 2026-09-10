@@ -7,6 +7,7 @@ callers never reproduce dtype/device conversions or reach into a backend directl
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 from ts_transformer.config import TSConfig
@@ -83,3 +84,42 @@ def rollout_control_dense(
         config,
         command_hook=command_hook,
     )
+
+
+def dense_query_offsets(
+    segment_durations_s: np.ndarray, output_dt_s: float
+) -> np.ndarray:
+    """Return regular output times plus every exact control-switch boundary."""
+    durations = np.asarray(segment_durations_s, dtype=np.float64)
+    if durations.ndim != 1 or not len(durations):
+        raise ValueError("control forecast needs at least one segment duration")
+    if not np.isfinite(durations).all() or np.any(durations <= 0.0):
+        raise ValueError("control segment durations must be finite and positive")
+    if not np.isfinite(output_dt_s) or output_dt_s <= 0.0:
+        raise ValueError("dense control output interval must be finite and positive")
+    boundaries = np.cumsum(durations)
+    total = float(boundaries[-1])
+    regular = np.arange(output_dt_s, total, output_dt_s, dtype=np.float64)
+    candidates = np.sort(np.concatenate((regular, boundaries)))
+    tolerance = np.finfo(np.float64).eps * max(total, 1.0) * 16.0
+    keep = np.concatenate(([True], np.diff(candidates) > tolerance))
+    offsets = candidates[keep]
+    offsets[-1] = total
+    return offsets
+
+
+def padded_dense_queries(
+    segment_durations_s: np.ndarray,
+    output_dt_s: float,
+) -> tuple[list[np.ndarray], np.ndarray, np.ndarray]:
+    offsets = [
+        dense_query_offsets(row, output_dt_s)
+        for row in segment_durations_s
+    ]
+    width = max(len(row) for row in offsets)
+    padded = np.zeros((len(offsets), width), dtype=np.float64)
+    valid = np.zeros((len(offsets), width), dtype=bool)
+    for row, values in enumerate(offsets):
+        padded[row, : len(values)] = values
+        valid[row, : len(values)] = True
+    return offsets, padded, valid

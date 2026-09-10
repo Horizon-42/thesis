@@ -102,3 +102,41 @@ class CommandHook(Protocol):
         that appears on every record is a key that distinguishes nothing, and adding one to
         the default would rewrite the records of every campaign already on disk.
         """
+
+
+def per_flight_hook_diagnostics(command_hook: CommandHook) -> list[dict[str, float | str]]:
+    """Each flight's own hook counts: ``steps``, then every other count as a share of it —
+    the record surface of the protocol above, read by every forecast that runs a hook.
+
+    The same normalisation ``train.fit_model`` writes into an epoch record
+    (``value / hook_steps``), one level down — an epoch reports the batch, a prediction
+    record reports the flight. Keys drop the ``hook_`` prefix and arrive camelCased like
+    every other ``source`` field. A module's LABELS (which named variant of itself it ran)
+    join the same bag under the same naming, undivided: they are strings, and a share of a
+    name means nothing.
+    """
+    counts = {
+        name: value.tolist()
+        for name, value in command_hook.per_flight_diagnostics().items()
+    }
+    labels = {
+        _camel_case(name.removeprefix(HOOK_DIAGNOSTIC_PREFIX)): value
+        for name, value in command_hook.diagnostic_labels().items()
+    }
+    steps = counts.pop(HOOK_STEPS_KEY)
+    return [
+        {
+            "steps": row_steps,
+            **{
+                _camel_case(name.removeprefix(HOOK_DIAGNOSTIC_PREFIX)): value[row] / row_steps
+                for name, value in counts.items()
+            },
+            **labels,
+        }
+        for row, row_steps in enumerate(steps)
+    ]
+
+
+def _camel_case(name: str) -> str:
+    head, *rest = name.split("_")
+    return head + "".join(word.title() for word in rest)

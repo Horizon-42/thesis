@@ -47,7 +47,7 @@ from ts_transformer.data.data_provenance import (  # noqa: E402
     require_matching_data_provenance,
 )
 from ts_transformer.data.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
-from ts_transformer.outputs.control.supervision import dynamics_arrays  # noqa: E402
+from ts_transformer.outputs.dynamics.context import dynamics_arrays  # noqa: E402
 from ts_transformer.training.fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_common_truth,
     resample_prediction_to_physical_time,

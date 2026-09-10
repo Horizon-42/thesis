@@ -442,7 +442,7 @@ def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
 
 
 def test_control_dynamics_carry_the_glidepath_for_the_rollout_penalty():
-    from ts_transformer.outputs.control.supervision import dynamics_arrays
+    from ts_transformer.outputs.dynamics.context import dynamics_arrays
 
     series, config = _series(n_flights=1)
     rows = dynamics_arrays(series[0], config.seq_len - 1)

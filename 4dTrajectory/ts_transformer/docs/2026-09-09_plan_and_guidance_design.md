@@ -1,6 +1,12 @@
 # Plan-and-guidance: the next model (design v4, 2026-09-10)
 
-Status: design only; nothing built. v1 (same day) split the plan into operating and route parameters
+Status: steps 0–2 BUILT, REVIEWED and MEASURED on `dev-plan-guidance`, 2026-09-10 — the shared
+rollout parts moved up (`7cb58b4`), the procedure reader and the eight extractors (§12.1), the
+guidance layer and the oracle ceiling (§12.2, after the step-2 review's fixes: the §7 veto does
+not fire; straight-in ADE 204 m / chamfer 34 m / arrival-time MAE 4.8 s from the
+truth's own plan, vectored ADE 1591 m against native32's 2870 m, 99.7 % flyable,
+99.7 % established, corridor left after the join by 1.4 %). Step 3 (the plan head)
+is unblocked; the decision it needs is in §12.2. v1 (same day) split the plan into operating and route parameters
 (decision (A)). v2 made the published approach procedure the backbone of the whole design: the
 learned plan lives inside the procedure, the guidance layer enforces the procedure by construction,
 and the result is judged twice — as a prediction of what aircraft do, and as a reference that
@@ -89,11 +95,11 @@ is recorded in the record — the model is never allowed to plan an infeasible f
 
 | parameter | meaning | range (procedure / aircraft) | extractor |
 |---|---|---|---|
-| `T` | time from the anchor to the threshold | > the time the shortest legal route needs at the fastest legal speed | the track's duration (as today) |
-| `V_mid` | speed held before deceleration | ≤ the speed limit at the next fix (procedure / ICAO category); ≥ stall margin | median ground speed over 20–10 km remaining |
-| `d_decel` | remaining distance at which the speed first drops below `V_target + 10 m/s` | before the FAF if the procedure limits speed there; ≥ 0 | `experiments.straight_in_residual_readout.decel_distance_km` (moves into `outputs/plan/extractors.py`, §11) |
-| `V_final` | final approach speed | ≥ the type's published V_ref (`landing_aero`, the observed speed gate's window) | the threshold-crossing speed |
-| `h_capture` | height at which the glidepath is captured | ≥ the platform / fix altitude at that distance; ≤ the glidepath | the track's altitude when the on-final gate opens |
+| `T` | time from the anchor to the threshold | > the time the shortest legal route needs at the fastest legal speed (the beeline over the coded speed limit; no KRDU document codes one, so the floor is uncoded — `None`, never the flight's own maximum) | the track's duration (as today) |
+| `V_mid` | speed held before deceleration | ≤ the speed limit at the next fix (procedure / ICAO category); ≥ stall margin | the mean ground speed over the path flown before `d_decel` (its length over its time); a flight already decelerating at the anchor holds its anchor speed (20 % of KRDU val) |
+| `d_decel` | remaining path at which the ground speed first drops below `V_final + 10 m/s` | before the FAF if the procedure limits speed there; ≥ 0 | `experiments.straight_in_residual_readout.decel_distance_km` (moves into `outputs/plan/extractors.py`, §11) |
+| `V_final` | final approach ground speed | the observed speed gate's WINDOW about the type's published V_ref (headwind-corrected IAS, `evaluation/docs/THRESHOLD_SPEED_GATE.md`) — not a floor on ground speed: 72 % of observed values sit below V_ref (§12.1) | the ground speed at the last observed row (~380 m short of the threshold) |
+| `h_capture` | height (above the threshold aim point) at which the final is captured LATERALLY — the glidepath is captured later, from above, on most flights (§12.1) | ≥ the floor coded at the next fix ahead of the join; ≤ its ceiling where one is coded | the chart height at the row the truth gate (`truth_final_gate`) opens |
 
 Five numbers, all aircraft operating parameters. Each is predicted as a point and as a
 distribution (the B-line quantile head, which is the one head that improved arrival-time
@@ -128,7 +134,12 @@ A fixed, deterministic controller that flies a plan on the procedure's skeleton.
    to a turn point, a base leg from the allowed side, a join on a legal leg at `d_join`, then the
    final. The pre-final path length equals `L_pre`; extra time (an assigned arrival later than the
    plan's own `T`) becomes extra pre-final length, computed once at planning time against the
-   route's true length (the trombone's mechanism, with the distance L3.e got wrong).
+   route's true length (the trombone's mechanism, with the distance L3.e got wrong). As built
+   (`outputs/plan/guidance/route.py`, 2026-09-10): the join's intercept is any angle within the
+   30° alignment limit (aligned where the length affords it), every turn is sized at the speed
+   the schedule has where it is flown, a turn-straight-turn that loops is not a route (the
+   chord onto the join is), and a length no hold or dog-leg lays is reported as the route's
+   shortfall, never flown as an extra.
 3. **Lateral tracking** — the nominal-law hook (archived 2026-09-09 under
    `archive/nominal_law_hook_2026_09/`; the guidance layer takes it back as its own module, §11):
    line-of-sight to the route, bounded bank,
@@ -208,8 +219,20 @@ Gates for the first prototype, KRDU val 1404, paired, two seeds:
 | reference: corridor / glidepath / fix-limit violations on the final | 12.7 % lateral, straight-in, true time (L3.e-r +0) | 0 % by construction |
 | bank | skill 0.726 (native32) | not a target; bank RMS ≤ 0.5° on straight-in |
 
-Vetoes: the plan head's parameters worse than trivial baselines (airport medians) — the learned
-part is not learning; or the oracle ceiling (§9 step 2) worse than today's model — the
+Provenance of the "today's best" column, re-read off the artifacts on 2026-09-10: the
+straight-in chamfer "65–109 m" mixes `L1_native32` (109.0 m, the prediction result) with the
+`cta=given` oracle arm `L3_cta` (65.9 m), and the hooked arms already read 42.3 m there; the
+arrival-time MAE 10.3 / 23.9 s is `B1_quantile`'s; the "~70 % established" row is L3.e-r +60 s.
+The gates stay as written; the first row's chamfer gate is read against 109 m.
+
+The oracle ceiling (§12.2, the truth's own plans through the guidance) reads against this
+table: vectored ADE 1591 m (row 1: inside the gate), straight-in chamfer 34 m (inside),
+arrival-time MAE 4.8 s straight-in / 14.0 s pooled (inside), fully flyable 99.7 % (inside),
+established 99.7 % (4 flights of 1404 arrive after the horizon), corridor violations after the
+join 1.4 % (NOT yet 0 % — the tracker's entry, not the plan's; §12.2).
+
+Vetoes: the plan head's parameters worse than trivial baselines (the stratum medians — measured,
+§12.1's last column) — the learned part is not learning; or the oracle ceiling (§9 step 2) worse than today's model — the
 parametrisation is too coarse.
 
 ## 8. Reuse, new work, risks
@@ -237,9 +260,13 @@ parametrisation is too coarse.
 1. Procedure reader + extractors: the skeleton for every runway in the fleet; the eight plan
    parameters for every KRDU arrival; their distributions; how well airport medians predict them;
    how many observed joins fall on a published transition versus a vector (CPU, one day).
+   **DONE 2026-09-10** — `python run_ts.py plan_extractors`, artifact
+   `4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step1_extractors/`; §12.1.
 2. Oracle ceiling: fly the *true* plans through the guidance layer on the skeleton and measure
    against the observed tracks and against the procedure. If the ceiling is worse than today's
    model as a prediction, revise the parametrisation before training anything.
+   **DONE 2026-09-10** — `python run_ts.py plan_oracle`, artifact
+   `4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step2_oracle/`; §12.2.
 3. Plan head on KRDU: point and quantile heads, one seed, both evaluations.
 4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
 5. Two seeds; pooled five-airport training; KSJC replication.
@@ -368,3 +395,170 @@ and can touch a plan campaign: the "name every field against the nearest recipe"
 is deferred (it moves stored names and needs its own relabel pass like C-3's), and the pipeline
 runner's `TrainingPlan` keeps its keyword constructor — a plan cell added to `run_ts.py pipeline`
 is one more keyword there, not a new copy of the override dict.
+
+## 12. Measurements
+
+### 12.1 Step 1 — the plan parameters on KRDU val (2026-09-10)
+
+Cohort: `L1_native32`'s validation split (1404 flights: 904 straight-in, 497 vectored, 842
+established at the anchor), anchor L−1, the observed track from the anchor on.
+`python run_ts.py plan_extractors --checkpoint native32=<l1_lowdim_20260907/L1_native32>/checkpoint.pt
+--out 4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step1_extractors`. The
+skeletons are the five KRDU RNAV(GPS) documents (`R05LY`, `R05RY`, `R23LY`, `R23RY`, `R32`);
+none codes a speed limit, and `R32` codes no TCH. Code: `flight_scenarios.procedure_final.
+procedure_skeleton`, `outputs/plan/skeleton.py`, `outputs/plan/extractors.py`; reviewed
+(opus) before the numbers below — the first readout had read 831 joins that happened BEFORE
+the anchor as measured captures, and a deceleration reference that could never be undefined.
+
+**831 of the 1404 flights (59 %) are already established at L−1** — the truth gate is open at
+the anchor. Their `d_join` is the anchor's remaining path and their `h_capture`, `side` and
+`L_pre` are CENSORED (the window never saw the join), so the three route parameters are
+measured on the 573 flights whose join lies inside the window (76 straight-in, 497 vectored).
+
+| parameter | all p50 [p10, p90] | straight-in | vectored | median-baseline MAE (straight-in / vectored) |
+|---|---|---|---|---|
+| `T` (s) | 186 [146, 524] | 166 [140, 200] | 486 [390, 566] | 19.4 / 57.8 |
+| `V_mid` (m/s) | 91.2 [81.6, 116.9] | 88.2 [78.9, 93.1] | 114.0 [105.7, 123.0] | 4.4 / 6.3 |
+| `d_decel` (m) | 10020 [7323, 14099] | 10209 [7409, 13549] | 9811 [7169, 16113] | 1992 / 2677 |
+| `V_final` (m/s) | 71.4 [64.9, 78.5] | 71.1 [64.9, 78.3] | 71.9 [65.2, 78.9] | 4.2 / 4.2 |
+| `h_capture` (m, in-window joins) | 597 [485, 820] | 615 [485, 788] | 591 [486, 820] | 107 / 114 |
+| `d_join` (m) | 12627 [10670, 16253] | 12301 [10645, 14260] | 14133 [10868, 18130] | 1130 / 2346 |
+| `side` (L / 0 / R, in-window joins) | 224 / 13 / 336 | 17 / 13 / 43 | 206 / 0 / 291 | — |
+| `L_pre` (m, in-window joins) | 34858 [2770, 41105] | 1545 [420, 3609] | 35612 [27589, 41478] | 1135 / 5131 |
+
+The last column is the §7 veto's reference: predicting the stratum's own median, per
+parameter. A plan head must beat it on the parameters it claims to learn. `d_decel` is where
+the ground speed first drops below the scenario TARGET speed + 10 m/s (the residual readout's
+rule); one flight never does.
+
+What the numbers change in the design:
+
+- **Straight-in joins are published transitions; vectored joins are radar vectors.** Of the
+  joins inside the window, 87.7 % of the straight-in ones (64/73) lie inside the RNP box of a
+  coded pre-final leg over the 60 s before the join; 2.2 % of the vectored ones (11/497).
+  §8 risk 2 is measured: for 35 % of the cohort a procedure-conforming reference is not what
+  was flown, so the fan carries the prediction claim there and the point comparison is only
+  fair on the straight-in stratum.
+- **`V_final` has no floor at V_ref.** The published V_ref is an AIRSPEED window the
+  evaluation reads with the METAR headwind (`evaluation/docs/THRESHOLD_SPEED_GATE.md`); the
+  observed final ground speed carries the headwind and the last row is ~380 m short, so a
+  ground-speed floor at the type's reference speed is violated by 72 % of the fleet. The
+  plan's floor is the stall margin (14 flights under it); the gate grades the flown speed
+  as it grades every record.
+- **`h_capture` is the height at the LATERAL join, not the glidepath capture.** Against the
+  glidepath at the join most flights are still above it (they capture it later), so the
+  design's "≤ the glidepath" ceiling is dropped; the bound is the next fix's coded floor and
+  ceiling. 207/573 (36 %) of the in-window joins sit below the FAF's 2200 ft floor at the join
+  (p10 485 m above the aim point against the floor's 544 m): real traffic below the platform,
+  which the guidance must be allowed to fly — the floor is a plan clamp the record reports,
+  not a refusal.
+- **The vectored pre-final path is long and regular.** `L_pre` p50 35.6 km [27.6, 41.5]
+  against a `d_join` of 14.1 km: the route builder must lay 20–30 km of pre-final path, far
+  past what the trombone's 45° offset could stretch, and the base leg comes from either side
+  (206 left / 291 right) — the route parameters are a distribution, as §3b says.
+- **Straight-in flights that do join inside the window join short and from a side**: 73
+  flights, `L_pre` p50 1.5 km, 60 of them with a base leg wider than 500 m.
+- **`d_decel` p50 10.0 km against the 05L FAF at 10.3 km**: the median flight starts its
+  final deceleration at the FAF; "before the FAF if the procedure limits speed there"
+  never binds on KRDU (no coded limits).
+- **`V_mid` is the MEAN speed over the path held before the deceleration point** (its
+  length over its time — the number the time closure needs; a 10–20 km band median, the
+  first definition, missed the flown time by 61 s on the vectored stratum whose pre-final
+  path is flown at 114 m/s). 288 flights (20 %, nearly all straight-in) are already
+  decelerating at the anchor and hold their anchor speed (`v_mid_from_anchor`). `T`'s floor
+  (the beeline at the type's approach maximum) is under-run by 160 flights (11 %), which
+  flew faster than that maximum somewhere on the way.
+
+### 12.2 Step 2 — the oracle ceiling on KRDU val (2026-09-10, after the step-2 review)
+
+Every flight's OWN eight parameters (§12.1's extractor) laid as a route and flown by the
+guidance layer on the shared point-mass rollout, from L−1, for the plan's `T` + 10 % (a late
+arrival is measured as late); the record cut at the first threshold crossing on the final, as
+every hooked-arm readout is. Same cohort as §12.1. `python run_ts.py plan_oracle --checkpoint
+native32=… --out 4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step2_oracle`
+(the pre-review run is kept beside it as `step2_oracle.superseded-20260910T2330Z`).
+Code: `outputs/plan/guidance/{route,controller}.py`, `outputs/plan/forecast.py`,
+`experiments/plan_oracle.py`.
+
+| metric | all (1404) | straight-in (904) | vectored (497) | today's best (§7, provenance-checked) |
+|---|---|---|---|---|
+| ADE mean (m) | 713 | 204 | 1591 | 1322 pooled, 2870 vectored (`L1_native32`) |
+| ADE p50 / p95 (m) | 251 / 1939 | 158 / 481 | 1382 / 2559 | |
+| FDE p50 (m) | 19 | 19 | 20 | |
+| chamfer p50 (m) | 43 | 34 | 636 | 109 straight-in (`L1_native32`) |
+| Fréchet p50 (m) | 145 | 134 | 2166 | |
+| arrival-time MAE (s) | 14.0 | 4.8 | 27.3 | 25.9 pooled (`L1_native32`); 10.3 straight-in / 23.9 pooled (`B1_quantile`) |
+| \|Δt\| p80 (s) | 25.0 | 7.1 | 36.5 | |
+| signed Δt p10 / p50 / p90 (s) | -33.0 / -5.5 / 2.3 | -8.5 / -3.0 / 3.5 | -41.0 / -26.0 / -12.8 | |
+| fully flyable | 99.7 % | 99.6 % | 100.0 % | 46 % (the three-hook stack, true time, cut) |
+| established at the threshold | 99.7 % | 99.8 % | 99.6 % | ~70 % (L3.e-r +60 s) |
+| corridor violation after the join | 1.4 % | 0.3 % | 3.4 % | 12.7 % lateral, straight-in (L3.e-r +0) |
+| glidepath-window violation after the join | 10.0 % | 12.1 % | 6.0 % | |
+| route laid | | final only 886, direct 16, held heading 2, dog-leg 0 | held heading 360, direct 130, dog-leg 7 | |
+| route shortfall p50 (m); routed flights over 500 m | 0; 15 of 518 | 0; 3 of 18 | -2; 12 of 497 | |
+| join intercept \|p50\| / \|p90\| (°, routed) | 1.4 / 21.8 | 1.5 / 30.0 | 0.0 / 18.0 | |
+| route time − T, p50 (s) | -5.4 | -2.8 | -21.1 | |
+| bank over the 25° cap / thrust at idle (share of steps) | 2.6 % / 9.6 % | 0.5 % / 12.1 % | 6.5 % / 5.0 % | |
+| barrier gated / clamped (share of steps) | 80.7 % / 8.7 % | 99.3 % / 10.4 % | 46.8 % / 5.5 % | |
+| capture height clamped into the window | 26.9 % | 3.3 % | 69.2 % | |
+
+The pre-review run (the same cohort, kept as evidence) read ADE 1113 / 210 / 2710 m, ADE p95
+3746 / 489 / 9543 m, chamfer 43 / 34 / 833 m, established 96.2 / 99.7 / 89.9 %, corridor left
+after the join 14.2 / 0.9 / 38.6 %, glidepath 11.1 / 11.3 / 10.7 %. What moved it: the route
+builder's join heading was bent twice (a previous choice's intercept re-added to the course),
+its dog-leg bisection landed on the wrong branch of a non-monotone length (10–23 km MORE
+path than the plan on 3 of 48 smoke flights, arriving 55–200 s late), five discrete
+intercepts could not lay a downwind flight's length (2–6 km short), the base turn at the
+anchor's speed jumped by a circumference where the real path lies, and a plan whose join
+lay a few hundred metres ahead of a pose beside the centreline was routed through a
+12–24 km teardrop the tracker then cut through (29 of 73 routed straight-in flights). All
+six are the route's, not the controller's, and each is a rule in
+`outputs/plan/guidance/route.py` now (`CLAUDE.md` names them).
+
+What it says:
+
+- **The veto does not fire, on both strata.** On the straight-in stratum the parametrisation
+  reproduces the observed track far inside today's model (ADE 204 m, chamfer 34 m,
+  arrival time 4.8 s MAE); on the vectored stratum the truth's own three route
+  parameters now lay a path that beats today's model as a prediction (ADE 1591 against
+  2870 m, Fréchet 2166 m) — but its chamfer (636 m) says the same thing the
+  pre-review run said: with the plan handed the truth, `d_join`, `side` and `L_pre` do not say
+  WHERE the 35 km of pre-final path go, only how long they are. §8 risk 1 stands measured:
+  the vectored point claim needs the extra waypoints or stays with the fan, and step 3
+  should be read on the straight-in stratum as the point claim and on the vectored one
+  through the distribution.
+- **The reference reads as designed on flyability and arrival**: 99.7 % fully flyable
+  (4 straight-in and 0 vectored flights with 11 stall rows between them), 99.7 % established
+  at the threshold (4 flights arrive after the horizon), against 46 % and ~70 % for
+  the hook stack.
+- **The corridor is nearly by construction; the glidepath is not yet.** After the join
+  1.4 % of flights leave the design corridor (20 flights, excess p50 59 m against a
+  half-width of ~260 m at 12 km — the barrier composed on the final clamps 8.7 % of steps) and
+  10.0 % the glidepath window (140 flights; excess p50 68 m straight-in, 5 m
+  vectored — the height law's gain on the from-above capture). The glidepath entry is
+  controller tuning (the capture-descent angle, the height gain), not parametrisation — a
+  step-3 sub-task before the reference claim is quoted; §7's "0 % by construction" is read
+  against it.
+- **Timing**: the speed schedule (`V_mid` held, a 0.5 m/s² deceleration to `V_final`)
+  reproduces straight-in arrival times (median -3.0 s, p10/p90 -8 / 4 s); vectored
+  flights arrive -26 s early at the median with the route laid to the plan's length
+  (shortfall p50 -2 m; 12 of 497 routed vectored flights more than 500 m off,
+  where no hold or dog-leg reaches the length and the gap is reported), so the schedule's
+  speed over the vectors is higher than the truth's — the time closure's own reading
+  (`route time − T`, -21 s) says the same, and the assigned-time stretch of step 4
+  absorbs exactly this residual by construction.
+- **The route's own diagnostics to watch in step 3**: the join intercept (0° p50 on the
+  vectored stratum, 18° p90 — the aligned join where the length affords it), the
+  15 routed flights of 518 whose length no route lays (3 straight-in,
+  12 vectored — the gap reported, never flown as an extra), and the thrust at idle on 9.6 % of steps (a
+  deceleration the airframe's drag cannot fly at the schedule's rate).
+- **Two step-1 definitions were settled by the first run**: `V_mid` as the mean speed over
+  the held path (a band median missed the vectored time by 61 s), and the deceleration as a
+  0.5 m/s² law rather than a linear ramp (the ramp arrived 13 s early on straight-in).
+
+Decision for step 3 (the user's): train the plan head as designed (five operating
+parameters as point + quantile, the route as a distribution), reading the point claim on
+the straight-in stratum and the vectored stratum through the fan — or first add the
+optional extra waypoints of §8 risk 1 so the vectored point claim has something to learn.
+Either way the guidance's glidepath entry above is on the critical path for the reference
+claim, and costs no training.

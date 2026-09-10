@@ -172,7 +172,7 @@ def test_reconstruction_is_a_valid_trajectory_that_ends_at_the_threshold(tmp_pat
     # label puts it AT the anchor, and a predicted via 60 m off with 2° of heading error
     # would otherwise be a full circle. The decoder draws the plain CSC instead.
     near = vector.copy()
-    off = 60.0 * cg._unit(a.heading + math.pi / 2)
+    off = 60.0 * cg.unit_vector(a.heading + math.pi / 2)
     near[1], near[2] = cg.runway_axes_np(a.position[0] + off[0], a.position[1] + off[1], psi)
     rel = cg.wrap_angle(a.heading - psi) + math.radians(2.0)
     near[3], near[4] = math.cos(rel), math.sin(rel)

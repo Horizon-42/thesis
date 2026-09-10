@@ -45,7 +45,7 @@ from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateVi
 from ts_transformer.outputs.envelope import MAX_BANK_RAD  # noqa: E402
 from ts_transformer.data.coordinate_frames import ENUFrame  # noqa: E402
 from ts_transformer.data.dataset import Normalizer, build_series  # noqa: E402
-from ts_transformer.outputs.control.supervision import dynamics_arrays  # noqa: E402
+from ts_transformer.outputs.dynamics.context import dynamics_arrays  # noqa: E402
 from evaluation.records import record_from_dict  # noqa: E402
 from ts_transformer.inference.export import build_prediction_record  # noqa: E402
 from flight_scenarios.runway_target import find_threshold  # noqa: E402

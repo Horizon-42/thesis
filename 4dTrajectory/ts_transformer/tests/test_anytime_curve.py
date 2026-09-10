@@ -54,6 +54,7 @@ from ts_transformer.inference.export import observed_series_metrics
 from ts_transformer.inference.forecast import Forecast, history_at_anchor, forecast_approaches
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.training.train import load_checkpoint, train
+from ts_transformer.experiments.support import forecast_geometry
 from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -654,7 +655,7 @@ def test_the_geometry_is_reported_beside_the_time_aligned_error(built_series) ->
         anchor = runner.bin_anchor(
             series, profile, 8_000.0, seq_len=config.seq_len, min_future_s=10.0
         )
-        geometry = runner._geometry(series, _truth_forecast(series, anchor, config))
+        geometry = forecast_geometry(series, _truth_forecast(series, anchor, config))
         assert geometry["chamfer_m"] == pytest.approx(0.0, abs=1e-6)
         assert geometry["frechet_m"] == pytest.approx(0.0, abs=1e-6)
 

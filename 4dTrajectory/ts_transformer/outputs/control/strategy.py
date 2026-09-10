@@ -67,8 +67,8 @@ from ts_transformer.outputs.control.loss.objective import (
     align_control_targets_to_query_clock,
     control_prediction_loss_components,
 )
+from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.outputs.control.supervision import (
-    dynamics_arrays,
     probe_dynamics,
     reference_control_supervision,
     reference_heading_rate_supervision,

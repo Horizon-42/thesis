@@ -27,12 +27,11 @@ from ts_transformer.data.dataset import (
 from ts_transformer.inference.forecast import Forecast, history_batch
 from ts_transformer.outputs.constraints import build_command_hook
 from ts_transformer.outputs.dynamics import rollout as control_rollout
-from ts_transformer.outputs.dynamics.hooks import (
-    HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY, CommandHook,
-)
+from ts_transformer.outputs.dynamics.rollout import padded_dense_queries
+from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
 from ts_transformer.outputs.envelope import physical_controls
 from ts_transformer.outputs.control.heads import ControlPrediction
-from ts_transformer.outputs.control.supervision import dynamics_arrays
+from ts_transformer.outputs.dynamics.context import dynamics_arrays
 
 
 def _dynamics_batch(
@@ -61,23 +60,6 @@ def _dynamics_batch(
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
     }
-
-
-def _padded_dense_queries(
-    segment_durations_s: np.ndarray,
-    output_dt_s: float,
-) -> tuple[list[np.ndarray], np.ndarray, np.ndarray]:
-    offsets = [
-        _dense_control_query_offsets(row, output_dt_s)
-        for row in segment_durations_s
-    ]
-    width = max(len(row) for row in offsets)
-    padded = np.zeros((len(offsets), width), dtype=np.float64)
-    valid = np.zeros((len(offsets), width), dtype=bool)
-    for row, values in enumerate(offsets):
-        padded[row, : len(values)] = values
-        valid[row, : len(values)] = True
-    return offsets, padded, valid
 
 
 def _control_prediction_batch(
@@ -155,7 +137,7 @@ def forecast_control_batch(
         if config.cta_conditioning != CTA_CONDITIONING_OFF else None
     )
     durations = prediction.segment_durations.detach().cpu().numpy().astype(np.float64)
-    offsets, padded_offsets, query_valid = _padded_dense_queries(
+    offsets, padded_offsets, query_valid = padded_dense_queries(
         durations, config.control_rollout_integrator_dt_s
     )
     command_hook = build_command_hook(config, dynamics)
@@ -193,7 +175,7 @@ def forecast_control_batch(
         if prediction.duration_quantiles_s is not None else None
     )
     hook_diagnostics = (
-        None if command_hook is None else _per_flight_hook_diagnostics(command_hook)
+        None if command_hook is None else per_flight_hook_diagnostics(command_hook)
     )
     forecasts: list[Forecast] = []
     for row, (item, row_offsets) in enumerate(zip(series, offsets, strict=True)):
@@ -242,43 +224,6 @@ def forecast_control_batch(
             ),
         ))
     return forecasts
-
-
-def _per_flight_hook_diagnostics(command_hook: CommandHook) -> list[dict[str, float | str]]:
-    """Each flight's own hook counts: ``steps``, then every other count as a share of it.
-
-    The same normalisation ``train.fit_model`` writes into an epoch record
-    (``value / hook_steps``), one level down — an epoch reports the batch, a prediction
-    record reports the flight. Keys drop the ``hook_`` prefix and arrive camelCased like
-    every other ``source`` field. A module's LABELS (which named variant of itself it ran)
-    join the same bag under the same naming, undivided: they are strings, and a share of a
-    name means nothing.
-    """
-    counts = {
-        name: value.tolist()
-        for name, value in command_hook.per_flight_diagnostics().items()
-    }
-    labels = {
-        _camel_case(name.removeprefix(HOOK_DIAGNOSTIC_PREFIX)): value
-        for name, value in command_hook.diagnostic_labels().items()
-    }
-    steps = counts.pop(HOOK_STEPS_KEY)
-    return [
-        {
-            "steps": row_steps,
-            **{
-                _camel_case(name.removeprefix(HOOK_DIAGNOSTIC_PREFIX)): value[row] / row_steps
-                for name, value in counts.items()
-            },
-            **labels,
-        }
-        for row, row_steps in enumerate(steps)
-    ]
-
-
-def _camel_case(name: str) -> str:
-    head, *rest = name.split("_")
-    return head + "".join(word.title() for word in rest)
 
 
 def _calibrated_interval_fields(
@@ -590,25 +535,3 @@ def latent_derangement(count: int, seed: int) -> np.ndarray:
     source = np.empty(count, dtype=np.int64)
     source[order] = np.roll(order, -1)
     return source
-
-
-def _dense_control_query_offsets(
-    segment_durations_s: np.ndarray, output_dt_s: float
-) -> np.ndarray:
-    """Return regular output times plus every exact control-switch boundary."""
-    durations = np.asarray(segment_durations_s, dtype=np.float64)
-    if durations.ndim != 1 or not len(durations):
-        raise ValueError("control forecast needs at least one segment duration")
-    if not np.isfinite(durations).all() or np.any(durations <= 0.0):
-        raise ValueError("control segment durations must be finite and positive")
-    if not np.isfinite(output_dt_s) or output_dt_s <= 0.0:
-        raise ValueError("dense control output interval must be finite and positive")
-    boundaries = np.cumsum(durations)
-    total = float(boundaries[-1])
-    regular = np.arange(output_dt_s, total, output_dt_s, dtype=np.float64)
-    candidates = np.sort(np.concatenate((regular, boundaries)))
-    tolerance = np.finfo(np.float64).eps * max(total, 1.0) * 16.0
-    keep = np.concatenate(([True], np.diff(candidates) > tolerance))
-    offsets = candidates[keep]
-    offsets[-1] = total
-    return offsets

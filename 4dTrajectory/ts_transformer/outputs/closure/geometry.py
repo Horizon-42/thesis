@@ -62,13 +62,20 @@ import math
 import numpy as np
 from scipy.optimize import minimize
 
-from ts_transformer.geometry.flyability import G as GRAVITY_MPS2
+from ts_transformer.geometry.dubins import (
+    PATH_STEP_M,
+    Pose,
+    arc_points,
+    chart_from_axes_np,
+    dubins_csc,
+    runway_axes_np,
+    segment_points,
+    turn_radius_m,
+    unit_vector,
+)
 from ts_transformer.geometry.geometric_metrics import arc_aligned_ade_m, cumulative_arc_m
 
-BANK_RAD = math.radians(25.0)       # a standard-rate-ish approach bank; not an envelope limit
-TURN_SPEED_CAP_MPS = 100.0          # the turn radius is sized at approach speed
 THRESHOLD_SPEED_MPS = 70.0
-PATH_STEP_M = 50.0
 
 # Rule template thresholds (Phase 0 values, unchanged).
 STRAIGHT_OFFSET_RADII = 2.5
@@ -85,96 +92,6 @@ KIND_DUBINS = "dubins"
 KIND_DOWNWIND_DUBINS = "downwind-dubins"
 KIND_VIA_DUBINS = "via-dubins"
 
-Pose = tuple[float, float, float]   # (e, n, heading)
-POSE_TOLERANCE = (1e-6, 1e-6)       # metres, radians: two poses this close are one pose
-
-
-def turn_radius_m(speed_mps: float) -> float:
-    return min(float(speed_mps), TURN_SPEED_CAP_MPS) ** 2 / (GRAVITY_MPS2 * math.tan(BANK_RAD))
-
-
-# Mirrors of final_approach_geometry.runway_axes / chart_from_axes (torch) for the numpy
-# fitting loops; tests/test_closure_geometry.py pins them to the torch versions.
-def runway_axes_np(e, n, psi: float) -> tuple[np.ndarray, np.ndarray]:
-    e, n = np.asarray(e, dtype=np.float64), np.asarray(n, dtype=np.float64)
-    return -(e * math.cos(psi) + n * math.sin(psi)), e * math.sin(psi) - n * math.cos(psi)
-
-
-def chart_from_axes_np(d, xt, psi: float) -> tuple[np.ndarray, np.ndarray]:
-    d, xt = np.asarray(d, dtype=np.float64), np.asarray(xt, dtype=np.float64)
-    return -d * math.cos(psi) + xt * math.sin(psi), -d * math.sin(psi) - xt * math.cos(psi)
-
-
-def _unit(heading: float) -> np.ndarray:
-    return np.array([math.cos(heading), math.sin(heading)])
-
-
-def _points_for(length: float, step: float) -> int:
-    """Points that sample ``length`` at most ``step`` apart, endpoints included."""
-    return max(2, math.ceil(length / step - 1e-9) + 1)
-
-
-def _segment(a: np.ndarray, b: np.ndarray, step: float) -> np.ndarray:
-    """``a`` to ``b`` at most ``step`` apart; a zero-length segment is its single point,
-    so the ``[1:]`` concatenations never repeat a node."""
-    length = float(np.hypot(*(b - a)))
-    if length < 1e-9:
-        return np.asarray(a, dtype=np.float64)[None, :].copy()
-    return a + np.linspace(0.0, 1.0, _points_for(length, step))[:, None] * (b - a)
-
-
-def arc_points(centre: np.ndarray, radius: float, start: float, sweep: float, step: float = PATH_STEP_M) -> np.ndarray:
-    """An arc at most ``step`` apart; a zero-sweep arc is its single point."""
-    if abs(radius * sweep) < 1e-9:
-        return (centre + radius * _unit(start))[None, :]
-    n = _points_for(abs(radius * sweep), step)
-    angles = start + np.linspace(0.0, sweep, n)
-    return centre + radius * np.stack([np.cos(angles), np.sin(angles)], 1)
-
-
-def dubins_csc(p0, h0: float, p1, h1: float, radius: float, step: float = PATH_STEP_M) -> np.ndarray | None:
-    """Shortest turn-straight-turn path between two poses (LSL / RSR / LSR / RSL).
-    Identical poses (within ``POSE_TOLERANCE``) return the single point — LSR would
-    otherwise fly a loop. A CSC path exists for every other pair in exact arithmetic
-    (same-side circles coincide only for identical poses; a same-position pose with
-    another heading is a loop, not an absence), so ``None`` is a floating-point corner
-    between the two tolerances below; the fits treat it as an absent candidate."""
-    p0, p1 = np.asarray(p0, dtype=np.float64), np.asarray(p1, dtype=np.float64)
-    if (np.hypot(*(p1 - p0)) < POSE_TOLERANCE[0]
-            and abs((h1 - h0 + math.pi) % (2 * math.pi) - math.pi) < POSE_TOLERANCE[1]):
-        return p0[None, :].copy()
-    best = None
-    for s0, s1 in ((1, 1), (-1, -1), (1, -1), (-1, 1)):
-        c0 = p0 + radius * np.array([-s0 * math.sin(h0), s0 * math.cos(h0)])
-        c1 = p1 + radius * np.array([-s1 * math.sin(h1), s1 * math.cos(h1)])
-        dc = c1 - c0
-        distance = float(np.hypot(*dc))
-        theta = math.atan2(dc[1], dc[0])
-        if s0 == s1:
-            if distance < 1e-6:
-                continue
-            psi = theta
-        else:
-            if distance < 2 * radius:
-                continue
-            psi = theta + s0 * math.asin(2 * radius / distance)
-        a0, a1 = psi - s0 * math.pi / 2, psi - s1 * math.pi / 2
-        t0 = c0 + radius * _unit(a0)
-        t1 = c1 + radius * _unit(a1)
-        f0, f1 = h0 - s0 * math.pi / 2, h1 - s1 * math.pi / 2
-        d0 = (s0 * (a0 - f0)) % (2 * math.pi)
-        d1 = (s1 * (f1 - a1)) % (2 * math.pi)
-        length = radius * (d0 + d1) + float(np.hypot(*(t1 - t0)))
-        if best is None or length < best[0]:
-            best = (length, s0, s1, c0, c1, f0, a0, a1, d0, d1, t0, t1)
-    if best is None:
-        return None
-    _length, s0, s1, c0, c1, f0, a0, a1, d0, d1, t0, t1 = best
-    return np.concatenate([
-        arc_points(c0, radius, f0, s0 * d0, step),
-        _segment(t0, t1, step)[1:],
-        arc_points(c1, radius, a1, s1 * d1, step)[1:],
-    ])
 
 
 def trombone(p0, psi: float, d0: float, xt0: float, d_join: float, radius: float,
@@ -187,12 +104,12 @@ def trombone(p0, psi: float, d0: float, xt0: float, d_join: float, radius: float
     and joins at its own distance. Returns the path, the join used, and the pose where
     the downwind ends (the base-turn point — the path's via)."""
     p0 = np.asarray(p0, dtype=np.float64)
-    ud = -_unit(psi)                                  # upstream
+    ud = -unit_vector(psi)                                  # upstream
     ux = np.array([math.sin(psi), -math.cos(psi)])    # right of the course
     side = 1.0 if xt0 > 0 else -1.0
     points = [p0.copy()]
     if d0 < d_join:
-        points.extend(_segment(p0, p0 + (d_join - d0) * ud, step)[1:])
+        points.extend(segment_points(p0, p0 + (d_join - d0) * ud, step)[1:])
     d_turn = max(d0, d_join)
     start = points[-1]
     via = (float(start[0]), float(start[1]), math.atan2(ud[1], ud[0]))
@@ -203,7 +120,7 @@ def trombone(p0, psi: float, d0: float, xt0: float, d_join: float, radius: float
     points.extend(arc_points(centre1, radius, math.atan2(*(start - centre1)[::-1]), sweep, step)[1:])
     base_start = points[-1]
     base_end = (d_turn + radius) * ud + side * radius * ux
-    points.extend(_segment(base_start, base_end, step)[1:])
+    points.extend(segment_points(base_start, base_end, step)[1:])
     centre2 = d_turn * ud + side * radius * ux
     heading_final = -ud
     cross = heading_base[0] * heading_final[1] - heading_base[1] * heading_final[0]
@@ -294,7 +211,7 @@ def straight_path(anchor: AnchorPose) -> ClosurePath:
     """Straight to the threshold (the chart origin): the aligned, straight-in case. The
     anchor IS the join (``s_join = 0``), so the vertical profile is the glidepath from
     the first step on."""
-    horizontal = _segment(anchor.position, np.zeros(2), PATH_STEP_M)
+    horizontal = segment_points(anchor.position, np.zeros(2), PATH_STEP_M)
     return ClosurePath(horizontal, anchor.d, 0.0, KIND_STRAIGHT, {"d_join": anchor.d})
 
 
@@ -324,11 +241,11 @@ def dubins_join(anchor: AnchorPose, psi: float, d_join: float, d_downwind: float
     """F2: hold the anchor heading for ``d_downwind`` metres, then the shortest Dubins
     CSC to the join pose (``None`` when that CSC does not exist)."""
     d_downwind = max(float(d_downwind), 0.0)
-    start = anchor.position + d_downwind * _unit(anchor.heading)
+    start = anchor.position + d_downwind * unit_vector(anchor.heading)
     rest = dubins_csc(start, anchor.heading, join_pose(d_join, psi), psi, anchor.radius)
     if rest is None:
         return None
-    horizontal = np.concatenate([_segment(anchor.position, start, PATH_STEP_M)[:-1], rest]) if d_downwind > 0 else rest
+    horizontal = np.concatenate([segment_points(anchor.position, start, PATH_STEP_M)[:-1], rest]) if d_downwind > 0 else rest
     via = (float(start[0]), float(start[1]), anchor.heading)
     return _close(horizontal, d_join, psi, KIND_DOWNWIND_DUBINS, {"d_join": d_join, "d_downwind": d_downwind}, via)
 
@@ -502,7 +419,7 @@ def fit_dubins_join(anchor: AnchorPose, psi: float, truth_xy: np.ndarray, d_join
     reach = max(anchor.d, float(cumulative_arc_m(truth_xy)[-1]))
     grid = [(d, w) for d in _d_join_grid(anchor, d_join0) for w in np.linspace(0.0, reach, 8)]
     if seed is not None and seed.via is not None:
-        along = float((np.array(seed.via[:2]) - anchor.position) @ _unit(anchor.heading))
+        along = float((np.array(seed.via[:2]) - anchor.position) @ unit_vector(anchor.heading))
         grid.append((seed.d_join, max(along, 0.0)))
     costs = [_cost(build(v), truth_xy) for v in grid]
     x = _refine(lambda v: _cost(build(v), truth_xy), np.array(grid[int(np.argmin(costs))]), maxfev=200)

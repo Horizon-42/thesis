@@ -69,12 +69,11 @@ from typing import Callable
 
 import numpy as np
 
-from ts_transformer.experiments.support import REPO_ROOT
+from ts_transformer.experiments.support import REPO_ROOT, forecast_geometry
 
 import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 
-import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
 from ts_transformer.data.anchor_grid import (
     DEFAULT_ANCHOR_GRID_KM,
     DEFAULT_GRID_MIN_FUTURE_S,
@@ -85,7 +84,6 @@ from ts_transformer.data.anchor_grid import (
     strata_fixed_at_l1,
 )
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED  # noqa: E402
-from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_OFF,
@@ -340,26 +338,6 @@ def cohort_series(arm: Arm, grid: Grid) -> list:
 
 # ── one bin: forecast at each flight's own anchor, score after it ────────────
 
-def _geometry(series, forecast) -> dict[str, float]:
-    """The time-free metrics for one forecast against the truth AFTER its anchor.
-
-    Both paths are ``[N, 4]`` ``(e, n, u, t)`` in the flight's own chart, which is all
-    `geometric_metrics` needs — chamfer and Fréchet are relative, so the chart origin
-    (threshold or airport) does not enter.
-    """
-    anchor_time = float(series.times[forecast.anchor])
-    future = series.supervision_times > anchor_time
-    truth = np.column_stack([
-        np.asarray(series.supervision_values, dtype=np.float64)[future][:, list(POSITION_IDX)],
-        np.asarray(series.supervision_times, dtype=np.float64)[future] - anchor_time,
-    ])
-    predicted = np.column_stack([
-        np.asarray(forecast.values, dtype=np.float64)[:, list(POSITION_IDX)],
-        np.cumsum(forecast.sample_durations_s),
-    ])
-    return gm.path_metrics(predicted, truth)
-
-
 def measure_bin(model, series, profiles, keys, target_m, *, config, normalizer, device,
                 batch_size: int, min_future_s: float, split: str,
                 build_records: bool = False,
@@ -398,7 +376,7 @@ def measure_bin(model, series, profiles, keys, target_m, *, config, normalizer, 
                 metrics = observed_series_metrics(
                     item, forecast, points=config.validation_common_grid_points
                 )
-                geometry = _geometry(item, forecast)
+                geometry = forecast_geometry(item, forecast)
                 rows[keys[index]] = {
                     "anchor_index": anchor,
                     "remaining_path_m": float(profiles[index][anchor]),

@@ -592,7 +592,62 @@ rollout needs is not one path's** (2026-09-10, the plan-and-guidance path's firs
 `outputs/envelope` (the dimensionless command box and its newton conversion) and
 `outputs/conditioning` (the condition vector) sit beside `outputs/base` and
 `outputs/duration_heads`, imported by the control strategy and by the plan guidance alike;
-`tests/test_architecture.py` refuses a shared part that imports any path. The closure
+`tests/test_architecture.py` refuses a shared part that imports any path. **The
+plan-and-guidance path is `outputs/plan/`** (2026-09-10,
+`docs/2026-09-09_plan_and_guidance_design.md`, built in its §9 order): `skeleton` (the coded
+approach in the flight's chart — `flight_scenarios.procedure_final.procedure_skeleton` read
+through `runway_skeleton`: the fixes in runway axes about `target_chart`, the FAF, the
+transitions' legs, the floor and ceiling coded at the next fix ahead, the optimizer's 150 m
+threshold check), `extractors` (the eight plan parameters read off an observed track with
+their ranges, `PlanLabels`; the join is `truth_final_gate`'s first row, `h_capture` the height
+at that LATERAL join, `V_mid` the anchor speed for a flight anchored inside the 10–20 km
+band); `run_ts.py plan_extractors` measures them over a checkpoint's cohort with the median
+baseline the design's veto reads (the KRDU numbers are its §12.1). **The guidance layer is
+`outputs/plan/guidance/`** (step 2): `route` lays a plan's route in the chart — the held
+heading to a turn point, then the turns onto the join (`geometry/dubins`), then the final
+leg — and reads the time the speed schedule needs for it (the time closure). **Six rules
+the route obeys, each measured in (2026-09-10, the step-2 review)**: the join's intercept is
+any angle within the on-final gate's 30° — the ALIGNED join where the plan's length affords
+it, else the smallest intercept whose path fits (a downwind flight's turns onto the final
+lay ~130 m per degree; five discrete steps left 5 of 48 flights 2–6 km short); every turn
+is sized at the speed the schedule has WHERE it is flown (`build_route(speed_at=…)`: the
+anchor's for the first, the schedule's at the turn point, the via and the join — at the
+anchor's radius the base turn's lengths jump by a circumference exactly where the real
+path lies); a turn-straight-turn whose two arcs sweep over 300° together is a LOOP or a
+teardrop, not a route (`LOOP_SWEEP_RAD`; a pose beside the centreline heading in takes
+the straight chord onto the join instead); inside the RNP box a plan whose join lies
+closer ahead than the converging leg the tracker needs is flown as the converge-then-final
+route a flight established at the anchor gets (29 of 73 routed straight-in flights were
+routed through 12–24 km of teardrop for 200–1600 m of plan — the tracker cut through
+them, so the flown path was right and the route's length and time were not); the hold and the
+dog-leg offset are searched coarse-then-fine (`_closest_length`: the laid length is
+piecewise smooth in either, a bisection lands on the wrong branch — measured 10–23 km MORE
+than the plan on 3 of 48); and a hold or dog-leg is taken only when it lays the plan's
+length CLOSER than the shortest path and never longer than it by over `HOLD_TOLERANCE_M`
+— a shortfall is reported (`Route.shortfall_m`), an extra is never flown.
+`controller.PlanGuidance` is the one `CommandHook` that flies it on the lagged rollout: an
+L1 look-ahead tracker with the route's curvature fed forward (bank), the height profile to
+the capture height and the glidepath (load factor), the corridor barrier composed on the
+final BEFORE the thrust is priced (the floor and the drag read the load factor actually
+flown), then the speed schedule — `V_mid` held, a 0.5 m/s² deceleration to `V_final`, a
+ground-speed law converted to the airspeed the dynamics carry — through the speed floor's
+own thrust inversion, every command inside `flyability`'s envelope; the thrust clamped at
+idle is counted beside the thrust over the maximum (`hook_plan_thrust_idle_steps`: a
+deceleration the airframe's drag cannot fly). `outputs/plan/forecast.py`'s `fly_plans` is
+the batch entry point (the shape `forecast_control_batch` has; a plan's capture height is
+clamped into the glidepath window at the join and the clamp counted). **The hold is at
+most ~3 s** (`n_segments_for`, one segment count per batch, so a shorter flight's hold is
+shorter — `planHoldS` on the record says which): at 7 s the tracker oscillated ±300 m on
+the final. `run_ts.py plan_oracle` flies every flight's OWN plan (the design's step 2
+ceiling; §12.2) and grades it twice, as a prediction and as a reference. What the guidance
+needs and the control path also needs moved up with it: `outputs/dynamics/context.py`
+(`dynamics_arrays`, `anchor_controls`), the dense query grid in `outputs/dynamics/rollout.py`,
+the per-flight hook counts' record surface `per_flight_hook_diagnostics` in
+`outputs/dynamics/hooks.py` (beside the protocol it reads), the Dubins primitives in
+`geometry/dubins.py` (`dubins_csc` takes an `end_radius` and a `max_sweep_rad`), and the
+time-free reading of one forecast against its truth, `experiments/support.forecast_geometry`
+(the anytime curve's and the oracle's, once). The
+strategy, the `PlanOutput` view and `PREDICTION_PLAN` come with the plan head (step 3). The closure
 path is `outputs/closure/{strategy,model,geometry,profile,forecast}`; the state path is
 `outputs/state/{strategy,model,loss,forecast}` (the fixed-time postprocessors and the
 corridor projection live in its `forecast`).

@@ -4,6 +4,64 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: plan-and-guidance steps 1–2 — the procedure skeleton, the plan extractors, the guidance layer, the oracle ceiling on KRDU val (reviewed)
+
+`dev-plan-guidance`, the design's §9 steps 1 and 2 (`4dTrajectory/ts_transformer/docs/2026-09-09_plan_and_guidance_design.md`;
+the numbers in its §12). Reviewed (opus) after step 1 (nine findings) and after step 2 (eight
+confirmed findings, all applied and re-measured — the six route rules below came out of them).
+
+- **Step 1.** `flight_scenarios.procedure_final.procedure_skeleton` reads the whole coded
+  RNAV(GPS) approach (the final to the MAPt with floors and ceilings, GPA, TCH, every
+  transition to its merge fix; all 25 runways on this machine read; a transition off its
+  merge fix is refused). `outputs/plan/skeleton.py` puts it in a flight's chart (runway axes
+  about `target_chart`, the optimizer's 150 m threshold check — both mirrors pinned by
+  `tests/test_plan_skeleton_mirrors.py` — the RNP-box distance to the published legs).
+  `outputs/plan/extractors.py` reads the eight plan parameters off an observed track with
+  their ranges (`PlanLabels`): a join BEFORE the anchor censors the capture height, the side
+  and the pre-final path (59 % of KRDU val at L−1); `d_decel` is where the ground speed
+  first drops under the target speed + 10 m/s; `V_mid` the mean speed over the path held
+  before it. `run_ts.py plan_extractors` measures them per stratum with the median baseline
+  the veto reads. KRDU val (1404): straight-in joins inside the window are published
+  transitions (87.7 %), vectored joins radar vectors (2.2 %); vectored `L_pre` p50 35.6 km.
+- **Step 2.** `outputs/plan/guidance/`: `route` lays a plan's route (the held heading to a
+  turn point, the turns onto the join, the final leg) and reads the time the speed schedule
+  needs for it; **six rules, each measured in**: the join's intercept is any angle within
+  the 30° alignment limit, aligned where the length affords it (five discrete steps left 5
+  of 48 flights 2–6 km short); every turn is sized at the speed the schedule has where it is
+  flown (at the anchor's radius a downwind flight's base-turn lengths jump by a
+  circumference exactly where the real path lies); two arcs over 300° together are a loop
+  or a teardrop, not a route (a pose beside the centreline heading in takes the chord);
+  inside the RNP box a join closer ahead than the converging leg is flown as the
+  converge-then-final route (29 of 73 routed straight-in flights were routed through
+  12–24 km of teardrop for 200–1600 m of plan; the tracker cut through them, the route's
+  length and time were wrong); the hold and the dog-leg offset are searched coarse-then-fine (the length is
+  piecewise smooth; the bisection landed 10–23 km OVER the plan on 3 of 48, +55…+200 s); a
+  hold or dog-leg is taken only when it lays the length closer than the shortest path and
+  never over it by more than 500 m — the gap is `Route.shortfall_m`, an extra is never
+  flown. `controller.PlanGuidance` is the one command hook: an L1 tracker with the route's
+  curvature fed forward (bank), the height profile to the capture height and the glidepath
+  (load factor), the corridor barrier composed on the final BEFORE the thrust is priced
+  (the floor and the drag read the load actually flown), the speed schedule — a
+  ground-speed law converted to the dynamics' airspeed — through the speed floor's thrust
+  inversion; thrust at idle counted beside thrust over the maximum; ~3 s holds, the hold
+  flown on the record (`planHoldS`). `outputs/plan/forecast.py`'s `fly_plans` is the batch
+  entry point (the strategy seam). `run_ts.py plan_oracle` flies every flight's own plan and
+  grades it as a prediction and as a reference. Moved up as shared: `outputs/dynamics/context.py`,
+  the dense query grid in `outputs/dynamics/rollout.py`, `per_flight_hook_diagnostics` into
+  `outputs/dynamics/hooks.py`, the Dubins primitives in `geometry/dubins.py` (`dubins_csc`
+  gains `end_radius`, `max_sweep_rad`), `forecast_geometry` into `experiments/support.py`.
+  KRDU val (1404), the truth's own plan: straight-in ADE 204 m / chamfer 34 m /
+  arrival-time MAE 4.8 s (native32: 109 m, 25.9 s pooled), vectored ADE 1591 m (2870),
+  99.7 % fully flyable, 99.7 % established at the threshold, the corridor left after the
+  join by 1.4 %, the glidepath window by 10.0 % (the height law's from-above capture —
+  not yet by construction). The §7 veto does not fire on either stratum; the pre-review run
+  (ADE 1113 / 210 / 2710 m, established 96 %, corridor 14 %) is kept as
+  `step2_oracle.superseded-20260910T2330Z`. The step-3 decision is in the design's §12.2.
+- Tests: `tests/test_plan_extractors.py`, `tests/test_plan_guidance.py` (the envelope, the
+  route's alignment sweep, the dog-leg gate, the two-radius primitive, the chord, the bank
+  sign), `tests/test_plan_skeleton_mirrors.py`, the seam's `test_procedure_final.py`.
+  Acceptance: the full ts suite 1010 passed (7 m 03 s); stored-run census 219 configs / 112 load, byte-identical.
+
 ### 2026-09-10 — ts_transformer: what the rollout needs moves out of `outputs/control/` (plan-and-guidance, step 0)
 
 The first commit of the plan-and-guidance path (`4dTrajectory/ts_transformer/docs/2026-09-09_plan_and_guidance_design.md`

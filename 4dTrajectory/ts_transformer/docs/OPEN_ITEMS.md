@@ -69,6 +69,41 @@ were NOT made without the owner:
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 
+## Plan-and-guidance (2026-09-10) — steps 0–2 built, reviewed and measured; step 3 waits for a decision
+
+`docs/2026-09-09_plan_and_guidance_design.md` (v4; §12 carries the numbers), branch
+`dev-plan-guidance`. Built: the shared rollout parts moved out of `outputs/control/`
+(step 0); the procedure skeleton reader (`flight_scenarios.procedure_final.procedure_skeleton`,
+`outputs/plan/skeleton.py`), the eight plan extractors (`outputs/plan/extractors.py`) and
+`run_ts.py plan_extractors` (step 1); the guidance layer (`outputs/plan/guidance/{route,
+controller}.py`, `outputs/plan/forecast.py`) and `run_ts.py plan_oracle` (step 2; reviewed,
+the review's route and controller findings applied and re-measured). Artifacts:
+`4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/{step1_extractors,step2_oracle}/`
+(the pre-review oracle kept as `step2_oracle.superseded-20260910T2330Z`).
+
+- **The oracle ceiling passes the §7 veto on both strata** (KRDU val 1404, the truth's own plan
+  flown): straight-in ADE 204 m / chamfer 34 m / arrival-time MAE 4.8 s against
+  native32's 109 m and 25.9 s pooled; vectored ADE 1591 m against 2870 m; 99.7 % fully
+  flyable, 99.7 % established at the threshold (the hook stack: 46 %, ~70 %).
+- **Nearly by construction laterally, not yet vertically**: after the join 1.4 % of flights
+  leave the design corridor (excess p50 59 m) and 10.0 % the glidepath window (excess
+  p50 68 m straight-in) — the height law's from-above capture, controller tuning before
+  the reference claim is quoted. Vectored flights arrive -26 s early at the median with the
+  route laid to the plan's length (the schedule over the vectors; step 4's assigned-time
+  stretch absorbs it by construction).
+- **The vectored point claim is a timing claim with the truth's own three route
+  parameters** (chamfer 636 m): `d_join`, `side`, `L_pre` say how long the 35 km of radar
+  vectors are, not where they go. §8 risk 1 measured.
+- **Decision (the user's) before step 3**: train the plan head as designed (point claim on
+  the straight-in stratum, the vectored stratum through the fan), or add §8's optional extra
+  waypoints first so the vectored point claim has something to learn. Either way the
+  guidance's glidepath entry is a step-3 sub-task and costs no training.
+- Step-1 findings that changed the design (§12.1): 59 % of KRDU val joins before the L−1
+  window (three route parameters censored there); straight-in joins are published
+  transitions (88 %), vectored joins radar vectors (2 %); `V_final` has no floor at V_ref
+  (the gate's window is an airspeed with the headwind); `h_capture` is the LATERAL join's
+  height; `V_mid` is the held path's mean speed; the deceleration is a 0.5 m/s² law.
+
 ## Current state (2026-09-07) — the latent-intent design supersedes everything below it
 
 The control path was redesigned on 2026-09-07 (`docs/2026-09-07_latent_intent_design.zh.md`,
