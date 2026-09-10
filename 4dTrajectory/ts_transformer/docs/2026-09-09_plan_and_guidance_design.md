@@ -1,4 +1,4 @@
-# Plan-and-guidance: the next model (design v3, 2026-09-09)
+# Plan-and-guidance: the next model (design v4, 2026-09-10)
 
 Status: design only; nothing built. v1 (same day) split the plan into operating and route parameters
 (decision (A)). v2 made the published approach procedure the backbone of the whole design: the
@@ -10,7 +10,12 @@ downwind; their directories are deleted) and adds §11, which places this design
 review's target architecture (`2026-09-09_package_review_bugs_and_architecture.md`) so it lands as
 one output strategy rather than ten touch points. Source of the programme's numbers:
 `docs/reports/2026-09-08_programme_results_and_plan.md`; the corrected hook numbers:
-`2026-09-07_latent_intent_design.zh.md` §六, L3.e-r / L3.f-r.
+`2026-09-07_latent_intent_design.zh.md` §六, L3.e-r / L3.f-r. v4 (2026-09-10) rewrites §11
+against the package as it now IS: every step of the review — the package (§4.1), the §5 freeze,
+the config views (§4.3), the output strategies (§4.2), the loop/predict extraction (§4.4), the
+runners (§4.5), the tests (§4.6) and the grouping by plane — landed on `dev-leg-ctrl` (`dfce744`),
+so the plan strategy is described in the strategy interface's real member names and the grouped
+paths, and this design's step 3 is unblocked.
 
 ## 1. Why change the architecture
 
@@ -86,7 +91,7 @@ is recorded in the record — the model is never allowed to plan an infeasible f
 |---|---|---|---|
 | `T` | time from the anchor to the threshold | > the time the shortest legal route needs at the fastest legal speed | the track's duration (as today) |
 | `V_mid` | speed held before deceleration | ≤ the speed limit at the next fix (procedure / ICAO category); ≥ stall margin | median ground speed over 20–10 km remaining |
-| `d_decel` | remaining distance at which the speed first drops below `V_target + 10 m/s` | before the FAF if the procedure limits speed there; ≥ 0 | `run_ts_straight_in_residual_readout.decel_distance_km` |
+| `d_decel` | remaining distance at which the speed first drops below `V_target + 10 m/s` | before the FAF if the procedure limits speed there; ≥ 0 | `experiments.straight_in_residual_readout.decel_distance_km` (moves into `outputs/plan/extractors.py`, §11) |
 | `V_final` | final approach speed | ≥ the type's published V_ref (`landing_aero`, the observed speed gate's window) | the threshold-crossing speed |
 | `h_capture` | height at which the glidepath is captured | ≥ the platform / fix altitude at that distance; ≤ the glidepath | the track's altitude when the on-final gate opens |
 
@@ -98,7 +103,7 @@ accuracy; or the L2.g latent fan). `T` keeps its calibrated interval (B2).
 
 | parameter | meaning | range (procedure) | extractor (for the distribution head and the oracle test) |
 |---|---|---|---|
-| `d_join` | remaining path at which the flight becomes established on the final | on a published leg or transition of the assigned runway's approach (snapped to the nearest legal join; the raw value is kept as a diagnostic) | `final_approach_geometry.truth_final_gate` |
+| `d_join` | remaining path at which the flight becomes established on the final | on a published leg or transition of the assigned runway's approach (snapped to the nearest legal join; the raw value is kept as a diagnostic) | `geometry.final_approach_geometry.truth_final_gate` |
 | `side` | which side the base leg comes from | {left, right}, restricted to the sides the procedure's transitions allow | sign of the cross-track offset at the gate opening |
 | `L_pre` | path length flown before the join | ≥ the shortest legal route to `d_join`; extra length only as a lengthening of the pre-final legs | arc length of the track up to `d_join` |
 
@@ -124,7 +129,9 @@ A fixed, deterministic controller that flies a plan on the procedure's skeleton.
    final. The pre-final path length equals `L_pre`; extra time (an assigned arrival later than the
    plan's own `T`) becomes extra pre-final length, computed once at planning time against the
    route's true length (the trombone's mechanism, with the distance L3.e got wrong).
-3. **Lateral tracking** — the nominal-law hook: line-of-sight to the route, bounded bank,
+3. **Lateral tracking** — the nominal-law hook (archived 2026-09-09 under
+   `archive/nominal_law_hook_2026_09/`; the guidance layer takes it back as its own module, §11):
+   line-of-sight to the route, bounded bank,
    coordinated load factor, actuator-lag compensation; inside the final the barrier keeps the
    aircraft inside the LPV corridor by construction.
 4. **Vertical** — the nominal hook's glidepath law: level or descending to `h_capture` subject to
@@ -207,13 +214,14 @@ parametrisation is too coarse.
 
 ## 8. Reuse, new work, risks
 
-- **Reused**: the point-mass rollout and actuator model; the nominal-law, barrier, speed-floor and
-  trombone hooks as guidance parts; the corridor geometry and on-final gate; the CIFP procedure
+- **Reused**: the point-mass rollout and actuator model; the nominal-law (from the archive, §11),
+  barrier, speed-floor and trombone hooks as guidance parts; the corridor geometry and on-final gate; the CIFP procedure
   parsing from the optimizer; the CTA conditioning; the quantile head and split-conformal
   calibration; the random-anchor sampler and anytime replay; all readouts and the publisher; the
   `evaluation` package's procedure gates.
-- **New**: the plan-parameter extractors as a dataset layer; the procedure reader as model
-  conditioning and guidance skeleton; the plan head; the route builder with the time-closure step;
+- **New**: the plan-parameter extractors (`outputs/plan/extractors.py`, bound to a window set
+  through the strategy's `bind_windows`, never a line in `data/dataset.py`); the procedure
+  reader as model conditioning and guidance skeleton; the plan head; the route builder with the time-closure step;
   the assembly of the hooks into one controller; the pooled-airport run.
 - **Risks and their tests**: (1) the parametrisation may be too coarse for vectored flights with
   more than one turn — allow one or two optional extra waypoints, gated by a readout of how many
@@ -246,57 +254,115 @@ reference-rollout surplus estimate is the better one — 7–10 points more flig
 every gate, and the median flight gets no stretch). One pre-registered check remains on that line:
 one L3.f-r arm re-flown under the A-4 fix (§11). Nothing else from the current line is queued.
 
-## 11. Where this lands in the package (the 2026-09-09 review)
+## 11. Where this lands in the package (updated 2026-09-10 — the review is built)
 
-The package review of the same day measured why the package is heavy: every new prediction path has
-cost edits in ten places (`TSConfig` + validators, the CLI, the run grammar, the dataset, the
-objective, the forecast, the export, the training loop, a runner, a test file). Its target is one
-`OutputStrategy` per prediction path with its own sub-config and test file — three touch points — and
-this design is exactly the fourth path. So the two documents fit together as follows.
+The package review of 2026-09-09 measured why the package was heavy: every new prediction path
+had cost edits in ten places (`TSConfig` + validators, the CLI, the run grammar, the dataset, the
+objective, the forecast, the export, the training loop, a runner, a test file). Its target — one
+`OutputStrategy` per path, one typed config view per output, one test file — is the package as it
+stands on `dev-leg-ctrl` since 2026-09-10 (`dfce744`): the §2 fixes, the package (§4.1), the §5
+freeze, the config views (§4.3), the strategies (§4.2), the loop/predict extraction (§4.4), the
+runners (§4.5), the tests (§4.6) and the grouping by plane (`data/ geometry/ backbone/ outputs/
+training/ inference/ cli/ experiments/`), each landed with the full suite and the stored-run
+census as acceptance (992 tests; 219 stored configs, 112 load, 0 names moved). This design is the
+fourth path, and what it adds is three things: one package under `outputs/`, one view in
+`config.py`, one test file per topic.
 
-**Plan-and-guidance is `outputs/plan/`** in the review's §4.2 layout, and its sub-config is a
-fourth `OutputSpec` variant (`PlanOutput`) in the review's §4.3 split. The eight methods of the
-protocol map onto the sections above one to one:
+**Plan-and-guidance is `outputs/plan/`.** `config.PREDICTION_OUTPUTS` gains `PREDICTION_PLAN =
+"plan"` (and `PREDICTION_OUTPUTS_AVAILABLE`, since a new run may select it), and the lazy registry
+`outputs._STRATEGY_MODULES` gains `"ts_transformer.outputs.plan.strategy"` — the registry refuses
+to import if the two sets differ, and `tests/test_architecture.py` asserts every output has a
+strategy. **Its config is a fourth VIEW, not a sum type**: the review's §4.3 was built as typed
+views over the flat `TSConfig` (every stored checkpoint, `run_naming` and the CLI read the flat
+dict), so `PlanOutput(OutputSpec)` declares the fields it OWNS, `_OUTPUT_VIEWS["plan"]` names it,
+each field lives on `TSConfig` with its default, `_validate_ownership` refuses a plan field off
+its default under another output (and a control field under `plan`), `from_dict` normalises them
+on load, and `_check_view_partition` fails the import if a field is on no view. Every CLI flag is
+named after its field (`cli.common.CLI_CONFIG_FIELDS`), and every field is in a `run_naming` list
+or excused by name — the plan path names its runs through the shared grammar's `output` token
+plus its own spelled fields (`plan · backbone · dynamics · loss · meta`); there is no
+per-strategy grammar.
 
-| `OutputStrategy` method | what it holds here | section |
+The strategy's members (`outputs/base.py`, the interface as built) map onto the sections above:
+
+| `OutputStrategy` member | what it holds here | section |
 |---|---|---|
-| `config_type` | `PlanOutput`: the five operating-parameter ranges, the route-parameter policy (assigned / distribution), the guidance gains, the two loss weights | §3, §4, §6 |
-| `batch_context` | the procedure skeleton for the assigned runway (fix distances, altitude and speed limits, LPV width) and the eight plan labels from the extractors | §2 (1), §3 |
-| `anchor_eligibility` | remaining-path-uniform with the scheduler fix (A0.b) | §6 |
-| `build_model` | the plan head: five point + quantile outputs, the route distribution head | §3a, §3b |
-| `loss` | direct regression in the parameters' own units; pinball for the quantiles; the route distribution's likelihood | §6 |
-| `forecast` | the guidance layer (route builder → lateral / vertical / speed → time closure) driving the point-mass rollout; the scheduler's assignments arrive as `PredictOptions` | §4, §5 |
-| `record_fields` | the plan (with every clamp), the route actually flown, the unabsorbable delay X, the fan | §5, §7 |
-| `epoch_record` | plan-parameter errors against the airport medians (the veto of §7) | §7 |
+| `name`, `view` | `"plan"`, `PlanOutput`: the five operating-parameter ranges, the route-parameter policy (assigned / distribution), the guidance gains, the two loss weights | §3, §4, §6 |
+| `anchor_policy`, `eligible_anchors(series, anchors)` | which observed states the guidance layer can start from (the control path's airborne rule is the precedent); the remaining-path-uniform SAMPLER with the scheduler fix (A0.b) is a `TSConfig` field the loop reads, not the strategy's | §6 |
+| `bind_windows(windows)` → `PlanContext(WindowContext)` | the per-flight labels from the extractors (the eight plan parameters, each with its range and its clamp) and the assigned runway's skeleton (fix distances, altitude and speed limits, LPV width); `row(i)` is the context slot `batch()` carries, `summary` the coverage line. The closure path's `ClosureContext` — labels from a file, refused at zero coverage, never a model input — is the template | §2 (1), §3 |
+| `build_model(config, normalizer)` | the plan head over `backbone.adapters`'s forecaster: five point + quantile outputs (`outputs.duration_heads`'s monotone quantile head, reused per parameter), the route distribution head | §3a, §3b |
+| `target_contract`, `loss_component_names`, `loss(...)` | direct regression in the parameters' own units; pinball for the quantiles; the route distribution's likelihood. Every term is in `loss_component_names` or the first batch raises | §6 |
+| `probe_context`, `probe_dense_supervision`, `probe_prediction` | the `--batch-size auto` probe's batch, carrying every key `PlanContext.row` carries (review B-1's rule, pinned the way `tests/test_supervision_terms.py` pins the control path's) | — |
+| `check_trainable`, `training_teacher`, `epoch_config`, `training_diagnostics`, `epoch_record`, `checkpoint_metadata` | refuse a cohort the skeleton does not cover; no teacher; no per-epoch schedule; the plan-parameter errors against the airport medians (the §7 veto) into `history.json`; the skeleton's source and cycle into `checkpoint_metadata.json` | §7 |
+| `forecast(model, series, config, normalizer, anchor, device, options)` | the guidance layer (route builder → lateral / vertical / speed → time closure) driving the point-mass rollout. The scheduler's assignments arrive in `ForecastOptions` — new fields beside `cta_offset_s` / `cta_s` (the assigned time, `d_join`, `side`, the delay to absorb), filled from `PredictOptions` by `cli.predict.parse_predict_options`; a strategy refuses the options that do not apply to its path | §4, §5 |
+| `replay(...)` → `Replay` | the validation replay on the plan's own clock (the control path's rollout-clock replay is the precedent) | §7 |
+| `record_fields(forecast)` | the plan (with every clamp), the route actually flown, the unabsorbable delay X, the fan — the record's `source` block | §5, §7 |
 
-What the design reuses from `control/` (rollout, actuator model, dynamics backends, the barrier /
-speed-floor / trombone modules, the corridor geometry, CTA conditioning, the quantile head and
-calibration) is exactly what the review keeps under `outputs/control/` and `outputs/base`; the
-guidance layer imports those modules as parts of one controller instead of composing them as
-post-hoc hooks. Nothing in this design touches `dataset`, `objective`, `forecast`, `export`,
-`train` or `validation` once the review's §4.2 has landed — and would touch all six before it.
+**What it reuses, and the one move that reuse forces.** The point-mass rollout and actuator
+model (`outputs/control/dynamics/{backends,rollout}`), the barrier / speed-floor / trombone
+modules with their gates and saturation (`outputs/control/constraints/`), CTA conditioning
+(`outputs/control/conditioning`), the quantile head (`outputs/duration_heads`), split-conformal
+calibration (`inference/calibration`), the corridor geometry, on-final gate and crossing rule
+(`geometry/final_approach_geometry`), the anytime grid and replay (`data/anchor_grid`,
+`experiments/anytime_curve`), the CIFP reader (`flight_scenarios.fas_geometry`,
+`approach_constraints`). The membership rule (`CLAUDE.md`: a module belongs under
+`outputs/control/` only if EVERY consumer is control-specific) means the plan path's first commit
+moves what it consumes up one level — `outputs/control/dynamics/` → `outputs/dynamics/`,
+`outputs/control/constraints/` → `outputs/constraints/`, `outputs/control/conditioning.py` →
+`outputs/conditioning.py` — a pure move like the one that put `duration_heads.py` there; the
+control strategy imports them from the new place. The guidance layer imports those modules as
+parts of ONE controller (`outputs/plan/guidance/`), never as post-hoc hooks. The nominal-law hook
+(`guidance_laws.py`, `nominal_residual.py`) is ARCHIVED under `archive/nominal_law_hook_2026_09/`
+and the archive is off the import path (`tests/test_architecture.py` refuses an import of it),
+so the lateral and vertical laws come back as the guidance layer's own modules
+(`outputs/plan/guidance/lateral.py`, `vertical.py`), the archive README naming their origin.
 
-**Order, and what is already done (updated 2026-09-09 evening, `dev-pkg-review`).** The
-review's step 0 is DONE: all four A-items and all four B-items are fixed — A-3 / A-4 at `c544db0`
-(the A-4 check re-flew one L3.f-r arm: aggregates move < 1 %, `a2aa8c4`), A-1 / A-2 / B-1 / B-2
-(and B-3 / B-4 and the C holes) at `e2e1c84`; the review's §7 is the ledger. The review's step 1
-(the package) is done at `f08d196`: every module is imported as `ts_transformer.<module>`. What
-remains before step 3 of this design is the review's step 2 (the §5 freeze/delete list, a user
-decision) and steps 3–4 (the §4.3 config split with the flat-dict adapter, then the §4.2
-strategies). Of this design's own steps (§9), steps 1 and 2 (the procedure reader, the extractors,
-the oracle ceiling) are CPU-only readouts that do not touch the spine, so they can run now on the
-package as it stands; step 3 (the plan head) waits for the review's §4.2, or it will be the
-eleventh copy of the ten-touch-point pattern. Decisions this leaves with the user: the §5
-freeze/delete list, the §4.3 defaults question, and whether steps 1–2 start now.
+**Layering the plan package must keep** (`tests/test_architecture.py` enforces it): only its
+strategy seam (`strategy`, `forecast`, `labels`, `loss`) reaches the spine — `training/objective`,
+`inference/forecast`, `backbone/adapters`, `data/dataset`; its inner modules may import
+`data/dataset` values and the shared `outputs/` parts but not the spine; nothing under it imports
+`training/train`, `training/validation`, `training/batching`, `inference/export` or `cli`.
+**Nothing in this design touches `data/dataset`, `training/objective`, `inference/forecast`,
+`inference/export`, `training/train` or `training/validation`** — each calls
+`outputs.strategy(config).<method>` where it used to branch on `prediction_output` (landed
+2026-09-10, `947c907`), which is what the previous version of this section was waiting for.
+
+**Runners, readouts, tests.** A runnable experiment is `experiments/<name>.py` behind
+`python run_ts.py <name>` (a module with `main()`; `--list` finds it by its docstring's first
+line), and measurement code is CODE in the package with tests. So: the extractors are
+`outputs/plan/extractors.py` (`experiments.straight_in_residual_readout.decel_distance_km` moves
+in with them), the step-1 readout (parameter distributions, airport-median baselines, how many
+joins fall on a published transition) is `experiments/plan_extractors.py`, the step-2 oracle
+ceiling is `experiments/plan_oracle.py`, the campaign driver `experiments/plan_campaign.py`.
+Tests are one file per topic under `tests/`: `test_plan_output.py` for the strategy
+(`test_closure_output.py` is the shape), `test_plan_guidance.py` for the controller's
+by-construction properties (corridor, glidepath, fix limits, stall, thrust, bank, time closure
+with X), `test_plan_extractors.py` for the extractors against synthetic tracks; the shared
+fixtures come from `tests/support.py` (`fake_data_provenance`, `terminal_contexts`).
+
+**Order, and what is already done (updated 2026-09-10, `dev-leg-ctrl` at `dfce744`).**
+Everything the previous version of this section waited for has landed. The review's step 0 (the
+A/B items and the C holes, `e2e1c84`; A-3 / A-4 at `c544db0`, the A-4 check at `a2aa8c4`),
+step 1 (the package, `f08d196`), step 2 (§5 — FROZEN rather than deleted: closure, the airport /
+runway frames, the fixed-dt grid and truth-intent stay loadable and no new run selects them,
+`dddee9a`), step 3 (§4.3 views, defaults unchanged, `6600201`), step 4 (§4.2 strategies,
+`947c907`), step 5 (§4.4, `d462c7a`), step 6 (§4.5 runners `ed708de`, §4.6 tests `1e637b9`)
+and the grouping (`544c205`, its follow-up `b9c5fa1`). This design's step 3 (the plan head) is
+therefore UNBLOCKED; steps 1–2 (the procedure reader, the extractors, the oracle ceiling) are
+CPU-only readouts and never were blocked. What is left is the user's go on §9 step 1.
 
 **Two review findings this design must not inherit.** C-12 (the head's load-factor floor 0.2
 against the grader's 0.5) — DECIDED 2026-09-09: the grader stays at 0.5, and the guidance layer
-commands the load factor inside `flyability`'s envelope (floor 0.5), never inside the learned
-head's box in `control/envelope.py` (floor 0.2, a search-space fact of the old path); the §7
-"today's best" flyability baselines therefore stay as measured. C-11 (the corridor geometry's
-origin) is fixed in `project_onto_final` (threshold-relative under every frame), and remains the
-one geometry the procedure reader and the corridor gate must agree on, so the reader is written
-against the threshold frame, never the airport reference point. One naming note for the plan
-campaign: `random_train_anchor_min_future_s` (§6's sampler floor) is still an UNNAMED field
-(review C-3, a decision), so two plan arms differing only in it would share a name under the
-current grammar; the §4.2/§4.3 split gives the plan strategy its own naming and removes that.
+commands the load factor inside `flyability`'s envelope (`geometry/flyability.py`, floor 0.5),
+never inside the learned head's box in `outputs/control/envelope.py` (floor 0.2, a search-space
+fact of the old path); the §7 "today's best" flyability baselines therefore stay as measured.
+C-11 (the corridor geometry's origin) is fixed in `project_onto_final` (threshold-relative under
+every frame), and remains the one geometry the procedure reader and the corridor gate must agree
+on, so the reader is written against the threshold frame, never the airport reference point.
+Naming: `random_train_anchor_min_future_s` (§6's sampler floor) names the run since 2026-09-09
+(`anchor-min-future=`, review C-3 decided), so two plan arms differing only in it no longer share
+a name; the plan's own fields follow the same import-time rule. Two review items are still open
+and can touch a plan campaign: the "name every field against the nearest recipe" grammar change
+is deferred (it moves stored names and needs its own relabel pass like C-3's), and the pipeline
+runner's `TrainingPlan` keeps its keyword constructor — a plan cell added to `run_ts.py pipeline`
+is one more keyword there, not a new copy of the override dict.
