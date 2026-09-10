@@ -114,7 +114,7 @@ class SeamTest(unittest.TestCase):
 
         source = (
             Path(__file__).resolve().parents[2]
-            / "4dTrajectory" / "ts_transformer" / "dataset.py"
+            / "4dTrajectory" / "ts_transformer" / "data" / "dataset.py"
         ).read_text(encoding="utf-8")
         convert = source.index("flight = flight_to_msl(flight)")
         self.assertLess(convert, source.index("state_samples_from_track(waypoints"))

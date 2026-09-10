@@ -24,6 +24,12 @@ the same fix the grouping commit made for the bare `data` rule) and committed: f
 - Root `pyproject.toml`: `norecursedirs` adds `archive`, so `./run_all_tests.sh` (which
   collects `4dTrajectory` whole) no longer aborts on the archived scene-encoder test's frozen
   imports — archived code stays off the import path, as `test_architecture.py` requires.
+- After the fast-forward into `dev-leg-ctrl`: `flight_scenarios/tests/test_datum.py`'s seam test
+  read `ts_transformer/dataset.py` by path and now reads `data/dataset.py`. `./run_all_tests.sh`
+  in the main tree: modeling + backend 1,799 passed with the three failures the base commit
+  already had (`test_optimizer`'s numpy 2.x scalar, the reference-record `arr_airport` check in
+  `test_scenario_optimization`, the harvest checkpoint start in `test_download_landings` — all
+  three reproduced at `e996d77`); aeroviz-4d/python 157 passed.
 
 ### 2026-09-10 — ts_transformer: the package grouped by plane — `data/`, `geometry/`, `backbone/`, `training/`, `inference/`
 
