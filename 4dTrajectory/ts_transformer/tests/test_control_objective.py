@@ -10,11 +10,11 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
+import ts_transformer.data.channels as ch
 from ts_transformer.outputs.control.conditioning import DYNAMICS_CONDITION_NAMES
 from ts_transformer.outputs.control import heads as control_models
 import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module
-import ts_transformer.objective as objective
+import ts_transformer.training.objective as objective
 import ts_transformer.outputs.control.loss.objective as control_objective
 import ts_transformer.experiments.pipeline as pipeline_module
 from ts_transformer.config import (
@@ -30,12 +30,12 @@ from ts_transformer.config import (
     TSConfig,
 )
 from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.fixed_dt_supervision import build_fixed_dt_supervision
-from ts_transformer.models import build_model
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.objective import prediction_loss
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.objective import prediction_loss
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

@@ -40,20 +40,20 @@ for path in (TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from ts_transformer.channels import IDX  # noqa: E402
+from ts_transformer.data.channels import IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG, PREDICTION_CONTROL, TSConfig,
 )
-from ts_transformer.dataset import Normalizer, build_series  # noqa: E402
+from ts_transformer.data.dataset import Normalizer, build_series  # noqa: E402
 from evaluation.records import record_from_dict  # noqa: E402
-from ts_transformer.export import build_prediction_record  # noqa: E402
-from ts_transformer.final_approach_geometry import chart_from_axes, runway_axes  # noqa: E402
-from ts_transformer.forecast import (  # noqa: E402
+from ts_transformer.inference.export import build_prediction_record  # noqa: E402
+from ts_transformer.geometry.final_approach_geometry import chart_from_axes, runway_axes  # noqa: E402
+from ts_transformer.inference.forecast import (  # noqa: E402
     Forecast, cut_at_threshold_crossing, forecast_approach, forecast_approaches,
 )
 from ts_transformer.outputs import ForecastOptions  # noqa: E402
 from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
-from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 STEP_S = 5.0

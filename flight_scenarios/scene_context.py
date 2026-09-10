@@ -46,7 +46,7 @@ RADIUS_M = 40_000.0
 N_MAX = 16
 RECENT_LANDINGS_S = 1_800.0
 SPEED_FLOOR_MPS = 1.0
-# Mirrors of 4dTrajectory/ts_transformer/final_approach_geometry.py's membership rule
+# Mirrors of 4dTrajectory/ts_transformer/geometry/final_approach_geometry.py's membership rule
 # (MEMBERSHIP_K, MEMBERSHIP_FLOOR_M, ALIGNMENT_MAX_DEG): that package is not importable
 # from here; tests/test_scene_context.py on the ts side pins the two to each other.
 MEMBERSHIP_K = 1.0

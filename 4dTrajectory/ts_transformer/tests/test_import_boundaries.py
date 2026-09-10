@@ -46,7 +46,7 @@ else:
 
 
 def test_dataset_import_does_not_require_pandas() -> None:
-    completed = _import_without("pandas", "ts_transformer.dataset")
+    completed = _import_without("pandas", "ts_transformer.data.dataset")
     assert completed.returncode == 0, completed.stderr
 
 
@@ -60,8 +60,8 @@ def test_the_provenance_and_protocol_modules_do_not_reach_the_data_plane() -> No
     `BuildReport` / `FlightSeries` appear in it only as annotations.
     """
     completed = _import_without(
-        "torch", "ts_transformer.data_provenance", "ts_transformer.evaluation_protocol",
-        "ts_transformer.splits",
+        "torch", "ts_transformer.data.data_provenance", "ts_transformer.inference.evaluation_protocol",
+        "ts_transformer.data.splits",
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -75,6 +75,6 @@ def test_the_remaining_path_axis_is_a_leaf_under_dataset() -> None:
     `anchor_grid` re-exports them, and `dataset` imports it at module scope — which stays
     legal only while the leaf reaches neither `dataset` nor torch.
     """
-    for banned in ("ts_transformer.dataset", "torch"):
-        completed = _import_without(banned, "ts_transformer.anchor_strata")
+    for banned in ("ts_transformer.data.dataset", "torch"):
+        completed = _import_without(banned, "ts_transformer.data.anchor_strata")
         assert completed.returncode == 0, completed.stderr

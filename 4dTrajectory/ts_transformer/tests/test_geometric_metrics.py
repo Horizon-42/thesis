@@ -19,7 +19,7 @@ for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.geometric_metrics as gm  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
 
 
 def _line(length_m: float, *, offset_n: float = 0.0, speed_mps: float = 100.0, alt: float = 0.0, n: int = 51):

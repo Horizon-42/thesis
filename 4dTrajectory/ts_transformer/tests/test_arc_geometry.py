@@ -10,23 +10,23 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
-from ts_transformer.arc_length_geometry import (
+import ts_transformer.data.channels as ch
+from ts_transformer.geometry.arc_length_geometry import (
     arc_length_geometry_metrics,
     arc_length_velocity_metrics,
     resample_horizontal_arc_length_numpy,
 )
 from ts_transformer.config import TSConfig
-from ts_transformer.terminal_state_loss import (
+from ts_transformer.geometry.terminal_state_loss import (
     last_reliable_terminal_velocity_target,
     terminal_state_metrics_numpy,
 )
-from ts_transformer.dataset import Normalizer
-from ts_transformer.fixed_dt_supervision import (
+from ts_transformer.data.dataset import Normalizer
+from ts_transformer.data.fixed_dt_supervision import (
     FixedDTControlSupervision,
     build_fixed_dt_supervision,
 )
-from ts_transformer.fixed_anchor_validation import (
+from ts_transformer.training.fixed_anchor_validation import (
     ARC_LENGTH_POSITION_END_WEIGHT,
     TERMINAL_CROSS_TRACK_EMPHASIS,
     TERMINAL_VERTICAL_EMPHASIS,

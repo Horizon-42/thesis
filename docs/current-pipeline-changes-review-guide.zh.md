@@ -296,7 +296,7 @@ Review：
 git diff -- \
   trajectory_data_process/harvest/store.py \
   trajectory_data_process/harvest/arrivals.py \
-  4dTrajectory/ts_transformer/dataset.py \
+  4dTrajectory/ts_transformer/data/dataset.py \
   trajectory_data_process/harvest/tests/test_arrivals.py \
   4dTrajectory/ts_transformer/tests/test_ts_transformer.py
 ```
@@ -398,7 +398,7 @@ git diff -- \
   evaluation/tests/test_evaluation.py \
   4dTrajectory/optimization/scenario_optimization.py \
   4dTrajectory/optimization/tests/test_scenario_optimization.py \
-  4dTrajectory/ts_transformer/export.py \
+  4dTrajectory/ts_transformer/inference/export.py \
   4dTrajectory/ts_transformer/tests/test_ts_transformer.py
 ```
 

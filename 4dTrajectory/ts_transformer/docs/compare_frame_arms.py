@@ -46,8 +46,8 @@ for path in (REPO, REPO / "geokit" / "src", TS_DIR.parent):
         sys.path.insert(0, str(path))
 from flight_scenarios.identity import summary_row_key  # noqa: E402
 from flight_scenarios.runway_target import find_threshold  # noqa: E402
-import ts_transformer.geometric_metrics as gm  # noqa: E402
-from ts_transformer.approach_difficulty import STRAIGHT_TORTUOSITY, strata_masks  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRAIGHT_TORTUOSITY, strata_masks  # noqa: E402
 
 # approach_difficulty's own boundary for "the easy one".
 # Parallel siblings whose separation a runway-blind frame would average across.

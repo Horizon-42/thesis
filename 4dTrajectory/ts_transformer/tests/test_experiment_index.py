@@ -5,7 +5,7 @@ Split from `test_ts_transformer.py` on 2026-09-10 (review §4.6).
 
 import json
 
-import ts_transformer.experiment_index as experiment_index
+import ts_transformer.training.experiment_index as experiment_index
 
 
 def test_experiment_index_keeps_legacy_incomplete_and_formal_runs_distinct(tmp_path):

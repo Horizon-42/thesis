@@ -31,25 +31,25 @@ import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 import ts_transformer.experiments.predictability_report as common_report  # noqa: E402
 from ts_transformer.config import PREDICTION_CONTROL  # noqa: E402
 from ts_transformer.outputs.control.dynamics.rollout import rollout_control_endpoints  # noqa: E402
-from ts_transformer.data_provenance import (  # noqa: E402
+from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,
 )
-from ts_transformer.dataset import (  # noqa: E402
+from ts_transformer.data.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     build_series,
     load_flight_dicts,
 )
-from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
 from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
-from ts_transformer.batch_contract import unpack_batch  # noqa: E402
-from ts_transformer.objective import (  # noqa: E402
+from ts_transformer.data.batch_contract import unpack_batch  # noqa: E402
+from ts_transformer.training.objective import (  # noqa: E402
     move_dynamics,
     move_fixed_dt_supervision,
     prediction_loss_components,
 )
-from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
+from ts_transformer.training.train import load_checkpoint, usable_series  # noqa: E402
 from ts_transformer.io_utils import file_sha256
 
 

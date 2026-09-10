@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import argparse
 
-from ts_transformer.evaluation_protocol import TestReleaseError, create_test_release
-from ts_transformer.train import load_checkpoint
+from ts_transformer.inference.evaluation_protocol import TestReleaseError, create_test_release
+from ts_transformer.training.train import load_checkpoint
 
 from .common import add_eligibility_arg, provenance_from_args
 

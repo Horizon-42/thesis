@@ -11,22 +11,22 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
+import ts_transformer.data.channels as ch
 import ts_transformer.experiments.history_ablation as history_ablation
-import ts_transformer.train as train_module
+import ts_transformer.training.train as train_module
 from ts_transformer.outputs.control.strategy import CONTROL_ANCHOR_STALL_MARGIN
 from ts_transformer.outputs import strategy as output_strategy
 from ts_transformer.config import PREDICTION_CONTROL, TSConfig
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import (
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import (
     FixedAnchorTrajectoryWindows,
     FlightEpochSampler,
     Normalizer,
     RandomAnchorTrajectoryWindows,
     build_series,
 )
-from ts_transformer.splits import split_by_flight
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.splits import split_by_flight
+from ts_transformer.data.synthetic import synthetic_arrivals
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 

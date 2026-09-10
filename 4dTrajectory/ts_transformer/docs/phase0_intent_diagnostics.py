@@ -71,23 +71,23 @@ for path in (HERE, TS_DIR.parent, REPO_ROOT):
         sys.path.insert(0, str(path))
 
 import compare_frame_arms as cfa  # noqa: E402
-import ts_transformer.final_approach_geometry as fag  # noqa: E402
-import ts_transformer.intent_conditioning as ic  # noqa: E402
+import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402
+import ts_transformer.data.intent_conditioning as ic  # noqa: E402
 import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
-import ts_transformer.geometric_metrics as gm  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
 from ts_transformer.config import DEFAULT_DT_S, DEFAULT_SEQ_LEN, TSConfig  # noqa: E402
-from ts_transformer.coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
-from ts_transformer.dataset import build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.data.coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
+from ts_transformer.data.dataset import build_series, load_flight_dicts  # noqa: E402
 from flight_scenarios.identity import flight_key  # noqa: E402
 from geokit import compass_bearing_to_math_enu_rad  # noqa: E402
-from ts_transformer.intent_explainability import (  # noqa: E402
+from ts_transformer.inference.intent_explainability import (  # noqa: E402
     ANCHOR_S,
     CONTEXT_NAMES,
     cv_r2 as _cv_r2,
     population,
     utc_s as _utc,
 )
-from ts_transformer.metrics import common_physical_time_flight_metrics  # noqa: E402
+from ts_transformer.geometry.metrics import common_physical_time_flight_metrics  # noqa: E402
 from trajectory_data_process.harvest.arrivals import load_arrival_flights  # noqa: E402
 
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
@@ -219,8 +219,8 @@ def cmd_residual(args: argparse.Namespace) -> None:
 # ── sensitivity ──────────────────────────────────────────────────────────────
 
 def cmd_sensitivity(args: argparse.Namespace) -> None:
-    from ts_transformer.forecast import forecast_approach
-    from ts_transformer.train import load_checkpoint
+    from ts_transformer.inference.forecast import forecast_approach
+    from ts_transformer.training.train import load_checkpoint
 
     model, config, normalizer, _payload = load_checkpoint(args.checkpoint)
     model = model.to("cpu").eval()

@@ -102,7 +102,7 @@ from ts_transformer.outputs.control.constraints.saturation import (
 )
 from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from ts_transformer.outputs.control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
-from ts_transformer.final_approach_geometry import K_MARGIN, corridor_halfwidth, corridor_halfwidth_slope
+from ts_transformer.geometry.final_approach_geometry import K_MARGIN, corridor_halfwidth, corridor_halfwidth_slope
 
 _SATURATED_INTERVAL_RAD = math.radians(0.1)   # a bank interval this narrow is a corner, not a bound
 _DIAGNOSTIC_KEYS = (

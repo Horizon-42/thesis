@@ -18,29 +18,29 @@ from typing import Any, Sequence
 import torch  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
-from ts_transformer.batching import resolve_batch_size  # noqa: E402
+from ts_transformer.training.batching import resolve_batch_size  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     COORDINATE_FRAMES_AVAILABLE,
     DEFAULT_AIRCRAFT_TYPE,
     MODELS,
     TSConfig,
 )
-from ts_transformer.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
-from ts_transformer.dataset import (  # noqa: E402
+from ts_transformer.data.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
+from ts_transformer.data.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     FlightSeries,
     build_series,
     load_flight_dicts,
     window_anchors,
 )
-from ts_transformer.splits import (  # noqa: E402
+from ts_transformer.data.splits import (  # noqa: E402
     cross_validation_folds,
     flight_keys_by_split,
     split_by_flight,
     split_name_for_dataset_id,
 )
-from ts_transformer.models import build_model, parameter_count, resolve_device  # noqa: E402
-from ts_transformer.train import evaluate_split, fit_model, usable_series  # noqa: E402
+from ts_transformer.backbone.adapters import build_model, parameter_count, resolve_device  # noqa: E402
+from ts_transformer.training.train import evaluate_split, fit_model, usable_series  # noqa: E402
 from ts_transformer.experiments.support import parse_airports
 from ts_transformer.experiments.support import series_digest
 from ts_transformer.io_utils import write_json_atomic

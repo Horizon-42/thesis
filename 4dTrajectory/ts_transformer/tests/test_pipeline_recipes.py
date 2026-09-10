@@ -19,7 +19,7 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     control_recipe,
 )
-from ts_transformer.train import CHECKPOINT_METADATA_SCHEMA
+from ts_transformer.training.train import CHECKPOINT_METADATA_SCHEMA
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

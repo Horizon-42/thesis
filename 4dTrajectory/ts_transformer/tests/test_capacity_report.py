@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-import ts_transformer.channels as ch
-import ts_transformer.build_multiflight_capacity_report as capacity_report
+import ts_transformer.data.channels as ch
+import ts_transformer.inference.build_multiflight_capacity_report as capacity_report
 
 
 @pytest.mark.parametrize(

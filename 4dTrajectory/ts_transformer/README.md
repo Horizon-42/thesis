@@ -77,7 +77,7 @@ README states only what a reader needs to run and interpret it.
 
 ## Glossary
 
-The abbreviations and terms of art this README (and `metrics.py` / the summary JSONs) use:
+The abbreviations and terms of art this README (and `geometry/metrics.py` / the summary JSONs) use:
 
 | term | meaning |
 |---|---|
@@ -98,36 +98,44 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 
 ## Layout
 
+Grouped by plane since 2026-09-10 (the package review's §4.2 layout, pure moves): `data/` (the
+data plane), `geometry/` (the corridor and the metrics), `backbone/` (the two vendored-network
+adapters and `vendor/`), `outputs/` (one package per prediction path behind one strategy),
+`training/`, `inference/`, `cli/` (one module per subcommand) and `experiments/` (the runners,
+behind `run_ts.py <name>`); `config.py`, `run_naming.py`, `io_utils.py` and `repo_layout.py`
+stay at the top. A group's `__init__.py` re-exports nothing — import the module by its
+qualified name (`from ts_transformer.data.dataset import build_series`).
+
 | File | What it is |
 |---|---|
 | `config.py` | `TSConfig` — the one namespace both vendored models read, serialised into every checkpoint |
-| `channels.py` | the feature contract: geodetic states ⇄ threshold-anchored ENU channels |
-| `dataset.py` | track loading, input resampling, mode-dispatched targets, normalisation |
-| `data_provenance.py` | which arrival rosters produced a run: manifest + eligibility digests, and the staleness refusal. Pure hashing — no torch, so `evaluation_protocol` can compare two fingerprints without the data plane |
-| `splits.py` | the by-flight train/val/test split (hashed identities) and the data-selection audit |
-| `models.py` | the two vendored-encoder adapters and `build_model`, which hands construction to the configured path's strategy |
+| `data/channels.py` | the feature contract: geodetic states ⇄ threshold-anchored ENU channels |
+| `data/dataset.py` | track loading, input resampling, mode-dispatched targets, normalisation |
+| `data/data_provenance.py` | which arrival rosters produced a run: manifest + eligibility digests, and the staleness refusal. Pure hashing — no torch, so `evaluation_protocol` can compare two fingerprints without the data plane |
+| `data/splits.py` | the by-flight train/val/test split (hashed identities) and the data-selection audit |
+| `backbone/adapters.py` | the two vendored-encoder adapters and `build_model`, which hands construction to the configured path's strategy |
 | `outputs/` | one package per prediction path behind one strategy (`outputs/state`, `outputs/closure`, `outputs/control`; `outputs/base.py` is the interface, `outputs/__init__.py` the lazy registry, `outputs/duration_heads.py` the point/quantile duration heads both paths build) |
-| `objective.py` | what a prediction is scored against: the target contracts, `loss_component_names`, every loss construction and the `PREDICTION_LOSS_HANDLERS` dispatch |
-| `validation.py` | how a fitted model is replayed on a split and which epoch is kept: one forward pass per split, the per-airport validation, `VALIDATION_SELECTIONS` |
-| `train.py` | the epoch, the training cohort, early stopping, the checkpoint it writes |
-| `forecast.py` | independent normalized, one-pass full, and recursive-window inference strategies |
-| `metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
-| `export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
-| `flyability.py` | closed-form control inversion — what a predicted path would have required, vs the envelope |
-| `time_grids.py` | shared output-time grids for training, metrics and inference |
-| `batching.py` | resolves an efficient batch size against the actual model and CUDA device |
-| `reference_velocity.py` | reference chart-velocity construction, isolated from trajectory loading |
-| `coordinate_frames.py` | threshold-centred horizontal coordinate-frame implementations (ENU / runway-aligned) |
-| `lateral_eligibility.py` | the evaluation-owned lateral-pass roster consumed by data loading (the train-anchor policy is each path strategy's `eligible_anchors`) |
+| `training/objective.py` | what a prediction is scored against: the target contracts, `loss_component_names`, every loss construction and the `PREDICTION_LOSS_HANDLERS` dispatch |
+| `training/validation.py` | how a fitted model is replayed on a split and which epoch is kept: one forward pass per split, the per-airport validation, `VALIDATION_SELECTIONS` |
+| `training/train.py` | the epoch, the training cohort, early stopping, the checkpoint it writes |
+| `inference/forecast.py` | independent normalized, one-pass full, and recursive-window inference strategies |
+| `geometry/metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
+| `inference/export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
+| `geometry/flyability.py` | closed-form control inversion — what a predicted path would have required, vs the envelope |
+| `data/time_grids.py` | shared output-time grids for training, metrics and inference |
+| `training/batching.py` | resolves an efficient batch size against the actual model and CUDA device |
+| `data/reference_velocity.py` | reference chart-velocity construction, isolated from trajectory loading |
+| `data/coordinate_frames.py` | threshold-centred horizontal coordinate-frame implementations (ENU / runway-aligned) |
+| `data/lateral_eligibility.py` | the evaluation-owned lateral-pass roster consumed by data loading (the train-anchor policy is each path strategy's `eligible_anchors`) |
 | `repo_layout.py` | where this repository keeps things (`REPO_ROOT`, `HARVEST_ROOT`, `OPT_OUTPUTS_ROOT`, `TS_SCRIPT`, `discover_k_airports`) — the one definition the CLI, the benchmark and the runners read |
 | `experiments/` | the re-runnable experiment runners, one module each, behind `python run_ts.py <name>` (`--list` names them); `support.py` re-exports the paths and holds the runners' shared helpers |
-| `cross_validation.py` / `development_cohorts.py` / `experiment_index.py` | leak-free hyperparameter search, explicit dev rosters, and the run manifest index |
-| `fixed_anchor_validation.py` / `evaluation_protocol.py` | deterministic fixed-anchor metrics and the one-way outer-test release gate |
+| `training/cross_validation.py` / `data/development_cohorts.py` / `training/experiment_index.py` | leak-free hyperparameter search, explicit dev rosters, and the run manifest index |
+| `training/fixed_anchor_validation.py` / `inference/evaluation_protocol.py` | deterministic fixed-anchor metrics and the one-way outer-test release gate |
 | `approach_clustering/` | train-only approach geometry clustering and shared-cohort comparison CLI |
-| `batch_benchmark.py` | outer-train-only CUDA throughput benchmark used by `benchmark-batch` |
+| `cli/benchmark_batch.py` | outer-train-only CUDA throughput benchmark used by `benchmark-batch` |
 | `__main__.py` / `cli/` | the subcommand table, and one module per subcommand (`train`, `cross_validate`, `evaluate_fit`, `freeze`, `predict`, plus `common`) — each exposes `HELP` / `add_cli_arguments()` / `run_cli()` |
-| `synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
-| `vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
+| `data/synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
+| `backbone/vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
 | `outputs/control/` (package: strategy, supervision, forecast, envelope, heads, conditioning, latent, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |
 
 ## Running it
@@ -480,8 +488,8 @@ an alias or compatibility branch.
 
 The state and `final_time_s` heads remain shared. In `normalized`, the duration head defines
 the state-node clock. In `full/window`, state nodes retain their fixed `dt` clock and the head
-is an auxiliary remaining-time estimate. Target-grid construction lives in `time_grids.py`;
-mode-specific inference is dispatched in `forecast.py`; fixed/random anchor policy remains a
+is an auxiliary remaining-time estimate. Target-grid construction lives in `data/time_grids.py`;
+mode-specific inference is dispatched in `inference/forecast.py`; fixed/random anchor policy remains a
 separate dataset choice.
 
 ```bash
@@ -702,7 +710,7 @@ The repository now contains routes 1 and 4; routes 2 and 3 remain distinct alter
 
 1. **Post-hoc flyability check** — ✅ **DONE**, see
    [Flyability](#flyability--measuring-the-gap-this-baseline-deliberately-leaves-open)
-   (`flyability.py`). Inverts the point-mass equations on the predicted trajectory to recover
+   (`geometry/flyability.py`). Inverts the point-mass equations on the predicted trajectory to recover
    the required load factor / bank / thrust and reports what fraction sits inside the
    envelope. Does not touch training, and needs **no casadi** (the inversion is algebra), so
    it lives in this package and needs no second environment. Note that it measures the gap;
@@ -1054,11 +1062,11 @@ hand-published `ts_*` categories.
 
 ## Vendored code
 
-`vendor/itransformer/` (MIT, commit `c2426e6`) and `vendor/patchtst/` (Apache-2.0, commit
+`backbone/vendor/itransformer/` (MIT, commit `c2426e6`) and `backbone/vendor/patchtst/` (Apache-2.0, commit
 `204c21e`) are copied from upstream **byte-identical**, with only import paths rewritten, so a
 future `git diff` against a newer upstream stays readable. Each carries its `LICENSE` and a
 `PROVENANCE.md` recording exactly what was copied, what was dropped, and why. Adapting a model
-to this project belongs in `models.py`, never in a vendored file.
+to this project belongs in `backbone/adapters.py`, never in a vendored file.
 
 Dropped from iTransformer: the Reformer/Flowformer/Flashformer/Informer attention variants,
 and with them the `reformer_pytorch` and `einops` dependencies.
@@ -1109,7 +1117,7 @@ point that later work may choose to extend, but none is an accident:
   KSMF, KSTL); only KRDU has been trained. Cross-airport generalisation is untested, and the
   ENU frame is per-runway-threshold, so a pooled model is a real design question, not a
   bigger `--data` glob.
-- **No flyability *fix*, only a measurement.** `flyability.py` reports how far outside the
+- **No flyability *fix*, only a measurement.** `geometry/flyability.py` reports how far outside the
   envelope a prediction sits; nothing projects it back inside. That is routes 2–4 above.
   The check also judges against one clean-configuration drag polar and one `Cl_max`, which
   is why it is calibrated against the observed tracks rather than read absolutely — a

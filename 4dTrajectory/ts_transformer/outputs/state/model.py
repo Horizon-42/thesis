@@ -12,15 +12,15 @@ from typing import TYPE_CHECKING
 import torch
 import torch.nn as nn
 
-from ts_transformer.batch_contract import anchor_state
+from ts_transformer.data.batch_contract import anchor_state
 from ts_transformer.outputs.duration_heads import FinalTimeHead
-from ts_transformer.channels import IDX, POSITION_IDX
+from ts_transformer.data.channels import IDX, POSITION_IDX
 from ts_transformer.config import (
     STATE_POSITION_ANCHOR_RELATIVE,
     STATE_POSITION_CORRIDOR_BOUNDED,
     TSConfig,
 )
-from ts_transformer.final_approach_geometry import (
+from ts_transformer.geometry.final_approach_geometry import (
     FINAL_APPROACH_KEYS,
     alignment_cosine,
     bound_to_final,
@@ -31,7 +31,7 @@ from ts_transformer.final_approach_geometry import (
 )
 
 if TYPE_CHECKING:  # the data-plane value type; importing it at runtime would be a cycle
-    from ts_transformer.dataset import Normalizer
+    from ts_transformer.data.dataset import Normalizer
 
 @dataclass(frozen=True)
 class StatePrediction:

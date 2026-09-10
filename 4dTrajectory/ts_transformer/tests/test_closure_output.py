@@ -18,22 +18,22 @@ for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.channels as ch  # noqa: E402
+import ts_transformer.data.channels as ch  # noqa: E402
 import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
 import ts_transformer.outputs.closure.model as co  # noqa: E402
 import ts_transformer.outputs.closure.profile as cp  # noqa: E402
 from ts_transformer.config import CHECKPOINT_SELECTION_OBJECTIVE, PREDICTION_CLOSURE, TSConfig  # noqa: E402
-from ts_transformer.dataset import Normalizer, build_series  # noqa: E402
+from ts_transformer.data.dataset import Normalizer, build_series  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records  # noqa: E402
-from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch  # noqa: E402
-from ts_transformer.forecast import forecast_approach  # noqa: E402
+from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch  # noqa: E402
+from ts_transformer.inference.forecast import forecast_approach  # noqa: E402
 from ts_transformer.outputs.closure.forecast import forecast_closure_from_labels  # noqa: E402
-from ts_transformer.models import build_model  # noqa: E402
+from ts_transformer.backbone.adapters import build_model  # noqa: E402
 from ts_transformer.run_naming import run_display_name  # noqa: E402
-from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
-from ts_transformer.objective import loss_component_names, prediction_loss_components, target_contract  # noqa: E402
-from ts_transformer.train import load_checkpoint, train  # noqa: E402
+from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.training.objective import loss_component_names, prediction_loss_components, target_contract  # noqa: E402
+from ts_transformer.training.train import load_checkpoint, train  # noqa: E402
 from ts_transformer.tests.support import fake_data_provenance, terminal_contexts
 
 AIRPORT, RUNWAY = "KRDU", "05L"

@@ -24,7 +24,7 @@ from aerodynamic_model.common import GeodeticState
 from aerodynamic_model.rollout import RolloutSample
 
 # Record-filename contract — the single source for every writer and glob (the optimizer
-# batch in scenario_optimization.py AND ts_transformer/export.py; this module is
+# batch in scenario_optimization.py AND ts_transformer/inference/export.py; this module is
 # casadi-free, which is what lets the torch env import it).
 # NOTE: ``*_reference_eval.json`` also matches the ``*_eval.json`` glob — reference
 # records survive the stale-record sweeps only because they live under REFERENCES_DIR

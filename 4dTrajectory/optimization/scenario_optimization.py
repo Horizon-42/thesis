@@ -471,7 +471,7 @@ def _limit_solver_threads() -> None:
 
 
 # The record-filename suffixes are single-sourced in evaluation_export.py (imported above)
-# — shared with ts_transformer/export.py, which writes the same directory shape.
+# — shared with ts_transformer/inference/export.py, which writes the same directory shape.
 
 
 def _clear_stale_records(out: Path, keep: set[str] | None = None) -> None:

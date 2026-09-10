@@ -16,11 +16,11 @@ for path in (TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.data_provenance as data_provenance  # noqa: E402
+import ts_transformer.data.data_provenance as data_provenance  # noqa: E402
 import ts_transformer.experiments.pipeline as run_ts_pipeline  # noqa: E402
-import ts_transformer.splits as splits  # noqa: E402
+import ts_transformer.data.splits as splits  # noqa: E402
 from ts_transformer.config import TSConfig  # noqa: E402
-from ts_transformer.lateral_eligibility import (  # noqa: E402
+from ts_transformer.data.lateral_eligibility import (  # noqa: E402
     EVALUATION_REPORT_SCHEMA,
     LATERAL_PASS_ROSTER_SCHEMA,
     build_lateral_pass_roster,

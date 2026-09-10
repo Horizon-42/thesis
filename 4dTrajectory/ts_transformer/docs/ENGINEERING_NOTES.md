@@ -177,7 +177,7 @@ Everything below is serialised into every checkpoint.
 - `summary.json` carries an `accuracy` block (mean AND p95) plus per-row `ade_m`/`fde_m`;
   `overlap` is a REQUIRED arg to `write_batch` — an optional metric is one that silently goes
   missing.
-- **A per-airport ADE without its ROUTE MIX is not a comparison** (`approach_difficulty.py`).
+- **A per-airport ADE without its ROUTE MIX is not a comparison** (`data/approach_difficulty.py`).
   Every row carries `route_tortuosity`, `remaining_path_m`, `anchor_range_m`,
   `anchor_cross_track_m`, `established_at_anchor`, and `accuracy.difficulty` carries the
   batch mix + the thresholds the flag encodes. Measured 2026-08-20 on the pooled checkpoint:
@@ -195,7 +195,7 @@ Everything below is serialised into every checkpoint.
 - **Controls are DIMENSIONLESS in this package** (`control/envelope.py`, the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, the same box on
   every airframe. Newtons appear in exactly two places — `physical_controls()` on the way into
-  the dynamics, and `forecast.py` on the way out to the evaluation record, whose contract stays
+  the dynamics, and `inference/forecast.py` on the way out to the evaluation record, whose contract stays
   in newtons and is shared with the CasADi optimizer. **The thrust floor is negative on
   purpose**: an approach needs net-negative force (idle + speedbrake/flaps/gear drag this
   clean-configuration polar does not model), and with a 0 N floor **40 % of inverted teacher
@@ -326,7 +326,7 @@ meaning and codebase pointers: `docs/2026-08-24_ksjc_result_labels_explained.md`
   point-mass equations turns them into the trajectory, so every prediction is dynamically
   admissible by construction. The two are the experiment. Single-aircraft-only and deterministic
   point-prediction remain scope decisions for both; see the package README.
-- **Flyability (`flyability.py`): read the DELTA against the observed tracks, never the absolute
+- **Flyability (`geometry/flyability.py`): read the DELTA against the observed tracks, never the absolute
   rate.** The closed-form control inversion (no casadi, no solver) judges against ONE
   clean-configuration drag polar, and real approaches are flown dirty — run on REAL flown tracks
   it first scored **0/149 fully flyable**, i.e. the check was wrong, not the flights. Median

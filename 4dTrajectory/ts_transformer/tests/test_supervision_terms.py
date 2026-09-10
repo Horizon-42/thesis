@@ -27,10 +27,10 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.objective as objective
+import ts_transformer.training.objective as objective
 import ts_transformer.outputs.control.loss.objective as control_objective
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, heading_rate_rad_s
-from ts_transformer.channels import channels_from_states
+from ts_transformer.data.channels import channels_from_states
 from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_RECIPE_SIMPLE_V3,
@@ -48,18 +48,18 @@ from ts_transformer.config import (
 from ts_transformer.outputs.control.dynamics import rollout as control_rollout
 from ts_transformer.outputs.control.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
 from ts_transformer.outputs.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
-from ts_transformer.coordinate_frames import ENUFrame
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.coordinate_frames import ENUFrame
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from ts_transformer.outputs.control.supervision import HEADING_RATE_SMOOTHING_WINDOW_S
-from ts_transformer.dataset import Normalizer, build_series
+from ts_transformer.data.dataset import Normalizer, build_series
 from ts_transformer.outputs.control.supervision import (
     probe_dynamics,
     reference_heading_rate_supervision,
 )
-from ts_transformer.forecast import forecast_approach
+from ts_transformer.inference.forecast import forecast_approach
 from ts_transformer.run_naming import run_display_name
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import load_checkpoint, train
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import load_checkpoint, train
 
 from aerodynamic_model.common import GeodeticState
 
@@ -157,7 +157,7 @@ def test_the_heading_is_unwrapped_before_it_is_differentiated():
         _constant_turn(3.0, psi0_rad=math.pi - math.radians(30.0), duration_s=duration_s)
     )
     # The channels carry velocity, not psi; the branch cut appears when psi is recovered.
-    from ts_transformer.channels import states_from_channels
+    from ts_transformer.data.channels import states_from_channels
 
     recovered = np.asarray([
         state.psi for _t, state in states_from_channels(
@@ -738,8 +738,8 @@ def test_the_teacherless_supervision_trains_under_random_anchors(tmp_path: Path)
 
 def _real_dynamics_batch(config: TSConfig) -> dict:
     """The context slot of a REAL one-window training batch under ``config``."""
-    from ts_transformer.batch_contract import unpack_batch
-    from ts_transformer.dataset import FixedAnchorTrajectoryWindows
+    from ts_transformer.data.batch_contract import unpack_batch
+    from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows
 
     series, report = build_series(
         synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3), config, airport=AIRPORT

@@ -23,23 +23,23 @@ import torch
 import ts_transformer.cli.common as cli_common
 import ts_transformer.cli.train as cli_train
 from ts_transformer.config import TSConfig
-from ts_transformer.data_provenance import (
+from ts_transformer.data.data_provenance import (
     LEGACY_ELIGIBILITY_BOUND_SCHEMA,
     arrival_data_provenance,
     eligible_set_digest,
     require_matching_data_provenance,
 )
-from ts_transformer.dataset import build_series
+from ts_transformer.data.dataset import build_series
 from flight_scenarios.identity import flight_key
-from ts_transformer.lateral_eligibility import (
+from ts_transformer.data.lateral_eligibility import (
     EVALUATION_REPORT_SCHEMA,
     build_lateral_pass_roster,
     default_evaluation_report_path,
     default_lateral_pass_roster_path,
 )
-from ts_transformer.splits import data_selection_audit, flight_keys_by_split
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import train
+from ts_transformer.data.splits import data_selection_audit, flight_keys_by_split
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import train
 
 _CLI_SPEC = importlib.util.spec_from_file_location(
     "ts_transformer_cli_eligible_set_test",
@@ -650,7 +650,7 @@ def test_the_training_audit_still_records_the_roster_byte_facts(
 def test_the_manifest_digest_view_reads_a_legacy_fingerprint_and_refuses_a_foreign_one() -> None:
     """A replay runner puts a STORED checkpoint's manifest digests into its own provenance;
     the v3 grid checkpoint must be readable there, an unknown schema must not."""
-    from ts_transformer.data_provenance import (
+    from ts_transformer.data.data_provenance import (
         LEGACY_ELIGIBILITY_BOUND_SCHEMA,
         provenance_manifest_digests,
     )

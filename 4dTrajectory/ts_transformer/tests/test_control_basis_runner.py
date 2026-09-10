@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import torch
 
-from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks
 from ts_transformer.outputs.control.basis_fit import inverse_dynamics_seed
 from flight_scenarios.identity import summary_row_key
 from ts_transformer.experiments.control_basis_oracle import summarise
@@ -120,8 +120,8 @@ from ts_transformer.outputs.control.basis_fit import (                          
     BasisSchedule,
     load_fitted_teacher,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
-from ts_transformer.dataset import (  # noqa: E402
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA  # noqa: E402
+from ts_transformer.data.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
@@ -129,9 +129,9 @@ from ts_transformer.dataset import (  # noqa: E402
     truth_duration_s,
 )
 from ts_transformer.io_utils import file_sha256                                   # noqa: E402
-from ts_transformer.models import build_model                                     # noqa: E402
-from ts_transformer.synthetic import synthetic_arrivals                           # noqa: E402
-from ts_transformer.train import load_checkpoint, train                           # noqa: E402
+from ts_transformer.backbone.adapters import build_model                                     # noqa: E402
+from ts_transformer.data.synthetic import synthetic_arrivals                           # noqa: E402
+from ts_transformer.training.train import load_checkpoint, train                           # noqa: E402
 from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -445,7 +445,7 @@ def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoin
     """The blocker of 2026-09-07: every v5 checkpoint's provenance is eligibility-bound, and
     a fingerprint taken without the roster reads as "the manifest changed" — the fitter died
     at startup on every real checkpoint. The roster is read iff the checkpoint recorded one."""
-    import ts_transformer.data_provenance as provenance_module
+    import ts_transformer.data.data_provenance as provenance_module
     seen = {}
 
     def spy(paths, *, eligibility_rosters=None):

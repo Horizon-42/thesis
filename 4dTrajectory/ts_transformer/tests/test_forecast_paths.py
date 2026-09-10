@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
+import ts_transformer.data.channels as ch
 import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module
 from ts_transformer.outputs import ForecastOptions
 from ts_transformer.config import (
@@ -18,12 +18,12 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.dataset import Normalizer, build_series
-from ts_transformer.forecast import forecast_approach, forecast_approaches
-from ts_transformer.models import build_model
+from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.inference.forecast import forecast_approach, forecast_approaches
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.state.model import StatePrediction
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.synthetic import synthetic_arrivals
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

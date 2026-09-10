@@ -48,7 +48,7 @@ import numpy as np
 
 from ts_transformer.experiments.support import REPO_ROOT
 
-from ts_transformer.approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
 from ts_transformer.config import DURATION_HEAD_QUANTILE, DURATION_MEDIAN_INDEX  # noqa: E402
 from flight_scenarios.identity import summary_row_key  # noqa: E402
 

@@ -8,16 +8,16 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
+import ts_transformer.data.channels as ch
 from ts_transformer.config import HORIZON_FULL, CHECKPOINT_SELECTION_COMMON_GRID_ADE, TSConfig
-from ts_transformer.dataset import Normalizer
-from ts_transformer.metrics import (
+from ts_transformer.data.dataset import Normalizer
+from ts_transformer.geometry.metrics import (
     common_physical_time_flight_metrics,
     states_with_derived_velocity,
 )
 from ts_transformer.outputs.state.model import StatePrediction
 from ts_transformer.outputs.state.loss import state_prediction_loss_components
-from ts_transformer.objective import masked_mse, prediction_loss
+from ts_transformer.training.objective import masked_mse, prediction_loss
 from ts_transformer.outputs.control.loss.objective import position_velocity_consistency_loss
 
 

@@ -28,8 +28,8 @@ import torch
 from torch import nn
 
 import ts_transformer.run_naming as rn
-import ts_transformer.validation as val
-from ts_transformer.anchor_grid import (
+import ts_transformer.training.validation as val
+from ts_transformer.data.anchor_grid import (
     DEFAULT_GRID_MIN_FUTURE_S,
     PARTIAL_COVERAGE,
     VALIDATION_ANCHOR_GRID_KM,
@@ -38,22 +38,22 @@ from ts_transformer.anchor_grid import (
     bin_label,
     remaining_path_profiles,
 )
-from ts_transformer.batch_contract import anchor_state, unpack_batch
+from ts_transformer.data.batch_contract import anchor_state, unpack_batch
 from ts_transformer.config import (
     CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_METRICS,
     TSConfig,
 )
-from ts_transformer.dataset import ExplicitAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.fixed_anchor_validation import FIXED_ANCHOR_LABEL, fixed_anchor_common_grid_ade_metrics
-from ts_transformer.models import build_model
+from ts_transformer.data.dataset import ExplicitAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.training.fixed_anchor_validation import FIXED_ANCHOR_LABEL, fixed_anchor_common_grid_ade_metrics
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.state.model import StatePrediction
-from ts_transformer.splits import split_by_flight
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import fit_model, train
+from ts_transformer.data.splits import split_by_flight
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import fit_model, train
 from ts_transformer.tests.support import fake_data_provenance
-from ts_transformer.validation import (
+from ts_transformer.training.validation import (
     ANCHOR_GRID_L1_KEY,
     MINIMUM_ANCHOR_GRID_BINS,
     ValidationSelection,

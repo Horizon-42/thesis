@@ -8,11 +8,11 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.batch_contract as batch_contract
-from ts_transformer.batch_contract import anchor_state, model_forward, unpack_batch
-import ts_transformer.dataset as dataset_module
-import ts_transformer.train as train_module
-import ts_transformer.validation as validation
+import ts_transformer.data.batch_contract as batch_contract
+from ts_transformer.data.batch_contract import anchor_state, model_forward, unpack_batch
+import ts_transformer.data.dataset as dataset_module
+import ts_transformer.training.train as train_module
+import ts_transformer.training.validation as validation
 from ts_transformer.config import (
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -20,26 +20,26 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.dataset import iter_batches
-from ts_transformer.dataset import (
+from ts_transformer.data.dataset import iter_batches
+from ts_transformer.data.dataset import (
     FixedAnchorTrajectoryWindows,
     FlightEpochSampler,
     Normalizer,
     build_series,
 )
-from ts_transformer.splits import split_by_flight
-from ts_transformer.fixed_dt_supervision import build_fixed_dt_supervision
-from ts_transformer.models import build_model
+from ts_transformer.data.splits import split_by_flight
+from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.objective import (
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.objective import (
     loss_component_names,
     move_dynamics,
     move_fixed_dt_supervision,
     prediction_loss_components,
 )
 from ts_transformer.tests.support import fake_data_provenance
-from ts_transformer.train import FIT_EVALUATION_NAME, evaluate_fit_splits, train
+from ts_transformer.training.train import FIT_EVALUATION_NAME, evaluate_fit_splits, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

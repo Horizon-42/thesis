@@ -8,22 +8,22 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
-import ts_transformer.validation as validation
+import ts_transformer.data.channels as ch
+import ts_transformer.training.validation as validation
 from ts_transformer.config import (
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.fixed_anchor_validation import (
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.training.fixed_anchor_validation import (
     fixed_anchor_common_grid_ade_metrics,
     fixed_anchor_common_truth,
 )
-from ts_transformer.models import build_model
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.objective import prediction_loss
+from ts_transformer.backbone.adapters import build_model
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.objective import prediction_loss
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

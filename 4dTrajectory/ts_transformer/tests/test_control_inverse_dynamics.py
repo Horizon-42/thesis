@@ -384,7 +384,7 @@ def test_a_time_constant_past_the_rk4_stability_limit_is_refused_not_integrated(
 
 def test_the_time_constant_axis_is_dropped_from_cv_when_the_lag_is_off():
     """An inert axis multiplies the candidate grid and returns identical folds."""
-    from ts_transformer.cross_validation import applicable_cv_parameters
+    from ts_transformer.training.cross_validation import applicable_cv_parameters
 
     requested = ("d_model", "control_bank_time_constant_s")
 
@@ -428,9 +428,9 @@ def _velocity_term_config(weight: float) -> TSConfig:
 
 def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
     """The true-time-position objective scored position only; this adds the velocity."""
-    import ts_transformer.objective as objective
+    import ts_transformer.training.objective as objective
     from ts_transformer.outputs.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
-    from ts_transformer.dataset import Normalizer
+    from ts_transformer.data.dataset import Normalizer
 
     normalizer = Normalizer(mean=np.zeros(6), std=np.ones(6))
     result = ControlStateLossResult(
@@ -463,7 +463,7 @@ def test_the_velocity_term_is_off_by_default_and_scores_measured_rows_when_on():
 def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
     """Fitted-tail velocity weights are zero, so placeholders cannot enter the loss."""
     import ts_transformer.outputs.control.loss.objective as control_objective
-    from ts_transformer.dataset import Normalizer
+    from ts_transformer.data.dataset import Normalizer
 
     config = _velocity_term_config(1.0)
     channels = len(config.channels)
@@ -496,7 +496,7 @@ def test_the_velocity_term_ignores_the_fitted_tail_and_reaches_the_controls():
 
 
 def ch_velocity():
-    from ts_transformer.channels import VELOCITY_IDX
+    from ts_transformer.data.channels import VELOCITY_IDX
     return VELOCITY_IDX
 
 
@@ -606,8 +606,8 @@ def test_the_imitation_target_is_inverted_through_the_configured_flight_model():
         seen.clear()
         supervision_module.segment_controls = spy
         try:
-            from ts_transformer.dataset import build_series
-            from ts_transformer.synthetic import synthetic_arrivals
+            from ts_transformer.data.dataset import build_series
+            from ts_transformer.data.synthetic import synthetic_arrivals
 
             flights = synthetic_arrivals("KRDU", "05L", n_flights=1, seed=3)
             series, _report = build_series(flights, config, airport="KRDU")
@@ -635,7 +635,7 @@ def test_an_enabled_loss_term_is_reported_as_its_own_component():
     whatever keys the objective actually returned, so an extra term with no name raises
     KeyError on the first batch -- after dataset build, which is the slow part.
     """
-    from ts_transformer.objective import loss_component_names
+    from ts_transformer.training.objective import loss_component_names
 
     off = loss_component_names(_imitation_config(0.0))
     on = loss_component_names(_imitation_config(0.05))
@@ -677,7 +677,7 @@ def test_simple_v3_is_the_settled_production_recipe():
     config = TSConfig(control_recipe_name=CONTROL_RECIPE_SIMPLE_V3, **v3)
     assert TSConfig.from_dict(config.to_dict()) == config
     # The term must actually be wired into training, not merely stored.
-    from ts_transformer.objective import loss_component_names
+    from ts_transformer.training.objective import loss_component_names
 
     assert "imitation" in loss_component_names(config)
     with pytest.raises(ValueError, match="recipe fields are frozen"):

@@ -6,11 +6,11 @@ Split from `test_ts_transformer.py` on 2026-09-10 (review §4.6).
 
 import torch
 
-import ts_transformer.channels as ch
-import ts_transformer.batching as batching
-import ts_transformer.objective as objective
+import ts_transformer.data.channels as ch
+import ts_transformer.training.batching as batching
+import ts_transformer.training.objective as objective
 import ts_transformer.outputs.control.strategy as control_strategy
-from ts_transformer.batching import resolve_batch_size
+from ts_transformer.training.batching import resolve_batch_size
 from ts_transformer.config import PREDICTION_CONTROL, TSConfig
 from ts_transformer.outputs.control.training.diagnostics import ControlTrainingDiagnosticsAccumulator
 from ts_transformer.outputs.control.heads import ControlPrediction

@@ -15,9 +15,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import ts_transformer.anchor_grid as anchor_grid
+import ts_transformer.data.anchor_grid as anchor_grid
 import ts_transformer.experiments.anytime_curve as runner
-from ts_transformer.approach_difficulty import (
+from ts_transformer.data.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
     STRATUM_STRAIGHT_IN,
@@ -27,8 +27,8 @@ from ts_transformer.approach_difficulty import (
     strata_masks,
 )
 from ts_transformer.config import TSConfig
-from ts_transformer.dataset import FlightSeries, build_series
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.dataset import FlightSeries, build_series
+from ts_transformer.data.synthetic import synthetic_arrivals
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

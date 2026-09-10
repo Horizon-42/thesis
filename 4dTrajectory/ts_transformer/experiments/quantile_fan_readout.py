@@ -44,9 +44,9 @@ import numpy as np
 
 from ts_transformer.experiments.support import REPO_ROOT
 
-import ts_transformer.geometric_metrics as gm  # noqa: E402
-from ts_transformer.approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
-from ts_transformer.calibration import (  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRATA_COVARIATES, strata_masks  # noqa: E402
+from ts_transformer.inference.calibration import (  # noqa: E402
     CONFORMAL_ALPHAS,
     QUANTILE_DIR_NAME,
     quantile_directory_name,

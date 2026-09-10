@@ -32,14 +32,14 @@ import numpy as np
 import pytest
 import torch
 
-from ts_transformer.anchor_grid import (
+from ts_transformer.data.anchor_grid import (
     DEFAULT_ANCHOR_GRID_KM,
     REMAINING_PATH_STRATA_EDGES_M,
     REMAINING_PATH_STRATA_LABELS,
     remaining_path_strata,
 )
-from ts_transformer.anchor_strata import remaining_path_uniform_offset
-from ts_transformer.approach_difficulty import remaining_path_profile_m
+from ts_transformer.data.anchor_strata import remaining_path_uniform_offset
+from ts_transformer.data.approach_difficulty import remaining_path_profile_m
 from ts_transformer.config import (
     CONTROL_RECIPE_SIMPLE_V3,
     RANDOM_TRAIN_ANCHOR_SAMPLING_PATH_UNIFORM,
@@ -51,8 +51,8 @@ from ts_transformer.config import (
     default_anchor,
     recipe_settings,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import (
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import (
     FixedAnchorTrajectoryWindows,
     Normalizer,
     RandomAnchorTrajectoryWindows,
@@ -61,8 +61,8 @@ from ts_transformer.dataset import (
     training_window_class,
 )
 from ts_transformer.run_naming import run_display_name
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import train
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

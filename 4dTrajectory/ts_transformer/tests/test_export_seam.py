@@ -24,23 +24,23 @@ from ts_transformer.config import (
     control_recipe,
 )
 from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import Normalizer, build_series
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import Normalizer, build_series
 from evaluation.metrics import evaluate_batch
 from evaluation.records import load_records, record_from_dict
-from ts_transformer.export import (
+from ts_transformer.inference.export import (
     accuracy_block, build_prediction_record, observed_series_metrics, record_stem, write_batch,
 )
-from ts_transformer.forecast import Forecast, forecast_approach
-from ts_transformer.metrics import RAW_KINEMATIC_METRIC_KEYS
-from ts_transformer.models import build_model
+from ts_transformer.inference.forecast import Forecast, forecast_approach
+from ts_transformer.geometry.metrics import RAW_KINEMATIC_METRIC_KEYS
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.state.model import StatePrediction
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.synthetic import synthetic_arrivals
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 from ts_transformer.tests.support import terminal_contexts
-from ts_transformer.train import load_checkpoint, train
+from ts_transformer.training.train import load_checkpoint, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

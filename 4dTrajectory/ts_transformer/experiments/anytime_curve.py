@@ -74,8 +74,8 @@ from ts_transformer.experiments.support import REPO_ROOT
 import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 
-import ts_transformer.geometric_metrics as gm  # noqa: E402
-from ts_transformer.anchor_grid import (
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
+from ts_transformer.data.anchor_grid import (
     DEFAULT_ANCHOR_GRID_KM,
     DEFAULT_GRID_MIN_FUTURE_S,
     PARTIAL_COVERAGE,
@@ -84,8 +84,8 @@ from ts_transformer.anchor_grid import (
     remaining_path_profiles,
     strata_fixed_at_l1,
 )
-from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED  # noqa: E402
-from ts_transformer.channels import POSITION_IDX  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED  # noqa: E402
+from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_OFF,
@@ -95,28 +95,28 @@ from ts_transformer.config import (  # noqa: E402
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.data_provenance import (  # noqa: E402
+from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     provenance_manifest_digests,
     require_matching_data_provenance,
 )
-from ts_transformer.dataset import (  # noqa: E402
+from ts_transformer.data.dataset import (  # noqa: E402
     Normalizer,
     build_series,
     load_flight_dicts,
 )
-from ts_transformer.export import (  # noqa: E402
+from ts_transformer.inference.export import (  # noqa: E402
     PredictionRecord,
     build_prediction_record,
     observed_series_metrics,
     write_batch,
 )
-from ts_transformer.forecast import forecast_approaches  # noqa: E402
+from ts_transformer.inference.forecast import forecast_approaches  # noqa: E402
 from ts_transformer.io_utils import file_sha256  # noqa: E402
-from ts_transformer.models import resolve_device  # noqa: E402
-from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
+from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
+from ts_transformer.training.train import load_checkpoint, usable_series  # noqa: E402
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
-from ts_transformer.anchor_grid import bin_anchor  # noqa: F401  (read off this module by its tests / sibling runners)
+from ts_transformer.data.anchor_grid import bin_anchor  # noqa: F401  (read off this module by its tests / sibling runners)
 
 RESULT_SCHEMA = "ts-anytime-curve-a0-v2"
 #: The ``anytime`` block ``--write-records`` adds to each record directory's summary. It is

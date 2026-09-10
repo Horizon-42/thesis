@@ -38,7 +38,7 @@ import torch.fx as fx
 from torch.fx.passes.shape_prop import ShapeProp
 
 from ts_transformer.config import TSConfig
-from ts_transformer.models import build_model, parameter_count
+from ts_transformer.backbone.adapters import build_model, parameter_count
 
 HERE = Path(__file__).resolve().parent
 

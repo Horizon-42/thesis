@@ -9,18 +9,18 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
-import ts_transformer.coordinate_frames as frames
-import ts_transformer.dataset as dataset_module
+import ts_transformer.data.channels as ch
+import ts_transformer.data.coordinate_frames as frames
+import ts_transformer.data.dataset as dataset_module
 import ts_transformer.outputs.control.supervision as supervision_module
 from aerodynamic_model.common import GeodeticState
 from ts_transformer.config import COORDINATE_FRAMES, TSConfig
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.forecast import forecast_approach
-from ts_transformer.models import build_model
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.inference.forecast import forecast_approach
+from ts_transformer.backbone.adapters import build_model
+from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.tests.support import fake_data_provenance
-from ts_transformer.train import load_checkpoint, train
+from ts_transformer.training.train import load_checkpoint, train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -264,7 +264,7 @@ def test_airport_enu_needs_the_arrival_airport():
 
 
 def test_target_conditioning_appends_input_only_channels():
-    from ts_transformer.target_conditioning import CONDITIONING_CHANNELS
+    from ts_transformer.data.target_conditioning import CONDITIONING_CHANNELS
 
     config = TSConfig(target_conditioning="channels")
     assert config.input_channels == ch.CHANNELS + CONDITIONING_CHANNELS
@@ -278,7 +278,7 @@ def test_target_conditioning_appends_input_only_channels():
 
 
 def test_conditioned_windows_carry_the_target_and_the_model_still_predicts_six_channels():
-    from ts_transformer.forecast import history_at_anchor
+    from ts_transformer.inference.forecast import history_at_anchor
 
     series, config = _series(
         n_flights=3, seq_len=20, n_segments=4, coordinate_frame="airport-enu",

@@ -13,15 +13,15 @@ from typing import Callable
 
 import torch
 
-from ts_transformer.channels import POSITION_IDX
+from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.config import (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     TSConfig,
 )
-from ts_transformer.dataset import Normalizer
-from ts_transformer.fixed_dt_supervision import FixedDTControlSupervision
-from ts_transformer.physical_criteria import terminal_position_error_m
+from ts_transformer.data.dataset import Normalizer
+from ts_transformer.data.fixed_dt_supervision import FixedDTControlSupervision
+from ts_transformer.geometry.physical_criteria import terminal_position_error_m
 
 
 @dataclass(frozen=True)

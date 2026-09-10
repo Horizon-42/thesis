@@ -11,7 +11,7 @@ component along the flight-path normal is ``cos gamma + V gamma_dot / g`` and th
 component across it is ``V cos gamma psi_dot / g``; their resultant, in units of the
 weight, is ``n``. ``evaluation.arrival`` uses it over a window of ADS-B samples to
 anchor the observed baseline's speed gate on the load factor the flight actually flew.
-(``ts_transformer/flyability.py`` still carries its own per-sample copy of the same
+(``ts_transformer/geometry/flyability.py`` still carries its own per-sample copy of the same
 two lines -- it also needs the bank angle; folding it onto this function is a listed
 follow-up, deferred while a campaign runs from that tree.)
 """

@@ -64,7 +64,7 @@ for _path in (_REPO_ROOT, _PACKAGE_ROOT):
         sys.path.insert(0, str(_path))
 
 import ts_transformer.approach_clustering.cli as approach_cohorts_cli  # noqa: E402
-import ts_transformer.batch_benchmark as batch_benchmark  # noqa: E402
+import ts_transformer.cli.benchmark_batch as batch_benchmark  # noqa: E402
 from ts_transformer.cli import (  # noqa: E402
     cross_validate as cross_validate_cli,
     evaluate_fit as evaluate_fit_cli,

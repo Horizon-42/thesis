@@ -65,10 +65,10 @@ from ts_transformer.experiments.support import REPO_ROOT
 
 import torch  # noqa: E402
 
-import ts_transformer.geometric_metrics as gm  # noqa: E402
-from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks  # noqa: E402
-from ts_transformer.batch_contract import model_forward  # noqa: E402
-from ts_transformer.channels import POSITION_IDX  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED, strata_masks  # noqa: E402
+from ts_transformer.data.batch_contract import model_forward  # noqa: E402
+from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     CONTROL_HOOK_OFF,
     CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
@@ -92,13 +92,13 @@ from ts_transformer.outputs.control.basis_fit import (  # noqa: E402
     inverse_dynamics_seed,
     width_scaled_learning_rate,
 )
-from ts_transformer.data_provenance import (  # noqa: E402
+from ts_transformer.data.data_provenance import (  # noqa: E402
     arrival_data_provenance,
     checkpoint_data_provenance,
     provenance_manifest_digests,
     require_matching_data_provenance,
 )
-from ts_transformer.dataset import (  # noqa: E402
+from ts_transformer.data.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
@@ -107,11 +107,11 @@ from ts_transformer.dataset import (  # noqa: E402
 )
 from flight_scenarios.identity import flight_key, summary_row_key  # noqa: E402
 from ts_transformer.io_utils import file_sha256  # noqa: E402
-from ts_transformer.metrics import common_physical_time_flight_metrics  # noqa: E402
-from ts_transformer.models import resolve_device  # noqa: E402
-from ts_transformer.physical_criteria import fixed_dt_position_ade_m  # noqa: E402
+from ts_transformer.geometry.metrics import common_physical_time_flight_metrics  # noqa: E402
+from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
+from ts_transformer.geometry.physical_criteria import fixed_dt_position_ade_m  # noqa: E402
 from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
-from ts_transformer.train import load_checkpoint, usable_series  # noqa: E402
+from ts_transformer.training.train import load_checkpoint, usable_series  # noqa: E402
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from dataclasses import fields  # noqa: F401  (read off this module by its tests / sibling runners)
 

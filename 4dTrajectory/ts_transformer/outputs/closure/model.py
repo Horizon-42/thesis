@@ -44,14 +44,14 @@ from torch import nn
 
 import ts_transformer.outputs.closure.geometry as cg
 import ts_transformer.outputs.closure.profile as cp
-from ts_transformer.approach_difficulty import approach_difficulty
-from ts_transformer.batch_contract import LossComponents
+from ts_transformer.data.approach_difficulty import approach_difficulty
+from ts_transformer.data.batch_contract import LossComponents
 from ts_transformer.config import CLOSURE_LABEL_KNOTS, CLOSURE_TIMING_SCALE_S, TSConfig
-from ts_transformer.geometric_metrics import cumulative_arc_m
-from ts_transformer.intent_conditioning import truth_join_point
+from ts_transformer.geometry.geometric_metrics import cumulative_arc_m
+from ts_transformer.data.intent_conditioning import truth_join_point
 
 if TYPE_CHECKING:   # dataset imports this module lazily; a module-level import would cycle
-    from ts_transformer.dataset import FlightSeries, Normalizer
+    from ts_transformer.data.dataset import FlightSeries, Normalizer
 
 LABEL_SCHEMA = "closure-labels-v2"  # v2: per-profile position / time errors, geometry kind + length ratio
 LABEL_RESIDUAL_MAX_M = 1_000.0      # above this F3 residual the flight is a fallback, not a label

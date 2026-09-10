@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 import torch
 
-from ts_transformer.batch_contract import model_forward
+from ts_transformer.data.batch_contract import model_forward
 from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -41,19 +41,19 @@ from ts_transformer.config import (
     TSConfig,
 )
 from ts_transformer.outputs.control.envelope import CONTROL_LOWER, CONTROL_UPPER
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import build_series
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import build_series
 from ts_transformer.outputs.control.forecast import duration_quantile_predictions
 from ts_transformer.io_utils import file_sha256
-from ts_transformer.models import build_model
+from ts_transformer.backbone.adapters import build_model
 import ts_transformer.outputs.control.loss.objective as control_objective
 from ts_transformer.outputs.control.loss.objective import DURATION_QUANTILE_COMPONENT
-from ts_transformer.objective import loss_component_names
+from ts_transformer.training.objective import loss_component_names
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.duration_heads import QuantileFinalTimeHead, pinball_duration_loss
 from ts_transformer.run_naming import run_display_name, run_slug
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import load_checkpoint, train
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import load_checkpoint, train
 
 from ts_transformer.tests.support import dynamics_context
 from ts_transformer.tests.test_duration_quantiles import _config
@@ -200,7 +200,7 @@ def _loss_components(config: TSConfig, monkeypatch, *, predicted_s: float, truth
             geodetic_states=torch.zeros(1, config.n_segments, 7, dtype=torch.float64),
         ),
     )
-    from ts_transformer.dataset import Normalizer
+    from ts_transformer.data.dataset import Normalizer
 
     normalizer = Normalizer(mean=np.zeros(config.enc_in), std=np.ones(config.enc_in))
     prediction = ControlPrediction(
@@ -489,7 +489,7 @@ def test_the_calibration_runner_takes_a_two_head_checkpoint(tmp_path: Path, monk
 def test_the_quantile_fan_decodes_a_two_head_checkpoint(tmp_path: Path, monkeypatch):
     """B3 on a B1.b arm: training's rollout was CTA-driven and the point head inert, and the
     fan is decoded at the QUANTILE head's five levels."""
-    from ts_transformer.calibration import QUANTILE_DIR_NAME, quantile_directory_name
+    from ts_transformer.inference.calibration import QUANTILE_DIR_NAME, quantile_directory_name
 
     checkpoint, _series = _trained_two_head(
         tmp_path, monkeypatch, cta_conditioning=CTA_CONDITIONING_GIVEN

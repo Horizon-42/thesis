@@ -219,7 +219,7 @@ from ts_transformer.outputs.control.constraints.saturation import (
 from ts_transformer.outputs.control.constraints.speed_floor import floor_speed
 from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from ts_transformer.outputs.control.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
-from ts_transformer.final_approach_geometry import (
+from ts_transformer.geometry.final_approach_geometry import (
     alignment_cosine,
     hard_aligned,
     runway_axes,

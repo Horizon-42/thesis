@@ -622,7 +622,7 @@ class PublicationPlan:
             return None
         if not self.eligibility_roster.is_file():
             return f"missing eligibility roster {self.eligibility_roster}"
-        from ts_transformer.data_provenance import (   # the package's rule, imported where it is needed
+        from ts_transformer.data.data_provenance import (   # the package's rule, imported where it is needed
             checkpoint_data_provenance,
             require_matching_data_provenance,
             roster_eligible_set_digest,
@@ -638,7 +638,7 @@ class PublicationPlan:
             return None
         # Metadata that predates `eligible_sets` names only the roster's bytes, so the
         # answer comes from the checkpoint payload — one path, torch load included.
-        from ts_transformer.train import load_checkpoint_payload
+        from ts_transformer.training.train import load_checkpoint_payload
         try:
             payload = load_checkpoint_payload(self.experiment.checkpoint)
             require_matching_data_provenance(

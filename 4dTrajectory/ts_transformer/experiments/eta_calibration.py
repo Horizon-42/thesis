@@ -66,19 +66,19 @@ from pathlib import Path
 
 from ts_transformer.experiments.support import REPO_ROOT
 
-from ts_transformer.approach_difficulty import approach_difficulty  # noqa: E402
-from ts_transformer.calibration import (  # noqa: E402
+from ts_transformer.data.approach_difficulty import approach_difficulty  # noqa: E402
+from ts_transformer.inference.calibration import (  # noqa: E402
     CalibrationSample,
     calibrate,
     render,
     write_conformal_table,
 )
 from ts_transformer.config import DURATION_HEADS_WITH_QUANTILES  # noqa: E402
-from ts_transformer.dataset import truth_duration_s  # noqa: E402
-from ts_transformer.forecast import default_anchor  # noqa: E402
+from ts_transformer.data.dataset import truth_duration_s  # noqa: E402
+from ts_transformer.inference.forecast import default_anchor  # noqa: E402
 from ts_transformer.outputs.control.forecast import duration_quantile_predictions  # noqa: E402
 from ts_transformer.io_utils import file_sha256  # noqa: E402
-from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
 from ts_transformer.experiments.anytime_curve import Grid, cohort_series, load_arm  # noqa: E402
 
 RESULT_SCHEMA = "ts-eta-calibration-b2-v1"

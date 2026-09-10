@@ -318,7 +318,7 @@ abs(elevation_hae_m - elevation_msl_m - hae_minus_msl_m) <= numeric_tolerance
 
 - [ ] **7. 统一所有 modeling consumers 的固定 offset。** 修改
   [`trajectory_data_process/harvest/observed.py`](../trajectory_data_process/harvest/observed.py)、
-  `flight_scenarios` scenario records、`4dTrajectory/ts_transformer/dataset.py`、evaluation
+  `flight_scenarios` scenario records、`4dTrajectory/ts_transformer/data/dataset.py`、evaluation
   metadata 及 optimizer/prediction record metadata，使同一 flight 从入口到输出始终携带并
   使用同一个 runway-local `hae_minus_msl_m`；synthetic 路径保持显式独立。
 

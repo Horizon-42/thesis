@@ -1,0 +1,163 @@
+"""One interface over the two vendored architectures.
+
+The vendored files are byte-identical to upstream, and upstream disagrees about how a
+model is called: iTransformer keeps the four-argument Autoformer-family signature
+``model(x_enc, x_mark_enc, x_dec, x_mark_dec)`` (ignoring the last three on the inverted
+path), while PatchTST takes a bare ``model(x)``. Rather than teach the training loop to
+branch on architecture — or edit the vendored code and forfeit the clean upstream diff —
+each state forecaster is wrapped in a thin adapter with one signature::
+
+    forecaster(x: Tensor[B, seq_len, C]) -> Tensor[B, N, C]
+
+The state path attaches ``final_time_s`` to that forecast. The opt-in control path instead
+retains the same encoder's ordered per-channel pre-projection features, conditions them on
+the flight's mass and aerodynamic parameters, and decodes bounded controls plus a
+non-uniform time partition.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import torch
+import torch.nn as nn
+
+from ts_transformer.config import TSConfig
+from ts_transformer.outputs import strategy
+from ts_transformer.backbone.vendor.itransformer import Model as VendoredITransformer
+from ts_transformer.backbone.vendor.patchtst import Model as VendoredPatchTST
+
+if TYPE_CHECKING:  # a data-plane value type; the builders only pass it through
+    from ts_transformer.data.dataset import Normalizer
+
+
+class ITransformerAdapter(nn.Module):
+    """iTransformer: attention ACROSS variates (each channel is one token).
+
+    The inverted design embeds a whole series per channel, so attention is computed between
+    channels rather than between time steps. For trajectory data that means it can represent
+    "east and north move together through a turn" directly — the coupling PatchTST cannot see.
+    """
+
+    def __init__(self, config: TSConfig):
+        super().__init__()
+        self.inner = VendoredITransformer(config)
+        self.channel_count = len(config.channels)
+
+    def _split(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """State columns, and the input-only conditioning columns (if any) as covariates.
+
+        The vendored model already implements covariate tokens: ``x_mark_enc`` is
+        concatenated on the VARIATE axis, attends with the state tokens, and its projector
+        outputs are filtered away (``[:, :, :N]``) — so the conditioning shapes the six
+        state forecasts without ever being forecast itself.
+        """
+        if x.shape[-1] == self.channel_count:
+            return x, None
+        return x[..., : self.channel_count], x[..., self.channel_count :]
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # No calendar covariates: time enters this project's data as the uniform grid
+        # itself (dt is constant). The only covariate tokens are target conditioning.
+        x_enc, x_mark = self._split(x)
+        return self.inner(x_enc, x_mark, None, None)
+
+    def encode_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Flatten encoder tokens in channel-contract order before the state projector."""
+        x, x_mark = self._split(x)
+        if self.inner.use_norm:
+            x = x - x.mean(1, keepdim=True).detach()
+            x = x / torch.sqrt(torch.var(x, dim=1, keepdim=True, unbiased=False) + 1e-5)
+        encoded = self.inner.enc_embedding(x, x_mark)
+        encoded, _attentions = self.inner.encoder(encoded, attn_mask=None)
+        # iTransformer has no channel-index embedding: averaging these permutation-
+        # equivariant tokens erases which latent came from e/n/u or its derivative. Keep
+        # the serialized CHANNELS order explicit in the flattened feature instead.
+        return encoded.flatten(start_dim=1)
+
+    def discard_state_head(self) -> None:
+        """Remove the unused state projector when this adapter feeds a control head."""
+        self.inner.projector = nn.Identity()
+
+
+class PatchTSTAdapter(nn.Module):
+    """PatchTST: channel-independent, patched attention along TIME.
+
+    Every channel is forecast by the same weights in isolation (``TSTiEncoder``), so
+    cross-channel coupling is structurally unavailable — see vendor/patchtst/PROVENANCE.md.
+    That is the documented design and the reason it generalises; here it is also the
+    interesting contrast against iTransformer.
+    """
+
+    def __init__(self, config: TSConfig):
+        super().__init__()
+        # The vendored Model reads most knobs off `configs` but takes the activation as a
+        # bare kwarg (upstream API) — plumb it, or TSConfig.activation would apply to
+        # iTransformer only while the checkpoint records it for both.
+        self.inner = VendoredPatchTST(config, act=config.activation)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.inner(x)
+
+    @staticmethod
+    def _backbone_features(backbone: nn.Module, x: torch.Tensor) -> torch.Tensor:
+        z = x.permute(0, 2, 1)
+        if backbone.revin:
+            z = backbone.revin_layer(z.permute(0, 2, 1), "norm").permute(0, 2, 1)
+        if backbone.padding_patch == "end":
+            z = backbone.padding_patch_layer(z)
+        z = z.unfold(dimension=-1, size=backbone.patch_len, step=backbone.stride)
+        z = z.permute(0, 1, 3, 2)
+        encoded = backbone.backbone(z)  # [B,C,d_model,patches]
+        # Pool only time patches. PatchTST processes channels independently and has no
+        # channel identity inside the backbone, so the ordered C axis must survive.
+        return encoded.mean(dim=3).flatten(start_dim=1)
+
+    def encode_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Pool channel-independent patch tokens before the state forecast head."""
+        if not self.inner.decomposition:
+            return self._backbone_features(self.inner.model, x)
+        residual, trend = self.inner.decomp_module(x)
+        return self._backbone_features(
+            self.inner.model_res, residual
+        ) + self._backbone_features(self.inner.model_trend, trend)
+
+    def discard_state_head(self) -> None:
+        """Remove unused flattened forecast heads from a control-only adapter."""
+        if self.inner.decomposition:
+            self.inner.model_res.head = nn.Identity()
+            self.inner.model_trend.head = nn.Identity()
+        else:
+            self.inner.model.head = nn.Identity()
+
+
+BUILDERS = {
+    "itransformer": ITransformerAdapter,
+    "patchtst": PatchTSTAdapter,
+}
+
+
+def build_state_forecaster(config: TSConfig) -> nn.Module:
+    """The vendored state forecaster selected by ``config.model``."""
+    return BUILDERS[config.model](config)
+
+
+def build_model(config: TSConfig, normalizer: Normalizer | None = None) -> nn.Module:
+    """Build the configured output path's model on the vendored backbone.
+
+    ``normalizer`` gives an output layer that works in physical units (the
+    corridor-bounded state output) its scale; a checkpoint restores it with the weights,
+    so loading passes none.
+    """
+    return strategy(config).build_model(config, normalizer)
+
+
+def resolve_device(spec: str) -> torch.device:
+    """``"auto"`` -> cuda when available, else cpu; anything else passed through verbatim."""
+    if spec == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(spec)
+
+
+def parameter_count(model: nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)

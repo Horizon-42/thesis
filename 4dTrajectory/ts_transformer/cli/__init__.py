@@ -6,9 +6,10 @@ in a 700-line function.
 
 `common.py` holds what more than one command needs: the shared argument groups, the
 config assembly (`config_from_args`), the cohort loading `train` and `cross-validate`
-share, and `split_keys_for_current_data`. `approach-cohorts` and `benchmark-batch` follow
-the same triple from their own modules (`approach_clustering.cli`, `batch_benchmark`),
-which is why they have no module here.
+share, and `split_keys_for_current_data`. `approach-cohorts` follows the same triple from
+its own package (`approach_clustering.cli`), which is why it has no module here;
+`benchmark-batch` is `benchmark_batch.py` (the top-level `batch_benchmark.py` until the
+2026-09-10 grouping).
 
 This package re-exports nothing on purpose: the command modules import each other's
 helpers through `common`, never through the package.

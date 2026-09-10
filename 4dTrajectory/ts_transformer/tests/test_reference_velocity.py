@@ -12,7 +12,7 @@ if str(TS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(TS_DIR.parent))
 
 from ts_transformer.config import TSConfig  # noqa: E402
-from ts_transformer.reference_velocity import (  # noqa: E402
+from ts_transformer.data.reference_velocity import (  # noqa: E402
     REFERENCE_VELOCITY_POSITION_DIFFERENCE,
     REFERENCE_VELOCITY_SMOOTHED_POSITION_DIFFERENCE,
     rebuild_reference_velocities,

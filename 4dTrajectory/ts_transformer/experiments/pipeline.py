@@ -69,7 +69,7 @@ from ts_transformer.config import (
     control_recipe,
     uses_control_dynamics,
 )
-from ts_transformer.cross_validation import (  # noqa: E402
+from ts_transformer.training.cross_validation import (  # noqa: E402
     BEST_CONFIG_NAME,
     CV_PARAMETER_GRIDS,
     DEFAULT_CV_EPOCHS,
@@ -80,13 +80,13 @@ from ts_transformer.cross_validation import (  # noqa: E402
     applicable_cv_parameters,
     parameter_grid,
 )
-from ts_transformer.data_provenance import (  # noqa: E402
+from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,
     roster_eligible_set_digest,
 )
-from ts_transformer.evaluation_protocol import TEST_RELEASE_NAME  # noqa: E402
-from ts_transformer.lateral_eligibility import (  # noqa: E402
+from ts_transformer.inference.evaluation_protocol import TEST_RELEASE_NAME  # noqa: E402
+from ts_transformer.data.lateral_eligibility import (  # noqa: E402
     default_lateral_pass_roster_path,
     ensure_lateral_pass_roster,
 )
@@ -95,7 +95,7 @@ from ts_transformer.run_naming import (  # noqa: E402
     run_display_name,
 )
 from ts_transformer.io_utils import file_sha256  # noqa: E402
-from ts_transformer.train import (  # noqa: E402
+from ts_transformer.training.train import (  # noqa: E402
     CHECKPOINT_METADATA_NAME,
     CHECKPOINT_METADATA_SCHEMA,
     CHECKPOINT_NAME,

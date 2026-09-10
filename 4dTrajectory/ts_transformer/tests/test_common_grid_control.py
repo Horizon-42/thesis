@@ -11,9 +11,9 @@ import torch
 
 import ts_transformer.experiments.predictability_report as predictability_report
 from ts_transformer.config import PREDICTION_CONTROL, TSConfig
-from ts_transformer.dataset import Normalizer, build_series
-from ts_transformer.models import build_model
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.backbone.adapters import build_model
+from ts_transformer.data.synthetic import synthetic_arrivals
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

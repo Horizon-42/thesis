@@ -4,6 +4,27 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-10 — ts_transformer: the package grouped by plane — `data/`, `geometry/`, `backbone/`, `training/`, `inference/`
+
+The last step of the package review (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`
+§4.2's layout, resolution paragraph), on `dev-pkg-review`. Pure moves: every module keeps its
+name and content, only its directory changed, and every qualified import across the repository
+was rewritten (the package, its tests, the docs scripts, the runners, the publisher, `run_ts.py`).
+Nothing on disk changed: full suite 992 passed, 1 skipped, and the 219 stored `history.json` configs give
+byte-identical run names, slugs and loadability.
+
+- `data/` (the data plane: `dataset`, `splits`, `data_provenance`, `channels`, the frames, the
+  grids, the anchor axis, eligibility, the conditionings, `synthetic`, `approach_difficulty`,
+  `fixed_dt_supervision`, `batch_contract`), `geometry/` (the corridor, arc length, the metrics,
+  flyability), `backbone/` (`adapters`, formerly `models.py`, and `vendor/`), `training/` (the
+  loop, the objective, the replay, the probe, cross-validation, the experiment index),
+  `inference/` (`forecast`, `calibration`, `export`, the test-release protocol, the readout
+  builders); `batch_benchmark.py` is `cli/benchmark_batch.py`. `outputs/`, `cli/`,
+  `experiments/` and the top level (`config`, `run_naming`, `io_utils`, `repo_layout`) as before.
+- A group's `__init__.py` re-exports nothing, so the torch-free boundaries
+  (`tests/test_import_boundaries.py`) hold; `tests/test_architecture.py`'s layering rules are
+  spelled in the new names.
+
 ### 2026-09-10 — ts_transformer: review §4.6 — `tests/support.py`, the 5,855-line test file split by topic, the suite green
 
 Step 6b of the package review's order (`4dTrajectory/ts_transformer/docs/2026-09-09_package_review_bugs_and_architecture.md`

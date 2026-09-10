@@ -6,7 +6,7 @@ from typing import Sequence
 
 import numpy as np
 
-from ts_transformer.dataset import FlightSeries
+from ts_transformer.data.dataset import FlightSeries
 
 
 def horizontal_arc_feature(

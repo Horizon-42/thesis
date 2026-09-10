@@ -13,7 +13,7 @@ import json
 import pytest
 
 import ts_transformer.experiments.eta_error_readout as runner
-from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED
 
 # id, tortuosity, established, remaining path, final-time error, FDE. Three straight-in
 # flights and two vectored ones, with errors chosen so every quantile is hand-computable.

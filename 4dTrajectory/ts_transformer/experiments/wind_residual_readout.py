@@ -47,7 +47,7 @@ import numpy as np
 from evaluation.cli import DEFAULT_METAR_ROOT  # noqa: E402
 from evaluation.wind import load_wind_tables, wind_at_landing  # noqa: E402
 import ts_transformer.docs.compare_frame_arms as cfa  # noqa: E402
-from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
 
 FINAL_WINDOW_S = 120.0
 # Headwind bins (m/s): a tailwind, calm, an ordinary headwind, a strong one.

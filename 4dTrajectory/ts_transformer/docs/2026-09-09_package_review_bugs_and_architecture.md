@@ -16,8 +16,8 @@ points, and the 2026-09-09 plan-and-guidance design is the next axis.
 |---|---|
 | bug findings | 4 number-changing on live paths, 4 crash paths, ~20 contract holes — §2, all with `file:line` |
 | architecture | diagnosis §3, target §4, retirement candidates with census evidence §5, order §6 |
-| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3), 4 (§4.2), 5 (§4.4), 6a (§4.5) and 6b (§4.6, see their resolution paragraphs) done in the same branch |
-| decisions needed from the user | §5's freeze/delete list; whether the config defaults move to the current recipe (§4.3); the five §7 decisions |
+| **resolution (2026-09-09/10, `dev-pkg-review`)** | **§7**: A-1 A-2 A-3 A-4 B-1 B-2 B-3 B-4 fixed; C-1 C-2 C-3 C-4(gate) C-5 C-6 C-7(dead checks) C-8 C-10 C-11 C-13 C-14 C-15 C-16 C-17 C-18 C-19 C-20 fixed; C-12 decided (grader stays 0.5); C-4 (floor: stays a field, see §4.3's resolution), C-7 (directory binding), C-9 stay open. §6 steps 1 (the package), 2 (§5), 3 (§4.3), 4 (§4.2), 5 (§4.4), 6a (§4.5), 6b (§4.6) and the §4.2 layout (see their resolution paragraphs) done in the same branch — the review's §6 order is complete |
+| decisions needed from the user | none blocking: §5 is frozen (its resolution), the config defaults stay (§4.3's resolution, the user's 2026-09-10 call); C-4 (floor), C-7 (ledger directory), C-9 (`cv_results.json` names) stay open in `docs/OPEN_ITEMS.md`, and the "name every field against the nearest recipe" grammar change waits for its own relabel pass |
 
 ## 1. Measured
 
@@ -329,6 +329,28 @@ nothing under `outputs/` imports the loop, only the strategy seam reaches the sp
 registry is lazy, `dataset` reaches only the registry. Acceptance: full suite 972 passed (the 12 known `test_ts_pipeline.py` fixtures red before and after); 219 stored
 configs, 112 load, 0 names moved.
 
+**Layout resolution (2026-09-10, `dev-pkg-review`, the last step).** The directories above,
+as pure moves once everything else was done — every module keeps its name and its content,
+only its directory changed, and every qualified import and path literal across the repository
+was rewritten: `data/` (the data plane — `dataset`, `splits`, `data_provenance`, `channels`,
+the frames and grids, `anchor_grid` / `anchor_strata`, `lateral_eligibility`,
+`reference_velocity`, the two conditionings, `synthetic`, `development_cohorts`,
+`approach_difficulty`, `fixed_dt_supervision`, `batch_contract`), `geometry/` (the corridor,
+arc length, the metrics, flyability, `physical_criteria`, `terminal_state_loss`), `backbone/`
+(`adapters`, formerly `models.py`, and `vendor/`), `training/` (`train`, `validation`,
+`fixed_anchor_validation`, `objective`, `batching`, `cross_validation`,
+`training_performance`, `experiment_index`), `inference/` (`forecast`, `calibration`,
+`export`, `evaluation_protocol`, `intent_explainability`,
+`build_multiflight_capacity_report`); `batch_benchmark.py` is `cli/benchmark_batch.py`;
+`config`, `run_naming`, `io_utils`, `repo_layout` and `__main__` stay at the top. **Not the
+sketch's split of files:** `dataset.py` is not `series.py` + `windows.py`, the anchor modules
+are not an `anchors/` package, `train.py` is not `session` / `epoch` / `selection` /
+`checkpoint` — those are the §4.7 file splits, each a content change with its own review;
+the grouping only moves. A group's `__init__.py` re-exports nothing, so the torch-free
+boundaries (`tests/test_import_boundaries.py`) hold, and `tests/test_architecture.py`'s
+layering rules are spelled in the grouped names. Acceptance: full suite 992 passed, 1 skipped; 219 stored
+configs, 112 load, 0 names moved.
+
 ### 4.3 Split `TSConfig` by owner — sum types where the validators say "belongs to X"
 
 Reading the five validators (775 lines) as a specification, most rules are of two kinds: "field
@@ -628,5 +650,6 @@ the module's own test file.
 | C-20 | **fixed** — `input_channels` present-null; the inert `offsets[~active]` line; the zero-ground-speed `gamma` fallback (`atan2` handles it, and V·sin γ = udot again); `strictly_increasing` accumulates first and ramps after; the dataset refuses a CTA mode it cannot fill instead of letting the head build an empty token; `anchor_state` renamed; `generated_at` is `utc_now()`; the plan's dead τ field deleted; the `CLAUDE.md` `overlap` claim corrected. Left: `intent_explainability`'s clip fallback (the scene half is a §5 archive candidate) | various |
 
 **§6 step 1 (the package)** was done on the same branch after the fixes — see the changelog
-entry. Steps 2–6 (§5 deletions, the config split, the strategies, the loop/predict extraction,
-the runners) are the user decisions this document already names, unchanged.
+entry. Steps 2–6 (§5 freeze, the config views, the strategies, the loop/predict extraction,
+the runners and the tests) and the §4.2 layout followed on 2026-09-10, each with its own
+resolution paragraph in its section and its own changelog entry.

@@ -24,7 +24,7 @@ _CLI_SPEC.loader.exec_module(ts_cli)
 
 import ts_transformer.cli.common as cli_common  # noqa: E402
 import ts_transformer.cli.evaluate_fit as cli_evaluate_fit  # noqa: E402
-import ts_transformer.evaluation_protocol as evaluation_protocol  # noqa: E402
+import ts_transformer.inference.evaluation_protocol as evaluation_protocol  # noqa: E402
 from ts_transformer.outputs import ForecastOptions
 from ts_transformer.config import (
     HORIZON_FULL,
@@ -34,20 +34,20 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import Normalizer, build_series
-from ts_transformer.splits import split_by_flight
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.splits import split_by_flight
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records
-from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
-from ts_transformer.forecast import forecast_approach
-from ts_transformer.models import build_model
-from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
+from ts_transformer.inference.forecast import forecast_approach
+from ts_transformer.backbone.adapters import build_model
+from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 from ts_transformer.outputs.state.loss import STATE_LOSS_COMPONENT_NAMES
 from ts_transformer.tests.support import fake_data_provenance, terminal_contexts
-from ts_transformer.train import (  # noqa: E402
+from ts_transformer.training.train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
     evaluate_fit_splits, load_checkpoint, train,
 )

@@ -89,7 +89,7 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v9`.
   declares no `target_source` gets the STRICT reading, never a bypass.
 - **The evaluation report's schema version has FOUR homes and a green test suite proves nothing
   about them.** Bumping `evaluation.metrics.REPORT_SCHEMA_VERSION` v4→v5 landed in the producer
-  only; `4dTrajectory/ts_transformer/lateral_eligibility.py` and
+  only; `4dTrajectory/ts_transformer/data/lateral_eligibility.py` and
   `aeroviz-4d/src/data/evaluationReport.ts` kept their own v4 literals, so the ts pipeline raised
   on every regenerated report and the frontend's `isEvaluationReport` rejected them — surfacing
   `"evaluation report is malformed"` (`EvaluationSummary.tsx`), which is a MISLEADING message:
@@ -208,7 +208,7 @@ tree decides *how good*. Report schema: `terminal-approach-evaluation-v9`.
 - **`final_time_s` is read back OFF the serialized array, never recomputed.** With `t` exact
   the two agree anyway, but deriving it makes the invariant structural rather than a
   coincidence. Two writers got this wrong the moment precision entered the contract
-  (`evaluation_record`, and `ts_transformer/export.py`'s second unrounded copy of an array it
+  (`evaluation_record`, and `ts_transformer/inference/export.py`'s second unrounded copy of an array it
   already had) — both were caught by `record_from_dict` rejecting the batch, loudly.
 - `aeroviz-4d/python/build_scenario_comparison_czml.py` mirrors the table
   (`_DEG_DECIMALS`/`_ALT_DECIMALS`) because that package must not import the modeling tree;

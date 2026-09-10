@@ -132,7 +132,7 @@ flight model.
 - **Controls are DIMENSIONLESS in this package** (`outputs/control/envelope.py` is the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, same box on every
   airframe. Newtons appear in exactly two places — `physical_controls()` into the dynamics, and
-  `forecast.py` out to the evaluation record. **The thrust floor is negative on purpose** (an
+  `inference/forecast.py` out to the evaluation record. **The thrust floor is negative on purpose** (an
   approach needs net-negative force this clean polar does not model). This is NOT the optimizer's
   envelope, which is a flyability claim; this one is a learned head's search space. **The two
   load-factor floors differ on purpose and neither moves (decided 2026-09-09, review C-12)**:
@@ -319,7 +319,7 @@ weights all read the one number):
 | `fixed-anchor-common-grid-ade` | airport-macro common-grid ADE at the **L−1 anchor** | the default, and right for every fixed-anchor arm — L−1 is where they train and where they are judged |
 | `anchor-grid-common-grid-ade` | the same ADE at **every anchor set the cohort supports**, equal weight per SET: L−1 plus whichever of `anchor_grid`'s 16 / 12 / 8 / 6 km CANDIDATE bins clears the coverage gate, each flight at its own closest admissible sample (full lookback, ≥ 60 s of truth after it) | **a random-anchor arm**. The fixed metric scores the ONE anchor such a model is least specialised for and froze `A0_random_hr8_tv1` at epoch 10 (L−1 ADE 2949 vs native32's 1322) while that checkpoint drew BETTER geometry than the fixed arm at every anchor (chamfer p50 −114…−524 m). Each set's ADE is the mean over the flights that HAVE that anchor — absent, never scored 0 — then the airport macro; the per-set values, counts and `dropped_bins` land in `history.json`'s `validation_anchor_grid` block every epoch, `fixed_anchor_common_grid_ade_m` among them so the L−1 veto stays readable. Costs ≈ 4–5× the selection stage (one extra deployable replay per surviving bin; the L−1 pass is reused), ≈ +12–15 % per epoch at KRDU scale. **Refused with `cta_conditioning=given` or `intent_conditioning=truth-…`** — the grid re-reads the oracle at every bin anchor, so the metric would be selecting on how fast it converges |
 
-**`anchor_grid.py` is the one definition of the grid** — bins (`DEFAULT_ANCHOR_GRID_KM`
+**`data/anchor_grid.py` is the one definition of the grid** — bins (`DEFAULT_ANCHOR_GRID_KM`
 20/16/12/8/6/4/2 km, `VALIDATION_ANCHOR_GRID_KM` the four the metric may select on), the
 60 s future floor, `PARTIAL_COVERAGE` = 0.5, the per-flight `bin_anchor` rule and the
 fixed-at-L−1 `strata_fixed_at_l1` rule. `run_ts.py anytime_curve` and the selection metric
@@ -327,7 +327,7 @@ import the SAME objects (`tests/test_anchor_grid.py` asserts identity, not equal
 grids that merely agreed today would make "the curve improved" and "this epoch was selected
 on the curve" claims about different anchors.
 
-**The grid's VALUES live one level down, in the leaf `anchor_strata.py`**, and `anchor_grid`
+**The grid's VALUES live one level down, in the leaf `data/anchor_strata.py`**, and `anchor_grid`
 re-exports them — because `anchor_grid` imports `dataset` while `dataset` needs the same
 kilometres for the training-anchor draw, so a single home would mean a cycle or a second
 copy. The leaf owns `DEFAULT_ANCHOR_GRID_KM`, the strata those values cut when read as EDGES
@@ -491,7 +491,7 @@ never zero.
 - **A per-airport ADE without its ROUTE MIX is not a comparison.** Inside a matched stratum every
   airport scores the same; the whole spread is the share of flights in that stratum. Reweighted
   to the pooled mix KSJC goes 483 → 1526 m, best of five to worst. The signature to recognise:
-  ADE and cross-track improve while **FDE does not**. → `approach_difficulty.py`
+  ADE and cross-track improve while **FDE does not**. → `data/approach_difficulty.py`
 - **Treat any margin under ~1.5× as provisional** — both a split change and a ≤0.3 % data rescale
   moved effects of that size. Seed floor on the frame axis: threshold arms move 5–22 m pooled
   ADE, airport arms up to 107 m.
@@ -506,6 +506,26 @@ never zero.
 
 A regular package under `4dTrajectory/` (`ts_transformer/__init__.py`, `4dTrajectory/pyproject.toml`);
 modules are imported by their qualified names — see the package rule under Conventions.
+
+**The package is grouped by plane** (2026-09-10, the review's §4.2 layout, done last as pure
+moves — every module keeps its name and content, only its directory changed):
+
+| directory | what lives there |
+|---|---|
+| `data/` | the data plane: `dataset`, `splits`, `data_provenance`, `channels`, `coordinate_frames`, `time_grids`, `anchor_grid` / `anchor_strata`, `lateral_eligibility`, `reference_velocity`, `target_conditioning` / `intent_conditioning`, `synthetic`, `development_cohorts`, `approach_difficulty`, `fixed_dt_supervision`, `batch_contract` |
+| `geometry/` | final-approach geometry and the metrics read off a trajectory: `final_approach_geometry`, `arc_length_geometry`, `geometric_metrics`, `metrics`, `flyability`, `physical_criteria`, `terminal_state_loss` |
+| `backbone/` | `adapters` (the one interface over the two vendored networks, formerly `models.py`) and `vendor/` |
+| `outputs/` | one package per prediction path behind one strategy (§4.2): `state/`, `closure/`, `control/`; `base`, the lazy registry, `duration_heads` |
+| `training/` | `train`, `validation`, `fixed_anchor_validation`, `objective`, `batching`, `cross_validation`, `training_performance`, `experiment_index` |
+| `inference/` | `forecast`, `calibration`, `export`, `evaluation_protocol`, `intent_explainability`, `build_multiflight_capacity_report` |
+| `cli/` | one module per subcommand, `common`, and `benchmark_batch` (formerly `batch_benchmark.py`) |
+| `experiments/` | the runners, behind `run_ts.py <name>` |
+| top level | `config`, `run_naming`, `io_utils`, `repo_layout`, `__main__` — what every plane reads |
+
+A group's `__init__.py` re-exports nothing: a group is a directory, not a namespace, and
+the torch-free boundaries (`data.data_provenance`, `data.splits`, `inference.evaluation_protocol`,
+`data.anchor_strata`) survive only because importing one module of a group imports nothing else
+of it (`tests/test_import_boundaries.py`).
 
 **The experiment runners are `experiments/<name>.py` behind ONE door** (2026-09-10, review §4.5):
 `python run_ts.py <name> [args]` at the repository root (`--list` prints the names with their
@@ -522,18 +542,18 @@ The pipeline's `HARVEST_ROOT` / `OPT_OUTPUTS_ROOT` are module globals on purpose
 point them at a fixture harvest with `monkeypatch`.
 
 **Five modules carry the training plane, and each answers one question** (T3, 2026-09-07 —
-`train.py` was 3,027 lines and `__main__.main` 714):
+`training/train.py` was 3,027 lines and `__main__.main` 714):
 
 | module | the question | lines |
 |---|---|---|
-| `objective.py` | what is a prediction scored against | 1,079 |
-| `validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 1,162 |
-| `train.py` | the epoch, the cohort, the checkpoint — `fit_model` is `prepare_session` (a `TrainingSession`) → per epoch `train_epoch` / `validate_epoch` / `procedure_update` → the selection, with `describe_session` / `describe_epoch` holding every print (2026-09-10, review §4.4) | 1,407 |
-| `dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` / `RemainingPathUniformAnchor` = one per flight per epoch, drawn uniformly over samples or over the flight's remaining-path span; `training_window_class` is the one place the two anchor axes pick a class) | 1,941 |
-| `anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 159 |
-| `anchor_strata.py` | the remaining-path VALUES both sides of that edge read: the grid's km, the strata they cut, the train-anchor draw law (leaf — no `dataset`, no torch) | 105 |
-| `data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 503 |
-| `splits.py` | which split a flight belongs to | 197 |
+| `training/objective.py` | what is a prediction scored against | 1,079 |
+| `training/validation.py` | how is a fitted model replayed on a split, and which epoch is kept | 1,162 |
+| `training/train.py` | the epoch, the cohort, the checkpoint — `fit_model` is `prepare_session` (a `TrainingSession`) → per epoch `train_epoch` / `validate_epoch` / `procedure_update` → the selection, with `describe_session` / `describe_epoch` holding every print (2026-09-10, review §4.4) | 1,407 |
+| `data/dataset.py` | observed arrivals → model windows (`FixedAnchor` = one common anchor, `ExplicitAnchor` = one CALLER-SUPPLIED anchor per flight, `RandomAnchor` / `RemainingPathUniformAnchor` = one per flight per epoch, drawn uniformly over samples or over the flight's remaining-path span; `training_window_class` is the one place the two anchor axes pick a class) | 1,941 |
+| `data/anchor_grid.py` | which remaining-path anchors a re-anchored reading is taken at (no torch) | 159 |
+| `data/anchor_strata.py` | the remaining-path VALUES both sides of that edge read: the grid's km, the strata they cut, the train-anchor draw law (leaf — no `dataset`, no torch) | 105 |
+| `data/data_provenance.py` | which arrival rosters produced this run (pure hashing, **no torch**) | 503 |
+| `data/splits.py` | which split a flight belongs to | 197 |
 | `cli/` | one module per subcommand (`common` 909, `predict` 915 — `run_cli` is `load_predict_checkpoint` → `load_predict_series` → `parse_predict_options` (every flag rule, one frozen `PredictOptions`) → `predict_sets` → `write_prediction_sets` (the one emitter) → `report_predictions`, `evaluate_fit` 119, `cross_validate` 78, `train` 49, `freeze` 42, `__init__` 15) | 2,127 |
 | `__main__.py` | the bootstrap and the `COMMANDS` table it dispatches from | 131 |
 
@@ -604,7 +624,7 @@ in to keep them self-contained) and are OFF the import path:
   is the predict-time barrier, which stays live.
 - `archive/scene_encoder_2026_09/` — the scene data plane's tensor side (`scene/features.py`),
   its L4-gate readout (`run_ts_scene_explainability.py`) and its test. The L4 gate failed and
-  the encoder was never built; `intent_explainability.py` stays live for the Phase 0
+  the encoder was never built; `inference/intent_explainability.py` stays live for the Phase 0
   diagnostics.
 
 `tests/test_architecture.py` asserts nothing live imports the archive — package modules,
@@ -771,7 +791,7 @@ trajectories.py` (which held a second copy of the comparison). So:
   search from candidate 0; a finished `cv_results.json` is read, not refused.
 
 **Measurement code is CODE.** Reusable logic goes in the package with tests
-(`outputs/control/basis_fit.py`, `geometric_metrics.py`, `approach_difficulty.strata_masks`);
+(`outputs/control/basis_fit.py`, `geometry/geometric_metrics.py`, `approach_difficulty.strata_masks`);
 a runnable experiment goes in `experiments/<name>.py` behind `python run_ts.py <name>`;
 **`docs/` holds documents**. The `docs/*.py` scripts predate this rule and are a layout
 defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add to them, and
@@ -790,7 +810,7 @@ defaults stays in its file: two helpers with the same name and different default
 helpers, not one copied.
 
 **`ts_transformer` is a PACKAGE (2026-09-09, review §4.1), and every import is qualified:**
-`from ts_transformer.config import TSConfig`, `import ts_transformer.channels as ch`,
+`from ts_transformer.config import TSConfig`, `import ts_transformer.data.channels as ch`,
 `from ts_transformer.control.envelope import …`. What goes on `sys.path` is `4dTrajectory/`
 (the package's parent — `__main__.py`, `tests/conftest.py` and every runner do it; `pip
 install -e 4dTrajectory` makes it unnecessary, like `geokit`), NEVER `ts_transformer/`
@@ -814,7 +834,7 @@ consume) but not `objective`/`forecast`/`models`, and nothing under `outputs/` i
 `train`/`validation`/`batching`/`export`/`cli`. `dataset` imports the registry (`outputs`)
 and nothing under it, and the registry and `outputs/base.py` import no spine module at
 runtime — that is the whole reason the strategies can import `dataset`, `forecast` and
-`objective` back without a cycle. `batch_contract.py` holds
+`objective` back without a cycle. `data/batch_contract.py` holds
 `unpack_batch`/`model_forward`/`anchor_state` and the `LossComponents` contract so a loss
 module can read a batch and return an objective without importing `objective`, which imports
 it. `tests/test_architecture.py` enforces all of it.
@@ -898,5 +918,5 @@ fallbacks and the relabel tooling: `docs/ENGINEERING_NOTES.md`.
 | picking up work, checking what a campaign settled | `docs/OPEN_ITEMS.md` |
 | putting the procedure constraint into TRAINING as a hard constraint (either path), or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` (survey with formulas + H0–H6 plan; papers in repo `docs/literature/procedure_hard_constraints/`) |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
-| comparing airports or quoting an ADE | `approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
+| comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

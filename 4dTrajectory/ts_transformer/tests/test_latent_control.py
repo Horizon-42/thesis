@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 import torch
 
-from ts_transformer.batch_contract import model_forward
+from ts_transformer.data.batch_contract import model_forward
 from ts_transformer.config import (
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -45,12 +45,12 @@ from ts_transformer.outputs.control.latent import (
     with_latent_aux_duration,
     with_latent_kl,
 )
-from ts_transformer.batch_contract import LossComponents
-from ts_transformer.models import build_model
+from ts_transformer.data.batch_contract import LossComponents
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.run_naming import output_name, run_display_name
-from ts_transformer.objective import loss_component_names
-from ts_transformer.train import load_checkpoint, train
+from ts_transformer.training.objective import loss_component_names
+from ts_transformer.training.train import load_checkpoint, train
 
 _CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_latent_test", Path(__file__).resolve().parents[1] / "__main__.py")
 assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
@@ -59,10 +59,10 @@ _CLI_SPEC.loader.exec_module(ts_cli)
 
 import ts_transformer.cli.predict as cli_predict
 from ts_transformer.config import CONTROL_DURATION_UNIFORM
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
-from ts_transformer.forecast import forecast_approach
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
+from ts_transformer.inference.forecast import forecast_approach
 from ts_transformer.outputs.control.forecast import (
     latent_derangement,
     latent_mode_forecasts,
@@ -73,7 +73,7 @@ from ts_transformer.outputs.control.forecast import (
 from ts_transformer.outputs.control.latent import displacement_verdict
 from ts_transformer.experiments.latent_readout import kept_epoch_latent, readout, render_latent
 from ts_transformer.experiments.latent_readout import main as readout_main
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.tests.support import dynamics_context
 
 
@@ -546,7 +546,7 @@ def test_the_deployable_replay_is_decoded_from_the_prior_not_the_posterior(tmp_p
     prior decode (no posterior) — counting forwards would pass even if the replay still
     reused the posterior object, because the end-of-training cohort evaluation also runs
     prior-only forwards."""
-    import ts_transformer.validation as validation
+    import ts_transformer.training.validation as validation
 
     replayed: list[object] = []
     original_replay = validation._prediction_batch_replay

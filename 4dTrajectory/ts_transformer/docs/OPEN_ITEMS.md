@@ -62,8 +62,10 @@ were NOT made without the owner:
   `parse_predict_options` → `PredictOptions`); §4.5 runners DONE 2026-09-10
   (`experiments/<name>.py` behind `run_ts.py <name>`, `repo_layout.py`, the twelve red pipeline
   fixtures fixed — the suite is green); §4.6 tests DONE 2026-09-10 (`tests/support.py`, the
-  5,855-line `test_ts_transformer.py` split into 23 single-topic files); then the folder
-  grouping — a commit with the full suite and the stored-run census as the acceptance test. The "name every field against
+  5,855-line `test_ts_transformer.py` split into 23 single-topic files); the folder grouping
+  DONE 2026-09-10 (`data/`, `geometry/`, `backbone/`, `training/`, `inference/` — pure moves,
+  the layout table in `CLAUDE.md`). The review's §6 order is complete; each step was one
+  commit with the full suite and the stored-run census as the acceptance test. The "name every field against
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 
@@ -98,7 +100,7 @@ the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure outp
   and shown to be mis-sized (truth path + naive speed profile 1.3 km; trombone from the truth
   join + truth timing 1.7 km). Open — a decision for the user: (A) stop, (B) revise the design
   to (d_join, T) decisions, (C) fix the output side first (geometric closure); the results
-  doc recommends C then B. **P0 geometric readout DONE 2026-09-05** (`geometric_metrics.py`
+  doc recommends C then B. **P0 geometric readout DONE 2026-09-05** (`geometry/geometric_metrics.py`
   in both readouts; `readout_geometry.*` backfilled in `scene_phase0_20260905` and
   `control_hooks_v2_20260906` KRDU + KSJC): the join arms gain 15–20 % on chamfer / Fréchet /
   arc-ADE, the duration arm gains none of it; the v2 soft barrier is the only hook that also

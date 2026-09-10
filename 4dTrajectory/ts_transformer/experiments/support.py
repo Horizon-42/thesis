@@ -13,7 +13,7 @@ from ts_transformer.cli.common import parse_airports
 from ts_transformer.repo_layout import REPO_ROOT, TS_DIR, TS_SCRIPT
 
 if TYPE_CHECKING:
-    from ts_transformer.dataset import FlightSeries
+    from ts_transformer.data.dataset import FlightSeries
 
 __all__ = [
     "EXPERIMENTS_MAIN", "REPO_ROOT", "RUN_TS", "TS_DIR", "TS_SCRIPT",

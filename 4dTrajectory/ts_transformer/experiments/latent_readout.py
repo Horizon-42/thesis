@@ -42,7 +42,7 @@ import numpy as np
 
 from ts_transformer.experiments.support import REPO_ROOT
 
-from ts_transformer.approach_difficulty import strata_masks  # noqa: E402
+from ts_transformer.data.approach_difficulty import strata_masks  # noqa: E402
 # One ruler for the displacement gate and one for an active unit, both defined beside the
 # KL they are read against (`outputs/control/latent.py`) rather than restated here.
 from ts_transformer.outputs.control.latent import ACTIVE_UNIT_KL_NATS, displacement_verdict  # noqa: E402

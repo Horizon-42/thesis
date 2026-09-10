@@ -28,13 +28,13 @@ import torch  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.config import DEFAULT_AIRCRAFT_TYPE, MODELS, TSConfig  # noqa: E402
-from ts_transformer.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
-from ts_transformer.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
-from ts_transformer.splits import flight_keys_by_split, split_by_flight  # noqa: E402
-from ts_transformer.export import accuracy_block, observed_series_metrics  # noqa: E402
-from ts_transformer.forecast import forecast_approach  # noqa: E402
-from ts_transformer.metrics import RAW_KINEMATIC_METRIC_KEYS  # noqa: E402
-from ts_transformer.train import fit_model, usable_series  # noqa: E402
+from ts_transformer.data.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
+from ts_transformer.data.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.data.splits import flight_keys_by_split, split_by_flight  # noqa: E402
+from ts_transformer.inference.export import accuracy_block, observed_series_metrics  # noqa: E402
+from ts_transformer.inference.forecast import forecast_approach  # noqa: E402
+from ts_transformer.geometry.metrics import RAW_KINEMATIC_METRIC_KEYS  # noqa: E402
+from ts_transformer.training.train import fit_model, usable_series  # noqa: E402
 from ts_transformer.experiments.support import parse_airports
 from ts_transformer.experiments.support import series_digest
 from ts_transformer.io_utils import write_json_atomic

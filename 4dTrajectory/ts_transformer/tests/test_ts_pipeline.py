@@ -12,7 +12,7 @@ import ts_transformer.experiments.plot_results as result_plots
 import ts_transformer.experiments.coordinate_ablation as ablation
 import ts_transformer.experiments.cv as cv_runner
 import ts_transformer.experiments.pipeline as pipeline
-from ts_transformer.lateral_eligibility import (
+from ts_transformer.data.lateral_eligibility import (
     LATERAL_PASS_POLICY,
     LATERAL_PASS_ROSTER_SCHEMA,
     default_lateral_pass_roster_path,

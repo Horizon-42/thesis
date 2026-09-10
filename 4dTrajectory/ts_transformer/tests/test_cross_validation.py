@@ -10,17 +10,17 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import ts_transformer.cross_validation as cv
+import ts_transformer.training.cross_validation as cv
 from ts_transformer.config import (
     HORIZON_FULL,
     HORIZON_WINDOW,
     CHECKPOINT_SELECTION_METRICS,
     TSConfig,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import Normalizer, build_series
-from ts_transformer.splits import split_by_flight
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.splits import split_by_flight
+from ts_transformer.data.synthetic import synthetic_arrivals
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 

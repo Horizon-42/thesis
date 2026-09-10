@@ -25,7 +25,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "4dTrajectory"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ts_transformer.approach_difficulty import STRATUM_ESTABLISHED, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRATUM_ESTABLISHED, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
 from score_control_arms import _imitation_dose  # noqa: E402
 
 

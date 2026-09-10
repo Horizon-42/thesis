@@ -9,7 +9,7 @@ import json
 import pytest
 
 from ts_transformer.config import TSConfig
-from ts_transformer.data_provenance import (
+from ts_transformer.data.data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     arrival_data_provenance,
     require_matching_data_provenance,

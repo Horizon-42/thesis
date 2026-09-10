@@ -17,28 +17,28 @@ for path in (TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.channels as ch  # noqa: E402
-import ts_transformer.final_approach_geometry as fag  # noqa: E402
-from ts_transformer.batch_contract import unpack_batch  # noqa: E402
+import ts_transformer.data.channels as ch  # noqa: E402
+import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402
+from ts_transformer.data.batch_contract import unpack_batch  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     CORRIDOR_GATE_ON_FINAL, STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.final_approach_geometry import probe_final_approach
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.geometry.final_approach_geometry import probe_final_approach
 from ts_transformer.outputs.control.supervision import probe_dynamics
-from ts_transformer.export import build_prediction_record  # noqa: E402
-from ts_transformer.forecast import Forecast, forecast_approach  # noqa: E402
+from ts_transformer.inference.export import build_prediction_record  # noqa: E402
+from ts_transformer.inference.forecast import Forecast, forecast_approach  # noqa: E402
 from ts_transformer.outputs import ForecastOptions  # noqa: E402
 from ts_transformer.outputs.state.forecast import project_onto_final  # noqa: E402
-from ts_transformer.models import build_model  # noqa: E402
+from ts_transformer.backbone.adapters import build_model  # noqa: E402
 from ts_transformer.outputs.state.model import StateOutputLayer, StatePrediction  # noqa: E402
-from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
 from ts_transformer.outputs.state.loss import (
     STATE_LOSS_COMPONENT_NAMES,
     state_prediction_loss_components,
 )
-from ts_transformer.objective import ProcedureMultipliers, procedure_loss
-from ts_transformer.train import load_checkpoint, train  # noqa: E402
+from ts_transformer.training.objective import ProcedureMultipliers, procedure_loss
+from ts_transformer.training.train import load_checkpoint, train  # noqa: E402
 from ts_transformer.tests.support import fake_data_provenance
 from trajectory_data_process.harvest.arrivals import SCHEMA_VERSION as ARRIVAL_SCHEMA  # noqa: E402
 
@@ -428,7 +428,7 @@ def test_control_recipes_accept_the_procedure_penalty_on_the_native_grid_only():
     from ts_transformer.config import (
         CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_LOSS_GRID_FIXED_DT, PREDICTION_CONTROL,
     )
-    from ts_transformer.objective import loss_component_names
+    from ts_transformer.training.objective import loss_component_names
 
     config = TSConfig(prediction_output=PREDICTION_CONTROL, procedure_loss_lateral_weight=1e-3)
     assert config.procedure_loss_active and "procedure" in loss_component_names(config)

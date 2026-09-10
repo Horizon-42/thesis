@@ -1,7 +1,7 @@
 """Put the package's parent and the repository root on ``sys.path`` once, for every test here.
 
 ``ts_transformer`` is a regular package under ``4dTrajectory/``; its modules are imported by
-their qualified names (``ts_transformer.dataset``), so what goes on the path is
+their qualified names (``ts_transformer.data.dataset``), so what goes on the path is
 ``4dTrajectory/`` — never ``ts_transformer/`` itself, which would make the flat names
 importable beside the qualified ones and load every module twice. Older test files still
 carry their own preamble doing the same; a new one does not need to.

@@ -11,11 +11,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import ts_transformer.channels as ch
+import ts_transformer.data.channels as ch
 import ts_transformer.cli.common as cli_common
 import ts_transformer.outputs.control.dynamics.rollout as control_rollout_module
 import ts_transformer.outputs.control.loss.fixed_dt as fixed_dt_loss_module
-import ts_transformer.objective as objective
+import ts_transformer.training.objective as objective
 import ts_transformer.experiments.pipeline as pipeline_module
 from ts_transformer.config import (
     HORIZON_FULL,
@@ -36,8 +36,8 @@ from ts_transformer.outputs.control.training.diagnostics import (
     clip_gradients_by_global_norm,
     gradient_norms,
 )
-from ts_transformer.fixed_dt_supervision import FixedDTControlSupervision
-from ts_transformer.models import build_model
+from ts_transformer.data.fixed_dt_supervision import FixedDTControlSupervision
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import (
     ControlBounds,
     ControlOutputHead,

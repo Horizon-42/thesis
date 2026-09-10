@@ -21,17 +21,17 @@ _CLI_SPEC.loader.exec_module(ts_cli)
 
 import ts_transformer.cli.common as cli_common  # noqa: E402
 import ts_transformer.cli.train as cli_train  # noqa: E402
-import ts_transformer.evaluation_protocol as evaluation_protocol  # noqa: E402
-import ts_transformer.experiment_index as experiment_index  # noqa: E402
+import ts_transformer.inference.evaluation_protocol as evaluation_protocol  # noqa: E402
+import ts_transformer.training.experiment_index as experiment_index  # noqa: E402
 from ts_transformer.config import (
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     CONTROL_RECIPE_SIMPLE_V3,
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.dataset import build_series
-from ts_transformer.development_cohorts import DEVELOPMENT_COHORT_SCHEMA, DevelopmentCohort  # noqa: E402
-from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.data.dataset import build_series
+from ts_transformer.data.development_cohorts import DEVELOPMENT_COHORT_SCHEMA, DevelopmentCohort  # noqa: E402
+from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
 from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"

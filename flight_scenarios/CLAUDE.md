@@ -19,7 +19,7 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   the ellipsoid (`aeroviz-4d/src/types/czml.d.ts`) and are CORRECT as recorded — converting at
   the source fixes modeling and breaks the viewer by the same 33 m.
 - The conversion is keyed on `altitude_source` (hence idempotent) and reaches THREE ingest paths
-  — `load_model_arrivals`, `build_scenario`, and `ts_transformer/dataset.py` (which reads bare
+  — `load_model_arrivals`, `build_scenario`, and `ts_transformer/data/dataset.py` (which reads bare
   waypoints and so cannot self-protect); unknown/missing sources RAISE rather than defaulting,
   and `"synthetic"` is already-MSL.
 - **The seam is symmetric on the way OUT**: modeling records (`*_states.json`, predictions) are
@@ -139,14 +139,14 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   exists. Measured KRDU 05L: **6.69 m apart** (35.8745003/−78.802002 vs
   35.87444889/−78.80196361), and elevation 111.86 vs 111.80 m. The real pipeline is consistent
   (`arrivals._runway_target(runway)` copies the CIFP-resolved `Runway`, so scenario targets are
-  bit-identical to the evaluation context), but `ts_transformer/synthetic.py` builds on the NASR
+  bit-identical to the evaluation context), but `ts_transformer/data/synthetic.py` builds on the NASR
   point — which is why its test context pins the NASR coordinates explicitly.
   `evaluation.arrival._require_target_agrees_with_runway_data` now catches any such mix at 1 cm.
 
 ## Aircraft resolution
 
 - **`"type": "UNK"` on every harvested arrival does NOT mean the batch is single-type.**
-  `_resolve_aircraft` (`flight_scenarios/build.py`, mirrored in `ts_transformer/dataset.py`)
+  `_resolve_aircraft` (`flight_scenarios/build.py`, mirrored in `ts_transformer/data/dataset.py`)
   tries declared type → **`icao24` via the OpenAP lookup** → `--aircraft-type` fallback, and the
   icao24 path recovers the REAL airframe for most flights: **20 distinct types** across 400 KRDU
   arrivals (A320 224, B738 38, E75L 25, CRJ9 23, … A333, GLF6, C550). Anything assuming one

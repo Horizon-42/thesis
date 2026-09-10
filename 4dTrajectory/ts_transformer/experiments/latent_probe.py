@@ -54,16 +54,16 @@ from ts_transformer.experiments.support import REPO_ROOT
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 
-from ts_transformer.batch_contract import model_forward, unpack_batch  # noqa: E402
+from ts_transformer.data.batch_contract import model_forward, unpack_batch  # noqa: E402
 from ts_transformer.outputs.control.latent import (  # noqa: E402
     LatentControlPrediction,
     displacement_verdict,
     latent_kl,
     sigma_from_logvar,
 )
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows  # noqa: E402
-from ts_transformer.models import resolve_device  # noqa: E402
-from ts_transformer.objective import move_dynamics  # noqa: E402
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows  # noqa: E402
+from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
+from ts_transformer.training.objective import move_dynamics  # noqa: E402
 from ts_transformer.experiments.anytime_curve import Arm, Grid, cohort_series, load_arm, parse_arms  # noqa: E402
 
 RESULT_SCHEMA = "ts-latent-probe-v1"

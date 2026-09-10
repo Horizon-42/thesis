@@ -23,10 +23,10 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.forecast as forecast_module
+import ts_transformer.inference.forecast as forecast_module
 import ts_transformer.outputs.state.forecast as state_forecast_module
 import ts_transformer.experiments.anytime_curve as runner
-from ts_transformer.approach_difficulty import (
+from ts_transformer.data.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
     STRATUM_STRAIGHT_IN,
@@ -43,17 +43,17 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.data_provenance import provenance_manifest_digests
-from ts_transformer.dataset import (
+from ts_transformer.data.data_provenance import provenance_manifest_digests
+from ts_transformer.data.dataset import (
     FlightSeries,
     build_series,
     dataset_flight_key,
     truth_duration_s,
 )
-from ts_transformer.export import observed_series_metrics
-from ts_transformer.forecast import Forecast, history_at_anchor, forecast_approaches
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import load_checkpoint, train
+from ts_transformer.inference.export import observed_series_metrics
+from ts_transformer.inference.forecast import Forecast, history_at_anchor, forecast_approaches
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import load_checkpoint, train
 from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"

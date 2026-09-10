@@ -18,14 +18,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import ts_transformer.calibration as calibration
-from ts_transformer.approach_difficulty import (
+import ts_transformer.inference.calibration as calibration
+from ts_transformer.data.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
     STRATUM_STRAIGHT_IN,
     STRATUM_VECTORED,
 )
-from ts_transformer.calibration import (
+from ts_transformer.inference.calibration import (
     CALIBRATION_HALF_RULE,
     CONFORMAL_ALPHAS,
     CONFORMAL_METADATA_KEY,
@@ -574,10 +574,10 @@ def test_predict_stamps_the_calibrated_interval_on_every_record(tmp_path: Path, 
     import importlib.util
 
     import ts_transformer.cli.predict as predict_module
-    from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-    from ts_transformer.dataset import build_series
-    from ts_transformer.synthetic import synthetic_arrivals
-    from ts_transformer.train import load_checkpoint, train
+    from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+    from ts_transformer.data.dataset import build_series
+    from ts_transformer.data.synthetic import synthetic_arrivals
+    from ts_transformer.training.train import load_checkpoint, train
 
     cli_path = Path(__file__).resolve().parents[1] / "__main__.py"
     spec = importlib.util.spec_from_file_location("ts_cli_calibration_test", cli_path)
@@ -683,7 +683,7 @@ def test_a_stratum_calibrated_at_one_alpha_only_is_not_deployed():
 def test_a_null_covariate_is_refused_rather_than_read_as_false():
     """A present-null `established_at_anchor` cast to False and moved the flight into the
     vectored stratum."""
-    from ts_transformer.approach_difficulty import strata_masks
+    from ts_transformer.data.approach_difficulty import strata_masks
     rows = {"a": _covariates(established=True), "b": {**_covariates(), "established_at_anchor": None}}
     with pytest.raises(ValueError, match="established_at_anchor"):
         strata_masks(rows, ["a", "b"])

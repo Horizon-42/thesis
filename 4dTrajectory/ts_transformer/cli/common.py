@@ -52,13 +52,13 @@ from ts_transformer.config import (
     coerce_sequence_fields,
     control_recipe_overrides,
 )
-from ts_transformer.cross_validation import validate_cv_parameters
-from ts_transformer.data_provenance import arrival_data_provenance, eligibility_sources
-from ts_transformer.dataset import build_series, load_flight_dicts
-from ts_transformer.development_cohorts import development_cohort_audit, load_development_cohort
-from ts_transformer.experiment_index import begin_run, finish_run
-from ts_transformer.reference_velocity import REFERENCE_VELOCITY_SOURCES
-from ts_transformer.splits import data_selection_audit, flight_keys_by_split
+from ts_transformer.training.cross_validation import validate_cv_parameters
+from ts_transformer.data.data_provenance import arrival_data_provenance, eligibility_sources
+from ts_transformer.data.dataset import build_series, load_flight_dicts
+from ts_transformer.data.development_cohorts import development_cohort_audit, load_development_cohort
+from ts_transformer.training.experiment_index import begin_run, finish_run
+from ts_transformer.data.reference_velocity import REFERENCE_VELOCITY_SOURCES
+from ts_transformer.data.splits import data_selection_audit, flight_keys_by_split
 
 #: The repo root, for the experiment manifest's provenance.
 from ts_transformer.repo_layout import REPO_ROOT  # noqa: E402

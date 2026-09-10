@@ -177,7 +177,7 @@ store, roster.
 - **Rebuilding `arrivals/` DELETES `lateral_pass_eligibility.json`, which nothing rebuilds
   for you.** `arrivals._clear()` unlinks every `*.json` under the directory before writing
   the new manifest, and the lateral-pass roster lives there but is owned by
-  `ts_transformer/lateral_eligibility.py`. So any `--evaluate-only` or
+  `ts_transformer/data/lateral_eligibility.py`. So any `--evaluate-only` or
   `--reclassify-existing` silently removes a file every TS train/predict requires, and the
   failure surfaces later as `FileNotFoundError` from whichever run touches it next — on
   2026-08-21 that was mid-campaign, after one arm had already trained. Rebuild it right

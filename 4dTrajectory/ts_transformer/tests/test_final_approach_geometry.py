@@ -17,7 +17,7 @@ for path in (TS_DIR.parent, REPO_ROOT, OPTIMIZATION_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.final_approach_geometry as fag  # noqa: E402
+import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     STATE_POSITION_CORRIDOR_BOUNDED, TSConfig,
 )

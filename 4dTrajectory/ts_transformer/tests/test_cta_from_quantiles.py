@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from ts_transformer.calibration import (
+from ts_transformer.inference.calibration import (
     FAN_INTERVAL_ALPHA,
     QUANTILE_DIR_NAME,
     calibrate,
@@ -30,14 +30,14 @@ from ts_transformer.config import (
     DURATION_MEDIAN_INDEX,
     DURATION_QUANTILES,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
 from flight_scenarios.identity import summary_row_key
-from ts_transformer.dataset import build_series
+from ts_transformer.data.dataset import build_series
 from ts_transformer.experiments import quantile_fan_readout
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.run_naming import run_display_name
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import load_checkpoint, train
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import load_checkpoint, train
 
 from ts_transformer.tests.test_duration_quantiles import _config
 from ts_transformer.tests.test_eta_calibration import _cohort

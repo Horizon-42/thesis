@@ -9,8 +9,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from ts_transformer.dataset import FlightSeries
-from ts_transformer.development_cohorts import write_development_cohort
+from ts_transformer.data.dataset import FlightSeries
+from ts_transformer.data.development_cohorts import write_development_cohort
 
 from .model import ApproachClusterModel
 

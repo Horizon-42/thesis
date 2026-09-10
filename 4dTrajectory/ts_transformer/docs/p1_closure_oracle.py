@@ -68,15 +68,15 @@ for path in (HERE, TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
 import ts_transformer.outputs.closure.geometry as cg  # noqa: E402
 import ts_transformer.outputs.closure.profile as cp  # noqa: E402
 import compare_frame_arms as cfa  # noqa: E402
-import ts_transformer.geometric_metrics as gm  # noqa: E402
-import ts_transformer.intent_conditioning as ic  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
+import ts_transformer.data.intent_conditioning as ic  # noqa: E402
 import phase0_intent_diagnostics as pid  # noqa: E402
 from ts_transformer.outputs.closure.model import LABEL_KNOTS, LABEL_RESIDUAL_MAX_M, LABEL_SCHEMA, fit_labels  # noqa: E402
 from ts_transformer.config import TSConfig  # noqa: E402
-from ts_transformer.coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
-from ts_transformer.dataset import build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.data.coordinate_frames import COORDINATE_FRAME_ENU  # noqa: E402
+from ts_transformer.data.dataset import build_series, load_flight_dicts  # noqa: E402
 from flight_scenarios.identity import flight_key  # noqa: E402
-from ts_transformer.metrics import common_physical_time_flight_metrics  # noqa: E402
+from ts_transformer.geometry.metrics import common_physical_time_flight_metrics  # noqa: E402
 
 FAMILIES = ("F0 rule@truth join", "F1 rule, d_join fitted", "F2 downwind+Dubins fitted", "F3 via-pose Dubins fitted")
 FALLBACK_CHAMFER_M = 1_000.0     # placeholder for P1.d's criterion; flags 0.6 % of F3 fits at KRDU

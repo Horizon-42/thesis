@@ -362,7 +362,7 @@ carry their own `sys.path` preamble; the seven newest do not), and package modul
 cite a `docs/` script as their data producer (`closure_output.py`, `config.py`,
 `__main__.py` all name `docs/p1_closure_oracle.py labels`).
 
-Done so far: `strata_masks` + `STRAIGHT_TORTUOSITY` moved into `approach_difficulty.py`
+Done so far: `strata_masks` + `STRAIGHT_TORTUOSITY` moved into `data/approach_difficulty.py`
 (one source, `compare_frame_arms` imports them); `tests/conftest.py` added; the L0 basis
 fit went in as `control/basis_fit.py` (`control/oracle/basis.py` until T2) + `run_ts.py control_basis_oracle` with tests.
 
@@ -488,7 +488,7 @@ the margin.
 ## 20. Two copies of the point-mass inversion and of the OLS slope, deferred under a campaign
 
 **Verified** (2026-09-07, opus review of `dev-observed-load-factor-metar`).
-`4dTrajectory/ts_transformer/flyability.py:259-262` computes `n` from `psi_dot`/`gamma_dot`
+`4dTrajectory/ts_transformer/geometry/flyability.py:259-262` computes `n` from `psi_dot`/`gamma_dot`
 with the same two lines `aircraft/kinematics.load_factor_from_rates` now owns (it also
 needs `mu`, so the shared function should return the two components), and
 `flight_scenarios/start_state._slope` is `aircraft.kinematics.linear_slope` returning 0.0
@@ -629,7 +629,7 @@ Plus 283 rows unmatched anywhere (mostly foreign registrations: Mexico, Ireland,
 
 ## 26. `config.seq_len - 1` still spelled out at ~12 sites that already have `default_anchor`
 
-**Verified** (2026-09-08, A2b review). `default_anchor(config)` moved from `forecast.py` to
+**Verified** (2026-09-08, A2b review). `default_anchor(config)` moved from `inference/forecast.py` to
 `config.py` so `dataset` could reserve a share of its random draws for L−1 without an import
 cycle. It is now importable everywhere `config` already is, but the literal `config.seq_len - 1`
 is still the spelled-out L−1 anchor in `anchor_grid.py:154`, `approach_clustering/cli.py:71`,
@@ -637,7 +637,7 @@ is still the spelled-out L−1 anchor in `anchor_grid.py:154`, `approach_cluster
 `run_ts.py clock_attribution:115` and `run_ts.py control_capacity_ceiling:233` — every one of
 which already imports `config`. A pure rename, no behaviour, at THOSE sites.
 
-**Corrected 2026-09-09 (package review A-2)**: the `train.py`, `fixed_anchor_validation.py` and
+**Corrected 2026-09-09 (package review A-2)**: the `training/train.py`, `training/fixed_anchor_validation.py` and
 `cli/predict.py` sites this entry listed were NOT pure renames — under a common anchor floor
 (`minimum_anchor_index`, the history ablation) they had to read the floor, and renaming them to
 `default_anchor` would have preserved the defect. They now read `dataset.fixed_anchor_index` /

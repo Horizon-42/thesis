@@ -18,21 +18,21 @@ for path in (_TS_DIR.parent, _REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.channels as ch  # noqa: E402
-import ts_transformer.dataset as dataset_module  # noqa: E402
-import ts_transformer.final_approach_geometry as fag  # noqa: E402
-import ts_transformer.intent_conditioning as ic  # noqa: E402
+import ts_transformer.data.channels as ch  # noqa: E402
+import ts_transformer.data.dataset as dataset_module  # noqa: E402
+import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402
+import ts_transformer.data.intent_conditioning as ic  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     INTENT_JOIN_CHANNELS, INTENT_LEAD_CHANNELS, PREDICTION_CONTROL, TSConfig,
     intent_channel_names,
 )
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
-from ts_transformer.forecast import history_at_anchor, forecast_approach  # noqa: E402
-from ts_transformer.models import build_model  # noqa: E402
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series  # noqa: E402
+from ts_transformer.inference.forecast import history_at_anchor, forecast_approach  # noqa: E402
+from ts_transformer.backbone.adapters import build_model  # noqa: E402
 from ts_transformer.run_naming import run_display_name  # noqa: E402
-from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
-from ts_transformer.target_conditioning import CONDITIONING_CHANNELS  # noqa: E402
-from ts_transformer.train import load_checkpoint, train  # noqa: E402
+from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.data.target_conditioning import CONDITIONING_CHANNELS  # noqa: E402
+from ts_transformer.training.train import load_checkpoint, train  # noqa: E402
 from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"

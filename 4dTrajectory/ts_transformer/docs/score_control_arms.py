@@ -36,7 +36,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "4dTrajectory"))
-from ts_transformer.approach_difficulty import STRAIGHT_TORTUOSITY  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRAIGHT_TORTUOSITY  # noqa: E402
 from ts_transformer.outputs.control.dynamics.inverse import actual_controls  # noqa: E402
 
 AERO = np.array([122.6, 2.7, 0.023, 0.0334, 0.8, 0.2])

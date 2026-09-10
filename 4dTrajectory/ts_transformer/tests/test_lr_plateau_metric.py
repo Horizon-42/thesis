@@ -36,11 +36,11 @@ from ts_transformer.config import (
     control_simple_v1_overrides,
     recipe_settings,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import build_series
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import build_series
 from ts_transformer.run_naming import run_display_name, run_slug
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import train
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import train
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 SELECTION_METRIC = "fixed-anchor-common-grid-ade"
@@ -149,7 +149,7 @@ _STALLED_SELECTION = (100.0, 99.0, 99.0, 99.0, 99.0, 99.0)
 
 def _stall_the_selection_metric(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the real metric's machinery, replace only the NUMBER it reports."""
-    import ts_transformer.train as train_module
+    import ts_transformer.training.train as train_module
 
     real = train_module.VALIDATION_SELECTIONS[SELECTION_METRIC]
     staged = iter(_STALLED_SELECTION)

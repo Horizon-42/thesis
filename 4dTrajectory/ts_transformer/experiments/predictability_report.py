@@ -35,27 +35,27 @@ import torch  # noqa: E402
 from sklearn.neighbors import NearestNeighbors  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
-from ts_transformer.channels import POSITION_IDX  # noqa: E402
+from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
     default_anchor, uses_control_dynamics,
 )
 
 from ts_transformer.outputs.control.dynamics.rollout import rollout_control_dense  # noqa: E402
-from ts_transformer.data_provenance import (  # noqa: E402
+from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
     require_matching_data_provenance,
 )
-from ts_transformer.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.data.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
 from ts_transformer.outputs.control.supervision import dynamics_arrays  # noqa: E402
-from ts_transformer.fixed_anchor_validation import (  # noqa: E402
+from ts_transformer.training.fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_common_truth,
     resample_prediction_to_physical_time,
 )
-from ts_transformer.metrics import raw_kinematic_metrics  # noqa: E402
-from ts_transformer.models import resolve_device  # noqa: E402
+from ts_transformer.geometry.metrics import raw_kinematic_metrics  # noqa: E402
+from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
 from ts_transformer.io_utils import file_sha256  # noqa: E402
-from ts_transformer.train import (  # noqa: E402
+from ts_transformer.training.train import (  # noqa: E402
     FIT_EVALUATION_NAME,
     FIT_EVALUATION_SCHEMA,
     load_checkpoint,

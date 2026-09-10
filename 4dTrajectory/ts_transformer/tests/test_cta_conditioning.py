@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import torch
 
-from ts_transformer.batch_contract import model_forward
+from ts_transformer.data.batch_contract import model_forward
 from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -27,20 +27,20 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
 )
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
-from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
-import ts_transformer.batching as batching
-from ts_transformer.forecast import forecast_approaches
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series, truth_duration_s
+from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
+import ts_transformer.training.batching as batching
+from ts_transformer.inference.forecast import forecast_approaches
 from ts_transformer.outputs import ForecastOptions  # noqa: E402
 from ts_transformer.outputs.control.forecast import (
     latent_mode_forecasts,
     shuffled_latent_forecasts,
 )
-from ts_transformer.models import build_model
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.run_naming import run_display_name
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import load_checkpoint, train
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import load_checkpoint, train
 from ts_transformer.tests.support import dynamics_context
 
 _CLI_SPEC = importlib.util.spec_from_file_location("ts_transformer_cli_cta_test", Path(__file__).resolve().parents[1] / "__main__.py")

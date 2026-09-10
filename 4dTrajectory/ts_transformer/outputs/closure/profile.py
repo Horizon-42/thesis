@@ -25,7 +25,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.optimize import lsq_linear
 
-from ts_transformer.geometric_metrics import cumulative_arc_m
+from ts_transformer.geometry.geometric_metrics import cumulative_arc_m
 
 SPEED_MIN_MPS = 40.0
 SPEED_MAX_MPS = 160.0

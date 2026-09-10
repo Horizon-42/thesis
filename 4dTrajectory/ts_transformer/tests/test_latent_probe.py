@@ -36,9 +36,9 @@ from ts_transformer.config import (
     TSConfig,
 )
 from ts_transformer.outputs.control.latent import displacement_verdict
-from ts_transformer.dataset import build_series, dataset_flight_key
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.train import train
+from ts_transformer.data.dataset import build_series, dataset_flight_key
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.train import train
 from ts_transformer.tests.support import fake_data_provenance
 
 AIRPORT, RUNWAY = "KRDU", "05L"

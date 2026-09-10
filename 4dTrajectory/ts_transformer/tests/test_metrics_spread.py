@@ -8,8 +8,8 @@ import math
 import numpy as np
 import pytest
 
-import ts_transformer.channels as ch
-from ts_transformer.metrics import raw_kinematic_metrics
+import ts_transformer.data.channels as ch
+from ts_transformer.geometry.metrics import raw_kinematic_metrics
 
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
@@ -21,7 +21,7 @@ def test_spread_matches_the_gate_side_signed_spread():
     # test is what makes "same statistic" a checked property instead of a mirror comment:
     # if either side changes its percentile method or keys, this fails.
     from evaluation.stats import signed_spread
-    from ts_transformer.metrics import signed_spread as vectorised_spread
+    from ts_transformer.geometry.metrics import signed_spread as vectorised_spread
 
     values = np.array([3.0, -1.5, 0.25, -7.0, 4.0, 2.5, -0.75])
     ours, theirs = vectorised_spread(values), signed_spread(values.tolist())

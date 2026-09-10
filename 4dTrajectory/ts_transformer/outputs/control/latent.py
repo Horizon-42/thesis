@@ -39,7 +39,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from ts_transformer.batch_contract import LossComponents
+from ts_transformer.data.batch_contract import LossComponents
 from ts_transformer.config import TSConfig
 from ts_transformer.outputs.control.heads import (
     ControlFeatureModel,

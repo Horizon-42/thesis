@@ -15,7 +15,7 @@ Two consumers share it and must never disagree: the optimizer's constraint bridg
 (``aeroviz_backend.procedure_segments._lpv_spec`` → ``approach_constraints.LpvFinalSpec``,
 where ``lateral.lpv_course_halfwidth`` evaluates the same cone from the GARP/LTP points)
 and the learned model's final-approach corridor
-(``4dTrajectory/ts_transformer/final_approach_geometry.py``).  This module lives in the
+(``4dTrajectory/ts_transformer/geometry/final_approach_geometry.py``).  This module lives in the
 data→modeling seam because both of them import it and neither may import the other.
 Runway length is not carried by the runway target, so every caller uses the 9023 ft floor
 today; the parameter exists so that a caller that knows the length asks for it explicitly.

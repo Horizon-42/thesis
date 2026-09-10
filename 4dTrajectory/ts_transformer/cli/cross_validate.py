@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from ts_transformer.cross_validation import (
+from ts_transformer.training.cross_validation import (
     CV_PARAMETER_GRIDS,
     DEFAULT_CV_EPOCHS,
     DEFAULT_CV_PARAMETERS,

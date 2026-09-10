@@ -37,8 +37,8 @@ from pathlib import Path
 import numpy as np
 
 import ts_transformer.docs.compare_frame_arms as cfa  # noqa: E402
-import ts_transformer.geometric_metrics as gm  # noqa: E402
-from ts_transformer.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
 
 STRATA = (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED)
 # Remaining horizontal distance to the threshold, km, outer edge first.

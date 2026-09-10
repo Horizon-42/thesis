@@ -46,7 +46,7 @@ HAE_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m"
 MSL_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_local_msl_cifp_threshold"
 LEGACY_EGM96_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_msl_egm96"
 # Sources that are ALREADY MSL and must not be converted:
-#   "synthetic" -- ``ts_transformer/synthetic.py`` builds waypoints as
+#   "synthetic" -- ``ts_transformer/data/synthetic.py`` builds waypoints as
 #                  ``threshold["elevation_m"] + height``, and threshold elevations are MSL.
 MSL_ALTITUDE_SOURCES = frozenset({MSL_ALTITUDE_SOURCE, "synthetic"})
 

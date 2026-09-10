@@ -62,8 +62,8 @@ import math
 import numpy as np
 from scipy.optimize import minimize
 
-from ts_transformer.flyability import G as GRAVITY_MPS2
-from ts_transformer.geometric_metrics import arc_aligned_ade_m, cumulative_arc_m
+from ts_transformer.geometry.flyability import G as GRAVITY_MPS2
+from ts_transformer.geometry.geometric_metrics import arc_aligned_ade_m, cumulative_arc_m
 
 BANK_RAD = math.radians(25.0)       # a standard-rate-ish approach bank; not an envelope limit
 TURN_SPEED_CAP_MPS = 100.0          # the turn radius is sized at approach speed

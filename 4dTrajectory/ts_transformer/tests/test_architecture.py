@@ -35,10 +35,10 @@ ARCHIVE = TS_DIR / "archive"
 # Shared with the state path through `fixed_anchor_validation`, `dataset` or `batching`:
 # each has a consumer outside outputs/control, so it stays at the top level.
 SHARED_BY_DESIGN = {
-    "terminal_state_loss",
-    "arc_length_geometry",
-    "fixed_dt_supervision",
-    "flyability",
+    "geometry.terminal_state_loss",
+    "geometry.arc_length_geometry",
+    "data.fixed_dt_supervision",
+    "geometry.flyability",
 }
 #: A path's strategy-facing modules (review §4.2): the seam between the spine and the path's
 #: own code. They may import the spine's shared modules (`objective`, `forecast`, `models`);
@@ -46,8 +46,11 @@ SHARED_BY_DESIGN = {
 STRATEGY_SEAM = {"strategy.py", "forecast.py", "supervision.py", "loss.py", "loss/objective.py"}
 #: What nothing under outputs/ may import: the loop, the replay, the export and the CLI are
 #: what CALL a strategy.
-LOOP_MODULES = {"train", "validation", "batching", "cross_validation", "export", "cli", "__main__"}
-SPINE_MODULES = {"objective", "forecast", "models"}
+LOOP_MODULES = {
+    "training.train", "training.validation", "training.batching",
+    "training.cross_validation", "inference.export", "cli", "__main__",
+}
+SPINE_MODULES = {"training.objective", "inference.forecast", "backbone.adapters"}
 
 
 def _module_files() -> list[Path]:
@@ -211,7 +214,7 @@ def test_nothing_live_imports_the_archive():
 def test_shared_modules_stay_outside_the_control_path():
     """Each name here has at least one consumer that is NOT control-specific."""
     for name in SHARED_BY_DESIGN:
-        assert (TS_DIR / f"{name}.py").is_file(), (
+        assert (TS_DIR / (name.replace(".", "/") + ".py")).is_file(), (
             f"{name} moved into outputs/control/, but the state path reaches it — check its "
             f"consumers before claiming it as control-only"
         )
@@ -233,7 +236,15 @@ def _output_modules() -> list[Path]:
 
 
 def _roots(names: set[str]) -> set[str]:
-    return {name.split(".")[0] for name in names}
+    """The names as the layering rules spell them: a module (`training.objective`) or a
+    package (`cli`), whichever an import's dotted name starts with."""
+    roots = set()
+    for name in names:
+        parts = name.split(".")
+        roots.add(parts[0])
+        if len(parts) > 1:
+            roots.add(".".join(parts[:2]))
+    return roots
 
 
 def test_nothing_under_outputs_imports_the_training_loop():
@@ -299,12 +310,12 @@ def test_the_registry_is_lazy_and_the_data_plane_reaches_only_it():
     path's data-side code (the batch context) belongs in its strategy, not in `dataset`."""
     for name in ("__init__.py", "base.py"):
         offending = _roots(_runtime_imported_names(OUTPUTS / name)) & (
-            SPINE_MODULES | LOOP_MODULES | {"dataset"}
+            SPINE_MODULES | LOOP_MODULES | {"data.dataset"}
         )
         assert not offending, (
             f"outputs/{name} imports {sorted(offending)} at runtime; the registry must stay lazy"
         )
-    dataset_imports = _runtime_imported_names(TS_DIR / "dataset.py")
+    dataset_imports = _runtime_imported_names(TS_DIR / "data" / "dataset.py")
     assert "outputs" in dataset_imports
     under = {name for name in dataset_imports if name.startswith("outputs.")}
     assert not under, (
@@ -523,7 +534,7 @@ def test_every_new_run_vocabulary_is_actually_refused(tmp_path, capsys):
         CONTROL_HOOKS, CONTROL_STATE_LOSS_GRIDS, CTA_CONDITIONINGS, INTENT_CONDITIONINGS,
         PREDICTION_OUTPUTS, STATE_POSITION_REFERENCES,
     )
-    from ts_transformer.coordinate_frames import COORDINATE_FRAMES
+    from ts_transformer.data.coordinate_frames import COORDINATE_FRAMES
 
     #: field -> (its full stored vocabulary, the other settings that value needs to be legal)
     VOCABULARY_CONTEXT = {

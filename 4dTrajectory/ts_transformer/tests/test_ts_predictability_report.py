@@ -10,7 +10,7 @@ import pytest
 
 import ts_transformer.experiments.predictability_report as report  # noqa: E402
 from ts_transformer.config import HORIZON_FULL, HORIZON_WINDOW, TSConfig  # noqa: E402
-from ts_transformer.time_grids import output_time_grid  # noqa: E402
+from ts_transformer.data.time_grids import output_time_grid  # noqa: E402
 
 
 def test_full_grid_shortens_the_last_segment_and_masks_padding():

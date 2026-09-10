@@ -21,7 +21,7 @@ for path in (TS_DIR.parent, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import ts_transformer.final_approach_geometry as fag  # noqa: E402
+import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG, CONTROL_HOOK_BARRIER,
     CONTROL_HOOK_BARRIER_SPEED_FLOOR, CONTROL_HOOK_BARRIER_SPEED_FLOOR_TROMBONE,
@@ -36,25 +36,25 @@ from ts_transformer.outputs.control.constraints import (  # noqa: E402
 )
 from ts_transformer.outputs.control.constraints import trombone as trombone_module  # noqa: E402
 from ts_transformer.outputs.control.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION  # noqa: E402
-from ts_transformer.flyability import flyability_summary, required_controls  # noqa: E402
+from ts_transformer.geometry.flyability import flyability_summary, required_controls  # noqa: E402
 from dataclasses import fields as dataclass_fields  # noqa: E402
 
 from ts_transformer.outputs.control.constraints.gates import on_final_weight, runway_axes_view  # noqa: E402
 from ts_transformer.outputs.control.dynamics import rollout as control_rollout  # noqa: E402
 from ts_transformer.outputs.control.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView  # noqa: E402
 from ts_transformer.outputs.control.envelope import MAX_BANK_RAD  # noqa: E402
-from ts_transformer.coordinate_frames import ENUFrame  # noqa: E402
-from ts_transformer.dataset import Normalizer, build_series  # noqa: E402
+from ts_transformer.data.coordinate_frames import ENUFrame  # noqa: E402
+from ts_transformer.data.dataset import Normalizer, build_series  # noqa: E402
 from ts_transformer.outputs.control.supervision import dynamics_arrays  # noqa: E402
 from evaluation.records import record_from_dict  # noqa: E402
-from ts_transformer.export import build_prediction_record  # noqa: E402
+from ts_transformer.inference.export import build_prediction_record  # noqa: E402
 from flight_scenarios.runway_target import find_threshold  # noqa: E402
 import ts_transformer.outputs.control.forecast as control_forecast_module  # noqa: E402
-from ts_transformer.forecast import forecast_approach  # noqa: E402
+from ts_transformer.inference.forecast import forecast_approach  # noqa: E402
 from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
 from ts_transformer.run_naming import run_display_name  # noqa: E402
-from ts_transformer.synthetic import synthetic_arrivals  # noqa: E402
-from ts_transformer.train import fit_model  # noqa: E402
+from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
+from ts_transformer.training.train import fit_model  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 TAN_GPA = math.tan(math.radians(3.0))

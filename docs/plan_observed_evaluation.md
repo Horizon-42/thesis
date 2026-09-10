@@ -9,7 +9,7 @@ Everything below is grounded in symbols that exist today; file:line anchors are 
 later session can navigate straight to them. Read this alongside:
 - `evaluation/` (the judging package — unchanged by the bug fixes)
 - `4dTrajectory/optimization/evaluation_export.py` (the record/roster contract, casadi-free)
-- `4dTrajectory/ts_transformer/export.py` (the precedent for a control-free eval batch)
+- `4dTrajectory/ts_transformer/inference/export.py` (the precedent for a control-free eval batch)
 - `aeroviz-4d/src/data/evaluationReport.ts` + `EvaluationReportWindow.tsx` (the UI that already renders the report)
 
 ---
@@ -134,7 +134,7 @@ existing `*_eval.json`.
 ### 4.2 Observed-batch writer  (Python, follows the ts precedent)
 
 Observed records + a `summary.json` roster in one directory, so `evaluation.load_records`
-(records.py:126, manifest-only — no glob) can read them. `ts_transformer/export.py::write_batch`
+(records.py:126, manifest-only — no glob) can read them. `ts_transformer/inference/export.py::write_batch`
 is the exact precedent: it already writes reference-shaped `*_eval.json` + a roster via the
 shared `evaluation_export.summary_row` (evaluation_export.py:115). Mirror it for observed
 tracks. Reuse `reference_evaluation_record`; stamp `subject: "observed"`.

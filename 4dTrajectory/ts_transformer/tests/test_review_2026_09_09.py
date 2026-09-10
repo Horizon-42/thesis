@@ -9,16 +9,16 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
-import ts_transformer.coordinate_frames as frames
+import ts_transformer.data.channels as ch
+import ts_transformer.data.coordinate_frames as frames
 import ts_transformer.outputs.control.strategy as control_strategy
 from ts_transformer.config import TSConfig
-from ts_transformer.dataset import Normalizer, build_series
-from ts_transformer.export import build_prediction_record, observed_series_metrics, write_batch
-from ts_transformer.forecast import forecast_approach
-from ts_transformer.models import build_model
+from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
+from ts_transformer.inference.forecast import forecast_approach
+from ts_transformer.backbone.adapters import build_model
 from ts_transformer.outputs.control.heads import ControlPrediction
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.synthetic import synthetic_arrivals
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

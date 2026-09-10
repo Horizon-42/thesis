@@ -26,7 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS  # noqa: E402
-from ts_transformer.flyability import (  # noqa: E402
+from ts_transformer.geometry.flyability import (  # noqa: E402
     G, HARD_VIOLATIONS, SOFT_VIOLATIONS, Envelope, calibrated_report, flyability_batch,
     flyability_summary, isa_density, report_for_records, required_controls,
 )

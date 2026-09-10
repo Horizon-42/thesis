@@ -22,7 +22,7 @@ from ts_transformer.approach_clustering.model import (
     _silhouette_score,
     fit_cluster_candidates,
 )
-from ts_transformer.development_cohorts import DevelopmentCohort
+from ts_transformer.data.development_cohorts import DevelopmentCohort
 
 
 def test_module_cli_bootstraps_repository_dependencies() -> None:

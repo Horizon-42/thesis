@@ -34,8 +34,8 @@ from ts_transformer.config import (
     PREDICTION_CLOSURE,
     TROMBONE_SURPLUS_REFERENCES,
 )
-from ts_transformer.approach_difficulty import approach_difficulty
-from ts_transformer.calibration import (
+from ts_transformer.data.approach_difficulty import approach_difficulty
+from ts_transformer.inference.calibration import (
     FAN_INTERVAL_ALPHA,
     QUANTILE_DIR_NAME,
     conformal_intervals,
@@ -44,20 +44,20 @@ from ts_transformer.calibration import (
     load_conformal_table,
     quantile_directory_name,
 )
-from ts_transformer.data_provenance import require_matching_data_provenance
+from ts_transformer.data.data_provenance import require_matching_data_provenance
 from ts_transformer.outputs.closure.model import ClosureLabels, load_labels
-from ts_transformer.dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
-from ts_transformer.evaluation_protocol import (
+from ts_transformer.data.dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
+from ts_transformer.inference.evaluation_protocol import (
     TestReleaseError,
     begin_test_evaluation,
     complete_test_evaluation,
 )
-from ts_transformer.export import (
+from ts_transformer.inference.export import (
     accuracy_block, build_prediction_record, observed_series_metrics, write_batch,
 )
-from ts_transformer.flyability import report_for_records
+from ts_transformer.geometry.flyability import report_for_records
 from ts_transformer.io_utils import file_sha256
-from ts_transformer.forecast import cut_at_threshold_crossing, default_anchor, forecast_approaches
+from ts_transformer.inference.forecast import cut_at_threshold_crossing, default_anchor, forecast_approaches
 from ts_transformer.outputs.control.forecast import (
     duration_quantile_predictions,
     latent_mode_forecasts,
@@ -67,8 +67,8 @@ from ts_transformer.outputs.control.forecast import (
 )
 from ts_transformer.outputs.closure.forecast import forecast_closure_from_labels
 from ts_transformer.outputs import ForecastOptions
-from ts_transformer.models import resolve_device
-from ts_transformer.train import load_checkpoint
+from ts_transformer.backbone.adapters import resolve_device
+from ts_transformer.training.train import load_checkpoint
 
 from .common import (
     add_data_args,

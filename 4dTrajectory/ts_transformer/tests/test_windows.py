@@ -10,18 +10,18 @@ import numpy as np
 import pytest
 import torch
 
-import ts_transformer.channels as ch
-import ts_transformer.dataset as dataset_module
+import ts_transformer.data.channels as ch
+import ts_transformer.data.dataset as dataset_module
 from ts_transformer.config import HORIZON_FULL, HORIZON_WINDOW, TSConfig
-from ts_transformer.dataset import (
+from ts_transformer.data.dataset import (
     FixedAnchorTrajectoryWindows,
     Normalizer,
     RandomAnchorTrajectoryWindows,
     build_series,
     window_anchors,
 )
-from ts_transformer.synthetic import synthetic_arrivals
-from ts_transformer.objective import masked_mse
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.training.objective import masked_mse
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 

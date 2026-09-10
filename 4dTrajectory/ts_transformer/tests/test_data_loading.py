@@ -10,18 +10,18 @@ from pathlib import Path
 import pytest
 
 import ts_transformer.cli.common as cli_common
-import ts_transformer.dataset as dataset_module
-import ts_transformer.splits as splits
-import ts_transformer.batch_benchmark as batch_probe
+import ts_transformer.data.dataset as dataset_module
+import ts_transformer.data.splits as splits
+import ts_transformer.cli.benchmark_batch as batch_probe
 from ts_transformer.config import TSConfig
-from ts_transformer.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
-from ts_transformer.splits import (
+from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
+from ts_transformer.data.splits import (
     cross_validation_folds,
     split_by_flight,
     split_name_for_dataset_id,
 )
-from ts_transformer.synthetic import synthetic_arrivals
+from ts_transformer.data.synthetic import synthetic_arrivals
 # Imported, never restated: a schema version pinned by hand in a fixture is a version
 # the fixture cannot check, and this one gates every loader that reads the roster.
 from trajectory_data_process.harvest.arrivals import (
@@ -41,7 +41,7 @@ def _series(n_flights=8, **config_overrides):
 
 
 def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU") -> Path:
-    from ts_transformer.dataset import flight_key
+    from ts_transformer.data.dataset import flight_key
 
     arrivals = root / "arrivals"
     tracks = root / "tracks"
@@ -173,7 +173,7 @@ def test_windows_never_straddle_two_flights():
 def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
     # An orphan beside the roster is deliberately ignored: no glob can leak rejected or
     # stale flights into the train/validation/test split.
-    from ts_transformer.dataset import load_flight_dicts
+    from ts_transformer.data.dataset import load_flight_dicts
 
     _write_arrival_manifest(tmp_path, ["A", "B", "C"])
     (tmp_path / "tracks" / "assigned" / "05L" / "orphan.json").write_text(
@@ -184,7 +184,7 @@ def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
     assert [f["id"] for f in flights] == ["A", "B", "C"]
     # Scene context rides along from the same roster: each flight's previous same-runway
     # landing (the fixture lands one per second on 05L).
-    from ts_transformer.intent_conditioning import LeadLanding
+    from ts_transformer.data.intent_conditioning import LeadLanding
 
     assert [f["lead_landing"] for f in flights] == [
         LeadLanding(None), LeadLanding("2026-01-01T00:00:00Z"),
@@ -193,7 +193,7 @@ def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
 
 
 def test_ts_load_aggregates_multiple_airport_manifests(tmp_path):
-    from ts_transformer.dataset import load_flight_dicts
+    from ts_transformer.data.dataset import load_flight_dicts
 
     first = _write_arrival_manifest(tmp_path / "first", ["A"], airport="KAAA")
     second = _write_arrival_manifest(tmp_path / "second", ["B"], airport="KBBB")
@@ -269,7 +269,7 @@ def test_batch_probe_opens_outer_train_track_files_only(tmp_path):
 
 
 def test_ts_load_rejects_duplicate_manifest_identity(tmp_path):
-    from ts_transformer.dataset import load_flight_dicts
+    from ts_transformer.data.dataset import load_flight_dicts
 
     manifest_path = _write_arrival_manifest(tmp_path, ["A"])
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -281,7 +281,7 @@ def test_ts_load_rejects_duplicate_manifest_identity(tmp_path):
 
 
 def test_ts_load_rejects_legacy_json_input(tmp_path):
-    from ts_transformer.dataset import load_flight_dicts
+    from ts_transformer.data.dataset import load_flight_dicts
 
     legacy = tmp_path / "KRDU_05L_landings.json"
     legacy.write_text(json.dumps([{"id": "OLD"}]), encoding="utf-8")
@@ -295,7 +295,7 @@ def test_flight_identity_separates_the_same_callsign_on_different_runways():
     # `predict --split test` returning 48 flights for an 18-flight split — because every
     # namesake on every runway matched. It also leaks the split: three copies of one id
     # land in train, val and test at once.
-    from ts_transformer.dataset import flight_key
+    from ts_transformer.data.dataset import flight_key
 
     series, _ = _series(n_flights=6)
     ids = [s.flight_id for s in series]

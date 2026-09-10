@@ -24,14 +24,14 @@ for path in (REPO_ROOT, TS_DIR.parent):
         sys.path.insert(0, str(path))
 
 from aerodynamic_model.common import GeodeticState  # noqa: E402
-from ts_transformer.approach_difficulty import (  # noqa: E402
+from ts_transformer.data.approach_difficulty import (  # noqa: E402
     ESTABLISHED_CROSS_TRACK_M,
     approach_difficulty,
     difficulty_block,
 )
-from ts_transformer.channels import target_chart_position  # noqa: E402
-from ts_transformer.coordinate_frames import AirportENUFrame, ENUFrame, RunwayAlignedFrame  # noqa: E402
-from ts_transformer.dataset import FlightSeries  # noqa: E402
+from ts_transformer.data.channels import target_chart_position  # noqa: E402
+from ts_transformer.data.coordinate_frames import AirportENUFrame, ENUFrame, RunwayAlignedFrame  # noqa: E402
+from ts_transformer.data.dataset import FlightSeries  # noqa: E402
 
 THRESHOLD_LAT, THRESHOLD_LON, THRESHOLD_ALT = 35.8745, -78.802, 132.0
 APPROACH_COURSE_RAD = math.radians(30.0)   # math-ENU, deliberately not axis-aligned

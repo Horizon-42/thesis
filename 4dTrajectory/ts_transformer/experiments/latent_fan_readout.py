@@ -52,8 +52,8 @@ import numpy as np
 
 from ts_transformer.experiments.support import REPO_ROOT
 
-import ts_transformer.geometric_metrics as gm  # noqa: E402
-from ts_transformer.approach_difficulty import strata_masks  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
+from ts_transformer.data.approach_difficulty import strata_masks  # noqa: E402
 # One implementation of "what a leaf contributes to a fan readout" and of the
 # chamfer-to-nearest-leaf cell, shared with the B line's quantile fan.
 from ts_transformer.experiments.quantile_fan_readout import (  # noqa: E402
