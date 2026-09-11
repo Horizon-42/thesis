@@ -1,6 +1,14 @@
 # Plan-and-guidance: the next model (design v5, 2026-09-11)
 
-Status: **v5 (2026-09-11, drafted for the user's read): the route is predicted ONE INSTRUCTION AT
+Status: **v5 step 3 BUILT and run small-scale (2026-09-11 evening, `dev-plan-next`; §12.4)**: the
+next-instruction readout (3a), the rolled oracle (3b) and the single-step plan head — the fourth
+output path, `prediction_output=plan` — trained on a 403-flight development cohort and rolled
+through the guidance (3c); the full-cohort head and the full rolled oracles are the numbers §12.4
+waits on. Two things the small run found and fixed: the oracle graded the truth itself as a
+glidepath violator (the window now binds inside the FAF, the coded floor before it, and the
+truth's own rows are graded beside every flight), and a flight already on the final needs the
+"no fix ahead" order too (the first head sent 23 of 48 established flights to a made-up fix).
+**v5 (2026-09-11, drafted for the user's read): the route is predicted ONE INSTRUCTION AT
 A TIME** — the next fly-by fix and the speed at it, from a 60 s window, at any anchor, rolled
 by the guidance until the join (§3b, §4.2, §5, §6, §7, §9 step 3); the whole path's fixes stay
 the offline label and the oracle's representation. Why: a radar vector is issued one at a time
@@ -361,6 +369,12 @@ parametrisation is too coarse.
    and where they do not the rolling itself is the difference); (c) training: the operating
    parameters as before, `next_fix` / `V_next` / `next_is_join` as point + distribution, 60 s
    window, remaining-path-uniform anchors; the single-step and the rolled readouts of §7.
+   **(a) DONE, (b) DONE, (c) BUILT and run small-scale, 2026-09-11 (`dev-plan-next`; §12.4)** —
+   `run_ts.py plan_next_readout` (3a; `step3a_next_readout/`), `run_ts.py plan_oracle --route
+   next` (3b; `step3b_rolled_l1/`, `step3b_rolled_a60s/`), `prediction_output=plan` with
+   `outputs/plan/{labels,model,strategy}.py`, `plan_oracle --policy model` (the rolled reading)
+   and the readout's HEAD columns (the single-step reading); the point heads only — the
+   distribution over the next fix (the fan) is the next item on (c).
 4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
 5. Two seeds; pooled five-airport training; KSJC replication.
 6. The multi-aircraft scheduler demonstration.
@@ -753,3 +767,212 @@ own fixes; the plan-route form is the floor); the residual is in the corners, ha
 vectored flights within ~85 m and half ~900 m where a fly-by at the fix's speed does not
 fit the leg — the next item on the guidance, not on the head; and the anchor for step 3 is
 the 60 s window's (46 % censored against 59 % at L−1), which is why v5 shortens the window.
+
+
+### 12.4 Step 3 — the single-step head: the readout, the rolled oracle, the first head (2026-09-11)
+
+`dev-plan-next`. Three instruments and one path, in §9's order. The grading changed first
+(the truth graded itself a violator): **the glidepath window binds inside the FAF only; before
+it, on the final, the coded floor at the next fix applies** (`experiments.plan_oracle.
+corridor_verdicts`, the optimizer's `prefaf_floor_m` rule; oracle schema v2), and every table
+grades the truth's OWN future rows under the same rule beside the flight's (`… the truth`
+rows) — on the 48-flight smoke the truth fails the pre-FAF floor on 14/48 (vectored aircraft
+are assigned altitudes below the coded IF floor; the 30 m tolerance of the observed
+evaluation) and the glidepath window on 3/48, so neither share is a gate: a flown share
+reads against the truth's.
+
+**3a — the next-instruction readout** (`step3a_next_readout/`, KRDU val 1404, the fixed 60 s
+anchor and 5 remaining-path-uniform random anchors per flight, seed 1337, 60 s of truth
+after every anchor):
+
+| | 60 s anchor, all | 60 s, straight-in | 60 s, vectored | random, all (7020) | random, vectored (2485) |
+|---|---|---|---|---|---|
+| censored (already on the final) | 45.6 % | 70.8 % | 0 % | 61.3 % | 17.0 % |
+| the join is next (of open) | 3.4 % | 9.8 % | 0 % | 3.6 % | 0.9 % |
+| fixes ahead (mean, open) | 2.07 | 1.07 | 2.60 | 2.12 | 2.46 |
+| next fix: lead path p10 / p50 / p90 | 1.8 / 29.5 / 37.9 km | 1.0 / 3.2 / 6.3 km | 25.8 / 33.4 / 38.7 km | 1.2 / 7.7 / 32.4 km | 1.5 / 13.3 / 34.3 km |
+| next fix: lead time p10 / p50 / p90 | 18 / 236 / 302 s | 10 / 32 / 63 s | 200 / 266 / 308 s | 12 / 70 / 258 s | 14 / 112 / 272 s |
+| next fix: \|across\| p50 | 4.4 km | 2.2 km | 5.2 km | 1.5 km | 1.3 km |
+| speed change to it p50 | −21.8 m/s | −6.7 | −28.5 | −10.0 | −11.3 |
+| median-baseline fix error p50 / p90 | 11.0 / 31.0 km | 2.2 / 4.9 km | 5.1 / 15.9 km | 8.9 / 25.5 km | 12.5 / 21.1 km |
+| next-is-join majority accuracy | 0.966 | 0.902 | 1.000 | 0.964 | 0.991 |
+
+What the single step has to predict: at the 60 s anchor a vectored flight's next fix lies
+25–39 km and 3.3–5.1 minutes ahead (the slice enters on a long downwind; the first turn is
+the base turn), and the trivial baseline misses it by 5 km at the median; read at random
+anchors over the approach the lead is 13 km / 112 s at the median and the baseline 12.5 km.
+The join is almost never the next thing on a vectored track (0–1 %), so the "no fix
+ahead" flag carries the ESTABLISHED state (below), not the join. Straight-in flights at
+60 s are on the final on 71 % and their next fix (the turn onto the final) 3 km / 32 s away.
+
+**3b — the rolled oracle** (`plan_oracle --route next`: the truth's own instructions flown ONE
+AT A TIME — each leg to the first pass of its fix, the aircraft re-anchored there, the next
+instruction laid from where it is, the closing onto the join and the final last; `outputs/
+plan/forecast.fly_rolling`, `fly_legs`). What rolling had to get right, each measured on the
+48-flight smoke before the full run: a leg is timed to the fix's FIRST pass, not the nearest
+route point (the route runs on past the fix and can come back near it — the leg flew the
+loop); the remaining path at the next anchor is the INSTRUCTION's, not the leg's inflated
+route's (read off the route, the closing was asked for 20 km of pre-final path and flew a
+loop); the closing's join is never behind the aircraft (the converge rule; a Dubins path
+back to a pose behind it otherwise); an instruction is a VECTOR — the fix AND the heading
+on after it (`Instruction`: fly-over semantics overshot every corner and the re-projection
+skipped half the fixes) — and carries the height at the fix (each leg descends to it by its
+fix: without it the leg flew to the plan's capture height over its inflated route and left
+the window on 62 % of vectored flights); a last fix at the join heads down the course.
+Three more came from the FULL L−1 run's worst flights (27 % of the vectored stratum
+worse than the whole-path flight by over 1 km, four of them by 9–14 km with 30–40 km of
+closing path — loops): a leg whose heading on points at the join gets NO extension beyond
+its fix (the 8 km onward point overshot the join and the polyline looped back to it); a
+leg is flown until the AIRCRAFT has executed the instruction — past the fix and on the
+heading given within 5° (`turn_done_row`; the tracker lags the route by its 8 s
+look-ahead, and cut on the route's clock the next leg started 60° off its heading 3 km
+short of the join, which the plan-route builder answered with a 25 km loop); and the
+closing from a pose heading at the join inside the 30° intercept is the polyline onto
+the join with its corner the fly-by point BEFORE it (`d_join + tangent`, so the arc onto
+the course ends at the join as the whole-path route's last corner does — at the join
+itself the arc ended past it and the corridor grading flagged it). The rolled flight
+reports where it was capped (`planCappedBy`: the 6-leg cap, the time cap) and the legs
+whose turn the aircraft never completed (`planTurnsIncomplete`). The 48-flight smoke,
+vectored stratum, against the whole-path waypoints flight on the same 48, at L−1:
+
+| vectored, 48-flight smoke, L−1 | rolled (first form) | rolled (final) | whole path |
+|---|---|---|---|
+| ADE mean / chamfer p50 / Fréchet p50 | 1310 / 144 / 766 m | 915 / 119 / 650 m | 862 / 85 / 379 m |
+| arrival-time MAE | 29.0 s | 16.7 s | 14.1 s |
+| established / corridor after the join | 96 % / 3.8 % | 100 % / 11.5 % | 100 % / 7.7 % |
+| glidepath (in FAF) flown / the truth | 11.5 % / 11.5 % | 7.7 % / 11.5 % | 3.8 % / 11.5 % |
+| floor (pre-FAF) flown / the truth | 26.9 % / 50 % | 23.1 % / 50 % | 0 % / 50 % |
+| legs / skipped / turn not completed | 3.69 / 0 % / — | 3.58 / 11.5 % / 7.7 % | 1 / — / — |
+
+Full KRDU val (1404 flights at L−1, 1404 at the 60 s anchor; `step3b_rolled_l1/`,
+`step3b_rolled_a60s/`; the whole-path columns are §12.3's artifacts, whose glidepath
+share is the v1 join-graded one and whose floor share does not exist):
+
+| vectored, KRDU val | rolled, L−1 | whole path, L−1 (§12.3, v1 grading) | rolled, 60 s | whole path, 60 s (§12.3, v1 grading) |
+|---|---|---|---|---|
+| ADE mean / chamfer p50 / Fréchet p50 | 1492 / 324 / 1800 m | 1159 / 268 / 1648 m | 2141 / 935 / 3121 m | 1705 / 887 / 3022 m |
+| arrival-time MAE | 20.5 s | 16.1 s | 25.5 s | 19.7 s |
+| established / corridor after the join | 94.2 % / 12.9 % | 99.0 % / 19.9 % | 92.4 % / 11.9 % | 99.0 % / 19.7 % |
+| glidepath (in FAF) flown / the truth | 15.1 % / 1.4 % | 8.2 % / — | 13.5 % / 1.4 % | 9.1 % / — |
+| floor (pre-FAF) flown / the truth | 19.7 % / 32.0 % | — | 19.7 % / 32.0 % | — |
+| legs flown | 3.61 | 1 | 3.53 | 1 |
+| bank capped | 19.1 % | 15.3 % | 18.2 % | 14.1 % |
+
+| straight-in, KRDU val | rolled, L−1 | whole path, L−1 (§12.3, v1 grading) | rolled, 60 s | whole path, 60 s (§12.3, v1 grading) |
+|---|---|---|---|---|
+| ADE mean / chamfer p50 / Fréchet p50 | 288 / 35 / 134 m | 194 / 34 / 134 m | 567 / 42 / 152 m | 350 / 42 / 152 m |
+| arrival-time MAE | 6.6 s | 4.8 s | 14.0 s | 8.4 s |
+| established / corridor after the join | 99.8 % / 0.7 % | 99.9 % / 0.6 % | 99.3 % / 2.5 % | 99.2 % / 2.9 % |
+| glidepath (in FAF) flown / the truth | 2.0 % / 0.3 % | 11.6 % / — | 3.2 % / 0.3 % | 36.8 % / — |
+| floor (pre-FAF) flown / the truth | 4.1 % / 5.3 % | — | 6.6 % / 8.5 % | — |
+| legs flown | 1.06 | 1 | 1.30 | 1 |
+| bank capped | 0.7 % | 0.5 % | 3.0 % | 2.2 % |
+
+**3c — the plan head** (`prediction_output=plan`; `outputs/plan/labels.py` the targets,
+`model.py` the head and the loss, `strategy.py` the path; the point heads, no fan yet).
+The head regresses 14 numbers per anchor in their own scales (L1 over the entries the
+track defines): the operating group (`T`, `V_mid`, `d_decel`, `V_final`, `h_capture`,
+`d_join`, and the REMAINING PATH — the schedule's coordinate, which the guidance needs and
+a prediction must therefore carry) and the next instruction (the fix ahead / across the
+anchor in runway axes, the heading on after it as a unit vector relative to the course,
+the speed, the remaining path and the height at it), plus the logit of "no fix ahead". The
+labels are read per drawn anchor at batch time (`extract_plan`, 0.4 ms each). The
+deployable forecast is the ROLLED flight (`fly_rolling_orders`: the head's order at the
+observed anchor, one leg on the guidance, the head asked again on the window of the
+observed track continued by the flown rows, until the closing; cut at the threshold; at
+most 6 instruction legs and 1.5× the first predicted arrival time); the validation replay
+is the DRAWN single-step flight (`draw_order`: the route through the predicted fix at the
+predicted schedule on the normalized grid, milliseconds per flight — the closure path's
+precedent). `plan_oracle --policy model` rolls a plan checkpoint's orders through the
+oracle's own instrument; `plan_next_readout` on a plan checkpoint adds the HEAD columns
+(the single-step reading of §7).
+
+The first run: 403 train / 117 val flights (every 17th / 12th of the locked split), 60 s
+window, remaining-path-uniform anchors, d_model 128 × 2 layers, 30 epochs, ~1 min. The
+validation objective fell 3.71 → 1.56 and was still falling (operating 0.29, T 0.51,
+instruction 0.43, no-fix flag 0.32). Rolled through the guidance on the first 48 val
+flights at the 60 s anchor, paired with the truth's own instructions rolled under the
+same checkpoint (its strata: 27 straight-in / 21 vectored / 23 established at row 29):
+
+| 48 flights, 60 s anchor | ceiling (truth's orders, first rolling) | the first head (first rolling) | ceiling (final rolling) | the head, corrected (final rolling) |
+|---|---|---|---|---|
+| vectored ADE / chamfer / Fréchet | 1913 / 820 / 2579 m | 6391 / 2613 / 10767 m | 2293 / 783 / 2567 m | 7657 / 2833 / 13015 m |
+| vectored established / legs / skipped / turn not completed | 95 % / 3.2 / 0 % / — | 38 % / 5.2 / 67 % / — | 90 % / 3.19 / 4.8 % / 9.5 % | 38 % / 2.14 / 4.8 % / 24 % |
+| straight-in ADE / chamfer | 550 / 43 m | 857 / 83 m | 554 / 39 m | 827 / 42 m |
+| straight-in corridor / glidepath / established | 3.7 % / 0 % / 100 % | 74 % / 82 % / 93 % | 3.7 % / 0 % / 100 % | 0 % / 0 % / 93 % |
+| arrival-time MAE flown / the head's T | 20.4 s / — | 53.6 / 52.5 s | 20.0 s / — | 60.6 / 57.0 s |
+
+**What the first head got wrong is a design fact, not a training one**: its "the join is
+next" flag was supervised only off the final (§6 as written: an established flight
+supervises the operating parameters alone), so on every established flight (23 of 48 at
+60 s) it predicted a fix from the prior and the guidance flew to it — 74 % of straight-in
+flights out of the corridor, 6.2 legs each. An aircraft on the final has no next fix
+either: the flag is now "no fix ahead" (the join next, OR already on the final),
+supervised on every sample, with `d_join` there its own remaining path (the join is
+here), and a closing that starts at or inside the join flies the height from where the
+aircraft is. The corrected head: straight-in corridor 74 → 0 %, glidepath 82 → 0 %,
+legs 6.2 → 1.0. The vectored stratum stays what a 403-flight head can do (the base turn
+25–39 km ahead is predicted 2.8 km off at random anchors against the 8.5 km baseline;
+11 km off at the 60 s anchor against 10.7 — the head has not learned the far lead; and
+its no-fix flag, initialised at even odds, is below the majority):
+
+| single-step readout, 48-flight smoke (the retrained head) | fixed 60 s | random anchors |
+|---|---|---|
+| HEAD next fix error p50 / p90 | 11.3 / 18.4 km | 2.8 / 9.2 km |
+| median baseline p50 / p90 | 10.7 / 34.4 km | 8.5 / 26.6 km |
+| HEAD next speed error p50 | 7.4 m/s | 7.7 m/s |
+| HEAD T MAE | 57.0 s | 25.0 s |
+| HEAD no-fix accuracy / majority | 0.72 / 0.96 | 0.72 / 0.98 |
+
+Full KRDU train (6856 flights, d_model 256 × 3 layers, 67 epochs run, best epoch 52; `step3c_plan_head_full/`): the validation
+objective's parts at the best epoch — operating 0.153, T 0.246, instruction 0.192, no-fix flag 0.067.
+Rolled through the guidance on the whole val split at the 60 s anchor (`plan_oracle --policy model
+--route next --anchor-s 60`, `step3c_rolled_model_a60s/`; 1404 flights), paired with the
+truth's own instructions rolled under the same checkpoint (`step3c_rolled_truth_a60s/`; the strata
+at this checkpoint's L−1, row 29: 799 straight-in / 601 vectored):
+
+| KRDU val, 60 s anchor | ceiling (truth's orders) | the full head |
+|---|---|---|
+| vectored ADE / chamfer / Fréchet | 1845 / 797 / 2631 m | 3781 / 1524 / 4715 m |
+| vectored established / corridor after the join | 93.7 % / 13.0 % | 83.4 % / 23.8 % |
+| vectored legs / skipped / turn not completed | 3.31 / 6.5 % / 5.7 % | 3.60 / 14.3 % / 9.7 % |
+| straight-in ADE / chamfer | 584 / 41 m | 635 / 42 m |
+| straight-in corridor / glidepath / established | 0.4 % / 1.6 % / 99.2 % | 1.8 % / 2.6 % / 99.2 % |
+| arrival-time MAE flown / the head's T (pooled) | 19.3 s / — | 34.6 / 24.4 s |
+| glidepath (in FAF) / floor (pre-FAF), pooled, flown | 7.0 % / 11.3 % | 10.5 % / 3.6 % |
+| … the truth | 0.9 % / 17.0 % | same |
+
+The single-step reading (`plan_next_readout` on the head, `step3c_next_readout_head/`; the fixed
+60 s anchor and 5 random anchors per flight):
+
+| single-step readout, KRDU val | vectored, 60 s | vectored, random | straight-in, 60 s | straight-in, random |
+|---|---|---|---|---|
+| HEAD next fix error p50 / p90 | 2612 / 9062 m | 1625 / 4409 m | 903 / 2968 m | 827 / 2574 m |
+| median baseline p50 / p90 | 6536 / 33725 m | 10686 / 22889 m | 1172 / 3719 m | 1488 / 4209 m |
+| HEAD next speed error p50 | 6.2 m/s | 5.7 m/s | 5.3 m/s | 4.3 m/s |
+| HEAD next remaining error p50 | 1923 m | 1652 m | 833 m | 758 m |
+| HEAD T MAE | 39.5 s | 24.9 s | 11.0 s | 6.3 s |
+| HEAD no-fix accuracy / majority | 0.998 / 0.998 | 0.987 / 0.983 | 0.855 / 0.843 | 0.846 / 0.842 |
+
+
+**Read.** The line runs end to end — labels per drawn anchor, the head, the drawn replay
+for checkpoint selection (the controller's own height law, `reference_height`), the
+rolled flight through the guidance, the two readings against the same ceiling. The
+rolled oracle (3b) sits 333 m of vectored ADE and 55 m of chamfer above the whole-path
+waypoints oracle at L−1 on the full split (1492 against 1159; 2141 against 1705 at the 60 s
+anchor), with 94.2 % of vectored flights established against 99.0 % — before the last three
+rolling rules it sat 1078 m above, with 27 % of the vectored flights over 1 km worse. What
+rolling still costs is the corner flown from a lagging pose (turn not completed on
+5.8 % of vectored flights, a fix skipped on 8.0 %) — the same residual as §12.3's —
+and the vertical: the rolled flight leaves the glidepath window inside the FAF on
+15.1 % of vectored flights (the truth 1.4 %), each leg descending to its instruction's
+height and the closing re-planning the capture from the last fix.
+
+**The full head's reading** (1404 val flights at the 60 s anchor, paired with the
+truth's orders under the same checkpoint): vectored ADE 3781 m against the ceiling's 1845 m, chamfer 1524 against 797 m,
+83.4 % established against 93.7 %; straight-in ADE 635 against 584 m, corridor after the join 1.8 % against 0.4 %;
+arrival-time MAE 34.6 s flown (24.4 s the head's own T) against the ceiling's 19.3 s and native32's 25.9 s. The single
+step: the head's next fix is 2.6 km off at the 60 s anchor and 1.6 km at random anchors on vectored
+flights, against the median baseline's 6.5 and 10.7 km (§7's veto does not fire); its arrival time 39.5 s / 24.9 s MAE there.
+Next on (c): the fan over the next fix (§3b's distribution), the corner, and the head's
+far lead (the base turn 25–39 km ahead at the 60 s anchor).

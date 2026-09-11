@@ -58,6 +58,7 @@ from ts_transformer.config import (
     HORIZON_WINDOW,
     PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
+    PREDICTION_PLAN,
     TSConfig,
     control_recipe_overrides,
 )
@@ -138,6 +139,10 @@ CLOSURE_LOSS_FIELDS = (
     "closure_timing_loss_weight",
     "closure_height_loss_weight",
 )
+#: The plan output's objective fields; its base name bumps when the regression itself
+#: is redesigned.
+PLAN_LOSS_BASE = "plan-v1"
+PLAN_LOSS_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight")
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
 # in different directories must not read as one).
 _PATH_FIELDS = frozenset({"closure_labels_path", "control_fitted_teacher_path"})
@@ -381,7 +386,7 @@ KNOWN_UNNAMED_FIELDS: dict[str, str] = {
     "subtract_last": "backbone knob, never set",
 }
 _named = (
-    set(CONTROL_LOSS_FIELDS) | set(STATE_LOSS_FIELDS) | set(CLOSURE_LOSS_FIELDS)
+    set(CONTROL_LOSS_FIELDS) | set(STATE_LOSS_FIELDS) | set(CLOSURE_LOSS_FIELDS) | set(PLAN_LOSS_FIELDS)
     | set(META_FIELDS) | {field for field, _ in _TAU_FIELDS} | set(LATENT_OUTPUT_FIELDS)
     | _DIRECTLY_NAMED_FIELDS
 )
@@ -506,6 +511,8 @@ def loss_design_name(config: Mapping[str, Any]) -> str:
     """Field 4: the named recipe, or nearest-recipe + edits, or a hash version."""
     if config.get("prediction_output") == PREDICTION_CLOSURE:
         return _with_diffs(config, CLOSURE_LOSS_FIELDS, CLOSURE_LOSS_BASE)
+    if config.get("prediction_output") == PREDICTION_PLAN:
+        return _with_diffs(config, PLAN_LOSS_FIELDS, PLAN_LOSS_BASE)
     if config.get("prediction_output") != PREDICTION_CONTROL:
         return _with_state_diffs(config)
     recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
@@ -559,10 +566,13 @@ def _with_diffs(config: Mapping[str, Any], fields: tuple[str, ...], base: str) -
 
 
 def dynamics_name(config: Mapping[str, Any]) -> str:
-    """Field 3: ``kinematic`` for state output, ``closed-form`` for closure; flight model
-    (+τ, +backend) for control."""
+    """Field 3: ``kinematic`` for state output, ``closed-form`` for closure, ``guidance``
+    for the plan (the guidance layer on the lagged rollout); flight model (+τ, +backend)
+    for control."""
     if config.get("prediction_output") == PREDICTION_CLOSURE:
         return "closed-form"
+    if config.get("prediction_output") == PREDICTION_PLAN:
+        return "guidance"
     if config.get("prediction_output") != PREDICTION_CONTROL:
         return "kinematic"
     model = config.get("control_dynamics_model") or CONTROL_DYNAMICS_POINT_MASS

@@ -183,12 +183,15 @@ AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
 PREDICTION_STATE = "state"
 PREDICTION_CONTROL = "control"
 PREDICTION_CLOSURE = "closure"
-PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_CLOSURE)
+# The plan-and-guidance path (design v5, 2026-09-11): the network predicts the operating
+# parameters and the NEXT instruction, a deterministic guidance layer flies them.
+PREDICTION_PLAN = "plan"
+PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_CLOSURE, PREDICTION_PLAN)
 # What a NEW run may select (review §5, 2026-09-09). A value in the stored vocabulary above
 # but not here is FROZEN: its checkpoints load, predict and publish exactly as before, and
 # `cli.common._refuse_unavailable_selection` refuses it for training. Closure is a comparison
 # arm with published numbers and a DELETED tracker (2026-09-07); it is not trained anew.
-PREDICTION_OUTPUTS_AVAILABLE = (PREDICTION_STATE, PREDICTION_CONTROL)
+PREDICTION_OUTPUTS_AVAILABLE = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_PLAN)
 # The truth-join oracles were the scene design's Phase 0 instrument; the L4 gate failed and
 # the scene encoder is archived (archive/scene_encoder_2026_09/), so no new oracle arm.
 INTENT_CONDITIONINGS_AVAILABLE = (INTENT_CONDITIONING_NONE,)
@@ -206,6 +209,9 @@ CLOSURE_FIELDS = (
 )
 # There is no pre-closure behaviour to reproduce, so every closure field is required.
 REQUIRED_SERIALIZED_CLOSURE_FIELDS = CLOSURE_FIELDS
+# The plan output's own fields (design v5 §6): the two loss weights. Required the same way.
+PLAN_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight")
+REQUIRED_SERIALIZED_PLAN_FIELDS = PLAN_FIELDS
 # The profile knot widths a closure labels file carries (outputs.closure.model.fit_labels writes
 # both); a config may only ask for one of them.
 CLOSURE_LABEL_KNOTS = (4, 8)
@@ -421,6 +427,11 @@ def uses_control_dynamics(prediction_output: str) -> bool:
 def uses_closure_labels(prediction_output: str) -> bool:
     """Whether an output strategy carries the per-flight closure labels as its context."""
     return prediction_output == PREDICTION_CLOSURE
+
+
+def uses_plan_labels(prediction_output: str) -> bool:
+    """Whether an output strategy reads the plan labels per drawn anchor as its context."""
+    return prediction_output == PREDICTION_PLAN
 
 
 HORIZON_NORMALIZED = "normalized"
@@ -1277,6 +1288,30 @@ class ClosureOutput(OutputSpec):
 
 
 @dataclass(frozen=True)
+class PlanOutput(OutputSpec):
+    """The plan-and-guidance path (design v5): the operating parameters and the next
+    instruction regressed on the labels the extractors read at each drawn anchor; the
+    guidance layer flies them at inference. Two loss weights: the operating group (the
+    arrival time, the speeds, the deceleration and join distances, the capture height,
+    the remaining path) and the instruction group (the next fix, its heading on, its
+    speed, remaining path and height, and whether there is one)."""
+
+    plan_operating_loss_weight: float
+    plan_instruction_loss_weight: float
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.horizon_mode != HORIZON_NORMALIZED:
+            raise ValueError(
+                "the plan output draws its own clock; only the normalized horizon contract "
+                "(n_segments target nodes) fits it"
+            )
+        for name in ("plan_operating_loss_weight", "plan_instruction_loss_weight"):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
+
+
+@dataclass(frozen=True)
 class DurationSpec:
     """How the rollout's total duration is predicted and partitioned into segments."""
 
@@ -1717,6 +1752,7 @@ _OUTPUT_VIEWS: dict[str, type[OutputSpec]] = {
     PREDICTION_STATE: StateOutput,
     PREDICTION_CLOSURE: ClosureOutput,
     PREDICTION_CONTROL: ControlOutput,
+    PREDICTION_PLAN: PlanOutput,
 }
 if set(_OUTPUT_VIEWS) != set(PREDICTION_OUTPUTS):
     raise RuntimeError("every prediction_output needs an OutputSpec view")
@@ -1823,6 +1859,9 @@ class TSConfig:
     closure_geometry_loss_weight: float = 1.0
     closure_timing_loss_weight: float = 1.0
     closure_height_loss_weight: float = 1.0
+    # ── the plan output (design v5 §6) ─────────────────────────────────────────
+    plan_operating_loss_weight: float = 1.0
+    plan_instruction_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
     # bounded to the final-approach corridor (see the constants). ``anchor-relative`` is
@@ -2276,6 +2315,11 @@ class TSConfig:
                 raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
         if self.control_command_hook != CONTROL_HOOK_OFF and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError("the command hook reads the threshold-anchored ENU chart")
+        if self.prediction_output == PREDICTION_PLAN and self.coordinate_frame != COORDINATE_FRAME_ENU:
+            raise ValueError(
+                "the plan path's skeleton and guidance are written in the threshold-anchored ENU "
+                f"chart (the course applied to chart deltas); coordinate_frame={self.coordinate_frame!r}"
+            )
         if self.uses_fitted_teacher and self.random_train_anchor:
             raise ValueError(
                 "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
@@ -2414,6 +2458,8 @@ class TSConfig:
             missing += [
                 name for name in REQUIRED_SERIALIZED_CLOSURE_FIELDS if name not in data
             ]
+        if uses_plan_labels(data.get("prediction_output", PREDICTION_STATE)):
+            missing += [name for name in REQUIRED_SERIALIZED_PLAN_FIELDS if name not in data]
         if missing:
             raise ValueError(
                 f"serialized config is missing {', '.join(sorted(missing))}; "

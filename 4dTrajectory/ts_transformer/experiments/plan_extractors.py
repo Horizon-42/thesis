@@ -29,6 +29,7 @@ from ts_transformer.data.approach_difficulty import (
     STRATA_COVARIATES,
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
+    STRATUM_SHORT,
     STRATUM_STRAIGHT_IN,
     STRATUM_VECTORED,
     approach_difficulty,
@@ -42,10 +43,6 @@ from ts_transformer.outputs.plan.skeleton import runway_skeleton
 INSTRUMENT = "the plan extractors"
 SCHEMA = "ts-plan-extractors-v1"
 STRATA = (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, STRATUM_ESTABLISHED)
-_SHORT = {
-    STRATUM_ALL: "all", STRATUM_STRAIGHT_IN: "straight-in", STRATUM_VECTORED: "vectored",
-    STRATUM_ESTABLISHED: "established",
-}
 
 
 def _p(values: np.ndarray, quantile: float) -> float:
@@ -123,8 +120,8 @@ def format_tables(summary: dict) -> str:
               "h_capture_m": 0, "d_join_m": 0, "side": 0, "L_pre_m": 0}
     strata = [s for s in STRATA if summary[s]["flights"]]
     lines = ["parameter p50 [p10, p90] per stratum (n = " + ", ".join(
-        f"{_SHORT[s]} {summary[s]['flights']}" for s in strata) + ")"]
-    head = f"{'parameter':<14}" + "".join(f"{_SHORT[s]:>30}" for s in strata)
+        f"{STRATUM_SHORT[s]} {summary[s]['flights']}" for s in strata) + ")"]
+    head = f"{'parameter':<14}" + "".join(f"{STRATUM_SHORT[s]:>30}" for s in strata)
     lines.append(head)
     for name in PLAN_PARAMETERS:
         lines.append(f"{name:<14}" + "".join(
@@ -148,7 +145,7 @@ def format_tables(summary: dict) -> str:
         r = summary[s]["route"]
         share = (r["join_on_transition"] / r["join_classified"]) if r["join_classified"] else float("nan")
         lines.append(
-            f"  {_SHORT[s]:<12} on-transition {r['join_on_transition']}/{r['join_classified']} "
+            f"  {STRATUM_SHORT[s]:<12} on-transition {r['join_on_transition']}/{r['join_classified']} "
             f"({100 * share:.1f} %)   side L/0/R {r['side_left']}/{r['side_straight']}/{r['side_right']}   "
             f"at-anchor {r['join_at_anchor']}   no join {r['no_join']}   V_mid@anchor {r['v_mid_from_anchor']}"
         )

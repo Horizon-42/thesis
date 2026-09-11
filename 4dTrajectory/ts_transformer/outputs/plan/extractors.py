@@ -144,6 +144,12 @@ class PlanLabels:
     #: a vector is a heading AND a speed instruction; the route's fly-by radius is this
     #: speed's and the schedule runs through these points under the waypoints route.
     waypoint_speeds: tuple[tuple[float, float], ...] | None = None
+    #: Per waypoint, the time from the anchor to the turn's middle (s): the lead a single
+    #: step must predict (design v5 §9 step 3a).
+    waypoint_times_s: tuple[float, ...] | None = None
+    #: Per waypoint, the chart height at the turn's middle (m above the aim point, as
+    #: `h_capture_m`): the altitude an instruction carries.
+    waypoint_heights_m: tuple[float, ...] | None = None
 
     def parameters(self) -> dict[str, float | int | None]:
         return {name: getattr(self, name) for name in PLAN_PARAMETERS}
@@ -153,6 +159,8 @@ class PlanLabels:
         out["ranges"] = {name: list(bounds) for name, bounds in self.ranges.items()}
         out["waypoints"] = None if self.waypoints is None else [list(fix) for fix in self.waypoints]
         out["waypoint_speeds"] = None if self.waypoint_speeds is None else [list(p) for p in self.waypoint_speeds]
+        out["waypoint_times_s"] = None if self.waypoint_times_s is None else list(self.waypoint_times_s)
+        out["waypoint_heights_m"] = None if self.waypoint_heights_m is None else list(self.waypoint_heights_m)
         return out
 
 
@@ -297,7 +305,7 @@ def extract_plan(series: FlightSeries, anchor: int, skeleton: RunwaySkeleton, *,
 
     join_at_anchor = join == 0
     if join is None or join_at_anchor:
-        h_capture = L_pre = side = waypoints = waypoint_speeds = None
+        h_capture = L_pre = side = waypoints = waypoint_speeds = waypoint_times = waypoint_heights = None
         waypoints_dropped = 0
         d_join = None if join is None else float(remaining[0])
         on_transition = None
@@ -314,6 +322,8 @@ def extract_plan(series: FlightSeries, anchor: int, skeleton: RunwaySkeleton, *,
             (float(remaining[mid]), float(np.median(speed[first : last + 1])))
             for _fix, (first, mid, last) in fixes
         )
+        waypoint_times = tuple(float(times[mid] - times[0]) for _fix, (_first, mid, _last) in fixes)
+        waypoint_heights = tuple(float(u[mid]) for _fix, (_first, mid, _last) in fixes)
         # the fix of the turn ONTO the final lies where the last leg meets the course —
         # often past the join (the gate opens inside a wide corridor before the turn is
         # complete). It is kept: the route takes it as the join itself. A fix past the
@@ -327,6 +337,8 @@ def extract_plan(series: FlightSeries, anchor: int, skeleton: RunwaySkeleton, *,
             keep = (fix_d > d_join) | (np.abs(fix_xt) <= ON_COURSE_FIX_M)
             waypoints = tuple(fix for fix, ok in zip(waypoints, keep, strict=True) if ok)
             waypoint_speeds = tuple(p for p, ok in zip(waypoint_speeds, keep, strict=True) if ok)
+            waypoint_times = tuple(t for t, ok in zip(waypoint_times, keep, strict=True) if ok)
+            waypoint_heights = tuple(h for h, ok in zip(waypoint_heights, keep, strict=True) if ok)
         window = max(1, int(round(SIDE_WINDOW_S / dt)))
         before = xt[max(0, join - window):join]
         widest = float(before[np.argmax(np.abs(before))])
@@ -376,4 +388,5 @@ def extract_plan(series: FlightSeries, anchor: int, skeleton: RunwaySkeleton, *,
         remaining_path_at_anchor_m=float(remaining[0]),
         ground_speed_at_anchor_mps=float(speed[0]),
         waypoints=waypoints, waypoints_dropped=waypoints_dropped, waypoint_speeds=waypoint_speeds,
+        waypoint_times_s=waypoint_times, waypoint_heights_m=waypoint_heights,
     )

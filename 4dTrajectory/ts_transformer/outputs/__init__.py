@@ -28,6 +28,7 @@ from ts_transformer.config import (
     PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
+    PREDICTION_PLAN,
     PREDICTION_STATE,
     TSConfig,
 )
@@ -42,6 +43,7 @@ _STRATEGY_MODULES: dict[str, str] = {
     PREDICTION_STATE: "ts_transformer.outputs.state.strategy",
     PREDICTION_CLOSURE: "ts_transformer.outputs.closure.strategy",
     PREDICTION_CONTROL: "ts_transformer.outputs.control.strategy",
+    PREDICTION_PLAN: "ts_transformer.outputs.plan.strategy",
 }
 if set(_STRATEGY_MODULES) != set(PREDICTION_OUTPUTS):
     raise RuntimeError("every prediction_output needs a strategy module")

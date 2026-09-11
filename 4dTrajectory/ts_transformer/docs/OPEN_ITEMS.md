@@ -102,10 +102,24 @@ the review's route and controller findings applied and re-measured). Artifacts:
 - **The vectored point claim is a timing claim with the truth's own three route
   parameters** (chamfer 636 m): `d_join`, `side`, `L_pre` say how long the 35 km of radar
   vectors are, not where they go. §8 risk 1 measured.
-- **Decision (the user's) before step 3**: train the plan head as designed (point claim on
-  the straight-in stratum, the vectored stratum through the fan), or add §8's optional extra
-  waypoints first so the vectored point claim has something to learn. Either way the
-  guidance's glidepath entry is a step-3 sub-task and costs no training.
+- **Step 3 (2026-09-11, `dev-plan-next`, design v5 §12.4): the single-step head is BUILT and
+  runs end to end** — `prediction_output=plan` (`outputs/plan/{labels,model,strategy}.py`),
+  the next-instruction readout (`step3a_next_readout/`: at the 60 s anchor a vectored
+  flight's next fix is 25–39 km / 3–5 min ahead, the median baseline 5 km off; at random
+  anchors 13 km / 112 s and 12.5 km), the rolled oracle (`--route next`; within ~50 m of
+  vectored ADE of the whole-path waypoints flight on the smoke once a leg ends where the
+  aircraft has executed its instruction — 915 against 862), and the first head on 403
+  flights rolled through the guidance (vectored ADE 7657 m against the ceiling's 2293 on
+  the same 48; straight-in 827 against 554 once "no fix ahead" covers the established
+  flights). Full val: the rolled oracle 1492 m of vectored ADE at L−1 against the whole-path
+  flight's 1159; the full head (6856 flights) rolled at the 60 s anchor 3781 m against its paired
+  ceiling's 1845 (straight-in 635 against 584), its next fix 1.6 km off at random
+  anchors against the median baseline's 10.7 km. The fan over the next fix and the
+  corner are next. Decided (v5): the single step, not §8's extra waypoints.
+- **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
+  binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
+  beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the
+  join and flagged the truth's own level segment; re-read them under v2 before quoting.
 - Step-1 findings that changed the design (§12.1): 59 % of KRDU val joins before the L−1
   window (three route parameters censored there); straight-in joins are published
   transitions (88 %), vectored joins radar vectors (2 %); `V_final` has no floor at V_ref

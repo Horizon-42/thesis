@@ -164,13 +164,19 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         "--prediction-output",
         choices=PREDICTION_OUTPUTS_AVAILABLE,
         default=None,
-        help="predict state endpoints (default) or bounded controls with dynamics rollout "
-             "(the closure output is frozen: its checkpoints load, no new run trains it)",
+        help="predict state endpoints (default), bounded controls with dynamics rollout, or "
+             "a plan (the operating parameters and the next instruction, flown by the guidance "
+             "layer; design v5) — the closure output is frozen: its checkpoints load, no new "
+             "run trains it",
     )
     parser.add_argument(
         "--closure-labels-path", default=None, metavar="JSON",
         help="closure output: the per-flight labels written by docs/p1_closure_oracle.py labels",
     )
+    parser.add_argument("--plan-operating-loss-weight", type=float, default=None,
+                        help="plan output: weight of the operating-parameter regression")
+    parser.add_argument("--plan-instruction-loss-weight", type=float, default=None,
+                        help="plan output: weight of the next-instruction regression")
     parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
     parser.add_argument("--n-segments", type=int, default=None,
                         help="N normalized state endpoints or non-uniform control segments")
@@ -529,6 +535,8 @@ CLI_CONFIG_FIELDS = (
     "model",
     "prediction_output",
     "closure_labels_path",
+    "plan_operating_loss_weight",
+    "plan_instruction_loss_weight",
     "seq_len",
     "n_segments",
     "horizon_mode",

@@ -60,6 +60,23 @@ point of the package, not a migration in progress.
   rollout (`outputs/control/constraints/closure_tracking.py`, `predict --closure-track`) is RETIRED —
   code DELETED 2026-09-07, its numbers (+10.5 m of ADE, 92 % fully flyable) kept as history in
   `docs/2026-09-06_closure_p1d_tracking_results.zh.md`. Do not rebuild it.
+- **`plan`** — the plan-and-guidance path (design v5, `docs/2026-09-09_plan_and_guidance_design.md`;
+  step 3 built 2026-09-11): the network predicts the OPERATING PARAMETERS and the NEXT
+  INSTRUCTION at any anchor (`outputs/plan/labels.TARGETS`: `T`, `V_mid`, `d_decel`,
+  `V_final`, `h_capture`, `d_join`, the remaining path; the next fix ahead / across the
+  anchor in runway axes, its heading on, speed, remaining path and height; the logit of
+  "no fix ahead"), regressed L1 in each target's scale over the entries the track defines,
+  and a deterministic guidance layer flies them ONE INSTRUCTION AT A TIME, re-asking the
+  head where the aircraft has EXECUTED each instruction — past the fix and on the heading
+  given (`outputs/plan/forecast.fly_rolling_orders`, `turn_done_row`; cut on the route's
+  clock the tracker's lag left the next leg 60° off its heading and the route builder
+  answered with a loop). Labels are read per
+  drawn anchor at batch time (`PlanContext`); the validation replay is the DRAWN single-step
+  route (`draw_order`), the deployable forecast the rolled flight cut at the threshold.
+  Locks: `normalized` horizon; no CTA yet. **An aircraft already on the final has no next
+  fix either** — the flag is "no fix ahead", supervised on every sample; the first head,
+  supervised off the final only, sent every established flight to a made-up fix (74 % of
+  straight-in flights out of the corridor).
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches
@@ -515,7 +532,7 @@ moves — every module keeps its name and content, only its directory changed):
 | `data/` | the data plane: `dataset`, `splits`, `data_provenance`, `channels`, `coordinate_frames`, `time_grids`, `anchor_grid` / `anchor_strata`, `lateral_eligibility`, `reference_velocity`, `target_conditioning` / `intent_conditioning`, `synthetic`, `development_cohorts`, `approach_difficulty`, `fixed_dt_supervision`, `batch_contract` |
 | `geometry/` | final-approach geometry and the metrics read off a trajectory: `final_approach_geometry`, `arc_length_geometry`, `geometric_metrics`, `metrics`, `flyability`, `physical_criteria`, `terminal_state_loss` |
 | `backbone/` | `adapters` (the one interface over the two vendored networks, formerly `models.py`) and `vendor/` |
-| `outputs/` | one package per prediction path behind one strategy (§4.2): `state/`, `closure/`, `control/`; `base`, the lazy registry, `duration_heads` |
+| `outputs/` | one package per prediction path behind one strategy (§4.2): `state/`, `closure/`, `control/`, `plan/`; `base`, the lazy registry, `duration_heads` |
 | `training/` | `train`, `validation`, `fixed_anchor_validation`, `objective`, `batching`, `cross_validation`, `training_performance`, `experiment_index` |
 | `inference/` | `forecast`, `calibration`, `export`, `evaluation_protocol`, `intent_explainability`, `build_multiflight_capacity_report` |
 | `cli/` | one module per subcommand, `common`, and `benchmark_batch` (formerly `batch_benchmark.py`) |
@@ -651,10 +668,10 @@ rounded at that speed's radius and the schedule runs through the fix speeds
 (`speed_schedule_mps(points=…)`, `PlanToFly.speed_points`) — without them the fixes were
 rounded at `V_mid`, which the truth had long left by its base turn, and the tracker cut
 the corners (31 % of vectored flights out of the corridor after the join, chamfer 296 m).
-With the speeds, on KRDU val: vectored chamfer 636 → {l1_wp_vec_chamfer_p50_m:.0f} m and arrival-time MAE
-27 → {l1_wp_vec_final_time_error_mae_s:.0f} s from the truth's own fixes — bimodal: half the vectored flights within
+With the speeds, on KRDU val: vectored chamfer 636 → 268 m and arrival-time MAE
+27 → 16 s from the truth's own fixes — bimodal: half the vectored flights within
 ~85 m, the other half ~900 m where the corners cannot be flown at the fix's speed (the bank
-cap on {l1_wp_vec_hook_bank_capped_share_pct} of steps; corridor left after the join by {l1_wp_vec_lateral_violation_share_pct}). Two representations were
+cap on 15.3 % of steps; corridor left after the join by 19.9 %). Two representations were
 measured out before the fixes: (start, heading change) drifts every later leg at another
 radius; a turn's end point is ambiguous about the leg heading. `run_ts.py plan_oracle`
 flies every flight's OWN plan (the
@@ -670,7 +687,21 @@ the per-flight hook counts' record surface `per_flight_hook_diagnostics` in
 `geometry/dubins.py` (`dubins_csc` takes an `end_radius` and a `max_sweep_rad`), and the
 time-free reading of one forecast against its truth, `experiments/support.forecast_geometry`
 (the anytime curve's and the oracle's, once). The
-strategy, the `PlanOutput` view and `PREDICTION_PLAN` come with the plan head (step 3). The closure
+strategy (`outputs/plan/strategy.py`), the `PlanOutput` view (two loss weights) and
+`PREDICTION_PLAN` ARE the plan head (step 3, 2026-09-11): `labels.py` turns a label set into
+the target vector, the validity mask and the no-fix flag (`targets_from_labels`) and a
+prediction back into the `PlanOrder` the guidance flies (`order_from_prediction`, every
+clamp recorded); `model.py` the head and `plan_loss_components`; the rolled flight is
+`forecast.fly_legs` under a `LegOrders` callable — the oracle's queue of the truth's
+instructions (`fly_rolling`) or the head's order at each anchor (`fly_rolling_orders`,
+`rolled_history` builds its window from the observed track continued by the flown rows).
+`run_ts.py plan_oracle --route next [--policy model]` is the rolled oracle / the rolled
+prediction under one instrument, `run_ts.py plan_next_readout` the next-instruction
+statistics and, on a plan checkpoint, the single-step reading (HEAD columns). **The
+oracle's vertical verdict binds the glidepath window inside the FAF only and the coded
+floor before it, and grades the truth's own rows beside every flight** (the truth fails
+the pre-FAF floor on 29 % of smoke flights — vectored aircraft are assigned altitudes
+below the coded IF floor — so no share there is a gate). The closure
 path is `outputs/closure/{strategy,model,geometry,profile,forecast}`; the state path is
 `outputs/state/{strategy,model,loss,forecast}` (the fixed-time postprocessors and the
 corridor projection live in its `forecast`).

@@ -409,7 +409,8 @@ def _waypoints_route(p0, h0, first_radius, radius_after, end_radius, waypoints, 
     onto_final = False
     if fixes:
         d_last, xt_last = skeleton.axes(fixes[-1][:1], fixes[-1][1:])
-        if abs(float(xt_last[0])) <= ON_COURSE_FIX_M and PATH_STEP_M < float(d_last[0]) < d_join_m:
+        # a fix at the plan's join IS the join (a rolled closing lays its polyline onto it)
+        if abs(float(xt_last[0])) <= ON_COURSE_FIX_M and PATH_STEP_M < float(d_last[0]) <= d_join_m:
             onto_final = True
             fixes[-1] = _join_pose(skeleton, float(d_last[0]))[0]   # the fix, on the centreline
     vertices = [np.array(p0, dtype=np.float64)]

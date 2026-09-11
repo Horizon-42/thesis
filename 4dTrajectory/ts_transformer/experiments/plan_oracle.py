@@ -29,11 +29,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ts_transformer.config import default_anchor
+from ts_transformer.config import PREDICTION_PLAN, default_anchor
 from ts_transformer.data.anchor_grid import bin_anchor
 from ts_transformer.data.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
+    STRATUM_SHORT,
     STRATUM_STRAIGHT_IN,
     STRATUM_VECTORED,
     approach_difficulty,
@@ -57,17 +58,31 @@ from ts_transformer.inference.forecast import cut_at_threshold_crossing
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.dynamics.context import ANCHOR_CONTROL_SAMPLES
 from ts_transformer.outputs.plan.extractors import MAX_WAYPOINTS, extract_plan
-from ts_transformer.outputs.plan.forecast import ROUTE_PLAN, ROUTES, fly_plans
+from ts_transformer.outputs.plan.forecast import (
+    KIND_ROLLED,
+    ROUTE_PLAN,
+    ROUTES,
+    fly_plans,
+    fly_rolling,
+)
+from ts_transformer.outputs.plan.labels import truth_instructions
+from ts_transformer.outputs.plan.strategy import rolled_prediction
 from ts_transformer.outputs.plan.guidance.route import KIND_DOWNWIND, KIND_STRETCHED, KIND_WAYPOINTS
 from ts_transformer.outputs.plan.skeleton import runway_skeleton
 
 INSTRUMENT = "the plan oracle"
-SCHEMA = "ts-plan-oracle-v1"
+#: Before the FAF the coded floor applies (the optimizer's `prefaf_floor_m` rows), with
+#: this much below it tolerated — the observed evaluation's altitude tolerance.
+FLOOR_TOLERANCE_M = 30.0
+#: `--policy model`: the plan HEAD's orders (a plan checkpoint) rolled through the same
+#: guidance and graded by the same instrument — the rolled prediction beside its ceiling.
+POLICY_TRUTH = "truth"
+POLICY_MODEL = "model"
+#: `--route next`: the truth's instructions flown one at a time (design v5), re-anchored
+#: at each fix — the rolled form of the waypoints oracle.
+ROUTE_NEXT = "next"
+SCHEMA = "ts-plan-oracle-v2"   # v2 (2026-09-11): glidepath verdict inside the FAF only, floor before it, the truth graded alongside
 STRATA = (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, STRATUM_ESTABLISHED)
-_SHORT = {
-    STRATUM_ALL: "all", STRATUM_STRAIGHT_IN: "straight-in", STRATUM_VECTORED: "vectored",
-    STRATUM_ESTABLISHED: "established",
-}
 #: The rollout horizon past the plan's T: a flight that arrives late is measured as late.
 HORIZON_SLACK_S = 30.0
 HORIZON_SLACK_FRACTION = 0.1
@@ -86,30 +101,26 @@ def _p(values, quantile: float) -> float:
     return float(np.percentile(np.asarray(values, dtype=np.float64), quantile))
 
 
-def reference_verdicts(series, forecast, skeleton) -> dict[str, float | bool]:
-    """The reference reading of one forecast: flyable, established, inside the corridor and
-    the glidepath window on the final."""
-    geodetic = forecast.geodetic_values
-    rows = [
-        {"t": float(t), "lat": float(g[0]), "lon": float(g[1]), "alt": float(g[2]),
-         "V": float(g[3]), "psi": float(g[4]), "gamma": float(g[5]), "m": float(g[6])}
-        for t, g in zip(np.cumsum(forecast.sample_durations_s), geodetic, strict=True)
-    ]
-    controls = required_controls(rows, series.scenario.aircraft, aero=series.scenario.aero)
-    summary = flyability_summary(controls, aircraft_code=str(series.scenario.aircraft.code))
-    values = np.asarray(forecast.values, dtype=np.float64)
+def corridor_verdicts(series, values: np.ndarray, anchor: int, skeleton) -> dict[str, float | bool]:
+    """The corridor reading of one track from ``anchor``: on the final, inside the design
+    corridor from the join on, in the glidepath window inside the FAF, above the coded floor
+    before it. Read on a forecast AND on the truth's own future rows, so a flown share is
+    read against the truth's under the same rule (2026-09-11: the truth fails the pre-FAF
+    floor on 14/48 smoke flights — vectored aircraft are assigned altitudes below the coded
+    IF floor — and the glidepath window on 3/48)."""
+    values = np.asarray(values, dtype=np.float64)
     e = torch.from_numpy(values[:, IDX["e"]])[None]
     n = torch.from_numpy(values[:, IDX["n"]])[None]
     u = torch.from_numpy(values[:, IDX["u"]])[None]
     psi = torch.tensor([skeleton.course_rad], dtype=torch.float64)
     target = torch.from_numpy(np.asarray(series.target_chart, dtype=np.float64))
     d, xt = runway_axes(e - target[0], n - target[1], psi)
-    anchor_e = torch.tensor([float(series.values[forecast.anchor, IDX["e"]])], dtype=torch.float64)
-    anchor_n = torch.tensor([float(series.values[forecast.anchor, IDX["n"]])], dtype=torch.float64)
+    anchor_e = torch.tensor([float(series.values[anchor, IDX["e"]])], dtype=torch.float64)
+    anchor_n = torch.tensor([float(series.values[anchor, IDX["n"]])], dtype=torch.float64)
     v_e, v_n = position_direction(e, n, anchor_e, anchor_n)
     cos_align = alignment_cosine(v_e, v_n, psi)
-    # the reference is graded on the final BEFORE the threshold: past it the glidepath is
-    # the ground and the record is already cut there
+    # graded on the final BEFORE the threshold: past it the glidepath is the ground and the
+    # record is already cut there
     on_final = (hard_on_final(d, xt, cos_align) & (d > 0.0))[0].numpy()
     lateral, vertical = corridor_violations(
         d, xt, u - target[2], torch.tensor([skeleton.glidepath_tan], dtype=torch.float64)
@@ -122,18 +133,49 @@ def reference_verdicts(series, forecast, skeleton) -> dict[str, float | bool]:
     entered = np.cumsum(inside) > 0
     graded = on_final & entered
     lateral = lateral[0].numpy()[graded]
-    vertical = vertical[0].numpy()[graded]
+    # the vertical verdict as the optimizer's rows read it: the glidepath window binds
+    # inside the FAF; before it, on the final, the coded floor at the next fix — a real
+    # approach holds its platform altitude below the glidepath until the intercept from
+    # below, and graded from the join that read as a violation on the truth itself
+    d_rows = d[0].numpy()
+    inside_faf = graded & (d_rows <= skeleton.faf.d)
+    before_faf = graded & (d_rows > skeleton.faf.d)
+    vertical = vertical[0].numpy()[inside_faf]
+    altitude = u[0].numpy()[before_faf] + skeleton.aim_altitude_m
+    floors = np.array([
+        -np.inf if (floor := skeleton.floor_altitude_m(float(dd))) is None else floor
+        for dd in d_rows[before_faf]
+    ], dtype=np.float64)
+    floor_excess = np.clip(floors - FLOOR_TOLERANCE_M - altitude, 0.0, None) if altitude.size else np.zeros(0)
     return {
-        "fully_flyable": bool(summary["fully_flyable"]),
-        "violations": dict(summary["violations"]),
-        "soft_violations": dict(summary["soft"]),
-        "established": bool(forecast.truncated_at_threshold),
         "on_final_rows": int(on_final.sum()),
         "graded_rows": int(graded.sum()),
         "lateral_violation": bool(lateral.size and lateral.max() > 0.0),
         "lateral_violation_max_m": float(lateral.max()) if lateral.size else 0.0,
         "glidepath_violation": bool(vertical.size and vertical.max() > 0.0),
         "glidepath_violation_max_m": float(vertical.max()) if vertical.size else 0.0,
+        "floor_violation": bool(floor_excess.size and floor_excess.max() > 0.0),
+        "floor_violation_max_m": float(floor_excess.max()) if floor_excess.size else 0.0,
+    }
+
+
+def reference_verdicts(series, forecast, skeleton) -> dict[str, float | bool]:
+    """The reference reading of one forecast: flyable, established, and the corridor
+    verdicts of `corridor_verdicts`."""
+    geodetic = forecast.geodetic_values
+    rows = [
+        {"t": float(t), "lat": float(g[0]), "lon": float(g[1]), "alt": float(g[2]),
+         "V": float(g[3]), "psi": float(g[4]), "gamma": float(g[5]), "m": float(g[6])}
+        for t, g in zip(np.cumsum(forecast.sample_durations_s), geodetic, strict=True)
+    ]
+    controls = required_controls(rows, series.scenario.aircraft, aero=series.scenario.aero)
+    summary = flyability_summary(controls, aircraft_code=str(series.scenario.aircraft.code))
+    return {
+        "fully_flyable": bool(summary["fully_flyable"]),
+        "violations": dict(summary["violations"]),
+        "soft_violations": dict(summary["soft"]),
+        "established": bool(forecast.truncated_at_threshold),
+        **corridor_verdicts(series, forecast.values, forecast.anchor, skeleton),
     }
 
 
@@ -163,10 +205,24 @@ def summarize(rows: list[dict]) -> dict:
             "established_share": float(np.mean([row["reference"]["established"] for row in members])),
             "lateral_violation_share": float(np.mean([row["reference"]["lateral_violation"] for row in members])),
             "glidepath_violation_share": float(np.mean([row["reference"]["glidepath_violation"] for row in members])),
+            "floor_violation_share": float(np.mean([row["reference"]["floor_violation"] for row in members])),
+            # the truth's own rows under the same rule
+            "lateral_violation_share_truth": float(np.mean([row["truth"]["lateral_violation"] for row in members])),
+            "glidepath_violation_share_truth": float(np.mean([row["truth"]["glidepath_violation"] for row in members])),
+            "floor_violation_share_truth": float(np.mean([row["truth"]["floor_violation"] for row in members])),
             "route_shortfall_p50_m": _p([row["route"]["shortfall_m"] for row in members], 50),
             "route_intercept_abs_p50_deg": _p([abs(row["route"]["intercept_deg"]) for row in members], 50),
             "route_stretched_share": float(np.mean([row["route"]["kind"] in (KIND_DOWNWIND, KIND_STRETCHED) for row in members])),
-            "route_waypoints_share": float(np.mean([row["route"]["kind"] == KIND_WAYPOINTS for row in members])),
+            "route_waypoints_share": float(np.mean([row["route"]["kind"] in (KIND_WAYPOINTS, KIND_ROLLED) for row in members])),
+            "rolled_legs_mean": float(np.mean([row["route"].get("legs", 0) for row in members])),
+            "instructions_skipped_share": float(np.mean([row["route"].get("instructions_skipped", 0) > 0 for row in members])),
+            "turns_incomplete_share": float(np.mean([row["route"].get("turns_incomplete", 0) > 0 for row in members])),
+            "rolled_capped_share": float(np.mean([bool(row["route"].get("capped_by")) for row in members])),
+            # the head's own arrival-time prediction, where the flight was the head's
+            "eta_head_mae_s": float(np.mean([
+                abs(row["eta_predicted_s"] - row["prediction"]["true_final_time_s"]) for row in members
+                if row.get("eta_predicted_s") is not None
+            ])) if any(row.get("eta_predicted_s") is not None for row in members) else float("nan"),
             "waypoints_mean": float(np.mean([len(row["labels"]["waypoints"] or ()) for row in members])),
             "waypoints_dropped_share": float(np.mean([row["labels"]["waypoints_dropped"] > 0 for row in members])),
             "hook_bank_capped_share": float(np.mean([row["hook"]["planBankCappedSteps"] for row in members])),
@@ -191,9 +247,15 @@ def format_table(summary: dict) -> str:
         ("abs_final_time_error_p50_s", "|dt| p50 s", 1), ("abs_final_time_error_p80_s", "|dt| p80 s", 1),
         ("final_time_error_mae_s", "dt MAE s", 1), ("route_time_minus_T_p50_s", "route t − T p50 s", 1),
         ("fully_flyable_share", "fully flyable", 3), ("established_share", "established", 3),
-        ("lateral_violation_share", "lateral viol.", 3), ("glidepath_violation_share", "glidepath viol.", 3),
+        ("lateral_violation_share", "lateral viol.", 3), ("lateral_violation_share_truth", "  … the truth", 3),
+        ("glidepath_violation_share", "glidepath viol. (in FAF)", 3),
+        ("glidepath_violation_share_truth", "  … the truth", 3),
+        ("floor_violation_share", "floor viol. (pre-FAF)", 3), ("floor_violation_share_truth", "  … the truth", 3),
         ("route_shortfall_p50_m", "route shortfall p50", 0), ("route_stretched_share", "route stretched", 3),
         ("route_waypoints_share", "route via waypoints", 3), ("waypoints_mean", "waypoints per plan", 2),
+        ("rolled_legs_mean", "legs flown (rolled)", 2), ("instructions_skipped_share", "instruction skipped", 3),
+        ("turns_incomplete_share", "turn not completed", 3), ("rolled_capped_share", "rolled flight capped", 3),
+        ("eta_head_mae_s", "ETA MAE s (the head's T)", 1),
         ("waypoints_dropped_share", "waypoints dropped", 3),
         ("route_intercept_abs_p50_deg", "route |intercept| p50", 1),
         ("hook_bank_capped_share", "bank capped", 3), ("hook_thrust_saturated_share", "thrust saturated", 3),
@@ -203,10 +265,10 @@ def format_table(summary: dict) -> str:
         ("capture_height_clamped_share", "capture h clamped", 3),
     ]
     lines = ["oracle ceiling (true plans through the guidance), n = " + ", ".join(
-        f"{_SHORT[s]} {summary[s]['flights']}" for s in strata)]
-    lines.append(f"{'metric':<22}" + "".join(f"{_SHORT[s]:>14}" for s in strata))
+        f"{STRATUM_SHORT[s]} {summary[s]['flights']}" for s in strata)]
+    lines.append(f"{'metric':<26}" + "".join(f"{STRATUM_SHORT[s]:>14}" for s in strata))
     for key, label, digits in metrics:
-        lines.append(f"{label:<22}" + "".join(f"{summary[s][key]:>14.{digits}f}" for s in strata))
+        lines.append(f"{label:<26}" + "".join(f"{summary[s][key]:>14.{digits}f}" for s in strata))
     lines.append("")
     lines.append("today's best (design §7, provenance-checked): " + ", ".join(
         f"{k} {v}" for k, v in TODAYS_BEST.items()))
@@ -219,8 +281,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--split", default="val", choices=("val", "train"))
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the split (a smoke test)")
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--route", choices=ROUTES, default=ROUTE_PLAN,
-                        help="lay the route from the three route parameters, or from those plus the plan's waypoints")
+    parser.add_argument("--policy", choices=(POLICY_TRUTH, POLICY_MODEL), default=POLICY_TRUTH,
+                        help="whose plan is flown: the truth's own labels (the ceiling), or the plan "
+                             "checkpoint's orders rolled leg by leg (the prediction; needs --route next)")
+    parser.add_argument("--route", choices=(*ROUTES, ROUTE_NEXT), default=ROUTE_PLAN,
+                        help="lay the route from the three route parameters, from those plus the plan's waypoints, "
+                             "or fly the waypoints one instruction at a time, re-anchored at each (design v5)")
     parser.add_argument("--max-waypoints", type=int, default=MAX_WAYPOINTS,
                         help="the fixed K of the waypoints representation")
     parser.add_argument("--anchor-km", type=float, default=0.0,
@@ -242,6 +308,11 @@ def main(argv: list[str] | None = None) -> int:
     anchor = default_anchor(arm.config)
     if args.anchor_km > 0.0 and args.anchor_s > 0.0:
         parser.error("--anchor-km and --anchor-s are two anchors; give one")
+    if args.policy == POLICY_MODEL:
+        if args.route != ROUTE_NEXT:
+            parser.error("--policy model rolls the head's orders: it needs --route next")
+        if arm.config.prediction_output != PREDICTION_PLAN:
+            parser.error(f"--policy model needs a plan checkpoint; {label} predicts {arm.config.prediction_output!r}")
     if args.anchor_s > 0.0:
         row = int(round(args.anchor_s / arm.config.dt_s))
         if row < ANCHOR_CONTROL_SAMPLES - 1:
@@ -287,15 +358,36 @@ def main(argv: list[str] | None = None) -> int:
         # the rollout runs PAST the plan's T so a late arrival is measured as late rather
         # than cut off unestablished; the metrics' clock is the truth's regardless
         horizons = [lab.T_s + max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION * lab.T_s) for lab in labels]
-        forecasts, routes, times = fly_plans(
-            chunk, chunk_anchors, labels, chunk_skeletons, arm.config, durations_s=horizons, route=args.route,
-        )
-        for item, a, sk, lab, forecast, route, route_time in zip(
-            chunk, chunk_anchors, chunk_skeletons, labels, forecasts, routes, times, strict=True
+        if args.route == ROUTE_NEXT and args.policy == POLICY_MODEL:
+            rolled = [
+                rolled_prediction(arm.model, item, arm.config, arm.normalizer, a, torch.device("cpu"), sk)
+                for item, a, sk in zip(chunk, chunk_anchors, chunk_skeletons, strict=True)
+            ]
+            forecasts = [r.forecast for r in rolled]
+            routes = [r.routes[-1] for r in rolled]
+            times = [r.route_time_s for r in rolled]
+        elif args.route == ROUTE_NEXT:
+            rolled = [
+                fly_rolling(item, a, lab, sk, arm.config, instructions=truth_instructions(lab, sk), horizon_s=h)
+                for item, a, lab, sk, h in zip(chunk, chunk_anchors, labels, chunk_skeletons, horizons, strict=True)
+            ]
+            forecasts = [r.forecast for r in rolled]
+            routes = [r.routes[-1] for r in rolled]
+            times = [r.route_time_s for r in rolled]
+        else:
+            rolled = [None] * len(chunk)
+            forecasts, routes, times = fly_plans(
+                chunk, chunk_anchors, labels, chunk_skeletons, arm.config, durations_s=horizons, route=args.route,
+            )
+        for item, a, sk, lab, forecast, route, route_time, flight in zip(
+            chunk, chunk_anchors, chunk_skeletons, labels, forecasts, routes, times, rolled, strict=True
         ):
             cut = cut_at_threshold_crossing(forecast, item)
-            # the oracle's arrival time is where the rollout crossed the threshold (the
-            # rollout's end where it never did) — the plan's T is the truth, not a prediction
+            # the arrival time is where the rollout crossed the threshold (the rollout's
+            # end where it never did): under the truth's plan its T is the truth, not a
+            # prediction; under the head's the flown arrival is what the rolled flight
+            # delivers, and the head's own T is kept beside it (`eta_predicted_s`)
+            eta_predicted_s = float(forecast.predicted_final_time_s) if args.policy == POLICY_MODEL else None
             cut = replace(cut, predicted_final_time_s=cut.final_time_s)
             metrics = observed_series_metrics(item, cut)
             rows.append({
@@ -306,11 +398,20 @@ def main(argv: list[str] | None = None) -> int:
                 "T_s": lab.T_s,
                 "labels": lab.to_dict(),
                 "route": {
-                    "kind": route.kind, "length_m": route.length_m,
-                    "pre_final_m": route.pre_final_m, "requested_pre_final_m": route.requested_pre_final_m,
-                    "shortfall_m": route.shortfall_m, "stretch_offset_m": route.stretch_offset_m,
+                    "kind": route.kind if flight is None else KIND_ROLLED,
+                    "length_m": route.length_m if flight is None else float(sum(flight.leg_lengths_m[:-1]) + route.length_m),
+                    "pre_final_m": route.pre_final_m if flight is None else flight.pre_final_m,
+                    "requested_pre_final_m": route.requested_pre_final_m if flight is None else float(lab.L_pre_m or 0.0),
+                    "shortfall_m": route.shortfall_m if flight is None else float(lab.L_pre_m or 0.0) - flight.pre_final_m,
+                    "stretch_offset_m": route.stretch_offset_m,
                     "intercept_deg": math.degrees(route.intercept_rad),
                     "route_time_s": route_time,
+                    **({} if flight is None else {
+                        "legs": len(flight.routes), "instructions_flown": flight.instructions_flown,
+                        "instructions_skipped": flight.instructions_skipped,
+                        "leg_kinds": [leg.kind for leg in flight.routes],
+                        "turns_incomplete": flight.turns_incomplete, "capped_by": flight.capped_by,
+                    }),
                 },
                 "prediction": {
                     key: metrics[key] for key in (
@@ -320,8 +421,12 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 "geometry": forecast_geometry(item, cut),
                 "reference": reference_verdicts(item, cut, sk),
+                "truth": corridor_verdicts(item, item.values[a + 1:], a, sk),
                 "hook": cut.command_hook_diagnostics,
                 "cut_final_time_s": cut.final_time_s,
+                "policy": args.policy,
+                "eta_predicted_s": eta_predicted_s,
+                "orders": None if flight is None else flight.orders,
             })
         print(f"  flown {len(rows)}/{len(series)}", flush=True)
     summary = summarize(rows)
@@ -332,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema_version": SCHEMA, "generated_at": utc_now(), "instrument": INSTRUMENT,
         "checkpoint": {"label": label, "path": str(path)},
         "split": args.split, "limit": args.limit, "flights": len(rows), "anchor": anchor,
-        "route": args.route, "max_waypoints": args.max_waypoints, "anchor_km": args.anchor_km,
+        "route": args.route, "policy": args.policy, "max_waypoints": args.max_waypoints, "anchor_km": args.anchor_km,
         "anchor_s": args.anchor_s,
         "flights_without_anchor": without,
         "todays_best": TODAYS_BEST, "summary": summary, "rows": rows,

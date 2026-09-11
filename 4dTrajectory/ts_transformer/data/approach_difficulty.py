@@ -56,6 +56,11 @@ STRATUM_STRAIGHT_IN = f"straight-in (tortuosity < {STRAIGHT_TORTUOSITY})"
 STRATUM_VECTORED = f"vectored (tortuosity >= {STRAIGHT_TORTUOSITY}, not established)"
 STRATUM_ESTABLISHED = "established at anchor"
 STRATUM_NEAR = "remaining path < 13 km"
+#: The strata's short names for a table column.
+STRATUM_SHORT = {
+    STRATUM_ALL: "all", STRATUM_STRAIGHT_IN: "straight-in", STRATUM_VECTORED: "vectored",
+    STRATUM_ESTABLISHED: "established",
+}
 STRATUM_FAR = "remaining path >= 13 km"
 
 # The two HORIZONTAL position channels. Tortuosity is a lateral notion (module docstring),

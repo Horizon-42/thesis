@@ -88,6 +88,22 @@ class PlanToFly:
     speed_points: tuple[tuple[float, float], ...] = ()
 
 
+def reference_height(remaining_m: float, *, s0: float, s_join: float, anchor_height_m: float,
+                     h_capture_m: float, glidepath_tan: float) -> float:
+    """The height law, ``remaining_m`` of path to the threshold: a straight descent from
+    the anchor height (at ``s0`` of remaining path) to the capture height at the join
+    (``s_join``); past the join, from above, a descent at `CAPTURE_DESCENT_RAD` until on
+    the glidepath, from below the capture height held until the glidepath comes down to
+    it. The controller's law and the drawn replay's (`plan.forecast.draw_order`), once."""
+    glidepath = max(remaining_m, 0.0) * glidepath_tan
+    if remaining_m > s_join and s0 > s_join:
+        fraction = (remaining_m - s_join) / (s0 - s_join)
+        return h_capture_m + (anchor_height_m - h_capture_m) * fraction
+    if h_capture_m > s_join * glidepath_tan:
+        return max(glidepath, h_capture_m - math.tan(CAPTURE_DESCENT_RAD) * (s_join - remaining_m))
+    return min(glidepath, h_capture_m)
+
+
 class PlanGuidance:
     needs_reference = False   # it flies its own route; the network's schedule is not consulted
 
@@ -149,19 +165,11 @@ class PlanGuidance:
 
     def _reference_height(self, i: int, remaining: float) -> float:
         route, plan = self.routes[i], self.plans[i]
-        s_join = route.remaining_m(route.join_index)
-        s0 = route.remaining_m(0)
-        glidepath = max(remaining, 0.0) * float(self.glidepath_tan[i])
-        if remaining > s_join and s0 > s_join:
-            # pre-final: a straight descent from the anchor height to the capture height
-            fraction = (remaining - s_join) / (s0 - s_join)
-            return plan.h_capture_m + (self.anchor_heights_m[i] - plan.h_capture_m) * fraction
-        glidepath_at_join = s_join * float(self.glidepath_tan[i])
-        if plan.h_capture_m > glidepath_at_join:
-            # from above: descend at the capture angle until on the glidepath
-            return max(glidepath, plan.h_capture_m - math.tan(CAPTURE_DESCENT_RAD) * (s_join - remaining))
-        # from below: hold the capture height until the glidepath comes down to it
-        return min(glidepath, plan.h_capture_m)
+        return reference_height(
+            remaining, s0=route.remaining_m(0), s_join=route.remaining_m(route.join_index),
+            anchor_height_m=float(self.anchor_heights_m[i]), h_capture_m=plan.h_capture_m,
+            glidepath_tan=float(self.glidepath_tan[i]),
+        )
 
     # ── the hook ────────────────────────────────────────────────────────────────
 

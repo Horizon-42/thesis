@@ -4,6 +4,67 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-11 — ts_transformer: plan-and-guidance step 3 — the next-instruction readout, the rolled oracle, the single-step plan head (`prediction_output=plan`)
+
+`dev-plan-next`; design v5 §12.4. The route is predicted one instruction at a time (v5):
+**(a)** `run_ts.py plan_next_readout` measures the lead a single step must predict (at the
+60 s anchor a vectored flight's next fix is 25–39 km / 3–5 min ahead, the median baseline
+5 km off; at random anchors 13 km / 112 s); **(b)** `run_ts.py plan_oracle --route next`
+rolls the truth's own instructions — each leg to the FIRST pass of its fix (the nearest
+route point lay on a later loop), the remaining path re-anchored to the instruction's (the
+leg's inflated route asked the closing for 20 km and flew a loop), the closing's join never
+behind the aircraft, an instruction a VECTOR (fix + heading on; fly-over semantics
+overshot every corner) with its height (each leg descends to it by its fix), no extension
+beyond a fix whose heading on points at the join (the onward point overshot it and the
+polyline looped back: 30–40 km of closing path on the full run's worst flights), a leg
+flown until the AIRCRAFT has executed its instruction (`turn_done_row`; cut on the
+route's clock the next leg started 60° off its heading and the plan-route builder answered
+with a loop), the closing onto the join a polyline with its corner BEFORE the join — and
+on the 48-flight smoke within ~50 m of vectored ADE of the whole-path waypoints flight
+(915 against 862; corridor after the join 11.5 % against 7.7 %);
+**(c)** the fourth output path: `PREDICTION_PLAN`, `PlanOutput` (two loss weights, run word
+`plan · … · guidance · plan-v1`), `outputs/plan/labels.py` (14 targets per anchor, the
+validity mask, the no-fix flag; `PlanOrder` back from a prediction, clamps recorded),
+`model.py` (the head on the shared backbone, L1 in each target's scale, the flag's BCE),
+`strategy.py` (`PlanContext` reads the labels per drawn anchor at batch time, 0.4 ms each;
+the DRAWN single-step replay for checkpoint selection; the ROLLED forecast through the
+guidance, cut at the threshold; `planOrders` on the record), `plan_oracle --policy model`
+and the readout's HEAD columns as the two §7 readings. The oracle's vertical verdict is
+v2: the glidepath window inside the FAF, the coded floor before it, the truth's own rows
+graded beside every flight (the truth failed the join-graded window on its own level
+segment; it fails the pre-FAF floor on 29 % of smoke flights, so no share there is a gate).
+
+- The first head (403 train flights, 30 epochs) sent every ESTABLISHED flight to a made-up
+  fix — its "join next" flag was supervised off the final only (§6 as written) — 74 % of
+  straight-in flights out of the corridor; the flag is now "no fix ahead" on every sample,
+  `d_join` there the anchor's own remaining path, and a closing that starts at or inside
+  the join flies the height from where the aircraft is: straight-in corridor 74 → 0 %,
+  glidepath 82 → 0 %, legs 6.2 → 1.0 on the same 48. Vectored: ADE 7657 m against the
+  paired ceiling's 2293 (a 403-flight head; the full-cohort head is the next number).
+- The step-3 code review (2026-09-11) fixed: the drawn replay's height law is the
+  controller's own (`guidance.controller.reference_height`, one definition — it ramped to
+  the capture height by the fix and put the glidepath on the pre-final leg); the
+  capture-height clamp is threaded into the rolled flight (its share read 0 by
+  construction); a rolled flight's caps are reported (`horizon_capped`, `planCappedBy`);
+  `join_valid` (a mask that could never bind) is gone; `rolled_history` refuses an anchor
+  without a full lookback; the plan path is refused off the ENU chart; the target contract
+  digests the target names; the strategy refuses a conformal table.
+- `fly_rolling`'s join index at the fix's first pass overflowed the route on one flight of
+  1404 (the pass at the route's last point) — clamped; the a60s rolled oracle re-run.
+- One definition of the strata's short names (`approach_difficulty.STRATUM_SHORT`; three
+  private mirrors gone); `Instruction` / `truth_instructions` live in `labels.py`.
+- Tests: `test_plan_output.py` (the config contract, the labels → targets → order round
+  trip, the loss on the labels and its masks, the context and the drawn replay, one whole
+  chain train → checkpoint → rolled forecast → export → evaluate on synthetic arrivals);
+  the rolling tests follow the `labels` seam. Full KRDU val: the rolled oracle sits
+  333 m of vectored ADE above the whole-path waypoints oracle at L−1 (1492 against 1159)
+  and 436 m at the 60 s anchor; the full head (6856 train flights, 67 epochs) rolled at
+  the 60 s anchor: vectored ADE 3781 m against its paired ceiling's 1845 m, straight-in 635
+  against 584 m, arrival-time MAE 34.6 s; its next fix 2.6 km off at 60 s / 1.6 km
+  at random anchors on vectored flights against the median baseline's 6.5 / 10.7 km.
+  Acceptance: the full ts suite 1023 passed (9 m 49 s); stored-run census 220 configs / 113
+  load, 0 names moved (the one new config is this step's smoke head).
+
 ### 2026-09-11 — ts_transformer: plan-and-guidance step 2b — the fixed-K fly-by waypoints oracle, and the oracle at earlier anchors
 
 `dev-plan-turns`; the design's §3b gains the representation, §12.3 the numbers. The three
