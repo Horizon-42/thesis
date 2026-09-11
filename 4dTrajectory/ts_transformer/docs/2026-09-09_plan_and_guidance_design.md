@@ -1,6 +1,20 @@
 # Plan-and-guidance: the next model (design v5, 2026-09-11)
 
-Status: **v5 step 3 BUILT and run small-scale (2026-09-11 evening, `dev-plan-next`; §12.4)**: the
+Status: **v5.1 BUILT and MEASURED (2026-09-11 night, `dev-plan-lockstep`; §12.5): the rolling is
+RECEDING-HORIZON and LOCKSTEP — §9 step 3(d), decided by the user on reading §12.4.** The
+lockstep oracle reads 1847 m of vectored ADE at L−1 against the leg form's 1492 at
+78× the speed (69 s for the split). **Re-asking the head every step made its vectored
+prediction worse** (5391 m every 30 s, 4991 every 60 s, 3781 once per leg; the lockstep
+ceiling 2184): it is asked on its own flown windows, which it never trained on — the next
+item is training-side (§12.5). The leg-form numbers of §12.4 remain the head's best prediction. Step 3 as built asked the head
+once per instruction and flew its answer to the fix: at the 60 s anchor that is one guess for a
+turn 25–39 km / 4 min away, committed for the whole leg, and the 2.6 km it misses by became the
+3781 m of rolled ADE. A radar vector is issued when the aircraft is near its turn, and the head's
+own error is 1.6 km at the near anchors against 2.6 km at the far one: so the head is asked again
+every `LOCKSTEP_S` = 30 s, the aircraft flying its current heading meanwhile, and every flight's
+next 30 s is rolled as ONE batch (the leg-at-a-time form rolled one flight at a time, ~4 s each,
+90 min per full run; the user asked for the oracle to be faster). The step-3 artifacts and
+numbers (§12.4) stay as they are; the lockstep numbers go to §12.5. Previous status: **v5 step 3 BUILT and run small-scale (2026-09-11 evening, `dev-plan-next`; §12.4)**: the
 next-instruction readout (3a), the rolled oracle (3b) and the single-step plan head — the fourth
 output path, `prediction_output=plan` — trained on a 403-flight development cohort and rolled
 through the guidance (3c); the full-cohort head and the full rolled oracles are the numbers §12.4
@@ -128,7 +142,9 @@ accuracy; or the L2.g latent fan). `T` keeps its calibrated interval (B2).
 path: from the anchor, the next fly-by fix and the speed to be flying at it — a vector
 "turn to heading X, reduce to Y" as the point it aims at — and whether there is one at all
 (no next fix: the current leg runs onto the final and the join is next). The guidance flies
-that one leg, re-anchors at the fix and the network is asked again, until the join. This is
+toward it and the network is asked again — v5.1: every 30 s, from wherever the aircraft is,
+not once per leg (§9 step 3(d); the turn point it aims at is refined as it approaches, the
+way a vector is issued near the turn) — until the join. This is
 how the instruction reaches the cockpit (one at a time, executed within seconds, the next
 unknown until it is given), what a scheduler assigns (the next vector, as ATC does), and the
 part of the route a 60 s history can say anything about. The fix-and-speed pair is
@@ -375,6 +391,22 @@ parametrisation is too coarse.
    `outputs/plan/{labels,model,strategy}.py`, `plan_oracle --policy model` (the rolled reading)
    and the readout's HEAD columns (the single-step reading); the point heads only — the
    distribution over the next fix (the fan) is the next item on (c).
+   **(d) v5.1 — receding-horizon, lockstep rolling (2026-09-11 night; `dev-plan-lockstep`).**
+   The unit of rolling is a TIME STEP, not an instruction: every `LOCKSTEP_S` = 30 s the
+   policy is asked again from the aircraft's current pose and window — the oracle's policy
+   holds the truth's next instruction until the aircraft has executed it (past its fix, on
+   its heading), the head re-predicts it — the route to the current instruction is re-laid
+   from where the aircraft is, and the next 30 s is flown. Every flight in a group is
+   stepped together (`fly_lockstep`: one guidance rollout per step for the whole group,
+   ~10 segments each, one head forward per step) — the batching the user asked for; the
+   leg-at-a-time form stays as `--rolling leg` with its §12.4 numbers. What (d) must
+   measure, in this order: (1) the lockstep ORACLE at L−1 and 60 s against §12.4's leg form
+   (the same instructions, re-laid every 30 s: the rolling cost should fall, and the wall
+   time by ~10×); (2) the full head re-asked every 30 s at 60 s, paired with its ceiling —
+   the number §12.4's 3781 m is re-read against, with the head unchanged (no retraining);
+   (3) the step length as an axis (15 / 30 / 60 s) only if (2) moves. Gate: the head's
+   rolled vectored ADE against native32's 2870 m and the straight-in chamfer against 109 m,
+   both at the 60 s anchor.
 4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
 5. Two seeds; pooled five-airport training; KSJC replication.
 6. The multi-aircraft scheduler demonstration.
@@ -976,3 +1008,102 @@ step: the head's next fix is 2.6 km off at the 60 s anchor and 1.6 km at random 
 flights, against the median baseline's 6.5 and 10.7 km (§7's veto does not fire); its arrival time 39.5 s / 24.9 s MAE there.
 Next on (c): the fan over the next fix (§3b's distribution), the corner, and the head's
 far lead (the base turn 25–39 km ahead at the 60 s anchor).
+
+
+### 12.5 Step 3(d) — receding-horizon, lockstep rolling (v5.1, 2026-09-11 night)
+
+`dev-plan-lockstep`; `plan_oracle --route next --rolling lockstep` (the default now; `--rolling
+leg` is §12.4's form). The unit of rolling is a 30 s step: the policy is asked again every
+step from the aircraft's pose and window, the route to the instruction in force is kept
+WHOLE and tracked from the point reached on it (`FlightState.progress`, handed to the
+guidance), re-laid only when the order changed materially (its fix over 1 km, its heading on
+over 10°, the closing's join over 1 km, fix ↔ none) or the aircraft drifted over 1 km from
+it; a step that executes its instruction (past the fix, on the heading given within 5°) is
+cut there so the next instruction is laid from the turn's end; a flight ends at its threshold
+crossing on the final; an aircraft on the final follows the final (a fix behind it counts as
+executed, one ahead is not flown); the whole group is stepped together in one guidance
+rollout of 10 holds. Eight rules had to be found on the 48-flight smoke and the full run's
+worst flights before the oracle came within ~350 m of the leg form: re-laying the route every
+step from a mid-turn pose made the turn-straight-turn builder flip its turn direction step
+after step (the aircraft drifting 3 km sideways per step, two of three diagnosed flights
+never executing their first instruction) — hence the route in force; a closing re-laid from
+at or inside the join with the plan's capture height held an established flight level at
+its anchor height — the height starts from where the aircraft is; a step's height law
+anchored at the current height re-steepened the descent each step — anchored at the height
+the route was laid from; an instruction within a kilometre turned into the closing for the
+step (`ahead_of`) and was never executed — the route is laid through the fix wherever it is;
+"executed" read off the along-track projection alone fired 20 km short of a base-turn fix
+(arrivals 200–290 s early) and, once repaired, still fired mid-turn (38° off the heading given:
+the next leg laid from mid-turn looped) — executed means the turn is DONE; a fly-by laid from
+inside its turn or with a design radius the geometry cannot afford (6 km at 146 m/s, 3.6 km
+short of the fix) looped — such a leg is "turn to heading X" with the onward point four radii
+ahead (`leg_route(mid_flight=True)`); and a closing near the join but off its direction is the
+intercept polyline at 30°, never the aligned-pose turn-straight-turn.
+
+**The oracle** (the truth's own instructions, KRDU val 1404; wall time 69 s at L−1
+and 79 s at 60 s against ~90 min for the leg form — 0.05 s per flight):
+
+| vectored, KRDU val | lockstep, L−1 | leg form, L−1 (§12.4) | whole path, L−1 (§12.3) | lockstep, 60 s | leg form, 60 s (§12.4) | whole path, 60 s (§12.3) |
+|---|---|---|---|---|---|---|
+| ADE mean / chamfer p50 / Fréchet p50 | 1847 / 700 / 2466 m | 1492 / 324 / 1800 m | 1159 / 268 / 1648 m | 2417 / 1057 / 3402 m | 2141 / 935 / 3121 m | 1705 / 887 / 3022 m |
+| arrival-time MAE | 28.7 s | 20.5 s | 16.1 s | 33.2 s | 25.5 s | 19.7 s |
+| established / corridor after the join | 87.9 % / 12.5 % | 94.2 % / 12.9 % | 99.0 % / 19.9 % | 86.7 % / 13.3 % | 92.4 % / 11.9 % | 99.0 % / 19.7 % |
+| glidepath (in FAF) / floor (pre-FAF) | 20.1 % / 14.3 % | 15.1 % / 19.7 % | 8.2 % / — | 19.1 % / 16.7 % | 13.5 % / 19.7 % | 9.1 % / — |
+| legs / skipped / turn not completed | 3.80 / 6.0 % / 3.0 % | 3.61 / 8.0 % / 5.8 % | 0.00 / 0.0 % / 0.0 % | 3.69 / 6.2 % / 3.4 % | 3.53 / 7.0 % / 6.6 % | 0.00 / 0.0 % / 0.0 % |
+| bank capped | 16.0 % | 19.1 % | 15.3 % | 15.5 % | 18.2 % | 14.1 % |
+
+| straight-in, KRDU val | lockstep, L−1 | leg form, L−1 | whole path, L−1 | lockstep, 60 s | leg form, 60 s | whole path, 60 s |
+|---|---|---|---|---|---|---|
+| ADE mean / chamfer p50 / Fréchet p50 | 283 / 36 / 134 m | 288 / 35 / 134 m | 194 / 34 / 134 m | 653 / 43 / 152 m | 567 / 42 / 152 m | 350 / 42 / 152 m |
+| arrival-time MAE | 6.6 s | 6.6 s | 4.8 s | 14.8 s | 14.0 s | 8.4 s |
+| established / corridor after the join | 99.8 % / 0.3 % | 99.8 % / 0.7 % | 99.9 % / 0.6 % | 98.2 % / 2.9 % | 99.3 % / 2.5 % | 99.2 % / 2.9 % |
+| glidepath (in FAF) / floor (pre-FAF) | 1.5 % / 4.1 % | 2.0 % / 4.1 % | 11.6 % / — | 4.1 % / 5.9 % | 3.2 % / 6.6 % | 36.8 % / — |
+| legs / skipped / turn not completed | 1.08 / 0.8 % / 0.0 % | 1.06 / 0.8 % / 0.1 % | 0.00 / 0.0 % / 0.0 % | 1.38 / 1.3 % / 0.1 % | 1.30 / 1.5 % / 0.2 % | 0.00 / 0.0 % / 0.0 % |
+| bank capped | 0.8 % | 0.7 % | 0.5 % | 2.8 % | 3.0 % | 2.2 % |
+
+**The full head re-asked every 30 s** (the §12.4 checkpoint unchanged; the 60 s anchor,
+paired with the truth's instructions rolled in lockstep under the same checkpoint,
+799 straight-in / 601 vectored; wall time 92 s and 80 s):
+
+| vectored, 60 s anchor | ceiling, lockstep 30 s | the head, re-asked every 30 s | the head, every 60 s | ceiling, leg form (§12.4) | the head, once per leg (§12.4) |
+|---|---|---|---|---|---|
+| ADE mean / chamfer p50 / Fréchet p50 | 2184 / 888 / 2816 m | 5391 / 2639 / 7750 m | 4991 / 2389 / 7028 m | 1845 / 797 / 2631 m | 3781 / 1524 / 4715 m |
+| arrival-time MAE | 30.0 s | 66.4 s | 54.5 s | 22.8 s | 56.9 s |
+| established / corridor after the join | 87.7 % / 14.8 % | 54.9 % / 4.7 % | 49.1 % / 29.0 % | 93.7 % / 13.0 % | 83.4 % / 23.8 % |
+| glidepath (in FAF) / floor (pre-FAF) | 19.5 % / 14.5 % | 52.1 % / 0.3 % | 43.6 % / 2.3 % | 13.8 % / 17.8 % | 21.0 % / 0.5 % |
+| legs / skipped / turn not completed | 3.48 / 5.5 % / 3.0 % | 5.18 / 0.0 % / 25.3 % | 5.61 / 0.0 % / 20.8 % | 3.31 / 6.5 % / 5.7 % | 3.60 / 14.3 % / 9.7 % |
+| bank capped | 15.1 % | 29.7 % | 35.5 % | 17.6 % | 27.6 % |
+
+| straight-in, 60 s anchor | ceiling, lockstep 30 s | the head, every 30 s | the head, every 60 s | ceiling, leg form | the head, once per leg |
+|---|---|---|---|---|---|
+| ADE mean / chamfer p50 / Fréchet p50 | 598 / 42 / 149 m | 887 / 43 / 150 m | 850 / 44 / 151 m | 584 / 41 / 148 m | 635 / 42 / 150 m |
+| arrival-time MAE | 14.8 s | 28.3 s | 23.8 s | 14.6 s | 15.8 s |
+| established / corridor after the join | 99.0 % / 0.4 % | 99.4 % / 1.3 % | 97.7 % / 4.6 % | 99.2 % / 0.4 % | 99.2 % / 1.8 % |
+| glidepath (in FAF) / floor (pre-FAF) | 1.9 % / 6.0 % | 6.3 % / 5.9 % | 5.0 % / 6.1 % | 1.6 % / 6.4 % | 2.6 % / 6.0 % |
+| legs / skipped / turn not completed | 1.23 / 1.3 % / 0.0 % | 1.24 / 0.0 % / 0.1 % | 1.23 / 0.0 % / 1.0 % | 1.17 / 1.3 % / 0.0 % | 1.16 / 0.3 % / 0.3 % |
+| bank capped | 1.4 % | 3.2 % | 6.3 % | 1.3 % | 2.3 % |
+
+Pooled arrival-time MAE: the head 45.8 s flown (24.4 s its own T at the first
+step) against the lockstep ceiling's 22.5 s, the leg form's 34.6 s and native32's 25.9 s.
+
+**Read.** Two things, one expected and one not. The lockstep ORACLE is 78× faster
+(69 s for the split against ~90 min) and sits 355 m of vectored ADE above the leg
+form at L−1 (1847 against 1492; chamfer 700 against 324 m; established
+87.9 % against 94.2 %) — the median flight is the same (paired ΔADE p50 ≈ 50 m), a 13 % tail
+is worse by over 1 km: the legs re-laid from where a 30 s step happened to end, not from
+the turn's end, and the whole route tracked faithfully where the leg form's cut hid a
+looping lay. **Re-asking the HEAD every step made the vectored prediction worse, not
+better**: 5391 m every 30 s, 4991 m every 60 s, 3781 m asked once per leg (its
+lockstep ceiling 2184); established 55 % / 49 % / 83 %; the straight-in
+stratum is unmoved (887 against 635 m, chamfer 43 m). The cause is in the readout's own
+numbers: the head was trained on OBSERVED windows and is asked, from the second step on,
+on windows of its own flown rows; its orders jitter from step to step (a fix moved over
+1 km re-lays the route, `RELAY_FIX_M`), and a spurious fix or a too-long arrival time on
+any one of 10–20 asks derails a flight that a single early guess would have landed —
+29 % of vectored flights ran to the time cap. The receding-horizon FORM is right (the
+oracle proves the guidance can be re-issued every 30 s at a small cost); the HEAD is not
+yet a receding-horizon head. Next, in this order: train the head on rolled windows (the
+windows a lockstep flight produces — a closed-loop training set from the oracle's
+flights, or noise on the observed windows), hold an order unless the head's change is
+material for two consecutive asks, and only then the fan over the next fix. §12.4's
+leg-form numbers remain the plan head's best prediction today.

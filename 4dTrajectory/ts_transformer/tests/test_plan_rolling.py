@@ -19,6 +19,7 @@ from ts_transformer.outputs.plan.extractors import extract_plan
 from ts_transformer.outputs.plan.forecast import (
     KIND_ROLLED,
     Instruction,
+    fly_lockstep_truth,
     fly_plans,
     fly_rolling,
 )
@@ -98,3 +99,22 @@ def test_an_instruction_on_top_of_the_aircraft_is_skipped_and_a_turn_back_is_flo
                          skeleton.course_rad, 80.0, labels.remaining_path_at_anchor_m, float(item.values[anchor, IDX["u"]]))
     flight = fly_rolling(item, anchor, labels, skeleton, config, instructions=[beside])
     assert flight.instructions_flown == 1 and flight.instructions_skipped == 0 and len(flight.routes) == 2
+
+
+def test_the_lockstep_oracle_reaches_the_threshold_and_a_group_flies_as_its_members_alone():
+    """v5.1: the truth's instructions re-laid every step, the group stepped together — each
+    flight closes on the final, executes its instructions, and flies exactly as it does in
+    a group of one (the batch is a batch, not a coupling)."""
+    series, config, skeleton, anchor = _cohort(3)
+    anchor = min(anchor, 12)
+    labels = [extract_plan(item, anchor, skeleton) for item in series]
+    horizons = [lab.T_s + 30.0 for lab in labels]
+    together = fly_lockstep_truth(series, [anchor] * 3, labels, [skeleton] * 3, config, horizons_s=horizons)
+    assert any(flight.instructions_flown > 0 for flight in together)
+    for item, flight, lab, horizon in zip(series, together, labels, horizons, strict=True):
+        assert flight.capped_by is None and flight.turns_incomplete == 0
+        assert flight.forecast.command_hook_diagnostics["planSteps"] >= 2
+        assert cut_at_threshold_crossing(flight.forecast, item).truncated_at_threshold
+        alone, = fly_lockstep_truth([item], [anchor], [lab], [skeleton], config, horizons_s=[horizon])
+        assert alone.forecast.values.shape == flight.forecast.values.shape
+        assert np.allclose(alone.forecast.values, flight.forecast.values, atol=1e-3)

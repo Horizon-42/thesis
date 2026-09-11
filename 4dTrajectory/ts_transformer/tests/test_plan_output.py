@@ -201,8 +201,9 @@ def test_train_checkpoint_forecast_export_and_evaluate_one_plan_run(tmp_path):
         assert forecast.prediction_output == PREDICTION_PLAN and forecast.controls is not None
         assert forecast.values.shape[1] == len(IDX) and np.all(np.isfinite(forecast.values))
         orders = forecast.command_hook_diagnostics["planOrders"]
-        assert len(orders) == forecast.command_hook_diagnostics["planLegs"] >= 1
-        assert set(orders[0]) >= {"T_s", "d_join_m", "remaining_m", "instruction", "clamped", "leg"}
+        # one order per lockstep (the head re-asked every step), at least one per phase
+        assert len(orders) == forecast.command_hook_diagnostics["planSteps"] >= forecast.command_hook_diagnostics["planLegs"] >= 1
+        assert set(orders[0]) >= {"T_s", "d_join_m", "remaining_m", "instruction", "clamped", "step"}
         assert forecast.predicted_final_time_s == pytest.approx(orders[0]["T_s"])
         records.append(build_prediction_record(item, forecast, index=index, model_name=loaded.model, horizon_mode=loaded.horizon_mode))
         metrics.append(observed_series_metrics(item, forecast))

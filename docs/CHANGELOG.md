@@ -4,6 +4,49 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-11 — ts_transformer: plan-and-guidance step 3(d) — receding-horizon, lockstep rolling (v5.1)
+
+`dev-plan-lockstep`; design v5.1 §9 step 3(d), §12.5. The user's reading of §12.4: a
+single-step head asked once per leg commits a 60 s window's guess at a turn 25–39 km away
+for four minutes; ask it again every 30 s instead, and make the oracle faster. So the unit
+of rolling is a time step (`LOCKSTEP_S` = 30 s): `fly_lockstep` steps a whole group
+together (one guidance rollout of 10 holds per step, `fly_routes(n_segments=, progress=)`),
+asks the policy every step (`truth_lockstep_policy` holds the truth's next instruction
+until executed; `rolled_predictions_lockstep` runs one head forward per step over every
+flight still flying), keeps the route to the instruction in force WHOLE and tracked from
+the point reached (`PlanGuidance(progress=…)`), re-lays it only when the order changed
+materially (`order_changed`) or the aircraft drifted (`off_route`), and cuts a step at the
+execution of its instruction. `plan_oracle --rolling {leg,lockstep}` (lockstep the
+default) and `wall_s` in the artifact; `PlanStrategy.forecast` rolls a batch in lockstep.
+
+- KRDU val: the lockstep oracle 1847 m of vectored ADE at L−1 against the leg form's
+  1492 (chamfer 700 against 324 m), 2417 against 2141 at the 60 s anchor —
+  in 69 s and 79 s for the split against ~90 min each. **The full head (unchanged)
+  re-asked every 30 s at 60 s is WORSE than asked once per leg**: vectored ADE 5391 m
+  (4991 every 60 s) against 3781, established 55 % against 83 %, its
+  lockstep ceiling 2184; straight-in unmoved (887 against 635, chamfer 43 m).
+  The head is asked on its own flown windows, which it never trained on; its orders
+  jitter and 29 % of vectored flights run to the time cap. The receding-horizon form is
+  right (the oracle), the head is not yet a receding-horizon head: training on rolled
+  windows is the next item; §12.4's leg-form numbers stay the best prediction.
+- `plan_oracle --lockstep-s N` (the step-length axis); a flight ends at its threshold
+  crossing; an order never extends the first budget; an aircraft on the final follows the
+  final (a fix behind it is executed, one ahead ignored); the review's fixes (the phase
+  route follows a re-lay, no floor past the budget, the instruction-leg cap, the cap on
+  the state, `leg_route` owns the on-final height rule, one time-cap expression, the join
+  distance in `order_changed`, no `leg` key). `leg_route(mid_flight=True)` gates the
+  re-lay forms so the leg form and the drawn replay keep the fly-by through the fix.
+- Five rules found on the 48-flight smoke (§12.5): the route in force (re-laid every step
+  from mid-turn, the Dubins builder flipped its turn direction step after step); a
+  converging closing starts its height from where the aircraft is; the height law is
+  anchored at the height the route was laid from; the route is laid through a fix wherever
+  it is (`ahead_of` turned a near fix into the closing); "executed" is on the outbound leg
+  beyond the fix (`passed_fix`), not the along-track projection alone.
+- Tests: the lockstep oracle reaches the threshold and a group flies as its members alone;
+  the chain test rolls in lockstep. Acceptance: the full ts suite 1024 passed (7 m 23 s,
+  foreground); stored-run census 221 configs / 114 load, 0 names moved (the two new
+  configs are step 3's plan heads).
+
 ### 2026-09-11 — ts_transformer: plan-and-guidance step 3 — the next-instruction readout, the rolled oracle, the single-step plan head (`prediction_output=plan`)
 
 `dev-plan-next`; design v5 §12.4. The route is predicted one instruction at a time (v5):

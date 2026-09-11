@@ -116,6 +116,14 @@ the review's route and controller findings applied and re-measured). Artifacts:
   ceiling's 1845 (straight-in 635 against 584), its next fix 1.6 km off at random
   anchors against the median baseline's 10.7 km. The fan over the next fix and the
   corner are next. Decided (v5): the single step, not §8's extra waypoints.
+- **Step 3(d) (2026-09-11 night, `dev-plan-lockstep`, design §12.5): the rolling is receding-horizon
+  and lockstep** — the policy asked every 30 s, the route in force tracked, the group stepped
+  together (`plan_oracle --rolling lockstep`, the default): the oracle 1847 m of vectored ADE at
+  L−1 against the leg form's 1492 in 69 s for the split (the leg form ~90 min). **The head
+  re-asked every 30 s is WORSE**: 5391 m against 3781 asked once per leg (4991 every
+  60 s; its lockstep ceiling 2184) — asked on its own flown windows it never trained on, its
+  orders jitter and 29 % of vectored flights run to the cap. Next: train the head on rolled
+  windows; hold an order unless the change persists; then the fan over the next fix.
 - **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
   binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
   beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the

@@ -66,11 +66,15 @@ point of the package, not a migration in progress.
   `V_final`, `h_capture`, `d_join`, the remaining path; the next fix ahead / across the
   anchor in runway axes, its heading on, speed, remaining path and height; the logit of
   "no fix ahead"), regressed L1 in each target's scale over the entries the track defines,
-  and a deterministic guidance layer flies them ONE INSTRUCTION AT A TIME, re-asking the
-  head where the aircraft has EXECUTED each instruction — past the fix and on the heading
-  given (`outputs/plan/forecast.fly_rolling_orders`, `turn_done_row`; cut on the route's
-  clock the tracker's lag left the next leg 60° off its heading and the route builder
-  answered with a loop). Labels are read per
+  and a deterministic guidance layer flies them, re-asking the head EVERY 30 s from the
+  aircraft's pose and window (v5.1, `outputs/plan/forecast.fly_lockstep`: the route to the
+  instruction in force is kept whole and tracked from the point reached, re-laid only when
+  the order changed materially or the aircraft drifted; a step that executes its
+  instruction — past the fix, on the heading given — is cut there; a whole group is stepped
+  together, 0.05 s per flight against ~4 s one leg at a time). Two traps the lockstep
+  found: re-laid every step from a mid-turn pose the turn-straight-turn builder flips its
+  turn direction step after step; and "executed" must mean ON the outbound leg beyond the
+  fix — the along-track test alone fires 20 km short of a base-turn fix. Labels are read per
   drawn anchor at batch time (`PlanContext`); the validation replay is the DRAWN single-step
   route (`draw_order`), the deployable forecast the rolled flight cut at the threshold.
   Locks: `normalized` horizon; no CTA yet. **An aircraft already on the final has no next

@@ -114,9 +114,12 @@ class PlanGuidance:
         routes: list[Route],
         plans: list[PlanToFly],
         anchor_heights_m: np.ndarray,
+        progress: np.ndarray | None = None,
     ):
         if len(routes) != len(plans) or len(routes) != dynamics["runway_heading_rad"].shape[0]:
             raise ValueError("one route and one plan per flight in the batch")
+        if progress is not None and len(progress) != len(routes):
+            raise ValueError("one route progress per flight in the batch")
         self.runway_heading = dynamics["runway_heading_rad"]
         self.aero_params = dynamics["aero_params"]
         self.origin_altitude_m = dynamics["frame_params"][:, 2]
@@ -126,7 +129,10 @@ class PlanGuidance:
         self.routes = routes
         self.plans = plans
         self.anchor_heights_m = np.asarray(anchor_heights_m, dtype=np.float64)
-        self._progress = np.zeros(len(routes), dtype=np.int64)
+        # where each flight already is on its route (a lockstep continues a route in
+        # force from the point reached on the last step): the nearest-point search
+        # starts there, never behind it
+        self._progress = np.zeros(len(routes), dtype=np.int64) if progress is None else np.asarray(progress, dtype=np.int64).copy()
         self._counts: torch.Tensor | None = None
         # On the final the corridor is a hard bound, not a tracking target: the barrier's
         # bank interval (the same module the adopted predict-time hook runs, hard form)

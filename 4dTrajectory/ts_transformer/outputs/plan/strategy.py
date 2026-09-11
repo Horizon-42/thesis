@@ -8,9 +8,10 @@ What this strategy answers the spine with:
   extractors run per sample at batch time (0.4 ms each on KRDU val), cached on a
   fixed-anchor set; the skeletons are read once per runway;
 - the model is `PlanOutputModel` on the shared backbone; the loss `plan_loss_components`;
-- the deployable forecast is the ROLLED flight (`forecast.fly_rolling_orders`): the head's
-  order at the observed anchor, one leg on the guidance, the head asked again on the window
-  of what was flown, until the closing onto the final; cut at the threshold crossing;
+- the deployable forecast is the ROLLED flight in lockstep (`forecast.fly_lockstep`, v5.1):
+  the head's order every 30 s from the aircraft's pose and window, the route in force
+  tracked, the group stepped together, until the closing onto the final; cut at the
+  threshold crossing (`fly_rolling_orders`, one leg per order, stays for `--rolling leg`);
 - the validation replay is the DRAWN single-step flight (`forecast.draw_order`): the route
   through the predicted next fix at the predicted schedule on the normalized grid — the
   checkpoint-selection clock, milliseconds per flight.
@@ -37,10 +38,17 @@ from ts_transformer.outputs.base import ForecastOptions, OutputStrategy, Replay,
 from ts_transformer.outputs.plan.extractors import extract_plan
 from ts_transformer.outputs.plan.forecast import (
     KIND_ROLLED,
+    LOCKSTEP_S,
     Anchor,
+    FlightState,
+    LegOrder,
     RolledFlight,
     draw_order,
+    fly_lockstep,
     fly_rolling_orders,
+    lockstep_states,
+    order_to_leg,
+    rolled_history,
 )
 from ts_transformer.outputs.plan.labels import (
     CONTEXT_SERIES,
@@ -136,14 +144,56 @@ def rolled_prediction(
     return fly_rolling_orders(series, anchor, skeleton, config, order_at=order_at, device=device)
 
 
+def rolled_predictions_lockstep(
+    model: nn.Module, series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer,
+    anchors: Sequence[int], device: torch.device, skeletons: Sequence[RunwaySkeleton],
+    *, step_s: float = LOCKSTEP_S,
+) -> list[RolledFlight]:
+    """A group's rolled predictions in lockstep (design v5.1): every `step_s` the head is
+    asked again for every flight still flying — one forward pass on the windows of the
+    observed tracks continued by the flown rows — and the group is stepped together."""
+    model.eval()
+    conditioning = {
+        id(item): series_conditioning(item, config, normalizer, anchor=int(a)) for item, a in zip(series, anchors, strict=True)
+    }
+    # the first order gives the remaining path the first step is laid with
+    def orders_for(states: Sequence[FlightState]) -> list[PlanOrder]:
+        windows = np.stack([
+            conditioned_history(normalizer.encode(rolled_history(s.series, s.anchor, s.chunks, config)), conditioning[id(s.series)])
+            for s in states
+        ]).astype(np.float32)
+        with torch.no_grad():
+            prediction = model(torch.from_numpy(windows).to(device))
+        values, probability = prediction_rows(prediction)
+        return [
+            order_from_prediction(values[i], float(probability[i]), s.current.e, s.current.n, s.skeleton)
+            for i, s in enumerate(states)
+        ]
+
+    states = lockstep_states(series, anchors, skeletons, [1.0] * len(series))
+    first = orders_for(states)
+    for state, order in zip(states, first, strict=True):
+        state.current = replace(state.current, remaining_m=order.remaining_m)
+
+    def policy(active: Sequence[FlightState]) -> list[LegOrder]:
+        orders = first if all(s.steps == 0 for s in active) and len(active) == len(states) else orders_for(active)
+        return [order_to_leg(order, s, s.steps) for order, s in zip(orders, active, strict=True)]
+
+    return fly_lockstep(states, config, policy=policy, step_s=step_s, device=device)
+
+
 def forecast_plan(
     model: nn.Module, series: FlightSeries, config: TSConfig, normalizer: Normalizer, anchor: int,
     device: torch.device, skeleton: RunwaySkeleton,
 ) -> Forecast:
-    """One flight's rolled prediction as a forecast, cut at the threshold crossing; the
-    record carries every order flown (`planOrders`) and the first order's arrival time
-    as the prediction."""
-    flight = rolled_prediction(model, series, config, normalizer, anchor, device, skeleton)
+    """One flight's rolled prediction as a forecast (lockstep, v5.1), cut at the threshold
+    crossing; the record carries every order flown (`planOrders`) and the first order's
+    arrival time as the prediction."""
+    flight, = rolled_predictions_lockstep(model, [series], config, normalizer, [anchor], device, [skeleton])
+    return _plan_forecast(flight, series)
+
+
+def _plan_forecast(flight: RolledFlight, series: FlightSeries) -> Forecast:
     forecast = cut_at_threshold_crossing(flight.forecast, series)
     diagnostics = dict(forecast.command_hook_diagnostics or {})
     diagnostics["planLegs"] = float(len(flight.routes))
@@ -223,7 +273,10 @@ class PlanStrategy(OutputStrategy):
         # `truncate_at_threshold` is what this path ALWAYS does (`forecast_plan` cuts every
         # rolled flight at its threshold crossing): both values of both flags are accepted
         skeletons = SkeletonCache()
-        return [forecast_plan(model, item, config, normalizer, anchor, device, skeletons.for_series(item)) for item in series]
+        flights = rolled_predictions_lockstep(
+            model, list(series), config, normalizer, [anchor] * len(series), device, [skeletons.for_series(item) for item in series],
+        )
+        return [_plan_forecast(flight, item) for flight, item in zip(flights, series, strict=True)]
 
     def replay(
         self,
@@ -282,4 +335,4 @@ class PlanStrategy(OutputStrategy):
 STRATEGY = PlanStrategy()
 
 
-__all__ = ["PLAN_TARGET_CONTRACT", "PlanContext", "PlanStrategy", "STRATEGY", "forecast_plan", "rolled_prediction"]
+__all__ = ["PLAN_TARGET_CONTRACT", "PlanContext", "PlanStrategy", "STRATEGY", "forecast_plan", "rolled_prediction", "rolled_predictions_lockstep"]

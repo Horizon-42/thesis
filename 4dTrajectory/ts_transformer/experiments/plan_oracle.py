@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -63,10 +64,12 @@ from ts_transformer.outputs.plan.forecast import (
     ROUTE_PLAN,
     ROUTES,
     fly_plans,
+    LOCKSTEP_S,
+    fly_lockstep_truth,
     fly_rolling,
 )
 from ts_transformer.outputs.plan.labels import truth_instructions
-from ts_transformer.outputs.plan.strategy import rolled_prediction
+from ts_transformer.outputs.plan.strategy import rolled_prediction, rolled_predictions_lockstep
 from ts_transformer.outputs.plan.guidance.route import KIND_DOWNWIND, KIND_STRETCHED, KIND_WAYPOINTS
 from ts_transformer.outputs.plan.skeleton import runway_skeleton
 
@@ -78,6 +81,10 @@ FLOOR_TOLERANCE_M = 30.0
 #: guidance and graded by the same instrument — the rolled prediction beside its ceiling.
 POLICY_TRUTH = "truth"
 POLICY_MODEL = "model"
+#: `--rolling`: one instruction per leg, the head asked at each fix (`fly_legs`, design §12.4),
+#: or receding-horizon lockstep — asked every `LOCKSTEP_S`, the group stepped together (v5.1).
+ROLLING_LEG = "leg"
+ROLLING_LOCKSTEP = "lockstep"
 #: `--route next`: the truth's instructions flown one at a time (design v5), re-anchored
 #: at each fix — the rolled form of the waypoints oracle.
 ROUTE_NEXT = "next"
@@ -284,6 +291,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--policy", choices=(POLICY_TRUTH, POLICY_MODEL), default=POLICY_TRUTH,
                         help="whose plan is flown: the truth's own labels (the ceiling), or the plan "
                              "checkpoint's orders rolled leg by leg (the prediction; needs --route next)")
+    parser.add_argument("--lockstep-s", type=float, default=LOCKSTEP_S,
+                        help="under --rolling lockstep: the re-ask period in seconds (the step length axis)")
+    parser.add_argument("--rolling", choices=(ROLLING_LEG, ROLLING_LOCKSTEP), default=ROLLING_LOCKSTEP,
+                        help="under --route next: one leg per instruction (the head asked at each fix), or the "
+                             "receding-horizon lockstep (asked every 30 s, the batch stepped together; v5.1)")
     parser.add_argument("--route", choices=(*ROUTES, ROUTE_NEXT), default=ROUTE_PLAN,
                         help="lay the route from the three route parameters, from those plus the plan's waypoints, "
                              "or fly the waypoints one instruction at a time, re-anchored at each (design v5)")
@@ -342,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
         without = 0
     skeletons: dict[tuple[str, str], object] = {}
     rows: list[dict] = []
+    started = time.perf_counter()
     for start in range(0, len(series), args.batch_size):
         chunk = series[start:start + args.batch_size]
         chunk_skeletons = []
@@ -358,11 +371,26 @@ def main(argv: list[str] | None = None) -> int:
         # the rollout runs PAST the plan's T so a late arrival is measured as late rather
         # than cut off unestablished; the metrics' clock is the truth's regardless
         horizons = [lab.T_s + max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION * lab.T_s) for lab in labels]
-        if args.route == ROUTE_NEXT and args.policy == POLICY_MODEL:
+        if args.route == ROUTE_NEXT and args.policy == POLICY_MODEL and args.rolling == ROLLING_LOCKSTEP:
+            rolled = rolled_predictions_lockstep(
+                arm.model, chunk, arm.config, arm.normalizer, chunk_anchors, torch.device("cpu"), chunk_skeletons,
+                step_s=args.lockstep_s,
+            )
+            forecasts = [r.forecast for r in rolled]
+            routes = [r.routes[-1] for r in rolled]
+            times = [r.route_time_s for r in rolled]
+        elif args.route == ROUTE_NEXT and args.policy == POLICY_MODEL:
             rolled = [
                 rolled_prediction(arm.model, item, arm.config, arm.normalizer, a, torch.device("cpu"), sk)
                 for item, a, sk in zip(chunk, chunk_anchors, chunk_skeletons, strict=True)
             ]
+            forecasts = [r.forecast for r in rolled]
+            routes = [r.routes[-1] for r in rolled]
+            times = [r.route_time_s for r in rolled]
+        elif args.route == ROUTE_NEXT and args.rolling == ROLLING_LOCKSTEP:
+            rolled = fly_lockstep_truth(
+                chunk, chunk_anchors, labels, chunk_skeletons, arm.config, horizons_s=horizons, step_s=args.lockstep_s,
+            )
             forecasts = [r.forecast for r in rolled]
             routes = [r.routes[-1] for r in rolled]
             times = [r.route_time_s for r in rolled]
@@ -411,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
                         "instructions_skipped": flight.instructions_skipped,
                         "leg_kinds": [leg.kind for leg in flight.routes],
                         "turns_incomplete": flight.turns_incomplete, "capped_by": flight.capped_by,
+                        "steps": len(flight.orders),
                     }),
                 },
                 "prediction": {
@@ -429,15 +458,18 @@ def main(argv: list[str] | None = None) -> int:
                 "orders": None if flight is None else flight.orders,
             })
         print(f"  flown {len(rows)}/{len(series)}", flush=True)
+    wall_s = time.perf_counter() - started
     summary = summarize(rows)
     text = format_table(summary)
+    text += f"\nflown in {wall_s:.0f} s ({wall_s / max(len(rows), 1):.2f} s per flight)\n"
     print(text, flush=True)
     args.out.mkdir(parents=True, exist_ok=True)
     write_json_atomic(args.out / "plan_oracle.json", {
         "schema_version": SCHEMA, "generated_at": utc_now(), "instrument": INSTRUMENT,
         "checkpoint": {"label": label, "path": str(path)},
         "split": args.split, "limit": args.limit, "flights": len(rows), "anchor": anchor,
-        "route": args.route, "policy": args.policy, "max_waypoints": args.max_waypoints, "anchor_km": args.anchor_km,
+        "route": args.route, "policy": args.policy, "rolling": args.rolling, "lockstep_s": args.lockstep_s, "wall_s": wall_s,
+        "max_waypoints": args.max_waypoints, "anchor_km": args.anchor_km,
         "anchor_s": args.anchor_s,
         "flights_without_anchor": without,
         "todays_best": TODAYS_BEST, "summary": summary, "rows": rows,

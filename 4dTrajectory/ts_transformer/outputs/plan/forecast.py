@@ -10,7 +10,7 @@ zeros (the guidance overrides every command); the schedule's total is the plan's
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Callable, Sequence
 
 import numpy as np
@@ -27,14 +27,14 @@ from ts_transformer.config import (
 from ts_transformer.data.channels import IDX
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import GLIDEPATH_ABOVE_M, GLIDEPATH_BELOW_M
-from ts_transformer.inference.forecast import Forecast
+from ts_transformer.inference.forecast import Forecast, cut_at_threshold_crossing
 from ts_transformer.outputs.dynamics import rollout as control_rollout
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
 from ts_transformer.outputs.dynamics.rollout import padded_dense_queries
 from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER, fraction_controls, physical_controls
 from ts_transformer.outputs.plan.extractors import PlanLabels
-from ts_transformer.outputs.plan.labels import Instruction, PlanOrder, join_point, wrap_angle
+from ts_transformer.outputs.plan.labels import Instruction, PlanOrder, join_point, truth_instructions, wrap_angle
 from ts_transformer.outputs.plan.guidance.controller import PlanGuidance, PlanToFly, reference_height
 from ts_transformer.outputs.plan.guidance.route import (
     CONVERGE_MIN_M,
@@ -203,6 +203,8 @@ def fly_routes(
     anchors: Sequence[int],
     *,
     clamped: Sequence[bool] | None = None,
+    n_segments: int | None = None,
+    progress: Sequence[int] | None = None,
     device: torch.device | None = None,
 ) -> list[Forecast]:
     """One rollout of a batch already laid: each flight's dynamics row (`dynamics_arrays`'
@@ -218,10 +220,15 @@ def fly_routes(
         for name in rows[0]
     }
     anchor_heights = np.asarray(list(anchor_heights_m), dtype=np.float64)
-    n_segments = n_segments_for(float(totals.max()))
+    # one segment count for the batch (`n_segments_for` the whole flight's; a lockstep
+    # step's is `LOCKSTEP_SEGMENTS`), so the hold flown is each flight's own T / N
+    n_segments = n_segments_for(float(totals.max())) if n_segments is None else int(n_segments)
     durations = np.repeat(totals[:, None] / n_segments, n_segments, axis=1)
     offsets, padded, valid = padded_dense_queries(durations, config.control_rollout_integrator_dt_s)
-    hook = PlanGuidance(config, dynamics, list(routes), list(plans), anchor_heights)
+    hook = PlanGuidance(
+        config, dynamics, list(routes), list(plans), anchor_heights,
+        progress=None if progress is None else np.asarray(list(progress), dtype=np.int64),
+    )
     zeros = torch.zeros((len(rows), n_segments, 3), dtype=torch.float64, device=device)
     with torch.no_grad():
         rollout = control_rollout.rollout_control_dense(
@@ -297,6 +304,18 @@ TURN_DONE_RAD = math.radians(5.0)
 #: An instruction leg is rolled for the schedule's time to the route's turn end plus this,
 #: so the aircraft (which lags the route) gets there; the rows past its turn are cut.
 TURN_SETTLE_S = 30.0
+#: An instruction whose fix is within this many turn radii of the aircraft (at the
+#: instruction's speed), or beside or behind it, is flown as "turn to heading X" from
+#: where the aircraft is rather than as a fly-by through the fix.
+TURN_AT_FIX_RADII = 1.5
+#: The "turn to heading X" form's onward point lies at least this many turn radii ahead:
+#: nearer, the turn onto the heading cannot meet the leg before its corner and the builder
+#: answers with a loop the other way (a 48° turn at 6 km: 240 s in a circle, 2026-09-11).
+HEADING_FORM_RADII = 4.0
+#: A closing laid from within this of the join that cannot head at it inside the
+#: intercept limit is the intercept polyline onto the centreline (never the aligned-pose
+#: turn-straight-turn, which loops from a pose 1–2 km short of the join).
+CLOSING_INTERCEPT_M = 8_000.0
 #: A heading on within this of the direction to the join points AT the join: the leg
 #: gets no extension beyond its fix (the onward point overshot the join and the polyline
 #: looped back to it — 32–44 km of closing path on the full L−1 oracle's worst flights).
@@ -309,9 +328,19 @@ CLOSING_SLACK_FRACTION = 0.1
 #: A head that keeps issuing fixes is cut here: after this many instruction legs the
 #: closing is flown whatever it says (the label set carries at most `MAX_WAYPOINTS`).
 MAX_INSTRUCTION_LEGS = 6
-#: A rolled prediction flies at most this multiple of its first predicted arrival time (plus
-#: the slack): the guard against a head whose legs never reach the final.
+#: A rolled prediction flies at most this multiple of its first order's budget (the
+#: predicted arrival time plus the closing slack): the guard against a head whose legs
+#: never reach the final — `rolled_time_cap_s`, the one expression for both forms.
 ROLLED_TIME_CAP_FACTOR = 1.5
+
+
+def closing_budget_s(arrival_time_s: float) -> float:
+    """An order's time budget: its arrival time plus the closing slack."""
+    return float(arrival_time_s) + max(CLOSING_SLACK_S, CLOSING_SLACK_FRACTION * float(arrival_time_s))
+
+
+def rolled_time_cap_s(first_budget_s: float) -> float:
+    return ROLLED_TIME_CAP_FACTOR * float(first_budget_s)
 
 
 @dataclass(frozen=True)
@@ -343,6 +372,7 @@ class LegOrder:
     remaining_m: float | None = None
     retry_on_skip: bool = False
     capture_clamped: bool = False    # the capture height was clamped into the glidepath window
+    arrival_time_s: float | None = None   # the head's own arrival time (the prediction a rolled flight reports)
     record: dict[str, object] | None = None
 
 
@@ -396,10 +426,13 @@ def ahead_of(anchor: Anchor, instruction: Instruction) -> bool:
 
 
 def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float | None, skeleton: RunwaySkeleton,
-              plan: PlanToFly) -> tuple[Route, PlanToFly, int]:
+              plan: PlanToFly, *, mid_flight: bool = False) -> tuple[Route, PlanToFly, int]:
     """The route and the schedule for one leg, and the route's OWN join index (its first
     point of the final leg, which the returned route's ``join_index`` overrides for an
-    instruction leg — see below).
+    instruction leg — see below). ``mid_flight`` (the lockstep's re-lays) admits the
+    "turn to heading X" forms for an instruction leg laid from inside its turn, with its
+    fix behind, or where the fly-by would loop; the drawn replay and the leg form keep
+    the fly-by through the fix.
 
     With an instruction: through its fix, the corner there rounded at the instruction's
     speed onto the heading it gives, that heading continued `LEG_EXTENSION_M` (none where
@@ -415,7 +448,7 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
     d_join = anchor.remaining_m if d_join_m is None else float(d_join_m)
     d_join = min(d_join, anchor.remaining_m)
     points_closing = ((anchor.remaining_m, anchor.speed_mps),)
-    onto_join = False
+    onto_join = join_ahead = False
     if instruction is None:
         d0, _xt0 = skeleton.axes(np.array([anchor.e]), np.array([anchor.n]))
         join_ahead = float(d0[0]) - CONVERGE_MIN_M > d_join
@@ -423,6 +456,17 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
         join = join_point(skeleton, max(d_join, 1.0))
         to_join = math.atan2(join[1] - anchor.n, join[0] - anchor.e)
         onto_join = join_ahead and abs(wrap_angle(anchor.heading_rad - to_join)) <= INTERCEPT_MAX_RAD
+        intercept = None
+        if join_ahead and not onto_join and float(d0[0]) - d_join <= CLOSING_INTERCEPT_M:
+            # near the join but off its direction: intercept the centreline at the limit
+            # angle, the corner there rounded onto the course (the aligned-pose
+            # turn-straight-turn loops from here)
+            d_intercept = float(d0[0]) - abs(float(_xt0[0])) / math.tan(INTERCEPT_MAX_RAD) - PATH_STEP_M
+            if d_intercept > max(d_join, PATH_STEP_M):
+                intercept = join_point(skeleton, d_intercept)
+            else:
+                d_join = max(float(d0[0]) - CONVERGE_MIN_M, PATH_STEP_M)
+                join_ahead = False
         if onto_join:
             # the polyline's corner is the fly-by point BEFORE the join whose arc onto the
             # course ends at the join (the whole-path route's last corner), at the
@@ -433,14 +477,24 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
             ))) * math.tan(0.5 * theta)
             corner = join_point(skeleton, d_join + tangent)
             onto_join = float(d0[0]) - PATH_STEP_M > d_join + tangent
+            if not onto_join:
+                # the corner onto the course would already have started: converge onto
+                # the centreline from where the aircraft is (re-laid inside the corner,
+                # the turn-straight-turn onto the aligned join pose looped)
+                d_join = max(float(d0[0]) - CONVERGE_MIN_M, PATH_STEP_M)
+                join_ahead = False
     points = ((anchor.remaining_m, anchor.speed_mps),) + (
         () if instruction is None else ((instruction.remaining_m, instruction.speed_mps),)
     )
     # the leg descends to the instruction's height by the end of its turn, the closing to
-    # the plan's capture height at the join
+    # the plan's capture height at the join — and a closing that converges from at or
+    # inside the join flies the height from where the aircraft is (re-laid every lockstep
+    # from an established flight, the plan's capture height held it level at its anchor
+    # height: every straight-in flight out of the glidepath window, 2026-09-11)
     leg_plan = replace(
         plan, speed_points=points,
-        h_capture_m=plan.h_capture_m if instruction is None else instruction.height_m,
+        h_capture_m=(anchor.height_m if instruction is None and not join_ahead else plan.h_capture_m)
+        if instruction is None else instruction.height_m,
     )
 
     def speed_at(remaining_m: float) -> float:
@@ -458,13 +512,33 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
             waypoints=((float(corner[0]), float(corner[1])),), waypoint_speeds=((d_join + tangent, speed_at_join),),
         )
         return route, leg_plan, route.join_index
+    if instruction is None and intercept is not None:
+        route = build_route(
+            anchor.e, anchor.n, anchor.heading_rad, anchor.speed_mps, **common,
+            waypoints=((float(intercept[0]), float(intercept[1])),), waypoint_speeds=((d_intercept, speed_at(d_intercept)),),
+        )
+        return route, leg_plan, route.join_index
     if instruction is None:
         route = build_route(anchor.e, anchor.n, anchor.heading_rad, anchor.speed_mps, **common)
         return route, leg_plan, route.join_index
     fix = np.array([instruction.fix_e, instruction.fix_n])
     join = join_point(skeleton, max(d_join, 1.0))
     to_join = math.atan2(join[1] - fix[1], join[0] - fix[0])
-    if abs(wrap_angle(instruction.heading_out_rad - to_join)) <= EXTENSION_SKIP_RAD:
+    to_fix = fix - np.array([anchor.e, anchor.n])
+    along_heading = float(to_fix[0] * math.cos(anchor.heading_rad) + to_fix[1] * math.sin(anchor.heading_rad))
+    radius = route_turn_radius_m(instruction.speed_mps)
+    if mid_flight and (float(np.hypot(*to_fix)) <= TURN_AT_FIX_RADII * radius or along_heading < -radius):
+        # inside the turn at the fix, or the fix clearly behind (a base-turn fix is abeam
+        # by construction and is flown to): the instruction is
+        # "turn to heading X" — the polyline from the pose along the heading given (the
+        # Dubins onto it is the turn), then the join; a fly-by through the fix from here
+        # ran its first leg back to the fix and looped (2026-09-11, the lockstep's first
+        # smoke: vectored ADE 4250 m)
+        reach = max(LEG_EXTENSION_M, HEADING_FORM_RADII * radius)
+        onward = np.array([anchor.e, anchor.n]) + reach * unit_vector(instruction.heading_out_rad)
+        waypoints = ((float(onward[0]), float(onward[1])),)
+        waypoint_speeds = ((instruction.remaining_m - reach, instruction.speed_mps),)
+    elif abs(wrap_angle(instruction.heading_out_rad - to_join)) <= EXTENSION_SKIP_RAD:
         waypoints = ((float(fix[0]), float(fix[1])),)
         waypoint_speeds = ((instruction.remaining_m, instruction.speed_mps),)
     else:
@@ -477,6 +551,17 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
         waypoints=waypoints, waypoint_speeds=waypoint_speeds,
     )
     turn_end = turn_end_index(route, instruction)
+    if mid_flight and float(route.arc_m[turn_end]) > float(np.hypot(*to_fix)) + math.pi * radius + LEG_EXTENSION_M:
+        # the fly-by from here loops before the fix (its arc to the turn's end runs more
+        # than a half-circle past the straight distance): "turn to heading X" instead
+        reach = max(LEG_EXTENSION_M, HEADING_FORM_RADII * radius)
+        onward = np.array([anchor.e, anchor.n]) + reach * unit_vector(instruction.heading_out_rad)
+        route = build_route(
+            anchor.e, anchor.n, anchor.heading_rad, anchor.speed_mps, **common,
+            waypoints=((float(onward[0]), float(onward[1])),),
+            waypoint_speeds=((instruction.remaining_m - reach, instruction.speed_mps),),
+        )
+        turn_end = turn_end_index(route, instruction)
     return replace(route, join_index=min(turn_end + 1, len(route.points) - 1)), leg_plan, route.join_index
 
 
@@ -517,6 +602,12 @@ def time_to_turn_end_s(route: Route, plan: PlanToFly) -> float:
     )
     pace = 0.5 * (speed[1:] + speed[:-1])
     return float(np.sum(np.diff(arc) / np.maximum(pace, 1.0)))
+
+
+def past_fix_abeam(anchor: Anchor, instruction: Instruction) -> bool:
+    """The aircraft is past the instruction's fix along the heading it gives."""
+    u_e, u_n = math.cos(instruction.heading_out_rad), math.sin(instruction.heading_out_rad)
+    return (anchor.e - instruction.fix_e) * u_e + (anchor.n - instruction.fix_n) * u_n >= 0.0
 
 
 def turn_done_row(forecast: Forecast, instruction: Instruction) -> int | None:
@@ -778,25 +869,361 @@ def fly_rolling_orders(
     def orders(current: Anchor, leg: int, legs: Sequence[Forecast]) -> LegOrder:
         # the first order is read once, before the first anchor's remaining path is known
         order = first if leg == 0 else order_at(current, rolled_history(series, anchor, legs, config))
+        # a closing from at or inside the join flies the height from where the aircraft
+        # is — `leg_route`'s rule, so the capture height here is the order's
         h_capture, clamped = capture_height_for(order, skeleton)
-        d0, _xt0 = skeleton.axes(np.array([current.e]), np.array([current.n]))
-        if order.instruction is None and order.d_join_m >= float(d0[0]) - CONVERGE_MIN_M:
-            # a closing that starts at or inside the join (the flight is on the final, or
-            # abeam it): the height profile starts where the aircraft is, as the oracle's
-            # does for a flight established at the anchor — never a capture height the
-            # head was not supervised on there
-            h_capture, clamped = current.height_m, False
         plan = PlanToFly(order.V_mid_mps, order.d_decel_m, order.V_final_mps, h_capture, ())
         return LegOrder(
             plan=plan, d_join_m=order.d_join_m, instruction=order.instruction,
-            budget_s=order.T_s + max(CLOSING_SLACK_S, CLOSING_SLACK_FRACTION * order.T_s),
+            budget_s=closing_budget_s(order.T_s),
             remaining_m=order.remaining_m, retry_on_skip=False, capture_clamped=clamped,
             record={**order.to_dict(), "leg": leg, "h_capture_flown_m": h_capture},
         )
 
     return fly_legs(
         series, anchor, skeleton, config, orders=orders, remaining_m=first.remaining_m,
-        predicted_final_time_s=first.T_s, time_cap_s=ROLLED_TIME_CAP_FACTOR * first.T_s + CLOSING_SLACK_S, device=device,
+        predicted_final_time_s=first.T_s, time_cap_s=rolled_time_cap_s(closing_budget_s(first.T_s)), device=device,
+    )
+
+
+# ── receding-horizon, lockstep rolling (design v5.1, §9 step 3(d)) ─────────────
+# The unit of rolling is a TIME STEP, not an instruction. Every `LOCKSTEP_S` the policy is
+# asked again from the aircraft's current pose and window — the oracle's policy holds the
+# truth's next instruction until the aircraft has executed it, the head re-predicts it —
+# the route to the instruction in force is re-laid from where the aircraft is, and the
+# next step is flown. Every flight of a group is stepped together: one guidance rollout
+# per step for the whole group (`LOCKSTEP_SEGMENTS` holds each), one policy call per step.
+# Asked once per leg (`fly_legs`), the head's guess at the 60 s anchor for a turn 25–39 km
+# away was committed for four minutes and its 2.6 km became 3781 m of rolled ADE; and one
+# flight at a time, a full run took 90 min (2026-09-11).
+
+#: The re-ask period, and the guidance holds one step is flown in (`HOLD_S` each).
+LOCKSTEP_S = 30.0
+LOCKSTEP_SEGMENTS = int(math.ceil(LOCKSTEP_S / HOLD_S))
+#: The route in force is re-laid when the order changed materially — its fix (or the
+#: closing's join) moved this far, its heading on this much, or fix ↔ none — or the
+#: aircraft is this far off the route; otherwise it is trimmed and tracked on. Re-laid
+#: every step from a mid-turn pose, the turn-straight-turn builder flipped its turn
+#: direction step after step and the aircraft never executed the instruction.
+RELAY_FIX_M = 1_000.0
+RELAY_HEADING_RAD = math.radians(10.0)
+RELAY_OFFSET_M = 1_000.0
+#: An aircraft this close to the centreline and this aligned with the course is ON the
+#: final: an instruction issued to it there is not flown (the head, re-asked on its own
+#: flown rows, pulled nearly every straight-in flight off the final with one).
+ON_FINAL_XT_M = 500.0
+
+
+@dataclass
+class FlightState:
+    """One flight being stepped: where it is, what it has flown, the instruction in force."""
+
+    series: FlightSeries
+    anchor: int
+    skeleton: RunwaySkeleton
+    current: Anchor
+    chunks: list[Forecast] = field(default_factory=list)
+    instruction: Instruction | None = None
+    #: the last step executed the instruction in force (past its fix, on its heading): the
+    #: oracle's policy then offers the next; the head's re-predicts regardless
+    instruction_executed: bool = False
+    route: Route | None = None            # the route in force (whole; `progress` is where the aircraft is on it)
+    progress: int = 0
+    route_height_m: float = 0.0           # the height the route in force was laid from (the height law's anchor)
+    plan: PlanToFly | None = None         # its schedule
+    d_join_m: float | None = None         # the join it was laid to
+    phase_routes: list[Route] = field(default_factory=list)    # the first route laid per phase
+    phase_lengths_m: list[float] = field(default_factory=list)
+    phase_durations_s: list[float] = field(default_factory=list)
+    flown: int = 0
+    skipped: int = 0
+    incomplete: int = 0
+    ignored_on_final: int = 0            # instructions not flown because the aircraft was on the final
+    executed_on_final: bool = False      # this step's instruction was already behind an aircraft on the final
+    records: list[dict[str, object]] = field(default_factory=list)
+    steps: int = 0
+    end_time_s: float = math.inf
+    time_cap_s: float = math.inf
+    cap_s: float | None = None            # the flight's time cap from its anchor (None: from its first budget)
+    predicted_final_time_s: float = 0.0
+    last_plan: PlanToFly | None = None
+    capped_by: str | None = None
+    done: bool = False
+
+    @property
+    def elapsed_s(self) -> float:
+        return self.current.time_s - float(self.series.times[self.anchor])
+
+
+#: A policy answers one step for a group of flights: one order per state, in order.
+LockstepPolicy = Callable[[Sequence[FlightState]], Sequence[LegOrder]]
+
+
+def route_progress(route: Route, start: int, e: float, n: float) -> int:
+    """The route point the aircraft has reached: from ``start`` on, the NEAREST point to
+    its position, as an absolute index — the guidance's own lookup (`PlanGuidance.
+    _route_lookup`), so a step continues exactly where the guidance would. Not the
+    first-pass rule: that followed a route that loops before its fix around the loop,
+    step after step, where the guidance cuts across to the far side (2026-09-11)."""
+    start = min(max(int(start), 0), len(route.points) - 1)
+    distance = np.hypot(route.points[start:, 0] - e, route.points[start:, 1] - n)
+    return start + int(np.argmin(distance))
+
+
+def order_changed(state: FlightState, instruction: Instruction | None, d_join_m: float | None) -> bool:
+    """Whether an order differs materially from the one the route in force was laid to."""
+    if state.route is None or (instruction is None) != (state.instruction is None):
+        return True
+    if instruction is None:
+        before, now = state.d_join_m, d_join_m
+        return (before is None) != (now is None) or (before is not None and abs(float(now) - float(before)) > RELAY_FIX_M)
+    held = state.instruction
+    join_moved = (state.d_join_m is None) != (d_join_m is None) or (
+        state.d_join_m is not None and abs(float(d_join_m) - float(state.d_join_m)) > RELAY_FIX_M
+    )
+    return (
+        join_moved
+        or math.hypot(instruction.fix_e - held.fix_e, instruction.fix_n - held.fix_n) > RELAY_FIX_M
+        or abs(wrap_angle(instruction.heading_out_rad - held.heading_out_rad)) > RELAY_HEADING_RAD
+    )
+
+
+def on_final(state: FlightState) -> bool:
+    """The aircraft is established on the final: within `ON_FINAL_XT_M` of the centreline,
+    aligned with the course inside the intercept limit, before the threshold."""
+    d0, xt0 = state.skeleton.axes(np.array([state.current.e]), np.array([state.current.n]))
+    return (
+        float(d0[0]) > 0.0 and abs(float(xt0[0])) <= ON_FINAL_XT_M
+        and abs(wrap_angle(state.current.heading_rad - state.skeleton.course_rad)) <= INTERCEPT_MAX_RAD
+    )
+
+
+def off_route(state: FlightState) -> bool:
+    """Whether the aircraft has drifted over `RELAY_OFFSET_M` from the route in force."""
+    if state.route is None:
+        return True
+    ahead = state.route.points[state.progress:]
+    distance = np.hypot(ahead[:, 0] - state.current.e, ahead[:, 1] - state.current.n)
+    return float(distance.min()) > RELAY_OFFSET_M
+
+
+def fly_lockstep(
+    states: Sequence[FlightState],
+    config: TSConfig,
+    *,
+    policy: LockstepPolicy,
+    step_s: float = LOCKSTEP_S,
+    time_caps_s: Sequence[float] | None = None,
+    device: torch.device | None = None,
+) -> list[RolledFlight]:
+    """Step every flight of ``states`` together until each has closed: each step the
+    policy's order per flight, the route to its instruction re-laid from its pose, one
+    guidance rollout of ``step_s`` for the whole group. A flight ends when its budget
+    (the order's, absolute) is spent; ``time_caps_s`` (from the anchor) bounds each flight,
+    by default `ROLLED_TIME_CAP_FACTOR` × its first order's budget; an instruction still
+    in force at the end is counted incomplete and the cap reported."""
+    config = guidance_config(config)
+    if time_caps_s is not None:
+        for state, cap in zip(states, time_caps_s, strict=True):
+            state.cap_s = float(cap)
+    while True:
+        active = [state for state in states if not state.done]
+        if not active:
+            break
+        orders = list(policy(active))
+        if len(orders) != len(active):
+            raise ValueError("the policy must answer one order per active flight")
+        rows, routes, plans, heights, durations, starts, anchors, clamped, progress = [], [], [], [], [], [], [], [], []
+        stepped: list[tuple[FlightState, Instruction | None]] = []
+        for state, order in zip(active, orders, strict=True):
+            # the route is laid through the fix wherever it is (a fix on top of the
+            # aircraft is passed over by `build_route`); an instruction is dropped only
+            # once executed (below), never for being near
+            instruction = order.instruction
+            if instruction is not None and state.flown >= MAX_INSTRUCTION_LEGS:
+                instruction, state.capped_by = None, CAPPED_BY_LEGS
+            state.executed_on_final = False
+            if instruction is not None and on_final(state):
+                # on the final: a fix already behind the aircraft was executed (the turn
+                # onto the final, its 5° heading match still pending); one ahead is not
+                # flown (a spurious fix from the head on its own flown rows)
+                if past_fix_abeam(state.current, instruction):
+                    state.executed_on_final = True
+                else:
+                    state.ignored_on_final += 1
+                instruction = None
+            if order.remaining_m is not None:
+                state.current = replace(state.current, remaining_m=max(float(order.remaining_m), 0.0))
+            if state.steps == 0:
+                state.time_cap_s = state.current.time_s + (rolled_time_cap_s(order.budget_s) if state.cap_s is None else state.cap_s)
+                state.predicted_final_time_s = float(order.budget_s if order.arrival_time_s is None else order.arrival_time_s)
+            # an order can shorten the budget, never extend it past the first order's
+            state.end_time_s = min(state.end_time_s, state.time_cap_s, state.current.time_s + float(order.budget_s))
+            # the residual of the budget is flown as it is, never floored past the end
+            duration = max(min(float(step_s), state.end_time_s - state.current.time_s), 1e-3)
+            new_phase = (
+                not state.phase_routes or state.instruction_executed
+                or (instruction is None) != (state.instruction is None)
+            )
+            relaid = new_phase or order_changed(state, instruction, order.d_join_m) or off_route(state)
+            if relaid:
+                route, leg_plan, _route_join = leg_route(
+                    state.current, instruction, order.d_join_m, state.skeleton, order.plan, mid_flight=True,
+                )
+                state.route, state.plan, state.d_join_m, state.progress = route, leg_plan, order.d_join_m, 0
+                state.route_height_m = state.current.height_m
+            else:
+                route, leg_plan = state.route, state.plan
+            if new_phase:
+                state.phase_routes.append(route)
+                state.phase_lengths_m.append(0.0)
+                state.phase_durations_s.append(0.0)
+            elif relaid:
+                # the phase's route is the one in force, re-laid mid-phase
+                state.phase_routes[-1] = route
+            state.instruction = instruction
+            state.instruction_executed = False
+            state.last_plan = leg_plan
+            state.records.append({**(order.record or {}), "step": state.steps})
+            rows.append(state.current.row)
+            routes.append(route)
+            plans.append(leg_plan)
+            heights.append(state.route_height_m)
+            durations.append(duration)
+            starts.append(state.current.time_s)
+            anchors.append(state.anchor)
+            clamped.append(order.capture_clamped)
+            progress.append(state.progress)
+            stepped.append((state, instruction))
+        chunks = fly_routes(
+            rows, routes, plans, heights, config, durations, starts, anchors,
+            clamped=clamped, n_segments=LOCKSTEP_SEGMENTS, progress=progress, device=device,
+        )
+        for (state, instruction), chunk in zip(stepped, chunks, strict=True):
+            # a step that executes its instruction ends there: the next instruction is
+            # laid from the turn's end, not up to a step later along the old route
+            executed = False
+            if instruction is not None:
+                row = turn_done_row(chunk, instruction)
+                if row is not None:
+                    executed = True
+                    if row > 0:
+                        chunk = cut_rows(chunk, row + 1)
+            state.chunks.append(chunk)
+            flown_m = float(np.sum(np.hypot(*np.diff(chunk.values[:, [IDX["e"], IDX["n"]]], axis=0).T)))
+            state.phase_lengths_m[-1] += flown_m
+            state.phase_durations_s[-1] += float(chunk.final_time_s)
+            state.steps += 1
+            last = chunk.values[-1]
+            geodetic = chunk.geodetic_values[-1]
+            state.current = Anchor(
+                e=float(last[IDX["e"]]), n=float(last[IDX["n"]]), height_m=float(last[IDX["u"]]),
+                heading_rad=float(geodetic[4]), speed_mps=float(geodetic[3]),
+                remaining_m=max(state.current.remaining_m - flown_m, 0.0), time_s=float(chunk.times[-1]),
+                row=advance_row(state.current.row, chunk),
+            )
+            # the route in force continues from the point the aircraft reached on it
+            state.progress = route_progress(state.route, state.progress, state.current.e, state.current.n)
+            if state.executed_on_final:
+                state.flown += 1
+                state.instruction_executed = True
+            if instruction is not None and executed:
+                state.flown += 1
+                state.instruction_executed = True
+                # the schedule's coordinate re-synced to the instruction's own
+                state.current = replace(state.current, remaining_m=max(float(instruction.remaining_m), 0.0))
+            if state.current.time_s >= state.end_time_s - 1e-6 or cut_at_threshold_crossing(chunk, state.series).truncated_at_threshold:
+                # the budget spent, or the threshold crossed on the final: the flight is over
+                state.done = True
+                if instruction is not None and not state.instruction_executed:
+                    state.incomplete += 1
+                    state.capped_by = CAPPED_BY_TIME
+    out: list[RolledFlight] = []
+    for state in states:
+        plan = state.plan
+        closing = route_time_s(
+            state.route, v_mid=plan.v_mid_mps, d_decel_m=plan.d_decel_m, v_final=plan.v_final_mps,
+            points=plan.speed_points,
+        )
+        whole = concatenate(state.chunks, state.anchor, state.predicted_final_time_s)
+        diagnostics = dict(whole.command_hook_diagnostics)
+        diagnostics["planCappedBy"] = state.capped_by or ""
+        diagnostics["planTurnsIncomplete"] = float(state.incomplete)
+        diagnostics["planSteps"] = float(state.steps)
+        diagnostics["planIgnoredOnFinal"] = float(state.ignored_on_final)
+        whole = replace(whole, horizon_capped=state.capped_by is not None, command_hook_diagnostics=diagnostics)
+        out.append(RolledFlight(
+            whole, list(state.phase_routes), state.flown, state.skipped, list(state.phase_lengths_m),
+            list(state.phase_durations_s), closing, list(state.records), state.incomplete, state.capped_by,
+        ))
+    return out
+
+
+def lockstep_states(
+    series: Sequence[FlightSeries], anchors: Sequence[int], skeletons: Sequence[RunwaySkeleton],
+    remaining_m: Sequence[float],
+) -> list[FlightState]:
+    return [
+        FlightState(item, int(a), sk, first_anchor(item, int(a), float(r)))
+        for item, a, sk, r in zip(series, anchors, skeletons, remaining_m, strict=True)
+    ]
+
+
+def truth_lockstep_policy(
+    states: Sequence[FlightState], labels: Sequence[PlanLabels], horizons_s: Sequence[float],
+) -> LockstepPolicy:
+    """The oracle's policy: each flight's own instructions in path order, the one in force
+    held until the aircraft has executed it (an instruction not ahead when its turn comes
+    is skipped and the next offered); the operating parameters its own plan's."""
+    by_state: dict[int, dict] = {}
+    for state, lab, horizon in zip(states, labels, horizons_s, strict=True):
+        plan, clamped = plan_to_fly(lab, state.current.height_m, state.skeleton, route=ROUTE_WAYPOINTS)
+        by_state[id(state)] = {
+            "queue": truth_instructions(lab, state.skeleton), "current": None, "plan": plan, "clamped": clamped,
+            "d_join": lab.d_join_m, "end": float(state.series.times[state.anchor]) + float(horizon),
+        }
+
+    def policy(active: Sequence[FlightState]) -> list[LegOrder]:
+        orders = []
+        for state in active:
+            own = by_state[id(state)]
+            if own["current"] is None or state.instruction_executed:
+                own["current"] = own["queue"].pop(0) if own["queue"] else None
+                while own["current"] is not None and not ahead_of(state.current, own["current"]):
+                    state.skipped += 1
+                    own["current"] = own["queue"].pop(0) if own["queue"] else None
+            orders.append(LegOrder(
+                plan=own["plan"], d_join_m=own["d_join"], instruction=own["current"],
+                budget_s=own["end"] - state.current.time_s, capture_clamped=own["clamped"],
+            ))
+        return orders
+
+    return policy
+
+
+def fly_lockstep_truth(
+    series: Sequence[FlightSeries], anchors: Sequence[int], labels: Sequence[PlanLabels],
+    skeletons: Sequence[RunwaySkeleton], config: TSConfig, *, horizons_s: Sequence[float],
+    step_s: float = LOCKSTEP_S, device: torch.device | None = None,
+) -> list[RolledFlight]:
+    """The lockstep oracle: every flight's own instructions, re-laid every ``step_s`` from
+    where the aircraft is, the group stepped together, each flown for its horizon."""
+    states = lockstep_states(series, anchors, skeletons, [lab.remaining_path_at_anchor_m for lab in labels])
+    policy = truth_lockstep_policy(states, labels, horizons_s)
+    return fly_lockstep(states, config, policy=policy, step_s=step_s, time_caps_s=list(horizons_s), device=device)
+
+
+def order_to_leg(order: PlanOrder, state: FlightState, step: int) -> LegOrder:
+    """A head's order as the leg order one step flies: the capture height inside the
+    glidepath window (the height from where the aircraft is when the closing starts at or
+    inside the join), the budget the order's arrival time plus the closing slack."""
+    h_capture, clamped = capture_height_for(order, state.skeleton)
+    plan = PlanToFly(order.V_mid_mps, order.d_decel_m, order.V_final_mps, h_capture, ())
+    return LegOrder(
+        plan=plan, d_join_m=order.d_join_m, instruction=order.instruction,
+        budget_s=closing_budget_s(order.T_s),
+        remaining_m=order.remaining_m, capture_clamped=clamped, arrival_time_s=order.T_s,
+        record={**order.to_dict(), "h_capture_flown_m": h_capture},
     )
 
 
