@@ -69,6 +69,7 @@ from ts_transformer.outputs.plan.forecast import (
     fly_rolling,
 )
 from ts_transformer.outputs.plan.labels import truth_instructions
+from ts_transformer.outputs.plan.rolled import POLICY_MODEL as ROLLED_POLICY_MODEL, POLICY_TRUTH as ROLLED_POLICY_TRUTH
 from ts_transformer.outputs.plan.strategy import rolled_prediction, rolled_predictions_lockstep
 from ts_transformer.outputs.plan.guidance.route import KIND_DOWNWIND, KIND_STRETCHED, KIND_WAYPOINTS
 from ts_transformer.outputs.plan.skeleton import runway_skeleton
@@ -79,8 +80,8 @@ INSTRUMENT = "the plan oracle"
 FLOOR_TOLERANCE_M = 30.0
 #: `--policy model`: the plan HEAD's orders (a plan checkpoint) rolled through the same
 #: guidance and graded by the same instrument — the rolled prediction beside its ceiling.
-POLICY_TRUTH = "truth"
-POLICY_MODEL = "model"
+POLICY_TRUTH = ROLLED_POLICY_TRUTH
+POLICY_MODEL = ROLLED_POLICY_MODEL
 #: `--rolling`: one instruction per leg, the head asked at each fix (`fly_legs`, design §12.4),
 #: or receding-horizon lockstep — asked every `LOCKSTEP_S`, the group stepped together (v5.1).
 ROLLING_LEG = "leg"

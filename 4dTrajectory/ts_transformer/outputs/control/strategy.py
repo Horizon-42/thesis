@@ -283,9 +283,9 @@ class ControlStrategy(OutputStrategy):
         return airborne_control_candidates(series, anchors)
 
     def bind_windows(
-        self, windows: TrajectoryWindows, *, fitted_teacher: FittedTeacherTable | None = None
+        self, windows: TrajectoryWindows, *, training_input: FittedTeacherTable | None = None
     ) -> WindowContext:
-        return ControlContext(windows, fitted_teacher)
+        return ControlContext(windows, training_input)
 
     def build_model(self, config: TSConfig, normalizer: Normalizer | None) -> nn.Module:
         del normalizer  # controls are rolled out in physical units already
@@ -421,7 +421,7 @@ class ControlStrategy(OutputStrategy):
                 "gradient, so training would learn nothing on the clamped steps"
             )
 
-    def training_teacher(self, config: TSConfig) -> FittedTeacherTable | None:
+    def training_input(self, config: TSConfig) -> FittedTeacherTable | None:
         # The imitation term's teacher table is a TRAINING input and is opened exactly
         # here — the one place that builds supervised window sets. Every replay path
         # builds its own window set without one and must keep working when the table is gone.

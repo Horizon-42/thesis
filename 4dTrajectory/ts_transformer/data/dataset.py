@@ -28,7 +28,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -99,9 +99,6 @@ from ts_transformer.data.time_grids import output_time_grid
 from ts_transformer.data.reference_velocity import rebuild_reference_velocities
 
 
-
-if TYPE_CHECKING:  # the control path's training-time input; the context it feeds owns it
-    from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 
 
 def dataset_flight_key(source: dict[str, Any], index: int) -> str:
@@ -822,7 +819,7 @@ class TrajectoryWindows(Dataset, ABC):
         *,
         minimum_anchor_index: int | None = None,
         minimum_future_s: float = 0.0,
-        fitted_teacher: FittedTeacherTable | None = None,
+        training_input: Any | None = None,
     ):
         self.series = list(series)
         self.config = config
@@ -915,7 +912,7 @@ class TrajectoryWindows(Dataset, ABC):
 
         # What this path adds to every batch — the context slot and, under the fixed-dt
         # grid, the dense supervision — built once per window set by its strategy.
-        self.context = output_strategy(config).bind_windows(self, fitted_teacher=fitted_teacher)
+        self.context = output_strategy(config).bind_windows(self, training_input=training_input)
 
     def __len__(self) -> int:
         return len(self.index)
@@ -1096,9 +1093,16 @@ class TrajectoryWindows(Dataset, ABC):
         )
 
     def batch(
-        self, indices: Sequence[int] | np.ndarray
+        self, indices: Sequence[int] | np.ndarray, *, epoch_seed: int | None = None
     ) -> tuple:
-        """Build one contiguous batch without per-sample Tensor creation and collation."""
+        """Build one contiguous batch without per-sample Tensor creation and collation.
+
+        ``epoch_seed`` is given by the TRAINING iterator only: with it, the path's context
+        may substitute a sample (`WindowContext.override` — the plan path's rolled windows,
+        design v5.2), whose history is the substitute's NORMALIZED window under the flight's
+        own conditioning and whose targets and weights are ZERO (nothing on the truth's grid
+        supervises a window the flight never flew; the path's loss reads its context row).
+        """
         batch_size = len(indices)
         L, N, C = self.config.seq_len, self.config.pred_len, len(self.config.channels)
         # The history carries the input contract (state channels + any conditioning);
@@ -1108,19 +1112,32 @@ class TrajectoryWindows(Dataset, ABC):
         weights = np.empty_like(y)
         final_time_s = np.empty(batch_size, dtype=np.float32)
         flight_weights = np.empty(batch_size, dtype=np.float32)
+        context_rows: list[dict[str, np.ndarray] | None] = []
 
         # Flights are ragged, so locating each source array remains a short explicit loop.
         # All expensive work inside a sample is vectorized over N progress points and C
         # channels, and conversion to Torch happens once per complete batch below.
         for row, index in enumerate(indices):
-            sample_x, sample_y, sample_weights, sample_time, flight_weight = (
-                self._sample_arrays(int(index))
-            )
+            substitute = None if epoch_seed is None else self.context.override(int(index), epoch_seed)
+            if substitute is None:
+                sample_x, sample_y, sample_weights, sample_time, flight_weight = (
+                    self._sample_arrays(int(index))
+                )
+                context_row = self.context.row(int(index))
+            else:
+                encoded, context_row = substitute
+                s_idx = self.index[int(index)][0]
+                sample_x = conditioned_history(encoded, self.conditioning[s_idx])
+                sample_y = np.zeros((N, C), dtype=np.float32)
+                sample_weights = np.zeros((N, C), dtype=np.float32)
+                sample_time = np.float32(0.0)
+                flight_weight = self.flight_weights[s_idx]
             x[row] = sample_x
             y[row] = sample_y
             weights[row] = sample_weights
             final_time_s[row] = sample_time
             flight_weights[row] = flight_weight
+            context_rows.append(context_row)
 
         result = tuple(
             torch.from_numpy(array)
@@ -1128,7 +1145,6 @@ class TrajectoryWindows(Dataset, ABC):
         )
         # The context slot: whatever this path adds per sample (the control dynamics, the
         # closure labels, the final-approach rows), and the dense supervision beside it.
-        context_rows = [self.context.row(int(index)) for index in indices]
         if context_rows[0] is None:
             return result
         context = {
@@ -1220,7 +1236,7 @@ class ExplicitAnchorTrajectoryWindows(FixedAnchorTrajectoryWindows):
         *,
         anchors: Mapping[str, int],
         minimum_anchor_index: int | None = None,
-        fitted_teacher: FittedTeacherTable | None = None,
+        training_input: Any | None = None,
         supervision: bool = True,
     ):
         self._anchor_by_flight = dict(anchors)
@@ -1228,7 +1244,7 @@ class ExplicitAnchorTrajectoryWindows(FixedAnchorTrajectoryWindows):
         super().__init__(
             series, config, normalizer,
             minimum_anchor_index=minimum_anchor_index,
-            fitted_teacher=fitted_teacher,
+            training_input=training_input,
         )
 
     def _eligible_anchors(
@@ -1268,19 +1284,20 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
         normalizer: Normalizer,
         *,
         minimum_anchor_index: int | None = None,
-        fitted_teacher: FittedTeacherTable | None = None,
+        training_input: Any | None = None,
     ):
         self.anchor_eligibility_policy = output_strategy(config).anchor_policy
-        # The config refuses a fitted teacher with random anchors (the table is fitted AT the
-        # fixed anchor), so this is always None here; it is forwarded, not special-cased, so
-        # the two window classes keep one constructor contract — train() passes it to both.
+        # The path's training-time input: the config refuses the control path's fitted
+        # teacher with random anchors (the table is fitted AT the fixed anchor); the plan
+        # path's rolled-window table is drawn per flight per epoch (`batch(epoch_seed=)`).
+        # Forwarded, not special-cased: the window classes keep one constructor contract.
         super().__init__(
             series,
             config,
             normalizer,
             minimum_anchor_index=minimum_anchor_index,
             minimum_future_s=config.random_train_anchor_min_future_s,
-            fitted_teacher=fitted_teacher,
+            training_input=training_input,
         )
         # The remaining path AT every stored anchor, and the stratum it falls in, both
         # aligned with `self.index`. The path is what `remaining-path-uniform` draws on; the
@@ -1543,4 +1560,5 @@ def iter_batches(
         indices = np.arange(len(dataset), dtype=np.int64)
 
     for start in range(0, len(indices), batch_size):
-        yield dataset.batch(indices[start : start + batch_size])
+        # a shuffled pass is a TRAINING epoch: its seed lets the path substitute draws
+        yield dataset.batch(indices[start : start + batch_size], epoch_seed=seed if shuffle else None)

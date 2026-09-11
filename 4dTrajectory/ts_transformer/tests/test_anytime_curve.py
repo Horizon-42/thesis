@@ -670,7 +670,7 @@ def test_an_arm_is_named_from_its_own_training_anchor_policy(
     covers the arms actually present. The random arm here is the fixed checkpoint re-read
     with `random_train_anchor=True`: this test is about the LABEL, and training a random-
     anchor model is currently broken upstream anyway (`RandomAnchorTrajectoryWindows`
-    takes no `fitted_teacher`).
+    takes no `training_input`).
     """
     flights, checkpoint = trained_checkpoint
     _patch_data_plane(monkeypatch, flights, tmp_path)

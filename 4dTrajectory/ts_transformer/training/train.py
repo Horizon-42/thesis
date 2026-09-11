@@ -39,7 +39,6 @@ from ts_transformer.config import (
     TSConfig,
     default_anchor,
 )
-from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 from ts_transformer.data.data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     provenance_eligible_set_digests,
@@ -133,6 +132,11 @@ class EpochResult:
     train_anchor_sampling: dict[str, Any] = field(default_factory=dict)
     control_training_diagnostics: dict[str, Any] = field(default_factory=dict)
     timing: dict[str, float] = field(default_factory=dict)
+    # The plan head under a rolled-window table (design v5.2): the epoch's realised
+    # rolled share, and the loss over the val split's rolled windows — a readout beside
+    # the selection value. Empty for every other run.
+    plan_rolled_training: dict[str, Any] = field(default_factory=dict)
+    plan_rolled_validation: dict[str, Any] = field(default_factory=dict)
     validation_profile_by_airport: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -165,7 +169,7 @@ class FitResult:
     procedure_multipliers: dict[str, float] | None = None
     # The teacher table this fit supervised its imitation term with, parsed ONCE by
     # ``fit_model`` and handed back so the caller can stamp its digest without reopening it.
-    fitted_teacher: FittedTeacherTable | None = None
+    training_input: Any | None = None
 
 
 def _generalization_metric(train_value: float, val_value: float) -> dict[str, float | None]:
@@ -454,7 +458,7 @@ class TrainingSession:
     strategy: OutputStrategy
     device: torch.device
     normalizer: Normalizer
-    fitted_teacher: FittedTeacherTable | None
+    training_input: Any | None
     train_set: TrajectoryWindows
     val_sets: dict[str, TrajectoryWindows]
     val_batch_plans: dict[str, ValidationBatchPlan]
@@ -497,6 +501,9 @@ class ValidationEpoch:
     components: dict[str, float]
     loss: float
     selection: ValidationSelection
+    # This path's own readouts of the pass (`OutputStrategy.validation_extras`), keyed as
+    # the epoch record's fields — measured beside the selection, never part of it.
+    extras: dict[str, Any] = field(default_factory=dict)
 
 
 def prepare_session(
@@ -537,13 +544,13 @@ def prepare_session(
     # the one place that builds supervised window sets. Every replay path (evaluate-fit,
     # the z-oracle forecast, the approach-cohort comparison) builds its own window set
     # without one and must keep working when the table is gone.
-    fitted_teacher = output_strategy.training_teacher(config)
+    training_input = output_strategy.training_input(config)
     train_set = training_window_class(config)(
         train_series,
         config,
         normalizer,
         minimum_anchor_index=minimum_anchor_index,
-        fitted_teacher=fitted_teacher,
+        training_input=training_input,
     )
     if verbose and train_set.context.summary is not None:
         print(f"  {train_set.context.summary}")
@@ -552,7 +559,7 @@ def prepare_session(
         config,
         normalizer,
         minimum_anchor_index=minimum_anchor_index,
-        fitted_teacher=fitted_teacher,
+        training_input=training_input,
     )
     val_batch_plans = {
         airport: build_validation_batch_plan(dataset, config.batch_size)
@@ -611,7 +618,7 @@ def prepare_session(
         strategy=output_strategy,
         device=device,
         normalizer=normalizer,
-        fitted_teacher=fitted_teacher,
+        training_input=training_input,
         train_set=train_set,
         val_sets=val_sets,
         val_batch_plans=val_batch_plans,
@@ -868,12 +875,16 @@ def validate_epoch(
         "val_checkpoint_selection_s",
         time.perf_counter() - selection_metrics_started,
     )
+    extras_started = time.perf_counter()
+    extras = session.strategy.validation_extras(model, val_sets, device, epoch_config)
+    profiler.add_cpu_seconds("val_extras_s", time.perf_counter() - extras_started)
     return ValidationEpoch(
         evaluations=val_evaluations,
         by_airport=val_by_airport,
         components=val_components,
         loss=val_loss,
         selection=validation_selection,
+        extras=extras,
     )
 
 
@@ -938,6 +949,14 @@ def describe_epoch(session: TrainingSession, result: EpochResult, marker: str) -
             f"{name}={val_components[name]:.4f}" for name in component_names
         )
     )
+    if result.plan_rolled_validation:
+        rolled = result.plan_rolled_validation
+        share = result.plan_rolled_training.get("share") if result.plan_rolled_training else None
+        print(
+            f"             rolled     val-rolled={rolled['loss']:.4f}  "
+            + "  ".join(f"{name}={value:.4f}" for name, value in rolled["components"].items())
+            + (f"  train-share={share:.2f}" if share is not None else "")
+        )
     if control_training_diagnostics:
         gradients = control_training_diagnostics["gradient_norm_pre_clip"]
         clip = control_training_diagnostics["clip"]
@@ -1036,6 +1055,7 @@ def fit_model(
             },
             procedure=procedure_epoch,
             **output_extras,
+            **validated.extras,
         ))
 
         if validation_selection.value < best_val - 1e-9:
@@ -1059,7 +1079,7 @@ def fit_model(
 
 
     normalizer, device, train_set = session.normalizer, session.device, session.train_set
-    val_window_count, fitted_teacher = session.val_window_count, session.fitted_teacher
+    val_window_count, training_input = session.val_window_count, session.training_input
     if best_state is None:
         raise RuntimeError("training completed without a checkpoint")
     model.load_state_dict(best_state)
@@ -1076,7 +1096,7 @@ def fit_model(
         # The λ the SELECTED epoch trained with, i.e. the one belonging to the restored
         # weights (the history carries the whole trajectory).
         procedure_multipliers=best_multipliers,
-        fitted_teacher=fitted_teacher,
+        training_input=training_input,
     )
 
 
@@ -1141,7 +1161,7 @@ def train(
     # manifests alone, and the teacher is a TRAINING input — no replay or prediction path
     # builds a window set that reads it, so a checkpoint must stay usable with the table
     # gone.
-    fitted_teacher = None if fit.fitted_teacher is None else fit.fitted_teacher.provenance
+    training_input = fit.training_input
     test_window_count = (
         None
         if reserved_test_keys is not None
@@ -1188,8 +1208,8 @@ def train(
         "data_provenance": data_provenance,
         "data_selection": data_selection,
     }
-    if fitted_teacher is not None:
-        checkpoint_payload["fitted_teacher"] = fitted_teacher
+    if training_input is not None:
+        checkpoint_payload[training_input.metadata_key] = training_input.provenance
     if fit.procedure_multipliers is not None:
         # The λ the selected epoch trained with: what a reader of the history needs to
         # weigh the logged ``procedure`` component, and where the dual run stood.
@@ -1267,8 +1287,8 @@ def train(
         # The eligible SET, not the roster file's bytes: regenerating the observed
         # evaluation moves those bytes with the set unchanged (data_provenance).
         checkpoint_metadata["eligible_sets"] = eligible_sets
-    if fitted_teacher is not None:
-        checkpoint_metadata["fitted_teacher"] = fitted_teacher
+    if training_input is not None:
+        checkpoint_metadata[training_input.metadata_key] = training_input.provenance
     if data_selection is not None:
         selection_path = out / "data_selection.json"
         selection_tmp = out / "data_selection.json.tmp"

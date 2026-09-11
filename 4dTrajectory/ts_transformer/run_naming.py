@@ -145,7 +145,7 @@ PLAN_LOSS_BASE = "plan-v1"
 PLAN_LOSS_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight")
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
 # in different directories must not read as one).
-_PATH_FIELDS = frozenset({"closure_labels_path", "control_fitted_teacher_path"})
+_PATH_FIELDS = frozenset({"closure_labels_path", "control_fitted_teacher_path", "plan_rolled_windows_path"})
 STATE_LOSS_FIELDS = (
     "fitted_tail_position_weight",
     "fitted_terminal_position_weight",
@@ -171,6 +171,10 @@ META_FIELDS = (
     # WHICH KIND of teacher, this says which one. A table is width-, anchor- and
     # cohort-specific, so two generations of it are two different runs.
     "control_fitted_teacher_path",
+    # ...and the plan head's rolled-window table (v5.2): which lockstep flights' windows it
+    # trained on, and at what share of its draws — a second table is a second run.
+    "plan_rolled_windows_path",
+    "plan_rolled_share",
     *INTENT_FIELDS,
     # The CTA axis reads the future the same way: a given-CTA run must wear it.
     *CTA_FIELDS,
@@ -300,6 +304,8 @@ _ABBREV = {
     "cta_conditioning": "cta",
     "closure_labels_path": "labels",
     "control_fitted_teacher_path": "teacher",
+    "plan_rolled_windows_path": "rolled",
+    "plan_rolled_share": "rolled-share",
     "state_position_reference": "pos-ref",
     "procedure_loss_lateral_weight": "proc-lat",
     "procedure_loss_vertical_weight": "proc-vert",

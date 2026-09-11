@@ -80,7 +80,34 @@ point of the package, not a migration in progress.
   Locks: `normalized` horizon; no CTA yet. **An aircraft already on the final has no next
   fix either** — the flag is "no fix ahead", supervised on every sample; the first head,
   supervised off the final only, sent every established flight to a made-up fix (74 % of
-  straight-in flights out of the corridor).
+  straight-in flights out of the corridor). **v5.2 (2026-09-11): the head is TRAINED ON
+  ROLLED WINDOWS** (`outputs/plan/rolled.py`, design §9 step 3(e), §12.6): `run_ts.py
+  plan_rolled_windows` flies every flight of a split in lockstep from L−1 and records, at
+  EVERY step, the head's input window there (`rolled_history`) with the truth's target
+  vector AT THAT STATE (`targets_at`, the one definition `targets_from_labels` reads at an
+  observed anchor): the instruction the truth's queue holds (`TruthQueue` — executed once
+  the aircraft is past the fix on its heading; a fix behind an aircraft on the final is
+  none ahead, `behind_on_final`, the lockstep's own rule), the truth's arrival time less
+  the time flown, the flight's own plan. `--policy truth` records the oracle's states,
+  `--policy model` a head's own labelled by the truth (DAgger's round; `--extend` carries
+  the previous table). `train --plan-rolled-windows-path T --plan-rolled-share p` replaces
+  that share of each epoch's per-flight draws by one of the flight's rolled windows
+  (`PlanContext.override`, through `batch(epoch_seed=)`; the coin has its OWN salt, so the
+  draws it passes over are the observed law's); the table must cover every train AND
+  val flight (no partial mode); the val split's rolled windows are scored every epoch
+  (`plan_rolled_validation`, `describe_epoch`'s `rolled` line) BESIDE the observed
+  objective, which still selects the checkpoint. Measured (§12.6, KRDU val, 60 s anchor):
+  the re-asked head's vectored ADE 5391 → 3641 m at share 0.75 (established 55 → 94 %
+  pooled; the once-per-leg head 3781, the ceiling 2184); the rolled val loss falls with the
+  share while the observed objective stands still, 0.75 and 1.0 tied; DAgger's first round
+  (the head's own states appended) did not help and taught it to name fixes past the cap.
+  Two traps: the label's `remaining_m` at
+  a flown state is the LOCKSTEP's coordinate (the anchor's remaining path less the path
+  flown, re-synced at an executed fix), not the geometric path through the fix — at
+  step 0 the two differ by the truth's own curvature before its first fix, so the rolled
+  and observed populations would disagree about one target; and a substituted training
+  sample carries ZERO truth-grid targets and weights, so a path whose loss reads `y` /
+  `mask` cannot use `override`.
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches
@@ -294,12 +321,15 @@ flight model.
   cohort's AIRPORTS (flight keys are unique within an airport only, so a foreign table would
   otherwise read as "covers 0 of N"), N, the anchors the dataset actually samples, coverage (with
   the count — there is no partial mode) and each flight's `truth_duration_s` to 1e-6 s.
-- **The fitted teacher is a TRAINING-TIME INPUT, not something a dataset loads.** `train.fit_model`
-  opens the file once and hands the table to the train and validation window sets; every replay
-  path (`evaluate-fit`, `predict --z-from-posterior`, the approach-cohort comparison, any
-  `forecast`) builds its own window set WITHOUT it and must keep working when the file is gone.
-  Its digest rides in `checkpoint_metadata.json` / the payload's `fitted_teacher`, never in
-  `data_provenance` — that object is compared for equality by `evaluate-fit` and `freeze-test`.
+- **A path's TRAINING-TIME INPUT is opened by `fit_model` once (`OutputStrategy.training_input`),
+  never by a dataset** — the control path's fitted teacher table, the plan path's rolled-window
+  table (v5.2). `fit_model` hands it to the train and validation window sets (`training_input=`,
+  renamed from `fitted_teacher=` 2026-09-11); every replay path (`evaluate-fit`, `predict
+  --z-from-posterior`, the approach-cohort comparison, any `forecast`) builds its own window set
+  WITHOUT it and must keep working when the file is gone. Its provenance rides in
+  `checkpoint_metadata.json` / the payload under the object's own `metadata_key`
+  (`fitted_teacher`, `plan_rolled_windows`), never in `data_provenance` — that object is compared
+  for equality by `evaluate-fit` and `freeze-test`.
 
 ## Current defaults and their status
 

@@ -22,7 +22,9 @@ from ts_transformer.config import (
     CONTROL_HOOK_OFF,
     CONTROL_RECIPE_CUSTOM,
     PREDICTION_CONTROL,
+    PREDICTION_PLAN,
     TSConfig,
+    owned_field_defaults,
 )
 from ts_transformer.data.channels import IDX
 from ts_transformer.data.dataset import FlightSeries
@@ -34,7 +36,19 @@ from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
 from ts_transformer.outputs.dynamics.rollout import padded_dense_queries
 from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER, fraction_controls, physical_controls
 from ts_transformer.outputs.plan.extractors import PlanLabels
-from ts_transformer.outputs.plan.labels import Instruction, PlanOrder, join_point, truth_instructions, wrap_angle
+from ts_transformer.outputs.plan.labels import (
+    LEG_MIN_S,
+    ON_FINAL_XT_M,
+    TURN_DONE_RAD,
+    Instruction,
+    PlanOrder,
+    fix_ahead,
+    join_point,
+    on_final_pose,
+    past_fix,
+    truth_instructions,
+    wrap_angle,
+)
 from ts_transformer.outputs.plan.guidance.controller import PlanGuidance, PlanToFly, reference_height
 from ts_transformer.outputs.plan.guidance.route import (
     CONVERGE_MIN_M,
@@ -86,8 +100,10 @@ ROUTES = (ROUTE_PLAN, ROUTE_WAYPOINTS)
 
 
 def guidance_config(config: TSConfig) -> TSConfig:
-    """The rollout the guidance flies under: the lagged dynamics, no post-hoc hook."""
-    return replace(config, **GUIDANCE_DYNAMICS)
+    """The rollout the guidance flies under: the lagged dynamics, no post-hoc hook — a
+    CONTROL config, so the plan run's own fields go back to their defaults (a rolled-window
+    table on the plan run is refused on a control config, 2026-09-11)."""
+    return replace(config, **GUIDANCE_DYNAMICS, **owned_field_defaults(PREDICTION_PLAN))
 
 
 def speed_points_for(labels: PlanLabels, route: str) -> tuple[tuple[float, float], ...]:
@@ -293,14 +309,12 @@ KIND_ROLLED = "rolled"
 #: far — long enough for the corner at the fix to be rounded at the fix's speed (a 90°
 #: corner at 110 m/s needs 3.5 km either side); only the part to the fix is flown.
 LEG_EXTENSION_M = 8_000.0
-#: A leg is flown for the time the schedule needs to its fix, at least this long (a fix
-#: on top of the aircraft is passed over instead).
-LEG_MIN_S = 10.0
-#: A leg is flown until the AIRCRAFT is on the heading its instruction gives, within this,
-#: past the fix (cut at the fix's first pass — mid-turn — the next leg started from a pose
-#: the plan-route builder answered with a loop, 2026-09-11); the route's own turn end is
-#: read with the same tolerance.
-TURN_DONE_RAD = math.radians(5.0)
+#: A leg is flown for the time the schedule needs to its fix, at least `LEG_MIN_S` (a fix
+#: on top of the aircraft is passed over instead), and until the AIRCRAFT is on the heading
+#: its instruction gives within `TURN_DONE_RAD`, past the fix (cut at the fix's first
+#: pass — mid-turn — the next leg started from a pose the plan-route builder answered
+#: with a loop, 2026-09-11); the route's own turn end is read with the same tolerance.
+#: Both live in `labels` with the pose predicates the labels are read by.
 #: An instruction leg is rolled for the schedule's time to the route's turn end plus this,
 #: so the aircraft (which lags the route) gets there; the rows past its turn are cut.
 TURN_SETTLE_S = 30.0
@@ -419,10 +433,10 @@ def next_anchor(previous: Anchor, forecast: Forecast, instruction: Instruction) 
 
 
 def ahead_of(anchor: Anchor, instruction: Instruction) -> bool:
-    """Whether the fix is somewhere to fly to at all: not on top of the aircraft. A fix
-    beside or behind it is a turn (a base turn puts the next fix 90° off the heading), and
-    the leg's own turn-straight-turn handles it."""
-    return math.hypot(instruction.fix_e - anchor.e, instruction.fix_n - anchor.n) > LEG_MIN_S * anchor.speed_mps
+    """`labels.fix_ahead` at an anchor: the fix is somewhere to fly to at all, not on top
+    of the aircraft (a fix beside or behind it is a turn the leg's own turn-straight-turn
+    handles)."""
+    return fix_ahead(anchor.e, anchor.n, anchor.speed_mps, instruction)
 
 
 def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float | None, skeleton: RunwaySkeleton,
@@ -605,9 +619,8 @@ def time_to_turn_end_s(route: Route, plan: PlanToFly) -> float:
 
 
 def past_fix_abeam(anchor: Anchor, instruction: Instruction) -> bool:
-    """The aircraft is past the instruction's fix along the heading it gives."""
-    u_e, u_n = math.cos(instruction.heading_out_rad), math.sin(instruction.heading_out_rad)
-    return (anchor.e - instruction.fix_e) * u_e + (anchor.n - instruction.fix_n) * u_n >= 0.0
+    """`labels.past_fix` at an anchor: past the instruction's fix along the heading it gives."""
+    return past_fix(anchor.e, anchor.n, instruction)
 
 
 def turn_done_row(forecast: Forecast, instruction: Instruction) -> int | None:
@@ -908,10 +921,9 @@ LOCKSTEP_SEGMENTS = int(math.ceil(LOCKSTEP_S / HOLD_S))
 RELAY_FIX_M = 1_000.0
 RELAY_HEADING_RAD = math.radians(10.0)
 RELAY_OFFSET_M = 1_000.0
-#: An aircraft this close to the centreline and this aligned with the course is ON the
-#: final: an instruction issued to it there is not flown (the head, re-asked on its own
-#: flown rows, pulled nearly every straight-in flight off the final with one).
-ON_FINAL_XT_M = 500.0
+#: An aircraft on the final (`labels.on_final_pose`: within `ON_FINAL_XT_M` of the
+#: centreline, aligned) is not flown an instruction (the head, re-asked on its own flown
+#: rows, pulled nearly every straight-in flight off the final with one).
 
 
 @dataclass
@@ -989,13 +1001,16 @@ def order_changed(state: FlightState, instruction: Instruction | None, d_join_m:
 
 
 def on_final(state: FlightState) -> bool:
-    """The aircraft is established on the final: within `ON_FINAL_XT_M` of the centreline,
-    aligned with the course inside the intercept limit, before the threshold."""
-    d0, xt0 = state.skeleton.axes(np.array([state.current.e]), np.array([state.current.n]))
-    return (
-        float(d0[0]) > 0.0 and abs(float(xt0[0])) <= ON_FINAL_XT_M
-        and abs(wrap_angle(state.current.heading_rad - state.skeleton.course_rad)) <= INTERCEPT_MAX_RAD
-    )
+    """`labels.on_final_pose` at the flight's state: established on the final."""
+    return on_final_pose(state.skeleton, state.current.e, state.current.n, state.current.heading_rad)
+
+
+def behind_on_final(state: FlightState, instruction: Instruction) -> bool:
+    """An aircraft on the final with the instruction's fix behind it has EXECUTED it (the
+    turn onto the final, its 5° heading match still pending) — the rule `fly_lockstep`
+    flies and the rolled-window labels read (`outputs.plan.rolled`), so a state the
+    lockstep would fly straight on is labelled "no fix ahead"."""
+    return on_final(state) and past_fix_abeam(state.current, instruction)
 
 
 def off_route(state: FlightState) -> bool:
@@ -1045,11 +1060,10 @@ def fly_lockstep(
             state.executed_on_final = False
             if instruction is not None and on_final(state):
                 # on the final: a fix already behind the aircraft was executed (the turn
-                # onto the final, its 5° heading match still pending); one ahead is not
-                # flown (a spurious fix from the head on its own flown rows)
-                if past_fix_abeam(state.current, instruction):
-                    state.executed_on_final = True
-                else:
+                # onto the final, its 5° heading match still pending; `behind_on_final`);
+                # one ahead is not flown (a spurious fix from the head on its own rows)
+                state.executed_on_final = behind_on_final(state, instruction)
+                if not state.executed_on_final:
                     state.ignored_on_final += 1
                 instruction = None
             if order.remaining_m is not None:

@@ -43,7 +43,6 @@ from ts_transformer.config import (
     CHECKPOINT_SELECTION_OBJECTIVE,
     TSConfig,
 )
-from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 from ts_transformer.data.dataset import (
     ExplicitAnchorTrajectoryWindows,
     FixedAnchorTrajectoryWindows,
@@ -336,7 +335,7 @@ def validation_datasets(
     normalizer: Normalizer,
     *,
     minimum_anchor_index: int | None = None,
-    fitted_teacher: FittedTeacherTable | None = None,
+    training_input: Any | None = None,
 ) -> dict[str, TrajectoryWindows]:
     by_airport: dict[str, list[FlightSeries]] = {}
     for item in series:
@@ -347,7 +346,7 @@ def validation_datasets(
             config,
             normalizer,
             minimum_anchor_index=minimum_anchor_index,
-            fitted_teacher=fitted_teacher,
+            training_input=training_input,
         )
         for airport, group in sorted(by_airport.items())
     }
@@ -649,7 +648,7 @@ def build_anchor_grid_validation_plans(
     37 %. The drop is printed and recorded, never silent. The run is refused only when
     fewer than `MINIMUM_ANCHOR_GRID_BINS` bins survive beside L−1.
 
-    No ``fitted_teacher`` is passed on purpose: a fitted table is bound to the L−1 anchor
+    No ``training_input`` is passed on purpose: a fitted table is bound to the L−1 anchor
     it was fitted at, and these sets score a REPLAY, never an objective. For the same
     reason the window sets are built ``supervision=False``: nothing here reads an imitation
     or heading-rate target, and building one would quietly hand a `fitted` run the

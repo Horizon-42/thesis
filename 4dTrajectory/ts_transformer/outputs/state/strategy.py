@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from ts_transformer.data.fixed_dt_supervision import FixedDTControlSupervision
     from ts_transformer.inference.forecast import Forecast
     from ts_transformer.training.objective import ProcedureMultipliers
-    from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 
 
 class FinalApproachContext(WindowContext):
@@ -48,7 +47,7 @@ class StateStrategy(OutputStrategy):
     view = StateOutput
 
     def bind_windows(
-        self, windows: TrajectoryWindows, *, fitted_teacher: FittedTeacherTable | None = None
+        self, windows: TrajectoryWindows, *, training_input: Any | None = None
     ) -> WindowContext:
         if windows.config.uses_final_approach_context:
             return FinalApproachContext(windows)

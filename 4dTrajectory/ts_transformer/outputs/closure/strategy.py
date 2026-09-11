@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from ts_transformer.data.fixed_dt_supervision import FixedDTControlSupervision
     from ts_transformer.inference.forecast import Forecast
     from ts_transformer.training.objective import ProcedureMultipliers
-    from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 
 
 class ClosureContext(WindowContext):
@@ -76,7 +75,7 @@ class ClosureStrategy(OutputStrategy):
     # so the default policy only ever names the fixed-anchor population.
 
     def bind_windows(
-        self, windows: TrajectoryWindows, *, fitted_teacher: FittedTeacherTable | None = None
+        self, windows: TrajectoryWindows, *, training_input: Any | None = None
     ) -> WindowContext:
         return ClosureContext(windows)
 

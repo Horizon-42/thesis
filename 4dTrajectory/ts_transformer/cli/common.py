@@ -177,6 +177,12 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="plan output: weight of the operating-parameter regression")
     parser.add_argument("--plan-instruction-loss-weight", type=float, default=None,
                         help="plan output: weight of the next-instruction regression")
+    parser.add_argument("--plan-rolled-windows-path", default=None, metavar="NPZ",
+                        help="plan output: the rolled-window table written by run_ts.py plan_rolled_windows "
+                             "(design v5.2); needs --plan-rolled-share")
+    parser.add_argument("--plan-rolled-share", type=float, default=None,
+                        help="plan output: the share of each epoch's per-flight draws taken from the "
+                             "rolled-window table instead of the observed anchors")
     parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
     parser.add_argument("--n-segments", type=int, default=None,
                         help="N normalized state endpoints or non-uniform control segments")
@@ -537,6 +543,8 @@ CLI_CONFIG_FIELDS = (
     "closure_labels_path",
     "plan_operating_loss_weight",
     "plan_instruction_loss_weight",
+    "plan_rolled_windows_path",
+    "plan_rolled_share",
     "seq_len",
     "n_segments",
     "horizon_mode",

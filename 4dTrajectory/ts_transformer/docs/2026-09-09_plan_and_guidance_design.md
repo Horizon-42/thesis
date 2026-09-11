@@ -1,6 +1,15 @@
 # Plan-and-guidance: the next model (design v5, 2026-09-11)
 
-Status: **v5.1 BUILT and MEASURED (2026-09-11 night, `dev-plan-lockstep`; §12.5): the rolling is
+Status: **v5.2 BUILT and MEASURED (2026-09-11 night, `dev-plan-rolled`; §9 step 3(e), §12.6): the
+head is TRAINED ON ROLLED WINDOWS** — the windows a lockstep flight produces, labelled with the
+truth's policy read at each state (`labels.TruthExpert`; `run_ts.py plan_rolled_windows`), mixed
+into every epoch's draw at `plan_rolled_share`, the val split's rolled windows scored every epoch
+beside the observed objective. The receding-horizon head now works: re-asked every 30 s at the
+60 s anchor, vectored ADE **5391 → 3641 m** (share 0.75; the once-per-leg head 3781, the lockstep
+ceiling 2184), established 55 → 94 % pooled, capped 29 → 9 %; straight-in 747 m, chamfer 44.
+The share is the lever (0.75 the candidate default, 1.0 its equal); DAgger's first round did not
+help. Next: hold an order unless the change persists, then the fan over the next fix.
+Previous status: **v5.1 BUILT and MEASURED (2026-09-11 night, `dev-plan-lockstep`; §12.5): the rolling is
 RECEDING-HORIZON and LOCKSTEP — §9 step 3(d), decided by the user on reading §12.4.** The
 lockstep oracle reads 1847 m of vectored ADE at L−1 against the leg form's 1492 at
 78× the speed (69 s for the split). **Re-asking the head every step made its vectored
@@ -407,6 +416,44 @@ parametrisation is too coarse.
    (3) the step length as an axis (15 / 30 / 60 s) only if (2) moves. Gate: the head's
    rolled vectored ADE against native32's 2870 m and the straight-in chamfer against 109 m,
    both at the 60 s anchor.
+   **(e) v5.2 — the head trained on rolled windows (planned 2026-09-11 night; `dev-plan-rolled`).**
+   §12.5's reading: from its second step on the head is asked on windows of its own flown
+   rows, and it was trained on observed windows only — its orders jitter, and 29 % of vectored
+   flights ran to the cap. The fix is on the training side, one instrument, two rounds:
+   (1) the ROLLED-WINDOW TABLE — `run_ts.py plan_rolled_windows` flies every flight of a
+   split in lockstep from L−1 and records, at EVERY step, the head's input window there
+   (`rolled_history`: the observed track to the anchor continued by the flown rows) with the
+   target vector the truth defines AT THAT STATE: the same vector `targets_from_labels` builds
+   at an observed anchor, read about the aircraft's pose (the fix ahead / across it, the
+   heading on; the truth's arrival time less the time flown; the schedule coordinate as the
+   path to go through the fix in force — or to the join and down the final; the flight's own
+   speeds, deceleration and join distances, capture height). Under `--policy truth` the flown
+   states are the oracle's — closed-loop windows along the truth's route, the ceiling's own
+   inputs; under `--policy model` a plan checkpoint's — the head's own states, each labelled
+   by the truth's queue at that state (the instruction executed once the aircraft is past its
+   fix on its heading; a fix behind an aircraft on the final is none ahead, `fly_lockstep`'s
+   own rule): the expert at the learner's state, DAgger's aggregation, `--extend` carrying the
+   previous table into the new one. One file per table (`.npz`, the provenance inside), bound
+   to the window contract (L, dt, channels, the target contract) and to the split's flights.
+   (2) TRAINING on it — `plan_rolled_windows_path` + `plan_rolled_share`: per flight per epoch
+   the draw is, with probability `share`, one of the flight's rolled windows (uniform over its
+   steps, from the same per-flight per-epoch digest discipline as the anchor draw, salted
+   apart) and otherwise the observed anchor draw, unchanged; the batch carries `plan_rolled`,
+   the epoch record the share realised. The loss is unchanged. The table must cover every
+   train AND val flight (no partial mode: a head trained on rolled windows for some flights
+   and not others is a mixture nobody asked for); the val split's rolled windows are scored
+   every epoch as a READOUT beside the observed objective (`plan_rolled_validation`); the
+   checkpoint stays selected on the observed L−1 objective until that readout says the two
+   part. What to measure, in order: (1) round 0 — the table from the truth policy (train +
+   val), the head at share 0.5 under step 3c's recipe, the rolled prediction in lockstep at
+   the 60 s anchor and L−1 (§12.5's 5391 m / 4991 m and the leg form's 3781 are the numbers
+   to beat, the lockstep ceiling 2184 the bound; established 55 % against 78 %); (2) round 1 —
+   the table from round 0's head (`--policy model`) appended to round 0's, the head
+   retrained; (3) the share as an axis (0.25 / 0.75) only if (1) moves. Gate as 3(d)'s: the
+   rolled vectored ADE against native32's 2870 m and the straight-in chamfer against 109 m at
+   the 60 s anchor. **BUILT and MEASURED 2026-09-11 night (§12.6)**: share 0.75 — vectored ADE
+   3641 m (gate not passed against 2870), straight-in chamfer 44 (passed), established 94 %;
+   the share is the lever, DAgger's first round is not.
 4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
 5. Two seeds; pooled five-airport training; KSJC replication.
 6. The multi-aircraft scheduler demonstration.
@@ -459,7 +506,7 @@ The strategy's members (`outputs/base.py`, the interface as built) map onto the 
 | `build_model(config, normalizer)` | the plan head over `backbone.adapters`'s forecaster: five point + quantile outputs (`outputs.duration_heads`'s monotone quantile head, reused per parameter), the route distribution head | §3a, §3b |
 | `target_contract`, `loss_component_names`, `loss(...)` | direct regression in the parameters' own units; pinball for the quantiles; the route distribution's likelihood. Every term is in `loss_component_names` or the first batch raises | §6 |
 | `probe_context`, `probe_dense_supervision`, `probe_prediction` | the `--batch-size auto` probe's batch, carrying every key `PlanContext.row` carries (review B-1's rule, pinned the way `tests/test_supervision_terms.py` pins the control path's) | — |
-| `check_trainable`, `training_teacher`, `epoch_config`, `training_diagnostics`, `epoch_record`, `checkpoint_metadata` | refuse a cohort the skeleton does not cover; no teacher; no per-epoch schedule; the plan-parameter errors against the airport medians (the §7 veto) into `history.json`; the skeleton's source and cycle into `checkpoint_metadata.json` | §7 |
+| `check_trainable`, `training_input`, `epoch_config`, `training_diagnostics`, `epoch_record`, `checkpoint_metadata` | refuse a cohort the skeleton does not cover; no teacher; no per-epoch schedule; the plan-parameter errors against the airport medians (the §7 veto) into `history.json`; the skeleton's source and cycle into `checkpoint_metadata.json` | §7 |
 | `forecast(model, series, config, normalizer, anchor, device, options)` | the guidance layer (route builder → lateral / vertical / speed → time closure) driving the point-mass rollout. The scheduler's assignments arrive in `ForecastOptions` — new fields beside `cta_offset_s` / `cta_s` (the assigned time, `d_join`, `side`, the delay to absorb), filled from `PredictOptions` by `cli.predict.parse_predict_options`; a strategy refuses the options that do not apply to its path | §4, §5 |
 | `replay(...)` → `Replay` | the validation replay on the plan's own clock (the control path's rollout-clock replay is the precedent) | §7 |
 | `record_fields(forecast)` | the plan (with every clamp), the route actually flown, the unabsorbable delay X, the fan — the record's `source` block | §5, §7 |
@@ -1107,3 +1154,100 @@ windows a lockstep flight produces — a closed-loop training set from the oracl
 flights, or noise on the observed windows), hold an order unless the head's change is
 material for two consecutive asks, and only then the fan over the next fix. §12.4's
 leg-form numbers remain the plan head's best prediction today.
+
+### 12.6 Step 3(e) — the head trained on rolled windows (v5.2, 2026-09-11 night)
+
+Planned before building (the §9 step 3(e) text is the plan). Every number is KRDU val (1404
+flights), the rolled prediction in lockstep (`plan_oracle --route next --policy model --rolling
+lockstep`), the 60 s anchor unless said; the head is step 3c's recipe (iTransformer d=256,
+3 layers, 30-row window, remaining-path-uniform anchors, selected on the observed L−1
+objective) with `plan_rolled_share` 0.5.
+
+**The table.** The truth policy over the checkpoint's split from L−1 (`plan_rolled_windows
+--policy truth --split train --split val`): 6856 + 1405 flights, **97,633 samples** (9 steps
+per flight at the median, 35 at most), 53 % of them on the final and 57 % with no fix ahead
+(the observed-anchor population has ~50 %); the oracle's own flown ADE along the way 612 m
+straight-in / 2388 m vectored (train), 99 of 6856 flights to the time cap; 696 s of CPU for
+both splits (57 MB). The head's own states labelled by the truth (`--policy model`, the
+step-3c head, 48 val flights): 639 samples, its flown vectored ADE 4919 m, 8 of 48 capped —
+round 1's input.
+
+**The draft round (2026-09-11 night, before the review; artifacts `step3e_rolled_truth/`,
+`step3e_rolled_head_r0/`, `step3e_lockstep_r0_a60s/`).** Labels with the schedule coordinate
+TRACKED as the lockstep tracks it (the anchor's remaining path less the path flown, re-synced
+at an executed fix) and `T` the truth's arrival time less the time flown — the review's
+reading: right along the oracle's own path, wrong for a slow learner (the coordinate runs out
+kilometres from the runway), and at step 0 not the observed label (the truth's curvature
+before its first fix). The head trained 97 epochs, 5 s each; its rolled-window val loss
+fell WITH the observed objective (0.695 against 0.644 at the kept epoch; no divergence, so
+the observed selection stands). Rolled at 60 s:
+
+| KRDU val, 60 s anchor, lockstep | all | straight-in | vectored |
+|---|---|---|---|
+| §12.5: the head re-asked every 30 s (observed windows only) — ADE mean | — | 887 | 5391 |
+| … established | 0.55 | — | 0.49 |
+| … rolled flight capped | 0.29 (vectored) | | |
+| §12.4: the head asked once per leg — vectored ADE | | | 3781 |
+| the lockstep ceiling (truth policy, 60 s) — vectored ADE | | | 2184 |
+| **draft round 0 — ADE mean** | 2095 | 694 | 3930 |
+| … ADE p50 / chamfer p50 | 1119 / 56 | 548 / 43 | 3087 / 1555 |
+| … established | 0.915 | 0.994 | 0.809 |
+| … rolled flight capped / turn not completed | 0.038 / 0.033 | 0.001 / 0.001 | 0.088 / 0.077 |
+| … ETA MAE (the head's T) s / flown dt MAE s | 24.4 / 36.4 | 11.3 / 17.5 | 39.1 / 58.8 |
+
+**Read.** Training on the oracle's own windows removes the derailing: capped 29 % → 3.8 %,
+established 55 % → 91.5 % (vectored 49 % → 81 %), vectored ADE 5391 → 3930 m — now beside
+the once-per-leg 3781 with none of its commitment, straight-in unchanged (694 against 635 at
+its best, chamfer 43). What is left is the head's geometry itself (vectored chamfer 1555 m
+against the ceiling's ~700): the fixes it names, not the derailing. The final rounds below
+use the review's labels (`TruthExpert`: the truth's values at the nearest truth row of the
+leg in force plus the way there — exact at the anchor, defined at any learner state).
+
+**The rounds (2026-09-11 night, the review's labels; artifacts `step3e_r0_table/`,
+`step3e_r0_head*/`, `step3e_r1_table/`, `step3e_r1_head/`, `step3e_*_lockstep_*/`).** Every
+head trained 70–103 epochs (kept 55–88), 5 s per epoch; the rolled-window val loss is the
+plan loss over the val split's 16,470 truth-policy windows (equal weight per sample; each
+component over its carriers).
+
+| KRDU val, 60 s anchor, lockstep | vectored ADE mean / p50 | vectored chamfer p50 | established vec. / all | capped vec. | straight-in ADE / chamfer | dt MAE all | rolled val loss (obs. objective) |
+|---|---|---|---|---|---|---|---|
+| §12.5: the head re-asked, observed windows only | 5391 / — | — | 0.49 / 0.55 | 0.29 | 887 / 43 | — | — |
+| §12.4: asked once per leg | 3781 | — | 0.78 (vec.) | — | 635 | 34.6 | — |
+| the lockstep ceiling (truth policy) | 2184 | — | — | — | — | 22.5 | — |
+| round 0, share 0.25 | 3833 / 3263 | 1881 | 0.839 / 0.930 | 0.085 | 761 / 44 | 38.6 | 0.736 (0.649) |
+| round 0, share 0.5 | 3862 / 3159 | 1467 | 0.779 / 0.901 | 0.116 | 756 / 44 | 38.3 | 0.630 (0.643) |
+| **round 0, share 0.75** | **3641 / 2904** | 1434 | 0.865 / 0.940 | 0.090 | 747 / 44 | 37.1 | 0.559 (0.651) |
+| round 0, share 1.0 | 3685 / 2862 | 1427 | 0.862 / 0.939 | 0.068 | 735 / 44 | 37.2 | 0.523 (0.646) |
+| round 1 (DAgger: round 0's own states appended), share 0.5 | 3905 / 3376 | 1576 | 0.762 / 0.895 | 0.453 | 682 / 43 | 36.2 | 0.847 (0.654)¹ |
+
+¹ over its own table's 32,057 val samples (the head's states are harder), not comparable
+with the rows above.
+
+Paired per flight over the 601 vectored flights, against §12.5's re-asked head: round 0 at
+share 0.5 −1694 m of ADE at the median, better on 78 %; share 0.75 −1867 m, 83 %; share
+1.0 −1962 m, 81 %. Against round 0 at share 0.5: share 0.75 −71 m (better on 55 %), share
+1.0 −130 m (59 %), share 0.25 +241 m (38 %), round 1 +73 m (45 %). At L−1 the same
+picture: share 0.5 3959 m / established 78.4 %, share 0.75 3719 m / 84.2 %.
+
+**Read.** (1) Training on the rolled windows is what the receding-horizon head needed: the
+derailing is gone (capped 29 % → 7–12 %; vectored established 49 % → 78–87 %, pooled 55 %
+→ 90–94 %), and the vectored ADE 5391 → 3641 m, now BELOW the once-per-leg head's 3781 with
+none of its four-minute commitment, straight-in at 735–761 m against its 635 (chamfer 44,
+the ceiling's 43). (2) The share is the lever and more is better: the rolled-window val
+loss falls monotonically with it (0.736 → 0.630 → 0.559 → 0.523) while the observed L−1
+objective does not move (0.643–0.651) — the two populations are learnt side by side, and the
+observed selection stays valid — and 0.75 and 1.0 are tied on the deployed reading
+(−71 / −130 m paired, 55 / 59 %), both ahead of 0.5. **Share 0.75 is the candidate default**
+(the observed anchors stay in the draw for the single-step readouts at any anchor); 1.0 is
+its equal here. (3) DAgger's first round did NOT help: the head's own states appended to
+the truth's (190k samples, 45 % of them with no fix ahead against the truth's 57 %) gave a
+head that names a fix more often — 255 of 601 vectored flights reached the six-instruction
+cap (`legs`) against 8 — and the same ADE (+73 m paired). The truth-policy windows are
+already the right distribution for a head that then flies close to the truth; a second
+round would want the cap in the labels or the head's spurious fixes suppressed first. (4)
+What is left is the head's GEOMETRY: vectored chamfer ~1430 m against the ceiling's ~700,
+ADE p50 2.9 km against 2.2 — the fixes it names, at the 60 s anchor, 25–39 km from the turn.
+The 3(d) gate: vectored ADE 3641 m is still above native32's 2870 (not passed); straight-in
+chamfer 44 m against 109 (passed); established 94 % against 70 %. Next: hold an order unless
+the head's change persists two asks (the jitter is smaller now but `RELAY_FIX_M` re-lays
+still fire), then the fan over the next fix (§9 step 3(c)'s distribution), then the seed.

@@ -1298,6 +1298,12 @@ class PlanOutput(OutputSpec):
 
     plan_operating_loss_weight: float
     plan_instruction_loss_weight: float
+    #: v5.2 (§9 step 3(e)): the rolled-window table (`outputs.plan.rolled`, written by
+    #: `run_ts.py plan_rolled_windows`) and the share of each epoch's per-flight draws it
+    #: replaces — the head trained on the windows a lockstep flight produces. Together or
+    #: not at all: a table is drawn at a share, a share draws from a table.
+    plan_rolled_windows_path: str
+    plan_rolled_share: float
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -1309,6 +1315,14 @@ class PlanOutput(OutputSpec):
         for name in ("plan_operating_loss_weight", "plan_instruction_loss_weight"):
             if getattr(self, name) < 0.0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
+        if not 0.0 <= self.plan_rolled_share <= 1.0:
+            raise ValueError(f"plan_rolled_share must be in [0, 1], got {self.plan_rolled_share!r}")
+        if bool(self.plan_rolled_windows_path) != (self.plan_rolled_share > 0.0):
+            raise ValueError(
+                "plan_rolled_windows_path and plan_rolled_share go together: the table is drawn at "
+                f"the share, the share draws from the table (got path {self.plan_rolled_windows_path!r}, "
+                f"share {self.plan_rolled_share!r})"
+            )
 
 
 @dataclass(frozen=True)
@@ -1862,6 +1876,10 @@ class TSConfig:
     # ── the plan output (design v5 §6) ─────────────────────────────────────────
     plan_operating_loss_weight: float = 1.0
     plan_instruction_loss_weight: float = 1.0
+    # v5.2: the rolled-window table and its draw share (both off: the observed anchors
+    # alone, what every plan run before 2026-09-11 trained on).
+    plan_rolled_windows_path: str = ""
+    plan_rolled_share: float = 0.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
     # bounded to the final-approach corridor (see the constants). ``anchor-relative`` is
@@ -2508,6 +2526,15 @@ _OWNED_FIELD_DEFAULTS: dict[str, Any] = {
 }
 #: Free text read by nobody: the one field outside every view.
 _UNVIEWED_FIELDS: frozenset[str] = frozenset({"notes"})
+
+
+def owned_field_defaults(prediction_output: str) -> dict[str, Any]:
+    """The defaults of the fields ``prediction_output``'s view OWNS — what a config must
+    carry for them to be read as another output's (`_validate_ownership` refuses them off
+    their defaults there). The plan guidance flies its rollout under a CONTROL config
+    derived from the plan run's (`outputs.plan.forecast.guidance_config`), and a plan run's
+    own fields must not ride along into it."""
+    return {name: _OWNED_FIELD_DEFAULTS[name] for name in _OUTPUT_OWNED_FIELDS[prediction_output]}
 
 
 def _check_view_partition() -> None:

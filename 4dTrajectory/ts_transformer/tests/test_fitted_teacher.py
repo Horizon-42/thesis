@@ -186,7 +186,7 @@ def test_the_dataset_serves_the_table_with_unit_weights_and_the_loss_consumes_th
     config = _config(control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
                      control_fitted_teacher_path=str(table))
     windows = FixedAnchorTrajectoryWindows(
-        series, config, Normalizer.fit(series), fitted_teacher=load_fitted_teacher(table)
+        series, config, Normalizer.fit(series), training_input=load_fitted_teacher(table)
     )
     indices = np.arange(len(series))
     _x, _y, _w, _final_time, _fw, dynamics = windows.batch(indices)
@@ -231,7 +231,7 @@ def test_the_dataset_build_refuses_a_table_that_is_not_this_cohorts(tmp_path, kw
                      control_fitted_teacher_path=str(table))
     with pytest.raises(ValueError, match=message):
         FixedAnchorTrajectoryWindows(
-            series, config, Normalizer.fit(series), fitted_teacher=load_fitted_teacher(table)
+            series, config, Normalizer.fit(series), training_input=load_fitted_teacher(table)
         )
 
 

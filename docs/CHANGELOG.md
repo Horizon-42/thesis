@@ -4,6 +4,73 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-11 — ts_transformer: plan-and-guidance step 3(e) — the head trained on rolled windows (v5.2)
+
+`dev-plan-rolled`; design v5.2 §9 step 3(e), §12.6. §12.5's reading: from its second step
+on the receding-horizon head is asked on windows of its OWN flown rows, and trained on
+observed windows only it jittered from step to step and sent 29 % of vectored flights to
+the time cap. The fix is on the training side. `outputs/plan/rolled.py`: `record_lockstep`
+wraps any lockstep policy and records, at every step, each flight's input window
+(`rolled_history`) with the target vector the truth defines AT THAT STATE — `targets_at`,
+the one definition `targets_from_labels` now reads at an observed anchor too: the
+instruction the truth's queue holds there (`TruthQueue`: executed once the aircraft is past
+the fix on its heading, `forecast.turn_done_row`'s rule read at one state; a fix behind an
+aircraft on the final is none ahead, `forecast.behind_on_final`, the rule `fly_lockstep`
+flies), the truth's arrival time less the time flown, the schedule coordinate as the
+lockstep tracks it, the flight's own plan. `RolledWindowTable` (one `.npz`, the header
+inside; `require_cover`: the window contract and every flight, no partial mode; `extend`
+for DAgger's aggregation) and `RolledDraw` (the per-flight per-epoch sha256 coin at
+`plan_rolled_share`, its own salt). `run_ts.py plan_rolled_windows --policy truth|model`
+writes the table over a checkpoint's split(s); `train --plan-rolled-windows-path
+--plan-rolled-share` draws from it (`PlanContext.override` through
+`TrajectoryWindows.batch(epoch_seed=)`, passed by the training iterator only; a
+substituted sample carries zero truth-grid targets), reports the share realised
+(`plan_rolled_training`) and the loss over the val split's rolled windows every epoch
+(`plan_rolled_validation`, `OutputStrategy.validation_extras`) beside the observed
+objective, which still selects the checkpoint.
+
+- The spine's training-time input is no longer one path's: `OutputStrategy.training_teacher`
+  / `fitted_teacher=` are `training_input` (an object with `provenance` and `metadata_key`;
+  the control table keeps its on-disk key `fitted_teacher`, the plan table is
+  `plan_rolled_windows`). `WindowContext.override` and `OutputStrategy.validation_extras`
+  are the two new hooks; `EpochResult` gains `plan_rolled_training` / `plan_rolled_validation`.
+- `PlanOutput.plan_rolled_windows_path` / `plan_rolled_share` (together or not at all; named
+  `rolled=` / `rolled-share=`; old plan checkpoints load with the defaults);
+  `PLAN_TARGET_CONTRACT` lives in `labels.py` (the table is stamped with it); the batch
+  context gains `plan_rolled`; `lockstep_model_policy` is the head as a lockstep policy.
+- KRDU val, the rolled prediction in lockstep from the 60 s anchor (§12.6): the truth
+  policy's table over both splits (97,633 samples, 696 s) and the head at share 0.75 —
+  vectored ADE **5391 → 3641 m** (the once-per-leg head 3781, the lockstep ceiling 2184),
+  established 55 → 94 % pooled (vectored 49 → 87 %), capped 29 → 9 %; straight-in 747 m,
+  chamfer 44. The share is the lever: 0.25 / 0.5 / 0.75 / 1.0 = 3833 / 3862 / 3641 / 3685 m,
+  the rolled val loss 0.736 / 0.630 / 0.559 / 0.523 while the observed objective stays at
+  0.64–0.65 (paired vs share 0.5: 0.75 −71 m, 1.0 −130 m); DAgger's first round (the round-0
+  head's own states appended, 190k samples) +73 m paired and 255 of 601 vectored flights at
+  the six-instruction cap. The 3(d) gate stays open (2870 m); what is left is the head's
+  geometry (vectored chamfer ~1430 m against the ceiling's ~700).
+- The review (opus) moved the label rule into ONE object, `labels.TruthExpert` — the truth's
+  policy read at ANY pose: the queue's instruction in force (executed past the fix on its
+  heading, or past it on the final; one on top of the aircraft skipped), and the schedule
+  coordinate and arrival time as the truth's own at the nearest truth row of the leg in force
+  plus the way there — exact at the anchor (so `targets_from_labels` reads the same object
+  and the observed and rolled populations agree about every target), defined at a learner's
+  state off the truth's path (the draft's "anchor's value less the path flown" ran out on a
+  slow learner kilometres from the runway). The pose predicates and their constants
+  (`fix_ahead`, `past_fix`, `turn_done`, `on_final_pose`; `LEG_MIN_S`, `TURN_DONE_RAD`,
+  `ON_FINAL_XT_M`) live in `labels.py`, `forecast.py` reads them from there. Also from the
+  review: the rolled val readout averages each component over its CARRIERS
+  (`model.loss_group_carriers`, the groups in `PLAN_LOSS_GROUPS` — by batch size the
+  `kinematic` number moved 70 % with the batch size); `extend` checks the whole window
+  contract and the step and unions the airports; the table's windows are encoded once per
+  window set; `--device` on the runner; `guidance_config` resets the plan run's own fields
+  (a rolled-window table on the config was refused on the control config the guidance
+  flies under — the first rolled readout died there).
+- Tests: `tests/test_plan_rolled.py` — the labels at a flown state are the instruction the
+  lockstep flies, the table round-trips and refuses another contract or cohort, the draw is
+  deterministic at the share, a training batch carries the rolled window, one run records
+  the share and the val readout. Acceptance: the full ts suite 1029 passed (7 m 33 s,
+  foreground); stored-run census 114 configs / 72 load, 0 names moved.
+
 ### 2026-09-11 — ts_transformer: plan-and-guidance step 3(d) — receding-horizon, lockstep rolling (v5.1)
 
 `dev-plan-lockstep`; design v5.1 §9 step 3(d), §12.5. The user's reading of §12.4: a

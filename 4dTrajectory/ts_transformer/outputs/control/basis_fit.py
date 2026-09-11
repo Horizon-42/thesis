@@ -32,6 +32,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+from typing import ClassVar
 from pathlib import Path
 
 import numpy as np
@@ -409,6 +410,9 @@ class FittedTeacherTable:
     uniform partition are checked at load) — the training dataset calls it once at build
     time so a stale table refuses the run instead of silently teaching the wrong schedule.
     """
+
+    #: Where a checkpoint records which table taught it (`train.fit_model`).
+    metadata_key: ClassVar[str] = "fitted_teacher"
 
     path: Path
     sha256: str

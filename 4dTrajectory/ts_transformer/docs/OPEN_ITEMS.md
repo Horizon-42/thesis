@@ -124,6 +124,16 @@ the review's route and controller findings applied and re-measured). Artifacts:
   60 s; its lockstep ceiling 2184) — asked on its own flown windows it never trained on, its
   orders jitter and 29 % of vectored flights run to the cap. Next: train the head on rolled
   windows; hold an order unless the change persists; then the fan over the next fix.
+- **Step 3(e) (2026-09-11, `dev-plan-rolled`, design v5.2 §12.6): the head trained on ROLLED
+  WINDOWS** — `run_ts.py plan_rolled_windows` (the lockstep flight's windows at every step,
+  labelled by the truth's queue at that state; `--policy truth` / `model`, `--extend`),
+  `train --plan-rolled-windows-path --plan-rolled-share`; the val split's rolled windows read
+  every epoch. MEASURED (§12.6): the re-asked head at 60 s, vectored ADE 5391 → 3641 m at
+  share 0.75 (the once-per-leg 3781, the ceiling 2184), established 55 → 94 % pooled, capped
+  29 → 9 %; shares 0.25/0.5/0.75/1.0 = 3833/3862/3641/3685 (the rolled val loss falls with
+  the share, the observed objective does not move); DAgger round 1 +73 m paired, no gain.
+  The 3(d) gate is still open (2870 m). Next: hold an order unless the change persists two
+  asks; the fan over the next fix; a second seed.
 - **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
   binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
   beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the

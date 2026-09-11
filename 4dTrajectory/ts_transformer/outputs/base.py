@@ -13,9 +13,10 @@ spine call site         method
                         :meth:`loss`
 `batching` (probe)      :meth:`probe_context`, :meth:`probe_dense_supervision`,
                         :meth:`probe_prediction`, :attr:`keeps_batch_margin`
-`train.fit_model`       :meth:`check_trainable`, :meth:`training_teacher`,
+`train.fit_model`       :meth:`check_trainable`, :meth:`training_input`,
                         :meth:`epoch_config`, :meth:`training_diagnostics`,
-                        :meth:`epoch_record`, :meth:`checkpoint_metadata`
+                        :meth:`epoch_record`, :meth:`validation_extras`,
+                        :meth:`checkpoint_metadata`
 `forecast`              :meth:`forecast` with :class:`ForecastOptions`
 `validation` (replay)   :meth:`replay` → :class:`Replay`
 `export` (record)       :meth:`record_fields`
@@ -42,7 +43,6 @@ if TYPE_CHECKING:  # value types of the spine; importing them at runtime would b
     from ts_transformer.data.fixed_dt_supervision import FixedDTControlSupervision
     from ts_transformer.inference.forecast import Forecast
     from ts_transformer.training.objective import ProcedureMultipliers
-    from ts_transformer.outputs.control.basis_fit import FittedTeacherTable
 
 
 @dataclass(frozen=True)
@@ -104,6 +104,15 @@ class WindowContext:
     def row(self, i: int) -> dict[str, np.ndarray] | None:
         return None
 
+    def override(self, i: int, epoch_seed: int) -> tuple[np.ndarray, dict[str, np.ndarray]] | None:
+        """A TRAINING draw's substitute for window ``i`` this epoch, or None: the NORMALIZED
+        ``[L, C]`` window that replaces the observed one (the set's conditioning is added
+        by `batch`) and the context row that goes with it. Only the training iterator asks
+        (`iter_batches(shuffle=True)` passes the epoch's seed); the plan path answers with
+        one of the flight's rolled windows at its share (design v5.2), every other path
+        with nothing."""
+        return None
+
     def dense(
         self, indices: Sequence[int] | np.ndarray
     ) -> FixedDTControlSupervision | None:
@@ -129,7 +138,7 @@ class OutputStrategy:
         return list(anchors)
 
     def bind_windows(
-        self, windows: TrajectoryWindows, *, fitted_teacher: FittedTeacherTable | None = None
+        self, windows: TrajectoryWindows, *, training_input: Any | None = None
     ) -> WindowContext:
         return WindowContext()
 
@@ -183,8 +192,12 @@ class OutputStrategy:
     def check_trainable(self, config: TSConfig) -> None:
         """Refuse a config that loads and predicts but cannot be TRAINED."""
 
-    def training_teacher(self, config: TSConfig) -> FittedTeacherTable | None:
-        """The training-time input `fit_model` opens once and hands every window set."""
+    def training_input(self, config: TSConfig) -> Any | None:
+        """The path's training-time input, opened by `fit_model` once and handed to every
+        window set it builds (the control path's fitted teacher table, the plan path's
+        rolled-window table): an object with ``provenance`` (what the checkpoint records)
+        and ``metadata_key`` (under which). Every replay path builds its window sets
+        without one and must keep working when the file is gone."""
         return None
 
     def epoch_config(self, config: TSConfig, epoch: int) -> TSConfig:
@@ -205,6 +218,18 @@ class OutputStrategy:
         diagnostics: Any | None,
     ) -> dict[str, Any]:
         """This path's blocks of the epoch record (`train.EpochResult` fields)."""
+        return {}
+
+    def validation_extras(
+        self,
+        model: nn.Module,
+        val_sets: dict[str, TrajectoryWindows],
+        device: torch.device,
+        config: TSConfig,
+    ) -> dict[str, Any]:
+        """This path's own READOUTS of the validation pass, one block per key of the epoch
+        record (`train.EpochResult` fields) — measured, never selected on: the plan path's
+        loss over the val split's rolled windows (design v5.2). The base has none."""
         return {}
 
     def checkpoint_metadata(self, config: TSConfig) -> dict[str, Any]:

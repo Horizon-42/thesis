@@ -22,6 +22,7 @@ from ts_transformer.config import TSConfig
 from ts_transformer.data.batch_contract import LossComponents
 from ts_transformer.outputs.plan.labels import (
     CONTEXT_NEXT_IS_JOIN,
+    CONTEXT_ROLLED,
     CONTEXT_SERIES,
     CONTEXT_TARGETS,
     CONTEXT_VALID,
@@ -39,6 +40,14 @@ from ts_transformer.outputs.plan.labels import (
 #: arrival time alone (`final_time`, so the ETA term stays readable), the next instruction
 #: (`kinematic`) and the no-fix flag (`terminal`).
 PLAN_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
+#: The regressed groups behind the first three components (the fourth, `terminal`, is the
+#: flag's cross-entropy on every sample): ONE definition, read by the loss and by the
+#: rolled-window readout that averages the loss over samples (`loss_group_carriers`).
+PLAN_LOSS_GROUPS: dict[str, tuple[str, ...]] = {
+    "state": tuple(name for name in OPERATING if name != "T_s"),
+    "final_time": ("T_s",),
+    "kinematic": INSTRUCTION,
+}
 
 #: Which decode each target gets: positive at its scale (a softplus), free at its scale, or
 #: one of the heading's unit-vector pair.
@@ -138,6 +147,7 @@ def probe_plan_context(batch_size: int, device: torch.device, config: TSConfig) 
         CONTEXT_VALID: torch.ones((batch_size, len(TARGETS)), dtype=torch.float32, device=device),
         CONTEXT_NEXT_IS_JOIN: torch.zeros(batch_size, dtype=torch.float32, device=device),
         CONTEXT_SERIES: torch.zeros(batch_size, dtype=torch.int64, device=device),
+        CONTEXT_ROLLED: torch.zeros(batch_size, dtype=torch.float32, device=device),
     }
 
 
@@ -165,9 +175,9 @@ def plan_loss_components(
         carries = (v.sum(dim=1) > 0).to(values.dtype) * weight
         return (per_flight * carries).sum() / carries.sum().clamp(min=1e-6)
 
-    operating = group(tuple(name for name in OPERATING if name != "T_s"))
-    arrival = group(("T_s",))
-    instruction = group(INSTRUCTION)
+    operating = group(PLAN_LOSS_GROUPS["state"])
+    arrival = group(PLAN_LOSS_GROUPS["final_time"])
+    instruction = group(PLAN_LOSS_GROUPS["kinematic"])
     join_target = context[CONTEXT_NEXT_IS_JOIN].to(values.dtype)
     bce = F.binary_cross_entropy_with_logits(prediction.join_logit.to(values.dtype), join_target, reduction="none")
     join = (bce * weight).sum() / weight.sum().clamp(min=1e-6)
@@ -179,6 +189,21 @@ def plan_loss_components(
     )
 
 
+def loss_group_carriers(valid: np.ndarray) -> dict[str, int]:
+    """How many of a batch's ``[B, P]`` validity rows carry each component: a regressed
+    group is carried where any of its entries is defined, the flag by every row. What
+    `plan_loss_components` averages each component over, so a reader averaging batches
+    weights each by its carriers rather than its size (a batch of "no fix ahead" samples
+    carries no `kinematic` at all)."""
+    valid = np.asarray(valid)
+    carriers = {
+        name: int(np.count_nonzero(valid[:, [TARGETS.index(target) for target in names]].sum(axis=1) > 0))
+        for name, names in PLAN_LOSS_GROUPS.items()
+    }
+    carriers["terminal"] = int(len(valid))
+    return carriers
+
+
 def prediction_rows(prediction: PlanPrediction) -> tuple[np.ndarray, np.ndarray]:
     """The prediction as numpy: the target vectors ``[B, P]`` and the join probabilities ``[B]``."""
     values = prediction.values.detach().cpu().numpy().astype(np.float64)
@@ -187,7 +212,7 @@ def prediction_rows(prediction: PlanPrediction) -> tuple[np.ndarray, np.ndarray]
 
 
 __all__ = [
-    "PLAN_LOSS_COMPONENT_NAMES", "PlanOutputModel", "PlanPrediction", "decode_raw",
-    "plan_loss_components", "prediction_rows", "probe_plan_context",
+    "PLAN_LOSS_COMPONENT_NAMES", "PLAN_LOSS_GROUPS", "PlanOutputModel", "PlanPrediction", "decode_raw",
+    "loss_group_carriers", "plan_loss_components", "prediction_rows", "probe_plan_context",
     "DISTANCE_SCALE_M", "HEIGHT_SCALE_M", "SPEED_SCALE_MPS", "TIME_SCALE_S",
 ]
