@@ -20,7 +20,7 @@ from ts_transformer.geometry.flyability import flyability_summary, required_cont
 from ts_transformer.inference.forecast import cut_at_threshold_crossing
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.outputs.dynamics.hooks import RolloutStateView
-from ts_transformer.outputs.plan.extractors import extract_plan
+from ts_transformer.outputs.plan.extractors import extract_plan, extract_waypoints
 from ts_transformer.outputs.plan.guidance.controller import (
     BANK_MAX_RAD,
     LOAD_FACTOR_MAX,
@@ -37,6 +37,7 @@ from ts_transformer.outputs.plan.guidance.route import (
     KIND_DOWNWIND,
     KIND_FINAL_ONLY,
     KIND_STRETCHED,
+    KIND_WAYPOINTS,
     OVERRUN_M,
     PATH_STEP_M,
     STRETCH_TOLERANCE_M,
@@ -323,3 +324,75 @@ def test_a_pose_beside_the_centreline_heading_in_takes_the_chord_not_a_loop():
     assert near.kind == KIND_FINAL_ONLY and near.pre_final_m == 0.0 and near.shortfall_m == 300.0
     assert near.length_m < 14_500.0 + OVERRUN_M + 600.0
     assert abs(near.intercept_rad) <= INTERCEPT_MAX_RAD
+
+
+def test_a_waypoints_route_rounds_the_fixes_and_reads_back_as_them():
+    """The fixed-K representation round-trips: a route laid through two fly-by fixes runs
+    the legs between them (rounding each corner), the extractor reads the same two fixes
+    back, and the route still ends on the join pose within the alignment limit and runs
+    down the final."""
+    _series, _config, skeleton, _anchor, _labels = _cohort(1)
+    join_d = 9_000.0
+    e0, n0 = _pose(skeleton, 30_000.0, -8_000.0)
+    # a 116° turn at the first fix, 9° at the second (onto the course), the anchor 30° off
+    # the first leg — no reversal, which the extractor would split into two fixes
+    fixes = (_pose(skeleton, 33_000.0, 2_000.0), _pose(skeleton, 20_000.0, 0.0))
+    heading = math.atan2(fixes[0][1] - n0, fixes[0][0] - e0) + math.radians(30.0)
+    route = build_route(
+        e0, n0, heading, 90.0, d_join_m=join_d, side=0, pre_final_m=30_000.0, skeleton=skeleton, waypoints=fixes,
+    )
+    assert route.kind == KIND_WAYPOINTS
+    # the leg between the fixes is flown: its midpoint lies on the route
+    mid = 0.5 * (np.array(fixes[0]) + np.array(fixes[1]))
+    assert float(np.min(np.hypot(route.points[:, 0] - mid[0], route.points[:, 1] - mid[1]))) < PATH_STEP_M
+    d_join, xt_join = skeleton.axes(route.points[route.join_index - 1 : route.join_index, 0],
+                                    route.points[route.join_index - 1 : route.join_index, 1])
+    assert float(d_join[0]) == pytest.approx(join_d, abs=1.0) and abs(float(xt_join[0])) < 1.0
+    assert abs(route.intercept_rad) <= INTERCEPT_MAX_RAD + 1e-9
+    assert route.shortfall_m == pytest.approx(30_000.0 - route.pre_final_m)
+    # read back at 50 m rows one second apart (the 90 m/s radius turns at 1.6°/s): the
+    # fixes laid are among the route's turns (the anchor's own turn onto the first leg
+    # and the turn onto the join are turns of the route too)
+    pre = route.points[: route.join_index]
+    found, _dropped = extract_waypoints(pre[:, 0], pre[:, 1], 1.0, max_waypoints=4)
+    for truth in fixes:
+        assert min(math.hypot(fix[0] - truth[0], fix[1] - truth[1]) for fix in found) < 400.0
+    # no fixes: the plan route as before
+    plain = build_route(e0, n0, heading, 90.0, d_join_m=join_d, side=0, pre_final_m=30_000.0, skeleton=skeleton, waypoints=())
+    assert plain.kind != KIND_WAYPOINTS
+
+
+def test_the_speed_schedule_runs_through_the_fix_speeds():
+    """Under the waypoints route the schedule interpolates the anchor's and the fixes'
+    speeds, holds the first before it, and past the last fix decelerates at the plan's rate
+    to V_final (from the deceleration point where that is earlier)."""
+    points = ((30_000.0, 100.0), (20_000.0, 90.0), (15_000.0, 80.0))
+    remaining = np.array([35_000.0, 30_000.0, 25_000.0, 20_000.0, 15_000.0, 10_000.0, 5_000.0, 0.0])
+    schedule = speed_schedule_mps(remaining, v_mid=100.0, d_decel_m=8_000.0, v_final=70.0, points=points)
+    # held before the first point; through the points; 80 held to the deceleration point at
+    # 8 km, then V² = 80² − 2·0.5·Δs floored at 70
+    assert schedule.tolist() == pytest.approx([100.0, 100.0, 95.0, 90.0, 80.0, 80.0, 70.0, 70.0])
+    # a last fix already below V_final holds its own speed
+    low = speed_schedule_mps(remaining, v_mid=100.0, d_decel_m=8_000.0, v_final=70.0, points=((30_000.0, 100.0), (15_000.0, 65.0)))
+    assert low[-1] == pytest.approx(65.0)
+    # no points: the plan's own law, unchanged
+    plain = speed_schedule_mps(remaining, v_mid=100.0, d_decel_m=8_000.0, v_final=70.0)
+    assert plain[0] == 100.0 and plain[-1] == 70.0
+
+
+def test_a_fix_is_rounded_at_its_own_speed():
+    """The fly-by radius at a fix is the speed the plan carries there: a slow fix is
+    rounded tighter and the route passes closer to it."""
+    _series, _config, skeleton, _anchor, _labels = _cohort(1)
+    e0, n0 = _pose(skeleton, 30_000.0, -8_000.0)
+    fixes = (_pose(skeleton, 33_000.0, 2_000.0), _pose(skeleton, 20_000.0, 0.0))
+    heading = math.atan2(fixes[0][1] - n0, fixes[0][0] - e0) + math.radians(30.0)
+    closest = {}
+    for speed in (60.0, 120.0):
+        route = build_route(
+            e0, n0, heading, 90.0, d_join_m=9_000.0, side=0, pre_final_m=30_000.0, skeleton=skeleton,
+            waypoints=fixes, waypoint_speeds=((25_000.0, speed), (10_000.0, speed)),
+        )
+        assert route.kind == KIND_WAYPOINTS
+        closest[speed] = float(np.min(np.hypot(route.points[:, 0] - fixes[0][0], route.points[:, 1] - fixes[0][1])))
+    assert closest[60.0] < closest[120.0]

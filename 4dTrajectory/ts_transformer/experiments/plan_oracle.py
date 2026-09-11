@@ -30,6 +30,7 @@ import numpy as np
 import torch
 
 from ts_transformer.config import default_anchor
+from ts_transformer.data.anchor_grid import bin_anchor
 from ts_transformer.data.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
@@ -38,7 +39,9 @@ from ts_transformer.data.approach_difficulty import (
     approach_difficulty,
     strata_masks,
 )
+from ts_transformer.data.approach_difficulty import remaining_path_profile_m
 from ts_transformer.data.channels import IDX
+from ts_transformer.data.dataset import truth_duration_s
 from ts_transformer.experiments.anytime_curve import Grid, cohort_series, load_arm, parse_arms
 from ts_transformer.experiments.support import forecast_geometry
 from ts_transformer.geometry.final_approach_geometry import (
@@ -52,9 +55,10 @@ from ts_transformer.geometry.flyability import flyability_summary, required_cont
 from ts_transformer.inference.export import observed_series_metrics
 from ts_transformer.inference.forecast import cut_at_threshold_crossing
 from ts_transformer.io_utils import utc_now, write_json_atomic
-from ts_transformer.outputs.plan.extractors import extract_plan
-from ts_transformer.outputs.plan.forecast import fly_plans
-from ts_transformer.outputs.plan.guidance.route import KIND_DOWNWIND, KIND_STRETCHED
+from ts_transformer.outputs.dynamics.context import ANCHOR_CONTROL_SAMPLES
+from ts_transformer.outputs.plan.extractors import MAX_WAYPOINTS, extract_plan
+from ts_transformer.outputs.plan.forecast import ROUTE_PLAN, ROUTES, fly_plans
+from ts_transformer.outputs.plan.guidance.route import KIND_DOWNWIND, KIND_STRETCHED, KIND_WAYPOINTS
 from ts_transformer.outputs.plan.skeleton import runway_skeleton
 
 INSTRUMENT = "the plan oracle"
@@ -162,6 +166,9 @@ def summarize(rows: list[dict]) -> dict:
             "route_shortfall_p50_m": _p([row["route"]["shortfall_m"] for row in members], 50),
             "route_intercept_abs_p50_deg": _p([abs(row["route"]["intercept_deg"]) for row in members], 50),
             "route_stretched_share": float(np.mean([row["route"]["kind"] in (KIND_DOWNWIND, KIND_STRETCHED) for row in members])),
+            "route_waypoints_share": float(np.mean([row["route"]["kind"] == KIND_WAYPOINTS for row in members])),
+            "waypoints_mean": float(np.mean([len(row["labels"]["waypoints"] or ()) for row in members])),
+            "waypoints_dropped_share": float(np.mean([row["labels"]["waypoints_dropped"] > 0 for row in members])),
             "hook_bank_capped_share": float(np.mean([row["hook"]["planBankCappedSteps"] for row in members])),
             "hook_thrust_saturated_share": float(np.mean([row["hook"]["planThrustSaturatedSteps"] for row in members])),
             "hook_thrust_idle_share": float(np.mean([row["hook"]["planThrustIdleSteps"] for row in members])),
@@ -186,6 +193,8 @@ def format_table(summary: dict) -> str:
         ("fully_flyable_share", "fully flyable", 3), ("established_share", "established", 3),
         ("lateral_violation_share", "lateral viol.", 3), ("glidepath_violation_share", "glidepath viol.", 3),
         ("route_shortfall_p50_m", "route shortfall p50", 0), ("route_stretched_share", "route stretched", 3),
+        ("route_waypoints_share", "route via waypoints", 3), ("waypoints_mean", "waypoints per plan", 2),
+        ("waypoints_dropped_share", "waypoints dropped", 3),
         ("route_intercept_abs_p50_deg", "route |intercept| p50", 1),
         ("hook_bank_capped_share", "bank capped", 3), ("hook_thrust_saturated_share", "thrust saturated", 3),
         ("hook_thrust_idle_share", "thrust idle", 3),
@@ -210,6 +219,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--split", default="val", choices=("val", "train"))
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the split (a smoke test)")
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--route", choices=ROUTES, default=ROUTE_PLAN,
+                        help="lay the route from the three route parameters, or from those plus the plan's waypoints")
+    parser.add_argument("--max-waypoints", type=int, default=MAX_WAYPOINTS,
+                        help="the fixed K of the waypoints representation")
+    parser.add_argument("--anchor-km", type=float, default=0.0,
+                        help="plan from each flight's own sample nearest this REMAINING PATH (0 = the L-1 anchor; "
+                             "the anytime grid's coordinate — later along a vectored track than L-1). The oracle "
+                             "needs no lookback, so only the control-inversion rows are required")
+    parser.add_argument("--anchor-s", type=float, default=0.0,
+                        help="plan from the one row this many seconds after the slice starts, every flight (0 = L-1): "
+                             "the anchor a shorter lookback window would give")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     arms = parse_arms(parser, args.checkpoint)
@@ -220,6 +240,35 @@ def main(argv: list[str] | None = None) -> int:
     arm = load_arm(label, path, grid, torch.device("cpu"), instrument=INSTRUMENT)
     series = cohort_series(arm, grid)
     anchor = default_anchor(arm.config)
+    if args.anchor_km > 0.0 and args.anchor_s > 0.0:
+        parser.error("--anchor-km and --anchor-s are two anchors; give one")
+    if args.anchor_s > 0.0:
+        row = int(round(args.anchor_s / arm.config.dt_s))
+        if row < ANCHOR_CONTROL_SAMPLES - 1:
+            parser.error(f"--anchor-s needs at least {(ANCHOR_CONTROL_SAMPLES - 1) * arm.config.dt_s:g} s of track")
+        anchors = {
+            item.dataset_id: (row if row < item.n_samples and truth_duration_s(item, row) >= HORIZON_SLACK_S else None)
+            for item in series
+        }
+        without = sum(1 for a in anchors.values() if a is None)
+        series = [item for item in series if anchors[item.dataset_id] is not None]
+        print(f"  anchor at {args.anchor_s:g} s (row {row}): {len(series)} flights have one, {without} do not", flush=True)
+    elif args.anchor_km > 0.0:
+        # the strata stay the L-1 ones (fixed, as the anytime curve fixes them); the plan
+        # is read from, and flown from, each flight's own sample nearest the bin
+        anchors = {
+            item.dataset_id: bin_anchor(
+                item, remaining_path_profile_m(item), 1000.0 * args.anchor_km,
+                seq_len=ANCHOR_CONTROL_SAMPLES + 1, min_future_s=HORIZON_SLACK_S,
+            )
+            for item in series
+        }
+        without = sum(1 for a in anchors.values() if a is None)
+        series = [item for item in series if anchors[item.dataset_id] is not None]
+        print(f"  anchor at {args.anchor_km:g} km: {len(series)} flights have one, {without} do not", flush=True)
+    else:
+        anchors = {item.dataset_id: anchor for item in series}
+        without = 0
     skeletons: dict[tuple[str, str], object] = {}
     rows: list[dict] = []
     for start in range(0, len(series), args.batch_size):
@@ -230,15 +279,19 @@ def main(argv: list[str] | None = None) -> int:
             if key not in skeletons:
                 skeletons[key] = runway_skeleton(item)
             chunk_skeletons.append(skeletons[key])
-        labels = [extract_plan(item, anchor, sk) for item, sk in zip(chunk, chunk_skeletons, strict=True)]
+        chunk_anchors = [int(anchors[item.dataset_id]) for item in chunk]
+        labels = [
+            extract_plan(item, a, sk, max_waypoints=args.max_waypoints)
+            for item, a, sk in zip(chunk, chunk_anchors, chunk_skeletons, strict=True)
+        ]
         # the rollout runs PAST the plan's T so a late arrival is measured as late rather
         # than cut off unestablished; the metrics' clock is the truth's regardless
         horizons = [lab.T_s + max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION * lab.T_s) for lab in labels]
         forecasts, routes, times = fly_plans(
-            chunk, anchor, labels, chunk_skeletons, arm.config, durations_s=horizons,
+            chunk, chunk_anchors, labels, chunk_skeletons, arm.config, durations_s=horizons, route=args.route,
         )
-        for item, sk, lab, forecast, route, route_time in zip(
-            chunk, chunk_skeletons, labels, forecasts, routes, times, strict=True
+        for item, a, sk, lab, forecast, route, route_time in zip(
+            chunk, chunk_anchors, chunk_skeletons, labels, forecasts, routes, times, strict=True
         ):
             cut = cut_at_threshold_crossing(forecast, item)
             # the oracle's arrival time is where the rollout crossed the threshold (the
@@ -249,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
                 "dataset_id": item.dataset_id,
                 "flight_id": item.flight_id,
                 "difficulty": approach_difficulty(item, anchor).to_dict(),
+                "anchor": a,
                 "T_s": lab.T_s,
                 "labels": lab.to_dict(),
                 "route": {
@@ -278,6 +332,9 @@ def main(argv: list[str] | None = None) -> int:
         "schema_version": SCHEMA, "generated_at": utc_now(), "instrument": INSTRUMENT,
         "checkpoint": {"label": label, "path": str(path)},
         "split": args.split, "limit": args.limit, "flights": len(rows), "anchor": anchor,
+        "route": args.route, "max_waypoints": args.max_waypoints, "anchor_km": args.anchor_km,
+        "anchor_s": args.anchor_s,
+        "flights_without_anchor": without,
         "todays_best": TODAYS_BEST, "summary": summary, "rows": rows,
     })
     (args.out / "plan_oracle.txt").write_text(text + "\n", encoding="utf-8")

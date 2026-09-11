@@ -4,6 +4,42 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-11 — ts_transformer: plan-and-guidance step 2b — the fixed-K fly-by waypoints oracle, and the oracle at earlier anchors
+
+`dev-plan-turns`; the design's §3b gains the representation, §12.3 the numbers. The three
+route parameters say how long a vectored path is, not where it goes (§12.2: chamfer 636 m
+from the truth's own three), so the pre-final path gains up to K = 4 fly-by FIXES — each
+turn as the point where the two legs it joins intersect, the RNAV way of coding a route
+and what a radar vector comes to (`outputs/plan/extractors.extract_waypoints`,
+`PlanLabels.waypoints`; a reversal is two fixes; a turn's fix past the join on the
+centreline is the turn onto the final and becomes the join). `build_route(waypoints=…)` lays
+the polyline through them with the corners rounded at each fix's own speed — **every
+fix carries the speed the truth had at its turn** (`waypoint_speeds`), and the schedule
+runs through those speeds (`speed_schedule_mps(points=…)`); a vector is a heading and a
+speed instruction (`KIND_WAYPOINTS`). Three representations were measured out on the way:
+fixes without their speeds were rounded at `V_mid` and cut by the tracker (chamfer
+296 m, 31 % of vectored flights out of the corridor after the join); (start, heading
+change) drifted every later leg when laid at another radius than the truth's (the vectored
+route 4.4 km longer than the plan); a turn's end point was ambiguous about the leg heading.
+`run_ts.py plan_oracle` gains `--route {plan,waypoints}`, `--anchor-s N` (one row N seconds
+after the slice starts, every flight) and `--anchor-km` (the anytime grid's remaining-path
+bin — later than L−1 on a vectored track); `fly_plans` takes one anchor per flight.
+
+- KRDU val, vectored stratum from the truth's own plan at L−1: chamfer 636 → 268 m,
+  Fréchet 2166 → 1648 m, ADE 1591 → 1159 m, 2.69 fixes per plan;
+  arrival-time MAE 27.3 → 16.1 s (the −21 s early arrival of §12.2 was the
+  schedule holding `V_mid` over the vectors), corridor after the join 19.9 %
+  (3.4 % under the plan route): the residual is bimodal — the flights the tracker can
+  follow sit at ~85 m, the rest at ~900 m where a fly-by corner at the fix's speed is
+  tighter than the aircraft can fly (short legs); the next step is the corner (a
+  fly-over, or the truth's radius per fix), not more fixes. §8 risk 1 answered for the
+  representation, not yet for the guidance.
+- The anchors: L−1 censors 59.2 % of plans (joined inside the window), the 60 s anchor
+  45.6 %; the 20 km remaining-path bin censors 42.5 % (it is later than L−1 on a
+  vectored track). The earlier anchor for step 3 is a shorter window.
+- Tests: the extractor on known turns and a reversal, the route's round trip through two
+  fixes. Acceptance: the full ts suite 1015 passed (6 m 53 s); stored-run census 219 configs / 112 load, byte-identical.
+
 ### 2026-09-10 — ts_transformer: plan-and-guidance steps 1–2 — the procedure skeleton, the plan extractors, the guidance layer, the oracle ceiling on KRDU val (reviewed)
 
 `dev-plan-guidance`, the design's §9 steps 1 and 2 (`4dTrajectory/ts_transformer/docs/2026-09-09_plan_and_guidance_design.md`;

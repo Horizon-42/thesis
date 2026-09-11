@@ -83,6 +83,9 @@ class PlanToFly:
     d_decel_m: float | None
     v_final_mps: float
     h_capture_m: float          # chart height above the aim point at the join
+    #: `(remaining path, speed)` points the schedule runs through (the waypoints route:
+    #: the anchor's and each fix's speed); empty for the plan's own law
+    speed_points: tuple[tuple[float, float], ...] = ()
 
 
 class PlanGuidance:
@@ -232,6 +235,7 @@ class PlanGuidance:
         v_ref = torch.stack([
             torch.as_tensor(float(speed_schedule_mps(
                 s, v_mid=plan.v_mid_mps, d_decel_m=plan.d_decel_m, v_final=plan.v_final_mps,
+                points=plan.speed_points,
             )), dtype=real, device=device)
             for s, plan in zip(remaining_np, self.plans, strict=True)
         ]) / torch.cos(view.path_angle)

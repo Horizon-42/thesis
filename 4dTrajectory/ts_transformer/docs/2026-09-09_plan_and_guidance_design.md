@@ -6,7 +6,9 @@ guidance layer and the oracle ceiling (§12.2, after the step-2 review's fixes: 
 not fire; straight-in ADE 204 m / chamfer 34 m / arrival-time MAE 4.8 s from the
 truth's own plan, vectored ADE 1591 m against native32's 2870 m, 99.7 % flyable,
 99.7 % established, corridor left after the join by 1.4 %). Step 3 (the plan head)
-is unblocked; the decision it needs is in §12.2. v1 (same day) split the plan into operating and route parameters
+is unblocked; the decision it needs is in §12.2, read with §12.3 (step 2b, 2026-09-11: the
+fixed-K fly-by waypoints oracle — vectored chamfer 636 → 268 m from the truth's own
+K ≤ 4 fixes — and the oracle at earlier anchors). v1 (same day) split the plan into operating and route parameters
 (decision (A)). v2 made the published approach procedure the backbone of the whole design: the
 learned plan lives inside the procedure, the guidance layer enforces the procedure by construction,
 and the result is judged twice — as a prediction of what aircraft do, and as a reference that
@@ -112,6 +114,30 @@ accuracy; or the L2.g latent fan). `T` keeps its calibrated interval (B2).
 | `d_join` | remaining path at which the flight becomes established on the final | on a published leg or transition of the assigned runway's approach (snapped to the nearest legal join; the raw value is kept as a diagnostic) | `geometry.final_approach_geometry.truth_final_gate` |
 | `side` | which side the base leg comes from | {left, right}, restricted to the sides the procedure's transitions allow | sign of the cross-track offset at the gate opening |
 | `L_pre` | path length flown before the join | ≥ the shortest legal route to `d_join`; extra length only as a lengthening of the pre-final legs | arc length of the track up to `d_join` |
+
+**Fixed-K fly-by waypoints (step 2b, 2026-09-11; §12.3).** The three route parameters say
+how long the pre-final path is, which side it comes from and where it joins — not where it
+goes (§12.2: vectored chamfer 636 m from the truth's own three). The representation that
+does, and stays fixed-size and continuous, is up to K fly-by FIXES: each of the path's
+turns as the point where the two legs it joins intersect — the RNAV way of coding a route,
+what a radar vector "fly heading X until Y" comes to, and directly the HDG/LNAV modes of an
+autopilot (`PlanLabels.waypoints`, `extractors.extract_waypoints`, K = `MAX_WAYPOINTS` = 4;
+a reversal is two fixes about its mid-tangent; a plan with fewer turns pads with none — a
+fix on the line between its neighbours is no turn). **Each fix carries the speed the
+truth had at its turn** (`PlanLabels.waypoint_speeds`: a vector is a heading AND a speed
+instruction): the route rounds the corner at that speed's radius and the speed schedule
+runs through the fix speeds (`speed_schedule_mps(points=…)`), then decelerates as before.
+The route through them is the polyline with each corner rounded (`route.KIND_WAYPOINTS`);
+a last fix on the centreline is the turn onto the final and becomes the join. Three
+things were tried and measured out first: a turn as (start, heading change) drifts every
+later leg when laid at another radius than the truth's (the vectored route came out
+4.4 km longer than the plan); a turn's END as the point is ambiguous about the leg
+heading it starts; fixes WITHOUT their speeds are rounded at `V_mid`, which the truth
+had long left by its base turn — the tracker cut the corners (bank cap on 17 % of steps,
+31 % of vectored flights out of the corridor after the join, chamfer 296 m). Whether the
+head predicts the fixes (as a distribution, like the other route parameters) is the
+step-3 decision; the fixes are the same kind of thing as the join — the controller's
+intent.
 
 In delivery these come from the scheduler, which decides the sequence and therefore the join. When
 the scheduler has not decided, the model offers a distribution over them (the latent sampler, whose
@@ -248,7 +274,8 @@ parametrisation is too coarse.
   the assembly of the hooks into one controller; the pooled-airport run.
 - **Risks and their tests**: (1) the parametrisation may be too coarse for vectored flights with
   more than one turn — allow one or two optional extra waypoints, gated by a readout of how many
-  truths need them; (2) procedure conformance versus what pilots actually fly — real KRDU vectored
+  truths need them (MEASURED 2026-09-11, §12.3: it is — and K ≤ 4 fly-by fixes close it,
+  vectored chamfer 636 → 268 m from the truth's own fixes); (2) procedure conformance versus what pilots actually fly — real KRDU vectored
   arrivals are radar vectors, so a conforming reference is a worse prediction of them; the two
   evaluations make this explicit rather than hiding it, and the fan carries the prediction claim
   there; (3) the join is as hard to predict as the intent — which is why it is assigned or a
@@ -267,6 +294,9 @@ parametrisation is too coarse.
    model as a prediction, revise the parametrisation before training anything.
    **DONE 2026-09-10** — `python run_ts.py plan_oracle`, artifact
    `4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step2_oracle/`; §12.2.
+   **2b (2026-09-11)**: the fixed-K fly-by waypoints oracle (`--route waypoints`) and the
+   oracle at earlier anchors (`--anchor-s 60`, `--anchor-km 20`); artifacts
+   `4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step2b_*/`; §12.3.
 3. Plan head on KRDU: point and quantile heads, one seed, both evaluations.
 4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
 5. Two seeds; pooled five-airport training; KSJC replication.
@@ -562,3 +592,93 @@ the straight-in stratum and the vectored stratum through the fan — or first ad
 optional extra waypoints of §8 risk 1 so the vectored point claim has something to learn.
 Either way the guidance's glidepath entry above is on the critical path for the reference
 claim, and costs no training.
+
+### 12.3 Step 2b — the fixed-K waypoints oracle, and the oracle at earlier anchors (2026-09-11)
+
+Same protocol as §12.2 (the truth's own plan flown, cut at the first threshold crossing on
+the final, the strata fixed at L−1), on three anchors and two route representations.
+`python run_ts.py plan_oracle … --route {plan,waypoints} [--anchor-s 60 | --anchor-km 20]`;
+artifacts `step2b_waypoints_l1`, `step2b_plan_a60s`, `step2b_waypoints_a60s`,
+`step2b_plan_r20km`, `step2b_waypoints_r20km` beside `step2_oracle`. The anchors: **L−1** is
+the end of the 120 s window (median remaining path 13.4 km, 59.2 % of plans
+censored — joined before the anchor); **60 s** is the one row 60 s after the slice starts,
+every flight — the anchor a 60 s lookback would give (median remaining path
+18.7 km, 45.6 % censored, 0 flights without one);
+**20 km path** is the anytime grid's 20 km REMAINING-PATH bin, each flight's own nearest
+sample (1399 flights have one; 5 do not) — note that remaining path is arc
+length, so for a vectored flight this anchor is LATER than L−1, past most of its vectors,
+and its 42.5 % censoring says so. The oracle needs no lookback (the control inversion's
+{ANCHOR_CONTROL_SAMPLES} rows only); a model at these anchors would.
+
+**Vectored stratum** (497 flights at L−1; "plan" = the three route parameters, "waypoints" = those plus the truth's own K ≤ 4 fixes):
+
+| metric | L−1, plan | L−1, waypoints | 60 s, plan | 60 s, waypoints | 20 km path, plan | 20 km path, waypoints |
+|---|---|---|---|---|---|---|
+| flights in the stratum | 497 | 497 | 497 | 497 | 497 | 497 |
+| ADE mean (m) | 1591 | 1159 | 2944 | 1705 | 746 | 989 |
+| ADE p95 (m) | 2559 | 2595 | 6593 | 3173 | 910 | 1850 |
+| chamfer p50 (m) | 636 | 268 | 1454 | 887 | 80 | 64 |
+| Fréchet p50 (m) | 2166 | 1648 | 4392 | 3022 | 344 | 286 |
+| arrival-time MAE (s) | 27.3 | 16.1 | 33.6 | 19.7 | 9.5 | 10.5 |
+| route time − T, p50 (s) | -21.1 | -6.5 | -25.0 | -11.6 | -5.1 | -2.3 |
+| fully flyable | 100.0 % | 99.6 % | 99.8 % | 99.6 % | 99.6 % | 99.6 % |
+| established at the threshold | 99.6 % | 99.0 % | 98.8 % | 99.0 % | 98.4 % | 97.2 % |
+| corridor violation after the join | 3.4 % | 19.9 % | 5.4 % | 19.7 % | 4.8 % | 14.5 % |
+| glidepath-window violation after the join | 6.0 % | 8.2 % | 6.8 % | 9.1 % | 31.6 % | 30.2 % |
+| waypoints per plan | — | 2.69 | 2.60 | 2.60 | 1.66 | 1.66 |
+| route through waypoints | — | 100.0 % | 0.0 % | 100.0 % | 0.0 % | 81.5 % |
+| bank over the 25° cap (share of steps) | 6.5 % | 15.3 % | 6.5 % | 14.1 % | 8.6 % | 13.1 % |
+
+**Straight-in stratum** (904 flights at L−1):
+
+| metric | L−1, plan | L−1, waypoints | 60 s, plan | 60 s, waypoints | 20 km path, plan | 20 km path, waypoints |
+|---|---|---|---|---|---|---|
+| flights in the stratum | 904 | 904 | 904 | 904 | 899 | 899 |
+| ADE mean (m) | 204 | 194 | 325 | 350 | 384 | 412 |
+| ADE p95 (m) | 481 | 476 | 774 | 920 | 869 | 1043 |
+| chamfer p50 (m) | 34 | 34 | 43 | 42 | 45 | 43 |
+| Fréchet p50 (m) | 134 | 134 | 153 | 152 | 160 | 157 |
+| arrival-time MAE (s) | 4.8 | 4.8 | 8.1 | 8.4 | 9.7 | 10.3 |
+| route time − T, p50 (s) | -2.8 | -2.8 | -5.1 | -4.8 | -6.2 | -6.2 |
+| fully flyable | 99.6 % | 99.6 % | 99.9 % | 99.9 % | 100.0 % | 100.0 % |
+| established at the threshold | 99.8 % | 99.9 % | 99.2 % | 99.2 % | 98.6 % | 98.9 % |
+| corridor violation after the join | 0.3 % | 0.6 % | 0.7 % | 2.9 % | 2.4 % | 4.4 % |
+| glidepath-window violation after the join | 12.1 % | 11.6 % | 35.4 % | 36.8 % | 39.5 % | 40.6 % |
+| waypoints per plan | — | 0.07 | 0.31 | 0.31 | 0.35 | 0.35 |
+| route through waypoints | — | 1.8 % | 0.0 % | 17.4 % | 0.0 % | 21.4 % |
+| bank over the 25° cap (share of steps) | 0.5 % | 0.5 % | 1.8 % | 2.2 % | 2.4 % | 2.7 % |
+
+What it says:
+
+- **The fixes close the shape gap.** From the truth's own fixes the vectored path is
+  reproduced to a chamfer of 268 m (three route parameters: 636 m) and a Fréchet
+  of 1648 m (2166 m), with 2.69 fixes per vectored plan (the arrival time is the
+  next bullet). §8 risk 1 is answered for the representation: the parametrisation was
+  too coarse for the vectored stratum, and K ≤ 4 fixes carry its shape wherever the
+  guidance can follow their corners (the bullet after next).
+- **The fix speeds close the timing too.** With each fix's speed on the schedule the
+  vectored arrival-time MAE is 16.1 s (27.3 s under the plan's own law) and the
+  route time − T median -6.5 s (-21.1 s): the −21 s of §12.2 was the schedule
+  holding `V_mid` over the vectors where the truth had slowed. Without the speeds the fixes
+  alone were rounded at `V_mid`'s radius, cut by the tracker (bank cap on 17 % of steps) and
+  overshot at the centreline (31 % of vectored flights out of the corridor after the join,
+  chamfer 296 m) — measured on the first full run of the day.
+- **The residual is bimodal, and it is the corner, not the fix.** Under the waypoints route
+  the vectored chamfer splits by the bank cap: the flights the tracker can follow (cap
+  under 15 % of steps) sit at ~85 m, the rest at ~900 m; the corridor is left after the
+  join by 19.9 % of vectored flights (3.4 % under the plan route), the cap
+  binds on 15.3 % of steps (6.5 %), and 2595 m is the ADE p95. A fly-by
+  corner at the fix's speed and a 20° bank needs legs twice its tangent long; where the
+  truth's legs are shorter the corner is rounded tighter than the aircraft can fly and
+  the tracker overshoots it. What the truth did there was not a fly-by of two straight
+  legs — a continuous turn, a slower speed, or a wider bank — so the next step on this
+  representation is the corner itself (a fly-over where the legs are short, or the
+  truth's radius as a fourth number per fix), not more fixes: a 0.5°/s rule over ±3 rows
+  that reads the wide turns of a fast vector was tried and measured worse on the smoke
+  (chamfer 85 → 106 m, twice the fixes dropped).
+- **The anchor decides what is predicted.** At L−1 59.2 % of plans are censored (the
+  flight joined inside the window) and the route parameters exist for the rest only; at
+  the 60 s anchor 45.6 % are — the vectors are ahead of the aircraft there, which is where a
+  plan head has something to predict. The 20 km remaining-path bin is the wrong tool for
+  that question (it is later than L−1 on a vectored track: 42.5 % censored); the earlier
+  anchor for step 3 is a shorter window, not a nearer bin.

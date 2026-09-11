@@ -18,18 +18,21 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 
 import numpy as np
 
 from ts_transformer.geometry.dubins import (
     PATH_STEP_M,
+    arc_points,
     chart_from_axes_np,
     dubins_csc,
     segment_points,
+    unit_vector,
 )
 from ts_transformer.geometry.final_approach_geometry import ALIGNMENT_MAX_DEG
 from ts_transformer.geometry.flyability import G as GRAVITY_MPS2
+from ts_transformer.outputs.plan.extractors import ON_COURSE_FIX_M
 from ts_transformer.outputs.plan.skeleton import RNP_HALF_WIDTH_M, RunwaySkeleton
 
 #: How far past the threshold the route continues, so the tracker has a leg to follow
@@ -76,6 +79,10 @@ KIND_DIRECT = "dubins"
 KIND_DOWNWIND = "downwind+dubins"
 KIND_STRETCHED = "dubins+dog-leg"
 KIND_FINAL_ONLY = "final"
+#: The fixed-K waypoints representation (design §3b / §8, 2026-09-11): the polyline through
+#: the plan's fly-by fixes with the corners rounded at the schedule's radius, then the
+#: turns onto the join.
+KIND_WAYPOINTS = "waypoints"
 #: The pre-final length is laid first as the design's route (§4.2): the current heading
 #: held to a turn point, then the turns onto the join — the downwind a controller extends.
 #: A plan the hold cannot lay within this tolerance falls back to the dog-leg, and a
@@ -272,6 +279,8 @@ def build_route(
     anchor_e: float, anchor_n: float, anchor_heading_rad: float, anchor_speed_mps: float,
     *, d_join_m: float, side: int, pre_final_m: float, skeleton: RunwaySkeleton,
     join_at_anchor: bool = False, speed_at: Callable[[float], float] | None = None,
+    waypoints: Sequence[tuple[float, float]] | None = None,
+    waypoint_speeds: Sequence[tuple[float, float]] | None = None,
 ) -> Route:
     """Lay the plan's route from the anchor pose.
 
@@ -285,7 +294,12 @@ def build_route(
     the via and the join (the anchor's speed throughout when not given). A downwind
     flight's base and final turns are flown well below its anchor speed, and at the
     anchor's radius the turn-straight-turn lengths jump by a whole circumference exactly
-    where the real path lies (2026-09-10: 5 of 48 flights 2–10 km short).
+    where the real path lies (2026-09-10: 5 of 48 flights 2–10 km short). With
+    ``waypoints`` (the fixed-K representation: the fly-by fix of each of the path's
+    turns, in path order) the pre-final path is the polyline through them with the
+    corners rounded at the schedule's radius — at each fix's own speed where
+    ``waypoint_speeds`` (``(remaining path, ground speed)`` per fix) is given — and from
+    the last the turns onto the join under what the plan's length leaves.
     """
     p0 = np.array([anchor_e, anchor_n], dtype=np.float64)
     d0, xt0 = skeleton.axes(np.array([anchor_e]), np.array([anchor_n]))
@@ -319,6 +333,12 @@ def build_route(
         """The turn radius ``laid_m`` along a pre-final path of the plan's length."""
         return route_turn_radius_m(speed(max(pre_final_m - laid_m, 0.0) + d_join_m))
 
+    if waypoints:
+        return _waypoints_route(
+            p0, anchor_heading_rad, radius, radius_after, end_radius, waypoints, join, course,
+            pre_final_m, d_join_m, skeleton,
+            speeds=None if waypoint_speeds is None else [v for _r, v in waypoint_speeds],
+        )
     shortest = _shortest_to_join(p0, anchor_heading_rad, join, course, radius, limit_m=pre_final_m, end_radius=end_radius)
     if shortest is None:
         raise ValueError("no turn-straight-turn path from the anchor to the join")
@@ -369,6 +389,106 @@ def build_route(
     )
 
 
+def _waypoints_route(p0, h0, first_radius, radius_after, end_radius, waypoints, join, course,
+                     pre_final_m: float, d_join_m: float, skeleton: RunwaySkeleton,
+                     speeds: Sequence[float] | None = None) -> Route:
+    """The pre-final path through the plan's fly-by waypoints: the polyline anchor → fixes
+    → join, each fix's corner replaced by the arc tangent to both legs at the schedule's
+    radius there (shrunk to fit a short leg — the tracker then cuts the corner and the
+    cap counts it), the anchor's own heading joined onto the first leg by a Dubins path.
+    A last fix ON the centreline before the plan's join is the turn onto the final: its
+    corner is rounded onto the course like any other and the join is where that arc ends
+    (a Dubins onto a join pose behind the corner took a 20° intercept where the aligned
+    join needed an S, and the tracker overshot the centreline by 130–210 m, 2026-09-11).
+    Otherwise, from the last arc, the turns onto the join ALIGNED wherever that needs no
+    loop (`_shortest_to_join` with no length budget: the fixes already lay the plan's
+    length, and an intercept here is a corridor entry the tracker overshoots). Then the
+    final. A fix on top of its predecessor is passed over."""
+    fixes = [np.asarray(fix, dtype=np.float64) for fix in waypoints]
+    fix_speeds = [None] * len(fixes) if speeds is None else [float(v) for v in speeds]
+    onto_final = False
+    if fixes:
+        d_last, xt_last = skeleton.axes(fixes[-1][:1], fixes[-1][1:])
+        if abs(float(xt_last[0])) <= ON_COURSE_FIX_M and PATH_STEP_M < float(d_last[0]) < d_join_m:
+            onto_final = True
+            fixes[-1] = _join_pose(skeleton, float(d_last[0]))[0]   # the fix, on the centreline
+    vertices = [np.array(p0, dtype=np.float64)]
+    vertex_speeds: list[float | None] = [None]
+    for fix, fix_speed in zip(fixes, fix_speeds, strict=True):
+        if float(np.hypot(*(fix - vertices[-1]))) >= PATH_STEP_M:
+            vertices.append(fix)
+            vertex_speeds.append(fix_speed)
+    # the polyline runs on to the threshold past a fix onto the final, so that corner's
+    # outgoing leg IS the course; else to the join pose
+    vertices.append(np.array([skeleton.target_e, skeleton.target_n]) if onto_final else np.asarray(join, dtype=np.float64))
+    pieces = [vertices[0][None, :]]
+    pos, heading, laid = vertices[0], float(h0), 0.0
+    i = 1
+    while i < len(vertices) - 1:
+        legs = [math.atan2(b[1] - a[1], b[0] - a[0]) for a, b in zip(vertices[:-1], vertices[1:])]
+        fix, h_in, h_out = vertices[i], legs[i - 1], legs[i]
+        theta = _wrap(h_out - h_in)
+        radius = radius_after(laid) if vertex_speeds[i] is None else route_turn_radius_m(vertex_speeds[i])
+        room = 0.5 * min(float(np.hypot(*(fix - vertices[i - 1]))), float(np.hypot(*(vertices[i + 1] - fix))))
+        tangent = radius * math.tan(0.5 * abs(theta))
+        if tangent > room:
+            tangent = room
+            radius = room / math.tan(0.5 * abs(theta))
+        arc_start = fix - tangent * unit_vector(h_in)
+        if i == 1:
+            # the anchor's own heading onto the first leg — a first fix that cannot be
+            # turned onto without a loop is passed over (the route ran 27 km through such
+            # a loop, 2026-09-11)
+            leg = dubins_csc(pos, heading, arc_start, h_in, first_radius, end_radius=radius, max_sweep_rad=LOOP_SWEEP_RAD)
+            if leg is None and len(vertices) > 3:
+                del vertices[1], vertex_speeds[1]
+                continue
+            if leg is None:
+                leg = dubins_csc(pos, heading, arc_start, h_in, first_radius, end_radius=radius)
+            if leg is None:
+                raise ValueError("no turn-straight-turn path from the anchor onto the first leg")
+            pieces.append(leg[1:])
+            laid += float(_arc(leg)[-1])
+        else:
+            pieces.append(segment_points(pos, arc_start, PATH_STEP_M)[1:])
+            laid += float(np.hypot(*(arc_start - pos)))
+        if abs(theta) > 1e-6:
+            sign = 1.0 if theta > 0.0 else -1.0
+            centre = arc_start + radius * np.array([-sign * math.sin(h_in), sign * math.cos(h_in)])
+            arc = arc_points(centre, radius, h_in - sign * math.pi / 2, theta)
+            pieces.append(arc[1:])
+            pos, laid = arc[-1], laid + radius * abs(theta)
+        else:
+            pos = arc_start
+        heading = h_out
+        i += 1
+    if onto_final and len(vertices) > 2:
+        # the join is where the last corner's arc ends, on the centreline heading down it
+        d_end, _xt_end = skeleton.axes(pos[:1], pos[1:])
+        d_join_m = max(float(d_end[0]), PATH_STEP_M)
+        pos = _join_pose(skeleton, d_join_m)[0]
+        pieces[-1] = np.concatenate([pieces[-1][:-1], pos[None, :]])
+        heading_at_join = course
+    else:
+        closing = _shortest_to_join(
+            pos, heading, join, course, radius_after(laid), limit_m=math.inf, end_radius=end_radius,
+        )
+        if closing is None:
+            raise ValueError("no turn-straight-turn path from the last waypoint to the join")
+        path, heading_at_join = closing
+        pieces.append(path[1:])
+    pre_final = np.concatenate(pieces)
+    points = np.concatenate([pre_final, _final_leg(skeleton, max(d_join_m, PATH_STEP_M))])
+    arc_m = _arc(points)
+    join_index = len(pre_final)
+    laid_m = float(arc_m[join_index - 1])
+    return Route(
+        points=points, arc_m=arc_m, join_index=join_index, pre_final_m=laid_m,
+        requested_pre_final_m=float(pre_final_m), shortfall_m=float(pre_final_m) - laid_m,
+        stretch_offset_m=0.0, intercept_rad=_wrap(heading_at_join - course), kind=KIND_WAYPOINTS,
+    )
+
+
 #: The deceleration from `V_mid` to `V_final`, once it starts, is flown at this rate
 #: (`V² = V_mid² − 2 a Δs`, then `V_final` held): a linear ramp over the whole remaining
 #: path reached the threshold 13 s early on the straight-in stratum and 36 s early on the
@@ -376,12 +496,28 @@ def build_route(
 DECEL_RATE_MPS2 = 0.5
 
 
-def speed_schedule_mps(remaining_m, *, v_mid: float, d_decel_m: float | None, v_final: float):
+def speed_schedule_mps(remaining_m, *, v_mid: float, d_decel_m: float | None, v_final: float,
+                       points: Sequence[tuple[float, float]] = ()):
     """The plan's speed as a function of the path still to fly: ``v_mid`` held to the
     deceleration point, then a `DECEL_RATE_MPS2` deceleration to ``v_final``, held to the
     threshold. A plan with no deceleration point (never slower than the target speed + the
-    margin on the track) holds ``v_mid`` throughout."""
+    margin on the track) holds ``v_mid`` throughout. With ``points`` (``(remaining path,
+    speed)`` — the anchor's and each fix's, the waypoints route) the speed runs through
+    them, held before the first, and past the last decelerates at the same rate from the
+    last point's speed (from the deceleration point where that is earlier) to ``v_final``
+    — or holds the last speed where it is already below."""
     remaining = np.asarray(remaining_m, dtype=np.float64)
+    if points:
+        far_to_near = sorted(points, key=lambda point: -point[0])
+        r = np.array([point[0] for point in far_to_near], dtype=np.float64)
+        v = np.array([point[1] for point in far_to_near], dtype=np.float64)
+        through = np.interp(-remaining, -r, v)
+        r_last, v_last = float(r[-1]), float(v[-1])
+        start = r_last if d_decel_m is None else min(r_last, float(d_decel_m))
+        flown = np.clip(start - remaining, 0.0, None)
+        decelerated = np.sqrt(np.clip(v_last * v_last - 2.0 * DECEL_RATE_MPS2 * flown, 0.0, None))
+        after = np.maximum(decelerated, min(v_final, v_last))
+        return np.where(remaining >= r_last, through, after)
     if d_decel_m is None:
         return np.full(remaining.shape, v_mid)
     flown = np.clip(float(d_decel_m) - remaining, 0.0, None)
@@ -389,13 +525,14 @@ def speed_schedule_mps(remaining_m, *, v_mid: float, d_decel_m: float | None, v_
     return np.where(remaining > float(d_decel_m), v_mid, np.maximum(decelerated, v_final))
 
 
-def route_time_s(route: Route, *, v_mid: float, d_decel_m: float | None, v_final: float) -> float:
+def route_time_s(route: Route, *, v_mid: float, d_decel_m: float | None, v_final: float,
+                 points: Sequence[tuple[float, float]] = ()) -> float:
     """The time the speed schedule needs to fly the route to the threshold (the time
     closure's reading; §4.6): ``∫ ds / V(s)`` over the laid path."""
     to_threshold = route.arc_m <= route.threshold_arc_m + 1e-9
     arc = route.arc_m[to_threshold]
     remaining = route.threshold_arc_m - arc
-    speed = speed_schedule_mps(remaining, v_mid=v_mid, d_decel_m=d_decel_m, v_final=v_final)
+    speed = speed_schedule_mps(remaining, v_mid=v_mid, d_decel_m=d_decel_m, v_final=v_final, points=points)
     steps = np.diff(arc)
     pace = 0.5 * (speed[1:] + speed[:-1])
     return float(np.sum(steps / np.maximum(pace, 1.0)))

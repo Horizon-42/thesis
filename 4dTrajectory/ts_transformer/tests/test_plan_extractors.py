@@ -15,7 +15,10 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT, final_appro
 from ts_transformer.config import TSConfig, default_anchor
 from ts_transformer.data.dataset import build_series, truth_duration_s
 from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.geometry.dubins import arc_points, segment_points, unit_vector
 from ts_transformer.outputs.plan.extractors import (
+    TURN_MIN_DEG,
+    extract_waypoints,
     DECEL_MARGIN_MPS,
     PLAN_PARAMETERS,
     extract_plan,
@@ -181,3 +184,71 @@ def test_the_real_krdu_skeleton_agrees_with_the_faf_read():
                       skeleton.final[-1].n - skeleton.target_n) < 15.0
     assert skeleton.transitions and all(branch[-1].ident == skeleton.final[0].ident
                                         for branch in skeleton.transitions)
+
+
+def _path_with_turns(turns, *, legs_m=(3_000.0, 4_000.0, 2_000.0), radius_m=1_500.0, step_m=100.0):
+    """A path that holds heading, turns by each of ``turns`` at ``radius_m``, holds again;
+    returns ``(e, n, the fly-by fix of each turn)`` — the fix is the leg intersection,
+    ``radius · tan(|turn| / 2)`` past the arc's start along the incoming leg."""
+    pos, heading = np.zeros(2), 0.3
+    pieces, fixes, laid = [pos[None, :]], [], 0.0
+    for leg, change in zip(legs_m, list(turns) + [None], strict=True):
+        end = pos + leg * unit_vector(heading)
+        pieces.append(segment_points(pos, end, step_m)[1:])
+        pos, laid = end, laid + leg
+        if change is None:
+            break
+        fixes.append(pos + radius_m * math.tan(0.5 * abs(change)) * unit_vector(heading))
+        sign = 1.0 if change >= 0 else -1.0
+        centre = pos + radius_m * np.array([-sign * math.sin(heading), sign * math.cos(heading)])
+        arc = arc_points(centre, radius_m, heading - sign * math.pi / 2, change, step_m)
+        pieces.append(arc[1:])
+        pos, heading, laid = arc[-1], heading + change, laid + radius_m * abs(change)
+    points = np.concatenate(pieces)
+    return points[:, 0], points[:, 1], fixes
+
+
+def test_waypoints_are_read_off_a_path_with_known_turns():
+    """Two turns of +90° and −60° at 1.5 km, 100 m rows one second apart (a 3.8°/s rate):
+    each fix is where the two legs meet; the cap keeps the largest turn's fix and counts
+    the rest; a reversal is two fixes on the two legs; a straight path has none; a heading
+    change under the minimum is not a turn."""
+    turns = (math.radians(90.0), math.radians(-60.0))
+    e, n, fixes = _path_with_turns(turns)
+    found, dropped = extract_waypoints(e, n, 1.0)
+    assert dropped == 0 and len(found) == 2
+    for fix, truth in zip(found, fixes, strict=True):
+        assert math.hypot(fix[0] - truth[0], fix[1] - truth[1]) < 300.0
+    capped, dropped = extract_waypoints(e, n, 1.0, max_waypoints=1)
+    assert dropped == 1 and len(capped) == 1
+    assert math.hypot(capped[0][0] - fixes[0][0], capped[0][1] - fixes[0][1]) < 300.0
+    # a 170° reversal: two fixes, the first on the incoming leg's line, the second on the
+    # outgoing leg's line, both beyond the arc
+    e2, n2, _fixes = _path_with_turns((math.radians(170.0),), legs_m=(3_000.0, 3_000.0))
+    pair, dropped = extract_waypoints(e2, n2, 1.0)
+    assert dropped == 0 and len(pair) == 2
+    incoming = unit_vector(0.3)
+    first = np.array(pair[0]) - np.array([e2[0], n2[0]])
+    assert abs(first[0] * incoming[1] - first[1] * incoming[0]) < 100.0 and first @ incoming > 3_000.0
+    outgoing = unit_vector(0.3 + math.radians(170.0))
+    second = np.array(pair[1]) - np.array([e2[-1], n2[-1]])
+    assert abs(second[0] * outgoing[1] - second[1] * outgoing[0]) < 100.0 and second @ outgoing < -3_000.0
+    straight = np.linspace(0.0, 10_000.0, 101)
+    assert extract_waypoints(straight, 0.3 * straight, 1.0) == ((), 0)
+    e3, n3, _fixes = _path_with_turns((math.radians(0.6 * TURN_MIN_DEG),), legs_m=(3_000.0, 3_000.0))
+    assert extract_waypoints(e3, n3, 1.0) == ((), 0)
+
+
+def test_every_waypoint_carries_the_speed_and_remaining_path_at_its_turn():
+    series, config = _series(3)
+    anchor = default_anchor(config)
+    for item in series:
+        labels = extract_plan(item, anchor, _hand_skeleton(item))
+        if labels.waypoints is None:
+            assert labels.waypoint_speeds is None
+            continue
+        assert len(labels.waypoint_speeds) == len(labels.waypoints)
+        remaining = [r for r, _v in labels.waypoint_speeds]
+        assert remaining == sorted(remaining, reverse=True)
+        assert all(r < labels.remaining_path_at_anchor_m for r in remaining)
+        assert all(40.0 < v < 160.0 for _r, v in labels.waypoint_speeds)

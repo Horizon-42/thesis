@@ -69,7 +69,7 @@ were NOT made without the owner:
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 
-## Plan-and-guidance (2026-09-10) — steps 0–2 built, reviewed and measured; step 3 waits for a decision
+## Plan-and-guidance (2026-09-10) — steps 0–2b built, reviewed and measured; step 3 waits for a decision
 
 `docs/2026-09-09_plan_and_guidance_design.md` (v4; §12 carries the numbers), branch
 `dev-plan-guidance`. Built: the shared rollout parts moved out of `outputs/control/`
@@ -91,6 +91,14 @@ the review's route and controller findings applied and re-measured). Artifacts:
   the reference claim is quoted. Vectored flights arrive -26 s early at the median with the
   route laid to the plan's length (the schedule over the vectors; step 4's assigned-time
   stretch absorbs it by construction).
+- **Step 2b (2026-09-11, §12.3): K ≤ 4 fly-by fixes close the vectored shape gap** —
+  chamfer 636 → 268 m, Fréchet 2166 → 1648 m from the truth's own fixes
+  (`PlanLabels.waypoints` + `waypoint_speeds`, `run_ts.py plan_oracle --route waypoints`);
+  with each fix's speed on the schedule the vectored arrival-time MAE is 16.1 s
+  (27.3 s) and the corridor after the join 19.9 %
+  (3.4 %). The 60 s anchor leaves 45.6 % of plans censored against 59.2 % at L−1: the
+  earlier anchor for step 3 is a shorter window (`--anchor-s`), not the 20 km
+  remaining-path bin (later than L−1 on a vectored track).
 - **The vectored point claim is a timing claim with the truth's own three route
   parameters** (chamfer 636 m): `d_join`, `side`, `L_pre` say how long the 35 km of radar
   vectors are, not where they go. §8 risk 1 measured.

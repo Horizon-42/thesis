@@ -638,8 +638,31 @@ the batch entry point (the shape `forecast_control_batch` has; a plan's capture 
 clamped into the glidepath window at the join and the clamp counted). **The hold is at
 most ~3 s** (`n_segments_for`, one segment count per batch, so a shorter flight's hold is
 shorter — `planHoldS` on the record says which): at 7 s the tracker oscillated ±300 m on
-the final. `run_ts.py plan_oracle` flies every flight's OWN plan (the design's step 2
-ceiling; §12.2) and grades it twice, as a prediction and as a reference. What the guidance
+the final. **The fixed-K fly-by waypoints are the route representation that reproduces a
+vectored path** (step 2b, 2026-09-11, §12.3): `PlanLabels.waypoints` — up to `MAX_WAYPOINTS`
+fixes, each the intersection of the two legs a turn joins (`extract_waypoints`; a reversal
+is two fixes about its mid-tangent; the turn onto the final is read past the join and its
+fix, on the centreline, becomes the join; a fix past the join and off the course is
+dropped) — and `build_route(waypoints=…)` lays the polyline through them with each corner
+rounded at the schedule's radius (`KIND_WAYPOINTS`; the anchor's heading joins the first
+leg by a Dubins path, the last corner onto the course is a fly-by, else the aligned join).
+**Each fix carries the speed the truth had at its turn** (`waypoint_speeds`): the corner is
+rounded at that speed's radius and the schedule runs through the fix speeds
+(`speed_schedule_mps(points=…)`, `PlanToFly.speed_points`) — without them the fixes were
+rounded at `V_mid`, which the truth had long left by its base turn, and the tracker cut
+the corners (31 % of vectored flights out of the corridor after the join, chamfer 296 m).
+With the speeds, on KRDU val: vectored chamfer 636 → {l1_wp_vec_chamfer_p50_m:.0f} m and arrival-time MAE
+27 → {l1_wp_vec_final_time_error_mae_s:.0f} s from the truth's own fixes — bimodal: half the vectored flights within
+~85 m, the other half ~900 m where the corners cannot be flown at the fix's speed (the bank
+cap on {l1_wp_vec_hook_bank_capped_share_pct} of steps; corridor left after the join by {l1_wp_vec_lateral_violation_share_pct}). Two representations were
+measured out before the fixes: (start, heading change) drifts every later leg at another
+radius; a turn's end point is ambiguous about the leg heading. `run_ts.py plan_oracle`
+flies every flight's OWN plan (the
+design's step 2 ceiling; §12.2) and grades it twice, as a prediction and as a reference —
+`--route waypoints` through the fixes, `--anchor-s N` from the one row N seconds after the
+slice starts (the anchor a shorter window gives; `fly_plans` takes one anchor per flight),
+`--anchor-km` from the anytime grid's remaining-path bin (LATER than L−1 on a vectored
+track: remaining path is arc length). What the guidance
 needs and the control path also needs moved up with it: `outputs/dynamics/context.py`
 (`dynamics_arrays`, `anchor_controls`), the dense query grid in `outputs/dynamics/rollout.py`,
 the per-flight hook counts' record surface `per_flight_hook_diagnostics` in

@@ -66,6 +66,12 @@ def n_segments_for(horizon_s: float) -> int:
     return int(min(N_SEGMENTS_MAX, max(N_SEGMENTS_MIN, math.ceil(horizon_s / HOLD_S))))
 #: The label a plan-guidance forecast carries as its hook name.
 HOOK_NAME = "plan-guidance"
+#: Which representation of the pre-final path the route is laid from: the three route
+#: parameters (`d_join`, `side`, `L_pre` — design §3b as written), or those plus the
+#: plan's fixed-K fly-by waypoints (`PlanLabels.waypoints`, 2026-09-11).
+ROUTE_PLAN = "plan"
+ROUTE_WAYPOINTS = "waypoints"
+ROUTES = (ROUTE_PLAN, ROUTE_WAYPOINTS)
 
 
 def guidance_config(config: TSConfig) -> TSConfig:
@@ -73,32 +79,45 @@ def guidance_config(config: TSConfig) -> TSConfig:
     return replace(config, **GUIDANCE_DYNAMICS)
 
 
-def plan_to_fly(labels: PlanLabels, anchor_height_m: float, skeleton: RunwaySkeleton) -> tuple[PlanToFly, bool]:
+def speed_points_for(labels: PlanLabels, route: str) -> tuple[tuple[float, float], ...]:
+    """The speed schedule's points under ``route``: the anchor's and each fix's speed on
+    the waypoints route, none on the plan's own law."""
+    if route != ROUTE_WAYPOINTS or not labels.waypoint_speeds:
+        return ()
+    return ((labels.remaining_path_at_anchor_m, labels.ground_speed_at_anchor_mps), *labels.waypoint_speeds)
+
+
+def plan_to_fly(labels: PlanLabels, anchor_height_m: float, skeleton: RunwaySkeleton, *,
+                route: str = ROUTE_PLAN) -> tuple[PlanToFly, bool]:
     """The controller's parameters from a label set, and whether the capture height was
     clamped into the glidepath window at the join. A join before the anchor (a censored
     capture height) starts the height profile where the aircraft is, unclamped."""
+    points = speed_points_for(labels, route)
     if labels.h_capture_m is None or labels.d_join_m is None:
-        return PlanToFly(labels.V_mid_mps, labels.d_decel_m, labels.V_final_mps, anchor_height_m), False
+        return PlanToFly(labels.V_mid_mps, labels.d_decel_m, labels.V_final_mps, anchor_height_m, points), False
     glidepath = max(labels.d_join_m, 0.0) * skeleton.glidepath_tan
     low = glidepath - CAPTURE_BELOW_GLIDEPATH_MAX_M
     high = glidepath + CAPTURE_ABOVE_GLIDEPATH_MAX_M
     clamped = min(max(labels.h_capture_m, low), high)
     return (
-        PlanToFly(labels.V_mid_mps, labels.d_decel_m, labels.V_final_mps, clamped),
+        PlanToFly(labels.V_mid_mps, labels.d_decel_m, labels.V_final_mps, clamped, points),
         clamped != labels.h_capture_m,
     )
 
 
 def route_for(series: FlightSeries, anchor: int, labels: PlanLabels, skeleton: RunwaySkeleton,
-              initial_state: np.ndarray) -> Route:
+              initial_state: np.ndarray, *, route: str = ROUTE_PLAN) -> Route:
     """The plan's route from the anchor pose (`dynamics_arrays`' initial state: the physical
     heading and speed there). A join before the anchor is the final from where it is."""
     row = series.values[anchor]
     d_join = labels.d_join_m if labels.d_join_m is not None else labels.remaining_path_at_anchor_m
     # the route's turns are sized at the speed the schedule has where they are flown
+    points = speed_points_for(labels, route)
+
     def speed_at(remaining_m: float) -> float:
         return float(speed_schedule_mps(
             remaining_m, v_mid=labels.V_mid_mps, d_decel_m=labels.d_decel_m, v_final=labels.V_final_mps,
+            points=points,
         ))
 
     # a censored side (the join before the anchor, or no offset wider than the side rule
@@ -109,37 +128,46 @@ def route_for(series: FlightSeries, anchor: int, labels: PlanLabels, skeleton: R
         d_join_m=d_join, side=0 if labels.side is None else labels.side,
         pre_final_m=0.0 if labels.L_pre_m is None else labels.L_pre_m,
         skeleton=skeleton, join_at_anchor=labels.join_at_anchor, speed_at=speed_at,
+        waypoints=labels.waypoints if route == ROUTE_WAYPOINTS else None,
+        waypoint_speeds=labels.waypoint_speeds if route == ROUTE_WAYPOINTS else None,
     )
 
 
 def fly_plans(
     series: Sequence[FlightSeries],
-    anchor: int,
+    anchor: int | Sequence[int],
     labels: Sequence[PlanLabels],
     skeletons: Sequence[RunwaySkeleton],
     config: TSConfig,
     *,
     durations_s: Sequence[float] | None = None,
     device: torch.device | None = None,
+    route: str = ROUTE_PLAN,
 ) -> tuple[list[Forecast], list[Route], list[float]]:
     """One rollout of every plan under the guidance; ``durations_s`` overrides each plan's
-    ``T`` (the assigned arrival time). Returns the forecasts, the routes laid, and the time
-    the speed schedule needs for each route (the time closure's reading)."""
+    ``T`` (the assigned arrival time); ``anchor`` is one index for the batch or one per
+    flight. Returns the forecasts, the routes laid, and the time the speed schedule
+    needs for each route (the time closure's reading)."""
     if not (len(series) == len(labels) == len(skeletons)):
         raise ValueError("one label set and one skeleton per flight")
+    if route not in ROUTES:
+        raise ValueError(f"route must be one of {ROUTES}, not {route!r}")
+    anchors = [int(anchor)] * len(series) if isinstance(anchor, (int, np.integer)) else [int(a) for a in anchor]
+    if len(anchors) != len(series):
+        raise ValueError("one anchor per flight")
     device = device or torch.device("cpu")
     config = guidance_config(config)
-    rows = [dynamics_arrays(item, anchor) for item in series]
+    rows = [dynamics_arrays(item, a) for item, a in zip(series, anchors, strict=True)]
     dynamics = {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
     }
-    anchor_heights = np.array([float(item.values[anchor, IDX["u"]]) for item in series])
+    anchor_heights = np.array([float(item.values[a, IDX["u"]]) for item, a in zip(series, anchors, strict=True)])
     routes = [
-        route_for(item, anchor, lab, skeleton, row["initial_state"])
-        for item, lab, skeleton, row in zip(series, labels, skeletons, rows, strict=True)
+        route_for(item, a, lab, skeleton, row["initial_state"], route=route)
+        for item, a, lab, skeleton, row in zip(series, anchors, labels, skeletons, rows, strict=True)
     ]
-    flown = [plan_to_fly(lab, h, sk) for lab, h, sk in zip(labels, anchor_heights, skeletons, strict=True)]
+    flown = [plan_to_fly(lab, h, sk, route=route) for lab, h, sk in zip(labels, anchor_heights, skeletons, strict=True)]
     plans = [plan for plan, _clamped in flown]
     clamped = [clamped for _plan, clamped in flown]
     totals = np.array(
@@ -170,14 +198,14 @@ def fly_plans(
         row["planCaptureHeightClamped"] = float(was_clamped)
         row["planHoldS"] = float(total / n_segments)
     forecasts: list[Forecast] = []
-    for row, (item, row_offsets) in enumerate(zip(series, offsets, strict=True)):
+    for row, (item, a, row_offsets) in enumerate(zip(series, anchors, offsets, strict=True)):
         count = len(row_offsets)
         final_time_s = float(row_offsets[-1])
         forecasts.append(Forecast(
-            times=float(item.times[anchor]) + row_offsets,
+            times=float(item.times[a]) + row_offsets,
             values=query_channels[row, :count],
             normalized_progress=row_offsets / final_time_s,
-            anchor=anchor,
+            anchor=a,
             final_time_s=final_time_s,
             predicted_final_time_s=float(totals[row]),
             horizon_mode=config.horizon_mode,
@@ -193,7 +221,8 @@ def fly_plans(
             command_hook_diagnostics=diagnostics[row],
         ))
     times = [
-        route_time_s(route, v_mid=plan.v_mid_mps, d_decel_m=plan.d_decel_m, v_final=plan.v_final_mps)
+        route_time_s(route, v_mid=plan.v_mid_mps, d_decel_m=plan.d_decel_m, v_final=plan.v_final_mps,
+                     points=plan.speed_points)
         for route, plan in zip(routes, plans, strict=True)
     ]
     assert all(math.isfinite(t) for t in times)
