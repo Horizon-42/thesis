@@ -1,6 +1,13 @@
-# Plan-and-guidance: the next model (design v4, 2026-09-10)
+# Plan-and-guidance: the next model (design v5, 2026-09-11)
 
-Status: steps 0–2 BUILT, REVIEWED and MEASURED on `dev-plan-guidance`, 2026-09-10 — the shared
+Status: **v5 (2026-09-11, drafted for the user's read): the route is predicted ONE INSTRUCTION AT
+A TIME** — the next fly-by fix and the speed at it, from a 60 s window, at any anchor, rolled
+by the guidance until the join (§3b, §4.2, §5, §6, §7, §9 step 3); the whole path's fixes stay
+the offline label and the oracle's representation. Why: a radar vector is issued one at a time
+and executed within seconds, so no aircraft ever holds the whole path the K-fix head would
+predict; a single step is the quantity that exists, and the one the scheduler assigns. Nothing
+below step 3 changes. Steps 0–2b BUILT, REVIEWED and MEASURED on `dev-plan-guidance` /
+`dev-plan-turns`, 2026-09-10/11 — the shared
 rollout parts moved up (`7cb58b4`), the procedure reader and the eight extractors (§12.1), the
 guidance layer and the oracle ceiling (§12.2, after the step-2 review's fixes: the §7 veto does
 not fire; straight-in ADE 204 m / chamfer 34 m / arrival-time MAE 4.8 s from the
@@ -107,7 +114,31 @@ Five numbers, all aircraft operating parameters. Each is predicted as a point an
 distribution (the B-line quantile head, which is the one head that improved arrival-time
 accuracy; or the L2.g latent fan). `T` keeps its calibrated interval (B2).
 
-### 3b. Route parameters — assigned, or a distribution; never a point output
+### 3b. Route parameters — the NEXT instruction (v5); assigned, or a distribution; never a committed path
+
+**v5 (2026-09-11).** The route the network predicts is the next radar instruction, not the
+path: from the anchor, the next fly-by fix and the speed to be flying at it — a vector
+"turn to heading X, reduce to Y" as the point it aims at — and whether there is one at all
+(no next fix: the current leg runs onto the final and the join is next). The guidance flies
+that one leg, re-anchors at the fix and the network is asked again, until the join. This is
+how the instruction reaches the cockpit (one at a time, executed within seconds, the next
+unknown until it is given), what a scheduler assigns (the next vector, as ATC does), and the
+part of the route a 60 s history can say anything about. The fix-and-speed pair is
+`PlanLabels.waypoints[0]` / `waypoint_speeds[0]` of §3b's fixed-K representation below,
+read at a random anchor; the whole path's fixes remain the offline label set and the
+oracle's representation (§12.3).
+
+| parameter (v5, predicted per anchor) | meaning | range | extractor |
+|---|---|---|---|
+| `next_fix` | the next fly-by fix, in runway axes about the anchor (`Δd`, `Δxt`); None when the current leg runs onto the final | inside the TMA the procedure's transitions cover; ahead of the anchor along the path | the first of `extract_waypoints` after the anchor (§3b below), or None |
+| `V_next` | ground speed at that fix | stall margin … the coded limit / the type's approach maximum | the median ground speed over the turn's rows (`waypoint_speeds`) |
+| `next_is_join` | no next fix: the leg runs onto the final | — | the join before any fix |
+
+Each is predicted as a point and as a distribution; the distribution over `next_fix` is the
+fan of §3b's last paragraph one step deep — a small, readable set of "the next vector is one of
+these", which the scheduler can override with its own. The three whole-path parameters below
+stay defined (the join is where the rolling ends; `side` and `L_pre` are what the rolled route
+amounts to, reported per flight), and the scheduler may still assign them whole.
 
 | parameter | meaning | range (procedure) | extractor (for the distribution head and the oracle test) |
 |---|---|---|---|
@@ -165,7 +196,14 @@ A fixed, deterministic controller that flies a plan on the procedure's skeleton.
    30° alignment limit (aligned where the length affords it), every turn is sized at the speed
    the schedule has where it is flown, a turn-straight-turn that loops is not a route (the
    chord onto the join is), and a length no hold or dog-leg lays is reported as the route's
-   shortfall, never flown as an extra.
+   shortfall, never flown as an extra. **v5 — rolled**: with a `next_fix` the route is ONE leg
+   — the turn onto the line to the fix at the anchor's speed, the corner at the fix rounded at
+   `V_next` — followed by the closing onto the join from there (the aligned join, the final
+   from `d_join`) as the fallback beyond the fix; the guidance flies to the fix, the state
+   there is the next anchor, and the plan is asked again. Without a next fix the route is
+   the closing itself (the 8-number route of step 2). The whole-path form
+   (`build_route(waypoints=…)`, §12.3) stays for the oracle and for a scheduler that assigns
+   the whole route.
 3. **Lateral tracking** — the nominal-law hook (archived 2026-09-09 under
    `archive/nominal_law_hook_2026_09/`; the guidance layer takes it back as its own module, §11):
    line-of-sight to the route, bounded bank,
@@ -186,9 +224,10 @@ fix limits, stall, thrust, bank. These become properties to verify, not outcomes
 
 ## 5. What the scheduler supplies and gets back
 
-- Supplies: the assigned arrival time and the route (`d_join`, `side`, the pre-final length or a
-  delay to absorb). If it assigns nothing, the model returns the fan over legal routes and the
-  arrival-time distribution, never a single guess.
+- Supplies: the assigned arrival time and the route — v5: the NEXT instruction (a fix and a
+  speed, i.e. a vector), as ATC gives it, step by step; or the whole route (`d_join`, `side`,
+  the pre-final length or a delay to absorb) at once. If it assigns nothing, the model returns
+  the fan over the next instruction and the arrival-time distribution, never a single guess.
 - Gets back: a procedure-conforming, flyable reference for the assigned time and route; the
   operating parameters behind it (when the aircraft slows, how fast, how high); the unabsorbable
   delay X if the assignment is infeasible; and, when nothing is assigned, the arrival-time interval
@@ -200,19 +239,26 @@ fix limits, stall, thrust, bank. These become properties to verify, not outcomes
 ## 6. Training
 
 - **Supervision**: the five operating parameters extracted from each observed track, regressed
-  directly in their own units (point and quantile heads); the three route parameters supervise
-  only the distribution head. No inverse-dynamics teacher, no imitation weight, no position-unit
+  directly in their own units (point and quantile heads); v5: the next instruction
+  (`next_fix`, `V_next`, `next_is_join`) at the anchor, point + distribution, censored only
+  where the flight is already established at the anchor (then there is no instruction to
+  predict, and the sample supervises the operating parameters alone); the three whole-path
+  route parameters are not a training target. No inverse-dynamics teacher, no imitation weight, no position-unit
   balancing. Bank fidelity is not a training target; it is a property of the guidance layer.
 - **Not through the guidance layer**, at first. This week's evidence (L1.c; the 09-06 training-
   through-hook arms) says training through a corrective layer teaches the network to lean on it.
   The plan is supervised directly; the guidance layer runs at inference. End-to-end fine-tuning
   through a differentiable guidance layer is a later, gated experiment.
-- **Inputs**: the same history window and threshold-anchored ENU chart (the frame ablation showed
-  the anchor is the model's runway knowledge), the procedure's skeleton as conditioning (the fix
+- **Inputs**: a 60 s history window (`seq_len` 30 at `dt_s` 2; v5 — the next instruction needs
+  the state and its trend, and the 120 s window put the anchor 12 km into the slice, past the
+  vectors for 59 % of flights, §12.3) in the threshold-anchored ENU chart (the frame ablation
+  showed the anchor is the model's runway knowledge), the procedure's skeleton as conditioning (the fix
   distances and limits, so the plan head knows its ranges), and the scheduler's inputs as
   conditioning (CTA conditioning exists; join conditioning is the same mechanism).
 - **Anchors**: the remaining-path-uniform random-anchor sampler with the scheduler fix (A0.b), so
-  the plan is re-issued at any point of the approach; the two-model rule stays available.
+  the plan is re-issued at any point of the approach — under v5 that is the training
+  distribution itself: every sample is "here, now, what is the next vector"; the two-model
+  rule stays available.
 - **Data**: pooled over the five airports (42,650 arrivals) rather than KRDU alone; the
   procedure reader makes airports comparable, and more data is the only lever on the 125 m line.
 
@@ -257,8 +303,17 @@ arrival-time MAE 4.8 s straight-in / 14.0 s pooled (inside), fully flyable 99.7 
 established 99.7 % (4 flights of 1404 arrive after the horizon), corridor violations after the
 join 1.4 % (NOT yet 0 % — the tracker's entry, not the plan's; §12.2).
 
+**v5 adds the single-step reading**, because a rolled prediction compounds: at every anchor of
+the anchor grid (and at the 60 s anchor), per stratum, the next-fix error (its position in
+runway axes, its speed, the time to it) against the truth's next fix, the share of
+`next_is_join` right, and the fan's coverage of the truth's next fix — read against the
+trivial baseline (the stratum's median next fix). The rolled reading is then the existing
+one: from a fixed anchor, fly leg by leg to the threshold and score the whole trajectory as
+above (the oracle of §12.3 is its ceiling, the plan-route oracle of §12.2 its floor).
+
 Vetoes: the plan head's parameters worse than trivial baselines (the stratum medians — measured,
-§12.1's last column) — the learned part is not learning; or the oracle ceiling (§9 step 2) worse than today's model — the
+§12.1's last column; v5: the next fix no better than the stratum's median next fix) — the
+learned part is not learning; or the oracle ceiling (§9 step 2) worse than today's model — the
 parametrisation is too coarse.
 
 ## 8. Reuse, new work, risks
@@ -297,7 +352,15 @@ parametrisation is too coarse.
    **2b (2026-09-11)**: the fixed-K fly-by waypoints oracle (`--route waypoints`) and the
    oracle at earlier anchors (`--anchor-s 60`, `--anchor-km 20`); artifacts
    `4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step2b_*/`; §12.3.
-3. Plan head on KRDU: point and quantile heads, one seed, both evaluations.
+3. **v5 — the single-step plan head on KRDU** (one seed, both evaluations), in three parts:
+   (a) the measurement first — from the step-2b labels, how far ahead the next fix lies
+   (distance, time) per stratum and anchor, and how often the next thing is the join: the
+   lead a single step must predict (CPU, an hour); (b) the single-step oracle — the truth's
+   next instruction flown leg by leg from the 60 s anchor and from L−1, re-planned at each
+   fix (the rolled form of §12.3's oracle; its numbers should match §12.3's waypoints columns,
+   and where they do not the rolling itself is the difference); (c) training: the operating
+   parameters as before, `next_fix` / `V_next` / `next_is_join` as point + distribution, 60 s
+   window, remaining-path-uniform anchors; the single-step and the rolled readouts of §7.
 4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
 5. Two seeds; pooled five-airport training; KSJC replication.
 6. The multi-aircraft scheduler demonstration.
@@ -682,3 +745,11 @@ What it says:
   plan head has something to predict. The 20 km remaining-path bin is the wrong tool for
   that question (it is later than L−1 on a vectored track: 42.5 % censored); the earlier
   anchor for step 3 is a shorter window, not a nearer bin.
+
+**Read for v5 (2026-09-11).** Three things §12.3 settles for the single-step design: the
+fixed-K fixes with their speeds are the representation a rolled step is read from (its
+ceiling, chamfer 268 m and arrival-time MAE 16 s on the vectored stratum from the truth's
+own fixes; the plan-route form is the floor); the residual is in the corners, half the
+vectored flights within ~85 m and half ~900 m where a fly-by at the fix's speed does not
+fit the leg — the next item on the guidance, not on the head; and the anchor for step 3 is
+the 60 s window's (46 % censored against 59 % at L−1), which is why v5 shortens the window.
