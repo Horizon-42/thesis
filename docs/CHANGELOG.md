@@ -4,6 +4,31 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-12 — ts_transformer: plan-and-guidance step 5 — the pooled five-airport training (v5.5): the closure transfers, the pooled head costs the home airport
+
+`dev-plan-pool`; design v5.5 §9 step 5, §12.10. Tooling: `run_ts.py plan_cohort` writes the
+development cohort a random-anchor plan run needs (the train CLI's flags and its exact
+`usable_series → split_by_flight → filter_training_cohort → window set` sequence; every train
+flight with no admissible anchor dropped; `<output-dir>/development_cohort.json` +
+`data_selection.json` with the reasons; refuses a rolled-table path; checks the config before the
+track load) — on KRDU it reproduces the hand-written `step3c_plan_head_full_cohort.json`
+exactly; `plan_oracle --by-airport` (`summarize_by_airport`, `summary_by_airport`);
+`plan_oracle_pair --common` (a pooled artifact against a single-airport one over the flights
+both hold, the base inside the arm, schema v2 with the `cohort` counts).
+
+Measured (one detached chain: the pooled cohort 21,911 / 4,496 flights over KRDU, KSJC, KSTL,
+KSMF, KMSY; the K = 4 point head 41 min — one epoch would have done, the truth table never
+reads the model; the truth table 292,057 samples / 26,407 flights / 175 MB in 33 min; the K = 4
+head at share 0.75, best epoch 117). KRDU val, 60 s anchor, paired on the 1404 flights against
+the KRDU-only head: vectored ADE 3087 → 3678 m (+227 m p50, lower on 37 %), established
+94.2 → 83.9 %; with the truth's time 2655 → 3684 (+591) — the §9 gate (within the seed line)
+fails: the airport-macro pooling takes the home airport's weight. The four other airports
+(their first head): straight-in 810–1010 m unassigned, 270–570 m with the truth's time (dt MAE
+3–5 s), fully flyable 99.6–100 %; vectored 2.7–4.2 km, established 55–85 % (KSMF 55, KMSY 64).
+Decision: the pooled head is not KRDU's delivery; per-airport heads for the other four next
+(5b). `docs/code-health-followups.md` §30: the rolled table is encoded once per window set
+(six copies on a pooled run). Full suite 1045 passed. Artifacts `…/plan_guidance_20260910/step5_*`.
+
 ### 2026-09-12 — ts_transformer: plan-and-guidance step 4 — the assigned time and join (v5.4): the time delivered, the join not in this form
 
 `dev-plan-cta`; design v5.4 §9 step 4, §12.9. The scheduler's assignment reaches the plan path:

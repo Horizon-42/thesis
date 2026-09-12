@@ -69,7 +69,7 @@ were NOT made without the owner:
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 
-## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–4 built and measured; next: step 5, the pooled five-airport training on the K = 4 head with the time closure
+## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–5 built and measured; next: step 5b, per-airport K = 4 heads for KSJC / KSTL / KSMF / KMSY
 
 `docs/2026-09-09_plan_and_guidance_design.md` (v4; §12 carries the numbers), branch
 `dev-plan-guidance`. Built: the shared rollout parts moved out of `outputs/control/`
@@ -173,6 +173,16 @@ the review's route and controller findings applied and re-measured). Artifacts:
   inconsistent order (alone 3876). `plan_oracle --assign-time truth --assign-time-offset-s S
   [--assign-join truth]`. Open: the flown shortfall under large delays (the controller's floor
   against the plan's), establishment under an advance, the route assignment as fixes.
+- **Step 5 (2026-09-12, `dev-plan-pool`, design §12.10): the pooled five-airport K = 4 head —
+  the closure transfers, the pooled head costs the home airport.** `run_ts.py plan_cohort`
+  (the development cohort a random-anchor run needs; reproduces the hand-written KRDU one
+  exactly) → 21,911 / 4,496 flights over five airports; the truth table 292k samples; the head
+  at share 0.75. KRDU val, 60 s anchor, paired against the KRDU-only head: vectored ADE
+  3087 → 3678 m (+227 p50, lower on 37 %), established 94 → 84 %; with the truth's time
+  2655 → 3684 (+591). The other airports: straight-in dt MAE 3–5 s with the time, fully flyable
+  99.6–100 %, vectored 2.7–4.2 km with established 55–85 %. The pooled head is not KRDU's
+  delivery; the other four airports get per-airport heads next (5b). `plan_oracle --by-airport`,
+  `plan_oracle_pair --common`. The bootstrap head of a pooled run needs one epoch, not 120.
 - **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
   binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
   beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the

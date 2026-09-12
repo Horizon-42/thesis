@@ -1,6 +1,18 @@
 # Plan-and-guidance: the next model (design v5, 2026-09-12)
 
-Status: **v5.4 step 4 BUILT and MEASURED (2026-09-12, `dev-plan-cta`; §9 step 4, §12.9): the
+Status: **v5.5 step 5 BUILT and MEASURED (2026-09-12, `dev-plan-pool`; §9 step 5, §12.10): the
+pooled five-airport K = 4 head — the guidance and the time closure TRANSFER, the pooled head
+COSTS the home airport.** One head on 21,911 train flights of five airports (`run_ts.py
+plan_cohort` writes the cohort; the rolled table 292k samples): on KRDU val it is WORSE than the
+KRDU-only head of §12.8 — vectored ADE 3087 → 3678 m (paired +227 m, lower on 37 %), established
+94 → 84 %; with the truth's time 2655 → 3684 (+591 paired) — the airport-macro pooling takes
+the home airport's weight, the §9 gate (within ~200 m) fails. On the four other airports, their
+first head: straight-in ADE 810–1010 m unassigned and 270–570 m with the truth's time (dt MAE
+3–5 s, fully flyable 99.6–100 % everywhere: the closure and the guidance transfer), vectored
+2.7–4.2 km with established 55–85 % (KSMF 55 %, KMSY 64 %). Decision: per-airport heads stay
+the delivery (the pooled head is not KRDU's); the other four airports get their own heads next
+(step 5b, ~10 min of GPU each); the bootstrap head of a pooled run needs ONE epoch. Previous
+status: **v5.4 step 4 BUILT and MEASURED (2026-09-12, `dev-plan-cta`; §9 step 4, §12.9): the
 ASSIGNED TIME is delivered, the assigned JOIN in this form is not.** The scheduler's arrival time
 is closed by the guidance at every ask — the speed lever (the held speed between the stall floor
 and the maximum, the deceleration point moving with it), then the path lever (the route builder's
@@ -595,7 +607,32 @@ parametrisation is too coarse.
    (≥ 90 % at +60 s, the §7 reference row), established by the assigned time (100 % or X),
    the corridor verdicts; (4) the join alone. Veto: a closure that costs the straight-in
    stratum at offset 0 (its time is already right: the speed factor must read ≈ 1 there).
-5. Two seeds; pooled five-airport training; KSJC replication.
+5. **The pooled five-airport training (v5.5, BUILT and MEASURED 2026-09-12; §6 "Data"; §12.10
+   — the closure transfers, the pooled head costs the home airport; 5b: per-airport heads).** The
+   K = 4 head with the time closure as its delivery form, trained on the five airports'
+   arrivals together — the one lever left on the 125 m line (§6), and the test of whether the
+   skeleton makes airports comparable. (a) **The cohort**: `run_ts.py plan_cohort` writes the
+   development cohort the train CLI needs (the locked by-flight split over the five rosters,
+   `split_seed` 1337, `openap-direct`; minus the train flights the 20 s random-anchor contract
+   does not cover — the one rule `step3c_plan_head_full_cohort.json` was written by, now a
+   runner rather than a hand script), the airports recorded. The loss is airport-macro by
+   construction (`flight_weights`: one sample per flight and epoch, the weights normalised so
+   every airport counts equally — the pooling rule of `experiment-principles`). (b) **Two
+   trainings**: the K = 4 point recipe on the pooled cohort first (no rolled windows — a rolled
+   table needs a checkpoint to name its cohort), its truth-policy rolled table over the pooled
+   train and val splits (`plan_rolled_windows --policy truth`), then the K = 4 head at share
+   0.75 — the 3(e)/(g) recipe, pooled. (c) **The readout, per airport**: `plan_oracle
+   --by-airport` (the summary cut by the flight key's airport beside the strata) on the pooled
+   val split — unassigned, and the truth's time assigned; KRDU's rows against the KRDU-only
+   head of §12.8 (3087 / 2655 m vectored at 60 s) paired on the KRDU flights the two share;
+   KSJC as the replication airport of §7. Read every per-airport ADE WITH its route mix
+   (`approach_difficulty`; a per-airport number without it is not a comparison). Gates: the
+   KRDU vectored ADE of the pooled head within the seed line (~200 m) of the KRDU-only head's
+   (pooling must not cost the home airport); the assigned-time dt MAE on every airport within
+   2× KRDU's 10.2 s (the closure transfers); every airport's fully-flyable share ≥ 95 % (the
+   guidance transfers). Veto: an airport whose oracle ceiling (the truth's plan through the
+   guidance, §12.2's instrument) is worse than native32's — the skeleton or the procedure
+   reader, not the head.
 6. The multi-aircraft scheduler demonstration.
 
 ## 10. What stops
@@ -1623,3 +1660,85 @@ planned. Open: the flown arrival's 6–22 s shortfall under large delays (the co
 against the plan's), the establishment loss under an advance, the glidepath share under a delay
 (27–29 % vectored against 36 % at offset 0 is a gain; the straight-in 5 % unchanged). Next: §9
 step 5 — the pooled five-airport training on the K = 4 head.
+
+### 12.10 Step 5 — the pooled five-airport training (v5.5, 2026-09-12): the closure transfers, the pooled head costs the home airport
+
+`dev-plan-pool`. **The cohort**: `run_ts.py plan_cohort` over the five harvests and rosters
+(the 3(g) recipe at K = 4 without a rolled table) → `step5_pooled_cohort/development_cohort.json`:
+**21,911 train + 4,496 val** flights — KRDU 6856 / 1405, KSJC 5026 / 1084, KSTL 4978 / 974, KSMF
+2676 / 522, KMSY 2375 / 511 — 6 train flights dropped by the 20 s random-anchor contract, 9,749
+of the locked split not built (the `openap-direct` fleet filter and unusable tracks; this cohort
+predates the runner writing `data_selection.json` beside the cohort — re-running the runner
+recovers the reasons, the splits reproduce byte for byte, as the KRDU check against
+`step3c_plan_head_full_cohort.json` did). **Two trainings and a table**, one detached chain:
+the K = 4 point head (`step5_pool_fan4_point_head`, 120 epochs at 19.7 s, 41 min — **one epoch
+would have done**: a rolled table needs a checkpoint only to name its cohort and the truth
+policy never reads the model), the truth-policy table (`step5_pool_table/rolled_truth.npz`:
+292,057 samples over 26,407 flights, 175 MB, 33 min; the oracle's own flown ADE on val from
+L−1 straight-in 703 m / vectored 1881 m), the K = 4 head at share 0.75
+(`step5_pool_fan4_head`, 12.4 s per epoch, best epoch 117, rolled val loss −0.34). **The
+readouts** at the 60 s anchor (`plan_oracle --by-airport`): unassigned (`step5_pool_top1_
+lockstep_a60s`), the truth's time assigned (`step5_pool_time0_a60s`), the oracle ceiling
+(`step5_pool_oracle_a60s`), and the pairs against the KRDU-only head on the 1404 KRDU flights
+both hold (`step5_pair_pool_vs_krdu_a60s`, `step5_pair_pool_time0_vs_krdu_a60s`;
+`plan_oracle_pair --common`).
+
+**Per airport, the pooled K = 4 head (60 s anchor; each row WITH its route mix — the n's).**
+
+| airport | straight-in n / ADE / chamfer / dt MAE — unassigned | … the truth's time | vectored n / ADE / chamfer / established / capped — unassigned | … the truth's time (ADE / dt MAE / established) |
+|---|---|---|---|---|
+| KRDU | 799 / 813 / 43 / 19.8 s | 347 / 3.0 s | 601 / 3678 / 1413 / 83.9 % / 8.8 % | 3684 / 27.0 s / 75.9 % |
+| KSJC | 876 / 851 / 50 / 22.7 s | 272 / 3.4 s | 207 / 2782 / 1221 / 78.7 % / 7.2 % | 2681 / 22.7 s / 82.1 % |
+| KSTL | 484 / 1009 / 64 / 21.9 s | 573 / 5.2 s | 486 / 3274 / 777 / 85.0 % / 9.7 % | 2685 / 20.7 s / 84.0 % |
+| KSMF | 127 / 819 / 56 / 22.0 s | 281 / 4.5 s | 395 / 3245 / 1438 / 54.7 % / 6.6 % | 3829 / 34.6 s / 74.2 % |
+| KMSY | 228 / 823 / 74 / 18.9 s | 396 / 4.2 s | 282 / 4159 / 923 / 63.5 % / 18.1 % | 4711 / 35.8 s / 63.5 % |
+| pooled | 2514 / 865 / 51 / 21.2 s | 366 / 3.8 s | 1971 / 3466 / 1145 / 74.8 % / — | 3508 / 27.8 s / 76.4 % |
+
+Fully flyable: 99.6–100 % on every airport, both readings. The pooled unassigned dt MAE is
+36.3 s (15.0 s with the time); established 88.4 % (89.1 %).
+
+**The oracle ceiling per airport (the truth's own instructions through the guidance, 60 s):**
+
+| airport | straight-in n / ADE / chamfer / dt MAE / established | vectored n / ADE / chamfer / dt MAE / established / capped | fully flyable |
+|---|---|---|---|
+| KMSY | 228 / 596 / 75 / 14.7 s / 100.0 % | 282 / 1603 / 176 / 18.3 s / 86.9 % / 6.4 % | 100.0 % |
+| KRDU | 799 / 598 / 42 / 14.8 s / 99.0 % | 601 / 2184 / 888 / 30.0 s / 87.7 % / 3.0 % | 100.0 % |
+| KSJC | 876 / 782 / 50 / 20.4 s / 99.7 % | 207 / 1672 / 900 / 20.9 s / 93.2 % / 1.0 % | 100.0 % |
+| KSMF | 127 / 792 / 54 / 18.9 s / 98.4 % | 395 / 1556 / 765 / 18.8 s / 90.6 % / 1.3 % | 100.0 % |
+| KSTL | 484 / 708 / 60 / 18.0 s / 99.4 % | 486 / 2046 / 382 / 34.8 s / 86.2 % / 4.3 % | 100.0 % |
+| pooled | 2514 / 693 / 50 / 17.6 s / 99.4 % | 1971 / 1887 / 548 / 26.3 s / 88.4 % / 3.2 % | 100.0 % |
+
+
+**KRDU: the pooled head against the KRDU-only head of §12.8, paired on the 1404 flights.**
+
+| KRDU val, 60 s anchor | KRDU-only head | pooled head | paired Δ p50 (lower on) |
+|---|---|---|---|
+| unassigned: pooled / straight-in / vectored ADE mean | 1766 / 749 / 3087 | 2055 / 813 / 3678 | +3 (49 %) / −15 (57 %) / **+227 m (37 %)** |
+| unassigned: vectored chamfer mean / established | 1367 / 94.2 % | 1699 / 83.9 % | +110 (33 %) |
+| the truth's time: pooled / straight-in / vectored ADE mean | 1314 / 281 / 2655 | 1792 / 347 / 3684 | +38 / +6 / **+591 m (27 %)** |
+| the truth's time: dt MAE pooled / straight-in / vectored | 10.2 / 3.2 / 16.7 s | 14.5 / 3.0 / 27.0 s | established 95.0 → 89.0 % |
+
+**Read.** (1) The guidance layer and the time closure transfer to airports they were never
+tuned on: straight-in flights at the 60 s anchor arrive 3–5 s from the assigned time on every
+airport, fully flyable 99.6–100 %, the straight-in chamfer 43–74 m — what the procedure
+skeleton and the controller do is not KRDU-specific. (2) The pooled head is a worse head for
+KRDU than KRDU's own: +227 m of vectored ADE paired (lower on 37 %), 10 points of established,
+and with the time assigned +591 m — outside the ~250 m two-seed spread of §12.8. The loss is
+airport-macro (each airport one fifth of the epoch whatever its size), so KRDU's 6856 flights
+weigh what KMSY's 2375 do, and the vectoring patterns the head must learn differ per airport
+(KSMF's and KMSY's vectored tracks end established on 55–64 %, KRDU's on 84 %). The §9 gate
+(the home airport within the seed line) fails. (3) The other four airports' numbers are their
+FIRST: straight-in like KRDU's (810–1010 m unassigned, 270–570 with the time), vectored worse
+(2.7–4.2 km; KMSY 18 % capped). Their CEILINGS are sound — the truth's own instructions
+through the guidance reach 1.6–2.2 km of vectored ADE and 86–93 % established on every
+airport, KSMF's and KMSY's (1556 / 1603 m) better than KRDU's (2184) — so no airport trips the
+§9 veto (the skeleton and the procedure reader transfer), and the gap from KSMF's 3245 and
+KMSY's 4159 to those ceilings is the head's: what a per-airport head is for. (4) The bootstrap
+cost: 41 min of GPU on a head nothing read.
+
+**Decision.** The pooled head is NOT the delivery for KRDU; the per-airport head stays. It is
+the baseline for the four other airports until they have their own (step 5b: the K = 4 recipe
+per airport with the pooled table's rows for that airport, ~10 min of GPU each — the table
+covers every flight, and `require_cover` asks only that it cover the run's cohort). The time
+closure and the guidance are confirmed as airport-independent deliverables. Next: step 5b,
+then the two-seed check of §9 step 5 on the per-airport heads.

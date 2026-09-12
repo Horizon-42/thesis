@@ -682,3 +682,18 @@ every ungated row by up to an ULP. The trombone was given
 alone because changing it moves an adopted, measured layer's output and would have to be
 re-measured against the published `control_hooks_v2_20260906` numbers rather than folded
 into L3.e.
+
+## 30. The plan path's rolled-window table is encoded once per window set — six copies on a pooled run (2026-09-12)
+
+**Verified** (review of the step-5 tooling, `dev-plan-pool`): `outputs/plan/strategy.py`'s
+`PlanContext` runs `normalizer.encode(np.asarray(rolled.windows, float64)).astype(float32)` over
+the WHOLE rolled table when it binds a window set, and `training/train.py::prepare_session`
+builds one train set plus one validation set PER AIRPORT (`validation_datasets`), so a pooled
+five-airport run encodes the table six times. KRDU's table is 97,633 samples (70 MB as
+`[S, 30, 6]` float32); the pooled cohort is 3.2× the flights, so ~225 MB per copy, ~1.35 GB
+resident across the six sets plus a ~450 MB float64 transient per construction, during CUDA
+training. Pre-existing code; the pooled run (`step5_pool_fan4_head`) is what first pays it.
+
+**Judgement**: cache the encoded array on the `RolledWindowTable` keyed by the normalizer (one
+copy per normalizer, shared by every set built under it). Not folded into the step-5 change
+because it is a training-plane refactor with its own measurement (memory, not numbers).

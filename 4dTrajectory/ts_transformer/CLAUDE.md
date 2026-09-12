@@ -171,6 +171,22 @@ point of the package, not a migration in progress.
   [--assign-join truth]` — the truth's time and join as the assignment, an oracle form that
   READS THE FUTURE and says so (`assignment` in the artifact; the control line's `cta=given`
   convention); its summary gains the X distribution, the speed factor and the stretch share.
+  **v5.5 (2026-09-12, §9 step 5): the POOLED five-airport run and its tooling.** `run_ts.py
+  plan_cohort` writes the development cohort a random-anchor plan run needs (the train CLI
+  refuses a run whose 20 s future contract covers fewer train flights than the locked split
+  holds): the train CLI's own flags, the same `usable_series → split_by_flight →
+  filter_training_cohort → window set` sequence, every train flight with no admissible anchor
+  dropped, `<output-dir>/development_cohort.json` + `data_selection.json` (the REASON each
+  excluded flight is out — a later `train` loads the cohort's keys only and rejects nothing);
+  refuses a rolled-table path (a table follows a cohort) and checks the config before the
+  track load. On KRDU alone it reproduces the hand-written `step3c_plan_head_full_cohort.json`
+  exactly. **A rolled table needs a checkpoint to name its cohort, and the truth policy never
+  reads the model: the bootstrap head of a pooled run needs ONE epoch, not 120** (the first
+  pooled run spent 41 min of GPU on weights nothing read). `plan_oracle --by-airport` cuts the
+  summary by the flight key's airport beside the strata (`summary_by_airport`); `plan_oracle_pair
+  --common` pairs a pooled artifact against a single-airport one over the flights both hold
+  (the base must be INSIDE the arm; the counts are in the header). The pooled table is encoded
+  once per window set — six copies on five airports (`docs/code-health-followups.md` §30).
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches

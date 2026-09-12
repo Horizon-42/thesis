@@ -300,6 +300,14 @@ def _assignment_cells(members: list[dict]) -> dict[str, float]:
     }
 
 
+def summarize_by_airport(rows: list[dict]) -> dict[str, dict]:
+    """The summary per airport (the flight key's prefix), for a pooled cohort — read every
+    per-airport number WITH its route mix (the strata columns): inside a matched stratum the
+    airports score alike, and the pooled spread is the share of flights in each stratum."""
+    airports = sorted({row["dataset_id"].split(":")[0] for row in rows})
+    return {airport: summarize([row for row in rows if row["dataset_id"].split(":")[0] == airport]) for airport in airports}
+
+
 def format_table(summary: dict) -> str:
     strata = [s for s in STRATA if summary[s]["flights"]]
     metrics = [
@@ -382,6 +390,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--anchor-s", type=float, default=0.0,
                         help="plan from the one row this many seconds after the slice starts, every flight (0 = L-1): "
                              "the anchor a shorter lookback window would give")
+    parser.add_argument("--by-airport", action="store_true",
+                        help="a pooled cohort: also the summary per airport (the flight key's prefix), each with its strata")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     arms = parse_arms(parser, args.checkpoint)
@@ -552,6 +562,10 @@ def main(argv: list[str] | None = None) -> int:
     wall_s = time.perf_counter() - started
     summary = summarize(rows)
     text = format_table(summary)
+    by_airport = summarize_by_airport(rows) if args.by_airport else None
+    if by_airport is not None:
+        for airport, block in by_airport.items():
+            text += f"\n\n[{airport}]\n" + format_table(block)
     text += f"\nflown in {wall_s:.0f} s ({wall_s / max(len(rows), 1):.2f} s per flight)\n"
     print(text, flush=True)
     args.out.mkdir(parents=True, exist_ok=True)
@@ -565,7 +579,7 @@ def main(argv: list[str] | None = None) -> int:
         "max_waypoints": args.max_waypoints, "anchor_km": args.anchor_km,
         "anchor_s": args.anchor_s,
         "flights_without_anchor": without,
-        "todays_best": TODAYS_BEST, "summary": summary, "rows": rows,
+        "todays_best": TODAYS_BEST, "summary": summary, "summary_by_airport": by_airport, "rows": rows,
     })
     (args.out / "plan_oracle.txt").write_text(text + "\n", encoding="utf-8")
     print(f"wrote {args.out / 'plan_oracle.json'}", flush=True)

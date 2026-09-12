@@ -26,7 +26,7 @@ from ts_transformer.data.approach_difficulty import STRATUM_SHORT, strata_masks
 from ts_transformer.experiments.plan_oracle import STRATA, held_share
 from ts_transformer.io_utils import utc_now, write_json_atomic
 
-SCHEMA = "ts-plan-oracle-pair-v1"
+SCHEMA = "ts-plan-oracle-pair-v2"   # v2 (2026-09-12): the `cohort` counts (--common)
 #: A flight whose ADE moved by more than this between the two artifacts is a DIFFERING
 #: row: the identity check's ruler (float64 rollouts reproduce to far below it).
 IDENTITY_TOLERANCE_M = 1e-3
@@ -81,18 +81,34 @@ FIELDS = (
 PAIRED = ("ade_m", "fde_m", "chamfer_m", "frechet_m", "abs_dt_s")
 
 
-def pair(base: dict[str, dict], arm: dict[str, dict]) -> dict:
-    ids = sorted(base)
-    if set(arm) != set(base):
+def pair(base: dict[str, dict], arm: dict[str, dict], *, common: bool = False) -> dict:
+    """The arm against the base, flight by flight. The two artifacts must cover the same
+    flights — or, with ``common`` (a pooled head read against a single-airport one), the
+    pair is over the flights BOTH hold and the result says how many each side had."""
+    if set(arm) != set(base) and not common:
         raise SystemExit(
             f"the two artifacts cover different flights: base {len(base)}, arm {len(arm)}, "
-            f"common {len(set(base) & set(arm))} — a pair needs the same cohort"
+            f"common {len(set(base) & set(arm))} — a pair needs the same cohort (or --common)"
         )
+    if common and not set(base) <= set(arm):
+        # the intended use is a single-airport base inside a pooled arm; a base with
+        # flights the arm lacks is another cohort (a split seed, an anchor rule), and a
+        # pair over whatever two such artifacts happen to share measures nothing
+        raise SystemExit(
+            f"--common needs the base inside the arm: {len(set(base) - set(arm))} base flight(s) are not in the arm"
+        )
+    base_all, arm_all = base, arm
+    ids = sorted(set(base) & set(arm))
+    if not ids:
+        raise SystemExit("the two artifacts share no flight")
+    base = {i: base[i] for i in ids}
+    arm = {i: arm[i] for i in ids}
     covariates = {i: base[i]["difficulty"] for i in ids}
     masks = strata_masks(covariates, ids)
     ade_delta = np.array([arm[i]["prediction"]["ade_m"] - base[i]["prediction"]["ade_m"] for i in ids])
     out = {
         "flights": len(ids),
+        "cohort": {"base_flights": len(base_all), "arm_flights": len(arm_all), "common": len(ids)},
         "identity": {
             "rows_differing": int(np.sum(np.abs(ade_delta) > IDENTITY_TOLERANCE_M)),
             "max_abs_ade_delta_m": float(np.max(np.abs(ade_delta))) if len(ids) else 0.0,
@@ -119,9 +135,12 @@ def pair(base: dict[str, dict], arm: dict[str, dict]) -> dict:
 
 def format_table(result: dict, base_label: str, arm_label: str) -> str:
     strata = [s for s in STRATA if result["strata"][s]["flights"]]
+    cohort = result["cohort"]
     lines = [
         f"paired per flight, {arm_label} against {base_label}, n = "
-        + ", ".join(f"{STRATUM_SHORT[s]} {result['strata'][s]['flights']}" for s in strata),
+        + ", ".join(f"{STRATUM_SHORT[s]} {result['strata'][s]['flights']}" for s in strata)
+        + (f" (the common {cohort['common']} of base {cohort['base_flights']} / arm {cohort['arm_flights']})"
+           if cohort["common"] != cohort["base_flights"] or cohort["common"] != cohort["arm_flights"] else ""),
         f"identity: {result['identity']['rows_differing']} of {result['flights']} rows differ in ADE by over "
         f"{IDENTITY_TOLERANCE_M:g} m (max |ΔADE| {result['identity']['max_abs_ade_delta_m']:.3f} m), "
         f"{result['identity']['established_differing']} differ in `established`",
@@ -149,10 +168,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", required=True, metavar="LABEL=PATH", help="the base artifact (a dir or plan_oracle.json)")
     parser.add_argument("--arm", required=True, metavar="LABEL=PATH", help="the arm artifact")
     parser.add_argument("--out", type=Path, default=None, help="where to write pair.json / pair.txt (optional)")
+    parser.add_argument("--common", action="store_true",
+                        help="pair over the flights both artifacts hold (a pooled head against a single-airport one)")
     args = parser.parse_args(argv)
     base_label, base_header, base = load_rows(args.base)
     arm_label, arm_header, arm = load_rows(args.arm)
-    result = pair(base, arm)
+    result = pair(base, arm, common=args.common)
     text = format_table(result, base_label, arm_label)
     print(text, flush=True)
     if args.out is not None:
