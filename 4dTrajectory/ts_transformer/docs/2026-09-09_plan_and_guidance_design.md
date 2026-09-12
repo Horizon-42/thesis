@@ -646,7 +646,30 @@ parametrisation is too coarse.
    guidance transfers). Veto: an airport whose oracle ceiling (the truth's plan through the
    guidance, §12.2's instrument) is worse than native32's — the skeleton or the procedure
    reader, not the head.
-6. The multi-aircraft scheduler demonstration.
+6. **The multi-aircraft scheduler demonstration (v5.6, PROPOSED 2026-09-12; §5; three choices
+   are the user's).** Every reference is now a plan the scheduler can read (§5): the per-airport
+   K = 4 head gives each arrival its ETA (the head's `T`, its calibrated interval when the
+   quantile head is added) and the time closure flies an assigned time and reports X. The
+   demonstration: (a) a TRAFFIC SAMPLE — the real arrivals to one runway inside one clock hour
+   of the val split (KRDU first; the wall clock is the manifest's landing time less each
+   flight's own `T`, so the flights share one clock; the truth's own order and spacing are the
+   comparison); (b) a SCHEDULER — first-come-first-served on the heads' ETAs at each flight's
+   60 s anchor, the slots a minimum spacing apart, each flight assigned the earliest slot at or
+   after its ETA, and a flight whose closure reports X > 0 (cannot delay that much) handed the
+   earlier slot it can make — the simplest rule that exercises the whole loop; (c) the
+   REFERENCES — the assigned times flown by the lockstep with the closure (`Assignment`), one
+   rolled flight per arrival; (d) the CHECK — threshold crossings in the assigned order and at
+   least the spacing apart, the minimum along-final separation between any two aircraft at any
+   instant (the §7 "multi-aircraft safety" row: separation losses counted, the minimum-margin
+   distribution), the X and the delay absorbed per flight, fully flyable, established — against
+   the truth's own sequence (which the data shows has the controllers' spacing in it). The
+   instrument: `run_ts.py plan_schedule --checkpoint … --runway … --hour …`, reusing
+   `rolled_predictions_lockstep(assignments=)` and `plan_oracle`'s verdicts. **The user's
+   choices, not mine** (§5 names them as the scheduler's): the spacing minimum (3 NM radar
+   separation ≈ 75 s at 75 m/s on the final, or wake-category spacing from the fleet's types),
+   the sequencing rule (FCFS on the ETA, or the truth's order held fixed so only the spacing is
+   assigned), and the traffic sample (one hour, one runway, which airports). Built after those
+   are decided; the two-seed check of the four per-airport heads runs alongside.
 
 ## 10. What stops
 
