@@ -6,6 +6,8 @@ import {
   categoryAccuracyValue,
   categoryForExperimentSplit,
   categoryResultSource,
+  experimentGroups,
+  experimentMatches,
   experimentOptions,
   sortCategoriesByAccuracy,
 } from "../trajectoryResultSources";
@@ -74,7 +76,14 @@ describe("trajectory result sources", () => {
     expect(experimentOptions(categories)).toEqual([{
       id: "campaign/stage/run_seed1337",
       group: "campaign",
+      // Unstamped publish: the campaign id heads the group, the flat label names the run.
+      groupTitle: "campaign",
       label: "run_seed1337 · control · normalized time · seed 1337",
+      runName: "run_seed1337 · control · normalized time · seed 1337",
+      variantLabel: null,
+      intent: null,
+      parameters: [],
+      checkpoint: "campaign/stage/run_seed1337/checkpoint.pt",
       model: "itransformer",
       predictionOutput: "control",
       horizonMode: "normalized",
@@ -144,5 +153,78 @@ describe("trajectory result sources", () => {
     };
 
     expect(experimentOptions([closure])[0]?.predictionOutput).toBe("closure");
+  });
+});
+
+describe("experiment browser structure", () => {
+  function stamped(
+    id: string, group: string, run: string,
+    extra: Partial<NonNullable<ComparisonCategory["experiment"]>> = {},
+  ) {
+    const category = experiment("val");
+    category.key = `experiment_${run}_val`;
+    category.dir = category.key;
+    category.experiment = {
+      ...category.experiment!,
+      id,
+      group,
+      runName: run,
+      variantLabel: null,
+      intent: { groupTitle: `Title of ${group}`, group: `Question of ${group}`, run: `Why ${run}` },
+      parameters: [
+        { section: "Model", name: "Output", value: "control", field: "prediction_output" },
+        { section: "Architecture", name: "d_model", value: "512" },
+      ],
+      ...extra,
+    };
+    return category;
+  }
+
+  it("carries the stamped name, intent and rows, and heads each group with its title", () => {
+    const options = experimentOptions([
+      stamped("a/one", "a", "one"),
+      stamped("a/two", "a", "two", { variantLabel: "@ 12km remaining (244 of 300 flights)" }),
+      stamped("b/three", "b", "three"),
+    ]);
+    expect(options[0]).toMatchObject({
+      runName: "one", groupTitle: "Title of a", intent: { run: "Why one" },
+    });
+    expect(options[1].variantLabel).toBe("@ 12km remaining (244 of 300 flights)");
+
+    const groups = experimentGroups(options);
+    expect(groups.map((group) => [group.id, group.title, group.intent, group.experiments.length]))
+      .toEqual([["a", "Title of a", "Question of a", 2], ["b", "Title of b", "Question of b", 1]]);
+  });
+
+  it("orders a campaign's runs by the name and variant shown, bins numerically", () => {
+    const bin = (label: string) => stamped(`a/grid@${label}`, "a", "grid", {
+      variantLabel: `@ ${label} remaining`,
+      // the flat label would order these the other way round
+      label: `z · ${label === "6km" ? "b" : "a"}`,
+    });
+    const options = experimentOptions([bin("12km"), stamped("a/alpha", "a", "alpha"), bin("6km")]);
+    expect(options.map((option) => [option.runName, option.variantLabel])).toEqual([
+      ["alpha", null],
+      ["grid", "@ 6km remaining"],
+      ["grid", "@ 12km remaining"],
+    ]);
+  });
+
+  it("heads a partly stamped campaign with the stamped run's title and question together", () => {
+    const unstamped = stamped("a/aaa_old", "a", "aaa_old", { intent: null });
+    const options = experimentOptions([unstamped, stamped("a/new", "a", "new")]);
+    expect(options[0].groupTitle).toBe("a"); // the unstamped run sorts first and falls back alone
+    const [group] = experimentGroups(options);
+    expect([group.title, group.intent]).toEqual(["Title of a", "Question of a"]);
+  });
+
+  it("filters on every term across names, intent and parameter rows", () => {
+    const [one, three] = experimentOptions([stamped("a/one", "a", "one"), stamped("b/three", "b", "three")]);
+    expect(experimentMatches(one, "")).toBe(true);
+    expect(experimentMatches(one, "WHY ONE")).toBe(true);
+    expect(experimentMatches(one, "d_model 512")).toBe(true);
+    expect(experimentMatches(one, "question of b")).toBe(false);
+    expect(experimentMatches(three, "three d_model")).toBe(true);
+    expect(experimentMatches(three, "three d_ff")).toBe(false);
   });
 });

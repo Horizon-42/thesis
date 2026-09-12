@@ -4,6 +4,38 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-12 — Experiments picker: every run shows its intent and its parameters as named rows
+
+**Ask.** The Trajectories → Experiments picker listed each run as one machine-grammar string
+(`control · iTransformer · first-order-lag @… · simple-v2+(hr=8, bank-tv=1) · d-model=512, …, +9
+more, <run>`) under a raw campaign id: no attribute names, no structure, no reason. The user asked
+for named parameters and each experiment's intent, written into the data where it was missing, and
+for a standing rule that every publication of experiment results states its intent.
+
+**Data.** `run_naming.run_parameter_rows(config)` is the grammar in structured form (`Model` /
+`Loss edits vs <base>` / Architecture / Training / Data & anchors / Supervision sources /
+Conditioning / Control rollout; nothing folded or hashed; `SETTING_SECTIONS` import-guarded).
+`loss_design_name` is now rendered from `loss_design_parts` — name/slug/loss name identical on all
+513 stored configs (snapshot before/after). New tracked registry
+`4dTrajectory/ts_transformer/docs/experiments/intents.json` (`ts-experiment-intents-v1`): 31
+campaigns (title + question + design doc), 66 run intents, 36 variant intents, in Chinese, drafted
+from the arm declarations' `_comment`s and the design docs (two record-campaign intents inferred
+from their `anytime_curve.json`: `anytime_a0b_records_20260908`, and in part
+`anytime_a2b_20260908`). The publisher stamps `experiment.{runName, variantLabel, parameters,
+intent}`, blocks a publication whose group or run has no registry entry, and refreshes all-or-
+nothing.
+
+**Backfill (user-requested).** `--refresh-labels-only` over the three experiment publication
+roots (KRDU 133, KSJC 15, POOLED 8 manifests): all **156** experiment categories on five airports
+stamped; every other byte of the five `categories.json` unchanged (labels, keys, order — diffed
+against backups). No CZML, records or directories touched. `npm run check-publication --server`:
+all airports load.
+
+**Frontend.** `ExperimentPicker` (trigger → portalled two-pane browser) + `ExperimentDetails`
+(intent + named rows; compact card in the panel). Verified in-browser on KRDU (worktree dev server,
+129 runs / 30 campaigns): browse, filter, preview, select → map loads the category; no console
+errors.
+
 ### 2026-09-12 — aeroviz-4d: the `plan` output is a legal picker category (every airport's picker was empty), and the frontend mirror is now test-pinned
 
 **Symptom.** After the plan-and-guidance heads were published (this evening: `experiment_step3g_fan4_head_*_val`, `experiment_step5b_<icao>_fan4_head*_val`), the comparison picker showed NOTHING on all five airports, and restarting the dev server did not help. Console: `[useComparisonCategories] Failed to load categories manifest: Error: comparison categories for KRDU is not a valid manifest`. Every file was served (200, `application/json`); the frontend rejected the manifest itself.

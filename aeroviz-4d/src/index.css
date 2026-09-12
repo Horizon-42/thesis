@@ -859,12 +859,503 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   gap: 2px;
 }
 
-.control-panel-experiment-checkpoint {
-  margin: -2px 0 8px;
+/* ── Experiment picker: a trigger in the panel that opens the experiment browser ───────── */
+.experiment-picker {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.control-panel .experiment-picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid rgba(125, 211, 252, 0.34);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #e2e8f0;
+  text-align: left;
+  font: inherit;
+}
+
+.control-panel .experiment-picker-trigger:hover {
+  background: rgba(30, 58, 95, 0.78);
+}
+
+.control-panel .experiment-picker-trigger[aria-expanded="true"] {
+  border-color: #7dd3fc;
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.3);
+}
+
+.experiment-picker-trigger-text {
+  display: grid;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.experiment-picker-trigger-group {
+  overflow: hidden;
+  color: #7dd3fc;
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.experiment-picker-trigger-run {
+  color: #f1f5f9;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.experiment-picker-trigger-variant,
+.experiment-picker-trigger-metric {
+  color: #94a3b8;
+  font-size: 10.5px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.experiment-picker-trigger-chevron {
+  flex: 0 0 auto;
+  color: #7dd3fc;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* ── Experiment details: intent + named parameter rows (browser pane and panel card) ─────── */
+.experiment-details {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  color: #dbe4f0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.experiment-details.is-compact {
+  gap: 8px;
+  margin: 2px 0 10px;
+  padding: 9px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.45);
+  font-size: 11.5px;
+}
+
+.experiment-details-header h4 {
+  margin: 2px 0 0;
+  color: #f8fafc;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.experiment-details-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  color: #7dd3fc;
+  font-size: 11px;
+}
+
+.experiment-details-group code,
+.experiment-details code {
+  color: #94a3b8;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.experiment-details-variant {
+  margin: 3px 0 0;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.experiment-details-intent {
+  display: grid;
+  gap: 6px;
+}
+
+.experiment-details-intent p {
+  margin: 0;
+}
+
+.experiment-details-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(125, 211, 252, 0.16);
+  color: #7dd3fc;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.experiment-details-campaign {
+  color: #a9b7ca;
+}
+
+.experiment-details-design,
+.experiment-details-legacy {
+  margin: 0;
+  color: #8a97ab;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.experiment-details-missing {
+  margin: 0;
+  padding: 6px 8px;
+  border-left: 2px solid rgba(250, 204, 21, 0.7);
+  background: rgba(250, 204, 21, 0.07);
+  color: #e8d9a0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.experiment-details-parameters {
+  display: grid;
+  gap: 8px;
+}
+
+.experiment-details-section h5 {
+  margin: 0 0 3px;
+  color: #7f8da3;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.experiment-details-section dl {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+}
+
+.experiment-details-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+/* Narrow panel: the attribute name above its value, so long config names never squeeze it. */
+.experiment-details.is-compact .experiment-details-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.experiment-details-row dt {
+  color: #94a3b8;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.experiment-details-row dd {
+  margin: 0;
+  color: #e2e8f0;
+  overflow-wrap: anywhere;
+}
+
+.experiment-details-more summary {
+  color: #7dd3fc;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.experiment-details-more[open] summary {
+  margin-bottom: 6px;
+}
+
+.experiment-details-more .experiment-details-section + .experiment-details-section {
+  margin-top: 8px;
+}
+
+.experiment-details-checkpoint {
+  display: grid;
+  gap: 1px;
+  margin: 0;
   color: #75859b;
   font-size: 10px;
-  line-height: 1.35;
+}
+
+/* ── Experiment browser: campaigns + runs on the left, the previewed run on the right ────── */
+.experiment-browser {
+  position: fixed;
+  z-index: 170;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid rgba(125, 211, 252, 0.32);
+  border-radius: 12px;
+  background: rgba(8, 15, 30, 0.97);
+  box-shadow: 0 24px 64px rgba(2, 6, 23, 0.72);
+  color: #e2e8f0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 12px;
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.experiment-browser-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.experiment-browser-titles {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.experiment-browser-titles h3 {
+  margin: 0;
+  color: #7dd3fc;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.experiment-browser-titles p {
+  margin: 3px 0 0;
+  color: #94a3b8;
+  font-size: 10.5px;
+}
+
+.experiment-browser-search {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.6);
+  color: #e2e8f0;
+  font: inherit;
+}
+
+.experiment-browser-search:focus {
+  border-color: #7dd3fc;
+  outline: none;
+}
+
+.experiment-browser-close {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid #3a4a6a;
+  border-radius: 4px;
+  background: #2a3550;
+  color: #c8d8ec;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.experiment-browser-close:hover {
+  background: #3a4f78;
+}
+
+.experiment-browser-body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(250px, 0.9fr) minmax(0, 1.1fr);
+  min-height: 0;
+}
+
+.experiment-browser-list,
+.experiment-browser-detail {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.experiment-browser-list {
+  /* the offsetParent of its runs, so the open-on-active scroll can measure them */
+  position: relative;
+  padding: 6px 6px 12px;
+  border-right: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.experiment-browser-detail {
+  padding: 14px 16px 18px;
+}
+
+.experiment-browser-empty {
+  margin: 12px 8px;
+  color: #8a97ab;
+  font-style: italic;
+}
+
+.experiment-browser-group + .experiment-browser-group {
+  margin-top: 2px;
+}
+
+.experiment-browser-group-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #dbeafe;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.experiment-browser-group-header:hover {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.experiment-browser-chevron {
+  flex: 0 0 auto;
+  color: #7dd3fc;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+
+.experiment-browser-group.is-open .experiment-browser-chevron {
+  transform: rotate(90deg);
+}
+
+.experiment-browser-group-title {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* The campaign id (it carries the date, and it is what the list is ordered by). */
+.experiment-browser-group-title code {
+  color: #7f8da3;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.experiment-browser-group-count {
+  flex: 0 0 auto;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: rgba(148, 163, 184, 0.16);
+  color: #aebbd0;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.experiment-browser-group-intent {
+  margin: 0 8px 6px 29px;
+  color: #93a4bb;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.experiment-browser-runs {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 8px 21px;
+  padding: 0;
+  list-style: none;
+}
+
+.experiment-browser-run {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.experiment-browser-run:hover,
+.experiment-browser-run.is-preview {
+  border-color: rgba(125, 211, 252, 0.22);
+  background: rgba(30, 58, 95, 0.45);
+}
+
+.experiment-browser-run:focus-visible {
+  outline: 2px solid #7dd3fc;
+  outline-offset: -1px;
+}
+
+.experiment-browser-run.is-active {
+  border-color: rgba(125, 211, 252, 0.55);
+  background: rgba(14, 116, 144, 0.28);
+}
+
+.experiment-browser-run-name {
+  color: #f1f5f9;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.experiment-browser-run.is-active .experiment-browser-run-name::before {
+  content: "● ";
+  color: #7dd3fc;
+}
+
+.experiment-browser-run-variant {
+  color: #94a3b8;
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.experiment-browser-run-intent {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #a9b7ca;
+  font-size: 11px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.experiment-browser-run-metric {
+  justify-self: start;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: rgba(34, 197, 94, 0.14);
+  color: #86efac;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Narrow viewports: one column, the list above the previewed run. */
+@media (max-width: 640px) {
+  .experiment-browser-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .experiment-browser-list {
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  }
 }
 
 .evaluation-summary-summary-only {

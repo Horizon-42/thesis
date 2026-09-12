@@ -27,6 +27,10 @@ Everything is derived from the run's serialized config dict — the exact object
 ``history.json['config']``, checkpoint metadata, and experiment/publication manifests —
 so a name can always be recomputed for any run ever trained, without touching artifacts.
 
+The same grammar has a STRUCTURED form, :func:`run_parameter_rows`: every part as a named
+row, the loss design's edits and every non-default setting listed in full (no ``+N more``, no
+hash) under a section — what the frontend Experiments picker renders as the run's parameters.
+
 Names describe a config relative to TODAY'S defaults: when a default changes, old runs'
 names gain (or lose) a meta item. That is deliberate — the name answers "what was
 special about this run", and "special" is defined by the current baseline.
@@ -406,6 +410,46 @@ _both = sorted(_named & set(KNOWN_UNNAMED_FIELDS))
 if _both:
     raise AssertionError(f"fields both named and excused from naming: {_both}")
 
+#: The structured view's sections for the META_FIELDS deviations (``run_parameter_rows``),
+#: in display order. ``seed`` is not here: it is always shown, in the ``Model`` rows.
+SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Architecture", (
+        "d_model", "n_heads", "d_ff", "e_layers", "dropout", "patch_len", "stride",
+        "n_segments", "seq_len", "dt_s", "full_horizon_steps", "window_horizon_steps",
+        "use_norm", "revin", "duration_head",
+    )),
+    ("Training", (
+        "epochs", "patience", "batch_size", "learning_rate", "weight_decay",
+        "lr_plateau_metric", "lr_plateau_patience", "lr_plateau_factor",
+        "checkpoint_selection_metric", "validation_common_grid_points",
+        "control_gradient_clip_norm",
+    )),
+    ("Data & anchors", (
+        "split_seed", "val_fraction", "test_fraction", "aircraft_filter", "aircraft_type",
+        "coordinate_frame", "state_position_reference", "reference_velocity_source",
+        "random_train_anchor", "random_train_anchor_sampling", "random_train_anchor_l1_share",
+        "random_train_anchor_min_future_s", "training_cohort_min_future_s",
+    )),
+    ("Supervision sources", (
+        "closure_labels_path", "control_fitted_teacher_path",
+        "plan_rolled_windows_path", "plan_rolled_share",
+    )),
+    ("Conditioning", ("target_conditioning", *INTENT_FIELDS, *CTA_FIELDS)),
+    ("Control rollout", (
+        "control_duration_parameterization", "control_duration_uniform_floor",
+        "control_rollout_integrator_dt_s", *CONTROL_HOOK_FIELDS,
+    )),
+)
+_SECTION_OF = {field: section for section, fields in SETTING_SECTIONS for field in fields}
+_sectioned = [field for _, fields in SETTING_SECTIONS for field in fields]
+if len(_sectioned) != len(set(_sectioned)) or set(_sectioned) != set(META_FIELDS) - {"seed"}:
+    # fail at import: a META field added without a section would vanish from the picker
+    raise AssertionError(
+        "SETTING_SECTIONS must place every META_FIELDS entry but seed exactly once: missing "
+        f"{sorted(set(META_FIELDS) - {'seed'} - set(_sectioned))}, unknown "
+        f"{sorted(set(_sectioned) - set(META_FIELDS))}"
+    )
+
 
 def _norm(value: Any) -> Any:
     return tuple(_norm(item) for item in value) if isinstance(value, (list, tuple)) else value
@@ -514,23 +558,26 @@ def _non_loss_recipe_mismatches(
     )
 
 
-def loss_design_name(config: Mapping[str, Any]) -> str:
-    """Field 4: the named recipe, or nearest-recipe + edits, or a hash version."""
+def loss_design_parts(config: Mapping[str, Any]) -> tuple[str, list[tuple[str, Any]]]:
+    """Field 4 decomposed: the base design and EVERY loss-field edit from it, unfolded.
+
+    The base is the output's own versioned objective (``state-v1`` / ``closure-v1`` /
+    ``plan-v1``), the named recipe, or — for a ``custom`` control run — its NEAREST recipe
+    (``custom`` itself when no recipe is nearer than the plain defaults). ``loss_design_name``
+    renders the name from this; the structured parameter view lists the edits in full.
+    """
     if config.get("prediction_output") == PREDICTION_CLOSURE:
-        return _with_diffs(config, CLOSURE_LOSS_FIELDS, CLOSURE_LOSS_BASE)
+        return CLOSURE_LOSS_BASE, _field_diffs(config, CLOSURE_LOSS_FIELDS)
     if config.get("prediction_output") == PREDICTION_PLAN:
-        return _with_diffs(config, PLAN_LOSS_FIELDS, PLAN_LOSS_BASE)
+        return PLAN_LOSS_BASE, _field_diffs(config, PLAN_LOSS_FIELDS)
     if config.get("prediction_output") != PREDICTION_CONTROL:
-        return _with_state_diffs(config)
+        return STATE_LOSS_BASE, _field_diffs(config, STATE_LOSS_FIELDS)
     recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
     if recipe != CONTROL_RECIPE_CUSTOM:
         # A named recipe freezes its own fields, but leaves later-added objective fields
         # (the final-approach penalty) open: a run that sets one is the recipe plus that
         # edit, and must not wear the bare name.
-        edits = _loss_diffs_against(config, control_recipe_overrides(recipe))
-        if not edits:
-            return recipe
-        return f"{recipe}+({', '.join(_diff_items(edits))})"
+        return recipe, _loss_diffs_against(config, control_recipe_overrides(recipe))
     # Name the custom run against its nearest recipe: fewest loss-field edits wins, then
     # fewest edits among the NON-loss fields the recipe also freezes, then a later recipe
     # (CONTROL_RECIPE_NAMES is oldest→newest, custom first). The second key exists because
@@ -547,29 +594,29 @@ def loss_design_name(config: Mapping[str, Any]) -> str:
         rank = (len(diffs), _non_loss_recipe_mismatches(config, overrides))
         if rank <= best_rank:
             best_name, best_diffs, best_rank = candidate, diffs, rank
-    if not best_diffs:
-        return best_name
-    if len(best_diffs) <= _MAX_LISTED_DIFFS:
-        joined = ", ".join(_diff_items(best_diffs))
-        if best_name == CONTROL_RECIPE_CUSTOM:
+    return best_name, best_diffs
+
+
+def loss_design_name(config: Mapping[str, Any]) -> str:
+    """Field 4: the named recipe, or nearest-recipe + edits, or a hash version."""
+    base, diffs = loss_design_parts(config)
+    if not diffs:
+        return base
+    if config.get("prediction_output") != PREDICTION_CONTROL:
+        # state / closure / plan: the output's own objective, edits inline up to the cap.
+        if len(diffs) <= _MAX_LISTED_DIFFS:
+            return f"{base}({', '.join(_diff_items(diffs))})"
+        return f"{base}-{_diff_hash(diffs)}"
+    if (config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM) != CONTROL_RECIPE_CUSTOM:
+        return f"{base}+({', '.join(_diff_items(diffs))})"
+    if len(diffs) <= _MAX_LISTED_DIFFS:
+        joined = ", ".join(_diff_items(diffs))
+        if base == CONTROL_RECIPE_CUSTOM:
             return f"custom({joined})"
-        return f"{best_name}+({joined})"
+        return f"{base}+({joined})"
     # Too complex to spell out: a stable content version, hashed over the edits
     # relative to the plain defaults so the name is baseline-independent.
     return f"custom-{_diff_hash(_loss_diffs_against(config, {}))}"
-
-
-def _with_state_diffs(config: Mapping[str, Any]) -> str:
-    return _with_diffs(config, STATE_LOSS_FIELDS, STATE_LOSS_BASE)
-
-
-def _with_diffs(config: Mapping[str, Any], fields: tuple[str, ...], base: str) -> str:
-    diffs = _field_diffs(config, fields)
-    if not diffs:
-        return base
-    if len(diffs) <= _MAX_LISTED_DIFFS:
-        return f"{base}({', '.join(_diff_items(diffs))})"
-    return f"{base}-{_diff_hash(diffs)}"
 
 
 def dynamics_name(config: Mapping[str, Any]) -> str:
@@ -598,6 +645,29 @@ def dynamics_name(config: Mapping[str, Any]) -> str:
     return name
 
 
+def _meta_diffs(
+    config: Mapping[str, Any], *, include_recipe_frozen: bool = False
+) -> list[tuple[str, Any]]:
+    """The META_FIELDS deviations, in display-priority order.
+
+    A named recipe's frozen fields are part of its name, so the NAME skips them; the
+    structured rows (``include_recipe_frozen``) list them, because there the question is
+    "what does this run use", not "what is special about it".
+    """
+    exclude: frozenset[str] = frozenset()
+    if not include_recipe_frozen:
+        recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
+        exclude = frozenset(control_recipe_overrides(recipe))
+    diffs = _field_diffs(config, META_FIELDS, exclude=exclude)
+    # split_seed defaults to None = "use seed"; recording it equal to seed is a spelling
+    # of the default, not a deviation.
+    return [
+        (field, value)
+        for field, value in diffs
+        if not (field == "split_seed" and value == config.get("seed", _DEFAULTS["seed"]))
+    ]
+
+
 def meta_items(config: Mapping[str, Any]) -> list[str]:
     """Field 5, config-derived part: non-default horizon + non-default META_FIELDS.
 
@@ -610,16 +680,7 @@ def meta_items(config: Mapping[str, Any]) -> list[str]:
         items.append("full horizon")
     elif horizon == HORIZON_WINDOW:
         items.append("recursive window")
-    recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
-    frozen = frozenset(control_recipe_overrides(recipe))
-    diffs = _field_diffs(config, META_FIELDS, exclude=frozen)
-    # split_seed defaults to None = "use seed"; recording it equal to seed is a spelling
-    # of the default, not a deviation.
-    diffs = [
-        (field, value)
-        for field, value in diffs
-        if not (field == "split_seed" and value == config.get("seed", _DEFAULTS["seed"]))
-    ]
+    diffs = _meta_diffs(config)
     listed = _diff_items(diffs[:_MAX_LISTED_META])
     if len(diffs) > _MAX_LISTED_META:
         listed.append(f"+{len(diffs) - _MAX_LISTED_META} more")
@@ -637,15 +698,7 @@ def dropped_meta_diffs(config: Mapping[str, Any]) -> list[tuple[str, Any]]:
     barrier gains and, since 2026-09-08, ``control_speed_floor_margin`` behind them — are the
     first things to fold.
     """
-    recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
-    frozen = frozenset(control_recipe_overrides(recipe))
-    diffs = _field_diffs(config, META_FIELDS, exclude=frozen)
-    diffs = [
-        (field, value)
-        for field, value in diffs
-        if not (field == "split_seed" and value == config.get("seed", _DEFAULTS["seed"]))
-    ]
-    return diffs[_MAX_LISTED_META:]
+    return _meta_diffs(config)[_MAX_LISTED_META:]
 
 
 def output_name(config: Mapping[str, Any]) -> str:
@@ -673,6 +726,52 @@ def run_display_name(config: Mapping[str, Any], *, extra: Sequence[str] = ()) ->
     if meta:
         parts.append(", ".join(meta))
     return " · ".join(parts)
+
+
+def run_parameter_rows(config: Mapping[str, Any]) -> list[dict[str, str]]:
+    """The grammar in structured form: ``{section, name, value[, field]}`` rows, in order.
+
+    ``Model`` names the grammar's parts (output, backbone, dynamics, loss design) plus the
+    horizon and the seed, always. ``Loss edits vs <base>`` lists every loss-field edit from the
+    loss design's base, and each setting section every non-default META field — ALL of them,
+    recipe-frozen ones included: the display name folds past six items and hashes a long loss
+    design, this view never does. A settings row's ``name`` IS the config field; a ``Model``
+    row names the field it chiefly reads as ``field`` — none for the dynamics and the loss
+    design, which are composed from several (flight model + τ + backend; recipe + edits).
+    """
+    backbone = str(config.get("model") or "?")
+    model_rows: list[tuple[str, str, str | None]] = [
+        ("Output", output_name(config), "prediction_output"),
+        ("Backbone", _BACKBONE_DISPLAY.get(backbone, backbone), "model"),
+        ("Dynamics", dynamics_name(config), None),
+        ("Loss design", loss_design_name(config), None),
+        ("Horizon", _fmt(config.get("horizon_mode", _DEFAULTS["horizon_mode"])), "horizon_mode"),
+        ("Seed", _fmt(config.get("seed", _DEFAULTS["seed"])), "seed"),
+    ]
+    rows: list[dict[str, str]] = []
+    for name, value, field in model_rows:
+        row = {"section": "Model", "name": name, "value": value}
+        if field is not None:
+            row["field"] = field
+        rows.append(row)
+    base, loss_edits = loss_design_parts(config)
+    section = f"Loss edits vs {base}"
+    rows.extend(
+        {"section": section, "name": field, "value": _display_value(field, value)}
+        for field, value in loss_edits
+    )
+    settings = [
+        (field, value)
+        for field, value in _meta_diffs(config, include_recipe_frozen=True)
+        if field != "seed"
+    ]
+    for section, _fields in SETTING_SECTIONS:
+        rows.extend(
+            {"section": section, "name": field, "value": _display_value(field, value)}
+            for field, value in settings
+            if _SECTION_OF[field] == section
+        )
+    return rows
 
 
 def category_display_label(split: str, display_name: str, *, kind: str = "Predicted") -> str:

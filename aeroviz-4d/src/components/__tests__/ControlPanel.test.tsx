@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const {
   appState,
@@ -447,9 +447,11 @@ describe("ControlPanel", () => {
     render(<ControlPanel />);
 
     expect((screen.getByLabelText("Result source") as HTMLSelectElement).value).toBe("experiment");
-    expect((screen.getByLabelText("Experiment model") as HTMLSelectElement).value)
-      .toBe("campaign/stage/run");
-    expect(screen.getByLabelText("Experiment model").textContent).toContain("normalized time");
+    const picker = screen.getByLabelText("Experiment model");
+    expect(picker.getAttribute("aria-expanded")).toBe("false");
+    // An unstamped publish: the flat label names the run, and the card says the intent is missing.
+    expect(picker.textContent).toContain("normalized time");
+    expect(screen.getByText(/No intent recorded/)).toBeTruthy();
     const split = screen.getByLabelText("Dataset split") as HTMLSelectElement;
     expect([...split.options].map((option) => option.value)).toEqual([
       "experiment_run_train",
@@ -458,6 +460,147 @@ describe("ControlPanel", () => {
     fireEvent.change(split, { target: { value: "experiment_run_train" } });
     expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("experiment_run_train");
     expect(screen.getByText("campaign/stage/run/checkpoint.pt")).toBeTruthy();
+  });
+
+  function stampedExperiment(run: string, group: string, dModel: string) {
+    return {
+      id: `${group}/${run}`,
+      group,
+      checkpoint: `${group}/${run}/checkpoint.pt`,
+      label: `control · iTransformer · point-mass · simple-v3 · ${run}`,
+      runName: run,
+      variantLabel: null,
+      intent: { groupTitle: `${group} title`, group: `${group} question`, run: `why ${run}` },
+      parameters: [
+        { section: "Model", name: "Output", value: "control", field: "prediction_output" },
+        { section: "Architecture", name: "d_model", value: dModel },
+      ],
+      predictionOutput: "control" as const,
+    };
+  }
+
+  function showStampedExperiments(): void {
+    appState.layers.trajectories = true;
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = "experiment_a_val";
+    appState.comparisonCategories = [
+      {
+        ...category("experiment_a_val", false, 5),
+        datasetSplit: "val",
+        resultSource: "experiment",
+        experiment: stampedExperiment("arm_a", "alpha", "512"),
+      },
+      {
+        ...category("experiment_b_train", false, 5),
+        datasetSplit: "train",
+        resultSource: "experiment",
+        experiment: stampedExperiment("arm_b", "beta", "256"),
+      },
+      {
+        ...category("experiment_b_val", false, 5),
+        datasetSplit: "val",
+        resultSource: "experiment",
+        experiment: stampedExperiment("arm_b", "beta", "256"),
+      },
+    ];
+  }
+
+  it("shows the selected run's intent and named Model rows in the panel card", () => {
+    showStampedExperiments();
+
+    render(<ControlPanel />);
+
+    const trigger = screen.getByLabelText("Experiment model");
+    expect(trigger.textContent).toContain("alpha title");
+    expect(trigger.textContent).toContain("arm_a");
+    expect(screen.getByText("why arm_a")).toBeTruthy();
+    expect(screen.getByText("alpha question")).toBeTruthy();
+    const model = screen.getByRole("region", { name: "Model" });
+    expect(within(model).getByText("Output").nextSibling?.textContent).toBe("control");
+    // The other sections fold behind a disclosure in the narrow panel.
+    expect(screen.getByText("All parameters (1 more)")).toBeTruthy();
+    expect(screen.getByText("alpha/arm_a/checkpoint.pt")).toBeTruthy();
+  });
+
+  it("opens a browser of campaigns with their question and previews a run's parameters", () => {
+    showStampedExperiments();
+    render(<ControlPanel />);
+
+    fireEvent.click(screen.getByLabelText("Experiment model"));
+    const browser = screen.getByRole("dialog", { name: "Experiment browser" });
+    const list = within(browser).getByRole("navigation", { name: "Experiment campaigns" });
+    // The active run's campaign is open with its question; the other starts collapsed.
+    expect(within(list).getByText("alpha question")).toBeTruthy();
+    expect(within(list).queryByText("beta question")).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: /beta title/ }));
+    expect(within(list).getByText("beta question")).toBeTruthy();
+
+    // Hover previews: the detail pane names every parameter.
+    const armB = within(list).getByRole("button", { name: /arm_b/ });
+    fireEvent.mouseEnter(armB);
+    const detail = browser.querySelector(".experiment-browser-detail") as HTMLElement;
+    expect(within(detail).getByRole("heading", { name: "arm_b" })).toBeTruthy();
+    expect(within(detail).getByText("d_model").nextSibling?.textContent).toBe("256");
+
+    // A click shows the run — its validation publication — and closes the browser.
+    fireEvent.click(armB);
+    expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("experiment_b_val");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("filters the browser across intent and parameters, and closes on Escape", () => {
+    showStampedExperiments();
+    render(<ControlPanel />);
+
+    fireEvent.click(screen.getByLabelText("Experiment model"));
+    const browser = screen.getByRole("dialog", { name: "Experiment browser" });
+    fireEvent.change(within(browser).getByLabelText("Filter experiments"), {
+      target: { value: "d_model 256" },
+    });
+    // Filtering opens every campaign that still has a match.
+    const list = within(browser).getByRole("navigation", { name: "Experiment campaigns" });
+    expect(within(list).queryByRole("button", { name: /arm_a/ })).toBeNull();
+    expect(within(list).getByRole("button", { name: /arm_b/ })).toBeTruthy();
+    fireEvent.change(within(browser).getByLabelText("Filter experiments"), {
+      target: { value: "no such run" },
+    });
+    expect(within(browser).getByText(/No run matches/)).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(setTrajectoryComparisonCategory).not.toHaveBeenCalled();
+  });
+
+  it("closes on a press outside it — pointerdown, which the Cesium canvas still delivers", () => {
+    showStampedExperiments();
+    render(<ControlPanel />);
+    const trigger = screen.getByLabelText("Experiment model");
+    // The trigger's accessible name carries the selected run, not only the field's label.
+    expect(trigger.getAttribute("aria-labelledby")?.split(" ")).toHaveLength(2);
+
+    fireEvent.click(trigger);
+    const browser = screen.getByRole("dialog", { name: "Experiment browser" });
+    fireEvent.pointerDown(within(browser).getByLabelText("Filter experiments"));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("walks the runs with the arrow keys and returns to the filter box", () => {
+    showStampedExperiments();
+    render(<ControlPanel />);
+    fireEvent.click(screen.getByLabelText("Experiment model"));
+    const browser = screen.getByRole("dialog", { name: "Experiment browser" });
+    const filter = within(browser).getByLabelText("Filter experiments");
+    expect(document.activeElement).toBe(filter);
+
+    fireEvent.keyDown(filter, { key: "ArrowDown" });
+    const first = document.activeElement as HTMLElement;
+    expect(first.className).toContain("experiment-browser-run");
+    expect(first.textContent).toContain("arm_a");
+    fireEvent.keyDown(first, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(filter);
   });
 
   it("shows only optimizer-category paths, explains result overrides, and omits Optimize states", () => {

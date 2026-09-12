@@ -68,6 +68,16 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   Optimizer publishes never stamp `resultSource` — absent field + non-`ts_` key ⇒
   optimization; the `ts_` prefix is the legacy marker for pre-`resultSource` data-driven
   publishes. Don't re-derive this split locally.
+- **Experiments picker = `ExperimentPicker`** (a trigger in the panel that opens a portalled
+  two-pane browser: campaigns as collapsible headings WITH their question, runs WITH their
+  intent, a filter over names/intent/parameters, the hovered run previewed) **+
+  `ExperimentDetails`** (intent + every parameter as a named row by section; also the panel's
+  compact card). They read the publisher-stamped `experiment.runName / variantLabel / intent /
+  parameters` — optional in the types (an unstamped publish falls back to the flat `label` and
+  says "No intent recorded"), but SHAPE-checked when present, so a malformed one empties the
+  airport's picker like any other field; `npm run check-publication` names
+  `experiment.intent` / `experiment.parameters[i]`. Grouping/filtering:
+  `trajectoryResultSources.experimentGroups` / `experimentMatches`.
 
 ## Build config
 

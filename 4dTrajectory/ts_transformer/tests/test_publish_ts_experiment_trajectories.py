@@ -14,6 +14,31 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+_INTENTS = {
+    "schemaVersion": publisher.INTENT_REGISTRY_SCHEMA,
+    "campaigns": {
+        "campaign": {
+            "title": "Test campaign",
+            "intent": "What the test campaign asks.",
+            "runs": {"stage_run_seed1337": "What the test run changes."},
+        },
+        "anytime_records_20260908": {
+            "title": "Anytime records",
+            "intent": "Replay checkpoints on the remaining-path anchor grid.",
+        },
+    },
+}
+
+
+@pytest.fixture(autouse=True)
+def intent_registry(tmp_path, monkeypatch) -> Path:
+    """Every experiment publication needs a registered intent; a test edits this copy."""
+    path = tmp_path / "intents.json"
+    _write_json(path, _INTENTS)
+    monkeypatch.setattr(publisher, "INTENT_REGISTRY", path)
+    return path
+
+
 def _indexed_checkpoint(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "experiments"
     run = root / "campaign" / "stage" / "run_seed1337"
@@ -932,3 +957,162 @@ def test_publication_manifest_serializes_external_output_roots(monkeypatch, tmp_
 
     assert document["rawOutputDir"] == str(plan.output_dir)
     assert document["frontendDir"] == str(plan.comparison_dir)
+
+
+# ── intent + structured parameters: what the Experiments picker shows ─────────────────────
+
+def _val_plan(tmp_path: Path, experiment, **kwargs) -> "publisher.PublicationPlan":
+    return publisher.PublicationPlan(
+        experiment, "KRDU", "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+        **kwargs,
+    )
+
+
+def test_experiment_metadata_carries_the_intent_and_the_parameter_rows(monkeypatch, tmp_path):
+    from ts_transformer.run_naming import run_parameter_rows
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+
+    metadata = _val_plan(tmp_path, experiment).experiment_metadata
+
+    assert metadata["intent"] == {
+        "groupTitle": "Test campaign",
+        "group": "What the test campaign asks.",
+        "run": "What the test run changes.",
+    }
+    assert metadata["runName"] == "stage_run_seed1337"
+    assert metadata["variantLabel"] is None
+    assert metadata["parameters"] == run_parameter_rows(experiment.config)
+    assert metadata["parameters"][0] == {
+        "section": "Model", "name": "Output", "value": "control", "field": "prediction_output",
+    }
+
+
+def test_a_variant_takes_its_own_intent_when_one_is_registered(
+    monkeypatch, tmp_path, intent_registry,
+):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    directory = _plain_prediction_dir(tmp_path, checkpoint, "projected_pred_val")
+    variant = publisher._parse_category_variant("project-faf=inference projection")
+    plan = _variant_plan(tmp_path, experiment, directory, variant)
+    assert "variant" not in plan.experiment_metadata["intent"]
+    assert plan.experiment_metadata["variantLabel"] == "inference projection"
+
+    registry = json.loads(intent_registry.read_text())
+    registry["campaigns"]["campaign"]["variants"] = {
+        "stage_run_seed1337@project-faf": "Why the projection exists.",
+    }
+    _write_json(intent_registry, registry)
+
+    assert plan.experiment_metadata["intent"]["variant"] == "Why the projection exists."
+
+
+def test_an_anytime_bin_reads_its_heading_from_the_record_campaign_and_its_run_from_training(
+    monkeypatch, tmp_path, intent_registry,
+):
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _anytime_plan(tmp_path, experiment, _anytime_records(tmp_path, checkpoint))
+
+    intent = plan.experiment_metadata["intent"]
+    assert intent["groupTitle"] == "Anytime records"
+    assert intent["run"] == "What the test run changes."
+
+
+def test_a_publication_without_a_registered_intent_is_blocked_before_any_work(
+    monkeypatch, tmp_path, intent_registry,
+):
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    registry = json.loads(intent_registry.read_text())
+    del registry["campaigns"]["campaign"]["runs"]["stage_run_seed1337"]
+    _write_json(intent_registry, registry)
+    monkeypatch.setattr(publisher.subprocess, "run", lambda *a, **k: pytest.fail("ran"))
+    plan = _val_plan(tmp_path, experiment)
+
+    status = publisher.run_publication(plan, dry_run=False, force=False, fail_fast=True)
+
+    assert status == "blocked"
+    assert not plan.publication_manifest.exists()
+    with pytest.raises(publisher.MissingIntentError, match="stage_run_seed1337"):
+        plan.experiment_metadata
+    # the predict/evaluate/CZML chain does not need the intent — only the stamped metadata
+    assert dict(plan.commands())["publish-czml"]
+
+
+def test_a_prediction_publication_needs_no_intent(monkeypatch, tmp_path, intent_registry):
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    _write_json(intent_registry, {**_INTENTS, "campaigns": {}})
+    monkeypatch.setattr(publisher.PublicationPlan, "preflight_error", lambda self: None)
+    plan = _val_plan(tmp_path, experiment, result_source="prediction")
+
+    assert publisher.run_publication(plan, dry_run=True, force=False, fail_fast=True) == "planned"
+
+
+def test_refresh_writes_nothing_while_a_listed_category_lacks_an_intent(
+    monkeypatch, tmp_path, intent_registry,
+):
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = _val_plan(tmp_path, experiment)
+    _write_json(plan.publication_manifest, {
+        "schemaVersion": publisher.PUBLICATION_SCHEMA,
+        "status": "completed",
+        "experimentId": experiment.experiment_id,
+        "campaign": experiment.campaign,
+        "runId": experiment.run_id,
+        "checkpoint": experiment.checkpoint_relative,
+        "airport": "KRDU",
+        "split": "val",
+        "resultSource": "experiment",
+        "category": plan.category,
+        "config": experiment.config,
+    })
+    manifest = plan.comparison_dir.parent / "categories.json"
+    _write_json(manifest, {"categories": [{"key": plan.category, "label": "legacy"}]})
+    before = manifest.read_text()
+    _write_json(intent_registry, {**_INTENTS, "campaigns": {}})
+
+    with pytest.raises(publisher.MissingIntentError, match="KRDU/" + plan.category):
+        publisher.refresh_labels_from_manifests(tmp_path / "published", tmp_path / "frontend")
+    assert manifest.read_text() == before
+
+    # a publication whose category is no longer listed is reported, never blocking
+    _write_json(manifest, {"categories": []})
+    assert publisher.refresh_labels_from_manifests(
+        tmp_path / "published", tmp_path / "frontend"
+    ) == (1, 0)
+
+
+@pytest.mark.parametrize("entry, message", [
+    ({"title": "", "intent": "x"}, "non-empty `title` and `intent`"),
+    ({"title": "t"}, "non-empty `title` and `intent`"),
+    ({"title": "t", "intent": "x", "runs": {"r": ""}}, "runs must map"),
+    ({"title": "t", "intent": "x", "variants": ["r@v"]}, "variants must map"),
+    ({"title": "t", "intent": "x", "design": ""}, "design must be"),
+])
+def test_the_registry_refuses_a_malformed_entry(tmp_path, entry, message):
+    path = tmp_path / "bad.json"
+    _write_json(path, {"schemaVersion": publisher.INTENT_REGISTRY_SCHEMA,
+                       "campaigns": {"c": entry}})
+    with pytest.raises(ValueError, match=message):
+        publisher.load_intent_campaigns(path)
+
+
+def test_the_repository_intent_registry_is_well_formed():
+    """The tracked registry itself: a malformed entry would block every publication."""
+    campaigns = publisher.load_intent_campaigns(
+        publisher._TS_DIR / "docs" / "experiments" / "intents.json"
+    )
+    assert campaigns
+

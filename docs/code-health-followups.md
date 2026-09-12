@@ -193,6 +193,12 @@ failures**, the 13 above plus two that are new since 2026-08-20 and both predate
 Every ts_transformer test passes in the same run (they had been uncollectable, not failing,
 while `cli/freeze_test.py` matched the `*_test.py` pattern); `aeroviz-4d/python` 155 passed.
 
+**Re-verified 2026-09-13** (worktree off `dev-leg-ctrl` at `d654872`, experiment-picker change;
+neither failing test imports a changed module, and both fail when run alone): **3 failures,
+1872 passed** — the numpy one, `test_write_reference_records_from_observed_tracks` (same
+`source.arr_airport` refusal) and `test_download_reuses_interrupted_checkpoint_start_for_cache_keys`.
+The twelve `test_ts_pipeline.py` failures no longer appear; `aeroviz-4d/python` 157 passed.
+
 **Judgement**: the eleven are assertion drift rather than broken behaviour — the pipeline
 itself runs — but that is inferred from the assertion text, not from exercising the runner.
 

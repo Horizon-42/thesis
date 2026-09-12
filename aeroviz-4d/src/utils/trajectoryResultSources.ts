@@ -1,6 +1,8 @@
 import type {
   ComparisonCategory,
   ComparisonResultSource,
+  ExperimentIntent,
+  ExperimentParameterRow,
   ExperimentPredictionOutput,
 } from "../data/airportData";
 
@@ -93,8 +95,17 @@ export function sortCategoriesByAccuracy(
 export interface ExperimentOption {
   id: string;
   group: string;
+  /** The group's heading: the registry title, or the campaign id for unstamped publishes. */
+  groupTitle: string;
   /** Ready-to-render display label — see {@link experimentOptionLabel}. */
   label: string;
+  /** The run's short name (its id); unstamped publishes fall back to the full label. */
+  runName: string;
+  /** Which records these are (anytime bin, predict-time hook …); null for the plain run. */
+  variantLabel: string | null;
+  intent: ExperimentIntent | null;
+  parameters: ExperimentParameterRow[];
+  checkpoint: string;
   model?: string | null;
   predictionOutput?: ExperimentPredictionOutput | null;
   horizonMode?: "normalized" | "full" | "window" | null;
@@ -141,10 +152,17 @@ export function experimentOptions(
   for (const category of categories) {
     const experiment = category.experiment;
     if (!isExperimentCategory(category) || !experiment || byId.has(experiment.id)) continue;
+    const label = experimentOptionLabel(experiment);
     byId.set(experiment.id, {
       id: experiment.id,
       group: experiment.group,
-      label: experimentOptionLabel(experiment),
+      groupTitle: experiment.intent?.groupTitle ?? experiment.group,
+      label,
+      runName: experiment.runName ?? label,
+      variantLabel: experiment.variantLabel ?? null,
+      intent: experiment.intent ?? null,
+      parameters: experiment.parameters ?? [],
+      checkpoint: experiment.checkpoint,
       model: experiment.model,
       predictionOutput: experiment.predictionOutput,
       horizonMode: experiment.horizonMode,
@@ -169,8 +187,71 @@ export function experimentOptions(
         if (a !== b) return a - b;
       }
     }
-    return left.label.localeCompare(right.label);
+    // By what the browser shows — the run's name, then its variant — numerically, so a
+    // campaign's "@ 6km" bin precedes its "@ 12km" one.
+    return RUN_ORDER.compare(left.runName, right.runName) ||
+      RUN_ORDER.compare(left.variantLabel ?? "", right.variantLabel ?? "") ||
+      RUN_ORDER.compare(left.label, right.label);
   });
+}
+
+const RUN_ORDER = new Intl.Collator(undefined, { numeric: true });
+
+/** One heading of the experiment browser: a campaign and its runs, in option order. */
+export interface ExperimentGroup {
+  id: string;
+  title: string;
+  /** The campaign's question — from its first stamped run; null when none is stamped. */
+  intent: string | null;
+  design: string | null;
+  experiments: ExperimentOption[];
+}
+
+export function experimentGroups(experiments: ExperimentOption[]): ExperimentGroup[] {
+  const groups = new Map<string, ExperimentGroup>();
+  for (const experiment of experiments) {
+    let group = groups.get(experiment.group);
+    if (!group) {
+      group = {
+        id: experiment.group,
+        title: experiment.group,
+        intent: null,
+        design: null,
+        experiments: [],
+      };
+      groups.set(experiment.group, group);
+    }
+    // Heading and question from the same run — the first stamped one — so a campaign that is
+    // only partly stamped never pairs its raw id with the registry's question.
+    if (group.intent === null && experiment.intent) {
+      group.title = experiment.intent.groupTitle;
+      group.intent = experiment.intent.group;
+      group.design = experiment.intent.design ?? null;
+    }
+    group.experiments.push(experiment);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * Case-insensitive match of every whitespace-separated term against what the browser shows
+ * for a run: its names, its campaign, its intent and its parameter rows.
+ */
+export function experimentMatches(experiment: ExperimentOption, query: string): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const haystack = [
+    experiment.runName,
+    experiment.variantLabel,
+    experiment.label,
+    experiment.group,
+    experiment.groupTitle,
+    experiment.intent?.group,
+    experiment.intent?.run,
+    experiment.intent?.variant,
+    ...experiment.parameters.flatMap((row) => [row.name, row.value]),
+  ].filter(Boolean).join("\n").toLowerCase();
+  return terms.every((term) => haystack.includes(term));
 }
 
 export function categoryForExperimentSplit(

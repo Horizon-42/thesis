@@ -199,6 +199,16 @@ Short index; the full text (with measurements) is in the named file, which loads
 - **Observed tracks have TWO time windows** (first reception vs the 25 km arrival slice, median
   45 s apart). The comparison overlay must use the model one, or the group renders ~5 km early
   and it reads as model error. → `aeroviz_backend/CLAUDE.md`
+- **Every published experiment states its INTENT** (the user's rule, 2026-09-12: every
+  publication of experiment results also says what the experiment is for).
+  `4dTrajectory/ts_transformer/docs/experiments/intents.json` holds each campaign's title +
+  question and one line per run (optionally per predict-time variant);
+  `publish_ts_experiment_trajectories.py` stamps it into the Experiments picker beside the run's
+  parameters as named rows, BLOCKS a publication that has no entry, and `--refresh-labels-only`
+  writes nothing while any listed category lacks one. Write the entries when the campaign is
+  designed and commit them with its arm declaration BEFORE launch (editing the registry under a
+  running campaign dirties the main tree); when reporting a publication, state each campaign's
+  intent in the report too. → `4dTrajectory/ts_transformer/CLAUDE.md`
 - **A ts checkpoint's data identity is the eligible SET, never the eligibility roster's bytes** —
   the roster embeds upstream provenance (which observed evaluation report it was joined against),
   which legitimately moves over an unchanged set; a byte-bound identity refused every checkpoint

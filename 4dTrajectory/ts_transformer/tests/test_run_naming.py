@@ -300,3 +300,71 @@ def test_the_scheduler_patience_factor_and_anchor_floor_name_a_custom_run():
     recipe = recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=True)
     recipe_name = run_display_name({**TSConfig().to_dict(), **recipe})
     assert recipe["lr_plateau_patience"] == 8 and "lr-patience" not in recipe_name
+
+
+# ── the structured form (the frontend Experiments picker's parameter rows) ─────────────────
+
+def _rows_by_section(rows: list[dict]) -> dict[str, dict[str, str]]:
+    sections: dict[str, dict[str, str]] = {}
+    for row in rows:
+        sections.setdefault(row["section"], {})[row["name"]] = row["value"]
+    return sections
+
+
+def test_parameter_rows_name_every_grammar_part_and_never_fold():
+    """The display name folds past six meta items; the rows list every one, each under the
+    config field it is, and the grammar's own parts under a named `Model` row."""
+    from ts_transformer.run_naming import run_parameter_rows
+    config = _control_config(
+        seed=2024, d_model=512, d_ff=1024, e_layers=6, batch_size=128,
+        learning_rate=1e-4, dropout=0.3, weight_decay=0.01,
+    )
+    assert "+2 more" in run_display_name(config)
+
+    rows = run_parameter_rows(config)
+    sections = _rows_by_section(rows)
+    assert list(sections)[0] == "Model"
+    assert sections["Model"] == {
+        "Output": "control", "Backbone": "iTransformer", "Dynamics": "point-mass",
+        "Loss design": loss_design_name(config), "Horizon": "normalized", "Seed": "2024",
+    }
+    assert sections["Architecture"] == {
+        "d_model": "512", "d_ff": "1024", "e_layers": "6", "dropout": "0.3",
+    }
+    assert sections["Training"] == {
+        "batch_size": "128", "learning_rate": "0.0001", "weight_decay": "0.01",
+    }
+    # the seed is a Model row, never a second settings row
+    assert all(row["name"] != "seed" for row in rows if row["section"] != "Model")
+    fields = {row["name"]: row.get("field") for row in rows if row["section"] == "Model"}
+    assert fields["Output"] == "prediction_output" and fields["Dynamics"] is None
+
+
+def test_parameter_rows_spell_out_a_loss_design_the_name_hashes():
+    from ts_transformer.run_naming import loss_design_parts, run_parameter_rows
+    config = _control_config(control_recipe_name="custom")
+    for field in CONTROL_LOSS_FIELDS[:8]:
+        default = config[field]
+        config[field] = (default + 1.0) if isinstance(default, float) else "different"
+    assert loss_design_name(config).startswith("custom-")
+
+    base, edits = loss_design_parts(config)
+    sections = _rows_by_section(run_parameter_rows(config))
+    assert sections["Model"]["Loss design"] == loss_design_name(config)
+    assert list(sections[f"Loss edits vs {base}"]) == [field for field, _ in edits]
+    assert len(edits) > 4
+
+
+def test_parameter_rows_of_a_named_recipe_list_the_settings_the_recipe_freezes():
+    """The NAME skips a recipe's frozen fields (they are the recipe); the rows answer "what
+    does this run use", so they list them."""
+    from ts_transformer.config import CONTROL_RECIPE_SIMPLE_V3, recipe_settings
+    from ts_transformer.run_naming import run_parameter_rows
+    recipe = recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=True)
+    config = {**TSConfig().to_dict(), **recipe}
+    assert "lr-patience" not in run_display_name(config)
+
+    sections = _rows_by_section(run_parameter_rows(config))
+    assert sections["Model"]["Loss design"] == "simple-v3"
+    assert sections["Training"]["lr_plateau_patience"] == "8"
+    assert not any(section.startswith("Loss edits") for section in sections)

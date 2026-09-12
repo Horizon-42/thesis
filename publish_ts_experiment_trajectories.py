@@ -24,6 +24,15 @@ hook published beside the baseline whose checkpoint it reuses — names one with
 directory onto a category some other directory already holds: they must coexist, never
 overwrite.
 
+**Every experiment states its intent.** The picker shows what a campaign asks and what each
+run changes, read from the tracked registry ``INTENT_REGISTRY`` (``campaigns[<picker group>]``
+title + intent, ``campaigns[<training campaign>].runs[<run id>]``, optionally
+``variants[<run>@<variant>]``) and stamped into the category's ``experiment.intent`` beside the
+structured ``experiment.parameters`` rows (``run_naming.run_parameter_rows``). A publication
+whose group or run has no entry is BLOCKED before any work, and ``--refresh-labels-only``
+refuses to write anything while a listed category lacks one — write the entries when the
+campaign is designed, with its arm declaration.
+
 Outer-test is not a valid option here.  This command is for development train/validation
 inspection only.
 """
@@ -49,7 +58,11 @@ _TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 if str(_TS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_TS_DIR.parent))
 
-from ts_transformer.run_naming import category_display_label, run_display_name  # noqa: E402
+from ts_transformer.run_naming import (  # noqa: E402
+    category_display_label,
+    run_display_name,
+    run_parameter_rows,
+)
 
 EXPERIMENT_ROOT = REPO_ROOT / "4dTrajectory" / "outputs" / "POOLED" / "experiments"
 EXPERIMENT_INDEX = EXPERIMENT_ROOT / "index.json"
@@ -70,6 +83,11 @@ PUBLICATION_SCHEMAS_READ = ("ts-experiment-publication-v1", PUBLICATION_SCHEMA)
 PUBLICATION_INDEX_SCHEMA = "ts-experiment-publication-index-v1"
 PUBLICATION_MANIFEST = "publication.json"
 DEVELOPMENT_SPLITS = ("train", "val")
+
+#: What each campaign asks and what each run changes — tracked source, written when a campaign
+#: is designed and read (never written) here. Read at CALL time, so a test can point it elsewhere.
+INTENT_REGISTRY = _TS_DIR / "docs" / "experiments" / "intents.json"
+INTENT_REGISTRY_SCHEMA = "ts-experiment-intents-v1"
 
 #: A MIRROR of ``experiments.anytime_curve.RECORDS_SCHEMA`` — the block that runner writes into
 #: each record directory's ``summary.json``. Not imported: that module pulls in torch and the
@@ -177,6 +195,85 @@ class CategoryVariant:
 #: (the category key reads as `<source>_<run>_<token>_<slug>_<split>`) and must not contain a
 #: path separator. Lower-cased and length-capped like the rest of the key (`_safe_stem`), so
 #: what is typed and what appears on disk cannot differ by case alone.
+class MissingIntentError(LookupError):
+    """An experiment publication whose campaign or run has no entry in the intent registry."""
+
+
+def _text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def load_intent_campaigns(path: Path) -> dict[str, dict[str, Any]]:
+    """The registry's campaigns, validated once here: ``title`` and ``intent`` required,
+    ``design`` optional, ``runs`` / ``variants`` optional maps of non-empty strings (read as
+    empty when absent — a record campaign that trained nothing has no runs)."""
+    document = _load_object(path)
+    if document.get("schemaVersion") != INTENT_REGISTRY_SCHEMA:
+        raise ValueError(
+            f"{path}: schemaVersion {document.get('schemaVersion')!r} is not "
+            f"{INTENT_REGISTRY_SCHEMA!r}"
+        )
+    campaigns = document.get("campaigns")
+    if not isinstance(campaigns, dict):
+        raise ValueError(f"{path}: `campaigns` must be an object")
+    validated: dict[str, dict[str, Any]] = {}
+    for key, entry in campaigns.items():
+        where = f"{path}: campaigns[{key!r}]"
+        if not isinstance(entry, dict) or not _text(entry.get("title")) or not _text(
+            entry.get("intent")
+        ):
+            raise ValueError(f"{where} needs a non-empty `title` and `intent`")
+        if "design" in entry and not _text(entry["design"]):
+            raise ValueError(f"{where}.design must be a non-empty string when present")
+        maps: dict[str, dict[str, str]] = {}
+        for name in ("runs", "variants"):
+            value = entry.get(name, {})
+            if not isinstance(value, dict) or not all(
+                isinstance(k, str) and _text(v) for k, v in value.items()
+            ):
+                raise ValueError(f"{where}.{name} must map ids to non-empty strings")
+            maps[name] = value
+        validated[key] = {**entry, **maps}
+    return validated
+
+
+def experiment_intent(
+    *,
+    group: str,
+    training_campaign: str,
+    run_id: str,
+    variant: CategoryVariant | None,
+) -> dict[str, str]:
+    """The picker's intent block: the heading campaign's title + question, the run's intent,
+    and — when the registry has one — the variant's.
+
+    ``group`` is the picker heading (an anytime bin's RECORD campaign), ``training_campaign``
+    the campaign the checkpoint was trained in: a run's intent belongs to where it was designed.
+    """
+    campaigns = load_intent_campaigns(INTENT_REGISTRY)
+    heading = campaigns.get(group)
+    trained = campaigns.get(training_campaign)
+    run_intent = None if trained is None else trained["runs"].get(run_id)
+    missing = []
+    if heading is None:
+        missing.append(f"campaigns[{group!r}] (title + intent)")
+    if run_intent is None:
+        missing.append(f"campaigns[{training_campaign!r}].runs[{run_id!r}]")
+    if missing:
+        raise MissingIntentError(
+            f"{_path_for_manifest(INTENT_REGISTRY)} has no " + " and no ".join(missing)
+            + " — state what the campaign asks and what this run changes before publishing it"
+        )
+    intent = {"groupTitle": heading["title"], "group": heading["intent"], "run": run_intent}
+    if "design" in heading:
+        intent["design"] = heading["design"]
+    if variant is not None:
+        variant_intent = trained["variants"].get(f"{run_id}@{variant.id_suffix}")
+        if variant_intent is not None:
+            intent["variant"] = variant_intent
+    return intent
+
+
 _VARIANT_SLUG = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 #: The anytime bins' own key shape (`a12km`). A flag slug must not be able to impersonate one:
 #: the two would be indistinguishable in a key while meaning different things.
@@ -557,10 +654,25 @@ class PublicationPlan:
         )
 
     @property
+    def picker_id(self) -> str:
+        return _picker_id(self.experiment.experiment_id, self.category_variant)
+
+    @property
+    def experiment_intent(self) -> dict[str, str]:
+        """Raises ``MissingIntentError`` when the registry has no entry for this publication."""
+        return experiment_intent(
+            group=self.experiment_group,
+            training_campaign=self.experiment.campaign,
+            run_id=self.experiment.run_id,
+            variant=self.category_variant,
+        )
+
+    @property
     def experiment_metadata(self) -> dict[str, Any]:
         return _publication_experiment_metadata(
             experiment_id=self.experiment.experiment_id,
             campaign=self.experiment_group,
+            training_campaign=self.experiment.campaign,
             checkpoint=self.experiment.checkpoint_relative,
             config=self.experiment.config,
             run_id=self.experiment.run_id,
@@ -594,7 +706,7 @@ class PublicationPlan:
         ]
         if self.result_source == "experiment":
             publish += [
-                "--experiment-id", self.experiment_metadata["id"],
+                "--experiment-id", self.picker_id,
                 "--experiment-group", self.experiment_group,
                 "--experiment-checkpoint", self.experiment.checkpoint_relative,
             ]
@@ -821,22 +933,37 @@ def _publication_label(
     return category_display_label(split, _run_label(config, run_id, variant), kind=kind)
 
 
+def _picker_id(experiment_id: str, variant: CategoryVariant | None) -> str:
+    # The picker DEDUPES by id, so each bin of a checkpoint needs its own — otherwise only
+    # the first bin published would ever appear in the Experiments list.
+    return experiment_id if variant is None else f"{experiment_id}@{variant.id_suffix}"
+
+
 def _publication_experiment_metadata(
     *,
     experiment_id: str,
-    campaign: str | None,
+    campaign: str,
+    training_campaign: str,
     checkpoint: str,
     config: dict[str, Any],
     run_id: str,
     variant: CategoryVariant | None = None,
 ) -> dict[str, Any]:
+    """The category's ``experiment`` block. Raises ``MissingIntentError`` (see
+    ``experiment_intent``) — a run is not published without a stated intent."""
     return {
-        # The picker DEDUPES by id, so each bin of a checkpoint needs its own — otherwise
-        # only the first bin published would ever appear in the Experiments list.
-        "id": experiment_id if variant is None else f"{experiment_id}@{variant.id_suffix}",
+        "id": _picker_id(experiment_id, variant),
         "group": campaign,
         "checkpoint": checkpoint,
         "label": _run_label(config, run_id, variant),
+        # The same run, structured for the picker: its name, which records these are, and
+        # every parameter as a named row.
+        "runName": run_id,
+        "variantLabel": None if variant is None else variant.label_suffix,
+        "parameters": run_parameter_rows(config),
+        "intent": experiment_intent(
+            group=campaign, training_campaign=training_campaign, run_id=run_id, variant=variant,
+        ),
         "model": config.get("model"),
         "predictionOutput": config.get("prediction_output", "state"),
         "horizonMode": config.get("horizon_mode", "normalized"),
@@ -898,6 +1025,17 @@ def refresh_category_metadata(plan: PublicationPlan) -> bool:
     )
 
 
+def _listed_category_keys(frontend_airports_root: Path, airport: str) -> set[str]:
+    manifest_path = frontend_airports_root / airport / "comparison" / "categories.json"
+    if not manifest_path.is_file():
+        return set()
+    return {
+        value.get("key")
+        for value in _load_object(manifest_path).get("categories") or ()
+        if isinstance(value, dict)
+    }
+
+
 def refresh_labels_from_manifests(
     output_root: Path, frontend_airports_root: Path
 ) -> tuple[int, int]:
@@ -905,10 +1043,15 @@ def refresh_labels_from_manifests(
 
     Reads only the stored publication manifests (which carry the run's exact config), so
     it needs neither the experiment index nor the checkpoints and never regenerates
-    trajectories — a pure metadata refresh for already-published categories.
+    trajectories — a pure metadata refresh for already-published categories. ALL OR NOTHING
+    on intents: if any listed experiment category has no registry entry, nothing is written
+    and every missing entry is named (``MissingIntentError``).
     """
     seen = 0
-    patched = 0
+    listed: dict[str, set[str]] = {}
+    updates: list[tuple[dict[str, Any], str, dict[str, Any] | None]] = []
+    unlisted: list[tuple[dict[str, Any], Path]] = []
+    missing: list[str] = []
     for manifest_path in sorted(output_root.rglob(PUBLICATION_MANIFEST)):
         document = _load_object(manifest_path)
         if (
@@ -917,36 +1060,56 @@ def refresh_labels_from_manifests(
         ):
             continue
         seen += 1
+        airport = document["airport"]
+        if airport not in listed:
+            listed[airport] = _listed_category_keys(frontend_airports_root, airport)
+        if document["category"] not in listed[airport]:
+            unlisted.append((document, manifest_path))
+            continue
         config = document.get("config") or {}
         run_id = document.get("runId") or ""
-        split = document.get("split") or ""
         result_source = document.get("resultSource") or "experiment"
         variant = _variant_from_document(document)
         metadata = None
         if result_source == "experiment":
-            metadata = _publication_experiment_metadata(
-                experiment_id=document.get("experimentId") or run_id,
-                campaign=_experiment_group(document.get("campaign"), variant),
-                checkpoint=document.get("checkpoint") or "",
-                config=config,
-                run_id=run_id,
-                variant=variant,
-            )
-        found = _apply_category_refresh(
+            try:
+                metadata = _publication_experiment_metadata(
+                    experiment_id=document.get("experimentId") or run_id,
+                    campaign=_experiment_group(document.get("campaign"), variant),
+                    training_campaign=document.get("campaign") or "",
+                    checkpoint=document.get("checkpoint") or "",
+                    config=config,
+                    run_id=run_id,
+                    variant=variant,
+                )
+            except MissingIntentError as error:
+                missing.append(f"{airport}/{document['category']}: {error}")
+                continue
+        label = _publication_label(
+            document.get("split") or "", result_source, config, run_id, variant
+        )
+        updates.append((document, label, metadata))
+    if missing:
+        raise MissingIntentError(
+            f"refusing to refresh: {len(missing)} published experiment categories have no "
+            "registered intent (nothing was written):\n  " + "\n  ".join(missing)
+        )
+    patched = 0
+    for document, label, metadata in updates:
+        _apply_category_refresh(
             frontend_airports_root / document["airport"] / "comparison" / "categories.json",
             document["category"],
-            _publication_label(split, result_source, config, run_id, variant),
-            result_source,
+            label,
+            document.get("resultSource") or "experiment",
             metadata,
         )
-        if found:
-            patched += 1
-            print(f"  ✓ refreshed {document['airport']}/{document['category']}")
-        else:
-            print(
-                f"  ⚠ no category {document['category']} at "
-                f"{document['airport']} (publication {manifest_path})"
-            )
+        patched += 1
+        print(f"  ✓ refreshed {document['airport']}/{document['category']}")
+    for document, manifest_path in unlisted:
+        print(
+            f"  ⚠ no category {document['category']} at "
+            f"{document['airport']} (publication {manifest_path})"
+        )
     return seen, patched
 
 
@@ -1099,6 +1262,14 @@ def run_publication(
     fail_fast: bool,
 ) -> str:
     context = f"{plan.experiment.experiment_id} · {plan.airport} · {plan.split}"
+    if plan.result_source == "experiment":
+        # First, before a reuse refresh or any predict/evaluate/CZML work: the category's
+        # metadata cannot be written without it, so nothing else is worth starting.
+        try:
+            plan.experiment_intent
+        except MissingIntentError as error:
+            print(f"  ⚠ blocked {context}: {error}")
+            return "blocked"
     if not force and plan.is_complete():
         if not dry_run:
             refresh_category_metadata(plan)
@@ -1302,9 +1473,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.refresh_labels_only:
-        seen, patched = refresh_labels_from_manifests(
-            args.output_root, args.frontend_airports_root
-        )
+        try:
+            seen, patched = refresh_labels_from_manifests(
+                args.output_root, args.frontend_airports_root
+            )
+        except MissingIntentError as error:
+            print(f"✗ {error}", file=sys.stderr)
+            return 1
         print(f"refreshed {patched} of {seen} completed publications under {args.output_root}")
         return 0
 

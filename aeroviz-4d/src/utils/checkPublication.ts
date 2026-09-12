@@ -22,6 +22,8 @@ import {
   isComparisonCategory,
   isComparisonIndex,
   isExperimentHorizonMode,
+  isExperimentIntent,
+  isExperimentParameterRow,
   isExperimentPredictionOutput,
   type ComparisonCategory,
   type ComparisonIndex,
@@ -95,7 +97,7 @@ export function explainCategoryRejection(value: unknown): string | null {
         return `\`experiment.${field}\` must be a string, got ${describe(experiment[field])}`;
       }
     }
-    for (const field of ["label", "model"] as const) {
+    for (const field of ["label", "model", "runName", "variantLabel"] as const) {
       if (experiment[field] != null && typeof experiment[field] !== "string") {
         return `\`experiment.${field}\` must be a string or null, got ${describe(experiment[field])}`;
       }
@@ -115,6 +117,24 @@ export function explainCategoryRejection(value: unknown): string | null {
     }
     if (experiment.seed != null && typeof experiment.seed !== "number") {
       return `\`experiment.seed\` must be a number or null, got ${describe(experiment.seed)}`;
+    }
+    if (experiment.parameters != null) {
+      if (!Array.isArray(experiment.parameters)) {
+        return `\`experiment.parameters\` must be an array or null, got ${describe(experiment.parameters)}`;
+      }
+      const bad = experiment.parameters.findIndex((row) => !isExperimentParameterRow(row));
+      if (bad >= 0) {
+        return (
+          `\`experiment.parameters[${bad}]\` must be {section, name, value: string, field?: string}, ` +
+          `got ${describe(experiment.parameters[bad])}`
+        );
+      }
+    }
+    if (experiment.intent != null && !isExperimentIntent(experiment.intent)) {
+      return (
+        "`experiment.intent` must be {groupTitle, group, run: string, variant?, design?: string}, " +
+        `got ${describe(experiment.intent)}`
+      );
     }
   }
   return "rejected by `isComparisonCategory` for a reason this explainer does not name";

@@ -10,6 +10,7 @@ import {
   airportChartsIndexUrl,
   isAirportsIndexManifest,
   isComparisonCategoriesManifest,
+  isComparisonCategory,
   isDrawableComparisonCategory,
   isComparisonIndex,
   normalizeAirportCode,
@@ -196,5 +197,46 @@ describe("airportData helpers", () => {
     expect(isComparisonIndex({ ...current, generation: undefined })).toBe(false);
     expect(isComparisonIndex({ ...current, referenceSource: undefined })).toBe(false);
     expect(isComparisonIndex({ ...current, evaluationReport: undefined })).toBe(false);
+  });
+});
+
+describe("experiment intent and parameter rows", () => {
+  const base = {
+    key: "experiment_run_val",
+    label: "Experiment",
+    dir: "experiment_run_val",
+    groups: 3,
+    constrained: false,
+    datasetSplit: "val",
+    resultSource: "experiment",
+  };
+  const metadata = {
+    id: "campaign/run",
+    group: "campaign",
+    checkpoint: "campaign/run/checkpoint.pt",
+    runName: "run",
+    variantLabel: null,
+    parameters: [{ section: "Model", name: "Output", value: "control", field: "prediction_output" }],
+    intent: { groupTitle: "Campaign", group: "What it asks", run: "What it changes" },
+  };
+
+  it("accepts the stamped structure and its absence", () => {
+    expect(isComparisonCategory({ ...base, experiment: metadata })).toBe(true);
+    expect(isComparisonCategory({
+      ...base,
+      experiment: { ...metadata, intent: { ...metadata.intent, variant: "v", design: "doc.md" } },
+    })).toBe(true);
+    const { runName: _r, parameters: _p, intent: _i, ...legacy } = metadata;
+    expect(isComparisonCategory({ ...base, experiment: legacy })).toBe(true);
+  });
+
+  it.each([
+    ["an intent without its run", { intent: { groupTitle: "C", group: "q" } }],
+    ["a non-string variant intent", { intent: { ...metadata.intent, variant: 3 } }],
+    ["a parameter row without a value", { parameters: [{ section: "Model", name: "Output" }] }],
+    ["parameters that are not a list", { parameters: { Output: "control" } }],
+    ["a numeric run name", { runName: 7 }],
+  ])("rejects %s", (_name, override) => {
+    expect(isComparisonCategory({ ...base, experiment: { ...metadata, ...override } })).toBe(false);
   });
 });

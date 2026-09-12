@@ -100,6 +100,21 @@ describe("checkCategoriesManifest", () => {
     expect(explainCategoryRejection(experimentCategory())).toBeNull();
   });
 
+  it("names a malformed intent, parameter row or run name", () => {
+    const meta = experimentCategory().experiment;
+    expect(explainCategoryRejection(experimentCategory({
+      experiment: { ...meta, intent: { groupTitle: "t", group: "q" } },
+    }))).toContain("`experiment.intent`");
+    expect(explainCategoryRejection(experimentCategory({
+      experiment: {
+        ...meta,
+        parameters: [{ section: "Model", name: "Output", value: "control" }, { section: "Model" }],
+      },
+    }))).toContain("`experiment.parameters[1]`");
+    expect(explainCategoryRejection(experimentCategory({ experiment: { ...meta, runName: 3 } })))
+      .toContain("`experiment.runName`");
+  });
+
   it("reports a manifest whose categories are not an array", () => {
     const findings = checkCategoriesManifest({ categories: "nope" });
     expect(findings).toHaveLength(1);

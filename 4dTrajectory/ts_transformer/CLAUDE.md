@@ -1114,6 +1114,19 @@ run once per publication root) and 23 hand-published `ts_*` ones
 move. Only `device` and the never-set backbone knobs stay excused.
 **On-disk run/category directories are historical record — never rename them.** Grammar,
 fallbacks and the relabel tooling: `docs/ENGINEERING_NOTES.md`.
+**The grammar has a structured form, `run_parameter_rows(config)`** (2026-09-12) —
+`{section, name, value[, field]}` rows: `Model` (output, backbone, dynamics, loss design, horizon,
+seed — always), `Loss edits vs <base>` (every edit from `loss_design_parts`' base: the NAME hashes
+a long loss design, the rows never do), then every non-default META field, recipe-frozen ones
+included, under `SETTING_SECTIONS` — asserted at import to place every META field but `seed`
+exactly once, so **a new META field needs a section** or the import fails. `loss_design_name` is
+rendered from `loss_design_parts`; the split was measured name-preserving on all 513 stored
+configs. The publisher stamps the rows as `experiment.parameters` and **`experiment.intent` from
+`docs/experiments/intents.json`**: `campaigns[<picker group>]` title + intent,
+`campaigns[<training campaign>].runs[<run id>]`, optional `variants[<run>@<variant id>]` (an
+anytime bin's group is its RECORD campaign, its run intent still the training campaign's). **No
+entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-labels-only
+--output-root <root>` restamps a published root (metadata only, all-or-nothing on intents).
 
 ## Traps (one line each; evidence in `docs/ENGINEERING_NOTES.md`)
 

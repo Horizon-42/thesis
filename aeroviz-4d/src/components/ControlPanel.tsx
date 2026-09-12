@@ -31,6 +31,8 @@ import {
   comparisonKindSwatch,
 } from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
+import ExperimentDetails from "./ExperimentDetails";
+import ExperimentPicker from "./ExperimentPicker";
 import { useEffect, useState } from "react";
 import {
   activeTrajectoryResultSource,
@@ -116,16 +118,21 @@ export default function ControlPanel({
   );
   const resultSortKey = resultSortBy === "default" ? null : resultSortBy;
   const activeSplit = activeComparisonCategory?.datasetSplit ?? "val";
-  const metricSuffix = (value: number | null | undefined): string =>
+  const metricText = (value: number | null | undefined): string | null =>
     resultSortKey && value != null
-      ? ` — ${RESULT_ACCURACY_SORT_LABELS[resultSortKey]} ${Math.round(value).toLocaleString()} m`
-      : "";
+      ? `${RESULT_ACCURACY_SORT_LABELS[resultSortKey]} ${Math.round(value).toLocaleString()} m`
+      : null;
+  const metricSuffix = (value: number | null | undefined): string => {
+    const text = metricText(value);
+    return text ? ` — ${text}` : "";
+  };
   const experiments = experimentOptions(experimentCategories, resultSortKey, activeSplit);
   const activeExperimentId = activeComparisonCategory?.experiment?.id ?? "";
+  const activeExperiment =
+    experiments.find((experiment) => experiment.id === activeExperimentId) ?? null;
   const activeExperimentCategories = experimentCategories.filter(
     (category) => category.experiment?.id === activeExperimentId,
   );
-  const experimentGroups = [...new Set(experiments.map((experiment) => experiment.group))];
   const comparisonLegend = useComparisonLegend(
     activeAirportCode,
     activeComparisonCategory?.dir ?? null,
@@ -376,34 +383,19 @@ export default function ControlPanel({
             {resultSource === "experiment" ? (
               experimentCategories.length > 0 ? (
                 <div className="control-panel-experiment-selectors">
-                  <label className="control-panel-airport-selector">
-                    <span>Experiment model</span>
-                    <select
-                      className="control-panel-airport-selector-input"
-                      value={activeExperimentId}
-                      onChange={(event) => {
-                        const next = categoryForExperimentSplit(
-                          experimentCategories,
-                          event.target.value,
-                          activeComparisonCategory?.datasetSplit === "train" ? "train" : "val",
-                        );
-                        setTrajectoryComparisonCategory(next?.dir ?? null);
-                      }}
-                    >
-                      {experimentGroups.map((group) => (
-                        <optgroup key={group} label={group}>
-                          {experiments
-                            .filter((experiment) => experiment.group === group)
-                            .map((experiment) => (
-                              <option key={experiment.id} value={experiment.id}>
-                                {experiment.label}
-                                {metricSuffix(experiment.metricValue)}
-                              </option>
-                            ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </label>
+                  <ExperimentPicker
+                    experiments={experiments}
+                    activeId={activeExperimentId}
+                    metricText={metricText}
+                    onSelect={(id) => {
+                      const next = categoryForExperimentSplit(
+                        experimentCategories,
+                        id,
+                        activeComparisonCategory?.datasetSplit === "train" ? "train" : "val",
+                      );
+                      setTrajectoryComparisonCategory(next?.dir ?? null);
+                    }}
+                  />
                   <label className="control-panel-airport-selector">
                     <span>Dataset split</span>
                     <select
@@ -421,10 +413,8 @@ export default function ControlPanel({
                       ))}
                     </select>
                   </label>
-                  {activeComparisonCategory?.experiment ? (
-                    <p className="control-panel-experiment-checkpoint">
-                      {activeComparisonCategory.experiment.checkpoint}
-                    </p>
+                  {activeExperiment ? (
+                    <ExperimentDetails experiment={activeExperiment} compact />
                   ) : null}
                 </div>
               ) : (

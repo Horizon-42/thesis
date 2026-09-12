@@ -169,6 +169,52 @@ export function isExperimentHorizonMode(value: unknown): value is ExperimentHori
     (EXPERIMENT_HORIZON_MODES as readonly string[]).includes(value);
 }
 
+/**
+ * One named parameter of a published run — `run_naming.run_parameter_rows`, stamped by
+ * `publish_ts_experiment_trajectories.py`. `section` groups the rows in the order they arrive
+ * (`Model` first, then the loss edits, then the setting sections); a settings row's `name` IS
+ * the config field, a `Model` row names the field it chiefly reads as `field`.
+ */
+export interface ExperimentParameterRow {
+  section: string;
+  name: string;
+  value: string;
+  field?: string;
+}
+
+/**
+ * Why a published run exists — the publisher stamps it from the tracked registry
+ * `4dTrajectory/ts_transformer/docs/experiments/intents.json` and refuses to publish without it.
+ */
+export interface ExperimentIntent {
+  /** Short heading of the picker group (the campaign). */
+  groupTitle: string;
+  /** What the campaign asks, and against what comparator. */
+  group: string;
+  /** What this run changes relative to its comparator. */
+  run: string;
+  /** What this predict-time variant does differently, where the registry says. */
+  variant?: string;
+  /** The design/result document the campaign is defined in. */
+  design?: string;
+}
+
+export function isExperimentParameterRow(value: unknown): value is ExperimentParameterRow {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.section === "string" && typeof row.name === "string" &&
+    typeof row.value === "string" && (row.field === undefined || typeof row.field === "string");
+}
+
+export function isExperimentIntent(value: unknown): value is ExperimentIntent {
+  if (!value || typeof value !== "object") return false;
+  const intent = value as Record<string, unknown>;
+  return typeof intent.groupTitle === "string" && typeof intent.group === "string" &&
+    typeof intent.run === "string" &&
+    (intent.variant === undefined || typeof intent.variant === "string") &&
+    (intent.design === undefined || typeof intent.design === "string");
+}
+
 export interface ExperimentCategoryMetadata {
   /** Stable repository-relative run identity (without the checkpoint filename). */
   id: string;
@@ -182,6 +228,15 @@ export interface ExperimentCategoryMetadata {
    * the picker falls back to composing a label from the fields below.
    */
   label?: string | null;
+  /**
+   * The structured form (publishes from 2026-09-12 on; older ones carry only `label` until the
+   * publisher's `--refresh-labels-only` restamps them): the run id, which records these are
+   * (an anytime bin, a predict-time hook …), every parameter as a named row, and the intent.
+   */
+  runName?: string | null;
+  variantLabel?: string | null;
+  parameters?: ExperimentParameterRow[] | null;
+  intent?: ExperimentIntent | null;
   model?: string | null;
   predictionOutput?: ExperimentPredictionOutput | null;
   horizonMode?: ExperimentHorizonMode | null;
@@ -256,6 +311,15 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
       typeof experiment.checkpoint === "string" &&
       (experiment.label === undefined || experiment.label === null ||
         typeof experiment.label === "string") &&
+      (experiment.runName === undefined || experiment.runName === null ||
+        typeof experiment.runName === "string") &&
+      (experiment.variantLabel === undefined || experiment.variantLabel === null ||
+        typeof experiment.variantLabel === "string") &&
+      (experiment.parameters === undefined || experiment.parameters === null ||
+        (Array.isArray(experiment.parameters) &&
+          experiment.parameters.every(isExperimentParameterRow))) &&
+      (experiment.intent === undefined || experiment.intent === null ||
+        isExperimentIntent(experiment.intent)) &&
       (experiment.model === undefined || experiment.model === null ||
         typeof experiment.model === "string") &&
       (experiment.predictionOutput === undefined || experiment.predictionOutput === null ||
