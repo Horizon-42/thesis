@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AIRPORTS_INDEX_URL,
+  EXPERIMENT_PREDICTION_OUTPUTS,
   airportDataUrl,
   airportProcedureDetailUrl,
   airportProcedureDetailsIndexUrl,
@@ -125,7 +126,7 @@ describe("airportData helpers", () => {
 
   // Every value of config.PREDICTION_OUTPUTS must survive here: one unlisted output rejects
   // its own category AND, through `.every`, empties the airport's entire manifest.
-  it.each(["state", "control", "closure"])(
+  it.each([...EXPERIMENT_PREDICTION_OUTPUTS])(
     "accepts %s experiment metadata without rejecting sibling categories",
     (predictionOutput) => {
       const baseline = {

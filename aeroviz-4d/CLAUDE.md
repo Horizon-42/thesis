@@ -19,6 +19,11 @@ npx vitest run src/utils/__tests__/ocsGeometry.test.ts  # Single test file
 npm run test:coverage                # Coverage report
 npm run build:local-terrain          # Airport-local heightmap terrain tiles
 npm run build:local-terrain:visual-assets
+# Does the picker load what was just published? The frontend's own guards over
+# categories.json + every comparison_index.json (names the rejected category and field),
+# the referenced CZML/report files, and — with --server — what the RUNNING dev server answers.
+npm run check-publication -- --airport KSMF --server http://localhost:5173   # all airports if no --airport
+npm run typecheck:scripts            # tsc over scripts/ (outside tsconfig.json's `src` include)
 
 # Python side
 pip install -r python/requirements.txt
@@ -102,6 +107,18 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   still serving the stale list, the supervisor relaunches npm, and the new vite silently binds
   5175 — the app looks restarted while the old process still answers on 5173 (2026-09-07,
   three attempts). `ss -ltnp | grep 517` shows which pid owns which port.
+- **An EMPTY picker on every airport after a publication is the manifest validator, not the
+  server.** `airportData.ts::EXPERIMENT_PREDICTION_OUTPUTS` mirrors the package's
+  `config.PREDICTION_OUTPUTS`; the publisher writes `experiment.predictionOutput` straight from
+  the run's config; `isComparisonCategoriesManifest` is `.every(isComparisonCategory)`, so ONE
+  category with an unlisted output empties the whole airport's list. Signature: every file
+  answers 200 `application/json`, a restart changes nothing, and the console says
+  `comparison categories for <ICAO> is not a valid manifest`. It happened with `closure`
+  (2026-09-07) and again with `plan` (2026-09-12). The mirror is now pinned by
+  `4dTrajectory/ts_transformer/tests/test_frontend_mirrors.py` — adding an output to the package
+  fails the ts suite until this list learns it — and `npm run check-publication` (above) is the
+  check to run at a milestone or when results are explicitly published: it answers "picker
+  loads" / "picker BROKEN: [category] field value" instead of a bare HTTP 200.
 - **`.flight-ops-panel` has `backdrop-filter`** → it becomes the containing block for
   `position:fixed` descendants AND clips overflow; floating windows must render via React portal
   into `document.body`.

@@ -11,6 +11,8 @@
     "build:local-terrain:visual-assets": "node scripts/build_local_terrain_heightmap.mjs --visual-assets-only",
     "preview": "vite preview",
     "test": "vitest",
+    "check-publication": "vite-node scripts/check_publication.ts --",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage"
   },

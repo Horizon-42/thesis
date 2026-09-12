@@ -116,18 +116,33 @@ export function airportComparisonCzmlUrl(
 export const OBSERVED_CATEGORY_KEY = "observed";
 export const OBSERVED_EVALUATION_REPORT_FILE = "evaluation_report.json";
 
-export type ComparisonResultSource = "prediction" | "experiment";
+/**
+ * Where a comparison category's trajectories came from. Exported (like the two `EXPERIMENT_*`
+ * lists below) so the guards and `utils/checkPublication` read ONE list rather than each
+ * spelling the union again.
+ */
+export const COMPARISON_RESULT_SOURCES = ["prediction", "experiment"] as const;
+export type ComparisonResultSource = typeof COMPARISON_RESULT_SOURCES[number];
+
+/** Dataset partition of a learned-prediction category and of its comparison index. */
+export const DATASET_SPLITS = ["train", "val", "test"] as const;
+export type DatasetSplit = typeof DATASET_SPLITS[number];
+
+/** The comparison-index schema this app reads; an index of any other version is rejected. */
+export const COMPARISON_INDEX_SCHEMA_VERSION = "comparison-v2-generation" as const;
 
 /**
  * MUST match `4dTrajectory/ts_transformer/config.py::PREDICTION_OUTPUTS` — an unlisted value
  * fails `isComparisonCategory`, and one failing category empties the whole airport's manifest.
  * (`control-mixture` was listed here but no producer ever emitted it; `closure` was emitted
- * and not listed, which is what took the KRDU picker down.)
+ * and not listed, which is what took the KRDU picker down; `plan` did the same on 2026-09-12.
+ * Pinned by `ts_transformer/tests/test_frontend_mirrors.py`.)
  */
 export const EXPERIMENT_PREDICTION_OUTPUTS = [
   "state",
   "control",
   "closure",
+  "plan",
 ] as const;
 export type ExperimentPredictionOutput = typeof EXPERIMENT_PREDICTION_OUTPUTS[number];
 
@@ -136,6 +151,22 @@ export function isExperimentPredictionOutput(
 ): value is ExperimentPredictionOutput {
   return typeof value === "string" &&
     (EXPERIMENT_PREDICTION_OUTPUTS as readonly string[]).includes(value);
+}
+
+/**
+ * MUST match `4dTrajectory/ts_transformer/config.py::HORIZON_MODES` — the same validator, the
+ * same `.every`, the same empty picker. Pinned by `ts_transformer/tests/test_frontend_mirrors.py`.
+ */
+export const EXPERIMENT_HORIZON_MODES = [
+  "normalized",
+  "full",
+  "window",
+] as const;
+export type ExperimentHorizonMode = typeof EXPERIMENT_HORIZON_MODES[number];
+
+export function isExperimentHorizonMode(value: unknown): value is ExperimentHorizonMode {
+  return typeof value === "string" &&
+    (EXPERIMENT_HORIZON_MODES as readonly string[]).includes(value);
 }
 
 export interface ExperimentCategoryMetadata {
@@ -153,7 +184,7 @@ export interface ExperimentCategoryMetadata {
   label?: string | null;
   model?: string | null;
   predictionOutput?: ExperimentPredictionOutput | null;
-  horizonMode?: "normalized" | "full" | "window" | null;
+  horizonMode?: ExperimentHorizonMode | null;
   seed?: number | null;
 }
 
@@ -192,7 +223,7 @@ export interface ComparisonCategory {
    */
   constrained: boolean;
   /** Dataset partition for learned prediction categories; absent for optimization/baselines. */
-  datasetSplit?: "train" | "val" | "test";
+  datasetSplit?: DatasetSplit;
   /** Existing entries omit this and remain ordinary Prediction results. */
   resultSource?: ComparisonResultSource;
   /** Present only for categories published from the checkpoint experiment sweep. */
@@ -230,8 +261,7 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
       (experiment.predictionOutput === undefined || experiment.predictionOutput === null ||
         isExperimentPredictionOutput(experiment.predictionOutput)) &&
       (experiment.horizonMode === undefined || experiment.horizonMode === null ||
-        experiment.horizonMode === "normalized" || experiment.horizonMode === "full" ||
-        experiment.horizonMode === "window") &&
+        isExperimentHorizonMode(experiment.horizonMode)) &&
       (experiment.seed === undefined || experiment.seed === null ||
         typeof experiment.seed === "number"));
   return (
@@ -239,13 +269,11 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
     typeof candidate.label === "string" &&
     typeof candidate.dir === "string" &&
     typeof candidate.constrained === "boolean" &&
+    typeof candidate.groups === "number" &&
     (candidate.datasetSplit === undefined ||
-      candidate.datasetSplit === "train" ||
-      candidate.datasetSplit === "val" ||
-      candidate.datasetSplit === "test") &&
+      (DATASET_SPLITS as readonly unknown[]).includes(candidate.datasetSplit)) &&
     (candidate.resultSource === undefined ||
-      candidate.resultSource === "prediction" ||
-      candidate.resultSource === "experiment") &&
+      (COMPARISON_RESULT_SOURCES as readonly unknown[]).includes(candidate.resultSource)) &&
     (candidate.accuracy === undefined ||
       candidate.accuracy === null ||
       typeof candidate.accuracy === "object") &&
@@ -383,14 +411,14 @@ export interface EvaluationBatchStats {
 }
 
 export interface ComparisonIndex {
-  schemaVersion: "comparison-v2-generation";
+  schemaVersion: typeof COMPARISON_INDEX_SCHEMA_VERSION;
   generation: string;
   epoch: string;
   startHidden: boolean;
   /** References reuse the airport's canonical observed datasource. */
   referenceSource: "canonicalObserved";
   /** Dataset partition for learned prediction categories. */
-  datasetSplit?: "train" | "val" | "test";
+  datasetSplit?: DatasetSplit;
   groups: ComparisonGroup[];
   optimization?: OptimizationStats;
   /** Complete batch-level evaluation statistics; excludes only per-flight details. */
@@ -422,15 +450,13 @@ export function isComparisonIndex(value: unknown): value is ComparisonIndex {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   return (
-    candidate.schemaVersion === "comparison-v2-generation" &&
+    candidate.schemaVersion === COMPARISON_INDEX_SCHEMA_VERSION &&
     typeof candidate.generation === "string" &&
     typeof candidate.epoch === "string" &&
     typeof candidate.startHidden === "boolean" &&
     candidate.referenceSource === "canonicalObserved" &&
     (candidate.datasetSplit === undefined ||
-      candidate.datasetSplit === "train" ||
-      candidate.datasetSplit === "val" ||
-      candidate.datasetSplit === "test") &&
+      (DATASET_SPLITS as readonly unknown[]).includes(candidate.datasetSplit)) &&
     typeof candidate.evaluationReport === "string" &&
     Array.isArray(candidate.groups) &&
     candidate.groups.every(isComparisonGroup)
