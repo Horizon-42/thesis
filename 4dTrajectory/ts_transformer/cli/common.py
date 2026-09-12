@@ -183,6 +183,9 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--plan-rolled-share", type=float, default=None,
                         help="plan output: the share of each epoch's per-flight draws taken from the "
                              "rolled-window table instead of the observed anchors")
+    parser.add_argument("--plan-fan-components", type=int, default=None,
+                        help="plan output: K mixture components over the next instruction, the fan "
+                             "(design v5.3 §9 step 3(g)); 0 = the point head")
     parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
     parser.add_argument("--n-segments", type=int, default=None,
                         help="N normalized state endpoints or non-uniform control segments")
@@ -545,6 +548,7 @@ CLI_CONFIG_FIELDS = (
     "plan_instruction_loss_weight",
     "plan_rolled_windows_path",
     "plan_rolled_share",
+    "plan_fan_components",
     "seq_len",
     "n_segments",
     "horizon_mode",

@@ -72,6 +72,7 @@ from ts_transformer.outputs.plan.model import (
     PlanOutputModel,
     PlanPrediction,
     loss_group_carriers,
+    fan_rows,
     plan_loss_components,
     prediction_rows,
     probe_plan_context,
@@ -255,18 +256,24 @@ def rolled_prediction(
 def lockstep_model_policy(
     model: nn.Module, series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer,
     anchors: Sequence[int], device: torch.device, skeletons: Sequence[RunwaySkeleton],
+    *, first_component: int | None = None,
+    first_order: Callable[[PlanOrder, FlightState], PlanOrder] | None = None,
 ) -> tuple[list[FlightState], Callable[[Sequence[FlightState]], list[LegOrder]]]:
     """The head as a lockstep policy (design v5.1): the group's flight states, and the
     policy that asks the head for every active flight at once — one forward pass on the
     windows of the observed tracks continued by the flown rows — and returns each order
     as the leg order the step flies. The first order is read here, so the states start
-    with the head's own remaining path."""
+    with the head's own remaining path. **A fan member (v5.3, §9 step 3(g)) is the fan ONE
+    STEP DEEP**: ``first_component`` reads the FIRST order from that mixture component
+    (`fan_rows`) and every later ask from the top-weight one as usual; ``first_order``
+    transforms each flight's first order given its state (the control fan's displaced
+    fix, laid in the flight's runway axes)."""
     model.eval()
     conditioning = {
         id(item): series_conditioning(item, config, normalizer, anchor=int(a)) for item, a in zip(series, anchors, strict=True)
     }
     # the first order gives the remaining path the first step is laid with
-    def orders_for(states: Sequence[FlightState]) -> list[PlanOrder]:
+    def orders_for(states: Sequence[FlightState], component: int | None = None) -> list[PlanOrder]:
         windows = np.stack([
             conditioned_history(normalizer.encode(rolled_history(s.series, s.anchor, s.chunks, config)), conditioning[id(s.series)])
             for s in states
@@ -274,13 +281,17 @@ def lockstep_model_policy(
         with torch.no_grad():
             prediction = model(torch.from_numpy(windows).to(device))
         values, probability = prediction_rows(prediction)
+        if component is not None:
+            values = fan_rows(prediction)[0][:, component]
         return [
             order_from_prediction(values[i], float(probability[i]), s.current.e, s.current.n, s.skeleton)
             for i, s in enumerate(states)
         ]
 
     states = lockstep_states(series, anchors, skeletons, [1.0] * len(series))
-    first = orders_for(states)
+    first = orders_for(states, component=first_component)
+    if first_order is not None:
+        first = [first_order(order, state) for order, state in zip(first, states, strict=True)]
     for state, order in zip(states, first, strict=True):
         state.current = replace(state.current, remaining_m=order.remaining_m)
 
@@ -295,12 +306,22 @@ def rolled_predictions_lockstep(
     model: nn.Module, series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer,
     anchors: Sequence[int], device: torch.device, skeletons: Sequence[RunwaySkeleton],
     *, step_s: float = LOCKSTEP_S, hold_asks: int = ORDER_HOLD_ASKS, hold_flips_only: bool = False,
+    first_component: int | None = None,
+    first_order: Callable[[PlanOrder, FlightState], PlanOrder] | None = None,
 ) -> list[RolledFlight]:
     """A group's rolled predictions in lockstep (design v5.1): every `step_s` the head is
     asked again for every flight still flying and the group is stepped together; a
     material change of order (or a fix ↔ none flip only) is adopted only once given on
-    `hold_asks` consecutive asks (v5.3, `forecast.held_order`)."""
-    states, policy = lockstep_model_policy(model, series, config, normalizer, anchors, device, skeletons)
+    `hold_asks` consecutive asks (v5.3, `forecast.held_order`); a fan member's first order
+    from one mixture component, or transformed (`lockstep_model_policy`) — ONE step deep,
+    which an order hold would silently deepen to `hold_asks` steps, so the two are refused
+    together."""
+    if (first_component is not None or first_order is not None) and hold_asks != 1:
+        raise ValueError("a fan member is the fan one step deep; an order hold would hold its first order longer")
+    states, policy = lockstep_model_policy(
+        model, series, config, normalizer, anchors, device, skeletons,
+        first_component=first_component, first_order=first_order,
+    )
     return fly_lockstep(
         states, config, policy=policy, step_s=step_s, hold_asks=hold_asks, hold_flips_only=hold_flips_only, device=device,
     )

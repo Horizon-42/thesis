@@ -1304,6 +1304,9 @@ class PlanOutput(OutputSpec):
     #: not at all: a table is drawn at a share, a share draws from a table.
     plan_rolled_windows_path: str
     plan_rolled_share: float
+    #: v5.3 (§9 step 3(g)): the fan over the next fix — 0 the point head, K ≥ 2 a
+    #: K-component mixture over the instruction group (`outputs.plan.model`).
+    plan_fan_components: int
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -1315,6 +1318,11 @@ class PlanOutput(OutputSpec):
         for name in ("plan_operating_loss_weight", "plan_instruction_loss_weight"):
             if getattr(self, name) < 0.0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
+        if self.plan_fan_components < 0 or self.plan_fan_components == 1:
+            raise ValueError(
+                "plan_fan_components is 0 (the point head) or at least 2 (a mixture over the next "
+                f"instruction), got {self.plan_fan_components!r}"
+            )
         if not 0.0 <= self.plan_rolled_share <= 1.0:
             raise ValueError(f"plan_rolled_share must be in [0, 1], got {self.plan_rolled_share!r}")
         if bool(self.plan_rolled_windows_path) != (self.plan_rolled_share > 0.0):
@@ -1880,6 +1888,12 @@ class TSConfig:
     # alone, what every plan run before 2026-09-11 trained on).
     plan_rolled_windows_path: str = ""
     plan_rolled_share: float = 0.0
+    # v5.3 §9 step 3(g): the FAN over the next fix — K mixture components over the
+    # instruction group (0: the point head, every plan run before 2026-09-12; K ≥ 2: a
+    # K-component diagonal-Gaussian mixture trained by its negative log-likelihood in place
+    # of the instruction group's L1; the point prediction is the top-weight component, the
+    # fan every component flown as its own lockstep member).
+    plan_fan_components: int = 0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
     # bounded to the final-approach corridor (see the constants). ``anchor-relative`` is

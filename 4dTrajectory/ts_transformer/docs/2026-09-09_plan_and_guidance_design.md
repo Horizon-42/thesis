@@ -1,6 +1,21 @@
 # Plan-and-guidance: the next model (design v5, 2026-09-12)
 
-Status: **v5.3 MEASURED and NOT ADOPTED (2026-09-12, `dev-plan-hold`; §9 step 3(f), §12.7): the
+Status: **v5.3 step 3(g) BUILT and MEASURED (2026-09-12, `dev-plan-fan`; §9 step 3(g), §12.8): the
+FAN over the next fix — the mixture head is ADOPTED as the plan head's objective, the one-step fan
+is NOT a deliverable.** `plan_fan_components` = 4 makes the instruction group a 4-component
+mixture trained by its negative log-likelihood; its TOP-WEIGHT component is the point prediction,
+and on TWO seeds it beats the L1 point head of §12.6 on the vectored stratum at the 60 s anchor:
+ADE **3641 → 3087 m** (seed 1337, paired −123 m at the median, lower on 57 %) and **3439 → 2837 m**
+(seed 2024, −377 m, 63 %), established 86.5 → 94.2 % and 89.5 → 95.2 %, FDE mean 2803 → 1459 and
+1925 → 1356, straight-in unchanged (747 → 749, 736 → 743); the point head's own two-seed spread is
+~200 m vectored. The 3(d) gate (2870 m) is passed by seed 2024 (2837) and missed by seed 1337 (3087) —
+read as AT the gate, not past it; at L−1 (seed 1337) 3719 → 3143 m, established 84.2 → 94.8 %. As a FAN the K members one step deep are no better than a blind
+5 km ring: vectored minADE_4 2454 against the control's 2450, the nearest member beats the top-1 on
+58 % of fanned flights against the control's 79 % (gate 2 fails); the 2σ coverage of 98.7 % is the
+width of the alternatives (σ 5–10 km), not information. Three of four components carry weight
+(usage 29 / 16 / 3 / 52 % vectored). Next: step 4 (assigned time and join) on the K = 4 head; the
+fan as a deliverable needs a different object (samples, or a member tracked across asks), listed,
+not planned. Previous status: **v5.3 MEASURED and NOT ADOPTED (2026-09-12, `dev-plan-hold`; §9 step 3(f), §12.7): the
 ORDER HOLD** — a materially different order adopted only once given on two consecutive asks
 (`forecast.held_order`; `plan_oracle --hold-asks N [--hold-flips-only]`) — fails the 3(d) gate
 and trips its veto on §12.6's share-0.75 head: vectored ADE 3641 → 3816 m, established
@@ -485,27 +500,46 @@ parametrisation is too coarse.
    moves. Gate as 3(d)'s: vectored ADE against native32's 2870 m and the straight-in chamfer
    against 109 m at the 60 s anchor; the veto: a hold that costs the straight-in stratum
    (its orders are steady) or delays a real change past its turn (turns not completed up).
-   **(g) the FAN over the next fix (planned 2026-09-12; §3b's distribution, the next item
-   after (f)).** What is left after (e)/(f) is the head's geometry — the fix it names at the
-   60 s anchor, 25–39 km from the turn — and §3b says the route is never a committed point:
-   the head offers a small readable set of "the next vector is one of these" and the
-   scheduler assigns or overrides. Decided form: a K-component MIXTURE over the instruction
-   group (`next_ahead`, `next_across`, the heading pair, `next_speed`; K = 4, one component
-   per candidate vector, a weight each; the no-fix flag stays a separate logit), trained by
-   the mixture's negative log-likelihood over the entries the track defines in place of the
-   instruction group's L1 — chosen over marginal quantiles (no joint candidates) and over the
-   latent z (a posterior encoder, and the L2 line's collapse history). The point prediction
-   is the top-weight component, so the rolled flight of (d)–(f) is unchanged in form; the
-   fan is every component flown as its own lockstep member from the same anchor (K rolled
-   flights per flight; the members re-asked as today, each holding its own component index
-   at every ask). Readout, the latent fan's protocol (`latent_fan_readout`): the truth's
-   chamfer to the nearest member against top-1, minADE_K, the fan's coverage of the truth's
-   next fix (its position inside the components' 2σ), against a RANDOM fan of K draws about
-   the top-1 as the control; per-component usage (mode collapse shows as one weight ≈ 1).
-   Gates: top-1 no worse than (f)'s point numbers within the seed line; the nearest member
-   beats top-1 on the vectored stratum by more than the random control does; the truth's
-   next fix inside the fan on ≥ 80 % of open vectored anchors. Veto: the usage readout
-   shows K − 1 dead components — then the mixture is a point head with extra parameters.
+   **(g) the FAN over the next fix (BUILT and MEASURED 2026-09-12, `dev-plan-fan`; §3b's
+   distribution; §12.8 — the mixture objective adopted, the one-step fan not).**
+   What is left after (e)/(f) is the head's geometry — the fix it names at the 60 s anchor,
+   25–39 km from the turn — and §3b says the route is never a committed point: the head
+   offers a small readable set of "the next vector is one of these" and the scheduler
+   assigns or overrides. As built: `plan_fan_components` = K (0 the point head, K ≥ 2 the
+   fan; `--plan-fan-components`, named `plan-v1(fan=K)`), a K-component diagonal-Gaussian
+   MIXTURE over the WHOLE instruction group (the fix ahead/across, the heading pair, the
+   speed, the remaining path and the height at it — the seven entries the labels write
+   together), K means decoded as the point head decodes the group, K log σ in the targets'
+   scaled units (`FAN_LOG_SIGMA_MIN + softplus`, bounded below, never a dead gradient), K
+   logits; trained by the mixture's negative log-likelihood (`model.mixture_nll`) in place
+   of the group's L1 — the `kinematic` component keeps its name and changes its quantity,
+   so a fan run's objective is comparable within the run only. Chosen over marginal
+   quantiles (no joint candidates) and over the latent z (a posterior encoder, and the L2
+   line's collapse history). The components start 4 km apart across the course at σ = one
+   scale unit, equal weights. The point prediction is the top-weight component
+   (`PlanPrediction.values`), so the rolled flight of (d)–(f) is unchanged in form; the fan
+   is `model.fan_rows` — every component as a full target vector with its weight and σ.
+   **A member is the fan ONE STEP DEEP** (`strategy.lockstep_model_policy(first_component=)`):
+   its FIRST order is component k's, every later order the top-1's — a component's index
+   is not a stable identity across asks, so "holding its own component at every ask" (the
+   planned form) is not a defined object; the one-step form is §3b's "the next vector is
+   one of these". Readout `run_ts.py plan_fan_readout` (the latent fan's protocol, its
+   `geometry_cell` imported): single step at the anchor — the top-1's and the nearest
+   component's fix error against the truth's next fix, the truth inside any component's
+   2σ box, the components' usage (how often each is the top weight) — and rolled: the
+   top-1, the K members, and a DISPLACED CONTROL fan of K members whose first fix is the
+   top-1's moved `--control-radius-m` (5 km, §12.4's vectored median-baseline error) in the
+   flight's runway axes at K evenly spaced bearings from "toward the runway", the schedule
+   coordinate moved with it (a ring, not random draws: the same K and spread with no
+   learned structure, reproducible). The top-1 is a member of BOTH sets (minADE_K over the
+   top-1 and the members, as `latent_fan_readout` reads it; the chamfer cell the nearest
+   MEMBER against the top-1, strict). Only flights whose first order flies a fix are fanned
+   (elsewhere every member is the top-1 again; the share is reported). Gates: the top-1
+   no worse than (f)'s point numbers within the seed line (3641 m vectored at 60 s); the
+   nearest member beats the top-1 on the vectored stratum by more than the control does;
+   the truth's next fix inside the fan on ≥ 80 % of open vectored anchors (read with the
+   σ: a component wide enough covers anything). Veto: the usage readout shows K − 1 dead
+   components — then the mixture is a point head with extra parameters.
 4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
 5. Two seeds; pooled five-airport training; KSJC replication.
 6. The multi-aircraft scheduler demonstration.
@@ -1366,3 +1400,80 @@ refusing a different hold). Kept from the step: the paired plan-oracle reading
 (`plan_oracle_pair`) as the instrument for every lockstep change from here. A hysteresis
 on the order is the wrong lever for this head; a steadier next fix has to come from the
 head itself — the fan (§9 step 3(g)), then the seed.
+
+### 12.8 Step 3(g) — the fan over the next fix (v5.3, 2026-09-12): the mixture adopted, the fan not
+
+`dev-plan-fan`; `plan_fan_components` = 4 (`--plan-fan-components 4`, named `plan-v1(fan=4)`),
+`run_ts.py plan_fan_readout --anchor-s 60`, `plan_oracle --policy model` for the top-1 and
+`plan_oracle_pair` for the pairs. The recipe is §12.6's share-0.75 head's (the step-3c head on
+the `step3c_plan_head_full_cohort.json` development cohort, rolled windows at share 0.75, 120
+epochs, 3.8 s each), with the mixture objective; artifacts `step3g_fan4_head/` (seed 1337, best
+epoch 120 — budget-limited), `step3g_fan4_head_s2024/`, `step3g_point_s75_head_s2024/` (the L1
+point head at the second seed, for the seed line), `step3g_fan4_top1_lockstep_{a60s,l1}/`,
+`step3g_fan4_s2024_top1_lockstep_a60s/`, `step3g_point_s2024_lockstep_a60s/`, the pairs
+`step3g_pair_*/`, the fan `step3g_fan4_readout_a60s/` (and its 48-flight smoke).
+
+**The head.** Both seeds learn the same shape: one sharp dominant component (weight 0.62 /
+0.69 on 400 val flights at 60 s; σ ≈ 2 km ahead × 0.6 km across) and three alternatives 6–10 km
+from it with σ of 3–10 km and weights 0.07–0.16 — a main hypothesis and broad catch-alls, not a
+collapse (usage of the four over the vectored stratum: 29 / 16 / 3 / 52 %; one component is
+nearly idle at 2.7 %). The `kinematic` component is now a negative log-likelihood (−0.60 to −0.67
+per entry on val) and is not comparable with the L1 heads' value.
+
+**The top-1 as the point prediction (KRDU val 1404, lockstep 30 s, 60 s anchor; paired within
+seed against the L1 point head of the same recipe and seed).**
+
+| vectored, 60 s anchor | L1 point head | mixture top-1 | paired ΔADE p50 (top-1 lower on) |
+|---|---|---|---|
+| seed 1337: ADE mean / FDE mean / chamfer mean | 3641 / 2803 / 1676 | 3087 / 1459 / 1367 | −123 m (57 %) |
+| seed 1337: established / capped / glidepath viol. | 86.5 % / 9.0 % / 53.2 % | 94.2 % / 4.2 % / 29.1 % | |
+| seed 2024: ADE mean / FDE mean / chamfer mean | 3439 / 1925 / 1476 | 2837 / 1356 / 1251 | −377 m (63 %) |
+| seed 2024: established / capped / glidepath viol. | 89.5 % / 6.2 % / 64.4 % | 95.2 % / 3.3 % / 37.1 % | |
+| straight-in ADE mean, seed 1337 / 2024 | 747 / 736 | 749 / 743 | +8 / +11 m |
+| pooled established, seed 1337 / 2024 | 94.0 / 95.4 % | 97.3 / 97.6 % | |
+| the point head's own two seeds, vectored ADE | 3641 (1337) / 3439 (2024) | | −1 m p50 (50 %): the seed line |
+
+At L−1 (seed 1337, against §12.6's `step3e_r0s75_lockstep_l1`): vectored ADE 3719 → 3143 m (paired −229 m at the
+median, lower on 62 %), FDE mean 3213 → 1454, chamfer mean 1718 → 1386, established 84.2 → 94.8 %,
+capped 10.3 → 5.0 %; straight-in 778 → 773; pooled established 93.0 → 97.6 % (`step3g_pair_fan4_top1_vs_s75_l1/`).
+
+**Read.** The mixture objective fixes the POINT prediction: on two seeds the vectored ADE falls
+550–600 m (mean) and the established share rises 6 points, far outside the point head's own
+~200 m seed spread, with the straight-in stratum untouched — an L1 on a multimodal next fix
+regresses toward the middle of the modes (a fix between a left and a right base), the mixture's
+top component sits on one. It is the first change since 3(e) that moves the vectored stratum in
+the right direction, and the 3(d) gate (native32's 2870 m) is reached at one seed (2837) and
+missed at the other (3087): at the gate, not past it.
+
+**The fan one step deep (the 708 flights whose first order flew a fix — every vectored flight,
+13 % of the straight-in ones).**
+
+| KRDU val, 60 s anchor, fanned flights | fan (K = 4 components) | control (5 km ring, K = 4) |
+|---|---|---|
+| vectored minADE_4 mean / p50 (top-1 3087 / 2616) | 2454 / 2222 | 2450 / 2092 |
+| vectored nearest chamfer p50 (top-1 1249) | 1083 | 1046 |
+| vectored nearest member beats the top-1 | 58.4 % | 78.9 % |
+| vectored any member established (top-1 94.2 %) | 98.5 % | 99.2 % |
+| straight-in (107 fanned) minADE_4 / nearest beats top-1 | 652 / 76.6 % | 569 / 62.6 % |
+| single step, vectored (600 with a truth fix): top-1 fix error p50 / nearest component's | 2294 / 1717 m | — |
+| single step, vectored: truth inside any component's 2σ | 98.7 % | — |
+
+**Read.** As a set of alternatives the fan carries no information a blind ring does not:
+minADE_4 ties the control, and a member nearer the truth than the top-1 exists for 58 % of
+vectored flights against the ring's 79 % — the ring's four displacements of the top-1's fix
+beat the top-1 MORE often than the head's own alternatives do, because the alternatives are
+broad components 6–10 km away whose means are not aimed anywhere. The 2σ coverage (98.7 %) is
+what a 5–10 km σ buys and says nothing; the nearest component's fix error (1717 m against the
+top-1's 2294) is the one single-step number in the fan's favour. Gate 1 (the top-1 no worse)
+passes with margin; gate 2 (the nearest member beats the top-1 by more than the control) fails;
+gate 3 (coverage) passes trivially and is not read; the veto (K − 1 dead components) does not
+fire (three carry weight).
+
+**Decision.** The MIXTURE OBJECTIVE is adopted as the plan head's training recipe
+(`plan_fan_components` = 4; the config default stays 0 so every stored point head keeps its
+layout and name — a future named plan recipe pins 4); the deployed prediction is its top-weight
+component, nothing downstream changes. The FAN as a delivered set is NOT adopted: one step deep
+with component means it is a ring; a fan that would carry the claim needs a different object —
+samples from the mixture flown as members, or a member that tracks its component across asks —
+listed here, not planned. Next: §9 step 4 (assigned time and join) on the K = 4 head, then the
+pooled five-airport training.

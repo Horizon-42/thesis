@@ -4,6 +4,45 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-12 — ts_transformer: plan-and-guidance step 3(g) — the fan over the next fix (v5.3): the mixture objective adopted, the one-step fan not
+
+`dev-plan-fan`; design v5.3 §9 step 3(g), §12.8. `plan_fan_components` = K (config field,
+default 0 = the point head; `--plan-fan-components`; named `plan-v1(fan=K)`): for K ≥ 2 the
+plan head's instruction group is a K-component diagonal-Gaussian mixture — K means decoded
+as the point head decodes the group, K log σ as `FAN_LOG_SIGMA_MIN + softplus(raw)` (bounded
+below, never a dead gradient), K logits — trained by its negative log-likelihood
+(`outputs/plan/model.mixture_nll`) in place of the group's L1; the `kinematic` component
+keeps its name and becomes an NLL (comparable within a fan run only). `PlanPrediction.values`
+carries the top-weight component (`fan_values` / `fan_log_sigma` / `fan_logits` beside it), so
+the order, the lockstep and the drawn replay are unchanged in form; `fan_rows` is every
+component as a full target vector with its weight and physical σ. The point head (K = 0)
+keeps its stored layout and start bit for bit (pinned in `tests/test_plan_fan.py`). A fan
+member is the fan ONE STEP DEEP (`strategy.lockstep_model_policy(first_component=k,
+first_order=)`: the first order from component k or transformed given the flight's state,
+every later one the top-1's; refused with an order hold). New runner `run_ts.py
+plan_fan_readout --checkpoint L=<ckpt> --anchor-s 60`: the single-step reading (fix errors,
+2σ coverage, per-component usage) and the rolled one — the top-1, the K members and a
+DISPLACED CONTROL fan (the top-1's first fix moved 5 km in runway axes at K bearings, the
+schedule coordinate with it), with `quantile_fan_readout.geometry_cell` and the top-1 a
+member of both sets; only flights whose first order flew a fix are fanned; the artifact is
+written before the table (a 40-minute run died formatting a stratum with no fanned flight).
+
+Measured (KRDU val 1404, lockstep 30 s, 60 s anchor, the §12.6 recipe at K = 4, two seeds,
+paired within seed against the L1 point head of the same recipe and seed): the mixture's
+TOP-1 — vectored ADE 3641 → 3087 m (seed 1337, −123 m paired p50, lower on 57 %) and
+3439 → 2837 m (seed 2024, −377 m, 63 %), established 86.5 → 94.2 % and 89.5 → 95.2 %, FDE mean
+2803 → 1459 and 1925 → 1356, straight-in unchanged (747 → 749, 736 → 743); the point head's own
+two-seed vectored spread ~200 m. The 3(d) gate (2870 m) reached at one seed, missed at the
+other. Both heads learn one sharp dominant component (weight 0.62–0.69, σ ≈ 2 × 0.6 km) and
+three broad alternatives 6–10 km away; usage 29 / 16 / 3 / 52 % on the vectored stratum. As a
+FAN the members are no better than the ring: vectored minADE_4 2454 against 2450, the nearest
+member beats the top-1 on 58 % of fanned flights against the control's 79 %; 2σ coverage
+98.7 % is the alternatives' width. Decision: the mixture objective is the plan head's recipe
+(K = 4; the default stays 0), the one-step fan is not a deliverable. Review (opus) findings
+fixed before the commit: the top-1 a member of both fan sets, the shared geometry cell, the
+control in runway axes with the schedule coordinate moved, the σ parameterisation, the fan
+member refused with an order hold, the K = 0 layout pinned. Full suite 1039 passed.
+
 ### 2026-09-12 — ts_transformer: plan-and-guidance step 3(f) — the order hold (v5.3), measured and not adopted; `plan_oracle_pair`
 
 `dev-plan-hold`; design v5.3 §9 step 3(f), §12.7. §12.6's reading: the receding-horizon

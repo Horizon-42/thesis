@@ -142,7 +142,7 @@ CLOSURE_LOSS_FIELDS = (
 #: The plan output's objective fields; its base name bumps when the regression itself
 #: is redesigned.
 PLAN_LOSS_BASE = "plan-v1"
-PLAN_LOSS_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight")
+PLAN_LOSS_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight", "plan_fan_components")
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
 # in different directories must not read as one).
 _PATH_FIELDS = frozenset({"closure_labels_path", "control_fitted_teacher_path", "plan_rolled_windows_path"})
@@ -306,6 +306,7 @@ _ABBREV = {
     "control_fitted_teacher_path": "teacher",
     "plan_rolled_windows_path": "rolled",
     "plan_rolled_share": "rolled-share",
+    "plan_fan_components": "fan",
     "state_position_reference": "pos-ref",
     "procedure_loss_lateral_weight": "proc-lat",
     "procedure_loss_vertical_weight": "proc-vert",

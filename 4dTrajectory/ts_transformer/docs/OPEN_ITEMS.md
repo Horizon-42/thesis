@@ -69,7 +69,7 @@ were NOT made without the owner:
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 
-## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–3(f) built and measured; next: 3(g), the fan over the next fix
+## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–3(g) built and measured; next: step 4, assigned time and join, on the K = 4 mixture head
 
 `docs/2026-09-09_plan_and_guidance_design.md` (v4; §12 carries the numbers), branch
 `dev-plan-guidance`. Built: the shared rollout parts moved out of `outputs/control/`
@@ -143,9 +143,20 @@ the review's route and controller findings applied and re-measured). Artifacts:
   and the step-0 fix stays in force (2038 of 3143 held steps a moved fix). Default
   `ORDER_HOLD_ASKS` = 1 (v5.2's behaviour); the axis stays; `run_ts.py plan_oracle_pair`
   pairs two plan-oracle artifacts flight by flight (hold 1 reproduces §12.6 to ≤ 0.07 m —
-  the head's float32 CPU forward is not bit-reproducible between runs). Next: 3(g) the fan
-  over the next fix (planned in §9: a K = 4 mixture over the instruction group, each
-  component a lockstep member, the latent fan's readout protocol), then a second seed.
+  the head's float32 CPU forward is not bit-reproducible between runs).
+- **Step 3(g) (2026-09-12, `dev-plan-fan`, design §12.8): the FAN over the next fix — the
+  MIXTURE OBJECTIVE ADOPTED, the one-step fan NOT.** `plan_fan_components` = 4 makes the
+  instruction group a 4-component diagonal-Gaussian mixture trained by its NLL; the top-weight
+  component is the point prediction. Two seeds, KRDU val, 60 s anchor, paired within seed
+  against the L1 point head of the same recipe: vectored ADE 3641 → 3087 m (1337) and
+  3439 → 2837 m (2024), established 86.5 → 94.2 % and 89.5 → 95.2 %, straight-in unchanged;
+  the point head's own seed spread ~200 m. The 3(d) gate (2870 m) reached at one seed, missed
+  at the other. As a fan (`run_ts.py plan_fan_readout`): minADE_4 ties a 5 km displaced ring
+  (2454 vs 2450), the nearest member beats the top-1 less often than the ring's (58 vs 79 %);
+  2σ coverage 98.7 % is the alternatives' width. Three of four components carry weight. The
+  config default stays 0 (stored point heads keep their layout); a named plan recipe should
+  pin 4. Next: step 4 on the K = 4 head; a fan that carries a claim needs samples or a member
+  tracked across asks (listed, not planned).
 - **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
   binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
   beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the

@@ -120,7 +120,30 @@ point of the package, not a migration in progress.
   L=<dir>` is how two plan-oracle artifacts are compared** — flight by flight, never two
   summary tables; its identity line is the refactor check, and a hold-1 re-roll differs
   from §12.6's artifact by ≤ 0.07 m of ADE because the head's float32 CPU forward is not
-  bit-reproducible between runs (51 of 78 differing rows differ at step 0).
+  bit-reproducible between runs (51 of 78 differing rows differ at step 0). **v5.3 (2026-09-12,
+  §9 step 3(g)): `plan_fan_components` = K ≥ 2 makes the instruction group a K-component
+  diagonal-Gaussian MIXTURE** (`outputs/plan/model.py`: K means, K log σ as
+  `FAN_LOG_SIGMA_MIN + softplus`, K logits; trained by `mixture_nll` in place of the group's
+  L1 — **the `kinematic` component keeps its name and becomes a negative log-likelihood, often
+  negative, comparable within a fan run only**). `values` carries the top-weight component so
+  the rolled flight is unchanged in form; `fan_rows` is every component as a full target
+  vector with its weight and σ. **A fan member is the fan ONE STEP DEEP**
+  (`lockstep_model_policy(first_component=k)`: the first order from component k, every later
+  one the top-1's — a component's index is not an identity across asks), refused with an
+  order hold. The point head (K = 0) keeps its stored layout bit for bit (15 outputs; pinned
+  in `tests/test_plan_fan.py`). `run_ts.py plan_fan_readout --checkpoint L=<ckpt> --anchor-s
+  60` reads a fan head twice — single step (fix errors, 2σ coverage, per-component usage) and
+  rolled (the top-1, the K members, a DISPLACED CONTROL fan of K: the top-1's first fix moved
+  5 km in runway axes at K bearings, the schedule coordinate with it) — with the latent fan's
+  `geometry_cell` and the top-1 a member of BOTH sets; only flights whose first order flew a
+  fix are fanned. A fan's columns are read against the control's, never alone. **Measured
+  (§12.8, two seeds): the mixture's TOP-1 beats the L1 point head by 550–600 m of vectored ADE
+  at 60 s (3641 → 3087, 3439 → 2837; established +6 points; straight-in unchanged; the point
+  head's own seed spread ~200 m) — the mixture objective is the plan head's recipe from here
+  (`--plan-fan-components 4`; the config default stays 0 for the stored heads); the one-step
+  fan's members are no better than a 5 km ring (minADE_4 2454 vs 2450, nearest-beats-top-1
+  58 vs 79 %) and the 2σ coverage (98.7 %) is the alternatives' width, so the fan is NOT a
+  deliverable in this form.**
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches
