@@ -41,6 +41,7 @@ from ts_transformer.outputs.plan.forecast import (
     LegOrder,
     LockstepPolicy,
     RolledFlight,
+    ORDER_HOLD_ASKS,
     fly_lockstep,
     on_final,
     rolled_history,
@@ -60,6 +61,9 @@ from ts_transformer.outputs.plan.labels import (
 
 #: The table's schema: the runner stamps it, the loader checks it.
 ROLLED_WINDOWS_SCHEMA = "ts-plan-rolled-windows-v1"
+#: The hold every table written before v5.3 was flown at (there was none: an order was
+#: adopted at once) — what a header without `hold_asks` reads as.
+PRE_HOLD_ASKS = 1
 #: The draw law's salt (`RolledDraw`): a different law is a different version.
 ROLLED_SAMPLING_VERSION = "per-flight-hash-v1-plan-rolled-share"
 #: Whose flown states a table holds: the truth policy's (the lockstep oracle: closed-loop
@@ -94,6 +98,8 @@ def record_lockstep(
     policy: LockstepPolicy,
     step_s: float = LOCKSTEP_S,
     time_caps_s: Sequence[float] | None = None,
+    hold_asks: int = ORDER_HOLD_ASKS,
+    hold_flips_only: bool = False,
     device: torch.device | None = None,
 ) -> tuple[list[RolledFlight], list[RolledSample]]:
     """Fly ``states`` in lockstep under ``policy`` and record, at EVERY step, each flight's
@@ -119,7 +125,10 @@ def record_lockstep(
             ))
         return policy(active)
 
-    flights = fly_lockstep(states, config, policy=recording, step_s=step_s, time_caps_s=time_caps_s, device=device)
+    flights = fly_lockstep(
+        states, config, policy=recording, step_s=step_s, time_caps_s=time_caps_s, hold_asks=hold_asks,
+        hold_flips_only=hold_flips_only, device=device,
+    )
     return flights, samples
 
 
@@ -166,6 +175,8 @@ class RolledWindowTable:
         return {
             "path": str(self.path), "sha256": self.sha256, "schema": self.header["schema"],
             "policy": self.header["policy"], "lockstep_s": self.header["lockstep_s"],
+            "hold_asks": self.header.get("hold_asks", PRE_HOLD_ASKS),
+            "hold_flips_only": self.header.get("hold_flips_only", False),
             "samples": self.samples, "flights": self.flights, "splits": self.header["splits"],
             "checkpoint": self.header["checkpoint"], "extended_from": self.header.get("extended_from"),
         }
@@ -227,13 +238,14 @@ def _group_sorted(keys: np.ndarray, rows: np.ndarray):
 
 
 def rolled_table_header(
-    config: TSConfig, *, policy: str, lockstep_s: float, airports: Sequence[str], splits: dict[str, int],
-    checkpoint: dict[str, str], generated_at: str, wall_s: float,
+    config: TSConfig, *, policy: str, lockstep_s: float, hold_asks: int, hold_flips_only: bool, airports: Sequence[str],
+    splits: dict[str, int], checkpoint: dict[str, str], generated_at: str, wall_s: float,
 ) -> dict:
     """The header a generator writes: the window contract the table was flown under, and
-    what it was flown over."""
+    what it was flown over (the policy, the step, the order hold)."""
     return {
         "schema": ROLLED_WINDOWS_SCHEMA, "policy": policy, "lockstep_s": float(lockstep_s),
+        "hold_asks": int(hold_asks), "hold_flips_only": bool(hold_flips_only),
         "seq_len": int(config.seq_len), "dt_s": float(config.dt_s), "channels": list(config.channels),
         "target_contract": PLAN_TARGET_CONTRACT, "targets": list(TARGETS),
         "airports": sorted(set(airports)), "splits": dict(splits), "checkpoint": dict(checkpoint),
@@ -267,12 +279,15 @@ def write_rolled_windows(
         "on_final": np.array([float(s.on_final) for s in samples], dtype=np.float32),
     }
     if extend is not None:
-        # the same window contract and the same re-ask period, or the two sets of samples
-        # are two different inputs under one name; the cohorts are unioned
-        for key in ("seq_len", "dt_s", "channels", "target_contract", "lockstep_s"):
-            if extend.header[key] != header[key]:
+        # the same window contract, the same re-ask period and the same order hold, or
+        # the two sets of samples are two different inputs under one name; the cohorts
+        # are unioned. A table written before v5.3 carries no hold key: it was flown at
+        # `PRE_HOLD_ASKS`, so it reads as that rather than as unknown
+        for key in ("seq_len", "dt_s", "channels", "target_contract", "lockstep_s", "hold_asks", "hold_flips_only"):
+            before = extend.header.get(key, {"hold_asks": PRE_HOLD_ASKS, "hold_flips_only": False}.get(key))
+            if before != header[key]:
                 raise ValueError(
-                    f"{extend.path}: cannot extend a table with {key}={extend.header[key]!r} by one with "
+                    f"{extend.path}: cannot extend a table with {key}={before!r} by one with "
                     f"{key}={header[key]!r}"
                 )
         new = {key: np.concatenate([getattr(extend, key), value]) for key, value in new.items()}

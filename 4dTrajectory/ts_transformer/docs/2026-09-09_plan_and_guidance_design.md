@@ -1,6 +1,16 @@
-# Plan-and-guidance: the next model (design v5, 2026-09-11)
+# Plan-and-guidance: the next model (design v5, 2026-09-12)
 
-Status: **v5.2 BUILT and MEASURED (2026-09-11 night, `dev-plan-rolled`; §9 step 3(e), §12.6): the
+Status: **v5.3 MEASURED and NOT ADOPTED (2026-09-12, `dev-plan-hold`; §9 step 3(f), §12.7): the
+ORDER HOLD** — a materially different order adopted only once given on two consecutive asks
+(`forecast.held_order`; `plan_oracle --hold-asks N [--hold-flips-only]`) — fails the 3(d) gate
+and trips its veto on §12.6's share-0.75 head: vectored ADE 3641 → 3816 m, established
+86.5 → 60.2 % (flips only: 3723 m, 79.7 %). The head's fix WALKS between asks (766 m at the
+median, 2.7 km at p75), so two asks never agree within 1 km and the step-0 fix stays in force
+for the whole flight: the moving fix is the head's steering, not jitter. `ORDER_HOLD_ASKS` = 1
+(v5.2's behaviour) stays the default; the axis stays; `run_ts.py plan_oracle_pair` is the paired
+reader (a hold-1 re-roll reproduces §12.6 to ≤ 0.07 m of ADE, the head's float32 CPU forward
+not being bit-reproducible). Next: the fan over the next fix (§9 step 3(g)), then the seed.
+Previous status: **v5.2 BUILT and MEASURED (2026-09-11 night, `dev-plan-rolled`; §9 step 3(e), §12.6): the
 head is TRAINED ON ROLLED WINDOWS** — the windows a lockstep flight produces, labelled with the
 truth's policy read at each state (`labels.TruthExpert`; `run_ts.py plan_rolled_windows`), mixed
 into every epoch's draw at `plan_rolled_share`, the val split's rolled windows scored every epoch
@@ -454,6 +464,48 @@ parametrisation is too coarse.
    the 60 s anchor. **BUILT and MEASURED 2026-09-11 night (§12.6)**: share 0.75 — vectored ADE
    3641 m (gate not passed against 2870), straight-in chamfer 44 (passed), established 94 %;
    the share is the lever, DAgger's first round is not.
+   **(f) v5.3 — the order HOLD (2026-09-12, `dev-plan-hold`; §12.7).** §12.6's reading: the
+   derailing is gone, the jitter is not — the head's orders still move from ask to ask, and
+   a fix moved over `RELAY_FIX_M` on ONE ask re-lays the route. The fix is in the lockstep,
+   not the head, and needs no training: an order that differs materially from the one in
+   force (`forecast.orders_differ`, the re-lay's own test — fix ↔ none, the fix or the join
+   moved over 1 km, the heading on over 10°) is adopted only once the policy has given it on
+   `ORDER_HOLD_ASKS` = 2 consecutive asks agreeing with each other; until then the
+   instruction and join in force are held and the route tracked on (`forecast.held_order`;
+   `fly_lockstep(hold_asks=)`, `plan_oracle --hold-asks N`, `plan_rolled_windows --hold-asks
+   N`; 1 = v5.2's behaviour). The lockstep's own rules are never held — an executed
+   instruction, the leg cap and the final decide the order there — so the hold is a no-op on
+   the oracle's path (its orders change only at execution; pinned in
+   `tests/test_plan_rolling.py`). Every step's record says `held` and the fix flown; a
+   flight reports `planHeldSteps` / `planOrderChanges`, the oracle table `orders held (of
+   steps)` / `order changes / flight`. What to measure, in order: (1) the share-0.75 head
+   (`step3e_r0_head_share75`) re-rolled at 60 s under `--hold-asks 1` — must reproduce
+   §12.6's row to the metre (the refactor's identity check); (2) the same under
+   `--hold-asks 2` at 60 s and L−1, paired per flight against (1); (3) 3 asks only if 2
+   moves. Gate as 3(d)'s: vectored ADE against native32's 2870 m and the straight-in chamfer
+   against 109 m at the 60 s anchor; the veto: a hold that costs the straight-in stratum
+   (its orders are steady) or delays a real change past its turn (turns not completed up).
+   **(g) the FAN over the next fix (planned 2026-09-12; §3b's distribution, the next item
+   after (f)).** What is left after (e)/(f) is the head's geometry — the fix it names at the
+   60 s anchor, 25–39 km from the turn — and §3b says the route is never a committed point:
+   the head offers a small readable set of "the next vector is one of these" and the
+   scheduler assigns or overrides. Decided form: a K-component MIXTURE over the instruction
+   group (`next_ahead`, `next_across`, the heading pair, `next_speed`; K = 4, one component
+   per candidate vector, a weight each; the no-fix flag stays a separate logit), trained by
+   the mixture's negative log-likelihood over the entries the track defines in place of the
+   instruction group's L1 — chosen over marginal quantiles (no joint candidates) and over the
+   latent z (a posterior encoder, and the L2 line's collapse history). The point prediction
+   is the top-weight component, so the rolled flight of (d)–(f) is unchanged in form; the
+   fan is every component flown as its own lockstep member from the same anchor (K rolled
+   flights per flight; the members re-asked as today, each holding its own component index
+   at every ask). Readout, the latent fan's protocol (`latent_fan_readout`): the truth's
+   chamfer to the nearest member against top-1, minADE_K, the fan's coverage of the truth's
+   next fix (its position inside the components' 2σ), against a RANDOM fan of K draws about
+   the top-1 as the control; per-component usage (mode collapse shows as one weight ≈ 1).
+   Gates: top-1 no worse than (f)'s point numbers within the seed line; the nearest member
+   beats top-1 on the vectored stratum by more than the random control does; the truth's
+   next fix inside the fan on ≥ 80 % of open vectored anchors. Veto: the usage readout
+   shows K − 1 dead components — then the mixture is a point head with extra parameters.
 4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
 5. Two seeds; pooled five-airport training; KSJC replication.
 6. The multi-aircraft scheduler demonstration.
@@ -1251,3 +1303,66 @@ The 3(d) gate: vectored ADE 3641 m is still above native32's 2870 (not passed); 
 chamfer 44 m against 109 (passed); established 94 % against 70 %. Next: hold an order unless
 the head's change persists two asks (the jitter is smaller now but `RELAY_FIX_M` re-lays
 still fire), then the fan over the next fix (§9 step 3(c)'s distribution), then the seed.
+
+### 12.7 Step 3(f) — the order hold (v5.3, 2026-09-12): measured, not adopted
+
+`dev-plan-hold`; `plan_oracle --hold-asks N [--hold-flips-only]` (`forecast.held_order`,
+`fly_lockstep(hold_asks=, hold_flips_only=)`), and the paired reader `run_ts.py
+plan_oracle_pair --base LABEL=<dir> --arm LABEL=<dir>` (two `plan_oracle.json` joined flight
+by flight: per stratum the means, the paired Δ p50 and the share of flights the arm is lower
+on, and the identity line — rows differing, the largest |ΔADE|). Every number: §12.6's
+share-0.75 head (`step3e_r0_head_share75`), KRDU val 1404, the lockstep every 30 s, the 60 s
+anchor unless said; artifacts `step3f_hold1_lockstep_a60s/`, `step3f_hold2_lockstep_a60s/`,
+`step3f_hold2_lockstep_l1/`, `step3f_flips_lockstep_a60s/` and the pairs
+`step3f_pair_{hold1_vs_3e,hold2_vs_hold1_a60s,hold2_vs_3e_l1,flips_vs_hold1_a60s}/`.
+
+**The identity check (hold 1 against §12.6's `step3e_r0s75_lockstep_a60s`).** Every summary
+number identical to the printed digit; 78 of 1404 rows differ in ADE, by at most 0.072 m, 0
+in `established` — 51 of them already at STEP 0, before any hold logic runs, by ≤ 0.035 in
+the head's own outputs (one float32 ULP at T ≈ 550 s): the head's CPU forward is not
+bit-reproducible between runs, and the rollout turns an ULP into centimetres. The refactor
+is faithful; a paired reading under 0.1 m is run-to-run noise.
+
+**The hold, measured.** The arm's mean against hold 1's; for ADE the paired Δ p50 and the
+share of flights the arm is lower on:
+
+| KRDU val, share-0.75 head, lockstep 30 s, 60 s anchor | hold 1 (v5.2) | hold 2, every material change | hold 2, fix ↔ none flips only |
+|---|---|---|---|
+| vectored ADE mean / paired Δ p50 (lower on) | 3641 | 3816 / +57 m (40 %) | 3723 / +0 m (16 %) |
+| vectored FDE mean / Fréchet mean | 2803 / 6131 | 5470 / 7232 | 3503 / 6615 |
+| vectored established | 86.5 % | 60.2 % | 79.7 % |
+| vectored capped / turn not completed | 9.0 % / 7.0 % | 4.7 % / 2.5 % | 7.8 % / 6.0 % |
+| vectored lateral / glidepath violation | 10.6 % / 53.2 % | 19.1 % / 35.4 % | 13.0 % / 47.1 % |
+| vectored orders held (of steps) / order changes per flight | 0 / 4.30 | 29.2 % / 0.69 | 3.5 % / 0.26 |
+| vectored flights that lost / gained `established` | — | 188 / 30 | 54 rows changed |
+| straight-in ADE mean / established | 747 / 99.6 % | 777 / 98.7 % | 737 / 99.7 % |
+| pooled established | 94.0 % | 82.3 % | 91.2 % |
+
+At L−1 (hold 2 against §12.6's `step3e_r0s75_lockstep_l1`, 1405 flights) the same picture:
+vectored ADE 3719 → 3938 (paired +88 m, lower on 42 %), established 84.2 → 55.4 %, FDE mean
+3213 → 6115; straight-in 778 → 823, established 99.5 → 98.3 %.
+
+**Why the hold fails: the head's fix WALKS.** Over the vectored stratum's 8954 consecutive
+asks under hold 1 the fix moves 766 m at the median between one ask and the next, 2744 m at
+p75 and 3870 m at p90, and flips fix ↔ none on 996 (11 %). Two consecutive asks therefore
+almost never agree within `RELAY_FIX_M`, and a change is almost never adopted: of the 3143
+steps hold 2 held on vectored flights, 2038 were a moved fix, 607 a moved join, 421 none →
+fix and 77 fix → none — the step-0 fix stays in force for the whole flight (the worst
+flight: 9 of 10 steps held on it, never executed, never closing; ADE 4039 → 15036 m).
+Capped and turns-not-completed FALL because the aircraft flies one steady leg instead of
+chasing the head; established falls because that leg is the wrong one. The flips-only hold
+keeps the walk (3.5 % of steps held) and still loses 6.8 points of vectored established: a
+fix → none flip is mostly the closing arriving, and holding it one ask (30 s, ~3 km down a
+stale leg) overshoots the join. The moving fix is the head's STEERING — the continuously
+re-issued bearing §12.5's oracle proved re-issuable every 30 s — not jitter to be damped;
+what derailed flights in §12.5 was fixed on the training side (3(e)), not in the lockstep.
+
+**Decision.** Neither hold passes the 3(d) gate (vectored ADE 3723–3816 m against 2870;
+established DOWN, the veto). `ORDER_HOLD_ASKS` = 1 — the v5.2 behaviour — is the default;
+the axis stays (`--hold-asks N`, `--hold-flips-only`), and every rolled flight and every
+rolled table records the hold it flew under (`planHoldAsks` / `planHoldFlipsOnly`; the
+table header's `hold_asks` / `hold_flips_only`, a pre-v5.3 table reading as 1, `--extend`
+refusing a different hold). Kept from the step: the paired plan-oracle reading
+(`plan_oracle_pair`) as the instrument for every lockstep change from here. A hysteresis
+on the order is the wrong lever for this head; a steadier next fix has to come from the
+head itself — the fan (§9 step 3(g)), then the seed.

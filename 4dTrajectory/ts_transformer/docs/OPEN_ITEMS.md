@@ -69,7 +69,7 @@ were NOT made without the owner:
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 
-## Plan-and-guidance (2026-09-10) — steps 0–2b built, reviewed and measured; step 3 waits for a decision
+## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–3(f) built and measured; next: 3(g), the fan over the next fix
 
 `docs/2026-09-09_plan_and_guidance_design.md` (v4; §12 carries the numbers), branch
 `dev-plan-guidance`. Built: the shared rollout parts moved out of `outputs/control/`
@@ -134,6 +134,18 @@ the review's route and controller findings applied and re-measured). Artifacts:
   the share, the observed objective does not move); DAgger round 1 +73 m paired, no gain.
   The 3(d) gate is still open (2870 m). Next: hold an order unless the change persists two
   asks; the fan over the next fix; a second seed.
+- **Step 3(f) (2026-09-12, `dev-plan-hold`, design v5.3 §12.7): the order HOLD — MEASURED,
+  NOT ADOPTED.** `forecast.held_order` adopts a materially different order only once given
+  on `hold_asks` consecutive asks (`plan_oracle --hold-asks N [--hold-flips-only]`). On the
+  share-0.75 head at 60 s: hold 2 vectored ADE 3641 → 3816 m, established 86.5 → 60.2 %,
+  FDE mean 2803 → 5470 (L−1: 3719 → 3938, 84.2 → 55.4 %); flips only 3723 m / 79.7 %. The
+  head's fix WALKS between asks (766 m p50, 2.7 km p75), so two asks never agree within 1 km
+  and the step-0 fix stays in force (2038 of 3143 held steps a moved fix). Default
+  `ORDER_HOLD_ASKS` = 1 (v5.2's behaviour); the axis stays; `run_ts.py plan_oracle_pair`
+  pairs two plan-oracle artifacts flight by flight (hold 1 reproduces §12.6 to ≤ 0.07 m —
+  the head's float32 CPU forward is not bit-reproducible between runs). Next: 3(g) the fan
+  over the next fix (planned in §9: a K = 4 mixture over the instruction group, each
+  component a lockstep member, the latent fan's readout protocol), then a second seed.
 - **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
   binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
   beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the

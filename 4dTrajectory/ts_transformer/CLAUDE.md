@@ -107,7 +107,20 @@ point of the package, not a migration in progress.
   step 0 the two differ by the truth's own curvature before its first fix, so the rolled
   and observed populations would disagree about one target; and a substituted training
   sample carries ZERO truth-grid targets and weights, so a path whose loss reads `y` /
-  `mask` cannot use `override`.
+  `mask` cannot use `override`. **v5.3 (2026-09-12): an ORDER HOLD in the lockstep is an
+  AXIS, not the default** (`forecast.held_order`; `plan_oracle --hold-asks N
+  [--hold-flips-only]`, `fly_lockstep(hold_asks=, hold_flips_only=)`; default 1 = adopt at
+  once, v5.2's behaviour): measured at 2 on the share-0.75 head the head's fix WALKS between
+  asks (766 m at the median, 2.7 km at p75), so two asks never agree within `RELAY_FIX_M`
+  and the hold locked flights onto their step-0 fix — vectored established 86.5 → 60.2 %
+  (flips only 79.7 %), design §12.7. Do not re-litigate without a head whose next fix is
+  steady between asks. Every rolled flight and rolled table says which hold it flew under
+  (`planHoldAsks` / `planHoldFlipsOnly`; the header's `hold_asks`, a pre-v5.3 table reading
+  as `rolled.PRE_HOLD_ASKS` = 1). **`run_ts.py plan_oracle_pair --base L=<dir> --arm
+  L=<dir>` is how two plan-oracle artifacts are compared** — flight by flight, never two
+  summary tables; its identity line is the refactor check, and a hold-1 re-roll differs
+  from §12.6's artifact by ≤ 0.07 m of ADE because the head's float32 CPU forward is not
+  bit-reproducible between runs (51 of 78 differing rows differ at step 0).
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches

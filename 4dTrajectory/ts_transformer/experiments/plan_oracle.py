@@ -65,6 +65,7 @@ from ts_transformer.outputs.plan.forecast import (
     ROUTES,
     fly_plans,
     LOCKSTEP_S,
+    ORDER_HOLD_ASKS,
     fly_lockstep_truth,
     fly_rolling,
 )
@@ -107,6 +108,12 @@ TODAYS_BEST = {
 
 def _p(values, quantile: float) -> float:
     return float(np.percentile(np.asarray(values, dtype=np.float64), quantile))
+
+
+def held_share(hook: dict) -> float:
+    """The share of a lockstep flight's steps the order hold kept the order in force on
+    (v5.3); every lockstep flight takes at least one step."""
+    return hook["planHeldSteps"] / hook["planSteps"]
 
 
 def corridor_verdicts(series, values: np.ndarray, anchor: int, skeleton) -> dict[str, float | bool]:
@@ -243,6 +250,13 @@ def summarize(rows: list[dict]) -> dict:
             "barrier_gated_share": float(np.mean([row["hook"]["gatedSteps"] for row in members])),
             "barrier_clamped_share": float(np.mean([row["hook"]["clampedSteps"] for row in members])),
             "capture_height_clamped_share": float(np.mean([row["hook"]["planCaptureHeightClamped"] for row in members])),
+            # the order hold (v5.3): the share of a flight's steps the policy's change was
+            # held on, and the material changes adopted per flight — lockstep flights only
+            # (the whole-path and leg forms carry no `planSteps`)
+            "orders_held_share": float(np.mean([held_share(row["hook"]) for row in members]))
+            if all("planHeldSteps" in row["hook"] for row in members) else float("nan"),
+            "order_changes_per_flight": float(np.mean([row["hook"]["planOrderChanges"] for row in members]))
+            if all("planOrderChanges" in row["hook"] for row in members) else float("nan"),
         }
     return out
 
@@ -271,6 +285,7 @@ def format_table(summary: dict) -> str:
         ("hook_load_clamped_share", "load clamped", 3), ("hook_route_cross_track_p50_m", "route xt p50", 0),
         ("barrier_gated_share", "barrier gated", 3), ("barrier_clamped_share", "barrier clamped", 3),
         ("capture_height_clamped_share", "capture h clamped", 3),
+        ("orders_held_share", "orders held (of steps)", 3), ("order_changes_per_flight", "order changes / flight", 2),
     ]
     lines = ["oracle ceiling (true plans through the guidance), n = " + ", ".join(
         f"{STRATUM_SHORT[s]} {summary[s]['flights']}" for s in strata)]
@@ -294,6 +309,11 @@ def main(argv: list[str] | None = None) -> int:
                              "checkpoint's orders rolled leg by leg (the prediction; needs --route next)")
     parser.add_argument("--lockstep-s", type=float, default=LOCKSTEP_S,
                         help="under --rolling lockstep: the re-ask period in seconds (the step length axis)")
+    parser.add_argument("--hold-asks", type=int, default=ORDER_HOLD_ASKS,
+                        help="under --rolling lockstep: a material change of order is adopted only once given on this "
+                             "many consecutive asks (v5.3; 1 = adopt at once, the v5.1/v5.2 behaviour and the default)")
+    parser.add_argument("--hold-flips-only", action="store_true",
+                        help="hold only a fix <-> none flip; a moved fix is adopted at once (needs --hold-asks > 1)")
     parser.add_argument("--rolling", choices=(ROLLING_LEG, ROLLING_LOCKSTEP), default=ROLLING_LOCKSTEP,
                         help="under --route next: one leg per instruction (the head asked at each fix), or the "
                              "receding-horizon lockstep (asked every 30 s, the batch stepped together; v5.1)")
@@ -375,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.route == ROUTE_NEXT and args.policy == POLICY_MODEL and args.rolling == ROLLING_LOCKSTEP:
             rolled = rolled_predictions_lockstep(
                 arm.model, chunk, arm.config, arm.normalizer, chunk_anchors, torch.device("cpu"), chunk_skeletons,
-                step_s=args.lockstep_s,
+                step_s=args.lockstep_s, hold_asks=args.hold_asks, hold_flips_only=args.hold_flips_only,
             )
             forecasts = [r.forecast for r in rolled]
             routes = [r.routes[-1] for r in rolled]
@@ -391,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.route == ROUTE_NEXT and args.rolling == ROLLING_LOCKSTEP:
             rolled = fly_lockstep_truth(
                 chunk, chunk_anchors, labels, chunk_skeletons, arm.config, horizons_s=horizons, step_s=args.lockstep_s,
+                hold_asks=args.hold_asks, hold_flips_only=args.hold_flips_only,
             )
             forecasts = [r.forecast for r in rolled]
             routes = [r.routes[-1] for r in rolled]
@@ -469,7 +490,8 @@ def main(argv: list[str] | None = None) -> int:
         "schema_version": SCHEMA, "generated_at": utc_now(), "instrument": INSTRUMENT,
         "checkpoint": {"label": label, "path": str(path)},
         "split": args.split, "limit": args.limit, "flights": len(rows), "anchor": anchor,
-        "route": args.route, "policy": args.policy, "rolling": args.rolling, "lockstep_s": args.lockstep_s, "wall_s": wall_s,
+        "route": args.route, "policy": args.policy, "rolling": args.rolling, "lockstep_s": args.lockstep_s,
+        "hold_asks": args.hold_asks, "hold_flips_only": args.hold_flips_only, "wall_s": wall_s,
         "max_waypoints": args.max_waypoints, "anchor_km": args.anchor_km,
         "anchor_s": args.anchor_s,
         "flights_without_anchor": without,

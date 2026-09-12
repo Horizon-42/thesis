@@ -38,7 +38,6 @@ from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER, fracti
 from ts_transformer.outputs.plan.extractors import PlanLabels
 from ts_transformer.outputs.plan.labels import (
     LEG_MIN_S,
-    ON_FINAL_XT_M,
     TURN_DONE_RAD,
     Instruction,
     PlanOrder,
@@ -921,9 +920,23 @@ LOCKSTEP_SEGMENTS = int(math.ceil(LOCKSTEP_S / HOLD_S))
 RELAY_FIX_M = 1_000.0
 RELAY_HEADING_RAD = math.radians(10.0)
 RELAY_OFFSET_M = 1_000.0
-#: An aircraft on the final (`labels.on_final_pose`: within `ON_FINAL_XT_M` of the
-#: centreline, aligned) is not flown an instruction (the head, re-asked on its own flown
-#: rows, pulled nearly every straight-in flight off the final with one).
+#: The order HOLD (v5.3, §9 step 3(f), §12.7): an order that differs materially from the
+#: one in force (`orders_differ` — the re-lay's own test) is adopted only once the policy
+#: has given it on this many CONSECUTIVE asks, agreeing with each other; until then the
+#: instruction and join in force are held and the route is tracked on. 1 = adopt at once,
+#: the v5.1/v5.2 behaviour and the DEFAULT: measured at 2 on the share-0.75 head (KRDU
+#: val, 60 s anchor), the hold locked vectored flights onto a STALE fix — the head's fix
+#: WALKS with the aircraft (consecutive asks 766 m apart at the median, 2.7 km at p75),
+#: so two asks almost never agree within `RELAY_FIX_M`, the first fix stays in force for
+#: the whole flight, and established fell 86.5 → 60.2 % (FDE p50 2803 → 5470 m). The
+#: axis stays (`plan_oracle --hold-asks N [--hold-flips-only]`) for the fix ↔ none
+#: variant. The lockstep's own rules are never held — an executed instruction, the leg
+#: cap and the final decide the order there (`held_order`).
+ORDER_HOLD_ASKS = 1
+# An aircraft on the final (`labels.on_final_pose`: within `ON_FINAL_XT_M` of the
+# centreline, aligned) is not flown an instruction (the head, re-asked on its own flown
+# rows, pulled nearly every straight-in flight off the final with one) — `fly_lockstep`'s
+# own rule, applied after the hold.
 
 
 @dataclass
@@ -952,6 +965,14 @@ class FlightState:
     incomplete: int = 0
     ignored_on_final: int = 0            # instructions not flown because the aircraft was on the final
     executed_on_final: bool = False      # this step's instruction was already behind an aircraft on the final
+    #: the order hold (`held_order`): the materially different order the policy has given
+    #: on `pending_asks` consecutive asks (adopted at `hold_asks`); the steps held and the
+    #: changes adopted, phase changes excluded (`planHeldSteps` / `planOrderChanges`)
+    pending_instruction: Instruction | None = None
+    pending_d_join_m: float | None = None
+    pending_asks: int = 0
+    held: int = 0
+    order_changes: int = 0
     records: list[dict[str, object]] = field(default_factory=list)
     steps: int = 0
     end_time_s: float = math.inf
@@ -982,22 +1003,78 @@ def route_progress(route: Route, start: int, e: float, n: float) -> int:
     return start + int(np.argmin(distance))
 
 
-def order_changed(state: FlightState, instruction: Instruction | None, d_join_m: float | None) -> bool:
-    """Whether an order differs materially from the one the route in force was laid to."""
-    if state.route is None or (instruction is None) != (state.instruction is None):
+def orders_differ(
+    held: Instruction | None, held_d_join_m: float | None, instruction: Instruction | None, d_join_m: float | None,
+) -> bool:
+    """Whether two orders differ MATERIALLY — fix ↔ none, the join (the closing's, or the
+    fix's) moved over `RELAY_FIX_M`, the fix moved that far, or the heading on over
+    `RELAY_HEADING_RAD`: the one test the re-lay and the order hold read."""
+    if (instruction is None) != (held is None):
         return True
-    if instruction is None:
-        before, now = state.d_join_m, d_join_m
-        return (before is None) != (now is None) or (before is not None and abs(float(now) - float(before)) > RELAY_FIX_M)
-    held = state.instruction
-    join_moved = (state.d_join_m is None) != (d_join_m is None) or (
-        state.d_join_m is not None and abs(float(d_join_m) - float(state.d_join_m)) > RELAY_FIX_M
+    join_moved = (held_d_join_m is None) != (d_join_m is None) or (
+        held_d_join_m is not None and abs(float(d_join_m) - float(held_d_join_m)) > RELAY_FIX_M
     )
+    if instruction is None:
+        return join_moved
     return (
         join_moved
         or math.hypot(instruction.fix_e - held.fix_e, instruction.fix_n - held.fix_n) > RELAY_FIX_M
         or abs(wrap_angle(instruction.heading_out_rad - held.heading_out_rad)) > RELAY_HEADING_RAD
     )
+
+
+def order_changed(state: FlightState, instruction: Instruction | None, d_join_m: float | None) -> bool:
+    """Whether an order differs materially from the one the route in force was laid to."""
+    return state.route is None or orders_differ(state.instruction, state.d_join_m, instruction, d_join_m)
+
+
+def _held_change(
+    held: Instruction | None, held_d_join_m: float | None, instruction: Instruction | None, d_join_m: float | None,
+    flips_only: bool,
+) -> bool:
+    """The change the hold gates: every material change (`orders_differ`), or only a
+    fix ↔ none FLIP — a moved fix is then adopted at once (the head's fix walks with the
+    aircraft, §12.7, and holding it locked the flight onto a stale one)."""
+    if flips_only:
+        return (instruction is None) != (held is None)
+    return orders_differ(held, held_d_join_m, instruction, d_join_m)
+
+
+def held_order(
+    state: FlightState, instruction: Instruction | None, d_join_m: float | None, hold_asks: int,
+    flips_only: bool = False,
+) -> tuple[Instruction | None, float | None, bool]:
+    """The order the step flies under the hold (v5.3): the policy's own where it does not
+    differ materially from the one in force, or where the lockstep's own rules decide it
+    (no route yet, the instruction executed, the leg cap reached, the aircraft on the
+    final — there the hold is OFF for the join too, so a straight-in flight's closing is
+    re-laid on every join move as it was before the hold); otherwise a change is adopted
+    only once the policy has given it on ``hold_asks`` consecutive asks agreeing with each
+    other (`_held_change`: every material change, or with ``flips_only`` fix ↔ none only),
+    and until then the instruction and join in force are held. "In force" is the
+    instruction last FLOWN (`state.instruction`) and the join the route was LAID to
+    (`state.d_join_m`) — `order_changed`'s own pair. A policy whose orders jitter between
+    three or more values never agrees twice and flies its first order to the cap (§12.7).
+    Returns the instruction, the join and whether the step was held."""
+    if (
+        state.route is None or state.instruction_executed or state.flown >= MAX_INSTRUCTION_LEGS
+        or on_final(state)
+        or not _held_change(state.instruction, state.d_join_m, instruction, d_join_m, flips_only)
+    ):
+        state.pending_asks = 0
+        return instruction, d_join_m, False
+    if state.pending_asks and not _held_change(
+        state.pending_instruction, state.pending_d_join_m, instruction, d_join_m, flips_only,
+    ):
+        state.pending_asks += 1
+    else:
+        state.pending_instruction, state.pending_d_join_m, state.pending_asks = instruction, d_join_m, 1
+    if state.pending_asks >= hold_asks:
+        state.pending_asks = 0
+        state.order_changes += 1
+        return instruction, d_join_m, False
+    state.held += 1
+    return state.instruction, state.d_join_m, True
 
 
 def on_final(state: FlightState) -> bool:
@@ -1029,14 +1106,22 @@ def fly_lockstep(
     policy: LockstepPolicy,
     step_s: float = LOCKSTEP_S,
     time_caps_s: Sequence[float] | None = None,
+    hold_asks: int = ORDER_HOLD_ASKS,
+    hold_flips_only: bool = False,
     device: torch.device | None = None,
 ) -> list[RolledFlight]:
     """Step every flight of ``states`` together until each has closed: each step the
-    policy's order per flight, the route to its instruction re-laid from its pose, one
-    guidance rollout of ``step_s`` for the whole group. A flight ends when its budget
+    policy's order per flight — a material change (or, with ``hold_flips_only``, a
+    fix ↔ none flip) adopted only once given on ``hold_asks`` consecutive asks
+    (`held_order`) — the route to its instruction re-laid from its pose,
+    one guidance rollout of ``step_s`` for the whole group. A flight ends when its budget
     (the order's, absolute) is spent; ``time_caps_s`` (from the anchor) bounds each flight,
     by default `ROLLED_TIME_CAP_FACTOR` × its first order's budget; an instruction still
     in force at the end is counted incomplete and the cap reported."""
+    if hold_asks < 1:
+        raise ValueError(f"hold_asks counts consecutive asks, at least 1; got {hold_asks}")
+    if hold_flips_only and hold_asks == 1:
+        raise ValueError("hold_flips_only narrows the hold; with hold_asks=1 there is no hold to narrow")
     config = guidance_config(config)
     if time_caps_s is not None:
         for state, cap in zip(states, time_caps_s, strict=True):
@@ -1054,7 +1139,11 @@ def fly_lockstep(
             # the route is laid through the fix wherever it is (a fix on top of the
             # aircraft is passed over by `build_route`); an instruction is dropped only
             # once executed (below), never for being near
-            instruction = order.instruction
+            # the hold reads the policy's order BEFORE the lockstep's own rules below,
+            # which it never holds
+            instruction, d_join_m, held = held_order(
+                state, order.instruction, order.d_join_m, hold_asks, flips_only=hold_flips_only,
+            )
             if instruction is not None and state.flown >= MAX_INSTRUCTION_LEGS:
                 instruction, state.capped_by = None, CAPPED_BY_LEGS
             state.executed_on_final = False
@@ -1079,12 +1168,16 @@ def fly_lockstep(
                 not state.phase_routes or state.instruction_executed
                 or (instruction is None) != (state.instruction is None)
             )
-            relaid = new_phase or order_changed(state, instruction, order.d_join_m) or off_route(state)
+            relaid = new_phase or order_changed(state, instruction, d_join_m) or off_route(state)
             if relaid:
+                # a held step re-lays only off the route: then the plan in force travels
+                # with the join in force (the new order's capture height was clamped at
+                # the join the hold just refused)
                 route, leg_plan, _route_join = leg_route(
-                    state.current, instruction, order.d_join_m, state.skeleton, order.plan, mid_flight=True,
+                    state.current, instruction, d_join_m, state.skeleton,
+                    state.plan if held else order.plan, mid_flight=True,
                 )
-                state.route, state.plan, state.d_join_m, state.progress = route, leg_plan, order.d_join_m, 0
+                state.route, state.plan, state.d_join_m, state.progress = route, leg_plan, d_join_m, 0
                 state.route_height_m = state.current.height_m
             else:
                 route, leg_plan = state.route, state.plan
@@ -1098,7 +1191,10 @@ def fly_lockstep(
             state.instruction = instruction
             state.instruction_executed = False
             state.last_plan = leg_plan
-            state.records.append({**(order.record or {}), "step": state.steps})
+            state.records.append({
+                **(order.record or {}), "step": state.steps, "held": held,
+                "flown_fix": None if instruction is None else [instruction.fix_e, instruction.fix_n],
+            })
             rows.append(state.current.row)
             routes.append(route)
             plans.append(leg_plan)
@@ -1165,6 +1261,10 @@ def fly_lockstep(
         diagnostics["planTurnsIncomplete"] = float(state.incomplete)
         diagnostics["planSteps"] = float(state.steps)
         diagnostics["planIgnoredOnFinal"] = float(state.ignored_on_final)
+        diagnostics["planHeldSteps"] = float(state.held)
+        diagnostics["planOrderChanges"] = float(state.order_changes)
+        diagnostics["planHoldAsks"] = float(hold_asks)
+        diagnostics["planHoldFlipsOnly"] = float(hold_flips_only)
         whole = replace(whole, horizon_capped=state.capped_by is not None, command_hook_diagnostics=diagnostics)
         out.append(RolledFlight(
             whole, list(state.phase_routes), state.flown, state.skipped, list(state.phase_lengths_m),
@@ -1218,13 +1318,18 @@ def truth_lockstep_policy(
 def fly_lockstep_truth(
     series: Sequence[FlightSeries], anchors: Sequence[int], labels: Sequence[PlanLabels],
     skeletons: Sequence[RunwaySkeleton], config: TSConfig, *, horizons_s: Sequence[float],
-    step_s: float = LOCKSTEP_S, device: torch.device | None = None,
+    step_s: float = LOCKSTEP_S, hold_asks: int = ORDER_HOLD_ASKS, hold_flips_only: bool = False,
+    device: torch.device | None = None,
 ) -> list[RolledFlight]:
     """The lockstep oracle: every flight's own instructions, re-laid every ``step_s`` from
-    where the aircraft is, the group stepped together, each flown for its horizon."""
+    where the aircraft is, the group stepped together, each flown for its horizon. The
+    hold is a no-op on its path (an order changes only at execution, a phase)."""
     states = lockstep_states(series, anchors, skeletons, [lab.remaining_path_at_anchor_m for lab in labels])
     policy = truth_lockstep_policy(states, labels, horizons_s)
-    return fly_lockstep(states, config, policy=policy, step_s=step_s, time_caps_s=list(horizons_s), device=device)
+    return fly_lockstep(
+        states, config, policy=policy, step_s=step_s, time_caps_s=list(horizons_s), hold_asks=hold_asks,
+        hold_flips_only=hold_flips_only, device=device,
+    )
 
 
 def order_to_leg(order: PlanOrder, state: FlightState, step: int) -> LegOrder:

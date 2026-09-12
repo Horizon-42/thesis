@@ -4,6 +4,42 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-12 — ts_transformer: plan-and-guidance step 3(f) — the order hold (v5.3), measured and not adopted; `plan_oracle_pair`
+
+`dev-plan-hold`; design v5.3 §9 step 3(f), §12.7. §12.6's reading: the receding-horizon
+head's orders still move from ask to ask and a fix moved over `RELAY_FIX_M` on ONE ask
+re-lays the route. The lockstep gains an ORDER HOLD (`outputs/plan/forecast.held_order`;
+`fly_lockstep(hold_asks=, hold_flips_only=)`): a materially different order
+(`orders_differ`, the re-lay's own test factored out of `order_changed`) is adopted only
+once given on `hold_asks` consecutive asks agreeing with each other, or with
+`hold_flips_only` only a fix ↔ none flip; the lockstep's own rules — an executed
+instruction, the leg cap, the final — are never held. Threaded through
+`fly_lockstep_truth`, `rolled.record_lockstep`, `strategy.rolled_predictions_lockstep`,
+`plan_oracle --hold-asks N [--hold-flips-only]` and `plan_rolled_windows` (the table header
+and `provenance` carry the hold; a pre-v5.3 table reads as `PRE_HOLD_ASKS` = 1 and
+`--extend` refuses a different hold). Every step's record says `held` and `flown_fix`;
+every rolled flight reports `planHeldSteps` / `planOrderChanges` / `planHoldAsks` /
+`planHoldFlipsOnly`. New runner `run_ts.py plan_oracle_pair --base L=<dir> --arm L=<dir>`:
+two plan-oracle artifacts joined flight by flight (per stratum the means, the paired Δ p50
+and the share the arm is lower on, the identity line).
+
+Measured on §12.6's share-0.75 head, KRDU val 1404, lockstep 30 s, the 60 s anchor: hold 1
+reproduces §12.6's artifact (78 of 1404 rows differ by ≤ 0.072 m of ADE, 51 of them at
+step 0 — the head's float32 CPU forward is not bit-reproducible between runs). Hold 2 on
+every material change: vectored ADE 3641 → 3816 m (paired +57, lower on 40 %), established
+86.5 → 60.2 %, FDE mean 2803 → 5470 (L−1: 3719 → 3938, 84.2 → 55.4 %); flips only 3723 m,
+79.7 %. The head's fix WALKS (consecutive asks 766 m apart at the median, 2.7 km at p75),
+so two asks never agree within 1 km and the step-0 fix stays in force for the whole flight
+(2038 of 3143 held steps a moved fix; the worst flight 9 of 10 steps held, ADE 4039 →
+15036 m). Neither passes the 3(d) gate; the veto (established down) fires.
+`ORDER_HOLD_ASKS` = 1 stays the default, the axis stays. Review (opus) findings fixed before
+the commit: the extend check and the provenance name the hold; a held step that re-lays
+(off the route) keeps the plan in force with the join in force; the held share is one
+definition with no bound that cannot bind; `orders_differ` and the three-way jitter are
+pinned in `tests/test_plan_rolling.py`. Artifacts:
+`4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step3f_*`. Next: §9 step 3(g),
+the fan over the next fix.
+
 ### 2026-09-11 — ts_transformer: plan-and-guidance step 3(e) — the head trained on rolled windows (v5.2)
 
 `dev-plan-rolled`; design v5.2 §9 step 3(e), §12.6. §12.5's reading: from its second step

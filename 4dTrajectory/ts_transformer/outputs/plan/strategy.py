@@ -48,6 +48,7 @@ from ts_transformer.outputs.plan.forecast import (
     LegOrder,
     RolledFlight,
     draw_order,
+    ORDER_HOLD_ASKS,
     fly_lockstep,
     fly_rolling_orders,
     lockstep_states,
@@ -293,12 +294,16 @@ def lockstep_model_policy(
 def rolled_predictions_lockstep(
     model: nn.Module, series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer,
     anchors: Sequence[int], device: torch.device, skeletons: Sequence[RunwaySkeleton],
-    *, step_s: float = LOCKSTEP_S,
+    *, step_s: float = LOCKSTEP_S, hold_asks: int = ORDER_HOLD_ASKS, hold_flips_only: bool = False,
 ) -> list[RolledFlight]:
     """A group's rolled predictions in lockstep (design v5.1): every `step_s` the head is
-    asked again for every flight still flying and the group is stepped together."""
+    asked again for every flight still flying and the group is stepped together; a
+    material change of order (or a fix ↔ none flip only) is adopted only once given on
+    `hold_asks` consecutive asks (v5.3, `forecast.held_order`)."""
     states, policy = lockstep_model_policy(model, series, config, normalizer, anchors, device, skeletons)
-    return fly_lockstep(states, config, policy=policy, step_s=step_s, device=device)
+    return fly_lockstep(
+        states, config, policy=policy, step_s=step_s, hold_asks=hold_asks, hold_flips_only=hold_flips_only, device=device,
+    )
 
 
 def forecast_plan(

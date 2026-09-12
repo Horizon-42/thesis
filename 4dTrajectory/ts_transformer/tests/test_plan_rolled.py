@@ -23,7 +23,7 @@ from ts_transformer.data.dataset import Normalizer, build_series, training_windo
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.data.target_conditioning import conditioned_history
 from ts_transformer.outputs.plan.extractors import extract_plan
-from ts_transformer.outputs.plan.forecast import behind_on_final, lockstep_states, truth_lockstep_policy
+from ts_transformer.outputs.plan.forecast import ORDER_HOLD_ASKS, behind_on_final, lockstep_states, truth_lockstep_policy
 from ts_transformer.outputs.plan.labels import (
     CONTEXT_NEXT_IS_JOIN,
     CONTEXT_ROLLED,
@@ -92,7 +92,8 @@ def _rolled_table(tmp_path, series, config, skeleton, *, policy_orders=None):
             return orders
     flights, samples = record_lockstep(states, labels, config, policy=policy, time_caps_s=horizons)
     header = rolled_table_header(
-        config, policy=POLICY_TRUTH, lockstep_s=30.0, airports=[AIRPORT], splits={"train": len(series)},
+        config, policy=POLICY_TRUTH, lockstep_s=30.0, hold_asks=ORDER_HOLD_ASKS, hold_flips_only=False,
+        airports=[AIRPORT], splits={"train": len(series)},
         checkpoint={"label": "test", "path": "none"}, generated_at="now", wall_s=0.0,
     )
     return write_rolled_windows(tmp_path / "rolled.npz", samples, header), flights, samples

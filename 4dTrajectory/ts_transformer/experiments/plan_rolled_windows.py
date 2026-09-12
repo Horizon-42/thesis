@@ -36,7 +36,13 @@ from ts_transformer.inference.export import observed_series_metrics
 from ts_transformer.inference.forecast import cut_at_threshold_crossing
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.plan.extractors import extract_plan
-from ts_transformer.outputs.plan.forecast import LOCKSTEP_S, closing_budget_s, lockstep_states, truth_lockstep_policy
+from ts_transformer.outputs.plan.forecast import (
+    LOCKSTEP_S,
+    ORDER_HOLD_ASKS,
+    closing_budget_s,
+    lockstep_states,
+    truth_lockstep_policy,
+)
 from ts_transformer.outputs.plan.labels import TARGETS
 from ts_transformer.outputs.plan.rolled import (
     POLICIES,
@@ -71,6 +77,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="whose flown states: the truth's instructions (the lockstep oracle) or the "
                              "checkpoint's orders (the head's own states, labelled by the truth's queue)")
     parser.add_argument("--lockstep-s", type=float, default=LOCKSTEP_S, help="the re-ask period")
+    parser.add_argument("--hold-asks", type=int, default=ORDER_HOLD_ASKS,
+                        help="a material change of order is adopted only once given on this many consecutive asks "
+                             "(v5.3; a no-op under --policy truth, whose orders change only at execution)")
+    parser.add_argument("--hold-flips-only", action="store_true",
+                        help="hold only a fix <-> none flip; a moved fix is adopted at once (needs --hold-asks > 1)")
     parser.add_argument("--extend", type=Path, default=None,
                         help="a previous table whose samples are carried into this one (DAgger's aggregation)")
     parser.add_argument("--device", default="cpu", help="where the head and the guidance rollout run (cpu, cuda)")
@@ -122,7 +133,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 caps = None
             flights, chunk_samples = record_lockstep(
-                states, labels, arm.config, policy=policy, step_s=args.lockstep_s, time_caps_s=caps, device=device,
+                states, labels, arm.config, policy=policy, step_s=args.lockstep_s, time_caps_s=caps,
+                hold_asks=args.hold_asks, hold_flips_only=args.hold_flips_only, device=device,
             )
             split_samples.extend(chunk_samples)
             for item, flight in zip(chunk, flights, strict=True):
@@ -154,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
         }
     wall_s = time.perf_counter() - started
     header = rolled_table_header(
-        arm.config, policy=args.policy, lockstep_s=args.lockstep_s, airports=sorted(airports),
+        arm.config, policy=args.policy, lockstep_s=args.lockstep_s, hold_asks=args.hold_asks,
+        hold_flips_only=args.hold_flips_only, airports=sorted(airports),
         splits={split: block["flights"] for split, block in summary.items()},
         checkpoint={"label": label, "path": str(path)}, generated_at=utc_now(), wall_s=wall_s,
     )
