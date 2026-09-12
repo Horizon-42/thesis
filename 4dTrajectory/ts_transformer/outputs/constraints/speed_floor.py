@@ -115,11 +115,15 @@ def floor_speed(
     """
     altitude = origin_altitude_m + view.height + view.vertical_speed * view.hold_s
     density = isa_density(altitude)
-    stall_speed = torch.sqrt(
-        2.0 * commanded_load * view.mass * GRAVITY_MPS2
-        / (density * aero[:, 0] * aero[:, 1])
-    )
-    return margin * stall_speed, density
+    return margin * stall_speed_mps(commanded_load, view.mass, density, aero[:, 0], aero[:, 1]), density
+
+
+def stall_speed_mps(load, mass_kg, density, area_m2, cl_max):
+    """The stall speed at load factor ``load``, ``√(2 n m g / (ρ S Cl_max))`` — the ONE
+    expression behind the tensor floor above and the plan's scalar closure
+    (`outputs.plan.guidance.timing.stall_floor_mps`); ``** 0.5`` so it reads a tensor or a
+    float alike."""
+    return (2.0 * load * mass_kg * GRAVITY_MPS2 / (density * area_m2 * cl_max)) ** 0.5
 
 
 class SpeedFloor:

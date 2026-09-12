@@ -1,6 +1,25 @@
 # Plan-and-guidance: the next model (design v5, 2026-09-12)
 
-Status: **v5.3 step 3(g) BUILT and MEASURED (2026-09-12, `dev-plan-fan`; §9 step 3(g), §12.8): the
+Status: **v5.4 step 4 BUILT and MEASURED (2026-09-12, `dev-plan-cta`; §9 step 4, §12.9): the
+ASSIGNED TIME is delivered, the assigned JOIN in this form is not.** The scheduler's arrival time
+is closed by the guidance at every ask — the speed lever (the held speed between the stall floor
+and the maximum, the deceleration point moving with it), then the path lever (the route builder's
+hold / dog-leg, bracketed over the builder's quanta), what neither absorbs reported as X. On the
+K = 4 head (3(g)), KRDU val, 60 s anchor, the truth's time assigned: dt MAE **35.1 → 10.2 s**
+pooled (straight-in 20.9 → 3.2, |dt| p50 1.5 s), paired ADE **−447 m** at the median (lower on
+81 %; straight-in 749 → 281, vectored 3087 → 2655), fully flyable **100 %** in every arm, the
+geometry unchanged (chamfer ±0) — a timing claim; established 97.3 → 95.0 % (the flights the
+speed cannot bring forward land late, 7.8 % of vectored ones at the cap). At −60 s the median
+flight arrives 61 s early (met); at +60 / +90 s the vectored stratum absorbs the delay at the
+floor speed (X p50 0, the flown arrival 6–22 s short of the assigned) and the straight-in stratum
+cannot (X p50 46 / 76 s: near `V_final`, no path to stretch) and says so. The §7 gates: the
+arrival-time MAE row passed (3.2 / 10.2 s against 10.3 / 23.9), fully flyable at +60 s passed
+(100 % against 90 %), "prediction, assigned time" NOT passed (vectored 2655 against 1596 — the
+head's fixes, not the clock, are the residual), "time and join" NOT passed and WORSE than time
+alone (3451; the truth's join under the head's own next fix is an inconsistent order: a join is
+assigned with the route that reaches it, the whole-path form). Next: the pooled five-airport
+training (§9 step 5) on the K = 4 head, with the time closure as the delivery form; the
+assigned route as fixes, not as a join. Previous status: **v5.3 step 3(g) BUILT and MEASURED (2026-09-12, `dev-plan-fan`; §9 step 3(g), §12.8): the
 FAN over the next fix — the mixture head is ADOPTED as the plan head's objective, the one-step fan
 is NOT a deliverable.** `plan_fan_components` = 4 makes the instruction group a 4-component
 mixture trained by its negative log-likelihood; its TOP-WEIGHT component is the point prediction,
@@ -540,7 +559,42 @@ parametrisation is too coarse.
    the truth's next fix inside the fan on ≥ 80 % of open vectored anchors (read with the
    σ: a component wide enough covers anything). Veto: the usage readout shows K − 1 dead
    components — then the mixture is a point head with extra parameters.
-4. Assigned-time and assigned-join conditioning; the +60 s delay test with X reported.
+4. **Assigned time and assigned join (v5.4, BUILT and MEASURED 2026-09-12, `dev-plan-cta`; §5,
+   §4.6; §12.9 — the time delivered, the join in this form not).**
+   The scheduler supplies an arrival time and/or a join; the guidance flies them and reports
+   what it cannot absorb. On the K = 4 mixture head (3(g)), in the lockstep, RECEDING: the
+   assignment is re-closed at EVERY ask from where the aircraft is. (a) **Plumbing**:
+   `Assignment(arrival_time_s, d_join_m)` per flight (the arrival ABSOLUTE on the series
+   clock); `lockstep_model_policy(assignments=)` replaces the head's `T_s` by the assigned
+   remaining time and its `d_join_m` by the assigned join at every ask (the head's other
+   parameters stand — its speeds, deceleration point, capture height, remaining path and next
+   fix), and the leg order carries `assigned_arrival_s`. (b) **Time closure**
+   (`guidance/timing.py`, run by `fly_lockstep` on the route in force each step): the route's
+   time at the schedule (`route_time_s`, the whole route to the threshold) against the assigned
+   remaining time; the SPEED lever first — one factor on `V_mid` and the instruction's speed
+   (never the anchor's own speed nor `V_final`), bisected between the floor (the larger of
+   `V_final` and the stall margin × the 1 g stall speed at the anchor's mass and altitude) and
+   `SPEED_MAX_MPS`; then, for a delay the floor cannot absorb, the PATH lever — the closing
+   re-laid with the schedule coordinate lengthened by what the residual needs at the floor
+   speed (the route builder's own hold / dog-leg, `build_route(pre_final_m=)`, one secant
+   correction), the stretched route staying in force until the order changes; what neither
+   absorbs is **X** (`planUnabsorbedS`, signed: positive a delay the envelope and
+   `MAX_STRETCH_OFFSET_M` cannot hold, negative an advance the speed cannot make), reported at
+   the first ask (the planning verdict) and the last. The speed lever is first because it is
+   the procedure-conforming one and ATC's own for small amounts; the stretch is what L3.e
+   showed a hook cannot decide and a plan can (§1). (c) **Instruments**: `plan_oracle --policy
+   model --assign-time truth --assign-time-offset-s S --assign-join truth` — the truth's
+   arrival time (+ offset) and the truth's join as the scheduler's assignment, the oracle form
+   that READS THE FUTURE and names itself so (`assignment` in the artifact; never a prediction
+   result; the control line's `cta=given` / `--cta-offset-s` convention); the summary gains
+   the X distribution, the speed factor and the stretch share. (d) **Measurement, in order**
+   (KRDU val, the 3(g) seed-1337 head, 60 s anchor, then L−1): (1) the truth's time at offset
+   0 — the §7 row "prediction, assigned time": vectored ADE against 1596 m (the control
+   path's `cta=given`), |dt| where X = 0; (2) time and join — against 1400 m; (3) offsets
+   −60 / +60 / +90 s — the time obeyed where X = 0, the X distribution, fully flyable
+   (≥ 90 % at +60 s, the §7 reference row), established by the assigned time (100 % or X),
+   the corridor verdicts; (4) the join alone. Veto: a closure that costs the straight-in
+   stratum at offset 0 (its time is already right: the speed factor must read ≈ 1 there).
 5. Two seeds; pooled five-airport training; KSJC replication.
 6. The multi-aircraft scheduler demonstration.
 
@@ -1477,3 +1531,95 @@ with component means it is a ring; a fan that would carry the claim needs a diff
 samples from the mixture flown as members, or a member that tracks its component across asks —
 listed here, not planned. Next: §9 step 4 (assigned time and join) on the K = 4 head, then the
 pooled five-airport training.
+
+### 12.9 Step 4 — the assigned time and join (v5.4, 2026-09-12): the time delivered, the join not in this form
+
+`dev-plan-cta`; `plan_oracle --policy model --assign-time truth [--assign-time-offset-s S]
+[--assign-join truth]` on the 3(g) seed-1337 head (`step3g_fan4_head`), KRDU val 1404, lockstep
+30 s; artifacts `step4_time0_a60s/`, `step4_time0_join_a60s/`, `step4_join_a60s/`,
+`step4_time_m60_a60s/`, `step4_time_p60_a60s/`, `step4_time_p90_a60s/`, `step4_time0_l1/` and the
+pairs `step4_pair_*` against the unassigned top-1 (`step3g_fan4_top1_lockstep_{a60s,l1}`). The
+assignment is the TRUTH's arrival time (+ offset) and the truth's join — an oracle form that
+reads the future (`assignment` in every artifact); the time it delivers is a scheduler's
+counterfactual, never a prediction result.
+
+**What was built** (`guidance/timing.py`, `strategy.Assignment`, `fly_lockstep`): at every ask
+the route in force is timed from the aircraft's progress point (`route_time_s(start=)`); the
+speed lever scales the plan's HELD speed (the instruction's speed at its fix; on a closing, where
+the schedule holds the anchor's speed to the deceleration point, a new held speed reached at the
+deceleration rate) between the floor — the stall margin × the 1 g stall speed at the flight's
+mass and altitude, or `V_final` if higher — and `SPEED_MAX_MPS`, the deceleration point moving
+out to where the held speed can still be bled off to `V_final`; a delay the floor cannot absorb
+goes to the path — `leg_route(stretch_m=)`, a closing through the plain builder's hold / dog-leg,
+an instruction leg flying its heading after the fix longer — sized at the floor speed and
+BRACKETED (the builder lays path in quanta: nothing below ~2 km of request, then 30–45 km at once),
+a lay that would make the flight late never taken; the stretch in force survives a re-lay and is
+dropped when the assignment no longer needs it. X = assigned remaining − closed time, signed.
+The assigned time is a target, never the budget (the budget is the later of the head's time and
+the assigned one: a flight the speed cannot bring forward lands late and reports dt, with X < 0).
+The review's findings (2026-09-12) landed before the measurement: the progress-point timing
+(from 0 the time never fell as the aircraft flew and the speed went to its maximum — every
+vectored flight derailed), the bracketed path lever, the deceleration point, the plan as laid
+re-anchored to the stretched path, the stretch kept across re-lays, the head's own ETA kept as
+the prediction, one stall-speed expression (`speed_floor.stall_speed_mps`).
+
+**The truth's time assigned (offset 0), paired per flight against the unassigned top-1:**
+
+| KRDU val, 60 s anchor | free top-1 | assigned the truth's time | paired Δ p50 (lower on) |
+|---|---|---|---|
+| pooled ADE mean / dt MAE | 1766 m / 35.1 s | 1314 m / 10.2 s | −447 m (81 %) / −20.2 s (91 %) |
+| straight-in ADE mean / dt MAE / \|dt\| p50 | 749 / 20.9 s / — | 281 / 3.2 s / 1.0 s | −423 m (83 %) / −15.5 s (94 %) |
+| vectored ADE mean / dt MAE / \|dt\| p50 | 3087 / 51.3 s / — | 2655 / 16.7 s / 4.0 s | −497 m (79 %) / −29.0 s (87 %) |
+| vectored chamfer mean / Fréchet mean | 1367 / — | 1586 / — | +8 m (41 %): the geometry unchanged |
+| established pooled / vectored | 97.3 / 94.2 % | 95.0 / 89.0 % | capped 4.2 → 7.8 % vectored |
+| fully flyable | 97.3 % (the §12.8 top-1) | **100 %** | |
+| speed factor p50 / |X| > 2 s share / stretched | — | 0.93 / 17 % / 0.4 % | X first ask p90: 16 s pooled, 45 s vectored |
+| thrust idle (share of steps) | 8.6 % | 11.5 % | the closed deceleration the drag cannot fly |
+
+At L−1 the same: pooled 1802 → 1337 (−446 m, 81 %), straight-in 773 → 268, vectored 3143 → 2726
+(−458, 78 %), |dt| p50 2.0 s, established 97.6 → 94.6 %.
+
+**The scheduler's counterfactuals (the 60 s anchor; dt is the flown arrival against the TRUTH,
+so a met assignment at offset S reads dt ≈ S):**
+
+| offset | stratum | X first ask p50 / \|X\| > 2 s | speed factor p50 / stretched / dropped | flown dt p50 (where X ≈ 0) | established / fully flyable |
+|---|---|---|---|---|---|
+| −60 s | straight-in | 0.0 / 20 % | 1.36 / 0 % / 0 % | −61.0 s (met) | 99.2 % / 100 % |
+| −60 s | vectored | 0.0 / 35 % (p90 105 s) | 1.16 / 0 % / 0 % | −61.5 s (met) | 72.2 % / 100 % |
+| +60 s | straight-in | **45.6 s** / 99.9 % | 0.75 / 0.4 % / 0 % | +14.5 s (8.9 where X ≈ 0) | 99.6 % / 100 % |
+| +60 s | vectored | 0.0 / 25 % | 0.77 / 2.2 % / 11.6 % | +50.5 s (54.0) | 93.2 % / 100 % |
+| +90 s | straight-in | **75.6 s** / 99.6 % | 0.75 / 0.4 % / 0 % | +14.5 s | 99.6 % / 100 % |
+| +90 s | vectored | 0.0 / 27 % | 0.73 / 4.7 % / 21.3 % | +59.0 s (67.5) | 95.2 % / 100 % |
+
+**The assigned join** (the truth's `d_join` replacing the head's at every ask, the head's next fix
+kept): with the time, vectored ADE 3451 against 2655 for the time alone and 3087 unassigned,
+established 78 %, capped 16 %; alone, 3876 / 77 % / 16 %. A join under the head's own fix is an
+inconsistent order — the leg to the fix then a closing to a join the fix was not aimed at loops
+or runs to the cap.
+
+**Read.** (1) The time is delivered: where the closure says it can meet the time it does, to
+1–2 s at the median and 3 s of MAE on straight-in flights; the −60 s advance is met to the second
+by the median flight of both strata; fully flyable stays at 100 % in every arm (the guidance flies
+the envelope; the L3 hooks never exceeded 46 %). (2) The two strata divide as their physics says:
+a vectored flight has 25–40 km of path and a speed 30–40 m/s above `V_final`, so the floor absorbs
++60 / +90 s (X ≈ 0 for three quarters of them) — and the flown arrival is 6–22 s short of the
+assigned, the plan's schedule being slightly faster than the schedule the floor lets the tracker
+fly (`thrust idle` 4–11 % of steps: a deceleration the drag cannot produce); a straight-in flight
+at the 60 s anchor is 10–15 km out near `V_final` with no room for a hold or a dog-leg inside the
+RNP box, so a delay past ~15 s is X — reported, not hidden. (3) As a prediction the assigned time
+takes the CLOCK out of the error and nothing else: pooled ADE −447 m paired, the straight-in
+stratum's 749 → 281 m (the speed profile was its error, §12.6), the vectored stratum's 3087 → 2655
+with the chamfer unchanged — the §7 gate of 1596 m (the control path under `cta=given`) is not
+met, and what remains is the head's geometry (the fixes it names at 25–39 km), not the timing.
+(4) Speeding up costs establishment (vectored 94 → 72 % at −60 s): the route's turns are laid at
+the scaled speed but the tracker's bank cap binds and the closing overshoots the join. (5) The
+join as a `d_join` override is not a deliverable: a join is assigned WITH the route that reaches
+it (the whole-path fixes of §12.3), which the lockstep's next-fix form does not carry.
+
+**Decision.** The assigned time is ADOPTED as the delivery form (`plan_oracle --assign-time`,
+`Assignment.arrival_time_s`; the X report is the contract). The assigned join in this form is
+NOT adopted; the route assignment belongs with the fixes (`build_route(waypoints=)`), listed, not
+planned. Open: the flown arrival's 6–22 s shortfall under large delays (the controller's floor
+against the plan's), the establishment loss under an advance, the glidepath share under a delay
+(27–29 % vectored against 36 % at offset 0 is a gain; the straight-in 5 % unchanged). Next: §9
+step 5 — the pooled five-airport training on the K = 4 head.

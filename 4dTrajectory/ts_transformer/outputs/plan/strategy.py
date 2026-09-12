@@ -24,7 +24,7 @@ What this strategy answers the spine with:
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 import numpy as np
@@ -41,6 +41,7 @@ from ts_transformer.inference.forecast import Forecast, cut_at_threshold_crossin
 from ts_transformer.outputs.base import ForecastOptions, OutputStrategy, Replay, WindowContext
 from ts_transformer.outputs.plan.extractors import extract_plan
 from ts_transformer.outputs.plan.forecast import (
+    closing_budget_s,
     KIND_ROLLED,
     LOCKSTEP_S,
     Anchor,
@@ -66,6 +67,7 @@ from ts_transformer.outputs.plan.labels import (
     PlanOrder,
     order_from_prediction,
     targets_from_labels,
+    T_MIN_S,
 )
 from ts_transformer.outputs.plan.model import (
     PLAN_LOSS_COMPONENT_NAMES,
@@ -253,11 +255,43 @@ def rolled_prediction(
     return fly_rolling_orders(series, anchor, skeleton, config, order_at=order_at, device=device)
 
 
+@dataclass(frozen=True)
+class Assignment:
+    """What the scheduler assigns one flight (design §5; v5.4, §9 step 4): an arrival time,
+    ABSOLUTE on the series clock, and/or a join distance-to-go; None leaves the head's own."""
+
+    arrival_time_s: float | None = None
+    d_join_m: float | None = None
+
+
+NO_ASSIGNMENT = Assignment()
+
+
+def assigned_order(order: PlanOrder, assignment: Assignment, state: FlightState) -> PlanOrder:
+    """The head's order under the assignment: its arrival time replaced by the assigned
+    REMAINING time from the flight's current clock (never under `T_MIN_S`), its join by the
+    assigned one (never past the remaining path); every other parameter the head's."""
+    changes: dict = {}
+    clamped = list(order.clamped)
+    if assignment.arrival_time_s is not None:
+        remaining_s = float(assignment.arrival_time_s) - state.current.time_s
+        changes["T_s"] = max(remaining_s, T_MIN_S)
+        if remaining_s < T_MIN_S:
+            clamped.append("assigned_T_s")
+    if assignment.d_join_m is not None:
+        d_join = min(max(float(assignment.d_join_m), 1.0), order.remaining_m)
+        changes["d_join_m"] = d_join
+        if d_join != float(assignment.d_join_m):
+            clamped.append("assigned_d_join_m")
+    return replace(order, clamped=tuple(clamped), **changes) if changes else order
+
+
 def lockstep_model_policy(
     model: nn.Module, series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer,
     anchors: Sequence[int], device: torch.device, skeletons: Sequence[RunwaySkeleton],
     *, first_component: int | None = None,
     first_order: Callable[[PlanOrder, FlightState], PlanOrder] | None = None,
+    assignments: Sequence[Assignment] | None = None,
 ) -> tuple[list[FlightState], Callable[[Sequence[FlightState]], list[LegOrder]]]:
     """The head as a lockstep policy (design v5.1): the group's flight states, and the
     policy that asks the head for every active flight at once — one forward pass on the
@@ -267,7 +301,9 @@ def lockstep_model_policy(
     STEP DEEP**: ``first_component`` reads the FIRST order from that mixture component
     (`fan_rows`) and every later ask from the top-weight one as usual; ``first_order``
     transforms each flight's first order given its state (the control fan's displaced
-    fix, laid in the flight's runway axes)."""
+    fix, laid in the flight's runway axes). ``assignments`` (v5.4, one per flight) replace
+    the head's arrival time and/or join at EVERY ask (`assigned_order`) and hand the
+    lockstep the assigned arrival to close the time on."""
     model.eval()
     conditioning = {
         id(item): series_conditioning(item, config, normalizer, anchor=int(a)) for item, a in zip(series, anchors, strict=True)
@@ -289,6 +325,10 @@ def lockstep_model_policy(
         ]
 
     states = lockstep_states(series, anchors, skeletons, [1.0] * len(series))
+    assigned = {
+        id(state): assignment
+        for state, assignment in zip(states, [NO_ASSIGNMENT] * len(states) if assignments is None else assignments, strict=True)
+    }
     first = orders_for(states, component=first_component)
     if first_order is not None:
         first = [first_order(order, state) for order, state in zip(first, states, strict=True)]
@@ -297,7 +337,26 @@ def lockstep_model_policy(
 
     def policy(active: Sequence[FlightState]) -> list[LegOrder]:
         orders = first if all(s.steps == 0 for s in active) and len(active) == len(states) else orders_for(active)
-        return [order_to_leg(order, s, s.steps) for order, s in zip(orders, active, strict=True)]
+        legs = []
+        for order, s in zip(orders, active, strict=True):
+            assignment = assigned[id(s)]
+            under = assigned_order(order, assignment, s)
+            leg = order_to_leg(under, s, s.steps)
+            if assignment.arrival_time_s is not None:
+                # the assigned time is a target the closure aims at, never the flight's
+                # guillotine: the budget covers the later of the head's own time and the
+                # assigned one, so a flight the closure cannot bring forward lands LATE and
+                # reports it as dt (with X < 0), instead of being cut short of the final
+                # (measured on the 48-flight smoke: vectored established 0.96 → 0.58 with
+                # the assigned time as the budget)
+                # the head's OWN arrival time stays the prediction the rolled flight reports
+                # (`eta_predicted_s`); the assigned one rides in `assigned_arrival_s`
+                leg = replace(
+                    leg, assigned_arrival_s=assignment.arrival_time_s, arrival_time_s=float(order.T_s),
+                    budget_s=closing_budget_s(max(float(under.T_s), float(order.T_s))),
+                )
+            legs.append(leg)
+        return legs
 
     return states, policy
 
@@ -308,6 +367,7 @@ def rolled_predictions_lockstep(
     *, step_s: float = LOCKSTEP_S, hold_asks: int = ORDER_HOLD_ASKS, hold_flips_only: bool = False,
     first_component: int | None = None,
     first_order: Callable[[PlanOrder, FlightState], PlanOrder] | None = None,
+    assignments: Sequence[Assignment] | None = None,
 ) -> list[RolledFlight]:
     """A group's rolled predictions in lockstep (design v5.1): every `step_s` the head is
     asked again for every flight still flying and the group is stepped together; a
@@ -320,7 +380,7 @@ def rolled_predictions_lockstep(
         raise ValueError("a fan member is the fan one step deep; an order hold would hold its first order longer")
     states, policy = lockstep_model_policy(
         model, series, config, normalizer, anchors, device, skeletons,
-        first_component=first_component, first_order=first_order,
+        first_component=first_component, first_order=first_order, assignments=assignments,
     )
     return fly_lockstep(
         states, config, policy=policy, step_s=step_s, hold_asks=hold_asks, hold_flips_only=hold_flips_only, device=device,

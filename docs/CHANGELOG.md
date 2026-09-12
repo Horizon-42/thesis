@@ -4,6 +4,49 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-12 — ts_transformer: plan-and-guidance step 4 — the assigned time and join (v5.4): the time delivered, the join not in this form
+
+`dev-plan-cta`; design v5.4 §9 step 4, §12.9. The scheduler's assignment reaches the plan path:
+`outputs/plan/strategy.Assignment(arrival_time_s — ABSOLUTE on the series clock — , d_join_m)`,
+applied by `lockstep_model_policy(assignments=)` at every ask (`assigned_order`: the head's `T_s`
+replaced by the assigned remaining time, its `d_join_m` by the assigned join; every other parameter
+the head's; the head's own ETA kept as the prediction the rolled flight reports; the budget the
+later of the head's time and the assigned one, so a flight the speed cannot bring forward lands
+late with X < 0 instead of being cut short of the final). `fly_lockstep` closes the time on the
+route in force at every ask (`outputs/plan/guidance/timing.py::close_time`): the route timed from
+the aircraft's PROGRESS point (`route.route_time_s(start=)`); the speed lever — one factor on the
+plan's held speed (`held_speed_mps`: the instruction's at its fix; on a closing `scaled()` adds a
+new held speed reached at `DECEL_RATE_MPS2`), bisected between the floor (`stall_floor_mps`, the
+stall margin × the 1 g stall speed at the flight's mass and altitude, or `V_final`) and
+`SPEED_MAX_MPS`, the deceleration point moving out with the held speed (`decel_point_for`); the
+path lever — `leg_route(stretch_m=)` (a closing through the plain builder's hold / dog-leg, an
+instruction leg flying its heading after the fix longer), sized at the floor speed, bracketed over
+`STRETCH_PROBES` lays (the builder lays in quanta), a late lay never taken, the plan as laid
+re-anchored to the stretched path, the stretch in force kept across re-lays and dropped when the
+assignment no longer needs it; X = assigned remaining − closed time (`planUnabsorbedFirstS` /
+`…LastS` / `…StepP50S`, `planSpeedFactorFirst/Last`, `planStretchM`, `planStretchDrops`, every
+step's record `closure`). `speed_floor.stall_speed_mps` is the one stall-speed expression (the
+tensor floor and the scalar closure). `plan_oracle --assign-time {none,truth}
+--assign-time-offset-s S --assign-join {none,truth}` (the truth's time and join as the assignment
+— an oracle form, `assignment` in the artifact) and the X / speed-factor / stretch rows.
+
+Measured (KRDU val 1404, the 3(g) seed-1337 K = 4 head, lockstep 30 s, 60 s anchor): the truth's
+time assigned — dt MAE 35.1 → 10.2 s pooled (straight-in 20.9 → 3.2, |dt| p50 1.5 s), paired ADE
+−447 m at the median (lower on 81 %; straight-in 749 → 281 m, vectored 3087 → 2655 m), chamfer
+unchanged, fully flyable 100 % in every arm, established 97.3 → 95.0 %; L−1 the same (1802 →
+1337). −60 s: the median flight of both strata arrives 61 s early (met), vectored established
+72 %. +60 / +90 s: the vectored stratum absorbs at the floor (X p50 0, speed factor 0.77 / 0.73,
+the flown arrival 6–22 s short of the assigned), the straight-in stratum cannot (X p50 45.6 /
+75.6 s: near `V_final`, no path to stretch inside the RNP box) and reports it. The assigned join
+as a `d_join` override: 3451 m with the time, 3876 alone, against 2655 / 3087 — an inconsistent
+order under the head's own fix, not adopted. §7: the arrival-time and fully-flyable rows pass,
+"assigned time" (1596) and "time + join" (1400) do not. Review (opus) findings fixed before the
+measurement: the progress-point timing (from 0 the closure pushed every vectored flight to its
+maximum speed and off its route), the quantised builder bracketed, the deceleration point, the
+re-anchored plan, the stretch across re-lays, the head's ETA, one stall expression. Full suite
+1045 passed. Artifacts `…/plan_guidance_20260910/step4_*`. Next: §9 step 5, the pooled
+five-airport training on the K = 4 head.
+
 ### 2026-09-12 — ts_transformer: plan-and-guidance step 3(g) — the fan over the next fix (v5.3): the mixture objective adopted, the one-step fan not
 
 `dev-plan-fan`; design v5.3 §9 step 3(g), §12.8. `plan_fan_components` = K (config field,

@@ -527,10 +527,14 @@ def speed_schedule_mps(remaining_m, *, v_mid: float, d_decel_m: float | None, v_
 
 
 def route_time_s(route: Route, *, v_mid: float, d_decel_m: float | None, v_final: float,
-                 points: Sequence[tuple[float, float]] = ()) -> float:
+                 points: Sequence[tuple[float, float]] = (), start: int = 0) -> float:
     """The time the speed schedule needs to fly the route to the threshold (the time
-    closure's reading; §4.6): ``∫ ds / V(s)`` over the laid path."""
+    closure's reading; §4.6): ``∫ ds / V(s)`` over the laid path from route point ``start``
+    — the point the aircraft has reached on a route kept in force (`FlightState.progress`);
+    read from 0 on a route the aircraft is still flying, the closure saw a time that never
+    fell as the aircraft flew and pushed the speed to its maximum (2026-09-12)."""
     to_threshold = route.arc_m <= route.threshold_arc_m + 1e-9
+    to_threshold[:max(int(start), 0)] = False
     arc = route.arc_m[to_threshold]
     remaining = route.threshold_arc_m - arc
     speed = speed_schedule_mps(remaining, v_mid=v_mid, d_decel_m=d_decel_m, v_final=v_final, points=points)

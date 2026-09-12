@@ -69,7 +69,7 @@ were NOT made without the owner:
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 
-## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–3(g) built and measured; next: step 4, assigned time and join, on the K = 4 mixture head
+## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–4 built and measured; next: step 5, the pooled five-airport training on the K = 4 head with the time closure
 
 `docs/2026-09-09_plan_and_guidance_design.md` (v4; §12 carries the numbers), branch
 `dev-plan-guidance`. Built: the shared rollout parts moved out of `outputs/control/`
@@ -157,6 +157,22 @@ the review's route and controller findings applied and re-measured). Artifacts:
   config default stays 0 (stored point heads keep their layout); a named plan recipe should
   pin 4. Next: step 4 on the K = 4 head; a fan that carries a claim needs samples or a member
   tracked across asks (listed, not planned).
+- **Step 4 (2026-09-12, `dev-plan-cta`, design §12.9): the ASSIGNED TIME delivered, the assigned
+  JOIN not in this form.** `strategy.Assignment(arrival_time_s, d_join_m)` replaces the head's
+  `T_s` / `d_join_m` at every ask; `fly_lockstep` closes the time on the route in force from the
+  aircraft's progress point (`guidance/timing.close_time`: the held speed between the stall floor
+  and the maximum with the deceleration point moving with it, then the builder's hold / dog-leg
+  bracketed over its quanta, X = what neither absorbs, signed). KRDU val, K = 4 head, 60 s
+  anchor, the truth's time: dt MAE 35.1 → 10.2 s pooled (straight-in 3.2 s, |dt| p50 1.5 s),
+  paired ADE −447 m (lower on 81 %; straight-in 749 → 281, vectored 3087 → 2655), fully flyable
+  100 % in every arm, chamfer unchanged; established 97.3 → 95.0 %. −60 s met to the second by the
+  median flight of both strata (vectored established 72 %); +60 / +90 s absorbed at the floor by
+  the vectored stratum (flown 6–22 s short), not by the straight-in one (X p50 46 / 76 s, no path
+  to stretch). The §7 rows: arrival-time MAE and fully-flyable PASS; "assigned time" 2655 against
+  1596 and "time + join" 3451 against 1400 FAIL — the join under the head's own fix is an
+  inconsistent order (alone 3876). `plan_oracle --assign-time truth --assign-time-offset-s S
+  [--assign-join truth]`. Open: the flown shortfall under large delays (the controller's floor
+  against the plan's), establishment under an advance, the route assignment as fixes.
 - **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
   binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
   beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the

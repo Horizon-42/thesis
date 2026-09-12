@@ -49,6 +49,7 @@ from ts_transformer.outputs.plan.labels import (
     wrap_angle,
 )
 from ts_transformer.outputs.plan.guidance.controller import PlanGuidance, PlanToFly, reference_height
+from ts_transformer.outputs.plan.guidance.timing import TIME_TOLERANCE_S, TimeClosure, close_time, stall_floor_mps
 from ts_transformer.outputs.plan.guidance.route import (
     CONVERGE_MIN_M,
     INTERCEPT_MAX_RAD,
@@ -387,6 +388,9 @@ class LegOrder:
     capture_clamped: bool = False    # the capture height was clamped into the glidepath window
     arrival_time_s: float | None = None   # the head's own arrival time (the prediction a rolled flight reports)
     record: dict[str, object] | None = None
+    #: v5.4: the scheduler's arrival time, ABSOLUTE on the series clock — the lockstep closes
+    #: the time on it at every ask (`guidance.timing.close_time`); None: the head's own
+    assigned_arrival_s: float | None = None
 
 
 LegOrders = Callable[[Anchor, int, Sequence[Forecast]], LegOrder]
@@ -439,13 +443,18 @@ def ahead_of(anchor: Anchor, instruction: Instruction) -> bool:
 
 
 def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float | None, skeleton: RunwaySkeleton,
-              plan: PlanToFly, *, mid_flight: bool = False) -> tuple[Route, PlanToFly, int]:
+              plan: PlanToFly, *, mid_flight: bool = False, stretch_m: float = 0.0) -> tuple[Route, PlanToFly, int]:
     """The route and the schedule for one leg, and the route's OWN join index (its first
     point of the final leg, which the returned route's ``join_index`` overrides for an
     instruction leg — see below). ``mid_flight`` (the lockstep's re-lays) admits the
     "turn to heading X" forms for an instruction leg laid from inside its turn, with its
     fix behind, or where the fly-by would loop; the drawn replay and the leg form keep
-    the fly-by through the fix.
+    the fly-by through the fix. ``stretch_m`` (v5.4, the time closure's path lever) asks
+    for that much MORE path: on a closing the plain builder lays it as a hold or a dog-leg
+    (the polyline shortcuts onto the join cannot stretch and are not taken; its
+    `shortfall_m` says what was not laid), on an instruction leg the heading after the fix
+    is flown that much longer before the turn to the join (none where that heading points at
+    the join: flying on would overshoot it).
 
     With an instruction: through its fix, the corner there rounded at the instruction's
     speed onto the heading it gives, that heading continued `LEG_EXTENSION_M` (none where
@@ -516,9 +525,16 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
         ))
 
     common = dict(
-        d_join_m=max(d_join, 1.0), side=0, pre_final_m=max(anchor.remaining_m - d_join, 0.0), skeleton=skeleton,
-        speed_at=speed_at,
+        d_join_m=max(d_join, 1.0), side=0, pre_final_m=max(anchor.remaining_m - d_join, 0.0),
+        skeleton=skeleton, speed_at=speed_at,
     )
+    if instruction is None and stretch_m > 0.0:
+        # the path lever: only the plain builder lays a hold or a dog-leg, to the plan's
+        # length plus the stretch
+        route = build_route(
+            anchor.e, anchor.n, anchor.heading_rad, anchor.speed_mps, **{**common, "pre_final_m": common["pre_final_m"] + stretch_m},
+        )
+        return route, leg_plan, route.join_index
     if instruction is None and onto_join:
         route = build_route(
             anchor.e, anchor.n, anchor.heading_rad, anchor.speed_mps, **common,
@@ -540,6 +556,7 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
     to_fix = fix - np.array([anchor.e, anchor.n])
     along_heading = float(to_fix[0] * math.cos(anchor.heading_rad) + to_fix[1] * math.sin(anchor.heading_rad))
     radius = route_turn_radius_m(instruction.speed_mps)
+    extension = LEG_EXTENSION_M + stretch_m
     if mid_flight and (float(np.hypot(*to_fix)) <= TURN_AT_FIX_RADII * radius or along_heading < -radius):
         # inside the turn at the fix, or the fix clearly behind (a base-turn fix is abeam
         # by construction and is flown to): the instruction is
@@ -547,7 +564,7 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
         # Dubins onto it is the turn), then the join; a fly-by through the fix from here
         # ran its first leg back to the fix and looped (2026-09-11, the lockstep's first
         # smoke: vectored ADE 4250 m)
-        reach = max(LEG_EXTENSION_M, HEADING_FORM_RADII * radius)
+        reach = max(extension, HEADING_FORM_RADII * radius)
         onward = np.array([anchor.e, anchor.n]) + reach * unit_vector(instruction.heading_out_rad)
         waypoints = ((float(onward[0]), float(onward[1])),)
         waypoint_speeds = ((instruction.remaining_m - reach, instruction.speed_mps),)
@@ -555,10 +572,10 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
         waypoints = ((float(fix[0]), float(fix[1])),)
         waypoint_speeds = ((instruction.remaining_m, instruction.speed_mps),)
     else:
-        onward = fix + LEG_EXTENSION_M * unit_vector(instruction.heading_out_rad)
+        onward = fix + extension * unit_vector(instruction.heading_out_rad)
         waypoints = ((float(fix[0]), float(fix[1])), (float(onward[0]), float(onward[1])))
         waypoint_speeds = ((instruction.remaining_m, instruction.speed_mps),
-                           (instruction.remaining_m - LEG_EXTENSION_M, instruction.speed_mps))
+                           (instruction.remaining_m - extension, instruction.speed_mps))
     route = build_route(
         anchor.e, anchor.n, anchor.heading_rad, anchor.speed_mps, **common,
         waypoints=waypoints, waypoint_speeds=waypoint_speeds,
@@ -567,7 +584,7 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
     if mid_flight and float(route.arc_m[turn_end]) > float(np.hypot(*to_fix)) + math.pi * radius + LEG_EXTENSION_M:
         # the fly-by from here loops before the fix (its arc to the turn's end runs more
         # than a half-circle past the straight distance): "turn to heading X" instead
-        reach = max(LEG_EXTENSION_M, HEADING_FORM_RADII * radius)
+        reach = max(extension, HEADING_FORM_RADII * radius)
         onward = np.array([anchor.e, anchor.n]) + reach * unit_vector(instruction.heading_out_rad)
         route = build_route(
             anchor.e, anchor.n, anchor.heading_rad, anchor.speed_mps, **common,
@@ -973,6 +990,14 @@ class FlightState:
     pending_asks: int = 0
     held: int = 0
     order_changes: int = 0
+    #: the time closure (v5.4): the plan as laid — what the closure scales FROM at every ask,
+    #: never the last closed plan (a factor on a factor would compound) — the first and the
+    #: last closure, and the stretch in force
+    base_plan: PlanToFly | None = None
+    closure_first: TimeClosure | None = None
+    closure_last: TimeClosure | None = None
+    stretch_m: float = 0.0
+    stretch_drops: int = 0
     records: list[dict[str, object]] = field(default_factory=list)
     steps: int = 0
     end_time_s: float = math.inf
@@ -1169,15 +1194,19 @@ def fly_lockstep(
                 or (instruction is None) != (state.instruction is None)
             )
             relaid = new_phase or order_changed(state, instruction, d_join_m) or off_route(state)
+            # a held step re-lays only off the route: then the plan in force travels with
+            # the join in force (the new order's capture height was clamped at the join the
+            # hold just refused)
+            lay_plan = state.base_plan if held else order.plan
             if relaid:
-                # a held step re-lays only off the route: then the plan in force travels
-                # with the join in force (the new order's capture height was clamped at
-                # the join the hold just refused)
+                # the stretch in force (v5.4) is asked for again: a phase change or a drift
+                # re-lays the route, not the delay the scheduler assigned
                 route, leg_plan, _route_join = leg_route(
-                    state.current, instruction, d_join_m, state.skeleton,
-                    state.plan if held else order.plan, mid_flight=True,
+                    state.current, instruction, d_join_m, state.skeleton, lay_plan, mid_flight=True,
+                    stretch_m=state.stretch_m,
                 )
                 state.route, state.plan, state.d_join_m, state.progress = route, leg_plan, d_join_m, 0
+                state.base_plan = leg_plan
                 state.route_height_m = state.current.height_m
             else:
                 route, leg_plan = state.route, state.plan
@@ -1188,12 +1217,51 @@ def fly_lockstep(
             elif relaid:
                 # the phase's route is the one in force, re-laid mid-phase
                 state.phase_routes[-1] = route
+            # v5.4: the assigned time closed on the route in force, from the plan as laid
+            closure = None
+            if order.assigned_arrival_s is not None:
+                remaining_s = float(order.assigned_arrival_s) - state.current.time_s
+                floor = stall_floor_mps(state.current.row)
+
+                def lay(extra: float, _i=instruction, _j=d_join_m, _p=lay_plan) -> tuple[Route, PlanToFly]:
+                    return leg_route(
+                        state.current, _i, _j, state.skeleton, _p, mid_flight=True, stretch_m=state.stretch_m + extra,
+                    )[:2]
+
+                base_route = state.route
+                closure, route, leg_plan, laid_plan = close_time(
+                    base_route, state.base_plan, remaining_s, v_floor_mps=floor,
+                    start=0 if relaid else state.progress, lay=lay,
+                )
+                if closure.unabsorbed_s < -TIME_TOLERANCE_S and state.stretch_m > 0.0:
+                    # a stretch in force the assignment no longer needs (the order or the
+                    # pose changed): the route without it, if that meets the time better
+                    route_0, plan_0 = lay(-state.stretch_m)
+                    closure_0, route_0, plan_0, laid_0 = close_time(
+                        route_0, plan_0, remaining_s, v_floor_mps=floor, start=0, lay=lay,
+                    )
+                    if abs(closure_0.unabsorbed_s) < abs(closure.unabsorbed_s):
+                        closure, route, leg_plan, laid_plan = closure_0, route_0, plan_0, laid_0
+                        state.stretch_m = 0.0
+                        state.stretch_drops += 1
+                if route is not base_route:
+                    # the path lever (or the drop) re-laid the route: it is the one in force
+                    # from here, its plan as laid the base the next asks scale from
+                    state.route, state.progress, state.route_height_m = route, 0, state.current.height_m
+                    state.base_plan = laid_plan
+                    state.stretch_m += closure.stretch_requested_m
+                    state.phase_routes[-1] = route
+                state.plan = leg_plan
+                if state.closure_first is None:
+                    state.closure_first = closure
+                state.closure_last = closure
             state.instruction = instruction
             state.instruction_executed = False
             state.last_plan = leg_plan
             state.records.append({
                 **(order.record or {}), "step": state.steps, "held": held,
                 "flown_fix": None if instruction is None else [instruction.fix_e, instruction.fix_n],
+                **({} if closure is None else {"closure": closure.record()}),
             })
             rows.append(state.current.row)
             routes.append(route)
@@ -1265,6 +1333,21 @@ def fly_lockstep(
         diagnostics["planOrderChanges"] = float(state.order_changes)
         diagnostics["planHoldAsks"] = float(hold_asks)
         diagnostics["planHoldFlipsOnly"] = float(hold_flips_only)
+        # v5.4: the assignment's closure — X at the first ask (the planning verdict) and the
+        # last, the speed factor last flown, the path added in force at the end
+        diagnostics["planAssigned"] = float(state.closure_first is not None)
+        if state.closure_first is not None:
+            diagnostics["planUnabsorbedFirstS"] = float(state.closure_first.unabsorbed_s)
+            diagnostics["planUnabsorbedLastS"] = float(state.closure_last.unabsorbed_s)
+            # X over EVERY ask — the plan-level verdict at the first ask can say "met" for a
+            # flight whose later asks could not (review 2026-09-12)
+            diagnostics["planUnabsorbedStepP50S"] = float(np.median([
+                record["closure"]["unabsorbed_s"] for record in state.records if "closure" in record
+            ]))
+            diagnostics["planSpeedFactorFirst"] = float(state.closure_first.speed_factor)
+            diagnostics["planSpeedFactorLast"] = float(state.closure_last.speed_factor)
+            diagnostics["planStretchM"] = float(state.stretch_m)
+            diagnostics["planStretchDrops"] = float(state.stretch_drops)
         whole = replace(whole, horizon_capped=state.capped_by is not None, command_hook_diagnostics=diagnostics)
         out.append(RolledFlight(
             whole, list(state.phase_routes), state.flown, state.skipped, list(state.phase_lengths_m),

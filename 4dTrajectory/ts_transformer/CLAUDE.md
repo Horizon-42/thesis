@@ -143,7 +143,34 @@ point of the package, not a migration in progress.
   (`--plan-fan-components 4`; the config default stays 0 for the stored heads); the one-step
   fan's members are no better than a 5 km ring (minADE_4 2454 vs 2450, nearest-beats-top-1
   58 vs 79 %) and the 2σ coverage (98.7 %) is the alternatives' width, so the fan is NOT a
-  deliverable in this form.**
+  deliverable in this form.** **v5.4 (2026-09-12, §9 step 4): the scheduler's ASSIGNMENT**
+  (`strategy.Assignment(arrival_time_s, d_join_m)` — the arrival ABSOLUTE on the series clock;
+  `lockstep_model_policy(assignments=)` / `rolled_predictions_lockstep(assignments=)` replace
+  the head's `T_s` and `d_join_m` at EVERY ask, `assigned_order`; the leg order carries
+  `assigned_arrival_s`). `fly_lockstep` then CLOSES THE TIME on the route in force at every ask
+  (`guidance/timing.close_time`): the SPEED lever first — one factor on the plan's HELD speed
+  (`held_speed_mps`: the instruction's at its fix; on a closing, where the schedule holds the
+  anchor's own speed to the deceleration point, `scaled()` adds a new held speed reached at the
+  deceleration rate — never `V_final`), bisected between the floor (`stall_floor_mps`, the stall
+  margin × the 1 g stall speed at the flight's mass and altitude, or `V_final` if higher) and
+  `SPEED_MAX_MPS`; then the PATH lever (`leg_route(stretch_m=)`: a closing goes through the
+  plain builder's hold / dog-leg, an instruction leg flies its heading after the fix longer),
+  sized at the FLOOR speed with a secant on the length ACTUALLY laid (`MIN_STRETCH_LAID_M`: the
+  builder laid nothing more → the lever is exhausted); X = assigned remaining − closed time
+  (`planUnabsorbedFirstS` / `planUnabsorbedLastS`, signed), `planSpeedFactorFirst/Last`,
+  `planStretchM`, every step's record `closure`. **Three rules that cost real flights when
+  missed**: the route time is integrated FROM THE PROGRESS POINT on a route in force
+  (`route_time_s(start=)`; from 0 the time never fell as the aircraft flew and the closure
+  pushed the speed to its maximum — every vectored flight derailed); the closure scales from
+  the plan AS LAID (`FlightState.base_plan`), never the last closed plan (a factor on a factor
+  compounds); and the assigned time is a TARGET, not the flight's budget — the budget is the
+  later of the head's own time and the assigned one, so a flight the closure cannot bring
+  forward lands late and reports dt with X < 0 instead of being cut short of the final
+  (measured: vectored established 0.96 → 0.58 with the assigned time as the budget). The
+  instrument is `plan_oracle --policy model --assign-time truth [--assign-time-offset-s S]
+  [--assign-join truth]` — the truth's time and join as the assignment, an oracle form that
+  READS THE FUTURE and says so (`assignment` in the artifact; the control line's `cta=given`
+  convention); its summary gains the X distribution, the speed factor and the stretch share.
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches

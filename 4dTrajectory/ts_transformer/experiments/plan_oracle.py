@@ -71,7 +71,8 @@ from ts_transformer.outputs.plan.forecast import (
 )
 from ts_transformer.outputs.plan.labels import truth_instructions
 from ts_transformer.outputs.plan.rolled import POLICY_MODEL as ROLLED_POLICY_MODEL, POLICY_TRUTH as ROLLED_POLICY_TRUTH
-from ts_transformer.outputs.plan.strategy import rolled_prediction, rolled_predictions_lockstep
+from ts_transformer.outputs.plan.guidance.timing import TIME_TOLERANCE_S
+from ts_transformer.outputs.plan.strategy import Assignment, rolled_prediction, rolled_predictions_lockstep
 from ts_transformer.outputs.plan.guidance.route import KIND_DOWNWIND, KIND_STRETCHED, KIND_WAYPOINTS
 from ts_transformer.outputs.plan.skeleton import runway_skeleton
 
@@ -90,6 +91,13 @@ ROLLING_LOCKSTEP = "lockstep"
 #: `--route next`: the truth's instructions flown one at a time (design v5), re-anchored
 #: at each fix — the rolled form of the waypoints oracle.
 ROUTE_NEXT = "next"
+#: `--assign-time truth` / `--assign-join truth` (v5.4, §9 step 4): the truth's arrival time
+#: (plus `--assign-time-offset-s`) and/or the truth's join are the scheduler's assignment to
+#: the head's rolled flight — the oracle form, which READS THE FUTURE and says so in the
+#: artifact (`assignment`); never a prediction result.
+ASSIGN_NONE = "none"
+ASSIGN_TRUTH = "truth"
+ASSIGNMENTS = (ASSIGN_NONE, ASSIGN_TRUTH)
 SCHEMA = "ts-plan-oracle-v2"   # v2 (2026-09-11): glidepath verdict inside the FAF only, floor before it, the truth graded alongside
 STRATA = (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, STRATUM_ESTABLISHED)
 #: The rollout horizon past the plan's T: a flight that arrives late is measured as late.
@@ -255,10 +263,41 @@ def summarize(rows: list[dict]) -> dict:
             # (the whole-path and leg forms carry no `planSteps`)
             "orders_held_share": float(np.mean([held_share(row["hook"]) for row in members]))
             if all("planHeldSteps" in row["hook"] for row in members) else float("nan"),
+            # the assignment's closure (v5.4): X at the first ask, the share it did not
+            # absorb, the speed factor, the stretch — assigned flights only
+            **_assignment_cells(members),
             "order_changes_per_flight": float(np.mean([row["hook"]["planOrderChanges"] for row in members]))
             if all("planOrderChanges" in row["hook"] for row in members) else float("nan"),
         }
     return out
+
+
+def _assignment_cells(members: list[dict]) -> dict[str, float]:
+    """The time closure's readout over the flights that were ASSIGNED a time (`planAssigned`);
+    NaN where none was — the whole-path, leg and unassigned lockstep forms."""
+    assigned = [row for row in members if row["hook"].get("planAssigned")]
+    if not assigned:
+        return {
+            "assigned_share": float(np.mean([bool(row["hook"].get("planAssigned")) for row in members])),
+            "unabsorbed_first_p50_s": float("nan"), "unabsorbed_first_p90_s": float("nan"),
+            "unabsorbed_share": float("nan"), "unabsorbed_step_p50_s": float("nan"),
+            "speed_factor_first_p50": float("nan"), "stretched_share": float("nan"),
+            "stretch_dropped_share": float("nan"), "final_time_error_absorbed_p50_s": float("nan"),
+        }
+    first = np.array([row["hook"]["planUnabsorbedFirstS"] for row in assigned])
+    absorbed = [row for row in assigned if abs(row["hook"]["planUnabsorbedFirstS"]) <= TIME_TOLERANCE_S]
+    return {
+        "assigned_share": float(len(assigned) / len(members)),
+        "unabsorbed_first_p50_s": _p(first, 50), "unabsorbed_first_p90_s": _p(np.abs(first), 90),
+        "unabsorbed_share": float(np.mean(np.abs(first) > TIME_TOLERANCE_S)),
+        "unabsorbed_step_p50_s": _p([row["hook"]["planUnabsorbedStepP50S"] for row in assigned], 50),
+        "speed_factor_first_p50": _p([row["hook"]["planSpeedFactorFirst"] for row in assigned], 50),
+        "stretched_share": float(np.mean([row["hook"]["planStretchM"] > 0.0 for row in assigned])),
+        "stretch_dropped_share": float(np.mean([row["hook"]["planStretchDrops"] > 0.0 for row in assigned])),
+        # the arrival-time error where the plan said it could meet the time: the closure's own check
+        "final_time_error_absorbed_p50_s": _p([row["prediction"]["final_time_error_s"] for row in absorbed], 50)
+        if absorbed else float("nan"),
+    }
 
 
 def format_table(summary: dict) -> str:
@@ -286,6 +325,12 @@ def format_table(summary: dict) -> str:
         ("barrier_gated_share", "barrier gated", 3), ("barrier_clamped_share", "barrier clamped", 3),
         ("capture_height_clamped_share", "capture h clamped", 3),
         ("orders_held_share", "orders held (of steps)", 3), ("order_changes_per_flight", "order changes / flight", 2),
+        ("assigned_share", "assigned a time", 3), ("unabsorbed_first_p50_s", "X first ask p50 s", 1),
+        ("unabsorbed_first_p90_s", "|X| first ask p90 s", 1), ("unabsorbed_share", "|X| > tol share", 3),
+        ("unabsorbed_step_p50_s", "X over asks p50 s", 1),
+        ("speed_factor_first_p50", "speed factor p50", 3), ("stretched_share", "path stretched", 3),
+        ("stretch_dropped_share", "stretch dropped", 3),
+        ("final_time_error_absorbed_p50_s", "dt p50 where absorbed s", 1),
     ]
     lines = ["oracle ceiling (true plans through the guidance), n = " + ", ".join(
         f"{STRATUM_SHORT[s]} {summary[s]['flights']}" for s in strata)]
@@ -314,6 +359,14 @@ def main(argv: list[str] | None = None) -> int:
                              "many consecutive asks (v5.3; 1 = adopt at once, the v5.1/v5.2 behaviour and the default)")
     parser.add_argument("--hold-flips-only", action="store_true",
                         help="hold only a fix <-> none flip; a moved fix is adopted at once (needs --hold-asks > 1)")
+    parser.add_argument("--assign-time", choices=ASSIGNMENTS, default=ASSIGN_NONE,
+                        help="v5.4: assign the head's rolled flight an arrival time — the TRUTH's (+ the offset), "
+                             "the oracle form that reads the future (needs --policy model --rolling lockstep)")
+    parser.add_argument("--assign-time-offset-s", type=float, default=0.0,
+                        help="the scheduler's counterfactual: the assigned time is the truth's plus this")
+    parser.add_argument("--assign-join", choices=ASSIGNMENTS, default=ASSIGN_NONE,
+                        help="v5.4: assign the head's rolled flight the TRUTH's join distance-to-go (where the truth "
+                             "has one; needs --policy model --rolling lockstep)")
     parser.add_argument("--rolling", choices=(ROLLING_LEG, ROLLING_LOCKSTEP), default=ROLLING_LOCKSTEP,
                         help="under --route next: one leg per instruction (the head asked at each fix), or the "
                              "receding-horizon lockstep (asked every 30 s, the batch stepped together; v5.1)")
@@ -346,6 +399,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--policy model rolls the head's orders: it needs --route next")
         if arm.config.prediction_output != PREDICTION_PLAN:
             parser.error(f"--policy model needs a plan checkpoint; {label} predicts {arm.config.prediction_output!r}")
+    assigning = args.assign_time != ASSIGN_NONE or args.assign_join != ASSIGN_NONE
+    if assigning and (args.policy != POLICY_MODEL or args.route != ROUTE_NEXT or args.rolling != ROLLING_LOCKSTEP):
+        parser.error("an assignment is flown by the head's lockstep: --policy model --route next --rolling lockstep")
+    if args.assign_time_offset_s and args.assign_time == ASSIGN_NONE:
+        parser.error("--assign-time-offset-s offsets an assigned time; give --assign-time truth")
     if args.anchor_s > 0.0:
         row = int(round(args.anchor_s / arm.config.dt_s))
         if row < ANCHOR_CONTROL_SAMPLES - 1:
@@ -393,9 +451,20 @@ def main(argv: list[str] | None = None) -> int:
         # than cut off unestablished; the metrics' clock is the truth's regardless
         horizons = [lab.T_s + max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION * lab.T_s) for lab in labels]
         if args.route == ROUTE_NEXT and args.policy == POLICY_MODEL and args.rolling == ROLLING_LOCKSTEP:
+            # the assignment: the truth's arrival time on the series clock (+ the offset) and
+            # its join where the track has one (a flight established at the anchor has none)
+            assignments = [
+                Assignment(
+                    arrival_time_s=(float(item.times[a]) + lab.T_s + args.assign_time_offset_s)
+                    if args.assign_time == ASSIGN_TRUTH else None,
+                    d_join_m=lab.d_join_m if args.assign_join == ASSIGN_TRUTH else None,
+                )
+                for item, a, lab in zip(chunk, chunk_anchors, labels, strict=True)
+            ] if assigning else None
             rolled = rolled_predictions_lockstep(
                 arm.model, chunk, arm.config, arm.normalizer, chunk_anchors, torch.device("cpu"), chunk_skeletons,
                 step_s=args.lockstep_s, hold_asks=args.hold_asks, hold_flips_only=args.hold_flips_only,
+                assignments=assignments,
             )
             forecasts = [r.forecast for r in rolled]
             routes = [r.routes[-1] for r in rolled]
@@ -492,6 +561,7 @@ def main(argv: list[str] | None = None) -> int:
         "split": args.split, "limit": args.limit, "flights": len(rows), "anchor": anchor,
         "route": args.route, "policy": args.policy, "rolling": args.rolling, "lockstep_s": args.lockstep_s,
         "hold_asks": args.hold_asks, "hold_flips_only": args.hold_flips_only, "wall_s": wall_s,
+        "assignment": {"time": args.assign_time, "offset_s": args.assign_time_offset_s, "join": args.assign_join},
         "max_waypoints": args.max_waypoints, "anchor_km": args.anchor_km,
         "anchor_s": args.anchor_s,
         "flights_without_anchor": without,
