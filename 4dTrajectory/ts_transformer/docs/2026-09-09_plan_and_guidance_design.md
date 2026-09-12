@@ -1,6 +1,18 @@
 # Plan-and-guidance: the next model (design v5, 2026-09-12)
 
-Status: **v5.5 step 5 BUILT and MEASURED (2026-09-12, `dev-plan-pool`; §9 step 5, §12.10): the
+Status: **v5.5 step 5b MEASURED (2026-09-12; §9 step 5, §12.11): PER-AIRPORT K = 4 heads are the
+delivery on every airport; the pooled head is retired as a delivery.** Each of KSJC, KSTL, KSMF
+and KMSY got its own K = 4 head (the 3(g) recipe on the airport's own cohort, drawing its rolled
+windows from the pooled table) and was paired against the pooled head on its own val flights at
+the 60 s anchor: the own head's vectored ADE is lower on four of five airports — KRDU 3087 vs
+3678, KSTL 2838 vs 3274 (paired +209 m for the pooled), KSMF 2758 vs 3245 (+79), KMSY 3768 vs
+4159 (+217) — and with the truth's time on all five (KRDU +591, KSTL +168, KSMF +33, KMSY +277,
+KSJC +57); KSJC alone reads the pooled head lower unassigned (2782 vs 3145, −40 paired on 207
+vectored flights). Straight-in strata and the time closure are the same under either head
+(dt MAE 2.8–8.2 s with the time). The airport-macro pooled objective does not transfer
+vectoring between airports. Next: §9 step 6, the multi-aircraft scheduler demonstration, on
+the per-airport heads with the time closure; the two-seed check of the per-airport heads
+alongside. Previous status: **v5.5 step 5 BUILT and MEASURED (2026-09-12, `dev-plan-pool`; §9 step 5, §12.10): the
 pooled five-airport K = 4 head — the guidance and the time closure TRANSFER, the pooled head
 COSTS the home airport.** One head on 21,911 train flights of five airports (`run_ts.py
 plan_cohort` writes the cohort; the rolled table 292k samples): on KRDU val it is WORSE than the
@@ -608,7 +620,8 @@ parametrisation is too coarse.
    the corridor verdicts; (4) the join alone. Veto: a closure that costs the straight-in
    stratum at offset 0 (its time is already right: the speed factor must read ≈ 1 there).
 5. **The pooled five-airport training (v5.5, BUILT and MEASURED 2026-09-12; §6 "Data"; §12.10
-   — the closure transfers, the pooled head costs the home airport; 5b: per-airport heads).** The
+   — the closure transfers, the pooled head costs the home airport; 5b MEASURED: per-airport
+   heads win on four of five airports, §12.11).** The
    K = 4 head with the time closure as its delivery form, trained on the five airports'
    arrivals together — the one lever left on the 125 m line (§6), and the test of whether the
    skeleton makes airports comparable. (a) **The cohort**: `run_ts.py plan_cohort` writes the
@@ -1742,3 +1755,46 @@ per airport with the pooled table's rows for that airport, ~10 min of GPU each �
 covers every flight, and `require_cover` asks only that it cover the run's cohort). The time
 closure and the guidance are confirmed as airport-independent deliverables. Next: step 5b,
 then the two-seed check of §9 step 5 on the per-airport heads.
+
+### 12.11 Step 5b — per-airport K = 4 heads against the pooled head (2026-09-12)
+
+One detached chain from the main tree: for each of KSJC, KSTL, KSMF, KMSY — `run_ts.py
+plan_cohort` on the airport alone (`step5b_<ICAO>_cohort/`: the pooled cohort's rows for that
+airport, byte for byte the same split), the K = 4 head at share 0.75 drawing its rolled windows
+from the POOLED table (`require_cover` asks only that the table cover the run's flights;
+`step5b_<ICAO>_fan4_head/`, best epochs KSJC 62, KSTL 120 — budget-limited, KSMF 118, KMSY 73),
+the readouts at the 60 s anchor unassigned and with the truth's time
+(`step5b_<ICAO>_{top1_lockstep,time0}_a60s/`), and the pairs against the pooled head's rows for
+the same flights (`step5b_pair_<ICAO>_own{,_time0}_vs_pool_a60s/`, `plan_oracle_pair --common`,
+the arm the POOLED head: a positive Δ is the pooled head's cost).
+
+| airport (vectored n) | own head vectored ADE / established | pooled head, same flights | paired Δ p50 (pooled lower on) | with the truth's time: own / pooled / Δ p50 |
+|---|---|---|---|---|
+| KRDU (601; §12.10) | 3087 / 94.2 % | 3678 / 83.9 % | +227 m (37 %) | 2655 / 3684 / +591 |
+| KSJC (207) | 3145 / 80.7 % | 2782 / 78.7 % | −40 m (54 %) | 2909 / 2681 / +57 (39 %) |
+| KSTL (486) | 2838 / 92.0 % | 3274 / 85.0 % | +209 m (41 %) | 2213 / 2685 / +168 (40 %) |
+| KSMF (395) | 2758 / 56.2 % | 3245 / 54.7 % | +79 m (45 %) | 3006 / 3829 / +33 (45 %) |
+| KMSY (282) | 3768 / 67.4 % | 4159 / 63.5 % | +217 m (43 %) | 4238 / 4711 / +277 (43 %) |
+
+Straight-in (own / pooled ADE, unassigned → with the time): KSJC 854 / 851 → 296 / 272, KSTL
+956 / 1009 → 464 / 573, KSMF 881 / 819 → 436 / 281, KMSY 819 / 823 → 302 / 396 — a wash within
+each airport's straight-in noise; the time closure delivers 2.8–8.2 s of dt MAE on every
+airport under either head; fully flyable ≥ 99 % throughout.
+
+**Read.** (1) On the vectored stratum the airport's own head beats the pooled one on four of
+five airports unassigned (paired +79 to +227 m for the pooled head, lower on 37–45 % of
+flights) and on all five with the time assigned (+33 to +591) — with more established flights
+on four of five. The exception is KSJC's unassigned reading (207 vectored flights, the pooled
+head −40 m paired at the median with 54 % lower — inside that stratum's noise, and reversed
+under the time). (2) A single airport-macro head over five airports is not better than five
+heads even for the two smallest (KSMF 2676, KMSY 2375 train flights): the vectoring pattern is
+airport-specific and the pooled objective averages it. (3) The pooled table is a legitimate
+source of rolled windows for a per-airport run (each airport's own windows are the ones drawn),
+so the five heads share one table — 33 min once rather than five times.
+
+**Decision.** Per-airport K = 4 heads are the delivery on every airport (`step3g_fan4_head` for
+KRDU, `step5b_<ICAO>_fan4_head` for the others); the pooled head `step5_pool_fan4_head` stays
+as the measured alternative, not a delivery. The gate of §9 step 5 as written (the home airport
+within the seed line under pooling) is settled: it is not, and the reason is the objective,
+not the data. Next: §9 step 6, the multi-aircraft scheduler demonstration on the per-airport
+heads with the time closure; the two-seed check of the four new heads alongside (KRDU has it).

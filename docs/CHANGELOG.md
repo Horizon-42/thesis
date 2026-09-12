@@ -4,6 +4,19 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-12 — ts_transformer: plan-and-guidance step 5b — per-airport K = 4 heads beat the pooled head on four of five airports
+
+Design §12.11; measurement only (no code). KSJC, KSTL, KSMF and KMSY each got a K = 4 head on
+their own cohort (`run_ts.py plan_cohort` per airport; the rolled windows drawn from the pooled
+table `step5_pool_table`, which `require_cover` accepts for a subset cohort), read at the 60 s
+anchor unassigned and with the truth's time, and paired against the pooled head on the same
+flights (`plan_oracle_pair --common`). Vectored ADE, own vs pooled: KSJC 3145 vs 2782 (paired
+−40 m for the pooled on 207 flights), KSTL 2838 vs 3274 (+209), KSMF 2758 vs 3245 (+79), KMSY
+3768 vs 4159 (+217), KRDU 3087 vs 3678 (+227, §12.10); with the truth's time the own head is
+lower on all five (+33 to +591). Straight-in and the time closure (dt MAE 2.8–8.2 s) are the
+same under either head. Per-airport K = 4 heads are the delivery on every airport; the pooled
+head is not. Artifacts `…/plan_guidance_20260910/step5b_*`. Next: §9 step 6.
+
 ### 2026-09-12 — ts_transformer: plan-and-guidance step 5 — the pooled five-airport training (v5.5): the closure transfers, the pooled head costs the home airport
 
 `dev-plan-pool`; design v5.5 §9 step 5, §12.10. Tooling: `run_ts.py plan_cohort` writes the

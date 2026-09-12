@@ -69,7 +69,7 @@ were NOT made without the owner:
   the nearest recipe" grammar change is deferred to after the folder grouping (it moves
   stored names and needs its own relabel pass like C-3's).
 
-## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–5 built and measured; next: step 5b, per-airport K = 4 heads for KSJC / KSTL / KSMF / KMSY
+## Plan-and-guidance (2026-09-10 → 09-12) — steps 0–5b built and measured; next: step 6, the multi-aircraft scheduler demonstration on the per-airport heads
 
 `docs/2026-09-09_plan_and_guidance_design.md` (v4; §12 carries the numbers), branch
 `dev-plan-guidance`. Built: the shared rollout parts moved out of `outputs/control/`
@@ -183,6 +183,13 @@ the review's route and controller findings applied and re-measured). Artifacts:
   99.6–100 %, vectored 2.7–4.2 km with established 55–85 %. The pooled head is not KRDU's
   delivery; the other four airports get per-airport heads next (5b). `plan_oracle --by-airport`,
   `plan_oracle_pair --common`. The bootstrap head of a pooled run needs one epoch, not 120.
+- **Step 5b (2026-09-12, design §12.11): per-airport K = 4 heads for KSJC, KSTL, KSMF, KMSY
+  (their rolled windows from the pooled table) against the pooled head on their own flights,
+  60 s anchor.** The own head's vectored ADE is lower on four of five airports unassigned
+  (pooled head +79 to +227 m paired; KSJC −40 on 207 flights) and on all five with the truth's
+  time (+33 to +591); straight-in and the time closure the same under either. Per-airport
+  heads are the delivery everywhere (`step3g_fan4_head`, `step5b_<ICAO>_fan4_head`); the pooled
+  head is not. Next: step 6 (the scheduler demonstration); two seeds for the four new heads.
 - **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
   binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
   beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the
