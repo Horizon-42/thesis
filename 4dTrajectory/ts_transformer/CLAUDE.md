@@ -187,6 +187,12 @@ point of the package, not a migration in progress.
   --common` pairs a pooled artifact against a single-airport one over the flights both hold
   (the base must be INSIDE the arm; the counts are in the header). The pooled table is encoded
   once per window set — six copies on five airports (`docs/code-health-followups.md` §30).
+  **A per-airport plan head's SEED LINE scales with its cohort (2026-09-12, design §12.11's
+  two-seed check)**: at seed 2024 the KSJC and KSTL heads move ≤ 30 m paired (means ≤ 240 m),
+  the KSMF head +358 m paired (+1.3 km of vectored ADE mean, the rolled cap 2.8 → 19 %) and
+  KMSY +215 — the two ~2.4k-flight cohorts. A single-seed own-vs-pooled margin there (+79 /
+  +217) is NOT evidence; a per-airport claim on such a cohort needs both seeds
+  (`step5b_<ICAO>_fan4_head_s2024` beside `step5b_<ICAO>_fan4_head`).
 - **The control path also carries two AXES (2026-09-07, `docs/2026-09-07_latent_intent_design.zh.md`)**:
   `latent_dim > 0` puts a latent intent z on the control output (`outputs/control/latent.py`:
   q(z | future) in training only, a K-component mixture prior from the context, z reaches

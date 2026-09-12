@@ -189,7 +189,12 @@ the review's route and controller findings applied and re-measured). Artifacts:
   (pooled head +79 to +227 m paired; KSJC −40 on 207 flights) and on all five with the truth's
   time (+33 to +591); straight-in and the time closure the same under either. Per-airport
   heads are the delivery everywhere (`step3g_fan4_head`, `step5b_<ICAO>_fan4_head`); the pooled
-  head is not. Next: step 6 (the scheduler demonstration); two seeds for the four new heads.
+  head is not. **Two seeds (the same evening, §12.11's last block): KSJC and KSTL agree within
+  the KRDU line (paired +30 / +22 m); KSMF and KMSY do NOT (+358 / +215 m paired, KSMF's vectored
+  mean +1.3 km with the rolled cap 2.8 → 19 %) — on those two ~2.4k-flight cohorts the own-vs-pooled
+  margin (+79 / +217) is inside the seed line and the row is undecided; the delivery there stays
+  the seed-1337 head. Open: a third seed on KSMF/KMSY, or the pooled head fine-tuned per
+  airport.** Next: step 6 (the scheduler demonstration).
 - **The oracle's vertical verdict changed (2026-09-11, schema v2)**: the glidepath window
   binds inside the FAF only, the coded floor before it, and the truth's own rows are graded
   beside every flight — §12.2/§12.3's glidepath shares (10 %, 7.7 %) were read from the

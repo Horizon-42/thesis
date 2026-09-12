@@ -1,6 +1,15 @@
 # Plan-and-guidance: the next model (design v5, 2026-09-12)
 
-Status: **v5.5 step 5b MEASURED (2026-09-12; §9 step 5, §12.11): PER-AIRPORT K = 4 heads are the
+Status: **v5.5 step 5b TWO-SEED CHECK MEASURED (2026-09-12, evening; §12.11, its last block):
+the four new heads at seed 2024. KSJC and KSTL agree with seed 1337 within KRDU's line (paired
++30 / +22 m at the median, means 3145 → 2906 / 2838 → 2780); KSMF and KMSY do NOT — KSMF vectored
+ADE 2758 → 4043 m (paired +358 m, the rolled cap 2.8 → 19 % of vectored flights), KMSY 3768 → 4044
+(+215, established 67 → 56 %). Those are the two ~2.4k-flight cohorts, and their single-seed
+own-vs-pooled margins of §12.11 (+79 / +217) sit INSIDE that line, so on KSMF and KMSY "own head
+or pooled head" is UNDECIDED; the delivery there stays the seed-1337 head as measured, with a third
+seed or a per-airport fine-tune of the pooled head listed to settle it. KRDU, KSJC and KSTL stand.
+The time closure is seed-independent (straight-in dt MAE 3.1–8.2 s under both seeds, fully flyable
+100 %). Next: §9 step 6 unchanged.** Previous status: **v5.5 step 5b MEASURED (2026-09-12; §9 step 5, §12.11): PER-AIRPORT K = 4 heads are the
 delivery on every airport; the pooled head is retired as a delivery.** Each of KSJC, KSTL, KSMF
 and KMSY got its own K = 4 head (the 3(g) recipe on the airport's own cohort, drawing its rolled
 windows from the pooled table) and was paired against the pooled head on its own val flights at
@@ -1820,4 +1829,39 @@ KRDU, `step5b_<ICAO>_fan4_head` for the others); the pooled head `step5_pool_fan
 as the measured alternative, not a delivery. The gate of §9 step 5 as written (the home airport
 within the seed line under pooling) is settled: it is not, and the reason is the objective,
 not the data. Next: §9 step 6, the multi-aircraft scheduler demonstration on the per-airport
-heads with the time closure; the two-seed check of the four new heads alongside (KRDU has it).
+heads with the time closure; the two-seed check of the four new heads is the block below.
+
+**The two-seed check (2026-09-12, evening).** The same recipe at `seed` 2024 on each of the four
+cohorts (`step5b_<ICAO>_fan4_head_s2024/`; epochs run / kept: KSJC 77/62, KSTL 120/116, KSMF 115/100, KMSY 115/100), the same two
+readouts at the 60 s anchor (`step5b_<ICAO>_s2024_{top1_lockstep,time0}_a60s/`), paired flight by
+flight against the seed-1337 head (`step5b_pair_<ICAO>_s2024{,_time0}_vs_s1337_a60s/`; the ARM is
+seed 2024, so a positive Δ is seed 2024 worse). One detached chain, 39 min.
+
+| airport (vectored n) | vectored ADE s1337 / s2024 | paired Δ p50 (s2024 lower on) | established s1337 / s2024 | with the truth's time: s1337 / s2024 / Δ p50 | straight-in s1337 / s2024 |
+|---|---|---|---|---|---|
+| KSJC (207) | 3145 / 2906 | +30 m (43 %) | 80.7 / 70.5 % | 2909 / 2700 / +25 (42 %) | 854 / 865 |
+| KSTL (486) | 2838 / 2780 | +22 m (46 %) | 92.0 / 93.4 % | 2213 / 2191 / +16 (47 %) | 956 / 851 |
+| KSMF (395) | 2758 / 4043 | **+358 m (32 %)** | 56.2 / 53.7 % | 3006 / 4381 / +131 (35 %) | 881 / 893 |
+| KMSY (282) | 3768 / 4044 | **+215 m (40 %)** | 67.4 / 56.0 % | 4238 / 4480 / +153 (43 %) | 819 / 820 |
+| KRDU (601; §12.8, for the line) | 3087 / 2837 | ~250 m of mean | 94.2 / 95.2 % | — | 749 / 743 |
+
+**Read.** (1) KSJC and KSTL are within the line KRDU set: paired medians of +22 / +30 m, means
+moving ≤ 240 m, straight-in and the time closure unchanged. KSJC's mean falls while its median
+rises — fewer far outliers (vectored FDE mean 2964 → 2416) but established 80.7 → 70.5 %, i.e.
+the two seeds trade which flights they lose. (2) KSMF's second seed is a different head:
+vectored ADE +1.3 km of mean and +358 m paired, chamfer 1230 → 1871, and the rolled cap on
+2.8 → 19.0 % of vectored flights — the head names fixes past the leg cap, the failure §12.6's
+DAgger round showed; KMSY +215 m paired, established 67 → 56 %. These are the two ~2.4k-flight
+cohorts (KSMF 2676, KMSY 2375 train flights): the K = 4 head is seed-fragile on a small cohort.
+(3) Consequence for the decision above: the own-vs-pooled margins on KSMF (+79 m paired) and
+KMSY (+217) are INSIDE the seed line measured here (358 / 215), so those two rows are
+undecided — the pooled head's own vectored ADE there (3245 / 4159) lies between the two seeds.
+KSTL's +209 against a line of 22, KSJC's tie, and KRDU's +227 / +591 stand. (4) The time
+closure is seed-independent: with the truth's time, straight-in dt MAE 3.1–8.2 s on every
+airport under both seeds, fully flyable 100 %, the straight-in ADE 322–391 m.
+
+**Decision addendum.** Per-airport heads stay the delivery on KRDU, KSJC and KSTL. On KSMF and
+KMSY the delivery is the seed-1337 head as measured, its margin over the pooled head read as
+inside the seed line, and the question is listed rather than settled: a third seed on those two
+cohorts, or the pooled head fine-tuned per airport (the cheaper form of "more data for a small
+airport"). A single-seed per-airport claim on a ~2.4k-flight cohort is not evidence from here on.

@@ -4,6 +4,23 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-12 — ts_transformer: plan-and-guidance step 5b, the two-seed check — KSJC/KSTL within the line, KSMF/KMSY seed-fragile
+
+Design §12.11's last block; measurement only (no code). The four per-airport K = 4 heads
+re-trained at seed 2024 (`step5b_<ICAO>_fan4_head_s2024`), read at the 60 s anchor unassigned and
+with the truth's time, paired flight by flight against the seed-1337 heads
+(`step5b_pair_<ICAO>_s2024{,_time0}_vs_s1337_a60s`). Vectored ADE s1337 → s2024: KSJC 3145 → 2906
+(paired +30 m at the median), KSTL 2838 → 2780 (+22), KSMF 2758 → 4043 (+358; the rolled cap
+2.8 → 19 % of vectored flights), KMSY 3768 → 4044 (+215; established 67 → 56 %). Straight-in and
+the time closure unchanged under both seeds (dt MAE 3.1–8.2 s with the time, fully flyable 100 %).
+So the step-5b own-vs-pooled margins on KSMF (+79) and KMSY (+217) are inside those two cohorts'
+seed line and those rows are undecided; KRDU, KSJC and KSTL stand. Delivery on KSMF/KMSY stays the
+seed-1337 head as measured; a third seed or a per-airport fine-tune of the pooled head is listed.
+Lesson recorded in the package `CLAUDE.md`: a single-seed per-airport claim on a ~2.4k-flight
+cohort is not evidence. The five seed-1337 heads' validation predictions were published to the
+frontend picker the same evening (`experiment_step3g_fan4_head_*_val`,
+`experiment_step5b_<icao>_fan4_head_*_val`; the experiment index rebuilt, 76 → 97 entries).
+
 ### 2026-09-12 — ts_transformer: plan-and-guidance step 5b — per-airport K = 4 heads beat the pooled head on four of five airports
 
 Design §12.11; measurement only (no code). KSJC, KSTL, KSMF and KMSY each got a K = 4 head on
