@@ -4,6 +4,37 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-14 — ts_transformer: runway intent R3 — the multi-runway arrival scheduler under the FAA minima, flown; separation rules sourced from JO 7110.65BB
+
+**Ask.** The user: "do it; first write plan then implement" (plan §17 of
+`4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md`), then "按计划做" — and asked where the
+plan's "3 NM ≈ 80 s" came from, wanting the most authoritative separation constraint from the documents, saved
+and indexed for the multi-aircraft work.
+
+**Sources.** `docs/literature/arrival_separation/` (new): FAA JO 7110.65BB Change 3 (in force 2026-07-09) quoted
+with paragraph numbers — 3 NM terminal radar (5-5-4 a/b), 2.5 NM only by authorization (5-5-4 j), CWT wake
+TBL 5-5-2 at the threshold (5-5-4 h; CWT merged into 7110.65BB by Change 2, JO 7110.126B cancelled), parallels
+under 2,500 ft as one runway, dependent 1.0 / 1.5 / 2 NM diagonals (5-9-6), independent 3,600 ft with FMA + PRM
+under 4,300 ft (5-9-7, 5-9-8), JO 7110.308E's CSPR list (STL yes, SJC no), intersecting runways (3-10-4); type ->
+CWT from JO 7360.1K Appendix A (parsed CSV, 2,653 rows); ICAO / RECAT-EU beside them; what could not be
+verified. `docs/literature/README.md` indexes every topic folder. The 80 s was an estimate (3 NM at ~70 m/s);
+it is now 3 NM at each airport's measured approach speed (KRDU 69.8 m/s -> 79.6 s).
+
+**Built.** `inference/runway_schedule.py` (the scheduler and the one definition of the rules; minima applied on
+the APPROACH CLOCK — parallel thresholds are staggered, KRDU 23L/23R 0.67 NM, KSTL 11 vs 12L 1.99 NM),
+`experiments/runway_intent_r3.py` (R2b's flights scheduled, flown with the time closure, checked) and its
+readout. Reviewed (opus): threshold stagger ignored, an unmeasured gate read as passed, gate 2 blind to the
+close pairs, the FCFS key read from runways never tried — fixed before the run. The first formal run compared
+flown and unassigned forecasts by `fde_m`, the displacement at the TRUTH's landing time, which scores a late
+assigned arrival as distance (31 -> 132 m at KSJC for a clock, not a path); re-run on the end point against the
+true threshold (18-21 m flown vs 18-26 unassigned), the first kept as `superseded_8bbe25b/`.
+
+**Result.** Gates: KSTL, KMSY pass all four; KRDU / KSJC / KSMF miss gate 3's busy clause by 0.3-1.2 s (a tie).
+The schedule barely binds (2.4-7.3 % of flights delayed), keeps the runway intent, and does not make the moved
+flights' times more accurate — ETA error is the size of the minimum. Flown, 71-88 % of undelayed flights land
+within 10 s of their slot, delayed ones 37-81 %; the time is lost between asks. R4 is not triggered. Artifacts
+`4dTrajectory/outputs/POOLED/experiments/runway_intent_r3_20260914/`.
+
 ### 2026-09-13 — ts_transformer: runway intent R2 — the runway head's pick flown end to end; the cost of not knowing the runway
 
 **Ask.** The user: "go on R2". Plan §16 of `4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md`

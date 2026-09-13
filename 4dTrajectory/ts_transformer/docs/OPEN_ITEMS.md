@@ -6,6 +6,27 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
+## Runway intent — R3 MEASURED 2026-09-14 (`docs/2026-09-13_runway_intent_plan.zh.md` §17)
+
+**R3** (multi-runway joint assignment and the arrival scheduler, `inference/runway_schedule.py` +
+`experiments/runway_intent_r3.py`): R2b's flights (every day_a validation-day flight the retrained expert
+flew, 5195 over five airports) scheduled FCFS by ETA over the runways the head allows, `log p - lambda *
+delay`, under the FAA IFR minima (JO 7110.65BB Change 3, quoted in repo `docs/literature/arrival_separation/`),
+then FLOWN with the scheduled time as the v5.4 assignment. **Pre-registered gates: KSTL and KMSY pass all
+four; KRDU, KSJC and KSMF miss only gate 3's busy-hour clause by 0.3-1.2 s of median timing error — a tie.**
+Plans have 0 violations and keep the head's runway (agreement unchanged +/-0.2 points); the unscheduled
+forecasts have 23-90 conflicts, resolved by delaying 2.4-7.3 % of flights, and on the flights the schedule
+moves its time is NOT nearer the truth (KRDU 50 vs 30 s, KSMF 52 vs 32; nearer on 46-66 %) — the ETA error
+(median 11-21 s) is the size of the minimum, so deterministic FCFS treats ETA noise as conflict. The
+truth keeps these minima on 99.3-100 % of consecutive roster pairs. Flown: 71-88 % of undelayed and
+37-81 % of delayed flights land within 10 s of their slot; the early ones lose the time BETWEEN asks (X
+~0 at the first ask, +22-29 s at the last), not for want of distance. Unlanded 3-34 %, 53-92 % of them the
+expert failing the flight unassigned too (KMSY 02/20). **R4 is not triggered** (busy runway agreement at
+most 2.2 points under quiet, busy timing no worse). Next (plan §17.8, the user's call): uncertainty-aware
+scheduling on the quantile duration heads; the closure's time delivery between asks (plan-and-guidance
+`guidance/timing.close_time`); publication needs a held-out-days category in the publisher (R3's flights
+are in no split of the checkpoint that flew them). Artifacts `outputs/POOLED/experiments/runway_intent_r3_20260914/`.
+
 ## Runway intent — R2 MEASURED 2026-09-13 (`docs/2026-09-13_runway_intent_plan.zh.md` §16)
 
 **R2** (the runway head's pick flown end to end by the plan experts — R0b's per-candidate mechanism,
@@ -22,8 +43,8 @@ end to end at four of five airports (+20-51 m vs +32-98 m for locking at the fir
 **R2d**, the runway fan: 28 picker variants of the per-airport experts (each candidate's forecast and the
 head's top pick; `plan_guidance_20260910` group, intents under `variants`), `check-publication` clean on
 disk — **the running dev servers must be restarted before they load** (they booted before the files
-existed and answer them with the SPA fallback). Colouring the fan by p_r is a frontend feature, not done. **Next: R3** (multi-runway joint assignment in the step 6
-scheduler). Artifacts `outputs/POOLED/experiments/runway_intent_r2{,b,c,d}_20260913/`.
+existed and answer them with the SPA fallback). Colouring the fan by p_r is a frontend feature, not done. R3 (the
+multi-runway scheduler) is above. Artifacts `outputs/POOLED/experiments/runway_intent_r2{,b,c,d}_20260913/`.
 
 ### R1.1 / R1.1b (2026-09-13, `docs/2026-09-13_runway_intent_plan.zh.md` §14–15)
 
