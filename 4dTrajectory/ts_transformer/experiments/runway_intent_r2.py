@@ -50,6 +50,7 @@ from ts_transformer.experiments.runway_hypotheses import (
     hypothesis_row,
     identity,
     print_summary,
+    reproject,
     skeleton_error,
     summarise,
 )
@@ -67,10 +68,14 @@ from ts_transformer.experiments.runway_intent_r11 import (
     head_table,
     prior_share,
 )
+from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import default_anchor, forecast_approaches
 from ts_transformer.training.train import load_checkpoint
 
 SCHEMA = "ts-runway-intent-r2-v1"
+#: The block `--write-records` puts in each record directory's summary.json (the runway fan, R2d).
+RECORDS_SCHEMA = "ts-runway-hypothesis-records-v1"
+TOP1 = "top1"
 PARTS = ("day_a", "day_b")
 HEAD = "r11_lift"
 SELECTORS = ("assigned", HEAD, "r1", *RULES, "oracle_fde")
@@ -172,6 +177,49 @@ def _expected(prob: dict[str, float], rows: dict[str, dict[str, Any]]) -> dict[s
     return {metric: float(sum(prob[r] * rows[r][metric] for r in rows) / total) for metric in ("fde_m", "ade_m")}
 
 
+def write_hypothesis_records(
+    root: Path, per_candidate: dict[str, dict[str, Any]], scored: dict[str, dict[str, Any]],
+    flights_out: list[dict[str, Any]], *, config: Any, checkpoint: str, split_flights: int, points: int,
+) -> dict[str, str]:
+    """The runway fan as prediction records (plan §16, R2d): one directory per candidate runway with
+    every scored flight's forecast under it, and one (``top1``) with each flight's forecast under the
+    head's top pick. A record is built on the flight's OWN runway's series with the hypothesis reprojected
+    into it — the observed reference is the whole track from the anchor, and its metrics are the ones R2
+    scores (`hypothesis_row`) — and carries ``source.runwayIntent``: the hypothesis, the head's probability
+    for it, whether it is the head's top pick, and the known runway. The flights are the expert's
+    validation split restricted to a partition's validation days, a SUBSET of the split, and the summary
+    block says how many of how many."""
+    by_key = {f["flight_key"]: f for f in flights_out}
+    written: dict[str, str] = {}
+    for hypothesis in [*per_candidate, TOP1]:
+        records, metrics = [], []
+        for index, key in enumerate(sorted(by_key)):
+            row, item = by_key[key], scored[key]
+            runway = row["picks"][HEAD] if hypothesis == TOP1 else hypothesis
+            ident = row["identity"]
+            if ident not in per_candidate[runway]:
+                continue
+            series, forecast = per_candidate[runway][ident]
+            shown = reproject(forecast, series, item["truth"])
+            record = build_prediction_record(item["truth"], shown, index=index, model_name=config.model,
+                                             horizon_mode=config.horizon_mode, split="val")
+            record.source["runwayIntent"] = {
+                "hypothesis": runway, "probability": row["probabilities"][HEAD][runway], "head": HEAD,
+                "top1": runway == row["picks"][HEAD], "known": row["assigned"], "partition": row["partition"],
+            }
+            records.append(record)
+            metrics.append(observed_series_metrics(item["truth"], shown, points=points))
+        directory = root / hypothesis
+        write_batch(records, output_dir=directory, config_dict=config.to_dict(), flight_metrics=metrics,
+                    checkpoint=checkpoint, split="val", extra_summary={"runway_hypothesis": {
+                        "schema": RECORDS_SCHEMA, "hypothesis": hypothesis, "head": HEAD,
+                        "roster": "the expert's validation split on a day partition's validation days",
+                        "records": len(records), "split_flights": split_flights,
+                    }})
+        written[hypothesis] = str(directory)
+    return written
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     add_sample_arguments(parser)
@@ -182,7 +230,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="expert-val (R2a): the expert's validation split on a partition's validation days; "
                              "day-val (R2b): every flight on day_a's validation days, for an expert trained "
                              "on day_a's training days only")
+    parser.add_argument("--write-records", default=None, metavar="DIR",
+                        help="also write the runway fan as prediction records: DIR/<runway>/ per candidate and "
+                             "DIR/top1/ (R2d); expert-val roster only — its flights are in the checkpoint's val split")
     args = parser.parse_args(argv)
+    if args.write_records and args.roster != "expert-val":
+        parser.error("--write-records needs --roster expert-val: its records are a subset of the checkpoint's val split")
 
     s = build_samples(args)
     airport = s.airport
@@ -266,6 +319,9 @@ def main(argv: list[str] | None = None) -> int:
                 "context_fallback": {rule: pick.fallback for rule, pick in rule_picks[i].items()},
             })
 
+    records = {} if not args.write_records else write_hypothesis_records(
+        Path(args.write_records), per_candidate, scored, out_flights, config=config, checkpoint=str(args.checkpoint),
+        split_flights=len(keys_of("val")), points=points)
     summary = summarise(out_flights, list(SELECTORS))
     print_summary(summary, list(SELECTORS))
     out = Path(args.output_dir)
@@ -290,6 +346,7 @@ def main(argv: list[str] | None = None) -> int:
             "unscored": len(flights) - len(out_flights),
         },
         "summary": summary,
+        "records": records,
         "flights": out_flights,
     }, indent=1), encoding="utf-8")
     print(f"\nwrote {out / 'runway_intent_r2.json'}: {len(out_flights)} flights")

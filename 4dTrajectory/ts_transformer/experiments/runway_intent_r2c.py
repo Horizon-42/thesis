@@ -9,8 +9,9 @@ grid); it is never a feature. Part 2 (whether a flip costs trajectory error, and
 end-to-end effect) needs the experts re-anchored at each ask and follows R2b.
 
 Lock rules read here, each the runway a forecast made at an ask would fly toward:
-``never`` (the current top pick), ``first`` (the first ask's pick, kept), ``p<τ>`` (the current pick
-until the first ask whose top probability reaches τ, then kept).
+``never`` (the current top pick), ``first`` (the first ask's pick, kept — here the slice entry; in
+part 2 the expert's own anchor, where its asks start), ``p<τ>`` (the current pick until the first ask
+whose top probability reaches τ, then kept).
 
     python run_ts.py runway_intent_r2c --airport KRDU \\
         --output-dir 4dTrajectory/outputs/POOLED/experiments/runway_intent_r2c_20260913/KRDU
@@ -100,7 +101,6 @@ def main(argv: list[str] | None = None) -> int:
     p_lift, p_r1, rule_picks = query(s, part, queries, lift, r1)
     index_of = {r: i for i, r in enumerate(s.candidates)}
     truth_of = {key: index_of[s.usable[key]["runway"]] for key in roster}
-    group_of, multi = s.group_of, s.multi
 
     per_flight: dict[str, dict[str, Any]] = {}
     for i, (key, t, remaining) in enumerate(owner):
@@ -120,20 +120,14 @@ def main(argv: list[str] | None = None) -> int:
     curve: dict[str, dict[str, Any]] = {}
     for key, cell in per_flight.items():
         truth = truth_of[key]
-        sided = multi[truth]
         for j, remaining in enumerate(cell["remaining_m"]):
-            b = curve.setdefault(bin_of(remaining), {"asks": 0, "flights": set(), "side_asks": 0,
+            b = curve.setdefault(bin_of(remaining), {"asks": 0, "flights": set(),
                                                      **{f"{h}_exact": 0 for h in (HEAD, "r1", "B1", "B3")},
-                                                     **{f"{h}_side": 0 for h in (HEAD, "r1", "B1", "B3")},
                                                      f"{HEAD}_nll": 0.0, "r1_nll": 0.0})
             b["asks"] += 1
             b["flights"].add(key)
             for h in (HEAD, "r1", "B1", "B3"):
-                pick = cell[h][j]
-                b[f"{h}_exact"] += pick == truth
-                if sided and group_of[pick] == group_of[truth]:
-                    b[f"{h}_side"] += pick == truth
-            b["side_asks"] += bool(sided and group_of[cell[HEAD][j]] == group_of[truth])
+                b[f"{h}_exact"] += cell[h][j] == truth
             b[f"{HEAD}_nll"] -= float(np.log(max(cell["p_true"][j], EPS)))
             b["r1_nll"] -= float(np.log(max(cell["p_true_r1"][j], EPS)))
     order = [bin_of(km * 1000.0 + 1.0) for km in (1e9,) + BINS_KM[:-1]] + [bin_of(0.0)]

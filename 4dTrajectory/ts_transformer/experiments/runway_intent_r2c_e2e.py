@@ -3,10 +3,12 @@
 Plan `docs/2026-09-13_runway_intent_plan.zh.md` §3.4 / §16. The heads are asked at the expert's
 anchor and every `ASK_S` after it (R2's query), on R2a's roster (flights neither model trained on,
 each read by its partition's head); every lock rule of `runway_intent_r2c.lock_picks` names a runway
-at every ask. Two rules differ only on a flight whose top pick flips, and there the expert is
-forecast from each ask's anchor under every runway a rule holds, plus the known runway: the paired
-error between rules (and against the known runway) on the asks where they differ is the whole
-end-to-end difference — on every other ask they fly the same forecast.
+at every ask (``first`` = the pick at the expert's anchor). A forecast is fixed by the flight, the
+anchor and the runway, so the expert is flown only where some rule holds a runway other than the
+known one — under every runway a rule holds there, and the known runway: an ask where every rule
+holds the known runway costs every rule nothing. Two readings, named apart: each rule's cost against
+the known runway averaged over ALL asks (zeros included — an ask where every rule agrees on a wrong
+runway costs them all alike), and the difference BETWEEN rules on the asks where they differ.
 
     python run_ts.py runway_intent_r2c_e2e --airport KRDU --checkpoint <plan checkpoint.pt> \\
         --output-dir 4dTrajectory/outputs/POOLED/experiments/runway_intent_r2c_20260913/KRDU_e2e
@@ -107,16 +109,17 @@ def main(argv: list[str] | None = None) -> int:
             picks[key] = lock_picks(tops, peaks[key])
             row += n
 
-    # forecasts only where two rules differ, grouped by anchor (one forecast batch per anchor)
+    # forecasts wherever some rule holds a runway other than the known one, grouped by anchor
     rules = list(next(iter(picks.values())).keys()) if picks else []
     needed: dict[int, set[tuple[str, str]]] = defaultdict(set)
-    differing: list[tuple[str, int]] = []
+    every_ask: list[tuple[str, int]] = []
     for key, by_rule in picks.items():
+        known = s.usable[key]["runway"]
         for j, a in enumerate(plan[key]):
+            every_ask.append((key, j))
             chosen = {s.candidates[by_rule[rule][j]] for rule in rules}
-            if len(chosen) > 1:
-                differing.append((key, j))
-                for runway in chosen | {s.usable[key]["runway"]}:
+            if chosen != {known}:
+                for runway in chosen | {known}:
                     needed[a].add((key, runway))
     errors: dict[tuple[str, int, str], dict[str, float]] = {}
     for a, pairs in sorted(needed.items()):
@@ -132,26 +135,47 @@ def main(argv: list[str] | None = None) -> int:
             truth = series[s.usable[key]["runway"]][identity(s.usable[key])]
             errors[(key, a, runway)] = hypothesis_row(forecast, x, truth, points=config.validation_common_grid_points)
 
-    # the paired reading on the differing asks
-    table: dict[str, list[float]] = {rule: [] for rule in rules} | {"known": []}
-    for key, j in differing:
-        a = plan[key][j]
+    def fde(key: str, j: int, runway: str) -> float | None:
+        return errors.get((key, plan[key][j], runway), {}).get("fde_m")
+
+    # an ask is scored once every forecast it needs exists, for every rule alike
+    delta: dict[str, list[float]] = {rule: [] for rule in rules}
+    right: dict[str, list[bool]] = {rule: [] for rule in rules}
+    between: dict[str, list[float]] = {rule: [] for rule in rules} | {"known": []}
+    differing: list[tuple[str, int]] = []
+    dropped = needing = 0
+    for key, j in every_ask:
         known = s.usable[key]["runway"]
-        if (key, a, known) not in errors or not all((key, a, s.candidates[picks[key][r][j]]) in errors for r in rules):
+        held = {rule: s.candidates[picks[key][rule][j]] for rule in rules}
+        if set(held.values()) == {known}:
+            for rule in rules:
+                delta[rule].append(0.0)
+                right[rule].append(True)
             continue
-        table["known"].append(errors[(key, a, known)]["fde_m"])
+        needing += 1
+        base = fde(key, j, known)
+        values = {rule: fde(key, j, runway) for rule, runway in held.items()}
+        if base is None or any(v is None for v in values.values()):
+            dropped += 1
+            continue
         for rule in rules:
-            table[rule].append(errors[(key, a, s.candidates[picks[key][rule][j]])]["fde_m"])
-    n = len(table["known"])
+            delta[rule].append(values[rule] - base)
+            right[rule].append(held[rule] == known)
+        if len(set(held.values())) > 1:
+            differing.append((key, j))
+            between["known"].append(base)
+            for rule in rules:
+                between[rule].append(values[rule])
     summary = {
-        "flights": len(plan), "asks": int(sum(len(v) for v in plan.values())),
-        "flights_where_rules_differ": len({k for k, _ in differing}), "asks_where_rules_differ": n,
-        "fde_mean_on_those_asks": {name: float(np.mean(v)) if v else None for name, v in table.items()},
-        "fde_delta_vs_known_mean": {rule: float(np.mean(np.array(table[rule]) - np.array(table["known"]))) if n else None
-                                    for rule in rules},
-        "runway_accuracy_on_those_asks": {
-            rule: float(np.mean([picks[k][rule][j] == index_of[s.usable[k]["runway"]] for k, j in differing])) if differing else None
+        "flights": len(plan), "asks": len(every_ask), "asks_needing_a_forecast": needing,
+        "asks_dropped": dropped, "asks_scored": len(every_ask) - dropped,
+        "flights_where_rules_differ": len({k for k, _ in differing}), "asks_where_rules_differ": len(differing),
+        "end_to_end_over_all_asks": {
+            rule: {"fde_delta_vs_known_mean": float(np.mean(delta[rule])) if delta[rule] else None,
+                   "runway_accuracy": float(np.mean(right[rule])) if right[rule] else None}
             for rule in rules},
+        "between_rules_on_differing_asks": {
+            "fde_mean": {name: float(np.mean(v)) if v else None for name, v in between.items()}},
     }
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -160,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
         "ask_every_s": ASK_S, "min_future_s": MIN_FUTURE_S, "rules": rules, "summary": summary,
         "differing": [{"flight_key": k, "ask": j, "anchor": plan[k][j],
                        "runways": {r: s.candidates[picks[k][r][j]] for r in rules}, "known": s.usable[k]["runway"],
-                       "fde_m": {r: errors.get((k, plan[k][j], s.candidates[picks[k][r][j]]), {}).get("fde_m") for r in rules}}
+                       "fde_m": {r: fde(k, j, s.candidates[picks[k][r][j]]) for r in rules},
+                       "known_fde_m": fde(k, j, s.usable[k]["runway"])}
                       for k, j in differing],
     }, indent=1), encoding="utf-8")
     print(json.dumps(summary, indent=1))

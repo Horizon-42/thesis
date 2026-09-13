@@ -59,13 +59,20 @@ def main(argv: list[str] | None = None) -> int:
         lines.append(f"| {a} | " + " | ".join(
             f"{pct(doc['locks'][r]['accuracy_over_asks'])} ({doc['locks'][r]['flips_per_flight']:.2f})" for r in rules) + " |")
 
-    lines += ["", "### Lock rules end to end — on the asks where two rules differ: the expert's FDE change against the known runway (m, mean) and runway accuracy (%)", "",
-              "| airport | flights / asks where rules differ | " + " | ".join(rules) + " |", "|---|---|" + "---|" * len(rules)]
+    lines += ["", "### Lock rules end to end — each rule's FDE change against the known runway, over ALL asks (m, mean; zeros where it holds the known runway) and its runway accuracy (%)", "",
+              "| airport | asks scored (needing a forecast) | " + " | ".join(rules) + " |", "|---|---|" + "---|" * len(rules)]
     for a, doc in e2e.items():
         s = doc["summary"]
-        cells = [f"{s['fde_delta_vs_known_mean'][r]:+.0f} ({pct(s['runway_accuracy_on_those_asks'][r])})"
-                 if s["fde_delta_vs_known_mean"].get(r) is not None else "—" for r in rules]
-        lines.append(f"| {a} | {s['flights_where_rules_differ']} / {s['asks_where_rules_differ']} of {s['asks']} | " + " | ".join(cells) + " |")
+        cells = [f"{s['end_to_end_over_all_asks'][r]['fde_delta_vs_known_mean']:+.0f} "
+                 f"({pct(s['end_to_end_over_all_asks'][r]['runway_accuracy'])})" for r in rules]
+        lines.append(f"| {a} | {s['asks_scored']} of {s['asks']} ({s['asks_needing_a_forecast']}) | " + " | ".join(cells) + " |")
+    lines += ["", "### Between the rules — on the asks where they differ: the expert's FDE (m, mean), the known runway beside them", "",
+              "| airport | flights / asks where rules differ | known | " + " | ".join(rules) + " |", "|---|---|---:|" + "---:|" * len(rules)]
+    for a, doc in e2e.items():
+        s = doc["summary"]
+        means = s["between_rules_on_differing_asks"]["fde_mean"]
+        lines.append(f"| {a} | {s['flights_where_rules_differ']} / {s['asks_where_rules_differ']} | "
+                     + " | ".join("—" if means.get(n) is None else f"{means[n]:.0f}" for n in ["known", *rules]) + " |")
 
     text = "\n".join(lines)
     (out / "readout.md").write_text(text + "\n", encoding="utf-8")
