@@ -1,4 +1,5 @@
-"""The approach geometry runway-intent R0 and R1 share, and R1's per-anchor feature vector.
+"""The approach geometry runway-intent R0 and R1 share, R1's per-anchor feature vector, and
+R1.1's candidate-symmetric rows built from it (`candidate_rows`).
 
 Plan `docs/2026-09-13_runway_intent_plan.zh.md` §12. CAUSAL by construction: a feature at anchor
 ``i`` reads the flight's waypoints ``[0, i]`` and the airport context strictly before the anchor's
@@ -75,6 +76,16 @@ def ring_anchors(
         if inside is not None and inside > 0:
             out[f"r{radius_km:g}km"] = inside
     return out
+
+
+def minutes_since_each(context: RunwayContext, anchor_time: datetime, candidates: Sequence[str]) -> list[float]:
+    """Minutes since each candidate's last landing before ``anchor_time``, capped at `SINCE_CAP_MIN`
+    (a runway not landed on within the cap reads as the cap)."""
+    since = {r: SINCE_CAP_MIN for r in candidates}
+    for landing in reversed(context.recent(anchor_time, timedelta(minutes=SINCE_CAP_MIN))):
+        if landing.runway in since and since[landing.runway] == SINCE_CAP_MIN:
+            since[landing.runway] = (anchor_time - landing.time).total_seconds() / 60.0
+    return [since[r] for r in candidates]
 
 
 def track_course_at(waypoints: Sequence[Sequence[float]], index: int) -> float:
@@ -228,3 +239,102 @@ def anchor_features(
     row = np.asarray(values, dtype=np.float64)
     assert row.shape == (len(space.names),), (row.shape, len(space.names))
     return row
+
+
+#: R1.1 (plan §14): the columns of one CANDIDATE's row, each read in that runway's own terms, so one
+#: learned rule applies to every runway — "the recent landings went here" is learned once, from all
+#: of them. No column names a runway.
+CANDIDATE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("prior_share", "static prior"),            # the runway's share of the partition's training landings
+    ("share30", "configuration"),
+    ("share60", "configuration"),
+    ("group_share30", "configuration"),         # its direction group's share of the last 30 min
+    ("last", "configuration"),                  # it took the last landing
+    ("min_since", "configuration"),             # minutes since its last landing, capped
+    ("b1", "configuration"),                    # it is B1's pick
+    ("sector_last", "same-sector landing"),
+    ("headwind_kt", "wind"),
+    ("crosswind_kt", "wind"),                   # magnitude
+    ("along_km", "own position & track"),
+    ("cross_km", "own position & track"),
+    ("course_diff_cos", "own position & track"),
+    ("course_diff_sin", "own position & track"),
+    ("d_along_60s_km", "own position & track"),  # the last 60 s of motion in its axes
+    ("d_cross_60s_km", "own position & track"),
+    ("airline_share", "airline"),               # the operator's share of training landings on it
+)
+#: R1's columns every candidate row of a sample carries unchanged. Alone they move every candidate's
+#: score alike, so under the softmax they only act through the per-candidate columns. R1's day-level
+#: columns (the raw wind, the report's age, the time of day) and its one-hot identities (airline,
+#: entry sector) are left out: R1 read the first two as a fingerprint of the usual configuration
+#: (plan §13.3 point 4), and a one-hot identity has no candidate-relative form.
+SHARED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("landings30", "configuration"),
+    ("landings60", "configuration"),
+    ("min_since_last", "configuration"),
+    ("min_since_sector_last", "same-sector landing"),
+    ("metar_missing", "wind"),
+    ("dist_km", "own position & track"),
+    ("groundspeed_mps", "own position & track"),
+    ("alt_m", "own position & track"),
+    ("vrate_mps", "own position & track"),
+    ("t_since_entry_s", "own position & track"),
+)
+CANDIDATE_ROW_NAMES: tuple[str, ...] = tuple(name for name, _ in CANDIDATE_COLUMNS + SHARED_COLUMNS)
+CANDIDATE_ROW_GROUPS: dict[str, str] = dict(CANDIDATE_COLUMNS + SHARED_COLUMNS)
+
+
+def candidate_rows(
+    space: FeatureSpace,
+    flat: np.ndarray,
+    *,
+    group_of: np.ndarray,
+    prior_share: np.ndarray,
+    b1_pick: np.ndarray,
+    minutes_since: np.ndarray,
+    airline_share: np.ndarray,
+) -> np.ndarray:
+    """R1.1's table ``[n, C, len(CANDIDATE_ROW_NAMES)]``: for each of the ``n`` samples, one row per
+    candidate runway. ``flat`` is R1's matrix (columns ``space.names``) and supplies everything it
+    already holds, re-indexed per candidate; the rest is passed in — ``prior_share`` ``[C]``,
+    ``b1_pick`` ``[n]`` (candidate index), ``minutes_since`` / ``airline_share`` ``[n, C]``;
+    ``group_of`` ``[C]`` is each candidate's direction group."""
+    column = {name: i for i, name in enumerate(space.names)}
+    n, count = len(flat), len(space.candidates)
+
+    def per(pattern: str) -> np.ndarray:
+        return flat[:, [column[pattern.format(r=r)] for r in space.candidates]]
+
+    def shared(name: str) -> np.ndarray:
+        return np.broadcast_to(flat[:, [column[name]]], (n, count))
+
+    share30 = per("share30_{r}")
+    group_share30 = np.stack([share30[:, group_of == group_of[c]].sum(axis=1) for c in range(count)], axis=1)
+    course = np.radians([float(space.targets[r]["course_deg"]) for r in space.candidates])
+    ue, un = np.sin(course), np.cos(course)
+    from_east, from_north = flat[:, [column["wind_from_east_kt"]]], flat[:, [column["wind_from_north_kt"]]]
+    d_east, d_north = flat[:, [column["d_east_60s_km"]]], flat[:, [column["d_north_60s_km"]]]
+    values = {
+        "prior_share": np.broadcast_to(np.asarray(prior_share, dtype=np.float64), (n, count)),
+        "share30": share30,
+        "share60": per("share60_{r}"),
+        "group_share30": group_share30,
+        "last": per("last_{r}"),
+        "min_since": minutes_since,
+        "b1": (np.asarray(b1_pick)[:, None] == np.arange(count)[None, :]).astype(np.float64),
+        "sector_last": per("sector_last_{r}"),
+        "headwind_kt": per("headwind_{r}"),
+        # the wind vector across each course (R1's headwind is the component along it)
+        "crosswind_kt": np.abs(from_east * un - from_north * ue),
+        "along_km": per("along_{r}_km"),
+        "cross_km": per("cross_{r}_km"),
+        "course_diff_cos": per("course_diff_cos_{r}"),
+        "course_diff_sin": per("course_diff_sin_{r}"),
+        # the same axes `anchor_features` reads: along = distance to go, cross = right of the course
+        "d_along_60s_km": -(d_east * ue + d_north * un),
+        "d_cross_60s_km": d_east * un - d_north * ue,
+        "airline_share": airline_share,
+    }
+    columns = [values[name] for name, _ in CANDIDATE_COLUMNS] + [shared(name) for name, _ in SHARED_COLUMNS]
+    return np.stack(columns, axis=2)
+

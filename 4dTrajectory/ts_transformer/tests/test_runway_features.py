@@ -8,7 +8,14 @@ import numpy as np
 
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 from ts_transformer.data.runway_context import ContextLanding, RunwayContext, WindReport
-from ts_transformer.data.runway_features import anchor_features, feature_space, ring_anchors
+from ts_transformer.data.runway_features import (
+    CANDIDATE_ROW_NAMES,
+    anchor_features,
+    candidate_rows,
+    feature_space,
+    minutes_since_each,
+    ring_anchors,
+)
 
 T0 = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 THRESHOLD = {"lat": 35.87, "lon": -78.79, "course_deg": 45.0}
@@ -100,3 +107,38 @@ def test_ring_anchors_do_not_depend_on_the_landing_runway():
     assert distance((lon, lat)) <= 10_000.0 < distance(before)
     # a ring the track never enters (it ends at 0.5 km from the reference) has no anchor
     assert "r0.1km" not in got
+
+
+def _candidate_table(flight: dict, index: int = 10):
+    space = _space(flight)
+    flat = anchor_features(space, _context(), flight, index, sector=5, anchor_time=T0)[None, :]
+    table = candidate_rows(
+        space, flat, group_of=np.array([0, 1]), prior_share=np.array([0.75, 0.25]),
+        b1_pick=np.array([0]), minutes_since=np.array([[5.0, 180.0]]), airline_share=np.array([[0.9, 0.1]]),
+    )
+    return space, flat[0], table[0]
+
+
+def test_a_candidate_row_reads_r1s_own_column_for_that_runway():
+    space, flat, table = _candidate_table(_flight())
+    named = dict(zip(space.names, flat))
+    rows = [dict(zip(CANDIDATE_ROW_NAMES, row)) for row in table]
+    for row, runway in zip(rows, space.candidates):
+        assert row["share30"] == named[f"share30_{runway}"]
+        assert row["headwind_kt"] == named[f"headwind_{runway}"]
+        assert row["along_km"] == named[f"along_{runway}_km"] and row["cross_km"] == named[f"cross_{runway}_km"]
+        assert row["landings30"] == named["landings30"]              # a shared column, the same on every row
+    assert [r["b1"] for r in rows] == [1.0, 0.0] and [r["prior_share"] for r in rows] == [0.75, 0.25]
+    assert [r["min_since"] for r in rows] == [5.0, 180.0] and [r["airline_share"] for r in rows] == [0.9, 0.1]
+    # 50 deg at 8 kt on a 45 deg course: nearly all headwind, a little crosswind; the reciprocal's the reverse
+    assert math.isclose(rows[0]["crosswind_kt"], 8.0 * abs(math.sin(math.radians(5.0))), rel_tol=1e-9)
+    assert math.isclose(rows[1]["crosswind_kt"], rows[0]["crosswind_kt"], rel_tol=1e-9)
+    # inbound on 05L's course: distance to go falls, the right-hand offset closes (1 km -> 0 at sample 20)
+    assert rows[0]["d_along_60s_km"] < 0 < rows[1]["d_along_60s_km"]
+    assert "wind_from_east_kt" not in CANDIDATE_ROW_NAMES and "hour_sin" not in CANDIDATE_ROW_NAMES
+
+
+def test_minutes_since_each_reads_the_last_landing_on_each_runway_before_the_anchor():
+    assert minutes_since_each(_context(), T0, ["05L", "23R"]) == [5.0, 180.0]
+    assert minutes_since_each(_context(), T0 - timedelta(minutes=10), ["05L", "23R"]) == [180.0, 180.0]
+

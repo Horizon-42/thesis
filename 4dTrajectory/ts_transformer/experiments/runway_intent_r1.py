@@ -38,6 +38,7 @@ import hashlib
 import json
 import math
 from collections import Counter
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,8 @@ from ts_transformer.config import TSConfig  # noqa: E402
 from ts_transformer.data.runway_context import (  # noqa: E402
     OPERATIONAL_DAY_SHIFT,
     RULES,
+    AirportContext,
+    RunwayContext,
     airport_reference,
     build_airport_context,
     operational_day,
@@ -58,8 +61,11 @@ from ts_transformer.data.runway_context import (  # noqa: E402
 )
 from ts_transformer.data.runway_features import (  # noqa: E402
     ENTRY,
+    FeatureSpace,
+    airline,
     anchor_features,
     feature_space,
+    minutes_since_each,
     ring_anchors,
     track_course_at,
 )
@@ -220,17 +226,46 @@ def grouped_permutation(
     return out
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+@dataclass(frozen=True)
+class RunwaySamples:
+    """One airport's sample table: every usable flight x its ring anchors, with R1's causal feature
+    vector, the landing runway, each split's fold and every partition's rule picks — the one
+    construction R1 and R1.1 (`runway_intent_r11`) read, so their numbers are on the same samples."""
+
+    airport: str
+    config: TSConfig
+    radii_km: list[float]
+    candidates: list[str]
+    space: FeatureSpace
+    pool: AirportContext
+    usable: dict[str, dict[str, Any]]
+    contexts: dict[str, RunwayContext]       # partition -> the rules under ITS training majority
+    group_of: np.ndarray                     # [C] each candidate's direction group
+    multi: np.ndarray                        # [C] the candidate's group has more than one runway
+    minority_names: dict[str, list[str]]
+    minority: dict[str, np.ndarray]
+    X: np.ndarray                            # [n, F] R1's features, columns `space.names`
+    y: np.ndarray                            # [n] the landing runway, a candidate index
+    anchors: np.ndarray                      # [n] anchor name
+    folds: dict[str, np.ndarray]             # partition -> [n] "train" / "val"
+    picks: dict[str, dict[str, np.ndarray]]  # partition -> rule -> [n] candidate index
+    b1_prob: np.ndarray                      # [n, C] B1 as a probability (add-one window counts)
+    keys: np.ndarray                         # [n] flight key
+    days: np.ndarray                         # [n] the landing's operating day
+    operators: np.ndarray                    # [n] callsign operator prefix ("" = no callsign)
+    minutes_since: np.ndarray                # [n, C] minutes since each candidate's last landing
+
+
+def add_sample_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--airport", required=True)
-    parser.add_argument("--output-dir", required=True)
     parser.add_argument("--ring-radii-km", default=",".join(f"{r:g}" for r in RING_RADII_KM))
     parser.add_argument("--window-min", type=float, default=30.0)
     parser.add_argument("--sector-window-min", type=float, default=60.0)
     parser.add_argument("--metar-delay-min", type=float, default=10.0)
     parser.add_argument("--calm-kt", type=float, default=3.0)
-    args = parser.parse_args(argv)
 
+
+def build_samples(args: argparse.Namespace) -> RunwaySamples:
     airport = args.airport.upper()
     radii_km = [float(value) for value in args.ring_radii_km.split(",")]
     # The split contract (seed, fractions) is the package's default — the locked outer split.
@@ -289,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
         part: {rule: [] for rule in RULES} for part in contexts
     }
     b1_prob: list[np.ndarray] = []
+    since: list[list[float]] = []
     reference = airport_reference(targets)
     for key, flight in sorted(usable.items()):
         entry = parse_utc(flight["entry_time_utc"])
@@ -310,14 +346,34 @@ def main(argv: list[str] | None = None) -> int:
             counts = Counter(landing.runway for landing in context.recent(t, context.window))
             smoothed = np.array([counts[r] + 1.0 for r in candidates])
             b1_prob.append(smoothed / smoothed.sum())
-    X = np.vstack(rows)
-    y = np.asarray(truth)
-    anchor_arr = np.asarray(anchor_names)
-    fold_arr = {name: np.asarray(values) for name, values in folds.items()}
-    picks_arr = {part: {rule: np.asarray(values) for rule, values in rules.items()}
-                 for part, rules in rule_picks.items()}
-    b1_arr = np.vstack(b1_prob)
-    keys_arr = np.asarray(flight_keys)
+            since.append(minutes_since_each(context, t, candidates))
+    return RunwaySamples(
+        airport=airport, config=config, radii_km=radii_km, candidates=candidates, space=space,
+        pool=pool, usable=usable, contexts=contexts, group_of=group_of, multi=multi,
+        minority_names=minority_names, minority=minority,
+        X=np.vstack(rows), y=np.asarray(truth), anchors=np.asarray(anchor_names),
+        folds={name: np.asarray(values) for name, values in folds.items()},
+        picks={part: {rule: np.asarray(values) for rule, values in rules.items()}
+               for part, rules in rule_picks.items()},
+        b1_prob=np.vstack(b1_prob), keys=np.asarray(flight_keys),
+        days=np.asarray([operational_day(parse_utc(usable[k]["landing_time_utc"])) for k in flight_keys]),
+        operators=np.asarray([airline(usable[k]) for k in flight_keys]),
+        minutes_since=np.asarray(since, dtype=np.float64),
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    add_sample_arguments(parser)
+    parser.add_argument("--output-dir", required=True)
+    args = parser.parse_args(argv)
+
+    s = build_samples(args)
+    airport, config, candidates, space, pool, usable = s.airport, s.config, s.candidates, s.space, s.pool, s.usable
+    radii_km, context = s.radii_km, pool.rules
+    group_of, multi, minority, minority_names = s.group_of, s.multi, s.minority, s.minority_names
+    X, y, anchor_arr, fold_arr, picks_arr = s.X, s.y, s.anchors, s.folds, s.picks
+    b1_arr, keys_arr = s.b1_prob, s.keys
 
     results: dict[str, Any] = {}
     models: dict[str, HistGradientBoostingClassifier] = {}
@@ -357,7 +413,7 @@ def main(argv: list[str] | None = None) -> int:
         group_of=group_of, multi=multi,
     )
 
-    days_arr = np.asarray([operational_day(parse_utc(usable[k]["landing_time_utc"])) for k in flight_keys])
+    days_arr = s.days
     validation_by_day = {
         part: by_day(fold_arr[part] == "val", days_arr, y, anchor_arr, {
             "model": probs[part].argmax(axis=1), "nowx": probs[f"{part}_nowx"].argmax(axis=1),
