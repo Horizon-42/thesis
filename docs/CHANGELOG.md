@@ -4,6 +4,36 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-13 — ts_transformer: runway intent R1.1 / R1.1b — a candidate-symmetric runway head that survives an unseen configuration
+
+**Ask.** The user: R1.1 before R2 — fix what the day split exposed (R1's head on KSJC's two
+30L-closure days: 55-57 % against B1's 97-98 %). Plan §14 (design, gates written before the run)
+and §15 (results) of `4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md`.
+
+**Built.** `runway_intent_r1.build_samples` / `RunwaySamples` (R1's sample construction as one
+function; R1's outputs byte-identical at all five airports); `data/runway_features.candidate_rows`
+(one row per candidate runway, every column in that runway's terms; the raw wind, report age, time of
+day and one-hot identities left out) and `minutes_since_each`; `experiments/runway_intent_r11.py`
+(`ListwiseBooster`: a gradient-boosted conditional logit — shared histogram Newton trees, a softmax
+across a sample's candidates, R1's budget; sklearn's boosting cannot take the loss and a one-tree-per-
+step sklearn version of the same Newton step took 23 min on KSMF against 58 s, same numbers within
+0.9 points; R1's head retrained on the same samples, matched against R1's artifact bit for bit);
+`experiments/runway_intent_r11_readout.py` (the §14 gates on every symmetric head).
+
+**Result.** R1.1 as pre-registered failed gate (i): its rows kept two per-runway constants (the
+runway's training share and the operator's share of its landings) that let the shared trees
+re-identify the runway (a classifier recovers a row's runway from its other columns at 96.7 %,
+review), and the closure days stayed at 53-59 %. R1.1b: `r11_noid` drops both (closure days fixed,
+but KRDU / KSMF lose 5-9 side points — the airline is a real signal); `r11_lift` drops the prior and
+moves the operator's share to its deviation from the base rate. The first R1.1b run missed gate (i)
+by 0.1 point and review traced it to the out-of-fold airline share (training days in 5 hashed blocks
+— a block's share is anti-correlated with its own labels, -0.84 to -1.00, and the verdict moved with
+the hash); the share now counts only training days before the sample's day. Rerun: `r11_lift`
+passes every gate — closure days 96.8 / 97.6 %, the side gain kept, G5 at all ten cells — and the
+day-blocked vs per-flight gap fell to at most 0.5 points. Gate (i) is not blind (the variant was
+chosen after reading those days); the sealed test days are. Next: R2. Artifacts
+`4dTrajectory/outputs/POOLED/experiments/runway_intent_r11_20260913/`, `runway_intent_r11b_20260913/`.
+
 ### 2026-09-13 — ts_transformer: runway intent R1 — a learned runway head on a day-blocked split, and what the split changes
 
 **Ask.** The user decided D1 = (a): a day-blocked split for the runway experiments, and to look at

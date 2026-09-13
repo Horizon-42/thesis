@@ -46,7 +46,6 @@ from ts_transformer.data.runway_features import (
 from ts_transformer.experiments.runway_intent_r1 import (
     HGB_SETTINGS,
     PERMUTATION_REPEATS,
-    _fraction,
     add_sample_arguments,
     build_samples,
     by_day,

@@ -6,7 +6,26 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
-## Runway intent — R1 MEASURED 2026-09-13 (`docs/2026-09-13_runway_intent_plan.zh.md` §13)
+## Runway intent — R1.1b PASSES 2026-09-13; next R2 (`docs/2026-09-13_runway_intent_plan.zh.md` §14–15)
+
+**R1.1 / R1.1b** (the user: "先做 R1.1", before R2): a CANDIDATE-SYMMETRIC runway head — every R1
+sample re-read as one row per candidate runway in that runway's own terms (`data.runway_features.
+candidate_rows`), scored by ONE set of trees under a softmax across the candidates (a gradient-boosted
+conditional logit, `experiments/runway_intent_r11.ListwiseBooster`, numpy histogram Newton trees with
+R1's budget; sklearn cannot take the loss). R1's head is retrained on the same samples and matched
+R1's artifact bit for bit, so every comparison is paired. R1.1 as pre-registered failed its key gate:
+the per-runway constants in its rows (the runway's training share, the operator's share of its
+landings) let the shared trees re-identify the runway, and KSJC's closure days stayed at 53-59 %.
+R1.1b drops the prior and moves the operator's share to its deviation from the base rate, counted
+only over training days BEFORE the sample's day (an out-of-fold share was anti-correlated with its
+own block's labels — review). **`r11_lift` passes every §14 gate**: KSJC closure days 96.8 / 97.6 %
+(B1 97.4 / 97.8, R1 54.7 / 57.2), the KRDU / KSMF side gain kept (+23.8 / +27.0, +23.9 / +31.4 points),
+G5 at all ten cells, §11.4 everywhere; the day-blocked vs per-flight gap on the paired flights fell
+from R1's 10.9 points (KSJC) to at most 0.5. Gate (i) is NOT a blind test — the variant was chosen
+after reading the closure days; the blind check is the sealed test days. **Next: R2** — `r11_lift` as
+the runway head, plan experts retrained on the day split, the end-to-end paired reading. Code
+`a2a39d2` / `b10ed3e` / `0c8f107`; artifacts `outputs/POOLED/experiments/runway_intent_r11_20260913/`
+(R1.1) and `runway_intent_r11b_20260913/` (R1.1b; `superseded_b10ed3e/` = the out-of-fold encoding).
 
 R1 (one HistGradientBoosting runway head per airport, causal features, anchors on rings around the
 airport reference, the DAY-BLOCKED split — operating days cut at 09Z, two partitions of the
@@ -22,8 +41,7 @@ validation) read 55–57 % against B1's 97–98 %, while the per-flight model, t
 other flights, reads 100 % on the same flights (KSJC paired 97.9 vs 87.0). Cause, measured: the
 hourly wind and time-of-day columns fingerprint the usual configuration (without them the closure
 days recover to 87–90 %); the remaining 8–10 points are presumably the per-runway configuration
-columns. **Next: R1.1, a candidate-symmetric head (shared weights per candidate, conditional logit) —
-gates drafted in §13.7, waiting on the user**; then R2. Artifacts
+columns. R1.1 / R1.1b followed (above). Artifacts
 `outputs/POOLED/experiments/runway_intent_r1_20260913/` (`superseded_db1e701/` is the pre-review
 run, void); readout `run_ts.py runway_intent_r1_readout`.
 
@@ -52,10 +70,9 @@ candidates × the existing per-runway predictors as conditional experts; multi-r
 assignment in the §9 step 6 scheduler; a joint scene model only if that shows interaction
 error. R0 (zero training: `experiments/runway_hypotheses.py` v4 on all five airports, causal
 baselines B0–B4, the anytime curve, the per-airport cost of a wrong runway) is the block above.
-**D1 decided 2026-09-13**: (a), the day-blocked split, for the R series only. **Open, the
-user's:** D2 scope, D3 the candidate set (v5 roster lacks KRDU 32 / KSMF 35R), D4 standalone
-classifier vs backbone head, D5 how the thesis states the runway-given premise, and whether R1.1
-precedes R2.
+**D1 decided 2026-09-13**: (a), the day-blocked split, for the R series only; R1.1 before R2
+(decided). **Open, the user's:** D2 scope, D3 the candidate set (v5 roster lacks KRDU 32 / KSMF 35R),
+D4 standalone classifier vs backbone head, D5 how the thesis states the runway-given premise.
 
 ---
 
