@@ -29,6 +29,15 @@ COMPARED = ("assigned", HEAD, "r1", *RULES)
 STRICT = ("KRDU", "KSMF", "KSTL")
 TOLERANT = ("KSJC", "KMSY")
 TOLERANCE_M = 25.0
+#: A SECONDARY reading, labelled as such: the runways the plan experts cannot fly even when told the
+#: runway — R0 measured a known-runway FDE median above 5 km there, or never scored them (plan §11.2,
+#: before R2). On them a WRONG pick can end nearer the truth than the known runway's forecast, so the
+#: paired FDE stops measuring the runway choice (R2b KMSY 02: known-runway median 26 km).
+EXPERT_CANNOT_FLY = {"KMSY": ("02", "20"), "KSTL": ("24",), "KSJC": ("12L",)}
+#: A second SECONDARY reading: only the flights whose known-runway forecast ends within this of the
+#: truth — where the expert flies the true runway, so a pick's paired change is the runway choice's
+#: own cost (the retrained experts also lost KSJC 12R: median 77 m -> 6 km on shared flights).
+KNOWN_FLOWN_M = 1000.0
 SHORT = {"assigned": "known", HEAD: "r11_lift", "r1": "R1", "B0_majority": "B0", "B1_active_config": "B1",
          "B2_active_config_gated": "B2", "B3_same_sector_last": "B3", "B4_wind": "B4"}
 
@@ -39,6 +48,8 @@ def common(flights: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def stats(flights: list[dict[str, Any]]) -> dict[str, Any]:
     """Per selector on these flights: runway accuracy and the paired error against the known runway."""
+    if not flights:
+        return {"n": 0}
     base_fde = np.array([f["hypotheses"][f["assigned"]]["fde_m"] for f in flights])
     base_ade = np.array([f["hypotheses"][f["assigned"]]["ade_m"] for f in flights])
     out: dict[str, Any] = {"n": len(flights), "known_fde_mean": float(base_fde.mean()) if flights else None,
@@ -153,6 +164,34 @@ def main(argv: list[str] | None = None) -> int:
                          f"n {c['n']}: {100 * c['selectors'][HEAD]['runway_accuracy']:.1f} % / {c['selectors'][HEAD]['fde_delta_mean']:+.0f}; "
                          f"B1 {100 * c['selectors']['B1_active_config']['runway_accuracy']:.1f} % / {c['selectors']['B1_active_config']['fde_delta_mean']:+.0f}")
         lines.append(f"| {a} | " + " | ".join(cells) + " |")
+
+    lines += ["", "### Per assigned runway (all flights): n, known-runway FDE median (m), head and B1 accuracy / ΔFDE mean (m)", "",
+              "| airport | runway | n | known FDE median | known FDE mean | r11_lift | B1 | B3 |", "|---|---|---:|---:|---:|---|---|---|"]
+    for a, f in flights.items():
+        for runway in sorted({x["assigned"] for x in f}):
+            c = stats([x for x in f if x["assigned"] == runway])
+            median = float(np.median([x["hypotheses"][runway]["fde_m"] for x in f if x["assigned"] == runway]))
+            cells = [f"{100 * c['selectors'][s]['runway_accuracy']:.0f} % / {c['selectors'][s]['fde_delta_mean']:+.0f}"
+                     for s in (HEAD, "B1_active_config", "B3_same_sector_last")]
+            lines.append(f"| {a} | {runway} | {c['n']} | {median:.0f} | {c['known_fde_mean']:.0f} | " + " | ".join(cells) + " |")
+
+    flyable = {a: [x for x in f if x["assigned"] not in EXPERT_CANNOT_FLY.get(a, ())] for a, f in flights.items()}
+    secondary = {a: stats(f) for a, f in flyable.items()}
+    secondary_pooled = stats([x for f in flyable.values() for x in f])
+    combined["secondary_flyable"] = {"excluded": EXPERT_CANNOT_FLY, "airports": secondary, "pooled": secondary_pooled,
+                                     "gates": gates(secondary, secondary_pooled)}
+    lines += ["", "### SECONDARY (not the pre-registered reading) — without the runways the experts cannot fly "
+              f"({', '.join(f'{a} {r}' for a, rs in EXPERT_CANNOT_FLY.items() for r in rs)})", ""]
+    lines += table({**secondary, "pooled": secondary_pooled})
+
+    flown = {a: [x for x in f if x["hypotheses"][x["assigned"]]["fde_m"] <= KNOWN_FLOWN_M] for a, f in flights.items()}
+    flown_cells = {a: stats(f) for a, f in flown.items()}
+    flown_pooled = stats([x for f in flown.values() for x in f])
+    combined["secondary_known_flown"] = {"known_fde_max_m": KNOWN_FLOWN_M, "airports": flown_cells, "pooled": flown_pooled,
+                                         "gates": gates(flown_cells, flown_pooled)}
+    lines += ["", f"### SECONDARY (not the pre-registered reading) — only flights the expert flies when told the runway "
+              f"(known-runway FDE ≤ {KNOWN_FLOWN_M:.0f} m): the runway choice's own cost", ""]
+    lines += table({**flown_cells, "pooled": flown_pooled})
 
     verdict = gates(all_cells, combined["strata"]["all"]["pooled"])
     combined["gates"] = verdict
