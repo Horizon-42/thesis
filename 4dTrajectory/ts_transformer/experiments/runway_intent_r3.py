@@ -80,6 +80,7 @@ BUSY_PER_HOUR = 10                # plan §17.3: an hour with >= 10 roster landi
 FLOWN_TOLERANCE_S = 10.0          # plan §17.3 gate 2: a flown gap counts as kept at >= S - 10 s
 FINAL_SPEED_WINDOW_M = 2.0 * NM_M  # the approach speed is read over the last 2 NM before the threshold
 STRATA = ("all", "busy", "quiet")
+EXPERT_FAILS_M = 1000.0           # an unassigned forecast ending further than this from the true threshold: the expert's own failure
 CLOSE_PAIR_MINIMA = 2.0           # an order is contestable when the true gap is under two minima
 #: Plan-only readings under other rule sets the text allows (docs/literature/arrival_separation §7):
 #: the reduced 2.5 NM of 5-5-4 j (authorization unverified at every airport), and the visual-approach
@@ -106,6 +107,14 @@ class Flown:
 
 def wall_s(stamp: str) -> float:
     return datetime.fromisoformat(stamp).timestamp()
+
+
+def endpoint_error_m(row: dict[str, Any]) -> float:
+    """How far a forecast ENDS from the true threshold (`hypothesis_row`'s end point in the true
+    runway's axes). The row's ``fde_m`` is the displacement at the TRUTH's landing time, so it scores a
+    forecast that lands later than the truth by the path it has left — an assigned flight lands at its
+    assigned time — and cannot compare an assigned flight with an unassigned one; this can."""
+    return float(math.hypot(row["endpoint_along_track_true_m"], row["endpoint_cross_track_true_m"]))
 
 
 def approach_speed_mps(flights: Sequence[dict[str, Any]], targets: dict[str, dict[str, Any]]) -> tuple[float, int]:
@@ -385,9 +394,13 @@ def summarise(rows: list[dict[str, Any]], separation: Separation, flown: dict[st
                 "scheduled_time_error_s_same_flights": _abs_quantiles([r["scheduled"]["time_s"] - r["truth"]["time_s"] for r in landed]),
                 "independent_time_error_s_same_flights": _abs_quantiles([r["independent"]["time_s"] - r["truth"]["time_s"] for r in landed]),
                 "delivery_error_s": _abs_quantiles([r["flown"]["time_s"] - r["scheduled"]["time_s"] for r in landed]),
-                "fde_m_mean": float(np.mean([r["flown"]["fde_m"] for r in members])),
+                # where the forecast ENDS against the true threshold, flown vs the same flight unassigned
+                "endpoint_error_m_median": float(np.median([r["flown"]["endpoint_error_m"] for r in members])),
+                "unassigned_endpoint_error_m_median": float(np.median([r["scheduled"]["unassigned_endpoint_error_m"] for r in members])),
+                "endpoint_error_m_median_landed": float(np.median([r["flown"]["endpoint_error_m"] for r in landed])),
+                "unassigned_endpoint_error_m_median_landed": float(np.median([r["scheduled"]["unassigned_endpoint_error_m"] for r in landed])),
+                # the time-aligned displacement at the truth's landing time: see `endpoint_error_m`
                 "fde_m_median": float(np.median([r["flown"]["fde_m"] for r in members])),
-                "unassigned_fde_m_mean": float(np.mean([r["scheduled"]["unassigned_fde_m"] for r in members])),
                 "unassigned_fde_m_median": float(np.median([r["scheduled"]["unassigned_fde_m"] for r in members])),
                 "unabsorbed_first_s_p50": float(np.median([r["flown"]["closure"]["planUnabsorbedFirstS"] for r in members])),
                 "absorbed_share": float(np.mean([abs(r["flown"]["closure"]["planUnabsorbedFirstS"]) <= TIME_TOLERANCE_S for r in members])),
@@ -473,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:
             s = table[key]
             r[name] = {"runway": s.runway, "time_s": s.time_s, "eta_s": s.eta_s, "delay_s": s.delay_s}
         r["scheduled"]["unassigned_fde_m"] = float(r2_by_key[key]["hypotheses"][plan[key].runway]["fde_m"])
+        r["scheduled"]["unassigned_endpoint_error_m"] = endpoint_error_m(r2_by_key[key]["hypotheses"][plan[key].runway])
         r["hour_landings"] = per_hour[hour_of[key]]
         r["stratum"] = "busy" if per_hour[hour_of[key]] >= BUSY_PER_HOUR else "quiet"
 
@@ -518,10 +532,14 @@ def main(argv: list[str] | None = None) -> int:
         for r in rows:
             x = flown[r["flight_key"]]
             r["flown"] = {"landed": x.landed, "time_s": x.time_s, "fde_m": x.metrics["fde_m"], "ade_m": x.metrics["ade_m"],
-                          "closure": x.closure}
+                          "endpoint_error_m": endpoint_error_m(x.metrics), "closure": x.closure}
         flown_slots = [Slot(k, plan[k].runway, x.time_s, plan[k].eta_s, plan[k].category) for k, x in flown.items() if x.landed]
         # a flight that never crossed is out of every flown pair: counted here, never read as kept
         checks["flown_unlanded"] = sum(not x.landed for x in flown.values())
+        # ...split by whether the expert fails the flight without an assignment too (R2b's forecast on
+        # the same runway ends > EXPERT_FAILS_M from the true threshold): the rest the assignment broke
+        checks["flown_unlanded_expert_fails_unassigned"] = sum(
+            not r["flown"]["landed"] and r["scheduled"]["unassigned_endpoint_error_m"] > EXPERT_FAILS_M for r in rows)
         checks["flown_violations_10s"] = len(violations(flown_slots, separation, tolerance_s=FLOWN_TOLERANCE_S))
         checks["flown_one_runway_kept_share"] = kept_share(flown_slots, separation, FLOWN_TOLERANCE_S)
         checks["flown_one_runway_kept_share_close"] = kept_share(flown_slots, separation, FLOWN_TOLERANCE_S, close_only=True)

@@ -39,7 +39,7 @@ def table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
     lines = [
         "| airport / hours | n | runway acc indep / sched / causal | abs dt p50 s indep / sched / causal | "
         "order agree close pairs indep / sched (n) | moved: n, abs dt p50 s sched / indep, closer | delay p90 s | flown landed | "
-        "abs dt p50 s flown (indep / sched same flights) | flown FDE med m (unassigned) |",
+        "abs dt p50 s flown (indep / sched same flights) | end to true threshold p50 m: flown (unassigned), landed flights |",
         "|---|---:|---|---|---|---|---:|---:|---|---|",
     ]
     for airport, art in artifacts.items():
@@ -53,7 +53,7 @@ def table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
                 f"{100 * fl['landed_share']:.1f}%",
                 f"{_f(fl['time_error_s']['p50'])} ({_f(fl['independent_time_error_s_same_flights']['p50'])} / "
                 f"{_f(fl['scheduled_time_error_s_same_flights']['p50'])})",
-                f"{_f(fl['fde_m_median'])} ({_f(fl['unassigned_fde_m_median'])})",
+                f"{_f(fl['endpoint_error_m_median_landed'])} ({_f(fl['unassigned_endpoint_error_m_median_landed'])})",
             )
             lines.append(
                 f"| {airport} / {stratum} | {c['flights']} | "
@@ -70,7 +70,7 @@ def table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
 def checks_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
     lines = [
         "| airport | approach speed m/s | 3 NM s | violations plan / causal / indep / truth(10 s) / flown(10 s) | "
-        "one-runway kept truth / flown (all pairs) | kept under 2 minima truth / flown (n) | unlanded | "
+        "one-runway kept truth / flown (all pairs) | kept under 2 minima truth / flown (n) | unlanded (expert fails unassigned too) | "
         "on-final separation kept / within 0.5 NM | closure absorbed | roster share of visible (busy) |",
         "|---|---:|---:|---|---|---|---:|---|---:|---|",
     ]
@@ -86,7 +86,7 @@ def checks_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
             f"{'—' if 'flown_one_runway_kept_share' not in ch else f'{100 * ch['flown_one_runway_kept_share'][0]:.1f}%'} | "
             f"{100 * ch['truth_one_runway_kept_share_close'][0]:.1f}% ({ch['truth_one_runway_kept_share_close'][1]}) / "
             f"{'—' if 'flown_one_runway_kept_share_close' not in ch else f'{100 * ch['flown_one_runway_kept_share_close'][0]:.1f}% ({ch['flown_one_runway_kept_share_close'][1]})'} | "
-            f"{ch.get('flown_unlanded', '—')} | "
+            f"{ch.get('flown_unlanded', '—')} ({ch.get('flown_unlanded_expert_fails_unassigned', '—')}) | "
             f"{'—' if final is None else f'{100 * final['share_kept']:.1f}% / {100 * final['share_within_half_nm']:.1f}%'} | "
             f"{'—' if flown_all is None else f'{100 * flown_all['absorbed_share']:.1f}%'} | "
             f"{100 * ch['roster_share_of_visible_landings']:.0f}% ({100 * ch['roster_share_of_visible_landings_busy']:.0f}%) |"

@@ -7,6 +7,7 @@ from geokit import METRES_PER_DEG_LAT, NM_M
 
 from ts_transformer.experiments.runway_intent_r3 import (
     approach_speed_mps,
+    endpoint_error_m,
     kept_share,
     one_runway_pairs,
     order_agreement,
@@ -102,3 +103,7 @@ def test_a_gate_not_measured_leaves_the_verdict_open():
     assert verdicts["FAIL"]["passed"] is False and verdicts["RUNWAY"]["passed"] is False
     assert verdicts["PASS"]["r4_timing_ratio_busy_over_quiet"] == pytest.approx(10.0 / 12.0)
     assert math.isclose(verdicts["RUNWAY"]["r4_runway_gap"], 0.0)
+
+
+def test_the_end_point_error_is_where_the_forecast_ends_against_the_true_threshold():
+    assert endpoint_error_m({"endpoint_along_track_true_m": -3.0, "endpoint_cross_track_true_m": 4.0, "fde_m": 900.0}) == 5.0
