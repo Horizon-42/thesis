@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from geokit import NM_M
 
 from ts_transformer.experiments.support import REPO_ROOT
@@ -27,6 +29,8 @@ KEPT_SHARE = 0.95                 # gate 2: flown consecutive one-runway landing
 ALL_HOURS_TOLERANCE_S = 5.0       # gate 3: all hours no worse than the independent ETA by more than this
 RUNWAY_TOLERANCE = 0.01           # gate 4: runway agreement >= the head's top-1 accuracy - 1 point
 R4_RUNWAY_GAP = 0.05              # R4 starts if busy-hour agreement is >= 5 points below quiet
+DELIVERED_S = 10.0                # a flown landing within this of its scheduled time delivered it
+DELAYED_S = 1.0                   # a scheduled delay above this: the schedule moved the flight
 
 
 def _f(value: Any, digits: int = 0) -> str:
@@ -90,6 +94,42 @@ def checks_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
             f"{'—' if final is None else f'{100 * final['share_kept']:.1f}% / {100 * final['share_within_half_nm']:.1f}%'} | "
             f"{'—' if flown_all is None else f'{100 * flown_all['absorbed_share']:.1f}%'} | "
             f"{100 * ch['roster_share_of_visible_landings']:.0f}% ({100 * ch['roster_share_of_visible_landings_busy']:.0f}%) |"
+        )
+    return lines
+
+
+def delivery_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
+    """How the flown landing met its scheduled time, for the flights the schedule DELAYED against the
+    ones it left at their own ETA: the closure has to lose the delay, and from the L-1 anchor (a median
+    ~13 km out) it often cannot — slower than the stall floor is not an option and the path lever
+    rarely engages."""
+    lines = [
+        "| airport | flights | delivered within 10 s: undelayed / delayed | flown - scheduled p50 s: undelayed / delayed | "
+        "delayed: delay p50 s, X first ask p50 s, stretched |",
+        "|---|---:|---|---|---|",
+    ]
+    for airport, art in artifacts.items():
+        landed = [r for r in art["flights"] if "flown" in r and r["flown"]["landed"]]
+        if not landed:
+            continue
+        delayed = [r for r in landed if r["scheduled"]["delay_s"] > DELAYED_S]
+        kept = [r for r in landed if r["scheduled"]["delay_s"] <= DELAYED_S]
+
+        def delivered(rows: list[dict[str, Any]]) -> str:
+            if not rows:
+                return "—"
+            d = [abs(r["flown"]["time_s"] - r["scheduled"]["time_s"]) <= DELIVERED_S for r in rows]
+            return f"{100 * np.mean(d):.1f}%"
+
+        def signed(rows: list[dict[str, Any]]) -> str:
+            return "—" if not rows else f"{np.median([r['flown']['time_s'] - r['scheduled']['time_s'] for r in rows]):+.0f}"
+
+        x = [r["flown"]["closure"]["planUnabsorbedFirstS"] for r in delayed]
+        stretched = [r["flown"]["closure"]["planStretchM"] > 0.0 for r in delayed]
+        lines.append(
+            f"| {airport} | {len(kept)} / {len(delayed)} | {delivered(kept)} / {delivered(delayed)} | {signed(kept)} / {signed(delayed)} | "
+            f"{_f(float(np.median([r['scheduled']['delay_s'] for r in delayed])) if delayed else None)}, "
+            f"{_f(float(np.median(x)) if x else None)}, {_f(100 * float(np.mean(stretched)) if stretched else None)}% |"
         )
     return lines
 
@@ -162,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
              *([] if not missing else ["", f"**missing airports (no artifact): {', '.join(missing)}**"]),
              "", "## Assignment and timing", "",
              *table(artifacts), "", "## Separation and closure", "", *checks_table(artifacts), "",
+             "## Delivery: the flown landing against its scheduled time (landed flights)", "", *delivery_table(artifacts), "",
              "## Other rule sets (plan-only; FCFS by ETA)", "", *variants_table(artifacts), "", "## Gates (plan §17.3)", "",
              "| airport | 1 plan 0 | 2 flown kept | 3 busy | 3 all | 4 runway | passed | R4: busy runway gap | R4: busy/quiet dt |",
              "|---|---|---|---|---|---|---|---:|---:|"]
