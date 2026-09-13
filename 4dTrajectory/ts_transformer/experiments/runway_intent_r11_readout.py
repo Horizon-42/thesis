@@ -1,7 +1,7 @@
 """Runway-intent R1.1 / R1.1b readout: the candidate-symmetric heads against R1's on the same samples, and the gates of plan §14.
 
 Reads whichever heads a campaign's documents hold — R1.1's ``r11`` (schema v1) and R1.1b's
-``r11_noid`` / ``r11_lift`` (v2) — and applies §14's gates to each; the §11.4 gates by
+``r11_noid`` / ``r11_lift`` (v2; v3 with the time-ordered airline share) — and applies §14's gates to each; the §11.4 gates by
 `runway_intent_r1_readout.gates` itself (one definition). R1.1b's pick (§15.3): ``r11_lift`` if
 it passes every gate, else ``r11_noid`` if it does, else neither. Written to the campaign folder
 as `readout.md` / `readout.json`.
@@ -47,8 +47,8 @@ def symmetric(heads: list[str]) -> list[str]:
 
 
 def importance_of(doc: dict[str, Any]) -> dict[str, Any]:
-    """v2 keys the importance by head; v1 held R1.1's alone."""
-    return doc["importance_day_a"] if doc["schema_version"].endswith("-v2") else {"r11": doc["importance_day_a"]}
+    """v1 held R1.1's importance alone; from v2 it is keyed by head."""
+    return {"r11": doc["importance_day_a"]} if doc["schema_version"].endswith("-v1") else doc["importance_day_a"]
 
 
 def head_table(docs: dict[str, Any], heads: list[str], anchor: str) -> list[str]:
@@ -155,7 +155,9 @@ def head_gates(docs: dict[str, Any], head: str) -> dict[str, Any]:
                                   for part in PARTITIONS}}
              for airport, doc in docs.items()}
     section = gates(as_r1, "full")
-    flags = [c is not None and c["pass"] for c in closure.values()] + [c["pass"] for c in keep.values()]
+    # a campaign missing an airport has not been read: every gate skips what is absent
+    flags = [all(airport in docs for airport in AIRPORTS)]
+    flags += [c is not None and c["pass"] for c in closure.values()] + [c["pass"] for c in keep.values()]
     flags += [c["pass"] for c in entry.values()] + [not section["veto_side_irreducible"]]
     flags += [flag for cell in section["cells"].values() for key, flag in cell.items() if key.startswith("g")]
     return {"closure_days": closure, "keep_side_gain": keep, "g5_entry": entry, "section_11_4": section,

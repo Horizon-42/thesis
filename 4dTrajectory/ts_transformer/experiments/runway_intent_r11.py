@@ -55,8 +55,8 @@ from ts_transformer.experiments.runway_intent_r1 import (
 )
 from ts_transformer.experiments.support import REPO_ROOT
 
-# v2: R1.1b's identity-free heads beside R1.1's (plan §15.3)
-SCHEMA = "ts-runway-intent-r11-v2"
+# v2: R1.1b's identity-free heads beside R1.1's (plan §15.3); v3: the time-ordered airline share (§15.4)
+SCHEMA = "ts-runway-intent-r11-v3"
 PARTITIONS = ("day_a", "day_b", "flight")
 #: The candidate-symmetric heads — R1.1 as pre-registered (§14) and R1.1b's two variants (§15.3),
 #: each a selection / transform of the one candidate table (`head_table`) — and R1's head.
@@ -75,9 +75,7 @@ HESSIAN_FLOOR = 1e-6
 MIN_CHILD_HESSIAN = 1e-3
 #: Feature values are binned once, on the training rows, into at most this many bins (sklearn's).
 MAX_BINS = 255
-#: The airline share: training days hashed into this many blocks (out of fold), and this many
-#: pseudo-landings placed at the partition's prior.
-AIRLINE_BLOCKS = 5
+#: The airline share: this many pseudo-landings placed at the base rate it is smoothed toward.
 AIRLINE_PRIOR_WEIGHT = 10.0
 DEFAULT_R1_CAMPAIGN = REPO_ROOT / "4dTrajectory" / "outputs" / "POOLED" / "experiments" / "runway_intent_r1_20260913"
 
@@ -258,43 +256,44 @@ def prior_share(majority: Counter, candidates: Sequence[str]) -> np.ndarray:
     return counts / counts.sum()
 
 
-def airline_block(day: str) -> int:
-    return int(_fraction(f"r11:airline:{day}") * AIRLINE_BLOCKS)
-
-
 def airline_shares(
-    operators: np.ndarray, labels: np.ndarray, days: np.ndarray, keys: np.ndarray,
-    train: np.ndarray, prior: np.ndarray,
-) -> np.ndarray:
-    """``[n, C]``: each sample's operator's share of the partition's TRAINING landings on each
-    candidate, counted once per flight and smoothed toward ``prior`` with `AIRLINE_PRIOR_WEIGHT`
-    pseudo-landings. OUT OF FOLD for a training sample: the training days are hashed into
-    `AIRLINE_BLOCKS` blocks and its share counts the other blocks' flights only, so its own label —
-    and its day's — never enters its own feature (a leave-one-out share would move with the label,
-    and a tree reads that). A validation sample counts every training day. A flight with no
-    callsign has no operator and reads the prior."""
-    count = len(prior)
-    blocks = np.array([airline_block(day) for day in days])
-    per_block: dict[tuple[int, str], np.ndarray] = {}
+    operators: np.ndarray, labels: np.ndarray, days: np.ndarray, keys: np.ndarray, train: np.ndarray,
+    count: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Each sample's operator's share of landings on each candidate, and the base rate it is
+    smoothed toward — both ``[n, C]``, both counted once per flight over the partition's TRAINING
+    days STRICTLY BEFORE the sample's operating day. One definition for a training and a validation
+    sample: neither its own label, nor its day's, nor any validation label, nor any fold assignment
+    enters it. R1.1 counted a training sample's share on the OTHER day blocks — out of fold, but then
+    a block's share is anti-correlated with its own block's labels (-0.84 to -1.00), a block
+    fingerprint the trees read (R1.1b review, plan §15.4). The base rate is add-one smoothed; the
+    operator's share puts `AIRLINE_PRIOR_WEIGHT` pseudo-landings at it; no callsign reads the base."""
+    order = sorted(set(days.tolist()))
+    position = {day: i for i, day in enumerate(order)}
+    overall = np.zeros((len(order) + 1, count))
+    per_operator: dict[str, np.ndarray] = {}
     counted: set[str] = set()
     for i in np.flatnonzero(train):
         if keys[i] in counted:
             continue
         counted.add(keys[i])
-        per_block.setdefault((int(blocks[i]), str(operators[i])), np.zeros(count))[labels[i]] += 1.0
-    total: dict[str, np.ndarray] = {}
-    for (_, operator), cell in per_block.items():
-        total[operator] = total.get(operator, np.zeros(count)) + cell
-    out = np.empty((len(labels), count))
+        row = position[days[i]] + 1          # after the cumulative sum, row k counts the days before day k
+        overall[row, labels[i]] += 1.0
+        per_operator.setdefault(str(operators[i]), np.zeros((len(order) + 1, count)))[row, labels[i]] += 1.0
+    overall = np.cumsum(overall, axis=0)
+    per_operator = {operator: np.cumsum(cells, axis=0) for operator, cells in per_operator.items()}
+    none = np.zeros(count)
+    share = np.empty((len(labels), count))
+    base = np.empty((len(labels), count))
     for i, operator in enumerate(operators):
+        k = position[days[i]]
+        base[i] = (overall[k] + 1.0) / (overall[k].sum() + count)
         if not operator:
-            out[i] = prior
+            share[i] = base[i]
             continue
-        counts = total.get(str(operator), np.zeros(count))
-        if train[i]:
-            counts = counts - per_block.get((int(blocks[i]), str(operator)), np.zeros(count))
-        out[i] = (counts + AIRLINE_PRIOR_WEIGHT * prior) / (counts.sum() + AIRLINE_PRIOR_WEIGHT)
-    return out
+        counts = per_operator[str(operator)][k] if str(operator) in per_operator else none
+        share[i] = (counts + AIRLINE_PRIOR_WEIGHT * base[i]) / (counts.sum() + AIRLINE_PRIOR_WEIGHT)
+    return share, base
 
 
 def head_columns(head: str) -> tuple[str, ...]:
@@ -305,18 +304,19 @@ def head_columns(head: str) -> tuple[str, ...]:
     return kept if head == "r11_noid" else kept + ("airline_lift",)
 
 
-def head_table(table: np.ndarray, head: str) -> np.ndarray:
+def head_table(table: np.ndarray, head: str, airline_base: np.ndarray) -> np.ndarray:
     """``head``'s rows, from the full candidate table: R1.1's as they are; ``r11_noid`` without the
     `IDENTITY_COLUMNS`; ``r11_lift`` without the prior and with the operator's share replaced by its
-    DEVIATION from the prior — about 0 on every runway for an operator that lands like everyone else,
-    so it no longer carries the runway's base rate, while a real preference (a terminal side) stays."""
+    DEVIATION from ``airline_base``, the base rate over the same days (`airline_shares`) — about 0 on
+    every runway for an operator that lands like everyone else, so it no longer carries the runway's
+    base rate, while a real preference (a terminal side) stays."""
     if head == "r11":
         return table
     index = {name: i for i, name in enumerate(CANDIDATE_ROW_NAMES)}
     kept = table[:, :, [index[name] for name in head_columns("r11_noid")]]
     if head == "r11_noid":
         return kept
-    lift = table[:, :, index["airline_share"]] - table[:, :, index["prior_share"]]
+    lift = table[:, :, index["airline_share"]] - airline_base
     return np.concatenate([kept, lift[:, :, None]], axis=2)
 
 
@@ -362,11 +362,13 @@ def main(argv: list[str] | None = None) -> int:
     candidates, count = s.candidates, len(s.candidates)
     kw = dict(group_of=s.group_of, multi=s.multi)
     priors = {part: prior_share(s.contexts[part].majority_counts, candidates) for part in PARTITIONS}
+    airline = {part: airline_shares(s.operators, s.y, s.days, s.keys, s.folds[part] == "train", count)
+               for part in PARTITIONS}
     tables = {
         part: candidate_rows(
             s.space, s.X, group_of=s.group_of, prior_share=priors[part],
             b1_pick=s.picks[part]["B1_active_config"], minutes_since=s.minutes_since,
-            airline_share=airline_shares(s.operators, s.y, s.days, s.keys, s.folds[part] == "train", priors[part]),
+            airline_share=airline[part][0],
         )
         for part in PARTITIONS
     }
@@ -378,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     for part in PARTITIONS:
         train, val = s.folds[part] == "train", s.folds[part] == "val"
         for head in SYMMETRIC_HEADS:
-            rows = head_table(tables[part], head)
+            rows = head_table(tables[part], head, airline[part][1])
             started = time.perf_counter()
             booster = ListwiseBooster(**HEAD_SETTINGS).fit(rows[train], s.y[train])
             timings[f"{head}/{part}"] = time.perf_counter() - started
@@ -435,8 +437,8 @@ def main(argv: list[str] | None = None) -> int:
     }
     val_a = s.folds["day_a"] == "val"
     importance = {
-        head: grouped_permutation_rows(boosters[head], head_table(tables["day_a"], head)[val_a], s.y[val_a],
-                                       head_columns(head), **kw)
+        head: grouped_permutation_rows(boosters[head], head_table(tables["day_a"], head, airline["day_a"][1])[val_a],
+                                       s.y[val_a], head_columns(head), **kw)
         for head in SYMMETRIC_HEADS
     }
 
@@ -455,8 +457,9 @@ def main(argv: list[str] | None = None) -> int:
         "head": {**HEAD_SETTINGS, "hessian_floor": HESSIAN_FLOOR, "min_child_hessian": MIN_CHILD_HESSIAN,
                  "max_bins": MAX_BINS, "tree": "histogram, leaf-wise, Newton (ListwiseBooster)"},
         "r1_head": HGB_SETTINGS,
-        "airline_share": {"blocks": AIRLINE_BLOCKS, "prior_weight": AIRLINE_PRIOR_WEIGHT,
-                          "rule": "out of fold by training-day block; counted per flight"},
+        "airline_share": {"prior_weight": AIRLINE_PRIOR_WEIGHT,
+                          "rule": "training days strictly before the sample's operating day; counted per flight; "
+                                  "smoothed toward the base rate over the same days (add-one)"},
         "split": {"paired_leakage_samples": int(both.sum()), "paired_leakage_flights": int(len(set(s.keys[both])))},
         "r1_reference_check": r1_check,
         "models": results,

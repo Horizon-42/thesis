@@ -9,7 +9,6 @@ from ts_transformer.experiments.runway_intent_r11 import (
     AIRLINE_PRIOR_WEIGHT,
     IDENTITY_COLUMNS,
     ListwiseBooster,
-    airline_block,
     airline_shares,
     head_columns,
     head_table,
@@ -54,47 +53,40 @@ def test_the_prior_is_each_runways_share_of_the_training_landings():
     np.testing.assert_allclose(prior_share(Counter({"30L": 3, "30R": 1}), ["12L", "30L", "30R"]), [0.0, 0.75, 0.25])
 
 
-def _flights_on(days: list[str], per_day: int) -> tuple[np.ndarray, ...]:
-    keys, day_of = [], []
-    for d in days:
-        for j in range(per_day):
-            keys.append(f"{d}-{j}")
-            day_of.append(d)
-    return np.array(keys), np.array(day_of)
+def _one_flight_per_day(labels: list[int], operator: str = "AAL") -> tuple[np.ndarray, ...]:
+    """Flight k lands on day k (two samples each, as R1's anchors give)."""
+    days = np.repeat(np.array([f"2026-06-{d + 1:02d}" for d in range(len(labels))]), 2)
+    keys = np.repeat(np.array([f"f{d}" for d in range(len(labels))]), 2)
+    return (np.array([operator] * len(days)), np.repeat(np.array(labels), 2), days, keys)
 
 
-def test_a_training_samples_airline_share_never_counts_its_own_label():
-    days = [f"2026-06-{d:02d}" for d in range(1, 21)]
-    keys, day_of = _flights_on(days, 3)
-    # every flight is sampled twice (two anchors), as R1's samples are
-    keys, day_of = np.repeat(keys, 2), np.repeat(day_of, 2)
-    n = len(keys)
-    operators = np.array(["AAL"] * n)
-    labels = np.zeros(n, dtype=int)
-    train = np.ones(n, dtype=bool)
-    prior = np.array([0.5, 0.5])
-    base = airline_shares(operators, labels, day_of, keys, train, prior)
-    flipped_labels = labels.copy()
-    flipped_labels[:2] = 1                               # the first flight's own label changes
-    flipped = airline_shares(operators, flipped_labels, day_of, keys, train, prior)
-    np.testing.assert_array_equal(flipped[:2], base[:2])  # its own share does not move
-    same_block = np.array([airline_block(d) == airline_block(day_of[0]) for d in day_of])
-    np.testing.assert_array_equal(flipped[same_block], base[same_block])  # nor its block's
-    assert not np.array_equal(flipped[~same_block], base[~same_block])    # the other blocks see it
+def test_a_samples_airline_share_counts_only_training_days_before_its_own():
+    operators, labels, days, keys = _one_flight_per_day([0, 0, 1, 1, 0, 1])
+    train = np.array([True] * 8 + [False] * 4)          # the last two days are validation
+    share, base = airline_shares(operators, labels, days, keys, train, 2)
+    for flipped_day in (3, 4, 5):                          # its own day, a later day, a validation day
+        changed = labels.copy()
+        changed[2 * flipped_day: 2 * flipped_day + 2] ^= 1
+        again, _ = airline_shares(operators, changed, days, keys, train, 2)
+        np.testing.assert_array_equal(again[6:8], share[6:8])        # day 3's samples do not move
+    earlier = labels.copy()
+    earlier[0:2] = 1
+    moved, _ = airline_shares(operators, earlier, days, keys, train, 2)
+    assert not np.array_equal(moved[6:8], share[6:8])               # an earlier training day does
+    # day 3 has seen days 0-2 (labels 0, 0, 1), each flight once: base = (2+1, 1+1) / (3+2)
+    np.testing.assert_allclose(base[6], [3 / 5, 2 / 5])
+    np.testing.assert_allclose(share[6], (np.array([2.0, 1.0]) + AIRLINE_PRIOR_WEIGHT * base[6]) / (3 + AIRLINE_PRIOR_WEIGHT))
+    np.testing.assert_allclose(share[0], base[0])                    # the first day has no history
 
 
-def test_validation_reads_every_training_flight_once_and_an_unknown_operator_reads_the_prior():
-    keys = np.array(["a", "a", "b", "c", "v", "w"])
-    days = np.array(["d1", "d1", "d2", "d3", "d4", "d4"])
-    operators = np.array(["AAL", "AAL", "AAL", "AAL", "AAL", ""])
-    labels = np.array([0, 0, 0, 1, 1, 1])
-    train = np.array([True, True, True, True, False, False])
-    prior = np.array([0.6, 0.4])
-    shares = airline_shares(operators, labels, days, keys, train, prior)
-    # three training flights (a counted once): two on candidate 0, one on candidate 1
-    expected = (np.array([2.0, 1.0]) + AIRLINE_PRIOR_WEIGHT * prior) / (3.0 + AIRLINE_PRIOR_WEIGHT)
-    np.testing.assert_allclose(shares[4], expected)
-    np.testing.assert_allclose(shares[5], prior)
+def test_no_callsign_reads_the_base_rate_and_an_unseen_operator_does_too():
+    operators, labels, days, keys = _one_flight_per_day([0, 1, 0])
+    operators = operators.copy()
+    operators[4:6] = ""
+    share, base = airline_shares(operators, labels, days, keys, np.ones(6, dtype=bool), 2)
+    np.testing.assert_allclose(share[4:6], base[4:6])
+    other, _ = airline_shares(np.array(["UAL"] * 6), labels, days, keys, np.array([False] * 4 + [True] * 2), 2)
+    np.testing.assert_allclose(other[4], [0.5, 0.5])   # no training day before day 2: add-one base
 
 
 def test_the_predict_path_reproduces_the_scores_the_fit_accumulated():
@@ -122,11 +114,12 @@ def test_the_identity_free_heads_drop_the_base_rate_and_keep_only_the_operators_
     rng = np.random.default_rng(3)
     table = rng.random((5, 3, len(CANDIDATE_ROW_NAMES)))
     index = {name: i for i, name in enumerate(CANDIDATE_ROW_NAMES)}
-    np.testing.assert_array_equal(head_table(table, "r11"), table)
-    noid, lift = head_table(table, "r11_noid"), head_table(table, "r11_lift")
+    base = rng.random((5, 3))
+    np.testing.assert_array_equal(head_table(table, "r11", base), table)
+    noid, lift = head_table(table, "r11_noid", base), head_table(table, "r11_lift", base)
     assert noid.shape[2] == len(head_columns("r11_noid")) == len(CANDIDATE_ROW_NAMES) - len(IDENTITY_COLUMNS)
     assert not set(IDENTITY_COLUMNS) & set(head_columns("r11_noid"))
     assert head_columns("r11_lift")[-1] == "airline_lift" and "prior_share" not in head_columns("r11_lift")
     np.testing.assert_array_equal(noid[:, :, 0], table[:, :, index[head_columns("r11_noid")[0]]])
-    np.testing.assert_allclose(lift[:, :, -1], table[:, :, index["airline_share"]] - table[:, :, index["prior_share"]])
+    np.testing.assert_allclose(lift[:, :, -1], table[:, :, index["airline_share"]] - base)
 
