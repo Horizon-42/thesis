@@ -19,8 +19,10 @@ on the flights the expert flies when told the runway every gate passes and the c
 pooled (B1 +466, B3 +427). **R2c**, the belief re-asked every 30 s: 92-99 % beyond 20 km to 99.2-100 %
 inside 3 km, flips mostly toward the truth, and never locking (fly toward the current top pick) is best
 end to end at four of five airports (+20-51 m vs +32-98 m for locking at the first ask) — adopted.
-**R2d**, the runway fan (each candidate's forecast and the head's top pick as picker variants of the
-per-airport experts) — being published. **Next: R3** (multi-runway joint assignment in the step 6
+**R2d**, the runway fan: 28 picker variants of the per-airport experts (each candidate's forecast and the
+head's top pick; `plan_guidance_20260910` group, intents under `variants`), `check-publication` clean on
+disk — **the running dev servers must be restarted before they load** (they booted before the files
+existed and answer them with the SPA fallback). Colouring the fan by p_r is a frontend feature, not done. **Next: R3** (multi-runway joint assignment in the step 6
 scheduler). Artifacts `outputs/POOLED/experiments/runway_intent_r2{,b,c,d}_20260913/`.
 
 ### R1.1 / R1.1b (2026-09-13, `docs/2026-09-13_runway_intent_plan.zh.md` §14–15)
