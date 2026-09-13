@@ -6,7 +6,24 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
-## Runway intent — R1.1b PASSES 2026-09-13; next R2 (`docs/2026-09-13_runway_intent_plan.zh.md` §14–15)
+## Runway intent — R2 MEASURED 2026-09-13 (`docs/2026-09-13_runway_intent_plan.zh.md` §16)
+
+**R2** (the runway head's pick flown end to end by the plan experts — R0b's per-candidate mechanism,
+`experiments/runway_intent_r2.py`): **R2a**, the per-airport plan experts on flights neither model saw
+(1828): choosing the runway with `r11_lift` costs **+55 m** of paired mean FDE against the known runway,
+B1 +405 m, the best rule (B3) +317 m — every pre-registered gate passes. **R2b**, the experts retrained on
+day_a's training days, every day_a validation-day flight (5061): four of six gates; KSJC and KMSY fail
+because the retrained experts cannot fly the minority-direction runways (KSJC 12R median 6 km, KMSY 02
+26 km) and always-the-majority then ends nearer the truth — the head picks those flights 99-100 % right;
+on the flights the expert flies when told the runway every gate passes and the choice costs **+73 m**
+pooled (B1 +466, B3 +427). **R2c**, the belief re-asked every 30 s: 92-99 % beyond 20 km to 99.2-100 %
+inside 3 km, flips mostly toward the truth, and never locking (fly toward the current top pick) is best
+end to end at four of five airports (+20-51 m vs +32-98 m for locking at the first ask) — adopted.
+**R2d**, the runway fan (each candidate's forecast and the head's top pick as picker variants of the
+per-airport experts) — being published. **Next: R3** (multi-runway joint assignment in the step 6
+scheduler). Artifacts `outputs/POOLED/experiments/runway_intent_r2{,b,c,d}_20260913/`.
+
+### R1.1 / R1.1b (2026-09-13, `docs/2026-09-13_runway_intent_plan.zh.md` §14–15)
 
 **R1.1 / R1.1b** (the user: "先做 R1.1", before R2): a CANDIDATE-SYMMETRIC runway head — every R1
 sample re-read as one row per candidate runway in that runway's own terms (`data.runway_features.
@@ -57,8 +74,11 @@ runway_intent_r0_readout`); code `fc57d80` + `9e3ac49`, R0a re-run on operating 
 
 **Found on the way, not runway choice:** the per-airport plan heads fly rarely-landed runways badly
 EVEN WITH the true runway — KMSY 02 (29 val flights) FDE median 23.2 km, KSTL 24 and KSJC 12L (one
-flight each) 23.0 / 5.7 km, and KSMF 17R 956 m / 17L 215 m against 30–70 m on most runways. Not
-investigated; the per-runway FDE table is in the R0 readout (`readout.md`, last section).
+flight each) 23.0 / 5.7 km, and KSMF 17R 956 m / 17L 215 m against 30–70 m on most runways. R2b
+sharpened it: retrained on fewer days (day_a's training days), the KSJC expert lost 12R too (median
+77 m -> 6.0 km on the same 16 flights) and KMSY 02 stays at 20-26 km under both; on such runways a
+WRONG runway's forecast can end nearer the truth, which is what failed R2b's KSJC / KMSY gates. Not
+investigated; the per-runway FDE tables are in the R0 and R2b readouts.
 
 ### The plan (2026-09-13)
 

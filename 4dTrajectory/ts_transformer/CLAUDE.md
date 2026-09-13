@@ -1132,8 +1132,9 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 
 - **Every ts number assumes the LANDED runway is known** — the threshold anchor (and the plan
   path's CIFP skeleton) is the harvest's final-approach runway, i.e. future information; no
-  trajectory path predicts the runway yet (R1's runway head is standalone). Quote ADE/FDE as
-  runway-given. What the label is worth and why the backbone cannot learn it implicitly: the
+  trajectory path predicts the runway yet (the runway head is standalone; R2 flies its pick through
+  the plan experts in `experiments/runway_intent_r2.py`: +55-79 m of mean FDE against the known
+  runway, plan §16). Quote ADE/FDE as runway-given. What the label is worth and why the backbone cannot learn it implicitly: the
   2026-09-03 frame ablation and runway-hypothesis docs; the plan to predict it (runway head +
   per-runway experts + multi-runway scheduling): `docs/2026-09-13_runway_intent_plan.zh.md`.
 - **A candidate-symmetric runway head must not carry a per-runway constant** — a row column that is
@@ -1188,5 +1189,5 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 | putting the procedure constraint into TRAINING as a hard constraint (either path), or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` (survey with formulas + H0–H6 plan; papers in repo `docs/literature/procedure_hard_constraints/`) |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
-| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (R0 §11: direction solved by context, the parallel SIDE is the problem; R1 §13: a per-runway head wins the side at KRDU / KSMF by 23–32 points and fails on configurations its training days lack; R1.1b §15: the candidate-symmetric `r11_lift` keeps the gain and survives KSJC's closure days — R2 next) |
+| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (R0 §11: direction solved by context, the parallel SIDE is the problem; R1 §13: a per-runway head wins the side at KRDU / KSMF by 23–32 points and fails on configurations its training days lack; R1.1b §15: the candidate-symmetric `r11_lift` keeps the gain and survives KSJC's closure days; R2 §16: its pick flown end to end costs +55-79 m of FDE against the known runway (B1 +400-470 m), never-lock adopted — R3 next) |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

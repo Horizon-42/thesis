@@ -4,6 +4,29 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-13 — ts_transformer: runway intent R2 — the runway head's pick flown end to end; the cost of not knowing the runway
+
+**Ask.** The user: "go on R2". Plan §16 of `4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md`
+(four stages; gates written before each run).
+
+**Built.** `experiments/runway_intent_r2.py` (the runway heads asked once at the plan expert's anchor
+from the last track point at or before it; the expert flown under every candidate by R0b's mechanism;
+`--roster expert-val | day-val`; `--write-records` writes the runway fan as prediction records with
+`source.runwayIntent`), `runway_intent_r2b_cohort.py` (an expert's cohort restricted to day_a's
+training days — the development-cohort mechanism takes it unchanged), `runway_intent_r2c.py` (the
+belief re-asked every 30 s) and `runway_intent_r2c_e2e.py` (lock rules end to end, the expert
+re-anchored at every ask), and their readouts. Reviewed (opus) at every step; the end-to-end lock
+reading was corrected to cover the asks where all rules agree on a wrong runway.
+
+**Result.** R2a (original experts, 1828 flights neither model saw): the head's pick costs +55 m of
+paired mean FDE against the known runway, B1 +405 m — every gate passes. R2b (experts retrained on
+day_a's training days, 5061 flights): four of six gates; KSJC and KMSY fail because the retrained
+experts cannot fly the minority-direction runways (KSJC 12R, KMSY 02), where always-the-majority ends
+nearer the truth — on the flights the expert flies when told the runway the choice costs +73 m
+(B1 +466). R2c: the belief sharpens along the approach (99.2-100 % inside 3 km), flips mostly correct
+it, never-lock is best end to end at four of five airports — adopted. R2d: the runway fan published as
+picker variants of the per-airport experts. Artifacts `4dTrajectory/outputs/POOLED/experiments/runway_intent_r2{,b,c,d}_20260913/`.
+
 ### 2026-09-13 — ts_transformer: runway intent R1.1 / R1.1b — a candidate-symmetric runway head that survives an unseen configuration
 
 **Ask.** The user: R1.1 before R2 — fix what the day split exposed (R1's head on KSJC's two
