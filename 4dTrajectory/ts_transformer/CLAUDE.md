@@ -1131,11 +1131,16 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 ## Traps (one line each; evidence in `docs/ENGINEERING_NOTES.md`)
 
 - **Every ts number assumes the LANDED runway is known** — the threshold anchor (and the plan
-  path's CIFP skeleton) is the harvest's final-approach runway, i.e. future information; nothing
-  predicts the runway yet. Quote ADE/FDE as runway-given. What the label is worth and why the
-  backbone cannot learn it implicitly: the 2026-09-03 frame ablation and runway-hypothesis docs;
-  the plan to predict it (runway head + per-runway experts + multi-runway scheduling):
-  `docs/2026-09-13_runway_intent_plan.zh.md`.
+  path's CIFP skeleton) is the harvest's final-approach runway, i.e. future information; no
+  trajectory path predicts the runway yet (R1's runway head is standalone). Quote ADE/FDE as
+  runway-given. What the label is worth and why the backbone cannot learn it implicitly: the
+  2026-09-03 frame ablation and runway-hypothesis docs; the plan to predict it (runway head +
+  per-runway experts + multi-runway scheduling): `docs/2026-09-13_runway_intent_plan.zh.md`.
+- **A runway / configuration model cannot be judged on the per-flight split** — same-day flights
+  share the configuration, and hourly wind / time of day fingerprint it: the per-flight model read
+  KSJC's two 30L-closure days at 100 %, the day-blocked one at 55–57 % (B1 97–98 %). The R series
+  splits by OPERATING day (`data/runway_context.operational_day`, cut at 09Z — a UTC-date cut splits
+  the evening peak); plan §13.
 
 - **The objective must score VELOCITY, not just position** — scoring position at 64 endpoints
   alone let 71 % of predicted bank energy collapse into one profile shared by every flight.
@@ -1178,5 +1183,5 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 | putting the procedure constraint into TRAINING as a hard constraint (either path), or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` (survey with formulas + H0–H6 plan; papers in repo `docs/literature/procedure_hard_constraints/`) |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
-| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (R0 measured §11: direction solved by context, the parallel SIDE is the problem; R1 next, blocked by decision D1) |
+| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (R0 §11: direction solved by context, the parallel SIDE is the problem; R1 §13: a learned head wins the side at KRDU / KSMF by 23–32 points on a day-blocked split and fails on configurations its training days lack — R1.1, a candidate-symmetric head, next) |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

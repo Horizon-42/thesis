@@ -6,7 +6,26 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
-## Runway intent — R0 MEASURED 2026-09-13 (`docs/2026-09-13_runway_intent_plan.zh.md` §11)
+## Runway intent — R1 MEASURED 2026-09-13 (`docs/2026-09-13_runway_intent_plan.zh.md` §13)
+
+R1 (one HistGradientBoosting runway head per airport, causal features, anchors on rings around the
+airport reference, the DAY-BLOCKED split — operating days cut at 09Z, two partitions of the
+non-test days — beside a per-flight control; code `22d4df5` + `e11ac8a`): at KRDU and KSMF the head
+beats the best causal rule on the parallel side by 23–32 points pooled (19–30 at the arrival-slice
+entry), minority runways 93–95 % against 40–49 %, NLL 4.5–7× lower — the §11.4 gates pass on both
+partitions and the veto does not fire. KSTL: +4.3 / −0.01 points, a tie that fails G1 mechanically
+on one partition — report KSTL as on par with the rules. **What the day split does**: on ordinary
+days nothing (same flights, the day-blocked model against the per-flight one: −0.2 to +1.1 points
+at four airports); on a day whose configuration the training days lack, it exposes a failure the
+per-flight split hides — KSJC's two 30L-closure days (everything on 30R, both in one partition's
+validation) read 55–57 % against B1's 97–98 %, while the per-flight model, trained on those days'
+other flights, reads 100 % on the same flights (KSJC paired 97.9 vs 87.0). Cause, measured: the
+hourly wind and time-of-day columns fingerprint the usual configuration (without them the closure
+days recover to 87–90 %); the remaining 8–10 points are presumably the per-runway configuration
+columns. **Next: R1.1, a candidate-symmetric head (shared weights per candidate, conditional logit) —
+gates drafted in §13.7, waiting on the user**; then R2. Artifacts
+`outputs/POOLED/experiments/runway_intent_r1_20260913/` (`superseded_db1e701/` is the pre-review
+run, void); readout `run_ts.py runway_intent_r1_readout`.
 
 R0 (no training; the plan heads' val splits; outer-test hashes out of every context pool):
 the landing DIRECTION is solved by co-temporal landings (B1 96–99 % at all five airports); the
@@ -14,10 +33,9 @@ SIDE is the problem — side-given-direction 73–75 % at KRDU, 61–65 % at KSM
 at KSJC (KMSY has no parallels), with the minority runways at 33–49 % (KRDU 05R / 23L, KSMF 17L,
 KSJC 30R, KSTL 11 / 12R). The causal rules are flat along the approach (the aircraft's own track
 is the unused signal). Choosing by B1 / B3 raises the plan heads' paired FDE mean by +380–650 m at
-KRDU / KSTL / KSMF, +20–30 m at KSJC. **Next: R1** (a runway head; gates pre-registered in §11.4),
-**blocked by D1** (the day-blocked split; R0 recommends it for the R series, plan heads retrain on it
-in ~10 min each). Artifacts `outputs/POOLED/experiments/runway_intent_r0_20260913/`; code `fc57d80`
-+ `9e3ac49`.
+KRDU / KSTL / KSMF, +20–30 m at KSJC. R1 (above) read the gates R0 pre-registered (§11.4).
+Artifacts `outputs/POOLED/experiments/runway_intent_r0_20260913/` (readout `run_ts.py
+runway_intent_r0_readout`); code `fc57d80` + `9e3ac49`, R0a re-run on operating days at `22d4df5`.
 
 **Found on the way, not runway choice:** the per-airport plan heads fly rarely-landed runways badly
 EVEN WITH the true runway — KMSY 02 (29 val flights) FDE median 23.2 km, KSTL 24 and KSJC 12L (one
@@ -34,10 +52,10 @@ candidates × the existing per-runway predictors as conditional experts; multi-r
 assignment in the §9 step 6 scheduler; a joint scene model only if that shows interaction
 error. R0 (zero training: `experiments/runway_hypotheses.py` v4 on all five airports, causal
 baselines B0–B4, the anytime curve, the per-airport cost of a wrong runway) is the block above.
-**Open, the user's:** D1 the split (per-flight random leaks the shared runway
-configuration; a day-blocked split — blocks R1), D2 scope, D3 the candidate set (v5 roster lacks
-KRDU 32 / KSMF 35R), D4 standalone classifier vs backbone head, D5 how the thesis states the
-runway-given premise.
+**D1 decided 2026-09-13**: (a), the day-blocked split, for the R series only. **Open, the
+user's:** D2 scope, D3 the candidate set (v5 roster lacks KRDU 32 / KSMF 35R), D4 standalone
+classifier vs backbone head, D5 how the thesis states the runway-given premise, and whether R1.1
+precedes R2.
 
 ---
 
