@@ -6,6 +6,7 @@ import numpy as np
 
 from ts_transformer.config import TSConfig
 from ts_transformer.experiments.runway_intent_r1 import (
+    by_day,
     day_folds,
     expected_calibration_error,
     level_accuracy,
@@ -49,3 +50,18 @@ def test_a_calibrated_forecaster_has_no_calibration_error():
     assert abs(expected_calibration_error(prob, truth)) < 1e-12
     overconfident = np.array([[0.99, 0.01]] * 4)
     assert expected_calibration_error(overconfident, truth) > 0.2
+
+
+def test_the_day_blocks_count_flights_at_the_entry_and_score_every_pick_array():
+    days = np.array(["d1", "d1", "d1", "d2", "d2", "d3"])
+    anchors = np.array(["entry", "r10km", "entry", "entry", "r10km", "entry"])
+    truth = np.array([1, 1, 0, 1, 1, 0])
+    picks = {"model": np.array([1, 0, 0, 0, 0, 0]), "rule": np.array([1, 1, 1, 1, 1, 1])}
+    mask = np.array([True, True, True, True, True, False])          # d3 is not validation
+    cells = by_day(mask, days, truth, anchors, picks, ["30L", "30R"])
+    assert list(cells) == ["d1", "d2"]
+    assert cells["d1"]["flights"] == 2 and cells["d1"]["samples"] == 3
+    assert cells["d1"]["top_share"] == 0.5 and cells["d1"]["top_runway"] == "30L"   # a tie goes to the lower index
+    assert cells["d1"]["exact"] == {"model": 2 / 3, "rule": 2 / 3}
+    assert cells["d2"]["top_runway"] == "30R" and cells["d2"]["top_share"] == 1.0
+    assert cells["d2"]["exact"] == {"model": 0.0, "rule": 1.0}

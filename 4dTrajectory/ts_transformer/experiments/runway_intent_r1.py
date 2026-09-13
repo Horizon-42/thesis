@@ -18,7 +18,8 @@ airport's own data teaches). Three trainings:
 Each model is read on its own validation samples against the causal rules recomputed on the same
 samples — each partition's rules and minority runways from ITS training days' landings; ``day_a`` and ``flight`` are also read PAIRED on the samples that are validation under
 both splits — the flight model has seen those days' other flights, the day model has not, and the
-difference is the leakage.
+difference is the leakage. Both readings are also cut by OPERATING day (`by_day`): a pooled
+number over a handful of validation days can hide one day a rule reads and the head does not.
 
 A secondary reading, ``day_a_nowx`` / ``day_b_nowx``: the day-blocked models without the
 `DAY_LEVEL_GROUPS` features. Added after the KMSY trial, where ``day_a`` fell below B1 at the entry
@@ -48,6 +49,7 @@ from ts_transformer.experiments.support import REPO_ROOT
 from sklearn.ensemble import HistGradientBoostingClassifier  # noqa: E402
 from ts_transformer.config import TSConfig  # noqa: E402
 from ts_transformer.data.runway_context import (  # noqa: E402
+    OPERATIONAL_DAY_SHIFT,
     RULES,
     airport_reference,
     build_airport_context,
@@ -65,7 +67,8 @@ from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
 
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 METAR_ROOT = REPO_ROOT / "data" / "metar"
-SCHEMA = "ts-runway-intent-r1-v2"   # v2: operating days, ring anchors, per-partition majority
+# v2: operating days, ring anchors, per-partition majority; v3: the per-operating-day blocks
+SCHEMA = "ts-runway-intent-r1-v3"
 #: Every landing crosses the 6 km ring (the farthest threshold sits 3.65 km from its airport's
 #: reference, KSTL 11), so each ring below it exists for every flight.
 RING_RADII_KM = (20.0, 15.0, 10.0, 6.0)
@@ -166,6 +169,26 @@ def score(
     out = {"all": block(np.ones(len(truth), dtype=bool))}
     for name in sorted(set(anchor_names), key=lambda a: (a != ENTRY, -float(a[1:-2]) if a != ENTRY else 0.0)):
         out[name] = block(anchor_names == name)
+    return out
+
+
+def by_day(
+    mask: np.ndarray, days: np.ndarray, truth: np.ndarray, anchors: np.ndarray,
+    picks: dict[str, np.ndarray], candidates: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Per operating day of the masked samples: its flights (one entry sample each), the busiest
+    runway among them and its share, and the exact accuracy of every named pick array."""
+    out: dict[str, dict[str, Any]] = {}
+    for day in sorted(set(days[mask].tolist())):
+        on = mask & (days == day)
+        labels = Counter(truth[on & (anchors == ENTRY)].tolist())
+        flights = sum(labels.values())
+        top, count = max(labels.items(), key=lambda item: (item[1], -item[0]))
+        out[day] = {
+            "flights": flights, "samples": int(on.sum()),
+            "top_runway": candidates[top], "top_share": count / flights,
+            "exact": {name: float((p[on] == truth[on]).mean()) for name, p in picks.items()},
+        }
     return out
 
 
@@ -334,6 +357,19 @@ def main(argv: list[str] | None = None) -> int:
         group_of=group_of, multi=multi,
     )
 
+    days_arr = np.asarray([operational_day(parse_utc(usable[k]["landing_time_utc"])) for k in flight_keys])
+    validation_by_day = {
+        part: by_day(fold_arr[part] == "val", days_arr, y, anchor_arr, {
+            "model": probs[part].argmax(axis=1), "nowx": probs[f"{part}_nowx"].argmax(axis=1),
+            "B1_active_config": picks_arr[part]["B1_active_config"],
+        }, candidates)
+        for part in ("day_a", "day_b")
+    }
+    leakage_by_day = by_day(both, days_arr, y, anchor_arr, {
+        "day_a": probs["day_a"].argmax(axis=1), "flight": probs["flight"].argmax(axis=1),
+        "B1_active_config": picks_arr["day_a"]["B1_active_config"],
+    }, candidates)
+
     days = sorted({operational_day(parse_utc(f["landing_time_utc"])) for f in pool.flights.values()})
     fold_days = {part: Counter(day_folds(d, config)[part] for d in days) for part in ("a", "b")}
     out = Path(args.output_dir)
@@ -346,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
         "minority_runways": minority_names,
         "anchors": {"entry": "the arrival-slice entry (25 km ring)",
                     "rings_km": list(radii_km), "rule": "first sample within R km of the airport reference"},
-        "operational_day_shift_h": 9,
+        "operational_day_shift_h": OPERATIONAL_DAY_SHIFT.total_seconds() / 3600,
         "features": list(space.names),
         "feature_groups": dict(space.groups),
         "hgb": HGB_SETTINGS,
@@ -361,6 +397,8 @@ def main(argv: list[str] | None = None) -> int:
         "context_pool": {"landings": len(pool.landings), "excluded_outer_test": pool.excluded_outer_test},
         "models": results,
         "leakage": leakage,
+        "validation_by_day": validation_by_day,
+        "leakage_by_day": leakage_by_day,
         "importance_day_a": importance,
     }
     (out / "runway_intent_r1.json").write_text(json.dumps(document, indent=1), encoding="utf-8")
@@ -385,6 +423,19 @@ def main(argv: list[str] | None = None) -> int:
         m = leakage[name]["all"]["model"]
         lines.append(f"  paired ({document['split']['paired_leakage_flights']} flights) {name:<6}: "
                      f"exact {m['exact']:.1%}  side|dir {_pct(m['side_given_direction'])}  NLL {m['nll']:.3f}")
+    for part, cells in validation_by_day.items():
+        worst = min(cells, key=lambda d: cells[d]["exact"]["model"])
+        w = cells[worst]
+        median = {n: float(np.median([c["exact"][n] for c in cells.values()])) for n in ("model", "B1_active_config")}
+        lines.append(
+            f"  {part} per day ({len(cells)} val days): model median {median['model']:.1%}, B1 median "
+            f"{median['B1_active_config']:.1%}; worst {worst}: model {w['exact']['model']:.1%}, B1 "
+            f"{w['exact']['B1_active_config']:.1%} ({w['flights']} flights, {w['top_runway']} {w['top_share']:.0%})"
+        )
+    gaps = {d: c for d, c in leakage_by_day.items() if abs(c["exact"]["flight"] - c["exact"]["day_a"]) >= 0.05}
+    lines.append("  paired by day, |flight - day_a| >= 5 points: " + (", ".join(
+        f"{d} ({c['flights']} flights, {c['top_runway']} {c['top_share']:.0%}) day_a {c['exact']['day_a']:.1%} "
+        f"flight {c['exact']['flight']:.1%}" for d, c in gaps.items()) or "none"))
     lines.append("  importance (day_a, exact / side drop): " + ", ".join(
         f"{g} {c['exact_drop']:+.3f}/{_pct(c['side_drop'], signed=True)}" for g, c in importance.items()))
     text = "\n".join(lines)
