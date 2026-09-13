@@ -6,6 +6,23 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
+## Runway intent — PLANNED 2026-09-13 (`docs/2026-09-13_runway_intent_plan.zh.md`)
+
+The user's point (2026-09-13): which runway an arrival lands on must be predicted, not given —
+it is the intent that multi-aircraft interaction turns on. Today every ts path reads the landed
+runway (threshold anchor; the plan path's CIFP skeleton), so every published number is
+runway-given. Plan: an explicit runway head `p(r | causal context)` over the airport's
+candidates × the existing per-runway predictors as conditional experts; multi-runway
+assignment in the §9 step 6 scheduler; a joint scene model only if that shows interaction
+error. **Next: R0**, zero training — extend `experiments/runway_hypotheses.py` to all five
+airports with causal baselines B0–B4, the anytime curve and the per-airport cost of a wrong
+runway. **Open, the user's:** D1 the split (per-flight random leaks the shared runway
+configuration; a day-blocked split — blocks R1), D2 scope, D3 the candidate set (v5 roster lacks
+KRDU 32 / KSMF 35R), D4 standalone classifier vs backbone head, D5 how the thesis states the
+runway-given premise.
+
+---
+
 ## Decisions left open by the 2026-09-09 package review (branch `dev-pkg-review`)
 
 The review's bugs are fixed (its §7 is the ledger; changelog entry of the same date). These
