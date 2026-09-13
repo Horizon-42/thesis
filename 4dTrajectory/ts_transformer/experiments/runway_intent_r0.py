@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -32,21 +31,19 @@ from typing import Any
 
 from ts_transformer.experiments.support import REPO_ROOT
 
-from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402
 from ts_transformer.data.runway_context import (  # noqa: E402
     RULES,
     ContextLanding,
     build_airport_context,
-    course_deg,
     parse_utc,
 )
+from ts_transformer.data.runway_features import ENTRY, anchors, track_course_at  # noqa: E402
 from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
 from ts_transformer.training.train import load_checkpoint  # noqa: E402
 
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 METAR_ROOT = REPO_ROOT / "data" / "metar"
 SCHEMA = "ts-runway-intent-r0-v1"
-ENTRY = "entry"
 #: The landing direction in a bin is the group with the most landings; bins with fewer
 #: landings than this are skipped, and a new direction counts as a flip only once it holds
 #: for `FLIP_PERSIST_BINS` consecutive counted bins (a single go-around is not a reversal).
@@ -57,43 +54,6 @@ FLIP_PERSIST_BINS = 2
 #: a different direction after the gap is a CHANGE ACROSS A GAP, counted apart from the flips —
 #: the first readout counted them as flips, a third of KSJC's and KSMF's (review, 2026-09-13).
 FLIP_MAX_GAP = timedelta(hours=3)
-
-
-def remaining_path_m(waypoints: list[list[float]]) -> list[float]:
-    """Flown horizontal path from each sample to the last one (the landing), metres."""
-    remaining = [0.0] * len(waypoints)
-    for i in range(len(waypoints) - 2, -1, -1):
-        _, lon0, lat0, _ = waypoints[i]
-        _, lon1, lat1, _ = waypoints[i + 1]
-        step = math.hypot(
-            (lon1 - lon0) * metres_per_deg_lon(0.5 * (lat0 + lat1)),
-            (lat1 - lat0) * METRES_PER_DEG_LAT,
-        )
-        remaining[i] = remaining[i + 1] + step
-    return remaining
-
-
-def anchors(waypoints: list[list[float]], bins_km: list[float]) -> dict[str, int]:
-    """``entry`` -> 0, and ``<D>km`` -> the first sample with at most D km left, for every D
-    the flight's slice actually starts beyond (a flight entering with 12 km left has no 15 km
-    anchor — it is counted out of that bin, and the bin's coverage says so)."""
-    remaining = remaining_path_m(waypoints)
-    out = {ENTRY: 0}
-    for distance_km in bins_km:
-        limit = distance_km * 1000.0
-        if remaining[0] <= limit:
-            continue
-        out[f"{distance_km:g}km"] = next(i for i, r in enumerate(remaining) if r <= limit)
-    return out
-
-
-def track_course_at(waypoints: list[list[float]], index: int) -> float:
-    """The course INTO the anchor sample (a backward difference: nothing after the anchor);
-    at the entry sample, the only one with nothing before it, the first segment's course."""
-    i0, i1 = (index - 1, index) if index > 0 else (0, 1)
-    _, lon0, lat0, _ = waypoints[i0]
-    _, lon1, lat1, _ = waypoints[i1]
-    return course_deg(lon0, lat0, lon1, lat1)
 
 
 def day_fold(day: str, config: Any) -> str:

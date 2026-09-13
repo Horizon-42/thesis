@@ -181,6 +181,11 @@ class RunwayContext:
         # Deterministic: count first, then runway name.
         return min(pool, key=lambda runway: (-counts[runway], runway)) if pool else None
 
+    @property
+    def majority_counts(self) -> Counter:
+        """The per-runway counts the static majority is taken from (a copy)."""
+        return Counter(self._majority)
+
     def majority_among(self, among: Iterable[str]) -> str:
         pool = sorted(among)
         return min(pool, key=lambda runway: (-self._majority[runway], runway))

@@ -3,12 +3,8 @@
 from datetime import datetime, timedelta, timezone
 
 from ts_transformer.data.runway_context import ContextLanding
-from ts_transformer.experiments.runway_intent_r0 import (
-    anchors,
-    direction_flips,
-    remaining_path_m,
-    track_course_at,
-)
+from ts_transformer.data.runway_features import anchors, remaining_path_m, track_course_at
+from ts_transformer.experiments.runway_intent_r0 import direction_flips
 
 T0 = datetime(2026, 6, 1, 6, 0, tzinfo=timezone.utc)
 GROUPS = {"05L": 0, "05R": 0, "23L": 1, "23R": 1}
