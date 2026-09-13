@@ -335,6 +335,18 @@
     "development_teacher_current_manifest_seed1337": "simple-v1 + 2026-08 oracle 教师初始化（当前 manifest 上 32 条 outer-train 调度、1000 步模仿）；与无教师臂配对。",
     "development_no_teacher_current_manifest_seed1337": "同配方、同种子、同数据，不做教师初始化；作为衡量教师初始化贡献的对照。"
    }
+  },
+  "runway_intent_r2b_20260913": {
+   "title": "跑道意图 R2b · 按天划分重训的 plan 专家",
+   "intent": "论文要引用\"不知道跑道的代价\"：用学到的跑道头（R1.1b 的 r11_lift）选跑道、再由 plan 专家飞出来，端到端误差比已知跑道高多少、比用同时段落地规则选跑道低多少。R2a 的专家按航班划分训练，见过评估日的其他航班；这里把五个机场的专家在 day_a 的训练日上重训，评估日它们一架都没见过，数字才可引用。",
+   "design": "4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md §16.2",
+   "runs": {
+    "KRDU_day_a_expert": "KRDU 的 plan 专家按天划分重训：原专家（step3g_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。",
+    "KSJC_day_a_expert": "KSJC 的 plan 专家按天划分重训：原专家（step5b_KSJC_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。",
+    "KSTL_day_a_expert": "KSTL 的 plan 专家按天划分重训：原专家（step5b_KSTL_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。",
+    "KSMF_day_a_expert": "KSMF 的 plan 专家按天划分重训：原专家（step5b_KSMF_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。",
+    "KMSY_day_a_expert": "KMSY 的 plan 专家按天划分重训：原专家（step5b_KMSY_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。"
+   }
   }
  }
 }

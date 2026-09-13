@@ -7,7 +7,14 @@ import pytest
 from ts_transformer.config import TSConfig
 from ts_transformer.data.runway_context import operational_day, parse_utc
 from ts_transformer.experiments.runway_intent_r1 import day_folds
-from ts_transformer.experiments.runway_intent_r2 import _expected, _top, anchor_waypoint, evaluation_flights
+from ts_transformer.experiments.runway_intent_r2 import (
+    _expected,
+    _top,
+    anchor_waypoint,
+    day_validation_flights,
+    evaluation_flights,
+)
+from ts_transformer.experiments.runway_intent_r2b_cohort import training_day_flights
 
 
 def test_the_head_reads_the_last_track_point_at_or_before_the_experts_anchor():
@@ -44,3 +51,17 @@ def test_an_evaluation_flight_is_expert_validation_on_a_partitions_validation_da
     # a flight outside the expert's validation split is out, whatever its day
     held_back = evaluation_flights(s, set(usable) - {next(iter(expected))})
     assert next(iter(expected)) not in held_back
+
+
+def test_the_r2b_cohort_keeps_training_days_and_the_r2b_roster_takes_the_validation_days():
+    config = TSConfig()
+    days = [f"2026-06-{d:02d}" for d in range(1, 31)]
+    landing = {f"KSMF:f{i}": f"{day}T14:00:00Z" for i, day in enumerate(days)}
+    fold = {fid: day_folds(operational_day(parse_utc(t)), config)["a"] for fid, t in landing.items()}
+    kept = training_day_flights(tuple(landing), landing, "day_a", config)
+    assert kept == [fid for fid in landing if fold[fid] == "train"]
+    s = SimpleNamespace(usable={fid.split(":")[1]: {"landing_time_utc": t} for fid, t in landing.items()}, config=config)
+    roster = day_validation_flights(s, "day_a")
+    assert set(roster) == {fid.split(":")[1] for fid in landing if fold[fid] == "val"}
+    assert not set(roster) & {fid.split(":")[1] for fid in kept}      # disjoint by construction
+

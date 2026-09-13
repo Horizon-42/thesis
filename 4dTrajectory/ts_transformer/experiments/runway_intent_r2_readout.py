@@ -108,8 +108,9 @@ def gates(cells: dict[str, dict[str, Any]], pooled: dict[str, Any]) -> dict[str,
     out["pooled"] = {"head": pooled["selectors"][HEAD]["fde_delta_mean"],
                      "b1": pooled["selectors"]["B1_active_config"]["fde_delta_mean"],
                      "pass": pooled["selectors"][HEAD]["fde_delta_mean"] < pooled["selectors"]["B1_active_config"]["fde_delta_mean"]}
-    out["all_pass"] = all(v is not None and v["pass"] for v in out.values() if isinstance(v, dict)) and \
-        all(a in cells for a in AIRPORTS)
+    # an airport with no document or no common flight has not been read: its gate fails
+    out["all_pass"] = (all(out[a] is not None and out[a]["pass"] for a in STRICT + TOLERANT)
+                       and out["pooled"]["pass"] and all(a in cells for a in AIRPORTS))
     return out
 
 

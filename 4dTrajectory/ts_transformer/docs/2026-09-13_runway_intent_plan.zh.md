@@ -807,3 +807,25 @@ B0–B4；上界：事后 FDE 最小的候选（不可引用）。另报**按信
 代码：`experiments/runway_intent_r2.py`（runner）、`experiments/runway_intent_r2_readout.py`（汇总与门槛）。产物
 `4dTrajectory/outputs/POOLED/experiments/runway_intent_r2_20260913/<ICAO>/`。
 
+### 16.2 R2b（写在运行之前）
+
+**队列**：`run_ts.py runway_intent_r2b_cohort` 把每个专家**自己的**开发队列（KRDU
+`plan_guidance_20260910/step3c_plan_head_full_cohort.json`，其余 `step5b_<ICAO>_cohort/development_cohort.json`）
+限制到 day_a 的**训练日**：训练仍是训练，验证仍是验证（开发队列机制原样接受，不改包）；落在 day_a 验证日和测试日
+的航班全部去掉。
+
+**训练**：专家自己存下的配置（`history.json` 的 `config`）作 `--config-overrides`——同一配方（K = 4 混合头、
+rolled windows 份额 0.75、同一张表：KRDU `step3e_r0_table`，其余 `step5_pool_table`；120 epoch、patience 15、
+seed 1337），加 `--development-cohort` 与 `--eligibility-roster`；正式 campaign `runway_intent_r2b_20260913`，
+experiment `<ICAO>_day_a_expert`（先提交、意图先写进 `intents.json`）。
+
+**评估**：R2 runner `--roster day-val`——day_a **全部**验证日航班（不只专家的验证哈希），用 day_a 的跑道头与规则；
+专家若见过其中任何一架（训练或选模），运行直接拒绝。
+
+**门槛**：§16.1 的三条在 R2b 的航班上重读——R2b 的数字才是可引用的"不知道跑道的代价"。另报（不设门槛）：重训专家在
+已知跑道下的 FDE / ADE，对照原专家（小队列的种子线 ±200–360 m，§12.11 of the plan-and-guidance design），用来确认
+重训没有坏掉。
+
+**成本**：五个头约 1 h GPU（原配方每机场约 10 min，队列约 72 %；KRDU 更大）＋评估约 1–1.5 h（每机场 1000–1900 架 ×
+候选数）。一条分离的链，由 opus 子代理按 PID 看守并回报数字。
+

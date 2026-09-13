@@ -8,11 +8,13 @@ or before it. The expert is the plan checkpoint, flown under each candidate by R
 the same `forecast_approaches` — the rolled lockstep cut at the threshold — scored in the true
 runway's chart). Every pick is scored against the known runway on the same flights.
 
-The flights are the ones NEITHER model trained on: the plan checkpoint's per-flight validation split,
-on the operating days that are validation days of a day partition (``day_a`` first) — each flight is
-read by that partition's runway head and rules. The expert did see other flights of the same days
-(it trains on the per-flight split): the paired comparison is unaffected, the absolute error level is
-not — R2b retrains the experts on the day split.
+The flights are the ones NEITHER model trained on (``--roster``). R2a (``expert-val``): the plan
+checkpoint's per-flight validation split, on the operating days that are validation days of a day
+partition (``day_a`` first) — each flight read by that partition's runway head and rules; the expert
+did see other flights of those days (it trains on the per-flight split), which leaves the paired
+comparison unbiased and the absolute error level not. R2b (``day-val``): every flight on ``day_a``'s
+validation days, flown by an expert retrained on ``day_a``'s training days only
+(`runway_intent_r2b_cohort`); the run refuses an expert that has seen any of them.
 
     python run_ts.py runway_intent_r2 --airport KRDU --checkpoint <plan checkpoint.pt> \\
         --output-dir 4dTrajectory/outputs/POOLED/experiments/runway_intent_r2_20260913/KRDU
@@ -88,6 +90,13 @@ def evaluation_flights(s: RunwaySamples, val_keys: set[str]) -> dict[str, str]:
         elif folds["b"] == "val":
             out[key] = "day_b"
     return out
+
+
+def day_validation_flights(s: RunwaySamples, partition: str) -> dict[str, str]:
+    """flight key -> ``partition`` for every usable flight on the partition's validation days."""
+    fold = {"day_a": "a", "day_b": "b"}[partition]
+    return {key: partition for key, flight in s.usable.items()
+            if day_folds(operational_day(parse_utc(flight["landing_time_utc"])), s.config)[fold] == "val"}
 
 
 def anchor_waypoint(flight: dict[str, Any], seconds_after_first: float) -> int:
@@ -169,6 +178,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkpoint", required=True, help="the plan expert (a threshold-anchored plan checkpoint)")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--roster", choices=("expert-val", "day-val"), default="expert-val",
+                        help="expert-val (R2a): the expert's validation split on a partition's validation days; "
+                             "day-val (R2b): every flight on day_a's validation days, for an expert trained "
+                             "on day_a's training days only")
     args = parser.parse_args(argv)
 
     s = build_samples(args)
@@ -183,10 +196,19 @@ def main(argv: list[str] | None = None) -> int:
     model = model.to(device)
     targets = json.loads(manifest_path.read_text(encoding="utf-8"))["runway_targets"]
 
-    val_keys = {k.split(":", 1)[1] for k in payload["split"]["val"] if k.startswith(f"{airport}:")}
-    partition_of = evaluation_flights(s, val_keys)
+    def keys_of(split: str) -> set[str]:
+        return {k.split(":", 1)[1] for k in payload["split"][split] if k.startswith(f"{airport}:")}
+
+    if args.roster == "expert-val":
+        partition_of = evaluation_flights(s, keys_of("val"))
+    else:
+        partition_of = day_validation_flights(s, "day_a")
+        seen = (keys_of("train") | keys_of("val")) & set(partition_of)
+        if seen:
+            parser.error(f"--roster day-val needs an expert that never saw day_a's validation days; "
+                         f"this one trained or selected on {len(seen)} of their flights")
     flights = {key: s.usable[key] for key in sorted(partition_of)}
-    print(f"{airport}: {len(flights)} evaluation flights (expert validation x a partition's validation days; "
+    print(f"{airport}: {len(flights)} evaluation flights ({args.roster}; "
           f"day_a {sum(p == 'day_a' for p in partition_of.values())}, day_b {sum(p == 'day_b' for p in partition_of.values())})")
 
     unflyable = {}
@@ -258,8 +280,11 @@ def main(argv: list[str] | None = None) -> int:
         "runway_head": {"name": HEAD, "settings": HEAD_SETTINGS, "reference": "r1", "reference_settings": HGB_SETTINGS,
                         "asked_at": "the expert's anchor (L-1), from the last raw track point at or before it"},
         "evaluation": {
-            "rule": "the expert's per-flight validation split x the operating days that are a day partition's "
-                    "validation days (day_a first); each flight read by that partition's head and rules",
+            "roster": args.roster,
+            "rule": ("the expert's per-flight validation split x the operating days that are a day partition's "
+                     "validation days (day_a first); each flight read by that partition's head and rules"
+                     if args.roster == "expert-val" else
+                     "every flight on day_a's validation days; the expert trained on day_a's training days only"),
             "flights": len(out_flights),
             "by_partition": {part: sum(f["partition"] == part for f in out_flights) for part in PARTS},
             "unscored": len(flights) - len(out_flights),
