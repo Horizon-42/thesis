@@ -1178,5 +1178,5 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 | putting the procedure constraint into TRAINING as a hard constraint (either path), or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` (survey with formulas + H0–H6 plan; papers in repo `docs/literature/procedure_hard_constraints/`) |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
-| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (plan R0–R4; decisions D1–D5 open) |
+| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (R0 measured §11: direction solved by context, the parallel SIDE is the problem; R1 next, blocked by decision D1) |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

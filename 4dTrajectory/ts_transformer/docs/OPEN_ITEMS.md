@@ -6,7 +6,25 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
-## Runway intent — PLANNED 2026-09-13 (`docs/2026-09-13_runway_intent_plan.zh.md`)
+## Runway intent — R0 MEASURED 2026-09-13 (`docs/2026-09-13_runway_intent_plan.zh.md` §11)
+
+R0 (no training; the plan heads' val splits; outer-test hashes out of every context pool):
+the landing DIRECTION is solved by co-temporal landings (B1 96–99 % at all five airports); the
+SIDE is the problem — side-given-direction 73–75 % at KRDU, 61–65 % at KSMF, ~90 % at KSTL, 93–95 %
+at KSJC (KMSY has no parallels), with the minority runways at 33–49 % (KRDU 05R / 23L, KSMF 17L,
+KSJC 30R, KSTL 11 / 12R). The causal rules are flat along the approach (the aircraft's own track
+is the unused signal). Choosing by B1 / B3 raises the plan heads' paired FDE mean by +380–650 m at
+KRDU / KSTL / KSMF, +20–30 m at KSJC. **Next: R1** (a runway head; gates pre-registered in §11.4),
+**blocked by D1** (the day-blocked split; R0 recommends it for the R series, plan heads retrain on it
+in ~10 min each). Artifacts `outputs/POOLED/experiments/runway_intent_r0_20260913/`; code `fc57d80`
++ `9e3ac49`.
+
+**Found on the way, not runway choice:** the per-airport plan heads fly rarely-landed runways badly
+EVEN WITH the true runway — KMSY 02 (29 val flights) FDE median 23.2 km, KSTL 24 and KSJC 12L (one
+flight each) 23.0 / 5.7 km, and KSMF 17R 956 m / 17L 215 m against 30–70 m on most runways. Not
+investigated; the per-runway FDE table is in the R0 readout (`readout.md`, last section).
+
+### The plan (2026-09-13)
 
 The user's point (2026-09-13): which runway an arrival lands on must be predicted, not given —
 it is the intent that multi-aircraft interaction turns on. Today every ts path reads the landed
@@ -14,9 +32,9 @@ runway (threshold anchor; the plan path's CIFP skeleton), so every published num
 runway-given. Plan: an explicit runway head `p(r | causal context)` over the airport's
 candidates × the existing per-runway predictors as conditional experts; multi-runway
 assignment in the §9 step 6 scheduler; a joint scene model only if that shows interaction
-error. **Next: R0**, zero training — extend `experiments/runway_hypotheses.py` to all five
-airports with causal baselines B0–B4, the anytime curve and the per-airport cost of a wrong
-runway. **Open, the user's:** D1 the split (per-flight random leaks the shared runway
+error. R0 (zero training: `experiments/runway_hypotheses.py` v4 on all five airports, causal
+baselines B0–B4, the anytime curve, the per-airport cost of a wrong runway) is the block above.
+**Open, the user's:** D1 the split (per-flight random leaks the shared runway
 configuration; a day-blocked split — blocks R1), D2 scope, D3 the candidate set (v5 roster lacks
 KRDU 32 / KSMF 35R), D4 standalone classifier vs backbone head, D5 how the thesis states the
 runway-given premise.
