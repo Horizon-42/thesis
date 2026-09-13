@@ -14,6 +14,11 @@ artifact — so every comparison is paired.
 Three trainings per head, as in R1: ``day_a`` / ``day_b`` (the operating-day partitions) and
 ``flight`` (the per-flight split, the leakage control, read paired with ``day_a``).
 
+R1.1b (plan §15.3) adds two heads on the same table: R1.1's rows still re-identify a runway through
+two per-runway constants — its training share (``prior_share``) and the operator's share of its
+landings — and on the closure days the trees trusted them over the recent landings. ``r11_noid``
+drops both; ``r11_lift`` drops the prior and moves the operator's share to its deviation from it.
+
     python run_ts.py runway_intent_r11 --airport KSJC \\
         --output-dir 4dTrajectory/outputs/POOLED/experiments/runway_intent_r11_20260913/KSJC
 """
@@ -50,9 +55,16 @@ from ts_transformer.experiments.runway_intent_r1 import (
 )
 from ts_transformer.experiments.support import REPO_ROOT
 
-SCHEMA = "ts-runway-intent-r11-v1"
+# v2: R1.1b's identity-free heads beside R1.1's (plan §15.3)
+SCHEMA = "ts-runway-intent-r11-v2"
 PARTITIONS = ("day_a", "day_b", "flight")
-HEADS = ("r11", "r1")
+#: The candidate-symmetric heads — R1.1 as pre-registered (§14) and R1.1b's two variants (§15.3),
+#: each a selection / transform of the one candidate table (`head_table`) — and R1's head.
+SYMMETRIC_HEADS = ("r11", "r11_noid", "r11_lift")
+HEADS = SYMMETRIC_HEADS + ("r1",)
+#: The two columns that carry a runway's base rate, i.e. which runway a row is (§15.2).
+IDENTITY_COLUMNS = ("prior_share", "airline_share")
+HEAD_GROUPS = {**CANDIDATE_ROW_GROUPS, "airline_lift": "airline"}
 #: R1's budget and tree shape (`HGB_SETTINGS`), so the two heads differ in the representation only.
 HEAD_SETTINGS = dict(n_iter=HGB_SETTINGS["max_iter"], learning_rate=HGB_SETTINGS["learning_rate"],
                      max_leaf_nodes=HGB_SETTINGS["max_leaf_nodes"],
@@ -285,18 +297,42 @@ def airline_shares(
     return out
 
 
+def head_columns(head: str) -> tuple[str, ...]:
+    """The column names of ``head``'s rows (`head_table`)."""
+    if head == "r11":
+        return CANDIDATE_ROW_NAMES
+    kept = tuple(name for name in CANDIDATE_ROW_NAMES if name not in IDENTITY_COLUMNS)
+    return kept if head == "r11_noid" else kept + ("airline_lift",)
+
+
+def head_table(table: np.ndarray, head: str) -> np.ndarray:
+    """``head``'s rows, from the full candidate table: R1.1's as they are; ``r11_noid`` without the
+    `IDENTITY_COLUMNS`; ``r11_lift`` without the prior and with the operator's share replaced by its
+    DEVIATION from the prior — about 0 on every runway for an operator that lands like everyone else,
+    so it no longer carries the runway's base rate, while a real preference (a terminal side) stays."""
+    if head == "r11":
+        return table
+    index = {name: i for i, name in enumerate(CANDIDATE_ROW_NAMES)}
+    kept = table[:, :, [index[name] for name in head_columns("r11_noid")]]
+    if head == "r11_noid":
+        return kept
+    lift = table[:, :, index["airline_share"]] - table[:, :, index["prior_share"]]
+    return np.concatenate([kept, lift[:, :, None]], axis=2)
+
+
 def grouped_permutation_rows(
-    head: ListwiseBooster, table: np.ndarray, truth: np.ndarray, *, group_of: np.ndarray, multi: np.ndarray,
+    head: ListwiseBooster, table: np.ndarray, truth: np.ndarray, names: Sequence[str], *,
+    group_of: np.ndarray, multi: np.ndarray,
 ) -> dict[str, dict[str, float | None]]:
-    """R1's grouped permutation importance on the candidate table: one group's columns are
-    permuted together across SAMPLES (every candidate row of a sample moves with it). The static
-    prior is constant across samples within a partition, so no permutation can move it; it is left
-    out rather than reported as zero."""
+    """R1's grouped permutation importance on a candidate table whose columns are ``names``: one
+    group's columns are permuted together across SAMPLES (every candidate row of a sample moves with
+    it). The static prior is constant across samples within a partition, so no permutation can move
+    it; it is left out rather than reported as zero."""
     base = level_accuracy(head.predict_proba(table).argmax(axis=1), truth, group_of, multi)
     rng = np.random.default_rng(0)
     out: dict[str, dict[str, float | None]] = {}
-    for group in sorted(set(CANDIDATE_ROW_GROUPS.values()) - {"static prior"}):
-        columns = [i for i, name in enumerate(CANDIDATE_ROW_NAMES) if CANDIDATE_ROW_GROUPS[name] == group]
+    for group in sorted({HEAD_GROUPS[name] for name in names} - {"static prior"}):
+        columns = [i for i, name in enumerate(names) if HEAD_GROUPS[name] == group]
         drops_exact, drops_side = [], []
         for _ in range(PERMUTATION_REPEATS):
             shuffled = table.copy()
@@ -336,15 +372,19 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     probs: dict[str, dict[str, np.ndarray]] = {head: {} for head in HEADS}
-    boosters: dict[str, ListwiseBooster] = {}
+    boosters: dict[str, ListwiseBooster] = {}      # the day_a heads, for their importance
     results: dict[str, Any] = {}
     timings: dict[str, float] = {}
     for part in PARTITIONS:
         train, val = s.folds[part] == "train", s.folds[part] == "val"
-        started = time.perf_counter()
-        boosters[part] = ListwiseBooster(**HEAD_SETTINGS).fit(tables[part][train], s.y[train])
-        timings[part] = time.perf_counter() - started
-        probs["r11"][part] = boosters[part].predict_proba(tables[part])
+        for head in SYMMETRIC_HEADS:
+            rows = head_table(tables[part], head)
+            started = time.perf_counter()
+            booster = ListwiseBooster(**HEAD_SETTINGS).fit(rows[train], s.y[train])
+            timings[f"{head}/{part}"] = time.perf_counter() - started
+            probs[head][part] = booster.predict_proba(rows)
+            if part == "day_a":
+                boosters[head] = booster
         reference = HistGradientBoostingClassifier(**HGB_SETTINGS).fit(s.X[train], s.y[train])
         prob = np.zeros((len(s.y), count))
         prob[:, reference.classes_] = reference.predict_proba(s.X)
@@ -381,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     validation_by_day = {
         part: by_day(s.folds[part] == "val", s.days, s.y, s.anchors, {
-            "r11": probs["r11"][part].argmax(axis=1), "r1": probs["r1"][part].argmax(axis=1),
+            **{head: probs[head][part].argmax(axis=1) for head in HEADS},
             "B1_active_config": s.picks[part]["B1_active_config"],
         }, candidates)
         for part in ("day_a", "day_b")
@@ -394,7 +434,11 @@ def main(argv: list[str] | None = None) -> int:
         for head in HEADS
     }
     val_a = s.folds["day_a"] == "val"
-    importance = grouped_permutation_rows(boosters["day_a"], tables["day_a"][val_a], s.y[val_a], **kw)
+    importance = {
+        head: grouped_permutation_rows(boosters[head], head_table(tables["day_a"], head)[val_a], s.y[val_a],
+                                       head_columns(head), **kw)
+        for head in SYMMETRIC_HEADS
+    }
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -406,7 +450,8 @@ def main(argv: list[str] | None = None) -> int:
         "minority_runways": s.minority_names,
         "anchors": {"entry": "the arrival-slice entry (25 km ring)", "rings_km": s.radii_km,
                     "rule": "first sample within R km of the airport reference"},
-        "candidate_row": {"columns": list(CANDIDATE_ROW_NAMES), "groups": CANDIDATE_ROW_GROUPS},
+        "candidate_row": {"columns": list(CANDIDATE_ROW_NAMES), "groups": HEAD_GROUPS,
+                          "heads": {head: list(head_columns(head)) for head in SYMMETRIC_HEADS}},
         "head": {**HEAD_SETTINGS, "hessian_floor": HESSIAN_FLOOR, "min_child_hessian": MIN_CHILD_HESSIAN,
                  "max_bins": MAX_BINS, "tree": "histogram, leaf-wise, Newton (ListwiseBooster)"},
         "r1_head": HGB_SETTINGS,
@@ -424,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
 
     lines = [f"{s.airport}: {len(s.usable)} usable flights, {len(s.y)} samples, {count} candidates; "
              f"R1 head matches R1's artifact: {r1_check.get('identical', 'no artifact')}; "
-             f"R1.1 fit seconds {', '.join(f'{p} {t:.0f}' for p, t in timings.items())}"]
+             f"fit seconds {', '.join(f'{k} {t:.0f}' for k, t in timings.items())}"]
     for part in PARTITIONS:
         for anchor in ("all", ENTRY):
             cells = []
@@ -443,13 +488,15 @@ def main(argv: list[str] | None = None) -> int:
                      f"day_a {a['exact']:.1%} / flight {f['exact']:.1%}")
     for part, cells in validation_by_day.items():
         trailing = [f"{day} ({c['flights']} flights, {c['top_runway']} {c['top_share']:.0%}): "
-                    f"r11 {c['exact']['r11']:.1%} r1 {c['exact']['r1']:.1%} B1 {c['exact']['B1_active_config']:.1%}"
+                    + " ".join(f"{head} {c['exact'][head]:.1%}" for head in HEADS)
+                    + f" B1 {c['exact']['B1_active_config']:.1%}"
                     for day, c in cells.items()
-                    if c["exact"]["B1_active_config"] - min(c["exact"]["r11"], c["exact"]["r1"]) >= 0.05]
+                    if c["exact"]["B1_active_config"] - min(c["exact"][head] for head in HEADS) >= 0.05]
         lines.append(f"  {part} days a head trails B1 by >= 5 points: " + ("; ".join(trailing) or "none"))
-    lines.append("  importance (r11 day_a, exact / side drop): " + ", ".join(
-        f"{g} {c['exact_drop']:+.3f}/{'n/a' if c['side_drop'] is None else format(c['side_drop'], '+.3f')}"
-        for g, c in importance.items()))
+    for head, groups in importance.items():
+        lines.append(f"  importance ({head} day_a, exact / side drop): " + ", ".join(
+            f"{g} {c['exact_drop']:+.3f}/{'n/a' if c['side_drop'] is None else format(c['side_drop'], '+.3f')}"
+            for g, c in groups.items()))
     text = "\n".join(lines)
     (out / "runway_intent_r11.txt").write_text(text + "\n", encoding="utf-8")
     print(text)

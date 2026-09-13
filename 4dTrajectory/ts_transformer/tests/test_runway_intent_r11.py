@@ -4,11 +4,15 @@ from collections import Counter
 
 import numpy as np
 
+from ts_transformer.data.runway_features import CANDIDATE_ROW_NAMES
 from ts_transformer.experiments.runway_intent_r11 import (
     AIRLINE_PRIOR_WEIGHT,
+    IDENTITY_COLUMNS,
     ListwiseBooster,
     airline_block,
     airline_shares,
+    head_columns,
+    head_table,
     prior_share,
 )
 
@@ -112,4 +116,17 @@ def test_a_newton_leaf_is_minus_g_over_h_plus_lambda():
     # the answers' leaf: 40 rows of g = -1/2, h = 1/4; the others' leaf: g = +1/2
     np.testing.assert_allclose(head.train_scores_[:, 0], 20.0 / (10.0 + lam))
     np.testing.assert_allclose(head.train_scores_[:, 1], -20.0 / (10.0 + lam))
+
+
+def test_the_identity_free_heads_drop_the_base_rate_and_keep_only_the_operators_deviation():
+    rng = np.random.default_rng(3)
+    table = rng.random((5, 3, len(CANDIDATE_ROW_NAMES)))
+    index = {name: i for i, name in enumerate(CANDIDATE_ROW_NAMES)}
+    np.testing.assert_array_equal(head_table(table, "r11"), table)
+    noid, lift = head_table(table, "r11_noid"), head_table(table, "r11_lift")
+    assert noid.shape[2] == len(head_columns("r11_noid")) == len(CANDIDATE_ROW_NAMES) - len(IDENTITY_COLUMNS)
+    assert not set(IDENTITY_COLUMNS) & set(head_columns("r11_noid"))
+    assert head_columns("r11_lift")[-1] == "airline_lift" and "prior_share" not in head_columns("r11_lift")
+    np.testing.assert_array_equal(noid[:, :, 0], table[:, :, index[head_columns("r11_noid")[0]]])
+    np.testing.assert_allclose(lift[:, :, -1], table[:, :, index["airline_share"]] - table[:, :, index["prior_share"]])
 
