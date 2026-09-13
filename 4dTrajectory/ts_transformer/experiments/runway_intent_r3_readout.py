@@ -100,13 +100,15 @@ def checks_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
 
 def delivery_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
     """How the flown landing met its scheduled time, for the flights the schedule DELAYED against the
-    ones it left at their own ETA: the closure has to lose the delay, and from the L-1 anchor (a median
-    ~13 km out) it often cannot — slower than the stall floor is not an option and the path lever
-    rarely engages."""
+    ones it left at their own ETA, with the closure's unabsorbed time X (assigned remaining - closed
+    time; > 0 early) at the first and the last ask. Measured on the first formal run: X is ~0 at the
+    first ask — the closure plans to absorb the delay — and the flights that land early reach the
+    last ask 20-54 s ahead, no nearer the runway at the anchor than the rest: the time is lost as the
+    head re-plans between asks, and on the final there is no lever left."""
     lines = [
         "| airport | flights | delivered within 10 s: undelayed / delayed | flown - scheduled p50 s: undelayed / delayed | "
-        "delayed: delay p50 s, X first ask p50 s, stretched |",
-        "|---|---:|---|---|---|",
+        "delayed: delay p50 s, X first / last ask p50 s, stretched | X last ask p50 s on flights > 10 s early |",
+        "|---|---:|---|---|---|---:|",
     ]
     for airport, art in artifacts.items():
         landed = [r for r in art["flights"] if "flown" in r and r["flown"]["landed"]]
@@ -124,12 +126,16 @@ def delivery_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
         def signed(rows: list[dict[str, Any]]) -> str:
             return "—" if not rows else f"{np.median([r['flown']['time_s'] - r['scheduled']['time_s'] for r in rows]):+.0f}"
 
-        x = [r["flown"]["closure"]["planUnabsorbedFirstS"] for r in delayed]
+        x_first = [r["flown"]["closure"]["planUnabsorbedFirstS"] for r in delayed]
+        x_last = [r["flown"]["closure"]["planUnabsorbedLastS"] for r in delayed]
         stretched = [r["flown"]["closure"]["planStretchM"] > 0.0 for r in delayed]
+        early = [r["flown"]["closure"]["planUnabsorbedLastS"] for r in landed
+                 if r["flown"]["time_s"] - r["scheduled"]["time_s"] < -DELIVERED_S]
         lines.append(
             f"| {airport} | {len(kept)} / {len(delayed)} | {delivered(kept)} / {delivered(delayed)} | {signed(kept)} / {signed(delayed)} | "
             f"{_f(float(np.median([r['scheduled']['delay_s'] for r in delayed])) if delayed else None)}, "
-            f"{_f(float(np.median(x)) if x else None)}, {_f(100 * float(np.mean(stretched)) if stretched else None)}% |"
+            f"{_f(float(np.median(x_first)) if x_first else None)} / {_f(float(np.median(x_last)) if x_last else None)}, "
+            f"{_f(100 * float(np.mean(stretched)) if stretched else None)}% | {_f(float(np.median(early)) if early else None)} |"
         )
     return lines
 
