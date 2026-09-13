@@ -1022,7 +1022,7 @@ day_a 验证日的**全部**航班（R2b 的名单：跑道头、规则的静态
 | 选择 | 采用 | 另读（只排不飞） |
 |---|---|---|
 | 间隔 S | **3 NM 雷达最低间隔（7110.65BB 5-5-4 a/b）与 CWT 尾流间隔（TBL 5-5-2，前机过入口时须存在，5-5-4 h）取大**；机型 → CWT 类别取 JO 7360.1K 附录 A | 2.5 NM（5-5-4 j：须文件化平均跑道占用 ≤ 50 s 等授权，五个机场都没核实） |
-| 距离换时间 | 机场的进近地速：day_a **训练日**每架机最后 2 NM 的地速中位数（KRDU 69.8 m/s，3 NM = 79.6 s；KSJC 66.2 m/s，84.0 s） | — |
+| 距离换时间 | 机场的进近地速：day_a **训练日**每架机最后 2 NM 的地速中位数（KRDU 69.8 m/s，3 NM = 79.6 s；KSJC 66.2 m/s，84.0 s；KSTL 70.9 m/s，78.4 s）。两次落地在**进近时钟**上比较：入口时刻减去入口沿航向的位置按进近速度折成的时间——平行跑道的入口沿航向并不对齐（KRDU 23L/23R 0.67 NM，KSTL 11 对 12L 1.99 NM、对 12R 1.49 NM），各自的入口时刻说明不了两机的前后距离（代码审查发现：按入口时刻比较，KRDU 的计划里有 2 对、KSTL 有 3 对实际不够间隔，却报 0 违规；已改） | — |
 | 排序 | 按 ETA 先来先服务（调度器定顺序） | **因果版**：每架机在自己的锚点时刻放入、对已冻结的时隙排（FCFS 用到的 ETA 有些要在该机锚点之后几分钟才有） |
 | 样本 | day_a 验证日全部航班（R2b 名单），整条流连续排，忙时（本名单每钟点 ≥ 10 架）单列 | — |
 | 平行跑道 | < 2500 ft 视为同一跑道（5-5-4 h NOTE；雷达间隔也跨两条跑道取，是我们的读法，AIM 5-4-14 e "single runway separation"）；2500–3600 ft 相关，对角 1.0 NM（5-9-6 a2）；3600–4300 ft 相关，1.5 NM（a3；独立进近在 4300 ft 以下须 FMA + PRM，不假设）；≥ 4300 ft 独立（5-9-7 a2，假设航图授权同时进近，未核实）；交叉跑道（3-10-4）不建模 | **目视读法**（7-4-4 c：平行跑道之间不设间隔，各跑道自己的雷达与尾流间隔不变） |
@@ -1038,6 +1038,12 @@ F 类在后是 5 NM）；换成时间用训练日实测的进近地速（KRDU 69
 由雷达间隔约束；JO 7110.308E 允许 KSTL 12/30 两对近距平行跑道在 F–I 类前机时降到 1.0 NM 对角——该机场当前是否执行
 没有核实，不用；交叉跑道（KMSY 02/20 × 11/29）的入口放行规则（3-10-4 a）不建模，两个方向当作无关。
 
+### 17.5 代码落点
+
+`inference/runway_schedule.py`（调度器与间隔核验，纯 numpy，不依赖 torch）；`experiments/runway_intent_r3.py`（runner：
+读 R2b 的航班表，调度，用 R2b 的专家飞，核验）；`experiments/runway_intent_r3_readout.py`（五机场汇总与门槛）。产物
+`4dTrajectory/outputs/POOLED/experiments/runway_intent_r3_20260914/`。
+
 ### 17.6 间隔约束的出处（2026-09-14）
 
 用户 2026-09-14："80s的间隔是怎么得出的 如果你不确定 可以搜索相关文档 拿到最有说服力的间隔约束 这在后面多机交互里也可以
@@ -1051,10 +1057,3 @@ F 类在后是 5 NM）；换成时间用训练日实测的进近地速（KRDU 69
 
 编码在 `inference/runway_schedule.py` 的 FAA 段（`FAA_RADAR_NM`、`FAA_PARALLEL_REGIMES`、`CWT_ON_APPROACH_NM`、
 `CWT_BY_TYPECODE`、`faa_separation`），每个值注明段落号；后面的多机交互（R4 及以后）读同一份。
-
-### 17.5 代码落点
-
-`inference/runway_schedule.py`（调度器与间隔核验，纯 numpy，不依赖 torch）；`experiments/runway_intent_r3.py`（runner：
-读 R2b 的航班表，调度，用 R2b 的专家飞，核验）；`experiments/runway_intent_r3_readout.py`（五机场汇总与门槛）。产物
-`4dTrajectory/outputs/POOLED/experiments/runway_intent_r3_20260914/`。
-

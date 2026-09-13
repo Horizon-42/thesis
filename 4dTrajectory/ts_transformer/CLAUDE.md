@@ -1142,6 +1142,15 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
   re-identify the runway and override the recent landings on a configuration the training days lack
   (R1.1: KSJC closure days 53-59 %); a label-derived column must also be built from EARLIER training
   days, never out of fold (a block's out-of-fold share is anti-correlated with its own labels). Plan §15.
+- **Arrival separation is a DISTANCE rule, and two landings are compared on the APPROACH CLOCK** —
+  `inference/runway_schedule.py` is the one definition (FAA JO 7110.65BB Change 3, every value cited to
+  its paragraph; the text itself in repo `docs/literature/arrival_separation/`): 3 NM radar or the CWT
+  wake minimum at the threshold on one runway and on parallels under 2,500 ft, dependent diagonals
+  1.0 / 1.5 NM, independent from 4,300 ft, types -> CWT from JO 7360.1K. A distance becomes a time at the
+  airport's measured approach speed, and a threshold time goes onto the approach clock by its
+  threshold's along-course position: parallel thresholds are staggered (KRDU 23L/23R 0.67 NM, KSTL 11 vs
+  12L 1.99 NM), and comparing the two threshold times passed 5 short pairs as 0 violations (R3 review,
+  2026-09-14). Multi-aircraft work reads the same module.
 - **A runway / configuration model cannot be judged on the per-flight split** — same-day flights
   share the configuration, and hourly wind / time of day fingerprint it: the per-flight model read
   KSJC's two 30L-closure days at 100 %, the day-blocked one at 55–57 % (B1 97–98 %). The R series
