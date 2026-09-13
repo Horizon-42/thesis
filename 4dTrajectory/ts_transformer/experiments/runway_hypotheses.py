@@ -25,6 +25,13 @@ Development scope: the checkpoint's validation split only; the co-temporal conte
 is the development roster (train + validation) and only landings BEFORE the ego flight's
 terminal-ring entry time.
 
+v4 (runway-intent R0, `docs/2026-09-13_runway_intent_plan.zh.md` §7): the causal baseline rules
+B0–B4 of `data.runway_context` join the selectors, each read at the FORECAST anchor's wall-clock
+time over its own pool (every flight whose split hash is outer-test excluded — see
+`build_airport_context`); and a PLAN checkpoint is accepted — its candidates are the runways
+whose CIFP skeleton builds against the manifest's target (the rest are reported, e.g. KSJC 12L's
+displaced threshold), and it has no mirror control (a mirrored threshold has no procedure).
+
     python run_ts.py runway_hypotheses --checkpoint <ckpt> --airport KRDU \
         --output-dir 4dTrajectory/outputs/KRDU/experiments/runway_hypotheses_20260903/A_seed1337
 """
@@ -59,9 +66,18 @@ from ts_transformer.inference.forecast import Forecast, default_anchor, forecast
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402
 from ts_transformer.data.lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
 from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
+from ts_transformer.config import PREDICTION_PLAN  # noqa: E402
+from ts_transformer.data.runway_context import RULES as CONTEXT_RULES  # noqa: E402
+from ts_transformer.data.runway_context import build_airport_context  # noqa: E402
+from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
+from ts_transformer.outputs.plan.skeleton import runway_skeleton  # noqa: E402
 from ts_transformer.training.train import load_checkpoint  # noqa: E402
+from flight_scenarios.identity import flight_key  # noqa: E402
 
-SCHEMA = "ts-runway-hypotheses-v3-stratum-labels"   # v2 keyed the strata "straight-in"/"vectored"
+METAR_ROOT = REPO_ROOT / "data" / "metar"
+# v3 keyed the strata "straight-in"/"vectored"; v4 adds the context rules, the plan path and a
+# per-selector ``n`` (a pick with no forecast for that flight is not scored — counted instead).
+SCHEMA = "ts-runway-hypotheses-v4-context-rules"
 # A pseudo-candidate per flight: the assigned threshold mirrored to the far side of its
 # parallel sibling's offset (same separation, same course). An oracle that gains as much
 # from this fake alternative as from the real sibling is picking the luckiest of K noisy
@@ -160,6 +176,27 @@ def mirror_target(own: dict[str, Any], sibling: dict[str, Any]) -> dict[str, Any
     return {**own, "lat": own["lat"] - d_lat, "lon": own["lon"] - d_lon}
 
 
+def skeleton_error(
+    flights: list[dict[str, Any]], runway: str, target: dict[str, Any], config: Any, airport: str,
+) -> str | None:
+    """Why the plan path cannot fly ``runway`` (its CIFP skeleton refuses the manifest's
+    target), or None. Probed on the first validation flight that builds under that runway —
+    the refusal is a property of the runway's document, not of the flight."""
+    for flight in flights:
+        probes, _report = build_series(
+            [{**flight, "runway": runway, "runway_target": target}], config,
+            airport=airport, aircraft_type=config.aircraft_type,
+        )
+        if not probes:
+            continue
+        try:
+            runway_skeleton(probes[0])
+        except ValueError as error:
+            return str(error)
+        return None
+    raise ValueError(f"no validation flight builds a series under {airport} {runway}")
+
+
 def active_configuration(
     records: list[dict[str, Any]], development_keys: set[str], airport: str,
     *, window: timedelta,
@@ -226,14 +263,13 @@ def summarise(flights: list[dict[str, Any]], selectors: list[str]) -> dict[str, 
     for stratum, mask in strata.items():
         block: dict[str, Any] = {"n": int(mask.sum()), "selectors": {}}
         for selector in selectors:
-            ade = np.array([
-                f["hypotheses"][f["picks"][selector]]["ade_m"] for f in flights
-            ])[mask]
-            fde = np.array([
-                f["hypotheses"][f["picks"][selector]]["fde_m"] for f in flights
-            ])[mask]
-            hit = np.array([f["picks"][selector] == f["assigned"] for f in flights])[mask]
+            chosen = [f for f, keep in zip(flights, mask) if keep]
+            scored = [f for f in chosen if f["picks"][selector] in f["hypotheses"]]
+            ade = np.array([f["hypotheses"][f["picks"][selector]]["ade_m"] for f in scored])
+            fde = np.array([f["hypotheses"][f["picks"][selector]]["fde_m"] for f in scored])
+            hit = np.array([f["picks"][selector] == f["assigned"] for f in chosen])
             block["selectors"][selector] = {
+                "n": len(scored),
                 "ade_mean": float(ade.mean()), "ade_median": float(np.median(ade)),
                 "fde_mean": float(fde.mean()), "fde_median": float(np.median(fde)),
                 "runway_accuracy": float(hit.mean()),
@@ -249,6 +285,7 @@ def summarise(flights: list[dict[str, Any]], selectors: list[str]) -> dict[str, 
                 selector: {
                     "fde_median": float(np.median([
                         f["hypotheses"][f["picks"][selector]]["fde_m"] for f in group
+                        if f["picks"][selector] in f["hypotheses"]
                     ])),
                     "runway_accuracy": float(np.mean([
                         f["picks"][selector] == runway for f in group
@@ -262,14 +299,16 @@ def summarise(flights: list[dict[str, Any]], selectors: list[str]) -> dict[str, 
 
 
 def print_summary(summary: dict[str, Any], selectors: list[str]) -> None:
-    for stratum in ("all", "straight-in", "vectored"):
+    # The summary is keyed by the stratum LABELS (v3); the bare names this loop used to spell
+    # raised KeyError at the first print, before hypotheses.json was written.
+    for stratum in (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED):
         block = summary[stratum]
         print(f"\n### {stratum} — n = {block['n']}\n")
-        print("| selector | ADE mean | ADE med | FDE mean | FDE med | runway acc |")
-        print("|---|---:|---:|---:|---:|---:|")
+        print("| selector | n | ADE mean | ADE med | FDE mean | FDE med | runway acc |")
+        print("|---|---:|---:|---:|---:|---:|---:|")
         for selector in selectors:
             s = block["selectors"][selector]
-            print(f"| {selector} | {s['ade_mean']:.0f} | {s['ade_median']:.0f} | "
+            print(f"| {selector} | {s['n']} | {s['ade_mean']:.0f} | {s['ade_median']:.0f} | "
                   f"{s['fde_mean']:.0f} | {s['fde_median']:.0f} | {s['runway_accuracy'] * 100:.1f}% |")
     print("\n### Per assigned runway — FDE median (m) / runway accuracy\n")
     print("| runway | n | " + " | ".join(selectors) + " |")
@@ -289,7 +328,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--context-window-min", type=float, default=30.0,
-                        help="co-temporal landings window before the ego's entry time")
+                        help="co-temporal landings window before the ego's entry time "
+                             "(active_config) and before the anchor (B1/B2/B4)")
+    parser.add_argument("--sector-window-min", type=float, default=60.0,
+                        help="B3: the same-sector landing must be this recent")
+    parser.add_argument("--metar-delay-min", type=float, default=10.0,
+                        help="B4: a METAR counts once its observation time is this far behind")
+    parser.add_argument("--calm-kt", type=float, default=3.0,
+                        help="B4 answers with B1 below this wind speed")
     args = parser.parse_args(argv)
 
     airport = args.airport.upper()
@@ -320,12 +366,31 @@ def main(argv: list[str] | None = None) -> int:
     # Build + forecast once per candidate; every clone keeps the ORIGINAL dict untouched.
     per_candidate: dict[str, dict[str, tuple[FlightSeries, Forecast]]] = {}
     targets = manifest["runway_targets"]
-    mirrors = {
+    plan_path = config.prediction_output == PREDICTION_PLAN
+    unflyable: dict[str, str] = {}
+    if plan_path:
+        for runway in candidates:
+            error = skeleton_error(raw_flights, runway, targets[runway], config, airport)
+            if error is not None:
+                unflyable[runway] = error
+                print(f"  {runway}: not a plan-path hypothesis — {error}")
+        candidates = [runway for runway in candidates if runway not in unflyable]
+    mirrors = {} if plan_path else {
         runway: mirror_target(targets[runway], targets[sibling])
         for runway in candidates
         if (sibling := parallel_sibling(runway, targets)) is not None
     }
-    for runway in [*candidates, MIRROR]:
+    split_of = lambda key: split_name_for_dataset_id(f"{airport}:{key}", config)  # noqa: E731
+    pool = build_airport_context(
+        manifest_path, HARVEST_ROOT / airport / "tracks" / "manifest.json",
+        sorted((METAR_ROOT / airport).glob("asos_*.csv")),
+        {runway: float(targets[runway]["course_deg"]) for runway in candidates}, split_of,
+        window=timedelta(minutes=args.context_window_min),
+        sector_window=timedelta(minutes=args.sector_window_min),
+        metar_delay=timedelta(minutes=args.metar_delay_min),
+        calm_kt=args.calm_kt,
+    )
+    for runway in [*candidates, *([MIRROR] if mirrors else [])]:
         if runway == MIRROR:
             clones = [
                 {**flight, "runway": f"{flight['runway']}{MIRROR}",
@@ -347,8 +412,9 @@ def main(argv: list[str] | None = None) -> int:
 
     selectors = [
         "assigned", "oracle_fde", "oracle_ade", "oracle_same_direction",
-        "oracle_mirror_control", "self_consistency", "course_gate_then_self", "active_config",
-        "active_config_then_gate",
+        *([] if plan_path else ["oracle_mirror_control"]),
+        "self_consistency", "course_gate_then_self", "active_config",
+        "active_config_then_gate", *CONTEXT_RULES,
     ]
     flights: list[dict[str, Any]] = []
     missing_context = 0
@@ -366,6 +432,16 @@ def main(argv: list[str] | None = None) -> int:
         config_runway, context_count = config_lookup(flight["entry_time_utc"])
         missing_context += context_count == 0
         picks = select(rows, candidates, assigned=assigned, config_runway=config_runway)
+        # The context rules, read at the FORECAST anchor's wall-clock time (series time 0 is
+        # the first waypoint) with the track's course there in degrees true.
+        anchor_time = _parse_utc(flight["entry_time_utc"]) + timedelta(
+            seconds=float(flight["waypoints"][0][0]) + float(truth.times[anchor])
+        )
+        context_picks = pool.rules.picks(
+            anchor_time, sector=pool.sectors[flight_key(flight, 0)],
+            track_course_deg=(90.0 - track_course_deg(truth, anchor)) % 360.0,
+        )
+        picks.update({rule: pick.runway for rule, pick in context_picks.items()})
         difficulty = approach_difficulty(truth, anchor).to_dict()
         flights.append({
             "identity": key,
@@ -373,6 +449,8 @@ def main(argv: list[str] | None = None) -> int:
             "assigned": assigned,
             "entry_time_utc": flight["entry_time_utc"],
             "active_config": {"runway": config_runway, "landings": context_count},
+            "anchor_time_utc": anchor_time.isoformat(),
+            "context_fallback": {rule: pick.fallback for rule, pick in context_picks.items()},
             "difficulty": difficulty,
             "hypotheses": rows,
             "picks": picks,
@@ -399,6 +477,20 @@ def main(argv: list[str] | None = None) -> int:
         "course_gate_deg": COURSE_GATE_DEG,
         "context_window_min": args.context_window_min,
         "context_pool": "development roster (train + validation), landings before entry",
+        "unflyable_candidates": unflyable,
+        "context_rules": {
+            "rules": list(CONTEXT_RULES),
+            "pool": "tracks-roster assigned landings + arrivals-roster entry sectors, minus every "
+                    "outer-test-hash flight; majority from train-hash landings; read at the "
+                    "forecast anchor's wall-clock time",
+            "landings": len(pool.landings),
+            "excluded_outer_test": pool.excluded_outer_test,
+            "window_min": args.context_window_min,
+            "sector_window_min": args.sector_window_min,
+            "metar_delay_min": args.metar_delay_min,
+            "calm_kt": args.calm_kt,
+            "metar_files": [str(p) for p in pool.metar_paths],
+        },
         "flights_without_context": missing_context,
         "summary": summary,
         "flights": flights,
