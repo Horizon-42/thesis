@@ -29,8 +29,12 @@ v4 (runway-intent R0, `docs/2026-09-13_runway_intent_plan.zh.md` §7): the causa
 B0–B4 of `data.runway_context` join the selectors, each read at the FORECAST anchor's wall-clock
 time over its own pool (every flight whose split hash is outer-test excluded — see
 `build_airport_context`); and a PLAN checkpoint is accepted — its candidates are the runways
-whose CIFP skeleton builds against the manifest's target (the rest are reported, e.g. KSJC 12L's
-displaced threshold), and it has no mirror control (a mirrored threshold has no procedure).
+whose CIFP skeleton builds against the manifest's target (the rest are reported — none on the
+v5 manifests: every runway's threshold fix agrees with its target), and it has no mirror control
+(a mirrored threshold has no procedure). Every selector's error is PAIRED: its ``assigned_*``
+fields are the assigned runway's error over the same flights it was scored on, because the
+flights a pick has no forecast for are the ones whose forecasts fail, and an unpaired mean
+drops them from the rule but not from the baseline.
 
     python run_ts.py runway_hypotheses --checkpoint <ckpt> --airport KRDU \
         --output-dir 4dTrajectory/outputs/KRDU/experiments/runway_hypotheses_20260903/A_seed1337
@@ -268,11 +272,18 @@ def summarise(flights: list[dict[str, Any]], selectors: list[str]) -> dict[str, 
             ade = np.array([f["hypotheses"][f["picks"][selector]]["ade_m"] for f in scored])
             fde = np.array([f["hypotheses"][f["picks"][selector]]["fde_m"] for f in scored])
             hit = np.array([f["picks"][selector] == f["assigned"] for f in chosen])
+            base_ade = np.array([f["hypotheses"][f["assigned"]]["ade_m"] for f in scored])
+            base_fde = np.array([f["hypotheses"][f["assigned"]]["fde_m"] for f in scored])
             block["selectors"][selector] = {
                 "n": len(scored),
                 "ade_mean": float(ade.mean()), "ade_median": float(np.median(ade)),
                 "fde_mean": float(fde.mean()), "fde_median": float(np.median(fde)),
                 "runway_accuracy": float(hit.mean()),
+                # the same flights under the assigned runway: the paired cost of the pick
+                "assigned_ade_mean": float(base_ade.mean()),
+                "assigned_fde_mean": float(base_fde.mean()),
+                "fde_delta_mean": float((fde - base_fde).mean()),
+                "fde_delta_median": float(np.median(fde - base_fde)),
             }
         out[stratum] = block
     # Per assigned runway: the oracle gap tells where the misassignment cost lives.
@@ -418,9 +429,13 @@ def main(argv: list[str] | None = None) -> int:
     ]
     flights: list[dict[str, Any]] = []
     missing_context = 0
+    unflyable_assigned = 0
     for flight in raw_flights:
         key = identity(flight)
         assigned = flight["runway"]
+        if assigned in unflyable:
+            unflyable_assigned += 1   # the plan path cannot fly its own runway: no baseline
+            continue
         if key not in per_candidate[assigned]:
             continue  # unbuildable under its own runway: not in the baseline either
         truth, _ = per_candidate[assigned][key]
@@ -478,6 +493,7 @@ def main(argv: list[str] | None = None) -> int:
         "context_window_min": args.context_window_min,
         "context_pool": "development roster (train + validation), landings before entry",
         "unflyable_candidates": unflyable,
+        "flights_on_unflyable_runways": unflyable_assigned,
         "context_rules": {
             "rules": list(CONTEXT_RULES),
             "pool": "tracks-roster assigned landings + arrivals-roster entry sectors, minus every "

@@ -6,6 +6,21 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## ts_transformer: `lead_landings` reads outer-test-hash landings as context (2026-09-13)
+
+**Verified** (code read, runway-intent R0 review): `data/intent_conditioning.py::lead_landings`
+takes EVERY `assigned` row of the tracks roster — outer-test-hash flights included — as the
+candidate leaders of a requested (train / val) flight, so a test flight's landing time and runway
+can become a development flight's `lead_landing`. Nothing trains on it by default (only
+`intent_conditioning=truth-…` arms read it, and those read the future by design), and no
+runway-intent R0 rule touches it — R0 builds its own pool without test-hash flights
+(`data/runway_context.build_airport_context`).
+
+**Judgement**: small, but it is a crack in "the outer-test split is never read"; the fix is to
+drop test-hash rows (the checkpoint's `split_name_for_dataset_id`) from the leader pool — which
+changes the lead of every flight whose true leader was a test flight, i.e. the stored truth-intent
+arms' inputs, so it is the owner's call.
+
 ## ts_transformer: two dead loss helpers (2026-09-07)
 
 **Verified** by AST walk over the module, on `dev-t3`: `objective.masked_mse` and

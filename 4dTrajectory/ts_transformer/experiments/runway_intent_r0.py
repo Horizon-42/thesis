@@ -53,6 +53,10 @@ ENTRY = "entry"
 FLIP_BIN = timedelta(minutes=15)
 FLIP_MIN_LANDINGS = 2
 FLIP_PERSIST_BINS = 2
+#: Counted bins further apart than this are two operating sessions (overnight, a harvest gap):
+#: a different direction after the gap is a CHANGE ACROSS A GAP, counted apart from the flips —
+#: the first readout counted them as flips, a third of KSJC's and KSMF's (review, 2026-09-13).
+FLIP_MAX_GAP = timedelta(hours=3)
 
 
 def remaining_path_m(waypoints: list[list[float]]) -> list[float]:
@@ -84,7 +88,9 @@ def anchors(waypoints: list[list[float]], bins_km: list[float]) -> dict[str, int
 
 
 def track_course_at(waypoints: list[list[float]], index: int) -> float:
-    i0, i1 = (index, index + 1) if index + 1 < len(waypoints) else (index - 1, index)
+    """The course INTO the anchor sample (a backward difference: nothing after the anchor);
+    at the entry sample, the only one with nothing before it, the first segment's course."""
+    i0, i1 = (index - 1, index) if index > 0 else (0, 1)
     _, lon0, lat0, _ = waypoints[i0]
     _, lon1, lat1, _ = waypoints[i1]
     return course_deg(lon0, lat0, lon1, lat1)
@@ -103,8 +109,9 @@ def day_fold(day: str, config: Any) -> str:
 
 def direction_flips(
     landings: list[ContextLanding], groups: dict[str, int]
-) -> dict[str, int]:
-    """Landing-direction reversals per UTC day (see `FLIP_BIN` for the rule)."""
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Landing-direction reversals per UTC day, and direction changes across a gap longer than
+    `FLIP_MAX_GAP` per UTC day (see `FLIP_BIN` for the rule)."""
     bins: dict[datetime, Counter] = defaultdict(Counter)
     for landing in landings:
         start = landing.time - timedelta(
@@ -118,10 +125,17 @@ def direction_flips(
         if sum(counts.values()) >= FLIP_MIN_LANDINGS
     ]
     flips: dict[str, int] = Counter()
+    across_gap: dict[str, int] = Counter()
     current: int | None = None
     candidate: int | None = None
     streak = 0
+    previous: datetime | None = None
     for start, group in counted:
+        if previous is not None and start - previous > FLIP_MAX_GAP:
+            if current is not None and group != current:
+                across_gap[start.date().isoformat()] += 1
+            current, candidate, streak = group, None, 0
+        previous = start
         if current is None:
             current = group
             continue
@@ -133,7 +147,7 @@ def direction_flips(
         if streak >= FLIP_PERSIST_BINS:
             flips[start.date().isoformat()] += 1
             current, candidate, streak = group, None, 0
-    return dict(flips)
+    return dict(flips), dict(across_gap)
 
 
 def summarise(records: list[dict[str, Any]], groups: dict[str, int]) -> dict[str, Any]:
@@ -235,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
             })
 
     summary = summarise(records, context.groups)
-    flips = direction_flips(landings, context.groups)
+    flips, across_gap = direction_flips(landings, context.groups)
     days = sorted({landing.time.date().isoformat() for landing in landings})
     folds: dict[str, dict[str, int]] = defaultdict(lambda: {"days": 0, "flips": 0, "days_with_flip": 0})
     for day in days:
@@ -258,7 +272,8 @@ def main(argv: list[str] | None = None) -> int:
             "sector_window_min": args.sector_window_min,
             "metar_delay_min": args.metar_delay_min, "calm_kt": args.calm_kt,
             "flip_rule": {"bin_min": FLIP_BIN.total_seconds() / 60,
-                          "min_landings": FLIP_MIN_LANDINGS, "persist_bins": FLIP_PERSIST_BINS},
+                          "min_landings": FLIP_MIN_LANDINGS, "persist_bins": FLIP_PERSIST_BINS,
+                          "max_gap_h": FLIP_MAX_GAP.total_seconds() / 3600},
         },
         "context_pool": {
             "landings": len(landings), "excluded_outer_test_hash": excluded_test,
@@ -270,7 +285,8 @@ def main(argv: list[str] | None = None) -> int:
         "summary": summary,
         "per_runway": {anchor: per_runway(records, anchor) for anchor in (ENTRY, "10km") if
                        any(r["anchor"] == anchor for r in records)},
-        "direction_flips": {"per_day": flips, "days": len(days), "day_blocked_folds": dict(folds)},
+        "direction_flips": {"per_day": flips, "across_gap_per_day": across_gap,
+                            "days": len(days), "day_blocked_folds": dict(folds)},
         "records": records,
     }
     (out / "runway_intent_r0.json").write_text(json.dumps(document, indent=1), encoding="utf-8")
@@ -290,7 +306,9 @@ def main(argv: list[str] | None = None) -> int:
                 f"{side:<14} {cell['fallback']:6.1%}"
             )
     lines += ["", f"direction flips: {sum(flips.values())} over {len(days)} days "
-                  f"({sum(v > 0 for v in flips.values())} days with at least one)"]
+                  f"({sum(v > 0 for v in flips.values())} days with at least one); "
+                  f"{sum(across_gap.values())} direction changes across a gap > "
+                  f"{FLIP_MAX_GAP.total_seconds() / 3600:g} h"]
     for fold in ("train", "val", "test"):
         cell = folds.get(fold, {"days": 0, "flips": 0, "days_with_flip": 0})
         lines.append(f"  day-blocked {fold:<5}: {cell['days']} days, {cell['flips']} flips, "
