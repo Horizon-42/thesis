@@ -35,6 +35,7 @@ from ts_transformer.data.runway_context import (  # noqa: E402
     RULES,
     ContextLanding,
     build_airport_context,
+    operational_day,
     parse_utc,
 )
 from ts_transformer.data.runway_features import ENTRY, anchors, track_course_at  # noqa: E402
@@ -57,7 +58,8 @@ FLIP_MAX_GAP = timedelta(hours=3)
 
 
 def day_fold(day: str, config: Any) -> str:
-    """A day-blocked split with the checkpoint's own seed and fractions (plan §6, D1)."""
+    """A day-blocked split with the checkpoint's own seed and fractions (plan §6, D1); ``day``
+    is an OPERATING day (`runway_context.operational_day`)."""
     digest = hashlib.sha256(f"{config.resolved_split_seed}:day:{day}".encode()).digest()
     fraction = int.from_bytes(digest[:8], "big") / 2**64
     if fraction < config.test_fraction:
@@ -70,8 +72,8 @@ def day_fold(day: str, config: Any) -> str:
 def direction_flips(
     landings: list[ContextLanding], groups: dict[str, int]
 ) -> tuple[dict[str, int], dict[str, int]]:
-    """Landing-direction reversals per UTC day, and direction changes across a gap longer than
-    `FLIP_MAX_GAP` per UTC day (see `FLIP_BIN` for the rule)."""
+    """Landing-direction reversals per operating day, and direction changes across a gap longer
+    than `FLIP_MAX_GAP` per operating day (see `FLIP_BIN` for the rule)."""
     bins: dict[datetime, Counter] = defaultdict(Counter)
     for landing in landings:
         start = landing.time - timedelta(
@@ -93,7 +95,7 @@ def direction_flips(
     for start, group in counted:
         if previous is not None and start - previous > FLIP_MAX_GAP:
             if current is not None and group != current:
-                across_gap[start.date().isoformat()] += 1
+                across_gap[operational_day(start)] += 1
             current, candidate, streak = group, None, 0
         previous = start
         if current is None:
@@ -105,7 +107,7 @@ def direction_flips(
         streak = streak + 1 if group == candidate else 1
         candidate = group
         if streak >= FLIP_PERSIST_BINS:
-            flips[start.date().isoformat()] += 1
+            flips[operational_day(start)] += 1
             current, candidate, streak = group, None, 0
     return dict(flips), dict(across_gap)
 
@@ -210,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = summarise(records, context.groups)
     flips, across_gap = direction_flips(landings, context.groups)
-    days = sorted({landing.time.date().isoformat() for landing in landings})
+    days = sorted({operational_day(landing.time) for landing in landings})
     folds: dict[str, dict[str, int]] = defaultdict(lambda: {"days": 0, "flips": 0, "days_with_flip": 0})
     for day in days:
         fold = folds[day_fold(day, config)]

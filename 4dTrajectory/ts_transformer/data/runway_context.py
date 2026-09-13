@@ -43,6 +43,12 @@ ENTRY_SECTORS = 8
 #: existence, not the configuration (first KMSY readout, 2026-09-13: 55 % against B1's 97 %).
 WIND_MIN_GROUP_SHARE = 0.05
 
+#: An OPERATING day starts at the overnight traffic minimum, not at UTC midnight: at these US
+#: airports 22Z–03Z carries 27–33 % of arrivals, so a UTC-midnight cut splits the evening session
+#: and puts one session's flights in two day folds (R1 review, 2026-09-13; the quietest hours are
+#: 07–11Z — 03:00–07:00 EDT, 00:00–04:00 PDT).
+OPERATIONAL_DAY_SHIFT = timedelta(hours=9)
+
 RULES = (
     "B0_majority",
     "B1_active_config",
@@ -90,6 +96,11 @@ def bearing_sector(lon: float, lat: float, ref_lon: float, ref_lat: float) -> in
 
 def parse_utc(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def operational_day(time: datetime) -> str:
+    """The operating day a UTC time belongs to (see `OPERATIONAL_DAY_SHIFT`), ISO date."""
+    return (time - OPERATIONAL_DAY_SHIFT).date().isoformat()
 
 
 @dataclass(frozen=True)
@@ -180,6 +191,14 @@ class RunwayContext:
         pool = [runway for runway in among if counts.get(runway, 0) > 0]
         # Deterministic: count first, then runway name.
         return min(pool, key=lambda runway: (-counts[runway], runway)) if pool else None
+
+    def with_majority(self, majority: Counter) -> "RunwayContext":
+        """The same pool read with another static majority — a split whose training days differ
+        must not take its majority from the others' labels (R1 review, 2026-09-13)."""
+        return RunwayContext(
+            self._landings, self.courses, majority, self._winds, window=self.window,
+            sector_window=self.sector_window, metar_delay=self.metar_delay, calm_kt=self.calm_kt,
+        )
 
     @property
     def majority_counts(self) -> Counter:

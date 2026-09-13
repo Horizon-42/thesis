@@ -8,7 +8,7 @@ import numpy as np
 
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 from ts_transformer.data.runway_context import ContextLanding, RunwayContext, WindReport
-from ts_transformer.data.runway_features import anchor_features, feature_space
+from ts_transformer.data.runway_features import anchor_features, feature_space, ring_anchors
 
 T0 = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 THRESHOLD = {"lat": 35.87, "lon": -78.79, "course_deg": 45.0}
@@ -83,3 +83,20 @@ def test_the_context_columns_read_the_airport_before_the_anchor():
     early = dict(zip(space.names, anchor_features(
         space, _context(), flight, 10, sector=5, anchor_time=T0 - timedelta(minutes=5))))
     assert early["landings30"] == 0.0 and early["last_05L"] == 0.0
+
+
+def test_ring_anchors_do_not_depend_on_the_landing_runway():
+    """Two flights on the same path that land on different runways get the same anchors: the
+    rings are around the airport reference, never measured to a threshold."""
+    flight = _flight()
+    reference = (THRESHOLD["lon"], THRESHOLD["lat"])
+    got = ring_anchors(flight["waypoints"], reference, [15.0, 10.0, 3.0, 0.1])
+    assert got["entry"] == 0
+    assert got == ring_anchors([list(w) for w in flight["waypoints"]], reference, [15.0, 10.0, 3.0, 0.1])
+    lon, lat = flight["waypoints"][got["r10km"]][1:3]
+    before = flight["waypoints"][got["r10km"] - 1][1:3]
+    distance = lambda p: math.hypot((p[0] - reference[0]) * metres_per_deg_lon(reference[1]),  # noqa: E731
+                                    (p[1] - reference[1]) * METRES_PER_DEG_LAT)
+    assert distance((lon, lat)) <= 10_000.0 < distance(before)
+    # a ring the track never enters (it ends at 0.5 km from the reference) has no anchor
+    assert "r0.1km" not in got

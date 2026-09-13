@@ -6,7 +6,7 @@ from ts_transformer.data.runway_context import ContextLanding
 from ts_transformer.data.runway_features import anchors, remaining_path_m, track_course_at
 from ts_transformer.experiments.runway_intent_r0 import direction_flips
 
-T0 = datetime(2026, 6, 1, 6, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc)   # 10:00 EDT: one operating day
 GROUPS = {"05L": 0, "05R": 0, "23L": 1, "23R": 1}
 
 

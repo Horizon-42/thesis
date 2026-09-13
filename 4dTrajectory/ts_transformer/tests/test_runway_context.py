@@ -13,6 +13,7 @@ from ts_transformer.data.runway_context import (
     bearing_sector,
     direction_groups,
     load_metar,
+    operational_day,
 )
 
 T0 = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
@@ -107,3 +108,20 @@ def test_metar_missing_fields_stay_missing(tmp_path):
     reports = load_metar([path])
     assert [r.valid.hour for r in reports] == [10, 11]
     assert reports[1].direction_deg is None and reports[1].speed_kt == pytest.approx(4.0)
+
+
+def test_the_operating_day_does_not_break_the_evening_session_at_utc_midnight():
+    evening = datetime(2026, 6, 1, 23, 30, tzinfo=timezone.utc)      # 19:30 EDT
+    after_midnight = datetime(2026, 6, 2, 2, 30, tzinfo=timezone.utc)  # 22:30 EDT, same session
+    next_morning = datetime(2026, 6, 2, 12, 0, tzinfo=timezone.utc)
+    assert operational_day(evening) == operational_day(after_midnight) == "2026-06-01"
+    assert operational_day(next_morning) == "2026-06-02"
+
+
+def test_a_context_read_with_another_majority_keeps_its_pool():
+    landings = [ContextLanding(_at(-5), "05R")]
+    base = _context(landings, majority=Counter({"23R": 9}))
+    other = base.with_majority(Counter({"05L": 9}))
+    assert base.picks(_at(60), sector=0, track_course_deg=45.0)["B0_majority"].runway == "23R"
+    assert other.picks(_at(60), sector=0, track_course_deg=45.0)["B0_majority"].runway == "05L"
+    assert other.picks(_at(0), sector=0, track_course_deg=45.0)["B1_active_config"].runway == "05R"

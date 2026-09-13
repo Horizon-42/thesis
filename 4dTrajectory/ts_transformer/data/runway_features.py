@@ -59,6 +59,24 @@ def anchors(waypoints: Sequence[Sequence[float]], bins_km: Iterable[float]) -> d
     return out
 
 
+def ring_anchors(
+    waypoints: Sequence[Sequence[float]], reference: tuple[float, float], radii_km: Iterable[float]
+) -> dict[str, int]:
+    """``entry`` -> 0, and ``r<R>km`` -> the FIRST sample within R km of the airport reference —
+    a query a controller could issue as the aircraft crosses the ring, and one that does not
+    depend on the landing runway. `anchors` measures the path left to the TRUE threshold, so at its
+    anchor the true runway's along-track distance is the bin value — a label pattern a model reads
+    (R1 review, 2026-09-13: +1.5–3.4 points of side accuracy at 15–20 km); R1 anchors on rings."""
+    ref_lon, ref_lat = reference
+    distance = [math.hypot(*_local_m(float(w[1]), float(w[2]), ref_lon, ref_lat)) for w in waypoints]
+    out = {ENTRY: 0}
+    for radius_km in radii_km:
+        inside = next((i for i, d in enumerate(distance) if d <= radius_km * 1000.0), None)
+        if inside is not None and inside > 0:
+            out[f"r{radius_km:g}km"] = inside
+    return out
+
+
 def track_course_at(waypoints: Sequence[Sequence[float]], index: int) -> float:
     """The course INTO the anchor sample (a backward difference: nothing after the anchor);
     at the entry sample, the only one with nothing before it, the first segment's course."""

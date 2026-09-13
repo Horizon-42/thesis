@@ -1,20 +1,22 @@
 """Runway-intent R1: a learned runway head against the causal rules — and what the split does.
 
 Plan `docs/2026-09-13_runway_intent_plan.zh.md` §12 (design) and §11.4 (the pre-registered gates).
-Per airport, every arrival whose per-flight split hash is NOT outer-test gives one sample per R0
-anchor (the arrival-slice entry and a remaining-path grid) with the causal features of
-`data.runway_features`, labelled with its landing runway. One HistGradientBoostingClassifier PER
+Per airport, every arrival whose per-flight split hash is NOT outer-test gives one sample per
+anchor — the arrival-slice entry (the 25 km ring) and the first crossing of each ring in
+`RING_RADII_KM` around the airport reference, runway-independent (`ring_anchors`; R0's
+remaining-path anchors measure to the true threshold and so leak its along-track distance) — with
+the causal features of `data.runway_features`, labelled with its landing runway. One HistGradientBoostingClassifier PER
 AIRPORT — not pooled across airports (experiment principle (3), stated: R1 first measures what each
 airport's own data teaches). Three trainings:
 
-- ``day_a`` / ``day_b`` — the DAY-BLOCKED split (the user's decision D1 = (a), 2026-09-13): days are
-  hashed into folds; the test fold's days are never used (kept for the final test on the sealed
+- ``day_a`` / ``day_b`` — the DAY-BLOCKED split (the user's decision D1 = (a), 2026-09-13): OPERATING
+  days (cut at the overnight traffic minimum, `operational_day`) are hashed into folds; the test fold's days are never used (kept for the final test on the sealed
   flights), and the other days are split into train / validation twice (``a`` with the split seed,
   ``b`` with `SECOND_PARTITION_SEED`) — a tree model has no seed variance, the day partition does;
 - ``flight`` — today's per-flight hash split over the same non-test days: the leakage control.
 
 Each model is read on its own validation samples against the causal rules recomputed on the same
-samples; ``day_a`` and ``flight`` are also read PAIRED on the samples that are validation under
+samples — each partition's rules and minority runways from ITS training days' landings; ``day_a`` and ``flight`` are also read PAIRED on the samples that are validation under
 both splits — the flight model has seen those days' other flights, the day model has not, and the
 difference is the leakage.
 
@@ -49,20 +51,24 @@ from ts_transformer.data.runway_context import (  # noqa: E402
     RULES,
     airport_reference,
     build_airport_context,
+    operational_day,
     parse_utc,
 )
 from ts_transformer.data.runway_features import (  # noqa: E402
     ENTRY,
     anchor_features,
-    anchors,
     feature_space,
+    ring_anchors,
     track_course_at,
 )
 from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
 
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 METAR_ROOT = REPO_ROOT / "data" / "metar"
-SCHEMA = "ts-runway-intent-r1-v1"
+SCHEMA = "ts-runway-intent-r1-v2"   # v2: operating days, ring anchors, per-partition majority
+#: Every landing crosses the 6 km ring (the farthest threshold sits 3.65 km from its airport's
+#: reference, KSTL 11), so each ring below it exists for every flight.
+RING_RADII_KM = (20.0, 15.0, 10.0, 6.0)
 SECOND_PARTITION_SEED = 2024
 MODELS = ("day_a", "day_b", "flight", "day_a_nowx", "day_b_nowx")
 #: The feature groups the ``*_nowx`` models drop: values shared by a whole hour or day.
@@ -158,7 +164,7 @@ def score(
         }
 
     out = {"all": block(np.ones(len(truth), dtype=bool))}
-    for name in sorted(set(anchor_names), key=lambda a: (a != ENTRY, -float(a[:-2]) if a != ENTRY else 0.0)):
+    for name in sorted(set(anchor_names), key=lambda a: (a != ENTRY, -float(a[1:-2]) if a != ENTRY else 0.0)):
         out[name] = block(anchor_names == name)
     return out
 
@@ -195,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--airport", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--bins-km", default="30,20,15,10,6,3")
+    parser.add_argument("--ring-radii-km", default=",".join(f"{r:g}" for r in RING_RADII_KM))
     parser.add_argument("--window-min", type=float, default=30.0)
     parser.add_argument("--sector-window-min", type=float, default=60.0)
     parser.add_argument("--metar-delay-min", type=float, default=10.0)
@@ -203,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     airport = args.airport.upper()
-    bins_km = [float(value) for value in args.bins_km.split(",")]
+    radii_km = [float(value) for value in args.ring_radii_km.split(",")]
     # The split contract (seed, fractions) is the package's default — the locked outer split.
     config = TSConfig()
     manifest_path = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
@@ -224,9 +230,22 @@ def main(argv: list[str] | None = None) -> int:
         calm_kt=args.calm_kt,
     )
     context = pool.rules
-    usable = {
-        key: flight for key, flight in pool.flights.items()
-        if day_folds(flight["landing_time_utc"][:10], config)["a"] != "test"
+
+    def day_of(flight: dict[str, Any]) -> dict[str, str]:
+        return day_folds(operational_day(parse_utc(flight["landing_time_utc"])), config)
+
+    usable = {key: flight for key, flight in pool.flights.items() if day_of(flight)["a"] != "test"}
+    fold_of_flight = {
+        key: {"day_a": day_of(flight)["a"], "day_b": day_of(flight)["b"], "flight": split_of(key)}
+        for key, flight in usable.items()
+    }
+    # Each partition's static majority (B0, the B2 fallback, B4's in-use filter, the minority
+    # runways) from ITS training flights only — never another partition's validation labels.
+    contexts = {
+        part: context.with_majority(Counter(
+            flight["runway"] for key, flight in usable.items() if fold_of_flight[key][part] == "train"
+        ))
+        for part in ("day_a", "day_b", "flight")
     }
     # Which operator prefixes get a column: read from the callsigns of every usable flight — a
     # vocabulary, no label — so all three trainings share one feature matrix.
@@ -235,31 +254,36 @@ def main(argv: list[str] | None = None) -> int:
     group_of = np.array([context.groups[r] for r in candidates])
     group_sizes = Counter(context.groups.values())
     multi = np.array([group_sizes[context.groups[r]] > 1 for r in candidates])
-    minority_names = minority_runways(context.groups, context.majority_counts)
-    minority = np.array([index_of[r] for r in minority_names], dtype=int)
+    minority_names = {
+        part: minority_runways(context.groups, ctx.majority_counts) for part, ctx in contexts.items()
+    }
+    minority = {part: np.array([index_of[r] for r in names], dtype=int)
+                for part, names in minority_names.items()}
 
     rows, truth, anchor_names, flight_keys = [], [], [], []
     folds: dict[str, list[str]] = {"day_a": [], "day_b": [], "flight": []}
-    rule_picks: dict[str, list[int]] = {rule: [] for rule in RULES}
+    rule_picks: dict[str, dict[str, list[int]]] = {
+        part: {rule: [] for rule in RULES} for part in contexts
+    }
     b1_prob: list[np.ndarray] = []
+    reference = airport_reference(targets)
     for key, flight in sorted(usable.items()):
-        day = day_folds(flight["landing_time_utc"][:10], config)
-        per_flight = split_of(key)
         entry = parse_utc(flight["entry_time_utc"])
         waypoints = flight["waypoints"]
         sector = pool.sectors[key]
-        for name, index in anchors(waypoints, bins_km).items():
+        for name, index in ring_anchors(waypoints, reference, radii_km).items():
             t = entry + timedelta(seconds=float(waypoints[index][0]))
             rows.append(anchor_features(space, context, flight, index, sector=sector, anchor_time=t))
             truth.append(index_of[flight["runway"]])
             anchor_names.append(name)
             flight_keys.append(key)
-            folds["day_a"].append(day["a"])
-            folds["day_b"].append(day["b"])
-            folds["flight"].append(per_flight)
-            picks = context.picks(t, sector=sector, track_course_deg=track_course_at(waypoints, index))
-            for rule in RULES:
-                rule_picks[rule].append(index_of[picks[rule].runway])
+            for part in folds:
+                folds[part].append(fold_of_flight[key][part])
+            course = track_course_at(waypoints, index)
+            for part, ctx in contexts.items():
+                picks = ctx.picks(t, sector=sector, track_course_deg=course)
+                for rule in RULES:
+                    rule_picks[part][rule].append(index_of[picks[rule].runway])
             counts = Counter(landing.runway for landing in context.recent(t, context.window))
             smoothed = np.array([counts[r] + 1.0 for r in candidates])
             b1_prob.append(smoothed / smoothed.sum())
@@ -267,7 +291,8 @@ def main(argv: list[str] | None = None) -> int:
     y = np.asarray(truth)
     anchor_arr = np.asarray(anchor_names)
     fold_arr = {name: np.asarray(values) for name, values in folds.items()}
-    picks_arr = {rule: np.asarray(values) for rule, values in rule_picks.items()}
+    picks_arr = {part: {rule: np.asarray(values) for rule, values in rules.items()}
+                 for part, rules in rule_picks.items()}
     b1_arr = np.vstack(b1_prob)
     keys_arr = np.asarray(flight_keys)
 
@@ -283,18 +308,24 @@ def main(argv: list[str] | None = None) -> int:
         prob = np.zeros((len(y), len(candidates)))
         prob[:, model.classes_] = model.predict_proba(X[:, columns])
         models[name], probs[name] = model, prob
+        part = FOLD_OF[name]
         results[name] = {
             "train_samples": int(train.sum()), "val_samples": int(val.sum()),
             "train_flights": int(len(set(keys_arr[train]))), "val_flights": int(len(set(keys_arr[val]))),
             "classes_seen": [candidates[i] for i in model.classes_],
             "features_used": int(columns.sum()),
-            "validation": score(prob[val], y[val], {r: p[val] for r, p in picks_arr.items()}, b1_arr[val],
-                                anchor_arr[val], group_of=group_of, multi=multi, minority=minority),
+            "minority_runways": minority_names[part],
+            "validation": score(prob[val], y[val], {r: p[val] for r, p in picks_arr[part].items()},
+                                b1_arr[val], anchor_arr[val], group_of=group_of, multi=multi,
+                                minority=minority[part]),
         }
     both = (fold_arr["day_a"] == "val") & (fold_arr["flight"] == "val")
+    # One reference for both models on the paired flights: the day_a partition's rules and
+    # minority set (the flight model is being compared, not re-baselined).
     leakage = {
-        name: score(probs[name][both], y[both], {r: p[both] for r, p in picks_arr.items()}, b1_arr[both],
-                    anchor_arr[both], group_of=group_of, multi=multi, minority=minority)
+        name: score(probs[name][both], y[both], {r: p[both] for r, p in picks_arr["day_a"].items()},
+                    b1_arr[both], anchor_arr[both], group_of=group_of, multi=multi,
+                    minority=minority["day_a"])
         for name in ("day_a", "flight")
     }
     val_a = fold_arr["day_a"] == "val"
@@ -303,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         group_of=group_of, multi=multi,
     )
 
-    days = sorted({flight["landing_time_utc"][:10] for flight in pool.flights.values()})
+    days = sorted({operational_day(parse_utc(f["landing_time_utc"])) for f in pool.flights.values()})
     fold_days = {part: Counter(day_folds(d, config)[part] for d in days) for part in ("a", "b")}
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -313,6 +344,9 @@ def main(argv: list[str] | None = None) -> int:
         "candidates": candidates,
         "direction_groups": context.groups,
         "minority_runways": minority_names,
+        "anchors": {"entry": "the arrival-slice entry (25 km ring)",
+                    "rings_km": list(radii_km), "rule": "first sample within R km of the airport reference"},
+        "operational_day_shift_h": 9,
         "features": list(space.names),
         "feature_groups": dict(space.groups),
         "hgb": HGB_SETTINGS,
@@ -332,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
     (out / "runway_intent_r1.json").write_text(json.dumps(document, indent=1), encoding="utf-8")
 
     lines = [f"{airport}: {len(usable)} usable flights, {len(y)} samples; candidates {candidates}; "
-             f"minority {minority_names}; days a {dict(fold_days['a'])} b {dict(fold_days['b'])}"]
+             f"minority (day_a) {minority_names['day_a']}; days a {dict(fold_days['a'])} b {dict(fold_days['b'])}"]
     for name in MODELS:
         for anchor in ("all", ENTRY):
             v = results[name]["validation"][anchor]
