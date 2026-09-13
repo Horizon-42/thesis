@@ -1,0 +1,5 @@
+# The saved pages (~2.6 MB of HTML, mostly site navigation) and the PDFs are not tracked; re-fetch them
+# with ./download.sh. README.md is the index; the parsed 7360.1K CSV is tracked (the scheduler's
+# type -> CWT table cites it).
+*.pdf
+papers/*.html

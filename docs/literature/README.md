@@ -1,0 +1,14 @@
+# Literature: index of topic folders
+
+Each folder holds one reading list: a `README.md` (index, findings, and the question it answers), a
+`download.sh` that re-fetches every source, and the sources themselves (`papers/`, or `official/` and
+`nasa_eurocontrol/` in `runway_assignment/`). PDFs are **not tracked in git** (root `.gitignore` has
+`*.pdf`), so run a folder's `download.sh` after a fresh clone. The convention: a paper read for an
+assessment goes into the folder for its topic, indexed in that folder's README.
+
+| folder | date | what it answers | start here |
+|---|---|---|---|
+| [`jepa/`](jepa/README.md) | 2026-09-06 | Can a Joint-Embedding Predictive Architecture (JEPA) be applied to `4dTrajectory/ts_transformer`, and would it make the trajectory flown from predicted operating parameters more accurate? Seven papers, plus LeCun's position paper (not fetched) | §4 *Assessment* (the answer), then the §1 paper table |
+| [`procedure_hard_constraints/`](procedure_hard_constraints/README.md) | 2026-09-08 | How to make the final-approach procedure constraint (LPV corridor + glidepath window) **hard** in ts_transformer training, on both the `state` and the `control` path. 80 PDFs in three clusters, with formula-level notes in `notes_{A,B,C}.md` | *The five findings that matter*, then `4dTrajectory/ts_transformer/docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` |
+| [`runway_assignment/`](runway_assignment/README.md) | 2026-09-03 | Who assigns the runway, when, and on what basis (tower/TRACON configuration, scheduler, clearance, side-step), and whether runway assignment belongs in the scheduling layer. Holds the **7110.65BB, 7210.3EE and AIM PDFs, ICAO Doc 9643 (SOIR) and the Erzberger–Itoh arrival-scheduling TP** that `arrival_separation/` cross-links | *Start here (the 90-minute version)*, then *What the documents say, in one table* |
+| [`arrival_separation/`](arrival_separation/README.md) | 2026-09-14 | The separation rules a multi-runway arrival scheduler must honour, quoted with paragraph numbers from **FAA JO 7110.65BB Change 3** (eff. 2026-07-09): same-runway radar and wake minima (CWT A–I and legacy), reduced 2.5 NM, parallels by centerline spacing, intersecting runways. Also the type → CWT mapping from JO 7360.1K (parsed CSV), ICAO Doc 4444 / SOIR / RECAT-EU for comparison, and the five study airports mapped to the rules | *At a glance*, then §7 *Constraints for the R3 scheduler*, then §4 *Applied to our five airports* |

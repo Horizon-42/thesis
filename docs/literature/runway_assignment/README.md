@@ -63,7 +63,7 @@ the trajectory predictor, which is what the 2026-09-03 experiments found empiric
 | FAA_AIM_…_w_Chg1-3_2026-07-09.pdf (918 p) | *Aeronautical Information Manual*, the pilot-side view | 4-1-13 ATIS; 4-3-2; 4-3-5; 5-4-19 Side-step Maneuver | faa.gov/air_traffic/publications/media/AIM_Basic_w_Chg_1_and_2_and_3_dtd_7-9-26_FINAL.pdf |
 | FAA_Order_8400.9_Runway_Use_Programs.pdf (8 p) | *National Safety and Operational Criteria for Runway Use Programs* (1981, still in force): noise-driven preferential runways that override the wind rule | all | faa.gov/documentLibrary/media/Order/8400-9.pdf |
 | FAA_AC_150-5060-5_Airport_Capacity_and_Delay.pdf (153 p) | Advisory Circular on runway-configuration capacity | Ch. 2–3 (capacity by configuration), Fig. 2-1 configuration diagrams | faa.gov/documentlibrary/media/advisory_circular/150_5060_5.pdf |
-| ICAO_Doc_9643_SOIR_…_2nd_ed_2020.pdf (40 p) | ICAO *Manual on Simultaneous Operations on Parallel or Near-Parallel Instrument Runways* | Ch. 1 modes of operation; Ch. 2 simultaneous approaches; Ch. 5 near-parallel | skybrary.aero/sites/default/files/bookshelf/4647.pdf |
+| ICAO_Doc_9643_SOIR_…_2nd_ed_2020.pdf (40 p) | ICAO *Manual on Simultaneous Operations on Parallel or Near-Parallel Instrument Runways* — **First Edition, 2004** (its title page; the file name's "2nd ed 2020" is wrong, kept because other indexes cite the path; checked 2026-09-14, `../arrival_separation/README.md` §5 item 13) | Ch. 1 modes of operation; Ch. 2 simultaneous approaches; Ch. 5 near-parallel | skybrary.aero/sites/default/files/bookshelf/4647.pdf |
 
 Not downloadable from an authorised public source (listed for completeness):
 
