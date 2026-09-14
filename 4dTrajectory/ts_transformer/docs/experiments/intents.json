@@ -389,6 +389,15 @@
    "title": "跑道意图 R3 · 多跑道到场调度，飞出来",
    "intent": "学到的跑道意图能不能直接当多机调度的输入：按 FAA JO 7110.65BB 的最低间隔（3 NM 雷达、CWT 尾流、平行跑道的相关/独立规则）先来先服务排定每架机的跑道与落地时刻，再让 plan 专家按排定的时刻飞出来——看排出的计划能否被飞出来、间隔在飞出来的轨迹里是否还保持，以及调度排出的时刻本身作为落地时刻的预测有多准。航班是 day_a 验证日的全部航班，由只见过 day_a 训练日的 R2b 专家飞（划分 dayval）。",
    "design": "4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md §17, §18.3"
+  },
+  "sf_n3": {
+   "title": "N3 · 推力通道按效果归一化（比力 n_x）",
+   "intent": "把控制头的推力通道从按执行器归一化的推力分数 δ=T/T_max 换成按效果归一化的沿航迹比力 n_x=(T−D)/W（滞后 RHS 每个 RK4 子步重解推力、阻力抵消），问：各机型类（737 系/A320 系/支线/重型）之间的比力偏差与重型机的速度偏快能否消除。对照同分割同种子的 B1_point_matched（δ 版）；推力范围逐状态相同，但比力下速度没有阻力反馈、中性初值为下降保速，已事先声明。",
+   "design": "4dTrajectory/ts_transformer/docs/2026-09-14_specific_force_control_design.md §7",
+   "runs": {
+    "N3_specific_force": "B1_point_matched 只改 control_thrust_parameterization=specific-force（seed 1337）；门：分类比力偏差范围向真值自身 0.0045 g 收敛、重型−737 速度偏差差距缩小；否决：总体 ADE 劣于其 δ 孪生超过约 125 m 种子线。",
+    "N3_specific_force_s2024": "同上，seed 2024（同分割）：控制路径的种子噪声约 125 m，门需两个种子同向。"
+   }
   }
  }
 }

@@ -51,6 +51,16 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 **Review.** An opus subagent found 1 blocker (the resume refusal) and 3 should-fix issues. All are fixed and
 re-verified (design §9).
 
+**M2.**
+- **The speed-floor hook works under specific-force.** The demand is drag- and mass-free, with the lag credit
+  capped at the engine. It saturates at the ENGINE's `(T_max − D)/W`, not at the head's 0.23 g box, which sits
+  below the engine on this fleet. Its soft form is inert by construction. The M1 refusal is lifted.
+- **`train --control-thrust-parameterization`.**
+- **Docs:** ts `CLAUDE.md` contract, defaults row and traps; `OPEN_ITEMS`; design §7.1.
+- **N3 is prepared, not launched:** `docs/experiments/sf_n3_arms.json`, intents key `sf_n3`.
+- **Smoke run** (KRDU, 2 epochs; train → predict → evaluate): the chain works end to end. The numbers are not
+  results (design §7.1).
+
 ### 2026-09-14 — runway intent R3.3: R3's flown schedule as a held-out-days (`dayval`) publication; a test overwrote the live KRDU categories.json
 
 **Ask.** The user: "先做1, 2, 最后3" — item 3, publish R3's trajectories (plan §18.3).

@@ -1784,15 +1784,6 @@ class ControlOutput(OutputSpec):
                     f"{CONTROL_SPECIFIC_FORCE!r}: a fitted-teacher table does not say which "
                     "coordinate its schedules are in"
                 )
-            if CONTROL_HOOK_SPEED_FLOOR in CONTROL_HOOK_MEMBERS.get(
-                self.hook.control_command_hook, ()
-            ):
-                raise ValueError(
-                    f"the {CONTROL_HOOK_SPEED_FLOOR!r} hook inverts the thrust-fraction law "
-                    "for its command and is not built for control_thrust_parameterization="
-                    f"{CONTROL_SPECIFIC_FORCE!r} (control_command_hook="
-                    f"{self.hook.control_command_hook!r})"
-                )
         if self.hook.active:
             if self.dynamics.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
                 raise ValueError(

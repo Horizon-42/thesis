@@ -362,12 +362,12 @@ def test_specific_force_is_refused_where_it_is_not_built():
         _config(**SPECIFIC_FORCE, control_imitation_loss_weight=1.0,
                 control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
                 control_fitted_teacher_path="teacher.json")
+    # Every hook that contains the speed floor is BUILT for the law since M2.
     floors = [hook for hook in CONTROL_HOOKS_AVAILABLE
               if CONTROL_HOOK_SPEED_FLOOR in CONTROL_HOOK_MEMBERS.get(hook, ())]
     assert floors, "no hook contains the speed floor; this check would pass vacuously"
     for hook in floors:
-        with pytest.raises(ValueError, match="not built for control_thrust_parameterization"):
-            _config(**SPECIFIC_FORCE, control_command_hook=hook)
+        _config(**SPECIFIC_FORCE, control_command_hook=hook)
     with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(prediction_output=PREDICTION_STATE,
                  control_thrust_parameterization=CONTROL_SPECIFIC_FORCE)
@@ -411,6 +411,31 @@ def test_every_named_recipe_pins_the_thrust_fraction_law():
             TSConfig(**{**settings, **SPECIFIC_FORCE})
     custom = recipe_settings("simple-v3", keep_name=False)
     TSConfig(**{**custom, **SPECIFIC_FORCE})
+
+
+def test_the_train_cli_selects_the_law_and_a_recipe_refuses_it(capsys):
+    import argparse
+    import ts_transformer.cli.common as cli_common
+
+    parser = argparse.ArgumentParser()
+    cli_common.add_data_args(parser)
+    cli_common.add_training_args(parser)
+    base = ["--data", "unused.json", "--output-dir", "unused-output"]
+    args = parser.parse_args([
+        *base, "--prediction-output", "control", "--horizon-mode", "normalized",
+        "--control-dynamics-model", "first-order-lag",
+        "--control-dynamics-backend", "scaled-transport-chart-velocity",
+        "--control-thrust-parameterization", "specific-force",
+    ])
+    config, _batch_auto = cli_common.config_from_args(args, parser)
+    assert config.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE
+    pinned = parser.parse_args([
+        *base, "--control-recipe-name", "simple-v3",
+        "--control-thrust-parameterization", "specific-force",
+    ])
+    with pytest.raises(SystemExit) as info:
+        cli_common.config_from_args(pinned, parser)
+    assert info.value.code == 2 and "control_thrust_parameterization" in capsys.readouterr().err
 
 
 def test_the_control_recipe_names_the_law_only_off_its_default():

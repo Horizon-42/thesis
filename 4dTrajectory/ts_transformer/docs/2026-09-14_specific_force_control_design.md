@@ -14,9 +14,9 @@ the literature (36 sources) and the measurements behind the choice are in
 |---|---|---|---|
 | N0 | fleet spread, per-class readout, literature | **done** 2026-09-14 | `683e604` on `dev-leg-ctrl`; `docs/literature/control_normalization/` |
 | D | this design, plus the teacher-distribution measurement (§2.4) | **done** 2026-09-14 | branch `specific-force-control`, worktree `.claude/worktrees/specific-force` |
-| M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | **done** 2026-09-14, reviewed (opus; 1 blocker + 3 should-fix, all fixed and re-verified, §9) | branch commit after this table's edit |
-| M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | pending | — |
-| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | not started — needs its intent entry and a go | — |
+| M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | **done** 2026-09-14, reviewed (opus; 1 blocker + 3 should-fix, all fixed and re-verified, §9) | `8ce4568` |
+| M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | **done** 2026-09-14, review §10 | the commit after `8ce4568` |
+| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **prepared, NOT launched**: arm file `docs/experiments/sf_n3_arms.json` and intents key `sf_n3` written; the dry run constructs both arms | launch after the merge (§7) |
 | N4 | conditioning vector as dimensionless groups (own axis) | not started | — |
 | N5 | pooled five-airport arm | not started | — |
 
@@ -318,6 +318,38 @@ The torch modules have no importer outside `ts_transformer` and the package's ow
 - **Expected (reading):** in-distribution ties are the norm in the literature (Villar Exp. 1,
   QuadBenchmark Table V). A pooled-ADE win is not the claim; the class structure is.
 
+## 7.1 Smoke run (M2) — the chain works; its numbers are NOT results
+
+**Run:** KRDU, `B1_point_matched`'s config with only the law moved, 2 epochs, one seed, train → predict val →
+`python -m evaluation`. Artifacts are in the session scratchpad and are not kept.
+
+**What ran:**
+- Every stage completed.
+- 1404 records, all stamped `controlThrustParameterization: specific-force`, with `specific_force` per segment
+  and newton thrust.
+- The per-class readout (the N3 instrument) runs on them.
+
+**Sanity reads — not results:**
+- Training is not pathological. Validation ADE was 3447 / 2750 m at epochs 1 / 2, against the thrust-fraction
+  arm's 6176 / 3535 m at the same epochs.
+- The control-head gradient at epoch 1 was mean 177 / max 1014, against 741 / 1619.
+- The head's n_x was already class-invariant after 2 epochs (−0.0621 … −0.0629 g on the established stratum), so
+  its class bias range, 0.0049 g, sits at the truth's own 0.0045 g — the mechanism the design predicts.
+- The model is 2 epochs old: duration bias +125 s, 0.6 % fully flyable. N3 is the measurement.
+
+**Speed floor under specific-force (M2):**
+- The demand is drag-free: `a_c = (a_req·dt − a_0·τ_eff)/(dt − τ_eff)`,
+  `a_req = (V_floor − V)/(g·dt) + sin γ`.
+- The lag credit is the actuator capped at the engine ceiling.
+- It is capped at the ENGINE's `(T_max − D)/W` only; "saturated" means full thrust, as under thrust-fraction.
+- **It is NOT held inside the head's 0.23 g box.** On this fleet that box is below the engine ceiling
+  (0.24–0.33 g at 1.1·V_s, 1 g). The M2 review found the box-capped version saturating on the box in 11 of 11
+  steps, with less authority than the thrust-fraction floor.
+- Its soft form is exactly inert by construction: an unused demand is parked one softness past softplus's linear
+  threshold, and the command is returned there. The thrust-fraction path relies on a rounding accident for the
+  same property; it is left bit-identical and logged (`docs/code-health-followups.md` §34).
+- The M1 config refusal is lifted.
+
 ## 8. Traps to know before touching it
 
 - **The speed has no drag feedback under specific-force** (§2.1). A constant n_x bias drifts
@@ -369,3 +401,27 @@ The torch modules have no importer outside `ts_transformer` and the package's ow
      mislabel of δ.
    - Commands are exported at the head's precision under both laws.
 
+## 10. M2 review (2026-09-14, opus subagent)
+
+No blocker. Three should-fix issues, all fixed:
+- The floor saturated on the head's box, not the engine.
+- The engine-ceiling test was vacuous: all six floor tests passed with the engine term disabled. Now 55 m/s
+  binds below the box and 40 m/s goes past it.
+- The soft form's inertness was still on the switch boundary.
+
+One nit fixed: the lag credit is now capped at the engine.
+
+**Verified by the reviewer:**
+- The thrust-fraction floor is bit-identical to `775b59e`: 18/18, on CPU and CUDA, float32 and float64, soft
+  and hard, outputs, gradients and diagnostics.
+- The N3 arm file differs from its twins only in the law.
+- The intents key resolves.
+
+**Re-review, all five fixes pass:**
+- **Downstream accepts past-box commands:** a hooked command beyond the box is accepted by the export, by
+  `record_from_dict`, by a hooked training epoch and by the dense predict.
+- **Inertness is exact:** across 20,000 random boxes, 0 misses (it was 25–29 %).
+- **Sharper tests added:**
+  - engine-versus-box saturation, at T/W 0.40 and 52.5 m/s;
+  - the soft form's engine cap;
+  - an unsaturated credit case that lands exactly on the floor.

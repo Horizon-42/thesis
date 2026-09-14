@@ -757,3 +757,22 @@ pass). Changes the flown speed on every instruction leg → a re-measure of the 
 absent fields differ", so it changes which stored CV results a `pipeline --skip-train` run reuses — the owner's
 call.
 
+## 34. The thrust-fraction speed floor's soft form is inert by a rounding accident (2026-09-14)
+
+**Verified** (while building the specific-force floor):
+- **The design:** `soft_max(x, b, s) = b + s·softplus((x − b)/s)` equals `x` exactly only where softplus takes
+  its linear branch, input > 20.
+- **The accident:** `_INERT_DEMAND` parks the demand exactly 20 softnesses below the box. At the box floor that
+  ratio is `(−0.2 + 0.6)/0.02 = 20.000000000000004`, so the branch is taken, and `b + s·((x − b)/s)` happens to
+  round back to `x`.
+- **Evidence:** `test_the_soft_speed_floor_is_inert_where_it_demands_nothing` passes on those exact values. The
+  specific-force twin, at 20 softnesses of 0.00717 g, did NOT round back. Its first fix, returning the command
+  past the switch, still sat ON the switch at the box floor (M2 review: 25–29 % of random boxes miss). It is now
+  parked ONE softness further, so every in-box command is strictly past the switch.
+
+**Judgement**: harmless today, and pinned by the test. But any change to `MIN_THRUST_FRACTION`, the softness or
+the multiplier can break it silently in the soft path (the test would catch the box-floor case only). Adopting
+the specific-force form (park 21 softnesses below and `torch.where(x − b ≥ 20·s, x, soft_max(...))`) would
+make it structural. That could
+move thrust-fraction outputs by an ulp where they are currently not exact, so it is the owner's call.
+

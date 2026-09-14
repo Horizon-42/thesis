@@ -22,6 +22,7 @@ from ts_transformer.config import (
     CHECKPOINT_SELECTION_METRICS,
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DYNAMICS_MODELS,
+    CONTROL_THRUST_PARAMETERIZATIONS,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_HOOKS_AVAILABLE,
     CTA_CONDITIONINGS_AVAILABLE,
@@ -282,6 +283,17 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
             "flight model: point-mass applies each control instantly; first-order-lag "
             "drives thrust, bank and load factor towards their command with a time "
             "constant, so they stay continuous across a segment boundary"
+        ),
+    )
+    parser.add_argument(
+        "--control-thrust-parameterization",
+        choices=CONTROL_THRUST_PARAMETERIZATIONS,
+        default=None,
+        help=(
+            "what the head's first control column is: thrust-fraction (T/T_max, every run "
+            "before 2026-09-14) or specific-force ((T-D)/W, the thrust re-solved inside the "
+            "lagged RHS so the same command moves every airframe alike); first-order-lag only "
+            "(docs/2026-09-14_specific_force_control_design.md)"
         ),
     )
     parser.add_argument("--control-thrust-time-constant-s", type=float, default=None)
@@ -571,6 +583,7 @@ CLI_CONFIG_FIELDS = (
     "control_duration_uniform_floor",
     "control_dynamics_backend",
     "control_dynamics_model",
+    "control_thrust_parameterization",
     "control_thrust_time_constant_s",
     "control_bank_time_constant_s",
     "control_load_time_constant_s",

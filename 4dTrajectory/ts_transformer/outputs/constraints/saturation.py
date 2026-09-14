@@ -25,10 +25,20 @@ SATURATION_SOFTNESS_RAD = math.radians(2.0)
 ACTIVE_BANK_CHANGE_RAD = math.radians(0.5)
 
 
+#: Where softplus becomes the identity: past this input it returns the input itself
+#: (torch's own default, passed explicitly so a module that parks a demand "far enough
+#: below" to be inert reads the same number the soft forms use).
+SOFTPLUS_LINEAR_THRESHOLD = 20.0
+
+
 def soft_max(x: torch.Tensor, bound: torch.Tensor, softness: float) -> torch.Tensor:
     """Smooth ``max(x, bound)``: equals ``bound`` well below it, ``x`` well above."""
-    return bound + softness * torch.nn.functional.softplus((x - bound) / softness)
+    return bound + softness * torch.nn.functional.softplus(
+        (x - bound) / softness, threshold=SOFTPLUS_LINEAR_THRESHOLD
+    )
 
 
 def soft_min(x: torch.Tensor, bound: torch.Tensor, softness: float) -> torch.Tensor:
-    return bound - softness * torch.nn.functional.softplus((bound - x) / softness)
+    return bound - softness * torch.nn.functional.softplus(
+        (bound - x) / softness, threshold=SOFTPLUS_LINEAR_THRESHOLD
+    )

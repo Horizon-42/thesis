@@ -6,6 +6,32 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
+## Specific-force control parameterisation — BUILT, NOT MEASURED (2026-09-14, branch `specific-force-control`)
+
+Design `docs/2026-09-14_specific_force_control_design.md`; literature
+`docs/literature/control_normalization/` (repo root).
+
+**The ask.** The user: "…是不是可以修改aerodynamic 或者增加一个normalize 处理？" The head's thrust channel was
+normalised by the actuator (δ = T/T_max). The new axis `control_thrust_parameterization=specific-force` normalises
+it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
+
+**Why it may matter** (KRDU `B1_point_matched`, 2 seeds, established stratum):
+- The head's δ is class-invariant; the truth's is not.
+- The class-dependent n_x bias spans 0.010–0.012 g, against the truth's own 0.0045 g.
+- Heavies fly 4.7–4.9 m/s fast relative to the 737 family.
+
+**Status and next steps:**
+- **M1** (`8ce4568`) and **M2** (the speed floor, CLI, docs, smoke) are built and reviewed. Defaults are
+  bit-identical, and no stored run is renamed or refused.
+- **N3 — the measurement:** KRDU `B1_point_matched` as `custom` + specific-force, seeds 1337/2024. The arm file
+  `docs/experiments/sf_n3_arms.json` and its intent entry are written, NOT launched.
+  - Gates: the per-class n_x bias range falls toward 0.0045 g; the heavy − 737 speed gap closes.
+  - Veto: pooled ADE within ~125 m of the base; the straight-in FDE veto.
+- **N4:** the conditioning vector as dimensionless groups, as its own axis. 4 of 8 channels are constant over the
+  fleet today.
+- **N5:** the pooled five-airport arm.
+- **Known difference, not a bug:** the specific-force speed has no drag feedback (design §2.1).
+
 ## Runway intent — R3.1 / R3.2 / R3.3 (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §18)
 
 The user: "先做1, 2, 最后3" — §17.8's uncertainty-aware scheduling, the closure's time delivery, publishing R3.

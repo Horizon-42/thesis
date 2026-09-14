@@ -262,6 +262,20 @@ flight model.
   rule: the caller's alignment is a central difference over POSITIONS, so the flying just after a
   row is in its direction; and `MEMBERSHIP_FLOOR_M` (500 m) is what decides whether a record is
   cut at all.
+- **The longitudinal column has TWO contracts — `control_thrust_parameterization`**
+  (2026-09-14, `docs/2026-09-14_specific_force_control_design.md`):
+  - **`thrust-fraction`** (the default, every stored run, pinned by every named recipe) is the
+    box below.
+  - **`specific-force`** makes the head's first column `n_x = (T − D)/W`. Its box is
+    `[−0.20, 0.23]` g and its neutral −0.05. It runs on `first-order-lag` only, and the lag RHS
+    re-solves `T = clamp(W·a_x + D, −0.2·T_max, T_max)` at EVERY RK4 stage, so drag cancels and
+    `V̇ = g(a_x − sin γ)`.
+  - **Rules:** `dynamics_arrays` / `anchor_controls` / `actual_controls` / `commanded_controls`
+    take the parameterisation as a REQUIRED argument; the box, neutral and half width come from
+    `envelope.control_contract()`; the plan path pins thrust-fraction.
+  - **The same thrust RANGE is not the same dynamics:** with the drag cancelled the speed has
+    NO drag feedback, so a biased n_x drifts where a biased δ settles. That is why its neutral
+    is a descent speed hold, not level trim.
 - **Controls are DIMENSIONLESS in this package** (`outputs/envelope.py` is the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, same box on every
   airframe. Newtons appear in exactly two places — `physical_controls()` into the dynamics, and
@@ -423,6 +437,7 @@ flight model.
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs. `airport-enu` / `runway-aligned` are FROZEN (2026-09-09, `COORDINATE_FRAMES_AVAILABLE`): the 2026-09-03 arms load, no new run selects them |
 | `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `cli.common._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
+| `control_thrust_parameterization` | `thrust-fraction` | `specific-force` = the head predicts `n_x = (T − D)/W` (the contract above). **Built, not yet measured**: the N3 arms (design §7) read the per-class n_x bias and the heavy − 737 speed gap against `B1_point_matched`. First-order-lag only; refused with the fitted teacher. The speed floor inverts it drag-free and saturates at the engine's `(T_max − D)/W` — NOT at the head's 0.23 g box, which sits below the engine on this fleet (a box-capped floor had less authority than the thrust-fraction one). Names a run `first-order-lag+specific-force …` / slug `lag-sf-…`, only off the default. `control_recipe()` carries it only off the default, because `pipeline` compares that dict for checkpoint reuse |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected. In `run_ts.py pipeline` the model is an axis of the cell: a lag cell's `train_dir` / `pred_dir` / category carry `_lag`, and the ONE override dict (`TrainingPlan._plan_overrides`) feeds the label, `--skip-train` and CV reuse — before 2026-09-09 two hand-written copies both lacked the field, so a lag cell was rebuilt as point-mass everywhere but the training command and shared its directory with the point-mass cell (review A-1) |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `outputs.closure.model.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). THREE modules are live — `barrier` (lateral, gated ON the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08), `trombone` (the pre-final path stretch, gated OFF the final — L3.e, 2026-09-08) — and the vocabulary carries three combinations: `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`, each applied in the order it spells. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier`, `barrier+trombone+speed-floor` and a SOLO `trombone` are not members and are refused with the vocabulary (the trombone hands the command back at the final approach course and has nothing to hand it to without the barrier) |
@@ -1129,6 +1144,14 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 --output-root <root>` restamps a published root (metadata only, all-or-nothing on intents).
 
 ## Traps (one line each; evidence in `docs/ENGINEERING_NOTES.md`)
+
+- **A stored config lacks every field added after it trained — read the absence as
+  `from_dict` does** (`config.absent_field_defaults`: the default, except REQUIRED fields).
+  Reading it as `None` refused every recipe arm's campaign resume the day a recipe pinned
+  `control_thrust_parameterization` (2026-09-14). `pipeline.cv_reuse_error` still compares with
+  `!=` (`docs/code-health-followups.md` §33).
+- **A specific-force rollout's speed drift is not a bug in the law** — the speed integrates
+  the command (no drag feedback, design §2.1). Never give that contract a level-trim neutral.
 
 - **Every ts number assumes the LANDED runway is known** — the threshold anchor (and the plan
   path's CIFP skeleton) is the harvest's final-approach runway, i.e. future information; no

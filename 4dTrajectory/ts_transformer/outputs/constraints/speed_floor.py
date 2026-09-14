@@ -56,6 +56,28 @@ final, because a corridor is a statement about the final approach. A stall is no
 statement about the airframe, it fires wherever the model commands it, and the measurement
 says it fires mostly far from the runway. A gate here would leave the entire problem
 untouched.
+
+**Under the specific-force law** (``control_thrust_parameterization="specific-force"``,
+``docs/2026-09-14_specific_force_control_design.md``) the first column is ``n_x = (T - D)/W``
+and the RHS makes ``V' = g·(a_x - sin γ)`` wherever the thrust clamp does not bind, so the
+same inversion is drag-free and mass-free::
+
+    a_mean = [a_c (dt - tau_eff) + a_0 tau_eff] / dt
+    a_c    = (a_req·dt - a_0·tau_eff) / (dt - tau_eff),   a_req = (V_floor - V)/(g·dt) + sin γ
+
+with the lag credit on the specific-force actuator ``a_0`` — credited no higher than the
+engine gives, because the RHS's thrust clamp caps what a spooled actuator above it flies.
+What the airframe still decides is the CEILING: the most the engine gives here,
+``(T_max - D)/W``, with D read at the segment-start speed, the end-of-hold density and the
+commanded load factor (the floor's own state). "Saturated" means exactly what it means under
+thrust-fraction: the demand reached full thrust. **The hook is NOT held inside the head's
+box**: that box (up to 0.23 g) is the network's search space, sized for the imitation
+scale, and on this fleet it sits BELOW the engine's ceiling (0.24-0.33 g at 1.1·V_s, 1 g,
+M2 review) — capping a physical safety layer there would give it less authority than the
+thrust-fraction floor, whose box IS the engine. The soft width is the same share of the
+longitudinal box under both contracts (0.02 of the thrust-fraction box's 0.6 half width).
+``hook_thrust_change`` is then a change of specific force, in g; a record says which by
+``source.controlThrustParameterization``.
 """
 
 from __future__ import annotations
@@ -65,13 +87,19 @@ import torch
 from aerodynamic_model.torch_dynamics import (
     GRAVITY_MPS2,
     aerodynamic_coefficients,
+    drag_force_n,
     isa_density,
 )
-from ts_transformer.config import TSConfig
+from ts_transformer.config import CONTROL_SPECIFIC_FORCE, TSConfig
 from ts_transformer.outputs.constraints.gates import RunwayAxesView, runway_axes_view
-from ts_transformer.outputs.constraints.saturation import soft_max
+from ts_transformer.outputs.constraints.saturation import SOFTPLUS_LINEAR_THRESHOLD, soft_max
 from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from ts_transformer.outputs.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
+from ts_transformer.outputs.envelope import (
+    MAX_THRUST_FRACTION,
+    MIN_THRUST_FRACTION,
+    THRUST_FRACTION_CONTRACT,
+    control_contract,
+)
 
 #: Width of the soft max around the thrust demand, in fractions of installed thrust. The
 #: barrier's soft bank saturation is 2 deg of a +/-45 deg box, i.e. ~4 % of that box's half
@@ -86,7 +114,7 @@ SATURATION_SOFTNESS_FRACTION = 0.02
 #: past ~20, so twenty softnesses below the box is inert to 1e-8 in float32. It must still be
 #: a FLOOR: an unclamped demand of -1e6 cancels in ``bound + softness * softplus(...)`` and
 #: reintroduces a larger error than the one this avoids.
-_INERT_DEMAND = MIN_THRUST_FRACTION - 20.0 * SATURATION_SOFTNESS_FRACTION
+_INERT_DEMAND = MIN_THRUST_FRACTION - SOFTPLUS_LINEAR_THRESHOLD * SATURATION_SOFTNESS_FRACTION
 _DIAGNOSTIC_KEYS = (
     HOOK_STEPS_KEY, "hook_floor_bound_steps", "hook_floor_saturated_steps",
     "hook_thrust_change",
@@ -139,12 +167,23 @@ class SpeedFloor:
         self.margin = config.control_speed_floor_margin
         self.thrust_lag_s = config.control_thrust_time_constant_s
         self.hard = hard
+        # WHICH quantity the first column is (the module docstring's last section).
+        self.specific_force = config.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE
+        contract = control_contract(config.control_thrust_parameterization)
+        # The head's floor: an in-box command is always at or above it (the hook's parking).
+        self.command_floor = contract.lower[0]
+        self.softness = (
+            SATURATION_SOFTNESS_FRACTION
+            * contract.half_width[0] / THRUST_FRACTION_CONTRACT.half_width[0]
+        )
         # ``[len(_DIAGNOSTIC_KEYS), B]`` — per row, so a prediction record carries its own.
         self._counts: torch.Tensor | None = None
 
     def __call__(
         self, state: RolloutStateView, command: torch.Tensor, segment_index: int
     ) -> torch.Tensor:
+        if self.specific_force:
+            return self._specific_force_floor(state, command)
         view = runway_axes_view(state, self.runway_heading)
         dtype = command.dtype
         hold = view.hold_s
@@ -165,7 +204,7 @@ class SpeedFloor:
         _cl, cd, _stalled = aerodynamic_coefficients(
             commanded_load, view.speed, view.mass, density, aero
         )
-        drag = 0.5 * density * view.speed.square() * cd * area
+        drag = drag_force_n(density, view.speed, cd, area)
         # The mean thrust over the hold that leaves the speed on the floor when it ends.
         mean_required = view.mass * (
             (floor - view.speed) / hold + GRAVITY_MPS2 * torch.sin(view.path_angle)
@@ -192,8 +231,67 @@ class SpeedFloor:
         # gating it on the change would hide it exactly where the network is already there.
         bound = (bounded - thrust).detach() > 0.0
         saturated = demand.detach().to(dtype) >= MAX_THRUST_FRACTION
+        self._count(bound, saturated, change)
+        return torch.stack((raised, bank, load), dim=-1)
+
+    def _specific_force_floor(
+        self, state: RolloutStateView, command: torch.Tensor
+    ) -> torch.Tensor:
+        """The same floor under the specific-force law: the demand is drag- and mass-free,
+        the airframe enters only through the engine's ceiling at this state."""
+        view = runway_axes_view(state, self.runway_heading)
+        dtype = command.dtype
+        hold = view.hold_s
+        specific_force, bank, load = command[:, 0], command[:, 1], command[:, 2]
+        aero = self.aero_params.to(view.d.dtype)
+        commanded_load = load.to(view.d.dtype)
+        floor, density = floor_speed(
+            view,
+            aero=aero,
+            origin_altitude_m=self.origin_altitude_m.to(view.d.dtype),
+            margin=self.margin,
+            commanded_load=commanded_load,
+        )
+        # The engine's ceiling here, in g: full thrust less the drag (the RHS's own polar).
+        _cl, cd, _stalled = aerodynamic_coefficients(
+            commanded_load, view.speed, view.mass, density, aero
+        )
+        drag = drag_force_n(density, view.speed, cd, aero[:, 0])
+        engine = (self.max_thrust_n.to(view.d.dtype) - drag) / (view.mass * GRAVITY_MPS2)
+        # The mean specific force over the hold that leaves the speed on the floor, with the
+        # spooled actuator credited no higher than the engine lets it fly.
+        mean_required = (floor - view.speed) / (GRAVITY_MPS2 * hold) + torch.sin(view.path_angle)
+        tau_eff = self.thrust_lag_s * (1.0 - torch.exp(-hold / self.thrust_lag_s))
+        flying = torch.minimum(state.actuators.to(view.d.dtype)[:, 0], engine)
+        demand = (mean_required * hold - flying * tau_eff) / (hold - tau_eff)
+        # A demand that binds nothing is parked ONE softness past softplus's linear
+        # threshold below the box floor, so every command in the box (the head's floor) is
+        # STRICTLY past the switch below and the soft form returns it exactly — by
+        # construction, not by how `x - b` happens to round (M2 review).
+        switch = SOFTPLUS_LINEAR_THRESHOLD * self.softness
+        parked = self.command_floor - switch - self.softness
+        bounded = torch.minimum(demand.clamp(min=parked), engine).to(dtype)
+        if self.hard:
+            raised = torch.maximum(specific_force, bounded)
+        else:
+            raised = torch.where(
+                specific_force - bounded >= switch,
+                specific_force,
+                soft_max(specific_force, bounded, self.softness),
+            )
+            # The soft form overshoots its bound by up to `softness * ln 2`: never past the
+            # engine on a demand the command did not already exceed.
+            raised = torch.minimum(raised, torch.maximum(engine.to(dtype), specific_force))
+        change = (raised - specific_force).abs().detach()
+        bound = (bounded - specific_force).detach() > 0.0
+        # "Full thrust is not enough", as under thrust-fraction — the engine, not the box.
+        saturated = (demand >= engine).detach()
+        self._count(bound, saturated, change)
+        return torch.stack((raised, bank, load), dim=-1)
+
+    def _count(self, bound: torch.Tensor, saturated: torch.Tensor, change: torch.Tensor) -> None:
         counts = torch.stack((
-            torch.ones_like(thrust, dtype=torch.float64),
+            torch.ones_like(change, dtype=torch.float64),
             bound.to(torch.float64),
             saturated.to(torch.float64),
             change.to(torch.float64),
@@ -203,7 +301,6 @@ class SpeedFloor:
         # the rows ARE the flights, so a second batch through the same hook would broadcast
         # into the first one's rows instead of failing.
         assert self._counts.shape[1] == counts.shape[1], "a hook is built per batch"
-        return torch.stack((raised, bank, load), dim=-1)
 
     def diagnostics(self) -> dict[str, torch.Tensor]:
         """Step counts (and the summed thrust change) over every call, summed over the batch."""
