@@ -37,7 +37,9 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
   - each category's `comparison_index.json`.
 - The same method reproduces the other four airports field for field, and the result passes the frontend's
   guards.
-- Write-back awaits the user's permission (their rule on `aeroviz-4d/public/data`).
+- Written back at 17:41 with the user's permission ("写回"); the main tree's `npm run check-publication --
+  --airport KRDU` reads 152 categories, 0 errors, 0 warnings. The rebuilt file, the rebuild script and the
+  damaged file are kept in `runway_intent_r3_20260914/incident_20260914_krdu_categories/`.
 - The publisher tests now point `main()`'s default roots into tmp and refuse every JSON write inside the live
   trees (the publisher's writer and the tests' own), since `PublicationPlan`'s default roots are bound at import.
 
