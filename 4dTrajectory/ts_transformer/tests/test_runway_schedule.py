@@ -3,6 +3,7 @@
 import math
 import random
 
+import numpy as np
 import pytest
 from geokit import FT_M, METRES_PER_DEG_LAT, NM_M, metres_per_deg_lon
 
@@ -20,6 +21,7 @@ from ts_transformer.inference.runway_schedule import (
     faa_separation,
     fcfs_by_eta,
     parallel_relations,
+    sample_schedules,
     schedule,
     violations,
     wake_category,
@@ -225,3 +227,27 @@ def test_the_faa_rules_by_spacing_and_category():
     assert faa_separation(_parallel_pair(700.0), speed_mps=SPEED, radar_nm=2.5).distance_nm("05L", "F", "05L", "F") == 2.5
     visual = faa_separation(_parallel_pair(700.0), speed_mps=SPEED, visual_parallels=True)
     assert visual.gap_s("05L", "B", "05R", "F") == 0.0 and visual.distance_nm("05L", "B", "05L", "F") == 5.0
+
+
+def test_sampled_schedules_move_every_eta_of_a_flight_by_its_error_and_reorder_by_the_draw():
+    a = Arrival("a", {"05L": 100.0}, {"05L": 0.0}, "F")
+    b = Arrival("b", {"05L": 130.0}, {"05L": 0.0}, "F")
+    # sample 0: no error — a first, b pushed one gap after it; sample 1: a is really 60 s later than
+    # predicted and b 20 s earlier, so b lands first and a waits behind it
+    errors = {"a": np.array([0.0, -60.0]), "b": np.array([0.0, 20.0])}
+    out = sample_schedules([a, b], errors, ONE_RUNWAY, delay_weight_per_s=1 / 60, min_probability=EPS)
+    assert out["a"].times_s[0] == pytest.approx(100.0) and out["b"].times_s[0] == pytest.approx(100.0 + GAP)
+    assert out["b"].times_s[1] == pytest.approx(110.0) and out["a"].times_s[1] == pytest.approx(110.0 + GAP)
+    assert out["a"].delays_s[1] == pytest.approx(110.0 + GAP - 160.0) and out["b"].delays_s[1] == 0.0
+    assert out["a"].runways == ("05L", "05L")
+    with pytest.raises(ValueError):
+        sample_schedules([a, b], {"a": np.zeros(3), "b": np.zeros(2)}, ONE_RUNWAY, delay_weight_per_s=1 / 60, min_probability=EPS)
+
+
+def test_a_flight_far_from_the_others_lands_at_its_drawn_arrival():
+    far = Arrival("far", {"05L": 5000.0, "05R": 5000.0}, {"05L": math.log(0.9), "05R": math.log(0.1)}, "F")
+    near = Arrival("near", {"05L": 100.0}, {"05L": 0.0}, "F")
+    errors = {"far": np.array([12.0, -7.0, 0.0]), "near": np.zeros(3)}
+    out = sample_schedules([near, far], errors, ONE_RUNWAY, delay_weight_per_s=1 / 60, min_probability=EPS)
+    assert np.allclose(out["far"].times_s, 5000.0 - errors["far"]) and np.all(out["far"].delays_s == 0.0)
+    assert out["far"].runways == ("05L", "05L", "05L")

@@ -293,7 +293,7 @@ def final_separation(flown: dict[str, Flown], slots: Sequence[Slot], separation:
     }
 
 
-def _abs_quantiles(values: Sequence[float]) -> dict[str, float]:
+def abs_quantiles(values: Sequence[float]) -> dict[str, float]:
     v = np.abs(np.asarray(values, dtype=float))
     return {"p50": float(np.median(v)), "p90": float(np.percentile(v, 90)), "mean": float(np.mean(v))} if len(v) else \
         {"p50": math.nan, "p90": math.nan, "mean": math.nan}
@@ -342,11 +342,11 @@ def variant_reading(rows: list[dict[str, Any]], slots: dict[str, Slot], separati
                  if slots[r["flight_key"]].delay_s > 1.0 or slots[r["flight_key"]].runway != r["independent"]["runway"]]
         out[stratum] = {
             "runway_accuracy": float(np.mean([slots[r["flight_key"]].runway == r["truth"]["runway"] for r in members])),
-            "time_error_s": _abs_quantiles([slots[r["flight_key"]].time_s - r["truth"]["time_s"] for r in members]),
+            "time_error_s": abs_quantiles([slots[r["flight_key"]].time_s - r["truth"]["time_s"] for r in members]),
             "delayed_share": float(np.mean([slots[r["flight_key"]].delay_s > 1.0 for r in members])),
             "moved": len(moved),
-            "moved_time_error_s": _abs_quantiles([slots[r["flight_key"]].time_s - r["truth"]["time_s"] for r in moved]),
-            "moved_independent_time_error_s": _abs_quantiles([r["independent"]["time_s"] - r["truth"]["time_s"] for r in moved]),
+            "moved_time_error_s": abs_quantiles([slots[r["flight_key"]].time_s - r["truth"]["time_s"] for r in moved]),
+            "moved_independent_time_error_s": abs_quantiles([r["independent"]["time_s"] - r["truth"]["time_s"] for r in moved]),
         }
     return out
 
@@ -361,7 +361,7 @@ def summarise(rows: list[dict[str, Any]], separation: Separation, flown: dict[st
         for name in ("independent", "scheduled", "causal"):
             cell[name] = {
                 "runway_accuracy": float(np.mean([r[name]["runway"] == r["truth"]["runway"] for r in members])),
-                "time_error_s": _abs_quantiles([r[name]["time_s"] - r["truth"]["time_s"] for r in members]),
+                "time_error_s": abs_quantiles([r[name]["time_s"] - r["truth"]["time_s"] for r in members]),
                 "order_agreement": order_agreement(members, separation, name)[0],
                 "order_agreement_close": order_agreement(members, separation, name, close_only=True)[0],
             }
@@ -376,8 +376,8 @@ def summarise(rows: list[dict[str, Any]], separation: Separation, flown: dict[st
         moved = [r for r in members if r["scheduled"]["delay_s"] > 1.0 or r["scheduled"]["runway"] != r["independent"]["runway"]]
         cell["moved"] = {
             "flights": len(moved),
-            "scheduled_time_error_s": _abs_quantiles([r["scheduled"]["time_s"] - r["truth"]["time_s"] for r in moved]),
-            "independent_time_error_s": _abs_quantiles([r["independent"]["time_s"] - r["truth"]["time_s"] for r in moved]),
+            "scheduled_time_error_s": abs_quantiles([r["scheduled"]["time_s"] - r["truth"]["time_s"] for r in moved]),
+            "independent_time_error_s": abs_quantiles([r["independent"]["time_s"] - r["truth"]["time_s"] for r in moved]),
             "scheduled_closer_share": float(np.mean([
                 abs(r["scheduled"]["time_s"] - r["truth"]["time_s"]) < abs(r["independent"]["time_s"] - r["truth"]["time_s"])
                 for r in moved])) if moved else math.nan,
@@ -389,11 +389,11 @@ def summarise(rows: list[dict[str, Any]], separation: Separation, flown: dict[st
             landed = [r for r in members if r["flown"]["landed"]]
             cell["flown"] = {
                 "landed_share": len(landed) / len(members),
-                "time_error_s": _abs_quantiles([r["flown"]["time_s"] - r["truth"]["time_s"] for r in landed]),
+                "time_error_s": abs_quantiles([r["flown"]["time_s"] - r["truth"]["time_s"] for r in landed]),
                 # the same flights' scheduled and independent errors, so the three are paired
-                "scheduled_time_error_s_same_flights": _abs_quantiles([r["scheduled"]["time_s"] - r["truth"]["time_s"] for r in landed]),
-                "independent_time_error_s_same_flights": _abs_quantiles([r["independent"]["time_s"] - r["truth"]["time_s"] for r in landed]),
-                "delivery_error_s": _abs_quantiles([r["flown"]["time_s"] - r["scheduled"]["time_s"] for r in landed]),
+                "scheduled_time_error_s_same_flights": abs_quantiles([r["scheduled"]["time_s"] - r["truth"]["time_s"] for r in landed]),
+                "independent_time_error_s_same_flights": abs_quantiles([r["independent"]["time_s"] - r["truth"]["time_s"] for r in landed]),
+                "delivery_error_s": abs_quantiles([r["flown"]["time_s"] - r["scheduled"]["time_s"] for r in landed]),
                 # where the forecast ENDS against the true threshold, flown vs the same flight unassigned
                 "endpoint_error_m_median": float(np.median([r["flown"]["endpoint_error_m"] for r in members])),
                 "unassigned_endpoint_error_m_median": float(np.median([r["scheduled"]["unassigned_endpoint_error_m"] for r in members])),
@@ -411,38 +411,19 @@ def summarise(rows: list[dict[str, Any]], separation: Separation, flown: dict[st
     return out
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--airport", required=True)
-    parser.add_argument("--r2", required=True, help="R2b's runway_intent_r2.json (--roster day-val) for this airport")
-    parser.add_argument("--checkpoint", required=True, help="the plan expert R2b flew (trained on day_a's training days)")
-    parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--device", default="auto")
-    parser.add_argument("--delay-weight-per-s", type=float, default=1.0 / 60.0,
-                        help="lambda: nats of runway log probability one second of delay costs (plan §17.4: 1/60)")
-    parser.add_argument("--min-probability", type=float, default=0.01,
-                        help="epsilon: a runway below it is never tried unless it is the head's top one")
-    parser.add_argument("--no-fly", action="store_true", help="read the schedules only; do not fly them")
-    args = parser.parse_args(argv)
-
-    airport = args.airport.upper()
-    r2 = json.loads(Path(args.r2).read_text(encoding="utf-8"))
-    if r2["airport"] != airport or r2["evaluation"]["roster"] != "day-val":
-        parser.error(f"--r2 must be {airport}'s R2b artifact (roster day-val); it is {r2['airport']} / {r2['evaluation']['roster']}")
-    config = TSConfig()
+def airport_rules(airport: str, config: TSConfig) -> tuple[Path, dict[str, Any], Separation, float, int]:
+    """The airport's arrivals manifest, its runway targets, and the FAA separation at its approach speed
+    (read on day_a's TRAINING days): ``(manifest_path, targets, separation, speed_mps, speed_flights)``."""
     manifest_path = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
     targets = json.loads(manifest_path.read_text(encoding="utf-8"))["runway_targets"]
-
-    # every quantity the rules read that the data sets is measured on day_a's TRAINING days
     speed_mps, speed_flights = approach_speed_mps(training_day_flights(manifest_path, airport, config), targets)
-    separation = faa_separation(targets, speed_mps=speed_mps)
-    print(f"{airport}: approach speed {speed_mps:.1f} m/s (median over the last 2 NM, {speed_flights} training-day flights); "
-          f"3 NM = {separation.gap_s('x', '', 'x', ''):.1f} s")
-    for pair, relation in sorted(separation.relations.items(), key=lambda kv: sorted(kv[0])):
-        a, b = sorted(pair)
-        print(f"  {a}/{b}: {relation}, spacing {separation.spacing_nm[pair] * NM_M / FT_M:.0f} ft, "
-              f"threshold stagger {abs(separation.along_nm[a] - separation.along_nm[b]):.2f} NM")
+    return manifest_path, targets, faa_separation(targets, speed_mps=speed_mps), speed_mps, speed_flights
 
+
+def roster(r2: dict[str, Any], manifest_path: Path) -> tuple[list[Arrival], list[dict[str, Any]], dict[str, float]]:
+    """R2b's flights as the scheduler sees them — an ETA per runway (the anchor's wall clock + the head's
+    predicted time there), the head's belief, the wake category of the type — the rows the readings fill
+    (the truth: the landed runway, and the landing on the same clock), and each flight's anchor time."""
     records = {r["flight_key"]: r for r in json.loads(manifest_path.read_text(encoding="utf-8"))["records"]}
     resolver = get_default_identity_resolver()
     rows: list[dict[str, Any]] = []
@@ -469,16 +450,58 @@ def main(argv: list[str] | None = None) -> int:
             "independent": {"runway": top, "time_s": etas[top]},
             "etas_s": etas, "probabilities": {r: float(probs[r]) for r in hyp},
         })
+    return arrivals, rows, known_at
 
-    plan = {s.key: s for s in schedule(fcfs_by_eta(arrivals, args.min_probability), separation,
-                                       delay_weight_per_s=args.delay_weight_per_s, min_probability=args.min_probability)}
-    causal = {s.key: s for s in schedule(sorted(arrivals, key=lambda a: (known_at[a.key], a.key)), separation,
-                                         delay_weight_per_s=args.delay_weight_per_s, min_probability=args.min_probability)}
+
+def mark_busy_hours(rows: list[dict[str, Any]]) -> Counter:
+    """Every row's stratum: busy when its truth landing's UTC hour holds ``BUSY_PER_HOUR`` roster landings
+    or more (``hour_landings`` beside it). Returns the landings per (date, hour)."""
     hour_of = {}
     for r in rows:
         landed = datetime.fromtimestamp(r["truth"]["time_s"], tz=timezone.utc)
         hour_of[r["flight_key"]] = (landed.date().isoformat(), landed.hour)
     per_hour = Counter(hour_of.values())
+    for r in rows:
+        r["hour_landings"] = per_hour[hour_of[r["flight_key"]]]
+        r["stratum"] = "busy" if r["hour_landings"] >= BUSY_PER_HOUR else "quiet"
+    return per_hour
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--airport", required=True)
+    parser.add_argument("--r2", required=True, help="R2b's runway_intent_r2.json (--roster day-val) for this airport")
+    parser.add_argument("--checkpoint", required=True, help="the plan expert R2b flew (trained on day_a's training days)")
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--delay-weight-per-s", type=float, default=1.0 / 60.0,
+                        help="lambda: nats of runway log probability one second of delay costs (plan §17.4: 1/60)")
+    parser.add_argument("--min-probability", type=float, default=0.01,
+                        help="epsilon: a runway below it is never tried unless it is the head's top one")
+    parser.add_argument("--no-fly", action="store_true", help="read the schedules only; do not fly them")
+    args = parser.parse_args(argv)
+
+    airport = args.airport.upper()
+    r2 = json.loads(Path(args.r2).read_text(encoding="utf-8"))
+    if r2["airport"] != airport or r2["evaluation"]["roster"] != "day-val":
+        parser.error(f"--r2 must be {airport}'s R2b artifact (roster day-val); it is {r2['airport']} / {r2['evaluation']['roster']}")
+    config = TSConfig()
+    # every quantity the rules read that the data sets is measured on day_a's TRAINING days
+    manifest_path, targets, separation, speed_mps, speed_flights = airport_rules(airport, config)
+    print(f"{airport}: approach speed {speed_mps:.1f} m/s (median over the last 2 NM, {speed_flights} training-day flights); "
+          f"3 NM = {separation.gap_s('x', '', 'x', ''):.1f} s")
+    for pair, relation in sorted(separation.relations.items(), key=lambda kv: sorted(kv[0])):
+        a, b = sorted(pair)
+        print(f"  {a}/{b}: {relation}, spacing {separation.spacing_nm[pair] * NM_M / FT_M:.0f} ft, "
+              f"threshold stagger {abs(separation.along_nm[a] - separation.along_nm[b]):.2f} NM")
+
+    arrivals, rows, known_at = roster(r2, manifest_path)
+
+    plan = {s.key: s for s in schedule(fcfs_by_eta(arrivals, args.min_probability), separation,
+                                       delay_weight_per_s=args.delay_weight_per_s, min_probability=args.min_probability)}
+    causal = {s.key: s for s in schedule(sorted(arrivals, key=lambda a: (known_at[a.key], a.key)), separation,
+                                         delay_weight_per_s=args.delay_weight_per_s, min_probability=args.min_probability)}
+    per_hour = mark_busy_hours(rows)
     r2_by_key = {f["flight_key"]: f for f in r2["flights"]}
     for r in rows:
         key = r["flight_key"]
@@ -487,8 +510,6 @@ def main(argv: list[str] | None = None) -> int:
             r[name] = {"runway": s.runway, "time_s": s.time_s, "eta_s": s.eta_s, "delay_s": s.delay_s}
         r["scheduled"]["unassigned_fde_m"] = float(r2_by_key[key]["hypotheses"][plan[key].runway]["fde_m"])
         r["scheduled"]["unassigned_endpoint_error_m"] = endpoint_error_m(r2_by_key[key]["hypotheses"][plan[key].runway])
-        r["hour_landings"] = per_hour[hour_of[key]]
-        r["stratum"] = "busy" if per_hour[hour_of[key]] >= BUSY_PER_HOUR else "quiet"
 
     truth_slots = [Slot(r["flight_key"], r["truth"]["runway"], r["truth"]["time_s"], r["truth"]["time_s"], r["category"]) for r in rows]
     independent_slots = [Slot(r["flight_key"], r["independent"]["runway"], r["independent"]["time_s"], r["independent"]["time_s"], r["category"]) for r in rows]

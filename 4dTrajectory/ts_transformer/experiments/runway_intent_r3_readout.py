@@ -33,7 +33,7 @@ DELIVERED_S = 10.0                # a flown landing within this of its scheduled
 DELAYED_S = 1.0                   # a scheduled delay above this: the schedule moved the flight
 
 
-def _f(value: Any, digits: int = 0) -> str:
+def fmt(value: Any, digits: int = 0) -> str:
     if value is None or (isinstance(value, float) and value != value):
         return "—"
     return f"{value:.{digits}f}"
@@ -55,18 +55,18 @@ def table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
             fl = c.get("flown")
             flown = ("—", "—", "—") if fl is None else (
                 f"{100 * fl['landed_share']:.1f}%",
-                f"{_f(fl['time_error_s']['p50'])} ({_f(fl['independent_time_error_s_same_flights']['p50'])} / "
-                f"{_f(fl['scheduled_time_error_s_same_flights']['p50'])})",
-                f"{_f(fl['endpoint_error_m_median_landed'])} ({_f(fl['unassigned_endpoint_error_m_median_landed'])})",
+                f"{fmt(fl['time_error_s']['p50'])} ({fmt(fl['independent_time_error_s_same_flights']['p50'])} / "
+                f"{fmt(fl['scheduled_time_error_s_same_flights']['p50'])})",
+                f"{fmt(fl['endpoint_error_m_median_landed'])} ({fmt(fl['unassigned_endpoint_error_m_median_landed'])})",
             )
             lines.append(
                 f"| {airport} / {stratum} | {c['flights']} | "
                 f"{100 * ind['runway_accuracy']:.1f} / {100 * sch['runway_accuracy']:.1f} / {100 * cau['runway_accuracy']:.1f} | "
-                f"{_f(ind['time_error_s']['p50'])} / {_f(sch['time_error_s']['p50'])} / {_f(cau['time_error_s']['p50'])} | "
-                f"{_f(100 * ind['order_agreement_close'], 1)} / {_f(100 * sch['order_agreement_close'], 1)} ({c['order_pairs_close']}) | "
-                f"{c['moved']['flights']}, {_f(c['moved']['scheduled_time_error_s']['p50'])} / "
-                f"{_f(c['moved']['independent_time_error_s']['p50'])}, {_f(100 * c['moved']['scheduled_closer_share'])}% | "
-                f"{_f(sch['delay_s']['p90'])} | {flown[0]} | {flown[1]} | {flown[2]} |"
+                f"{fmt(ind['time_error_s']['p50'])} / {fmt(sch['time_error_s']['p50'])} / {fmt(cau['time_error_s']['p50'])} | "
+                f"{fmt(100 * ind['order_agreement_close'], 1)} / {fmt(100 * sch['order_agreement_close'], 1)} ({c['order_pairs_close']}) | "
+                f"{c['moved']['flights']}, {fmt(c['moved']['scheduled_time_error_s']['p50'])} / "
+                f"{fmt(c['moved']['independent_time_error_s']['p50'])}, {fmt(100 * c['moved']['scheduled_closer_share'])}% | "
+                f"{fmt(sch['delay_s']['p90'])} | {flown[0]} | {flown[1]} | {flown[2]} |"
             )
     return lines
 
@@ -133,9 +133,9 @@ def delivery_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
                  if r["flown"]["time_s"] - r["scheduled"]["time_s"] < -DELIVERED_S]
         lines.append(
             f"| {airport} | {len(kept)} / {len(delayed)} | {delivered(kept)} / {delivered(delayed)} | {signed(kept)} / {signed(delayed)} | "
-            f"{_f(float(np.median([r['scheduled']['delay_s'] for r in delayed])) if delayed else None)}, "
-            f"{_f(float(np.median(x_first)) if x_first else None)} / {_f(float(np.median(x_last)) if x_last else None)}, "
-            f"{_f(100 * float(np.mean(stretched)) if stretched else None)}% | {_f(float(np.median(early)) if early else None)} |"
+            f"{fmt(float(np.median([r['scheduled']['delay_s'] for r in delayed])) if delayed else None)}, "
+            f"{fmt(float(np.median(x_first)) if x_first else None)} / {fmt(float(np.median(x_last)) if x_last else None)}, "
+            f"{fmt(100 * float(np.mean(stretched)) if stretched else None)}% | {fmt(float(np.median(early)) if early else None)} |"
         )
     return lines
 
@@ -155,20 +155,20 @@ def variants_table(artifacts: dict[str, dict[str, Any]]) -> list[str]:
                 lines.append(
                     f"| {airport} / {name} | {100 * art['checks']['truth_one_runway_kept_share'][0]:.1f}% | "
                     f"{art['checks']['independent_violations']} | {100 * every['scheduled']['runway_accuracy']:.1f} | "
-                    f"{_f(every['scheduled']['time_error_s']['p50'])} ({_f(every['independent']['time_error_s']['p50'])}) | "
-                    f"{'—' if busy is None else f'{_f(busy['scheduled']['time_error_s']['p50'])} ({_f(busy['independent']['time_error_s']['p50'])})'} | "
+                    f"{fmt(every['scheduled']['time_error_s']['p50'])} ({fmt(every['independent']['time_error_s']['p50'])}) | "
+                    f"{'—' if busy is None else f'{fmt(busy['scheduled']['time_error_s']['p50'])} ({fmt(busy['independent']['time_error_s']['p50'])})'} | "
                     f"{100 * every['scheduled']['delay_s']['delayed_share']:.1f}% / "
                     f"{'—' if busy is None else f'{100 * busy['scheduled']['delay_s']['delayed_share']:.1f}%'} | "
-                    f"{_f(every['moved']['scheduled_time_error_s']['p50'])} ({_f(every['moved']['independent_time_error_s']['p50'])}) |"
+                    f"{fmt(every['moved']['scheduled_time_error_s']['p50'])} ({fmt(every['moved']['independent_time_error_s']['p50'])}) |"
                 )
                 continue
             every, busy = v["all"], v.get("busy")
             lines.append(
                 f"| {airport} / {name} | {100 * v['truth_one_runway_kept_share'][0]:.1f}% | {v['independent_violations']} | "
-                f"{100 * every['runway_accuracy']:.1f} | {_f(every['time_error_s']['p50'])} ({_f(s['all']['independent']['time_error_s']['p50'])}) | "
-                f"{'—' if busy is None else f'{_f(busy['time_error_s']['p50'])} ({_f(s['busy']['independent']['time_error_s']['p50'])})'} | "
+                f"{100 * every['runway_accuracy']:.1f} | {fmt(every['time_error_s']['p50'])} ({fmt(s['all']['independent']['time_error_s']['p50'])}) | "
+                f"{'—' if busy is None else f'{fmt(busy['time_error_s']['p50'])} ({fmt(s['busy']['independent']['time_error_s']['p50'])})'} | "
                 f"{100 * every['delayed_share']:.1f}% / {'—' if busy is None else f'{100 * busy['delayed_share']:.1f}%'} | "
-                f"{_f(every['moved_time_error_s']['p50'])} ({_f(every['moved_independent_time_error_s']['p50'])}) |"
+                f"{fmt(every['moved_time_error_s']['p50'])} ({fmt(every['moved_independent_time_error_s']['p50'])}) |"
             )
     return lines
 
@@ -186,7 +186,8 @@ def gates(artifacts: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "4_runway_agreement": every["scheduled"]["runway_accuracy"] >= every["independent"]["runway_accuracy"] - RUNWAY_TOLERANCE,
         }
         # a gate that was not measured (no flight flown, no busy hour) leaves the verdict open, never passed
-        g["passed"] = None if any(v is None for v in g.values()) else all(g.values())
+        # a failed gate fails the airport; otherwise an unmeasured one leaves the verdict open
+        g["passed"] = False if any(v is False for v in g.values()) else None if any(v is None for v in g.values()) else True
         if busy is not None and quiet is not None:
             g["r4_runway_gap"] = quiet["scheduled"]["runway_accuracy"] - busy["scheduled"]["runway_accuracy"]
             g["r4_runway_trigger"] = g["r4_runway_gap"] >= R4_RUNWAY_GAP
@@ -217,8 +218,8 @@ def main(argv: list[str] | None = None) -> int:
         lines.append(
             f"| {airport} | {mark[g['1_plan_violations_zero']]} | {mark[g['2_flown_kept_share']]} | {mark[g['3_busy_timing']]} | "
             f"{mark[g['3_all_hours_no_worse']]} | {mark[g['4_runway_agreement']]} | {mark[g['passed']]} | "
-            f"{_f(100 * g['r4_runway_gap'], 1) if 'r4_runway_gap' in g else '—'} | "
-            f"{_f(g['r4_timing_ratio_busy_over_quiet'], 2) if 'r4_timing_ratio_busy_over_quiet' in g else '—'} |"
+            f"{fmt(100 * g['r4_runway_gap'], 1) if 'r4_runway_gap' in g else '—'} | "
+            f"{fmt(g['r4_timing_ratio_busy_over_quiet'], 2) if 'r4_timing_ratio_busy_over_quiet' in g else '—'} |"
         )
     lines += ["", "Gate 2 is the pre-registered reading: every consecutive flown one-runway pair, most of them minutes "
               "apart; the pairs a minimum can bind are the \"kept under 2 minima\" column, and a flight that never "

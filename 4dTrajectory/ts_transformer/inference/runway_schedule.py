@@ -26,9 +26,10 @@ from __future__ import annotations
 
 import bisect
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Mapping, Sequence
 
+import numpy as np
 from geokit import FT_M, METRES_PER_DEG_LAT, NM_M, metres_per_deg_lon
 
 #: How far under a minimum two times may be and still keep it: the times are wall clocks (~1.8e9 s,
@@ -339,3 +340,41 @@ def violations(slots: Sequence[Slot], separation: Separation, *, tolerance_s: fl
                 out.append((leader, follower, short))
             i -= 1
     return out
+
+
+@dataclass(frozen=True)
+class SampledSlots:
+    """One arrival across the samples of `sample_schedules`: its runway, landing time and delay in each."""
+
+    runways: tuple[str, ...]
+    times_s: np.ndarray
+    delays_s: np.ndarray
+
+
+def sample_schedules(
+    arrivals: Sequence[Arrival], errors_s: Mapping[str, np.ndarray], separation: Separation, *,
+    delay_weight_per_s: float, min_probability: float, known_at: Mapping[str, float] | None = None,
+) -> dict[str, SampledSlots]:
+    """The schedule under ETA uncertainty, one sample at a time (runway-intent R3.1, plan §18.1). In
+    sample m every arrival's ETAs move by ``-errors_s[key][m]`` — ONE error per flight, the same on each
+    runway (an ETA error is a timing error) — which makes it a draw of the flight's free arrival, and the
+    traffic is scheduled first come first served by the moved ETAs (`fcfs_by_eta`, `schedule`), or, given
+    ``known_at``, placed in the order the arrivals became known (each against the slots already frozen:
+    the causal form). The delay in a sample is against the moved ETA on the runway given."""
+    samples = {len(np.asarray(errors_s[a.key])) for a in arrivals}
+    if len(samples) != 1:
+        raise ValueError(f"every arrival needs the same number of error samples, got {sorted(samples)}")
+    count = samples.pop()
+    runways: dict[str, list[str]] = {a.key: [] for a in arrivals}
+    times = {a.key: np.full(count, np.nan) for a in arrivals}
+    delays = {a.key: np.full(count, np.nan) for a in arrivals}
+    for m in range(count):
+        moved = [replace(a, etas={r: t - float(errors_s[a.key][m]) for r, t in a.etas.items()}) for a in arrivals]
+        order = fcfs_by_eta(moved, min_probability) if known_at is None else sorted(moved, key=lambda a: (known_at[a.key], a.key))
+        for slot in schedule(order, separation,
+                             delay_weight_per_s=delay_weight_per_s, min_probability=min_probability):
+            runways[slot.key].append(slot.runway)
+            times[slot.key][m] = slot.time_s
+            delays[slot.key][m] = slot.delay_s
+    return {key: SampledSlots(tuple(runways[key]), times[key], delays[key]) for key in runways}
+
