@@ -51,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
                  for a in AIRPORTS if (campaign / a / "runway_intent_r31.json").exists()}
     missing = [a for a in AIRPORTS if a not in artifacts]
     verdicts = gates(artifacts)
+    centered = sorted({art["error_model"].get("centered", False) for art in artifacts.values()})
     lines = ["# Runway-intent R3.1 readout", "", f"campaign: `{campaign}`",
+             f"error model: {'CENTERED (each stratum median taken out: calibrated = raw ETA)' if centered == [True] else 'as calibrated' if centered == [False] else 'MIXED'}",
              *([] if not missing else ["", f"**missing airports (no artifact): {', '.join(missing)}**"]),
              "", "## Landing-time prediction (|dt| p50 s, signed p50 s in brackets)", "",
              "| airport / hours | n | stochastic | stochastic causal | calibrated independent | raw independent | R3 deterministic | "

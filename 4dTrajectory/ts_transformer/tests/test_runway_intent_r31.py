@@ -94,3 +94,12 @@ def test_the_gates_read_the_calibrated_baseline_and_leave_an_unmeasured_gate_ope
     assert verdicts["PASS"]["passed"] is True
     assert verdicts["WORSE"]["passed"] is False and verdicts["MOVED"]["passed"] is False
     assert verdicts["NOBUSY"]["passed"] is None and verdicts["NOMOVED"]["passed"] is None
+
+
+def test_the_centered_model_keeps_the_spread_and_makes_the_calibrated_prediction_the_raw_eta():
+    residuals = np.array([-30.0, -5.0, 0.0, 10.0, 50.0])
+    model = ErrorModel((1e9, 2e9), {POOLED: residuals, "T tercile 1": residuals + 7.0}).centered()
+    assert np.median(model.residuals["T tercile 1"]) == 0.0 and np.median(model.residuals[POOLED]) == 0.0
+    assert np.ptp(model.residuals["T tercile 1"]) == np.ptp(residuals)
+    draws = error_grid(model.residuals["T tercile 1"], 200, np.random.default_rng(0))
+    assert abs(np.median(draws)) < 0.05          # the grid interpolates about the median: 0.025 s with 5 residuals

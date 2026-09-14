@@ -100,6 +100,13 @@ class ErrorModel:
         own = self.name(int(np.digitize([predicted_s], self.edges_s)[0]))
         return own if own in self.residuals else POOLED
 
+    def centered(self) -> "ErrorModel":
+        """The same spreads with every stratum's median taken out: the calibrated prediction becomes the
+        raw ETA (to the quantile grid's interpolation about the median), and the stochastic schedule's
+        difference from it is the interaction alone (the training days' median error need not carry to
+        other days — R3.1 measured that it does not)."""
+        return ErrorModel(self.edges_s, {name: e - np.median(e) for name, e in self.residuals.items()})
+
     def table(self) -> dict[str, Any]:
         return {"edges_s": list(self.edges_s), "strata": {
             name: {"n": len(e), "p10": float(np.percentile(e, 10)), "p50": float(np.median(e)),
@@ -199,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=20260914)
     parser.add_argument("--delay-weight-per-s", type=float, default=1.0 / 60.0, help="lambda, as in R3")
     parser.add_argument("--min-probability", type=float, default=0.01, help="epsilon, as in R3")
+    parser.add_argument("--center-errors", action="store_true",
+                        help="sensitivity: take each stratum's median error out (the calibrated prediction is then "
+                             "the raw ETA, and the stochastic schedule differs from it by the interaction alone)")
     args = parser.parse_args(argv)
     if args.samples < 2:
         parser.error("--samples must be at least 2")
@@ -224,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
     if overlap:
         raise RuntimeError(f"{len(overlap)} calibration flights are in the evaluation roster — the two must be disjoint")
     errors = ErrorModel.fit([row["predicted_s"] for row in calibration], [row["error_s"] for row in calibration])
+    if args.center_errors:
+        errors = errors.centered()
     print(f"  error model: {json.dumps(errors.table())}", flush=True)
 
     arrivals, rows, known_at = roster(r2, manifest_path)
@@ -260,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         "error_model": {
             "calibration": "the expert's own validation split (day_a training days), each flight under its landed "
                            "runway; e = the head's predicted remaining time - the true one",
+            "centered": args.center_errors,
             "calibration_flights": len(calibration),
             "calibration_build": calibration_build,
             "caveat": "the calibration split is also the split the checkpoint was selected on: coverage is measured, "
