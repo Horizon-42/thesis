@@ -718,3 +718,27 @@ training. Pre-existing code; the pooled run (`step5_pool_fan4_head`) is what fir
 **Judgement**: cache the encoded array on the `RolledWindowTable` keyed by the normalizer (one
 copy per normalizer, shared by every set built under it). Not folded into the step-5 change
 because it is a training-plane refactor with its own measurement (memory, not numbers).
+
+## 31. The time closure's "drop the stretch" branch lays its probes on top of the stretch it is dropping
+
+**Verified** (2026-09-14, R3.2 review, reproduced: `outputs/plan/forecast.py`, `fly_lockstep`'s closure
+block). When a flight with a stretch in force reads late, the branch re-lays the route without it,
+`lay(-state.stretch_m)`, and re-closes with `close_time(route_0, ..., lay=lay)` — but `lay` adds
+`state.stretch_m` (still in force at that point) to every request, so the inner path lever's probes are
+laid on top of the old stretch, all read too long, and all are refused. Reproduced: 30 km in force, a
+flight 120 s early at the floor → the branch returns X = +120 s with nothing laid. Fix: pass
+`lay=lambda extra, _s=state.stretch_m: lay(extra - _s)` there. Not folded in: R3.2 adopted no closure
+change (plan §18.2), and this moves flown results (rarely: a stretch in force and a late read).
+
+## 32. An instruction leg's speed points are keyed in the head's path to go and read at the route's
+
+**Verified** (2026-09-14, R3.2). `forecast.leg_route` gives an instruction leg the speed points
+`((anchor.remaining_m, anchor speed), (instruction.remaining_m, instruction speed))` — the HEAD's
+path-to-go coordinates — while the controller (`guidance/controller.py`, `v_ref`) and the time closure
+(`route_time_s`) read the schedule at the ROUTE's own path to go, which the `LEG_EXTENSION_M`
+placeholder past the fix (8 km, then back onto the join) inflates. So the speed flown to the fix depends
+on the placeholder's length (synthetic leg, heading away from the join: 6.8 s of leg time between 8 and
+16 km of placeholder) and the fix's speed point is often never reached on the leg. **Judgement**: key the
+leg's points at the route's own coordinates (the anchor at `route.remaining_m(0)`, the fix at its first
+pass). Changes the flown speed on every instruction leg → a re-measure of the plan-path steps; not done.
+
