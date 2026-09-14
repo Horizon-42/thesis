@@ -23,8 +23,10 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 - `category_display_label` raises on an unknown split.
 - Frontend: switching keeps the split in view, and ranking reads the split in view only.
 - Records: 5195 over five airports, identical to R3's formal flights (0 s / 0 m).
-- Publication waits for the ff-merge: the worktree's `aeroviz-4d/public/data/airports` is a symlink into the
-  main tree, whose frontend rejects an airport's whole list on an unknown split.
+- Published after the user's ff-merge (`d14e21d`): five `dayval` categories, one per airport, under
+  `runway_intent_r3_20260914`. Each airport gained exactly one entry, and `check-publication` reads 0 errors
+  everywhere. The merge had to come first: the worktree's `aeroviz-4d/public/data/airports` is a symlink into
+  the main tree, whose frontend rejects an airport's whole list on an unknown split.
 
 **Incident.**
 - What happened: a new publisher test called `main()` with only `--output-root`, then wrote a fake
