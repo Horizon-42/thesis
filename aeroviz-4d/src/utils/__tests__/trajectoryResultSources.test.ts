@@ -160,6 +160,27 @@ describe("trajectory result sources", () => {
     // Selecting it from the val view still opens its only publication.
     expect(categoryForExperimentSplit([val, dayvalOnly], "campaign/stage/run_seed1337@r3-schedule", "val")
       ?.datasetSplit).toBe("dayval");
+
+    // The same holds for an in-sample (train-only) run and for a category that names no split.
+    const trainOnly: ComparisonCategory = {
+      ...experiment("train"),
+      accuracy: { adeM: { mean: 50, p95: 90 } },
+      experiment: { ...experiment("train").experiment!, id: "campaign/train_only" },
+    };
+    const { datasetSplit: _dropped, ...noSplitBase } = experiment("val");
+    const noSplit: ComparisonCategory = {
+      ...noSplitBase,
+      key: "experiment_nosplit",
+      dir: "experiment_nosplit",
+      accuracy: { adeM: { mean: 10, p95: 20 } },
+      experiment: { ...experiment("val").experiment!, id: "campaign/no_split" },
+    };
+    expect(experimentOptions([val, trainOnly, noSplit], "adeMean", "val")
+      .map((option) => [option.id, option.metricValue])).toEqual([
+      ["campaign/stage/run_seed1337", 900],
+      ["campaign/no_split", null],
+      ["campaign/train_only", null],
+    ]);
   });
 
   it("prefers the publisher's canonical run label when stamped", () => {

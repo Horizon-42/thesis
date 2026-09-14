@@ -154,7 +154,7 @@ def test_the_schedule_records_carry_the_scheduled_time_as_the_prediction(tmp_pat
     assert out["records"] == 2 and summary["split"] == runway_intent_r3.RECORDS_SPLIT == "dayval"
     assert summary["checkpoint"] == str(checkpoint)
     block = summary["runway_schedule"]
-    assert (block["records"], block["landed"], block["moved"]) == (2, 1, 1)
+    assert (block["records"], block["landed"], block["scheduled_on_other_runway"]) == (2, 1, 1)
     assert {name: block[name] for name in settings} == settings
     assert "scheduled landing time" in block["timing"] and "TRUE runway" in block["runway_frame"]
     landed_row, unlanded_row = summary["results"]
@@ -162,14 +162,16 @@ def test_the_schedule_records_carry_the_scheduled_time_as_the_prediction(tmp_pat
     schedule = [json.loads((tmp_path / "records" / row["eval_file"]).read_text())["source"]["runwaySchedule"]
                 for row in summary["results"]]
     assert schedule[0]["etaErrorS"] == pytest.approx(-12.0) and schedule[0]["scheduledTimeErrorS"] == pytest.approx(30.0)
+    assert schedule[0]["scheduledTimeS"] == pytest.approx(landed_row["true_final_time_s"] + 30.0)
     assert schedule[0]["flownTimeErrorS"] == pytest.approx(35.0) and schedule[0]["deliveryS"] == pytest.approx(5.0)
     assert schedule[1]["landed"] is False and schedule[1]["deliveryS"] is None and schedule[1]["flownTimeErrorS"] is None
     assert (schedule[1]["scheduledRunway"], schedule[1]["trueRunway"]) == ("05R", "05L")
 
 
-def test_records_are_written_only_for_a_flown_schedule(tmp_path):
+def test_records_are_written_only_for_a_flown_schedule(tmp_path, capsys):
     with pytest.raises(SystemExit) as exit_info:
         runway_intent_r3.main(["--airport", "KRDU", "--r2", "r2.json", "--checkpoint", "c.pt",
                                "--output-dir", str(tmp_path / "out"), "--no-fly", "--write-records", str(tmp_path / "rec")])
     assert exit_info.value.code == 2
+    assert "--write-records writes the FLOWN schedule" in capsys.readouterr().err
     assert not (tmp_path / "rec").exists() and not (tmp_path / "out").exists()

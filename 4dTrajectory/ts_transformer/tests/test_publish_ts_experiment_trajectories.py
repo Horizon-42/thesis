@@ -9,7 +9,21 @@ import pytest
 import publish_ts_experiment_trajectories as publisher
 
 
+#: The live trees, resolved at import (before any test patches the module): in a worktree they are
+#: symlinks into the main tree's data, so a "local" write there is a live one.
+_LIVE_TREES = tuple(
+    path.resolve() for path in (publisher.FRONTEND_AIRPORTS_ROOT, publisher.REPO_ROOT / "4dTrajectory" / "outputs")
+)
+
+
+def _refuse_live(path: Path) -> None:
+    resolved = Path(path).resolve()
+    if any(resolved.is_relative_to(tree) for tree in _LIVE_TREES):
+        raise AssertionError(f"a test tried to write the live tree: {resolved}")
+
+
 def _write_json(path: Path, value: object) -> None:
+    _refuse_live(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
 
@@ -41,10 +55,19 @@ def intent_registry(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture(autouse=True)
 def live_trees_out_of_reach(tmp_path, monkeypatch) -> None:
-    """`main()` reads its default output and frontend roots from these globals at call time: pointed
-    into tmp, a test that forgets a root writes there, never into the live trees."""
+    """No test writes the live trees. `main()` reads its default roots from these globals at call time,
+    so they point into tmp; `PublicationPlan`'s field defaults and `rebuild_publication_index`'s are bound
+    at import and are NOT covered by that — so every JSON the publisher writes (manifests, category
+    patches, the index) and every one a test writes (`_write_json`) is refused inside the live trees."""
     monkeypatch.setattr(publisher, "RAW_OUTPUT_ROOT", tmp_path / "default-roots" / "published")
     monkeypatch.setattr(publisher, "FRONTEND_AIRPORTS_ROOT", tmp_path / "default-roots" / "frontend")
+    write = publisher._write_json_atomic
+
+    def guarded(path: Path, value: dict) -> None:
+        _refuse_live(path)
+        write(path, value)
+
+    monkeypatch.setattr(publisher, "_write_json_atomic", guarded)
 
 
 def _indexed_checkpoint(tmp_path: Path) -> tuple[Path, Path]:
@@ -823,17 +846,25 @@ def _flight_row(number: int) -> dict[str, str]:
     }
 
 
+#: The checkpoint's split contract in these tests: NOT the default, so a seal check that read the
+#: package defaults instead of the checkpoint's own config would pick the wrong flights.
+_SPLIT_SEED = 7
+
+
 def _rows_on_either_side_of_the_seal() -> tuple[dict[str, str], dict[str, str]]:
-    """A development flight and an outer-test one under the package's locked split (default contract)."""
+    """A flight the checkpoint's split keeps (but the default contract seals) and one it seals (but the
+    default keeps) — each reads the other way under the wrong config."""
     from flight_scenarios.identity import flight_key
     from ts_transformer.config import TSConfig
     from ts_transformer.data.splits import split_name_for_dataset_id
 
-    def sealed(row):
-        return split_name_for_dataset_id(f"KRDU:{flight_key(row, 0)}", TSConfig()) == "test"
+    def sealed(row, config):
+        return split_name_for_dataset_id(f"KRDU:{flight_key(row, 0)}", config) == "test"
 
-    rows = [_flight_row(number) for number in range(200)]
-    return next(r for r in rows if not sealed(r)), next(r for r in rows if sealed(r))
+    own, default = TSConfig(split_seed=_SPLIT_SEED), TSConfig()
+    rows = [_flight_row(number) for number in range(400)]
+    return (next(r for r in rows if not sealed(r, own) and sealed(r, default)),
+            next(r for r in rows if sealed(r, own) and not sealed(r, default)))
 
 
 def _dayval_records(tmp_path: Path, checkpoint: Path, rows: list[dict[str, str]]) -> Path:
@@ -842,13 +873,19 @@ def _dayval_records(tmp_path: Path, checkpoint: Path, rows: list[dict[str, str]]
     return records
 
 
-def _dayval_experiment(monkeypatch, tmp_path: Path):
-    """The test checkpoint with a FULL config (the seal check reads its locked split contract) and the
-    preflight's file checks satisfied."""
+def _dayval_experiment(monkeypatch, tmp_path: Path, own_split: dict[str, list[str]] | None = None):
+    """The test checkpoint with a FULL config (the seal check reads its locked split contract), the
+    split it persisted (``own_split``: none of the test flights by default), and the preflight's file
+    checks satisfied."""
     from ts_transformer.config import TSConfig
+    from ts_transformer.training import train as ts_train
 
     index, checkpoint = _indexed_checkpoint(tmp_path)
-    experiment = replace(publisher.discover_checkpoints(index)[0], config=TSConfig().to_dict())
+    experiment = replace(
+        publisher.discover_checkpoints(index)[0], config=TSConfig(split_seed=_SPLIT_SEED).to_dict(),
+    )
+    split = {"train": [], "val": [], "test": [], **(own_split or {})}
+    monkeypatch.setattr(ts_train, "load_checkpoint_payload", lambda path: {"split": split})
     monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
     manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
     _write_json(manifest, {})
@@ -896,13 +933,27 @@ def test_a_dayval_publication_needs_a_reused_directory_and_says_what_it_is(monke
 
 def test_a_dayval_directory_holding_an_outer_test_flight_is_refused(monkeypatch, tmp_path):
     """A reuse-only split's records come from a runner, not from `predict`'s development split: the
-    outer-test seal is checked on every flight, not taken on the runner's word."""
+    outer-test seal is checked on every flight, under the CHECKPOINT's split contract, not taken on
+    the runner's word."""
     _index, checkpoint, experiment = _dayval_experiment(monkeypatch, tmp_path)
     kept, sealed = _rows_on_either_side_of_the_seal()
     plan = _dayval_plan(tmp_path, experiment, _dayval_records(tmp_path, checkpoint, [kept, sealed]))
     assert "outer-test" in (plan.preflight_error() or "")
     _dayval_records(tmp_path, checkpoint, [kept])
     assert plan.preflight_error() is None
+
+
+def test_a_dayval_directory_holding_a_flight_the_checkpoint_saw_is_refused(monkeypatch, tmp_path):
+    """The other half of "held out": none of the checkpoint's own training / validation flights."""
+    from flight_scenarios.identity import flight_key
+
+    kept, _sealed = _rows_on_either_side_of_the_seal()
+    for name in ("train", "val"):
+        _index, checkpoint, experiment = _dayval_experiment(
+            monkeypatch, tmp_path / name, own_split={name: [f"KRDU:{flight_key(kept, 0)}"]},
+        )
+        plan = _dayval_plan(tmp_path / name, experiment, _dayval_records(tmp_path / name, checkpoint, [kept]))
+        assert "trained or selected on" in (plan.preflight_error() or ""), name
 
 
 def test_a_category_group_files_the_variant_under_the_campaign_that_wrote_the_records(

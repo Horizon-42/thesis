@@ -447,7 +447,7 @@ def write_schedule_records(
         record.source["runwaySchedule"] = {
             "scheduledRunway": scheduled["runway"], "trueRunway": r["truth"]["runway"],
             "scheduledTimeUtc": datetime.fromtimestamp(scheduled["time_s"], tz=timezone.utc).isoformat(),
-            "delayS": scheduled["delay_s"], "headTopRunway": r["independent"]["runway"],
+            "scheduledTimeS": scheduled["time_s"] - r["anchor_s"], "delayS": scheduled["delay_s"], "headTopRunway": r["independent"]["runway"],
             "headProbability": r["probabilities"][scheduled["runway"]], "wakeCategory": r["category"],
             "etaErrorS": scheduled["eta_s"] - truth_s, "scheduledTimeErrorS": scheduled["time_s"] - truth_s,
             "landed": x.landed, "flownTimeErrorS": x.time_s - truth_s if x.landed else None,
@@ -460,15 +460,19 @@ def write_schedule_records(
                 split=RECORDS_SPLIT, extra_summary={"runway_schedule": {
                     "schema": RECORDS_SCHEMA, "split": RECORDS_SPLIT, "airport": airport, "partition": "day_a",
                     "roster": "every flight on day_a's validation days the day_a-retrained expert flew (R2b)",
-                    "plan": "R3: FCFS by ETA under the FAA JO 7110.65BB minima, flown with the scheduled time assigned",
-                    "timing": ("the prediction is the scheduled landing time (as a CTA arm's is its CTA): final_time_error_s "
-                               "is the schedule's error, arrival_endpoint_error_m where the flown aircraft is at that time; "
-                               "runwaySchedule.etaErrorS is the head's own ETA's, flownTimeErrorS the flown landing's"),
+                    "plan": ("R3: FCFS by ETA under the FAA JO 7110.65BB minima, flown with the scheduled time assigned; "
+                             "NOT causal — the order reads ETAs some flights only have after an earlier flight's anchor"),
+                    "timing": ("the prediction is the scheduled landing time (runwaySchedule.scheduledTimeS from the anchor), "
+                               "as a CTA arm's is its CTA: durationHeadFinalTimeS and final_time_error_s read it, and "
+                               "arrival_endpoint_error_m is where the flown aircraft is at that time; predictedFinalTimeS "
+                               "(the row's predicted_final_time_s) is the FLOWN duration, as in every record; "
+                               "runwaySchedule.etaErrorS is the head's own ETA's error, flownTimeErrorS the flown landing's"),
                     "runway_frame": ("every record is filed and graded under the flight's TRUE runway (its identity, its "
                                      "observed track); a flight scheduled onto another runway is flown there, so its lateral "
                                      "error includes the runway spacing — runwaySchedule.scheduledRunway says which"),
                     "records": len(records), "landed": sum(x.landed for x in flown.values()),
-                    "moved": sum(by_key[k]["scheduled"]["runway"] != by_key[k]["truth"]["runway"] for k in flown),
+                    "scheduled_on_other_runway": sum(
+                        by_key[k]["scheduled"]["runway"] != by_key[k]["truth"]["runway"] for k in flown),
                     **settings,
                 }})
     return {"directory": str(root), "records": len(records), "split": RECORDS_SPLIT}

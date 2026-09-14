@@ -37,7 +37,8 @@ campaign is designed, with its arm declaration.
 validation days of a day partition it was trained beside (runway-intent R3's schedule, flown by R2b's
 day_a experts). No predict step writes that split, so it is published only from the runner's own
 directory (``--reuse-prediction-dir``), only under Experiments, and every record's flight is checked
-against the checkpoint's locked outer-test hash before anything is written. ``--category-group``
+before anything is written: not in the checkpoint's locked outer-test hash, not among its own
+training / validation flights. ``--category-group``
 files such a variant under the campaign that WROTE the records (its registry entry gives the heading
 and question) rather than the one that trained the checkpoint.
 
@@ -746,28 +747,37 @@ class PublicationPlan:
             steps.insert(0, ("predict", predict))
         return steps
 
-    def _outer_test_error(self, rows: Iterable[dict[str, Any]]) -> str | None:
-        """Refuse records holding a flight of the checkpoint's locked outer-test split.
+    def _held_out_error(self, rows: Iterable[dict[str, Any]]) -> str | None:
+        """Refuse records that are not held out from this checkpoint: a flight of its locked
+        outer-test split, or one of its OWN training / validation flights.
 
         A development split's records come from `predict`, which reads only that split; a
-        reuse-only split's come from a runner, so the seal is CHECKED here — the package's own
-        per-flight hash on the checkpoint's own split contract — not taken on the runner's word.
+        reuse-only split's come from a runner, so both halves of what the label promises are
+        CHECKED here — the package's per-flight hash on the checkpoint's split contract, and the
+        split the checkpoint persisted — not taken on the runner's word.
         """
         from flight_scenarios.identity import flight_key   # the package's rules, imported where they are needed
         from ts_transformer.config import TSConfig
         from ts_transformer.data.splits import split_name_for_dataset_id
+        from ts_transformer.training.train import load_checkpoint_payload
         try:
             config = TSConfig.from_dict(self.experiment.config)
         except ValueError as exc:
             return f"cannot read the checkpoint's locked split to check the outer-test seal: {exc}"
-        sealed = [
-            key for key in (flight_key(row, index) for index, row in enumerate(rows))
-            if split_name_for_dataset_id(f"{self.airport}:{key}", config) == "test"
-        ]
+        dataset_ids = [f"{self.airport}:{flight_key(row, index)}" for index, row in enumerate(rows)]
+        sealed = [key for key in dataset_ids if split_name_for_dataset_id(key, config) == "test"]
         if sealed:
             return (
                 f"reused predictions in {self.prediction_dir} hold {len(sealed)} flight(s) of the "
                 f"locked outer-test split (first {sealed[0]}); outer-test is never published"
+            )
+        own = load_checkpoint_payload(self.experiment.checkpoint)["split"]
+        seen = [key for key in dataset_ids if key in set(own["train"]) | set(own["val"])]
+        if seen:
+            return (
+                f"reused predictions in {self.prediction_dir} hold {len(seen)} flight(s) the checkpoint "
+                f"trained or selected on (first {seen[0]}); a {self.split!r} publication shows only "
+                "flights it never saw"
             )
         return None
 
@@ -860,9 +870,9 @@ class PublicationPlan:
                     "and a directory spanning several would be filed whole under each"
                 )
             if self.split in REUSE_ONLY_SPLITS:
-                sealed_error = self._outer_test_error(reused.get("results") or ())
-                if sealed_error is not None:
-                    return sealed_error
+                held_out_error = self._held_out_error(reused.get("results") or ())
+                if held_out_error is not None:
+                    return held_out_error
         # Two prediction directories must never land on ONE category. Everything a category
         # is named from comes from the checkpoint, so publishing a second directory of the
         # same checkpoint without a variant would silently replace the first — its CZML, its
