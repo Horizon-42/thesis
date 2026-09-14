@@ -6,6 +6,24 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
+## Runway intent — R3.1 / R3.2 / R3.3 (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §18)
+
+The user: "先做1, 2, 最后3" — §17.8's uncertainty-aware scheduling, the closure's time delivery, publishing R3.
+**R3.1 MEASURED — no pre-registered gate passes at any airport**: scheduling under ETA uncertainty
+(`runway_schedule.sample_schedules`, 200 FCFS schedules per airport on the flights' calibrated ETA errors, each
+flight's draws its error stratum's quantile grid in a random order) against the same error model without
+interaction: all hours −0.4 to +0.3 s of median |dt|, busy hours −1.3 to +0.5 s, the moved flights worse at
+3–4 airports; the training days' median ETA error does not carry to validation days (the calibrated baseline is
+worse than the raw ETA at 4 of 5 airports); the centred sensitivity agrees. Landing-time error lives in each
+flight's own ETA, not between aircraft; R4 stays off. **R3.2 CLOSED AS A DIAGNOSIS, no fix adopted**: the time
+closure times an instruction leg through the 8 km `LEG_EXTENSION_M` placeholder past the fix, reads the flight
+minutes late (X −85 / −176 s at KSMF / KSTL) and chases, then is early with no lever at the switch to the
+closing (+104 s); three tail models smoke-tested on R3's plan removed the chase but none improved delivery at
+both airports (what is flown after a fix is the head's later orders) — stopped before tuning on the evaluation
+flights; v3 on branch `wip-r32-leg-timing`; code-health §31, §32. Next (the user's call): a closure timed over
+the whole remaining route, developed off the evaluation roster. Artifacts `outputs/POOLED/experiments/
+runway_intent_r31{,_centered}_20260914/`, `runway_intent_r32_20260914/diagnosis/`.
+
 ## Runway intent — R3 MEASURED 2026-09-14 (`docs/2026-09-13_runway_intent_plan.zh.md` §17)
 
 **R3** (multi-runway joint assignment and the arrival scheduler, `inference/runway_schedule.py` +

@@ -4,6 +4,28 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-14 — ts_transformer: runway intent R3.1 / R3.2 — scheduling under ETA uncertainty has no predictive value; the closure's lost time located, not fixed
+
+**Ask.** The user: "先做1, 2, 最后3" (plan §17.8's three next steps, §18 of
+`4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md`).
+
+**R3.1.** `inference/runway_schedule.sample_schedules` + `experiments/runway_intent_r31.py`: each day_a expert's
+ETA error calibrated on its own validation split (training days), stratified by the head's own predicted remaining
+time; 200 FCFS schedules on drawn free arrivals, each flight's prediction the median landing time, read against
+the same error model without interaction. Reviewed (opus): draws taken with replacement put a flight alone 1-2.5 s
+off its baseline and read as a 0.4 s interaction gain — the quantile grid removed it before the run. Result: no
+pre-registered gate passes; the interaction moves the median |dt| by −0.4..+0.3 s over all hours and makes the
+moved flights worse at 3-4 airports; the calibration's median error does not carry from training to validation
+days. R4 stays off.
+
+**R3.2.** `experiments/runway_intent_r32_diagnosis.py`: the v5.4 time closure reads a flight on an instruction leg
+through the 8 km placeholder the leg's route carries past the fix, reads it minutes late (X −85 / −176 s at KSMF /
+KSTL), flies it at maximum speed, and at the switch to the closing it is early by ~13 s with ~12 km to go and no
+lever (+104 s jump). Three tail models (the head's path to go, the closing laid from the turn) removed the chase
+but none improved delivery at both airports; stopped before tuning the closure on the evaluation flights — no
+change adopted (v3 kept on `wip-r32-leg-timing`); two verified follow-ups in `docs/code-health-followups.md`
+§31-32.
+
 ### 2026-09-14 — ts_transformer: runway intent R3 — the multi-runway arrival scheduler under the FAA minima, flown; separation rules sourced from JO 7110.65BB
 
 **Ask.** The user: "do it; first write plan then implement" (plan §17 of
