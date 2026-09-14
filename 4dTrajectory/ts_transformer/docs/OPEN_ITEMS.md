@@ -6,6 +6,15 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
+## Runway intent — R1.2 PLANNED (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §19)
+
+The user: "加到计划里" (after asking why each airport has its own model). R1.2 trains `r11_lift`'s candidate-symmetric
+head on all five airports at once, airport-balanced weights, same settings, and pairs it against the per-airport
+`r11_lift` on the same samples. Pre-registered gates (§19.4): exact accuracy ≥ `r11_lift` − 1.0 point in every
+airport × partition cell, NLL ≤ 1.05×, ECE ≤ 0.05, the KSJC closure days and KMSY 07-21 ≥ 95 %, the KRDU / KSMF side lift
+within 2 points of `r11_lift`'s. Secondary readings: an airport one-hot arm, leave-one-airport-out. Not started;
+the user schedules it.
+
 ## Runway intent — R3.1 / R3.2 / R3.3 (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §18)
 
 The user: "先做1, 2, 最后3" — §17.8's uncertainty-aware scheduling, the closure's time delivery, publishing R3.
