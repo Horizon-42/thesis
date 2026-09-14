@@ -5,6 +5,7 @@ and the assignment flown by the head's lockstep on the synthetic KRDU cohort."""
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -16,9 +17,11 @@ from ts_transformer.data.dataset import build_series
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.inference.forecast import cut_at_threshold_crossing
 from ts_transformer.outputs.plan.extractors import extract_plan
+import ts_transformer.outputs.plan.forecast as plan_forecast
 from ts_transformer.outputs.plan.forecast import (
     LegOrder,
     Instruction,
+    closing_tail_m,
     leg_route,
     lockstep_states,
     plan_to_fly,
@@ -31,10 +34,12 @@ from ts_transformer.outputs.plan.guidance.timing import (
     MIN_STRETCH_LAID_M,
     STRETCH_PROBES,
     TIME_TOLERANCE_S,
+    LegEnd,
     close_speed,
     close_time,
     held_speed_mps,
     plan_time_s,
+    tail_time_s,
     reanchored,
     scaled,
     stall_floor_mps,
@@ -276,3 +281,72 @@ def test_a_faster_held_speed_moves_the_deceleration_point_out_to_reach_v_final()
     # re-anchoring moves only the first point's coordinate
     moved = reanchored(plan, _straight_route(25_000.0))
     assert moved.speed_points[0] == (pytest.approx(25_000.0), 100.0) and moved.v_mid_mps == plan.v_mid_mps
+
+
+def test_the_tail_is_timed_as_the_same_path_laid_straight():
+    plan = PlanToFly(100.0, 3_000.0, 70.0, 500.0, ((20_000.0, 100.0),))
+    assert tail_time_s(plan, 0.0) == 0.0
+    for length in (2_000.0, 9_000.0, 20_000.0):
+        assert tail_time_s(plan, length) == pytest.approx(plan_time_s(_straight_route(length), plan), rel=2e-3)
+    # an instruction leg: its route to the end of the turn, then the tail — never the route beyond
+    route = replace(_straight_route(40_000.0), join_index=200)          # the "turn" ends 10 km along
+    end = LegEnd(route.join_index, 5_000.0)
+    to_turn = plan_time_s(replace(_straight_route(40_000.0), join_index=200), plan) - plan_time_s(
+        _straight_route(30_000.0), plan)
+    assert plan_time_s(route, plan, 0, end) == pytest.approx(to_turn + tail_time_s(plan, 5_000.0), rel=1e-6)
+    assert plan_time_s(route, plan, 0, end) < 0.5 * plan_time_s(route, plan)
+
+
+def test_an_instruction_leg_closes_with_the_speed_lever_alone_and_reads_its_tail():
+    plan = PlanToFly(100.0, None, 70.0, 500.0, ((40_000.0, 100.0),))
+    route = replace(_straight_route(40_000.0), join_index=200)          # a 30 km placeholder past the turn
+    end = LegEnd(route.join_index, 5_000.0)
+    meant = plan_time_s(route, plan, 0, end)
+
+    def never(_extra_m: float):
+        raise AssertionError("a leg's path lever would lengthen the placeholder, not the path flown")
+
+    # on time by the leg's own reading: the placeholder never makes it late
+    closure, r1, _p1, _b1 = close_time(route, plan, meant, v_floor_mps=70.0, lay=never, leg_end=end)
+    assert abs(closure.unabsorbed_s) <= TIME_TOLERANCE_S and closure.speed_factor == pytest.approx(1.0, abs=0.01)
+    assert closure.tail_m == 5_000.0 and r1 is route
+    old, *_ = close_time(route, plan, meant, v_floor_mps=70.0, lay=lambda e: (route, plan))
+    assert old.unabsorbed_s < -100.0 and old.tail_m is None             # the placeholder read as minutes late
+    # a delay past the floor on a leg: the floor, the rest left as X for the closing to lay, nothing laid
+    floor_time = plan_time_s(route, scaled(plan, 0.7), 0, end)
+    closure, r2, _p2, _b2 = close_time(route, plan, floor_time + 60.0, v_floor_mps=70.0, lay=never, leg_end=end)
+    assert closure.unabsorbed_s == pytest.approx(60.0, abs=1.0) and closure.stretch_m == 0.0 and r2 is route
+    # the same state asked again reads the same X (the next ask rebuilds exactly this leg end)
+    again, *_ = close_time(route, plan, floor_time + 60.0, v_floor_mps=70.0, lay=never, leg_end=end)
+    assert again.unabsorbed_s == closure.unabsorbed_s
+    # a stretch in force is the heading after the fix flown longer, at the held speed
+    stretched = LegEnd(route.join_index, 5_000.0, stretch_m=2_000.0)
+    assert plan_time_s(route, plan, 0, stretched) == pytest.approx(meant + 2_000.0 / held_speed_mps(plan))
+
+
+def test_an_instruction_leg_is_timed_to_its_turn_then_the_heads_path_never_through_the_placeholder(monkeypatch):
+    series, config, skeleton, anchor = _cohort(1)
+    state, labels, plan, _route, _leg_plan = _first_route(series[0], config, skeleton, anchor)
+    here, heading = state.current, state.current.heading_rad
+    # a fix 3 km ahead given a heading AWAY from the join (a downwind): the leg is laid on past the fix
+    # for LEG_EXTENSION_M and back onto the join
+    away = skeleton.course_rad + math.pi
+    to_go = here.remaining_m - 3_000.0
+    fix = Instruction(here.e + 3_000.0 * math.cos(heading), here.n + 3_000.0 * math.sin(heading), away, 80.0, to_go, 600.0)
+    r8, p8, _j = leg_route(here, fix, labels.d_join_m, skeleton, plan, mid_flight=True)
+    monkeypatch.setattr(plan_forecast, "LEG_EXTENSION_M", 16_000.0)
+    r16, p16, _j = leg_route(here, fix, labels.d_join_m, skeleton, plan, mid_flight=True)
+    assert r16.length_m > r8.length_m + 5_000.0
+    tail8 = closing_tail_m(r8, fix, labels.d_join_m, skeleton, plan, here)
+    tail16 = closing_tail_m(r16, fix, labels.d_join_m, skeleton, plan, here)
+    end8, end16 = LegEnd(r8.join_index, tail8), LegEnd(r16.join_index, tail16)
+    assert end8.index == end16.index and tail8 == pytest.approx(tail16)
+    # timed by the leg, the placeholder's length reaches the time only through the speed flown to the fix
+    # (the leg's speed points are keyed in the head's path to go and read at the route's, which the
+    # placeholder moves — the controller reads them the same way); timed through it, by all of it
+    old = plan_time_s(r16, p16) - plan_time_s(r8, p8)
+    assert old > 60.0
+    assert abs(plan_time_s(r16, p16, 0, end16) - plan_time_s(r8, p8, 0, end8)) < 0.1 * old
+    # the tail is the closing laid from the turn's end: never shorter than the straight line to the threshold
+    threshold = np.array([np.interp(r8.threshold_arc_m, r8.arc_m, r8.points[:, k]) for k in (0, 1)])
+    assert tail8 >= float(np.hypot(*(r8.points[r8.join_index] - threshold))) - 1.0

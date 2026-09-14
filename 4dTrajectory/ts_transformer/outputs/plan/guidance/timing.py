@@ -20,6 +20,22 @@ could not decide and a plan can (§1, L3.e). The identity behind the path lever 
 the remaining path cannot absorb at the floor speed, as extra path flown at that speed — is
 the trombone hook's (`outputs/constraints/trombone.py`, its `ΔL = V_e·T_r − D`), here decided
 at planning time on the route's true length and laid by the route builder.
+
+An INSTRUCTION leg is timed differently (`LegEnd`; runway-intent R3.2, 2026-09-14): its route runs
+through the fix, on along the heading given for `forecast.LEG_EXTENSION_M` (8 km, laid so the corner at
+the fix can be rounded — "only the part to the fix is flown") and back onto the join and the final, and
+timed to the threshold that placeholder made a flight whose heading points away from the join read
+minutes LATE: the closure flew it at its maximum speed, and the switch to the closing, whose route is the
+real one, left it early with ~12 km to go and no lever (KSMF / KSTL: X −85 / −176 s before the switch,
++104 s at it, p50). So the leg is timed to the end of its turn at the fix, then the path of the CLOSING
+the route builder lays from there (`forecast.closing_tail_m` — what the lockstep lays when the turn executes
+and the closing follows) at the plan's schedule (`tail_time_s`), and any stretch in force at the held
+speed. The head's own path to go at the fix was tried first and read the flights EARLY instead: it is
+longer than the closing the guidance flies (smoke, KSTL: undelayed within 10 s 81.5 → 68.1 %). A leg
+closes with the SPEED lever alone: a lay on a leg only
+lengthens the placeholder, whose growth is not the path the flight will fly (the review measured 18.4 km
+asked, 9 km laid, and the next ask reading the flight 100 s the other way); a delay the floor cannot
+absorb on a leg is the closing's to lay, where a hold or a dog-leg is real path.
 """
 
 from __future__ import annotations
@@ -33,7 +49,13 @@ import numpy as np
 from ts_transformer.geometry.flyability import isa_density
 from ts_transformer.outputs.constraints.speed_floor import stall_speed_mps
 from ts_transformer.outputs.plan.guidance.controller import STALL_MARGIN, PlanToFly
-from ts_transformer.outputs.plan.guidance.route import DECEL_RATE_MPS2, OVERRUN_M, Route, route_time_s
+from ts_transformer.outputs.plan.guidance.route import (
+    DECEL_RATE_MPS2,
+    OVERRUN_M,
+    Route,
+    route_time_s,
+    speed_schedule_mps,
+)
 from ts_transformer.outputs.plan.labels import SPEED_MAX_MPS
 
 #: An assignment met within this is closed; the lockstep's own step is 30 s and the
@@ -59,6 +81,32 @@ MIN_STRETCH_LAID_M = 100.0
 #: A lay: the schedule coordinate lengthened by ``extra_m`` → the route and its leg plan
 #: (`forecast.leg_route` at a lengthened anchor).
 Lay = Callable[[float], tuple[Route, PlanToFly]]
+#: The tail's integration step: the schedule changes over hundreds of metres.
+TAIL_STEP_M = 50.0
+
+
+@dataclass(frozen=True)
+class LegEnd:
+    """How an instruction leg is timed: its route to point ``index`` (the end of the turn at its
+    fix), then ``tail_m`` of path to the threshold at the plan's schedule (`tail_time_s`), then the
+    stretch in force (``stretch_m``, the heading after the fix held that much longer) at the held
+    speed."""
+
+    index: int
+    tail_m: float
+    stretch_m: float = 0.0
+
+
+def tail_time_s(plan: PlanToFly, tail_m: float) -> float:
+    """The time the plan's schedule needs for ``tail_m`` of path to the threshold: ``∫ ds / V(s)``
+    with the speed read at the path to go ``s``, as `route_time_s` reads it on a laid route."""
+    if tail_m <= 0.0:
+        return 0.0
+    remaining = np.linspace(tail_m, 0.0, max(int(math.ceil(tail_m / TAIL_STEP_M)), 1) + 1)
+    speed = speed_schedule_mps(remaining, v_mid=plan.v_mid_mps, d_decel_m=plan.d_decel_m, v_final=plan.v_final_mps,
+                               points=plan.speed_points)
+    pace = 0.5 * (speed[1:] + speed[:-1])
+    return float(np.sum(-np.diff(remaining) / np.maximum(pace, 1.0)))
 
 
 @dataclass(frozen=True)
@@ -72,6 +120,7 @@ class TimeClosure:
     stretch_m: float                 # the path ADDED as laid (the route's length grew by this)
     closed_time_s: float
     stretch_requested_m: float = 0.0  # what the lay was asked for (the builder lays what it can)
+    tail_m: float | None = None      # an instruction leg's path timed beyond its turn (`LegEnd`); None on a closing
 
     @property
     def unabsorbed_s(self) -> float:
@@ -83,6 +132,7 @@ class TimeClosure:
             "assigned_remaining_s": self.assigned_remaining_s, "plan_time_s": self.plan_time_s,
             "speed_factor": self.speed_factor, "stretch_m": self.stretch_m,
             "stretch_requested_m": self.stretch_requested_m, "unabsorbed_s": self.unabsorbed_s,
+            "tail_m": self.tail_m,
         }
 
 
@@ -134,17 +184,23 @@ def scaled(plan: PlanToFly, factor: float) -> PlanToFly:
     return replace(plan, v_mid_mps=plan.v_mid_mps * factor, speed_points=points, d_decel_m=decel_point_for(plan, points[-1][1]))
 
 
-def plan_time_s(route: Route, plan: PlanToFly, start: int = 0) -> float:
-    """The time the plan needs to fly ``route`` from its point ``start`` to the threshold."""
+def plan_time_s(route: Route, plan: PlanToFly, start: int = 0, leg_end: LegEnd | None = None) -> float:
+    """The time the plan needs to fly ``route`` from its point ``start`` to the threshold — or, on an
+    instruction leg (``leg_end``), to the end of its turn and then the tail (`LegEnd`)."""
+    if leg_end is None:
+        return route_time_s(
+            route, v_mid=plan.v_mid_mps, d_decel_m=plan.d_decel_m, v_final=plan.v_final_mps, points=plan.speed_points,
+            start=start,
+        )
     return route_time_s(
         route, v_mid=plan.v_mid_mps, d_decel_m=plan.d_decel_m, v_final=plan.v_final_mps, points=plan.speed_points,
-        start=start,
-    )
+        start=start, end=leg_end.index,
+    ) + tail_time_s(plan, leg_end.tail_m) + leg_end.stretch_m / held_speed_mps(plan)
 
 
 def close_speed(
     route: Route, plan: PlanToFly, remaining_s: float, *, v_floor_mps: float, v_max_mps: float = SPEED_MAX_MPS,
-    start: int = 0,
+    start: int = 0, leg_end: LegEnd | None = None,
 ) -> tuple[PlanToFly, float]:
     """The speed lever on a fixed route, flown from its point ``start``: the factor between
     the floor and the maximum whose route time meets ``remaining_s`` (the time falls as the
@@ -154,13 +210,13 @@ def close_speed(
     held = held_speed_mps(plan)
     low = min(max(v_floor_mps, plan.v_final_mps) / held, v_max_mps / held)
     high = v_max_mps / held
-    if plan_time_s(route, scaled(plan, low), start) <= remaining_s:
+    if plan_time_s(route, scaled(plan, low), start, leg_end) <= remaining_s:
         return scaled(plan, low), low          # even the floor is too fast: the path's turn
-    if plan_time_s(route, scaled(plan, high), start) >= remaining_s:
+    if plan_time_s(route, scaled(plan, high), start, leg_end) >= remaining_s:
         return scaled(plan, high), high        # even the maximum is too slow: X < 0
     for _ in range(BISECTION_STEPS):
         mid = 0.5 * (low + high)
-        if plan_time_s(route, scaled(plan, mid), start) > remaining_s:
+        if plan_time_s(route, scaled(plan, mid), start, leg_end) > remaining_s:
             low = mid          # too slow at mid: faster
         else:
             high = mid
@@ -181,6 +237,7 @@ def reanchored(plan: PlanToFly, route: Route) -> PlanToFly:
 
 def close_time(
     route: Route, plan: PlanToFly, remaining_s: float, *, v_floor_mps: float, lay: Lay, start: int = 0,
+    leg_end: LegEnd | None = None,
 ) -> tuple[TimeClosure, Route, PlanToFly, PlanToFly]:
     """The closure for one ask: the speed lever on the route in force; then, for a delay the
     floor cannot absorb, the path lever — ``lay(extra_m)`` re-lays the route with that much
@@ -192,16 +249,17 @@ def close_time(
     aircraft, from 0). Returns the closure, the route (the stretched one where the path
     lever was used), the closed plan and the plan AS LAID for that route (what the next ask
     scales from); at or past the threshold the plan is returned unchanged with X the
-    assigned remaining time."""
+    assigned remaining time. ``leg_end`` times an instruction leg (`LegEnd`), which closes with the
+    speed lever alone (the module docstring: a lay there lengthens a placeholder)."""
     if route.remaining_m(start) <= 0.0:
         return TimeClosure(remaining_s, 0.0, 1.0, 0.0, 0.0), route, plan, plan
-    base_time = plan_time_s(route, plan, start)
-    closed, factor = close_speed(route, plan, remaining_s, v_floor_mps=v_floor_mps, start=start)
-    time = plan_time_s(route, closed, start)
+    base_time = plan_time_s(route, plan, start, leg_end)
+    closed, factor = close_speed(route, plan, remaining_s, v_floor_mps=v_floor_mps, start=start, leg_end=leg_end)
+    time = plan_time_s(route, closed, start, leg_end)
     residual = remaining_s - time
     requested = laid = 0.0
     base = plan
-    if residual > TIME_TOLERANCE_S:
+    if residual > TIME_TOLERANCE_S and leg_end is None:
         to_fly = route.remaining_m(start)
         extra = min(residual * held_speed_mps(closed), MAX_STRETCH_M)
         short, long = 0.0, None            # the bracket: the largest request still EARLY, the smallest LATE
@@ -239,11 +297,12 @@ def close_time(
             _residual, laid, requested, route, base, _floor_time = best
             closed, factor = close_speed(route, base, remaining_s, v_floor_mps=v_floor_mps)
             time = plan_time_s(route, closed)
-    return TimeClosure(remaining_s, base_time, factor, laid, time, requested), route, closed, base
+    closure = TimeClosure(remaining_s, base_time, factor, laid, time, requested, None if leg_end is None else leg_end.tail_m)
+    return closure, route, closed, base
 
 
 __all__ = [
     "BISECTION_STEPS", "Lay", "MAX_STRETCH_M", "MIN_STRETCH_LAID_M", "STRETCH_PROBES", "TIME_TOLERANCE_S",
-    "TimeClosure", "close_speed", "close_time", "decel_point_for", "held_speed_mps", "plan_time_s", "reanchored",
+    "LegEnd", "TimeClosure", "close_speed", "close_time", "decel_point_for", "held_speed_mps", "plan_time_s", "reanchored",
     "scaled", "stall_floor_mps",
 ]

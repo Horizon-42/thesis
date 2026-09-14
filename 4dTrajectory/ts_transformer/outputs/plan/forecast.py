@@ -49,7 +49,7 @@ from ts_transformer.outputs.plan.labels import (
     wrap_angle,
 )
 from ts_transformer.outputs.plan.guidance.controller import PlanGuidance, PlanToFly, reference_height
-from ts_transformer.outputs.plan.guidance.timing import TIME_TOLERANCE_S, TimeClosure, close_time, stall_floor_mps
+from ts_transformer.outputs.plan.guidance.timing import TIME_TOLERANCE_S, LegEnd, TimeClosure, close_time, stall_floor_mps
 from ts_transformer.outputs.plan.guidance.route import (
     CONVERGE_MIN_M,
     INTERCEPT_MAX_RAD,
@@ -595,6 +595,23 @@ def leg_route(anchor: Anchor, instruction: Instruction | None, d_join_m: float |
     return replace(route, join_index=min(turn_end + 1, len(route.points) - 1)), leg_plan, route.join_index
 
 
+def closing_tail_m(route: Route, instruction: Instruction, d_join_m: float | None, skeleton: RunwaySkeleton,
+                   plan: PlanToFly, anchor: Anchor) -> float:
+    """The path the time closure times past an instruction leg's turn (`guidance.timing.LegEnd`,
+    runway-intent R3.2): the CLOSING the route builder lays from the end of the turn at the fix (the
+    route's ``join_index``) — on the heading given, at the instruction's speed and height, with the path
+    to go the lockstep re-syncs the flight to when the turn executes — i.e. what the lockstep flies next
+    when the closing follows. The laid route past the turn is the `LEG_EXTENSION_M` placeholder and back
+    onto the join: never flown, and timed it read a flight whose heading points away from the join
+    minutes late."""
+    turn = route.points[route.join_index]
+    pose = replace(anchor, e=float(turn[0]), n=float(turn[1]), heading_rad=float(instruction.heading_out_rad),
+                   speed_mps=float(instruction.speed_mps), remaining_m=max(float(instruction.remaining_m), 0.0),
+                   height_m=float(instruction.height_m))
+    closing, _plan, _join = leg_route(pose, None, d_join_m, skeleton, plan, mid_flight=True)
+    return closing.remaining_m(0)
+
+
 def first_pass_index(route: Route, fix_e: float, fix_n: float) -> int:
     """The route point where it FIRST passes the fix: the first local minimum of the
     distance to it that is also the running minimum. The route runs on past the fix to
@@ -970,6 +987,7 @@ class FlightState:
     #: oracle's policy then offers the next; the head's re-predicts regardless
     instruction_executed: bool = False
     route: Route | None = None            # the route in force (whole; `progress` is where the aircraft is on it)
+    leg_tail_m: float | None = None       # the closing timed past the instruction leg's turn (`closing_tail_m`)
     progress: int = 0
     route_height_m: float = 0.0           # the height the route in force was laid from (the height law's anchor)
     plan: PlanToFly | None = None         # its schedule
@@ -1229,16 +1247,25 @@ def fly_lockstep(
                     )[:2]
 
                 base_route = state.route
+                start = 0 if relaid else state.progress
+                if instruction is not None and (relaid or state.leg_tail_m is None):
+                    # the closing past the leg's turn, laid once per leg (the turn does not move
+                    # while the route in force is kept)
+                    state.leg_tail_m = closing_tail_m(base_route, instruction, d_join_m, state.skeleton, lay_plan, state.current)
                 closure, route, leg_plan, laid_plan = close_time(
-                    base_route, state.base_plan, remaining_s, v_floor_mps=floor,
-                    start=0 if relaid else state.progress, lay=lay,
+                    base_route, state.base_plan, remaining_s, v_floor_mps=floor, start=start, lay=lay,
+                    leg_end=None if instruction is None else LegEnd(base_route.join_index, state.leg_tail_m, state.stretch_m),
                 )
                 if closure.unabsorbed_s < -TIME_TOLERANCE_S and state.stretch_m > 0.0:
                     # a stretch in force the assignment no longer needs (the order or the
                     # pose changed): the route without it, if that meets the time better
                     route_0, plan_0 = lay(-state.stretch_m)
+                    # its own path lever lays from the route WITHOUT the stretch: `lay` adds the
+                    # stretch in force, so the request is taken off it (review, R3.2)
                     closure_0, route_0, plan_0, laid_0 = close_time(
-                        route_0, plan_0, remaining_s, v_floor_mps=floor, start=0, lay=lay,
+                        route_0, plan_0, remaining_s, v_floor_mps=floor, start=0,
+                        lay=lambda extra, _s=state.stretch_m: lay(extra - _s),
+                        leg_end=None if instruction is None else LegEnd(route_0.join_index, state.leg_tail_m, 0.0),
                     )
                     if abs(closure_0.unabsorbed_s) < abs(closure.unabsorbed_s):
                         closure, route, leg_plan, laid_plan = closure_0, route_0, plan_0, laid_0
