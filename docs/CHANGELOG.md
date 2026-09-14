@@ -8,15 +8,17 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 
 **Ask.** The user: "先做1, 2, 最后3" — item 3, publish R3's trajectories (plan §18.3).
 
-**Change** (`220138a`, reviewed by opus):
+**Change** (`220138a`, then `a6d921a` after a second opus review):
 - The split `run_naming.SPLIT_DAYVAL`: a day partition's validation days, flown by a checkpoint trained on
   that partition's training days.
 - `runway_intent_r3 --write-records`. A record's prediction is its SCHEDULED landing time (as a CTA arm's
-  is its CTA). The head's own ETA error and the flown time's ride in `source.runwaySchedule`. R3's flights
+  is its CTA; `runwaySchedule.scheduledTimeS`, and the block's `timing` names which fields read it). The head's
+  own ETA error and the flown time's ride in `source.runwaySchedule`. R3's flights
   go through the plan path's forecast, so records say `plan`.
 - Publisher:
   - dayval only from a reused directory and only under Experiments;
-  - the locked outer-test hash is checked on every record's flight;
+  - every record's flight is checked against both halves of "held out": the locked outer-test hash and the
+    checkpoint's own persisted train/val;
   - `--category-group` files a variant under the campaign that wrote the records.
 - `category_display_label` raises on an unknown split.
 - Frontend: switching keeps the split in view, and ranking reads the split in view only.
@@ -36,7 +38,8 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 - The same method reproduces the other four airports field for field, and the result passes the frontend's
   guards.
 - Write-back awaits the user's permission (their rule on `aeroviz-4d/public/data`).
-- The publisher tests now point `main()`'s default roots into tmp (autouse fixture).
+- The publisher tests now point `main()`'s default roots into tmp and refuse every JSON write inside the live
+  trees (the publisher's writer and the tests' own), since `PublicationPlan`'s default roots are bound at import.
 
 ### 2026-09-14 — ts_transformer: runway intent R3.1 / R3.2 — scheduling under ETA uncertainty has no predictive value; the closure's lost time located, not fixed
 
