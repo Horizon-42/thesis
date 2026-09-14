@@ -391,7 +391,7 @@ export default function ControlPanel({
                       const next = categoryForExperimentSplit(
                         experimentCategories,
                         id,
-                        activeComparisonCategory?.datasetSplit === "train" ? "train" : "val",
+                        activeComparisonCategory?.datasetSplit ?? "val",
                       );
                       setTrajectoryComparisonCategory(next?.dir ?? null);
                     }}
@@ -408,7 +408,8 @@ export default function ControlPanel({
                         <option key={category.key} value={category.dir}>
                           {category.datasetSplit === "train" ? "Training (in-sample)" :
                             category.datasetSplit === "val" ? "Validation (model selection)" :
-                              "Held-out test"} ({category.groups})
+                              category.datasetSplit === "dayval" ? "Held-out days (day partition validation)" :
+                                "Held-out test"} ({category.groups})
                         </option>
                       ))}
                     </select>

@@ -32,7 +32,7 @@ import argparse
 import json
 import math
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -50,7 +50,7 @@ from ts_transformer.data.dataset import build_series, load_flight_dicts
 from ts_transformer.data.lateral_eligibility import default_lateral_pass_roster_path
 from ts_transformer.data.runway_context import airport_reference, operational_day, parse_utc
 from ts_transformer.data.splits import split_name_for_dataset_id
-from ts_transformer.experiments.runway_hypotheses import HARVEST_ROOT, hypothesis_row, identity
+from ts_transformer.experiments.runway_hypotheses import HARVEST_ROOT, hypothesis_row, identity, reproject
 from ts_transformer.experiments.runway_intent_r1 import day_folds
 from ts_transformer.geometry.final_approach_geometry import (
     alignment_cosine,
@@ -58,7 +58,8 @@ from ts_transformer.geometry.final_approach_geometry import (
     position_direction,
     runway_axes,
 )
-from ts_transformer.inference.forecast import Forecast, cut_at_threshold_crossing, default_anchor
+from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
+from ts_transformer.inference.forecast import Forecast, default_anchor
 from ts_transformer.inference.runway_schedule import (
     FAA_REDUCED_RADAR_NM,
     Arrival,
@@ -71,10 +72,16 @@ from ts_transformer.inference.runway_schedule import (
     wake_category,
 )
 from ts_transformer.outputs.plan.guidance.timing import TIME_TOLERANCE_S
-from ts_transformer.outputs.plan.strategy import Assignment, SkeletonCache, rolled_predictions_lockstep
+from ts_transformer.outputs.plan.strategy import (
+    Assignment, SkeletonCache, rolled_flight_forecast, rolled_predictions_lockstep,
+)
+from ts_transformer.run_naming import SPLIT_DAYVAL
 from ts_transformer.training.train import load_checkpoint
 
 SCHEMA = "ts-runway-intent-r3-v1"
+RECORDS_SCHEMA = "ts-runway-schedule-records-v1"
+#: The split R3's records are published under (plan §18.3; `run_naming.SPLIT_DAYVAL`).
+RECORDS_SPLIT = SPLIT_DAYVAL
 HEAD = "r11_lift"                 # R2b's runway head (runway_intent_r2.HEAD)
 BUSY_PER_HOUR = 10                # plan §17.3: an hour with >= 10 roster landings is busy
 FLOWN_TOLERANCE_S = 10.0          # plan §17.3 gate 2: a flown gap counts as kept at >= S - 10 s
@@ -103,6 +110,8 @@ class Flown:
     east_m: np.ndarray             # [N] about the airport reference
     north_m: np.ndarray
     on_final: np.ndarray           # [N] the on-final gate, in the scheduled runway's axes
+    shown: Forecast                # the flown forecast, cut at its crossing, in the TRUE runway's chart
+    truth: Any                     # the observed series on the true runway (the record's reference)
 
 
 def wall_s(stamp: str) -> float:
@@ -215,7 +224,7 @@ def fly(
         )
         print(f"  flew {len(group)} on {runway}", flush=True)
         for key, x, flight in zip(keys, group, rolled, strict=True):
-            cut = cut_at_threshold_crossing(flight.forecast, x)
+            cut = rolled_flight_forecast(flight, x)
             truth = series_on[truth_runway[key]][identity(flights[key])]
             hook = cut.command_hook_diagnostics
             offsets = np.cumsum(cut.sample_durations_s)
@@ -223,6 +232,7 @@ def fly(
             lat = np.asarray([s.latitude for _, s in states])
             lon = np.asarray([s.longitude for _, s in states])
             out[key] = Flown(
+                shown=reproject(cut, x, truth), truth=truth,
                 landed=bool(cut.truncated_at_threshold),
                 time_s=anchor_wall[key] + float(cut.final_time_s),
                 metrics=hypothesis_row(cut, x, truth, points=points),
@@ -411,6 +421,59 @@ def summarise(rows: list[dict[str, Any]], separation: Separation, flown: dict[st
     return out
 
 
+def write_schedule_records(
+    root: Path, flown: dict[str, Flown], rows: list[dict[str, Any]], *, config: TSConfig, checkpoint: Path, airport: str,
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """The flown schedule as prediction records (plan §18.3, R3.3): every flight's flown forecast in its
+    TRUE runway's chart against its observed track — the shape `predict` writes, so `python -m evaluation`
+    and the comparison-CZML publisher take it — under split `RECORDS_SPLIT`; ``source.runwaySchedule``
+    carries the slot the scheduler gave it and what the flight delivered.
+
+    A record's prediction is its SCHEDULED landing time — the time the scheduler handed the closure, the way a
+    CTA arm's record carries its CTA — so its final-time error is the schedule's and its endpoint error is where
+    the flown aircraft is at that time; the head's own ETA error and the flown time's ride in
+    ``runwaySchedule``. ``settings`` (the R2b artifact, the scheduler's weights, the approach speed) go into
+    the summary block, so a non-default run's records say so."""
+    by_key = {r["flight_key"]: r for r in rows}
+    records, metrics = [], []
+    points = config.validation_common_grid_points
+    for index, key in enumerate(sorted(flown)):
+        x, r = flown[key], by_key[key]
+        scheduled, truth_s = r["scheduled"], r["truth"]["time_s"]
+        shown = replace(x.shown, predicted_final_time_s=scheduled["time_s"] - r["anchor_s"])
+        record = build_prediction_record(x.truth, shown, index=index, model_name=config.model,
+                                         horizon_mode=config.horizon_mode, split=RECORDS_SPLIT)
+        record.source["runwaySchedule"] = {
+            "scheduledRunway": scheduled["runway"], "trueRunway": r["truth"]["runway"],
+            "scheduledTimeUtc": datetime.fromtimestamp(scheduled["time_s"], tz=timezone.utc).isoformat(),
+            "delayS": scheduled["delay_s"], "headTopRunway": r["independent"]["runway"],
+            "headProbability": r["probabilities"][scheduled["runway"]], "wakeCategory": r["category"],
+            "etaErrorS": scheduled["eta_s"] - truth_s, "scheduledTimeErrorS": scheduled["time_s"] - truth_s,
+            "landed": x.landed, "flownTimeErrorS": x.time_s - truth_s if x.landed else None,
+            "deliveryS": x.time_s - scheduled["time_s"] if x.landed else None,
+            "unabsorbedFirstS": x.closure["planUnabsorbedFirstS"], "unabsorbedLastS": x.closure["planUnabsorbedLastS"],
+        }
+        records.append(record)
+        metrics.append(observed_series_metrics(x.truth, shown, points=points))
+    write_batch(records, output_dir=root, config_dict=config.to_dict(), flight_metrics=metrics, checkpoint=str(checkpoint),
+                split=RECORDS_SPLIT, extra_summary={"runway_schedule": {
+                    "schema": RECORDS_SCHEMA, "split": RECORDS_SPLIT, "airport": airport, "partition": "day_a",
+                    "roster": "every flight on day_a's validation days the day_a-retrained expert flew (R2b)",
+                    "plan": "R3: FCFS by ETA under the FAA JO 7110.65BB minima, flown with the scheduled time assigned",
+                    "timing": ("the prediction is the scheduled landing time (as a CTA arm's is its CTA): final_time_error_s "
+                               "is the schedule's error, arrival_endpoint_error_m where the flown aircraft is at that time; "
+                               "runwaySchedule.etaErrorS is the head's own ETA's, flownTimeErrorS the flown landing's"),
+                    "runway_frame": ("every record is filed and graded under the flight's TRUE runway (its identity, its "
+                                     "observed track); a flight scheduled onto another runway is flown there, so its lateral "
+                                     "error includes the runway spacing — runwaySchedule.scheduledRunway says which"),
+                    "records": len(records), "landed": sum(x.landed for x in flown.values()),
+                    "moved": sum(by_key[k]["scheduled"]["runway"] != by_key[k]["truth"]["runway"] for k in flown),
+                    **settings,
+                }})
+    return {"directory": str(root), "records": len(records), "split": RECORDS_SPLIT}
+
+
 def airport_rules(airport: str, config: TSConfig) -> tuple[Path, dict[str, Any], Separation, float, int]:
     """The airport's arrivals manifest, its runway targets, and the FAA separation at its approach speed
     (read on day_a's TRAINING days): ``(manifest_path, targets, separation, speed_mps, speed_flights)``."""
@@ -479,7 +542,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-probability", type=float, default=0.01,
                         help="epsilon: a runway below it is never tried unless it is the head's top one")
     parser.add_argument("--no-fly", action="store_true", help="read the schedules only; do not fly them")
+    parser.add_argument("--write-records", default=None, metavar="DIR",
+                        help=f"also write the flown schedule as prediction records (split {RECORDS_SPLIT!r}) into DIR (R3.3)")
     args = parser.parse_args(argv)
+    if args.write_records and args.no_fly:
+        parser.error("--write-records writes the FLOWN schedule: it needs the flying (drop --no-fly)")
 
     airport = args.airport.upper()
     r2 = json.loads(Path(args.r2).read_text(encoding="utf-8"))
@@ -565,6 +632,13 @@ def main(argv: list[str] | None = None) -> int:
         checks["flown_one_runway_kept_share"] = kept_share(flown_slots, separation, FLOWN_TOLERANCE_S)
         checks["flown_one_runway_kept_share_close"] = kept_share(flown_slots, separation, FLOWN_TOLERANCE_S, close_only=True)
         checks["flown_final_separation"] = final_separation(flown, flown_slots, separation)
+        if args.write_records:
+            checks["records"] = write_schedule_records(
+                Path(args.write_records), flown, rows, config=ckpt_config, checkpoint=Path(args.checkpoint).resolve(),
+                airport=airport, settings={
+                    "r2": str(args.r2), "delay_weight_per_s": args.delay_weight_per_s,
+                    "min_probability": args.min_probability, "approach_speed_mps": speed_mps,
+                })
 
     summary = summarise(rows, separation, flown)
     print(json.dumps({"checks": checks, "summary": summary, "variants": variants}, indent=1))

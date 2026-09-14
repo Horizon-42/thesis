@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Publish train/validation trajectories for indexed TS checkpoints.
+"""Publish train/validation (and a day partition's held-out-day) trajectories for indexed TS checkpoints.
 
 The script is intentionally an orchestration layer.  It does not define another trajectory
 or evaluation format; every job calls the existing predictor, the shared ``evaluation`` package,
@@ -33,8 +33,16 @@ whose group or run has no entry is BLOCKED before any work, and ``--refresh-labe
 refuses to write anything while a listed category lacks one — write the entries when the
 campaign is designed, with its arm declaration.
 
+**Held-out days (``dayval``).** A later campaign's runner may fly an earlier checkpoint over the
+validation days of a day partition it was trained beside (runway-intent R3's schedule, flown by R2b's
+day_a experts). No predict step writes that split, so it is published only from the runner's own
+directory (``--reuse-prediction-dir``), only under Experiments, and every record's flight is checked
+against the checkpoint's locked outer-test hash before anything is written. ``--category-group``
+files such a variant under the campaign that WROTE the records (its registry entry gives the heading
+and question) rather than the one that trained the checkpoint.
+
 Outer-test is not a valid option here.  This command is for development train/validation
-inspection only.
+inspection (and a day partition's held-out days) only.
 """
 
 from __future__ import annotations
@@ -46,7 +54,7 @@ import re
 import subprocess
 import sys
 import tarfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from functools import cached_property, lru_cache
 from pathlib import Path
@@ -59,6 +67,7 @@ if str(_TS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_TS_DIR.parent))
 
 from ts_transformer.run_naming import (  # noqa: E402
+    SPLIT_DAYVAL,
     category_display_label,
     run_display_name,
     run_parameter_rows,
@@ -83,6 +92,11 @@ PUBLICATION_SCHEMAS_READ = ("ts-experiment-publication-v1", PUBLICATION_SCHEMA)
 PUBLICATION_INDEX_SCHEMA = "ts-experiment-publication-index-v1"
 PUBLICATION_MANIFEST = "publication.json"
 DEVELOPMENT_SPLITS = ("train", "val")
+#: Record splits a REUSED prediction directory may carry beyond the development ones — no predict step
+#: writes them: `SPLIT_DAYVAL`, the validation days of a day partition flown by a checkpoint trained on
+#: that partition's training days (runway-intent R3's schedule, `runway_intent_r3 --write-records`).
+REUSE_ONLY_SPLITS = (SPLIT_DAYVAL,)
+PUBLISHABLE_SPLITS = DEVELOPMENT_SPLITS + REUSE_ONLY_SPLITS
 
 #: What each campaign asks and what each run changes — tracked source, written when a campaign
 #: is designed and read (never written) here. Read at CALL time, so a test can point it elsewhere.
@@ -522,10 +536,20 @@ class PublicationPlan:
     variant: CategoryVariant | None = None
 
     def __post_init__(self) -> None:
-        if self.split not in DEVELOPMENT_SPLITS:
+        if self.split not in PUBLISHABLE_SPLITS:
             raise ValueError(
-                f"experiment publication accepts development splits {DEVELOPMENT_SPLITS}, "
-                f"got {self.split!r}"
+                f"experiment publication accepts development splits {DEVELOPMENT_SPLITS} "
+                f"(and {REUSE_ONLY_SPLITS} from a reused directory), got {self.split!r}"
+            )
+        if self.split in REUSE_ONLY_SPLITS and self.prediction_dir is None:
+            raise ValueError(
+                f"the {self.split!r} split needs --reuse-prediction-dir: no predict step writes it "
+                "(its records come from the runner that flew them)"
+            )
+        if self.split in REUSE_ONLY_SPLITS and self.result_source != "experiment":
+            raise ValueError(
+                f"the {self.split!r} split is an experiment's records: it is published under "
+                "Experiments (--result-source experiment), never as a primary Prediction"
             )
         if self.result_source not in {"prediction", "experiment"}:
             raise ValueError(f"unknown result source {self.result_source!r}")
@@ -722,6 +746,31 @@ class PublicationPlan:
             steps.insert(0, ("predict", predict))
         return steps
 
+    def _outer_test_error(self, rows: Iterable[dict[str, Any]]) -> str | None:
+        """Refuse records holding a flight of the checkpoint's locked outer-test split.
+
+        A development split's records come from `predict`, which reads only that split; a
+        reuse-only split's come from a runner, so the seal is CHECKED here — the package's own
+        per-flight hash on the checkpoint's own split contract — not taken on the runner's word.
+        """
+        from flight_scenarios.identity import flight_key   # the package's rules, imported where they are needed
+        from ts_transformer.config import TSConfig
+        from ts_transformer.data.splits import split_name_for_dataset_id
+        try:
+            config = TSConfig.from_dict(self.experiment.config)
+        except ValueError as exc:
+            return f"cannot read the checkpoint's locked split to check the outer-test seal: {exc}"
+        sealed = [
+            key for key in (flight_key(row, index) for index, row in enumerate(rows))
+            if split_name_for_dataset_id(f"{self.airport}:{key}", config) == "test"
+        ]
+        if sealed:
+            return (
+                f"reused predictions in {self.prediction_dir} hold {len(sealed)} flight(s) of the "
+                f"locked outer-test split (first {sealed[0]}); outer-test is never published"
+            )
+        return None
+
     def _eligibility_error(self) -> str | None:
         """Refuse a roster that no longer selects the flights the checkpoint was trained on.
 
@@ -810,6 +859,10 @@ class PublicationPlan:
                     f"not just {self.airport}: this publication is one airport's category, "
                     "and a directory spanning several would be filed whole under each"
                 )
+            if self.split in REUSE_ONLY_SPLITS:
+                sealed_error = self._outer_test_error(reused.get("results") or ())
+                if sealed_error is not None:
+                    return sealed_error
         # Two prediction directories must never land on ONE category. Everything a category
         # is named from comes from the checkpoint, so publishing a second directory of the
         # same checkpoint without a variant would silently replace the first — its CZML, its
@@ -1439,11 +1492,25 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--category-group",
+        default=None,
+        metavar="CAMPAIGN",
+        help=(
+            "file the --category-variant under CAMPAIGN's picker heading (its registry entry "
+            "gives the title and question) instead of the checkpoint's training campaign: for "
+            "records a LATER campaign wrote with an earlier checkpoint"
+        ),
+    )
+    parser.add_argument(
         "--split",
         action="append",
-        choices=DEVELOPMENT_SPLITS,
+        choices=PUBLISHABLE_SPLITS,
         default=None,
-        help="development split; repeat as needed (default: train and val)",
+        help=(
+            "development split; repeat as needed (default: train and val); "
+            f"{', '.join(REUSE_ONLY_SPLITS)} (a day partition's held-out days) only with "
+            "--reuse-prediction-dir and the experiment source"
+        ),
     )
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument(
@@ -1533,6 +1600,10 @@ def main(argv: list[str] | None = None) -> int:
             variant = _parse_category_variant(args.category_variant)
         except ValueError as error:
             parser.error(str(error))
+    if args.category_group is not None:
+        if variant is None:
+            parser.error("--category-group files a --category-variant; give one")
+        variant = replace(variant, group=args.category_group)
 
     requested_airports = {value.strip().upper() for value in args.airport} if args.airport else None
     splits = tuple(args.split or DEVELOPMENT_SPLITS)
@@ -1543,19 +1614,22 @@ def main(argv: list[str] | None = None) -> int:
             airports = [airport for airport in airports if airport in requested_airports]
         for airport in airports:
             for split in splits:
-                plans.append(PublicationPlan(
-                    checkpoint,
-                    airport,
-                    split,
-                    result_source=args.result_source,
-                    raw_output_root=args.output_root.resolve(),
-                    harvest_root=args.harvest_root.resolve(),
-                    frontend_airports_root=args.frontend_airports_root.resolve(),
-                    device=args.device,
-                    record_retention=args.record_retention,
-                    prediction_dir=reused_dirs.get(checkpoint.experiment_id),
-                    variant=variant,
-                ))
+                try:
+                    plans.append(PublicationPlan(
+                        checkpoint,
+                        airport,
+                        split,
+                        result_source=args.result_source,
+                        raw_output_root=args.output_root.resolve(),
+                        harvest_root=args.harvest_root.resolve(),
+                        frontend_airports_root=args.frontend_airports_root.resolve(),
+                        device=args.device,
+                        record_retention=args.record_retention,
+                        prediction_dir=reused_dirs.get(checkpoint.experiment_id),
+                        variant=variant,
+                    ))
+                except ValueError as error:   # a refused combination of flags, before any work
+                    parser.error(f"{checkpoint.experiment_id} {airport}/{split}: {error}")
     if not plans:
         parser.error("no checkpoint provenance contains the requested airport(s)")
 

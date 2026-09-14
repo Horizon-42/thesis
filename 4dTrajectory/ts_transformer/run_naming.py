@@ -339,12 +339,18 @@ _ABBREV = {
     "trombone_surplus_reference": "trombone-surplus",
 }
 
+#: The validation days of a day partition (the runway-intent R series, `experiments.runway_intent_r1`
+#: `day_folds`), flown by a checkpoint trained and selected on that partition's training days only —
+#: none of the checkpoint's own splits, and not the sealed outer test. Records under it come from a
+#: runner (`runway_intent_r3 --write-records`), never from `predict`.
+SPLIT_DAYVAL = "dayval"
 #: Split prefixes shared by every category-label producer (publisher, pipeline,
 #: relabeler). The wording is asserted by frontend fixtures — change with care.
 SPLIT_DISPLAY = {
     "train": "Training split (in-sample)",
     "val": "Validation split (model selection)",
     "test": "Test split (held-out)",
+    SPLIT_DAYVAL: "Held-out days (a day partition's validation days)",
 }
 
 _DEFAULTS: dict[str, Any] = TSConfig().to_dict()
@@ -775,10 +781,9 @@ def run_parameter_rows(config: Mapping[str, Any]) -> list[dict[str, str]]:
 
 
 def category_display_label(split: str, display_name: str, *, kind: str = "Predicted") -> str:
-    """A comparison-category label: split prefix + kind + canonical run name."""
-    prefix = SPLIT_DISPLAY.get(split)
-    head = f"{kind}: {display_name}"
-    return f"{prefix} — {head}" if prefix else head
+    """A comparison-category label: split prefix + kind + canonical run name. An unknown split raises: a
+    label without its prefix would read as some other split's."""
+    return f"{SPLIT_DISPLAY[split]} — {kind}: {display_name}"
 
 
 def _slugify(text: str) -> str:

@@ -1,17 +1,28 @@
 """Runway-intent R3's readings (`experiments.runway_intent_r3`) and gates (`experiments.runway_intent_r3_readout`)."""
 
+import json
 import math
 
+import numpy as np
 import pytest
+import torch
 from geokit import METRES_PER_DEG_LAT, NM_M
 
+from ts_transformer.backbone.adapters import build_model
+from ts_transformer.config import TSConfig
+from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.experiments import runway_intent_r3
 from ts_transformer.experiments.runway_intent_r3 import (
+    Flown,
     approach_speed_mps,
     endpoint_error_m,
     kept_share,
     one_runway_pairs,
     order_agreement,
+    write_schedule_records,
 )
+from ts_transformer.inference.forecast import forecast_approach
 from ts_transformer.experiments.runway_intent_r3_readout import gates
 from ts_transformer.inference.runway_schedule import INDEPENDENT, SINGLE, Separation, Slot
 
@@ -107,3 +118,58 @@ def test_a_gate_not_measured_leaves_the_verdict_open():
 
 def test_the_end_point_error_is_where_the_forecast_ends_against_the_true_threshold():
     assert endpoint_error_m({"endpoint_along_track_true_m": -3.0, "endpoint_cross_track_true_m": 4.0, "fde_m": 900.0}) == 5.0
+
+
+def test_the_schedule_records_carry_the_scheduled_time_as_the_prediction(tmp_path):
+    """R3.3: a record's prediction is its SCHEDULED landing time (as a CTA arm's is its CTA), graded against
+    the observed track; the head's ETA error and the flown one ride beside it; an unlanded flight has no
+    delivery; the summary block says what the numbers measure and under which settings."""
+    config = TSConfig()
+    series, _report = build_series(synthetic_arrivals("KRDU", "05L", n_flights=2, seed=3), config, airport="KRDU")
+    model, normalizer = build_model(config).eval(), Normalizer.fit(series)
+    flown, rows = {}, []
+    for number, (x, landed) in enumerate(zip(series, (True, False), strict=True)):
+        forecast = forecast_approach(model, x, config, normalizer, device=torch.device("cpu"))
+        anchor_s = 1000.0 * (number + 1)
+        truth_s = anchor_s + float(x.supervision_times[-1] - x.times[forecast.anchor])
+        key = f"F{number}"
+        rows.append({
+            "flight_key": key, "category": "D", "anchor_s": anchor_s, "probabilities": {"05L": 0.9, "05R": 0.1},
+            "truth": {"runway": "05L", "time_s": truth_s}, "independent": {"runway": "05L"},
+            "scheduled": {"runway": "05L" if landed else "05R", "time_s": truth_s + 30.0, "eta_s": truth_s - 12.0,
+                          "delay_s": 42.0},
+        })
+        flown[key] = Flown(
+            landed=landed, time_s=truth_s + 35.0, metrics={}, wall_s=np.zeros(1), east_m=np.zeros(1),
+            north_m=np.zeros(1), on_final=np.zeros(1, dtype=bool), shown=forecast, truth=x,
+            closure={"planUnabsorbedFirstS": 1.0, "planUnabsorbedLastS": 0.5},
+        )
+    checkpoint = tmp_path / "expert" / "checkpoint.pt"
+    settings = {"r2": "r2.json", "delay_weight_per_s": 1 / 60, "min_probability": 0.01, "approach_speed_mps": 70.0}
+
+    out = write_schedule_records(tmp_path / "records", flown, rows, config=config, checkpoint=checkpoint,
+                                 airport="KRDU", settings=settings)
+
+    summary = json.loads((tmp_path / "records" / "summary.json").read_text())
+    assert out["records"] == 2 and summary["split"] == runway_intent_r3.RECORDS_SPLIT == "dayval"
+    assert summary["checkpoint"] == str(checkpoint)
+    block = summary["runway_schedule"]
+    assert (block["records"], block["landed"], block["moved"]) == (2, 1, 1)
+    assert {name: block[name] for name in settings} == settings
+    assert "scheduled landing time" in block["timing"] and "TRUE runway" in block["runway_frame"]
+    landed_row, unlanded_row = summary["results"]
+    assert landed_row["final_time_error_s"] == pytest.approx(30.0, abs=1e-6)   # scheduled - truth
+    schedule = [json.loads((tmp_path / "records" / row["eval_file"]).read_text())["source"]["runwaySchedule"]
+                for row in summary["results"]]
+    assert schedule[0]["etaErrorS"] == pytest.approx(-12.0) and schedule[0]["scheduledTimeErrorS"] == pytest.approx(30.0)
+    assert schedule[0]["flownTimeErrorS"] == pytest.approx(35.0) and schedule[0]["deliveryS"] == pytest.approx(5.0)
+    assert schedule[1]["landed"] is False and schedule[1]["deliveryS"] is None and schedule[1]["flownTimeErrorS"] is None
+    assert (schedule[1]["scheduledRunway"], schedule[1]["trueRunway"]) == ("05R", "05L")
+
+
+def test_records_are_written_only_for_a_flown_schedule(tmp_path):
+    with pytest.raises(SystemExit) as exit_info:
+        runway_intent_r3.main(["--airport", "KRDU", "--r2", "r2.json", "--checkpoint", "c.pt",
+                               "--output-dir", str(tmp_path / "out"), "--no-fly", "--write-records", str(tmp_path / "rec")])
+    assert exit_info.value.code == 2
+    assert not (tmp_path / "rec").exists() and not (tmp_path / "out").exists()

@@ -75,6 +75,9 @@ describe("airportData helpers", () => {
       .toBe(true);
     expect(isComparisonCategoriesManifest({ categories: [{ ...entry, datasetSplit: "training" }] }))
       .toBe(false);
+    // a day partition's validation days (runway-intent R3's schedule), not the checkpoint's val
+    expect(isComparisonCategoriesManifest({ categories: [{ ...entry, datasetSplit: "dayval" }] }))
+      .toBe(true);
   });
 
   it("accepts experiment categories only with explicit checkpoint metadata", () => {

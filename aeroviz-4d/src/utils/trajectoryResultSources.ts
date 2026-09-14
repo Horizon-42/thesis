@@ -1,6 +1,7 @@
 import type {
   ComparisonCategory,
   ComparisonResultSource,
+  DatasetSplit,
   ExperimentIntent,
   ExperimentParameterRow,
   ExperimentPredictionOutput,
@@ -141,12 +142,14 @@ export function experimentOptionLabel(
  * Deduplicated experiment models, grouped by campaign. With `sortBy`, each option
  * carries the metric of its `preferredSplit` category and experiments are ranked
  * best-first WITHIN their campaign group (the picker renders one optgroup per
- * campaign); metric-less experiments keep label order at the group's end.
+ * campaign); metric-less experiments keep label order at the group's end. An
+ * experiment with no category of that split carries no metric: another split's
+ * number (a held-out-days run's, an in-sample one) is never ranked against it.
  */
 export function experimentOptions(
   categories: ComparisonCategory[],
   sortBy: ResultAccuracySortKey | null = null,
-  preferredSplit: "train" | "val" | "test" = "val",
+  preferredSplit: DatasetSplit = "val",
 ): ExperimentOption[] {
   const byId = new Map<string, ExperimentOption>();
   for (const category of categories) {
@@ -169,7 +172,11 @@ export function experimentOptions(
       seed: experiment.seed,
       metricValue: sortBy
         ? categoryAccuracyValue(
-            categoryForExperimentSplit(categories, experiment.id, preferredSplit),
+            categories.find(
+              (candidate) =>
+                candidate.experiment?.id === experiment.id &&
+                candidate.datasetSplit === preferredSplit,
+            ),
             sortBy,
           )
         : null,
@@ -257,7 +264,7 @@ export function experimentMatches(experiment: ExperimentOption, query: string): 
 export function categoryForExperimentSplit(
   categories: ComparisonCategory[],
   experimentId: string,
-  preferredSplit: "train" | "val" | "test" = "val",
+  preferredSplit: DatasetSplit = "val",
 ): ComparisonCategory | null {
   const matches = categories.filter((category) => category.experiment?.id === experimentId);
   return (

@@ -41,7 +41,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DATASET_SPLITS = ("train", "val", "test")
+#: MIRROR of `aeroviz-4d/src/data/airportData.ts` `DATASET_SPLITS` (change the two together).
+#: "dayval": a day partition's validation days (`ts_transformer.run_naming.SPLIT_DAYVAL`).
+DATASET_SPLITS = ("train", "val", "test", "dayval")
 
 from data_layout import airport_data_path
 from flight_identity import flight_key

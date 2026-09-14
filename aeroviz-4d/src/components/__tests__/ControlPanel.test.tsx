@@ -462,6 +462,36 @@ describe("ControlPanel", () => {
     expect(screen.getByText("campaign/stage/run/checkpoint.pt")).toBeTruthy();
   });
 
+  it("labels a day partition's held-out days as such, never as the held-out test", () => {
+    const metadata = {
+      id: "runway_intent_r2b_20260913/KRDU_day_a_expert",
+      group: "runway_intent_r3_20260914",
+      checkpoint: "runway_intent_r2b_20260913/KRDU_day_a_expert/checkpoint.pt",
+      model: "itransformer",
+      predictionOutput: "plan",
+      horizonMode: "normalized" as const,
+      seed: 1337,
+    };
+    appState.layers.trajectories = true;
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = "experiment_krdu_dayval";
+    appState.comparisonCategories = [
+      {
+        ...category("experiment_krdu_dayval", false, 12),
+        datasetSplit: "dayval",
+        resultSource: "experiment",
+        experiment: metadata,
+      },
+    ];
+
+    render(<ControlPanel />);
+
+    const split = screen.getByLabelText("Dataset split") as HTMLSelectElement;
+    expect([...split.options].map((option) => option.textContent)).toEqual([
+      "Held-out days (day partition validation) (12)",
+    ]);
+  });
+
   function stampedExperiment(run: string, group: string, dModel: string) {
     return {
       id: `${group}/${run}`,
@@ -546,6 +576,27 @@ describe("ControlPanel", () => {
     fireEvent.click(armB);
     expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("experiment_b_val");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps the held-out days in view when switching to another run that has them", () => {
+    appState.layers.trajectories = true;
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = "experiment_a_dayval";
+    appState.comparisonCategories = (["a", "b"] as const).flatMap((arm) =>
+      (["val", "dayval"] as const).map((split) => ({
+        ...category(`experiment_${arm}_${split}`, false, 5),
+        datasetSplit: split,
+        resultSource: "experiment" as const,
+        experiment: stampedExperiment(`arm_${arm}`, "alpha", "512"),
+      })),
+    );
+    render(<ControlPanel />);
+
+    fireEvent.click(screen.getByLabelText("Experiment model"));
+    const browser = screen.getByRole("dialog", { name: "Experiment browser" });
+    const list = within(browser).getByRole("navigation", { name: "Experiment campaigns" });
+    fireEvent.click(within(list).getByRole("button", { name: /arm_b/ }));
+    expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("experiment_b_dayval");
   });
 
   it("filters the browser across intent and parameters, and closes on Escape", () => {

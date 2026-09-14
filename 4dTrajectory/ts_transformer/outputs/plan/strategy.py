@@ -395,10 +395,12 @@ def forecast_plan(
     crossing; the record carries every order flown (`planOrders`) and the first order's
     arrival time as the prediction."""
     flight, = rolled_predictions_lockstep(model, [series], config, normalizer, [anchor], device, [skeleton])
-    return _plan_forecast(flight, series)
+    return rolled_flight_forecast(flight, series)
 
 
-def _plan_forecast(flight: RolledFlight, series: FlightSeries) -> Forecast:
+def rolled_flight_forecast(flight: RolledFlight, series: FlightSeries) -> Forecast:
+    """A rolled flight as the plan path's forecast: cut at the threshold crossing, stamped `plan`, with the
+    plan diagnostics every published plan record carries (`planOrders`, the counts)."""
     forecast = cut_at_threshold_crossing(flight.forecast, series)
     diagnostics = dict(forecast.command_hook_diagnostics or {})
     diagnostics["planLegs"] = float(len(flight.routes))
@@ -517,7 +519,7 @@ class PlanStrategy(OutputStrategy):
         flights = rolled_predictions_lockstep(
             model, list(series), config, normalizer, [anchor] * len(series), device, [skeletons.for_series(item) for item in series],
         )
-        return [_plan_forecast(flight, item) for flight, item in zip(flights, series, strict=True)]
+        return [rolled_flight_forecast(flight, item) for flight, item in zip(flights, series, strict=True)]
 
     def replay(
         self,

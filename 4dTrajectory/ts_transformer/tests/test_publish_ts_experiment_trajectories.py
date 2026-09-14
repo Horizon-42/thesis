@@ -39,6 +39,14 @@ def intent_registry(tmp_path, monkeypatch) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def live_trees_out_of_reach(tmp_path, monkeypatch) -> None:
+    """`main()` reads its default output and frontend roots from these globals at call time: pointed
+    into tmp, a test that forgets a root writes there, never into the live trees."""
+    monkeypatch.setattr(publisher, "RAW_OUTPUT_ROOT", tmp_path / "default-roots" / "published")
+    monkeypatch.setattr(publisher, "FRONTEND_AIRPORTS_ROOT", tmp_path / "default-roots" / "frontend")
+
+
 def _indexed_checkpoint(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "experiments"
     run = root / "campaign" / "stage" / "run_seed1337"
@@ -806,6 +814,149 @@ def test_reused_prediction_dir_requires_a_summary(tmp_path):
         publisher.PublicationPlan(
             experiment, "KRDU", "val", prediction_dir=tmp_path / "nowhere",
         )
+
+
+def _flight_row(number: int) -> dict[str, str]:
+    return {
+        "id": f"AAL{number}", "runway": "23R", "icao24": "ace5bc",
+        "landing_time_utc": "2026-05-21T03:22:54Z", "arr_airport": "KRDU",
+    }
+
+
+def _rows_on_either_side_of_the_seal() -> tuple[dict[str, str], dict[str, str]]:
+    """A development flight and an outer-test one under the package's locked split (default contract)."""
+    from flight_scenarios.identity import flight_key
+    from ts_transformer.config import TSConfig
+    from ts_transformer.data.splits import split_name_for_dataset_id
+
+    def sealed(row):
+        return split_name_for_dataset_id(f"KRDU:{flight_key(row, 0)}", TSConfig()) == "test"
+
+    rows = [_flight_row(number) for number in range(200)]
+    return next(r for r in rows if not sealed(r)), next(r for r in rows if sealed(r))
+
+
+def _dayval_records(tmp_path: Path, checkpoint: Path, rows: list[dict[str, str]]) -> Path:
+    records = tmp_path / "runway_intent_r3_records" / "KRDU"
+    _write_json(records / "summary.json", {"checkpoint": str(checkpoint), "split": "dayval", "results": rows})
+    return records
+
+
+def _dayval_experiment(monkeypatch, tmp_path: Path):
+    """The test checkpoint with a FULL config (the seal check reads its locked split contract) and the
+    preflight's file checks satisfied."""
+    from ts_transformer.config import TSConfig
+
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = replace(publisher.discover_checkpoints(index)[0], config=TSConfig().to_dict())
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    manifest = tmp_path / "harvest" / "KRDU" / "arrivals" / "manifest.json"
+    _write_json(manifest, {})
+    monkeypatch.setattr(
+        publisher, "_sha256", lambda path: "manifest-sha" if path == manifest else experiment.checkpoint_sha256,
+    )
+    return index, checkpoint, experiment
+
+
+def _tmp_roots(tmp_path: Path) -> list[str]:
+    """Every root `main()` writes under, pointed into the test's tmp dir: the argparse defaults are the
+    REAL output and frontend trees (a test that omitted `--frontend-airports-root` once overwrote the
+    live KRDU categories.json)."""
+    return [
+        "--output-root", str(tmp_path / "published"), "--harvest-root", str(tmp_path / "harvest"),
+        "--frontend-airports-root", str(tmp_path / "frontend"),
+    ]
+
+
+def _dayval_plan(tmp_path: Path, experiment, records: Path, **kwargs):
+    return publisher.PublicationPlan(
+        experiment, "KRDU", "dayval", raw_output_root=tmp_path / "published", harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend", prediction_dir=records, **kwargs,
+    )
+
+
+def test_a_dayval_publication_needs_a_reused_directory_and_says_what_it_is(monkeypatch, tmp_path):
+    """`dayval` (a day partition's validation days, R3's schedule records): no predict step writes it,
+    so it is published only from the runner's own record directory, only under Experiments, under its
+    own label."""
+    _index, checkpoint, experiment = _dayval_experiment(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="needs --reuse-prediction-dir"):
+        publisher.PublicationPlan(experiment, "KRDU", "dayval")
+    records = _dayval_records(tmp_path, checkpoint, [_rows_on_either_side_of_the_seal()[0]])
+    with pytest.raises(ValueError, match="under Experiments"):
+        _dayval_plan(tmp_path, experiment, records, result_source="prediction")
+    plan = _dayval_plan(tmp_path, experiment, records)
+    assert plan.category.endswith("_dayval") and plan.category_label.startswith("Held-out days")
+    assert plan.preflight_error() is None
+    commands = dict(plan.commands())
+    assert "predict" not in commands
+    publish = commands["publish-czml"]
+    assert publish[publish.index("--dataset-split") + 1] == "dayval"
+
+
+def test_a_dayval_directory_holding_an_outer_test_flight_is_refused(monkeypatch, tmp_path):
+    """A reuse-only split's records come from a runner, not from `predict`'s development split: the
+    outer-test seal is checked on every flight, not taken on the runner's word."""
+    _index, checkpoint, experiment = _dayval_experiment(monkeypatch, tmp_path)
+    kept, sealed = _rows_on_either_side_of_the_seal()
+    plan = _dayval_plan(tmp_path, experiment, _dayval_records(tmp_path, checkpoint, [kept, sealed]))
+    assert "outer-test" in (plan.preflight_error() or "")
+    _dayval_records(tmp_path, checkpoint, [kept])
+    assert plan.preflight_error() is None
+
+
+def test_a_category_group_files_the_variant_under_the_campaign_that_wrote_the_records(
+    monkeypatch, tmp_path, intent_registry,
+):
+    """R3's records are flown by R2b's experts: the picker heading and question are R3's (the campaign
+    that wrote them), the run's line and the variant's stay with the training campaign."""
+    index, checkpoint, _experiment = _dayval_experiment(monkeypatch, tmp_path)
+    monkeypatch.setattr(publisher, "discover_checkpoints", lambda *_a, **_k: [_experiment])
+    registry = json.loads(intent_registry.read_text())
+    registry["campaigns"]["schedule_records"] = {"title": "Schedule records", "intent": "Fly the schedule."}
+    registry["campaigns"]["campaign"]["variants"] = {"stage_run_seed1337@r3-schedule": "The schedule, flown."}
+    _write_json(intent_registry, registry)
+    records = _dayval_records(tmp_path, checkpoint, [_rows_on_either_side_of_the_seal()[0]])
+    captured = []
+    monkeypatch.setattr(publisher, "run_publication", lambda plan, **_kwargs: captured.append(plan) or "completed")
+
+    code = publisher.main([
+        "--experiment-index", str(index), "--split", "dayval", *_tmp_roots(tmp_path),
+        "--reuse-prediction-dir", f"campaign/stage/run_seed1337={records}",
+        "--category-variant", "r3-schedule=R3 schedule", "--category-group", "schedule_records",
+    ])
+
+    assert code == 0 and len(captured) == 1
+    plan = captured[0]
+    assert plan.experiment_group == "schedule_records" and plan.category.endswith("_dayval")
+    intent = plan.experiment_metadata["intent"]
+    assert intent["groupTitle"] == "Schedule records"
+    assert (intent["run"], intent["variant"]) == ("What the test run changes.", "The schedule, flown.")
+
+    # ...and a refresh from the stored manifest keeps the heading and the split's prefix
+    _write_json(plan.evaluation_report, {"trajectories": [], "summary": {}})
+    _write_json(plan.publication_manifest, publisher._publication_document(
+        plan, status="completed", completed_steps=("evaluate", "publish-czml"),
+    ))
+    categories = plan.comparison_dir.parent / "categories.json"
+    _write_json(categories, {"categories": [{"key": plan.category, "label": "stale"}]})
+    assert publisher.refresh_labels_from_manifests(tmp_path / "published", tmp_path / "frontend") == (1, 1)
+    entry = json.loads(categories.read_text())["categories"][0]
+    assert entry["label"] == plan.category_label and entry["label"].startswith("Held-out days")
+    assert entry["experiment"]["group"] == "schedule_records"
+
+
+def test_main_reports_refused_dayval_flags_as_usage_errors(monkeypatch, tmp_path, capsys):
+    index, _checkpoint, experiment = _dayval_experiment(monkeypatch, tmp_path)
+    monkeypatch.setattr(publisher, "discover_checkpoints", lambda *_a, **_k: [experiment])
+    for argv, message in (
+        (["--split", "dayval"], "needs --reuse-prediction-dir"),
+        (["--category-group", "schedule_records"], "--category-group files a --category-variant"),
+    ):
+        with pytest.raises(SystemExit) as exit_info:
+            publisher.main(["--experiment-index", str(index), *_tmp_roots(tmp_path), *argv])
+        assert exit_info.value.code == 2
+        assert message in capsys.readouterr().err
 
 
 def test_publication_plan_cannot_access_outer_test(tmp_path):

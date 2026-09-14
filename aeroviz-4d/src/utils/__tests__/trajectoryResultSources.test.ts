@@ -133,6 +133,35 @@ describe("trajectory result sources", () => {
     expect(ranked[0]?.metricValue).toBe(480);
   });
 
+  it("ranks by the split in view only, and still finds a held-out-days-only run", () => {
+    const val = experiment("val");
+    val.accuracy = { adeM: { mean: 900, p95: 2000 } };
+    const dayvalOnly: ComparisonCategory = {
+      ...experiment("val"),
+      key: "experiment_r3_dayval",
+      dir: "experiment_r3_dayval",
+      datasetSplit: "dayval",
+      accuracy: { adeM: { mean: 100, p95: 300 } },
+      experiment: { ...experiment("val").experiment!, id: "campaign/stage/run_seed1337@r3-schedule" },
+    };
+    const metrics = (split: "val" | "dayval") =>
+      experimentOptions([val, dayvalOnly], "adeMean", split)
+        .map((option) => [option.id, option.metricValue]);
+
+    // The held-out-days run's 100 m is another split's number: it never outranks a val metric.
+    expect(metrics("val")).toEqual([
+      ["campaign/stage/run_seed1337", 900],
+      ["campaign/stage/run_seed1337@r3-schedule", null],
+    ]);
+    expect(metrics("dayval")).toEqual([
+      ["campaign/stage/run_seed1337@r3-schedule", 100],
+      ["campaign/stage/run_seed1337", null],
+    ]);
+    // Selecting it from the val view still opens its only publication.
+    expect(categoryForExperimentSplit([val, dayvalOnly], "campaign/stage/run_seed1337@r3-schedule", "val")
+      ?.datasetSplit).toBe("dayval");
+  });
+
   it("prefers the publisher's canonical run label when stamped", () => {
     const canonical = experiment("val");
     canonical.experiment = {

@@ -1,6 +1,7 @@
 """Tests for the scenario-comparison CZML builder (single + per-runway batch)."""
 
 import json
+from pathlib import Path
 
 import build_scenario_comparison_czml as comparison_builder
 from build_scenario_comparison_czml import (
@@ -859,6 +860,19 @@ def test_upsert_prediction_category_stamps_dataset_split(tmp_path):
     )
     category = json.loads(manifest.read_text())["categories"][0]
     assert category["datasetSplit"] == "train"
+
+
+def test_dataset_splits_mirror_the_frontend():
+    """`DATASET_SPLITS` is a MIRROR of the frontend's list (a split only one side knows is either
+    refused here or dropped there as an invalid category)."""
+    import re
+
+    from build_scenario_comparison_czml import DATASET_SPLITS
+
+    source = (Path(__file__).resolve().parents[2] / "src" / "data" / "airportData.ts").read_text(encoding="utf-8")
+    literal = re.search(r"export const DATASET_SPLITS = \[([^\]]*)\] as const", source).group(1)
+    assert tuple(re.findall(r'"([^"]+)"', literal)) == DATASET_SPLITS
+    assert "dayval" in DATASET_SPLITS
 
 
 def test_upsert_category_stamps_compact_accuracy_for_result_ranking(tmp_path):

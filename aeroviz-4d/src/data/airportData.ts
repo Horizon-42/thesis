@@ -124,8 +124,13 @@ export const OBSERVED_EVALUATION_REPORT_FILE = "evaluation_report.json";
 export const COMPARISON_RESULT_SOURCES = ["prediction", "experiment"] as const;
 export type ComparisonResultSource = typeof COMPARISON_RESULT_SOURCES[number];
 
-/** Dataset partition of a learned-prediction category and of its comparison index. */
-export const DATASET_SPLITS = ["train", "val", "test"] as const;
+/**
+ * Dataset partition of a learned-prediction category and of its comparison index. "dayval" is a day
+ * partition's validation days, flown by a checkpoint trained on that partition's training days only
+ * (`ts_transformer.run_naming.SPLIT_DAYVAL`) — not the checkpoint's own val, not the sealed test.
+ * MIRRORED by `python/build_scenario_comparison_czml.py` `DATASET_SPLITS`.
+ */
+export const DATASET_SPLITS = ["train", "val", "test", "dayval"] as const;
 export type DatasetSplit = typeof DATASET_SPLITS[number];
 
 /** The comparison-index schema this app reads; an index of any other version is rejected. */

@@ -376,7 +376,19 @@
     "KSTL_day_a_expert": "KSTL 的 plan 专家按天划分重训：原专家（step5b_KSTL_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。",
     "KSMF_day_a_expert": "KSMF 的 plan 专家按天划分重训：原专家（step5b_KSMF_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。",
     "KMSY_day_a_expert": "KMSY 的 plan 专家按天划分重训：原专家（step5b_KMSY_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。"
+   },
+   "variants": {
+    "KRDU_day_a_expert@r3-schedule": "R3 的计划飞出来：KRDU day_a 验证日的全部航班，跑道与时刻由调度排定（跑道头 r11_lift 的概率 + 这个专家的 ETA，FAA 最低间隔、先来先服务），这个专家按排定的时刻飞（v5.4 的时刻闭合），切在入口。时刻误差读的是排定的时刻对真实落地（像 CTA 臂的记录读它的 CTA）；专家自己 ETA 的误差、飞到的时刻的误差在记录的 runwaySchedule 里。被调度换了跑道的航班仍按真实跑道归档、对真实航迹评估，横向误差里含两条跑道的间距（runwaySchedule.scheduledRunway 标明）。",
+    "KSJC_day_a_expert@r3-schedule": "R3 的计划飞出来：KSJC day_a 验证日的全部航班，跑道与时刻由调度排定（跑道头 r11_lift 的概率 + 这个专家的 ETA，FAA 最低间隔、先来先服务），这个专家按排定的时刻飞（v5.4 的时刻闭合），切在入口。时刻误差读的是排定的时刻对真实落地（像 CTA 臂的记录读它的 CTA）；专家自己 ETA 的误差、飞到的时刻的误差在记录的 runwaySchedule 里。被调度换了跑道的航班仍按真实跑道归档、对真实航迹评估，横向误差里含两条跑道的间距（runwaySchedule.scheduledRunway 标明）。",
+    "KSTL_day_a_expert@r3-schedule": "R3 的计划飞出来：KSTL day_a 验证日的全部航班，跑道与时刻由调度排定（跑道头 r11_lift 的概率 + 这个专家的 ETA，FAA 最低间隔、先来先服务），这个专家按排定的时刻飞（v5.4 的时刻闭合），切在入口。时刻误差读的是排定的时刻对真实落地（像 CTA 臂的记录读它的 CTA）；专家自己 ETA 的误差、飞到的时刻的误差在记录的 runwaySchedule 里。被调度换了跑道的航班仍按真实跑道归档、对真实航迹评估，横向误差里含两条跑道的间距（runwaySchedule.scheduledRunway 标明）。",
+    "KSMF_day_a_expert@r3-schedule": "R3 的计划飞出来：KSMF day_a 验证日的全部航班，跑道与时刻由调度排定（跑道头 r11_lift 的概率 + 这个专家的 ETA，FAA 最低间隔、先来先服务），这个专家按排定的时刻飞（v5.4 的时刻闭合），切在入口。时刻误差读的是排定的时刻对真实落地（像 CTA 臂的记录读它的 CTA）；专家自己 ETA 的误差、飞到的时刻的误差在记录的 runwaySchedule 里。被调度换了跑道的航班仍按真实跑道归档、对真实航迹评估，横向误差里含两条跑道的间距（runwaySchedule.scheduledRunway 标明）。",
+    "KMSY_day_a_expert@r3-schedule": "R3 的计划飞出来：KMSY day_a 验证日的全部航班，跑道与时刻由调度排定（跑道头 r11_lift 的概率 + 这个专家的 ETA，FAA 最低间隔、先来先服务），这个专家按排定的时刻飞（v5.4 的时刻闭合），切在入口。时刻误差读的是排定的时刻对真实落地（像 CTA 臂的记录读它的 CTA）；专家自己 ETA 的误差、飞到的时刻的误差在记录的 runwaySchedule 里。被调度换了跑道的航班仍按真实跑道归档、对真实航迹评估，横向误差里含两条跑道的间距（runwaySchedule.scheduledRunway 标明）。"
    }
+  },
+  "runway_intent_r3_20260914": {
+   "title": "跑道意图 R3 · 多跑道到场调度，飞出来",
+   "intent": "学到的跑道意图能不能直接当多机调度的输入：按 FAA JO 7110.65BB 的最低间隔（3 NM 雷达、CWT 尾流、平行跑道的相关/独立规则）先来先服务排定每架机的跑道与落地时刻，再让 plan 专家按排定的时刻飞出来——看排出的计划能否被飞出来、间隔在飞出来的轨迹里是否还保持，以及调度排出的时刻本身作为落地时刻的预测有多准。航班是 day_a 验证日的全部航班，由只见过 day_a 训练日的 R2b 专家飞（划分 dayval）。",
+   "design": "4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md §17, §18.3"
   }
  }
 }

@@ -413,7 +413,9 @@ function predictionPresentation(
       "prediction at the observed arrival time; endpoint error compares the predicted " +
       "arrival position with the observed endpoint. The runway-threshold pass rate grades the " +
       "prediction's final state against both evaluation gates. Train results are in-sample; " +
-      "validation results are the development/model-selection partition. A solver solve rate " +
+      "validation results are the development/model-selection partition; held-out-day results " +
+      "are a day partition's validation days, flown by a checkpoint trained on that partition's " +
+      "training days only. A solver solve rate " +
       "does not apply.",
     rows: [
       row("Trajectories", formatCount(prediction?.flights), prediction?.flights != null),

@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 _TS_DIR = Path(__file__).resolve().parents[1]
 if str(_TS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_TS_DIR.parent))
@@ -207,7 +209,8 @@ def test_category_label_prefixes_the_split():
         "Validation split (model selection) — "
         "Predicted: state · iTransformer · kinematic · state-v1"
     )
-    assert category_display_label("nope", "x", kind="Experiment") == "Experiment: x"
+    with pytest.raises(KeyError):
+        category_display_label("nope", "x", kind="Experiment")
 
 
 def test_slug_is_filesystem_safe():
