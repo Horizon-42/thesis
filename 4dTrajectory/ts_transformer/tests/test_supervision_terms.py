@@ -754,6 +754,11 @@ def _real_dynamics_batch(config: TSConfig) -> dict:
     {"control_imitation_loss_weight": 64.0},
     {"control_heading_rate_loss_weight": 8.0},
     {"control_imitation_loss_weight": 64.0, "control_heading_rate_loss_weight": 8.0},
+    # The specific-force contract (2026-09-14): same keys, the box and the actuator in n_x.
+    {"control_dynamics_model": "first-order-lag",
+     "control_dynamics_backend": "scaled-transport-chart-velocity",
+     "control_thrust_parameterization": "specific-force",
+     "control_imitation_loss_weight": 64.0, "control_heading_rate_loss_weight": 8.0},
 ])
 def test_the_probe_batch_carries_every_key_the_real_batch_carries(overrides):
     """Review B-1. `--batch-size auto` runs the real training step on `probe_dynamics`;

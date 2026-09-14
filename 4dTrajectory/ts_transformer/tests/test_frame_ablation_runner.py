@@ -106,6 +106,32 @@ def test_a_stored_arm_is_resumed_only_when_complete_and_unchanged(tmp_path):
     assert (arm / "checkpoint.pt").exists() and (arm / "history.json").exists()
 
 
+def test_a_field_added_after_an_arm_trained_reads_as_the_default_it_flew(tmp_path):
+    """Review of 2026-09-14 (M1, blocker): `control_thrust_parameterization` is pinned by
+    every named recipe, and no history.json written before it carries it. Read as None, the
+    field refused the resume of every recipe arm on disk — 4 of 4 in b1_quantile_20260907.
+    It reads as `TSConfig.from_dict` reads it: the default, which is what those arms flew. A
+    missing REQUIRED field stays a difference, because `from_dict` refuses it."""
+    # What `main` builds for a declaration that names `"base_recipe": "simple-v3"`.
+    base = {**runner.recipe_settings("simple-v3", keep_name=True), "device": "cpu"}
+    _config, declared = runner.arm_config(base, {})
+    assert declared["control_thrust_parameterization"] == "thrust-fraction"
+    stored = {key: value for key, value in declared.items()
+              if key != "control_thrust_parameterization"}
+    arm = tmp_path / "B1"
+    arm.mkdir()
+    (arm / "history.json").write_text(json.dumps({"config": stored}))
+    assert runner.stale_arm_error("B1", arm, declared) is None
+    # ...but a stored run that flew the OTHER law is a different arm.
+    (arm / "history.json").write_text(json.dumps(
+        {"config": {**stored, "control_thrust_parameterization": "specific-force"}}))
+    assert "control_thrust_parameterization" in runner.stale_arm_error("B1", arm, declared)
+    # ...and a REQUIRED field that is missing is not defaulted.
+    required = {key: value for key, value in declared.items() if key != "control_dynamics_model"}
+    (arm / "history.json").write_text(json.dumps({"config": required}))
+    assert "control_dynamics_model" in runner.stale_arm_error("B1", arm, declared)
+
+
 def test_the_train_step_is_done_when_history_json_exists(tmp_path):
     """`train` writes checkpoint.pt first and history.json last, so the step's artifact is
     the history — a checkpoint alone is a crash, not a finished arm."""

@@ -140,6 +140,23 @@ def test_a_forecast_that_flies_past_the_threshold_is_cut_at_the_crossing():
     assert not forecast.truncated_at_threshold and forecast.n_steps == len(d_m)
 
 
+def test_the_specific_force_commands_are_cut_with_the_controls_they_price():
+    """Under the specific-force contract the record carries the n_x command beside each
+    segment's newton thrust (`Forecast.specific_force_commands`); the cut must shorten the
+    two together or `export` would pair a thrust with another segment's command."""
+    series = _series(_config())
+    d_m = np.linspace(6_000.0, -2_000.0, 41)
+    forecast = replace(
+        _forecast_along(series, d_m, np.zeros_like(d_m), segments=8),
+        specific_force_commands=np.linspace(-0.1, 0.0, 8),
+    )
+    cut = cut_at_threshold_crossing(forecast, series)
+    assert cut.truncated_at_threshold
+    assert len(cut.specific_force_commands) == len(cut.controls) < 8
+    assert np.array_equal(cut.specific_force_commands,
+                          forecast.specific_force_commands[: len(cut.controls)])
+
+
 def test_a_forecast_that_never_reaches_the_threshold_is_left_whole_and_says_so():
     """No crossing, no cut — and no claim of one. Inventing an arrival would be worse.
 

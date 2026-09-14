@@ -1492,7 +1492,7 @@ def _final_batch(config: TSConfig, *, xt_m: float, d_m: float, height_above_gp_m
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9)
     series, _ = build_series(flights, config, airport=AIRPORT)
     anchor = config.seq_len - 1
-    rows = [dynamics_arrays(item, anchor) for item in series]
+    rows = [dynamics_arrays(item, anchor, parameterization=config.control_thrust_parameterization) for item in series]
     dynamics = {key: torch.from_numpy(np.stack([row[key] for row in rows])) for key in rows[0]}
     threshold = find_threshold(AIRPORT, RUNWAY)
     frame = ENUFrame(lat0=float(threshold["lat"]), lon0=float(threshold["lon"]), alt0=float(threshold["elevation_m"]))

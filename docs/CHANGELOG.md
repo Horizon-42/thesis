@@ -4,6 +4,53 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-14 — specific-force control parameterisation, M1 (branch `specific-force-control`)
+
+**Ask.** The user: "现在的模型，是直接预测不同质量下的操作参数 … 是不是可以修改aerodynamic 或者增加一个normalize
+处理？" Then: design it and implement it on a new branch, with a review at every key step; the user merges.
+
+**Why.** The literature is `docs/literature/control_normalization/` (`683e604`). On KRDU `B1_point_matched`
+(2 seeds), the head commands nearly the same δ = T/T_max on every aircraft class, while the truth needs
+0.028–0.041. That leaves a class-dependent specific-force bias of 0.010–0.012 g against the truth's own
+0.0045 g, and heavies fly 4.7–4.9 m/s fast relative to the 737 family.
+
+**Change** (design `4dTrajectory/ts_transformer/docs/2026-09-14_specific_force_control_design.md`):
+- **New axis** `control_thrust_parameterization ∈ {thrust-fraction (default), specific-force}`.
+  - Under specific-force the head's first column is n_x = (T − D)/W.
+  - The lag RHS re-solves the thrust at every RK4 stage as clamp(W·a_x + D, −0.2·T_max, T_max), so drag cancels
+    and V̇ = g(a_x − sin γ) where the clamp does not bind (`aerodynamic_model/torch_lag_dynamics`:
+    `SpecificForceLaw`, per-law step functions and compile caches).
+  - First-order-lag only. Refused with the fitted teacher and, until M2, with the speed-floor hook.
+  - Every named recipe pins thrust-fraction.
+- **Per-contract box** (`outputs/envelope.ControlContract`): the specific-force box is [−0.20, 0.23] with half
+  width 0.215 g (= 0.6 × the fleet-median T_max/W), and its neutral is −0.05.
+  - The neutral is a descent speed hold, not level trim. With the drag cancelled the speed has no drag feedback,
+    and a level-trim neutral flew untrained heads to 311–328 m/s against thrust-fraction's 209–213.
+- **Plumbing.** `dynamics_arrays` / `actual_controls` / `commanded_controls` take the parameterisation as a
+  REQUIRED argument. The record keeps newtons: under specific-force the segment-start thrust, plus
+  `control_segments[*].specific_force` and `source.controlThrustParameterization`, both absent under the default.
+- **Every default path is bit-identical to `775b59e`:**
+  - lag, point-mass, CUDA-compiled, objective + backward, and record JSON;
+  - the census of 245 stored `history.json`: 0 names, slugs or loadability changes.
+
+**Campaign-resume behaviour change.**
+- `experiments/frame_ablation.stale_arm_error` now reads a field a stored config lacks the way
+  `TSConfig.from_dict` does: its default, except REQUIRED fields (`config.absent_field_defaults`).
+- The new recipe pin had refused every recipe arm on disk: 4/4 in `b1_quantile_20260907`.
+- The same rule makes **36 more stored arms resumable** that `775b59e` refused for other fields added after they
+  trained: `duration_head`, `lr_plateau_metric`, `random_train_anchor_sampling`, the `latent_*` fields, the
+  heading-rate and bank-TV weights, `control_imitation_target`. Their defaults are documented as the earlier
+  behaviour.
+- Re-running those campaigns now skips their trained arms and runs pending steps, where it used to stop.
+
+**Also.**
+- The predictability report labels its control columns by contract (`thrust_fraction`, unit 1). It used to say
+  `thrust_N` / `N`, a mislabel of δ.
+- The training diagnostics keep `thrust_N` for comparability.
+
+**Review.** An opus subagent found 1 blocker (the resume refusal) and 3 should-fix issues. All are fixed and
+re-verified (design §9).
+
 ### 2026-09-14 — runway intent R3.3: R3's flown schedule as a held-out-days (`dayval`) publication; a test overwrote the live KRDU categories.json
 
 **Ask.** The user: "先做1, 2, 最后3" — item 3, publish R3's trajectories (plan §18.3).

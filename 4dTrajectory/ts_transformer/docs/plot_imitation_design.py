@@ -157,6 +157,7 @@ def figure_mode_alignment(arms: dict[str, dict]) -> None:
 
 def _bank_matrices(pred_dir: Path):
     import json
+    from ts_transformer.config import CONTROL_THRUST_FRACTION
     from ts_transformer.outputs.dynamics.inverse import actual_controls
     aero = np.array([122.6, 2.7, 0.023, 0.0334, 0.8, 0.2])
     grid = 64
@@ -174,7 +175,8 @@ def _bank_matrices(pred_dir: Path):
                             r["m"]] for r, k in zip(future, keep) if k], float)
         try:
             bank = actual_controls(states, times, aero_params=aero,
-                                   max_thrust_n=240_000.0)[:, 1]
+                                   max_thrust_n=240_000.0,
+                                   parameterization=CONTROL_THRUST_FRACTION)[:, 1]
         except ValueError:
             continue
         progress = (np.arange(grid) + 0.5) / grid

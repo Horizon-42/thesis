@@ -14,6 +14,7 @@ from ts_transformer.config import PREDICTION_CONTROL, TSConfig
 from ts_transformer.data.dataset import Normalizer, build_series
 from ts_transformer.backbone.adapters import build_model
 from ts_transformer.data.synthetic import synthetic_arrivals
+from ts_transformer.outputs.envelope import THRUST_FRACTION_CONTRACT
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -102,10 +103,13 @@ def test_control_distribution_statistics_reports_bounds_changes_and_duration_tai
     upper = np.array([[100.0, 0.5, 2.0], [200.0, 1.0, 2.0]])
 
     result = predictability_report.control_distribution_statistics(
-        controls, durations, lower, upper
+        controls, durations, lower, upper, THRUST_FRACTION_CONTRACT
     )
 
-    thrust = result["channels"]["thrust_N"]
+    # Labelled by the run's contract (was `thrust_N` in "N", a mislabel: the head emits a
+    # fraction, never newtons).
+    thrust = result["channels"]["thrust_fraction"]
+    assert thrust["unit"] == "1"
     assert thrust["median"] == pytest.approx(75.0)
     assert thrust["near_lower_fraction"] == pytest.approx(2.0 / 6.0)
     assert thrust["near_upper_fraction"] == pytest.approx(2.0 / 6.0)

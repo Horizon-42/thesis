@@ -19,6 +19,7 @@ from ts_transformer.data.batch_contract import LossComponents, anchor_state
 from ts_transformer.data.channels import IDX
 from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
+    CONTROL_SPECIFIC_FORCE,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_HOOK_OFF,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -75,6 +76,7 @@ from ts_transformer.outputs.control.supervision import (
 )
 from ts_transformer.outputs.control.training.diagnostics import (
     ControlTrainingDiagnosticsAccumulator,
+    saturation_labels,
 )
 
 if TYPE_CHECKING:
@@ -174,7 +176,9 @@ class ControlContext(WindowContext):
         windows, config = self.windows, self.config
         s_idx, anchor = windows.index[i]
         series = windows.series[s_idx]
-        arrays = dynamics_arrays(series, anchor)
+        arrays = dynamics_arrays(
+            series, anchor, parameterization=config.control_thrust_parameterization
+        )
         if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
             # Training feeds the truth as the controlled time of arrival.
             arrays["cta_s"] = np.array(truth_duration_s(series, anchor), dtype=np.float64)
@@ -439,7 +443,10 @@ class ControlStrategy(OutputStrategy):
 
     def training_diagnostics(self, config: TSConfig) -> ControlTrainingDiagnosticsAccumulator | None:
         if config.control_gradient_clip_norm > 0.0:
-            return ControlTrainingDiagnosticsAccumulator(config.control_gradient_clip_norm)
+            return ControlTrainingDiagnosticsAccumulator(
+                config.control_gradient_clip_norm,
+                saturation_labels(config.control_thrust_parameterization),
+            )
         return None
 
     def epoch_record(
@@ -544,6 +551,11 @@ class ControlStrategy(OutputStrategy):
 
     def record_fields(self, forecast: Forecast) -> dict[str, Any]:
         return {
+            # The longitudinal contract the schedule was predicted in — written only under
+            # specific-force (`control_segments[*].specific_force` carries the commands);
+            # absent means thrust-fraction, so every such record reproduces to the bit.
+            **({"controlThrustParameterization": CONTROL_SPECIFIC_FORCE}
+               if forecast.specific_force_commands is not None else {}),
             # Latent control output: which prior sample this is (None = the top-1 the
             # contract carries) and its probability; whether it was decoded from another
             # flight's latent (the collapse diagnostic). z itself is never written.

@@ -12,7 +12,9 @@ import torch.nn as nn
 
 from ts_transformer.data.approach_difficulty import approach_difficulty
 from ts_transformer.inference.calibration import conformal_intervals, interval_stratum
+from aerodynamic_model.torch_dynamics import specific_force_thrust_n
 from ts_transformer.config import (
+    CONTROL_THRUST_FRACTION,
     CTA_CONDITIONING_OFF,
     DURATION_HEADS_WITH_QUANTILES,
     TSConfig,
@@ -29,9 +31,41 @@ from ts_transformer.outputs.constraints import build_command_hook
 from ts_transformer.outputs.dynamics import rollout as control_rollout
 from ts_transformer.outputs.dynamics.rollout import padded_dense_queries
 from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
+from ts_transformer.outputs.dynamics.backends import lag_control_law
 from ts_transformer.outputs.envelope import physical_controls
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
+
+
+def record_newton_controls(
+    flown: torch.Tensor,
+    segment_end_geodetic_states: torch.Tensor,
+    dynamics: dict[str, torch.Tensor],
+    config: TSConfig,
+) -> torch.Tensor:
+    """A SPECIFIC-FORCE schedule flown, in the record's newton contract, ``[B, N, 3]``.
+
+    The thrust column is the thrust the command asks for where its segment BEGINS —
+    ``clamp(W·n_x + D, T_lo, T_max)`` at the segment's start state and COMMANDED load factor,
+    through the lag RHS's own ``specific_force_thrust_n`` and the floor of the law the
+    rollout flew (``backends.lag_control_law``), so the record can never clamp where the
+    dynamics did not. Inside the hold the RHS re-solves it at every stage, so one number per
+    segment is a stand-in, chosen so the record's per-state controls stay a zero-order hold
+    of this schedule as the contract says. (Under thrust-fraction the newton thrust IS the
+    command: ``physical_controls``.)
+    """
+    initial = dynamics["initial_state"].to(flown)
+    starts = torch.cat(
+        (initial.unsqueeze(1), segment_end_geodetic_states.to(flown)[:, :-1]), dim=1
+    )
+    max_thrust = dynamics["max_thrust_n"].to(flown).unsqueeze(-1)
+    thrust = specific_force_thrust_n(
+        flown[..., 0], flown[..., 2],
+        starts[..., 3], starts[..., 2], starts[..., 6],
+        dynamics["aero_params"].to(flown).unsqueeze(1),
+        lag_control_law(config).min_thrust_fraction * max_thrust, max_thrust,
+    )
+    return torch.cat((thrust.unsqueeze(-1), flown[..., 1:]), dim=-1)
 
 
 def _dynamics_batch(
@@ -45,7 +79,10 @@ def _dynamics_batch(
     scheduler asks for), and under B3 the caller supplies ``cta_s`` — the model's own
     duration quantile — which is the whole point of ``cta=self-q``.
     """
-    rows = [dynamics_arrays(item, anchor) for item in series]
+    rows = [
+        dynamics_arrays(item, anchor, parameterization=config.control_thrust_parameterization)
+        for item in series
+    ]
     if config.cta_conditioning != CTA_CONDITIONING_OFF:
         given = (
             np.asarray(cta_s, dtype=np.float64) if cta_s is not None
@@ -155,17 +192,24 @@ def forecast_control_batch(
     query_geodetic = (
         rollout.query_geodetic_states.detach().cpu().numpy().astype(np.float64)
     )
-    # The head predicts in the dimensionless envelope; the exported record contract is
-    # newtons, and is shared with the CasADi optimizer and the evaluation package.
-    # The schedule FLOWN (a hook may have rewritten the network's commands), in newtons.
-    controls = (
-        physical_controls(
-            rollout.controls.to(prediction.controls.dtype), dynamics["max_thrust_n"]
+    # The head predicts in its contract; the exported record contract is newtons, and is
+    # shared with the CasADi optimizer and the evaluation package. The schedule FLOWN (a
+    # hook may have rewritten the network's commands), in newtons.
+    # Both contracts export the commands at the head's own precision (a hook's float64
+    # rewrite is rounded to it), so bank and load read the same bits under either law.
+    flown = rollout.controls.to(prediction.controls.dtype)
+    specific_force = config.control_thrust_parameterization != CONTROL_THRUST_FRACTION
+    newtons = (
+        record_newton_controls(
+            flown.to(rollout.controls.dtype), rollout.segment_end_geodetic_states,
+            dynamics, config,
         )
-        .detach()
-        .cpu()
-        .numpy()
-        .astype(np.float64)
+        if specific_force
+        else physical_controls(flown, dynamics["max_thrust_n"])
+    )
+    controls = newtons.detach().cpu().numpy().astype(np.float64)
+    specific_force_commands = (
+        flown[..., 0].detach().cpu().numpy().astype(np.float64) if specific_force else None
     )
     predicted_final_time = (
         prediction.final_time_s.detach().cpu().numpy().astype(np.float64)
@@ -193,6 +237,9 @@ def forecast_control_batch(
             truncated_at_threshold=False,
             horizon_capped=False,
             controls=controls[row],
+            specific_force_commands=(
+                None if specific_force_commands is None else specific_force_commands[row]
+            ),
             sample_durations_s=np.diff(np.concatenate(([0.0], row_offsets))),
             segment_durations_s=durations[row],
             geodetic_values=query_geodetic[row, :count],

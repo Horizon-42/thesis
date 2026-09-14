@@ -37,6 +37,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "4dTrajectory"))
 from ts_transformer.data.approach_difficulty import STRAIGHT_TORTUOSITY  # noqa: E402
+from ts_transformer.config import CONTROL_THRUST_FRACTION  # noqa: E402
 from ts_transformer.outputs.dynamics.inverse import actual_controls  # noqa: E402
 
 AERO = np.array([122.6, 2.7, 0.023, 0.0334, 0.8, 0.2])
@@ -148,7 +149,8 @@ def score(pred_dir: Path) -> dict | None:
         states, times = states[keep], times[keep]
         try:
             bank = actual_controls(states, times, aero_params=AERO,
-                                   max_thrust_n=MAX_THRUST_N)[:, 1]
+                                   max_thrust_n=MAX_THRUST_N,
+                                   parameterization=CONTROL_THRUST_FRACTION)[:, 1]
         except ValueError:
             continue
         progress = (np.arange(COMMON_GRID_POINTS) + 0.5) / COMMON_GRID_POINTS

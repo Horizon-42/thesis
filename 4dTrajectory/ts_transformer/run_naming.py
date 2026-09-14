@@ -57,6 +57,8 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_NAMES,
+    CONTROL_SPECIFIC_FORCE,
+    CONTROL_THRUST_FRACTION,
     DEFAULT_N_SEGMENTS_BY_MODEL,
     HORIZON_FULL,
     HORIZON_WINDOW,
@@ -75,6 +77,10 @@ _DYNAMICS_SLUG = {
     CONTROL_DYNAMICS_POINT_MASS: "pm",
     CONTROL_DYNAMICS_FIRST_ORDER_LAG: "lag",
 }
+#: The longitudinal contract off its default, as the dynamics word and the slug spell it.
+#: It is physics — WHICH quantity the rollout integrates the head's first column as — so it
+#: sits in the always-shown dynamics word, never in the foldable meta list.
+_THRUST_PARAMETERIZATION_SLUG = {CONTROL_SPECIFIC_FORCE: "sf"}
 _BACKEND_SLUG = {
     # `transport-chart-velocity` is RETIRED from the config vocabulary (T2, 2026-09-07) and
     # stays here on purpose: 13 stored 2026-07/08 configs carry it, their on-disk run
@@ -371,7 +377,7 @@ if _unknown:  # fail at import: a renamed TSConfig field must rename here too
 #: recipe, the horizon and the seed are spelled by their own functions below.
 _DIRECTLY_NAMED_FIELDS = frozenset({
     "model", "prediction_output", "control_recipe_name", "horizon_mode", "seed",
-    "control_dynamics_model", "control_dynamics_backend",
+    "control_dynamics_model", "control_dynamics_backend", "control_thrust_parameterization",
     "latent_dim", "latent_prior_components",
 })
 
@@ -645,10 +651,18 @@ def dynamics_name(config: Mapping[str, Any]) -> str:
         ]
         if taus:
             name += f"({', '.join(taus)})"
+    thrust = _thrust_parameterization(config)
+    if thrust != CONTROL_THRUST_FRACTION:
+        name += f"+{thrust}"
     backend = config.get("control_dynamics_backend") or CONTROL_DYNAMICS_REANCHORED_RK4
     if backend != CONTROL_DYNAMICS_REANCHORED_RK4:
         name += f" @{backend}"
     return name
+
+
+def _thrust_parameterization(config: Mapping[str, Any]) -> str:
+    """A stored config predating the field ran the default law."""
+    return config.get("control_thrust_parameterization") or CONTROL_THRUST_FRACTION
 
 
 def _meta_diffs(
@@ -803,6 +817,9 @@ def run_slug(config: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
         else "kinematic"
     )
     dyn = _DYNAMICS_SLUG.get(model, _slugify(str(model)))
+    thrust = _thrust_parameterization(config)
+    if config.get("prediction_output") == PREDICTION_CONTROL and thrust != CONTROL_THRUST_FRACTION:
+        dyn += f"-{_THRUST_PARAMETERIZATION_SLUG.get(thrust, _slugify(thrust))}"
     backend = config.get("control_dynamics_backend") or CONTROL_DYNAMICS_REANCHORED_RK4
     if config.get("prediction_output") == PREDICTION_CONTROL and (
         backend != CONTROL_DYNAMICS_REANCHORED_RK4

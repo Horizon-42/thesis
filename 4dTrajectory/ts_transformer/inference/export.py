@@ -236,6 +236,14 @@ def build_prediction_record(
                 zip(starts, control_boundaries, forecast.segment_durations_s, controls)
             )
         ]
+        # Under specific-force the command is n_x and `thrust` above is its thrust at the
+        # segment's start; the command itself rides beside it. Absent under thrust-fraction,
+        # whose thrust IS the command, so every such record reproduces to the bit.
+        if forecast.specific_force_commands is not None:
+            for segment, command in zip(
+                control_segments, forecast.specific_force_commands, strict=True
+            ):
+                segment["specific_force"] = float(command)
     eval_record["reference_file"] = f"{REFERENCES_DIR}/{record_stem(scenario.source, index)}{_REFERENCE_EVAL_SUFFIX}"
 
     reference_record = reference_evaluation_record(

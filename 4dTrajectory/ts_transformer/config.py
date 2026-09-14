@@ -15,8 +15,9 @@ would break the byte-identical property PROVENANCE.md promises.
 from __future__ import annotations
 
 from dataclasses import MISSING, asdict, dataclass, field, fields
+import json
 import math
-from typing import Any
+from typing import Any, Mapping
 
 # Channel order is a hard contract between the data build, the model, and the export.
 # It lives in channels.py; imported here so the default cannot drift from it.
@@ -283,6 +284,19 @@ CONTROL_DYNAMICS_BACKENDS = (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
 )
+# WHICH quantity the longitudinal control is (docs/2026-09-14_specific_force_control_design.md).
+# ``thrust-fraction`` commands T / T_max — normalised by the actuator; every run before
+# 2026-09-14 trained under it and every named recipe pins it. ``specific-force`` commands
+# n_x = (T - D)/W — normalised by the EFFECT: the lag RHS re-solves the thrust at every RK4
+# stage, the drag cancels, and the airframe enters only through the thrust clamp (the same
+# [-0.2, 1] x T_max range at every state), the stall clamp and the exported thrust. The SAME
+# thrust range is not the same dynamical system: with the drag cancelled the speed has no
+# drag feedback, so a biased command drifts where the thrust-fraction law settles (design
+# §2.1). First-order-lag only: the point-mass rows hold newton controls across a segment and
+# have no per-stage thrust.
+CONTROL_THRUST_FRACTION = "thrust-fraction"
+CONTROL_SPECIFIC_FORCE = "specific-force"
+CONTROL_THRUST_PARAMETERIZATIONS = (CONTROL_THRUST_FRACTION, CONTROL_SPECIFIC_FORCE)
 CONTROL_RECIPE_CUSTOM = "custom"
 CONTROL_RECIPE_SIMPLE_V1 = "simple-v1"
 # simple-v1 with the lagged flight model substituted and nothing else changed, so the two
@@ -874,6 +888,9 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "duration_head": "point",
         "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
         "control_dynamics_model": CONTROL_DYNAMICS_POINT_MASS,
+        # Every published simple-v* comparison flew the thrust-fraction law; an n_x arm
+        # varies a field the recipe freezes, so it is `custom` and its dynamics word says so.
+        "control_thrust_parameterization": CONTROL_THRUST_FRACTION,
         "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
         "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_NATIVE,
         "control_state_objective": CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -1369,6 +1386,7 @@ class DynamicsSpec:
 
     control_dynamics_model: str
     control_dynamics_backend: str
+    control_thrust_parameterization: str
     control_thrust_time_constant_s: float
     control_bank_time_constant_s: float
     control_load_time_constant_s: float
@@ -1382,6 +1400,20 @@ class DynamicsSpec:
         _require_member(
             "control_dynamics_model", self.control_dynamics_model, CONTROL_DYNAMICS_MODELS
         )
+        _require_member(
+            "control_thrust_parameterization", self.control_thrust_parameterization,
+            CONTROL_THRUST_PARAMETERIZATIONS,
+        )
+        if (self.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE
+                and self.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG):
+            # A scope statement, not physics: the specific force needs the thrust re-solved
+            # at every RK4 stage, which only the lag RHS does. The point-mass rows convert to
+            # newtons once per segment and would hold T, not n_x.
+            raise ValueError(
+                f"control_thrust_parameterization={CONTROL_SPECIFIC_FORCE!r} is implemented "
+                "on the first-order-lag flight model only; control_dynamics_model="
+                f"{self.control_dynamics_model!r}"
+            )
         for name in sorted(TIME_CONSTANT_FIELDS):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0.0:
@@ -1742,6 +1774,25 @@ class ControlOutput(OutputSpec):
                 "Weigh the pinball with duration_quantile_loss_weight, or take the point "
                 f"term back with duration_head={DURATION_HEAD_TWO_HEAD!r}"
             )
+        if self.dynamics.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE:
+            if self.objective.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
+                # The table's schema names no parameterisation, so a specific-force run
+                # could read a thrust-fraction table and imitate δ as if it were n_x.
+                raise ValueError(
+                    f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r} is not "
+                    "built for control_thrust_parameterization="
+                    f"{CONTROL_SPECIFIC_FORCE!r}: a fitted-teacher table does not say which "
+                    "coordinate its schedules are in"
+                )
+            if CONTROL_HOOK_SPEED_FLOOR in CONTROL_HOOK_MEMBERS.get(
+                self.hook.control_command_hook, ()
+            ):
+                raise ValueError(
+                    f"the {CONTROL_HOOK_SPEED_FLOOR!r} hook inverts the thrust-fraction law "
+                    "for its command and is not built for control_thrust_parameterization="
+                    f"{CONTROL_SPECIFIC_FORCE!r} (control_command_hook="
+                    f"{self.hook.control_command_hook!r})"
+                )
         if self.hook.active:
             if self.dynamics.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
                 raise ValueError(
@@ -2160,6 +2211,10 @@ class TSConfig:
     # it reduces to ``point-mass`` as the time constants go to zero, and reuses the same
     # force equations, so the two are comparable rather than two separate models.
     control_dynamics_model: str = CONTROL_DYNAMICS_POINT_MASS
+    # Which quantity the longitudinal control is (see CONTROL_THRUST_PARAMETERIZATIONS).
+    # Not in REQUIRED_SERIALIZED_CONTROL_FIELDS: every checkpoint trained before the field
+    # existed ran the default, so absence reproduces it exactly.
+    control_thrust_parameterization: str = CONTROL_THRUST_FRACTION
     # Actuator/autopilot time constants, in the control contract's order
     # (thrust, bank, load factor). Bank is the slow one: rolling into and out of a
     # vectored turn is what the meeting identified as the discontinuity worth fixing,
@@ -2481,17 +2536,7 @@ class TSConfig:
         safe stand-in for "the old runs did this" is therefore required, not defaulted.
         """
         data = dict(data)
-        missing = [name for name in REQUIRED_SERIALIZED_FIELDS if name not in data]
-        if uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE)):
-            missing += [
-                name for name in REQUIRED_SERIALIZED_CONTROL_FIELDS if name not in data
-            ]
-        if uses_closure_labels(data.get("prediction_output", PREDICTION_STATE)):
-            missing += [
-                name for name in REQUIRED_SERIALIZED_CLOSURE_FIELDS if name not in data
-            ]
-        if uses_plan_labels(data.get("prediction_output", PREDICTION_STATE)):
-            missing += [name for name in REQUIRED_SERIALIZED_PLAN_FIELDS if name not in data]
+        missing = missing_required_fields(data)
         if missing:
             raise ValueError(
                 f"serialized config is missing {', '.join(sorted(missing))}; "
@@ -2583,6 +2628,41 @@ def _check_view_partition() -> None:
 _check_view_partition()
 
 
+def _required_serialized_fields(data: Mapping[str, Any]) -> tuple[str, ...]:
+    """The fields `TSConfig.from_dict` REQUIRES of a stored config of this output."""
+    output = data.get("prediction_output", PREDICTION_STATE)
+    return (
+        *REQUIRED_SERIALIZED_FIELDS,
+        *(REQUIRED_SERIALIZED_CONTROL_FIELDS if uses_control_dynamics(output) else ()),
+        *(REQUIRED_SERIALIZED_CLOSURE_FIELDS if uses_closure_labels(output) else ()),
+        *(REQUIRED_SERIALIZED_PLAN_FIELDS if uses_plan_labels(output) else ()),
+    )
+
+
+def missing_required_fields(data: Mapping[str, Any]) -> list[str]:
+    """The required fields a stored config lacks — what `TSConfig.from_dict` refuses."""
+    return [name for name in _required_serialized_fields(data) if name not in data]
+
+
+def absent_field_defaults(data: Mapping[str, Any]) -> dict[str, Any]:
+    """What `TSConfig.from_dict` reads for every field a stored config does NOT carry: this
+    build's default, for each field it does not require (a missing REQUIRED field is refused
+    there, so it is left out here and still reads as absent).
+
+    This is the ABSENT-field half of `from_dict`'s rule (it does not normalise fields that
+    are present but owned by another output), for readers that compare a stored config field
+    by field. The campaign runner's resume check read an absent field as ``None``, so the
+    first field a recipe pins AFTER an arm was trained (``control_thrust_parameterization``,
+    2026-09-14) refused every such arm's resume although the arm flew exactly the default.
+    """
+    required = set(_required_serialized_fields(data))
+    return {
+        name: value
+        for name, value in json.loads(json.dumps(TSConfig().to_dict())).items()
+        if name not in data and name not in required
+    }
+
+
 def default_anchor(config: TSConfig) -> int:
     """Use the earliest anchor with a complete observed lookback.
 
@@ -2619,6 +2699,11 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
     }
     if config.control_recipe_name != CONTROL_RECIPE_CUSTOM:
         base["name"] = config.control_recipe_name
+    # Present only off the default: every stored checkpoint's metadata predates the field,
+    # and `experiments.pipeline` compares this dict for reuse — writing the default too
+    # would refuse every one of them.
+    if config.control_thrust_parameterization != CONTROL_THRUST_FRACTION:
+        base["thrust_parameterization"] = config.control_thrust_parameterization
     if not uses_control_dynamics(config.prediction_output):
         raise ValueError("state output has no control recipe")
     return base

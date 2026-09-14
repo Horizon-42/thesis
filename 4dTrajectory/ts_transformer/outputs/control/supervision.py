@@ -15,7 +15,7 @@ from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays, probe_final_approach
 from ts_transformer.outputs.conditioning import condition_vector
 from ts_transformer.outputs.dynamics.inverse import segment_controls
-from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import control_contract
 
 
 def reference_control_supervision(
@@ -68,6 +68,7 @@ def reference_control_supervision(
     )
     aero = series.scenario.aero
     n_segments = int(config.n_segments)
+    contract = control_contract(config.control_thrust_parameterization)
     inverted = segment_controls(
         states,
         times,
@@ -77,8 +78,8 @@ def reference_control_supervision(
             dtype=np.float64,
         ),
         max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
-        control_lower=CONTROL_LOWER,
-        control_upper=CONTROL_UPPER,
+        control_lower=contract.lower_array,
+        control_upper=contract.upper_array,
         n_segments=n_segments,
         total_duration_s=total_duration_s,
     )
@@ -225,13 +226,14 @@ def probe_dynamics(
     (review B-1): ``--batch-size auto`` then died with a bare ``KeyError`` inside the
     objective, after the dataset build, on every custom arm that weighted either term.
     """
+    contract = control_contract(config.control_thrust_parameterization)
     rows = {
         "condition": [0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5],
         "initial_state": [35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, 66_000.0],
         "aero_params": [122.6, 2.7, 0.02, 0.04, 0.9, 0.1],
-        "control_lower": CONTROL_LOWER.tolist(),
-        "control_upper": CONTROL_UPPER.tolist(),
-        "initial_controls": [0.2, 0.0, 1.0],
+        "control_lower": list(contract.lower),
+        "control_upper": list(contract.upper),
+        "initial_controls": list(contract.neutral),
         "frame_params": [35.9, -78.8, 100.0, 0.0],
     }
     dynamics = {
@@ -255,7 +257,7 @@ def probe_dynamics(
         )
     if config.control_imitation_loss_weight:
         dynamics["reference_controls"] = torch.tensor(
-            [[[0.2, 0.0, 1.0]]], dtype=torch.float64, device=device
+            [[list(contract.neutral)]], dtype=torch.float64, device=device
         ).expand(batch_size, n_segments, -1)
         dynamics["reference_control_weight"] = torch.ones(
             (batch_size, n_segments), dtype=torch.float64, device=device

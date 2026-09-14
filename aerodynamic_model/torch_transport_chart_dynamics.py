@@ -24,7 +24,9 @@ from aerodynamic_model.torch_dynamics import (
     GRAVITY_MPS2,
     STATE_NAMES,
     aerodynamic_coefficients,
+    drag_force_n,
     isa_density,
+    specific_force_thrust_n,
 )
 from aerodynamic_model.torch_piecewise_rollout import (
     rollout_piecewise_constant_with_step,
@@ -226,7 +228,7 @@ def transport_chart_rhs(
         / (mass * GRAVITY_MPS2),
         load_command,
     )
-    drag = 0.5 * density * speed.square() * cd * area
+    drag = drag_force_n(density, speed, cd, area)
     speed_rate = (thrust - drag) / mass - GRAVITY_MPS2 * sin_gamma
 
     tangent = torch.stack(
@@ -277,6 +279,33 @@ def transport_chart_rhs(
             torch.zeros_like(mass).unsqueeze(-1),
         ),
         dim=-1,
+    )
+
+
+def transport_chart_specific_force_thrust_n(
+    state_chart: torch.Tensor,
+    specific_force: torch.Tensor,
+    load_factor: torch.Tensor,
+    aero_params: torch.Tensor,
+    frame_params: torch.Tensor,
+    min_thrust_n: torch.Tensor,
+    max_thrust_n: torch.Tensor,
+) -> torch.Tensor:
+    """:func:`specific_force_thrust_n` at a chart state, read the way
+    :func:`transport_chart_rhs` reads it (same speed, same ``_wgs84_geometry`` altitude,
+    same mass), so the drag it adds is the drag the RHS subtracts."""
+    _require_last_dim(
+        state_chart, len(TRANSPORT_CHART_STATE_NAMES), "state_chart"
+    )
+    _east, north, up, ve, vn, vu, mass = state_chart.unbind(-1)
+    _lat0, _lat, altitude, _radius_m, _radius_n, _alt0 = _wgs84_geometry(
+        north, up, frame_params
+    )
+    horizontal_speed = torch.sqrt(ve.square() + vn.square())
+    speed = torch.sqrt(horizontal_speed.square() + vu.square())
+    return specific_force_thrust_n(
+        specific_force, load_factor, speed, altitude, mass, aero_params,
+        min_thrust_n, max_thrust_n,
     )
 
 

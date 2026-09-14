@@ -14,7 +14,7 @@ the literature (36 sources) and the measurements behind the choice are in
 |---|---|---|---|
 | N0 | fleet spread, per-class readout, literature | **done** 2026-09-14 | `683e604` on `dev-leg-ctrl`; `docs/literature/control_normalization/` |
 | D | this design, plus the teacher-distribution measurement (§2.4) | **done** 2026-09-14 | branch `specific-force-control`, worktree `.claude/worktrees/specific-force` |
-| M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | pending | — |
+| M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | **done** 2026-09-14, reviewed (opus; 1 blocker + 3 should-fix, all fixed and re-verified, §9) | branch commit after this table's edit |
 | M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | pending | — |
 | N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | not started — needs its intent entry and a go | — |
 | N4 | conditioning vector as dimensionless groups (own axis) | not started | — |
@@ -68,12 +68,25 @@ specific-force thrust inside EVERY RHS evaluation (every RK4 stage):
   is evaluated on the same inputs.
 - **The airframe (m, T_max, S, CLmax, polar) enters in three places only:** the thrust clamp,
   the existing stall clamp on `n`, and the exported thrust.
-- **The clamp keeps today's admissible set.** A clamp between `−0.2·T_max` and `T_max` is
-  exactly today's δ box, so the set of trajectories a head can produce is unchanged; only the
-  coordinate it predicts in changes. That is what makes N3 a clean test of the
-  parameterisation. Dropping the lower clamp (the floor exists because the clean polar lacks
-  flap and gear drag) would admit the 0.87 % of truth segments the floor cuts (§2.4). That is a
-  separate axis, not built.
+- **The clamp keeps today's thrust RANGE, not today's dynamics.** At every state the clamp
+  admits exactly the thrusts δ ∈ [−0.2, 1] does, so no command becomes feasible or infeasible
+  by the change. Dropping the lower clamp (the floor exists because the clean polar lacks flap
+  and gear drag) would admit the 0.87 % of truth segments the floor cuts (§2.4); that is a
+  separate axis, not built. But the same range does NOT give the same trajectories for the
+  same piecewise-constant schedule — see the next point.
+- **With the drag cancelled, the speed has no drag feedback.** Under thrust-fraction
+  `∂V̇/∂V = −(∂D/∂V)/m`: a biased command settles where drag balances it (stabilising above
+  the minimum-drag speed, destabilising on the back side below it). Under specific-force,
+  unclamped, `∂V̇/∂V = 0`: the speed integrates the command, and a bias drifts linearly until
+  the T_max clamp binds, where `∂V̇/∂a_x = 0`. Measured by the M1 review with untrained heads
+  at level-trim neutrals on four synthetic KRDU descents (2.5–3°, 416 s):
+  - thrust-fraction peaked at 209–213 m/s;
+  - specific-force at n_x = 0 peaked at 311–328 m/s, stopped only by the clamp.
+
+  So an n_x head must supply the speed regulation that drag partly supplied for a δ head.
+  The imitation teacher and the trajectory loss train it, and N3 measures the
+  parameterisation INCLUDING this difference — it is not a pure change of coordinates. The
+  specific-force neutral is chosen against it (§2.3).
 - **The thrust is recomputed at every RK4 stage.** A thrust held over a segment is not a held
   `n_x`, which is why the law lives inside the lag RHS and not in a pre-rollout conversion.
 - **`control_thrust_time_constant_s` (1.5 s) lags `a_x` under this law.** That approximates
@@ -101,15 +114,23 @@ specific-force thrust inside EVERY RHS evaluation (every RK4 stage):
 | contract | names | lower | upper | half width | neutral |
 |---|---|---|---|---|---|
 | thrust-fraction | `thrust_fraction, bank_rad, load_factor` | −0.2, −π/4, 0.2 | 1.0, π/4, 2.0 | 0.6, π/4, 0.9 | 0.2, 0, 1 |
-| **specific-force** | `specific_force, bank_rad, load_factor` | **−0.20**, −π/4, 0.2 | **0.23**, π/4, 2.0 | **0.215**, π/4, 0.9 | **0.0**, 0, 1 |
+| **specific-force** | `specific_force, bank_rad, load_factor` | **−0.20**, −π/4, 0.2 | **0.23**, π/4, 2.0 | **0.215**, π/4, 0.9 | **−0.05**, 0, 1 |
 
 - **Half width 0.215 g** is today's δ half width (0.6) times the fleet-median T_max/W (0.358).
   So a given physical error costs the same in the imitation MSE for the median airframe, and
   `SIMPLE_V3_IMITATION_LOSS_WEIGHT` (64) stays comparable across the two arms.
 - **Lower −0.20** sits below the truth's p0.1 (−0.179) and below the feasible floor of 99.7 %
   of states (§2.4). The upper bound follows from the width.
-- **Neutral 0** holds speed in level flight on every airframe. Today's 0.2 δ is the same thing
-  for the median airframe: 0.2·0.358 − 0.076 ≈ 0.
+- **Neutral −0.05** holds speed on a ~2.9° descent, on every airframe (`n_x = sin γ` is the
+  speed hold). That is an approach's dominant condition, and it sits beside the truth
+  teacher's median, −0.059 g (§2.4).
+  - It is deliberately NOT level trim, which is what δ's neutral 0.2 means for the median
+    airframe (0.2·0.358 − 0.076 ≈ 0).
+  - Level trim is benign under thrust-fraction only because drag bounds the descent
+    overspeed; under specific-force nothing does (§2.1).
+  - Measured on the same four synthetic descents: at −0.05 the untrained heads stay within
+    103–144 m/s, from 118–136 m/s.
+  - It was 0 until the M1 review measured the overspeed.
 - **The box is the head's search space, as today's is, not a flyability claim;** the clamp in
   §2.1 is the feasibility.
 
@@ -299,6 +320,10 @@ The torch modules have no importer outside `ts_transformer` and the package's ow
 
 ## 8. Traps to know before touching it
 
+- **The speed has no drag feedback under specific-force** (§2.1). A constant n_x bias drifts
+  the speed without bound until the thrust clamp binds, so do not read a specific-force
+  rollout's speed drift as a bug in the law, and do not give it a level-trim neutral.
+
 - **`dynamics_arrays` without the parameterisation is a TypeError on purpose.** A δ box under
   an n_x rollout is a silent +0.4 m/s² bias.
 - **The specific-force thrust must be computed at every RK4 stage.** Computing it once per
@@ -307,3 +332,40 @@ The torch modules have no importer outside `ts_transformer` and the package's ow
   ψ̇ read thrust (it must not), test 9 fails.
 - **A hook that writes the thrust channel must know the law.** Today that is only the speed
   floor. The plan controller writes δ and is plan-only.
+
+## 9. M1 review (2026-09-14, opus subagent) and what changed
+
+**Verified by the reviewer:**
+- **Default law bit-identical to `775b59e`:** the lag fixture 7/7; CUDA compiled path 9/9;
+  interleaving both laws gives 4 graphs and 0 recompiles; the full objective + backward and the
+  forecast→record JSON 44/44.
+- **Census:** 0 of 245 stored `history.json` differ in name, slug, parameter rows or
+  loadability.
+- **Every consumer of the longitudinal column** passes the parameterisation (AST scan: 35
+  calls).
+- **The specific-force thrust of every exported segment** matches its own start state.
+
+**Fixed after it:**
+1. **Blocker — the campaign runner refused to resume every recipe arm on disk.**
+   - Cause: the recipe pin is a field no stored `history.json` carries, and
+     `frame_ablation.stale_arm_error` read the absent field as `None`.
+   - Fix: it now reads a stored config the way `TSConfig.from_dict` does, through
+     `config.absent_field_defaults`: the default, except for REQUIRED fields.
+   - Checked on the real campaigns: B1 4/4, L1 3/3, B1b 1/1, A2b 2/2 resumable.
+   - Test: `test_frame_ablation_runner.py`.
+2. **The record export restated the law's thrust floor.** It now reads it from
+   `backends.lag_control_law(config)`.
+3. **The same-admissible-set claim was wrong**, and the neutral 0 overspeeds (§2.1, §2.3).
+   The claim is reworded, and the neutral is now −0.05.
+4. **Test gaps:**
+   - The default-law test was vacuous; it is now a golden pinned from `775b59e`.
+   - The export test now checks every segment.
+   - A real barrier rollout now asserts column 0 passes through.
+5. **Smaller fixes:**
+   - The drag expression now exists once (`torch_dynamics.drag_force_n`); every RHS is still
+     bit-identical.
+   - Stale comments corrected.
+   - The predictability report labels columns by contract, fixing the old `thrust_N`/`N`
+     mislabel of δ.
+   - Commands are exported at the head's precision under both laws.
+

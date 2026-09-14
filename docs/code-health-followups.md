@@ -742,3 +742,18 @@ on the placeholder's length (synthetic leg, heading away from the join: 6.8 s of
 leg's points at the route's own coordinates (the anchor at `route.remaining_m(0)`, the fix at its first
 pass). Changes the flown speed on every instruction leg → a re-measure of the plan-path steps; not done.
 
+## 33. Three more readers compare a stored config field by field with `!=` (2026-09-14)
+
+**Verified** (M1 review of the specific-force axis):
+- **The readers:** `experiments/pipeline.cv_reuse_error` compares the full `TSConfig(...).to_dict()` with a stored
+  `cv_results.json`'s `base_config`. `experiments/coordinate_ablation` (one stored CV result against another) and
+  `inference/build_multiflight_capacity_report._load_results` have the same shape.
+- **The problem:** a field added after the artifact was written reads as a difference. Both stored
+  `cv_results.json` already lacked 45–50 fields at `775b59e`, so neither was reusable before the change either.
+- **The fix is ready:** the campaign runner's resume check got exactly this rule, `config.absent_field_defaults`,
+  on 2026-09-14.
+
+**Judgement**: adopt the same helper in the three readers. It turns "never reusable" into "reusable when only
+absent fields differ", so it changes which stored CV results a `pipeline --skip-train` run reuses — the owner's
+call.
+

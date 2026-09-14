@@ -12,7 +12,6 @@ import torch
 
 import ts_transformer.data.channels as ch
 from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
-from ts_transformer.outputs.control import heads as control_models
 import ts_transformer.outputs.dynamics.rollout as control_rollout_module
 import ts_transformer.training.objective as objective
 import ts_transformer.outputs.control.loss.objective as control_objective
@@ -29,7 +28,7 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER, THRUST_FRACTION_CONTRACT
 from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
 from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
 from ts_transformer.backbone.adapters import build_model
@@ -311,7 +310,7 @@ def test_control_model_starts_from_neutral_uniform_rollout():
     prediction = model(history, dynamics)
     # The untrained head emits the neutral physical control, not a fixed fraction of
     # whatever the bounds happen to be: 20% thrust, wings level, load factor one.
-    expected = torch.tensor(control_models.NEUTRAL_CONTROLS).view(1, 1, 3)
+    expected = torch.tensor(THRUST_FRACTION_CONTRACT.neutral).view(1, 1, 3)
     expected_time = math.log(2.0) * config.final_time_scale_s
 
     torch.testing.assert_close(

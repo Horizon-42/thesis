@@ -28,7 +28,7 @@ from ts_transformer.training.objective import ProcedureMultipliers, procedure_lo
 from ts_transformer.outputs.constraints import build_command_hook
 from ts_transformer.outputs.dynamics import rollout as control_rollout
 from ts_transformer.outputs.dynamics.backends import EndpointControlRollout
-from ts_transformer.outputs.envelope import BANK_INDEX, CONTROL_HALF_WIDTH, physical_controls
+from ts_transformer.outputs.envelope import BANK_INDEX, control_contract
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
 from ts_transformer.outputs.control.loss.fixed_dt import fixed_dt_control_state_loss
@@ -282,8 +282,11 @@ def control_imitation_mse(
 ) -> torch.Tensor | None:
     """Per-flight MSE between the predicted schedule and the one the flown track implies.
 
-    Both sides live in the dimensionless control box, and each channel is divided by half
-    its box width so a full-scale error costs the same in thrust, bank and load factor.
+    Both sides live in the run's control contract, and each channel is divided by half its
+    box width (``ControlContract.half_width``) so a full-scale error costs the same in the
+    longitudinal column, bank and load factor. The specific-force box's half width is the
+    thrust-fraction box's times the fleet-median T_max/W, so for the median airframe one
+    weight prices a given speed-rate error the same under both contracts.
     Under ``control_imitation_target="inverse-dynamics"`` the segments past the last
     measured velocity carry zero weight (see :func:`dataset.reference_control_supervision`);
     under ``"fitted"`` every segment carries weight one, because that schedule was fitted
@@ -300,7 +303,9 @@ def control_imitation_mse(
     target = dynamics["reference_controls"].to(prediction.controls.dtype)
     weight = dynamics["reference_control_weight"].to(prediction.controls.dtype)
     scale = torch.as_tensor(
-        CONTROL_HALF_WIDTH, dtype=prediction.controls.dtype, device=prediction.controls.device
+        control_contract(config.control_thrust_parameterization).half_width,
+        dtype=prediction.controls.dtype,
+        device=prediction.controls.device,
     )
     delta = (prediction.controls - target) / scale
     return (delta.square().mean(dim=-1) * weight).sum(dim=1) / weight.sum(dim=1).clamp(
@@ -344,12 +349,16 @@ def control_heading_rate_mse(
     def cast(value: torch.Tensor) -> torch.Tensor:
         return value.to(dtype=dtype, device=device)
 
+    actual = cast(rollout.actual_controls)
     predicted_dps = torch.rad2deg(
         heading_rate_rad_s(
             states,
-            physical_controls(
-                cast(rollout.actual_controls), cast(dynamics["max_thrust_n"])
-            ),
+            # The psi row reads bank and the (stall-limited) load factor only, never the
+            # thrust, so the thrust column is passed as ZERO under both contracts: exact, and
+            # the specific-force thrust would need each endpoint's drag for a value the row
+            # never reads (`tests/test_specific_force.py::test_the_turn_rate_row_never_reads_the_thrust_column`
+            # pins the independence).
+            torch.cat((torch.zeros_like(actual[..., :1]), actual[..., 1:]), dim=-1),
             # Per-flight ``[B,6]`` against per-endpoint ``[B,N,7]`` states.
             cast(dynamics["aero_params"]).unsqueeze(-2),
         )
@@ -386,7 +395,7 @@ def control_bank_total_variation(
         return None
     bank = controls[..., BANK_INDEX]
     return (bank[:, 1:] - bank[:, :-1]).abs().mean(dim=1) / float(
-        CONTROL_HALF_WIDTH[BANK_INDEX]
+        control_contract(config.control_thrust_parameterization).half_width[BANK_INDEX]
     )
 
 

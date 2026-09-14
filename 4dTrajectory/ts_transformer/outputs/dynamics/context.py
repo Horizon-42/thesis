@@ -17,7 +17,7 @@ from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays
 from ts_transformer.outputs.conditioning import condition_vector
 from ts_transformer.outputs.dynamics.inverse import actual_controls
-from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import control_contract
 
 # How much observed lookback the anchor-state control inversion differentiates. It needs
 # at least three samples for a second-order gradient; a few more absorb ADS-B jitter
@@ -25,13 +25,16 @@ from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 ANCHOR_CONTROL_SAMPLES = 11
 
 
-def anchor_controls(series: FlightSeries, anchor: int, mass_kg: float) -> np.ndarray:
+def anchor_controls(
+    series: FlightSeries, anchor: int, mass_kg: float, *, parameterization: str
+) -> np.ndarray:
     """Return the controls the observed lookback implies are in effect at ``anchor``.
 
     This is the lagged model's actuator initial condition. It reads only samples at or
     before the anchor, so it is as deployable as the history window itself, and it is the
     ACTUAL control (never a command) for every flight model — the commands that produced
-    it are a separate inversion in ``control_inverse_dynamics``.
+    it are a separate inversion in ``control_inverse_dynamics``. In the contract
+    ``parameterization`` names, because that is the unit the lag RHS reads its actuators in.
     """
     start = max(0, anchor + 1 - ANCHOR_CONTROL_SAMPLES)
     window = slice(start, anchor + 1)
@@ -55,11 +58,22 @@ def anchor_controls(series: FlightSeries, anchor: int, mass_kg: float) -> np.nda
             dtype=np.float64,
         ),
         max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
+        parameterization=parameterization,
     )[-1]
 
 
-def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
-    """Physical per-flight tensors required by a control model and its rollout."""
+def dynamics_arrays(
+    series: FlightSeries, anchor: int, *, parameterization: str
+) -> dict[str, np.ndarray]:
+    """Physical per-flight tensors required by a control model and its rollout.
+
+    ``parameterization`` (``control_thrust_parameterization``) picks the contract the box
+    and the initial actuator are in. REQUIRED, never defaulted: a control call site that
+    forgot it would hand a specific-force rollout a thrust-fraction box and actuator — δ ≈
+    0.04 read as 0.04 g is +0.4 m/s² on every flight, bounded and silently wrong. The plan
+    path passes thrust-fraction explicitly (its guidance commands δ).
+    """
+    contract = control_contract(parameterization)
     scenario = series.scenario
     mass_kg = float(scenario.initial.m)
     initial = states_from_channels(
@@ -91,16 +105,18 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
             dtype=np.float64,
         ),
         "max_thrust_n": np.array(max_thrust, dtype=np.float64),
-        # The dimensionless envelope is the same box on every airframe (see
-        # control_envelope); the flight's installed thrust enters through max_thrust_n.
-        "control_lower": CONTROL_LOWER.astype(np.float32),
-        "control_upper": CONTROL_UPPER.astype(np.float32),
+        # The contract's box is the same on every airframe (outputs/envelope.py); the
+        # flight's installed thrust enters through max_thrust_n.
+        "control_lower": contract.lower_array.astype(np.float32),
+        "control_upper": contract.upper_array.astype(np.float32),
         # The lagged model's actuator initial condition. Emitted unconditionally so the
         # batch contract does not depend on the flight model, and clipped to the same box
-        # the head predicts in — an anchor whose implied thrust is outside the envelope is
-        # a starting point the model could not have commanded.
+        # the head predicts in — an anchor whose implied command is outside the box is a
+        # starting point the model could not have commanded.
         "initial_controls": np.clip(
-            anchor_controls(series, anchor, mass_kg), CONTROL_LOWER, CONTROL_UPPER
+            anchor_controls(series, anchor, mass_kg, parameterization=parameterization),
+            contract.lower_array,
+            contract.upper_array,
         ).astype(np.float64),
         "frame_params": np.array(
             [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],

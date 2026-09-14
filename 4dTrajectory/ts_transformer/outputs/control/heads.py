@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 
 from ts_transformer.config import TSConfig
-from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import ControlContract, control_contract
 from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
@@ -26,12 +26,14 @@ from ts_transformer.config import (
 from ts_transformer.outputs.duration_heads import FinalTimeHead, QuantileFinalTimeHead
 
 
+# Three columns in the order every contract shares; the labels are the thrust-fraction
+# saturation diagnostics' historical keys (`training.diagnostics.saturation_labels`).
 CONTROL_NAMES = ("thrust_N", "bank_rad", "load_factor")
 
 
 @dataclass(frozen=True)
 class ControlPrediction:
-    controls: torch.Tensor           # [B, N, 3], physical control units
+    controls: torch.Tensor           # [B, N, 3], in the run's control contract (envelope.py)
     segment_durations: torch.Tensor  # [B, N], physical seconds
     final_time_s: torch.Tensor       # [B], segment_durations.sum(dim=-1)
     # B1: the five `DURATION_QUANTILES` in seconds, `[B, Q]`, or None under the point head.
@@ -44,7 +46,7 @@ class ControlPrediction:
 
 @dataclass(frozen=True)
 class ControlBounds:
-    """Aircraft-specific bounds in ``(thrust_N, bank_rad, load_factor)`` order."""
+    """Per-flight bounds in the run's control-contract order (``outputs/envelope.py``)."""
 
     lower: tuple[float, float, float]
     upper: tuple[float, float, float]
@@ -294,18 +296,14 @@ class ControlFeatureModel(nn.Module):
         return quantiles[:, DURATION_MEDIAN_INDEX], quantiles
 
 
-# What "doing nothing" means before any gradient arrives: 20% of installed thrust, wings
-# level, load factor one. Expressed as physical values and mapped through the envelope, so
-# a bound change moves the initialization with it instead of silently relocating it.
-NEUTRAL_CONTROLS = (0.2, 0.0, 1.0)
-
-
-def _neutral_control_bias(head: ControlOutputHead) -> torch.Tensor:
-    """Sigmoid logits whose bounded output is :data:`NEUTRAL_CONTROLS`."""
-    neutral = np.array(NEUTRAL_CONTROLS, dtype=np.float64)
-    unit = np.clip(
-        (neutral - CONTROL_LOWER) / (CONTROL_UPPER - CONTROL_LOWER), 1e-6, 1.0 - 1e-6
-    )
+def _neutral_control_bias(head: ControlOutputHead, contract: ControlContract) -> torch.Tensor:
+    """Sigmoid logits whose bounded output is the contract's neutral command — what "doing
+    nothing" means before any gradient arrives (``ControlContract.neutral``). Expressed as
+    physical values and mapped through the contract's box, so a bound change moves the
+    initialization with it instead of silently relocating it."""
+    neutral = np.array(contract.neutral, dtype=np.float64)
+    lower, upper = contract.lower_array, contract.upper_array
+    unit = np.clip((neutral - lower) / (upper - lower), 1e-6, 1.0 - 1e-6)
     return torch.tensor(
         np.log(unit / (1.0 - unit)),
         dtype=head.control_projection.bias.dtype,
@@ -313,8 +311,8 @@ def _neutral_control_bias(head: ControlOutputHead) -> torch.Tensor:
     ).repeat(head.n_segments)
 
 
-def _initialize_control_head(head: ControlOutputHead) -> None:
-    """Zero the last layer so every flight starts at the neutral controls.
+def _initialize_control_head(head: ControlOutputHead, contract: ControlContract) -> None:
+    """Zero the last layer so every flight starts at the contract's neutral controls.
 
     Every caller wants exactly this; the ``bank_rad`` / ``feature_std`` variants the
     function used to offer had no caller (review §4.7, deleted 2026-09-09).
@@ -324,7 +322,7 @@ def _initialize_control_head(head: ControlOutputHead) -> None:
         head.control_projection.weight.zero_()
         if duration_projection is not None:
             duration_projection.weight.zero_()
-        head.control_projection.bias.copy_(_neutral_control_bias(head))
+        head.control_projection.bias.copy_(_neutral_control_bias(head, contract))
         if duration_projection is not None:
             duration_projection.bias.zero_()
 
@@ -414,7 +412,9 @@ class ControlOutputModel(ControlFeatureModel):
         super().__init__(config, feature_encoder)
         self.final_time_head = duration_head_for(config)
         self.control_head = control_head_for(config)
-        _initialize_control_head(self.control_head)
+        _initialize_control_head(
+            self.control_head, control_contract(config.control_thrust_parameterization)
+        )
         _initialize_duration_head(self.final_time_head)
         # LAST (see the base class): with it built here, every parameter a `point` run has
         # draws exactly what it would have drawn, so two arms that differ only in
