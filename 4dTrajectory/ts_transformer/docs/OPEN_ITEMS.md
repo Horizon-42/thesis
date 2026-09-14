@@ -23,6 +23,7 @@ both airports (what is flown after a fix is the head's later orders) — stopped
 flights; v3 on branch `wip-r32-leg-timing`; code-health §31, §32. Next (the user's call): a closure timed over
 the whole remaining route, developed off the evaluation roster. Artifacts `outputs/POOLED/experiments/
 runway_intent_r31{,_centered}_20260914/`, `runway_intent_r32_20260914/diagnosis/`.
+**R3.3 CODE DONE, RECORDS WRITTEN, PUBLICATION WAITS FOR THE MERGE** (`220138a`): split `dayval`, `runway_intent_r3 --write-records` (5195 records over five airports, identical to R3's formal flights; a record's prediction is the SCHEDULED time), publisher (reuse-only, experiment-only, outer-test hash checked, `--category-group`), frontend. Publish only after the ff-merge: the worktree's frontend data is the main tree's. **KRDU `categories.json` was overwritten by a test (16:13)** — rebuilt and validated in `$CLAUDE_JOB_DIR/tmp/recover_KRDU.json`, waiting for the user's go-ahead to write it back.
 
 ## Runway intent — R3 MEASURED 2026-09-14 (`docs/2026-09-13_runway_intent_plan.zh.md` §17)
 

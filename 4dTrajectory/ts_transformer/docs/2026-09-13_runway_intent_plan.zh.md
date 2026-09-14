@@ -14,7 +14,7 @@
 | R4 | 不启动（R3 没测出交互误差，§17.7）；§17.8 列出 R3 找到的真正瓶颈 |
 | R3.1 | **完成 2026-09-14，五个机场的预注册门槛都没过**（§18.1 结果）：把 ETA 的不确定度算进去，交互对落地时刻的预测仍然没有增益——全时段与对照差 ±0.4 s，被调度动了的航班在 3–4 个机场更差；训练日标定出的 ETA 中位误差搬不到验证日（标定后的对照在 4 个机场比原始 ETA 差）。去中心化的敏感性读法结论相同。代码 `3e57847`、`b9ecddc` |
 | R3.2 | **完成：诊断成立，修正不采纳**（§18.2 结果）：早到的航班在指令航段上被闭合读成"晚了"（X 中位 −85 / −176 s），全速追赶，切到收尾航段时一跳 +104 s 变成早到——指令航段的航路在定位点之后接了 8 km 的占位延长段，闭合却把它一直计时到入口。三种"定位点之后怎么计时"的改法在 R3 的计划上试飞（KSMF、KSTL），追赶都消失了，但交付率没有一种变好：定位点之后飞什么由头后面的指令决定，逐段的计时模型接不住。为免在评估航班上调参，停在这里；代码 `0f864ed`（诊断），v3 留在分支 `wip-r32-leg-timing`（`2e240dd`） |
-| R3.3 | 计划写好（§18.3）：R3 的航迹发布到前端（发布器加"留出日"类别） |
+| R3.3 | **代码完成、记录已写，发布等合并**（§18.3 结果）：划分 `dayval`、R3 runner 的 `--write-records`、发布器与前端（`220138a`，opus 复核后修正）；五个机场 5195 条记录与 R3 正式运行逐架一致（飞到的时刻、FDE 差 0）。发布要等用户把分支快进合并进 dev-leg-ctrl（前端数据目录是主树的软链接，主树前端不认 `dayval` 时整个机场的列表会被拒）。**事故**：一个新测试写坏了主树的 KRDU `categories.json`，已在草稿里重建、校验，等用户允许写回 |
 | 待用户决定 | D1 已定（R 系列按天划分）；R1.1 先于 R2（已定）；D2–D5（§9） |
 | 分支 / 提交 | `worktree-runway-intent-plan`：计划 `e4412f8`，R0 代码 `fc57d80`，复核修正 `9e3ac49`；R1 `db1e701`，复核修正 `22d4df5`，按运行日读数 `e11ac8a` |
 | R0 产物 | `4dTrajectory/outputs/POOLED/experiments/runway_intent_r0_20260913/`（`readout.md` 由 `run_ts.py runway_intent_r0_readout` 重新生成） |
@@ -1327,7 +1327,60 @@ v1 另有代码审查查出的缺陷（路径手段加进尾巴的长度与下�
 - **发布器**（`publish_ts_experiment_trajectories.py`）：`dayval` 只接受 `--reuse-prediction-dir`（没有针对它的 predict 步），类别
   标签写明"held-out days: day_a validation days, N of M flights"；**CZML 生成器**的 `DATASET_SPLITS` 与**前端**的 `DATASET_SPLITS`
   加 `dayval`（前端把它与其它划分分组显示；未知划分目前会被当成无效类别丢掉）。三处各带测试。
-- **意图**：`docs/experiments/intents.json` 加 `runway_intent_r3_20260914` 活动与五个机场的专家各一条。
+- **意图**：`docs/experiments/intents.json` 加 `runway_intent_r3_20260914` 活动（选择器的标题与问题，发布器 `--category-group`），五个机场的专家各一条变体 `<ICAO>_day_a_expert@r3-schedule`，挂在训练它们的 R2b 活动下（运行与变体的意图归训练活动）。
 - **发布**：由 opus 子代理跑发布器（五个机场，每个机场一个类别）并做磁盘校验；前端的 dev server 由用户自己重启（用户
   2026-09-14："server我自己来重启"）。
 
+#### 18.3 结果（2026-09-14）
+
+**实现**（`220138a`）：
+- `run_naming.SPLIT_DAYVAL`；CZML 生成器与前端的 `DATASET_SPLITS` 加 `dayval`（镜像，有测试）；`category_display_label`
+  遇到未知划分改为报错（原来会静默丢掉前缀）。
+- R3 runner `--write-records DIR`：每架飞出来的航班（切在入口，投到真实跑道的坐标系）写成 `dayval` 的预测记录。
+- 发布器：`dayval` 只能来自 `--reuse-prediction-dir`、只能发在 Experiments 下；写任何东西之前，逐架核对记录里没有检查点
+  锁定划分的 outer-test 航班；`--category-group` 让变体挂在写记录的活动（R3）下。
+- 前端：切换实验时保持当前划分；实验只按当前划分的指标排名。
+
+**复核（opus）后的改动**：
+- **记录的时刻误差读排定的时刻**。原来读的是专家自己的 ETA：推迟 48 s 的航班显示 −101 s，实际只差 −54 s。现在记录的预测是
+  排定的落地时刻（与 CTA 臂的记录读它的 CTA 同一约定）。
+  - `final_time_error_s` 是调度作为落地时刻预测的误差；`arrival_endpoint_error_m` 是那一刻飞行器离入口多远。
+  - `runwaySchedule` 另带 `etaErrorS`（专家自己 ETA 的误差）、`flownTimeErrorS`（飞到的时刻的误差）和 `deliveryS`。
+- **R3 的飞行改走 plan 路径自己的 forecast**（`rolled_flight_forecast`，原 `_plan_forecast`）。记录因此标 `plan`、带 plan 的字段，
+  原来是 `control`。
+- **被调度换了跑道的航班**（KRDU 34、KSJC 76、KSTL 64、KSMF 52、KMSY 4）仍按真实跑道归档、对真实航迹评估，横向误差里含跑道间距。
+  这一点写进了意图与记录的 `runway_frame`；前端尚不逐架显示排定的跑道（后续可做）。
+- **发布器**：`dayval` 配 `--result-source prediction` 被拒；参数组合出错时报 usage error，不再抛栈。
+
+**记录**（`runway_intent_r3_20260914/records/<ICAO>`，runner 的 JSON 在 `records_run/<ICAO>`，R3 的正式产物未动）：
+
+| 机场 | 记录 | 落地 | 未落地 | 换跑道 |
+|---|---|---|---|---|
+| KRDU | 1228 | 1189 | 39 | 34 |
+| KSJC | 972 | 912 | 60 | 76 |
+| KSTL | 1250 | 1170 | 80 | 64 |
+| KSMF | 955 | 812 | 143 | 52 |
+| KMSY | 790 | 523 | 267 | 4 |
+
+- 五个机场的计划与 R3 正式运行完全相同，逐架飞到的时刻与 FDE 差 0 s / 0 m。
+- 时刻字段与 runner 的 JSON 一致（差 ≤ 1e-7 s）。
+- outer-test 航班 0 架。
+- 发布器 dry run（写入全部指向草稿目录）通过全部前置检查：检查点与到场清单的 SHA、合格集合、重用目录、outer-test、意图。
+
+**发布（待办）**：
+- 前端数据目录在 worktree 里是主树的软链接。主树的前端与生成器还不认 `dayval`，这时发布，主树前端会把该机场整个类别列表
+  判为无效。
+- 顺序：用户快进合并 → opus 子代理按机场跑发布器并做磁盘与前端校验（`npm run check-publication`）→ 用户重启 dev server。
+
+**事故（2026-09-14 16:13）**：
+- 为 `--category-group` 写的一个发布器测试调用 `main()` 时只给了 `--output-root`，随后向 `plan.comparison_dir.parent` 写了
+  一个假的 `categories.json`；经 worktree 的软链接覆盖了主树的 KRDU `categories.json`（152 条 → 1 条）。该文件不在 git 里，
+  也没有备份。
+- 已按磁盘上的来源重建到草稿：
+  - 136 条来自发布清单（与 `--refresh-labels-only` 同一套函数）；
+  - 12 条遗留 `ts_*` 用 `relabel_published_categories` 的标签；
+  - 4 条优化器 / 观测类别用其它机场的同名条目；
+  - groups / 划分 / 精度取各类别自己的 `comparison_index.json`。
+- 同一方法重建其余四个机场（107 条）与现存文件逐字段 0 差异；重建的 KRDU 文件过主树前端的守卫（列出 152、可画 151、
+  CZML 604、问题 0）。
+- 等用户允许后写回。测试已加 autouse fixture，把 `main()` 的默认根目录指到 tmp。

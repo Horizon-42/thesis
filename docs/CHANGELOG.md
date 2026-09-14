@@ -4,6 +4,40 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-14 — runway intent R3.3: R3's flown schedule as a held-out-days (`dayval`) publication; a test overwrote the live KRDU categories.json
+
+**Ask.** The user: "先做1, 2, 最后3" — item 3, publish R3's trajectories (plan §18.3).
+
+**Change** (`220138a`, reviewed by opus):
+- The split `run_naming.SPLIT_DAYVAL`: a day partition's validation days, flown by a checkpoint trained on
+  that partition's training days.
+- `runway_intent_r3 --write-records`. A record's prediction is its SCHEDULED landing time (as a CTA arm's
+  is its CTA). The head's own ETA error and the flown time's ride in `source.runwaySchedule`. R3's flights
+  go through the plan path's forecast, so records say `plan`.
+- Publisher:
+  - dayval only from a reused directory and only under Experiments;
+  - the locked outer-test hash is checked on every record's flight;
+  - `--category-group` files a variant under the campaign that wrote the records.
+- `category_display_label` raises on an unknown split.
+- Frontend: switching keeps the split in view, and ranking reads the split in view only.
+- Records: 5195 over five airports, identical to R3's formal flights (0 s / 0 m).
+- Publication waits for the ff-merge: the worktree's `aeroviz-4d/public/data/airports` is a symlink into the
+  main tree, whose frontend rejects an airport's whole list on an unknown split.
+
+**Incident.**
+- What happened: a new publisher test called `main()` with only `--output-root`, then wrote a fake
+  `categories.json` next to `plan.comparison_dir`. Through the symlink, that overwrote the live KRDU
+  `categories.json` (152 entries → 1). The file is git-ignored and had no backup.
+- Rebuilt from on-disk sources:
+  - publication manifests through the publisher's own refresh functions;
+  - the relabeler for the legacy `ts_*` keys;
+  - other airports' entries for the optimizer/observed rows;
+  - each category's `comparison_index.json`.
+- The same method reproduces the other four airports field for field, and the result passes the frontend's
+  guards.
+- Write-back awaits the user's permission (their rule on `aeroviz-4d/public/data`).
+- The publisher tests now point `main()`'s default roots into tmp (autouse fixture).
+
 ### 2026-09-14 — ts_transformer: runway intent R3.1 / R3.2 — scheduling under ETA uncertainty has no predictive value; the closure's lost time located, not fixed
 
 **Ask.** The user: "先做1, 2, 最后3" (plan §17.8's three next steps, §18 of
