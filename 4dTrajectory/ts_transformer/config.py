@@ -297,6 +297,15 @@ CONTROL_DYNAMICS_BACKENDS = (
 CONTROL_THRUST_FRACTION = "thrust-fraction"
 CONTROL_SPECIFIC_FORCE = "specific-force"
 CONTROL_THRUST_PARAMETERIZATIONS = (CONTROL_THRUST_FRACTION, CONTROL_SPECIFIC_FORCE)
+# HOW the airframe is presented to the control head (`outputs/conditioning.py`; design N4).
+# ``raw`` scales each quantity on its own (mass, installed thrust, wing area, the polar) —
+# every run before 2026-09-15, pinned by every named recipe. ``ratios`` hands the head the
+# dynamics' own groups in place of the thrust and the area: the thrust-to-weight ratio and the
+# 1-g stall speed. The two sets carry the same information and have the same width, so an arm
+# that moves only this field starts from the same weights and differs only in what it reads.
+CONTROL_CONDITION_FEATURES_RAW = "raw"
+CONTROL_CONDITION_FEATURES_RATIOS = "ratios"
+CONTROL_CONDITION_FEATURES = (CONTROL_CONDITION_FEATURES_RAW, CONTROL_CONDITION_FEATURES_RATIOS)
 CONTROL_RECIPE_CUSTOM = "custom"
 CONTROL_RECIPE_SIMPLE_V1 = "simple-v1"
 # simple-v1 with the lagged flight model substituted and nothing else changed, so the two
@@ -891,6 +900,9 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         # Every published simple-v* comparison flew the thrust-fraction law; an n_x arm
         # varies a field the recipe freezes, so it is `custom` and its dynamics word says so.
         "control_thrust_parameterization": CONTROL_THRUST_FRACTION,
+        # ...and read the airframe as raw quantities; a `ratios` arm is `custom` and wears
+        # `airframe=ratios`.
+        "control_condition_features": CONTROL_CONDITION_FEATURES_RAW,
         "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
         "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_NATIVE,
         "control_state_objective": CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -1726,6 +1738,7 @@ class ControlOutput(OutputSpec):
 
     control_recipe_name: str
     cta_conditioning: str
+    control_condition_features: str
     duration: DurationSpec
     dynamics: DynamicsSpec
     objective: ControlObjective
@@ -1736,6 +1749,10 @@ class ControlOutput(OutputSpec):
         super().__post_init__()
         _require_member("control_recipe_name", self.control_recipe_name, CONTROL_RECIPE_NAMES)
         _require_member("cta_conditioning", self.cta_conditioning, CTA_CONDITIONINGS)
+        _require_member(
+            "control_condition_features", self.control_condition_features,
+            CONTROL_CONDITION_FEATURES,
+        )
         if self.horizon_mode != HORIZON_NORMALIZED:
             raise ValueError(
                 "control output uses learned non-uniform segments and currently requires "
@@ -2145,6 +2162,10 @@ class TSConfig:
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
+    # How the airframe is written into the head's condition vector (CONTROL_CONDITION_FEATURES).
+    # Not in REQUIRED_SERIALIZED_CONTROL_FIELDS: every checkpoint trained before the field
+    # existed read the raw set, so absence reproduces it exactly.
+    control_condition_features: str = CONTROL_CONDITION_FEATURES_RAW
     # WHAT the duration head emits (DURATION_HEADS, B1/B1.b): one point estimate, the five
     # DURATION_QUANTILES, or both. Every value but `point` belongs to the control output
     # only. Under `quantile` the median walks the existing `final_time_s` contract (it IS
@@ -2695,6 +2716,8 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
     # would refuse every one of them.
     if config.control_thrust_parameterization != CONTROL_THRUST_FRACTION:
         base["thrust_parameterization"] = config.control_thrust_parameterization
+    if config.control_condition_features != CONTROL_CONDITION_FEATURES_RAW:
+        base["condition_features"] = config.control_condition_features
     if not uses_control_dynamics(config.prediction_output):
         raise ValueError("state output has no control recipe")
     return base

@@ -776,3 +776,29 @@ the specific-force form (park 21 softnesses below and `torch.where(x − b ≥ 2
 make it structural. That could
 move thrust-fraction outputs by an ulp where they are currently not exact, so it is the owner's call.
 
+**Addendum (2026-09-15, N4 review):** `control_condition_features` is one more field every stored
+`cv_results.json` lacks. Nothing new breaks, since both stored files were already unusable for reuse.
+
+## 35. The control path's anchor-eligibility gate restates the stall speed (2026-09-15)
+
+**Verified** (N4 review):
+- `outputs/control/strategy.airborne_control_candidates` computes `√(2 m g / (ρ₀ S Cl_max))` inline.
+- It uses its own `SEA_LEVEL_DENSITY_KG_M3 = 1.225` and `flyability`'s `G`.
+- The repository's one definition is `aircraft.aero_params.stall_speed_ms`. The optimizer's floor, evaluation's
+  threshold speed gate and (since N4) the `ratios` condition channel all call it.
+
+**Judgement**: the values agree today (both 1.225 and 9.81). Calling `stall_speed_ms` would make that
+structural. The gate is spelled into the stored `airborne-1.10-stall-margin-v1` output-eligibility policy, so
+the change must be shown to select the same anchors before it lands.
+
+## 36. `predictability_report.batch_dynamics_tensors` duplicates the forecast's context batch (2026-09-15)
+
+**Verified** (N4 review):
+- It is `outputs/control/forecast._dynamics_batch` without the CTA branch.
+- So every argument added to `dynamics_arrays` has to be added in both places. Both
+  `control_thrust_parameterization` and `control_condition_features` were.
+- A test now pins that its condition rows equal the forecast's.
+
+**Judgement**: make `_dynamics_batch` public and call it from the report. The report is validation-only and
+never runs a CTA arm.
+

@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from aircraft.aero_params import AeroParams
 from ts_transformer.data.channels import states_from_channels
 from ts_transformer.config import CTA_CONDITIONING_GIVEN, TSConfig
 from ts_transformer.data.dataset import FlightSeries
@@ -227,10 +228,16 @@ def probe_dynamics(
     objective, after the dataset build, on every custom arm that weighted either term.
     """
     contract = control_contract(config.control_thrust_parameterization)
+    # A mid-size narrowbody. Its condition row is written by the feature set the head reads,
+    # from the same airframe the aero row and the installed thrust below describe.
+    aero = AeroParams(S=122.6, Cl_max=2.7, Cd0=0.02, k=0.04, stall_threshold=0.9, k_stall=0.1)
+    mass_kg, max_thrust_n = 66_000.0, 240_000.0
     rows = {
-        "condition": [0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5],
-        "initial_state": [35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, 66_000.0],
-        "aero_params": [122.6, 2.7, 0.02, 0.04, 0.9, 0.1],
+        "condition": condition_vector(
+            mass_kg, max_thrust_n, aero, features=config.control_condition_features
+        ).tolist(),
+        "initial_state": [35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, mass_kg],
+        "aero_params": [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
         "control_lower": list(contract.lower),
         "control_upper": list(contract.upper),
         "initial_controls": list(contract.neutral),
@@ -243,7 +250,7 @@ def probe_dynamics(
         for name, value in rows.items()
     }
     dynamics["max_thrust_n"] = torch.full(
-        (batch_size,), 240_000.0, dtype=torch.float32, device=device
+        (batch_size,), max_thrust_n, dtype=torch.float32, device=device
     )
     probe = probe_final_approach(batch_size, device)
     dynamics["runway_heading_rad"] = probe["runway_heading_rad"]

@@ -116,8 +116,10 @@ def test_a_field_added_after_an_arm_trained_reads_as_the_default_it_flew(tmp_pat
     base = {**runner.recipe_settings("simple-v3", keep_name=True), "device": "cpu"}
     _config, declared = runner.arm_config(base, {})
     assert declared["control_thrust_parameterization"] == "thrust-fraction"
-    stored = {key: value for key, value in declared.items()
-              if key != "control_thrust_parameterization"}
+    # Every field a recipe pins that no stored history.json carries (N4 added the second).
+    added_later = ("control_thrust_parameterization", "control_condition_features")
+    assert declared["control_condition_features"] == "raw"
+    stored = {key: value for key, value in declared.items() if key not in added_later}
     arm = tmp_path / "B1"
     arm.mkdir()
     (arm / "history.json").write_text(json.dumps({"config": stored}))

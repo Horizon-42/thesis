@@ -16,9 +16,9 @@ the literature (36 sources) and the measurements behind the choice are in
 | D | this design, plus the teacher-distribution measurement (§2.4) | **done** 2026-09-14 | branch `specific-force-control`, worktree `.claude/worktrees/specific-force` |
 | M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | **done** 2026-09-14, reviewed (opus; 1 blocker + 3 should-fix, all fixed and re-verified, §9) | `8ce4568` |
 | M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | **done** 2026-09-14, review §10 | the commit after `8ce4568` |
-| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **prepared, NOT launched**: arm file `docs/experiments/sf_n3_arms.json` and intents key `sf_n3` written; the dry run constructs both arms | launch after the merge (§7) |
-| N4 | conditioning vector as dimensionless groups (own axis) | not started | — |
-| N5 | pooled five-airport arm | not started | — |
+| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **running** since 2026-09-15 00:18 UTC, from the `specific-force` worktree at `47b4b40` (clean tree, formal run); campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`, log `…/experiments/sf_n3.log` | results → §7.2 |
+| N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | **built** 2026-09-15 on branch `sf-n4` (worktree `.claude/worktrees/sf-n4`), review §11.5; arm file `docs/experiments/sf_n4_arms.json` (4 arms), intents key `sf_n4` | launch after N3's runner exits (§11.4) |
+| N5 | pooled five-airport arm | not started; decided after N3 (§11.4) | — |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
 the user merges. Every code milestone gets a subagent review before its commit
@@ -26,7 +26,13 @@ the user merges. Every code milestone gets a subagent review before its commit
 user merges.
 
 **Resume conventions.**
-- Work only in the worktree. Its `data`, `trajectory_data_process/outputs`,
+- Two worktrees since N3's launch. `.claude/worktrees/specific-force` (branch
+  `specific-force-control`) is the RUNNER: a campaign is launched from it, and it is never
+  edited while one runs (a dirty tree refuses the next arm's `begin_run`).
+  `.claude/worktrees/sf-n4` (branch `sf-n4`, a descendant) is where development continues.
+  Once a campaign has exited, `git -C .claude/worktrees/specific-force merge --ff-only sf-n4`
+  brings the runner up to date. The user merges `specific-force-control` into `dev-leg-ctrl`.
+- Work only in a worktree. Its `data`, `trajectory_data_process/outputs`,
   `4dTrajectory/outputs` and `aeroviz-4d/public/data/airports` are SYMLINKS to live data, so a
   test must write only to `tmp_path`.
 - Stage explicit paths; check `git diff --cached --stat` before every commit.
@@ -331,7 +337,8 @@ The torch modules have no importer outside `ts_transformer` and the package's ow
 
 **Sanity reads — not results:**
 - Training is not pathological. Validation ADE was 3447 / 2750 m at epochs 1 / 2, against the thrust-fraction
-  arm's 6176 / 3535 m at the same epochs.
+  arm's 6176 / 3535 m at the same epochs. **Correction (2026-09-15, §11.6):** 6176 / 3535 are the STORED
+  twin's, trained 140 commits earlier. The thrust-fraction configuration at this code reads 5482 / 3754.
 - The control-head gradient at epoch 1 was mean 177 / max 1014, against 741 / 1619.
 - The head's n_x was already class-invariant after 2 epochs (−0.0621 … −0.0629 g on the established stratum), so
   its class bias range, 0.0049 g, sits at the truth's own 0.0045 g — the mechanism the design predicts.
@@ -425,3 +432,159 @@ One nit fixed: the lag credit is now capped at the engine.
   - engine-versus-box saturation, at T/W 0.40 and 52.5 m/s;
   - the soft form's engine cap;
   - an unsaturated credit case that lands exactly on the floor.
+
+## 11. N4 — the condition vector as ratios (the alternative-hypothesis control)
+
+### 11.1 The question
+
+N3 tests one explanation of the thrust-fraction head's class structure: a δ command means a
+different speed rate on every airframe, and the head cannot separate them. There is a second
+explanation, and N3 alone cannot rule it out. **The head may fail because of how the airframe
+is written into its condition vector.** Under `raw` the vector holds the mass, the installed
+thrust and the wing area as three separately scaled numbers. The δ that flies a given speed
+rate is `δ = (n_x + D/W) / (T_max/W)`, so the head needs the RATIO of two of its inputs, and
+its first layer is linear in them.
+
+N4 hands the δ head that ratio and changes nothing else. If N4 closes the class bias as far as
+N3 does, the presentation explains the failure and the specific-force law is not needed for it.
+If N4 leaves the bias while N3 closes it, the parameterisation is the mechanism.
+
+### 11.2 The feature set (measured on KRDU, 26 OpenAP-direct types, 9,729 arrivals)
+
+| channel | `raw` | `ratios` | fleet range under `ratios` |
+|---|---|---|---|
+| 1 | `mass_100t` | `mass_100t` | 0.068–2.51 (37×) |
+| 2 | `max_thrust_1MN` (46×) | `thrust_to_weight` = T_max/(m·g) | 0.310–0.417 (1.3×) |
+| 3 | `wing_area_500m2` (14×) | `stall_speed_100mps` = √(2mg/(ρ₀·S·CLmax))/100 | 0.394–0.620 (1.6×) |
+| 4–8 | `cl_max_3`, `cd0_0p1`, `induced_k_0p1`, `stall_threshold`, `stall_k_0p2` | the same | — |
+
+- **Four of the eight channels are constant on this fleet.** Cd0 = 0.02, k = 0.04,
+  stall_threshold = 0.9 and k_stall = 0.1 for every type (the package's one clean polar).
+  Only the mass, T_max, S and CLmax vary. With Cd0 and k fixed, D/W at a fixed multiple of
+  the stall speed depends on CLmax alone. So under the δ law the per-class δ the head needs
+  is a function of T_max/W and CLmax, and the ratios set gives it both directly.
+- **The same information, and the same width.**
+  - Given CLmax, `(m, T_max/W, V_s)` and `(m, T_max, S)` determine each other; the test
+    recovers T_max and S from the ratios to float32 precision on three airframes.
+  - The mass stays in both. It carries what the rollout cannot see (wake category, the speeds
+    controllers give heavies), and without it the ratios set would carry less information
+    than the raw set.
+  - Both sets have eight channels, so the condition encoder has one shape. Under one seed a
+    ratios head starts from its raw twin's weights, value for value (tested). The arm
+    differs from its twin only in what it reads.
+- **The stall speed is the package's one definition** (`aircraft.aero_params.stall_speed_ms`,
+  also read by the optimizer's velocity floor and evaluation's threshold speed gate), at sea
+  level and 1 g. It is a size-free proxy for the wing loading; it is not the speed floor.
+- **Not a dimensionless set in the strict sense.** The stall speed is scaled by 100 m/s and
+  the mass by 100 t. The value is named `ratios`, not `dimensionless`, for that reason.
+
+### 11.3 The code (branch `sf-n4`)
+
+- `config.py`:
+  - `CONTROL_CONDITION_FEATURES = ("raw", "ratios")`.
+  - The field `control_condition_features = "raw"` on `ControlOutput`, so ownership refuses
+    it off the default on every other output.
+  - Every named recipe pins `raw`, so a ratios run is `custom`.
+  - Not required-serialized: absence reads `raw`, which every stored checkpoint ran.
+  - `control_recipe()` carries `condition_features` only off the default.
+- `outputs/conditioning.py`:
+  - `CONDITION_FEATURE_SETS[features]`, `condition_names(features)` and `CONDITION_WIDTH`.
+    The import asserts that every set has one width.
+  - `condition_vector(..., features=)` takes the set as a REQUIRED keyword.
+    `DYNAMICS_CONDITION_NAMES` and `CONDITION_CHANNELS` are gone.
+- `outputs/dynamics/context.dynamics_arrays(..., condition_features=)` is REQUIRED, for the
+  same reason as `parameterization`: one width means a forgotten argument is a silent
+  mislabel. The plan path passes `raw` explicitly, since no plan head reads the row.
+- `outputs/control/heads.py`: the encoder's input width is read from the configured set.
+- `outputs/control/supervision.probe_dynamics`: the probe's condition row is now written by
+  `condition_vector` from the probe's own airframe (the literal is gone). Under `raw` it is
+  bit-identical to the old literal (checked).
+- `run_naming.py`: META field `airframe=ratios`, placed ahead of the backbone knobs that fold,
+  in the `Conditioning` section of the parameter rows.
+- CLI: `train --control-condition-features`. `predict` reads the checkpoint's own value and
+  offers no override: a head trained on one set would read the other silently.
+- Tests: `tests/test_condition_features.py` (14 tests); the architecture one-source test covers
+  both sets; the frame-ablation resume test drops both recipe-pinned fields.
+
+**Verified before review:**
+- **Default path bit-identical to `47b4b40`**, measured on a lagged simple-v3 training step
+  (4 synthetic flights): loss, all 32 parameter gradients, the dynamics batch, and 4 forecast
+  records.
+- **Census over the 245 stored `history.json`**: display name, slug, parameter rows and
+  `from_dict` are identical before and after (107 unloadable in both: the stale generations).
+- **Campaign resume**: across 105 stored arms (38 arm files, 37 campaign directories),
+  `stale_arm_error` is identical before and after (79 resumable in both).
+- **The N4 arms** differ from the stored `B1_point_matched` / `_s2024` configs only in
+  `control_condition_features`. The other two differences are artefacts of the comparison,
+  not of the arms: `split_seed` is passed on the command line, and `corridor_gate` is a
+  retired field. The dry run constructs both arms.
+- ts suite: 1181 passed.
+
+### 11.4 The run order
+
+1. N3's runner exits. Its arms are read provisionally against the stored twins, marked as such.
+2. `git -C .claude/worktrees/specific-force merge --ff-only sf-n4`, then launch the `sf_n4`
+   campaign from that worktree, the same way N3 was launched:
+   `run_ts.py frame_ablation --arms 4dTrajectory/ts_transformer/docs/experiments/sf_n4_arms.json
+   --campaign 4dTrajectory/outputs/KRDU/experiments/sf_n4 --airport KRDU --split-seed 1337`.
+   Four arms, in this order: `N4_twin`, `N4_twin_s2024` (the thrust-fraction twins re-trained at
+   this code, §11.6), then `N4_ratios`, `N4_ratios_s2024`. That is about 4.5 h of GPU.
+3. **Both N3 and N4 are read against `N4_twin` / `N4_twin_s2024`**, with the same instrument
+   and the same gates. `N4_twin` against the stored `B1_point_matched` measures what 140
+   commits moved.
+4. **N5 (pooled five airports) only if N3's mechanism holds on both seeds.** There is no
+  stored pooled thrust-fraction twin, so N5 is four arms (δ and n_x, two seeds), not two.
+
+### 11.5 N4 review (2026-09-15, opus subagent, code only)
+
+No blocker. The reviewer mutated the code in a /tmp copy: 11 of 13 mutations failed the new tests. The two
+that passed were the predictability report's call sites, now tested. Checked and passing:
+- every builder and reader of the condition row;
+- a ratios checkpoint's save → load → forecast round trip;
+- ownership, the recipe pins and the pipeline's reuse rule;
+- the channels' units and the mass they read;
+- the default path on CPU and CUDA;
+- the arm file against its twins.
+
+**Should-fix S1: the twins were trained 140 commits earlier.** Their manifests record `c0f2b9e` (2026-09-07).
+Any drift in the default training path since then would land in BOTH N3's and N4's delta. Checked by
+training the twin's configuration for 2 epochs with the current code, same seed and split, and comparing its
+epoch records with the twin's `history.json` (§11.6).
+
+**Fixed:**
+- N1: the predictability report's model batch had no test. Its rows are now pinned to the forecast's
+  (followups §36: it duplicates the forecast's context batch).
+- N2: a test called "measured" that only read three hand-picked airframes is dropped.
+- N3: the plan-output refusal now matches its message.
+- N4: a ratios checkpoint round trip is added.
+- N5: the stall-speed comment is corrected. The control path's anchor gate still restates the formula
+  (followups §35).
+- The pipeline's CV-reuse note is added to followups §33.
+
+### 11.6 The stored twins do not reproduce at this code (2026-09-15)
+
+**Measured** (the S1 check). `B1_point_matched`'s exact configuration, re-trained for 2 epochs with the
+same seed and split. The code is `sf-n4`, whose default path is bit-identical to N3's `47b4b40` (§11.3).
+Output in the session scratchpad.
+
+| epoch | stored twin (`c0f2b9e`): train / val / selection ADE | this code, run 1 | this code, run 2 |
+|---|---|---|---|
+| 1 | 12.8653 / 8.3809 / 6176.0 m | 12.7541 / 7.7371 / 5481.6 m | bit-identical to run 1 |
+| 2 | 6.7472 / 5.0437 / 3535.2 m | 6.3738 / 4.9609 / 3753.7 m | bit-identical to run 1 |
+
+- **The same data.** The splits, the eligible set, the data provenance, the cohort, the windows and
+  the parameter count are all equal.
+- **The same initialisation and first batch.** At the first update the duration head's gradient
+  agrees to 12 digits.
+- **Only the control head's gradient differs**, by 0.25 % at its first-update maximum. The
+  validation components that moved most are `state` and `terminal`.
+- **The environment did not change.** torch 2.11.0 and numpy 2.5.1 were installed on 2026-07-19,
+  before the twins were trained.
+- **So the default control training path changed in code** between `c0f2b9e` (2026-09-07) and
+  `47b4b40`.
+
+**Consequence.** A stored-twin delta mixes the arm's effect with 140 commits of drift. `sf_n4`
+therefore re-trains the twins at this code, and N3 and N4 are both read against them (§11.4).
+
+**Cause:** bisect running (an opus subagent: 1-epoch real-data trainings at candidate commits under
+`/tmp/claude-1000/bisect/`). The finding goes here, with whether the change was an intended fix.

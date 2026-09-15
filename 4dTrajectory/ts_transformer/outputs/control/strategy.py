@@ -177,7 +177,8 @@ class ControlContext(WindowContext):
         s_idx, anchor = windows.index[i]
         series = windows.series[s_idx]
         arrays = dynamics_arrays(
-            series, anchor, parameterization=config.control_thrust_parameterization
+            series, anchor, parameterization=config.control_thrust_parameterization,
+            condition_features=config.control_condition_features,
         )
         if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
             # Training feeds the truth as the controlled time of arrival.

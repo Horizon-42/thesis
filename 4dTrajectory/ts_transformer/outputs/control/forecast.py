@@ -80,7 +80,10 @@ def _dynamics_batch(
     duration quantile — which is the whole point of ``cta=self-q``.
     """
     rows = [
-        dynamics_arrays(item, anchor, parameterization=config.control_thrust_parameterization)
+        dynamics_arrays(
+            item, anchor, parameterization=config.control_thrust_parameterization,
+            condition_features=config.control_condition_features,
+        )
         for item in series
     ]
     if config.cta_conditioning != CTA_CONDITIONING_OFF:

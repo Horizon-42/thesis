@@ -191,7 +191,10 @@ def batch_dynamics_tensors(
     """Build the exact per-flight conditioning/rollout tensors used by training."""
     anchor = config.seq_len - 1
     rows = [
-        dynamics_arrays(item, anchor, parameterization=config.control_thrust_parameterization)
+        dynamics_arrays(
+            item, anchor, parameterization=config.control_thrust_parameterization,
+            condition_features=config.control_condition_features,
+        )
         for item in series
     ]
     return {
@@ -399,6 +402,7 @@ def run_deterministic(
             dynamics_arrays(
                 item, run.config.seq_len - 1,
                 parameterization=run.config.control_thrust_parameterization,
+                condition_features=run.config.control_condition_features,
             )
             for item in series
         ]

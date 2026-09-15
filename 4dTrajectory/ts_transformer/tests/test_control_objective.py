@@ -11,7 +11,7 @@ import pytest
 import torch
 
 import ts_transformer.data.channels as ch
-from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.conditioning import CONDITION_WIDTH
 import ts_transformer.outputs.dynamics.rollout as control_rollout_module
 import ts_transformer.training.objective as objective
 import ts_transformer.outputs.control.loss.objective as control_objective
@@ -121,7 +121,7 @@ def test_control_models_use_per_sample_bounds_and_aircraft_condition(
     lower = torch.tensor([[0.0, -0.5, 0.5], [0.0, -0.7, 0.6]])
     upper = torch.tensor([[10_000.0, 0.5, 1.8], [250_000.0, 0.7, 2.0]])
     dynamics = {
-        "condition": torch.rand(2, len(DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.rand(2, CONDITION_WIDTH),
         "control_lower": lower,
         "control_upper": upper,
     }
@@ -302,7 +302,7 @@ def test_control_model_starts_from_neutral_uniform_rollout():
     lower = torch.tensor([CONTROL_LOWER, CONTROL_LOWER], dtype=torch.float32)
     upper = torch.tensor([CONTROL_UPPER, CONTROL_UPPER], dtype=torch.float32)
     dynamics = {
-        "condition": torch.randn(2, len(DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.randn(2, CONDITION_WIDTH),
         "control_lower": lower,
         "control_upper": upper,
     }

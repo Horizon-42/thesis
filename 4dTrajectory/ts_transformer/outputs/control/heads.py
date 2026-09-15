@@ -11,7 +11,7 @@ import torch.nn as nn
 
 from ts_transformer.config import TSConfig
 from ts_transformer.outputs.envelope import ControlContract, control_contract
-from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.conditioning import condition_names
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
@@ -193,7 +193,7 @@ class ControlFeatureModel(nn.Module):
         self.feature_encoder = feature_encoder
         self.feature_encoder.discard_state_head()
         self.condition_encoder = nn.Sequential(
-            nn.Linear(len(DYNAMICS_CONDITION_NAMES), config.d_model),
+            nn.Linear(len(condition_names(config.control_condition_features)), config.d_model),
             nn.GELU(),
             nn.Dropout(config.dropout),
         )

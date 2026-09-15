@@ -23,6 +23,7 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DYNAMICS_MODELS,
     CONTROL_THRUST_PARAMETERIZATIONS,
+    CONTROL_CONDITION_FEATURES,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_HOOKS_AVAILABLE,
     CTA_CONDITIONINGS_AVAILABLE,
@@ -294,6 +295,17 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
             "before 2026-09-14) or specific-force ((T-D)/W, the thrust re-solved inside the "
             "lagged RHS so the same command moves every airframe alike); first-order-lag only "
             "(docs/2026-09-14_specific_force_control_design.md)"
+        ),
+    )
+    parser.add_argument(
+        "--control-condition-features",
+        choices=CONTROL_CONDITION_FEATURES,
+        default=None,
+        help=(
+            "how the airframe is written into the control head's condition vector: raw "
+            "(mass, installed thrust, wing area, polar; every run before 2026-09-15) or "
+            "ratios (mass, thrust-to-weight, 1-g stall speed, polar — the same information "
+            "and width, in the groups the rollout depends on; design §11)"
         ),
     )
     parser.add_argument("--control-thrust-time-constant-s", type=float, default=None)
@@ -584,6 +596,7 @@ CLI_CONFIG_FIELDS = (
     "control_dynamics_backend",
     "control_dynamics_model",
     "control_thrust_parameterization",
+    "control_condition_features",
     "control_thrust_time_constant_s",
     "control_bank_time_constant_s",
     "control_load_time_constant_s",

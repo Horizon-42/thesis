@@ -4,6 +4,42 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-15 — ts_transformer: the control head's condition vector as ratios (N4, branch `sf-n4`)
+
+**Why.** N3 (running) tests whether predicting the specific force removes the thrust-fraction head's class
+structure. The alternative explanation is the conditioning. Under the raw vector the head sees the mass, the
+installed thrust and the wing area separately, and the δ it needs is `(n_x + D/W)/(T_max/W)`, a RATIO of two
+inputs. N4 is the control that separates the two explanations (design §11).
+
+**What.**
+- New control-output axis `control_condition_features ∈ {raw, ratios}`, default `raw`.
+- `ratios` keeps the mass and the polar and replaces T_max and S by `T_max/(m g)` and the 1-g stall speed
+  (`aircraft.aero_params.stall_speed_ms`). It is the same information in the same width, so a ratios head starts
+  from its raw twin's weights.
+- `condition_vector` and `dynamics_arrays` take the set as a REQUIRED keyword; `DYNAMICS_CONDITION_NAMES` and
+  `CONDITION_CHANNELS` are replaced by `CONDITION_FEATURE_SETS`, `condition_names()` and `CONDITION_WIDTH`.
+- The batch-size probe's condition row is written by `condition_vector`; under `raw` it is bit-identical to the
+  literal it replaces.
+- Every named recipe pins `raw`; a run is named `airframe=ratios`; `train --control-condition-features`.
+- Arms `docs/experiments/sf_n4_arms.json` + intents key `sf_n4`: the two ratios arms, and first the two
+  thrust-fraction twins re-trained at this code (below).
+
+**Measured on the way.**
+- On KRDU's 26 OpenAP-direct types, Cd0, k, stall_threshold and k_stall are the same for every type, so 4 of the
+  8 condition channels carry nothing. The raw thrust channel spans 46× over the fleet; T_max/W spans 1.3×.
+- **The stored twins do not reproduce** (review S1, design §11.6). `B1_point_matched` (trained at `c0f2b9e`),
+  re-trained for 2 epochs with the same config, seed and split at this code, reads epoch-1 val **7.737 against
+  8.381**. Two runs at this code agree bit for bit. The data, the initialisation (the duration head's
+  first-update gradient to 12 digits) and torch/numpy are the same. So the default control training path
+  changed in code between 2026-09-07 and `47b4b40`, and a stored-twin delta would carry that drift. `sf_n4`
+  re-trains the twins. A bisect is running.
+- The M2 smoke note that quoted the twin's 6176 / 3535 m at epochs 1 / 2 is corrected in design §7.1: this
+  code's thrust-fraction run reads 5482 / 3754.
+
+**Nothing moved.** The default path is bit-identical to `47b4b40` on a lagged training step (loss, every
+gradient, the batch, the records). Over the 245 stored runs, names, slugs, parameter rows and loading are
+identical, and so is campaign resume over 105 stored arms. ts suite 1181 passed.
+
 ### 2026-09-14 — specific-force control parameterisation, M1 (branch `specific-force-control`)
 
 **Ask.** The user: "现在的模型，是直接预测不同质量下的操作参数 … 是不是可以修改aerodynamic 或者增加一个normalize

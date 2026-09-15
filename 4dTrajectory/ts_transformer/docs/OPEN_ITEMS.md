@@ -23,13 +23,24 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
 **Status and next steps:**
 - **M1** (`8ce4568`) and **M2** (the speed floor, CLI, docs, smoke) are built and reviewed. Defaults are
   bit-identical, and no stored run is renamed or refused.
-- **N3 — the measurement:** KRDU `B1_point_matched` as `custom` + specific-force, seeds 1337/2024. The arm file
-  `docs/experiments/sf_n3_arms.json` and its intent entry are written, NOT launched.
+- **N3 — the measurement:** KRDU `B1_point_matched` as `custom` + specific-force, seeds 1337/2024
+  (`docs/experiments/sf_n3_arms.json`). **RUNNING** since 2026-09-15 00:18 UTC from the `specific-force` worktree
+  at `47b4b40`; campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`.
   - Gates: the per-class n_x bias range falls toward 0.0045 g; the heavy − 737 speed gap closes.
   - Veto: pooled ADE within ~125 m of the base; the straight-in FDE veto.
-- **N4:** the conditioning vector as dimensionless groups, as its own axis. 4 of 8 channels are constant over the
-  fleet today.
-- **N5:** the pooled five-airport arm.
+- **N4 — the alternative-hypothesis control, BUILT** (branch `sf-n4`, design §11): `control_condition_features=
+  ratios` hands the thrust-fraction head T_max/W and the 1-g stall speed in place of T_max and S (same information,
+  same width, same initial weights). If it closes the class bias as far as N3, the conditioning's presentation
+  explains the failure; if not, the parameterisation does. Arms `docs/experiments/sf_n4_arms.json`; launch after
+  N3's runner exits. Measured on the way: Cd0, k and the stall parameters are constant on KRDU's 26 types — 4 of
+  the 8 channels carry nothing.
+- **The stored `B1_point_matched` twins do NOT reproduce at the current code** (design §11.6): the same config,
+  seed and split, re-trained deterministically, reads epoch-1 val 7.737 against the twin's 8.381, and the data,
+  init and environment are the same. So `sf_n4` also re-trains the δ twins (`N4_twin`, `N4_twin_s2024`, first),
+  and N3 and N4 are both read against them. A bisect for the commit is running; until it reports, any comparison
+  of a new control run against a pre-2026-09-10 control artifact carries unexplained drift.
+- **N5:** the pooled five-airport arm, only if N3's mechanism holds on both seeds (no pooled δ twin is stored, so
+  it is four arms).
 - **Known difference, not a bug:** the specific-force speed has no drag feedback (design §2.1).
 
 ## Runway intent — R3.1 / R3.2 / R3.3 (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §18)

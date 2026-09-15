@@ -192,6 +192,11 @@ META_FIELDS = (
     # and the named recipes pin this at `point`, so a `quantile` or `two-head` run is
     # `custom` and this item shows (`T=q5` / `T=2h`).
     "duration_head",
+    # N4: how the airframe is written into the head's condition vector. It is the whole
+    # difference between an N4 arm and its twin, so it sits ahead of the backbone knobs that
+    # fold. Every stored config predates it and reads as the default, so adding it renames
+    # nothing.
+    "control_condition_features",
     "d_model",
     "n_heads",
     "d_ff",
@@ -312,6 +317,7 @@ _ABBREV = {
     "target_conditioning": "target",
     "intent_conditioning": "intent",
     "cta_conditioning": "cta",
+    "control_condition_features": "airframe",
     "closure_labels_path": "labels",
     "control_fitted_teacher_path": "teacher",
     "plan_rolled_windows_path": "rolled",
@@ -446,7 +452,9 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "closure_labels_path", "control_fitted_teacher_path",
         "plan_rolled_windows_path", "plan_rolled_share",
     )),
-    ("Conditioning", ("target_conditioning", *INTENT_FIELDS, *CTA_FIELDS)),
+    ("Conditioning", (
+        "target_conditioning", *INTENT_FIELDS, *CTA_FIELDS, "control_condition_features",
+    )),
     ("Control rollout", (
         "control_duration_parameterization", "control_duration_uniform_floor",
         "control_rollout_integrator_dt_s", *CONTROL_HOOK_FIELDS,

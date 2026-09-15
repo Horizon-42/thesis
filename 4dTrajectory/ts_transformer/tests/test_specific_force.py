@@ -47,6 +47,7 @@ from ts_transformer.config import (  # noqa: E402
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+    CONTROL_CONDITION_FEATURES_RAW,
     CONTROL_THRUST_FRACTION,
     PREDICTION_CONTROL,
     PREDICTION_STATE,
@@ -57,7 +58,7 @@ from ts_transformer.config import (  # noqa: E402
 from ts_transformer.data.dataset import Normalizer, build_series  # noqa: E402
 from ts_transformer.data.synthetic import synthetic_arrivals  # noqa: E402
 from ts_transformer.inference.export import build_prediction_record  # noqa: E402
-from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES  # noqa: E402
+from ts_transformer.outputs.conditioning import CONDITION_WIDTH  # noqa: E402
 from ts_transformer.outputs.control.forecast import forecast_control_batch  # noqa: E402
 from ts_transformer.outputs.control.supervision import probe_dynamics  # noqa: E402
 from ts_transformer.outputs.dynamics.backends import RolloutInputs, control_dynamics_backend  # noqa: E402
@@ -201,9 +202,10 @@ def test_dynamics_arrays_reads_the_contract_it_is_told_and_never_a_default():
     series = _series(config, n_flights=1)[0]
     anchor = config.seq_len - 1
     with pytest.raises(TypeError):
-        dynamics_arrays(series, anchor)
-    specific = dynamics_arrays(series, anchor, parameterization=CONTROL_SPECIFIC_FORCE)
-    fraction = dynamics_arrays(series, anchor, parameterization=CONTROL_THRUST_FRACTION)
+        dynamics_arrays(series, anchor, condition_features=CONTROL_CONDITION_FEATURES_RAW)
+    raw = {"condition_features": CONTROL_CONDITION_FEATURES_RAW}
+    specific = dynamics_arrays(series, anchor, parameterization=CONTROL_SPECIFIC_FORCE, **raw)
+    fraction = dynamics_arrays(series, anchor, parameterization=CONTROL_THRUST_FRACTION, **raw)
     assert np.allclose(specific["control_lower"], SPECIFIC_FORCE_CONTRACT.lower)
     assert np.allclose(specific["control_upper"], SPECIFIC_FORCE_CONTRACT.upper)
     assert np.allclose(fraction["control_lower"], THRUST_FRACTION_CONTRACT.lower)
@@ -228,7 +230,7 @@ def test_an_untrained_specific_force_head_starts_at_a_descent_speed_hold():
     lower = torch.tensor([contract.lower] * 2, dtype=torch.float32)
     upper = torch.tensor([contract.upper] * 2, dtype=torch.float32)
     dynamics = {
-        "condition": torch.randn(2, len(DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.randn(2, CONDITION_WIDTH),
         "control_lower": lower,
         "control_upper": upper,
     }
@@ -285,7 +287,10 @@ def test_a_specific_force_record_says_so_and_prices_its_thrust_where_each_segmen
     # Every segment's thrust, evaluated independently (numpy drag) at ITS start state: the
     # anchor for segment 0, the record's own row at the previous boundary after that (the
     # dense grid carries every boundary exactly).
-    context = dynamics_arrays(series, config.seq_len - 1, parameterization=CONTROL_SPECIFIC_FORCE)
+    context = dynamics_arrays(
+        series, config.seq_len - 1, parameterization=CONTROL_SPECIFIC_FORCE,
+        condition_features=config.control_condition_features,
+    )
     aero_row, thrust = context["aero_params"], float(context["max_thrust_n"])
     rows = {round(row["t"], 6): row for row in record.states_payload["predicted_states"]}
     for index, segment in enumerate(segments):
@@ -382,7 +387,8 @@ def test_the_barrier_passes_the_specific_force_column_through():
     _config(**SPECIFIC_FORCE, control_command_hook="barrier+trombone")
     config = _config(**SPECIFIC_FORCE, control_command_hook="barrier")
     series = _series(config)
-    rows = [dynamics_arrays(item, config.seq_len - 1, parameterization=CONTROL_SPECIFIC_FORCE)
+    rows = [dynamics_arrays(item, config.seq_len - 1, parameterization=CONTROL_SPECIFIC_FORCE,
+                            condition_features=config.control_condition_features)
             for item in series]
     dynamics = {key: torch.from_numpy(np.stack([row[key] for row in rows])) for key in rows[0]}
     generator = torch.Generator().manual_seed(2)

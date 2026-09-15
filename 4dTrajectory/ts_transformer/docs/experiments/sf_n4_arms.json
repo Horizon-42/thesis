@@ -1,0 +1,43 @@
+{
+ "_comment": "N4 of docs/2026-09-14_specific_force_control_design.md §11 — the ALTERNATIVE-HYPOTHESIS control for N3, plus the SAME-CODE thrust-fraction twins both N3 and N4 are read against. BASE = b1_quantile_20260907's B1_point_matched exactly (custom, N=32, simple-v3's supervision, imitation 64, velocity 0.003, point duration head at final_time_loss_weight 26, the thrust-fraction law, the raw condition set). WHY THE TWINS ARE RE-TRAINED (§11.6): the stored B1_point_matched pair was trained at c0f2b9e, 140 commits before N3's launch commit, and a 2-epoch check with the same seed and split measured the default path moving (epoch-1 val 8.381 → 7.737; deterministic: two current-code runs agree bit for bit; torch/numpy unchanged), so a stored twin would put code drift into every delta. ARMS: N4_twin / N4_twin_s2024 = B1_point_matched re-trained at this commit (the base for N3 AND N4; first, so N3 can be read as soon as they finish); N4_ratios / N4_ratios_s2024 = the base with ONE field moved, control_condition_features=ratios (the head reads mass, T_max/W and the 1-g stall speed in place of mass, T_max and S — the same information and width, so the arm starts from its twin's weights). Launch: run_ts.py frame_ablation --arms <this> --campaign 4dTrajectory/outputs/KRDU/experiments/sf_n4 (the campaign id `sf_n4` is the intents.json key) --airport KRDU --split-seed 1337 (formal: from a clean tree, the intent entry committed first). WHAT N4 MEASURES: N3 asks whether predicting the specific force removes the thrust-fraction head's class-dependent speed-rate bias; the alternative is that the δ head fails because the RAW conditioning makes T_max/W a learned ratio of two inputs. Same instrument and gates as N3 (docs/literature/control_normalization/measurements/per_class_readout.py on each arm's pred_val beside its twin's): the per-class n_x bias range (the stored twins 0.0104 / 0.0117 g, the truth's own 0.0045 g) and the heavy − B737 speed-bias gap (4.7 / 4.9 m/s). READING: if N4 closes the class bias as far as N3 does, the conditioning's presentation explains the failure and the law is not needed for it; if N4 leaves it while N3 closes it, the parameterisation is the mechanism. VETO: pooled ADE worse than its twin by more than the ~125 m seed line.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_state_loss_grid": "native-segment-endpoints",
+  "control_state_objective": "true-time-position",
+  "control_imitation_loss_weight": 64.0,
+  "control_velocity_loss_weight": 0.003,
+  "duration_head": "point",
+  "final_time_loss_weight": 26.0
+ },
+ "arms": [
+  {
+   "key": "N4_twin",
+   "label": "B1_point_matched re-trained at the N3/N4 code (thrust fraction, raw condition set; seed 1337) — the same-code twin",
+   "overrides": {}
+  },
+  {
+   "key": "N4_twin_s2024",
+   "label": "the same, seed 2024 (same split)",
+   "overrides": {
+    "seed": 2024
+   }
+  },
+  {
+   "key": "N4_ratios",
+   "label": "B1_point_matched with the airframe read as ratios: mass, T_max/W, 1-g stall speed, polar (seed 1337)",
+   "overrides": {
+    "control_condition_features": "ratios"
+   }
+  },
+  {
+   "key": "N4_ratios_s2024",
+   "label": "the same, seed 2024 (same split) — the control path's seed line is ~125 m of pooled ADE",
+   "overrides": {
+    "control_condition_features": "ratios",
+    "seed": 2024
+   }
+  }
+ ]
+}

@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from ts_transformer.config import (
+    CONTROL_CONDITION_FEATURES_RAW,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_HOOK_OFF,
@@ -189,8 +190,12 @@ def fly_plans(
     device = device or torch.device("cpu")
     config = guidance_config(config)
     # The guidance commands δ (the speed floor's thrust inversion): thrust-fraction, always.
+    # No plan head reads the condition row, so its feature set is the raw one, stated.
     rows = [
-        dynamics_arrays(item, a, parameterization=CONTROL_THRUST_FRACTION)
+        dynamics_arrays(
+            item, a, parameterization=CONTROL_THRUST_FRACTION,
+            condition_features=CONTROL_CONDITION_FEATURES_RAW,
+        )
         for item, a in zip(series, anchors, strict=True)
     ]
     anchor_heights = [float(item.values[a, IDX["u"]]) for item, a in zip(series, anchors, strict=True)]
@@ -405,7 +410,10 @@ LegOrders = Callable[[Anchor, int, Sequence[Forecast]], LegOrder]
 
 
 def first_anchor(series: FlightSeries, anchor: int, remaining_m: float) -> Anchor:
-    row = dynamics_arrays(series, anchor, parameterization=CONTROL_THRUST_FRACTION)
+    row = dynamics_arrays(
+        series, anchor, parameterization=CONTROL_THRUST_FRACTION,
+        condition_features=CONTROL_CONDITION_FEATURES_RAW,
+    )
     state = row["initial_state"]
     values = series.values[anchor]
     return Anchor(

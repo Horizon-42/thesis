@@ -63,7 +63,7 @@ def anchor_controls(
 
 
 def dynamics_arrays(
-    series: FlightSeries, anchor: int, *, parameterization: str
+    series: FlightSeries, anchor: int, *, parameterization: str, condition_features: str
 ) -> dict[str, np.ndarray]:
     """Physical per-flight tensors required by a control model and its rollout.
 
@@ -72,6 +72,11 @@ def dynamics_arrays(
     forgot it would hand a specific-force rollout a thrust-fraction box and actuator — δ ≈
     0.04 read as 0.04 g is +0.4 m/s² on every flight, bounded and silently wrong. The plan
     path passes thrust-fraction explicitly (its guidance commands δ).
+
+    ``condition_features`` (``control_condition_features``) picks how the airframe is
+    written into ``condition``. REQUIRED for the same reason: the feature sets have one
+    width, so a head trained on one set would read the other's numbers without a shape
+    error. The plan path passes the raw set explicitly; no plan head reads the row.
     """
     contract = control_contract(parameterization)
     scenario = series.scenario
@@ -84,7 +89,7 @@ def dynamics_arrays(
     )[0][1]
     aero = scenario.aero
     max_thrust = float(scenario.aircraft.engine.max_thrust_total_n)
-    condition = condition_vector(mass_kg, max_thrust, aero)
+    condition = condition_vector(mass_kg, max_thrust, aero, features=condition_features)
     heading = float(getattr(series.frame, "heading_rad", 0.0))
     return {
         "condition": condition,

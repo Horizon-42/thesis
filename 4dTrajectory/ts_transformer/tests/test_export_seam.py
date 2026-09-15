@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 
-from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.conditioning import CONDITION_WIDTH
 from ts_transformer.config import (
     HORIZON_NORMALIZED,
     CONTROL_DYNAMICS_POINT_MASS,
@@ -281,7 +281,7 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
     assert loaded_config == config
     assert loaded_config.prediction_output == PREDICTION_CONTROL
     assert isinstance(model(torch.zeros(1, config.seq_len, config.enc_in), {
-        "condition": torch.ones(1, len(DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.ones(1, CONDITION_WIDTH),
         "control_lower": torch.tensor([CONTROL_LOWER], dtype=torch.float32),
         "control_upper": torch.tensor([CONTROL_UPPER], dtype=torch.float32),
     }), ControlPrediction)
