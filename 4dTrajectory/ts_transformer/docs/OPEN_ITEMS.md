@@ -37,8 +37,9 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
 - **The stored `B1_point_matched` twins do NOT reproduce at the current code** (design §11.6): the same config,
   seed and split, re-trained deterministically, reads epoch-1 val 7.737 against the twin's 8.381, and the data,
   init and environment are the same. So `sf_n4` also re-trains the δ twins (`N4_twin`, `N4_twin_s2024`, first),
-  and N3 and N4 are both read against them. A bisect for the commit is running; until it reports, any comparison
-  of a new control run against a pre-2026-09-10 control artifact carries unexplained drift.
+  and N3 and N4 are both read against them. **Cause (bisected): `c544db0`**, review A-3's single terminal
+  supervision contract. It is an intended, documented fix, but with no config field, so it is invisible in run
+  names. Any comparison of a new run against a pre-2026-09-09 state/control artifact carries it.
 - **N5:** the pooled five-airport arm, only if N3's mechanism holds on both seeds (no pooled δ twin is stored, so
   it is four arms).
 - **Known difference, not a bug:** the specific-force speed has no drag feedback (design §2.1).

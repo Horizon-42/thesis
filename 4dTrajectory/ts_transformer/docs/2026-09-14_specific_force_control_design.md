@@ -586,5 +586,30 @@ Output in the session scratchpad.
 **Consequence.** A stored-twin delta mixes the arm's effect with 140 commits of drift. `sf_n4`
 therefore re-trains the twins at this code, and N3 and N4 are both read against them (§11.4).
 
-**Cause:** bisect running (an opus subagent: 1-epoch real-data trainings at candidate commits under
-`/tmp/claude-1000/bisect/`). The finding goes here, with whether the change was an intended fix.
+**Cause: `c544db0` (2026-09-09, package review A-3), an intended and documented fix.** Bisected with
+1-epoch real-data trainings (opus subagent; artifacts in `/tmp/claude-1000/bisect/`):
+
+| code | epoch-1 train / val / selection ADE |
+|---|---|
+| `c0f2b9e` (the twins' commit) | 12.8653 / 8.3809 / 6176.0 m, bit-identical to the stored twin |
+| `731ee58` = `c544db0^` | the same, bit for bit |
+| `c544db0` | 12.7541 / 7.7371 / 5481.6 m, bit-identical to this code |
+| `c544db0` with only its `dataset.py` hunk reversed | back to the twin's row, bit for bit |
+
+- **The change** is in `dataset._build_supervision`. A flight whose OBSERVED track reaches the threshold
+  used to get a flat 1/6 on all six channels of its last supervision row. It now gets
+  1/6 + `fitted_terminal_position_weight`/3 = 0.5 on its three position channels, the terminal emphasis a
+  fitted-tail flight already had.
+- **Who it touches:** 132 of 6,851 KRDU train flights (1.9 %) and 22 of 1,404 val flights.
+- **Why it moves training this much:** under `true-time-position` such a flight's terminal endpoint goes
+  from about 3 % to about 9 % of its position term. That is the 0.25 % in the control head's
+  first-update gradient; the duration head does not see it.
+- **The measured effect:** epoch-1 selection ADE −694 m (−11 %). The commit stated the population
+  (1 of the first 60 arrivals) but never measured the effect on training.
+- **No later commit moves epoch 1**, and A-4 (the other half of the commit) does not: the hook is off.
+- **`val_loss` is not comparable across `c544db0`, even for an identical model**, because the val `state`
+  term reads the same weights on those 22 flights. The selection ADE reads no supervision weights and is
+  comparable.
+- **It is a data-side contract, not a config field.** A retrain of any pre-09-09 config picks it up with
+  nothing in its config, name or `history.json` to show it — which is exactly how the twins stopped being
+  twins.

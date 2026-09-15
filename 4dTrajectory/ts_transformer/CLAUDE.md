@@ -1155,6 +1155,12 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
   `!=` (`docs/code-health-followups.md` §33).
 - **A specific-force rollout's speed drift is not a bug in the law** — the speed integrates
   the command (no drag feedback, design §2.1). Never give that contract a level-trim neutral.
+- **A state/control checkpoint trained before `c544db0` (2026-09-09) is NOT a same-code baseline for a run
+  trained after it**, even with an identical config. Review A-3 moved the terminal supervision weights of
+  the flights whose observed track reaches the threshold (1.9 % of KRDU train). It is a data-side contract
+  with no config field, so nothing in the name shows it. `B1_point_matched` retrained with the same seed:
+  epoch-1 selection ADE −11 %, and `val_loss` is not comparable across it at all. Re-train the twin
+  (specific-force design §11.6).
 
 - **Every ts number assumes the LANDED runway is known** — the threshold anchor (and the plan
   path's CIFP skeleton) is the harvest's final-approach runway, i.e. future information; no

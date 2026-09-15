@@ -32,7 +32,10 @@ inputs. N4 is the control that separates the two explanations (design §11).
   8.381**. Two runs at this code agree bit for bit. The data, the initialisation (the duration head's
   first-update gradient to 12 digits) and torch/numpy are the same. So the default control training path
   changed in code between 2026-09-07 and `47b4b40`, and a stored-twin delta would carry that drift. `sf_n4`
-  re-trains the twins. A bisect is running.
+  re-trains the twins. **Bisected to `c544db0`** (2026-09-09, review A-3). A flight whose observed track
+  reaches the threshold (1.9 % of train) now carries terminal position emphasis. The fix was intended and
+  documented, but it has no config field, and its effect on training was never measured: epoch-1 selection
+  ADE −11 %. `val_loss` is not comparable across it. Reversing that one hunk restores the twin bit for bit.
 - The M2 smoke note that quoted the twin's 6176 / 3535 m at epochs 1 / 2 is corrected in design §7.1: this
   code's thrust-fraction run reads 5482 / 3754.
 
