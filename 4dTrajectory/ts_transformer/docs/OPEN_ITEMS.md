@@ -28,7 +28,9 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
   at `47b4b40`; campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`.
   - Gates: the per-class n_x bias range falls toward 0.0045 g; the heavy − 737 speed gap closes.
   - Veto: pooled ADE within ~125 m of the base; the straight-in FDE veto.
-- **N4 — the alternative-hypothesis control, BUILT** (branch `sf-n4`, design §11): `control_condition_features=
+- **N4 — the alternative-hypothesis control, RAN; REJECTED on both seeds** (design §11.7). Ratios move the δ head's
+  class bias only 0.0125 → 0.0119 / 0.0118 → 0.0105 g, where the specific force moves it to 0.0042 / 0.0044: the
+  class structure is the parameterisation's. `ratios` is not adopted. Design: (branch `sf-n4`, design §11): `control_condition_features=
   ratios` hands the thrust-fraction head T_max/W and the 1-g stall speed in place of T_max and S (same information,
   same width, same initial weights). If it closes the class bias as far as N3, the conditioning's presentation
   explains the failure; if not, the parameterisation does. Arms `docs/experiments/sf_n4_arms.json`; launch after
