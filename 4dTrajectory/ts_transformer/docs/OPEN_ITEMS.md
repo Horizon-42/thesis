@@ -42,9 +42,14 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
   names. Any comparison of a new run against a pre-2026-09-09 state/control artifact carries it.
 - **N5:** the pooled five-airport arm, only if N3's mechanism holds on both seeds (no pooled δ twin is stored, so
   it is four arms).
-- **N3 binding reading, seed 1337 (design §7.3, against the same-code `N4_twin`):** gate 1 passes (n_x class range
-  0.0042 vs 0.0125 g), gate 2 fails (heavy − 737 gap +6.17 vs +5.16 m/s), and the straight-in FDE veto trips
-  (887 vs 647 m p50). Pooled ADE is 57 m better, inside the seed line. Seed 2024 waits for `N4_twin_s2024`.
+- **N3 final, both seeds against same-code twins (design §7.3):**
+  - gate 1 passes (n_x class range 0.0042 / 0.0044 vs 0.0125 / 0.0118 g);
+  - gate 2 fails (the heavy − 737 gap grows 1.0 / 1.4 m/s);
+  - the straight-in FDE veto trips (+240 / +222 m p50);
+  - pooled ADE is −57 / −73 m.
+
+  Not adopted. The same-code δ twins differ by only 30 m of pooled ADE, against the stored pair's 125 m, so the
+  control path's seed line needs re-measuring on converged pairs.
 - **N6 — the speed command, BUILT and reviewed on `sf-n6`** (design §12). The head predicts a target airspeed
   relative to the anchor's, flown by an 8 s speed loop through the specific-force clamp: the invariance N3 showed,
   plus the restoring force whose absence is the FDE veto's mechanism. The reviewer measured each law's teacher flown

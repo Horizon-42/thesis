@@ -16,7 +16,7 @@ the literature (36 sources) and the measurements behind the choice are in
 | D | this design, plus the teacher-distribution measurement (§2.4) | **done** 2026-09-14 | branch `specific-force-control`, worktree `.claude/worktrees/specific-force` |
 | M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | **done** 2026-09-14, reviewed (opus; 1 blocker + 3 should-fix, all fixed and re-verified, §9) | `8ce4568` |
 | M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | **done** 2026-09-14, review §10 | the commit after `8ce4568` |
-| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **ran** 2026-09-15 00:18–02:33 UTC at `47b4b40`, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`, **published** (KRDU picker, group `sf_n3`). Provisional reading on both seeds (§7.2). **Binding reading, seed 1337 (§7.3):** gate 1 passes (0.0042 vs 0.0125 g), gate 2 fails, the straight-in FDE veto trips (887 vs 647 m). Seed 2024 waits for `N4_twin_s2024` | §7.2, §7.3 |
+| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **ran** 2026-09-15 00:18–02:33 UTC at `47b4b40`, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`, **published** (KRDU picker, group `sf_n3`). **Final, both seeds against same-code twins (§7.3):** gate 1 passes (0.0042 / 0.0044 vs 0.0125 / 0.0118 g), gate 2 fails, the straight-in FDE veto trips (+240 / +222 m). Pooled ADE −57 / −73 m. Not adopted; the evidence for N6 | §7.2, §7.3 |
 | N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | built 2026-09-15 on branch `sf-n4` (`608f14a`, review §11.5). **Running** since 2026-09-15 ~02:40 UTC from the `specific-force` worktree fast-forwarded to `f1b19c5`: campaign `4dTrajectory/outputs/KRDU/experiments/sf_n4`, log `…/experiments/sf_n4.log`, 4 arms (twins first) | results → §11.7 |
 | N5 | pooled five-airport arm | not started; only if the mechanism holds on all gates (§11.4) — N3's provisional reading does not | — |
 | N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | **built and reviewed** 2026-09-15 on branch `sf-n6` (worktree `.claude/worktrees/sf-n6`, from `e959bc0`; review §12.8). Arm file `docs/experiments/sf_n6_arms.json`, intents key `sf_n6`. **§12.6's condition is MET (§7.3): queued after `sf_n4`**, launched from the runner worktree fast-forwarded to `sf-n6` | §12 |
@@ -380,7 +380,7 @@ p50 by remaining distance):
 - **Nothing here is final until `N4_twin` reads the same-code baseline.** `c544db0`'s terminal emphasis
   may have moved the twins' endpoint error too.
 
-### 7.3 N3 against the SAME-CODE twin — BINDING for seed 1337 (2026-09-15)
+### 7.3 N3 against the SAME-CODE twins — BINDING on both seeds (2026-09-15)
 
 `sf_n4/N4_twin` is `B1_point_matched` re-trained at the N3/N4 code (seed 1337, 180 epochs). N3 seed 1337
 against it, same instrument:
@@ -402,9 +402,36 @@ against it, same instrument:
   FDE p50, inside the seed line. `c544db0` moved epoch 1 by −11 % but not the converged model.
 - **N3's pooled ADE is 57 m BETTER than its same-code twin** (not worse by 20, as against the stored
   one). It stays inside the seed line either way.
-- Seed 2024's binding reading waits for `N4_twin_s2024`.
 - **§12.6's condition is met:** `N4_twin`'s straight-in FDE (647 m) sits 240 m below N3's. N6 is queued
   after `sf_n4`.
+
+**Seed 2024** (`N4_twin_s2024`: 168 epochs, early stop; selection ADE 1294.6 m):
+
+| KRDU val, 1404 flights | N3_specific_force_s2024 | N4_twin_s2024 | stored B1_point_matched_s2024 |
+|---|---|---|---|
+| **gate 1** per-class n_x bias range (truth 0.0045 g) | **0.0044** | 0.0118 | 0.0117 |
+| **gate 2** heavy − B737 speed bias (m/s) | **+6.31** | +4.89 | +4.90 |
+| ADE pooled / straight-in / vectored (m) | 1222 / 412 / 2649 | 1295 / 446 / 2793 | 1373 / 451 / 3004 |
+| **FDE p50** pooled / straight-in (m) | 1110 / **885** | 911 / 663 | 937 / 659 |
+| duration MAE pooled / straight-in (s) | 25.7 / 13.6 | 25.4 / 13.3 | 26.2 / 13.9 |
+| paired ADE vs N4_twin_s2024, arm better | 59.3 % (median −36 m) | — | — |
+| flyability Δ vs observed: fully / samples | −0.724 / −0.051 | −0.982 / −0.069 | −0.984 / −0.072 |
+
+**N3's verdict, both seeds against same-code twins (final):**
+- **Gate 1 passes on both.** The per-class n_x bias range is 0.0042 / 0.0044 g against 0.0125 / 0.0118,
+  at the truth's own class spread (0.0045). The specific force IS the invariant: under it the head stops
+  commanding one δ for every class.
+- **Gate 2 fails on both.** The heavy − 737 speed gap grows by 1.0 / 1.4 m/s.
+- **The straight-in FDE veto trips on both,** by +240 / +222 m. The mechanism is the late-final speed
+  deficit (§7.2): no drag feedback, `∂V̇/∂V = 0`.
+- **Pooled ADE is better by 57 / 73 m and vectored ADE by 143 / 144 m, on both seeds.** Paired, the arm
+  is better on 54 / 59 % of flights. Flyability improves by about a third on both.
+- **The seed line needs re-reading.** The same-code δ twins differ by only 30 m of pooled ADE (1325 /
+  1295) and 16 m of straight-in FDE (647 / 663), against the stored pair's 125 m. The stored pair's
+  spread came with an early stop at 143 epochs; this pair ran 180 / 168. So N3's consistent 57–73 m is
+  below the documented 125 m line but twice this pair's spread: suggestive, not established.
+- **N3 is not adopted:** it trips a veto. It is the evidence N6 is built on: the invariant is right, and
+  the law lacks the restoring force.
 
 ## 7.1 Smoke run (M2) — the chain works; its numbers are NOT results
 
