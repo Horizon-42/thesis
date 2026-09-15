@@ -1166,7 +1166,8 @@ runner worktree at `eaf409a`.
 **What failed — the zoom climb** (read off the arm's own records):
 - On the flights that fail, the head commands a load factor a little over 1 (1.08–1.17) at high speed
   (~120 m/s), around segment 12, while lowering its speed command.
-- The aircraft pitches up to 30–45°. The speed loop drives the thrust to T_max to hold the target, cannot, and
+- The path angle γ climbs to 30–45° (γ, not pitch: the point-mass model has no attitude state). The speed loop
+  drives the thrust to T_max to hold the target, cannot, and
   the speed bleeds from ~117 to 26–31 m/s. The aircraft stalls and falls (γ −24°), recovers, and on some flights
   repeats the cycle.
 - Across the three laws' predictions:
@@ -1175,7 +1176,7 @@ runner worktree at `eaf409a`.
 - Dipping below the 1-g sea-level stall speed is NOT specific to N6. δ does it on 99.6 % of flights, n_x on
   53.6 %, speed-command on 39.3 %: the clean polar's known stall term.
 
-**Reading (not measured further):** the loop hides the energy cost of a pitch-up.
+**Reading (not measured further):** the loop hides the energy cost of a pull-up (a load factor above cos γ).
 - Under δ or n_x, a load factor above cos γ costs speed at once, and the velocity term prices it.
 - Under the loop, the thrust holds the speed, so the loss sees nothing until the T_max clamp binds. Then the
   speed collapses inside one segment: a cliff in the loss surface.
