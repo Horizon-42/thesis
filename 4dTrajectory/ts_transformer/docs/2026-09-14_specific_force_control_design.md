@@ -422,16 +422,59 @@ against it, same instrument:
   at the truth's own class spread (0.0045). The specific force IS the invariant: under it the head stops
   commanding one δ for every class.
 - **Gate 2 fails on both.** The heavy − 737 speed gap grows by 1.0 / 1.4 m/s.
-- **The straight-in FDE veto trips on both,** by +240 / +222 m. The mechanism is the late-final speed
-  deficit (§7.2): no drag feedback, `∂V̇/∂V = 0`.
+- **The straight-in FDE veto trips on both,** by +240 / +222 m. The "no drag feedback" mechanism first
+  given for it is WRONG (§7.4). The error is a height/speed split on the last 5 km, with the total energy
+  right.
 - **Pooled ADE is better by 57 / 73 m and vectored ADE by 143 / 144 m, on both seeds.** Paired, the arm
   is better on 54 / 59 % of flights. Flyability improves by about a third on both.
 - **The seed line needs re-reading.** The same-code δ twins differ by only 30 m of pooled ADE (1325 /
   1295) and 16 m of straight-in FDE (647 / 663), against the stored pair's 125 m. The stored pair's
   spread came with an early stop at 143 epochs; this pair ran 180 / 168. So N3's consistent 57–73 m is
   below the documented 125 m line but twice this pair's spread: suggestive, not established.
-- **N3 is not adopted:** it trips a veto. It is the evidence N6 is built on: the invariant is right, and
-  the law lacks the restoring force.
+- **N3 is not adopted:** it trips a veto. The invariant is right. The veto's cause is the final-descent
+  energy split (§7.4), not a missing restoring force, so N6 was built on a wrong reading.
+
+### 7.4 Where the straight-in FDE goes, re-measured — the restoring-force reading was wrong (2026-09-15)
+
+Two measurements taken after N6, both against the same-code twins (both seeds).
+
+**1. The straight-in approach is flown on the BACK side of this model's drag curve.**
+- With the package's clean polar (Cd0 0.02, k 0.04), the minimum-drag speed is `V_md = V_s·√(Cl_max/√(Cd0/k))`,
+  which is 1.84 / 1.95 / 2.06 × the 1-g stall speed (p5 / p50 / p95 over the fleet).
+- On KRDU val's 904 straight-in flights the observed speed is 1.38 / 1.64 / 1.88 × V_s at the anchor, and
+  1.18 / 1.31 / 1.44 × V_s over the last ~70 s. 98 % of straight-in anchors are below V_md.
+- Below V_md, `∂D/∂V < 0`, so the δ law's drag feedback AMPLIFIES a speed error (`∂V̇/∂V > 0`). It restores
+  one only above V_md (§2.1 said so; §7.2 and §12.1 forgot it).
+- **So δ has no restoring force where N3 loses.** §7.2's "no drag feedback" explanation cannot be the cause.
+  The front-side runaway of UNTRAINED heads (§2.1: 311–328 against 209–213 m/s) is real, but training
+  removes it: N3 trained normally.
+
+**2. The divergence sits in the last 5 km, and it is a SPLIT, not a drift**
+(`run_ts.py straight_in_residual_readout`, straight-in, p50 / mean):
+
+| band | twin 1337: ΔV (m/s), Δh (m), along (m) | N3 1337 | twin 2024 | N3 2024 |
+|---|---|---|---|---|
+| 15–10 km | +0.2, −2, +1 | +0.0, −1, +0 | +0.3, −1, +2 | +0.1, −2, +1 |
+| 10–5 km | −1.1, +7, −6 | −1.1, +5, −9 | −0.9, +9, +24 | −0.3, −1, +21 |
+| 5–0 km | +0.2, **−30**, −155 | **−4.4, +36**, −207 | −0.1, **−29**, −164 | **−6.4, +54**, −195 |
+
+- **Up to 5 km out the two laws are equally close to the truth.** Nothing accumulates from the anchor.
+- **On the last 5 km the δ run ends ~30 m low at the right speed. The n_x run ends 36–54 m high and 4.4–6.4
+  m/s slow.**
+- In height-equivalent energy, `Δh + V·ΔV/g` at ~70 m/s: δ −29 / −30 m; n_x +5 / +8 m. **The n_x head gets
+  the TOTAL energy at the end right (better than δ) and splits it wrongly**: too much height, too little
+  speed.
+- The split between height and speed is set by the path angle, i.e. by the LOAD-FACTOR channel.
+- **FDE is a position error**: the slow aircraft is behind the truth at the end, and the height adds to it.
+
+**Reading (the next thing to measure, not built):**
+- The specific-force law makes the thrust channel airframe-invariant and energy-correct. The final-descent
+  error is in how the head flies the vertical profile onto the threshold.
+- Candidates, none measured:
+  - why the n_x head's last segments hold a shallower path: its load-factor teacher, the glidepath in
+    the terminal terms;
+  - whether the rollout's final seconds are weighted differently under the two laws.
+- A longitudinal restoring force (N6) addresses none of this.
 
 ## 7.1 Smoke run (M2) — the chain works; its numbers are NOT results
 
@@ -762,6 +805,12 @@ therefore re-trains the twins at this code, and N3 and N4 are both read against 
 
 ### 12.1 Why
 
+> **Correction (2026-09-15, §7.4): the premise below is wrong for where N3 loses.** The straight-in approach
+> flies below the minimum-drag speed, where the δ law's drag feedback amplifies speed errors rather than
+> restoring them. N3's endpoint error is a last-5-km height/speed split with the total energy right. N6 tested
+> a hypothesis the data then contradicted. It is kept as written for the record.
+
+
 N3 (provisional, §7.2) splits the question in two.
 - **The specific force is the right invariant.** Its per-class bias collapses to the truth's own class
   spread on both seeds.
@@ -1007,3 +1056,7 @@ runner worktree at `eaf409a`.
    future.
 
 **N5 (pooled) is not warranted.** No law cleared all of N3's gates.
+
+**And the premise was wrong (§7.4).** N3's FDE veto is a final-descent height/speed split, not a missing
+restoring force. None of the three candidates above is the next step; the final descent's vertical profile
+under the n_x law is.

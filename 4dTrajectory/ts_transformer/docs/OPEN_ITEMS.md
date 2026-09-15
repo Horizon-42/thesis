@@ -52,6 +52,13 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
 
   Not adopted. The same-code δ twins differ by only 30 m of pooled ADE, against the stored pair's 125 m, so the
   control path's seed line needs re-measuring on converged pairs.
+- **The FDE veto's cause, re-measured (design §7.4):** not a missing restoring force.
+  - Straight-in flights fly below the model's minimum-drag speed, where δ's drag feedback amplifies errors.
+  - The two laws match the truth equally to 5 km out.
+  - On the last 5 km the n_x run ends 36–54 m HIGH and 4.4–6.4 m/s SLOW with the total energy right. δ ends
+    ~30 m low at the right speed.
+  - **Next: why the n_x head flies the final descent shallower** (the load-factor channel). A longitudinal law
+    change (N6) does not address it.
 - **N6 — the speed command: RAN, FAILED — unstable in training** (design §12.9).
   - The first arm diverged from epoch 26: pre-clip control-head gradients 1e7–1e10, from zoom climbs the speed
     loop hides until the T_max clamp binds.

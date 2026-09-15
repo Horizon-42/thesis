@@ -21,6 +21,13 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
   - not adopted, and the next design goes back to the user.
 - **The stored B1 twins drifted** because of `c544db0` (review A-3, no config field).
 - **A converged same-code δ pair differs by only 30 m of pooled ADE.**
+- **Correction, the same day (design §7.4): N3's FDE veto is NOT a missing restoring force**, the reading N6
+  was built on.
+  - Straight-in approaches fly below the model's minimum-drag speed (98 % of anchors; the last minute at
+    1.2–1.4 V_s against V_md ≈ 1.95 V_s), where δ's drag feedback amplifies speed errors.
+  - The laws match the truth equally to 5 km out.
+  - On the last 5 km, n_x ends 36–54 m high and 4.4–6.4 m/s slow with its total energy right (+5 / +8 m
+    equivalent). δ ends ~30 m low at the right speed.
 
 ### 2026-09-15 — ts_transformer: a third longitudinal contract, the speed command (N6, branch `sf-n6`)
 
